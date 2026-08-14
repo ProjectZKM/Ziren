@@ -21,9 +21,7 @@ use std::mem::size_of;
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use zkm_core_executor::{
-    events::PrecompileEvent, syscalls::SyscallCode, ExecutionRecord, Program,
-};
+use zkm_core_executor::{events::PrecompileEvent, syscalls::SyscallCode, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{
     air::{AirLookup, LookupScope, MachineAir},
@@ -75,11 +73,8 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendControlChip {
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let mut rows: Vec<[F; NUM_SHA_EXTEND_CONTROL_COLS]> = Vec::new();
         for (_, event) in input.get_precompile_events(SyscallCode::SHA_EXTEND) {
-            let event = if let PrecompileEvent::ShaExtend(event) = event {
-                event
-            } else {
-                unreachable!()
-            };
+            let event =
+                if let PrecompileEvent::ShaExtend(event) = event { event } else { unreachable!() };
             let mut row = [F::ZERO; NUM_SHA_EXTEND_CONTROL_COLS];
             let cols: &mut ShaExtendControlCols<F> = row.as_mut_slice().borrow_mut();
             cols.shard = F::from_canonical_u32(event.shard);
@@ -138,13 +133,7 @@ where
         let pid = AB::Expr::from_u32(SyscallCode::SHA_EXTEND.syscall_id());
 
         let tuple = |index: AB::Expr| -> Vec<AB::Expr> {
-            vec![
-                pid.clone(),
-                local.shard.into(),
-                local.clk.into(),
-                local.w_ptr.into(),
-                index,
-            ]
+            vec![pid.clone(), local.shard.into(), local.clk.into(), local.w_ptr.into(), index]
         };
 
         // Send the initial index `i = 16`.

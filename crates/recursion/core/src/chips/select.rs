@@ -1,5 +1,5 @@
 use core::borrow::Borrow;
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
@@ -224,7 +224,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
     fn included(&self, _record: &Self::Record) -> bool {
         true
     }
-
 }
 
 impl<AB> Air<AB> for SelectChip

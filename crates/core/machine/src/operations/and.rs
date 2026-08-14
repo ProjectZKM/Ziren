@@ -5,8 +5,8 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode,
 };
-use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{air::ZKMAirBuilder, Word};
+use zkm_primitives::consts::WORD_SIZE;
 
 /// A set of columns needed to compute the and of two words.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

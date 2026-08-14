@@ -10,7 +10,6 @@ pub mod air;
 pub mod columns;
 pub mod trace;
 
-
 use self::columns::{permutation::Poseidon2, Poseidon2Degree3, Poseidon2Degree9};
 
 /// The width of the permutation.
@@ -153,7 +152,8 @@ pub(crate) mod tests {
             .map(|x| KoalaBear::as_canonical_u32(&x));
 
         let rng = &mut rand::thread_rng();
-        let input_1: [KoalaBear; WIDTH] = std::array::from_fn(|_| KoalaBear::from_u64(rng.gen::<u64>()));
+        let input_1: [KoalaBear; WIDTH] =
+            std::array::from_fn(|_| KoalaBear::from_u64(rng.gen::<u64>()));
         let output_1 = inner_perm().permute(input_1).map(|x| KoalaBear::as_canonical_u32(&x));
         let input_1 = input_1.map(|x| KoalaBear::as_canonical_u32(&x));
 

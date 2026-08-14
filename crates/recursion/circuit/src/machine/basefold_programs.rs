@@ -18,18 +18,18 @@
 //! | `build_wrap_basefold_program`         | `shrink_program_from_input` (wrap)    | `verify_wrap_basefold`      |
 
 use p3_koala_bear::KoalaBear;
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+use zkm_pcs::StarkMachine;
 use zkm_recursion_compiler::circuit::AsmCompiler;
 use zkm_recursion_compiler::config::InnerConfig;
 use zkm_recursion_compiler::ir::Builder;
 use zkm_recursion_core::RecursionProgram;
-use zkm_pcs::air::MachineAir;
-use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
-use zkm_pcs::StarkMachine;
 
 use crate::witness::Witnessable;
 
-use super::core_basefold::{verify_core_basefold, ZKMCoreBasefoldWitnessValues};
 use super::compress_basefold::{verify_compress_basefold, ZKMCompressBasefoldWitnessValues};
+use super::core_basefold::{verify_core_basefold, ZKMCoreBasefoldWitnessValues};
 use super::deferred_basefold::{verify_deferred_basefold, ZKMDeferredBasefoldWitnessValues};
 use super::wrap_basefold::{verify_wrap_basefold, ZKMWrapBasefoldWitnessValues};
 
@@ -45,7 +45,9 @@ pub fn build_normalize_basefold_program<A>(
 ) -> RecursionProgram<KoalaBear>
 where
     A: MachineAir<KoalaBear>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>>,
+        + for<'b> p3_air::Air<
+            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+        >,
 {
     let builder_span = tracing::debug_span!("build normalize-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
@@ -63,11 +65,8 @@ where
     // degree bits) — a DIFFERENT consumer.  `chip_height_bits` is
     // the recursion-verifier's transcript prologue input, not the
     // constraint-side degree mask.
-    let chip_log_heights_per_shard: Vec<std::collections::BTreeMap<String, u8>> = input
-        .shard_proofs
-        .iter()
-        .map(|sp| sp.chip_log_heights.clone())
-        .collect();
+    let chip_log_heights_per_shard: Vec<std::collections::BTreeMap<String, u8>> =
+        input.shard_proofs.iter().map(|sp| sp.chip_log_heights.clone()).collect();
     verify_core_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
@@ -105,7 +104,9 @@ pub fn build_compose_basefold_program<A>(
 ) -> RecursionProgram<KoalaBear>
 where
     A: MachineAir<KoalaBear>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>>,
+        + for<'b> p3_air::Air<
+            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+        >,
 {
     let builder_span = tracing::debug_span!("build compose-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
@@ -139,7 +140,9 @@ pub fn build_deferred_basefold_program<A>(
 ) -> RecursionProgram<KoalaBear>
 where
     A: MachineAir<KoalaBear>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>>,
+        + for<'b> p3_air::Air<
+            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+        >,
 {
     let builder_span = tracing::debug_span!("build deferred-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
@@ -176,7 +179,9 @@ pub fn build_wrap_basefold_program<A>(
 ) -> RecursionProgram<KoalaBear>
 where
     A: MachineAir<KoalaBear>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>>,
+        + for<'b> p3_air::Air<
+            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+        >,
 {
     let builder_span = tracing::debug_span!("build wrap-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
@@ -272,9 +277,8 @@ mod tests {
             zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >,
-    ) -> super::ZKMCoreBasefoldWitnessValues<
-        zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-    > {
+    ) -> super::ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>
+    {
         use zkm_pcs::shape::OrderedShape;
 
         // Use the SHAPE-FAITHFUL dummy, built for the SAME machine the
@@ -542,17 +546,15 @@ mod tests {
         // Take each builder as a `fn` pointer.  If the signature
         // changes (e.g. a new generic bound or extra parameter
         // added), this test fails to compile.
-        use zkm_core_machine::mips::MipsAir;
         use p3_koala_bear::KoalaBear;
+        use zkm_core_machine::mips::MipsAir;
 
         let _normalize: fn(
             &zkm_pcs::StarkMachine<
                 zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 MipsAir<KoalaBear>,
             >,
-            &super::ZKMCoreBasefoldWitnessValues<
-                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-            >,
+            &super::ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
             usize,
         ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
             build_normalize_basefold_program::<MipsAir<KoalaBear>>;
@@ -575,9 +577,7 @@ mod tests {
                 zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 MipsAir<KoalaBear>,
             >,
-            &super::ZKMWrapBasefoldWitnessValues<
-                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-            >,
+            &super::ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
             usize,
             // `build_wrap_basefold_program` takes `value_assertions: bool`
             // to control whether constraint failures panic (debug) or

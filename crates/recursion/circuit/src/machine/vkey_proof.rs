@@ -114,4 +114,3 @@ where
         Self { vk_merkle_proofs, values, root: dummy_digest }
     }
 }
-

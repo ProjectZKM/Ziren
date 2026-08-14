@@ -104,20 +104,15 @@ fn run_jit_alu_chain(program: &Program) -> u64 {
         pc_start: 0,
         pc_base: 0,
         clk_bump: 4,
-            mem_read_recorder: None,
+        mem_read_recorder: None,
     };
     let jit_fn = build_jit_function(program, params, None).expect("build_jit_function");
 
     let mut memory = vec![0u8; 4096];
     let jump_table_ptr: *const *const u8 = ptr::null();
     let mut trace_buf = vec![0u8; 4096];
-    let mut ctx = build_context(
-        0,
-        memory.as_mut_ptr(),
-        jump_table_ptr,
-        trace_buf.as_mut_ptr(),
-        [0u32; 36],
-    );
+    let mut ctx =
+        build_context(0, memory.as_mut_ptr(), jump_table_ptr, trace_buf.as_mut_ptr(), [0u32; 36]);
 
     let start = Instant::now();
     unsafe { run_jit(&jit_fn, &mut ctx) };
@@ -181,12 +176,14 @@ fn main() {
         jit.push(run_jit_alu_chain(&program));
     }
 
-    eprintln!("=== JIT vs interpreter ({} ADD instrs, {} repeats, after warmup) ===",
-              NUM_INSTRS, REPEATS);
+    eprintln!(
+        "=== JIT vs interpreter ({} ADD instrs, {} repeats, after warmup) ===",
+        NUM_INSTRS, REPEATS
+    );
     report("interp very_fast", &very_fast);
-    report("interp fast",      &fast);
-    report("interp trace",     &trace);
-    report("jit (call)",       &jit);
+    report("interp fast", &fast);
+    report("interp trace", &trace);
+    report("jit (call)", &jit);
 
     let mean = |s: &[u64]| s.iter().sum::<u64>() as f64 / REPEATS as f64;
     let jit_mean = mean(&jit);
@@ -212,18 +209,9 @@ fn main() {
             interp_h.push(run_real_elf_run_fast(&hello_bytes, true, 0));
             jit_h.push(run_real_elf_run_fast(&hello_bytes, false, 0));
         }
-        eprintln!(
-            "interp run_fast    mean {:>9.3} ms",
-            mean(&interp_h) / 1e6
-        );
-        eprintln!(
-            "JIT-by-default     mean {:>9.3} ms",
-            mean(&jit_h) / 1e6
-        );
-        eprintln!(
-            "JIT vs interp on hello-world: {:>5.2}x",
-            mean(&interp_h) / mean(&jit_h)
-        );
+        eprintln!("interp run_fast    mean {:>9.3} ms", mean(&interp_h) / 1e6);
+        eprintln!("JIT-by-default     mean {:>9.3} ms", mean(&jit_h) / 1e6);
+        eprintln!("JIT vs interp on hello-world: {:>5.2}x", mean(&interp_h) / mean(&jit_h));
     }
 
     if let Ok(elf_bytes) = std::fs::read(elf_path) {
@@ -259,10 +247,7 @@ fn main() {
                 *jit_fib.iter().min().unwrap() as f64 / 1e6,
                 *jit_fib.iter().max().unwrap() as f64 / 1e6,
             );
-            eprintln!(
-                "JIT vs interp on fib(n={n}): {:>5.2}x",
-                interp_mean / jit_fib_mean
-            );
+            eprintln!("JIT vs interp on fib(n={n}): {:>5.2}x", interp_mean / jit_fib_mean);
         }
     } else {
         eprintln!();

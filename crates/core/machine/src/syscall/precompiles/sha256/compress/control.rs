@@ -21,9 +21,7 @@ use std::mem::size_of;
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use zkm_core_executor::{
-    events::PrecompileEvent, syscalls::SyscallCode, ExecutionRecord, Program,
-};
+use zkm_core_executor::{events::PrecompileEvent, syscalls::SyscallCode, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{
     air::{AirLookup, LookupScope, MachineAir},

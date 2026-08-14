@@ -86,7 +86,12 @@ impl<T> RawProgram<T> {
     /// second component is one where `par_iter` walker dispatch would
     /// help; the third component bounds the wall-time win.
     pub fn parallelism_summary(&self) -> (usize, usize, usize) {
-        fn walk<T>(block: &SeqBlock<T>, n_par: &mut usize, n_subs: &mut usize, n_par_instrs: &mut usize) {
+        fn walk<T>(
+            block: &SeqBlock<T>,
+            n_par: &mut usize,
+            n_subs: &mut usize,
+            n_par_instrs: &mut usize,
+        ) {
             match block {
                 SeqBlock::Basic(_) => {}
                 SeqBlock::Parallel(subs) => {
@@ -178,9 +183,7 @@ impl<'a, T> IntoIterator for &'a SeqBlock<T> {
     fn into_iter(self) -> Self::IntoIter {
         match self {
             SeqBlock::Basic(b) => SeqBlockIter::Basic(b.instrs.iter()),
-            SeqBlock::Parallel(progs) => {
-                SeqBlockIter::Parallel(Box::new(progs.iter().flatten()))
-            }
+            SeqBlock::Parallel(progs) => SeqBlockIter::Parallel(Box::new(progs.iter().flatten())),
         }
     }
 }

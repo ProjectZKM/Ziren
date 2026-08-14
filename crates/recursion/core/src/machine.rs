@@ -62,9 +62,7 @@ pub struct RecursionAirEventCount {
 impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAir<F, DEGREE> {
     /// Get a machine with all chips, except the dummy chip.
 
-
     /// Get a machine with all chips, except the dummy chip.
-
 
     /// A machine with dyunamic chip sizes that includes the wide variant of the Poseidon2 chip.
     pub fn compress_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
@@ -272,9 +270,12 @@ impl From<RecursionShape> for OrderedShape {
 mod basefold_air_assertions {
     use super::*;
     use crate::chips::{
-        alu_base::BaseAluChip, alu_ext::ExtAluChip,
+        alu_base::BaseAluChip,
+        alu_ext::ExtAluChip,
         mem::{constant::MemoryChip as MemoryConstChip, variable::MemoryChip as MemoryVarChip},
-        poseidon2_wide::Poseidon2WideChip, public_values::PublicValuesChip, select::SelectChip,
+        poseidon2_wide::Poseidon2WideChip,
+        public_values::PublicValuesChip,
+        select::SelectChip,
     };
     use p3_air::Air;
     use p3_koala_bear::KoalaBear;
@@ -329,7 +330,7 @@ pub mod tests {
     use crate::machine::RecursionAir;
     use p3_field::{
         extension::{BinomialExtensionField, HasFrobenius},
-        BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField,
+        BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing,
     };
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use rand::prelude::*;
@@ -430,11 +431,10 @@ pub mod tests {
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut addr = 0;
         for _ in 0..100 {
-            let inner: [F; 4] = std::iter::repeat_with(|| {
-                core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))
-            })
-            .find(|xs| !xs.iter().all(F::is_zero))
-            .unwrap();
+            let inner: [F; 4] =
+                std::iter::repeat_with(|| core::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
+                    .find(|xs| !xs.iter().all(F::is_zero))
+                    .unwrap();
             let x = BinomialExtensionField::<F, D>::from_basis_coefficients_slice(&inner).unwrap();
             let gal = x.galois_orbit();
 

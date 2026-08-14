@@ -82,10 +82,7 @@ where
     // For `height == domain` this is byte-identical:
     // every eq-table entry is consumed, no rows are padded.
     let domain = 1usize << eval_point.len();
-    debug_assert!(
-        height <= domain,
-        "trace height ({height}) must be <= 2^|eval_point| ({domain})"
-    );
+    debug_assert!(height <= domain, "trace height ({height}) must be <= 2^|eval_point| ({domain})");
     // ── GPU-IDLE lever: TRUNCATED eq-table build ───────────────────────
     // Only rows `[0, height)` are ever summed below, so only the FIRST
     // `height` eq-table entries are ever read — yet the table is built over
@@ -115,9 +112,7 @@ where
     // `O(height)`.
     let k = if height <= 1 { 0 } else { (height - 1).ilog2() as usize + 1 };
     let (eq, tail) = if k < eval_point.len() {
-        let tail = eval_point[k..]
-            .iter()
-            .fold(EF::ONE, |acc, &r| acc * (EF::ONE - r));
+        let tail = eval_point[k..].iter().fold(EF::ONE, |acc, &r| acc * (EF::ONE - r));
         (eq_mle_table::<EF>(&eval_point[..k]), tail)
     } else {
         (eq_mle_table::<EF>(eval_point), EF::ONE)
@@ -205,7 +200,6 @@ mod tests {
     type F = p3_koala_bear::KoalaBear;
     type EF = p3_field::extension::BinomialExtensionField<F, 4>;
 
-
     /// Numerical test: evaluating a trace at a multilinear point
     /// against a hand-computed reference.
     ///
@@ -260,7 +254,6 @@ mod tests {
         // 20 + (-80) + (-90) + 240 = 90.
         assert_eq!(evals[0], EF::from(F::from_u64(90)));
     }
-
 
     /// Edge case: single-row trace (height=1) at empty point
     /// returns the single row's values directly (each column's
@@ -372,8 +365,9 @@ mod eval_trace_columns_reference_tests {
             (31, 1025),
             (68, 2048),
         ] {
-            let trace: Vec<F> =
-                (0..width * height).map(|i| F::from_u64((i as u64 * 2_654_435_761) % 1_000_003)).collect();
+            let trace: Vec<F> = (0..width * height)
+                .map(|i| F::from_u64((i as u64 * 2_654_435_761) % 1_000_003))
+                .collect();
             let log_h = height.max(1).next_power_of_two().trailing_zeros() as usize;
             // Exercise both `k == eval_point.len()` and `k < eval_point.len()`.
             for extra in [0usize, 3] {

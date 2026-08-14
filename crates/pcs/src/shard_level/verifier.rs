@@ -15,8 +15,8 @@ use super::basefold_constraint_folder::{
 use super::shard_proof::{BasefoldShardProof, FoldOrientation};
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
-use crate::types::ShardOpenedValues;
 use crate::lookup::LookupKind;
+use crate::types::ShardOpenedValues;
 use crate::{Challenge, Chip, StarkGenericConfig, StarkVerifyingKey, Val};
 
 /// Errors emitted by the host-side shard-level BaseFold verifier.
@@ -200,11 +200,7 @@ impl BasefoldShardVerifier {
             // prover's `trace.height()` derivation via
             // `proof.chip_log_heights[name]`. Default 0 if absent
             // (matches legacy proof bytes where the map is empty).
-            let log_h = proof
-                .chip_log_heights
-                .get(name.as_str())
-                .copied()
-                .unwrap_or(0);
+            let log_h = proof.chip_log_heights.get(name.as_str()).copied().unwrap_or(0);
             challenger.observe(Val::<SC>::from_u64(log_h as u64));
 
             // Name length + name bytes (unchanged).
@@ -322,9 +318,9 @@ impl BasefoldShardVerifier {
         // Skipped when the hash-bind is off (then `main_commitment` IS the raw
         // root — the bundle re-check would trivially fail, so gate on it).
         {
-            use core::any::TypeId;
             use crate::shard_level::shard_proof::EvaluationProof;
             use crate::{InnerChallenge, InnerVal};
+            use core::any::TypeId;
             let inner_ring = TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
                 && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>()
                 && TypeId::of::<SC::Challenger>()
@@ -336,8 +332,7 @@ impl BasefoldShardVerifier {
                     // group 0, so main is group 1.  The batched proof carries
                     // the MAIN round's commit (the preprocessed one is the
                     // verifying key's).
-                    let raw_inner =
-                        crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
+                    let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
 
                     // Guard the counts (BaseFieldOverflow + AreaOutOfBounds).
                     // Counts feed `from_canonical_usize` (wraps mod the field
@@ -358,9 +353,7 @@ impl BasefoldShardVerifier {
                             Some(main_round) => main_round.iter().copied().unzip(),
                             // Legacy single-round bundle: the whole packing IS
                             // the main round.
-                            None => crate::jagged_pcs::jagged_counts_from_packing(
-                                &bundle.packing,
-                            ),
+                            None => crate::jagged_pcs::jagged_counts_from_packing(&bundle.packing),
                         };
                     let order = <InnerVal as p3_field::PrimeField32>::ORDER_U32 as usize;
                     if rc_g.iter().chain(cc_g.iter()).any(|&c| c >= order) {
@@ -386,11 +379,8 @@ impl BasefoldShardVerifier {
                     // hashed felt sequence is byte-identical to the host emit
                     // (which used the full JaggedPacking; both derive the same
                     // per-chip (row, col) counts).
-                    let recomputed = crate::jagged_pcs::jagged_hash_bind_modified(
-                        raw_inner,
-                        &rc_g,
-                        &cc_g,
-                    );
+                    let recomputed =
+                        crate::jagged_pcs::jagged_hash_bind_modified(raw_inner, &rc_g, &cc_g);
                     // SAFETY: [InnerVal;8] == [Val<SC>;8] under the inner gate.
                     let observed_inner: [InnerVal; 8] = unsafe {
                         core::mem::transmute_copy::<[Val<SC>; 8], [InnerVal; 8]>(
@@ -523,22 +513,21 @@ where
     // directly on the OUTER (wrap) branch. The prover threads the same
     // capability bounds; both rings satisfy them (inner `JaggedChallenger`,
     // wrap `OuterChallenger`). Verify-only: no VK / committed-byte impact.
-    SC::Challenger: 'static
-        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + p3_challenger::CanObserve<
-            <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-            >>::Commitment,
-        >,
+    SC::Challenger:
+        'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + p3_challenger::CanObserve<
+                <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                    crate::jagged_pcs::JaggedVal,
+                >>::Commitment,
+            >,
 {
-    use core::any::{Any, TypeId};
-    use crate::jagged_pcs::jagged::{
-        verify_jagged_basefold_no_observe, JaggedBasefoldBundle,
-    };
     use crate::jagged::JaggedChipInfo;
+    use crate::jagged_pcs::jagged::{verify_jagged_basefold_no_observe, JaggedBasefoldBundle};
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{InnerChallenge, InnerVal};
+    use core::any::{Any, TypeId};
 
     // Type gate (same as prover-side prove_trusted_evaluations): a TypeId
     // transmute-safety guard for the unsafe `InnerChallenge` reinterpretation
@@ -560,36 +549,33 @@ where
     // associated types (on this branch `SC::Challenger == OuterChallenger`,
     // `SC::BfMmcs == OuterValMmcs`).  Verify-only: no VK / committed-byte
     // impact.
-    if TypeId::of::<SC::Challenger>()
-        != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
-    {
-        use p3_air::BaseAir;
+    if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
             build_jagged_verify_inputs, verify_jagged_basefold_inner_generic,
             JaggedBasefoldBundleGeneric,
         };
+        use p3_air::BaseAir;
         let bytes = match evaluation_proof {
             EvaluationProof::Empty => return Ok(()),
             EvaluationProof::Bytes(b) => b,
             EvaluationProof::Bundle(_) => {
                 return Err(BasefoldVerifyError::JaggedPcs(
-                    "outer ring expects a serialized (Bytes) BaseFold bundle, got Bundle"
-                        .into(),
+                    "outer ring expects a serialized (Bytes) BaseFold bundle, got Bundle".into(),
                 ));
             }
         };
-        let bundle = match JaggedBasefoldBundleGeneric::<
-            <SC as crate::BasefoldRing>::BfMmcs,
-        >::from_bytes(bytes)
-        {
-            Some(b) => b,
-            None => {
-                return Err(BasefoldVerifyError::JaggedPcs(format!(
-                    "outer BaseFold bundle deserialize failed ({} bytes)",
-                    bytes.len()
-                )));
-            }
-        };
+        let bundle =
+            match JaggedBasefoldBundleGeneric::<<SC as crate::BasefoldRing>::BfMmcs>::from_bytes(
+                bytes,
+            ) {
+                Some(b) => b,
+                None => {
+                    return Err(BasefoldVerifyError::JaggedPcs(format!(
+                        "outer BaseFold bundle deserialize failed ({} bytes)",
+                        bytes.len()
+                    )));
+                }
+            };
         let chip_widths: Vec<usize> =
             chips.iter().map(|c| <_ as BaseAir<Val<SC>>>::width(*c)).collect();
         // SAFETY: Challenge<SC> == InnerChallenge under the field gate above.
@@ -630,12 +616,8 @@ where
                         .get(r)
                         .map(|round| round.iter().map(|(h, w)| h * w).sum())
                         .unwrap_or(0);
-                    let pad: usize = bundle
-                        .packing
-                        .padding_heights
-                        .get(r)
-                        .map(|p| p.iter().sum())
-                        .unwrap_or(0);
+                    let pad: usize =
+                        bundle.packing.padding_heights.get(r).map(|p| p.iter().sum()).unwrap_or(0);
                     (c.clone(), real + pad)
                 })
                 .collect::<Vec<_>>(),
@@ -643,9 +625,7 @@ where
         return if ok {
             Ok(())
         } else {
-            Err(BasefoldVerifyError::JaggedPcs(
-                "outer BaseFold bundle rejected".into(),
-            ))
+            Err(BasefoldVerifyError::JaggedPcs("outer BaseFold bundle rejected".into()))
         };
     }
 
@@ -742,8 +722,7 @@ where
             )));
         }
         let mut prep_total = 0usize;
-        for ((name, width), (height, claimed_width)) in
-            prep_chip_dims.iter().zip(prep_round.iter())
+        for ((name, width), (height, claimed_width)) in prep_chip_dims.iter().zip(prep_round.iter())
         {
             if claimed_width != width {
                 return Err(BasefoldVerifyError::JaggedPcs(format!(
@@ -770,10 +749,8 @@ where
 
     // Round 1: the shard's main chips, widths from the packing.
     use p3_air::BaseAir;
-    let main_column_counts: &[usize] = combined_packing
-        .column_counts
-        .get(n_prep_infos..)
-        .unwrap_or(&[]);
+    let main_column_counts: &[usize] =
+        combined_packing.column_counts.get(n_prep_infos..).unwrap_or(&[]);
     chip_infos.extend(chips.iter().enumerate().map(|(i, chip)| {
         let column_count = main_column_counts
             .get(i)
@@ -815,9 +792,7 @@ where
                 combined_packing.offsets[col_idx + 1]
                     .saturating_sub(combined_packing.offsets[col_idx])
             } else if col_idx < combined_packing.offsets.len() {
-                combined_packing
-                    .total_values
-                    .saturating_sub(combined_packing.offsets[col_idx])
+                combined_packing.total_values.saturating_sub(combined_packing.offsets[col_idx])
             } else {
                 0
             };
@@ -861,9 +836,7 @@ where
                     combined_packing.offsets[pad_idx + 1]
                         .saturating_sub(combined_packing.offsets[pad_idx])
                 } else {
-                    combined_packing
-                        .total_values
-                        .saturating_sub(combined_packing.offsets[pad_idx])
+                    combined_packing.total_values.saturating_sub(combined_packing.offsets[pad_idx])
                 };
                 chip_infos.push(JaggedChipInfo {
                     name: alloc::format!("<stacking-pad:{}>", chip_infos.len()),
@@ -887,11 +860,7 @@ where
     let r_row_per_chip: Vec<Vec<InnerChallenge>> = chip_infos
         .iter()
         .map(|info| {
-            let log_h = info
-                .row_count
-                .max(1)
-                .next_power_of_two()
-                .trailing_zeros() as usize;
+            let log_h = info.row_count.max(1).next_power_of_two().trailing_zeros() as usize;
             let slice: &[Challenge<SC>] = if shared_eval_point.len() >= log_h {
                 &shared_eval_point[shared_eval_point.len() - log_h..]
             } else {
@@ -957,20 +926,15 @@ where
             opened_main.push(zero_claim());
             continue;
         }
-        let idx = chips
-            .iter()
-            .position(|c| c.name() == info.name)
-            .ok_or_else(|| {
-                BasefoldVerifyError::JaggedPcs(format!(
-                    "preprocessed round covers chip {} which the shard does not have",
-                    info.name,
-                ))
-            })?;
+        let idx = chips.iter().position(|c| c.name() == info.name).ok_or_else(|| {
+            BasefoldVerifyError::JaggedPcs(format!(
+                "preprocessed round covers chip {} which the shard does not have",
+                info.name,
+            ))
+        })?;
         opened_main.push(relabel(opened_values.chips[idx].preprocessed.local.clone()));
     }
-    opened_main.extend(
-        opened_values.chips.iter().map(|c| relabel(c.main.local.clone())),
-    );
+    opened_main.extend(opened_values.chips.iter().map(|c| relabel(c.main.local.clone())));
     // The main round's trailing padding.
     for _ in opened_main.len()..chip_infos.len() {
         opened_main.push(zero_claim());
@@ -1093,9 +1057,7 @@ fn full_geq_host<EF: Field + Copy>(threshold: &[EF], eval_point: &[EF]) -> EF {
         .iter()
         .rev()
         .zip(eval_point.iter().rev())
-        .fold(one, |acc, (x, y)| {
-            ((one - *y) * (one - *x) + *y * *x) * acc + *y * (one - *x)
-        })
+        .fold(one, |acc, (x, y)| ((one - *y) * (one - *x) + *y * *x) * acc + *y * (one - *x))
 }
 
 /// Produce the per-chip `degree` point used by [`full_geq_host`].
@@ -1109,7 +1071,6 @@ fn full_geq_host<EF: Field + Copy>(threshold: &[EF], eval_point: &[EF]) -> EF {
 fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
     vec![EF::ZERO; max_log_row_count + 1]
 }
-
 
 /// Host-side zerocheck verification.
 ///
@@ -1153,8 +1114,7 @@ where
     // `gkr_batch_open` + `lambda` drive the claimed_sum binding (G2-b) below;
     // `alpha` drives the constraint-RLC half (G2-a), deferred to the re-point.
     let _alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-    let gkr_batch_open: Challenge<SC> =
-        challenger.sample_algebra_element::<Challenge<SC>>();
+    let gkr_batch_open: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
     // ── constraint-RLC BINDING (HARD CHECK) ───────
@@ -1182,8 +1142,7 @@ where
     );
     if rlc_eval != zerocheck_proof.point_and_eval.1 {
         return Err(BasefoldVerifyError::Zerocheck(
-            "zerocheck rlc_eval != point_and_eval.1 (item-12 constraint-RLC binding)"
-                .to_string(),
+            "zerocheck rlc_eval != point_and_eval.1 (item-12 constraint-RLC binding)".to_string(),
         ));
     }
 
@@ -1410,11 +1369,8 @@ where
     // the anchor orientation follows the per-machine `core_rev` flag
     // (core => rev); legacy (recursion / wrap) shards keep `eq(z_gkr, z*)`.
     let conv_use_rev = core_rev;
-    let z_gkr_anchor: Vec<Challenge<SC>> = if conv_use_rev {
-        z_gkr.iter().rev().copied().collect()
-    } else {
-        z_gkr.clone()
-    };
+    let z_gkr_anchor: Vec<Challenge<SC>> =
+        if conv_use_rev { z_gkr.iter().rev().copied().collect() } else { z_gkr.clone() };
 
     // (2) eq(anchor, z*) — circuit zerocheck.rs:480-489.
     let zerocheck_eq_val = eq_eval_host::<Challenge<SC>>(&z_gkr_anchor, z_star);
@@ -1446,11 +1402,8 @@ where
 
     for (chip, opening) in chips.iter().zip(opened_values.chips.iter()) {
         // degree = quotient[0] (circuit opening.degree), real-height bits.
-        let degree: &[Challenge<SC>] = opening
-            .quotient
-            .first()
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
+        let degree: &[Challenge<SC>] =
+            opening.quotient.first().map(|v| v.as_slice()).unwrap_or(&[]);
 
         // (4e) geq + padded-row adjustment.  full_geq over (degree, z_ext);
         // when degree.len() != z_extended.len() (e.g. placeholder lift) the
@@ -1489,13 +1442,11 @@ where
             .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + o * p);
 
         // (4h) fold: rlc = rlc·λ + eq·(constraint_eval + openings_batch).
-        rlc_eval = rlc_eval * lambda
-            + zerocheck_eq_val * (constraint_eval + openings_batch);
+        rlc_eval = rlc_eval * lambda + zerocheck_eq_val * (constraint_eval + openings_batch);
     }
 
     rlc_eval
 }
-
 
 // ─────────────────────────────────────────────────────────────
 // LogUp-GKR stage: host-side verification helpers
@@ -1510,9 +1461,7 @@ where
 fn eq_eval_host<EF: Field + Copy>(a: &[EF], b: &[EF]) -> EF {
     debug_assert_eq!(a.len(), b.len(), "eq_eval_host: dimension mismatch");
     let one = EF::ONE;
-    a.iter()
-        .zip(b.iter())
-        .fold(one, |acc, (ai, bi)| acc * ((one - *ai) * (one - *bi) + *ai * *bi))
+    a.iter().zip(b.iter()).fold(one, |acc, (ai, bi)| acc * ((one - *ai) * (one - *bi) + *ai * *bi))
 }
 
 /// Host-side MLE evaluation at an arbitrary extension-field point.
@@ -1543,10 +1492,7 @@ fn evaluate_mle_host<EF: Field + Copy>(mle_evals: &[EF], point: &[EF]) -> EF {
         }
         weights = next;
     }
-    mle_evals
-        .iter()
-        .zip(weights.iter())
-        .fold(EF::ZERO, |acc, (v, w)| acc + *v * *w)
+    mle_evals.iter().zip(weights.iter()).fold(EF::ZERO, |acc, (v, w)| acc + *v * *w)
 }
 
 /// Evaluate a degree-`d` polynomial (stored as `d+1` coefficients
@@ -1719,8 +1665,6 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
-
-
     // Note: we derive log_num_interactions from the output MLE length
     // rather than taking chip_metadata as an extra parameter, since
     // the proof itself encodes the dimension.
@@ -1761,9 +1705,8 @@ where
     // (1) Sample the LogUp permutation challenges (alpha + beta_seed),
     // matching the prover (row_gkr/top_level.rs:62-78).
     let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-    let beta_seed: Vec<Challenge<SC>> = (0..beta_seed_dim)
-        .map(|_| challenger.sample_algebra_element::<Challenge<SC>>())
-        .collect();
+    let beta_seed: Vec<Challenge<SC>> =
+        (0..beta_seed_dim).map(|_| challenger.sample_algebra_element::<Challenge<SC>>()).collect();
     // betas[0] = argument_index (kind) weight, betas[1..] = per-value weights —
     // the partial-lagrange table over {0,1}^beta_seed_dim (eq_mle_table),
     // identical to the prover's leaf-denominator construction.
@@ -1861,8 +1804,7 @@ where
     //   - observe (n0, n1, d0, d1)
     //   - sample line challenge, extend eval_point, update n/d
     for (i, round_proof) in proof.round_proofs.iter().enumerate() {
-        let lambda: Challenge<SC> =
-            challenger.sample_algebra_element::<Challenge<SC>>();
+        let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
         // Expected claimed sum.
         let expected_claim = lambda * numerator_eval + denominator_eval;
@@ -1923,8 +1865,7 @@ where
 
         // Update eval_point: sumcheck-reduced point + line challenge.
         eval_point = sumcheck_point.clone();
-        let line: Challenge<SC> =
-            challenger.sample_algebra_element::<Challenge<SC>>();
+        let line: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
         eval_point.push(line);
 
         // Update n/d evals via linear interpolation at `line`.
@@ -2041,11 +1982,8 @@ where
         let name = <A as MachineAir<Val<SC>>>::name(&chip.air);
 
         // degree = quotient[0] = real-height big-endian bits.
-        let degree: &[Challenge<SC>] = opening
-            .quotient
-            .first()
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
+        let degree: &[Challenge<SC>] =
+            opening.quotient.first().map(|v| v.as_slice()).unwrap_or(&[]);
         if degree.len() != point_extended.len() {
             return Err(BasefoldVerifyError::LogupGkr(format!(
                 "reconstruction: chip '{}' degree dim {} != point_extended dim {}",
@@ -2061,13 +1999,12 @@ where
 
         // Trace openings at the GKR point, looked up by chip NAME (the
         // chip_openings BTreeMap is name-ordered, `chips` is def-ordered).
-        let chip_eval =
-            logup_evaluations.chip_openings.get(name.as_str()).ok_or_else(|| {
-                BasefoldVerifyError::LogupGkr(format!(
-                    "reconstruction: no chip_opening for chip '{}'",
-                    name
-                ))
-            })?;
+        let chip_eval = logup_evaluations.chip_openings.get(name.as_str()).ok_or_else(|| {
+            BasefoldVerifyError::LogupGkr(format!(
+                "reconstruction: no chip_opening for chip '{}'",
+                name
+            ))
+        })?;
         let main_trailing: &[Challenge<SC>] = &chip_eval.main_trace_evaluations;
         let prep_trailing: Option<&[Challenge<SC>]> =
             chip_eval.preprocessed_trace_evaluations.as_deref();
@@ -2106,16 +2043,11 @@ where
             Option<Vec<Challenge<SC>>>,
             Challenge<SC>,
         ) = if let Some(main_full) = chip_eval.main_trace_evaluations_full.as_deref() {
-            (
-                main_full.to_vec(),
-                chip_eval.preprocessed_trace_evaluations_full.clone(),
-                geq_eval,
-            )
+            (main_full.to_vec(), chip_eval.preprocessed_trace_evaluations_full.clone(), geq_eval)
         } else {
             // Legacy trailing-opening lift (zerocheck's convention): geq
             // over the NON-reversed point, embed = 1 − that geq.
-            let mut pe_legacy: Vec<Challenge<SC>> =
-                Vec::with_capacity(max_log_row_count + 1);
+            let mut pe_legacy: Vec<Challenge<SC>> = Vec::with_capacity(max_log_row_count + 1);
             pe_legacy.push(Challenge::<SC>::ZERO);
             pe_legacy.extend_from_slice(trace_point);
             let geq_legacy = full_geq_host::<Challenge<SC>>(degree, &pe_legacy);
@@ -2130,24 +2062,15 @@ where
 
         // Zero padding openings — the trace eval on a fully padding row
         // (all-zero), used to correct the padding region.
-        let padding_main: Vec<Challenge<SC>> =
-            vec![Challenge::<SC>::ZERO; main.len()];
+        let padding_main: Vec<Challenge<SC>> = vec![Challenge::<SC>::ZERO; main.len()];
         let padding_prep: Option<Vec<Challenge<SC>>> =
             prep.as_ref().map(|p| vec![Challenge::<SC>::ZERO; p.len()]);
 
-        for (interaction, is_send) in chip
-            .sends()
-            .iter()
-            .map(|s| (s, true))
-            .chain(chip.receives().iter().map(|r| (r, false)))
+        for (interaction, is_send) in
+            chip.sends().iter().map(|s| (s, true)).chain(chip.receives().iter().map(|r| (r, false)))
         {
             let (real_numerator, real_denominator) = interaction
-                .eval::<Challenge<SC>, Challenge<SC>>(
-                    prep.as_deref(),
-                    &main,
-                    alpha,
-                    &beta_powers,
-                );
+                .eval::<Challenge<SC>, Challenge<SC>>(prep.as_deref(), &main, alpha, &beta_powers);
             let (padding_numerator, padding_denominator) = interaction
                 .eval::<Challenge<SC>, Challenge<SC>>(
                     padding_prep.as_deref(),
@@ -2160,8 +2083,7 @@ where
             let numerator_eval_i = real_numerator - padding_numerator * geq_eval;
             let denominator_eval_i =
                 real_denominator + (Challenge::<SC>::ONE - padding_denominator) * geq_eval;
-            let numerator_eval_i =
-                if is_send { numerator_eval_i } else { -numerator_eval_i };
+            let numerator_eval_i = if is_send { numerator_eval_i } else { -numerator_eval_i };
             numerator_values.push(numerator_eval_i);
             denominator_values.push(denominator_eval_i);
         }
@@ -2176,8 +2098,7 @@ where
     denominator_values.resize(1usize << interaction_point.len(), Challenge::<SC>::ONE);
 
     let reconstructed_numerator = evaluate_mle_host(&numerator_values, interaction_point);
-    let reconstructed_denominator =
-        evaluate_mle_host(&denominator_values, interaction_point);
+    let reconstructed_denominator = evaluate_mle_host(&denominator_values, interaction_point);
 
     // (6) The GKR round walk's reduced final evals MUST equal the
     // reconstruction from the chips' trace openings.  This is the assert
@@ -2208,11 +2129,11 @@ where
     // here, at the end of the LogUp-GKR stage, because `verify_zerocheck_host`
     // opens by sampling α / γ / λ — the challenges the opening vector has to be
     // bound before.
-    crate::shard_level::prover::observe_logup_gkr_openings::<
-        Val<SC>,
-        Challenge<SC>,
-        SC::Challenger,
-    >(challenger, chips.len(), &proof.logup_evaluations);
+    crate::shard_level::prover::observe_logup_gkr_openings::<Val<SC>, Challenge<SC>, SC::Challenger>(
+        challenger,
+        chips.len(),
+        &proof.logup_evaluations,
+    );
 
     Ok(())
 }
@@ -2296,12 +2217,7 @@ mod tests {
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
 
         let threshold = vec![EF::ZERO; 4];
-        let eval_point = vec![
-            EF::from_u32(3),
-            EF::from_u32(7),
-            EF::from_u32(11),
-            EF::from_u32(13),
-        ];
+        let eval_point = vec![EF::from_u32(3), EF::from_u32(7), EF::from_u32(11), EF::from_u32(13)];
         let result = full_geq_host(&threshold, &eval_point);
         assert_eq!(result, EF::ONE);
     }

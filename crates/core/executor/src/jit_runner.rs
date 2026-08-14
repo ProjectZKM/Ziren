@@ -128,9 +128,8 @@ mod platform {
         syscall_handler: Option<SyscallHandler>,
     ) -> Result<std::sync::Arc<JitFunction>, RunnerError> {
         let key = program_fingerprint(program);
-        let cache = JIT_CACHE.get_or_init(|| {
-            std::sync::Mutex::new(std::collections::HashMap::new())
-        });
+        let cache =
+            JIT_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
         if let Some(jit_fn) = cache.lock().expect("jit cache poisoned").get(&key) {
             return Ok(jit_fn.clone());
         }
@@ -231,7 +230,9 @@ mod platform {
             let rc = unsafe { libc::ftruncate(fd, len as libc::off_t) };
             if rc != 0 {
                 let err = std::io::Error::last_os_error();
-                unsafe { libc::close(fd); }
+                unsafe {
+                    libc::close(fd);
+                }
                 return Err(err);
             }
             // MAP_SHARED so writes flow through to the fd.  An
@@ -249,7 +250,9 @@ mod platform {
             };
             if ptr == libc::MAP_FAILED {
                 let err = std::io::Error::last_os_error();
-                unsafe { libc::close(fd); }
+                unsafe {
+                    libc::close(fd);
+                }
                 return Err(err);
             }
             Ok(Self {
@@ -302,7 +305,9 @@ mod platform {
         /// `JitContext::memory`.
         pub fn exit_unconstrained(&mut self) -> *mut u8 {
             if let Some(cow) = self.cow_ptr.take() {
-                unsafe { libc::munmap(cow.cast(), self.len); }
+                unsafe {
+                    libc::munmap(cow.cast(), self.len);
+                }
             }
             self.ptr = self.primary_ptr;
             self.ptr
@@ -341,10 +346,7 @@ mod platform {
             // host_buffer_size_for(MAX_MEMORY) is sized for the worst
             // case and `addr` is bounded by the executor at MAX_MEMORY.
             unsafe {
-                std::ptr::write_unaligned(
-                    self.ptr.add(off).cast::<u32>(),
-                    value.to_le(),
-                );
+                std::ptr::write_unaligned(self.ptr.add(off).cast::<u32>(), value.to_le());
             }
             self.seen_addrs.insert(addr & !3);
         }
@@ -370,12 +372,7 @@ mod platform {
         /// full O(seen_addrs) flush cost.  Walks word-aligned to
         /// keep it cheap; partial-word syscall args (rare) get a
         /// little extra coverage from rounding.
-        pub fn sync_range_to_executor(
-            &self,
-            executor: &mut Executor<'_>,
-            base: u32,
-            nbytes: u32,
-        ) {
+        pub fn sync_range_to_executor(&self, executor: &mut Executor<'_>, base: u32, nbytes: u32) {
             use crate::events::MemoryRecord;
             if nbytes == 0 {
                 return;
@@ -385,10 +382,11 @@ mod platform {
             let mut addr = start;
             while addr < end {
                 let word = self.load_word(addr);
-                executor.state.memory.page_table.insert(
-                    addr,
-                    MemoryRecord { value: word, shard: 0, timestamp: 0 },
-                );
+                executor
+                    .state
+                    .memory
+                    .page_table
+                    .insert(addr, MemoryRecord { value: word, shard: 0, timestamp: 0 });
                 addr = addr.wrapping_add(4);
             }
         }
@@ -435,9 +433,7 @@ mod platform {
             let end = base.wrapping_add(nbytes).wrapping_add(3) & !3;
             let mut addr = start;
             while addr < end {
-                if let Some(&word) =
-                    executor.state.uninitialized_memory.page_table.get(addr)
-                {
+                if let Some(&word) = executor.state.uninitialized_memory.page_table.get(addr) {
                     self.store_word(addr, word);
                 }
                 addr = addr.wrapping_add(4);
@@ -448,10 +444,11 @@ mod platform {
             use crate::events::MemoryRecord;
             for &addr in &self.seen_addrs {
                 let word = self.load_word(addr);
-                executor.state.memory.page_table.insert(
-                    addr,
-                    MemoryRecord { value: word, shard: 0, timestamp: 0 },
-                );
+                executor
+                    .state
+                    .memory
+                    .page_table
+                    .insert(addr, MemoryRecord { value: word, shard: 0, timestamp: 0 });
             }
         }
 
@@ -484,9 +481,7 @@ mod platform {
             let uninit_addrs: Vec<u32> =
                 executor.state.uninitialized_memory.page_table.keys().collect();
             for addr in uninit_addrs {
-                if let Some(&word) =
-                    executor.state.uninitialized_memory.page_table.get(addr)
-                {
+                if let Some(&word) = executor.state.uninitialized_memory.page_table.get(addr) {
                     self.store_word(addr, word);
                 }
             }
@@ -497,7 +492,9 @@ mod platform {
         fn drop(&mut self) {
             // Discard any COW first — never cache it across bridges.
             if let Some(cow) = self.cow_ptr.take() {
-                unsafe { libc::munmap(cow.cast(), self.len); }
+                unsafe {
+                    libc::munmap(cow.cast(), self.len);
+                }
             }
             // Always free both the mapping and the fd.  Pooling the fd
             // across runs leaks state: the prior run's MAP_SHARED writes
@@ -607,10 +604,11 @@ mod platform {
         // value would otherwise reach the executor.
         use crate::events::MemoryRecord;
         for (i, &v) in ctx.registers[..36].iter().enumerate() {
-            executor.state.memory.registers.insert(
-                i as u32,
-                MemoryRecord { value: v, shard: 0, timestamp: 0 },
-            );
+            executor
+                .state
+                .memory
+                .registers
+                .insert(i as u32, MemoryRecord { value: v, shard: 0, timestamp: 0 });
         }
 
         // Pre-sync host → executor so the syscall impl sees the JIT's
@@ -720,9 +718,7 @@ mod platform {
                 mem_bridge.sync_range_to_executor(executor, a0, 96);
                 mem_bridge.sync_range_to_executor(executor, a1, 96);
             }
-            SyscallCode::BN254_FP_ADD
-            | SyscallCode::BN254_FP_SUB
-            | SyscallCode::BN254_FP_MUL => {
+            SyscallCode::BN254_FP_ADD | SyscallCode::BN254_FP_SUB | SyscallCode::BN254_FP_MUL => {
                 mem_bridge.sync_range_to_executor(executor, a0, 32);
                 mem_bridge.sync_range_to_executor(executor, a1, 32);
             }
@@ -873,13 +869,7 @@ mod platform {
         // file so subsequent JIT'd code observes them.  Blast all 36
         // back so HI/LO/BRK/HEAP propagate too.
         for i in 0..36u32 {
-            let v = executor
-                .state
-                .memory
-                .registers
-                .get(i)
-                .map(|r| r.value)
-                .unwrap_or(0);
+            let v = executor.state.memory.registers.get(i).map(|r| r.value).unwrap_or(0);
             ctx.registers[i as usize] = v;
         }
         // Restore V0 to the syscall return value (the loop above
@@ -1035,9 +1025,7 @@ mod platform {
             | SyscallCode::BLS12381_FP2_MUL => {
                 mem_bridge.sync_range_from_executor(executor, a0, 96);
             }
-            SyscallCode::BN254_FP_ADD
-            | SyscallCode::BN254_FP_SUB
-            | SyscallCode::BN254_FP_MUL => {
+            SyscallCode::BN254_FP_ADD | SyscallCode::BN254_FP_SUB | SyscallCode::BN254_FP_MUL => {
                 mem_bridge.sync_range_from_executor(executor, a0, 32);
             }
             SyscallCode::BN254_FP2_ADD
@@ -1299,21 +1287,20 @@ mod platform {
         // build time) get the same empty Vec as before — byte-equivalent.
         // Callers that set `BuildParams.mem_read_recorder` get a
         // populated oracle that TracingVM can consume for replay.
-        let mem_reads: Vec<crate::minimal_trace::MemValue> =
-            take_recorded_mem_reads()
-                .into_iter()
-                .map(|r| crate::minimal_trace::MemValue {
-                    clk: r.clk,
-                    addr: r.addr,
-                    value: r.value,
-                    // the JIT recorder does not track per-address
-                    // shard/timestamp bookkeeping — the shard-bookkeeping gap that
-                    // prevents a JIT-produced oracle from driving a
-                    // byte-exact trace. Left 0 here.
-                    shard: 0,
-                    timestamp: 0,
-                })
-                .collect();
+        let mem_reads: Vec<crate::minimal_trace::MemValue> = take_recorded_mem_reads()
+            .into_iter()
+            .map(|r| crate::minimal_trace::MemValue {
+                clk: r.clk,
+                addr: r.addr,
+                value: r.value,
+                // the JIT recorder does not track per-address
+                // shard/timestamp bookkeeping — the shard-bookkeeping gap that
+                // prevents a JIT-produced oracle from driving a
+                // byte-exact trace. Left 0 here.
+                shard: 0,
+                timestamp: 0,
+            })
+            .collect();
 
         crate::minimal_trace::TraceChunk {
             shard_index,
@@ -1380,7 +1367,7 @@ mod platform {
     /// or `None` if the program is fully JIT-eligible.  Used by
     /// `Executor::run_fast` to skip the JIT path cheaply rather than
     /// spending transpile time only to hit `Err(Driver)`.
-    
+
     /// Below this many *static* instructions the JIT transpile cost
     /// can outweigh the execution saving for straight-line programs.
     /// For looped programs the JIT'd code is re-executed many times,
@@ -1399,7 +1386,7 @@ mod platform {
         if program.instructions.len() < JIT_MIN_INSTR_COUNT {
             return Some(0xff);
         }
-        
+
         for ins in &program.instructions {
             match ins.opcode {
                 // UNIMPL trap-stub lowering exists; real ELFs run
@@ -1485,9 +1472,10 @@ mod platform {
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub use platform::{
     build_context, build_jit_function, cached_jit_function, first_unsupported_opcode,
-    host_buffer_size_for, host_offset_of, jit_syscall_handler,
-    program_fingerprint_of, run_jit, run_jit_capture_trace_chunk, BuildParams, JitBridgeState,
-    JitMemoryBridge, JitRunOutcome, RunnerError,};
+    host_buffer_size_for, host_offset_of, jit_syscall_handler, program_fingerprint_of, run_jit,
+    run_jit_capture_trace_chunk, BuildParams, JitBridgeState, JitMemoryBridge, JitRunOutcome,
+    RunnerError,
+};
 
 /// Re-export of the JIT crate's syscall handler signature so the
 /// executor can register [`jit_syscall_handler`] without depending on
@@ -1646,7 +1634,9 @@ mod mem_reads_recorder_tests {
             jit_record_mem_read(2, 0x200, 0xBB);
             let post = recorded_mem_reads_len();
             (pre, post)
-        }).join().unwrap();
+        })
+        .join()
+        .unwrap();
 
         assert_eq!(other_len.0, 0, "other thread should start with empty buffer");
         assert_eq!(other_len.1, 1, "other thread should see its own push");

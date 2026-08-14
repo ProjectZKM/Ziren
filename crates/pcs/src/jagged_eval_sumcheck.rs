@@ -46,7 +46,6 @@
 //! final point lies on the hypercube reduction trajectory and whose
 //! `point_and_eval.1` matches that closing identity.
 
-
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
@@ -54,9 +53,7 @@ use p3_challenger::FieldChallenger;
 use p3_field::{Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 
-use crate::jagged_branching_program::{
-    bits_big_endian, full_jagged_evaluation, BranchingProgram,
-};
+use crate::jagged_branching_program::{bits_big_endian, full_jagged_evaluation, BranchingProgram};
 use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
 use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 
@@ -251,32 +248,17 @@ fn materialize_f_evals(
 /// First `half` bits ↔ var_0..var_{half-1} (lower's MSB-first
 /// representation per partial_lagrange convention); last `half` bits ↔
 /// var_half..var_{n-1} (upper's MSB-first).
-fn materialize_bp_evals(
-    bp: &BranchingProgram<InnerChallenge>,
-    half: usize,
-) -> Vec<InnerChallenge> {
+fn materialize_bp_evals(bp: &BranchingProgram<InnerChallenge>, half: usize) -> Vec<InnerChallenge> {
     let n = 2 * half;
     let total = 1usize << n;
     let mut evals = vec![InnerChallenge::ZERO; total];
     for i in 0..total {
         // Lower's big-endian bits = [bit_0(i), bit_1(i), ..., bit_{half-1}(i)]
         let lower_bits: Vec<InnerChallenge> = (0..half)
-            .map(|j| {
-                if (i >> j) & 1 == 1 {
-                    InnerChallenge::ONE
-                } else {
-                    InnerChallenge::ZERO
-                }
-            })
+            .map(|j| if (i >> j) & 1 == 1 { InnerChallenge::ONE } else { InnerChallenge::ZERO })
             .collect();
         let upper_bits: Vec<InnerChallenge> = (half..n)
-            .map(|j| {
-                if (i >> j) & 1 == 1 {
-                    InnerChallenge::ONE
-                } else {
-                    InnerChallenge::ZERO
-                }
-            })
+            .map(|j| if (i >> j) & 1 == 1 { InnerChallenge::ONE } else { InnerChallenge::ZERO })
             .collect();
         evals[i] = bp.eval(&lower_bits, &upper_bits);
     }
@@ -386,11 +368,7 @@ fn naive_jagged_eval_sumcheck(
     debug_assert_eq!(bp.len(), 1);
     let final_eval = f[0] * bp[0];
 
-    PartialSumcheckProof {
-        univariate_polys,
-        claimed_sum,
-        point_and_eval: (points, final_eval),
-    }
+    PartialSumcheckProof { univariate_polys, claimed_sum, point_and_eval: (points, final_eval) }
 }
 
 /// Naive-sumcheck threshold: above this `n = 2*(log_m+1)`, fall back
@@ -446,8 +424,7 @@ impl<'a> StructuralJaggedEvalProver<'a> {
         par: bool,
     ) -> Self {
         let num_chips = merged_prefix_sums.len();
-        let num_dimensions =
-            if num_chips == 0 { 0 } else { merged_prefix_sums[0].len() };
+        let num_dimensions = if num_chips == 0 { 0 } else { merged_prefix_sums[0].len() };
         Self {
             bp: BranchingProgram::new(z_row, z_trace),
             merged_prefix_sums,
@@ -490,8 +467,7 @@ impl<'a> StructuralJaggedEvalProver<'a> {
 
         // Build full point: h_prefix_sum bits || lambda || rhos
         // (length = h_prefix_sum.len() + 1 + rhos.len() = num_dimensions).
-        let mut full_point: Vec<InnerChallenge> =
-            Vec::with_capacity(self.num_dimensions);
+        let mut full_point: Vec<InnerChallenge> = Vec::with_capacity(self.num_dimensions);
         full_point.extend_from_slice(h_prefix_sum);
         full_point.push(lambda);
         full_point.extend_from_slice(&self.rhos);
@@ -536,10 +512,7 @@ impl<'a> StructuralJaggedEvalProver<'a> {
                     let y_half = self.eval_chip(self.half, mps, zc, ie);
                     (y_0, y_half)
                 })
-                .fold(
-                    (InnerChallenge::ZERO, InnerChallenge::ZERO),
-                    |(a, b), (c, d)| (a + c, b + d),
-                )
+                .fold((InnerChallenge::ZERO, InnerChallenge::ZERO), |(a, b), (c, d)| (a + c, b + d))
         }
     }
 
@@ -553,20 +526,19 @@ impl<'a> StructuralJaggedEvalProver<'a> {
             let inter = &mut self.intermediate_eq_full_evals;
             let mps_all = self.merged_prefix_sums;
             jeval_pool().install(|| {
-                inter
-                    .par_iter_mut()
-                    .zip(mps_all.par_iter())
-                    .for_each(|(acc, mps)| {
-                        let bit = mps[mps.len() - 1 - round_num];
-                        let factor = alpha * bit + (InnerChallenge::ONE - alpha) * (InnerChallenge::ONE - bit);
-                        *acc *= factor;
-                    });
+                inter.par_iter_mut().zip(mps_all.par_iter()).for_each(|(acc, mps)| {
+                    let bit = mps[mps.len() - 1 - round_num];
+                    let factor =
+                        alpha * bit + (InnerChallenge::ONE - alpha) * (InnerChallenge::ONE - bit);
+                    *acc *= factor;
+                });
             });
         } else {
             for (k, mps) in self.merged_prefix_sums.iter().enumerate() {
                 let bit = mps[mps.len() - 1 - round_num];
                 // EQ(alpha, bit) = alpha*bit + (1-alpha)*(1-bit)
-                let factor = alpha * bit + (InnerChallenge::ONE - alpha) * (InnerChallenge::ONE - bit);
+                let factor =
+                    alpha * bit + (InnerChallenge::ONE - alpha) * (InnerChallenge::ONE - bit);
                 self.intermediate_eq_full_evals[k] *= factor;
             }
         }
@@ -597,9 +569,7 @@ fn jeval_pool() -> &'static rayon::ThreadPool {
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
             .filter(|&x| x > 0)
-            .unwrap_or_else(|| {
-                std::thread::available_parallelism().map(|x| x.get()).unwrap_or(16)
-            });
+            .unwrap_or_else(|| std::thread::available_parallelism().map(|x| x.get()).unwrap_or(16));
         rayon::ThreadPoolBuilder::new()
             .num_threads(n)
             .thread_name(|i| format!("jeval-{i}"))
@@ -616,11 +586,7 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
     claimed_sum: InnerChallenge,
     challenger: &mut C,
 ) -> PartialSumcheckProof<InnerChallenge> {
-    let n = if merged_prefix_sums.is_empty() {
-        0
-    } else {
-        merged_prefix_sums[0].len()
-    };
+    let n = if merged_prefix_sums.is_empty() { 0 } else { merged_prefix_sums[0].len() };
     // Parallelize the per-column inner loops of the structural sumcheck across
     // host cores.  Byte-identical: field addition is associative and commutative,
     // so the tree-reduce equals the sequential fold.  The 64-column floor skips
@@ -743,10 +709,7 @@ fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger
     }
 
     if let Some(hp) = host_prover.as_ref() {
-        assert!(
-            hp.rhos == rhos_out,
-            "ZIREN_GPU_JAGGED_EVAL_DEVICE_VERIFY: final rhos mismatch"
-        );
+        assert!(hp.rhos == rhos_out, "ZIREN_GPU_JAGGED_EVAL_DEVICE_VERIFY: final rhos mismatch");
     }
 
     PartialSumcheckProof {
@@ -792,11 +755,8 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     // structural sumcheck (2*log_m vars) from the closed form (log_m+1 bits) and
     // break the in-circuit jagged closing on real data (z_star.len = log_m).
     let last = prefix_sums.last().copied().unwrap_or(0);
-    let log_m = if last <= 1 {
-        0
-    } else {
-        (last - 1).next_power_of_two().trailing_zeros() as usize
-    };
+    let log_m =
+        if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
     // RECURSION-LAYER AREA PIN: when the caller passes `Some(_)` (a recursion/compress
     // commit, whose dense was pinned to `2^RECURSION_LOG_TRACE_AREA`), run the
     // jagged-eval over the PINNED dense rather than the natural column geometry,
@@ -820,11 +780,9 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     // construction, and the engine now supplies the claimed sum itself.  Every
     // statement between here and the `observe` below is challenger-silent, so
     // the hoist is transcript-neutral.
-    let z_col_lagrange =
-        crate::jagged_branching_program::partial_lagrange(z_col);
+    let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
     let num_chips = prefix_sums.len() - 1;
-    let z_col_eq_vals: Vec<InnerChallenge> =
-        z_col_lagrange[..num_chips].to_vec();
+    let z_col_eq_vals: Vec<InnerChallenge> = z_col_lagrange[..num_chips].to_vec();
 
     // Production path (any size) — SP1's structural prover.
     // O(N × num_cols) per the fold structure; feasible at all scales.
@@ -876,12 +834,9 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
             .map(|k| {
                 let mut merged: Vec<InnerChallenge> =
                     crate::jagged_branching_program::bits_big_endian(prefix_sums[k], half);
-                merged.extend_from_slice(
-                    &crate::jagged_branching_program::bits_big_endian::<InnerChallenge>(
-                        prefix_sums[k + 1],
-                        half,
-                    ),
-                );
+                merged.extend_from_slice(&crate::jagged_branching_program::bits_big_endian::<
+                    InnerChallenge,
+                >(prefix_sums[k + 1], half));
                 merged
             })
             .collect()
@@ -918,18 +873,13 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
             // Naive path needs a fresh challenger to compare against;
             // structural already advanced the real challenger.  Skip
             // shadow check in production since it doubles work.
-            let perm: crate::kb31_poseidon2::InnerPerm =
-                zkm_primitives::poseidon2_init();
+            let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
             crate::kb31_poseidon2::InnerChallenger::new(perm)
         };
         // Re-observe up to claimed_sum for fair comparison.
         shadow_challenger.observe_algebra_element(claimed_sum);
-        let naive = naive_jagged_eval_sumcheck(
-            f_evals,
-            bp_evals,
-            claimed_sum,
-            &mut shadow_challenger,
-        );
+        let naive =
+            naive_jagged_eval_sumcheck(f_evals, bp_evals, claimed_sum, &mut shadow_challenger);
         debug_assert_eq!(
             partial_sumcheck_proof.claimed_sum, naive.claimed_sum,
             "structural vs naive claimed_sum disagree"
@@ -1032,14 +982,16 @@ mod tests {
         ];
         // half = z_trace.len() so n = 2*3 = 6 → 64-cell hypercube.
 
-        let proof = prove_jagged_evaluation(
-            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None,
-        );
+        let proof =
+            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None);
         let psp = &proof.partial_sumcheck_proof;
 
         // Closed-form claimed_sum.
         let expected_sum = crate::jagged_branching_program::full_jagged_evaluation(
-            &prefix_sums, &z_row, &z_col, &z_trace,
+            &prefix_sums,
+            &z_row,
+            &z_col,
+            &z_trace,
         );
         assert_eq!(psp.claimed_sum, expected_sum);
 
@@ -1055,7 +1007,8 @@ mod tests {
             let g0 = poly.eval_at_point(InnerChallenge::ZERO);
             let g1 = poly.eval_at_point(InnerChallenge::ONE);
             assert_eq!(
-                g0 + g1, claim,
+                g0 + g1,
+                claim,
                 "round {round_idx}: g(0) + g(1) should equal claim {claim:?}",
             );
             // Next round's claim = poly evaluated at the round's challenge.
@@ -1090,9 +1043,8 @@ mod tests {
             InnerChallenge::from_u8(23),
             InnerChallenge::from_u8(29),
         ];
-        let proof = prove_jagged_evaluation(
-            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None,
-        );
+        let proof =
+            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None);
         let psp = &proof.partial_sumcheck_proof;
         let n = 2 * half_bits;
         assert_eq!(psp.univariate_polys.len(), n);
@@ -1125,13 +1077,15 @@ mod tests {
         let z_col: Vec<InnerChallenge> = vec![]; // 1 col → 0 challenge bits
         let z_trace = vec![InnerChallenge::ZERO; log_m + 1];
 
-        let proof = prove_jagged_evaluation(
-            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None,
-        );
+        let proof =
+            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None);
 
         // Direct computation via the closed-form evaluator.
         let expected = crate::jagged_branching_program::full_jagged_evaluation(
-            &prefix_sums, &z_row, &z_col, &z_trace,
+            &prefix_sums,
+            &z_row,
+            &z_col,
+            &z_trace,
         );
         assert_eq!(proof.partial_sumcheck_proof.claimed_sum, expected);
     }
@@ -1168,10 +1122,10 @@ mod tests {
             &[(4, 1), (3, 1), (2, 1)],
             &[(5, 2), (4, 3), (2, 1)],
             &[(6, 1), (4, 2), (3, 1)],
-            &[(2, 1)],                  // single chip, single column (wrap-like)
-            &[(3, 1)],                  // single chip
-            &[(3, 1), (2, 1)],          // two chips
-            &[(4, 2)],                  // single chip, 2 columns
+            &[(2, 1)],         // single chip, single column (wrap-like)
+            &[(3, 1)],         // single chip
+            &[(3, 1), (2, 1)], // two chips
+            &[(4, 2)],         // single chip, 2 columns
         ];
 
         // Knob combo -> set of shape-indices where it matched.
@@ -1189,10 +1143,18 @@ mod tests {
             }
             let num_cols = offsets.len() - 1;
             let last = *offsets.last().unwrap();
-            let log_m = if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
+            let log_m = if last <= 1 {
+                0
+            } else {
+                (last - 1).next_power_of_two().trailing_zeros() as usize
+            };
             let half = log_m + 1;
             let max_log_row = chips.iter().map(|c| c.0).max().unwrap();
-            let z_col_len = if num_cols <= 1 { 0 } else { (num_cols as usize).next_power_of_two().trailing_zeros() as usize };
+            let z_col_len = if num_cols <= 1 {
+                0
+            } else {
+                (num_cols as usize).next_power_of_two().trailing_zeros() as usize
+            };
             // PRODUCTION-FAITHFUL: z_star (= reduction.eval_point = BP z_index)
             // has length log_dense_size = log2_ceil(total area) = log_m, which is
             // ONE LESS than half (= log_m+1, the prefix-sum bit width).  The
@@ -1212,10 +1174,7 @@ mod tests {
             let proof = prove_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace, &mut ch, None);
             let psp = &proof.partial_sumcheck_proof;
             // sanity: claimed_sum == closed form at rev(z_star).
-            assert_eq!(
-                psp.claimed_sum,
-                full_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace)
-            );
+            assert_eq!(psp.claimed_sum, full_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace));
             let target = psp.point_and_eval.1;
             let pp = &psp.point_and_eval.0; // len n = 2*half
             let n = pp.len();
@@ -1297,7 +1256,8 @@ mod tests {
                     lag_sum += z_col_lag[k] * fl;
                 }
                 if lag_sum * bp == target {
-                    matched_here.push([zrow_rev, zeval_rev, swap, fh_rev, sh_rev, lag_m_rev, lag_pp_rev]);
+                    matched_here
+                        .push([zrow_rev, zeval_rev, swap, fh_rev, sh_rev, lag_m_rev, lag_pp_rev]);
                 }
             }
             eprintln!("shape {si} {chips:?}: half={half} n={n} matches={}", matched_here.len());
@@ -1321,7 +1281,9 @@ mod tests {
         // Informational only (no panic): empty survivors means the structural
         // prover's full_point layout is not a simple input-reversal of pp.
         if survivors.is_empty() {
-            eprintln!("   (no simple reversal matches — structural full_point layout is non-trivial)");
+            eprintln!(
+                "   (no simple reversal matches — structural full_point layout is non-trivial)"
+            );
         }
     }
 }

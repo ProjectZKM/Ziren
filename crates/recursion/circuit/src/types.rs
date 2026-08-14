@@ -3,9 +3,9 @@ use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_field::{PrimeCharacteristicRing, TwoAdicField};
 use p3_matrix::Dimensions;
 
+use zkm_pcs::septic_digest::SepticDigest;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 use zkm_recursion_core::DIGEST_SIZE;
-use zkm_pcs::septic_digest::SepticDigest;
 
 use crate::{
     challenger::CanObserveVariable, hash::FieldHasherVariable, CircuitConfig,
@@ -14,7 +14,10 @@ use crate::{
 
 /// Reference: [zkm_core::stark::StarkVerifyingKey]
 #[derive(Clone)]
-pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> {
+pub struct VerifyingKeyVariable<
+    C: CircuitConfig<F = SC::Val>,
+    SC: KoalaBearFriParametersVariable<C>,
+> {
     pub commitment: SC::DigestVariable,
     pub pc_start: Felt<C::F>,
     pub initial_global_cumulative_sum: SepticDigest<Felt<C::F>>,
@@ -100,7 +103,9 @@ pub struct TwoAdicPcsMatsVariable<C: CircuitConfig> {
     pub values: Vec<Vec<Ext<C::F, C::EF>>>,
 }
 
-impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> VerifyingKeyVariable<C, SC> {
+impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>>
+    VerifyingKeyVariable<C, SC>
+{
     pub fn observe_into<Challenger>(&self, builder: &mut Builder<C>, challenger: &mut Challenger)
     where
         Challenger: CanObserveVariable<C, Felt<C::F>> + CanObserveVariable<C, SC::DigestVariable>,

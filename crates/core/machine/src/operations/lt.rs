@@ -16,8 +16,8 @@
 
 use itertools::izip;
 use p3_air::AirBuilder;
-use zkm_pcs::air::BaseAirBuilder;
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use zkm_pcs::air::BaseAirBuilder;
 
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
@@ -114,11 +114,8 @@ impl<F: PrimeField32> LtOperation<F> {
 
         self.msb_b = F::from_u8((b_bytes[3] >> 7) & 1);
         self.msb_c = F::from_u8((c_bytes[3] >> 7) & 1);
-        self.is_sign_eq = if signed {
-            F::from_bool((b_bytes[3] >> 7) == (c_bytes[3] >> 7))
-        } else {
-            F::ONE
-        };
+        self.is_sign_eq =
+            if signed { F::from_bool((b_bytes[3] >> 7) == (c_bytes[3] >> 7)) } else { F::ONE };
         if signed {
             self.bit_b = self.msb_b;
             self.bit_c = self.msb_c;
@@ -133,7 +130,6 @@ impl<F: PrimeField32> LtOperation<F> {
             c: self.comparison_bytes[1].as_canonical_u32() as u8,
         });
     }
-
 }
 
 impl<F: Field> LtOperation<F> {
@@ -183,10 +179,7 @@ impl<F: Field> LtOperation<F> {
         // `is_sign_eq <=> bit_b == bit_c`.
         builder.assert_bool(cols.is_sign_eq);
         builder.when(cols.is_sign_eq).assert_eq(cols.bit_b, cols.bit_c);
-        builder
-            .when(is_real.clone())
-            .when_not(cols.is_sign_eq)
-            .assert_one(cols.bit_b + cols.bit_c);
+        builder.when(is_real.clone()).when_not(cols.is_sign_eq).assert_one(cols.bit_b + cols.bit_c);
 
         // The result: `lt = bit_b·(1 − bit_c) + is_sign_eq·sltu`.
         builder.assert_eq(

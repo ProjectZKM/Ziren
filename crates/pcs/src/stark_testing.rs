@@ -144,14 +144,9 @@ fn test_public_value_impl(n: usize, x: u64) {
     let pcs = Pcs { mmcs: val_mmcs, fri_params, _phantom: PhantomData };
     let challenger = Challenger::from_hasher(vec![], byte_hash);
     let config = p3_uni_stark::StarkConfig::new(pcs, challenger);
-    let pis = vec![
-        Mersenne31::from_u64(0),
-        Mersenne31::from_u64(1),
-        Mersenne31::from_u64(x),
-    ];
+    let pis = vec![Mersenne31::from_u64(0), Mersenne31::from_u64(1), Mersenne31::from_u64(x)];
     let proof = p3_uni_stark::prove(&config, &FibonacciAir {}, trace, &pis);
-    p3_uni_stark::verify(&config, &FibonacciAir {}, &proof, &pis)
-        .expect("verification failed");
+    p3_uni_stark::verify(&config, &FibonacciAir {}, &proof, &pis).expect("verification failed");
 }
 
 #[test]

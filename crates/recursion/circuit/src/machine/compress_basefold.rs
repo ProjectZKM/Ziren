@@ -40,21 +40,21 @@ use std::mem::MaybeUninit;
 
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter};
-use zkm_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
 use zkm_pcs::{
     air::{MachineAir, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
     shard_level::shard_proof::BasefoldShardProof,
     InnerChallenge, InnerVal, StarkVerifyingKey, Word, DIGEST_SIZE,
 };
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter};
+use zkm_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
 
-use crate::{CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable};
 use crate::hash::{FieldHasher, FieldHasherVariable};
 use crate::jagged_circuit::{JaggedDimensionMetadata, JaggedSumcheckEvalProof};
 use crate::machine::{
     ZKMMerkleProofVerifier, ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable,
 };
 use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
+use crate::{CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable};
 
 /// Compress witness value type for the shard-level
 /// proof shape — host-side input the prover packages and the
@@ -195,8 +195,7 @@ pub fn verify_compress_basefold<C, SC, A>(
     // Sourcing vk_root from the witness rather than a compile-time parameter
     // decouples the compose program structure from the vk_map root.
     let vk_root = vk_merkle_data.root;
-    let vk_hashes: Vec<_> =
-        vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
+    let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
     // Pre-loop: initialize aggregated public-output
@@ -220,7 +219,9 @@ pub fn verify_compress_basefold<C, SC, A>(
     let mut _exit_code: Felt<C::F> = builder.uninit();
     let mut _execution_shard: Felt<C::F> = unsafe { MaybeUninit::zeroed().assume_init() };
     let mut _committed_value_digest: [Word<Felt<C::F>>; PV_DIGEST_NUM_WORDS] =
-        array::from_fn(|_| Word(array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() })));
+        array::from_fn(|_| {
+            Word(array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() }))
+        });
     let mut _deferred_proofs_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
         array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
     let mut _reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
@@ -238,11 +239,9 @@ pub fn verify_compress_basefold<C, SC, A>(
     // batch — production defaults via the shared helper.
     // log_stacking_height = max_log_row_count is the standard
     // single-stripe-per-power-of-two-rows setting.
-    let _basefold_shard_verifier =
-        crate::shard_proof_variable_lift::build_basefold_shard_verifier::<SC>(
-            max_log_row_count,
-            max_log_row_count as u32,
-        );
+    let _basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<
+        SC,
+    >(max_log_row_count, max_log_row_count as u32);
 
     // Split the per-input loop into a parallel-friendly
     // VERIFY pass (ir_par_map_collect emits DslIr::Parallel) and a
@@ -725,9 +724,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         }
 
         // Assert zkm_vk_digest matches.
-        for (digest, current) in
-            _zkm_vk_digest.iter().zip(_current_public_values.zkm_vk_digest)
-        {
+        for (digest, current) in _zkm_vk_digest.iter().zip(_current_public_values.zkm_vk_digest) {
             builder.assert_felt_eq(*digest, current);
         }
 
@@ -780,8 +777,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             );
             _execution_shard = builder.eval(
                 _current_public_values.start_execution_shard * is_first_execution_shard_seen
-                    + _execution_shard
-                        * (SymbolicFelt::ONE - is_first_execution_shard_seen),
+                    + _execution_shard * (SymbolicFelt::ONE - is_first_execution_shard_seen),
             );
             // Consistency check.
             builder.assert_felt_eq(
@@ -822,13 +818,9 @@ pub fn verify_compress_basefold<C, SC, A>(
                     .into_iter()
                     .zip(_current_public_values.committed_value_digest)
                 {
-                    for (byte_current, byte_public) in
-                        word_current.into_iter().zip(word_public)
-                    {
-                        builder.assert_felt_eq(
-                            is_non_zero * (byte_current - byte_public),
-                            C::F::ZERO,
-                        );
+                    for (byte_current, byte_public) in word_current.into_iter().zip(word_public) {
+                        builder
+                            .assert_felt_eq(is_non_zero * (byte_current - byte_public), C::F::ZERO);
                     }
                 }
             }
@@ -852,10 +844,8 @@ pub fn verify_compress_basefold<C, SC, A>(
                     .into_iter()
                     .zip(_current_public_values.deferred_proofs_digest)
                 {
-                    builder.assert_felt_eq(
-                        is_non_zero * (digest_current - digest_public),
-                        C::F::ZERO,
-                    );
+                    builder
+                        .assert_felt_eq(is_non_zero * (digest_current - digest_public), C::F::ZERO);
                 }
             }
             // Update deferred_proofs_digest.
@@ -1042,11 +1032,7 @@ where
 
         // (2) Verify the sub-sumcheck (round polys, challenges, final
         //     point-and-eval consistency all handled inside).
-        crate::sumcheck::verify_sumcheck::<C, FC>(
-            builder,
-            challenger,
-            partial_sumcheck_proof,
-        );
+        crate::sumcheck::verify_sumcheck::<C, FC>(builder, challenger, partial_sumcheck_proof);
 
         // (3) Split the reduced point in half — first half flows into
         //     the BP as `prefix_sum`, second half as `next_prefix_sum`.
@@ -1115,12 +1101,11 @@ where
             let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
             let mut merged: Vec<Felt<C::F>> = curr.clone();
             merged.extend_from_slice(next);
-            let (full_lagrange, _ps) =
-                crate::jagged_eval_primitives::emit_prefix_sum_check::<C>(
-                    builder,
-                    merged,
-                    proof_point_vec.clone(),
-                );
+            let (full_lagrange, _ps) = crate::jagged_eval_primitives::emit_prefix_sum_check::<C>(
+                builder,
+                merged,
+                proof_point_vec.clone(),
+            );
             expected_eval = expected_eval + (z_col_lagrange[k] * full_lagrange);
         }
 
@@ -1164,10 +1149,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
     /// so the embedded `merkle_tree_height` sizes the vk-merkle witness
     /// (vk-root from witness, not a baked constant).
     pub fn dummy<A>(
-        machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-            A,
-        >,
+        machine: &zkm_pcs::StarkMachine<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
         shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
@@ -1197,7 +1179,11 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape, recursion_area_pin)
+                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(
+                    machine,
+                    proof_shape,
+                    recursion_area_pin,
+                )
             })
             .collect();
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
@@ -1492,5 +1478,4 @@ mod tests {
         // Closure exists; shape verified at call site by the
         // EVPV trait bound on `verify_shard`.
     }
-
 }

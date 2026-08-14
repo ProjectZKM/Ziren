@@ -1,13 +1,13 @@
-use zkm_pcs::air::BaseAirBuilder;
 use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
+use zkm_pcs::air::BaseAirBuilder;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -178,7 +178,6 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
             !shard.add_sub_events.is_empty()
         }
     }
-
 }
 
 impl AddSubChip {
@@ -292,14 +291,12 @@ mod tests {
     use p3_maybe_rayon::prelude::ParallelIterator;
     use rand::{thread_rng, Rng};
     use zkm_core_executor::{ExecutionRecord, Opcode};
-    use zkm_pcs::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::AddSubChip;
-    use crate::programs::tests::{alu_op, run_instructions};
     #[cfg(feature = "sys")]
     use super::{AddSubCols, NUM_ADD_SUB_COLS};
+    use crate::programs::tests::{alu_op, run_instructions};
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
 
     #[test]
@@ -340,8 +337,22 @@ mod tests {
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
             instructions.extend(alu_op(Opcode::SUB, operand_1, operand_2));
         }
-        instructions.push(zkm_core_executor::Instruction::new(Opcode::ADD, 28, 29, 30, false, false));
-        instructions.push(zkm_core_executor::Instruction::new(Opcode::ADD, 27, 29, 30, false, false));
+        instructions.push(zkm_core_executor::Instruction::new(
+            Opcode::ADD,
+            28,
+            29,
+            30,
+            false,
+            false,
+        ));
+        instructions.push(zkm_core_executor::Instruction::new(
+            Opcode::ADD,
+            27,
+            29,
+            30,
+            false,
+            false,
+        ));
         let shard = run_instructions(instructions);
         assert_eq!(shard.add_sub_events.len(), 2048);
 

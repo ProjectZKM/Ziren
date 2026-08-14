@@ -8,4 +8,4 @@
 pub mod base;
 pub mod padded;
 
-pub use padded::{Padding, PaddedMle};
+pub use padded::{PaddedMle, Padding};

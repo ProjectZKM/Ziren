@@ -267,10 +267,7 @@ pub fn materialize_dense_jagged_from_cells<F: Field>(
         // contiguous chunk of `active`.  Inside each chip, columns
         // are written column-major (chip's row-major data is
         // transposed to column-major in the output).
-        let chip_chunks = chip_cells
-            .iter()
-            .zip(chip_offsets.iter())
-            .collect::<Vec<_>>();
+        let chip_chunks = chip_cells.iter().zip(chip_offsets.iter()).collect::<Vec<_>>();
         // Split the `active` slice by chip offsets so each chip writes
         // into a non-overlapping `&mut [F]`.
         let mut slot_starts: Vec<usize> = chip_offsets.clone();
@@ -294,10 +291,8 @@ pub fn materialize_dense_jagged_from_cells<F: Field>(
         // are skipped (their cells come from the GPU dense hook), which
         // reproduces the same `use_rev` layout on device.
         let use_rev_commit = use_rev;
-        chip_slots
-            .into_par_iter()
-            .zip(chip_chunks.into_par_iter())
-            .for_each(|(slot, ((trace_values, width), _))| {
+        chip_slots.into_par_iter().zip(chip_chunks.into_par_iter()).for_each(
+            |(slot, ((trace_values, width), _))| {
                 let (trace_values, width) = (*trace_values, *width);
                 let height = if width == 0 { 0 } else { trace_values.len() / width };
                 if width == 0 || height == 0 {
@@ -326,7 +321,8 @@ pub fn materialize_dense_jagged_from_cells<F: Field>(
                         dst[row] = trace_values[src * width + col];
                     }
                 });
-            });
+            },
+        );
     }
     // Extend with zeros to fill the padded power-of-two size.
     dense_values.resize(padded_size, F::ZERO);
@@ -351,9 +347,7 @@ pub fn materialize_dense_jagged_from_cells<F: Field>(
 /// Prefer [`compute_jagged_metadata`] + [`materialize_dense_jagged`] for new
 /// code — that pair lets the dense vector exist only for the brief window
 /// when the BaseFold commit needs it.
-pub fn pack_traces_jagged<F: Field>(
-    traces: &[(String, RowMajorMatrix<F>)],
-) -> JaggedPacking<F> {
+pub fn pack_traces_jagged<F: Field>(traces: &[(String, RowMajorMatrix<F>)]) -> JaggedPacking<F> {
     let mut chip_infos = Vec::with_capacity(traces.len());
     let mut offsets = Vec::new();
     let mut dense_values = Vec::new();
@@ -385,13 +379,7 @@ pub fn pack_traces_jagged<F: Field>(
     let dense_len = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
     dense_values.resize(dense_len, F::ZERO);
 
-    JaggedPacking {
-        dense_values,
-        chip_infos,
-        offsets,
-        total_values,
-        dense_len,
-    }
+    JaggedPacking { dense_values, chip_infos, offsets, total_values, dense_len }
 }
 
 /// Compute the cumulative column offsets for Jagged verification.
@@ -511,8 +499,7 @@ pub fn jagged_stats(packing: &JaggedPacking<impl Field>) -> JaggedStats {
         padded_size,
         padding_ratio: padded_size as f64 / packing.total_values.max(1) as f64,
         per_chip_padded_total,
-        savings_vs_per_chip: 1.0
-            - (padded_size as f64 / per_chip_padded_total.max(1) as f64),
+        savings_vs_per_chip: 1.0 - (padded_size as f64 / per_chip_padded_total.max(1) as f64),
     }
 }
 
@@ -584,12 +571,7 @@ pub fn fold_tables_local<F: Field>(
                 alpha_pow *= alpha;
             }
 
-            FoldedTable {
-                name: name.clone(),
-                folded_values: folded,
-                height,
-                original_width: width,
-            }
+            FoldedTable { name: name.clone(), folded_values: folded, height, original_width: width }
         })
         .collect()
 }
@@ -601,9 +583,7 @@ pub fn fold_tables_local<F: Field>(
 /// for a single BaseFold commit.
 ///
 /// Fan-in = number of tables (typically ~20), NOT number of columns (~hundreds).
-pub fn pack_folded_tables_jagged<F: Field>(
-    tables: &[FoldedTable<F>],
-) -> JaggedPacking<F> {
+pub fn pack_folded_tables_jagged<F: Field>(tables: &[FoldedTable<F>]) -> JaggedPacking<F> {
     let mut chip_infos = Vec::with_capacity(tables.len());
     let mut offsets = Vec::new();
     let mut dense_values = Vec::new();
@@ -626,13 +606,7 @@ pub fn pack_folded_tables_jagged<F: Field>(
     let dense_len = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
     dense_values.resize(dense_len, F::ZERO);
 
-    JaggedPacking {
-        dense_values,
-        chip_infos,
-        offsets,
-        total_values,
-        dense_len,
-    }
+    JaggedPacking { dense_values, chip_infos, offsets, total_values, dense_len }
 }
 
 /// Full hierarchical PCS pipeline: fold tables locally, then pack for BaseFold.
@@ -771,7 +745,10 @@ mod tests {
         println!("\nFlat vs Hierarchical:");
         println!("  Flat real values: {}", flat_stats.total_real_values);
         println!("  Hierarchical real values: {}", stats.total_real_values);
-        println!("  Data reduction: {:.1}x", flat_stats.total_real_values as f64 / stats.total_real_values as f64);
+        println!(
+            "  Data reduction: {:.1}x",
+            flat_stats.total_real_values as f64 / stats.total_real_values as f64
+        );
     }
 
     #[test]

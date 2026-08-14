@@ -27,8 +27,8 @@
 //! corresponding host-side variant lives on the prover side.
 
 use serde::{Deserialize, Serialize};
-use zkm_recursion_compiler::ir::{Ext, Felt};
 use zkm_pcs::septic_digest::SepticDigest;
+use zkm_recursion_compiler::ir::{Ext, Felt};
 
 /// Single-row variant of [`zkm_pcs::AirOpenedValues`] for the
 /// BaseFold pipeline.

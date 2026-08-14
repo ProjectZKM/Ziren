@@ -4,7 +4,7 @@ use core::{
 };
 use std::array;
 
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
@@ -12,9 +12,7 @@ use zkm_core_executor::events::{GlobalLookupEvent, MemoryInitializeFinalizeEvent
 use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{
-    air::{
-        AirLookup, LookupScope, MachineAir, ZKMAirBuilder,
-    },
+    air::{AirLookup, LookupScope, MachineAir, ZKMAirBuilder},
     LookupKind,
 };
 
@@ -431,11 +429,7 @@ where
         );
         builder.send(
             AirLookup::new(
-                vec![
-                    local.index.into() + AB::Expr::ONE,
-                    local.addr.into(),
-                    local.is_comp.into(),
-                ],
+                vec![local.index.into() + AB::Expr::ONE, local.addr.into(), local.is_comp.into()],
                 local.is_real.into(),
                 control_kind,
             ),

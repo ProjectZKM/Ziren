@@ -1,9 +1,9 @@
 use p3_bn254_fr::{Bn254, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
+use p3_commit::BatchOpening;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::extension::BinomialExtensionField;
-use p3_commit::BatchOpening;
 use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
 use p3_koala_bear::KoalaBear;
 use p3_merkle_tree::MerkleTreeMmcs;
@@ -24,8 +24,7 @@ pub const OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 pub type OuterVal = KoalaBear;
 pub type OuterChallenge = BinomialExtensionField<OuterVal, 4>;
 pub type OuterPerm = Poseidon2Bn254<3>;
-pub type OuterHash =
-    MultiField32PaddingFreeSponge<OuterVal, Bn254, OuterPerm, 3, 16, DIGEST_SIZE>;
+pub type OuterHash = MultiField32PaddingFreeSponge<OuterVal, Bn254, OuterPerm, 3, 16, DIGEST_SIZE>;
 pub type OuterDigestHash = Hash<OuterVal, Bn254, DIGEST_SIZE>;
 pub type OuterDigest = [Bn254; DIGEST_SIZE];
 pub type OuterCompress = TruncatedPermutation<OuterPerm, 2, 1, 3>;
@@ -48,7 +47,6 @@ pub type OuterCommitPhaseStep = CommitPhaseProofStep<OuterChallenge, OuterChalle
 pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal, OuterInputProof>;
 pub type OuterBatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
 pub type OuterPcsProof = <OuterPcs as p3_commit::Pcs<OuterChallenge, OuterChallenger>>::Proof;
-
 
 /// The permutation for outer recursion.
 pub fn outer_perm() -> OuterPerm {
@@ -82,7 +80,15 @@ pub fn outer_fri_config() -> FriParameters<OuterChallengeMmcs> {
             Err(_) => 21,
         }
     };
-    FriParameters { log_blowup: 4, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 16, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
+    FriParameters {
+        log_blowup: 4,
+        log_final_poly_len: 0,
+        max_log_arity: 1,
+        num_queries,
+        commit_proof_of_work_bits: 16,
+        query_proof_of_work_bits: 16,
+        mmcs: challenge_mmcs,
+    }
 }
 
 /// The FRI config for outer recursion.
@@ -100,7 +106,15 @@ pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriParameters<OuterCha
             Err(_) => 84 / log_blowup,
         }
     };
-    FriParameters { log_blowup, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 16, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
+    FriParameters {
+        log_blowup,
+        log_final_poly_len: 0,
+        max_log_arity: 1,
+        num_queries,
+        commit_proof_of_work_bits: 16,
+        query_proof_of_work_bits: 16,
+        mmcs: challenge_mmcs,
+    }
 }
 
 #[derive(Deserialize)]
@@ -167,9 +181,11 @@ impl Default for KoalaBearPoseidon2Outer {
 }
 
 impl StarkGenericConfig for KoalaBearPoseidon2Outer {
-
     fn prep_commit(
-        named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>)],
+        named_preprocessed_traces: &[(
+            String,
+            p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>,
+        )],
         use_rev: bool,
     ) -> zkm_pcs::Com<Self> {
         // The OuterSC wrap-machine PREPROCESSED commit goes through the jagged
@@ -182,7 +198,10 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
         zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs>;
 
     fn prep_precompute(
-        named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>)],
+        named_preprocessed_traces: &[(
+            String,
+            p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>,
+        )],
         use_rev: bool,
     ) -> Self::PrepPrecomputed {
         outer_jagged_hooks::outer_prep_precompute(named_preprocessed_traces, use_rev)
@@ -243,8 +262,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         OuterValMmcs::new(hash, compress, 0)
     }
 
-    fn fri_config(
-    ) -> zkm_pcs::basefold::config::FriConfig<zkm_pcs::jagged_pcs::JaggedVal> {
+    fn fri_config() -> zkm_pcs::basefold::config::FriConfig<zkm_pcs::jagged_pcs::JaggedVal> {
         // WRAP-stage params: (log_blowup=3, num_queries=94,
         // pow_bits=22) for full 100-bit query-phase soundness on the on-chain
         // wrap proof.  The inner env-default (1,94,16) here would be only
@@ -252,7 +270,6 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // See `FriConfig::wrap_fri_config`.
         zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
     }
-
 
     fn digest_felts(
         commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
@@ -264,10 +281,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // commit natively; this host projection only needs prover/verifier
         // agreement, which split_32 gives deterministically.
         let roots = commit.roots();
-        assert!(
-            !roots.is_empty(),
-            "BN254 wrap commitment MerkleCap must have at least one root",
-        );
+        assert!(!roots.is_empty(), "BN254 wrap commitment MerkleCap must have at least one root",);
         let felts = p3_field::split_32::<Bn254, KoalaBear>(roots[0][0], 8);
         let mut out = [KoalaBear::default(); 8];
         for i in 0..8 {
@@ -328,11 +342,18 @@ pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
     let hash = OuterHash::new(perm.clone()).unwrap();
     let compress = OuterCompress::new(perm.clone());
     let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress, 0));
-    FriParameters { log_blowup: 1, log_final_poly_len: 0, max_log_arity: 1, num_queries: 1, commit_proof_of_work_bits: 1, query_proof_of_work_bits: 1, mmcs: challenge_mmcs }
+    FriParameters {
+        log_blowup: 1,
+        log_final_poly_len: 0,
+        max_log_arity: 1,
+        num_queries: 1,
+        commit_proof_of_work_bits: 1,
+        query_proof_of_work_bits: 1,
+        mmcs: challenge_mmcs,
+    }
 }
 
 // ── D=5 outer config (128-bit security) ───────────────────────────────────
-
 
 // Compile-time proof that the genericized
 // BaseFold jagged-PCS digest path (`zkm_pcs::jagged_pcs::*_generic`) is
@@ -358,14 +379,13 @@ mod basefold_over_bn254_generic_typecheck {
     use super::{KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
     // The commit no longer observes internally, so the caller needs `CanObserve`.
     use p3_challenger::CanObserve;
+    use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;
+    use zkm_pcs::basefold::{StackedBasefoldProof, StackedVerifierError};
     use zkm_pcs::jagged_pcs::{
         commit_jagged_pcs_generic, open_jagged_pcs_generic, verify_jagged_pcs_generic,
-        JaggedCommitGeneric, JaggedProverDataGeneric,
-        JaggedChallenge, JaggedMmcs, JaggedVal,
+        JaggedChallenge, JaggedCommitGeneric, JaggedMmcs, JaggedProverDataGeneric, JaggedVal,
     };
-    use p3_matrix::dense::RowMajorMatrix;
-    use zkm_pcs::basefold::{StackedBasefoldProof, StackedVerifierError};
 
     // Sanity: `JaggedVal == OuterVal == KoalaBear`, so the OUTER MMCS is an
     // `Mmcs<JaggedVal>` exactly as the generic cores require. (Inner alias is
@@ -378,10 +398,7 @@ mod basefold_over_bn254_generic_typecheck {
         traces: std::vec::Vec<(std::string::String, RowMajorMatrix<JaggedVal>)>,
         mmcs: OuterValMmcs,
         dft: Arc<OuterDft>,
-    ) -> (
-        JaggedCommitGeneric<OuterValMmcs>,
-        JaggedProverDataGeneric<OuterValMmcs>,
-    ) {
+    ) -> (JaggedCommitGeneric<OuterValMmcs>, JaggedProverDataGeneric<OuterValMmcs>) {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri)
     }
@@ -394,10 +411,7 @@ mod basefold_over_bn254_generic_typecheck {
         ch: &mut OuterChallenger,
         mmcs: OuterValMmcs,
         dft: Arc<OuterDft>,
-    ) -> (
-        JaggedCommitGeneric<OuterValMmcs>,
-        JaggedProverDataGeneric<OuterValMmcs>,
-    ) {
+    ) -> (JaggedCommitGeneric<OuterValMmcs>, JaggedProverDataGeneric<OuterValMmcs>) {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         let (commit, prover_data) =
             commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri);
@@ -449,7 +463,6 @@ mod basefold_over_bn254_generic_typecheck {
         )
     }
 }
-
 
 // OUTER-ring jagged BaseFold setup commit.
 //
@@ -503,7 +516,7 @@ pub mod outer_jagged_hooks {
         use_rev: bool,
     ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs> {
         use zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
-        
+
         let mmcs = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         // The commit consumes BORROWED views over the
@@ -550,10 +563,7 @@ mod basefold_over_bn254_roundtrip_test {
                 .collect();
             RowMajorMatrix::new(v, w)
         };
-        let traces = vec![
-            ("Cpu".to_string(), mk(20, 100, 1)),
-            ("Add".to_string(), mk(8, 50, 7)),
-        ];
+        let traces = vec![("Cpu".to_string(), mk(20, 100, 1)), ("Add".to_string(), mk(8, 50, 7))];
 
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
@@ -670,10 +680,7 @@ mod basefold_over_bn254_roundtrip_test {
                 .collect();
             RowMajorMatrix::new(v, w)
         };
-        let traces = vec![
-            ("Cpu".to_string(), mk(4, 16, 1)),
-            ("Add".to_string(), mk(2, 8, 7)),
-        ];
+        let traces = vec![("Cpu".to_string(), mk(4, 16, 1)), ("Add".to_string(), mk(2, 8, 7))];
 
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
@@ -689,17 +696,15 @@ mod basefold_over_bn254_roundtrip_test {
                 (0..log_h).map(|_| pt.sample_algebra_element()).collect()
             })
             .collect();
-        let z_row: Vec<JaggedChallenge> = r_row_per_chip
-            .iter()
-            .max_by_key(|v| v.len())
-            .cloned()
-            .unwrap_or_default();
+        let z_row: Vec<JaggedChallenge> =
+            r_row_per_chip.iter().max_by_key(|v| v.len()).cloned().unwrap_or_default();
 
         // The jagged entry points take `(name, PaddedMle)` pairs, not owned
         // matrices; build them once and reuse.
         let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView> = traces
             .iter()
-            .map(|(name, m)| (name.clone(), {
+            .map(|(name, m)| {
+                (name.clone(), {
                     let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     zkm_pcs::multilinear::PaddedMle::padded_with_zeros(
@@ -708,7 +713,8 @@ mod basefold_over_bn254_roundtrip_test {
                         )),
                         log_h,
                     )
-                }))
+                })
+            })
             .collect();
 
         let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();

@@ -5,16 +5,16 @@ use instruction::{
 };
 use itertools::Itertools;
 use p3_field::{
-    Field, PrimeCharacteristicRing, ExtensionField, PrimeField, PrimeField64, TwoAdicField,
+    ExtensionField, Field, PrimeCharacteristicRing, PrimeField, PrimeField64, TwoAdicField,
 };
 use std::{borrow::Borrow, collections::HashMap, mem::transmute};
 use vec_map::VecMap;
 use zkm_core_machine::utils::{zkm_debug_mode, SpanBuilder};
+use zkm_pcs::septic_curve::SepticCurve;
 use zkm_recursion_core::{
     air::{Block, RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
     BaseAluInstr, BaseAluOpcode,
 };
-use zkm_pcs::septic_curve::SepticCurve;
 
 use zkm_recursion_core::*;
 
@@ -533,22 +533,24 @@ where
         // This step also counts the number of times each address is
         // read from. Backfill below walks the resulting flat
         // iter_mut, which descends into Parallel sub-programs.
-        let (mut top_seq_blocks, traces) = tracing::debug_span!("compile_one loop").in_scope(|| {
-            let mut traces = vec![];
-            let mut span_builder = if debug_mode {
-                Some(SpanBuilder::<_, &'static str>::new("cycle_tracker".to_string()))
-            } else {
-                None
-            };
-            let blocks = self.compile_block(operations, debug_mode, &mut traces, span_builder.as_mut());
-            if let Some(span_builder) = span_builder {
-                let cycle_tracker_root_span = span_builder.finish().unwrap();
-                for line in cycle_tracker_root_span.lines() {
-                    tracing::info!("{}", line);
+        let (mut top_seq_blocks, traces) =
+            tracing::debug_span!("compile_one loop").in_scope(|| {
+                let mut traces = vec![];
+                let mut span_builder = if debug_mode {
+                    Some(SpanBuilder::<_, &'static str>::new("cycle_tracker".to_string()))
+                } else {
+                    None
+                };
+                let blocks =
+                    self.compile_block(operations, debug_mode, &mut traces, span_builder.as_mut());
+                if let Some(span_builder) = span_builder {
+                    let cycle_tracker_root_span = span_builder.finish().unwrap();
+                    for line in cycle_tracker_root_span.lines() {
+                        tracing::info!("{}", line);
+                    }
                 }
-            }
-            (blocks, traces)
-        });
+                (blocks, traces)
+            });
 
         // Replace the mults using the address count data gathered in this previous.
         // Exhaustive match for refactoring purposes.
@@ -938,25 +940,20 @@ mod tests {
     /// Generate random [F; 4] arrays using rand 0.8 compatible approach.
     fn rand_felt4_iter(seed: u64) -> impl Iterator<Item = [F; 4]> {
         let mut rng = StdRng::seed_from_u64(seed);
-        std::iter::from_fn(move || {
-            Some(core::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
-        })
+        std::iter::from_fn(move || Some(core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))))
     }
 
     /// Generate random [F; 16] arrays using rand 0.8 compatible approach.
     fn rand_felt16_iter(seed: u64) -> impl Iterator<Item = [F; 16]> {
         let mut rng = StdRng::seed_from_u64(seed);
-        std::iter::from_fn(move || {
-            Some(core::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
-        })
+        std::iter::from_fn(move || Some(core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))))
     }
 
     use zkm_core_machine::utils::{run_test_machine, setup_logger};
-    use zkm_recursion_core::{machine::RecursionAir, RecursionProgram, Runtime};
     use zkm_pcs::{
-        inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, InnerHash,
-        StarkGenericConfig,
+        inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, InnerHash, StarkGenericConfig,
     };
+    use zkm_recursion_core::{machine::RecursionAir, RecursionProgram, Runtime};
 
     use crate::circuit::{AsmBuilder, AsmConfig, CircuitV2Builder};
 
@@ -1073,8 +1070,6 @@ mod tests {
         }
     }
 
-
-
     #[test]
     fn test_hint_bit_decomposition() {
         setup_logger();
@@ -1105,13 +1100,9 @@ mod tests {
 
         let mut builder = AsmBuilder::<F, EF>::default();
 
-        let input_fs = rand_felt_iter(0xC0FFEE7AB1E)
-            .take(ITERS)
-            .collect::<Vec<_>>();
+        let input_fs = rand_felt_iter(0xC0FFEE7AB1E).take(ITERS).collect::<Vec<_>>();
 
-        let input_efs = rand_felt4_iter(0x7EA7AB1E)
-            .take(ITERS)
-            .collect::<Vec<_>>();
+        let input_efs = rand_felt4_iter(0x7EA7AB1E).take(ITERS).collect::<Vec<_>>();
 
         let mut buf = VecDeque::<u8>::new();
 
@@ -1127,7 +1118,8 @@ mod tests {
         builder.cycle_tracker_v2_enter("printing exts".to_string());
         for (i, input_block) in input_efs.iter().enumerate() {
             builder.cycle_tracker_v2_enter(format!("printing ext {i}"));
-            let input_ext = builder.eval(EF::from_basis_coefficients_slice(input_block).unwrap().cons());
+            let input_ext =
+                builder.eval(EF::from_basis_coefficients_slice(input_block).unwrap().cons());
             builder.print_e(input_ext);
             builder.cycle_tracker_v2_exit();
         }
@@ -1159,7 +1151,8 @@ mod tests {
 
         let mut builder = AsmBuilder::<F, EF>::default();
         let mut ext_iter = rand_felt4_iter(0x3264);
-        let mut random_ext = move || EF::from_basis_coefficients_slice(&ext_iter.next().unwrap()).unwrap();
+        let mut random_ext =
+            move || EF::from_basis_coefficients_slice(&ext_iter.next().unwrap()).unwrap();
         for _ in 0..100 {
             let input = random_ext();
             let output: &[F] = input.as_basis_coefficients_slice();
@@ -1175,52 +1168,44 @@ mod tests {
     }
 
     macro_rules! test_assert_fixture {
-        ($assert_felt:ident, $assert_ext:ident, $should_offset:literal) => {
+        ($assert_felt:ident, $assert_ext:ident, $should_offset:literal) => {{
+            use std::convert::identity;
+            let mut builder = AsmBuilder::<F, EF>::default();
+            // Test with F (felt)
             {
-                use std::convert::identity;
-                let mut builder = AsmBuilder::<F, EF>::default();
-                // Test with F (felt)
-                {
-                    let mut elts = rand_felt_iter(0xDEADBEEF);
-                    for _ in 0..100 {
-                        let a: F = elts.next().unwrap();
-                        let b: F = elts.next().unwrap();
-                        let c = a + b;
-                        let ar: Felt<_> = builder.eval(identity(a));
-                        let br: Felt<_> = builder.eval(identity(b));
-                        let cr: Felt<_> = builder.eval(ar + br);
-                        let cm = if $should_offset {
-                            c + elts.find(|x| !x.is_zero()).unwrap()
-                        } else {
-                            c
-                        };
-                        builder.$assert_felt(cr, identity(cm));
-                    }
+                let mut elts = rand_felt_iter(0xDEADBEEF);
+                for _ in 0..100 {
+                    let a: F = elts.next().unwrap();
+                    let b: F = elts.next().unwrap();
+                    let c = a + b;
+                    let ar: Felt<_> = builder.eval(identity(a));
+                    let br: Felt<_> = builder.eval(identity(b));
+                    let cr: Felt<_> = builder.eval(ar + br);
+                    let cm =
+                        if $should_offset { c + elts.find(|x| !x.is_zero()).unwrap() } else { c };
+                    builder.$assert_felt(cr, identity(cm));
                 }
-                // Test with EF (ext)
-                {
-                    let mut ext_iter = rand_felt4_iter(0xABADCAFE);
-                    let mut elts = std::iter::from_fn(move || {
-                        Some(EF::from_basis_coefficients_slice(&ext_iter.next().unwrap()).unwrap())
-                    });
-                    for _ in 0..100 {
-                        let a: EF = elts.next().unwrap();
-                        let b: EF = elts.next().unwrap();
-                        let c = a + b;
-                        let ar: Ext<_, _> = builder.eval(EF::cons(a));
-                        let br: Ext<_, _> = builder.eval(EF::cons(b));
-                        let cr: Ext<_, _> = builder.eval(ar + br);
-                        let cm = if $should_offset {
-                            c + elts.find(|x| !x.is_zero()).unwrap()
-                        } else {
-                            c
-                        };
-                        builder.$assert_ext(cr, EF::cons(cm));
-                    }
-                }
-                test_operations(builder.into_operations());
             }
-        };
+            // Test with EF (ext)
+            {
+                let mut ext_iter = rand_felt4_iter(0xABADCAFE);
+                let mut elts = std::iter::from_fn(move || {
+                    Some(EF::from_basis_coefficients_slice(&ext_iter.next().unwrap()).unwrap())
+                });
+                for _ in 0..100 {
+                    let a: EF = elts.next().unwrap();
+                    let b: EF = elts.next().unwrap();
+                    let c = a + b;
+                    let ar: Ext<_, _> = builder.eval(EF::cons(a));
+                    let br: Ext<_, _> = builder.eval(EF::cons(b));
+                    let cr: Ext<_, _> = builder.eval(ar + br);
+                    let cm =
+                        if $should_offset { c + elts.find(|x| !x.is_zero()).unwrap() } else { c };
+                    builder.$assert_ext(cr, EF::cons(cm));
+                }
+            }
+            test_operations(builder.into_operations());
+        }};
     }
 
     #[test]

@@ -23,8 +23,8 @@ use itertools::Itertools;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::Mmcs;
 use p3_field::{BasedVectorSpace, ExtensionField, Field, TwoAdicField};
-use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::Matrix;
 use p3_maybe_rayon::prelude::*;
 use p3_util::{log2_strict_usize, reverse_slice_index_bits};
 
@@ -128,8 +128,7 @@ fn fold_even_odd_ext<F: TwoAdicField, EF: ExtensionField<F>>(poly: Vec<EF>, beta
     let g_inv = F::two_adic_generator(log2_strict_usize(m.height()) + 1).inverse();
     let one_half = F::ONE.halve();
 
-    let mut halve_inv_powers: Vec<F> =
-        g_inv.shifted_powers(one_half).take(m.height()).collect();
+    let mut halve_inv_powers: Vec<F> = g_inv.shifted_powers(one_half).take(m.height()).collect();
     reverse_slice_index_bits(&mut halve_inv_powers);
 
     m.par_rows()

@@ -176,8 +176,8 @@ impl<F: Field> ShiftRightOperation<F> {
 
             let mut num_bits_to_shift = zero.clone();
             for i in 0..3 {
-                num_bits_to_shift = num_bits_to_shift.clone()
-                    + cols.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
+                num_bits_to_shift =
+                    num_bits_to_shift.clone() + cols.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
             }
             for i in 0..BYTE_SIZE {
                 builder
@@ -189,8 +189,8 @@ impl<F: Field> ShiftRightOperation<F> {
                 one.clone(),
             );
 
-            let num_bytes_to_shift = cols.c_least_sig_byte[3]
-                + cols.c_least_sig_byte[4] * AB::F::from_u32(2);
+            let num_bytes_to_shift =
+                cols.c_least_sig_byte[3] + cols.c_least_sig_byte[4] * AB::F::from_u32(2);
             for i in 0..WORD_SIZE {
                 builder
                     .when(cols.shift_by_n_bytes[i])
@@ -233,8 +233,8 @@ impl<F: Field> ShiftRightOperation<F> {
             }
             let mut num_bits_to_shift = zero.clone();
             for i in 0..3 {
-                num_bits_to_shift = num_bits_to_shift.clone()
-                    + cols.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
+                num_bits_to_shift =
+                    num_bits_to_shift.clone() + cols.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
             }
 
             for i in (0..LONG_WORD_SIZE).rev() {
@@ -250,8 +250,7 @@ impl<F: Field> ShiftRightOperation<F> {
             for i in (0..LONG_WORD_SIZE).rev() {
                 let mut v: AB::Expr = cols.shr_carry_output_shifted_byte[i].into();
                 if i + 1 < LONG_WORD_SIZE {
-                    v = v.clone()
-                        + cols.shr_carry_output_carry[i + 1] * carry_multiplier.clone();
+                    v = v.clone() + cols.shr_carry_output_carry[i + 1] * carry_multiplier.clone();
                 }
                 builder.assert_eq(v, cols.bit_shift_result[i]);
             }

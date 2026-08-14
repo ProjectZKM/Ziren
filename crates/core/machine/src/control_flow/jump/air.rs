@@ -1,8 +1,8 @@
-use zkm_pcs::air::BaseAirBuilder;
 use crate::memory::RegisterCols;
 use std::borrow::Borrow;
+use zkm_pcs::air::BaseAirBuilder;
 
-use p3_air::{WindowAccess, Air, AirBuilder};
+use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::Opcode;
 use zkm_pcs::{air::ZKMAirBuilder, Word};

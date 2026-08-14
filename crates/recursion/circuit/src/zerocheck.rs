@@ -26,12 +26,10 @@ use std::marker::PhantomData;
 
 use p3_air::{Air, BaseAir};
 use p3_field::{Algebra, PrimeCharacteristicRing, TwoAdicField};
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
-use zkm_pcs::{
-    air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError,
-};
 use zkm_pcs::folder::PairWindow;
 use zkm_pcs::septic_digest::SepticDigest;
+use zkm_pcs::{air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
 use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
@@ -72,19 +70,15 @@ pub fn full_geq<C: CircuitConfig>(
         eval_point.len(),
         "full_geq: threshold and eval_point must have equal dimension"
     );
-    threshold
-        .iter()
-        .rev()
-        .zip(eval_point.iter().rev())
-        .fold(SymbolicExt::ONE, |acc, (x, y)| {
-            // Lifted from the upstream:
-            //   ((1-y)(1-x) + y*x) * acc + y*(1-x)
-            // → the eq term carries forward when the bits agree,
-            //   then a "step-up" term fires whenever y is 1 and x
-            //   is 0 (i.e., eval_point > threshold at this bit).
-            let one = SymbolicExt::ONE;
-            ((one - *y) * (one - *x) + *y * *x) * acc + *y * (one - *x)
-        })
+    threshold.iter().rev().zip(eval_point.iter().rev()).fold(SymbolicExt::ONE, |acc, (x, y)| {
+        // Lifted from the upstream:
+        //   ((1-y)(1-x) + y*x) * acc + y*(1-x)
+        // → the eq term carries forward when the bits agree,
+        //   then a "step-up" term fires whenever y is 1 and x
+        //   is 0 (i.e., eval_point > threshold at this bit).
+        let one = SymbolicExt::ONE;
+        ((one - *y) * (one - *x) + *y * *x) * acc + *y * (one - *x)
+    })
 }
 
 /// Full Lagrange equality evaluation for two extension-field points.
@@ -107,17 +101,9 @@ pub fn eq_eval<C: CircuitConfig>(
     a: &[SymbolicExt<C::F, C::EF>],
     b: &[SymbolicExt<C::F, C::EF>],
 ) -> SymbolicExt<C::F, C::EF> {
-    assert_eq!(
-        a.len(),
-        b.len(),
-        "eq_eval: points must have equal dimension"
-    );
+    assert_eq!(a.len(), b.len(), "eq_eval: points must have equal dimension");
     let one = SymbolicExt::<C::F, C::EF>::ONE;
-    a.iter()
-        .zip(b.iter())
-        .fold(one, |acc, (ai, bi)| {
-            acc * ((one - *ai) * (one - *bi) + *ai * *bi)
-        })
+    a.iter().zip(b.iter()).fold(one, |acc, (ai, bi)| acc * ((one - *ai) * (one - *bi) + *ai * *bi))
 }
 
 /// Verify that a chip's opening has the expected per-batch widths.
@@ -147,10 +133,7 @@ where
         ));
     }
     if opening.main.local.len() != chip.width() {
-        return Err(OpeningShapeError::MainWidthMismatch(
-            chip.width(),
-            opening.main.local.len(),
-        ));
+        return Err(OpeningShapeError::MainWidthMismatch(chip.width(), opening.main.local.len()));
     }
     Ok(())
 }
@@ -174,10 +157,7 @@ where
         ));
     }
     if opening.main.local.len() != chip.width() {
-        return Err(OpeningShapeError::MainWidthMismatch(
-            chip.width(),
-            opening.main.local.len(),
-        ));
+        return Err(OpeningShapeError::MainWidthMismatch(chip.width(), opening.main.local.len()));
     }
     Ok(())
 }
@@ -231,14 +211,9 @@ where
         alpha: Ext<C::F, C::EF>,
         public_values: &'a [Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
-        let preprocessed = PairWindow {
-            local: &opening.preprocessed.local,
-            next: &opening.preprocessed.local,
-        };
-        let main = PairWindow {
-            local: &opening.main.local,
-            next: &opening.main.local,
-        };
+        let preprocessed =
+            PairWindow { local: &opening.preprocessed.local, next: &opening.preprocessed.local };
+        let main = PairWindow { local: &opening.main.local, next: &opening.main.local };
         // SP1's `VerifierConstraintFolder` (verifier/shard.rs:243) carries NO
         // cumulative sums, and the Ziren host zeroes them in the zerocheck
         // constraint eval (`eval_air_constraints_at_row`, zerocheck_poly.rs:661
@@ -326,14 +301,9 @@ where
         local_cumulative_sum: &'a Ext<C::F, C::EF>,
         global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
     ) -> Ext<C::F, C::EF> {
-        let preprocessed = PairWindow {
-            local: &opening.preprocessed.local,
-            next: &opening.preprocessed.local,
-        };
-        let main = PairWindow {
-            local: &opening.main.local,
-            next: &opening.main.local,
-        };
+        let preprocessed =
+            PairWindow { local: &opening.preprocessed.local, next: &opening.preprocessed.local };
+        let main = PairWindow { local: &opening.main.local, next: &opening.main.local };
         let mut folder = BasefoldConstraintFolder::<C> {
             preprocessed,
             main,
@@ -506,12 +476,8 @@ where
         // `zerocheck_proof.point_and_eval.1` (section (5)) — the OTHER half of
         // the binding — so the anchor MUST match the prover or that assert
         // fails.  Legacy shards keep `eq(z_gkr, z*)`.
-        let point_symbolic: Vec<SymbolicExt<C::F, C::EF>> = zerocheck_proof
-            .point_and_eval
-            .0
-            .iter()
-            .map(|x| (*x).into())
-            .collect();
+        let point_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+            zerocheck_proof.point_and_eval.0.iter().map(|x| (*x).into()).collect();
         let gkr_point_symbolic: Vec<SymbolicExt<C::F, C::EF>> = if verifier_use_rev {
             gkr_evaluations.point.iter().rev().map(|x| (*x).into()).collect()
         } else {
@@ -577,10 +543,8 @@ where
             for (i, x) in degree_symbolic.iter().enumerate() {
                 builder.assert_ext_eq(*x * (*x - SymbolicExt::ONE), SymbolicExt::ZERO);
                 if i >= 1 {
-                    builder.assert_ext_eq(
-                        *x * *degree_symbolic.first().unwrap(),
-                        SymbolicExt::ZERO,
-                    );
+                    builder
+                        .assert_ext_eq(*x * *degree_symbolic.first().unwrap(), SymbolicExt::ZERO);
                 }
             }
 
@@ -596,13 +560,8 @@ where
 
             // (4f) Constraint accumulator at the sumcheck point
             // minus the padded-row contribution.
-            let constraint_eval_ext = Self::eval_constraints_basefold(
-                builder,
-                chip,
-                opening,
-                alpha,
-                public_values,
-            );
+            let constraint_eval_ext =
+                Self::eval_constraints_basefold(builder, chip, opening, alpha, public_values);
             let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
             let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
             let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val.clone();
@@ -618,10 +577,7 @@ where
                 .zip(
                     gkr_batch_open_challenge_powers
                         .iter()
-                        .take(
-                            opening.main.local.len()
-                                + opening.preprocessed.local.len(),
-                        )
+                        .take(opening.main.local.len() + opening.preprocessed.local.len())
                         .copied(),
                 )
                 .map(|(opening, power)| {
@@ -634,8 +590,8 @@ where
             // chip RLC.
             let rlc_sym: SymbolicExt<C::F, C::EF> = rlc_eval.into();
             let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
-            let new_rlc: SymbolicExt<C::F, C::EF> = rlc_sym * lambda_sym
-                + zerocheck_eq_val * (constraint_eval + openings_batch);
+            let new_rlc: SymbolicExt<C::F, C::EF> =
+                rlc_sym * lambda_sym + zerocheck_eq_val * (constraint_eval + openings_batch);
             rlc_eval = builder.eval(new_rlc);
         }
 
@@ -676,13 +632,10 @@ where
                 // sum-modification identity failed' — not just the
                 // reconstruction (logup_gkr.rs check (i)).
                 if verifier_use_rev {
-                    let main_full = chip_evaluation
-                        .main_trace_evaluations_full
-                        .as_deref()
-                        .expect(
-                            "rev claim-collapse requires main_trace_evaluations_full \
+                    let main_full = chip_evaluation.main_trace_evaluations_full.as_deref().expect(
+                        "rev claim-collapse requires main_trace_evaluations_full \
                              (FIX-off core proof)",
-                        );
+                    );
                     let prep_full = chip_evaluation
                         .preprocessed_trace_evaluations_full
                         .as_deref()
@@ -787,8 +740,7 @@ where
         //
         // `opened_values.chips` is in NAME order (the prover's
         // `build_opened_values` name-sorts), matching the host.
-        let len_felt: Felt<C::F> =
-            builder.constant(C::F::from_canonical_usize(shard_chips.len()));
+        let len_felt: Felt<C::F> = builder.constant(C::F::from_canonical_usize(shard_chips.len()));
         challenger.observe(builder, len_felt);
         for opening in opened_values.chips.iter() {
             crate::logup_gkr::observe_length_prefixed_ext_slice::<C, FC>(
@@ -809,10 +761,10 @@ where
 mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
+    use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_compiler::ir::Ext;
-    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;
@@ -882,11 +834,7 @@ mod tests {
     /// honest `claimed_sum` a single-chip shard would carry.  Mirrors the
     /// in-circuit section (6) rev branch + the section-(3) β-power convention
     /// (β powers start at β¹ — `successors(ONE).skip(1)`).
-    fn host_full_claim_single_chip(
-        main_full: &[EF],
-        prep_full: &[EF],
-        beta: EF,
-    ) -> EF {
+    fn host_full_claim_single_chip(main_full: &[EF], prep_full: &[EF], beta: EF) -> EF {
         // β powers β¹, β², … (skip the β⁰=1 term — matches
         // `gkr_batch_open_challenge_powers` at zerocheck.rs:499-505).
         let n = main_full.len() + prep_full.len();
@@ -962,11 +910,8 @@ mod tests {
     /// binding `assert_ext_eq` is a no-op → the circuit runs clean.
     #[test]
     fn full_claim_binding_accepts_honest_full() {
-        let main_full = vec![
-            EF::from(F::from_u32(5)),
-            EF::from(F::from_u32(7)),
-            EF::from(F::from_u32(9)),
-        ];
+        let main_full =
+            vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
         let prep_full = vec![EF::from(F::from_u32(3))];
         let beta = EF::from(F::from_u32(11));
         let claimed_sum = host_full_claim_single_chip(&main_full, &prep_full, beta);
@@ -990,22 +935,16 @@ mod tests {
     #[test]
     #[should_panic]
     fn full_claim_binding_rejects_forged_full() {
-        let honest_main_full = vec![
-            EF::from(F::from_u32(5)),
-            EF::from(F::from_u32(7)),
-            EF::from(F::from_u32(9)),
-        ];
+        let honest_main_full =
+            vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
         let prep_full = vec![EF::from(F::from_u32(3))];
         let beta = EF::from(F::from_u32(11));
         // HONEST claimed_sum (the value bound to the commitment @z*).
         let claimed_sum = host_full_claim_single_chip(&honest_main_full, &prep_full, beta);
         // FORGED *_full (one entry 5→6); the claimed_sum is still the honest
         // one above → mismatch → the binding assert trips.
-        let forged_main_full = vec![
-            EF::from(F::from_u32(6)),
-            EF::from(F::from_u32(7)),
-            EF::from(F::from_u32(9)),
-        ];
+        let forged_main_full =
+            vec![EF::from(F::from_u32(6)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
         run_full_claim_binding(&forged_main_full, &prep_full, beta, claimed_sum);
     }
 
@@ -1016,11 +955,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn full_claim_binding_rejects_forged_prep_full() {
-        let main_full = vec![
-            EF::from(F::from_u32(5)),
-            EF::from(F::from_u32(7)),
-            EF::from(F::from_u32(9)),
-        ];
+        let main_full =
+            vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
         let honest_prep_full = vec![EF::from(F::from_u32(3))];
         let beta = EF::from(F::from_u32(11));
         let claimed_sum = host_full_claim_single_chip(&main_full, &honest_prep_full, beta);

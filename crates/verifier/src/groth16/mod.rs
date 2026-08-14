@@ -10,8 +10,8 @@ use substrate_bn::Fr;
 
 use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
-use zkm_recursion_core::stark::KoalaBearPoseidon2Outer;
 use zkm_pcs::PartStarkVerifyingKey;
+use zkm_recursion_core::stark::KoalaBearPoseidon2Outer;
 
 use crate::{decode_zkm_vkey_hash, error::Error, hash_public_inputs};
 pub(crate) use converter::{load_groth16_proof_from_bytes, load_groth16_verifying_key_from_bytes};

@@ -138,8 +138,20 @@ impl<F: Field> MulOperation<F> {
         // The MSBs of `b` and `c` via lookup.
         {
             let opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
-            builder.send_byte(opcode, cols.b_msb, b[WORD_SIZE - 1], AB::Expr::ZERO, is_real.clone());
-            builder.send_byte(opcode, cols.c_msb, c[WORD_SIZE - 1], AB::Expr::ZERO, is_real.clone());
+            builder.send_byte(
+                opcode,
+                cols.b_msb,
+                b[WORD_SIZE - 1],
+                AB::Expr::ZERO,
+                is_real.clone(),
+            );
+            builder.send_byte(
+                opcode,
+                cols.c_msb,
+                c[WORD_SIZE - 1],
+                AB::Expr::ZERO,
+                is_real.clone(),
+            );
         }
 
         // Sign extension happens exactly for signed multiplies of negative
@@ -198,7 +210,6 @@ impl<F: Field> MulOperation<F> {
         builder.slice_range_check_u16(&cols.carry, is_real.clone());
         builder.slice_range_check_u8(&cols.product, is_real);
     }
-
 }
 
 impl<T: Copy> MulOperation<T> {

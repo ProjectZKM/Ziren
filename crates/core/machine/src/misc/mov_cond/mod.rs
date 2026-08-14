@@ -6,7 +6,7 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -145,7 +145,6 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
             !shard.movcond_events.is_empty()
         }
     }
-
 }
 
 impl MovCondChip {

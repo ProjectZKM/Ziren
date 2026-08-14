@@ -82,10 +82,7 @@ impl<F> RawProgram<Instruction<F>> {
     /// running [`Self::analyze`] and discarding the offset assignments,
     /// but cheaper because no Vec rebuild happens.
     pub fn event_counts(&self) -> RecursionAirEventCount {
-        fn walk_block<T>(
-            block: &SeqBlock<Instruction<T>>,
-            counts: &mut RecursionAirEventCount,
-        ) {
+        fn walk_block<T>(block: &SeqBlock<Instruction<T>>, counts: &mut RecursionAirEventCount) {
             match block {
                 SeqBlock::Basic(basic) => {
                     for instr in &basic.instrs {
@@ -119,10 +116,7 @@ impl<F> RawProgram<Instruction<F>> {
     ///
     /// SP1 ref: crates/recursion/executor/src/analyzed.rs::analyze.
     pub fn analyze(self) -> (RawProgram<AnalyzedInstruction<F>>, RecursionAirEventCount) {
-        fn instr_offset<T>(
-            instr: &Instruction<T>,
-            counts: &mut RecursionAirEventCount,
-        ) -> usize {
+        fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) -> usize {
             fn incr(num: &mut usize, amt: usize) -> usize {
                 let start = *num;
                 *num += amt;
@@ -139,10 +133,9 @@ impl<F> RawProgram<Instruction<F>> {
                 // FriFold: runtime emits ps_at_z.len() events per instruction
                 // (one per polynomial in the batch). Was off-by-default-1.
                 Instruction::Hint(HintInstr { output_addrs_mults })
-                | Instruction::HintBits(HintBitsInstr {
-                    output_addrs_mults,
-                    input_addr: _,
-                }) => incr(&mut counts.mem_var_events, output_addrs_mults.len()),
+                | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
+                    incr(&mut counts.mem_var_events, output_addrs_mults.len())
+                }
                 Instruction::HintExt2Felts(HintExt2FeltsInstr {
                     output_addrs_mults,
                     input_addr: _,
@@ -157,9 +150,7 @@ impl<F> RawProgram<Instruction<F>> {
                 ),
                 // Assign event-vec offsets for the two newly-tracked
                 // event types.
-                Instruction::CommitPublicValues(_) => {
-                    incr(&mut counts.commit_pv_hash_events, 1)
-                }
+                Instruction::CommitPublicValues(_) => incr(&mut counts.commit_pv_hash_events, 1),
                 // No event-vector slot consumed; offset is meaningless.
                 Instruction::Print(_) => 0,
             }
@@ -198,11 +189,8 @@ impl<F> RawProgram<Instruction<F>> {
         }
 
         let mut counts = RecursionAirEventCount::default();
-        let analyzed_blocks = self
-            .seq_blocks
-            .into_iter()
-            .map(|b| analyze_block(b, &mut counts))
-            .collect();
+        let analyzed_blocks =
+            self.seq_blocks.into_iter().map(|b| analyze_block(b, &mut counts)).collect();
         (RawProgram { seq_blocks: analyzed_blocks }, counts)
     }
 }
@@ -223,11 +211,7 @@ mod tests {
         Instruction::BaseAlu(BaseAluInstr {
             opcode: BaseAluOpcode::AddF,
             mult: KoalaBear::ONE,
-            addrs: BaseAluIo {
-                out: Address(k(0)),
-                in1: Address(k(1)),
-                in2: Address(k(2)),
-            },
+            addrs: BaseAluIo { out: Address(k(0)), in1: Address(k(1)), in2: Address(k(2)) },
         })
     }
 
@@ -272,21 +256,14 @@ mod tests {
 
     #[test]
     fn analyze_handles_parallel_blocks() {
-        let make_basic = || {
-            SeqBlock::Basic(BasicBlock {
-                instrs: vec![dummy_base_alu(), dummy_base_alu()],
-            })
-        };
+        let make_basic =
+            || SeqBlock::Basic(BasicBlock { instrs: vec![dummy_base_alu(), dummy_base_alu()] });
         let par_subs: Vec<RawProgram<Instruction<KoalaBear>>> = vec![
             RawProgram { seq_blocks: vec![make_basic()] },
             RawProgram { seq_blocks: vec![make_basic()] },
         ];
         let prog: RawProgram<Instruction<KoalaBear>> = RawProgram {
-            seq_blocks: vec![
-                make_basic(),
-                SeqBlock::Parallel(par_subs),
-                make_basic(),
-            ],
+            seq_blocks: vec![make_basic(), SeqBlock::Parallel(par_subs), make_basic()],
         };
         let (_, counts) = prog.analyze();
         // 4 outer (2+2) + 2 sub × 2 instrs each = 4 + 4 = 8 base_alu events.
@@ -309,18 +286,17 @@ mod tests {
             RawProgram { seq_blocks: vec![make_basic(), make_basic()] },
         ];
         let prog: RawProgram<Instruction<KoalaBear>> = RawProgram {
-            seq_blocks: vec![
-                make_basic(),
-                SeqBlock::Parallel(par_subs),
-                make_basic(),
-            ],
+            seq_blocks: vec![make_basic(), SeqBlock::Parallel(par_subs), make_basic()],
         };
         let counts_via_event_counts = prog.event_counts();
         let (_, counts_via_analyze) = prog.analyze();
         assert_eq!(counts_via_event_counts.base_alu_events, counts_via_analyze.base_alu_events);
         assert_eq!(counts_via_event_counts.mem_const_events, counts_via_analyze.mem_const_events);
         assert_eq!(counts_via_event_counts.ext_alu_events, counts_via_analyze.ext_alu_events);
-        assert_eq!(counts_via_event_counts.poseidon2_wide_events, counts_via_analyze.poseidon2_wide_events);
+        assert_eq!(
+            counts_via_event_counts.poseidon2_wide_events,
+            counts_via_analyze.poseidon2_wide_events
+        );
         // Total instructions: 1 outer + 3 inner sub-progs + 1 outer trailer
         // = 5 basic blocks × 3 instrs each = 15 → 10 base_alu + 5 mem.
         assert_eq!(counts_via_event_counts.base_alu_events, 10);

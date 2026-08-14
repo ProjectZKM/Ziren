@@ -1,6 +1,6 @@
 use std::borrow::{Borrow, BorrowMut};
 
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 #[cfg(feature = "sys")]
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;

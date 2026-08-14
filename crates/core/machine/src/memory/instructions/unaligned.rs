@@ -197,13 +197,7 @@ where
             + local.is_swr * Opcode::SWR.as_field::<AB::F>();
 
         // SAFETY: the stores keep `op_a` immutable; the loads write it.
-        receive_memory_instruction(
-            builder,
-            common,
-            opcode,
-            local.is_swl + local.is_swr,
-            is_real,
-        );
+        receive_memory_instruction(builder, common, opcode, local.is_swl + local.is_swr, is_real);
     }
 }
 
@@ -284,5 +278,4 @@ impl<F: PrimeField32> MachineAir<F> for MemoryUnalignedChip {
             !shard.memory_unaligned_events.is_empty()
         }
     }
-
 }

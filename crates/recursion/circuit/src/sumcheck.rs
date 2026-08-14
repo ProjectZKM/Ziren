@@ -94,10 +94,7 @@ pub fn verify_sumcheck_with_order<C, FC>(
     // `p_0(0) + p_0(1) == claimed_sum`.
     let first_poly = &proof.univariate_polys[0];
     let first_poly_symbolic = lift_to_symbolic::<C>(first_poly);
-    builder.assert_ext_eq(
-        first_poly_symbolic.eval_one_plus_eval_zero(),
-        proof.claimed_sum,
-    );
+    builder.assert_ext_eq(first_poly_symbolic.eval_one_plus_eval_zero(), proof.claimed_sum);
 
     // Observe round-0 coefficients into the transcript so the
     // verifier's α_0 sample matches the prover's.
@@ -124,10 +121,7 @@ pub fn verify_sumcheck_with_order<C, FC>(
 
         // Per-round soundness identity:
         //   p_i(0) + p_i(1) = p_{i-1}(α_{i-1}).
-        builder.assert_ext_eq(
-            expected_eval,
-            round_poly_symbolic.eval_one_plus_eval_zero(),
-        );
+        builder.assert_ext_eq(expected_eval, round_poly_symbolic.eval_one_plus_eval_zero());
 
         observe_poly_coeffs::<C, FC>(builder, challenger, round_poly);
         previous_poly = round_poly_symbolic;
@@ -150,10 +144,7 @@ pub fn verify_sumcheck_with_order<C, FC>(
         builder.assert_ext_eq(*verifier_alpha, *prover_point_coord);
     }
 
-    builder.assert_ext_eq(
-        previous_poly.eval_at_point(alpha.into()),
-        proof.point_and_eval.1,
-    );
+    builder.assert_ext_eq(previous_poly.eval_at_point(alpha.into()), proof.point_and_eval.1);
 }
 
 /// Lift a concrete-coefficient `UnivariatePolynomial<Ext>` into the
@@ -163,10 +154,7 @@ fn lift_to_symbolic<C: CircuitConfig>(
     poly: &UnivariatePolynomial<Ext<C::F, C::EF>>,
 ) -> UnivariatePolynomial<SymbolicExt<C::F, C::EF>> {
     UnivariatePolynomial::new(
-        poly.coefficients
-            .iter()
-            .map(|c| SymbolicExt::<C::F, C::EF>::from(*c))
-            .collect(),
+        poly.coefficients.iter().map(|c| SymbolicExt::<C::F, C::EF>::from(*c)).collect(),
     )
 }
 
@@ -181,11 +169,8 @@ fn observe_poly_coeffs<C, FC>(
     C: CircuitConfig,
     FC: FieldChallengerVariable<C, C::Bit>,
 {
-    let coeffs_as_felts: Vec<_> = poly
-        .coefficients
-        .iter()
-        .flat_map(|x| C::ext2felt(builder, *x))
-        .collect();
+    let coeffs_as_felts: Vec<_> =
+        poly.coefficients.iter().flat_map(|x| C::ext2felt(builder, *x)).collect();
     challenger.observe_slice(builder, coeffs_as_felts);
 }
 

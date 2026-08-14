@@ -162,17 +162,11 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // Combined with the known stack_dim, the target total dim is
         // stack_dim + log2(batch_evals_flat.len().next_power_of_two())
         // == log2(area), matching the host's `target_dim`.
-        let proof_batch_evals_count: usize = proof
-            .batch_evaluations
-            .iter()
-            .map(|r| r.len())
-            .sum();
+        let proof_batch_evals_count: usize = proof.batch_evaluations.iter().map(|r| r.len()).sum();
         let needed_batch_dim = if proof_batch_evals_count <= 1 {
             0
         } else {
-            proof_batch_evals_count
-                .next_power_of_two()
-                .trailing_zeros() as usize
+            proof_batch_evals_count.next_power_of_two().trailing_zeros() as usize
         };
         let needed_total_dim = stack_dim + needed_batch_dim;
         let mut padded_point: Vec<Ext<C::F, C::EF>> = point.to_vec();
@@ -204,12 +198,8 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // (`crates/pcs/src/basefold/stacked.rs`).  A proof with several opening
         // rounds makes a non-power-of-two total the norm rather than the
         // exception: SP1's preprocessed round contributes its own stripes.
-        let mut batch_evals_flat: Vec<Ext<C::F, C::EF>> = proof
-            .batch_evaluations
-            .iter()
-            .flatten()
-            .copied()
-            .collect();
+        let mut batch_evals_flat: Vec<Ext<C::F, C::EF>> =
+            proof.batch_evaluations.iter().flatten().copied().collect();
         assert!(
             batch_evals_flat.len() <= 1 << batch_dim,
             "stacked PCS: total batch_evaluations length ({}) overflows 2^batch_dim ({}).\n\
@@ -229,8 +219,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         }
 
         // Reconstructed evaluation at batch_point must equal claim.
-        let expected_evaluation =
-            evaluate_mle_ext::<C>(builder, &batch_evals_flat, batch_point);
+        let expected_evaluation = evaluate_mle_ext::<C>(builder, &batch_evals_flat, batch_point);
 
         // FIX-off sub-stripe commits: when the reduced point is SHORTER than the
         // (de-clamped) log_stacking_height, the FS-extension coords that fall in
@@ -273,10 +262,10 @@ mod tests {
     use crate::challenger::DuplexChallengerVariable;
     use p3_field::PrimeCharacteristicRing;
     use std::marker::PhantomData;
+    use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_compiler::ir::{Ext, Felt};
-    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;

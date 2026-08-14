@@ -12,9 +12,9 @@ use p3_maybe_rayon::prelude::*;
 use tracing::instrument;
 use zkm_core_machine::utils::next_power_of_two;
 
+use zkm_pcs::air::MachineAir;
 #[cfg(not(feature = "sys"))]
 use zkm_primitives::RC_16_30_U32;
-use zkm_pcs::air::MachineAir;
 
 #[cfg(not(feature = "sys"))]
 use crate::chips::mem::MemoryAccessColsChips;
@@ -173,7 +173,6 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
     fn included(&self, _record: &Self::Record) -> bool {
         true
     }
-
 
     fn preprocessed_width(&self) -> usize {
         PREPROCESSED_POSEIDON2_WIDTH

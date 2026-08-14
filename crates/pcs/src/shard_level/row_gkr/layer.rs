@@ -33,10 +33,7 @@ impl<F: Clone> RowMajorTable<F> {
     /// sufficient because Copy has no Drop, so leaking on panic is
     /// sound.
     #[must_use]
-    pub unsafe fn filled_raw_uninit(
-        num_row_variables: usize,
-        num_interactions: usize,
-    ) -> Self
+    pub unsafe fn filled_raw_uninit(num_row_variables: usize, num_interactions: usize) -> Self
     where
         F: Copy + p3_field::PrimeCharacteristicRing,
     {
@@ -60,11 +57,7 @@ impl<F: Clone> RowMajorTable<F> {
     /// Compatibility constructor for callers that previously used the
     /// pow2-storage layout.
     #[must_use]
-    pub fn filled(
-        num_row_variables: usize,
-        num_interaction_variables: usize,
-        fill: F,
-    ) -> Self {
+    pub fn filled(num_row_variables: usize, num_interaction_variables: usize, fill: F) -> Self {
         let num_interactions = 1usize << num_interaction_variables;
         let total = (1usize << num_row_variables) * num_interactions;
         Self {
@@ -121,7 +114,12 @@ impl<F: Clone> RowMajorTable<F> {
     #[inline]
     #[must_use]
     pub fn idx(&self, row: usize, interaction: usize) -> usize {
-        debug_assert!(row < self.num_real_rows, "RowMajorTable::idx: row {} >= num_real_rows {}", row, self.num_real_rows);
+        debug_assert!(
+            row < self.num_real_rows,
+            "RowMajorTable::idx: row {} >= num_real_rows {}",
+            row,
+            self.num_real_rows
+        );
         debug_assert!(interaction < self.num_interactions);
         row * self.num_interactions + interaction
     }
@@ -282,7 +280,6 @@ impl<F: Field, EF: ExtensionField<F>> LayerState<F, EF> {
             Self::Device { num_interaction_variables, .. } => *num_interaction_variables,
         }
     }
-
 }
 
 /// Layers indexed top-down: layer 0 is the first / largest;
@@ -356,15 +353,14 @@ mod tests {
     fn gkr_circuit_layer_dispatches_dim_queries() {
         let table_f: RowMajorTable<KoalaBear> = RowMajorTable::filled(2, 2, KoalaBear::from_u32(0));
         let table_ef: RowMajorTable<EF> = RowMajorTable::filled(2, 2, EF::default());
-        let first: GkrCircuitLayer<KoalaBear, EF> =
-            GkrCircuitLayer::FirstLayer(LogUpGkrCpuLayer {
-                numerator_0: vec![table_f.clone()],
-                denominator_0: vec![table_ef.clone()],
-                numerator_1: vec![table_f],
-                denominator_1: vec![table_ef.clone()],
-                num_row_variables: 2,
-                num_interaction_variables: 2,
-            });
+        let first: GkrCircuitLayer<KoalaBear, EF> = GkrCircuitLayer::FirstLayer(LogUpGkrCpuLayer {
+            numerator_0: vec![table_f.clone()],
+            denominator_0: vec![table_ef.clone()],
+            numerator_1: vec![table_f],
+            denominator_1: vec![table_ef.clone()],
+            num_row_variables: 2,
+            num_interaction_variables: 2,
+        });
         assert_eq!(first.num_row_variables(), 2);
         assert_eq!(first.num_interaction_variables(), 2);
 
@@ -393,7 +389,8 @@ mod tests {
                 num_interaction_variables: 2,
             }))
         };
-        let mut circuit = LogupGkrCpuCircuit::new(vec![make_layer(3), make_layer(2), make_layer(1)]);
+        let mut circuit =
+            LogupGkrCpuCircuit::new(vec![make_layer(3), make_layer(2), make_layer(1)]);
         assert_eq!(circuit.pop_bottom().unwrap().num_row_variables(), 1);
         assert_eq!(circuit.pop_bottom().unwrap().num_row_variables(), 2);
         assert_eq!(circuit.pop_bottom().unwrap().num_row_variables(), 3);

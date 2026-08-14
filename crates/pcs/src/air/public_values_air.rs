@@ -209,10 +209,8 @@ fn eval_global_sum<AB: ZKMAirBuilder>(
     pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
 ) {
     let initial = SepticDigest::<AB::Expr>::zero().0;
-    let send_values: Vec<AB::Expr> = once(AB::Expr::ZERO)
-        .chain(initial.x.0)
-        .chain(initial.y.0)
-        .collect();
+    let send_values: Vec<AB::Expr> =
+        once(AB::Expr::ZERO).chain(initial.x.0).chain(initial.y.0).collect();
     builder.send(
         AirLookup::new(send_values, AB::Expr::ONE, LookupKind::GlobalAccumulation),
         LookupScope::Local,

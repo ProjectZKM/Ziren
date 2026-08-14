@@ -1133,8 +1133,7 @@ pub fn poseidon2_hash(input: Vec<KoalaBear>) -> [KoalaBear; 8] {
 /// and WITNESSED for the in-circuit fold (recursion witness) — all three MUST
 /// agree, so the encoding lives here.  `poseidon2(name bytes as felts)[0]`.
 pub fn prep_chip_name_digest(name: &str) -> KoalaBear {
-    let bytes: Vec<KoalaBear> =
-        name.as_bytes().iter().map(|&b| KoalaBear::from_u8(b)).collect();
+    let bytes: Vec<KoalaBear> = name.as_bytes().iter().map(|&b| KoalaBear::from_u8(b)).collect();
     poseidon2_hash(bytes)[0]
 }
 

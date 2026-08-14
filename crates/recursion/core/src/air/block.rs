@@ -51,7 +51,6 @@ impl<T: Clone> Block<T> {
         let arr: [AB::Expr; D] = self.0.clone().map(|x| AB::Expr::ZERO + x);
         BinomialExtension(arr)
     }
-
 }
 
 impl<T> From<[T; D]> for Block<T> {

@@ -158,7 +158,8 @@ mod tests {
         let out = interleave_chip(&table);
         // row_0 = [0,1,2,3], row_1 = [4,5,6,7]
         // expected = [0,4,1,5,2,6,3,7]
-        let expected: Vec<EF> = vec![0, 4, 1, 5, 2, 6, 3, 7].into_iter().map(EF::from_u32).collect();
+        let expected: Vec<EF> =
+            vec![0, 4, 1, 5, 2, 6, 3, 7].into_iter().map(EF::from_u32).collect();
         assert_eq!(out, expected);
     }
 

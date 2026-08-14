@@ -12,8 +12,8 @@ use p3_challenger::CanObserve;
 use p3_dft::Radix2DitParallel;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use zkm_primitives::poseidon2_init;
 
 // KoalaBear is a 31-bit prime; clamp to 30 bits to keep modular
@@ -30,8 +30,7 @@ fn rand_ef<R: Rng>(rng: &mut R) -> InnerChallenge {
 }
 
 use crate::kb31_poseidon2::{
-    InnerChallenge, InnerChallenger, InnerCompress, InnerHash, InnerPerm, InnerVal,
-    InnerValMmcs,
+    InnerChallenge, InnerChallenger, InnerCompress, InnerHash, InnerPerm, InnerVal, InnerValMmcs,
 };
 
 use super::{BasefoldProver, BasefoldVerifier, FriConfig, Mle};
@@ -132,12 +131,7 @@ fn test_basefold_roundtrip_two_rounds() {
     let mmcs = build_mmcs();
     let dft = Arc::new(Radix2DitParallel::<F>::default());
 
-    let prover = BasefoldProver::<F, EF, _, _>::new(
-        fri_config.clone(),
-        dft,
-        mmcs.clone(),
-        2,
-    );
+    let prover = BasefoldProver::<F, EF, _, _>::new(fri_config.clone(), dft, mmcs.clone(), 2);
     let verifier = BasefoldVerifier::<F, EF, _>::new(fri_config, mmcs, 2);
 
     let mut p_chal = build_challenger();
@@ -148,14 +142,8 @@ fn test_basefold_roundtrip_two_rounds() {
 
     let eval_point: Vec<EF> = (0..num_variables).map(|_| rand_ef(&mut rng)).collect();
 
-    let claims_0: Vec<EF> = mle_round_0
-        .iter()
-        .flat_map(|m| m.eval_at::<EF>(&eval_point))
-        .collect();
-    let claims_1: Vec<EF> = mle_round_1
-        .iter()
-        .flat_map(|m| m.eval_at::<EF>(&eval_point))
-        .collect();
+    let claims_0: Vec<EF> = mle_round_0.iter().flat_map(|m| m.eval_at::<EF>(&eval_point)).collect();
+    let claims_1: Vec<EF> = mle_round_1.iter().flat_map(|m| m.eval_at::<EF>(&eval_point)).collect();
 
     let proof = prover.prove_trusted_mle_evaluations(
         eval_point.clone(),

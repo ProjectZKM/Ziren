@@ -43,7 +43,6 @@
 
 mod utils;
 
-use zkm_pcs::air::BaseAirBuilder;
 use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
@@ -51,7 +50,7 @@ use core::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
@@ -60,14 +59,15 @@ use zkm_core_executor::{
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_primitives::consts::WORD_SIZE;
+use zkm_pcs::air::BaseAirBuilder;
 use zkm_pcs::{air::MachineAir, PicusInfo, Word};
+use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
-    frame::{eval_instruction_frame, InstructionFrameCols},
     alu::sr::utils::{nb_bits_to_shift, nb_bytes_to_shift},
     bytes::utils::shr_carry,
+    frame::{eval_instruction_frame, InstructionFrameCols},
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
@@ -351,13 +351,9 @@ impl ShiftRightChip {
             }
             cols.bit_shift_result = bit_shift_result.map(F::from_u8);
             cols.shr_carry_output_carry = shr_carry_output_carry.map(F::from_u8);
-            cols.shr_carry_output_shifted_byte =
-                shr_carry_output_shifted_byte.map(F::from_u8);
+            cols.shr_carry_output_shifted_byte = shr_carry_output_shifted_byte.map(F::from_u8);
             for i in 0..WORD_SIZE {
-                debug_assert_eq!(
-                    cols.bit_shift_result[i],
-                    F::from_u8(event.a.to_le_bytes()[i])
-                );
+                debug_assert_eq!(cols.bit_shift_result[i], F::from_u8(event.a.to_le_bytes()[i]));
             }
             // Range checks.
             blu.add_u8_range_checks(&byte_shift_result);
@@ -409,8 +405,8 @@ where
             // of bits to shift.
             let mut num_bits_to_shift = AB::Expr::zero();
             for i in 0..3 {
-                num_bits_to_shift = num_bits_to_shift.clone()
-                    + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
+                num_bits_to_shift =
+                    num_bits_to_shift.clone() + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
             }
             for i in 0..BYTE_SIZE {
                 builder
@@ -426,8 +422,8 @@ where
 
             // The 2-bit number represented by the 3rd and 4th least significant bits of c is the
             // number of bytes to shift.
-            let num_bytes_to_shift = local.c_least_sig_byte[3]
-                + local.c_least_sig_byte[4] * AB::F::from_u32(2);
+            let num_bytes_to_shift =
+                local.c_least_sig_byte[3] + local.c_least_sig_byte[4] * AB::F::from_u32(2);
 
             // If shift_by_n_bytes[i] = 1, then i = num_bytes_to_shift.
             for i in 0..WORD_SIZE {
@@ -480,8 +476,8 @@ where
             // of bits to shift.
             let mut num_bits_to_shift = AB::Expr::zero();
             for i in 0..3 {
-                num_bits_to_shift = num_bits_to_shift.clone()
-                    + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
+                num_bits_to_shift =
+                    num_bits_to_shift.clone() + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
             }
 
             // Calculate ShrCarry.
@@ -582,9 +578,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{ExecutionRecord, Opcode};
-    use zkm_pcs::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::ShiftRightChip;
     use crate::programs::tests::{alu_op, run_instructions};

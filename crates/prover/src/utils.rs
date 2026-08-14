@@ -12,12 +12,12 @@ use p3_koala_bear::KoalaBear;
 use p3_symmetric::CryptographicHasher;
 use zkm_core_executor::{Executor, Program};
 use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
+use zkm_pcs::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
 use zkm_recursion_circuit::machine::RootPublicValues;
 use zkm_recursion_core::{
     air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
     stark::KoalaBearPoseidon2Outer,
 };
-use zkm_pcs::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
 
 use crate::{InnerSC, ZKMCoreProofData};
 
@@ -95,9 +95,7 @@ pub fn is_recursion_public_values_valid(
 }
 
 /// Get the committed values Bn Poseidon2 digest this reduce proof is representing.
-pub fn zkm_committed_values_digest_bn254(
-    proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
-) -> Bn254 {
+pub fn zkm_committed_values_digest_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> Bn254 {
     let proof = &proof.proof;
     let pv: &RecursionPublicValues<KoalaBear> = proof.public_values.as_slice().borrow();
     let committed_values_digest_bytes: [KoalaBear; 32] =

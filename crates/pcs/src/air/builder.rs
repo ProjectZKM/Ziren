@@ -9,8 +9,8 @@ use strum_macros::{Display, EnumIter};
 
 use super::{lookup::AirLookup, BinomialExtension};
 use crate::{
-    lookup::LookupKind, septic_digest::SepticDigest, septic_extension::SepticExtension, Word,
-    ProverConstraintFolder, StarkGenericConfig,
+    lookup::LookupKind, septic_digest::SepticDigest, septic_extension::SepticExtension,
+    ProverConstraintFolder, StarkGenericConfig, Word,
 };
 
 /// The default increment for the program counter.  Is used for all instructions except
@@ -200,8 +200,11 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         next_pc: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        let values =
-            once(shard.into()).chain(once(clk.into())).chain(once(pc.into())).chain(once(next_pc.into())).collect();
+        let values = once(shard.into())
+            .chain(once(clk.into()))
+            .chain(once(pc.into()))
+            .chain(once(next_pc.into()))
+            .collect();
         self.send(
             AirLookup::new(values, multiplicity.into(), LookupKind::State),
             LookupScope::Local,
@@ -218,15 +221,16 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         next_pc: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        let values =
-            once(shard.into()).chain(once(clk.into())).chain(once(pc.into())).chain(once(next_pc.into())).collect();
+        let values = once(shard.into())
+            .chain(once(clk.into()))
+            .chain(once(pc.into()))
+            .chain(once(next_pc.into()))
+            .collect();
         self.receive(
             AirLookup::new(values, multiplicity.into(), LookupKind::State),
             LookupScope::Local,
         );
     }
-
-
 
     /// Sends a syscall operation to be processed (with "ECALL" opcode).
     #[allow(clippy::too_many_arguments)]
@@ -497,12 +501,21 @@ impl<SC: StarkGenericConfig> EmptyMessageBuilder for ProverConstraintFolder<'_, 
 // EmptyMessageBuilder for VerifierConstraintFolder is covered by the GenericVerifierConstraintFolder impl in folder.rs
 impl<F: Field> EmptyMessageBuilder for SymbolicAirBuilder<F> {}
 
-impl<F: Field, EF: p3_field::ExtensionField<F>> EmptyMessageBuilder for crate::DebugConstraintBuilder<'_, F, EF> {}
+impl<F: Field, EF: p3_field::ExtensionField<F>> EmptyMessageBuilder
+    for crate::DebugConstraintBuilder<'_, F, EF>
+{
+}
 
 // Blanket impls for upstream p3_uni_stark folders, so our Air impls (which require ZKMAirBuilder)
 // can be used with the upstream prove/verify functions.
-impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder for p3_uni_stark::ProverConstraintFolder<'_, SC> {}
-impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder for p3_uni_stark::VerifierConstraintFolder<'_, SC> {}
+impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder
+    for p3_uni_stark::ProverConstraintFolder<'_, SC>
+{
+}
+impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder
+    for p3_uni_stark::VerifierConstraintFolder<'_, SC>
+{
+}
 // `p3_uni_stark::prove`/`verify` run `debug_constraints` (under `debug_assertions`)
 // with the upstream `p3_air::DebugConstraintBuilder`, so the per-chip unit tests
 // (`uni_stark_prove`, prove.rs:929) need it to satisfy `ZKMAirBuilder` too.  The

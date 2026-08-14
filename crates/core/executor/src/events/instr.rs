@@ -1,6 +1,6 @@
+use super::cpu::{OptionMemoryReadRecord, OptionMemoryRecordEnum};
 use super::MemoryRecordEnum;
 use super::MemoryWriteRecord;
-use super::cpu::{OptionMemoryReadRecord, OptionMemoryRecordEnum};
 use crate::Opcode;
 use serde::{Deserialize, Serialize};
 
@@ -87,7 +87,6 @@ impl AluEvent {
     pub fn new(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32) -> Self {
         Self { pc, next_pc: pc + 4, opcode, a, b, c, hi: 0, ..Default::default() }
     }
-
 }
 
 /// Complicated Arithmetic Logic Unit (ALU) Event.
@@ -160,7 +159,6 @@ impl CompAluEvent {
             c_record: None.into(),
         }
     }
-
 }
 
 /// Memory Instruction Event.
@@ -348,7 +346,13 @@ impl JumpEvent {
         c: u32,
     ) -> Self {
         Self {
-            pc, next_pc, next_next_pc, opcode, a, b, c,
+            pc,
+            next_pc,
+            next_next_pc,
+            opcode,
+            a,
+            b,
+            c,
             is_instruction: 0,
             clk: 0,
             recv_next_pc: 0,

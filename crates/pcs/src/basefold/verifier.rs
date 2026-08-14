@@ -24,13 +24,11 @@ use core::marker::PhantomData;
 use itertools::Itertools;
 use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
 use p3_commit::{BatchOpeningRef, Mmcs};
-use p3_field::{
-    ExtensionField, Field, TwoAdicField,
-};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;
 use p3_util::reverse_bits_len;
 
-use super::config::{BATCH_GRINDING_BITS, FriConfig};
+use super::config::{FriConfig, BATCH_GRINDING_BITS};
 use super::proof::BasefoldProof;
 
 #[derive(Debug, Clone)]
@@ -61,12 +59,7 @@ where
     MT: Mmcs<F, Commitment: Clone>,
 {
     pub fn new(fri_config: FriConfig<F>, mmcs: MT, num_expected_commitments: usize) -> Self {
-        Self {
-            fri_config,
-            mmcs,
-            num_expected_commitments,
-            _ef: PhantomData,
-        }
+        Self { fri_config, mmcs, num_expected_commitments, _ef: PhantomData }
     }
 
     fn partial_lagrange(point: &[EF]) -> Vec<EF> {
@@ -97,9 +90,8 @@ where
         challenger: &mut Challenger,
     ) -> Result<(), BasefoldVerifierError>
     where
-        Challenger: FieldChallenger<F>
-            + GrindingChallenger<Witness = F>
-            + CanObserve<MT::Commitment>,
+        Challenger:
+            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
     {
         // (1) Verify batch grinding.
         if !challenger.check_witness(BATCH_GRINDING_BITS, proof.batch_grinding_witness) {
@@ -109,9 +101,8 @@ where
         // (2) Sample batching point + Lagrange coefficients.
         let total_polys: usize = evaluation_claims.iter().map(|c| c.len()).sum();
         let num_batching_vars = total_polys.next_power_of_two().trailing_zeros() as usize;
-        let batching_point: Vec<EF> = (0..num_batching_vars)
-            .map(|_| challenger.sample_algebra_element())
-            .collect();
+        let batching_point: Vec<EF> =
+            (0..num_batching_vars).map(|_| challenger.sample_algebra_element()).collect();
         let batching_coefficients = Self::partial_lagrange(&batching_point);
 
         // (3) Compute the batched evaluation claim.
@@ -151,10 +142,8 @@ where
 
         // (5) Walk the commit-phase rounds.
         let mut betas = Vec::with_capacity(num_variables);
-        for (commitment, poly) in proof
-            .fri_commitments
-            .iter()
-            .zip_eq(proof.univariate_messages.iter())
+        for (commitment, poly) in
+            proof.fri_commitments.iter().zip_eq(proof.univariate_messages.iter())
         {
             for &elem in poly {
                 challenger.observe_algebra_element(elem);
@@ -165,22 +154,16 @@ where
 
         // First sumcheck consistency: (1-x_0)*p[0] + x_0*p[1] == eval_claim
         let first_poly = proof.univariate_messages[0];
-        if eval_claim
-            != (EF::ONE - point_rev[0]) * first_poly[0] + point_rev[0] * first_poly[1]
-        {
+        if eval_claim != (EF::ONE - point_rev[0]) * first_poly[0] + point_rev[0] * first_poly[1] {
             return Err(BasefoldVerifierError::SumcheckMismatch { round: 0 });
         }
         let mut expected_eval = first_poly[0] + betas[0] * first_poly[1];
 
-        for (i, (poly, beta)) in proof.univariate_messages[1..]
-            .iter()
-            .zip_eq(betas[1..].iter())
-            .enumerate()
+        for (i, (poly, beta)) in
+            proof.univariate_messages[1..].iter().zip_eq(betas[1..].iter()).enumerate()
         {
             let i = i + 1;
-            if expected_eval
-                != (EF::ONE - point_rev[i]) * poly[0] + point_rev[i] * poly[1]
-            {
+            if expected_eval != (EF::ONE - point_rev[i]) * poly[0] + point_rev[i] * poly[1] {
                 return Err(BasefoldVerifierError::SumcheckMismatch { round: i });
             }
             expected_eval = poly[0] + *beta * poly[1];
@@ -218,8 +201,7 @@ where
                     "round {round_idx}: query count mismatch"
                 )));
             }
-            let round_coeffs =
-                &batching_coefficients[batch_idx..batch_idx + round_polys];
+            let round_coeffs = &batching_coefficients[batch_idx..batch_idx + round_polys];
 
             for (q, leaf) in opening.leaves.iter().enumerate() {
                 // Each `leaf.values` entry is one committed matrix's
@@ -230,8 +212,7 @@ where
                 for mat_values in leaf.values.iter() {
                     let polys_in_mat = mat_values.len();
                     for k in 0..polys_in_mat {
-                        batched_query_evals[q] +=
-                            round_coeffs[poly_offset + k] * mat_values[k];
+                        batched_query_evals[q] += round_coeffs[poly_offset + k] * mat_values[k];
                     }
                     poly_offset += polys_in_mat;
                 }
@@ -258,10 +239,7 @@ where
                 let dims: Vec<Dimensions> = leaf
                     .values
                     .iter()
-                    .map(|v| Dimensions {
-                        height: 1usize << log_max_height,
-                        width: v.len(),
-                    })
+                    .map(|v| Dimensions { height: 1usize << log_max_height, width: v.len() })
                     .collect();
                 self.mmcs
                     .verify_batch(
@@ -333,8 +311,7 @@ where
             ));
         }
 
-        for (round_idx, ((commit, opening), beta)) in (self.fri_config.log_blowup()
-            ..log_max_height)
+        for (round_idx, ((commit, opening), beta)) in (self.fri_config.log_blowup()..log_max_height)
             .rev()
             .zip_eq(commitments.iter().zip_eq(query_openings.iter()).zip_eq(betas))
         {
@@ -345,19 +322,13 @@ where
             }
 
             // Per-query verification.
-            for (q, ((index, folded_eval), x)) in indices
-                .iter_mut()
-                .zip_eq(folded.iter_mut())
-                .zip_eq(xis.iter_mut())
-                .enumerate()
+            for (q, ((index, folded_eval), x)) in
+                indices.iter_mut().zip_eq(folded.iter_mut()).zip_eq(xis.iter_mut()).enumerate()
             {
                 let leaf = &opening.leaves[q];
-                let mat_values = leaf
-                    .values
-                    .first()
-                    .ok_or_else(|| BasefoldVerifierError::IncorrectShape(
-                        "empty commit-phase leaf".to_string(),
-                    ))?;
+                let mat_values = leaf.values.first().ok_or_else(|| {
+                    BasefoldVerifierError::IncorrectShape("empty commit-phase leaf".to_string())
+                })?;
                 if mat_values.len() != 2 * EF::DIMENSION {
                     return Err(BasefoldVerifierError::IncorrectShape(format!(
                         "commit-phase leaf width {} != 2 * EF::D",
@@ -367,15 +338,11 @@ where
 
                 let evals: [EF; 2] = mat_values
                     .chunks_exact(EF::DIMENSION)
-                    .map(|c| {
-                        EF::from_basis_coefficients_iter(c.iter().copied()).unwrap()
-                    })
+                    .map(|c| EF::from_basis_coefficients_iter(c.iter().copied()).unwrap())
                     .collect::<Vec<_>>()
                     .try_into()
                     .map_err(|_| {
-                        BasefoldVerifierError::IncorrectShape(
-                            "leaf eval count != 2".to_string(),
-                        )
+                        BasefoldVerifierError::IncorrectShape("leaf eval count != 2".to_string())
                     })?;
 
                 let index_sibling = *index ^ 1;
@@ -389,17 +356,14 @@ where
                 xs[index_sibling % 2] *= F::two_adic_generator(1);
 
                 *folded_eval = evals[0]
-                    + (*beta - EF::from(xs[0])) * (evals[1] - evals[0])
-                        / EF::from(xs[1] - xs[0]);
+                    + (*beta - EF::from(xs[0])) * (evals[1] - evals[0]) / EF::from(xs[1] - xs[0]);
 
                 *index = index_pair;
                 *x = x.square();
 
                 // Verify the leaf inclusion proof.
-                let dims = vec![Dimensions {
-                    height: 1usize << round_idx,
-                    width: 2 * EF::DIMENSION,
-                }];
+                let dims =
+                    vec![Dimensions { height: 1usize << round_idx, width: 2 * EF::DIMENSION }];
                 self.mmcs
                     .verify_batch(
                         commit,

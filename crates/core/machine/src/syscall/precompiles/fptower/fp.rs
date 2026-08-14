@@ -8,7 +8,7 @@ use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use itertools::Itertools;
 use num::BigUint;
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
@@ -189,7 +189,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
             }
         }
     }
-
 }
 
 impl<F, P: FpOpField> BaseAir<F> for FpOpChip<P> {
@@ -219,8 +218,7 @@ where
         let p = limbs_from_prev_access(&local.x_access);
         let q = limbs_from_prev_access(&local.y_access);
 
-        let modulus_coeffs =
-            P::MODULUS.iter().map(|&limbs| AB::Expr::from_u8(limbs)).collect_vec();
+        let modulus_coeffs = P::MODULUS.iter().map(|&limbs| AB::Expr::from_u8(limbs)).collect_vec();
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
         local.output.eval_variable(
@@ -249,7 +247,7 @@ where
         builder.eval_memory_access_slice(
             local.shard,
             local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
-                                                       * same. */
+                                             * same. */
             local.x_ptr,
             &local.x_access,
             local.is_real,

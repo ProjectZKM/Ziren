@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 use std::{borrow::Borrow, mem::transmute};
 
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

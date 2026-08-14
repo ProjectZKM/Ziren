@@ -21,10 +21,10 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use zkm_core_machine::io::ZKMStdin;
+use zkm_pcs::{Val, ZKMProverOpts};
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::{HashableKey, ZKMProver};
 use zkm_recursion_core::DIGEST_SIZE;
-use zkm_pcs::{Val, ZKMProverOpts};
 
 type KB = p3_koala_bear::KoalaBear;
 
@@ -91,12 +91,7 @@ fn main() {
         let elf_path = dir.join("program.bin");
         let stdin_path = dir.join("stdin.bin");
 
-        eprintln!(
-            "\n=== [{}/{}] workload: {} ===",
-            idx + 1,
-            args.workloads.len(),
-            workload
-        );
+        eprintln!("\n=== [{}/{}] workload: {} ===", idx + 1, args.workloads.len(), workload);
 
         let elf = read_file(&elf_path);
         let stdin: ZKMStdin = bincode::deserialize(&read_file(&stdin_path))
@@ -127,10 +122,7 @@ fn main() {
                 continue;
             }
         };
-        eprintln!(
-            "[collect] prove_core ok: {} shard proofs",
-            core_proof.proof.0.len()
-        );
+        eprintln!("[collect] prove_core ok: {} shard proofs", core_proof.proof.0.len());
 
         eprintln!("[collect] compress start");
         let compressed = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -150,10 +142,7 @@ fn main() {
         let h = compressed.vk.hash_koalabear();
         let new = !hashes.contains_key(&h);
         hashes.insert(h, hashes.len());
-        eprintln!(
-            "[collect] {} compress_vk hash = {:?} (new={})",
-            workload, h, new
-        );
+        eprintln!("[collect] {} compress_vk hash = {:?} (new={})", workload, h, new);
 
         // Also capture the shrink VK hash, since verify_shrink (verify.rs:367)
         // checks the SHRINK proof's vk against the same recursion_vk_map.
@@ -169,10 +158,7 @@ fn main() {
                 let sh = shrunk.vk.hash_koalabear();
                 let snew = !hashes.contains_key(&sh);
                 hashes.insert(sh, hashes.len());
-                eprintln!(
-                    "[collect] {} shrink_vk hash = {:?} (new={})",
-                    workload, sh, snew
-                );
+                eprintln!("[collect] {} shrink_vk hash = {:?} (new={})", workload, sh, snew);
             }
             Ok(Err(e)) => {
                 eprintln!("[collect] shrink ERROR for {}: {:?}", workload, e);

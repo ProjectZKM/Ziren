@@ -70,9 +70,6 @@ pub mod test_fixtures {
         events
     }
 
-
-
-
     fn public_values_events() -> Vec<CommitPublicValuesEvent<KoalaBear>> {
         let (mut rng, num_test_cases) = initialize();
         let mut events = Vec::with_capacity(num_test_cases);

@@ -10,8 +10,8 @@ use crate::{
     alu::{AddSubCols, LtCols, MulCols, ShiftLeftCols, ShiftRightCols},
     control_flow::{BranchColumns, JumpColumns},
     memory::{
-        LoadNarrowColumns, LoadWordColumns, MemoryBumpCols, MemoryInitCols,
-        MemoryUnalignedColumns, SingleMemoryLocal, StoreNarrowColumns, StoreWordColumns,
+        LoadNarrowColumns, LoadWordColumns, MemoryBumpCols, MemoryInitCols, MemoryUnalignedColumns,
+        SingleMemoryLocal, StoreNarrowColumns, StoreWordColumns,
     },
     misc::columns::MiscInstrColumns,
     misc::mov_cond::MovCondCols,
@@ -263,7 +263,9 @@ mod parity_tests {
                 }
             }
         }
-        panic!("{what}: FFI trace diverges from Rust; first diffs (row, col, rust, ffi): {diffs:?}");
+        panic!(
+            "{what}: FFI trace diverges from Rust; first diffs (row, col, rust, ffi): {diffs:?}"
+        );
     }
 
     /// Run every instruction chip of `record` through both sides and compare.
@@ -547,17 +549,11 @@ mod parity_tests {
     fn test_all_instruction_chips_ffi_eq_rust_u256_mul() {
         // The long-multiplication guest exercises the Misc chip
         // (MADDU/MSUBU) that fibonacci and keccak never touch.
-        run_and_check(
-            Program::from(test_artifacts::U256XU2048_MUL_ELF).unwrap(),
-            "u256x2048-mul",
-        );
+        run_and_check(Program::from(test_artifacts::U256XU2048_MUL_ELF).unwrap(), "u256x2048-mul");
     }
 
     #[test]
     fn test_all_instruction_chips_ffi_eq_rust_keccak() {
-        run_and_check(
-            Program::from(test_artifacts::KECCAK_SPONGE_ELF).unwrap(),
-            "keccak-sponge",
-        );
+        run_and_check(Program::from(test_artifacts::KECCAK_SPONGE_ELF).unwrap(), "keccak-sponge");
     }
 }

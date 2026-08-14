@@ -135,7 +135,8 @@ where
 
         // A'''[0, 0] = A''[0, 0] XOR RC.
         for limb in 0..U64_LIMBS {
-            let computed_a_prime_prime_0_0_limb = (limb * BITS_PER_LIMB..(limb + 1) * BITS_PER_LIMB)
+            let computed_a_prime_prime_0_0_limb = (limb * BITS_PER_LIMB
+                ..(limb + 1) * BITS_PER_LIMB)
                 .rev()
                 .fold(AB::Expr::ZERO, |acc, z| {
                     builder.assert_bool(local.keccak.a_prime_prime_0_0_bits[z]);
@@ -162,10 +163,7 @@ where
                 ..(limb + 1) * BITS_PER_LIMB)
                 .rev()
                 .fold(AB::Expr::ZERO, |acc, z| acc.double() + get_xored_bit(z));
-            builder.assert_eq(
-                computed_a_prime_prime_prime_0_0_limb,
-                a_prime_prime_prime_0_0_limb,
-            );
+            builder.assert_eq(computed_a_prime_prime_prime_0_0_limb, a_prime_prime_prime_0_0_limb);
         }
 
         // Round-chain bus: receive `a` @ (block, index), send `a'''` @ (block, index+1).

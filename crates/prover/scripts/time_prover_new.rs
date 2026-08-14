@@ -13,10 +13,7 @@ use zkm_prover::ZKMProver;
 
 fn main() {
     setup_logger();
-    eprintln!(
-        "[time-prover-new] VERIFY_VK={:?}",
-        std::env::var("VERIFY_VK").ok(),
-    );
+    eprintln!("[time-prover-new] VERIFY_VK={:?}", std::env::var("VERIFY_VK").ok(),);
     let t = Instant::now();
     let _prover = ZKMProver::<DefaultProverComponents>::new();
     eprintln!("[time-prover-new] new() took {:?}", t.elapsed());

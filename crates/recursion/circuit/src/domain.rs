@@ -1,6 +1,6 @@
 use p3_commit::{LagrangeSelectors, PolynomialSpace};
-use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField, TwoAdicField};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
+use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use zkm_recursion_compiler::prelude::*;
 
 /// Reference: [p3_commit::PolynomialSpace]
@@ -71,9 +71,11 @@ where
     ) -> Ext<<C as Config>::F, <C as Config>::EF> {
         let unshifted_power = builder.exp_power_of_2_v::<Ext<_, _>>(
             point
-                * C::EF::from_basis_coefficients_fn(|i| if i == 0 { self.shift() } else { C::F::ZERO })
-                    .inverse()
-                    .cons(),
+                * C::EF::from_basis_coefficients_fn(
+                    |i| if i == 0 { self.shift() } else { C::F::ZERO },
+                )
+                .inverse()
+                .cons(),
             Usize::Const(self.log_size()),
         );
         builder.eval(unshifted_power - C::EF::ONE)
@@ -83,8 +85,10 @@ where
         builder: &mut Builder<C>,
         point: Felt<<C as Config>::F>,
     ) -> Felt<<C as Config>::F> {
-        let unshifted_power = builder
-            .exp_power_of_2_v::<Felt<_>>(point * self.shift().inverse(), Usize::Const(self.log_size()));
+        let unshifted_power = builder.exp_power_of_2_v::<Felt<_>>(
+            point * self.shift().inverse(),
+            Usize::Const(self.log_size()),
+        );
         builder.eval(unshifted_power - C::F::ONE)
     }
 }

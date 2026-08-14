@@ -16,17 +16,37 @@ pub enum MipsRegister {
     /// `$at` — assembler temporary.
     At,
     /// Function return values.
-    V0, V1,
+    V0,
+    V1,
     /// Function arguments.
-    A0, A1, A2, A3,
+    A0,
+    A1,
+    A2,
+    A3,
     /// Caller-saved temporaries.
-    T0, T1, T2, T3, T4, T5, T6, T7,
+    T0,
+    T1,
+    T2,
+    T3,
+    T4,
+    T5,
+    T6,
+    T7,
     /// Callee-saved.
-    S0, S1, S2, S3, S4, S5, S6, S7,
+    S0,
+    S1,
+    S2,
+    S3,
+    S4,
+    S5,
+    S6,
+    S7,
     /// More temporaries.
-    T8, T9,
+    T8,
+    T9,
     /// Kernel registers (unused by user code).
-    K0, K1,
+    K0,
+    K1,
     /// Global pointer.
     Gp,
     /// Stack pointer.

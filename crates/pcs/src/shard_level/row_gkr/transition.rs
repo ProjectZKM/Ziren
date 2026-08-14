@@ -51,9 +51,7 @@ use super::layer::{LogUpGkrCpuLayer, RowMajorTable};
 ///
 /// Numerator type promotes from `NumF` to `EF` (multiplication
 /// `denominator * numerator` lives in `EF`).
-pub fn layer_transition<NumF, EF>(
-    layer: &LogUpGkrCpuLayer<NumF, EF>,
-) -> LogUpGkrCpuLayer<EF, EF>
+pub fn layer_transition<NumF, EF>(layer: &LogUpGkrCpuLayer<NumF, EF>) -> LogUpGkrCpuLayer<EF, EF>
 where
     NumF: Field + Into<EF> + Copy + Sync,
     EF: ExtensionField<NumF> + Send + Sync,
@@ -81,7 +79,12 @@ where
     // work — per-row parallelism inside the chip is the right
     // granularity.
     use p3_maybe_rayon::prelude::*;
-    let per_chip: Vec<(RowMajorTable<EF>, RowMajorTable<EF>, RowMajorTable<EF>, RowMajorTable<EF>)> = (0..num_chips)
+    let per_chip: Vec<(
+        RowMajorTable<EF>,
+        RowMajorTable<EF>,
+        RowMajorTable<EF>,
+        RowMajorTable<EF>,
+    )> = (0..num_chips)
         .into_par_iter()
         .map(|chip_idx| {
             let n0 = &layer.numerator_0[chip_idx];
@@ -117,11 +120,8 @@ where
             // prefix the upper half (n0/d0) fills before the lower (n1/d1), so
             // e.g. n0=d0=8192, n1=d1=0.  `n0` is therefore always the max, but
             // take it explicitly so the sizing is correct regardless of order.
-            let src_real = n0
-                .num_real_rows
-                .max(d0.num_real_rows)
-                .max(n1.num_real_rows)
-                .max(d1.num_real_rows);
+            let src_real =
+                n0.num_real_rows.max(d0.num_real_rows).max(n1.num_real_rows).max(d1.num_real_rows);
 
             let next_n0_real = src_real.min(next_rows);
             let next_d0_real = next_n0_real;
@@ -155,10 +155,14 @@ where
                             let n1_real = row_upper < n1.num_real_rows;
                             let d1_real = row_upper < d1.num_real_rows;
                             for i in 0..int_count {
-                                let n_00: EF = if n0_real { (*n0.get(row_upper, i)).into() } else { EF::ZERO };
-                                let d_00: EF = if d0_real { *d0.get(row_upper, i) } else { EF::ONE };
-                                let n_01: EF = if n1_real { (*n1.get(row_upper, i)).into() } else { EF::ZERO };
-                                let d_01: EF = if d1_real { *d1.get(row_upper, i) } else { EF::ONE };
+                                let n_00: EF =
+                                    if n0_real { (*n0.get(row_upper, i)).into() } else { EF::ZERO };
+                                let d_00: EF =
+                                    if d0_real { *d0.get(row_upper, i) } else { EF::ONE };
+                                let n_01: EF =
+                                    if n1_real { (*n1.get(row_upper, i)).into() } else { EF::ZERO };
+                                let d_01: EF =
+                                    if d1_real { *d1.get(row_upper, i) } else { EF::ONE };
                                 n0_row[i] = d_01 * n_00 + d_00 * n_01;
                                 d0_row[i] = d_00 * d_01;
                             }
@@ -181,10 +185,14 @@ where
                             let n1_real = row_lower < n1.num_real_rows;
                             let d1_real = row_lower < d1.num_real_rows;
                             for i in 0..int_count {
-                                let n_10: EF = if n0_real { (*n0.get(row_lower, i)).into() } else { EF::ZERO };
-                                let d_10: EF = if d0_real { *d0.get(row_lower, i) } else { EF::ONE };
-                                let n_11: EF = if n1_real { (*n1.get(row_lower, i)).into() } else { EF::ZERO };
-                                let d_11: EF = if d1_real { *d1.get(row_lower, i) } else { EF::ONE };
+                                let n_10: EF =
+                                    if n0_real { (*n0.get(row_lower, i)).into() } else { EF::ZERO };
+                                let d_10: EF =
+                                    if d0_real { *d0.get(row_lower, i) } else { EF::ONE };
+                                let n_11: EF =
+                                    if n1_real { (*n1.get(row_lower, i)).into() } else { EF::ZERO };
+                                let d_11: EF =
+                                    if d1_real { *d1.get(row_lower, i) } else { EF::ONE };
                                 n1_row[i] = d_11 * n_10 + d_10 * n_11;
                                 d1_row[i] = d_10 * d_11;
                             }
@@ -193,16 +201,28 @@ where
             }
 
             let next_n0 = RowMajorTable::<EF>::from_padded_cells(
-                next_n0_cells, next_num_row_variables, chip_num_interactions, next_n0_real,
+                next_n0_cells,
+                next_num_row_variables,
+                chip_num_interactions,
+                next_n0_real,
             );
             let next_d0 = RowMajorTable::<EF>::from_padded_cells(
-                next_d0_cells, next_num_row_variables, chip_num_interactions, next_d0_real,
+                next_d0_cells,
+                next_num_row_variables,
+                chip_num_interactions,
+                next_d0_real,
             );
             let next_n1 = RowMajorTable::<EF>::from_padded_cells(
-                next_n1_cells, next_num_row_variables, chip_num_interactions, next_n1_real,
+                next_n1_cells,
+                next_num_row_variables,
+                chip_num_interactions,
+                next_n1_real,
             );
             let next_d1 = RowMajorTable::<EF>::from_padded_cells(
-                next_d1_cells, next_num_row_variables, chip_num_interactions, next_d1_real,
+                next_d1_cells,
+                next_num_row_variables,
+                chip_num_interactions,
+                next_d1_real,
             );
 
             (next_n0, next_d0, next_n1, next_d1)

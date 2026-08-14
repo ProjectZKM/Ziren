@@ -235,7 +235,6 @@ impl<T: Field, A: crate::multilinear::base::MleBaseBackend<T>> PaddedMle<T, A> {
     pub fn into_inner(self) -> Option<Arc<Mle<T, A>>> {
         self.inner
     }
-
 }
 
 /// DATA ops — CPU-only.  These reach into the backing cells (via
@@ -417,10 +416,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
 /// MSB-first bit decomposition of `num` into `dimension` bits (index 0
 /// is the most significant).  Mirrors SP1 `Point::from_usize`.
 fn from_usize_msb<EF: Field>(num: usize, dimension: usize) -> Vec<EF> {
-    (0..dimension)
-        .rev()
-        .map(|i| if (num >> i) & 1 == 1 { EF::ONE } else { EF::ZERO })
-        .collect()
+    (0..dimension).rev().map(|i| if (num >> i) & 1 == 1 { EF::ONE } else { EF::ZERO }).collect()
 }
 
 /// Analytic "greater-or-equal" indicator: `Σ_{row ≥ threshold}
@@ -484,10 +480,8 @@ mod tests {
                 let reference =
                     evaluate_trace_columns_at_point::<F, EF>(&trace.values, width, &point);
 
-                let padded = PaddedMle::padded_with_zeros(
-                    Arc::new(Mle::from_row_major(trace)),
-                    l as u32,
-                );
+                let padded =
+                    PaddedMle::padded_with_zeros(Arc::new(Mle::from_row_major(trace)), l as u32);
                 let got = padded.eval_at(&point);
 
                 assert_eq!(got, reference, "real_log={real_log} width={width} pad={pad}");
@@ -542,15 +536,11 @@ mod tests {
                 let mut full_tbl = vec![F::ZERO; (1usize << l) * width];
                 for row in 0..(1usize << l) {
                     for col in 0..width {
-                        full_tbl[row * width + col] = if row < height {
-                            trace.values[row * width + col]
-                        } else {
-                            pad_val
-                        };
+                        full_tbl[row * width + col] =
+                            if row < height { trace.values[row * width + col] } else { pad_val };
                     }
                 }
-                let reference =
-                    evaluate_trace_columns_at_point::<F, EF>(&full_tbl, width, &point);
+                let reference = evaluate_trace_columns_at_point::<F, EF>(&full_tbl, width, &point);
 
                 let padded = PaddedMle::padded(
                     Arc::new(Mle::from_row_major(trace)),
@@ -586,8 +576,7 @@ mod tests {
             assert_eq!(tr.height(), height, "as_trace_ref height");
 
             // PaddedMle::real_trace_ref: same, for a zero-padded trace MLE.
-            let padded =
-                PaddedMle::padded_with_zeros(Arc::new(mle), (real_log + 2) as u32);
+            let padded = PaddedMle::padded_with_zeros(Arc::new(mle), (real_log + 2) as u32);
             let ptr = padded.real_trace_ref().expect("width>0 => Some");
             assert_eq!(ptr.values, raw_values.as_slice(), "real_trace_ref values");
             assert_eq!(ptr.width, raw_width, "real_trace_ref width");
@@ -597,8 +586,7 @@ mod tests {
         }
 
         // A dummy (width-0) padded MLE has no real cells → None.
-        let dummy: PaddedMle<F> =
-            PaddedMle::dummy(3, Padding::Constant(F::ZERO, 0));
+        let dummy: PaddedMle<F> = PaddedMle::dummy(3, Padding::Constant(F::ZERO, 0));
         assert!(dummy.real_trace_ref().is_none(), "dummy => None");
         assert_eq!(dummy.num_polynomials(), 0);
     }
@@ -632,8 +620,7 @@ mod tests {
 
                 // Raw-trace path (the legacy `prove_shard_zerocheck` source):
                 // lift the row-major trace cells to EF, then bitrev the rows.
-                let raw_lift: Vec<EF> =
-                    trace.values.iter().map(|v| EF::from(*v)).collect();
+                let raw_lift: Vec<EF> = trace.values.iter().map(|v| EF::from(*v)).collect();
                 let raw_cells = bitrev_rows(&raw_lift, width, height);
 
                 // Shared-MLE path: lift the PaddedMle inner cells, then

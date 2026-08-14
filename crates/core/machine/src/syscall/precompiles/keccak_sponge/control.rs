@@ -244,14 +244,10 @@ where
         builder.assert_bool(local.is_first_block);
         builder.assert_bool(local.is_final_block);
         // Bus-B selectors.
-        builder.assert_eq(
-            local.do_block_recv,
-            local.is_real * (AB::Expr::ONE - local.is_first_block),
-        );
-        builder.assert_eq(
-            local.do_block_send,
-            local.is_real * (AB::Expr::ONE - local.is_final_block),
-        );
+        builder
+            .assert_eq(local.do_block_recv, local.is_real * (AB::Expr::ONE - local.is_first_block));
+        builder
+            .assert_eq(local.do_block_send, local.is_real * (AB::Expr::ONE - local.is_final_block));
 
         // Receive the syscall once (first block).
         builder.receive_syscall(
@@ -387,12 +383,7 @@ impl KeccakSpongeControlChip {
 
         // --- Bus B (block chain): receive original @ block, send permuted @ block+1. ---
         let b_header = |block: AB::Expr| -> Vec<AB::Expr> {
-            vec![
-                pid.clone(),
-                AB::Expr::from_u32(KECCAK_BUS_BLOCK),
-                local.clk.into(),
-                block,
-            ]
+            vec![pid.clone(), AB::Expr::from_u32(KECCAK_BUS_BLOCK), local.clk.into(), block]
         };
         let mut b_recv = b_header(local.block.into());
         b_recv.extend(Self::state_limbs::<AB>(orig));

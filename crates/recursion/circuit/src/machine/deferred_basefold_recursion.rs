@@ -34,13 +34,13 @@
 //!   `wrap_basefold_recursion` companion landed in this sub-sprint.
 
 use p3_koala_bear::KoalaBear;
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+use zkm_pcs::StarkMachine;
 use zkm_recursion_compiler::circuit::AsmCompiler;
 use zkm_recursion_compiler::config::InnerConfig;
 use zkm_recursion_compiler::ir::Builder;
 use zkm_recursion_core::RecursionProgram;
-use zkm_pcs::air::MachineAir;
-use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
-use zkm_pcs::StarkMachine;
 
 use crate::witness::Witnessable;
 
@@ -60,10 +60,11 @@ pub fn build_deferred_basefold_recursion_program<A>(
 ) -> RecursionProgram<KoalaBear>
 where
     A: MachineAir<KoalaBear>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>>,
+        + for<'b> p3_air::Air<
+            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+        >,
 {
-    let builder_span =
-        tracing::debug_span!("build deferred-basefold-recursion program").entered();
+    let builder_span = tracing::debug_span!("build deferred-basefold-recursion program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
     verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
@@ -94,10 +95,7 @@ mod tests {
     /// drift across upstream refactors.
     #[test]
     fn shares_verifier_body_with_mips_path() {
-        let _ = verify_deferred_basefold::<
-            InnerConfig,
-            KoalaBearPoseidon2,
-            RecursionAir<KoalaBear, 9>,
-        >;
+        let _ =
+            verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2, RecursionAir<KoalaBear, 9>>;
     }
 }

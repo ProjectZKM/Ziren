@@ -197,7 +197,6 @@ where
                         // Send the checkpoint in-memory (no tempfile + bincode roundtrip).
                         let global_clk = runtime.state.global_clk;
 
-
                         tracing::trace!(
                             target = "checkpoint_pin",
                             event = "produce",
@@ -205,9 +204,7 @@ where
                             done = done,
                             global_clk = global_clk,
                         );
-                        checkpoints_tx
-                            .send((index, checkpoint, done, global_clk))
-                            .unwrap();
+                        checkpoints_tx.send((index, checkpoint, done, global_clk)).unwrap();
 
                         // If we've reached the final checkpoint, break out of the loop.
                         if done {
@@ -257,33 +254,32 @@ where
             let handle = s.spawn(move || {
                 let _span = span.enter();
                 tracing::debug_span!("phase 2 trace generation").in_scope(|| {
-                    let _: () = loop {
-                        // Receive the latest checkpoint.
-                        let received = { checkpoints_rx.lock().unwrap().recv() };
-                        if let Ok((index, execution_state, done, num_cycles))
-                            = received
-                        {
-                            // In-memory checkpoint — no
-                            // tempfile read, no bincode::deserialize.
-                            tracing::trace!(
-                                target = "checkpoint_pin",
-                                event = "consume",
-                                index = index,
-                                done = done,
-                                num_cycles = num_cycles,
-                            );
-                            // JIT producer: the checkpoint below is a
-                            // single FROM-START, whole-program state, so ONE
-                            // `trace_checkpoint` cannot cover the program —
-                            // `Executor::execute` stops after
-                            // `shard_batch_size` shards.  Drive the trace
-                            // executor to completion instead and hand each
-                            // batch to the SAME downstream body, so peak
-                            // memory stays at one batch (the multi-checkpoint
-                            // path's profile) and the per-batch public-value
-                            // semantics are unchanged.
-                            let mut batch_index = index;
-                            let mut process_batch = |mut records: Vec<ExecutionRecord>,
+                    let _: () =
+                        loop {
+                            // Receive the latest checkpoint.
+                            let received = { checkpoints_rx.lock().unwrap().recv() };
+                            if let Ok((index, execution_state, done, num_cycles)) = received {
+                                // In-memory checkpoint — no
+                                // tempfile read, no bincode::deserialize.
+                                tracing::trace!(
+                                    target = "checkpoint_pin",
+                                    event = "consume",
+                                    index = index,
+                                    done = done,
+                                    num_cycles = num_cycles,
+                                );
+                                // JIT producer: the checkpoint below is a
+                                // single FROM-START, whole-program state, so ONE
+                                // `trace_checkpoint` cannot cover the program —
+                                // `Executor::execute` stops after
+                                // `shard_batch_size` shards.  Drive the trace
+                                // executor to completion instead and hand each
+                                // batch to the SAME downstream body, so peak
+                                // memory stays at one batch (the multi-checkpoint
+                                // path's profile) and the per-batch public-value
+                                // semantics are unchanged.
+                                let mut batch_index = index;
+                                let mut process_batch = |mut records: Vec<ExecutionRecord>,
                                                      report: ExecutionReport,
                                                      done: bool,
                                                      num_cycles: u64|
@@ -523,36 +519,35 @@ where
                             Ok(())
                             };
 
-                            if true {
-                                // Whole-program from-start checkpoint: loop
-                                // `execute_record` on ONE carried executor
-                                // until it reports `done`, mirroring the
-                                // interpreter producer's `execute_state` loop
-                                // (and the GPU driver's).
-                                trace_checkpoint_to_completion::<SC, _>(
-                                    program.clone(),
-                                    execution_state,
-                                    opts,
-                                    shape_config,
-                                    &mut process_batch,
-                                )?;
+                                if true {
+                                    // Whole-program from-start checkpoint: loop
+                                    // `execute_record` on ONE carried executor
+                                    // until it reports `done`, mirroring the
+                                    // interpreter producer's `execute_state` loop
+                                    // (and the GPU driver's).
+                                    trace_checkpoint_to_completion::<SC, _>(
+                                        program.clone(),
+                                        execution_state,
+                                        opts,
+                                        shape_config,
+                                        &mut process_batch,
+                                    )?;
+                                } else {
+                                    let (records, report) =
+                                        tracing::debug_span!("trace checkpoint").in_scope(|| {
+                                            trace_checkpoint::<SC>(
+                                                program.clone(),
+                                                execution_state,
+                                                opts,
+                                                shape_config,
+                                            )
+                                        });
+                                    process_batch(records, report, done, num_cycles)?;
+                                }
                             } else {
-                                let (records, report) =
-                                tracing::debug_span!("trace checkpoint")
-                                    .in_scope(|| {
-                                        trace_checkpoint::<SC>(
-                                            program.clone(),
-                                            execution_state,
-                                            opts,
-                                            shape_config,
-                                        )
-                                    });
-                                process_batch(records, report, done, num_cycles)?;
+                                break;
                             }
-                        } else {
-                            break;
-                        }
-                    };
+                        };
                     Ok(())
                 })
             });
@@ -632,9 +627,8 @@ where
                                                     // Only real machine chips are
                                                     // injectable.
                                                     let name = air.to_string();
-                                                    let width = cluster_chip_widths
-                                                        .get(&name)
-                                                        .copied()?;
+                                                    let width =
+                                                        cluster_chip_widths.get(&name).copied()?;
                                                     Some((name, width))
                                                 })
                                                 .collect()
@@ -1036,7 +1030,6 @@ where
 
     (records, runtime.report)
 }
-
 
 #[cfg(debug_assertions)]
 #[cfg(not(doctest))]

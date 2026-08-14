@@ -101,8 +101,8 @@ impl<F: Field, EF: ExtensionField<F>> PublicValuesConstraintFolder<'_, F, EF> {
     fn interaction_denominator(&self, message: &AirLookup<EF>) -> EF {
         let mut denominator = *self.perm_challenges.0;
         let mut betas = self.perm_challenges.1.iter();
-        denominator += *betas.next().expect("beta_0 (kind term)")
-            * EF::from_usize(message.kind as usize);
+        denominator +=
+            *betas.next().expect("beta_0 (kind term)") * EF::from_usize(message.kind as usize);
         for value in message.values.iter() {
             denominator += *value * *betas.next().expect("beta_i (value term)");
         }

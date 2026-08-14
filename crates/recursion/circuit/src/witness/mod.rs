@@ -142,4 +142,3 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
         self.0.y.0.write(witness);
     }
 }
-

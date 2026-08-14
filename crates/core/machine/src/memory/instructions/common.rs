@@ -12,9 +12,9 @@
 //! carries) instead of being delegated to the `AddSub` chip over the ALU bus,
 //! which removes one 19-cell `AddSub` dependency row per memory instruction.
 
-use zkm_pcs::air::BaseAirBuilder;
 use crate::memory::RegisterCols;
 use std::mem::size_of;
+use zkm_pcs::air::BaseAirBuilder;
 
 use hashbrown::HashMap;
 use p3_air::AirBuilder;
@@ -217,10 +217,9 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     );
     // The plain stores read op_a immutably: the register write carries the
     // previous value through unchanged.
-    builder.when(op_a_immutable.clone() * is_real.clone()).assert_word_eq(
-        *cols.frame.op_a_access.value(),
-        cols.frame.op_a_access.prev_value,
-    );
+    builder
+        .when(op_a_immutable.clone() * is_real.clone())
+        .assert_word_eq(*cols.frame.op_a_access.value(), cols.frame.op_a_access.prev_value);
     builder
         .when(is_real.clone())
         .assert_word_eq(cols.prev_a_val, cols.frame.op_a_access.prev_value);
@@ -331,9 +330,7 @@ pub(crate) fn generate_memory_trace<F: PrimeField32>(
     events: &[MemInstrEvent],
     padded_nb_rows: usize,
     num_cols: usize,
-    event_to_row: impl Fn(&MemInstrEvent, &mut [F], &mut HashMap<ByteLookupEvent, usize>)
-        + Sync
-        + Send,
+    event_to_row: impl Fn(&MemInstrEvent, &mut [F], &mut HashMap<ByteLookupEvent, usize>) + Sync + Send,
     pad_row: impl Fn(&mut [F]) + Sync + Send,
 ) -> (RowMajorMatrix<F>, Vec<HashMap<ByteLookupEvent, usize>>) {
     let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);

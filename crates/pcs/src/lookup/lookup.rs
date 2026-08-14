@@ -186,8 +186,8 @@ impl<F: Field> Lookup<F> {
 
         // Denominator = α + β₀·argument_index + Σ_k βₖ·v_k.
         let mut betas_iter = betas.iter().cloned();
-        let mut denominator: Expr =
-            alpha + betas_iter.next().expect("at least one beta (argument_index slot)")
+        let mut denominator: Expr = alpha
+            + betas_iter.next().expect("at least one beta (argument_index slot)")
                 * Expr::from_usize(self.argument_index());
         for (column, beta) in self.values.iter().zip(betas_iter) {
             let v: Expr = column.apply::<Expr, Var>(prep_slice, main);
@@ -266,14 +266,18 @@ mod eval_tests {
         let betas = vec![EF::from_u32(13), EF::from_u32(17), EF::from_u32(19)];
 
         // `Lookup::eval` (Var = EF), unsigned numerator.
-        let (num_eval, den_eval) =
-            lookup.eval::<EF, EF>(None, &main_ef, alpha, &betas);
+        let (num_eval, den_eval) = lookup.eval::<EF, EF>(None, &main_ef, alpha, &betas);
 
         // Prover analog (base field), signed numerator.
-        let (num_gen_send, den_gen) = crate::shard_level::row_gkr::first_layer::generate_interaction_vals::<
-            KoalaBear,
-            EF,
-        >(&lookup, &[], &main_base, true, alpha, &betas);
+        let (num_gen_send, den_gen) =
+            crate::shard_level::row_gkr::first_layer::generate_interaction_vals::<KoalaBear, EF>(
+                &lookup,
+                &[],
+                &main_base,
+                true,
+                alpha,
+                &betas,
+            );
         let (num_gen_recv, _) = crate::shard_level::row_gkr::first_layer::generate_interaction_vals::<
             KoalaBear,
             EF,

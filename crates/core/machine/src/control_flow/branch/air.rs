@@ -1,7 +1,7 @@
 use crate::memory::RegisterCols;
 use std::borrow::Borrow;
 
-use p3_air::{WindowAccess, Air, AirBuilder};
+use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::Opcode;
 use zkm_pcs::{
@@ -77,10 +77,9 @@ where
         );
         // A branch READS op_a immutably: the register write carries the
         // previous value through unchanged.
-        builder.when(is_real.clone()).assert_word_eq(
-            *local.frame.op_a_access.value(),
-            local.frame.op_a_access.prev_value,
-        );
+        builder
+            .when(is_real.clone())
+            .assert_word_eq(*local.frame.op_a_access.value(), local.frame.op_a_access.prev_value);
 
         // Bind this chip's operand columns to the frame's register-file view:
         // the chip must compute on exactly the values the register accesses
@@ -215,9 +214,7 @@ where
         // agree), on real rows.
         builder.when(is_real.clone()).assert_eq(
             local.a_gt_b,
-            AB::Expr::ONE
-                - local.compare.lt
-                - local.compare.is_comp_eq * local.compare.is_sign_eq,
+            AB::Expr::ONE - local.compare.lt - local.compare.is_comp_eq * local.compare.is_sign_eq,
         );
     }
 }

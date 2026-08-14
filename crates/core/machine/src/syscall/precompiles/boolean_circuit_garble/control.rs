@@ -20,9 +20,7 @@ use std::mem::size_of;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use zkm_core_executor::{
-    events::PrecompileEvent, syscalls::SyscallCode, ExecutionRecord, Program,
-};
+use zkm_core_executor::{events::PrecompileEvent, syscalls::SyscallCode, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{
     air::{AirLookup, LookupScope, MachineAir},
@@ -192,9 +190,7 @@ where
 
         // Bind the `delta` columns to the four `delta` words read from memory.
         for i in 0..4 {
-            builder
-                .when(local.is_real)
-                .assert_word_eq(local.delta[i], *local.delta_mem[i].value());
+            builder.when(local.is_real).assert_word_eq(local.delta[i], *local.delta_mem[i].value());
         }
 
         // Write the output word.
@@ -239,8 +235,8 @@ where
 
         // Receive the final chain state `@ gate_id = gates_num`, at
         // `input_address + 20 + GATE_INFO_BYTES*4 * gates_num`.
-        let gates_end = gates_start
-            + local.gates_num.into() * AB::Expr::from_u32((GATE_INFO_BYTES * 4) as u32);
+        let gates_end =
+            gates_start + local.gates_num.into() * AB::Expr::from_u32((GATE_INFO_BYTES * 4) as u32);
         builder.receive(
             AirLookup::new(
                 tuple(local.gates_num.into(), gates_end),

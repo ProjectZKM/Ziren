@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use p3_field::{Field, PrimeCharacteristicRing, ExtensionField, BasedVectorSpace};
+use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 
 use crate::*;
@@ -100,7 +100,12 @@ pub fn ext_alu<F: PrimeCharacteristicRing>(
     })
 }
 
-pub fn mem<F: PrimeCharacteristicRing>(kind: MemAccessKind, mult: u32, addr: u32, val: u32) -> Instruction<F> {
+pub fn mem<F: PrimeCharacteristicRing>(
+    kind: MemAccessKind,
+    mult: u32,
+    addr: u32,
+    val: u32,
+) -> Instruction<F> {
     mem_single(kind, mult, addr, F::from_u32(val))
 }
 

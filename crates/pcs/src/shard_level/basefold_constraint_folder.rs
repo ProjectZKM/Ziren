@@ -180,14 +180,9 @@ where
     EF: ExtensionField<F>,
     A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF, EF>>,
 {
-    let preprocessed = PairWindow {
-        local: &opening.preprocessed.local,
-        next: &opening.preprocessed.local,
-    };
-    let main = PairWindow {
-        local: &opening.main.local,
-        next: &opening.main.local,
-    };
+    let preprocessed =
+        PairWindow { local: &opening.preprocessed.local, next: &opening.preprocessed.local };
+    let main = PairWindow { local: &opening.main.local, next: &opening.main.local };
     let mut folder = BasefoldConstraintFolder::<F, EF, EF> {
         preprocessed,
         main,

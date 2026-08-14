@@ -61,10 +61,7 @@ impl<K: PrimeCharacteristicRing + Copy> UnivariatePolynomial<K> {
 
     /// Evaluate the polynomial at `point` via Horner's method.
     pub fn eval_at_point(&self, point: K) -> K {
-        self.coefficients
-            .iter()
-            .rev()
-            .fold(K::ZERO, |acc, x| acc * point + *x)
+        self.coefficients.iter().rev().fold(K::ZERO, |acc, x| acc * point + *x)
     }
 
     /// Compute `p(0) + p(1)`.  This identity (`p(0) + p(1) =
@@ -75,11 +72,7 @@ impl<K: PrimeCharacteristicRing + Copy> UnivariatePolynomial<K> {
         if self.coefficients.is_empty() {
             K::ZERO
         } else {
-            let sum_all = self
-                .coefficients
-                .iter()
-                .copied()
-                .fold(K::ZERO, |acc, x| acc + x);
+            let sum_all = self.coefficients.iter().copied().fold(K::ZERO, |acc, x| acc + x);
             self.coefficients[0] + sum_all
         }
     }
@@ -88,9 +81,7 @@ impl<K: PrimeCharacteristicRing + Copy> UnivariatePolynomial<K> {
 impl<K: PrimeCharacteristicRing + Copy> Mul<K> for UnivariatePolynomial<K> {
     type Output = Self;
     fn mul(self, rhs: K) -> Self::Output {
-        Self {
-            coefficients: self.coefficients.into_iter().map(|x| x * rhs).collect(),
-        }
+        Self { coefficients: self.coefficients.into_iter().map(|x| x * rhs).collect() }
     }
 }
 
@@ -119,19 +110,12 @@ pub fn interpolate<K: Field>(xs: &[K], ys: &[K]) -> UnivariatePolynomial<K> {
     assert_eq!(xs.len(), ys.len(), "xs/ys length mismatch");
     let mut result = UnivariatePolynomial::new(vec![K::ZERO]);
     for (i, (&x, &y)) in xs.iter().zip(ys.iter()).enumerate() {
-        let (denominator, numerator) = xs
-            .iter()
-            .enumerate()
-            .filter(|(j, _)| *j != i)
-            .fold(
-                (K::ONE, UnivariatePolynomial::new(vec![y])),
-                |(denominator, numerator), (_, &xj)| {
-                    (
-                        denominator * (x - xj),
-                        numerator.mul_by_x() + numerator * (-xj),
-                    )
-                },
-            );
+        let (denominator, numerator) = xs.iter().enumerate().filter(|(j, _)| *j != i).fold(
+            (K::ONE, UnivariatePolynomial::new(vec![y])),
+            |(denominator, numerator), (_, &xj)| {
+                (denominator * (x - xj), numerator.mul_by_x() + numerator * (-xj))
+            },
+        );
         result = result + numerator * denominator.inverse();
     }
     result
@@ -159,9 +143,7 @@ pub fn interpolate<K: Field>(xs: &[K], ys: &[K]) -> UnivariatePolynomial<K> {
 /// Faster than calling [`interpolate`] with three sample points
 /// (avoids the O(n²) Lagrange-basis loop) and uses one inversion
 /// instead of three.
-pub fn interpolate_3point_evals_at_012<K: Field>(
-    evals: [K; 3],
-) -> UnivariatePolynomial<K> {
+pub fn interpolate_3point_evals_at_012<K: Field>(evals: [K; 3]) -> UnivariatePolynomial<K> {
     let [p0, p1, p2] = evals;
     let two_inv = K::from_u8(2).inverse();
     let c0 = p0;
@@ -223,8 +205,7 @@ mod tests {
     fn interpolate_3point_at_012_matches_generic_interpolate() {
         let evals = [F::ONE, F::TWO, F::from_u16(7)];
         let fast = interpolate_3point_evals_at_012(evals);
-        let slow =
-            interpolate(&[F::ZERO, F::ONE, F::TWO], &evals.to_vec());
+        let slow = interpolate(&[F::ZERO, F::ONE, F::TWO], &evals.to_vec());
         assert_eq!(fast.coefficients, slow.coefficients);
     }
 
@@ -254,11 +235,7 @@ mod tests {
     #[test]
     fn interpolate_3point_round_trip() {
         // p(X) = 1 + 3X + 5X²  →  p(0)=1, p(1)=9, p(2)=27.
-        let original = UnivariatePolynomial::new(vec![
-            F::ONE,
-            F::from_u8(3),
-            F::from_u8(5),
-        ]);
+        let original = UnivariatePolynomial::new(vec![F::ONE, F::from_u8(3), F::from_u8(5)]);
         let evals = [
             original.eval_at_point(F::ZERO),
             original.eval_at_point(F::ONE),

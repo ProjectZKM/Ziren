@@ -16,8 +16,8 @@ use super::{
 };
 use crate::{
     air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, BasefoldRing,
-    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, PcsProverData,
-    ProverConstraintFolder, MainTraceData, ShardProof, StarkVerifyingKey,
+    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, MainTraceData, PcsProverData,
+    ProverConstraintFolder, ShardProof, StarkVerifyingKey,
 };
 
 /// Wrap raw per-chip main traces into the name-keyed `PaddedMle` store
@@ -155,9 +155,8 @@ where
     /// `Mle::from_row_major`) and consumed by `open()` — the commit and
     /// the prove read the same cells.  `None` on device provers (their
     /// traces are device-resident).
-    pub main_store: Option<
-        std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>,
-    >,
+    pub main_store:
+        Option<std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>>,
 }
 
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
@@ -370,37 +369,37 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn prove_trusted_evaluations(
         &self,
         chips: &[&MachineChip<SC, A>],
-        // The FIRST opening round: the preprocessed traces, in the order
-        // `setup` committed them (BY NAME — the same convention as the main
-        // round), their column claims, and the proving key's
-        // commit.  Empty for a machine with no preprocessed traces, which then
-        // proves a single main round.
+    // The FIRST opening round: the preprocessed traces, in the order
+    // `setup` committed them (BY NAME — the same convention as the main
+    // round), their column claims, and the proving key's
+    // commit.  Empty for a machine with no preprocessed traces, which then
+    // proves a single main round.
         preprocessed_named: &[(String, crate::multilinear::PaddedMle<Val<SC>>)],
         preprocessed_claims: Vec<Vec<crate::Challenge<SC>>>,
         preprocessed_commit: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as BasefoldRing>::BfMmcs,
         >,
-        // BORROWED views over the shard prover's
-        // shared `Arc<Mle>` store; the free-fn builds `chip_traces` by a
-        // zero-copy slice relabel of these views (no clone / move).  This is the
-        // `StarkGpuProver` device-open OVERRIDE point — the coupled ziren-gpu
-        // mirror takes the same borrowed view.
+    // BORROWED views over the shard prover's
+    // shared `Arc<Mle>` store; the free-fn builds `chip_traces` by a
+    // zero-copy slice relabel of these views (no clone / move).  This is the
+    // `StarkGpuProver` device-open OVERRIDE point — the coupled ziren-gpu
+    // mirror takes the same borrowed view.
         main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
         shared_eval_point: &[crate::Challenge<SC>],
         challenger: &mut SC::Challenger,
         precomputed_commit: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as BasefoldRing>::BfMmcs,
         >,
-        // The zerocheck residual's per-chip column claims.  UNCONDITIONAL:
-        // the claims the prover already computed ARE the jagged round's
-        // input, not a fast path with a recompute behind it.
+    // The zerocheck residual's per-chip column claims.  UNCONDITIONAL:
+    // the claims the prover already computed ARE the jagged round's
+    // input, not a fast path with a recompute behind it.
         pre_y_per_chip: Vec<Vec<crate::Challenge<SC>>>,
-        // The jagged `reducer` / `opener` are not params: the CpuProver
-        // default sources the HOST reducer/opener inside the body below (they
-        // are ZSTs); a `StarkGpuProver` OVERRIDES this method and sources its
-        // own DEVICE reducer/opener.  The internal free-fn keeps `&dyn`
-        // params as plumbing for its other callers — the trait method feeds
-        // it the type-determined Host* here.
+    // The jagged `reducer` / `opener` are not params: the CpuProver
+    // default sources the HOST reducer/opener inside the body below (they
+    // are ZSTs); a `StarkGpuProver` OVERRIDES this method and sources its
+    // own DEVICE reducer/opener.  The internal free-fn keeps `&dyn`
+    // params as plumbing for its other callers — the trait method feeds
+    // it the type-determined Host* here.
     ) -> crate::shard_level::shard_proof::EvaluationProof
     where
         SC: BasefoldRing,
@@ -459,7 +458,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                     crate::Challenge<SC>,
                 >,
             >
-            // The K = F (base-field first round) folder instance.
+    // The K = F (base-field first round) folder instance.
             + for<'b> Air<
                 crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
                     'b,
@@ -517,14 +516,13 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         // `padded_with_zeros` host chips and the `dummy` width-0 chips are built
         // with it), so any entry reports it.  An empty chip set never reaches a
         // shard proof; fall back to the BASE floor for totality.
-        let max_log_row_count = main_traces
-            .values()
-            .next()
-            .map(|pm| pm.num_variables() as usize)
-            .unwrap_or_else(|| {
-                crate::shard_level::verifier::BasefoldShardVerifier::production_default()
-                    .max_log_row_count
-            });
+        let max_log_row_count =
+            main_traces.values().next().map(|pm| pm.num_variables() as usize).unwrap_or_else(
+                || {
+                    crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+                        .max_log_row_count
+                },
+            );
         // The shared analytic trace-MLE store — the SINGLE authoritative host
         // main-trace store — is built ONCE at the construction site and handed
         // over ready-made on `data.main_traces`.
@@ -541,9 +539,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 let name = chip.name();
                 match main_traces.get(&name) {
                     Some(pm) => pm.clone(),
-                    None => panic!(
-                        "prove_shard_with_data: chip {name} missing from main_traces",
-                    ),
+                    None => panic!("prove_shard_with_data: chip {name} missing from main_traces",),
                 }
             })
             .collect();
@@ -897,36 +893,30 @@ where
         // (otherwise round 0's claimed_sum check desyncs).
         let basefold_challenger_snapshot: SC::Challenger = challenger.clone();
 
-        // BaseFold + jagged PCS + zerocheck + LogUp-GKR is the ONLY proof
-        // system: every ring (inner KoalaBear/JaggedChallenger and the OUTER
-        // wrap BN254/MultiField32) opens via the shard-level BaseFold
-        // jagged-PCS.  There is no two-adic-quotient FRI open path.
-        {
-            // Produce the shard-level BaseFold proof: LogUp-GKR, zerocheck,
-            // and the jagged-PCS opening, driven from the challenger
-            // snapshot above.
-            //
-            // Pass `self` so the basefold producer routes through the
-            // trait-method seam (`self.prove_shard_with_data` ->
-            // `self.prove_trusted_evaluations`).
-            let basefold_shard_proof = prove_shard_with_data_boxed::<SC, A, _>(
-                self,
-                &chips,
-                pk.preprocessed_mles(),
-                <SC as crate::BasefoldRing>::prep_open_data(pk.preprocessed_data()),
-                &pk.chip_ordering,
-                data.public_values.clone(),
-                &basefold_challenger_snapshot,
-                // The commit-time retained jagged commitment (`None` on the
-                // wrap ring).
-                data.main_data,
-            );
+        // Produce the shard-level BaseFold proof: LogUp-GKR, zerocheck,
+        // and the jagged-PCS opening, driven from the challenger
+        // snapshot above.
+        //
+        // Pass `self` so the basefold producer routes through the
+        // trait-method seam (`self.prove_shard_with_data` ->
+        // `self.prove_trusted_evaluations`).
+        let basefold_shard_proof = prove_shard_with_data_boxed::<SC, A, _>(
+            self,
+            &chips,
+            pk.preprocessed_mles(),
+            <SC as crate::BasefoldRing>::prep_open_data(pk.preprocessed_data()),
+            &pk.chip_ordering,
+            data.public_values.clone(),
+            &basefold_challenger_snapshot,
+            // The commit-time retained jagged commitment (`None` on the
+            // wrap ring).
+            data.main_data,
+        );
 
-            return Ok(ShardProof::<SC> {
-                public_values: data.public_values,
-                basefold_shard_proof,
-            });
-        }
+        Ok(ShardProof::<SC> {
+            public_values: data.public_values,
+            basefold_shard_proof,
+        })
     }
 
     /// Prove the execution record is valid.
@@ -1042,25 +1032,25 @@ impl Error for CpuProverError {}
 /// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A, P>(
-    // The prover, so the inner
-    // `prove_shard_with_data` call routes through `prover`'s trait method
-    // (`prover.prove_shard_with_data` -> `self.prove_trusted_evaluations`),
-    // exposing the override seam.  On `CpuProver` every step delegates to
-    // the free-fn → byte-identical.
+// The prover, so the inner
+// `prove_shard_with_data` call routes through `prover`'s trait method
+// (`prover.prove_shard_with_data` -> `self.prove_trusted_evaluations`),
+// exposing the override seam.  On `CpuProver` every step delegates to
+// the free-fn → byte-identical.
     prover: &P,
     chips: &[&MachineChip<SC, A>],
     pk_preprocessed_mles: &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>],
-    // The proving key's PRECOMPUTED preprocessed commit
-    // (`StarkProvingKey::preprocessed_data`, via
-    // `BasefoldRing::prep_open_data`), opened as a round of every shard proof.
+// The proving key's PRECOMPUTED preprocessed commit
+// (`StarkProvingKey::preprocessed_data`, via
+// `BasefoldRing::prep_open_data`), opened as a round of every shard proof.
     pk_preprocessed_jagged: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
         SC::BfMmcs,
     >,
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
-    // The commit-time retained jagged commitment, threaded into
-    // `ShardData.commit_data` for the driver to consume.
+// The commit-time retained jagged commitment, threaded into
+// `ShardData.commit_data` for the driver to consume.
     commit_data: Option<RetainedJaggedCommit<SC>>,
 ) -> Option<
     Box<
@@ -1083,7 +1073,7 @@ where
                 <SC as StarkGenericConfig>::Challenge,
             >,
         >
-        // The K = F (base-field first round) folder instance.
+// The K = F (base-field first round) folder instance.
         + for<'b> Air<
             crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
                 'b,
@@ -1097,8 +1087,8 @@ where
     Val<SC>: 'static,
     <SC as StarkGenericConfig>::Challenge:
         p3_field::BasedVectorSpace<Val<SC>> + 'static,
-    // Threaded through to `prove_trusted_evaluations`'s static
-    // OUTER generic BaseFold open (see its where-clause).
+// Threaded through to `prove_trusted_evaluations`'s static
+// OUTER generic BaseFold open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
         + p3_challenger::CanObserve<
@@ -1107,8 +1097,8 @@ where
             >>::Commitment,
         >,
 {
-    use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
+    use core::any::TypeId;
 
     // A REAL assert, not a `debug_assert!`: it is the precondition the
     // downstream per-ring jagged open relies on, and `debug_assert!` compiles
@@ -1162,17 +1152,15 @@ where
     // preprocessed column get a width-0 dummy.
     let preprocessed_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
         .iter()
-        .map(|chip| {
-            match pk_chip_ordering.get(&chip.name().to_string()) {
-                Some(&idx) => crate::multilinear::PaddedMle::padded_with_zeros(
-                    pk_preprocessed_mles[idx].clone(),
-                    max_log_row_count as u32,
-                ),
-                None => crate::multilinear::PaddedMle::dummy(
-                    max_log_row_count as u32,
-                    crate::multilinear::Padding::Constant(<Val<SC>>::ZERO, 0),
-                ),
-            }
+        .map(|chip| match pk_chip_ordering.get(&chip.name().to_string()) {
+            Some(&idx) => crate::multilinear::PaddedMle::padded_with_zeros(
+                pk_preprocessed_mles[idx].clone(),
+                max_log_row_count as u32,
+            ),
+            None => crate::multilinear::PaddedMle::dummy(
+                max_log_row_count as u32,
+                crate::multilinear::Padding::Constant(<Val<SC>>::ZERO, 0),
+            ),
         })
         .collect();
     debug_assert_eq!(

@@ -11,7 +11,7 @@ use zkm_recursion_circuit::{
     hash::FieldHasherVariable,
     machine::{
         wrap_basefold::{verify_wrap_basefold_core, ZKMWrapBasefoldWitnessValues},
-        ZKMMerkleProofWitnessValues, ZKMWrapBasefoldWitnessVariable, PublicValuesOutputDigest,
+        PublicValuesOutputDigest, ZKMMerkleProofWitnessValues, ZKMWrapBasefoldWitnessVariable,
     },
 };
 use zkm_recursion_compiler::{
@@ -25,8 +25,8 @@ use zkm_recursion_core::{air::RecursionPublicValues, hash_vkey_with_part_vk};
 
 pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
-use zkm_recursion_gnark_ffi::{DvSnarkBn254Prover, Groth16Bn254Prover, PlonkBn254Prover};
 use zkm_pcs::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
+use zkm_recursion_gnark_ffi::{DvSnarkBn254Prover, Groth16Bn254Prover, PlonkBn254Prover};
 
 use crate::{
     utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
@@ -182,13 +182,10 @@ pub fn build_constraints_and_witness(
     tracing::info!("building verifier constraints");
     // #H (BaseFold-over-BN254 wrap port): the wrap STARK is proved over
     // BaseFold-BN254; the gnark outer circuit verifies its basefold shard proof.
-    let basefold_proof = *template_proof
-        .basefold_shard_proof
-        .clone()
-        .expect(
-            "build_constraints_and_witness: wrap proof missing basefold_shard_proof \
+    let basefold_proof = *template_proof.basefold_shard_proof.clone().expect(
+        "build_constraints_and_witness: wrap proof missing basefold_shard_proof \
              (the outer ring must be a BaseFold config)",
-        );
+    );
     let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
     let template_input = ZKMWrapBasefoldWitnessValues {
         vks_and_proofs: vec![(template_vk.clone(), basefold_proof)],

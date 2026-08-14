@@ -70,9 +70,9 @@ impl<C: CircuitConfig, T: IntoSymbolic<C>> IntoSymbolic<C> for [T] {
 mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
+    use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
-    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;
@@ -95,10 +95,8 @@ mod tests {
     #[test]
     fn vec_of_ext_lifts_to_symbolic_vec() {
         let mut builder = AsmBuilder::<F, EF>::default();
-        let exts: Vec<Ext<F, EF>> =
-            (0..4).map(|_| builder.constant(EF::ZERO)).collect();
-        let sym: Vec<SymbolicExt<F, EF>> =
-            <Vec<Ext<F, EF>> as IntoSymbolic<C>>::as_symbolic(&exts);
+        let exts: Vec<Ext<F, EF>> = (0..4).map(|_| builder.constant(EF::ZERO)).collect();
+        let sym: Vec<SymbolicExt<F, EF>> = <Vec<Ext<F, EF>> as IntoSymbolic<C>>::as_symbolic(&exts);
         assert_eq!(sym.len(), 4);
     }
 }

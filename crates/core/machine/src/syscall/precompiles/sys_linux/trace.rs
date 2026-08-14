@@ -122,25 +122,19 @@ impl SysLinuxChip {
         let sid = F::from_u32(event.syscall_code);
         cols.decode_mmap
             .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_MMAP as u32));
-        cols.decode_mmap2.populate_from_field_element(
-            sid - F::from_u32(SyscallCode::SYS_MMAP2 as u32),
-        );
-        cols.decode_clone.populate_from_field_element(
-            sid - F::from_u32(SyscallCode::SYS_CLONE as u32),
-        );
-        cols.decode_exit_group.populate_from_field_element(
-            sid - F::from_u32(SyscallCode::SYS_EXT_GROUP as u32),
-        );
-        cols.decode_brk
-            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_BRK as u32));
-        cols.decode_fnctl.populate_from_field_element(
-            sid - F::from_u32(SyscallCode::SYS_FCNTL as u32),
-        );
+        cols.decode_mmap2
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_MMAP2 as u32));
+        cols.decode_clone
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_CLONE as u32));
+        cols.decode_exit_group
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_EXT_GROUP as u32));
+        cols.decode_brk.populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_BRK as u32));
+        cols.decode_fnctl
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_FCNTL as u32));
         cols.decode_read
             .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_READ as u32));
-        cols.decode_write.populate_from_field_element(
-            sid - F::from_u32(SyscallCode::SYS_WRITE as u32),
-        );
+        cols.decode_write
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_WRITE as u32));
 
         let is_mmap = event.syscall_code == SyscallCode::SYS_MMAP as u32
             || event.syscall_code == SyscallCode::SYS_MMAP2 as u32;
@@ -181,18 +175,15 @@ impl SysLinuxChip {
                 let lo_nibble = a1_bytes[1] & 0x0F;
                 let hi_nibble = (a1_bytes[1] >> 4) & 0x0F;
                 for bit in 0..4 {
-                    cols.a1_byte1_lo_bits[bit] =
-                        F::from_u32((lo_nibble as u32 >> bit) & 1);
+                    cols.a1_byte1_lo_bits[bit] = F::from_u32((lo_nibble as u32 >> bit) & 1);
                 }
                 for bit in 0..4 {
-                    cols.a1_byte1_hi_bits[bit] =
-                        F::from_u32((hi_nibble as u32 >> bit) & 1);
+                    cols.a1_byte1_hi_bits[bit] = F::from_u32((hi_nibble as u32 >> bit) & 1);
                 }
 
                 let page_off = event.a1 & 0xFFF;
                 let upper = (event.a1 >> 12) << 12;
-                cols.is_page_offset_zero
-                    .populate_from_field_element(F::from_u32(page_off));
+                cols.is_page_offset_zero.populate_from_field_element(F::from_u32(page_off));
 
                 if event.a0 == 0 {
                     assert!(event.write_records.len() == 2);

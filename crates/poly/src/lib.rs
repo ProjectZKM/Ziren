@@ -5,7 +5,7 @@ use core::{
 use std::slice::Iter;
 
 use itertools::Itertools;
-use p3_field::{Field, PrimeCharacteristicRing, ExtensionField};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 
 /// A polynomial represented as a vector of coefficients.
 #[derive(Debug, Clone)]
@@ -263,9 +263,7 @@ impl Polynomial<u8> {
     /// Converts the polynomial to a field polynomial.
     #[must_use]
     pub fn as_field<F: Field>(self) -> Polynomial<F> {
-        Polynomial {
-            coefficients: self.coefficients.iter().map(|x| F::from_u8(*x)).collect(),
-        }
+        Polynomial { coefficients: self.coefficients.iter().map(|x| F::from_u8(*x)).collect() }
     }
 }
 

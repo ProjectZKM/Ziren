@@ -1,6 +1,6 @@
 use std::{cell::UnsafeCell, mem::ManuallyDrop};
 
-use p3_field::{Field, PrimeCharacteristicRing, ExtensionField};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 
 use crate::ir::DslIr;
 

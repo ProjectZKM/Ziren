@@ -5,13 +5,13 @@ use std::sync::{Arc, Mutex};
 use clap::Parser;
 use p3_koala_bear::KoalaBear;
 use zkm_core_machine::utils::setup_logger;
+use zkm_pcs::{shape::OrderedShape, MachineProver};
 use zkm_prover::{
     components::DefaultProverComponents,
     shapes::{check_shapes, ZKMCompressProgramShape, ZKMProofShape},
     CompressAir, ShrinkAir, ZKMProver, REDUCE_BATCH_SIZE,
 };
 use zkm_recursion_core::shape::RecursionShapeConfig;
-use zkm_pcs::{shape::OrderedShape, MachineProver};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -76,9 +76,8 @@ fn main() {
         // Enumeration config: the bumped FIX-off candidate so every core shape
         // enumerates.  Borrow it from a temporary prover-config; the actual
         // program build uses `prover` (compress_shape_config = None) below.
-        let enum_cfg = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::from_hash_map(
-            &candidate,
-        );
+        let enum_cfg =
+            RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::from_hash_map(&candidate);
 
         // Build with NO compress_shape_config -> natural (pre-fix_shape) heights.
         prover.compress_shape_config = None;
@@ -87,12 +86,9 @@ fn main() {
 
         // Core-derived enumeration (like build_compress_vks), NOT the
         // band-shaped generate_maximal_shapes.
-        let all_shapes = ZKMProofShape::generate(
-            core_shape_config,
-            &enum_cfg,
-            args.recursion_batch_size,
-        )
-        .collect::<Vec<_>>();
+        let all_shapes =
+            ZKMProofShape::generate(core_shape_config, &enum_cfg, args.recursion_batch_size)
+                .collect::<Vec<_>>();
         let num_shapes = all_shapes.len();
         tracing::info!("measure: number of enumerated shapes: {}", num_shapes);
 

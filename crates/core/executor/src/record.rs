@@ -493,10 +493,7 @@ impl MachineRecord for ExecutionRecord {
         stats.insert("divrem_events".to_string(), self.divrem_events.len());
         stats.insert("lt_events".to_string(), self.lt_events.len());
         stats.insert("cloclz_events".to_string(), self.cloclz_events.len());
-        stats.insert(
-            "memory_load_narrow_events".to_string(),
-            self.memory_load_narrow_events.len(),
-        );
+        stats.insert("memory_load_narrow_events".to_string(), self.memory_load_narrow_events.len());
         stats.insert("memory_load_word_events".to_string(), self.memory_load_word_events.len());
         stats.insert(
             "memory_store_narrow_events".to_string(),
@@ -589,13 +586,11 @@ impl MachineRecord for ExecutionRecord {
         // trace generator already produced instead of re-folding every event.
         // The fallback keeps every caller that has no `GlobalChip` trace (unit
         // tests, `debug_constraints`, any future prover stage) correct.
-        pv.global_cumulative_sum = match self
-            .global_cumulative_sum
-            .get(self.global_lookup_events.len())
-        {
-            Some(digest) => digest,
-            None => compute_global_cumulative_sum(&self.global_lookup_events),
-        };
+        pv.global_cumulative_sum =
+            match self.global_cumulative_sum.get(self.global_lookup_events.len()) {
+                Some(digest) => digest,
+                None => compute_global_cumulative_sum(&self.global_lookup_events),
+            };
         pv.to_vec()
     }
 }

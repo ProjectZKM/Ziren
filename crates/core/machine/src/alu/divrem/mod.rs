@@ -60,14 +60,14 @@
 //! # the same to stay in agreement with the executor.
 //! assert not is_c_0   # i.e. c != 0 on every real row
 
-use zkm_pcs::air::BaseAirBuilder;
 use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
+use zkm_pcs::air::BaseAirBuilder;
 
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
@@ -78,11 +78,11 @@ use zkm_core_executor::{
 
 use crate::{memory::MemoryReadWriteCols, CoreChipError};
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{
     air::{MachineAir, PicusInfo},
     Word,
 };
+use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
@@ -374,12 +374,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 };
                 // The inlined multiplication (the MULT/MULTU request row):
                 // its 64-bit product equals `c_times_quotient` byte for byte.
-                cols.mul.populate(
-                    output,
-                    quotient,
-                    event.c,
-                    is_signed_operation(event.opcode),
-                );
+                cols.mul.populate(output, quotient, event.c, is_signed_operation(event.opcode));
 
                 let remainder_bytes = {
                     if is_signed_operation(event.opcode) {
@@ -437,7 +432,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             !shard.divrem_events.is_empty()
         }
     }
-
 }
 
 impl<F> BaseAir<F> for DivRemChip {
@@ -686,9 +680,7 @@ where
                 AB::Expr::ZERO,
                 local.remainder_check_multiplicity.into(),
             );
-            builder
-                .when(local.remainder_check_multiplicity)
-                .assert_one(local.remainder_check.lt);
+            builder.when(local.remainder_check_multiplicity).assert_one(local.remainder_check.lt);
         }
 
         // Check that the MSBs are correct.

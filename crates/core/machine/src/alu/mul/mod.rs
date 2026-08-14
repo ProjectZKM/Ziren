@@ -31,14 +31,14 @@
 mod utils;
 
 use crate::memory::RegisterCols;
-use zkm_pcs::air::BaseAirBuilder;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
+use zkm_pcs::air::BaseAirBuilder;
 
 use hashbrown::HashMap;
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
@@ -47,13 +47,13 @@ use zkm_core_executor::{
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{air::MachineAir, PicusInfo, Word};
+use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{
-    frame::{eval_instruction_frame, InstructionFrameCols},
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     alu::mul::utils::get_msb,
+    frame::{eval_instruction_frame, InstructionFrameCols},
     memory::{MemoryCols, MemoryReadWriteCols},
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
@@ -249,7 +249,6 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
             !shard.mul_events.is_empty()
         }
     }
-
 }
 
 impl MulChip {
@@ -528,13 +527,10 @@ where
         // and populates them ONLY on hi-writing rows (MULT/MULTU; plain MUL has
         // no HI write and leaves them zero).  Tie them to the frame exactly
         // there, so the memory access cannot decouple from the state chain.
-        builder
-            .when(local.hi_record_is_real)
-            .assert_eq(local.shard, local.frame.shard);
+        builder.when(local.hi_record_is_real).assert_eq(local.shard, local.frame.shard);
         builder.when(local.hi_record_is_real).assert_eq(
             local.clk,
-            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
-                + local.frame.clk_16bit_limb,
+            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb + local.frame.clk_16bit_limb,
         );
 
         // Write the HI register, the register can only be Register::HI（33）.
@@ -553,9 +549,7 @@ where
         builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
         // Every MULT/MULTU row writes HI (there are no dependency-only
         // multiply rows any more).
-        builder
-            .when(local.is_mult + local.is_multu)
-            .assert_one(local.hi_record_is_real);
+        builder.when(local.is_mult + local.is_multu).assert_one(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
         builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
         builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
@@ -569,9 +563,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{ExecutionRecord, Opcode};
-    use zkm_pcs::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::MulChip;
     use crate::programs::tests::{alu_op, run_instructions};

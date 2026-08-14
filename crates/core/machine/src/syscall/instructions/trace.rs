@@ -63,12 +63,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
 
                     if idx < input.syscall_events.len() {
                         let event = &input.syscall_events[idx];
-                        self.event_to_row(
-                            event,
-                            cols,
-                            &mut blu,
-                            &input.program,
-                        );
+                        self.event_to_row(event, cols, &mut blu, &input.program);
                     } else {
                         // Padding rows carry no instruction: neutralise the
                         // frame or its register-access multiplicities break the
@@ -146,9 +141,8 @@ impl SyscallInstrsChip {
         );
 
         // Populate `is_halt`.
-        cols.is_halt_check.populate_from_field_element(
-            syscall_id - F::from_u32(SyscallCode::HALT.syscall_id()),
-        );
+        cols.is_halt_check
+            .populate_from_field_element(syscall_id - F::from_u32(SyscallCode::HALT.syscall_id()));
 
         // Populate `is_exit_group`.
         cols.is_exit_group_check.populate_from_field_element(

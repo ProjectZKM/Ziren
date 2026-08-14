@@ -27,4 +27,3 @@ pub fn bn254_poseidon2_rc3() -> Vec<[Bn254; 3]> {
         })
         .collect()
 }
-

@@ -45,8 +45,12 @@ impl<F: PrimeCharacteristicRing> SepticDigest<F> {
     /// The digest used for starting the accumulation of digests.
     pub fn starting_digest() -> Self {
         SepticDigest(SepticCurve {
-            x: SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(DIGEST_SUM_START_X[i])),
-            y: SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(DIGEST_SUM_START_Y[i])),
+            x: SepticExtension::<F>::from_basis_coefficients_fn(|i| {
+                F::from_u32(DIGEST_SUM_START_X[i])
+            }),
+            y: SepticExtension::<F>::from_basis_coefficients_fn(|i| {
+                F::from_u32(DIGEST_SUM_START_Y[i])
+            }),
         })
     }
 }
@@ -91,10 +95,12 @@ mod test {
         });
         let point = SepticCurve { x, y };
         assert!(point.check_on_point());
-        let x: SepticExtension<KoalaBear> =
-            SepticExtension::from_basis_coefficients_fn(|i| KoalaBear::from_u32(DIGEST_SUM_START_X[i]));
-        let y: SepticExtension<KoalaBear> =
-            SepticExtension::from_basis_coefficients_fn(|i| KoalaBear::from_u32(DIGEST_SUM_START_Y[i]));
+        let x: SepticExtension<KoalaBear> = SepticExtension::from_basis_coefficients_fn(|i| {
+            KoalaBear::from_u32(DIGEST_SUM_START_X[i])
+        });
+        let y: SepticExtension<KoalaBear> = SepticExtension::from_basis_coefficients_fn(|i| {
+            KoalaBear::from_u32(DIGEST_SUM_START_Y[i])
+        });
         let point = SepticCurve { x, y };
         assert!(point.check_on_point());
         let x: SepticExtension<KoalaBear> = SepticExtension::from_basis_coefficients_fn(|i| {

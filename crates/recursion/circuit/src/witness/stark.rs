@@ -1,15 +1,15 @@
 use std::borrow::Borrow;
 
-use p3_field::{PrimeCharacteristicRing, BasedVectorSpace};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_fri::{CommitPhaseProofStep, QueryProof};
 use p3_koala_bear::KoalaBear;
 
-use zkm_recursion_compiler::ir::{Builder, Config, Ext, Felt};
-use zkm_recursion_core::air::Block;
 use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
     InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerInputProof, InnerVal,
 };
+use zkm_recursion_compiler::ir::{Builder, Config, Ext, Felt};
+use zkm_recursion_core::air::Block;
 
 use crate::{
     BatchOpeningVariable, CircuitConfig, FriCommitPhaseProofStepVariable, FriProofVariable,
@@ -92,11 +92,8 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>>
             })
             .collect();
         // Read per-round PoW witnesses.
-        let commit_pow_witnesses = self
-            .commit_pow_witnesses
-            .iter()
-            .map(|w| w.read(builder))
-            .collect();
+        let commit_pow_witnesses =
+            self.commit_pow_witnesses.iter().map(|w| w.read(builder)).collect();
         let query_proofs = self.query_proofs.read(builder);
         // final_poly is now Vec<Challenge>; circuit expects a single Ext (poly of degree 0).
         assert!(!self.final_poly.is_empty(), "final_poly must have at least one element");
@@ -158,8 +155,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>>
         // Thread the per-round log_arity through as a Felt so the
         // verifier can read variable-arity schedules from the
         // proof instead of hardcoding 1.
-        let log_arity =
-            builder.constant(<C::F>::from_canonical_usize(self.log_arity.into()));
+        let log_arity = builder.constant(<C::F>::from_canonical_usize(self.log_arity.into()));
         Self::WitnessVariable { log_arity, sibling_value, opening_proof }
     }
 

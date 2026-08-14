@@ -98,8 +98,7 @@ impl BooleanCircuitGarbleChip {
             AirLookup::new(
                 tuple(
                     local.gate_id.into() + AB::Expr::ONE,
-                    local.input_address.into()
-                        + AB::Expr::from_u32((GATE_INFO_BYTES * 4) as u32),
+                    local.input_address.into() + AB::Expr::from_u32((GATE_INFO_BYTES * 4) as u32),
                 ),
                 local.is_real.into(),
                 LookupKind::PrecompileChain,

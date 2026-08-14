@@ -94,7 +94,6 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
             !shard.jump_events.is_empty()
         }
     }
-
 }
 
 impl JumpChip {

@@ -1,13 +1,13 @@
-use zkm_pcs::air::BaseAirBuilder;
 use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
+use zkm_pcs::air::BaseAirBuilder;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
@@ -156,12 +156,12 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
                     let mut row = [F::ZERO; NUM_BITWISE_COLS];
                     let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(
-                    event,
-                    cols,
-                    &mut blu,
-                    &input.program,
-                    input.public_values.execution_shard,
-                );
+                        event,
+                        cols,
+                        &mut blu,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
                 });
                 blu
             })
@@ -178,7 +178,6 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
             !shard.bitwise_events.is_empty()
         }
     }
-
 }
 
 impl BitwiseChip {
@@ -288,9 +287,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{ExecutionRecord, Opcode};
-    use zkm_pcs::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::utils::{uni_stark_prove, uni_stark_verify};
 

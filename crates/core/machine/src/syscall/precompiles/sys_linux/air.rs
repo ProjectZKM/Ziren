@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::{syscalls::SyscallCode, Register};
 use zkm_pcs::{
@@ -263,14 +263,12 @@ impl SysLinuxChip {
         let mut a1_byte1_lo = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_lo_bits[bit]);
-            a1_byte1_lo =
-                a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_u32(1 << bit);
+            a1_byte1_lo = a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_u32(1 << bit);
         }
         let mut a1_byte1_hi = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_hi_bits[bit]);
-            a1_byte1_hi =
-                a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_u32(1 << bit);
+            a1_byte1_hi = a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_u32(1 << bit);
         }
         builder.when(local.is_mmap).assert_eq(
             local.a1[1],
@@ -279,8 +277,7 @@ impl SysLinuxChip {
 
         // Inline page_offset (not stored). upper_address is no longer needed as a
         // single field expression — the mmap_size bytes are constrained directly.
-        let page_offset: AB::Expr =
-            local.a1[0].into() + a1_byte1_lo * AB::Expr::from_u32(256);
+        let page_offset: AB::Expr = local.a1[0].into() + a1_byte1_lo * AB::Expr::from_u32(256);
 
         // is_offset_0 = (page_offset == 0), derived from IsZero.
         IsZeroOperation::<AB::F>::eval(

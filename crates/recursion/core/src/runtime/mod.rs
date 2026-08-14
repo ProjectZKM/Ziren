@@ -363,17 +363,14 @@ where
         // SP1 ref: `/tmp/sp1/crates/recursion/executor/src/runtime/mod.rs`
         // (the Runtime::run loop iterates RawProgram<AnalyzedInstruction>).
         let program_arc = self.program.clone();
-        let (analyzed_program, event_counts) =
-            program_arc.seq_blocks.clone().analyze();
+        let (analyzed_program, event_counts) = program_arc.seq_blocks.clone().analyze();
         let unsafe_record = UnsafeRecord::<F>::new(event_counts);
         // Pre-init public_values cell with default via SP1's raw_get
         // pattern — works through `&UnsafeRecord` so it's compatible
         // with the new `&self` walker. CommitPublicValues overwrites.
         unsafe {
-            UnsafeCell::raw_get(
-                unsafe_record.public_values.as_ptr()
-                    as *const UnsafeCell<crate::air::RecursionPublicValues<F>>,
-            )
+            UnsafeCell::raw_get(unsafe_record.public_values.as_ptr()
+                as *const UnsafeCell<crate::air::RecursionPublicValues<F>>)
             .write(crate::air::RecursionPublicValues::default());
         }
 
@@ -439,8 +436,7 @@ where
         // Vec into `Vec<T>`. Sound because every event slot is initialized
         // exactly once by execute_one (analyze pass guarantees one offset
         // per emit) and public_values has at least the default written.
-        self.record =
-            unsafe { unsafe_record.into_record(self.program.clone(), self.record.index) };
+        self.record = unsafe { unsafe_record.into_record(self.program.clone(), self.record.index) };
         Ok(())
     }
 
@@ -524,15 +520,16 @@ where
         let _offset = ai.offset();
         let instruction = ai.inner().clone();
         match instruction {
-                Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
-                    state.nb_base_ops += 1;
-                    let in1 = self.mr_us(addrs.in1).val[0];
-                    let in2 = self.mr_us(addrs.in2).val[0];
-                    let out = match opcode {
-                        BaseAluOpcode::AddF => in1 + in2,
-                        BaseAluOpcode::SubF => in1 - in2,
-                        BaseAluOpcode::MulF => in1 * in2,
-                        BaseAluOpcode::DivF | BaseAluOpcode::DivFAssert => match in2.try_inverse().map(|x| x * in1) {
+            Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
+                state.nb_base_ops += 1;
+                let in1 = self.mr_us(addrs.in1).val[0];
+                let in2 = self.mr_us(addrs.in2).val[0];
+                let out = match opcode {
+                    BaseAluOpcode::AddF => in1 + in2,
+                    BaseAluOpcode::SubF => in1 - in2,
+                    BaseAluOpcode::MulF => in1 * in2,
+                    BaseAluOpcode::DivF | BaseAluOpcode::DivFAssert => {
+                        match in2.try_inverse().map(|x| x * in1) {
                             Some(x) => x,
                             None => {
                                 if in1.is_zero() {
@@ -548,26 +545,35 @@ where
                                         in2,
                                         instr,
                                         pc: state.pc.as_canonical_u32() as usize,
-                                        trace: self.nearest_pc_backtrace_at(state.pc.as_canonical_u32() as usize),
+                                        trace: self.nearest_pc_backtrace_at(
+                                            state.pc.as_canonical_u32() as usize,
+                                        ),
                                     });
                                 }
                             }
-                        },
-                    };
-                    self.mw_us(addrs.out, Block::from(out), mult);
-                    unsafe { Self::raw_write_ev(&rec.base_alu_events[_offset], BaseAluEvent { out, in1, in2 }); }
+                        }
+                    }
+                };
+                self.mw_us(addrs.out, Block::from(out), mult);
+                unsafe {
+                    Self::raw_write_ev(
+                        &rec.base_alu_events[_offset],
+                        BaseAluEvent { out, in1, in2 },
+                    );
                 }
-                Instruction::ExtAlu(instr @ ExtAluInstr { opcode, mult, addrs }) => {
-                    state.nb_ext_ops += 1;
-                    let in1 = self.mr_us(addrs.in1).val;
-                    let in2 = self.mr_us(addrs.in2).val;
-                    let in1_ef = EF::from_basis_coefficients_slice(&in1.0).unwrap();
-                    let in2_ef = EF::from_basis_coefficients_slice(&in2.0).unwrap();
-                    let out_ef = match opcode {
-                        ExtAluOpcode::AddE => in1_ef + in2_ef,
-                        ExtAluOpcode::SubE => in1_ef - in2_ef,
-                        ExtAluOpcode::MulE => in1_ef * in2_ef,
-                        ExtAluOpcode::DivE | ExtAluOpcode::DivEAssert => match in2_ef.try_inverse().map(|x| x * in1_ef) {
+            }
+            Instruction::ExtAlu(instr @ ExtAluInstr { opcode, mult, addrs }) => {
+                state.nb_ext_ops += 1;
+                let in1 = self.mr_us(addrs.in1).val;
+                let in2 = self.mr_us(addrs.in2).val;
+                let in1_ef = EF::from_basis_coefficients_slice(&in1.0).unwrap();
+                let in2_ef = EF::from_basis_coefficients_slice(&in2.0).unwrap();
+                let out_ef = match opcode {
+                    ExtAluOpcode::AddE => in1_ef + in2_ef,
+                    ExtAluOpcode::SubE => in1_ef - in2_ef,
+                    ExtAluOpcode::MulE => in1_ef * in2_ef,
+                    ExtAluOpcode::DivE | ExtAluOpcode::DivEAssert => {
+                        match in2_ef.try_inverse().map(|x| x * in1_ef) {
                             Some(x) => x,
                             None => {
                                 if in1_ef.is_zero() {
@@ -580,198 +586,223 @@ where
                                         in2: in2_ef,
                                         instr,
                                         pc: state.pc.as_canonical_u32() as usize,
-                                        trace: self.nearest_pc_backtrace_at(state.pc.as_canonical_u32() as usize),
+                                        trace: self.nearest_pc_backtrace_at(
+                                            state.pc.as_canonical_u32() as usize,
+                                        ),
                                     });
                                 }
                             }
-                        },
-                    };
-                    let out = Block::from(out_ef.as_basis_coefficients_slice());
-                    self.mw_us(addrs.out, out, mult);
-                    unsafe { Self::raw_write_ev(&rec.ext_alu_events[_offset], ExtAluEvent { out, in1, in2 }); }
-                }
-                Instruction::Mem(MemInstr {
-                    addrs: MemIo { inner: addr },
-                    vals: MemIo { inner: val },
-                    mult,
-                    kind,
-                }) => {
-                    state.nb_memory_ops += 1;
-                    match kind {
-                        MemAccessKind::Read => {
-                            let mem_entry = self.mr_us(addr);
-                            assert_eq!(
-                                mem_entry.val, val,
-                                "stored memory value should be the specified value"
-                            );
                         }
-                        MemAccessKind::Write => drop(self.mw_us(addr, val, mult)),
                     }
-                    // mem_const_count is pre-sized by `UnsafeRecord::new`
-                    // from the analyzed Mem-instruction count (SP1 ref:
-                    // /tmp/sp1/crates/recursion/executor/src/record.rs:111).
-                    // No per-instruction increment needed.
+                };
+                let out = Block::from(out_ef.as_basis_coefficients_slice());
+                self.mw_us(addrs.out, out, mult);
+                unsafe {
+                    Self::raw_write_ev(&rec.ext_alu_events[_offset], ExtAluEvent { out, in1, in2 });
                 }
-                Instruction::Poseidon2(instr) => {
-                    let Poseidon2Instr { addrs: Poseidon2Io { input, output }, mults } = *instr;
-                    state.nb_poseidons += 1;
-                    let in_vals = std::array::from_fn(|i| self.mr_us(input[i]).val[0]);
-                    let perm_output = self.perm.as_ref().unwrap().permute(in_vals);
+            }
+            Instruction::Mem(MemInstr {
+                addrs: MemIo { inner: addr },
+                vals: MemIo { inner: val },
+                mult,
+                kind,
+            }) => {
+                state.nb_memory_ops += 1;
+                match kind {
+                    MemAccessKind::Read => {
+                        let mem_entry = self.mr_us(addr);
+                        assert_eq!(
+                            mem_entry.val, val,
+                            "stored memory value should be the specified value"
+                        );
+                    }
+                    MemAccessKind::Write => drop(self.mw_us(addr, val, mult)),
+                }
+                // mem_const_count is pre-sized by `UnsafeRecord::new`
+                // from the analyzed Mem-instruction count (SP1 ref:
+                // /tmp/sp1/crates/recursion/executor/src/record.rs:111).
+                // No per-instruction increment needed.
+            }
+            Instruction::Poseidon2(instr) => {
+                let Poseidon2Instr { addrs: Poseidon2Io { input, output }, mults } = *instr;
+                state.nb_poseidons += 1;
+                let in_vals = std::array::from_fn(|i| self.mr_us(input[i]).val[0]);
+                let perm_output = self.perm.as_ref().unwrap().permute(in_vals);
 
-                    perm_output.iter().zip(output).zip(mults).for_each(|((&val, addr), mult)| {
-                        self.mw_us(addr, Block::from(val), mult);
-                    });
-                    unsafe { Self::raw_write_ev(&rec.poseidon2_events[_offset], 
+                perm_output.iter().zip(output).zip(mults).for_each(|((&val, addr), mult)| {
+                    self.mw_us(addr, Block::from(val), mult);
+                });
+                unsafe {
+                    Self::raw_write_ev(
+                        &rec.poseidon2_events[_offset],
                         Poseidon2Event { input: in_vals, output: perm_output },
-                    ); }
+                    );
                 }
-                Instruction::Select(SelectInstr {
-                    addrs: SelectIo { bit, out1, out2, in1, in2 },
-                    mult1,
-                    mult2,
-                }) => {
-                    state.nb_select += 1;
-                    let bit = self.mr_us(bit).val[0];
-                    let in1 = self.mr_us(in1).val[0];
-                    let in2 = self.mr_us(in2).val[0];
-                    let out1_val = bit * in2 + (F::ONE - bit) * in1;
-                    let out2_val = bit * in1 + (F::ONE - bit) * in2;
-                    self.mw_us(out1, Block::from(out1_val), mult1);
-                    self.mw_us(out2, Block::from(out2_val), mult2);
-                    unsafe { Self::raw_write_ev(&rec.select_events[_offset], 
-                        SelectEvent {
-                            bit,
-                            out1: out1_val,
-                            out2: out2_val,
-                            in1,
-                            in2,
-                        },
-                    ); }
+            }
+            Instruction::Select(SelectInstr {
+                addrs: SelectIo { bit, out1, out2, in1, in2 },
+                mult1,
+                mult2,
+            }) => {
+                state.nb_select += 1;
+                let bit = self.mr_us(bit).val[0];
+                let in1 = self.mr_us(in1).val[0];
+                let in2 = self.mr_us(in2).val[0];
+                let out1_val = bit * in2 + (F::ONE - bit) * in1;
+                let out2_val = bit * in1 + (F::ONE - bit) * in2;
+                self.mw_us(out1, Block::from(out1_val), mult1);
+                self.mw_us(out2, Block::from(out2_val), mult2);
+                unsafe {
+                    Self::raw_write_ev(
+                        &rec.select_events[_offset],
+                        SelectEvent { bit, out1: out1_val, out2: out2_val, in1, in2 },
+                    );
                 }
-                Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr }) => {
-                    state.nb_bit_decompositions += 1;
-                    let num = self.mr_us(input_addr).val[0].as_canonical_u32();
-                    // Decompose the num into LE bits.
-                    let bits = (0..output_addrs_mults.len())
-                        .map(|i| Block::from(F::from_u32((num >> i) & 1)))
-                        .collect::<Vec<_>>();
-                    // Write the bits to the array at dst.
-                    for (i, (bit, (addr, mult))) in
-                        bits.into_iter().zip(output_addrs_mults).enumerate()
-                    {
-                        self.mw_us(addr, bit, mult);
-                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + i], MemEvent { inner: bit }); }
-                    }
-                }
-                Instruction::HintAddCurve(HintAddCurveInstr {
-                    output_x_addrs_mults,
-                    output_y_addrs_mults,
-                    input1_x_addrs,
-                    input1_y_addrs,
-                    input2_x_addrs,
-                    input2_y_addrs,
-                }) => {
-                    let input1_x = SepticExtension::<F>::from_base_fn(|i| {
-                        self.mr_us(input1_x_addrs[i]).val[0]
-                    });
-                    let input1_y = SepticExtension::<F>::from_base_fn(|i| {
-                        self.mr_us(input1_y_addrs[i]).val[0]
-                    });
-                    let input2_x = SepticExtension::<F>::from_base_fn(|i| {
-                        self.mr_us(input2_x_addrs[i]).val[0]
-                    });
-                    let input2_y = SepticExtension::<F>::from_base_fn(|i| {
-                        self.mr_us(input2_y_addrs[i]).val[0]
-                    });
-                    let point1 = SepticCurve { x: input1_x, y: input1_y };
-                    let point2 = SepticCurve { x: input2_x, y: input2_y };
-                    let output = point1.add_incomplete(point2);
-
-                    let _x_count = output_x_addrs_mults.len();
-                    for (i, (val, (addr, mult))) in output
-                        .x
-                        .0
-                        .into_iter()
-                        .zip(output_x_addrs_mults.into_iter())
-                        .enumerate()
-                    {
-                        self.mw_us(addr, Block::from(val), mult);
-                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + i], MemEvent { inner: Block::from(val) }); }
-                    }
-                    for (i, (val, (addr, mult))) in output
-                        .y
-                        .0
-                        .into_iter()
-                        .zip(output_y_addrs_mults.into_iter())
-                        .enumerate()
-                    {
-                        self.mw_us(addr, Block::from(val), mult);
-                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + _x_count + i], MemEvent { inner: Block::from(val) }); }
-                    }
-                }
-
-                Instruction::CommitPublicValues(instr) => {
-                    let pv_addrs = instr.pv_addrs.as_array();
-                    let pv_values: [F; RECURSIVE_PROOF_NUM_PV_ELTS] =
-                        array::from_fn(|i| self.mr_us(pv_addrs[i]).val[0]);
-                    let public_values: crate::air::RecursionPublicValues<F> =
-                        *pv_values.as_slice().borrow();
-                    // Overwrite the default-init public_values cell.
-                    unsafe { Self::raw_write_ev(&rec.public_values, public_values); }
-                    unsafe { Self::raw_write_ev(&rec.commit_pv_hash_events[_offset], CommitPublicValuesEvent { public_values }); }
-                }
-
-                Instruction::Print(PrintInstr { field_elt_type, addr }) => match field_elt_type {
-                    FieldEltType::Base => {
-                        state.nb_print_f += 1;
-                        let f = self.mr_us(addr).val[0];
-                        match debug_stdout.as_mut() {
-                            Some(w) => writeln!(w, "PRINTF={f}").map_err(RuntimeError::DebugPrint)?,
-                            None => eprintln!("PRINTF={f}"),
-                        }
-                    }
-                    FieldEltType::Extension => {
-                        state.nb_print_e += 1;
-                        let ef = self.mr_us(addr).val;
-                        match debug_stdout.as_mut() {
-                            Some(w) => writeln!(w, "PRINTEF={ef:?}").map_err(RuntimeError::DebugPrint)?,
-                            None => eprintln!("PRINTEF={ef:?}"),
-                        }
-                    }
-                },
-                Instruction::HintExt2Felts(HintExt2FeltsInstr {
-                    output_addrs_mults,
-                    input_addr,
-                }) => {
-                    state.nb_bit_decompositions += 1;
-                    let fs = self.mr_us(input_addr).val;
-                    // Write the bits to the array at dst.
-                    for (i, (f, (addr, mult))) in
-                        fs.into_iter().zip(output_addrs_mults).enumerate()
-                    {
-                        let felt = Block::from(f);
-                        self.mw_us(addr, felt, mult);
-                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + i], MemEvent { inner: felt }); }
-                    }
-                }
-                Instruction::Hint(HintInstr { output_addrs_mults }) => {
-                    // Check that enough Blocks can be read, so `drain` does not panic.
-                    if witness.as_mut().expect("witness must be Some at root walker").len() < output_addrs_mults.len() {
-                        return Err(RuntimeError::EmptyWitnessStream);
-                    }
-                    let witness = witness.as_mut().expect("witness must be Some at root walker").drain(0..output_addrs_mults.len());
-                    for (i, ((addr, mult), val)) in zip(output_addrs_mults, witness).enumerate() {
-                        // Inline [`Self::mw`] to mutably borrow multiple fields of `self`.
-                        self.mw_us(addr, val, mult);
-                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + i], MemEvent { inner: val }); }
+            }
+            Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr }) => {
+                state.nb_bit_decompositions += 1;
+                let num = self.mr_us(input_addr).val[0].as_canonical_u32();
+                // Decompose the num into LE bits.
+                let bits = (0..output_addrs_mults.len())
+                    .map(|i| Block::from(F::from_u32((num >> i) & 1)))
+                    .collect::<Vec<_>>();
+                // Write the bits to the array at dst.
+                for (i, (bit, (addr, mult))) in bits.into_iter().zip(output_addrs_mults).enumerate()
+                {
+                    self.mw_us(addr, bit, mult);
+                    unsafe {
+                        Self::raw_write_ev(
+                            &rec.mem_var_events[_offset + i],
+                            MemEvent { inner: bit },
+                        );
                     }
                 }
             }
+            Instruction::HintAddCurve(HintAddCurveInstr {
+                output_x_addrs_mults,
+                output_y_addrs_mults,
+                input1_x_addrs,
+                input1_y_addrs,
+                input2_x_addrs,
+                input2_y_addrs,
+            }) => {
+                let input1_x =
+                    SepticExtension::<F>::from_base_fn(|i| self.mr_us(input1_x_addrs[i]).val[0]);
+                let input1_y =
+                    SepticExtension::<F>::from_base_fn(|i| self.mr_us(input1_y_addrs[i]).val[0]);
+                let input2_x =
+                    SepticExtension::<F>::from_base_fn(|i| self.mr_us(input2_x_addrs[i]).val[0]);
+                let input2_y =
+                    SepticExtension::<F>::from_base_fn(|i| self.mr_us(input2_y_addrs[i]).val[0]);
+                let point1 = SepticCurve { x: input1_x, y: input1_y };
+                let point2 = SepticCurve { x: input2_x, y: input2_y };
+                let output = point1.add_incomplete(point2);
+
+                let _x_count = output_x_addrs_mults.len();
+                for (i, (val, (addr, mult))) in
+                    output.x.0.into_iter().zip(output_x_addrs_mults.into_iter()).enumerate()
+                {
+                    self.mw_us(addr, Block::from(val), mult);
+                    unsafe {
+                        Self::raw_write_ev(
+                            &rec.mem_var_events[_offset + i],
+                            MemEvent { inner: Block::from(val) },
+                        );
+                    }
+                }
+                for (i, (val, (addr, mult))) in
+                    output.y.0.into_iter().zip(output_y_addrs_mults.into_iter()).enumerate()
+                {
+                    self.mw_us(addr, Block::from(val), mult);
+                    unsafe {
+                        Self::raw_write_ev(
+                            &rec.mem_var_events[_offset + _x_count + i],
+                            MemEvent { inner: Block::from(val) },
+                        );
+                    }
+                }
+            }
+
+            Instruction::CommitPublicValues(instr) => {
+                let pv_addrs = instr.pv_addrs.as_array();
+                let pv_values: [F; RECURSIVE_PROOF_NUM_PV_ELTS] =
+                    array::from_fn(|i| self.mr_us(pv_addrs[i]).val[0]);
+                let public_values: crate::air::RecursionPublicValues<F> =
+                    *pv_values.as_slice().borrow();
+                // Overwrite the default-init public_values cell.
+                unsafe {
+                    Self::raw_write_ev(&rec.public_values, public_values);
+                }
+                unsafe {
+                    Self::raw_write_ev(
+                        &rec.commit_pv_hash_events[_offset],
+                        CommitPublicValuesEvent { public_values },
+                    );
+                }
+            }
+
+            Instruction::Print(PrintInstr { field_elt_type, addr }) => match field_elt_type {
+                FieldEltType::Base => {
+                    state.nb_print_f += 1;
+                    let f = self.mr_us(addr).val[0];
+                    match debug_stdout.as_mut() {
+                        Some(w) => writeln!(w, "PRINTF={f}").map_err(RuntimeError::DebugPrint)?,
+                        None => eprintln!("PRINTF={f}"),
+                    }
+                }
+                FieldEltType::Extension => {
+                    state.nb_print_e += 1;
+                    let ef = self.mr_us(addr).val;
+                    match debug_stdout.as_mut() {
+                        Some(w) => {
+                            writeln!(w, "PRINTEF={ef:?}").map_err(RuntimeError::DebugPrint)?
+                        }
+                        None => eprintln!("PRINTEF={ef:?}"),
+                    }
+                }
+            },
+            Instruction::HintExt2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr }) => {
+                state.nb_bit_decompositions += 1;
+                let fs = self.mr_us(input_addr).val;
+                // Write the bits to the array at dst.
+                for (i, (f, (addr, mult))) in fs.into_iter().zip(output_addrs_mults).enumerate() {
+                    let felt = Block::from(f);
+                    self.mw_us(addr, felt, mult);
+                    unsafe {
+                        Self::raw_write_ev(
+                            &rec.mem_var_events[_offset + i],
+                            MemEvent { inner: felt },
+                        );
+                    }
+                }
+            }
+            Instruction::Hint(HintInstr { output_addrs_mults }) => {
+                // Check that enough Blocks can be read, so `drain` does not panic.
+                if witness.as_mut().expect("witness must be Some at root walker").len()
+                    < output_addrs_mults.len()
+                {
+                    return Err(RuntimeError::EmptyWitnessStream);
+                }
+                let witness = witness
+                    .as_mut()
+                    .expect("witness must be Some at root walker")
+                    .drain(0..output_addrs_mults.len());
+                for (i, ((addr, mult), val)) in zip(output_addrs_mults, witness).enumerate() {
+                    // Inline [`Self::mw`] to mutably borrow multiple fields of `self`.
+                    self.mw_us(addr, val, mult);
+                    unsafe {
+                        Self::raw_write_ev(
+                            &rec.mem_var_events[_offset + i],
+                            MemEvent { inner: val },
+                        );
+                    }
+                }
+            }
+        }
 
         state.pc = next_pc;
         state.clk = next_clk;
         state.timestamp += 1;
         Ok(())
     }
-
 }

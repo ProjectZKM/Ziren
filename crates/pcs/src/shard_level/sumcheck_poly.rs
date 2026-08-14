@@ -43,11 +43,7 @@ pub trait SumcheckPoly<K: Field>: SumcheckPolyBase + ComponentPoly<K> + Sized {
     where
         Self: Sized,
     {
-        polys
-            .iter()
-            .zip(claims.iter())
-            .map(|(p, c)| p.sum_as_poly_in_last_variable(*c))
-            .collect()
+        polys.iter().zip(claims.iter()).map(|(p, c)| p.sum_as_poly_in_last_variable(*c)).collect()
     }
 }
 
@@ -223,10 +219,8 @@ where
 
     // Final eval at the terminal alpha.
     let alpha_last = *point.first().unwrap();
-    let evals: Vec<EF> = uni_polys
-        .iter()
-        .map(|poly| poly_eval(&poly.coefficients, alpha_last))
-        .collect();
+    let evals: Vec<EF> =
+        uni_polys.iter().map(|poly| poly_eval(&poly.coefficients, alpha_last)).collect();
 
     let component_poly_evals: Vec<Vec<EF>> =
         polys_cursor.iter().map(|poly| poly.get_component_poly_evals()).collect();
@@ -558,8 +552,7 @@ mod tests {
     /// `rlc_univariate_polynomials` with one poly is identity.
     #[test]
     fn rlc_one_poly_is_identity() {
-        let p =
-            UnivariatePolynomial { coefficients: vec![EF::from_u32(3), EF::from_u32(5)] };
+        let p = UnivariatePolynomial { coefficients: vec![EF::from_u32(3), EF::from_u32(5)] };
         let r = rlc_univariate_polynomials(&[p.clone()], EF::from_u32(99));
         assert_eq!(r.coefficients, p.coefficients);
     }

@@ -30,16 +30,16 @@
 //! - Ideally, we would calculate b * pow(2, c), but pow(2, c) could overflow in F.
 //! - Shifting by a multiple of 8 bits is easy (=num_bytes_to_shift) since we just shift words.
 
-use zkm_pcs::air::BaseAirBuilder;
 use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
+use zkm_pcs::air::BaseAirBuilder;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
@@ -48,8 +48,8 @@ use zkm_core_executor::{
     ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{air::MachineAir, PicusInfo, Word};
+use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
@@ -208,12 +208,12 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
                     let mut row = [F::ZERO; NUM_SHIFT_LEFT_COLS];
                     let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(
-                event,
-                cols,
-                &mut blu,
-                &input.program,
-                input.public_values.execution_shard,
-            );
+                        event,
+                        cols,
+                        &mut blu,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
                 });
                 blu
             })
@@ -230,7 +230,6 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             !shard.shift_left_events.is_empty()
         }
     }
-
 }
 
 impl ShiftLeft {
@@ -295,10 +294,7 @@ impl ShiftLeft {
 
         // Sanity check.
         for i in num_bytes_to_shift..WORD_SIZE {
-            debug_assert_eq!(
-                cols.bit_shift_result[i - num_bytes_to_shift],
-                F::from_u8(a[i])
-            );
+            debug_assert_eq!(cols.bit_shift_result[i - num_bytes_to_shift], F::from_u8(a[i]));
         }
     }
 }
@@ -341,8 +337,8 @@ where
         // 3 is the maximum number of bits necessary to represent num_bits_to_shift as
         // num_bits_to_shift is in [0, 7].
         for i in 0..3 {
-            num_bits_to_shift = num_bits_to_shift.clone()
-                + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
+            num_bits_to_shift =
+                num_bits_to_shift.clone() + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
         }
         for i in 0..BYTE_SIZE {
             builder
@@ -460,9 +456,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{ExecutionRecord, Opcode};
-    use zkm_pcs::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::ShiftLeft;
     use crate::programs::tests::{alu_op, run_instructions};

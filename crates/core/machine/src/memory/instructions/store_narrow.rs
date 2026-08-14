@@ -210,5 +210,4 @@ impl<F: PrimeField32> MachineAir<F> for StoreNarrowChip {
             !shard.memory_store_narrow_events.is_empty()
         }
     }
-
 }

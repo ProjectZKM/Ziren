@@ -129,10 +129,7 @@ impl<F: Field, EF: Field> LogupGkrProof<F, EF> {
     #[must_use]
     pub fn dummy() -> Self {
         Self {
-            circuit_output: LogUpGkrOutput {
-                numerator: Vec::new(),
-                denominator: Vec::new(),
-            },
+            circuit_output: LogUpGkrOutput { numerator: Vec::new(), denominator: Vec::new() },
             round_proofs: Vec::new(),
             logup_evaluations: LogUpEvaluations {
                 point: Vec::new(),
@@ -157,7 +154,10 @@ mod tests {
         let f = |n: u64| F::from_u64(n);
 
         let proof = LogupGkrProof::<F, EF> {
-            circuit_output: LogUpGkrOutput { numerator: vec![v(1), v(2)], denominator: vec![v(3), v(4)] },
+            circuit_output: LogUpGkrOutput {
+                numerator: vec![v(1), v(2)],
+                denominator: vec![v(3), v(4)],
+            },
             round_proofs: vec![LogupGkrRoundProof {
                 numerator_0: v(5),
                 numerator_1: v(6),
@@ -256,7 +256,8 @@ mod tests {
     #[test]
     fn univariate_new_preserves_input() {
         use p3_field::PrimeCharacteristicRing;
-        let coefs = vec![EF::from(F::from_u64(1)), EF::from(F::from_u64(2)), EF::from(F::from_u64(3))];
+        let coefs =
+            vec![EF::from(F::from_u64(1)), EF::from(F::from_u64(2)), EF::from(F::from_u64(3))];
         let p = UnivariatePolynomial::new(coefs.clone());
         assert_eq!(p.coefficients, coefs);
     }

@@ -22,9 +22,9 @@ use core::marker::PhantomData;
 
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{Field, TwoAdicField};
-use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::util::reverse_matrix_index_bits;
+use p3_matrix::Matrix;
 
 use super::code::RsCodeWord;
 use super::config::FriConfig;

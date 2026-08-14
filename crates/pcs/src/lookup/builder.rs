@@ -41,9 +41,8 @@ impl<F: Field> LookupBuilder<F> {
             })
             .collect();
 
-        let public_values = (0..PROOF_MAX_NUM_PVS)
-            .map(|i| SymbolicVariable::new(BaseEntry::Public, i))
-            .collect();
+        let public_values =
+            (0..PROOF_MAX_NUM_PVS).map(|i| SymbolicVariable::new(BaseEntry::Public, i)).collect();
 
         Self {
             preprocessed: RowMajorMatrix::new(prep_values, preprocessed_width),
@@ -143,9 +142,7 @@ fn eval_symbolic_to_virtual_pair<F: Field>(
                 BaseEntry::Preprocessed { offset: 0 } => {
                     (vec![(PairCol::Preprocessed(v.index), F::ONE)], F::ZERO)
                 }
-                BaseEntry::Main { offset: 0 } => {
-                    (vec![(PairCol::Main(v.index), F::ONE)], F::ZERO)
-                }
+                BaseEntry::Main { offset: 0 } => (vec![(PairCol::Main(v.index), F::ONE)], F::ZERO),
                 _ => panic!("not an affine expression in current row elements {:?}", v.entry),
             },
             BaseLeaf::IsFirstRow => {
@@ -253,11 +250,7 @@ mod tests {
                 LookupScope::Local,
             );
             builder.send(
-                AirLookup::new(
-                    vec![x + y, z.into()],
-                    AB::F::from_u32(5).into(),
-                    LookupKind::Byte,
-                ),
+                AirLookup::new(vec![x + y, z.into()], AB::F::from_u32(5).into(), LookupKind::Byte),
                 LookupScope::Local,
             );
 

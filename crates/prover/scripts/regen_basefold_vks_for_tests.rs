@@ -19,10 +19,10 @@ use std::fs::File;
 
 use zkm_core_machine::io::ZKMStdin;
 use zkm_core_machine::utils::setup_logger;
+use zkm_pcs::ZKMProverOpts;
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::{HashableKey, ZKMProver};
 use zkm_recursion_core::DIGEST_SIZE;
-use zkm_pcs::ZKMProverOpts;
 
 type KB = p3_koala_bear::KoalaBear;
 

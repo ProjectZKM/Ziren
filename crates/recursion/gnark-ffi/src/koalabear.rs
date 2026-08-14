@@ -20,23 +20,17 @@ pub extern "C" fn koalabearextinv(a: u32, b: u32, c: u32, d: u32, i: u32) -> u32
 /// D=5 quintic extension inverse: takes 5 base-field limbs, returns the i-th
 /// limb of the inverse.
 #[no_mangle]
-pub extern "C" fn koalabearext5inv(
-    a: u32,
-    b: u32,
-    c: u32,
-    d: u32,
-    e: u32,
-    i: u32,
-) -> u32 {
+pub extern "C" fn koalabearext5inv(a: u32, b: u32, c: u32, d: u32, e: u32, i: u32) -> u32 {
     let a = KoalaBear::from_u32(a);
     let b = KoalaBear::from_u32(b);
     let c = KoalaBear::from_u32(c);
     let d = KoalaBear::from_u32(d);
     let e = KoalaBear::from_u32(e);
-    let inv =
-        QuinticTrinomialExtensionField::<KoalaBear>::from_basis_coefficients_slice(&[a, b, c, d, e])
-            .unwrap()
-            .inverse();
+    let inv = QuinticTrinomialExtensionField::<KoalaBear>::from_basis_coefficients_slice(&[
+        a, b, c, d, e,
+    ])
+    .unwrap()
+    .inverse();
     let inv: &[KoalaBear] = inv.as_basis_coefficients_slice();
     inv[i as usize].as_canonical_u32()
 }

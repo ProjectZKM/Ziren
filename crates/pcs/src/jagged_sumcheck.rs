@@ -5,7 +5,6 @@
 //! exists so the BaseFold path can call the reduction without any feature
 //! gate.
 
-
 use alloc::vec::Vec;
 
 use p3_field::{Field, PrimeCharacteristicRing};
@@ -56,11 +55,8 @@ fn build_weight_table(
     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
     let row_eq_full: Vec<InnerChallenge> =
         crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-    let eq_per_chip: Vec<&[InnerChallenge]> = packing
-        .chip_infos
-        .iter()
-        .map(|_info| row_eq_full.as_slice())
-        .collect();
+    let eq_per_chip: Vec<&[InnerChallenge]> =
+        packing.chip_infos.iter().map(|_info| row_eq_full.as_slice()).collect();
 
     let mut k: usize = 0;
     for (c_idx, info) in packing.chip_infos.iter().enumerate() {
@@ -84,8 +80,11 @@ fn build_weight_table(
                  chip_infos.len={}, offsets.len={}, total_values={}.  Prover/verifier \
                  disagree on chip column count.  Likely cause: trace.width < chip.width() \
                  in prove_trusted_evaluations; pad to chip.width().",
-                info.name, off + h_c,
-                packing.chip_infos.len(), packing.offsets.len(), packing.total_values,
+                info.name,
+                off + h_c,
+                packing.chip_infos.len(),
+                packing.offsets.len(),
+                packing.total_values,
             );
             let zc = z_col_lagrange[k];
             for row in 0..h_c {
@@ -102,7 +101,10 @@ fn build_weight_table(
 /// `interpolate_3point_evals_at_012` (recursion `univariate.rs`) so the
 /// host prover's Fiat-Shamir challenges align with the in-circuit
 /// `verify_sumcheck`, which observes *coefficients* (not evals).
-pub fn observe_round_poly_evals<C: p3_challenger::FieldChallenger<InnerVal>>(challenger: &mut C, evals: [InnerChallenge; 3]) {
+pub fn observe_round_poly_evals<C: p3_challenger::FieldChallenger<InnerVal>>(
+    challenger: &mut C,
+    evals: [InnerChallenge; 3],
+) {
     let [p0, p1, p2] = evals;
     let two_inv = InnerChallenge::from_u8(2).inverse();
     let c0 = p0;
@@ -127,10 +129,6 @@ fn jagged_eval_round_poly(p: [InnerChallenge; 3], x: InnerChallenge) -> InnerCha
     let t2 = p[2] * x * xm1 * half;
     t0 + t1 + t2
 }
-
-
-
-
 
 /// Build the jagged-reduction weight table for an EXTERNAL
 /// (GPU-hook) prover.  Exactly the table `prove_jagged_reduction_owned`
@@ -265,8 +263,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     {
         let n_dense = 1usize << packing.log_dense_size();
         // (a) One offset per global column plus the sentinel.
-        let num_cols_total: usize =
-            packing.chip_infos.iter().map(|c| c.column_count).sum();
+        let num_cols_total: usize = packing.chip_infos.iter().map(|c| c.column_count).sum();
         if packing.offsets.len() != num_cols_total + 1 {
             tracing::debug!(
                 "jagged reduction: offsets len {} != total columns {} + 1",
@@ -277,8 +274,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         }
         // (b) The sentinel is the committed total, and the whole packing fits
         //     inside the dense hypercube it claims.
-        if packing.offsets[num_cols_total] != packing.total_values
-            || packing.total_values > n_dense
+        if packing.offsets[num_cols_total] != packing.total_values || packing.total_values > n_dense
         {
             tracing::debug!(
                 "jagged reduction: offsets sentinel {} != total_values {} (or > 2^{})",
@@ -343,7 +339,6 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     Some((z_star, proof.q_at_z, w_at_z))
 }
 
-
 // ZIREN_PHASE1_ACCEPTANCE_GATE
 //
 // Acceptance gate for the jagged/zerocheck closing identity.
@@ -368,8 +363,8 @@ mod phase1_acceptance_gate {
     use p3_challenger::FieldChallenger;
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
-    use rand::{Rng, SeedableRng};
     use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
 
     fn challenger() -> InnerChallenger {
         let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
@@ -404,10 +399,10 @@ mod phase1_acceptance_gate {
         let traces = build_traces(chips, &mut rng);
         // The metadata/dense helpers now take borrowed
         // views; build them over the owned `traces` (kept alive in this scope).
-        let trace_views: Vec<(String, crate::multilinear::PaddedMle<InnerVal>)> =
-            traces
-                .iter()
-                .map(|(n, m)| (n.clone(), {
+        let trace_views: Vec<(String, crate::multilinear::PaddedMle<InnerVal>)> = traces
+            .iter()
+            .map(|(n, m)| {
+                (n.clone(), {
                     let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     crate::multilinear::PaddedMle::padded_with_zeros(
@@ -416,8 +411,9 @@ mod phase1_acceptance_gate {
                         )),
                         log_h,
                     )
-                }))
-                .collect();
+                })
+            })
+            .collect();
 
         // Metadata packing (column-by-column prefix-sum layout).
         let packing = crate::jagged::compute_jagged_metadata(&trace_views);
@@ -503,8 +499,7 @@ mod phase1_acceptance_gate {
         let z_col: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| prover_ch.sample_algebra_element()).collect();
 
-        let weights_ref =
-            build_weight_table_from_z_col(&packing, &r_row_per_chip, &z_col, &z_row);
+        let weights_ref = build_weight_table_from_z_col(&packing, &r_row_per_chip, &z_col, &z_row);
         let hp = crate::jagged_long::HadamardProduct {
             base: crate::jagged_long::LongMle::from_components(
                 vec![crate::basefold::Mle::from_values(dense_q.clone())],
@@ -515,8 +510,7 @@ mod phase1_acceptance_gate {
                 packing.log_dense_size() as u32,
             ),
         };
-        let proof =
-            crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, &mut prover_ch);
+        let proof = crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, &mut prover_ch);
         let mut verifier_ch = challenger();
         let z_col_v: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| verifier_ch.sample_algebra_element()).collect();
@@ -548,10 +542,10 @@ mod phase1_acceptance_gate {
     #[test]
     fn gate_weight_table_matches_branching_program() {
         let cases: &[&[(usize, usize)]] = &[
-            &[(4, 2), (4, 2)],          // equal heights
-            &[(4, 1), (3, 1), (2, 1)],  // mixed
-            &[(5, 2), (4, 3), (2, 1)],  // mixed, multi-col
-            &[(6, 1), (5, 1), (4, 1)],  // mixed
+            &[(4, 2), (4, 2)],         // equal heights
+            &[(4, 1), (3, 1), (2, 1)], // mixed
+            &[(5, 2), (4, 3), (2, 1)], // mixed, multi-col
+            &[(6, 1), (5, 1), (4, 1)], // mixed
         ];
         let mut all_ok = true;
         for (ci, chips) in cases.iter().enumerate() {
@@ -648,7 +642,8 @@ mod phase1_acceptance_gate {
         // Build raw traces + raw_y (= opened_values main.local) and band_y (= host claim).
         let mut raw_claims_flat: Vec<InnerChallenge> = Vec::new();
         let mut band_claims_flat: Vec<InnerChallenge> = Vec::new();
-        let mut per_chip: Vec<(usize, usize, Vec<InnerChallenge>, Vec<InnerChallenge>)> = Vec::new();
+        let mut per_chip: Vec<(usize, usize, Vec<InnerChallenge>, Vec<InnerChallenge>)> =
+            Vec::new();
         for &(lr, lb, w) in chips {
             let raw_h = 1usize << lr;
             let trace: Vec<Vec<InnerVal>> =
@@ -674,9 +669,11 @@ mod phase1_acceptance_gate {
         // (A) BASELINE — raw claims with NO embed factor: must MISMATCH.
         let raw_eval = s4b_evaluate_mle(&raw_claims_flat, &z_col);
         let baseline_fail = raw_eval != claimed_sum;
-        eprintln!("[S4b] BASELINE (no embed): assert {} (raw_eval==claimed_sum? {})",
+        eprintln!(
+            "[S4b] BASELINE (no embed): assert {} (raw_eval==claimed_sum? {})",
             if baseline_fail { "FAILS (as expected)" } else { "PASSES (unexpected!)" },
-            raw_eval == claimed_sum);
+            raw_eval == claimed_sum
+        );
 
         // (B) Apply candidate per-chip SCALAR embed_factors to the raw claims.
         // candA = Π leading coords [max-log_band, max-log_raw) of (1 - z_row[k]).
@@ -687,34 +684,60 @@ mod phase1_acceptance_gate {
             for (lr, lb, y_raw, _yb) in per_chip.iter() {
                 let mut f = InnerChallenge::ONE;
                 match cand {
-                    "A" => for j in (max_log_row - lb)..(max_log_row - lr) { f *= InnerChallenge::ONE - z_row[j]; },
-                    "B" => for k in *lr..*lb { f *= InnerChallenge::ONE - z_row[k]; },
-                    "C" => { let mut d = InnerChallenge::ONE;
-                             for j in (max_log_row - lb)..(max_log_row - lr) { d *= InnerChallenge::ONE - z_row[j]; }
-                             f = d.inverse(); },
+                    "A" => {
+                        for j in (max_log_row - lb)..(max_log_row - lr) {
+                            f *= InnerChallenge::ONE - z_row[j];
+                        }
+                    }
+                    "B" => {
+                        for k in *lr..*lb {
+                            f *= InnerChallenge::ONE - z_row[k];
+                        }
+                    }
+                    "C" => {
+                        let mut d = InnerChallenge::ONE;
+                        for j in (max_log_row - lb)..(max_log_row - lr) {
+                            d *= InnerChallenge::ONE - z_row[j];
+                        }
+                        f = d.inverse();
+                    }
                     _ => unreachable!(),
                 }
-                for v in y_raw.iter() { lifted.push(*v * f); }
+                for v in y_raw.iter() {
+                    lifted.push(*v * f);
+                }
             }
             lifted.resize(padded, InnerChallenge::ZERO);
             let lifted_eval = s4b_evaluate_mle(&lifted, &z_col);
-            eprintln!("[S4b] candidate {cand}: assert {} (lifted_eval==claimed_sum? {})",
+            eprintln!(
+                "[S4b] candidate {cand}: assert {} (lifted_eval==claimed_sum? {})",
                 if lifted_eval == claimed_sum { "PASSES" } else { "FAILS" },
-                lifted_eval == claimed_sum);
+                lifted_eval == claimed_sum
+            );
         }
 
         // (C) PROVE the band claims (the genuine value) DO satisfy the assert.
         let band_eval = s4b_evaluate_mle(&band_claims_flat, &z_col);
-        eprintln!("[S4b] CONTROL (band claims direct): assert {} (band_eval==claimed_sum? {})",
+        eprintln!(
+            "[S4b] CONTROL (band claims direct): assert {} (band_eval==claimed_sum? {})",
             if band_eval == claimed_sum { "PASSES" } else { "FAILS" },
-            band_eval == claimed_sum);
+            band_eval == claimed_sum
+        );
 
         // (D) Per-chip per-column ratio band_y/raw_y — show it is NOT column-uniform
         // (so no per-chip scalar exists), only for chips with band>raw and w>1.
         for (lr, lb, y_raw, y_band) in per_chip.iter() {
             if lb > lr && y_raw.len() > 1 {
-                let ratios: Vec<InnerChallenge> = y_raw.iter().zip(y_band.iter())
-                    .map(|(r, b)| if *r != InnerChallenge::ZERO { *b * r.inverse() } else { InnerChallenge::ZERO })
+                let ratios: Vec<InnerChallenge> = y_raw
+                    .iter()
+                    .zip(y_band.iter())
+                    .map(|(r, b)| {
+                        if *r != InnerChallenge::ZERO {
+                            *b * r.inverse()
+                        } else {
+                            InnerChallenge::ZERO
+                        }
+                    })
                     .collect();
                 let uniform = ratios.windows(2).all(|w| w[0] == w[1]);
                 eprintln!("[S4b] chip log_raw={lr} log_band={lb} w={}: per-col band/raw ratios uniform? {} ratios={:?}",
@@ -756,7 +779,11 @@ mod phase1_acceptance_gate {
                 // the RAW width placed in the LOW rows, zeros in the high rows.
                 let mut dense = vec![InnerVal::ZERO; h_band];
                 for r in 0..h_raw {
-                    let pos = if lr == 0 { 0 } else { ((r as u32).reverse_bits() >> (32 - lr as u32)) as usize };
+                    let pos = if lr == 0 {
+                        0
+                    } else {
+                        ((r as u32).reverse_bits() >> (32 - lr as u32)) as usize
+                    };
                     dense[pos] = trace_cols[col][r];
                 }
                 // Weight ALL band rows with eq_c[row] (the high zero rows add 0):
@@ -798,7 +825,10 @@ mod phase1_acceptance_gate {
         // (1) per-column: low-placement band_y == raw_y EXACTLY.
         assert_eq!(raw_flat, band_new_flat, "low-placement band_y must equal raw_y per column");
         // (2) the current bitrev_lb commit genuinely differs (the bug being fixed).
-        assert_ne!(raw_flat, band_old_flat, "current bitrev_lb band_y must differ from raw_y (the 4b bug)");
+        assert_ne!(
+            raw_flat, band_old_flat,
+            "current bitrev_lb band_y must differ from raw_y (the 4b bug)"
+        );
 
         // (3) recursion-level: claimed_sum(new) == evaluate_mle_ext(raw_claims, z_col),
         // i.e. the in-circuit step-4 assert holds with RAW column_claims and NO embed_factor.
@@ -819,7 +849,6 @@ mod phase1_acceptance_gate {
         );
         eprintln!("[S5] low-placement commit PROVEN: band_y==raw_y per column; recursion step-4 assert holds with NO embed_factor; offsets/total stay band-keyed.");
     }
-
 }
 
 /// Differential test for the closed-form `w_at_z` computation in
@@ -834,12 +863,12 @@ mod phase1_acceptance_gate {
 /// the closed form cannot silently change any verdict.
 #[cfg(test)]
 mod closed_form_weight_equivalence {
-    use crate::kb31_poseidon2::InnerChallenger;
     use super::*;
     use crate::jagged::JaggedChipInfo;
     use crate::jagged_branching_program::full_jagged_evaluation;
-    use alloc::string::ToString;
+    use crate::kb31_poseidon2::InnerChallenger;
     use alloc::format;
+    use alloc::string::ToString;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
 
@@ -868,11 +897,8 @@ mod closed_form_weight_equivalence {
             }
         }
         offsets.push(running);
-        let log_dense_size = if running == 0 {
-            0
-        } else {
-            running.next_power_of_two().trailing_zeros() as usize
-        };
+        let log_dense_size =
+            if running == 0 { 0 } else { running.next_power_of_two().trailing_zeros() as usize };
         JaggedPacking {
             dense_values: Vec::new(),
             chip_infos,
@@ -892,26 +918,23 @@ mod closed_form_weight_equivalence {
         let z_row: Vec<InnerChallenge> = (0..z_row_dim).map(|_| rand_ef(&mut rng)).collect();
         let num_cols = packing.offsets.len() - 1;
         let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
-        let z_col: Vec<InnerChallenge> =
-            (0..num_col_vars).map(|_| rand_ef(&mut rng)).collect();
+        let z_col: Vec<InnerChallenge> = (0..num_col_vars).map(|_| rand_ef(&mut rng)).collect();
         let z_star: Vec<InnerChallenge> =
             (0..packing.log_dense_size()).map(|_| rand_ef(&mut rng)).collect();
         let r_row_per_chip: Vec<Vec<InnerChallenge>> =
             packing.chip_infos.iter().map(|_| z_row.clone()).collect();
 
         // Old path: materialize the dense weight MLE and fold it.
-        let w_table =
-            build_weight_table_from_z_col(&packing, &r_row_per_chip, &z_col, &z_row);
-        let table_form =
-            crate::zerocheck_prover::MultilinearExt::new(w_table).evaluate(&z_star);
+        let w_table = build_weight_table_from_z_col(&packing, &r_row_per_chip, &z_col, &z_row);
+        let table_form = crate::zerocheck_prover::MultilinearExt::new(w_table).evaluate(&z_star);
 
         // New path: branching-program closed form.
         let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
-        let closed_form =
-            full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star_rev);
+        let closed_form = full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star_rev);
 
         assert_eq!(
-            table_form, closed_form,
+            table_form,
+            closed_form,
             "closed form != materialized weight table for chips {chips:?} \
              (seed {seed}, z_row_dim {z_row_dim}, log_dense {})",
             packing.log_dense_size(),
@@ -921,15 +944,15 @@ mod closed_form_weight_equivalence {
     #[test]
     fn closed_form_matches_weight_table_fixed_shapes() {
         let cases: &[&[(usize, usize)]] = &[
-            &[(1, 1)],                              // single cell
-            &[(1, 5)],                              // one row, many columns
-            &[(64, 1)],                             // one column
-            &[(16, 4), (16, 4)],                    // equal heights
-            &[(16, 3), (8, 5), (4, 1)],             // mixed heights, multi-col
-            &[(31, 2), (17, 3), (5, 7)],            // non-power-of-two heights
-            &[(64, 2), (0, 3), (32, 1)],            // zero-height chip in the middle
-            &[(64, 2), (16, 0), (32, 1)],           // zero-COLUMN chip in the middle
-            &[(1024, 1), (1, 1023)],                // extreme aspect ratios
+            &[(1, 1)],                                 // single cell
+            &[(1, 5)],                                 // one row, many columns
+            &[(64, 1)],                                // one column
+            &[(16, 4), (16, 4)],                       // equal heights
+            &[(16, 3), (8, 5), (4, 1)],                // mixed heights, multi-col
+            &[(31, 2), (17, 3), (5, 7)],               // non-power-of-two heights
+            &[(64, 2), (0, 3), (32, 1)],               // zero-height chip in the middle
+            &[(64, 2), (16, 0), (32, 1)],              // zero-COLUMN chip in the middle
+            &[(1024, 1), (1, 1023)],                   // extreme aspect ratios
             &[(4, 1), (4, 1), (4, 1), (4, 1), (4, 1)], // many tiny chips
         ];
         for (i, chips) in cases.iter().enumerate() {
@@ -971,8 +994,7 @@ mod closed_form_weight_equivalence {
         let z_row: Vec<InnerChallenge> = (0..12).map(|_| rand_ef(&mut rng)).collect();
         let num_cols = packing.offsets.len() - 1;
         let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
-        let z_col: Vec<InnerChallenge> =
-            (0..num_col_vars).map(|_| rand_ef(&mut rng)).collect();
+        let z_col: Vec<InnerChallenge> = (0..num_col_vars).map(|_| rand_ef(&mut rng)).collect();
         let r_row_per_chip: Vec<Vec<InnerChallenge>> =
             packing.chip_infos.iter().map(|_| z_row.clone()).collect();
         let y_per_chip: Vec<Vec<InnerChallenge>> = packing

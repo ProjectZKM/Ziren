@@ -58,7 +58,10 @@ pub fn generate_interaction_vals<F: Field, EF: ExtensionField<F>>(
 /// `main_values.len() / main_width` (the chip's main-trace rows sourced
 /// from the shared trace-MLE inner).  When `preprocessed_trace` is
 /// `None`, the per-row preprocessed slice is treated as empty.
-pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionField<F> + Send + Sync>(
+pub fn build_chip_interaction_tables<
+    F: PrimeField + Send + Sync,
+    EF: ExtensionField<F> + Send + Sync,
+>(
     interactions: &[(&Lookup<F>, bool)],
     main_values: &[F],
     main_width: usize,
@@ -97,7 +100,12 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
                 };
                 for (col_idx, (interaction, is_send)) in interactions.iter().enumerate() {
                     let (numer, denom) = generate_interaction_vals::<F, EF>(
-                        interaction, prep_row, main_row, *is_send, alpha, betas,
+                        interaction,
+                        prep_row,
+                        main_row,
+                        *is_send,
+                        alpha,
+                        betas,
                     );
                     numer_row[col_idx] = numer;
                     denom_row[col_idx] = denom;
@@ -119,7 +127,12 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
 /// — the PaddedMle path skips materialised row padding entirely.
 /// Retained for tests and as a reference implementation.
 #[allow(dead_code)]
-fn pad_rows<F: Clone>(values: Vec<F>, num_cols: usize, target_log_rows: usize, pad_value: F) -> Vec<F> {
+fn pad_rows<F: Clone>(
+    values: Vec<F>,
+    num_cols: usize,
+    target_log_rows: usize,
+    pad_value: F,
+) -> Vec<F> {
     if num_cols == 0 {
         return values;
     }
@@ -180,7 +193,7 @@ fn split_real_msb<F: Clone>(
 ///
 /// Requires `values.len() == (1 << log_rows) * num_cols` and
 /// `log_rows >= 1`.
-#[allow(dead_code)]  // retained for tests + as a reference reading
+#[allow(dead_code)] // retained for tests + as a reference reading
 fn split_row_msb<F: Clone>(values: &[F], num_cols: usize, log_rows: usize) -> (Vec<F>, Vec<F>) {
     debug_assert!(log_rows >= 1, "split_row_msb requires log_rows >= 1");
     if num_cols == 0 {
@@ -242,11 +255,7 @@ where
 {
     assert!(num_row_variables >= 1, "num_row_variables must be >= 1");
     assert_eq!(chips.len(), shared_trace_mles.len(), "chip count vs main trace count");
-    assert_eq!(
-        chips.len(),
-        preprocessed_traces.len(),
-        "chip count vs preprocessed trace count"
-    );
+    assert_eq!(chips.len(), preprocessed_traces.len(), "chip count vs preprocessed trace count");
 
     let mut numerator_0: Vec<RowMajorTable<F>> = Vec::with_capacity(chips.len());
     let mut denominator_0: Vec<RowMajorTable<EF>> = Vec::with_capacity(chips.len());
@@ -297,17 +306,26 @@ where
         // beyond `num_real_rows` are resolved at access time inside
         // `ChipLayerState` using each quadrant's identity-fraction
         // pad value (n* → 0, d* → 1).
-        let chip_height: usize = if num_interactions == 0 {
-            0
-        } else {
-            numer_mat.values.len() / num_interactions
-        };
+        let chip_height: usize =
+            if num_interactions == 0 { 0 } else { numer_mat.values.len() / num_interactions };
         let half_logical = 1usize << (num_row_variables - 1);
         let real_upper = chip_height.min(half_logical);
         let real_lower = chip_height.saturating_sub(half_logical).min(half_logical);
 
-        let (n_upper, n_lower) = split_real_msb(numer_mat.values, num_interactions, half_logical, real_upper, real_lower);
-        let (d_upper, d_lower) = split_real_msb(denom_mat.values, num_interactions, half_logical, real_upper, real_lower);
+        let (n_upper, n_lower) = split_real_msb(
+            numer_mat.values,
+            num_interactions,
+            half_logical,
+            real_upper,
+            real_lower,
+        );
+        let (d_upper, d_lower) = split_real_msb(
+            denom_mat.values,
+            num_interactions,
+            half_logical,
+            real_upper,
+            real_lower,
+        );
 
         // Encode each half as a `RowMajorTable` with raw per-chip
         // `num_interactions` storage (no per-chip column padding —
@@ -318,10 +336,20 @@ where
         let log_int_padded = num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
         total_padded_interactions += 1usize << log_int_padded;
         let make_table = |cells: Vec<F>, real_rows: usize| -> RowMajorTable<F> {
-            RowMajorTable::from_padded_cells(cells, num_row_variables - 1, num_interactions, real_rows)
+            RowMajorTable::from_padded_cells(
+                cells,
+                num_row_variables - 1,
+                num_interactions,
+                real_rows,
+            )
         };
         let make_table_ef = |cells: Vec<EF>, real_rows: usize| -> RowMajorTable<EF> {
-            RowMajorTable::from_padded_cells(cells, num_row_variables - 1, num_interactions, real_rows)
+            RowMajorTable::from_padded_cells(
+                cells,
+                num_row_variables - 1,
+                num_interactions,
+                real_rows,
+            )
         };
 
         numerator_0.push(make_table(n_upper, real_upper));
@@ -429,7 +457,10 @@ mod tests {
 
         let interaction = Lookup {
             values: vec![],
-            multiplicity: VirtualPairCol::new(vec![(PairCol::Main(0), KoalaBear::ONE)], KoalaBear::ZERO),
+            multiplicity: VirtualPairCol::new(
+                vec![(PairCol::Main(0), KoalaBear::ONE)],
+                KoalaBear::ZERO,
+            ),
             kind: crate::lookup::LookupKind::Byte,
             scope: crate::air::LookupScope::Local,
         };
@@ -441,10 +472,20 @@ mod tests {
         let betas = vec![beta_0];
 
         let (n_send, _) = generate_interaction_vals::<KoalaBear, EF>(
-            &interaction, &[], &main_row, true, alpha, &betas,
+            &interaction,
+            &[],
+            &main_row,
+            true,
+            alpha,
+            &betas,
         );
         let (n_recv, _) = generate_interaction_vals::<KoalaBear, EF>(
-            &interaction, &[], &main_row, false, alpha, &betas,
+            &interaction,
+            &[],
+            &main_row,
+            false,
+            alpha,
+            &betas,
         );
         assert_eq!(n_send, KoalaBear::from_u32(7));
         assert_eq!(n_recv, -KoalaBear::from_u32(7));
@@ -457,13 +498,19 @@ mod tests {
         // Two interactions: kind=Byte (argument_index=4) and kind=Range (=5).
         let interaction_byte = Lookup {
             values: vec![],
-            multiplicity: VirtualPairCol::new(vec![(PairCol::Main(0), KoalaBear::ONE)], KoalaBear::ZERO),
+            multiplicity: VirtualPairCol::new(
+                vec![(PairCol::Main(0), KoalaBear::ONE)],
+                KoalaBear::ZERO,
+            ),
             kind: crate::lookup::LookupKind::Byte,
             scope: crate::air::LookupScope::Local,
         };
         let interaction_range = Lookup {
             values: vec![],
-            multiplicity: VirtualPairCol::new(vec![(PairCol::Main(0), KoalaBear::ONE)], KoalaBear::ZERO),
+            multiplicity: VirtualPairCol::new(
+                vec![(PairCol::Main(0), KoalaBear::ONE)],
+                KoalaBear::ZERO,
+            ),
             kind: crate::lookup::LookupKind::Range,
             scope: crate::air::LookupScope::Local,
         };
@@ -473,10 +520,20 @@ mod tests {
         let betas = vec![beta_0];
 
         let (_, d_byte) = generate_interaction_vals::<KoalaBear, EF>(
-            &interaction_byte, &[], &main_row, true, alpha, &betas,
+            &interaction_byte,
+            &[],
+            &main_row,
+            true,
+            alpha,
+            &betas,
         );
         let (_, d_range) = generate_interaction_vals::<KoalaBear, EF>(
-            &interaction_range, &[], &main_row, true, alpha, &betas,
+            &interaction_range,
+            &[],
+            &main_row,
+            true,
+            alpha,
+            &betas,
         );
         // d = alpha + beta_0 * argument_index = 0 + 2 * argi
         assert_eq!(d_byte, EF::from_u32(2 * 4));

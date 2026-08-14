@@ -18,36 +18,36 @@ use zkm_recursion_compiler::{
 
 mod types;
 
-pub mod challenger;
-pub mod domain;
-pub mod fri;
-pub mod hash;
-pub mod machine;
-pub mod merkle_tree;
-pub mod stark;
-pub(crate) mod utils;
 /// BaseFold proof verifier — see [`basefold_verifier`] module doc.
 pub mod basefold_chip_opened_values;
 pub mod basefold_constraint_folder;
 pub mod basefold_verifier;
 pub mod basefold_witness;
+pub mod challenger;
+pub mod domain;
 pub mod dummy;
-pub mod jagged_pcs_lift;
-pub mod shard_level_witness;
-pub mod shard_proof_variable_lift;
+pub mod fri;
+pub mod hash;
 pub mod jagged_circuit;
 pub mod jagged_eval;
 pub mod jagged_eval_primitives;
+pub mod jagged_pcs_lift;
 pub mod logup_gkr;
 pub mod logup_proof;
+pub mod machine;
+pub mod merkle_tree;
 pub mod partial_sumcheck;
 pub mod public_values_folder;
 pub mod recursive_jagged_pcs;
 pub mod recursive_stacked_pcs;
 pub mod shard_basefold;
+pub mod shard_level_witness;
+pub mod shard_proof_variable_lift;
+pub mod stark;
 pub mod sumcheck;
 pub mod symbolic;
 pub mod univariate;
+pub(crate) mod utils;
 pub mod witness;
 pub mod zerocheck;
 
@@ -97,8 +97,12 @@ pub trait KoalaBearFriParameters:
     >,
 >
 {
-    type ValMmcs: Mmcs<KoalaBear, ProverData<RowMajorMatrix<KoalaBear>> = Self::RowMajorProverData, Proof: Send + Sync, Error: Send + Sync>
-        + Send
+    type ValMmcs: Mmcs<
+            KoalaBear,
+            ProverData<RowMajorMatrix<KoalaBear>> = Self::RowMajorProverData,
+            Proof: Send + Sync,
+            Error: Send + Sync,
+        > + Send
         + Sync;
     type RowMajorProverData: Send + Sync;
     type FriChallenger: CanObserve<<Self::ValMmcs as Mmcs<KoalaBear>>::Commitment>

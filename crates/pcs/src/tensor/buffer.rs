@@ -30,8 +30,8 @@
 //! // Attempting to exceed it will panic
 //! ```
 
-use serde::{Deserialize, Serialize, Serializer};
 use p3_field::{BasedVectorSpace, ExtensionField, Field};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::tensor::{
     backend::{Backend, CpuBackend, GLOBAL_CPU_BACKEND},

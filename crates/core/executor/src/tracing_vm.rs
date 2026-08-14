@@ -48,7 +48,7 @@
 
 use crate::{
     minimal_trace::{MinimalTrace, TraceChunk},
-    ExecutionError, ExecutionRecord, Executor, ExecutionState, Program,
+    ExecutionError, ExecutionRecord, ExecutionState, Executor, Program,
 };
 use std::sync::Arc;
 use zkm_pcs::ZKMCoreOpts;
@@ -75,11 +75,7 @@ pub struct TracingVM<'a> {
 impl<'a> TracingVM<'a> {
     /// Construct a new TracingVM bound to the given record.
     #[must_use]
-    pub fn new(
-        program: Arc<Program>,
-        opts: ZKMCoreOpts,
-        record: &'a mut ExecutionRecord,
-    ) -> Self {
+    pub fn new(program: Arc<Program>, opts: ZKMCoreOpts, record: &'a mut ExecutionRecord) -> Self {
         Self { program, opts, record }
     }
 
@@ -103,10 +99,7 @@ impl<'a> TracingVM<'a> {
     /// than the oracle. Once a future revision wires the oracle and the bespoke
     /// per-opcode lifter, this method's body shrinks to a tight inner
     /// loop. For now it exists to validate the *parallel* story below.
-    pub fn execute_from_chunk(
-        &mut self,
-        chunk: &TraceChunk,
-    ) -> Result<(), ExecutionError> {
+    pub fn execute_from_chunk(&mut self, chunk: &TraceChunk) -> Result<(), ExecutionError> {
         self.execute_from_chunk_with_streams(chunk, &[], &[])
     }
 
@@ -130,8 +123,7 @@ impl<'a> TracingVM<'a> {
         // sequential run had: pc, global_clk, current_shard, register
         // records (value+shard+timestamp), the touched-memory records,
         // and the stream cursors.
-        let mut state =
-            ExecutionState::new(chunk.pc_start, chunk.pc_start.wrapping_add(4));
+        let mut state = ExecutionState::new(chunk.pc_start, chunk.pc_start.wrapping_add(4));
         state.global_clk = chunk.clk_start;
         if chunk.current_shard != 0 {
             state.current_shard = chunk.current_shard;
@@ -142,17 +134,17 @@ impl<'a> TracingVM<'a> {
         // (JIT path) with shard/timestamp 0.
         if chunk.start_register_records.len() == 36 {
             for (i, &(v, sh, ts)) in chunk.start_register_records.iter().enumerate() {
-                state.memory.registers.insert(
-                    i as u32,
-                    MemoryRecord { value: v, shard: sh, timestamp: ts },
-                );
+                state
+                    .memory
+                    .registers
+                    .insert(i as u32, MemoryRecord { value: v, shard: sh, timestamp: ts });
             }
         } else {
             for (i, &v) in chunk.start_registers.iter().enumerate() {
-                state.memory.registers.insert(
-                    i as u32,
-                    MemoryRecord { value: v, shard: 0, timestamp: 0 },
-                );
+                state
+                    .memory
+                    .registers
+                    .insert(i as u32, MemoryRecord { value: v, shard: 0, timestamp: 0 });
             }
         }
         // Seed the shared streams at the chunk-start cursor positions.
@@ -179,13 +171,11 @@ impl<'a> TracingVM<'a> {
         // also seeded below so postprocess can finalize every address.
         if !chunk.mem_reads.is_empty() {
             for mv in chunk.mem_reads.iter() {
-                sub.state.memory.page_table
-                    .entry(mv.addr)
-                    .or_insert(MemoryRecord {
-                        value: mv.value,
-                        shard: mv.shard,
-                        timestamp: mv.timestamp,
-                    });
+                sub.state.memory.page_table.entry(mv.addr).or_insert(MemoryRecord {
+                    value: mv.value,
+                    shard: mv.shard,
+                    timestamp: mv.timestamp,
+                });
             }
         }
 
@@ -216,9 +206,9 @@ impl<'a> TracingVM<'a> {
         sub.emit_global_memory_events = false;
         loop {
             match sub.execute() {
-                Ok(true) => break,  // natural halt within the chunk
+                Ok(true) => break, // natural halt within the chunk
                 Ok(false) => {}
-                Err(ExecutionError::ExceededCycleLimit(_)) => break,  // shard boundary
+                Err(ExecutionError::ExceededCycleLimit(_)) => break, // shard boundary
                 Err(e) => return Err(e),
             }
         }
@@ -439,16 +429,15 @@ mod tests {
     #[test]
     fn oracle_populates_in_checkpoint_mode() {
         use crate::instruction::Instruction;
+        use crate::minimal_trace::MinimalTrace;
         use crate::opcode::Opcode;
         use crate::Executor;
-        use crate::minimal_trace::MinimalTrace;
 
         // 100 ADDs targeting reg 1 — no user-memory I/O, so oracle
         // should remain empty (sanity).
         let pc_base = 0x1000_0000u32;
-        let insns: Vec<Instruction> = (0..100)
-            .map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true))
-            .collect();
+        let insns: Vec<Instruction> =
+            (0..100).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
         let program = Program::new(insns, pc_base, pc_base);
         let mut exec = Executor::new(program, ZKMCoreOpts::default());
         exec.minimal_trace_collector = Some(MinimalTrace::default());
@@ -458,7 +447,9 @@ mod tests {
         loop {
             let (_state, done) = exec.execute_state(false).expect("execute_state");
             steps += 1;
-            if done || steps > 10 { break; }
+            if done || steps > 10 {
+                break;
+            }
         }
 
         let trace = exec.minimal_trace_collector.take().unwrap();
@@ -468,9 +459,11 @@ mod tests {
         // hooked but only collects when there are real user-mem
         // accesses.
         let total_reads: usize = trace.chunks.iter().map(|c| c.mem_reads.len()).sum();
-        assert_eq!(total_reads, 0,
+        assert_eq!(
+            total_reads, 0,
             "register-only program produced {} oracle entries (expected 0)",
-            total_reads);
+            total_reads
+        );
         eprintln!(
             "[D.4 oracle-checkpoint] chunks={} total_mem_reads={} (expected 0 for register-only program)",
             trace.chunks.len(), total_reads,
@@ -492,9 +485,8 @@ mod tests {
         use std::time::Instant;
 
         let pc_base = 0x1000_0000u32;
-        let insns: Vec<Instruction> = (0..5000)
-            .map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true))
-            .collect();
+        let insns: Vec<Instruction> =
+            (0..5000).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
         let program = Program::new(insns, pc_base, pc_base);
 
         // Baseline: full bookkeeping
@@ -514,8 +506,11 @@ mod tests {
 
         // Byte-equiv: event counts must match (skip_replay_bookkeeping
         // only drops counters, not events).
-        assert_eq!(cpu_a, cpu_b,
-            "lifter flag changed cpu_events: baseline={} lifter={}", cpu_a, cpu_b);
+        assert_eq!(
+            cpu_a, cpu_b,
+            "lifter flag changed cpu_events: baseline={} lifter={}",
+            cpu_a, cpu_b
+        );
 
         // Regression gate: lifter must not be > 1.5× slower than baseline.
         let ratio = t_lifter.as_nanos() as f64 / t_baseline.as_nanos().max(1) as f64;
@@ -542,9 +537,8 @@ mod tests {
         use crate::Executor;
 
         let pc_base = 0x1000_0000u32;
-        let insns: Vec<Instruction> = (0..50)
-            .map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true))
-            .collect();
+        let insns: Vec<Instruction> =
+            (0..50).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
         let program = Program::new(insns, pc_base, pc_base);
 
         // ── Sequential pass A: capture records + MinimalTrace ──
@@ -559,19 +553,26 @@ mod tests {
 
         // ── Parallel pass B: replay via TracingVM workers ──
         let program_arc = Arc::new(program);
-        let records_b =
-            drive_tracing_vm_parallel(program_arc, ZKMCoreOpts::default(), &trace)
-                .expect("parallel replay B");
+        let records_b = drive_tracing_vm_parallel(program_arc, ZKMCoreOpts::default(), &trace)
+            .expect("parallel replay B");
         let total_cpu_b: usize = records_b.iter().map(|r| r.cpu_events.len()).sum();
         let total_addsub_b: usize = records_b.iter().map(|r| r.add_sub_events.len()).sum();
 
         // Structural equivalence: both paths must emit the same number
         // of CPU + ADD events. (Per-field byte-equivalence is covered by the record tests.)
-        assert_eq!(total_cpu_a, total_cpu_b,
+        assert_eq!(
+            total_cpu_a,
+            total_cpu_b,
             "CPU event count diverges: seq={} par={}, trace chunks={}",
-            total_cpu_a, total_cpu_b, trace.chunks.len());
-        assert_eq!(total_addsub_a, total_addsub_b,
-            "ADD event count diverges: seq={} par={}", total_addsub_a, total_addsub_b);
+            total_cpu_a,
+            total_cpu_b,
+            trace.chunks.len()
+        );
+        assert_eq!(
+            total_addsub_a, total_addsub_b,
+            "ADD event count diverges: seq={} par={}",
+            total_addsub_a, total_addsub_b
+        );
     }
 
     /// deeper byte-equiv: compare CpuEvent + AluEvent
@@ -610,11 +611,9 @@ mod tests {
         let records_a = std::mem::take(&mut exec_a.records);
 
         // Parallel
-        let records_b = drive_tracing_vm_parallel(
-            Arc::new(program),
-            ZKMCoreOpts::default(),
-            &trace,
-        ).expect("par replay");
+        let records_b =
+            drive_tracing_vm_parallel(Arc::new(program), ZKMCoreOpts::default(), &trace)
+                .expect("par replay");
 
         // Flatten per-shard CpuEvent streams for comparison.
         let cpu_a: Vec<_> = records_a.iter().flat_map(|r| r.cpu_events.iter()).collect();
@@ -661,9 +660,8 @@ mod tests {
         // emits several. We just assert contiguity + ordering, not
         // an exact count (shard sizing is set by ZKMCoreOpts).
         let pc_base = 0x1000_0000u32;
-        let insns: Vec<Instruction> = (0..200)
-            .map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true))
-            .collect();
+        let insns: Vec<Instruction> =
+            (0..200).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
         let program = Program::new(insns, pc_base, pc_base);
         let mut exec = Executor::new(program, ZKMCoreOpts::default());
         exec.minimal_trace_collector = Some(MinimalTrace::default());
@@ -676,10 +674,11 @@ mod tests {
         // chunk[i+1].clk_start). Worker correctness comes from the
         // `execute_from_chunk` bound — already tested above.
         for w in trace.chunks.windows(2) {
-            assert_eq!(w[0].clk_end, w[1].clk_start,
+            assert_eq!(
+                w[0].clk_end, w[1].clk_start,
                 "chunks must tile: chunk[{}].clk_end={} != chunk[{}].clk_start={}",
-                w[0].shard_index, w[0].clk_end,
-                w[1].shard_index, w[1].clk_start);
+                w[0].shard_index, w[0].clk_end, w[1].shard_index, w[1].clk_start
+            );
         }
         // Final chunk must cover up to executor halt.
         if let Some(last) = trace.chunks.last() {
@@ -703,9 +702,8 @@ mod tests {
         use crate::opcode::Opcode;
         // 200 ADDs — each is 5 clk → 1000 clk if unbounded.
         let pc_base = 0x1000_0000u32;
-        let insns: Vec<Instruction> = (0..200)
-            .map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true))
-            .collect();
+        let insns: Vec<Instruction> =
+            (0..200).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
         let program = Arc::new(Program::new(insns, pc_base, pc_base));
         let opts = ZKMCoreOpts::default();
         let mut record = ExecutionRecord::new(program.clone());

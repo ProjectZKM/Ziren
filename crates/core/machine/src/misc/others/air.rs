@@ -1,13 +1,13 @@
 use crate::memory::RegisterCols;
-use zkm_pcs::air::BaseAirBuilder;
 use std::borrow::Borrow;
+use zkm_pcs::air::BaseAirBuilder;
 
 use crate::{memory::MemoryCols, operations::IsEqualWordOperation};
-use p3_air::{WindowAccess, Air, AirBuilder};
+use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::{events::MemoryAccessPosition, ByteOpcode, Opcode};
-use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{air::ZKMAirBuilder, Word};
+use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder},
@@ -63,10 +63,9 @@ where
         );
         // TEQ reads op_a immutably: the register write carries the previous
         // value through unchanged.
-        builder.when(local.is_teq).assert_word_eq(
-            *local.frame.op_a_access.value(),
-            local.frame.op_a_access.prev_value,
-        );
+        builder
+            .when(local.is_teq)
+            .assert_word_eq(*local.frame.op_a_access.value(), local.frame.op_a_access.prev_value);
         // Bind `prev_a_value` to the access's previous value EXACTLY on the
         // rows that use it (the read-write group: MADD family + INS).  SEXT /
         // EXT / TEQ pin the column to zero below while the register's actual
@@ -90,13 +89,10 @@ where
         builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
         // The HI-writing group keeps private shard/clk columns for its memory
         // access (the Mul coupling): tie them to the frame exactly there.
-        builder
-            .when(is_check_memory.clone())
-            .assert_eq(local.shard, local.frame.shard);
+        builder.when(is_check_memory.clone()).assert_eq(local.shard, local.frame.shard);
         builder.when(is_check_memory).assert_eq(
             local.clk,
-            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
-                + local.frame.clk_16bit_limb,
+            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb + local.frame.clk_16bit_limb,
         );
 
         self.eval_ext(builder, local);
@@ -343,9 +339,7 @@ impl MiscInstrsChip {
                 zero(),
                 local.is_ins.into(),
             );
-            builder
-                .when(local.is_ins)
-                .assert_word_eq(local.op_a_value, local.ins_ror2.value());
+            builder.when(local.is_ins).assert_word_eq(local.op_a_value, local.ins_ror2.value());
         }
         // op_c = (msb << 5) + lsb
         builder.when(local.is_ins).assert_eq(
@@ -417,9 +411,7 @@ impl MiscInstrsChip {
                 zero(),
                 zero(),
             );
-            builder
-                .when(local.is_ext)
-                .assert_word_eq(local.op_a_value, local.ext_srl.value());
+            builder.when(local.is_ext).assert_word_eq(local.op_a_value, local.ext_srl.value());
         }
 
         // op_c = (msbd << 5) + lsb

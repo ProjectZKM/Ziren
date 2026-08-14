@@ -7,14 +7,10 @@ use std::{
 use p3_air::Air;
 
 use super::{
-    folder::VerifierConstraintFolder,
-    types::ShardProof,
-    OpeningError, StarkGenericConfig, StarkVerifyingKey, Val,
+    folder::VerifierConstraintFolder, types::ShardProof, OpeningError, StarkGenericConfig,
+    StarkVerifyingKey, Val,
 };
-use crate::{
-    air::MachineAir,
-    MachineChip,
-};
+use crate::{air::MachineAir, MachineChip};
 
 /// A verifier for a collection of air chips.
 pub struct Verifier<SC, A>(PhantomData<SC>, PhantomData<A>);
@@ -59,8 +55,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 >>::Commitment,
             >,
     {
-        
-
         // BaseFold-over-BN254: every shard proof (inner KoalaBear and the OUTER
         // wrap) carries a shard-level BaseFold proof.  There is no
         // two-adic-quotient FRI/STARK verify fallback; a missing
@@ -86,7 +80,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             .map_err(|e| VerificationError::BasefoldShardVerifier(format!("{e}")))?;
         return Ok(());
     }
-
 }
 
 /// An error that occurs when the shape of the openings does not match the expected shape.

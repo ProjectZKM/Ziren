@@ -2,7 +2,7 @@ use core::borrow::Borrow;
 use std::borrow::BorrowMut;
 use std::iter::zip;
 
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 #[cfg(feature = "sys")]
 use p3_field::PrimeCharacteristicRing;
 use p3_field::{Field, PrimeField32};
@@ -279,7 +279,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
     fn included(&self, _record: &Self::Record) -> bool {
         true
     }
-
 }
 
 impl<AB> Air<AB> for BaseAluChip
@@ -296,7 +295,16 @@ where
 
         for (
             BaseAluValueCols { vals: BaseAluIo { out, in1, in2 } },
-            BaseAluAccessCols { addrs, is_add, is_sub, is_mul, is_div, is_div_active, is_div_soundness, mult },
+            BaseAluAccessCols {
+                addrs,
+                is_add,
+                is_sub,
+                is_mul,
+                is_div,
+                is_div_active,
+                is_div_soundness,
+                mult,
+            },
         ) in zip(local.values, prep_local.accesses)
         {
             // Check exactly one flag is enabled.

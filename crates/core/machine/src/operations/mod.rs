@@ -24,9 +24,9 @@ mod lt;
 mod mul_operation;
 mod not;
 mod or;
+pub mod poseidon2;
 mod shift_left_operation;
 mod shift_right_operation;
-pub mod poseidon2;
 mod xor;
 
 pub use add::*;

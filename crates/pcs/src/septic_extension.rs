@@ -2,12 +2,17 @@
 use num_bigint::BigUint;
 use num_traits::One;
 use p3_field::PrimeField32;
-use p3_field::{Algebra, BasedVectorSpace, ExtensionField, Field, PackedFieldExtension, Packable, PrimeCharacteristicRing};
+use p3_field::{
+    Algebra, BasedVectorSpace, ExtensionField, Field, Packable, PackedFieldExtension,
+    PrimeCharacteristicRing,
+};
 use serde::{Deserialize, Serialize};
 use std::array;
 use std::fmt::Display;
 use std::iter::{Product, Sum};
-use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign};
+use std::ops::{
+    Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
+};
 
 use crate::air::SepticExtensionAirBuilder;
 
@@ -699,7 +704,6 @@ impl<T: Clone> SepticBlock<T> {
         let arr: [AB::Expr; 7] = self.0.clone().map(|x| AB::Expr::ZERO + x);
         SepticExtension(arr)
     }
-
 }
 
 impl<T> From<[T; 7]> for SepticBlock<T> {

@@ -111,7 +111,6 @@ impl MemoryRecordEnum {
             },
         }
     }
-
 }
 
 /// Memory Initialize/Finalize Event.

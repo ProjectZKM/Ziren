@@ -6,7 +6,7 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
@@ -196,7 +196,6 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
             !shard.lt_events.is_empty()
         }
     }
-
 }
 
 impl LtChip {
@@ -507,9 +506,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{ExecutionRecord, Opcode};
-    use zkm_pcs::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::LtChip;
     use crate::programs::tests::{alu_op, run_instructions};
@@ -542,9 +539,16 @@ mod tests {
         const NEG_3: u32 = 0b11111111111111111111111111111101;
         const NEG_4: u32 = 0b11111111111111111111111111111100;
         let mut instructions = Vec::new();
-        for (b, c) in
-            [(3, 2), (2, 3), (5, NEG_3), (NEG_3, 5), (NEG_3, NEG_4), (NEG_4, NEG_3), (3, 3), (NEG_3, NEG_3)]
-        {
+        for (b, c) in [
+            (3, 2),
+            (2, 3),
+            (5, NEG_3),
+            (NEG_3, 5),
+            (NEG_3, NEG_4),
+            (NEG_4, NEG_3),
+            (3, 3),
+            (NEG_3, NEG_3),
+        ] {
             instructions.extend(alu_op(Opcode::SLT, b, c));
         }
         let shard = run_instructions(instructions);

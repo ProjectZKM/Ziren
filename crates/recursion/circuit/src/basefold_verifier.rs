@@ -36,7 +36,6 @@
 //!
 #![allow(unused_variables)]
 
-
 /// Parameters for BaseFold proof verification in the recursion circuit.
 #[derive(Clone, Debug)]
 pub struct BasefoldVerifierParams {
@@ -156,10 +155,7 @@ pub struct ScaffoldHostChallenger {
 
 impl ScaffoldChallenger for ScaffoldHostChallenger {
     fn observe_usize(&mut self, value: usize) {
-        self.state = self
-            .state
-            .wrapping_mul(0x9E3779B97F4A7C15)
-            .wrapping_add(value as u64);
+        self.state = self.state.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(value as u64);
     }
     fn observe_usize_slice(&mut self, values: &[usize]) {
         self.observe_usize(values.len());
@@ -278,10 +274,7 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
     /// convention to match the stark-side
     /// [`crate::basefold::Mle::eval_at`].  Folds adjacent pairs:
     /// `out[i] = (1-r)*current[2i] + r*current[2i+1]`.
-    pub fn evaluate_multilinear_padded_host_shape<EF, F>(
-        coeffs: &[EF],
-        point: &[EF],
-    ) -> EF
+    pub fn evaluate_multilinear_padded_host_shape<EF, F>(coeffs: &[EF], point: &[EF]) -> EF
     where
         EF: Copy
             + core::ops::Add<Output = EF>
@@ -376,10 +369,7 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
         last_beta: EF,
     ) -> bool
     where
-        EF: Copy
-            + PartialEq
-            + core::ops::Add<Output = EF>
-            + core::ops::Mul<Output = EF>,
+        EF: Copy + PartialEq + core::ops::Add<Output = EF> + core::ops::Mul<Output = EF>,
         F: Copy,
     {
         let Some(last) = proof.rounds.last() else { return false };
@@ -707,10 +697,7 @@ where
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_compiler::ir::DslIr;
     assert_eq!(sibling_pairs.len(), betas.len(), "round count mismatch");
-    assert!(
-        index_bits.len() >= sibling_pairs.len(),
-        "index_bits must cover every fold round"
-    );
+    assert!(index_bits.len() >= sibling_pairs.len(), "index_bits must cover every fold round");
 
     let mut folded = initial_eval;
     let mut x = initial_x;
@@ -857,8 +844,7 @@ where
         // with partial_lagrange(batching_point) coefficients, mirroring the
         // host (crates/pcs/src/basefold/verifier.rs:110-125, 208-246).
         let batching_coefficients: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = {
-            let total_polys: usize =
-                batch_evaluations.iter().map(|r| r.len()).sum();
+            let total_polys: usize = batch_evaluations.iter().map(|r| r.len()).sum();
             let num_batching_vars =
                 total_polys.max(1).next_power_of_two().trailing_zeros() as usize;
             let batching_point: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> =
@@ -995,9 +981,10 @@ where
         {
             use zkm_recursion_compiler::prelude::Ext;
             let final_poly_ext: Ext<C::F, C::EF> = proof.final_poly;
-            let num_queries = self.params.num_queries.min(
-                proof.query_phase_openings.first().map(|v| v.len()).unwrap_or(0),
-            );
+            let num_queries = self
+                .params
+                .num_queries
+                .min(proof.query_phase_openings.first().map(|v| v.len()).unwrap_or(0));
             for query_idx in 0..num_queries {
                 let sibling_pairs: Vec<[Ext<C::F, C::EF>; 2]> = proof
                     .query_phase_openings
@@ -1030,13 +1017,9 @@ where
                     let mut acc: zkm_recursion_compiler::ir::SymbolicExt<C::F, C::EF> =
                         zkm_recursion_compiler::ir::SymbolicExt::<C::F, C::EF>::ZERO;
                     let mut batch_idx = 0usize;
-                    for (round_idx, round_openings) in
-                        proof.component_openings.iter().enumerate()
-                    {
-                        let round_polys = batch_evaluations
-                            .get(round_idx)
-                            .map(|r| r.len())
-                            .unwrap_or(0);
+                    for (round_idx, round_openings) in proof.component_openings.iter().enumerate() {
+                        let round_polys =
+                            batch_evaluations.get(round_idx).map(|r| r.len()).unwrap_or(0);
                         let op = &round_openings[query_idx];
                         // (8) inner product: acc += coeff[batch_idx + k] * leaf[k]
                         // over the flat per-matrix leaf values (host :229-237).
@@ -1065,8 +1048,7 @@ where
                             let mut leaf_digest: HV::DigestVariable =
                                 HV::hash(builder, &leaf_felts);
                             let path_len = op.merkle_path_digests.len();
-                            for (level, sibling_digest) in
-                                op.merkle_path_digests.iter().enumerate()
+                            for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate()
                             {
                                 let bit = query_indices[query_idx][level].clone();
                                 let pair = HV::select_chain_digest(
@@ -1076,11 +1058,7 @@ where
                                 );
                                 leaf_digest = HV::compress(builder, pair);
                             }
-                            HV::assert_digest_eq(
-                                builder,
-                                leaf_digest,
-                                commitments[round_idx],
-                            );
+                            HV::assert_digest_eq(builder, leaf_digest, commitments[round_idx]);
                             // Round-count binding (2),
                             // Ziren-faithful — SP1's `index == 0` RESIDUAL
                             // assert (slop merkle tcs.rs:165): after walking
@@ -1101,8 +1079,7 @@ where
                             // — BYTE-IDENTICAL on honest proofs (no constraint
                             // emitted), load-bearing only on an under-claimed
                             // path.
-                            for residual_bit in
-                                query_indices[query_idx][path_len..].iter().cloned()
+                            for residual_bit in query_indices[query_idx][path_len..].iter().cloned()
                             {
                                 C::assert_bit_zero(builder, residual_bit);
                             }
@@ -1111,15 +1088,9 @@ where
                     // Materialize the accumulated inner product ONCE per query.
                     builder.eval(acc)
                 } else {
-                    sibling_pairs
-                        .first()
-                        .map(|pair| pair[0])
-                        .unwrap_or_else(|| {
-                            builder.eval(zkm_recursion_compiler::ir::SymbolicExt::<
-                                C::F,
-                                C::EF,
-                            >::ZERO)
-                        })
+                    sibling_pairs.first().map(|pair| pair[0]).unwrap_or_else(|| {
+                        builder.eval(zkm_recursion_compiler::ir::SymbolicExt::<C::F, C::EF>::ZERO)
+                    })
                 };
 
                 use p3_field::TwoAdicField;
@@ -1186,11 +1157,8 @@ where
                         // Witnessed DigestVariable, no const promotion.
                         let sibling_variable: HV::DigestVariable = *sibling_digest;
                         let bit = path_bits[level].clone();
-                        let pair = HV::select_chain_digest(
-                            builder,
-                            bit,
-                            [leaf_digest, sibling_variable],
-                        );
+                        let pair =
+                            HV::select_chain_digest(builder, bit, [leaf_digest, sibling_variable]);
                         leaf_digest = HV::compress(builder, pair);
                     }
                     // Round-count binding (2),
@@ -1224,8 +1192,7 @@ where
                     // verifier.rs:280, 394).
                     if round_idx < proof.rounds.len() {
                         // commitment is a witnessed DigestVariable.
-                        let round_commit: HV::DigestVariable =
-                            proof.rounds[round_idx].commitment;
+                        let round_commit: HV::DigestVariable = proof.rounds[round_idx].commitment;
                         HV::assert_digest_eq(builder, leaf_digest, round_commit);
                     }
                 }
@@ -1265,12 +1232,12 @@ mod tests {
         type F = i64;
         let coeffs: Vec<EF> = vec![4, 8, 12, 16]; // = original * 4
         let point: Vec<EF> = vec![2, 2]; // = 0.5 * 4
-        // Expected result: 2.5 * 4 * 4 / (4*4) = 10 in scaled units
-        // Compute: (4 - 2) * (... at x1) ; first iter folds bit 0 with r=2
-        // Iter 0: r=2, pairs (4,8), (12,16) → [4 + 2*(8-4), 12 + 2*(16-12)] = [12, 20]
-        // Iter 1: r=2, pairs (12,20) → [12 + 2*(20-12)] = [28]
-        // So the test result = 28.
-        // (This is testing the algorithm, not arithmetic semantics — Mle::eval_at uses the same.)
+                                         // Expected result: 2.5 * 4 * 4 / (4*4) = 10 in scaled units
+                                         // Compute: (4 - 2) * (... at x1) ; first iter folds bit 0 with r=2
+                                         // Iter 0: r=2, pairs (4,8), (12,16) → [4 + 2*(8-4), 12 + 2*(16-12)] = [12, 20]
+                                         // Iter 1: r=2, pairs (12,20) → [12 + 2*(20-12)] = [28]
+                                         // So the test result = 28.
+                                         // (This is testing the algorithm, not arithmetic semantics — Mle::eval_at uses the same.)
         let result = RecursiveBasefoldVerifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>::evaluate_multilinear_padded_host_shape::<EF, F>(
             &coeffs, &point,
         );
@@ -1292,9 +1259,9 @@ mod tests {
     // over-accept) are REJECTED.
 
     use p3_field::PrimeCharacteristicRing as _PrimeCharRing;
+    use zkm_pcs::InnerVal;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_compiler::prelude::{Builder, Felt};
-    use zkm_pcs::InnerVal;
 
     /// Run the round-count binding against a single witnessed `value`
     /// over a `max_num_vars` ceiling, executing the resulting circuit

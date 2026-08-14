@@ -1,5 +1,5 @@
-use std::fmt;
 use std::collections::BTreeSet;
+use std::fmt;
 
 use itertools::Itertools;
 use p3_matrix::dense::RowMajorMatrix;

@@ -71,8 +71,7 @@ impl CoreProofShape {
         let num_chips = self.shard_chip_names.len().max(1);
         let main_area = self.main_area.max(1);
         // area is measured in stacking-height multiples; convert to cells.
-        let total_cells: u128 =
-            (main_area as u128) * (1u128 << consts::LOG_STACKING_HEIGHT);
+        let total_cells: u128 = (main_area as u128) * (1u128 << consts::LOG_STACKING_HEIGHT);
         let per_chip_cells = (total_cells / num_chips as u128).max(1);
         // ceil(log2(per_chip_cells))
         let log_height: usize = if per_chip_cells.is_power_of_two() {
@@ -196,14 +195,11 @@ mod tests {
     fn machine_shape_smallest_cluster_picks_minimal_fit() {
         let core: BTreeSet<String> =
             ["AddSub", "Cpu", "Program"].iter().map(|s| s.to_string()).collect();
-        let core_keccak: BTreeSet<String> = ["AddSub", "Cpu", "Program", "KeccakPermute"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let core_keccak: BTreeSet<String> =
+            ["AddSub", "Cpu", "Program", "KeccakPermute"].iter().map(|s| s.to_string()).collect();
         let machine = MachineShape::new(vec![core.clone(), core_keccak.clone()]);
 
-        let needed: BTreeSet<String> =
-            ["AddSub", "Cpu"].iter().map(|s| s.to_string()).collect();
+        let needed: BTreeSet<String> = ["AddSub", "Cpu"].iter().map(|s| s.to_string()).collect();
         assert_eq!(machine.smallest_cluster(&needed), Some(&core));
 
         let needed_keccak: BTreeSet<String> =
@@ -215,8 +211,7 @@ mod tests {
     fn machine_shape_no_matching_cluster_returns_none() {
         let core: BTreeSet<String> = ["AddSub", "Cpu"].iter().map(|s| s.to_string()).collect();
         let machine = MachineShape::new(vec![core]);
-        let needed: BTreeSet<String> =
-            ["Sha256Extend"].iter().map(|s| s.to_string()).collect();
+        let needed: BTreeSet<String> = ["Sha256Extend"].iter().map(|s| s.to_string()).collect();
         assert_eq!(machine.smallest_cluster(&needed), None);
     }
 

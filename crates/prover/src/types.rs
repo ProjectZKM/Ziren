@@ -10,8 +10,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
 use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 
-use zkm_recursion_circuit::machine::core_basefold::ZKMCoreBasefoldWitnessValues;
 use zkm_recursion_circuit::machine::compress_basefold::ZKMCompressBasefoldWitnessValues;
+use zkm_recursion_circuit::machine::core_basefold::ZKMCoreBasefoldWitnessValues;
 use zkm_recursion_circuit::machine::deferred_basefold::ZKMDeferredBasefoldWitnessValues;
 
 use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
@@ -72,10 +72,10 @@ impl HashableKey for ZKMVerifyingKey {
     }
 }
 
-impl<SC: StarkGenericConfig<Val = KoalaBear>>
-    HashableKey for StarkVerifyingKey<SC>
+impl<SC: StarkGenericConfig<Val = KoalaBear>> HashableKey for StarkVerifyingKey<SC>
 where
-    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: std::borrow::Borrow<[[KoalaBear; DIGEST_SIZE]]>,
+    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment:
+        std::borrow::Borrow<[[KoalaBear; DIGEST_SIZE]]>,
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
         // SP1's inputs, in SP1's order (hypercube/src/verifier/hashable_key.rs:107):

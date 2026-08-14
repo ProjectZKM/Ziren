@@ -17,12 +17,12 @@ use thiserror::Error;
 use zkm_core_executor::ExecutionReport;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
+use zkm_pcs::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 use zkm_primitives::io::ZKMPublicValues;
 use zkm_prover::{
     components::{DefaultProverComponents, ZKMProverComponents},
     CoreSC, InnerSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey, ZKMVerifyingKey,
 };
-use zkm_pcs::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 
 use crate::install::try_install_circuit_artifacts;
 use crate::ProverClient;

@@ -56,12 +56,7 @@ where
         unsafe {
             std::ptr::write(
                 ptr,
-                CrashDetails {
-                    signal: 0,
-                    fault_addr: 0,
-                    mips_pc: 0,
-                    instr_count: 0,
-                },
+                CrashDetails { signal: 0, fault_addr: 0, mips_pc: 0, instr_count: 0 },
             );
         }
     }
@@ -101,16 +96,11 @@ where
         };
         return Ok(IsolatedRunResult::Crashed {
             signal: sig,
-            details: CrashDetails {
-                signal: sig,
-                ..details
-            },
+            details: CrashDetails { signal: sig, ..details },
         });
     }
 
-    Err(JitError::GuestCrash(format!(
-        "child exited abnormally: status=0x{status:x}"
-    )))
+    Err(JitError::GuestCrash(format!("child exited abnormally: status=0x{status:x}")))
 }
 
 #[cfg(test)]

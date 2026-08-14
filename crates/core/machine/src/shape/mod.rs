@@ -84,10 +84,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// bands equals `fix_shape`'s `range(log2_shard_size..)` result (the skipped
     /// smaller bands never fit the CPU chip). Returns `None` if no band fits
     /// (the over-large case `fix_shape` also rejects).
-    pub fn find_core_shape(
-        &self,
-        heights: &[(MipsAirId, usize)],
-    ) -> Option<Shape<MipsAirId>> {
+    pub fn find_core_shape(&self, heights: &[(MipsAirId, usize)]) -> Option<Shape<MipsAirId>> {
         let mut minimal_shape = None;
         let mut minimal_area = usize::MAX;
         for clusters in self.partial_core_shapes.values() {
@@ -253,9 +250,11 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             for allowed_log2_height in allowed_log2_heights {
                 let allowed_height = 1usize << allowed_log2_height;
                 if height <= allowed_height {
-                    for cand in
-                        self.get_precompile_shapes(air, *memory_events_per_row, *allowed_log2_height)
-                    {
+                    for cand in self.get_precompile_shapes(
+                        air,
+                        *memory_events_per_row,
+                        *allowed_log2_height,
+                    ) {
                         let mem_events_height = cand[2].1;
                         let global_events_height = cand[3].1;
                         if num_memory_local_events.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
@@ -263,8 +262,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                             && num_global_events <= (1 << global_events_height)
                         {
                             shape.extend(
-                                cand.iter()
-                                    .map(|x| (MipsAirId::from_str(&x.0).unwrap(), x.1)),
+                                cand.iter().map(|x| (MipsAirId::from_str(&x.0).unwrap(), x.1)),
                             );
                             // Lift the sub-family shard to its whole-family
                             // cluster (inject the absent family chips at log-1).
@@ -386,13 +384,10 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         let get = |id: &MipsAirId| -> usize { raw.get(&id.to_string()).copied().unwrap_or(0) };
         let has_cpu = get(&MipsAirId::Cpu) > 0;
         let is_packed = has_cpu
-            && (get(&MipsAirId::MemoryGlobalInit) > 0
-                || get(&MipsAirId::MemoryGlobalFinalize) > 0);
+            && (get(&MipsAirId::MemoryGlobalInit) > 0 || get(&MipsAirId::MemoryGlobalFinalize) > 0);
         // Preprocessed (Byte / Program) shape from their raw heights.
-        let prep_heights: Vec<(MipsAirId, usize)> = [MipsAirId::Program, MipsAirId::Byte]
-            .into_iter()
-            .map(|id| (id, get(&id)))
-            .collect();
+        let prep_heights: Vec<(MipsAirId, usize)> =
+            [MipsAirId::Program, MipsAirId::Byte].into_iter().map(|id| (id, get(&id))).collect();
         let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
         // Precompile sub-family coverage: no-CPU precompile shard.
         if !has_cpu
@@ -404,14 +399,29 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         // Core heights (same MipsAirIds + order as MipsAir::core_heights), then
         // memory heights for the packed branch (same as MipsAir::memory_heights).
         let core_ids = [
-            MipsAirId::Cpu, MipsAirId::Branch, MipsAirId::Jump, MipsAirId::MovCond,
-            MipsAirId::MiscInstrs, MipsAirId::LoadNarrow, MipsAirId::LoadWord,
-            MipsAirId::StoreNarrow, MipsAirId::StoreWord,
-            MipsAirId::MemoryUnaligned, MipsAirId::SyscallInstrs,
-            MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
-            MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
+            MipsAirId::Cpu,
+            MipsAirId::Branch,
+            MipsAirId::Jump,
+            MipsAirId::MovCond,
+            MipsAirId::MiscInstrs,
+            MipsAirId::LoadNarrow,
+            MipsAirId::LoadWord,
+            MipsAirId::StoreNarrow,
+            MipsAirId::StoreWord,
+            MipsAirId::MemoryUnaligned,
+            MipsAirId::SyscallInstrs,
+            MipsAirId::DivRem,
+            MipsAirId::AddSub,
+            MipsAirId::Bitwise,
+            MipsAirId::Mul,
+            MipsAirId::ShiftRight,
+            MipsAirId::ShiftLeft,
+            MipsAirId::Lt,
+            MipsAirId::MemoryLocal,
             MipsAirId::MemoryBump,
-            MipsAirId::CloClz, MipsAirId::Global, MipsAirId::SyscallCore,
+            MipsAirId::CloClz,
+            MipsAirId::Global,
+            MipsAirId::SyscallCore,
         ];
         let mut heights: Vec<(MipsAirId, usize)> =
             core_ids.iter().map(|id| (*id, get(id))).collect();
@@ -447,12 +457,9 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         let get = |id: &MipsAirId| -> usize { raw.get(&id.to_string()).copied().unwrap_or(0) };
         let has_cpu = get(&MipsAirId::Cpu) > 0;
         let is_packed = has_cpu
-            && (get(&MipsAirId::MemoryGlobalInit) > 0
-                || get(&MipsAirId::MemoryGlobalFinalize) > 0);
-        let prep_heights: Vec<(MipsAirId, usize)> = [MipsAirId::Program, MipsAirId::Byte]
-            .into_iter()
-            .map(|id| (id, get(&id)))
-            .collect();
+            && (get(&MipsAirId::MemoryGlobalInit) > 0 || get(&MipsAirId::MemoryGlobalFinalize) > 0);
+        let prep_heights: Vec<(MipsAirId, usize)> =
+            [MipsAirId::Program, MipsAirId::Byte].into_iter().map(|id| (id, get(&id))).collect();
         let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
         // Precompile sub-family coverage: no-CPU precompile shard.
         if !has_cpu
@@ -462,14 +469,29 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             return self.precompile_canonical_cluster_shape_from_names(prep, raw);
         }
         let core_ids = [
-            MipsAirId::Cpu, MipsAirId::Branch, MipsAirId::Jump, MipsAirId::MovCond,
-            MipsAirId::MiscInstrs, MipsAirId::LoadNarrow, MipsAirId::LoadWord,
-            MipsAirId::StoreNarrow, MipsAirId::StoreWord,
-            MipsAirId::MemoryUnaligned, MipsAirId::SyscallInstrs,
-            MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
-            MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
+            MipsAirId::Cpu,
+            MipsAirId::Branch,
+            MipsAirId::Jump,
+            MipsAirId::MovCond,
+            MipsAirId::MiscInstrs,
+            MipsAirId::LoadNarrow,
+            MipsAirId::LoadWord,
+            MipsAirId::StoreNarrow,
+            MipsAirId::StoreWord,
+            MipsAirId::MemoryUnaligned,
+            MipsAirId::SyscallInstrs,
+            MipsAirId::DivRem,
+            MipsAirId::AddSub,
+            MipsAirId::Bitwise,
+            MipsAirId::Mul,
+            MipsAirId::ShiftRight,
+            MipsAirId::ShiftLeft,
+            MipsAirId::Lt,
+            MipsAirId::MemoryLocal,
             MipsAirId::MemoryBump,
-            MipsAirId::CloClz, MipsAirId::Global, MipsAirId::SyscallCore,
+            MipsAirId::CloClz,
+            MipsAirId::Global,
+            MipsAirId::SyscallCore,
         ];
         let mut heights: Vec<(MipsAirId, usize)> =
             core_ids.iter().map(|id| (*id, get(id))).collect();
@@ -523,19 +545,18 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         // (so `find_shape` re-selects this cluster), plus the swept Program /
         // fixed Byte band.  Memory-cluster (packed) chips are included so the
         // packed-small branch fires when MemoryGlobalInit/Finalize are capped.
-        let raw_from_cluster = |cluster: &ShapeCluster<MipsAirId>,
-                                prog: usize|
-         -> BTreeMap<String, usize> {
-            let mut raw: BTreeMap<String, usize> = BTreeMap::new();
-            raw.insert(MipsAirId::Program.to_string(), 1usize << prog);
-            raw.insert(MipsAirId::Byte.to_string(), 1usize << byte_band);
-            for (air, hs) in cluster.iter() {
-                if let Some(cap) = hs.last().copied().flatten() {
-                    raw.insert(air.to_string(), 1usize << cap);
+        let raw_from_cluster =
+            |cluster: &ShapeCluster<MipsAirId>, prog: usize| -> BTreeMap<String, usize> {
+                let mut raw: BTreeMap<String, usize> = BTreeMap::new();
+                raw.insert(MipsAirId::Program.to_string(), 1usize << prog);
+                raw.insert(MipsAirId::Byte.to_string(), 1usize << byte_band);
+                for (air, hs) in cluster.iter() {
+                    if let Some(cap) = hs.last().copied().flatten() {
+                        raw.insert(air.to_string(), 1usize << cap);
+                    }
                 }
-            }
-            raw
-        };
+                raw
+            };
 
         let mut out: BTreeSet<Vec<(String, usize)>> = BTreeSet::new();
         let mut emit = |shape: Shape<MipsAirId>| {
@@ -640,18 +661,19 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         // A cluster's own canonical shape: each chip at its band-cap log-height
         // (`hs.last()`), plus Program (swept) / Byte (fixed), then canonicalize
         // (superset-cluster missing chips at log-1).  No min-area search.
-        let cluster_canonical = |cluster: &ShapeCluster<MipsAirId>, prog: usize| -> Shape<MipsAirId> {
-            let mut shape: Shape<MipsAirId> = Shape::new(HashMap::new());
-            shape.insert(MipsAirId::Program, prog);
-            shape.insert(MipsAirId::Byte, byte_band);
-            for (air, hs) in cluster.iter() {
-                if let Some(cap) = hs.last().copied().flatten() {
-                    shape.insert(*air, cap);
+        let cluster_canonical =
+            |cluster: &ShapeCluster<MipsAirId>, prog: usize| -> Shape<MipsAirId> {
+                let mut shape: Shape<MipsAirId> = Shape::new(HashMap::new());
+                shape.insert(MipsAirId::Program, prog);
+                shape.insert(MipsAirId::Byte, byte_band);
+                for (air, hs) in cluster.iter() {
+                    if let Some(cap) = hs.last().copied().flatten() {
+                        shape.insert(*air, cap);
+                    }
                 }
-            }
-            canonicalize(&mut shape);
-            shape
-        };
+                canonicalize(&mut shape);
+                shape
+            };
 
         let mut out: BTreeSet<Vec<(String, usize)>> = BTreeSet::new();
         let mut emit = |shape: Shape<MipsAirId>| {
@@ -1159,7 +1181,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             .map(|(air, height)| self.costs.get(air).copied().unwrap_or(0) * (1 << height))
             .sum()
     }
-
 }
 
 impl<F: PrimeField32> Default for CoreShapeConfig<F> {
@@ -1415,11 +1436,29 @@ pub mod tests {
         eprintln!("[ENUMCANON] set size = {}", set.len());
         // The REALCANON the fib-1k CPU shard padded to (from prove.rs probe).
         let mut want: Vec<(String, usize)> = vec![
-            ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
-            ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
-            ("Jump", 10), ("Lt", 12), ("LoadNarrow", 10), ("LoadWord", 10), ("StoreNarrow", 10), ("StoreWord", 10), ("MemoryUnaligned", 10), ("MemoryLocal", 10),
-            ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
-            ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
+            ("AddSub", 13),
+            ("Bitwise", 12),
+            ("Branch", 11),
+            ("Byte", 16),
+            ("CloClz", 10),
+            ("Cpu", 14),
+            ("DivRem", 10),
+            ("Global", 9),
+            ("Jump", 10),
+            ("Lt", 12),
+            ("LoadNarrow", 10),
+            ("LoadWord", 10),
+            ("StoreNarrow", 10),
+            ("StoreWord", 10),
+            ("MemoryUnaligned", 10),
+            ("MemoryLocal", 10),
+            ("MiscInstrs", 1),
+            ("MovCond", 10),
+            ("Mul", 10),
+            ("Program", 19),
+            ("ShiftLeft", 9),
+            ("ShiftRight", 9),
+            ("SyscallCore", 10),
             ("SyscallInstrs", 10),
         ]
         .into_iter()
@@ -1475,14 +1514,32 @@ pub mod tests {
         let cfg = CoreShapeConfig::<KoalaBear>::default();
         // RAW event counts the fib-1k CPU shard actually had (prove.rs probe).
         let raw: BTreeMap<String, usize> = [
-            ("AddSub", 4860), ("Bitwise", 2127), ("Branch", 1121), ("CloClz", 1),
-            ("Cpu", 8369), ("DivRem", 1000), ("Global", 450), ("Jump", 70),
-            ("Lt", 3296), ("LoadNarrow", 501), ("LoadWord", 501), ("StoreNarrow", 501), ("StoreWord", 501), ("MemoryUnaligned", 501), ("MemoryLocal", 51),
-            ("MiscInstrs", 0), ("MovCond", 26), ("Mul", 1003), ("ShiftLeft", 107),
-            ("ShiftRight", 30), ("SyscallCore", 24), ("SyscallInstrs", 24),
+            ("AddSub", 4860),
+            ("Bitwise", 2127),
+            ("Branch", 1121),
+            ("CloClz", 1),
+            ("Cpu", 8369),
+            ("DivRem", 1000),
+            ("Global", 450),
+            ("Jump", 70),
+            ("Lt", 3296),
+            ("LoadNarrow", 501),
+            ("LoadWord", 501),
+            ("StoreNarrow", 501),
+            ("StoreWord", 501),
+            ("MemoryUnaligned", 501),
+            ("MemoryLocal", 51),
+            ("MiscInstrs", 0),
+            ("MovCond", 26),
+            ("Mul", 1003),
+            ("ShiftLeft", 107),
+            ("ShiftRight", 30),
+            ("SyscallCore", 24),
+            ("SyscallInstrs", 24),
             // Preprocessed raw heights (Program from its instruction count band,
             // Byte at its 2^16 table) — feed the prep find_shape.
-            ("Program", 1 << 14), ("Byte", 1 << 16),
+            ("Program", 1 << 14),
+            ("Byte", 1 << 16),
         ]
         .into_iter()
         .map(|(n, h)| (n.to_string(), h))
@@ -1494,12 +1551,30 @@ pub mod tests {
             got.iter().map(|(id, h)| (id.to_string(), *h)).collect();
         got_v.sort();
         let mut want: Vec<(String, usize)> = vec![
-            ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
-            ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
-            ("Jump", 10), ("Lt", 12), ("LoadNarrow", 10), ("LoadWord", 10), ("StoreNarrow", 10), ("StoreWord", 10), ("MemoryUnaligned", 10), ("MemoryLocal", 10),
+            ("AddSub", 13),
+            ("Bitwise", 12),
+            ("Branch", 11),
+            ("Byte", 16),
+            ("CloClz", 10),
+            ("Cpu", 14),
+            ("DivRem", 10),
+            ("Global", 9),
+            ("Jump", 10),
+            ("Lt", 12),
+            ("LoadNarrow", 10),
+            ("LoadWord", 10),
+            ("StoreNarrow", 10),
+            ("StoreWord", 10),
+            ("MemoryUnaligned", 10),
+            ("MemoryLocal", 10),
             ("MemoryBump", 1),
-            ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
-            ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
+            ("MiscInstrs", 1),
+            ("MovCond", 10),
+            ("Mul", 10),
+            ("Program", 19),
+            ("ShiftLeft", 9),
+            ("ShiftRight", 9),
+            ("SyscallCore", 10),
             ("SyscallInstrs", 10),
         ]
         .into_iter()
@@ -1534,11 +1609,8 @@ pub mod tests {
         let mut set: std::collections::BTreeSet<Vec<(String, usize)>> = Default::default();
         let mut swept = 0usize;
         for cluster in &ms.chip_clusters {
-            let names: Vec<String> = cluster
-                .iter()
-                .filter(|n| chips_by_name.contains_key(*n))
-                .cloned()
-                .collect();
+            let names: Vec<String> =
+                cluster.iter().filter(|n| chips_by_name.contains_key(*n)).cloned().collect();
             if names.is_empty() {
                 continue;
             }
@@ -1584,11 +1656,29 @@ pub mod tests {
             }
         }
         let mut want: Vec<(String, usize)> = vec![
-            ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
-            ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
-            ("Jump", 10), ("Lt", 12), ("LoadNarrow", 10), ("LoadWord", 10), ("StoreNarrow", 10), ("StoreWord", 10), ("MemoryUnaligned", 10), ("MemoryLocal", 10),
-            ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
-            ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
+            ("AddSub", 13),
+            ("Bitwise", 12),
+            ("Branch", 11),
+            ("Byte", 16),
+            ("CloClz", 10),
+            ("Cpu", 14),
+            ("DivRem", 10),
+            ("Global", 9),
+            ("Jump", 10),
+            ("Lt", 12),
+            ("LoadNarrow", 10),
+            ("LoadWord", 10),
+            ("StoreNarrow", 10),
+            ("StoreWord", 10),
+            ("MemoryUnaligned", 10),
+            ("MemoryLocal", 10),
+            ("MiscInstrs", 1),
+            ("MovCond", 10),
+            ("Mul", 10),
+            ("Program", 19),
+            ("ShiftLeft", 9),
+            ("ShiftRight", 9),
+            ("SyscallCore", 10),
             ("SyscallInstrs", 10),
         ]
         .into_iter()
@@ -1640,10 +1730,28 @@ pub mod tests {
         // The fib-1k CPU shard chip-SET (same names as raw_canonical_matches_*),
         // here used as a FIXED chip-set whose RAW heights we sweep.
         let names: Vec<&str> = vec![
-            "AddSub", "Bitwise", "Branch", "CloClz", "Cpu", "DivRem", "Global",
-            "Jump", "Lt", "LoadNarrow", "LoadWord", "StoreNarrow", "StoreWord",
-            "MemoryUnaligned", "MemoryLocal", "MiscInstrs", "MovCond",
-            "Mul", "ShiftLeft", "ShiftRight", "SyscallCore", "SyscallInstrs",
+            "AddSub",
+            "Bitwise",
+            "Branch",
+            "CloClz",
+            "Cpu",
+            "DivRem",
+            "Global",
+            "Jump",
+            "Lt",
+            "LoadNarrow",
+            "LoadWord",
+            "StoreNarrow",
+            "StoreWord",
+            "MemoryUnaligned",
+            "MemoryLocal",
+            "MiscInstrs",
+            "MovCond",
+            "Mul",
+            "ShiftLeft",
+            "ShiftRight",
+            "SyscallCore",
+            "SyscallInstrs",
         ];
         // Several RAW height profiles, ALL with the SAME chip-set present (every
         // chip has >=1 event so it is genuinely present, never canonicalized
@@ -1657,7 +1765,8 @@ pub mod tests {
                     let v = match *n {
                         "Cpu" => cpu,
                         "AddSub" | "Lt" | "Mul" | "DivRem" => big,
-                        "Bitwise" | "Branch" | "LoadNarrow" | "LoadWord" | "StoreNarrow" | "StoreWord" | "MemoryUnaligned" | "Global" => mid,
+                        "Bitwise" | "Branch" | "LoadNarrow" | "LoadWord" | "StoreNarrow"
+                        | "StoreWord" | "MemoryUnaligned" | "Global" => mid,
                         _ => small,
                     };
                     m.insert(n.to_string(), v.max(1));
@@ -1667,10 +1776,10 @@ pub mod tests {
                 m
             };
             vec![
-                ("tiny",   mk(8369, 4860, 1000, 24, 14)),
-                ("small",  mk(20000, 10000, 3000, 60, 14)),
+                ("tiny", mk(8369, 4860, 1000, 24, 14)),
+                ("small", mk(20000, 10000, 3000, 60, 14)),
                 ("medium", mk(120000, 60000, 20000, 500, 15)),
-                ("large",  mk(900000, 400000, 100000, 4000, 16)),
+                ("large", mk(900000, 400000, 100000, 4000, 16)),
                 ("xlarge", mk(3500000, 1500000, 400000, 20000, 16)),
             ]
         };
@@ -1758,7 +1867,10 @@ pub mod tests {
                     .collect();
                 eprintln!(
                     "[STEP0] host-committed shapes DIFFER between '{}' and '{}' on {} chips: {:?}",
-                    nonempty[0].0, nonempty[nonempty.len() - 1].0, differ.len(), differ
+                    nonempty[0].0,
+                    nonempty[nonempty.len() - 1].0,
+                    differ.len(),
+                    differ
                 );
             }
         }
@@ -1919,7 +2031,10 @@ pub mod tests {
             "Byte",
             "Program",
         ] {
-            assert!(present.contains(must), "canonicalized shard must contain {must}; got {present:?}");
+            assert!(
+                present.contains(must),
+                "canonicalized shard must contain {must}; got {present:?}"
+            );
         }
         // The injected ShaCompress chips sit at log-height 1 (zero-event pad).
         assert_eq!(
@@ -2045,13 +2160,9 @@ pub fn canonicalize_shape(shape: &mut Shape<MipsAirId>) {
     // live machine id) and pick the smallest superset cluster.
     let mut best: Option<BTreeSet<MipsAirId>> = None;
     for cluster in clusters.iter() {
-        let ids: BTreeSet<MipsAirId> = cluster
-            .iter()
-            .filter_map(|n| MipsAirId::from_str(n).ok())
-            .collect();
-        if present.is_subset(&ids)
-            && best.as_ref().map(|b| ids.len() < b.len()).unwrap_or(true)
-        {
+        let ids: BTreeSet<MipsAirId> =
+            cluster.iter().filter_map(|n| MipsAirId::from_str(n).ok()).collect();
+        if present.is_subset(&ids) && best.as_ref().map(|b| ids.len() < b.len()).unwrap_or(true) {
             best = Some(ids);
         }
     }

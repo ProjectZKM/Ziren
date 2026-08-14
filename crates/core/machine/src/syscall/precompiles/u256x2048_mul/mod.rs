@@ -16,10 +16,10 @@ mod tests {
         syscalls::SyscallCode,
         ExecutionRecord, Program,
     };
-    use zkm_primitives::consts::bytes_to_words_le;
     use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, StarkGenericConfig,
     };
+    use zkm_primitives::consts::bytes_to_words_le;
 
     use crate::{
         io::ZKMStdin,

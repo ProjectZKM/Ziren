@@ -10,12 +10,12 @@ use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumTryAs};
 use zkm_core_executor::ZKMReduceProof;
-use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 use zkm_pcs::ShardProof;
 use zkm_pcs::{
-    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2,
-    StarkVerifyingKey, Word, DIGEST_SIZE,
+    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey, Word,
+    DIGEST_SIZE,
 };
+use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 
 use error::StarkError;
 use verify::verify_stark_compressed_proof;
@@ -154,8 +154,7 @@ impl StarkVerifier {
     }
 }
 
-impl HashableKey for StarkVerifyingKey<KoalaBearPoseidon2>
-{
+impl HashableKey for StarkVerifyingKey<KoalaBearPoseidon2> {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
         // SP1's inputs, in SP1's order
         // (hypercube/src/verifier/hashable_key.rs:107).  Nothing about the

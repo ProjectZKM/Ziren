@@ -8,18 +8,18 @@ use zkm_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
 use zkm_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
 
 use thiserror::Error;
+use zkm_pcs::{
+    air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
+    koala_bear_poseidon2::KoalaBearPoseidon2,
+    MachineProof, MachineProver, MachineVerificationError, PartStarkVerifyingKey,
+    StarkGenericConfig, Word,
+};
 use zkm_recursion_circuit::machine::RootPublicValues;
 use zkm_recursion_core::{
     air::RecursionPublicValues, hash_vkey_with_part_vk, stark::KoalaBearPoseidon2Outer,
 };
 use zkm_recursion_gnark_ffi::{
     Groth16Bn254Proof, Groth16Bn254Prover, PlonkBn254Proof, PlonkBn254Prover,
-};
-use zkm_pcs::{
-    air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
-    koala_bear_poseidon2::KoalaBearPoseidon2,
-    MachineProof, MachineProver, MachineVerificationError, PartStarkVerifyingKey,
-    StarkGenericConfig, Word,
 };
 
 use crate::{
@@ -138,12 +138,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc != next_pc_prev: start_pc should equal next_pc_prev for all shards",
                 ));
-            } else if !shard_proof.contains_execution() && public_values.start_pc != public_values.next_pc
+            } else if !shard_proof.contains_execution()
+                && public_values.start_pc != public_values.next_pc
             {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc != next_pc: start_pc should equal next_pc for non-cpu shards",
                 ));
-            } else if shard_proof.contains_execution() && public_values.start_pc == KoalaBear::ZERO {
+            } else if shard_proof.contains_execution() && public_values.start_pc == KoalaBear::ZERO
+            {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc == 0: execution should never start at halted state",
                 ));

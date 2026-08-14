@@ -15,8 +15,8 @@
 
 use std::collections::BTreeMap;
 
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 use zkm_pcs::shard_level::types as st;
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
 use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::jagged_circuit::JaggedPcsProofVariable;
@@ -53,10 +53,7 @@ pub fn lift_partial_sumcheck_proof<K: Clone>(
 /// Convert a stark-side [`st::LogUpGkrOutput`] into the
 /// recursion-circuit's own [`rc::LogUpGkrOutput`].
 pub fn lift_logup_gkr_output<K: Clone>(src: &st::LogUpGkrOutput<K>) -> rc::LogUpGkrOutput<K> {
-    rc::LogUpGkrOutput {
-        numerator: src.numerator.clone(),
-        denominator: src.denominator.clone(),
-    }
+    rc::LogUpGkrOutput { numerator: src.numerator.clone(), denominator: src.denominator.clone() }
 }
 
 /// Convert a stark-side [`st::LogupGkrRoundProof`] into the
@@ -88,9 +85,7 @@ pub fn lift_chip_evaluation<K: Clone>(src: &st::ChipEvaluation<K>) -> rc::ChipEv
 
 /// Convert a stark-side [`st::LogUpEvaluations`] into the
 /// recursion-circuit's own [`rc::LogUpEvaluations`].
-pub fn lift_logup_evaluations<K: Clone>(
-    src: &st::LogUpEvaluations<K>,
-) -> rc::LogUpEvaluations<K> {
+pub fn lift_logup_evaluations<K: Clone>(src: &st::LogUpEvaluations<K>) -> rc::LogUpEvaluations<K> {
     rc::LogUpEvaluations {
         point: src.point.clone(),
         chip_openings: src
@@ -267,8 +262,7 @@ pub fn build_basefold_shard_verifier_with_params<HV>(
 ) -> crate::shard_basefold::BasefoldShardVerifier<
     crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
 > {
-    let basefold_verifier =
-        crate::basefold_verifier::RecursiveBasefoldVerifier::<HV>::new(params);
+    let basefold_verifier = crate::basefold_verifier::RecursiveBasefoldVerifier::<HV>::new(params);
     let stacked_pcs_verifier = crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
         basefold_verifier,
         log_stacking_height,
@@ -309,11 +303,8 @@ where
     let chips = chip_openings
         .values()
         .map(|opening| {
-            let preprocessed_evals = opening
-                .preprocessed_trace_evaluations
-                .as_ref()
-                .cloned()
-                .unwrap_or_default();
+            let preprocessed_evals =
+                opening.preprocessed_trace_evaluations.as_ref().cloned().unwrap_or_default();
             let main_evals = opening.main_trace_evaluations.clone();
             let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
@@ -322,9 +313,8 @@ where
             // `verify_zerocheck` expects at zerocheck.rs:503 when
             // it constructs `degree_symbolic` of the same length as
             // `proof_point_extended` (= max_log_row_count + 1).
-            let degree_bits: Vec<Ext<C::F, C::EF>> = (0..max_log_row_count + 1)
-                .map(|_| builder.constant(C::EF::ZERO))
-                .collect();
+            let degree_bits: Vec<Ext<C::F, C::EF>> =
+                (0..max_log_row_count + 1).map(|_| builder.constant(C::EF::ZERO)).collect();
             crate::basefold_chip_opened_values::BasefoldChipOpenedValues {
                 preprocessed: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
                     local: preprocessed_evals,
@@ -360,10 +350,7 @@ pub fn build_opened_values_from_chip_openings_with_cumsums<C>(
     >,
     chip_cumulative_sums: &std::collections::BTreeMap<
         String,
-        zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
-            Felt<C::F>,
-            Ext<C::F, C::EF>,
-        >,
+        zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>,
     >,
     max_log_row_count: usize,
 ) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
@@ -378,17 +365,13 @@ where
     let chips = chip_openings
         .iter()
         .map(|(name, opening)| {
-            let preprocessed_evals = opening
-                .preprocessed_trace_evaluations
-                .as_ref()
-                .cloned()
-                .unwrap_or_default();
+            let preprocessed_evals =
+                opening.preprocessed_trace_evaluations.as_ref().cloned().unwrap_or_default();
             let main_evals = opening.main_trace_evaluations.clone();
             let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
-            let degree_bits: Vec<Ext<C::F, C::EF>> = (0..max_log_row_count + 1)
-                .map(|_| builder.constant(C::EF::ZERO))
-                .collect();
+            let degree_bits: Vec<Ext<C::F, C::EF>> =
+                (0..max_log_row_count + 1).map(|_| builder.constant(C::EF::ZERO)).collect();
 
             // Use real cumulative sums when present; fall back to zero
             // placeholders when chip is missing from the map.
@@ -459,8 +442,6 @@ pub fn finalize_carried_opened_values<C>(
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    
-
     let bit_len = max_log_row_count + 1;
     let chips = carried
         .chips
@@ -507,9 +488,7 @@ where
     chip_names
         .iter()
         .map(|name| {
-            let bits = (0..max_log_row_count + 1)
-                .map(|_| builder.constant(C::F::ZERO))
-                .collect();
+            let bits = (0..max_log_row_count + 1).map(|_| builder.constant(C::F::ZERO)).collect();
             (name.clone(), bits)
         })
         .collect()
@@ -546,7 +525,6 @@ where
     C: CircuitConfig,
 {
     use p3_field::PrimeCharacteristicRing;
-    
 
     // Pair each chip name with its log_h (default 0 when missing).
     let mut entries: Vec<(String, u8)> = chip_names
@@ -583,11 +561,8 @@ where
                 .map(|i| {
                     // i=0 is the MSB (slot 0 of Horner accumulation).
                     let shift = bit_len - 1 - i;
-                    let bit_val = if shift < usize::BITS as usize {
-                        (log_h_u >> shift) & 1
-                    } else {
-                        0
-                    };
+                    let bit_val =
+                        if shift < usize::BITS as usize { (log_h_u >> shift) & 1 } else { 0 };
                     if bit_val == 1 {
                         builder.constant(C::F::ONE)
                     } else {
@@ -661,11 +636,8 @@ where
             // The witnessed per-chip degree bits (big-endian bits of
             // 2^log_h).  Fall back to a single zero stub when absent
             // (empty/legacy proofs) → log_h = 0.
-            let degree: &[Ext<C::F, C::EF>] = opened_values
-                .chips
-                .get(idx)
-                .map(|c| c.degree.as_slice())
-                .unwrap_or(&[]);
+            let degree: &[Ext<C::F, C::EF>] =
+                opened_values.chips.get(idx).map(|c| c.degree.as_slice()).unwrap_or(&[]);
             let dlen = degree.len();
 
             // CEIL log of the witnessed HEIGHT, recomposed in the extension
@@ -755,11 +727,8 @@ where
         .into_iter()
         .enumerate()
         .map(|(idx, _name)| {
-            let degree: &[Ext<C::F, C::EF>] = opened_values
-                .chips
-                .get(idx)
-                .map(|c| c.degree.as_slice())
-                .unwrap_or(&[]);
+            let degree: &[Ext<C::F, C::EF>] =
+                opened_values.chips.get(idx).map(|c| c.degree.as_slice()).unwrap_or(&[]);
             if degree.is_empty() {
                 return builder.constant(C::F::ZERO);
             }
@@ -787,8 +756,7 @@ mod tests {
     #[test]
     fn logup_gkr_proof_lifts() {
         use p3_field::PrimeCharacteristicRing;
-        let src: st::LogupGkrProof<InnerVal, InnerChallenge> =
-            st::LogupGkrProof::dummy();
+        let src: st::LogupGkrProof<InnerVal, InnerChallenge> = st::LogupGkrProof::dummy();
         let lifted = lift_logup_gkr_proof(&src);
         assert_eq!(lifted.round_proofs.len(), src.round_proofs.len());
         assert_eq!(lifted.witness, src.witness);
@@ -806,10 +774,8 @@ mod tests {
         use zkm_recursion_compiler::config::InnerConfig;
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let zero = builder.constant(InnerChallenge::ZERO);
-        let mut chip_openings: BTreeMap<
-            String,
-            zkm_pcs::shard_level::types::ChipEvaluation<_>,
-        > = BTreeMap::new();
+        let mut chip_openings: BTreeMap<String, zkm_pcs::shard_level::types::ChipEvaluation<_>> =
+            BTreeMap::new();
         chip_openings.insert(
             "Cpu".to_string(),
             zkm_pcs::shard_level::types::ChipEvaluation {
@@ -830,11 +796,8 @@ mod tests {
                 preprocessed_trace_evaluations_full: None,
             },
         );
-        let opened = build_opened_values_from_chip_openings::<InnerConfig>(
-            &mut builder,
-            &chip_openings,
-            4,
-        );
+        let opened =
+            build_opened_values_from_chip_openings::<InnerConfig>(&mut builder, &chip_openings, 4);
         assert_eq!(opened.chips.len(), 2);
         // BTreeMap iteration is sorted: Cpu < Memory.
         assert_eq!(opened.chips[0].main.local.len(), 3);
@@ -861,23 +824,19 @@ mod tests {
                 numerator: vec![v(10), v(20)],
                 denominator: vec![v(30), v(40)],
             },
-            round_proofs: vec![
-                zkm_pcs::shard_level::types::LogupGkrRoundProof {
-                    numerator_0: v(1),
-                    numerator_1: v(2),
-                    denominator_0: v(3),
-                    denominator_1: v(4),
-                    sumcheck_proof: zkm_pcs::shard_level::types::PartialSumcheckProof {
-                        univariate_polys: vec![
-                            zkm_pcs::shard_level::types::UnivariatePolynomial {
-                                coefficients: vec![v(5), v(6)],
-                            },
-                        ],
-                        claimed_sum: v(7),
-                        point_and_eval: (vec![v(8)], v(9)),
-                    },
+            round_proofs: vec![zkm_pcs::shard_level::types::LogupGkrRoundProof {
+                numerator_0: v(1),
+                numerator_1: v(2),
+                denominator_0: v(3),
+                denominator_1: v(4),
+                sumcheck_proof: zkm_pcs::shard_level::types::PartialSumcheckProof {
+                    univariate_polys: vec![zkm_pcs::shard_level::types::UnivariatePolynomial {
+                        coefficients: vec![v(5), v(6)],
+                    }],
+                    claimed_sum: v(7),
+                    point_and_eval: (vec![v(8)], v(9)),
                 },
-            ],
+            }],
             logup_evaluations: zkm_pcs::shard_level::types::LogUpEvaluations {
                 point: vec![v(100), v(101)],
                 chip_openings: BTreeMap::from([(
@@ -946,15 +905,10 @@ mod tests {
         use zkm_recursion_compiler::circuit::AsmBuilder;
         use zkm_recursion_compiler::config::InnerConfig;
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let chip_openings: BTreeMap<
-            String,
-            zkm_pcs::shard_level::types::ChipEvaluation<_>,
-        > = BTreeMap::new();
-        let opened = build_opened_values_from_chip_openings::<InnerConfig>(
-            &mut builder,
-            &chip_openings,
-            4,
-        );
+        let chip_openings: BTreeMap<String, zkm_pcs::shard_level::types::ChipEvaluation<_>> =
+            BTreeMap::new();
+        let opened =
+            build_opened_values_from_chip_openings::<InnerConfig>(&mut builder, &chip_openings, 4);
         assert_eq!(opened.chips.len(), 0);
     }
 
@@ -997,16 +951,16 @@ mod tests {
             point_and_eval: (Vec::new(), builder.constant(InnerChallenge::ZERO)),
         };
         let empty_cols: Vec<Vec<usize>> = Vec::new();
-        let evaluation_proof =
-            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<InnerConfig, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
-                &mut builder,
-                &[],
-                21,
-                &empty_cols,
-            );
+        let evaluation_proof = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<
+            InnerConfig,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+        >(&mut builder, &[], 21, &empty_cols);
         let chip_height_bits = empty_chip_height_bits::<InnerConfig>(&mut builder, &[], 21);
 
-        let assembled = assemble_basefold_shard_proof_variable::<InnerConfig, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
+        let assembled = assemble_basefold_shard_proof_variable::<
+            InnerConfig,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+        >(
             main_commit,
             public_values,
             &logup_gkr_proof,
@@ -1025,7 +979,9 @@ mod tests {
     /// production defaults yields a correctly-shaped verifier.
     #[test]
     fn build_basefold_shard_verifier_production_default() {
-        let v = build_basefold_shard_verifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(21, 21);
+        let v = build_basefold_shard_verifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
+            21, 21,
+        );
         assert_eq!(v.max_log_row_count, 21);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 21);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 21);
@@ -1040,7 +996,9 @@ mod tests {
     /// configuration — verifier still constructs).
     #[test]
     fn build_basefold_shard_verifier_with_mismatched_heights() {
-        let v = build_basefold_shard_verifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(15, 12);
+        let v = build_basefold_shard_verifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
+            15, 12,
+        );
         assert_eq!(v.max_log_row_count, 15);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 12);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 15);
@@ -1092,12 +1050,8 @@ mod tests {
         map.insert("B".to_string(), 5);
         map.insert("C".to_string(), 5); // tie broken by name
         let max_log_row_count = 5; // bit_len = 6
-        let result = chip_height_bits_from_log_heights::<C>(
-            &mut builder,
-            &names,
-            &map,
-            max_log_row_count,
-        );
+        let result =
+            chip_height_bits_from_log_heights::<C>(&mut builder, &names, &map, max_log_row_count);
         // Name-ascending sort order: A, B, C (height is NOT a sort key).
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].0, "A");
@@ -1116,12 +1070,7 @@ mod tests {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let names = vec!["X".to_string()];
         let map: BTreeMap<String, u8> = BTreeMap::new();
-        let result = chip_height_bits_from_log_heights::<C>(
-            &mut builder,
-            &names,
-            &map,
-            4,
-        );
+        let result = chip_height_bits_from_log_heights::<C>(&mut builder, &names, &map, 4);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "X");
         // 5 slots, all zero (log_h=0 default).

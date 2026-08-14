@@ -82,7 +82,10 @@ impl<F> LongMle<F> {
 
     /// Total values across all components — `sum(num_polynomials * 2^num_variables)`.
     pub fn total_values(&self) -> usize {
-        self.components.iter().map(|mle| mle.num_polynomials() << mle.num_variables()).sum::<usize>()
+        self.components
+            .iter()
+            .map(|mle| mle.num_polynomials() << mle.num_variables())
+            .sum::<usize>()
     }
 
     /// Total variables of the long polynomial.
@@ -215,9 +218,8 @@ mod tests {
                 let nv = long.num_variables() as usize;
                 assert_eq!(1usize << nv, flat.len(), "num_variables disagrees with flat length");
 
-                let point: Vec<InnerChallenge> = (0..nv)
-                    .map(|_| InnerChallenge::from_u32(rng.gen::<u32>() % 1000))
-                    .collect();
+                let point: Vec<InnerChallenge> =
+                    (0..nv).map(|_| InnerChallenge::from_u32(rng.gen::<u32>() % 1000)).collect();
 
                 let got = long.eval_at(&point);
                 let want = Mle::from_values(flat).eval_at(&point)[0];
@@ -242,8 +244,9 @@ mod tests {
                 let split = nv - lsh as usize;
 
                 let alpha = InnerChallenge::from_u32(rng.gen::<u32>() % 1000);
-                let rest: Vec<InnerChallenge> =
-                    (0..nv - 1).map(|_| InnerChallenge::from_u32(rng.gen::<u32>() % 1000)).collect();
+                let rest: Vec<InnerChallenge> = (0..nv - 1)
+                    .map(|_| InnerChallenge::from_u32(rng.gen::<u32>() % 1000))
+                    .collect();
 
                 // Folded polynomial evaluated at `rest`.
                 let folded = long.fix_last_variable(alpha);
@@ -365,8 +368,7 @@ mod tests {
         for widths in [vec![2usize, 2], vec![4, 4]] {
             let lsh = 3u32;
             let comps = build(&mut rng, &widths, lsh);
-            let total: usize =
-                comps.iter().map(|m| m.num_polynomials() << m.num_variables()).sum();
+            let total: usize = comps.iter().map(|m| m.num_polynomials() << m.num_variables()).sum();
             assert!(total.is_power_of_two());
 
             let weights: Vec<InnerChallenge> =
@@ -397,9 +399,7 @@ mod tests {
 
             // Final base value == trace poly at the recorded point.
             let base_full = LongMle::from_components(
-                vec![Mle::from_values(
-                    hp.base.first_component().guts().as_slice().to_vec(),
-                )],
+                vec![Mle::from_values(hp.base.first_component().guts().as_slice().to_vec())],
                 hp.base.num_variables(),
             );
             let want = base_full.eval_at(&proof.eval_point);
@@ -540,11 +540,13 @@ mod tests {
             let inter = hp.base.first_component().guts().as_slice();
 
             assert_eq!(
-                &natural[..], inter,
+                &natural[..],
+                inter,
                 "widths={widths:?}: interleaved base must equal the NATURAL-order dense layout",
             );
             assert_ne!(
-                &legacy[..], inter,
+                &legacy[..],
+                inter,
                 "widths={widths:?}: legacy bitrev is the one real difference — if this stops \
                  holding the orientation flag has changed meaning",
             );
@@ -632,12 +634,8 @@ where
     let e = ext.guts().as_slice();
     debug_assert_eq!(b.len(), e.len());
 
-    let eval_0: EF = e
-        .par_iter()
-        .step_by(2)
-        .zip(b.par_iter().step_by(2))
-        .map(|(x, y)| *x * *y)
-        .sum();
+    let eval_0: EF =
+        e.par_iter().step_by(2).zip(b.par_iter().step_by(2)).map(|(x, y)| *x * *y).sum();
 
     // `claim = p(0) + p(1)` lets the odd half be skipped entirely.
     let eval_1: EF = claim.map(|c| c - eval_0).unwrap_or_else(|| {
@@ -685,8 +683,7 @@ where
     }
 }
 
-impl<F, EF> crate::shard_level::sumcheck_poly::SumcheckPolyFirstRound<EF>
-    for HadamardProduct<F, EF>
+impl<F, EF> crate::shard_level::sumcheck_poly::SumcheckPolyFirstRound<EF> for HadamardProduct<F, EF>
 where
     F: Field + Sync,
     EF: ExtensionField<F> + Send + Sync,
@@ -802,8 +799,8 @@ pub fn prove_jagged_reduction_hadamard_poly<C>(
 where
     C: p3_challenger::FieldChallenger<crate::InnerVal>,
 {
-    use crate::shard_level::sumcheck_poly::{SumcheckPoly, SumcheckPolyFirstRound};
     use crate::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
+    use crate::shard_level::sumcheck_poly::{SumcheckPoly, SumcheckPolyFirstRound};
     let n = <HadamardProduct<crate::InnerVal, crate::InnerChallenge> as
         crate::shard_level::sumcheck_poly::SumcheckPolyBase>::num_variables(&hp);
 

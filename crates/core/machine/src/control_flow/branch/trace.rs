@@ -94,7 +94,6 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
             !shard.branch_events.is_empty()
         }
     }
-
 }
 
 impl BranchChip {

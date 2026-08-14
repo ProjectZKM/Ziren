@@ -9,7 +9,7 @@ use crate::{
     utils::{next_power_of_two, pad_rows_fixed, zeroed_f_vec},
     CoreChipError,
 };
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -137,8 +137,7 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
                 let pc = input.program.pc_base + (i as u32 * 4);
                 let mut row = [F::ZERO; NUM_PROGRAM_MULT_COLS];
                 let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
-                cols.multiplicity =
-                    F::from_usize(*instruction_counts.get(&pc).unwrap_or(&0));
+                cols.multiplicity = F::from_usize(*instruction_counts.get(&pc).unwrap_or(&0));
                 row
             })
             .collect::<Vec<_>>();

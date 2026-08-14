@@ -31,7 +31,6 @@
 //! that the [`crate::jagged_eval_sumcheck::prove_jagged_evaluation`]
 //! sumcheck reduces.
 
-
 use alloc::vec::Vec;
 use core::array;
 
@@ -96,13 +95,12 @@ pub fn all_memory_states() -> [MemoryState; 4] {
 /// `Mle::partial_lagrange` ordering used in `eval` (LSB-first
 /// indexing over [row, index, curr, next]).
 pub fn all_bit_states() -> [BitState; 16] {
-    let mut out: [BitState; 16] =
-        array::from_fn(|_| BitState {
-            row_bit: false,
-            index_bit: false,
-            curr_col_prefix_sum_bit: false,
-            next_col_prefix_sum_bit: false,
-        });
+    let mut out: [BitState; 16] = array::from_fn(|_| BitState {
+        row_bit: false,
+        index_bit: false,
+        curr_col_prefix_sum_bit: false,
+        next_col_prefix_sum_bit: false,
+    });
     for i in 0..16 {
         out[i] = BitState {
             row_bit: (i & 1) != 0,
@@ -141,10 +139,7 @@ pub fn transition_function(bs: BitState, ms: MemoryState) -> StateOrFail {
     }
     let new_carry = (sum >> 1) != 0;
 
-    StateOrFail::State(MemoryState {
-        carry: new_carry,
-        comparison_so_far: new_comparison_so_far,
-    })
+    StateOrFail::State(MemoryState { carry: new_carry, comparison_so_far: new_comparison_so_far })
 }
 
 /// Compute partial-lagrange evaluation of EQ at a 4-point input —
@@ -195,7 +190,6 @@ impl<EF: Field> BranchingProgram<EF> {
         let num_vars = z_row.len().max(z_index.len());
         Self { z_row, z_index, num_vars }
     }
-
 
     fn get_ith_lsb_ef(point: &[EF], i: usize) -> EF {
         let dim = point.len();
@@ -290,10 +284,7 @@ pub fn partial_lagrange<EF: Field>(point: &[EF]) -> Vec<EF> {
 /// `prefix_sums[k]` (usize) into the multilinear-evaluation point
 /// the BP consumes.
 pub fn bits_big_endian<EF: Field>(value: usize, num_bits: usize) -> Vec<EF> {
-    (0..num_bits)
-        .rev()
-        .map(|i| if (value >> i) & 1 == 1 { EF::ONE } else { EF::ZERO })
-        .collect()
+    (0..num_bits).rev().map(|i| if (value >> i) & 1 == 1 { EF::ONE } else { EF::ZERO }).collect()
 }
 
 /// Closed-form evaluation of the jagged polynomial.
@@ -322,7 +313,8 @@ pub fn full_jagged_evaluation<EF: Field>(
     // prefix sums (not `z_index.len()`) avoids the off-by-one that truncated
     // the top prefix-sum bit for single/equal-height packings.
     let last = prefix_sums.last().copied().unwrap_or(0);
-    let log_m = if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
+    let log_m =
+        if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
     // The `claimed_sum` this closed form returns is INVARIANT to `num_bits` (as long
     // as `num_bits` is wide enough to hold every prefix sum).  The branching
     // program reads each prefix-sum bit via `get_ith_lsb`, which indexes from the
@@ -374,12 +366,15 @@ mod tests {
         let bs = all_bit_states();
         assert_eq!(bs.len(), 16);
         // Index 0 = all-false.
-        assert_eq!(bs[0], BitState {
-            row_bit: false,
-            index_bit: false,
-            curr_col_prefix_sum_bit: false,
-            next_col_prefix_sum_bit: false,
-        });
+        assert_eq!(
+            bs[0],
+            BitState {
+                row_bit: false,
+                index_bit: false,
+                curr_col_prefix_sum_bit: false,
+                next_col_prefix_sum_bit: false,
+            }
+        );
         // Index 1 = row-bit only set.
         assert_eq!(bs[1].row_bit, true);
         assert_eq!(bs[1].index_bit, false);
@@ -387,9 +382,12 @@ mod tests {
         assert_eq!(bs[2].row_bit, false);
         assert_eq!(bs[2].index_bit, true);
         // Index 15 = all true.
-        assert!(bs[15].row_bit && bs[15].index_bit
+        assert!(
+            bs[15].row_bit
+                && bs[15].index_bit
                 && bs[15].curr_col_prefix_sum_bit
-                && bs[15].next_col_prefix_sum_bit);
+                && bs[15].next_col_prefix_sum_bit
+        );
     }
 
     /// Sanity: transition from initial state with all-zero bits
@@ -424,8 +422,7 @@ mod tests {
     /// `[1, 0, 0, ..., 0]`.
     #[test]
     fn partial_lagrange_4_at_zero_point_is_basis() {
-        let result =
-            partial_lagrange_4::<InnerChallenge>([InnerChallenge::ZERO; 4]);
+        let result = partial_lagrange_4::<InnerChallenge>([InnerChallenge::ZERO; 4]);
         assert_eq!(result[0], InnerChallenge::ONE);
         for i in 1..16 {
             assert_eq!(result[i], InnerChallenge::ZERO);
@@ -459,9 +456,7 @@ mod tests {
     /// Compute the bit-decomposition of `value` as a big-endian
     /// `Vec<F>` of length `num_bits`.
     fn bits_be<F: Field>(value: usize, num_bits: usize) -> Vec<F> {
-        (0..num_bits).rev()
-            .map(|i| if (value >> i) & 1 == 1 { F::ONE } else { F::ZERO })
-            .collect()
+        (0..num_bits).rev().map(|i| if (value >> i) & 1 == 1 { F::ONE } else { F::ZERO }).collect()
     }
 
     /// **Indicator correctness**: BP eval at integer points should
@@ -493,13 +488,11 @@ mod tests {
                 // Expected: index == 0 + row (since t_c = 0) AND index < t_{c+1} = 3
                 let expected_one = (index == row) && (index < row_count);
                 if expected_one {
-                    assert_eq!(
-                        result, InnerChallenge::ONE,
-                        "row={row} index={index} expected ONE",
-                    );
+                    assert_eq!(result, InnerChallenge::ONE, "row={row} index={index} expected ONE",);
                 } else {
                     assert_eq!(
-                        result, InnerChallenge::ZERO,
+                        result,
+                        InnerChallenge::ZERO,
                         "row={row} index={index} expected ZERO",
                     );
                 }
@@ -532,9 +525,9 @@ mod tests {
     fn bits_big_endian_layout() {
         let bits: Vec<InnerVal> = bits_big_endian(5, 4);
         assert_eq!(bits[0], InnerVal::ZERO); // bit 3
-        assert_eq!(bits[1], InnerVal::ONE);  // bit 2
+        assert_eq!(bits[1], InnerVal::ONE); // bit 2
         assert_eq!(bits[2], InnerVal::ZERO); // bit 1
-        assert_eq!(bits[3], InnerVal::ONE);  // bit 0
+        assert_eq!(bits[3], InnerVal::ONE); // bit 0
     }
 
     /// **Closed-form correctness**: at integer points (z_row, z_col,
@@ -568,12 +561,14 @@ mod tests {
                 let expected_one = row < h_c;
                 if expected_one {
                     assert_eq!(
-                        result, InnerChallenge::ONE,
+                        result,
+                        InnerChallenge::ONE,
                         "col={col} row={row} index={index} expected ONE",
                     );
                 } else {
                     assert_eq!(
-                        result, InnerChallenge::ZERO,
+                        result,
+                        InnerChallenge::ZERO,
                         "col={col} row={row} index={index} expected ZERO",
                     );
                 }

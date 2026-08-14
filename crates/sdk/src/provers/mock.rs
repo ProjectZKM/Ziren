@@ -12,12 +12,12 @@ use anyhow::Result;
 use p3_field::{PrimeCharacteristicRing, PrimeField};
 use p3_fri::FriProof;
 use p3_koala_bear::KoalaBear;
+use zkm_pcs::septic_digest::SepticDigest;
 use zkm_prover::{
     components::DefaultProverComponents,
     verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
     DvSnarkBn254Proof, Groth16Bn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
 };
-use zkm_pcs::septic_digest::SepticDigest;
 
 use super::{ProofOpts, ProverType};
 
@@ -72,10 +72,7 @@ impl Prover<DefaultProverComponents> for MockProver {
             ZKMProofKind::Compressed => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
 
-                let shard_proof = ShardProof {
-                    public_values: vec![],
-                    basefold_shard_proof: None,
-                };
+                let shard_proof = ShardProof { public_values: vec![], basefold_shard_proof: None };
 
                 let reduce_vk = StarkVerifyingKey {
                     commit: vec![[KoalaBear::ZERO; 8]].into(),

@@ -34,9 +34,9 @@ use std::marker::PhantomData;
 
 use p3_air::{AirBuilder, ExtensionBuilder};
 use p3_field::{Algebra, ExtensionField, Field};
-use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
 use zkm_pcs::folder::PairWindow;
 use zkm_pcs::septic_digest::SepticDigest;
+use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
 
 /// In-circuit chip-constraint folder for the BaseFold pipeline.
 ///
@@ -208,9 +208,9 @@ where
 mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
+    use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
-    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;
@@ -222,12 +222,9 @@ mod tests {
     fn folder_constructs_and_assert_zero_works() {
         let mut builder = AsmBuilder::<F, EF>::default();
         let alpha = builder.constant(EF::ONE);
-        let preproc_row: Vec<Ext<F, EF>> =
-            (0..2).map(|_| builder.constant(EF::ZERO)).collect();
-        let main_row: Vec<Ext<F, EF>> =
-            (0..3).map(|_| builder.constant(EF::ZERO)).collect();
-        let public_values: Vec<Felt<F>> =
-            (0..4).map(|_| builder.constant(F::ZERO)).collect();
+        let preproc_row: Vec<Ext<F, EF>> = (0..2).map(|_| builder.constant(EF::ZERO)).collect();
+        let main_row: Vec<Ext<F, EF>> = (0..3).map(|_| builder.constant(EF::ZERO)).collect();
+        let public_values: Vec<Felt<F>> = (0..4).map(|_| builder.constant(F::ZERO)).collect();
 
         let local_sum = builder.constant(EF::ZERO);
         // Construct a placeholder SepticDigest by re-using the
@@ -288,15 +285,17 @@ mod tests {
 mod basefold_air_assertions_circuit {
     use super::*;
     use p3_air::Air;
+    use zkm_pcs::InnerVal;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_core::chips::{
-        alu_base::BaseAluChip, alu_ext::ExtAluChip,
+        alu_base::BaseAluChip,
+        alu_ext::ExtAluChip,
         mem::{constant::MemoryChip as MemoryConstChip, variable::MemoryChip as MemoryVarChip},
         poseidon2_wide::Poseidon2WideChip,
-        public_values::PublicValuesChip, select::SelectChip,
+        public_values::PublicValuesChip,
+        select::SelectChip,
     };
     use zkm_recursion_core::machine::RecursionAir;
-    use zkm_pcs::InnerVal;
 
     type C = InnerConfig;
 

@@ -89,9 +89,7 @@ pub fn eq_eval<F: Field>(a: &[F], x: &[F]) -> F {
     assert_eq!(a.len(), x.len());
     a.iter()
         .zip(x.iter())
-        .fold(F::ONE, |acc, (&a_i, &x_i)| {
-            acc * (a_i * x_i + (F::ONE - a_i) * (F::ONE - x_i))
-        })
+        .fold(F::ONE, |acc, (&a_i, &x_i)| acc * (a_i * x_i + (F::ONE - a_i) * (F::ONE - x_i)))
 }
 
 /// Estimate the cost savings of zerocheck vs quotient polynomial.
@@ -114,11 +112,17 @@ pub fn estimate_savings(
     let _zerocheck_sumcheck_cost = num_vars * 3; // 3 coefficients per round
 
     println!("\n=== Zerocheck Savings Estimate ===");
-    println!("Trace: 2^{} = {} rows, {} chips, degree {}",
-        num_vars, n, num_chips, max_constraint_degree);
+    println!(
+        "Trace: 2^{} = {} rows, {} chips, degree {}",
+        num_vars, n, num_chips, max_constraint_degree
+    );
     println!();
     println!("Quotient polynomial approach:");
-    println!("  Quotient domain: {} ({}x blowup)", quotient_domain_size, 1 << quotient_degree.next_power_of_two().trailing_zeros());
+    println!(
+        "  Quotient domain: {} ({}x blowup)",
+        quotient_domain_size,
+        1 << quotient_degree.next_power_of_two().trailing_zeros()
+    );
     println!("  Quotient trace cells: {}", quotient_trace_cells);
     println!("  PCS cost: {} hashes (commit + open)", quotient_pcs_cost);
     println!();
@@ -131,8 +135,10 @@ pub fn estimate_savings(
     println!("  Quotient trace eliminated: {} cells", quotient_trace_cells);
     println!("  PCS commits saved: 1 per shard");
     println!("  PCS opens saved: 1 per shard (quotient opening)");
-    println!("  Domain reduction: {}x → 1x (no extended domain)",
-        1 << quotient_degree.next_power_of_two().trailing_zeros());
+    println!(
+        "  Domain reduction: {}x → 1x (no extended domain)",
+        1 << quotient_degree.next_power_of_two().trailing_zeros()
+    );
 }
 
 #[cfg(test)]
@@ -141,8 +147,8 @@ mod tests {
 
     #[test]
     fn test_eq_eval() {
-        use p3_koala_bear::KoalaBear;
         use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
 
         type F = KoalaBear;
 

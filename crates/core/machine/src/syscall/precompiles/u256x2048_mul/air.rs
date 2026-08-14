@@ -7,7 +7,7 @@ use crate::{
 };
 
 use num::{BigUint, One};
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

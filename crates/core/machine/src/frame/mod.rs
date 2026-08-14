@@ -22,9 +22,8 @@ use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_core_executor::events::SyscallEvent;
 use zkm_core_executor::events::{
-    AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition,
-    JumpEvent, MemInstrEvent, MemoryRecordEnum, MiscEvent, MovCondEvent,
-    OptionMemoryRecordEnumTag,
+    AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, JumpEvent, MemInstrEvent,
+    MemoryAccessPosition, MemoryRecordEnum, MiscEvent, MovCondEvent, OptionMemoryRecordEnumTag,
 };
 use zkm_core_executor::{ByteOpcode, Program};
 use zkm_derive::AlignedBorrow;
@@ -57,7 +56,6 @@ pub struct InstructionFrameCols<T> {
     pub op_a_access: RegisterReadWriteCols<T>,
     pub op_b_access: RegisterReadCols<T>,
     pub op_c_access: RegisterReadCols<T>,
-
 }
 
 impl<T: Copy> InstructionFrameCols<T> {
@@ -133,12 +131,8 @@ pub fn eval_instruction_frame<AB>(
     );
 
     // Immediates bypass the register read.
-    builder
-        .when(frame.instruction.imm_b)
-        .assert_word_eq(frame.op_b_val(), frame.instruction.op_b);
-    builder
-        .when(frame.instruction.imm_c)
-        .assert_word_eq(frame.op_c_val(), frame.instruction.op_c);
+    builder.when(frame.instruction.imm_b).assert_word_eq(frame.op_b_val(), frame.instruction.op_b);
+    builder.when(frame.instruction.imm_c).assert_word_eq(frame.op_c_val(), frame.instruction.op_c);
 
     builder.eval_register_access(
         frame.shard,
@@ -475,7 +469,8 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         program: &Program,
         blu: &mut impl ByteRecord,
     ) {
-        let a_record: zkm_core_executor::events::OptionMemoryRecordEnum = if event.a_record_is_real {
+        let a_record: zkm_core_executor::events::OptionMemoryRecordEnum = if event.a_record_is_real
+        {
             Some(MemoryRecordEnum::Write(event.a_record)).into()
         } else {
             None.into()

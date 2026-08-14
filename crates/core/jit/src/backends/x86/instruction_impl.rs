@@ -909,9 +909,7 @@ impl SystemInstructions for TranspilerBackend {
         dynasm!(self.assembler ; .arch x64
             ; mov DWORD [Rq(CONTEXT) + super::LAST_EXECUTED_PC_OFFSET], DWORD pc as i32
         );
-        let handler = self
-            .syscall_handler
-            .expect("SYSCALL invoked without registered handler");
+        let handler = self.syscall_handler.expect("SYSCALL invoked without registered handler");
         let target = handler as usize;
         dynasm!(self.assembler ; .arch x64
             // SysV-ABI prologue: 16-byte stack alignment.
@@ -982,10 +980,10 @@ impl SystemInstructions for TranspilerBackend {
         self.emit_register_load(rt, TEMP_B);
         self.emit_register_load(rs, TEMP_A);
         let keep_rd = TEMP_A; // start with rs
-        // Load current rd into TEMP_B if we need a fallback.
-        // x86 cmovne: dst = (cmp_zf == 0) ? src : dst.  We want
-        // rd_new = (rt == 0) ? rs : rd_old.  Load rd_old into RAX,
-        // cmp rt, 0; cmovne RAX, rs; store RAX.
+                              // Load current rd into TEMP_B if we need a fallback.
+                              // x86 cmovne: dst = (cmp_zf == 0) ? src : dst.  We want
+                              // rd_new = (rt == 0) ? rs : rd_old.  Load rd_old into RAX,
+                              // cmp rt, 0; cmovne RAX, rs; store RAX.
         self.emit_register_load(rd, dynasmrt::x64::Rq::RAX as u8);
         self.emit_register_load(rs, TEMP_A);
         self.emit_register_load(rt, TEMP_B);

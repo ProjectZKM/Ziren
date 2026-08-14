@@ -19,15 +19,14 @@
 
 use std::collections::BTreeMap;
 
-use p3_air::Air;
-use p3_challenger::FieldChallenger;
-use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
-use p3_matrix::dense::RowMajorMatrix;
 use super::types::PartialSumcheckProof;
 use crate::air::MachineAir;
 use crate::folder::VerifierConstraintFolder;
 use crate::{Challenge, Chip, StarkGenericConfig, Val};
-
+use p3_air::Air;
+use p3_challenger::FieldChallenger;
+use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
+use p3_matrix::dense::RowMajorMatrix;
 
 /// Shard-level zerocheck prover.
 ///
@@ -62,10 +61,7 @@ pub fn prove_shard_zerocheck<SC, A>(
     // whole proof is uniformly rev; every recursion / shrink / wrap prove is
     // `false` (byte-identical).
     dense_rev: bool,
-) -> (
-    PartialSumcheckProof<Challenge<SC>>,
-    std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
-)
+) -> (PartialSumcheckProof<Challenge<SC>>, std::collections::BTreeMap<String, Vec<Challenge<SC>>>)
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
@@ -94,7 +90,6 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
-
     let n_chips = chips.len();
 
     // Sample the per-chip constraint-batching challenge
@@ -110,8 +105,7 @@ where
     // one EF squeeze and downstream sumcheck/jagged-PCS round 0
     // checks will desync.
     let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-    let gkr_batch_open: Challenge<SC> =
-        challenger.sample_algebra_element::<Challenge<SC>>();
+    let gkr_batch_open: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
     // ── Per-chip ZeroCheckPoly path ──────────────────────
@@ -188,10 +182,10 @@ where
         // "empty host trace" test.
         let pm = &shared_trace_mles[chip_idx];
         let name = chip.name().to_string();
-        let opening =
-            logup_evaluations.chip_openings.get(&name).unwrap_or_else(|| {
-                panic!("chip {name} missing from logup_evaluations.chip_openings")
-            });
+        let opening = logup_evaluations
+            .chip_openings
+            .get(&name)
+            .unwrap_or_else(|| panic!("chip {name} missing from logup_evaluations.chip_openings"));
 
         // The shared host `ZeroCheckPoly` is host-cell only, and this free-fn
         // never runs with a device provider (StarkGpuProver assembles the
@@ -351,17 +345,16 @@ where
             })
         };
         // The poly eq-anchor: rev(zeta) under the new convention, else zeta.
-        let zeta_anchor: Vec<Challenge<SC>> = if use_rev {
-            zeta.iter().rev().copied().collect()
-        } else {
-            zeta.to_vec()
-        };
+        let zeta_anchor: Vec<Challenge<SC>> =
+            if use_rev { zeta.iter().rev().copied().collect() } else { zeta.to_vec() };
 
-        let padded_row_adjustment = compute_padded_row_adjustment::<
-            Val<SC>,
-            Challenge<SC>,
-            A,
-        >(chip, alpha, public_values, main_width, prep_width);
+        let padded_row_adjustment = compute_padded_row_adjustment::<Val<SC>, Challenge<SC>, A>(
+            chip,
+            alpha,
+            public_values,
+            main_width,
+            prep_width,
+        );
         let initial_geq_value =
             if main_height > 0 { Challenge::<SC>::ZERO } else { Challenge::<SC>::ONE };
         let virtual_geq = VirtualGeq::new(
@@ -409,7 +402,6 @@ where
     (sp1_proof, trace_at_z)
 }
 
-
 /// Derive a chip's global cumulative sum from the last 14 elements of
 /// its main trace (x = elements 0..7, y = elements 7..14). Zero when
 /// the chip commits to the local scope or has too few rows.
@@ -446,12 +438,11 @@ where
         return crate::septic_digest::SepticDigest::<F>::zero();
     }
     let last_row = &values[sz - 14..sz];
-    let x = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(
-        |j| last_row[j],
-    );
-    let y = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(
-        |j| last_row[j + 7],
-    );
+    let x =
+        crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(|j| last_row[j]);
+    let y = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(|j| {
+        last_row[j + 7]
+    });
     crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
 }
 
@@ -473,16 +464,13 @@ where
     if chip.commit_scope() == crate::air::LookupScope::Local || tail14.len() != 14 {
         return crate::septic_digest::SepticDigest::<F>::zero();
     }
-    let x = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(
-        |j| tail14[j],
-    );
-    let y = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(
-        |j| tail14[j + 7],
-    );
+    let x =
+        crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(|j| tail14[j]);
+    let y = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(|j| {
+        tail14[j + 7]
+    });
     crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
 }
-
-
 
 /// Max log_degree across a shard's main traces; equals the
 /// shard-level zerocheck round count.
@@ -503,7 +491,6 @@ fn _btreemap_anchor() -> BTreeMap<String, ()> {
     BTreeMap::new()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,8 +509,8 @@ mod tests {
     #[test]
     fn shard_max_log_degree_single_row_returns_zero() {
         type F = p3_koala_bear::KoalaBear;
-        use p3_matrix::dense::RowMajorMatrix;
         use p3_field::PrimeCharacteristicRing;
+        use p3_matrix::dense::RowMajorMatrix;
         let trace = RowMajorMatrix::new(vec![F::ZERO], 1);
         assert_eq!(shard_max_log_degree::<F>(&[trace]), 0);
     }
@@ -544,5 +531,4 @@ mod tests {
         let traces = vec![t1, t2, t3];
         assert_eq!(shard_max_log_degree::<F>(&traces), 4);
     }
-
 }

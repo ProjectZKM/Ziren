@@ -4,10 +4,7 @@ use std::{
     process::exit,
 };
 
-use p3_air::{
-    Air, AirBuilder, ExtensionBuilder,
-    PermutationAirBuilder,
-};
+use p3_air::{Air, AirBuilder, ExtensionBuilder, PermutationAirBuilder};
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::ParallelBridge;
@@ -72,10 +69,7 @@ pub fn debug_constraints<SC, A>(
         let perm_next = &(*perm_next);
 
         let mut builder = DebugConstraintBuilder {
-            preprocessed: PairWindow {
-                local: &preprocessed_local,
-                next: &preprocessed_next,
-            },
+            preprocessed: PairWindow { local: &preprocessed_local, next: &preprocessed_next },
             main: PairWindow { local: main_local, next: main_next },
             perm: PairWindow { local: perm_local, next: perm_next },
             perm_challenges,
@@ -263,4 +257,3 @@ where
         self.global_cumulative_sum
     }
 }
-

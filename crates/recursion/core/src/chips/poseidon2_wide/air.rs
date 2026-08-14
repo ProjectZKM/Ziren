@@ -2,7 +2,7 @@
 
 use std::{array, borrow::Borrow};
 
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_primitives::RC_16_30_U32;
 
@@ -104,9 +104,8 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
 
         // Add the round constants.
         let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
-        let add_rc: [AB::Expr; WIDTH] = array::from_fn(|i| {
-            local_state[i].clone() + AB::F::from_u32(RC_16_30_U32[round][i])
-        });
+        let add_rc: [AB::Expr; WIDTH] =
+            array::from_fn(|i| local_state[i].clone() + AB::F::from_u32(RC_16_30_U32[round][i]));
 
         // Apply the sboxes.
         // See `populate_external_round` for why we don't have columns for the sbox output here.

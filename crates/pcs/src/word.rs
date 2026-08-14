@@ -36,7 +36,6 @@ impl<T> Word<T> {
 }
 
 impl<T: PrimeCharacteristicRing> Word<T> {
-
     /// Returns a word with all zero expressions.
     #[must_use]
     pub fn zero<AB: ZKMAirBuilder<Expr = T>>() -> Word<T> {

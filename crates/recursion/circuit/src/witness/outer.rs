@@ -79,11 +79,8 @@ impl Witnessable<OuterConfig> for OuterFriProof {
                 cap[0].read(builder)
             })
             .collect();
-        let commit_pow_witnesses = self
-            .commit_pow_witnesses
-            .iter()
-            .map(|w| w.read(builder))
-            .collect();
+        let commit_pow_witnesses =
+            self.commit_pow_witnesses.iter().map(|w| w.read(builder)).collect();
         let query_proofs = self.query_proofs.read(builder);
         assert!(!self.final_poly.is_empty(), "final_poly must have at least one element");
         let final_poly = self.final_poly[0].read(builder);

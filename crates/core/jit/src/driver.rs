@@ -285,16 +285,10 @@ fn lower_one<T: MipsTranspiler>(
     let rs = MipsRegister::from_u8(ins.op_b as u8);
     let rt = MipsRegister::from_u8(ins.op_c as u8);
     // For ALU-style ops the second operand can be an immediate.
-    let op_b: MipsOperand = if ins.imm_b {
-        MipsOperand::Imm(i64::from(ins.op_b as i32))
-    } else {
-        MipsOperand::Reg(rs)
-    };
-    let op_c: MipsOperand = if ins.imm_c {
-        MipsOperand::Imm(i64::from(ins.op_c as i32))
-    } else {
-        MipsOperand::Reg(rt)
-    };
+    let op_b: MipsOperand =
+        if ins.imm_b { MipsOperand::Imm(i64::from(ins.op_b as i32)) } else { MipsOperand::Reg(rs) };
+    let op_c: MipsOperand =
+        if ins.imm_c { MipsOperand::Imm(i64::from(ins.op_c as i32)) } else { MipsOperand::Reg(rt) };
     let imm32 = ins.op_c as i32;
     // For branches, the executor encodes `op_c` as a *byte offset
     // relative to next_pc* (= current_pc + 4); see
@@ -303,8 +297,7 @@ fn lower_one<T: MipsTranspiler>(
     // lowering expects an *absolute* target PC (per the existing
     // comment on beq/bne in instruction_impl.rs), so we resolve it
     // here once and pass the absolute value down.
-    let branch_target_pc =
-        (current_pc.wrapping_add(4).wrapping_add(ins.op_c as u32)) as i32;
+    let branch_target_pc = (current_pc.wrapping_add(4).wrapping_add(ins.op_c as u32)) as i32;
 
     match op {
         // ── ALU ─────────────────────────────────────────────
@@ -529,11 +522,8 @@ fn lower_one<T: MipsTranspiler>(
             let is_byte = ins.op_c == 0;
             if ins.imm_b {
                 let v = ins.op_b;
-                let folded: u32 = if is_byte {
-                    ((v as i8) as i32) as u32
-                } else {
-                    ((v as i16) as i32) as u32
-                };
+                let folded: u32 =
+                    if is_byte { ((v as i8) as i32) as u32 } else { ((v as i16) as i32) as u32 };
                 t.add(rd, MipsOperand::Imm(folded as i64), MipsOperand::Imm(0));
             } else if is_byte {
                 t.sext_b(rd, rs);
@@ -989,7 +979,9 @@ mod tests {
     }
 
     impl crate::SystemInstructions for LogTranspiler {
-        fn unimpl_trap(&mut self) { self.log.push("unimpl_trap".to_string()); }
+        fn unimpl_trap(&mut self) {
+            self.log.push("unimpl_trap".to_string());
+        }
         fn syscall(&mut self, pc: u32) {
             self.log.push(format!("syscall {pc:#x}"));
         }

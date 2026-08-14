@@ -35,10 +35,17 @@ fn main() {
     let mut bad_marker: BTreeMap<String, usize> = BTreeMap::new();
     let mut ok_marker: BTreeMap<String, usize> = BTreeMap::new();
     let markers = [
-        "ShaCompress", "KeccakSponge", "Bls12381AddAssign",
-        "Secp256k1AddAssign", "Secp256r1AddAssign", "Bn254AddAssign",
-        "Poseidon2Permute", "EdAddAssign", "Uint256MulMod",
-        "BooleanCircuitGarble", "SysLinux",
+        "ShaCompress",
+        "KeccakSponge",
+        "Bls12381AddAssign",
+        "Secp256k1AddAssign",
+        "Secp256r1AddAssign",
+        "Bn254AddAssign",
+        "Poseidon2Permute",
+        "EdAddAssign",
+        "Uint256MulMod",
+        "BooleanCircuitGarble",
+        "SysLinux",
     ];
 
     for shape in all.into_iter() {

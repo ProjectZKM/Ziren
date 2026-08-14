@@ -49,8 +49,7 @@ pub fn populate_local_permutation_row<F: PrimeField, EF: ExtensionField<F>>(
             .map(|(lookup, is_send)| {
                 let mut denominator = alpha;
                 let mut betas = betas.clone();
-                denominator +=
-                    betas.next().unwrap() * EF::from_usize(lookup.argument_index());
+                denominator += betas.next().unwrap() * EF::from_usize(lookup.argument_index());
                 for (columns, beta) in lookup.values.iter().zip(betas) {
                     denominator += beta * columns.apply::<F, F>(preprocessed_row, main_row);
                 }
@@ -280,8 +279,7 @@ pub fn eval_permutation_constraints<'a, F, AB>(
                 let mut betas = beta.powers();
 
                 rlc = rlc.clone()
-                    + betas.next().unwrap()
-                        * AB::ExprEF::from_usize(lookup.argument_index());
+                    + betas.next().unwrap() * AB::ExprEF::from_usize(lookup.argument_index());
                 for (field, beta) in lookup.values.iter().zip(betas.clone()) {
                     let elem = field.apply::<AB::Expr, AB::Var>(&preprocessed_local, main_local);
                     rlc = rlc.clone() + beta * elem;

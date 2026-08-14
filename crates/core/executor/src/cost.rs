@@ -166,12 +166,9 @@ pub fn estimate_mips_event_counts(
         + opcode_counts[Opcode::LBU]
         + opcode_counts[Opcode::LH]
         + opcode_counts[Opcode::LHU];
-    events_counts[MipsAirId::LoadWord] =
-        opcode_counts[Opcode::LW] + opcode_counts[Opcode::LL];
-    events_counts[MipsAirId::StoreNarrow] =
-        opcode_counts[Opcode::SB] + opcode_counts[Opcode::SH];
-    events_counts[MipsAirId::StoreWord] =
-        opcode_counts[Opcode::SW] + opcode_counts[Opcode::SC];
+    events_counts[MipsAirId::LoadWord] = opcode_counts[Opcode::LW] + opcode_counts[Opcode::LL];
+    events_counts[MipsAirId::StoreNarrow] = opcode_counts[Opcode::SB] + opcode_counts[Opcode::SH];
+    events_counts[MipsAirId::StoreWord] = opcode_counts[Opcode::SW] + opcode_counts[Opcode::SC];
     events_counts[MipsAirId::MemoryUnaligned] = opcode_counts[Opcode::LWL]
         + opcode_counts[Opcode::LWR]
         + opcode_counts[Opcode::SWL]
@@ -502,10 +499,8 @@ mod tests {
                 "per-chip counts diverged at step {step} (opcode {opcode:?})"
             );
 
-            let expected_area: u64 = expected
-                .iter()
-                .map(|(air, &n)| n * costs.get(&air).copied().unwrap_or(0))
-                .sum();
+            let expected_area: u64 =
+                expected.iter().map(|(air, &n)| n * costs.get(&air).copied().unwrap_or(0)).sum();
             assert_eq!(acc.trace_area(cpu_cycles), expected_area, "area diverged at step {step}");
 
             let expected_max = expected.iter().map(|(_, &h)| h).max().unwrap_or(0);

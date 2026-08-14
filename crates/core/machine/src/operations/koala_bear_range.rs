@@ -56,8 +56,7 @@ impl<F: Field> KoalaBearBitDecomposition<F> {
         let mut reconstructed_value = AB::Expr::ZERO;
         for (i, bit) in cols.bits.iter().enumerate() {
             builder.when(is_real.clone()).assert_bool(*bit);
-            reconstructed_value =
-                reconstructed_value.clone() + AB::Expr::from_u32(1 << i) * *bit;
+            reconstructed_value = reconstructed_value.clone() + AB::Expr::from_u32(1 << i) * *bit;
         }
 
         // Assert that bits2num(bits) == value.

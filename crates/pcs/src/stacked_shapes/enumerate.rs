@@ -93,22 +93,8 @@ fn precompile_families() -> &'static [(&'static str, &'static [&'static str])] {
         ("keccak", &["KeccakSponge", "KeccakSpongeControl"]),
         ("sha256", &["ShaExtend", "ShaExtendControl", "ShaCompress", "ShaCompressControl"]),
         ("poseidon2", &["Poseidon2Permute"]),
-        (
-            "k256",
-            &[
-                "Secp256k1AddAssign",
-                "Secp256k1DoubleAssign",
-                "Secp256k1Decompress",
-            ],
-        ),
-        (
-            "p256",
-            &[
-                "Secp256r1AddAssign",
-                "Secp256r1DoubleAssign",
-                "Secp256r1Decompress",
-            ],
-        ),
+        ("k256", &["Secp256k1AddAssign", "Secp256k1DoubleAssign", "Secp256k1Decompress"]),
+        ("p256", &["Secp256r1AddAssign", "Secp256r1DoubleAssign", "Secp256r1Decompress"]),
         (
             "bn254",
             &[
@@ -297,7 +283,6 @@ pub fn create_all_input_shapes(machine_shape: &MachineShape) -> Vec<CoreProofSha
     out
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,10 +361,8 @@ mod tests {
         let ms = build_mips_machine_shape();
         let core_alu = ["AddSub", "Mul", "Lt", "DivRem"];
 
-        let cpu_clusters =
-            ms.chip_clusters.iter().filter(|c| c.contains("Cpu")).count();
-        let cpu_free =
-            ms.chip_clusters.iter().filter(|c| !c.contains("Cpu")).count();
+        let cpu_clusters = ms.chip_clusters.iter().filter(|c| c.contains("Cpu")).count();
+        let cpu_free = ms.chip_clusters.iter().filter(|c| !c.contains("Cpu")).count();
 
         // Cpu-free = memory_min + the two SPLIT memory shards (3) + one
         // minimal precompile shard per family (precompile_base ∪ family).
@@ -438,11 +421,8 @@ mod tests {
         // For any fixed prep multiple, main_mult entries should be non-decreasing.
         // After SP1-style port: prep ranges over [1..=MAX_AREA_MULTIPLE].
         for prep in 1..=MAX_AREA_MULTIPLE {
-            let mut mains: Vec<usize> = bands
-                .iter()
-                .filter(|(p, _)| *p == prep)
-                .map(|(_, m)| *m)
-                .collect();
+            let mut mains: Vec<usize> =
+                bands.iter().filter(|(p, _)| *p == prep).map(|(_, m)| *m).collect();
             let sorted = mains.clone();
             mains.sort();
             assert_eq!(mains, sorted, "bands for prep={} are not monotone in main", prep);

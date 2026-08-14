@@ -7,7 +7,7 @@ use std::{fmt::Debug, marker::PhantomData};
 use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use num::BigUint;
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
@@ -259,7 +259,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
             }
         }
     }
-
 }
 
 impl<F, E: EllipticCurve> BaseAir<F> for WeierstrassAddAssignChip<E> {
@@ -363,7 +362,7 @@ where
         builder.eval_memory_access_slice(
             local.shard,
             local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
-                                                       * same. */
+                                             * same. */
             local.p_ptr,
             &local.p_access,
             local.is_real,
@@ -371,16 +370,10 @@ where
 
         // Fetch the syscall id for the curve type.
         let syscall_id_felt = match E::CURVE_TYPE {
-            CurveType::Secp256k1 => {
-                AB::F::from_u32(SyscallCode::SECP256K1_ADD.syscall_id())
-            }
-            CurveType::Secp256r1 => {
-                AB::F::from_u32(SyscallCode::SECP256R1_ADD.syscall_id())
-            }
+            CurveType::Secp256k1 => AB::F::from_u32(SyscallCode::SECP256K1_ADD.syscall_id()),
+            CurveType::Secp256r1 => AB::F::from_u32(SyscallCode::SECP256R1_ADD.syscall_id()),
             CurveType::Bn254 => AB::F::from_u32(SyscallCode::BN254_ADD.syscall_id()),
-            CurveType::Bls12381 => {
-                AB::F::from_u32(SyscallCode::BLS12381_ADD.syscall_id())
-            }
+            CurveType::Bls12381 => AB::F::from_u32(SyscallCode::BLS12381_ADD.syscall_id()),
             _ => panic!("Unsupported curve"),
         };
 

@@ -1,4 +1,3 @@
-
 use crate::{
     events::{
         MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord, PrecompileEvent, SyscallEvent,

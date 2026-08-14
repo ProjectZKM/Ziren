@@ -190,7 +190,9 @@ pub mod ilv_prof {
     pub fn dump(tag: &str) {
         let (calls, mles, w1, w1b, elems, tot, copy, stripe) = snapshot();
         if calls == 0 {
-            eprintln!("ILV_PROF[{tag}] calls=0 (interleave_multilinears_with_fixed_rate NEVER RAN)");
+            eprintln!(
+                "ILV_PROF[{tag}] calls=0 (interleave_multilinears_with_fixed_rate NEVER RAN)"
+            );
             return;
         }
         let ms = |n: u64| n as f64 / 1e6;
@@ -333,9 +335,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
     }
 
     // Final stripe: pad with zeros up to the next full stripe.
-    let new_len = overflow
-        .len()
-        .next_multiple_of(stack_height);
+    let new_len = overflow.len().next_multiple_of(stack_height);
     overflow.resize(new_len, F::ZERO);
     let overflow_batch = overflow.len() / stack_height;
     if overflow_batch > 0 {
@@ -357,11 +357,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
 /// transpose was a hot loop in the BaseFold commit path. Parallelizing
 /// across destination chunks (one per output row of the transposed
 /// matrix) gives near-linear speedup on N-core machines.
-fn transpose_row_major<F: Field>(
-    src: &[F],
-    rows: usize,
-    cols: usize,
-) -> RowMajorMatrix<F> {
+fn transpose_row_major<F: Field>(src: &[F], rows: usize, cols: usize) -> RowMajorMatrix<F> {
     debug_assert_eq!(src.len(), rows * cols);
     use p3_maybe_rayon::prelude::*;
     // Allocator opt: skip F::ZERO init; every slot is unconditionally
@@ -412,11 +408,7 @@ where
         stack_point: &[EF],
         prover_data: &StackedBasefoldProverData<F, MT>,
     ) -> Vec<EF> {
-        prover_data
-            .interleaved_mles
-            .iter()
-            .flat_map(|mle| mle.eval_at::<EF>(stack_point))
-            .collect()
+        prover_data.interleaved_mles.iter().flat_map(|mle| mle.eval_at::<EF>(stack_point)).collect()
     }
 
     /// Commit a heterogeneous batch of MLEs.  Returns the basefold
@@ -434,8 +426,7 @@ where
             multilinears,
             self.log_stacking_height,
         );
-        let (commit, pcs_batch_data) =
-            self.basefold_prover.commit_mles(interleaved_mles.clone());
+        let (commit, pcs_batch_data) = self.basefold_prover.commit_mles(interleaved_mles.clone());
         (commit, StackedBasefoldProverData { pcs_batch_data, interleaved_mles })
     }
 
@@ -448,7 +439,6 @@ where
         &self.basefold_prover
     }
 
-
     pub fn prove_trusted_evaluation<Challenger>(
         &self,
         eval_point: Vec<EF>,
@@ -460,9 +450,8 @@ where
         challenger: &mut Challenger,
     ) -> StackedBasefoldProof<F, EF, MT>
     where
-        Challenger: FieldChallenger<F>
-            + GrindingChallenger<Witness = F>
-            + CanObserve<MT::Commitment>,
+        Challenger:
+            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
     {
         // First `log_stacking_height` coords fold the per-stripe
         // hypercube (the lowest bits of the underlying dense index);
@@ -475,10 +464,8 @@ where
         // Compute batch evaluations per round (one EF per interleaved
         // stripe).  These get echoed in the proof — the verifier uses
         // them as BaseFold's `evaluation_claims` argument.
-        let batch_evaluations: Vec<Vec<EF>> = prover_data
-            .iter()
-            .map(|d| self.round_batch_evaluations(&stack_point, d))
-            .collect();
+        let batch_evaluations: Vec<Vec<EF>> =
+            prover_data.iter().map(|d| self.round_batch_evaluations(&stack_point, d)).collect();
 
         // `interleaved_mles` is `Vec<Arc<Mle>>`, so this clone is a refcount
         // bump per stripe, not a copy of any trace.
@@ -542,9 +529,8 @@ where
         challenger: &mut Challenger,
     ) -> Result<(), StackedVerifierError>
     where
-        Challenger: FieldChallenger<F>
-            + GrindingChallenger<Witness = F>
-            + CanObserve<MT::Commitment>,
+        Challenger:
+            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
     {
         if point.len() < self.log_stacking_height as usize {
             return Err(StackedVerifierError::IncorrectShape);
@@ -598,10 +584,7 @@ where
 /// bit) — same convention as [`Mle::eval_at`], so the values
 /// produced here line up with the per-stripe evals the prover sends
 /// in `batch_evaluations`.
-fn eval_multilinear_padded<F: Field, EF: ExtensionField<F>>(
-    values: &[EF],
-    point: &[EF],
-) -> EF
+fn eval_multilinear_padded<F: Field, EF: ExtensionField<F>>(values: &[EF], point: &[EF]) -> EF
 where
     EF: PrimeCharacteristicRing,
 {
@@ -714,19 +697,13 @@ mod test {
         // virtual concatenated MLE (zero-padded to area) evaluated at
         // eval_point.  We synthesize it directly from the round
         // batch_evaluations the prover would compute.
-        let stack_point: Vec<EF> =
-            eval_point[..log_stacking_height as usize].to_vec();
-        let batch_evals_flat: Vec<EF> = data
-            .interleaved_mles
-            .iter()
-            .flat_map(|m| m.eval_at::<EF>(&stack_point))
-            .collect();
+        let stack_point: Vec<EF> = eval_point[..log_stacking_height as usize].to_vec();
+        let batch_evals_flat: Vec<EF> =
+            data.interleaved_mles.iter().flat_map(|m| m.eval_at::<EF>(&stack_point)).collect();
         let batch_point = &eval_point[log_stacking_height as usize..];
-        let evaluation_claim =
-            eval_multilinear_padded::<F, EF>(&batch_evals_flat, batch_point);
+        let evaluation_claim = eval_multilinear_padded::<F, EF>(&batch_evals_flat, batch_point);
 
-        let proof =
-            prover.prove_trusted_evaluation(eval_point.clone(), &[&data], &mut p_chal);
+        let proof = prover.prove_trusted_evaluation(eval_point.clone(), &[&data], &mut p_chal);
 
         let mut v_chal = build_challenger();
         v_chal.observe(commit.clone());
@@ -827,15 +804,11 @@ mod test {
         for m in data1.interleaved_mles.iter() {
             batch_evals_flat.extend(m.eval_at::<EF>(&stack_point));
         }
-        let evaluation_claim =
-            eval_multilinear_padded::<F, EF>(&batch_evals_flat, batch_point);
+        let evaluation_claim = eval_multilinear_padded::<F, EF>(&batch_evals_flat, batch_point);
 
         // Open over BOTH rounds' prover data, in partition order.
-        let proof = prover.prove_trusted_evaluation(
-            eval_point.clone(),
-            &[&data0, &data1],
-            &mut p_chal,
-        );
+        let proof =
+            prover.prove_trusted_evaluation(eval_point.clone(), &[&data0, &data1], &mut p_chal);
 
         // Verifier replays the SAME observe order before verifying.
         let mut v_chal = build_challenger();
@@ -900,8 +873,12 @@ mod test {
         let sp: Vec<EF> = eval_point[..log_stacking_height as usize].to_vec();
         let bp = &eval_point[log_stacking_height as usize..];
         let mut bef: Vec<EF> = Vec::new();
-        for m in d0.interleaved_mles.iter() { bef.extend(m.eval_at::<EF>(&sp)); }
-        for m in d1.interleaved_mles.iter() { bef.extend(m.eval_at::<EF>(&sp)); }
+        for m in d0.interleaved_mles.iter() {
+            bef.extend(m.eval_at::<EF>(&sp));
+        }
+        for m in d1.interleaved_mles.iter() {
+            bef.extend(m.eval_at::<EF>(&sp));
+        }
         let claim = eval_multilinear_padded::<F, EF>(&bef, bp);
         let proof = prover.prove_trusted_evaluation(eval_point.clone(), &[&d0, &d1], &mut p_chal);
 

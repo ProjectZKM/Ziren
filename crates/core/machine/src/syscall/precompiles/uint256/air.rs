@@ -15,7 +15,7 @@ use crate::{
 
 use generic_array::GenericArray;
 use num::{BigUint, One, Zero};
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use std::{
@@ -215,7 +215,6 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
             !shard.get_precompile_events(SyscallCode::UINT256_MUL).is_empty()
         }
     }
-
 }
 
 impl<F> BaseAir<F> for Uint256MulChip {
@@ -243,8 +242,7 @@ where
         // If the modulus is zero, then we don't perform the modulus operation.
         // Evaluate the modulus_is_zero operation by summing each byte of the modulus. The sum will
         // not overflow because we are summing 32 bytes.
-        let modulus_byte_sum =
-            modulus_limbs.0.iter().fold(AB::Expr::ZERO, |acc, &limb| acc + limb);
+        let modulus_byte_sum = modulus_limbs.0.iter().fold(AB::Expr::ZERO, |acc, &limb| acc + limb);
         IsZeroOperation::<AB::F>::eval(
             builder,
             modulus_byte_sum,

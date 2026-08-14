@@ -165,8 +165,7 @@ impl<F: Field> ShiftLeftOperation<F> {
                 if i < num_bytes_to_shift {
                     shifting.assert_eq(a[i].clone(), zero.clone());
                 } else {
-                    shifting
-                        .assert_eq(a[i].clone(), cols.bit_shift_result[i - num_bytes_to_shift]);
+                    shifting.assert_eq(a[i].clone(), cols.bit_shift_result[i - num_bytes_to_shift]);
                 }
             }
         }

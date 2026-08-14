@@ -75,11 +75,7 @@ const fn build_transition_table() -> [[Option<u8>; 16]; 4] {
             //
             // comparison: i < t_{c+1} — defer to running comparison when
             // index_bit == next_bit, else the next-prefix bit decides.
-            let new_comparison = if index_bit == next_bit {
-                comparison_in
-            } else {
-                next_bit
-            };
+            let new_comparison = if index_bit == next_bit { comparison_in } else { next_bit };
             // carry: grade-school addition row + carry_in + curr_prefix must
             // produce index_bit at this layer, else the path FAILs (None).
             let sum = (row_bit as u8) + (carry_in as u8) + (curr_bit as u8);
@@ -168,8 +164,7 @@ pub fn emit_branching_program_eval<C: CircuitConfig>(
         ];
         let eq_weights = partial_lagrange_four::<C>(layer_point);
 
-        let mut new_state_weights: [SymbolicExt<C::F, C::EF>; 4] =
-            [SymbolicExt::ZERO; 4];
+        let mut new_state_weights: [SymbolicExt<C::F, C::EF>; 4] = [SymbolicExt::ZERO; 4];
         for ms_in in 0..4usize {
             let mut accum: [SymbolicExt<C::F, C::EF>; 4] = [SymbolicExt::ZERO; 4];
             for (bs, w) in eq_weights.iter().enumerate() {
@@ -221,8 +216,7 @@ pub fn emit_prefix_sum_check<C: CircuitConfig>(
         let bit_sym: SymbolicExt<C::F, C::EF> = SymbolicExt::from(*bit);
         let point_sym: SymbolicExt<C::F, C::EF> = (*point).into();
         let one: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
-        let eq =
-            (one - bit_sym) * (one - point_sym) + bit_sym * point_sym;
+        let eq = (one - bit_sym) * (one - point_sym) + bit_sym * point_sym;
         lagrange = lagrange * eq;
     }
 
@@ -232,9 +226,9 @@ pub fn emit_prefix_sum_check<C: CircuitConfig>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
-    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;
@@ -279,10 +273,7 @@ mod tests {
             transition_function, BitState, MemoryState, StateOrFail,
         };
         for ms_idx in 0..4usize {
-            let ms = MemoryState {
-                carry: (ms_idx & 1) != 0,
-                comparison_so_far: (ms_idx & 2) != 0,
-            };
+            let ms = MemoryState { carry: (ms_idx & 1) != 0, comparison_so_far: (ms_idx & 2) != 0 };
             for bs_idx in 0..16usize {
                 let bs = BitState {
                     row_bit: (bs_idx & 1) != 0,
@@ -295,7 +286,8 @@ mod tests {
                     StateOrFail::Fail => None,
                 };
                 assert_eq!(
-                    super::TRANSITIONS[ms_idx][bs_idx], expected,
+                    super::TRANSITIONS[ms_idx][bs_idx],
+                    expected,
                     "TRANSITIONS[{ms_idx}][{bs_idx}] mismatch vs host transition_function",
                 );
             }

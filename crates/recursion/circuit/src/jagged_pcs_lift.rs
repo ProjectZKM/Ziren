@@ -104,11 +104,11 @@ where
     // scaffolding-test and `EvaluationProof::Empty` paths
     // byte-for-byte.
     if !bytes.is_empty() {
-        if let Some(bundle) =
-            zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle::from_bytes(bytes)
-        {
-            let (cp, sc, je, ee, cr) =
-                crate::shard_level_witness::const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
+        if let Some(bundle) = zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle::from_bytes(bytes) {
+            let (cp, sc, je, ee, cr) = crate::shard_level_witness::const_basefold_proof_from_bundle::<
+                C,
+                HV,
+            >(&bundle, builder);
             // Bytes-fallback (legacy/scaffolding): const-build the MODIFIED
             // (hash-bound) digest from the real bundle's raw root + packing so
             // the in-circuit re-bind holds on this path too.  Inner ring only
@@ -120,10 +120,8 @@ where
                 core::array::from_fn(|_| builder.constant(C::F::ZERO))
             } else {
                 let raw: [zkm_pcs::InnerVal; 8] = cap_roots[0];
-                let modified = zkm_pcs::jagged_pcs::jagged_hash_bind_from_packing(
-                    raw,
-                    &bundle.packing,
-                );
+                let modified =
+                    zkm_pcs::jagged_pcs::jagged_hash_bind_from_packing(raw, &bundle.packing);
                 core::array::from_fn(|i| builder.constant(modified[i]))
             };
             return crate::shard_level_witness::lift_jagged_basefold_bundle::<C, HV>(
@@ -176,16 +174,15 @@ where
 
     // Precompute the zero DigestVariable once (const_digest
     // borrows the builder; the round-commitment closures reuse this Copy).
-    let zero_digest_var: HV::DigestVariable = HV::const_digest(
-        builder,
-        <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),
-    );
+    let zero_digest_var: HV::DigestVariable =
+        HV::const_digest(builder, <HV as crate::hash::FieldHasher<C::F>>::Digest::default());
 
     let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
-    let zero_uni_poly = |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
-        UnivariatePolynomial { coefficients: (0..=degree).map(|_| zero_ext(b)).collect() }
-    };
+    let zero_uni_poly =
+        |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
+            UnivariatePolynomial { coefficients: (0..=degree).map(|_| zero_ext(b)).collect() }
+        };
 
     // Compute the padded column count from the actual per-round
     // shape.  This must match the column_claims construction in
@@ -204,10 +201,8 @@ where
     // verify_trusted_evaluations requires
     // `column_claims.len() == 2 ^ num_col_variables`, so these
     // formulas MUST agree.
-    let total_cols_before_pad: usize = column_counts_by_round
-        .iter()
-        .map(|cc| cc.iter().sum::<usize>())
-        .sum();
+    let total_cols_before_pad: usize =
+        column_counts_by_round.iter().map(|cc| cc.iter().sum::<usize>()).sum();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
     // col_prefix_sums must satisfy `col_prefix_sums.len() - 1 == num_cols`
     // where `num_cols` is the padded column count the MLE is taken over.
@@ -225,7 +220,11 @@ where
     // The placeholder proof now carries Ext/Felt circuit
     // variables (const-built here via the `zero_ext`/`zero_felt` helpers),
     // matching the re-typed `RecursiveBasefoldProof<Felt, Ext, Dig>`.
-    let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable> {
+    let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<
+        Felt<C::F>,
+        Ext<C::F, C::EF>,
+        HV::DigestVariable,
+    > {
         rounds: (0..max_log_row_count)
             .map(|_| crate::basefold_verifier::RecursiveBasefoldRound::<
                 Felt<C::F>,
@@ -259,8 +258,8 @@ where
         // and collects one sibling_pair per round, so outer length
         // must equal num_variables (== max_log_row_count here).
         query_phase_openings: (0..max_log_row_count)
-            .map(|_| vec![
-                crate::basefold_verifier::RecursiveBasefoldOpening::<
+            .map(|_| {
+                vec![crate::basefold_verifier::RecursiveBasefoldOpening::<
                     Felt<C::F>,
                     Ext<C::F, C::EF>,
                     HV::DigestVariable,
@@ -270,8 +269,8 @@ where
                     merkle_path_bytes: vec![],
                     merkle_path_digests: vec![],
                     _phantom: core::marker::PhantomData,
-                },
-            ])
+                }]
+            })
             .collect(),
         batch_evaluations: vec![vec![zero_ext(builder)]],
     };
@@ -289,9 +288,7 @@ where
     // Sumcheck runs over `num_col_variables` rounds → one univariate
     // poly per round, and point_and_eval.0 has that many coords.
     let jagged_sumcheck_proof = PartialSumcheckProof::<Ext<C::F, C::EF>> {
-        univariate_polys: (0..num_col_variables)
-            .map(|_| zero_uni_poly(builder, 2))
-            .collect(),
+        univariate_polys: (0..num_col_variables).map(|_| zero_uni_poly(builder, 2)).collect(),
         claimed_sum: zero_ext(builder),
         point_and_eval: (
             (0..num_col_variables).map(|_| zero_ext(builder)).collect(),
@@ -303,9 +300,7 @@ where
     // sumcheck over num_col_variables rounds.
     let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
         partial_sumcheck_proof: PartialSumcheckProof {
-            univariate_polys: (0..num_col_variables)
-                .map(|_| zero_uni_poly(builder, 1))
-                .collect(),
+            univariate_polys: (0..num_col_variables).map(|_| zero_uni_poly(builder, 1)).collect(),
             claimed_sum: zero_ext(builder),
             point_and_eval: (
                 (0..num_col_variables).map(|_| zero_ext(builder)).collect(),
@@ -406,7 +401,12 @@ mod tests {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let bytes = Vec::new();
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_evaluation_proof_bytes::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 21, &cols);
+        let var = lift_evaluation_proof_bytes::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
+            &mut builder,
+            &bytes,
+            21,
+            &cols,
+        );
         // column_counts lifted through verbatim.
         assert_eq!(var.column_counts, cols);
         assert_eq!(var.original_commitments.len(), 2);
@@ -420,7 +420,12 @@ mod tests {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let bytes = vec![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let cols: Vec<Vec<usize>> = vec![vec![1, 2]];
-        let var = lift_evaluation_proof_bytes::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 16, &cols);
+        let var = lift_evaluation_proof_bytes::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
+            &mut builder,
+            &bytes,
+            16,
+            &cols,
+        );
         assert_eq!(var.column_counts, cols);
     }
 
@@ -434,7 +439,12 @@ mod tests {
         // flattened = 3+3 = 6 per round, 2 rounds = 12 → padded to 16
         // → col_prefix_sums.len() = 17.
         let cols: Vec<Vec<usize>> = vec![vec![3, 3], vec![3, 3]];
-        let var = lift_evaluation_proof_bytes::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &[], 8, &cols);
+        let var = lift_evaluation_proof_bytes::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
+            &mut builder,
+            &[],
+            8,
+            &cols,
+        );
         assert_eq!(var.params.col_prefix_sums.len(), 17);
         assert_eq!(var.params.col_prefix_sums[0].len(), 9); // max_log_row_count + 1
     }

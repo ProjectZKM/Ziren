@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use crate::{air::MemoryAirBuilder, utils::pad_rows_fixed_with_err, CoreChipError};
 use generic_array::GenericArray;
 use num::{BigUint, One};
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use typenum::U32;
@@ -259,7 +259,6 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
             !shard.get_precompile_events(SyscallCode::ED_DECOMPRESS).is_empty()
         }
     }
-
 }
 
 impl<F, E: EdwardsParameters> BaseAir<F> for EdDecompressChip<E> {

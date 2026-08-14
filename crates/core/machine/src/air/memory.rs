@@ -107,8 +107,8 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         // a byte in place, which is what makes the check cost one column instead of two.
         let diff_minus_one = clk.clone() - prev_clk.clone() - Self::Expr::ONE;
         let diff_16bit_limb: Self::Expr = access.diff_16bit_limb.clone().into();
-        let diff_8bit_limb = (diff_minus_one - diff_16bit_limb.clone())
-            * Self::F::from_u32(1 << 16).inverse();
+        let diff_8bit_limb =
+            (diff_minus_one - diff_16bit_limb.clone()) * Self::F::from_u32(1 << 16).inverse();
 
         self.send_byte(
             Self::Expr::from_u8(ByteOpcode::U16Range as u8),
@@ -239,8 +239,7 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         // Verify that value = limb_16 + limb_8 * 2^16.
         self.when(do_check.clone()).assert_eq(
             value,
-            limb_16.clone().into()
-                + limb_8.clone().into() * Self::Expr::from_u32(1 << 16),
+            limb_16.clone().into() + limb_8.clone().into() * Self::Expr::from_u32(1 << 16),
         );
 
         // Send the range checks for the limbs.

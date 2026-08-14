@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_pcs::{
@@ -151,25 +151,22 @@ impl ShaCompressChip {
         }
 
         // Verify correct mem address for initialize phase
-        builder.when(local.is_initialize).assert_eq(
-            local.mem_addr,
-            local.h_ptr + cycle_step.clone() * AB::Expr::from_u32(4),
-        );
+        builder
+            .when(local.is_initialize)
+            .assert_eq(local.mem_addr, local.h_ptr + cycle_step.clone() * AB::Expr::from_u32(4));
 
         // Verify correct mem address for compression phase
         builder.when(local.is_compression).assert_eq(
             local.mem_addr,
             local.w_ptr
-                + (((cycle_num - AB::Expr::ONE) * AB::Expr::from_u32(8))
-                    + cycle_step.clone())
+                + (((cycle_num - AB::Expr::ONE) * AB::Expr::from_u32(8)) + cycle_step.clone())
                     * AB::Expr::from_u32(4),
         );
 
         // Verify correct mem address for finalize phase
-        builder.when(local.is_finalize).assert_eq(
-            local.mem_addr,
-            local.h_ptr + cycle_step.clone() * AB::Expr::from_u32(4),
-        );
+        builder
+            .when(local.is_finalize)
+            .assert_eq(local.mem_addr, local.h_ptr + cycle_step.clone() * AB::Expr::from_u32(4));
 
         // In the initialize phase, verify that local.a, local.b, ... is correctly read from memory
         // and does not change

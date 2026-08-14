@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 
 use crate::operations::poseidon2::air::{eval_external_round, eval_internal_rounds};

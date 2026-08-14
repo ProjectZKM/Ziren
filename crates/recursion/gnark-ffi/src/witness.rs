@@ -31,7 +31,10 @@ impl GnarkWitness {
                 .exts
                 .into_iter()
                 .map(|w| {
-                    w.as_basis_coefficients_slice().iter().map(|x| x.as_canonical_biguint().to_string()).collect()
+                    w.as_basis_coefficients_slice()
+                        .iter()
+                        .map(|x| x.as_canonical_biguint().to_string())
+                        .collect()
                 })
                 .collect(),
             vkey_hash: witness.vkey_hash.as_canonical_biguint().to_string(),

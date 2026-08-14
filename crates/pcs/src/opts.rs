@@ -373,10 +373,8 @@ impl Default for ZKMCoreOpts {
             // `SHARD_SIZE=4194305` and at the 2^24 default produce the
             // BYTE-IDENTICAL proof.  Raising this further changes nothing;
             // the shard-size lever is `ELEMENT_THRESHOLD` below.
-            shard_size: env::var("SHARD_SIZE").map_or_else(
-                |_| 1 << 24,
-                |s| s.parse::<usize>().unwrap_or(1 << 24),
-            ),
+            shard_size: env::var("SHARD_SIZE")
+                .map_or_else(|_| 1 << 24, |s| s.parse::<usize>().unwrap_or(1 << 24)),
             // SP1-parity per-shard trace-AREA cap (raw main-trace cells). The
             // ELEMENT_THRESHOLD env OVERRIDES it (mirrors the SHARD_SIZE pattern above);
             // only the no-env / unparseable default is pinned to SP1's ELEMENT_THRESHOLD.

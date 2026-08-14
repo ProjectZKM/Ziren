@@ -24,9 +24,9 @@ use std::marker::PhantomData;
 
 use p3_air::Air;
 use p3_field::{Algebra, PrimeCharacteristicRing};
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::MachineChip;
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
 use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
@@ -124,11 +124,7 @@ pub fn evaluate_mle_ext<C: CircuitConfig>(
     point: &[Ext<C::F, C::EF>],
 ) -> Ext<C::F, C::EF> {
     let dim = point.len();
-    assert_eq!(
-        mle_evals.len(),
-        1 << dim,
-        "mle eval vector size must be 2^point.dimension"
-    );
+    assert_eq!(mle_evals.len(), 1 << dim, "mle eval vector size must be 2^point.dimension");
 
     // partial_lagrange — index-as-MSB expansion (LSB-first point):
     // for each new coord, double the table by `(1-r)` and `r`
@@ -139,8 +135,7 @@ pub fn evaluate_mle_ext<C: CircuitConfig>(
     for &r in point {
         let r_sym: SymbolicExt<C::F, C::EF> = r.into();
         let old_len = weights.len();
-        let mut next: Vec<SymbolicExt<C::F, C::EF>> =
-            vec![SymbolicExt::ZERO; old_len * 2];
+        let mut next: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; old_len * 2];
         for j in 0..old_len {
             let prod = weights[j] * r_sym;
             next[j] = weights[j] - prod;
@@ -173,8 +168,7 @@ pub fn partial_lagrange_symbolic<C: CircuitConfig>(
     let mut weights: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ONE];
     for &r in point {
         let old_len = weights.len();
-        let mut next: Vec<SymbolicExt<C::F, C::EF>> =
-            vec![SymbolicExt::ZERO; old_len * 2];
+        let mut next: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; old_len * 2];
         for j in 0..old_len {
             let prod = weights[j] * r;
             next[j] = weights[j] - prod;
@@ -410,9 +404,8 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     // reuse `alpha` so the in-circuit transcript is byte-identical to the
     // host from alpha onward.
     let alpha = challenger.sample_ext(builder);
-    let beta_seed: Vec<Ext<C::F, C::EF>> = (0..chip_metadata.beta_seed_dim)
-        .map(|_| challenger.sample_ext(builder))
-        .collect();
+    let beta_seed: Vec<Ext<C::F, C::EF>> =
+        (0..chip_metadata.beta_seed_dim).map(|_| challenger.sample_ext(builder)).collect();
 
     // (3) Evaluate public-values constraints.  Negated digest =
     // cumulative_sum (matches the sign convention upstream).  The
@@ -471,11 +464,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         builder.assert_ext_eq(round_proof.sumcheck_proof.claimed_sum, expected_claim);
 
         // Verify the per-round sumcheck.
-        crate::sumcheck::verify_sumcheck::<C, FC>(
-            builder,
-            challenger,
-            &round_proof.sumcheck_proof,
-        );
+        crate::sumcheck::verify_sumcheck::<C, FC>(builder, challenger, &round_proof.sumcheck_proof);
 
         // Verify the eval claim is consistent with the prover's
         // 4-tuple message.  The tuple encodes (num_0, num_1,
@@ -485,14 +474,15 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         //   final_eval = eq(point, eval_point) *
         //     (num_0 * den_1 + num_1 * den_0) * λ +
         //     (den_0 * den_1)
-        let (sumcheck_point, final_eval) =
-            (&round_proof.sumcheck_proof.point_and_eval.0, round_proof.sumcheck_proof.point_and_eval.1);
+        let (sumcheck_point, final_eval) = (
+            &round_proof.sumcheck_proof.point_and_eval.0,
+            round_proof.sumcheck_proof.point_and_eval.1,
+        );
         let sumcheck_point_sym: Vec<SymbolicExt<C::F, C::EF>> =
             sumcheck_point.iter().map(|e| (*e).into()).collect();
         let eval_point_sym: Vec<SymbolicExt<C::F, C::EF>> =
             eval_point.iter().map(|e| (*e).into()).collect();
-        let eq_eval_value =
-            crate::zerocheck::eq_eval::<C>(&sumcheck_point_sym, &eval_point_sym);
+        let eq_eval_value = crate::zerocheck::eq_eval::<C>(&sumcheck_point_sym, &eval_point_sym);
         let n0_sym: SymbolicExt<C::F, C::EF> = round_proof.numerator_0.into();
         let n1_sym: SymbolicExt<C::F, C::EF> = round_proof.numerator_1.into();
         let d0_sym: SymbolicExt<C::F, C::EF> = round_proof.denominator_0.into();
@@ -594,12 +584,8 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         let mut point_extended: Vec<SymbolicExt<C::F, C::EF>> =
             Vec::with_capacity(max_log_row_count + 1);
         point_extended.push(SymbolicExt::ZERO);
-        point_extended.extend(
-            trace_point
-                .iter()
-                .rev()
-                .map(|p| -> SymbolicExt<C::F, C::EF> { (*p).into() }),
-        );
+        point_extended
+            .extend(trace_point.iter().rev().map(|p| -> SymbolicExt<C::F, C::EF> { (*p).into() }));
 
         // (4) Expand the LogUp challenges into the symbolic algebra.  `betas`
         // = partial-Lagrange table over `beta_seed` (= host `eq_mle_table`,
@@ -607,8 +593,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         let alpha_sym: SymbolicExt<C::F, C::EF> = alpha.into();
         let beta_seed_sym: Vec<SymbolicExt<C::F, C::EF>> =
             beta_seed.iter().map(|b| -> SymbolicExt<C::F, C::EF> { (*b).into() }).collect();
-        let betas: Vec<SymbolicExt<C::F, C::EF>> =
-            partial_lagrange_symbolic::<C>(&beta_seed_sym);
+        let betas: Vec<SymbolicExt<C::F, C::EF>> = partial_lagrange_symbolic::<C>(&beta_seed_sym);
 
         // (5) Per-chip reconstruction.  `shard_chips`, `opened_values.chips`,
         // and `logup_evaluations.chip_openings.values()` are ALL name-ordered
@@ -662,7 +647,9 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             let main: &[Ext<C::F, C::EF>] = chip_eval
                 .main_trace_evaluations_full
                 .as_deref()
-                .expect("logup reconstruction requires main_trace_evaluations_full (FIX-off core proof)");
+                .expect(
+                "logup reconstruction requires main_trace_evaluations_full (FIX-off core proof)",
+            );
             let prep: Option<&[Ext<C::F, C::EF>]> =
                 chip_eval.preprocessed_trace_evaluations_full.as_deref();
 
@@ -670,8 +657,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             // row), used to correct the padding region.
             let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let padding_main: Vec<Ext<C::F, C::EF>> = vec![zero_ext; main.len()];
-            let padding_prep: Option<Vec<Ext<C::F, C::EF>>> =
-                prep.map(|p| vec![zero_ext; p.len()]);
+            let padding_prep: Option<Vec<Ext<C::F, C::EF>>> = prep.map(|p| vec![zero_ext; p.len()]);
 
             for (interaction, is_send) in chip
                 .sends()
@@ -696,15 +682,10 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
 
                 // Degree-masked num/den, then sign for receives (host
                 // verifier.rs:1828-1832 / SP1 :249-253).
-                let numerator_eval_i =
-                    real_numerator - padding_numerator * geq_eval.clone();
-                let denominator_eval_i = real_denominator
-                    + (SymbolicExt::ONE - padding_denominator) * geq_eval.clone();
-                let numerator_eval_i = if is_send {
-                    numerator_eval_i
-                } else {
-                    -numerator_eval_i
-                };
+                let numerator_eval_i = real_numerator - padding_numerator * geq_eval.clone();
+                let denominator_eval_i =
+                    real_denominator + (SymbolicExt::ONE - padding_denominator) * geq_eval.clone();
+                let numerator_eval_i = if is_send { numerator_eval_i } else { -numerator_eval_i };
                 numerator_values.push(numerator_eval_i);
                 denominator_values.push(denominator_eval_i);
             }
@@ -784,9 +765,9 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
 mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
+    use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::ir::Ext;
-    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type F = InnerVal;
     type EF = InnerChallenge;
@@ -801,8 +782,7 @@ mod tests {
 
         // 2^3 = 8 evaluations, all = 1 (constant-1 polynomial).
         let mle: Vec<Ext<F, EF>> = (0..8).map(|_| builder.constant(EF::ONE)).collect();
-        let point: Vec<Ext<F, EF>> =
-            (0..3).map(|_| builder.constant(EF::ZERO)).collect();
+        let point: Vec<Ext<F, EF>> = (0..3).map(|_| builder.constant(EF::ZERO)).collect();
         let result = evaluate_mle_ext(&mut builder, &mle, &point);
         // Construction succeeded; the `Ext<F, EF>` is now part of
         // the IR.  Body intentionally elides runtime execution to
@@ -818,10 +798,8 @@ mod tests {
         let mut builder = AsmBuilder::<F, EF>::default();
 
         let mle: Vec<Ext<F, EF>> = (0..4).map(|_| builder.constant(EF::ZERO)).collect();
-        let point: Vec<Ext<F, EF>> = vec![
-            builder.constant(EF::from(F::ONE + F::ONE)),
-            builder.constant(EF::from(F::ONE)),
-        ];
+        let point: Vec<Ext<F, EF>> =
+            vec![builder.constant(EF::from(F::ONE + F::ONE)), builder.constant(EF::from(F::ONE))];
         let _result = evaluate_mle_ext(&mut builder, &mle, &point);
     }
 
@@ -979,14 +957,12 @@ mod tests {
             beta_seed_vals.iter().map(|&v| builder.constant(v)).collect();
         let trace_point: Vec<Ext<F, EF>> =
             trace_point_vals.iter().map(|&v| builder.constant(v)).collect();
-        let degree: Vec<Ext<F, EF>> =
-            degree_vals.iter().map(|&v| builder.constant(v)).collect();
+        let degree: Vec<Ext<F, EF>> = degree_vals.iter().map(|&v| builder.constant(v)).collect();
         let rw_num_ext: Ext<F, EF> = builder.constant(rw_num);
         let rw_den_ext: Ext<F, EF> = builder.constant(rw_den);
 
         // (3) point_extended = [ZERO, ...trace_point.rev()].
-        let mut point_extended: Vec<SymbolicExt<F, EF>> =
-            Vec::with_capacity(trace_point.len() + 1);
+        let mut point_extended: Vec<SymbolicExt<F, EF>> = Vec::with_capacity(trace_point.len() + 1);
         point_extended.push(SymbolicExt::ZERO);
         point_extended
             .extend(trace_point.iter().rev().map(|p| -> SymbolicExt<F, EF> { (*p).into() }));
@@ -1005,8 +981,12 @@ mod tests {
         let zero_ext: Ext<F, EF> = builder.constant(EF::ZERO);
         let padding_main: Vec<Ext<F, EF>> = vec![zero_ext; main_full.len()];
 
-        let (real_num, real_den) =
-            lookup.eval::<SymbolicExt<F, EF>, Ext<F, EF>>(None, &main_full, alpha_sym.clone(), &betas);
+        let (real_num, real_den) = lookup.eval::<SymbolicExt<F, EF>, Ext<F, EF>>(
+            None,
+            &main_full,
+            alpha_sym.clone(),
+            &betas,
+        );
         let (pad_num, pad_den) = lookup.eval::<SymbolicExt<F, EF>, Ext<F, EF>>(
             None,
             &padding_main,
@@ -1050,20 +1030,30 @@ mod tests {
         let main_full = vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7))];
         let alpha = EF::from(F::from_u32(11));
         let beta_seed = vec![EF::from(F::from_u32(13))]; // arity 2 → beta_seed_dim 1
-        // max_log_row_count = 3 → point_extended dim 4 → degree dim 4.
-        let trace_point = vec![
-            EF::from(F::from_u32(2)),
-            EF::from(F::from_u32(3)),
-            EF::from(F::from_u32(4)),
-        ];
+                                                         // max_log_row_count = 3 → point_extended dim 4 → degree dim 4.
+        let trace_point =
+            vec![EF::from(F::from_u32(2)), EF::from(F::from_u32(3)), EF::from(F::from_u32(4))];
         // Honest degree = big-endian bits of height 2^2 = 4 over 4 slots:
         // 0b0100 → [0,1,0,0].
         let degree = vec![EF::ZERO, EF::ONE, EF::ZERO, EF::ZERO];
 
-        let (rw_num, rw_den) =
-            host_reconstruct_single_send(&lookup, &main_full, &degree, alpha, &beta_seed, &trace_point);
+        let (rw_num, rw_den) = host_reconstruct_single_send(
+            &lookup,
+            &main_full,
+            &degree,
+            alpha,
+            &beta_seed,
+            &trace_point,
+        );
         run_single_send_reconstruction(
-            &lookup, &main_full, &degree, alpha, &beta_seed, &trace_point, rw_num, rw_den,
+            &lookup,
+            &main_full,
+            &degree,
+            alpha,
+            &beta_seed,
+            &trace_point,
+            rw_num,
+            rw_den,
         );
     }
 
@@ -1081,11 +1071,8 @@ mod tests {
         let main_full = vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7))];
         let alpha = EF::from(F::from_u32(11));
         let beta_seed = vec![EF::from(F::from_u32(13))];
-        let trace_point = vec![
-            EF::from(F::from_u32(2)),
-            EF::from(F::from_u32(3)),
-            EF::from(F::from_u32(4)),
-        ];
+        let trace_point =
+            vec![EF::from(F::from_u32(2)), EF::from(F::from_u32(3)), EF::from(F::from_u32(4))];
         // HONEST round-walk eval (height 2^2 = 4 → [0,1,0,0]).
         let honest_degree = vec![EF::ZERO, EF::ONE, EF::ZERO, EF::ZERO];
         let (rw_num, rw_den) = host_reconstruct_single_send(
@@ -1126,11 +1113,8 @@ mod tests {
         let honest_main_full = vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7))];
         let alpha = EF::from(F::from_u32(11));
         let beta_seed = vec![EF::from(F::from_u32(13))];
-        let trace_point = vec![
-            EF::from(F::from_u32(2)),
-            EF::from(F::from_u32(3)),
-            EF::from(F::from_u32(4)),
-        ];
+        let trace_point =
+            vec![EF::from(F::from_u32(2)), EF::from(F::from_u32(3)), EF::from(F::from_u32(4))];
         let degree = vec![EF::ZERO, EF::ONE, EF::ZERO, EF::ZERO];
         // HONEST round-walk eval from the HONEST *_full.
         let (rw_num, rw_den) = host_reconstruct_single_send(

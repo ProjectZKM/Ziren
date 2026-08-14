@@ -240,7 +240,6 @@ pub type Message<T> = Vec<Arc<T>>;
 /// sequence indexed by round number.
 pub type Rounds<T> = Vec<T>;
 
-
 impl<F: Field> Mle<F, CpuBackend> {
     /// Fix the *stride-1* (LSB / `point[0]`) variable to `alpha`, returning an
     /// `Mle<EF>` over one fewer variable.

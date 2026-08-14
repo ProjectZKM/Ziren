@@ -85,8 +85,7 @@ pub(crate) const PENDING_JUMP_AT_START_OFFSET: i32 =
 /// Offset of the "last executed PC" tracker.  Written at every
 /// SYSCALL emission so the host handler can recover the syscall's
 /// guest PC — ENTER_UNCONSTRAINED needs it to snapshot `state.pc`.
-pub(crate) const LAST_EXECUTED_PC_OFFSET: i32 =
-    offset_of!(JitContext, last_executed_pc) as i32;
+pub(crate) const LAST_EXECUTED_PC_OFFSET: i32 = offset_of!(JitContext, last_executed_pc) as i32;
 
 /// Where each MIPS register physically lives during JIT execution.
 ///
@@ -457,11 +456,7 @@ impl TranspilerBackend {
     ///   - loads the 4-byte aligned word into `eax`,
     ///   - leaves `i = vaddr & 3` in `edx` and the host address in
     ///     `Rq(TEMP_A)` so SWL/SWR can use it for the write-back.
-    pub(crate) fn emit_lwl_lwr_load_mem(
-        &mut self,
-        rs1: crate::risc::MipsRegister,
-        imm: i32,
-    ) {
+    pub(crate) fn emit_lwl_lwr_load_mem(&mut self, rs1: crate::risc::MipsRegister, imm: i32) {
         use dynasmrt::{dynasm, DynasmApi};
         self.emit_register_load(rs1, TEMP_A);
         dynasm!(self.assembler ; .arch x64

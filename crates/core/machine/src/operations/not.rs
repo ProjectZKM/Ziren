@@ -2,8 +2,8 @@ use p3_air::AirBuilder;
 use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_core_executor::{events::ByteRecord, ByteOpcode};
 use zkm_derive::AlignedBorrow;
-use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{air::ZKMAirBuilder, Word};
+use zkm_primitives::consts::WORD_SIZE;
 
 /// A set of columns needed to compute the not of a word.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
@@ -44,9 +44,7 @@ impl<F: Field> NotOperation<F> {
 
         // For any byte b, b + !b = 0xFF.
         for i in 0..WORD_SIZE {
-            builder
-                .when(is_real)
-                .assert_eq(cols.value[i] + a[i], AB::F::from_u8(u8::MAX));
+            builder.when(is_real).assert_eq(cols.value[i] + a[i], AB::F::from_u8(u8::MAX));
         }
     }
 }

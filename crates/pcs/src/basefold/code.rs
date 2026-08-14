@@ -36,5 +36,4 @@ impl<F: Field> RsCodeWord<F> {
     pub fn width(&self) -> usize {
         self.data.width
     }
-
 }

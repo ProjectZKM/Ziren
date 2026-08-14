@@ -708,9 +708,9 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Sha256Extend(_) => {
                 Some(Self::Sha256ExtendControl(ShaExtendControlChip::default()))
             }
-            Self::BooleanCircuitGarble(_) => Some(Self::BooleanCircuitGarbleControl(
-                BooleanCircuitGarbleControlChip::default(),
-            )),
+            Self::BooleanCircuitGarble(_) => {
+                Some(Self::BooleanCircuitGarbleControl(BooleanCircuitGarbleControlChip::default()))
+            }
             Self::KeccakSponge(_) => {
                 Some(Self::KeccakSpongeControl(KeccakSpongeControlChip::default()))
             }
@@ -885,9 +885,7 @@ pub mod tests {
         let chips = MipsAir::<KoalaBear>::chips();
         // `MipsAirId::Cpu` survives only as the VIRTUAL cycles axis for shard
         // splitting / shape banding — there is no chip behind it.
-        for (a, b) in
-            chips.iter().zip_eq(MipsAirId::iter().filter(|id| *id != MipsAirId::Cpu))
-        {
+        for (a, b) in chips.iter().zip_eq(MipsAirId::iter().filter(|id| *id != MipsAirId::Cpu)) {
             assert_eq!(a.name(), b.to_string());
         }
     }
@@ -1348,8 +1346,8 @@ pub mod tests {
     // NOT the injected chips' content (which is identical to FIX-on's here).
     #[test]
     fn test_fix_on_core_verify_control_rollout1b() {
-        use zkm_core_executor::Executor;
         use crate::shape::CoreShapeConfig;
+        use zkm_core_executor::Executor;
         setup_logger();
         let mut program = fibonacci_program();
         let shape_config = CoreShapeConfig::default();
@@ -1394,8 +1392,8 @@ pub mod tests {
     #[test]
     #[ignore]
     fn recon_probe_honest_only() {
-        use zkm_core_executor::Executor;
         use crate::shape::CoreShapeConfig;
+        use zkm_core_executor::Executor;
         use zkm_pcs::{MachineProver, StarkGenericConfig};
         setup_logger();
 
@@ -1436,8 +1434,8 @@ pub mod tests {
     // (`--test-threads=1`): the flag is a process-wide env var.
     #[test]
     fn test_fix_on_height_forgery_red_green_gate_c() {
-        use zkm_core_executor::Executor;
         use crate::shape::CoreShapeConfig;
+        use zkm_core_executor::Executor;
         use zkm_pcs::{MachineProver, StarkGenericConfig};
         setup_logger();
 
@@ -1777,9 +1775,7 @@ pub mod tests {
                 // Kept, inverted, as the regression guard that the hole stays
                 // closed.
                 let baseline = stage0_verify(&machine, &vk, &forged);
-                eprintln!(
-                    "[STAGE0-TINY-FORGERY] forged verify (recon off) => {baseline}"
-                );
+                eprintln!("[STAGE0-TINY-FORGERY] forged verify (recon off) => {baseline}");
                 assert_ne!(
                     baseline, "OK",
                     "FORGERY MUST BE REJECTED (tiny): an area-preserving height \
@@ -1898,12 +1894,7 @@ pub mod tests {
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let scale = EF::from(KoalaBear::from_u32(2));
         let mut touched = 0usize;
-        for (_name, ce) in bf
-            .logup_gkr_proof
-            .logup_evaluations
-            .chip_openings
-            .iter_mut()
-        {
+        for (_name, ce) in bf.logup_gkr_proof.logup_evaluations.chip_openings.iter_mut() {
             if let Some(mf) = ce.main_trace_evaluations_full.as_mut() {
                 for v in mf.iter_mut() {
                     *v *= scale;
@@ -2055,8 +2046,8 @@ pub mod tests {
         //   (ii) forged degree + ANY changed *_full → claim binding REJECTS.
         // Endpoint (i): reuse the degree-ONLY forgery (honest *_full).
         let mut deg_only = proof.clone();
-        let _ = stage0_apply_height_forgery(&mut deg_only)
-            .expect("fib hosts the degree-only forgery");
+        let _ =
+            stage0_apply_height_forgery(&mut deg_only).expect("fib hosts the degree-only forgery");
         let i_on = stage3_verify_rev(&machine, &vk, &deg_only);
         eprintln!("[STAGE3-ADAPTIVE] (i) degree-only + honest *_full, recon-ON => {i_on}");
         assert!(
@@ -2090,10 +2081,8 @@ pub mod tests {
         let mut forged = proof.clone();
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let scale = EF::from(KoalaBear::from_u32(3));
-        let bf = forged.shard_proofs[0]
-            .basefold_shard_proof
-            .as_mut()
-            .expect("first shard basefold");
+        let bf =
+            forged.shard_proofs[0].basefold_shard_proof.as_mut().expect("first shard basefold");
         let mut touched = 0usize;
         for (_n, ce) in bf.logup_gkr_proof.logup_evaluations.chip_openings.iter_mut() {
             if let Some(mf) = ce.main_trace_evaluations_full.as_mut() {
@@ -2157,7 +2146,9 @@ pub mod tests {
         let (lc, lb) = lower.unwrap();
         bf.opened_values.chips[rc].quotient[0][rb] = one_ef;
         bf.opened_values.chips[lc].quotient[0][lb] = zero_ef;
-        eprintln!("[STAGE3-ATTR] forged degree raise chip[{rc}] bit {rb}, lower chip[{lc}] bit {lb}");
+        eprintln!(
+            "[STAGE3-ATTR] forged degree raise chip[{rc}] bit {rb}, lower chip[{lc}] bit {lb}"
+        );
 
         // forged => recon-ON REJECTS at the reconstruction.
         let forged_on = stage3_verify_rev(&machine, &vk, &forged);
@@ -2271,8 +2262,8 @@ pub mod tests {
             assert_eq!(a.0, b.0);
             assert_eq!(a.1.log_size, b.1.log_size);
             assert_eq!(a.1.shift, b.1.shift);
-            assert_eq!(a.2.1, b.2.1);
-            assert_eq!(a.2.0, b.2.0);
+            assert_eq!(a.2 .1, b.2 .1);
+            assert_eq!(a.2 .0, b.2 .0);
         }
         assert_eq!(vk.chip_ordering, deserialized_vk.chip_ordering);
     }

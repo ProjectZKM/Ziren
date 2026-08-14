@@ -28,12 +28,12 @@
 
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::{Executor, Program};
-use zkm_pcs::air::MachineAir;
 use zkm_core_machine::{
     io::ZKMStdin,
     mips::MipsAir,
     utils::{run_test, run_test_io, setup_logger},
 };
+use zkm_pcs::air::MachineAir;
 use zkm_pcs::{
     debug_lookups_with_all_chips, koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, LookupKind,
     LookupScope, StarkMachine, ZKMCoreOpts,
@@ -305,8 +305,7 @@ fn main() {
                     ),
                     _ => ZKMStdin::new(),
                 };
-                std::fs::write(dir.join("stdin.bin"), bincode::serialize(&stdin).unwrap())
-                    .unwrap();
+                std::fs::write(dir.join("stdin.bin"), bincode::serialize(&stdin).unwrap()).unwrap();
                 eprintln!("dumped {name}");
             }
         }
@@ -392,9 +391,8 @@ fn main() {
             }
 
             // Optional comma-separated subset: `playground all a,b,c`.
-            let filter: Option<Vec<String>> = std::env::args()
-                .nth(2)
-                .map(|f| f.split(',').map(str::to_string).collect());
+            let filter: Option<Vec<String>> =
+                std::env::args().nth(2).map(|f| f.split(',').map(str::to_string).collect());
 
             let mut failed: Vec<&str> = vec![];
             for (name, elf) in artifacts {

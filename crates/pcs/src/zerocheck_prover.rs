@@ -81,13 +81,12 @@ pub fn eq_mle_table<EF: Field + Send + Sync>(r: &[EF]) -> Vec<EF> {
         let mut next: Vec<EF> = vec![EF::ZERO; new_len];
         let one_minus_ri = EF::ONE - ri;
         let (lo, hi) = next.split_at_mut(old_len);
-        lo.par_iter_mut()
-            .zip(hi.par_iter_mut())
-            .zip(table.par_iter())
-            .for_each(|((lo_j, hi_j), &v)| {
+        lo.par_iter_mut().zip(hi.par_iter_mut()).zip(table.par_iter()).for_each(
+            |((lo_j, hi_j), &v)| {
                 *lo_j = v * one_minus_ri;
                 *hi_j = v * ri;
-            });
+            },
+        );
         table = next;
     }
     debug_assert_eq!(table.len(), final_len);
@@ -156,10 +155,7 @@ impl<EF: Field> MultilinearExt<EF> {
 /// evaluate an MLE or `eq(r, –)` at the sumcheck evaluation point, reverse
 /// `eval_point` (or call [`MultilinearExt::evaluate`] which performs the
 /// matching last-variable-first fold).
-pub fn prove_zerocheck_multilinear<F, EF>(
-    c_evals: &[EF],
-    r: &[EF],
-) -> ZerocheckProof<EF>
+pub fn prove_zerocheck_multilinear<F, EF>(c_evals: &[EF], r: &[EF]) -> ZerocheckProof<EF>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -336,26 +332,16 @@ where
     let main_width = main.width();
     let preproc_width = preprocessed.width();
     if preproc_width > 0 {
-        assert_eq!(
-            preprocessed.height(),
-            n,
-            "preprocessed trace height must equal 2^num_vars"
-        );
+        assert_eq!(preprocessed.height(), n, "preprocessed trace height must equal 2^num_vars");
     }
 
     // Lift the full main + preprocessed traces to extension field, so the
     // VerifierConstraintFolder (which expects Var = SC::Challenge) can
     // consume them row-by-row.
-    let main_ext: Vec<Challenge<SC>> = main
-        .values
-        .iter()
-        .map(|&v| Challenge::<SC>::from(v))
-        .collect();
-    let preproc_ext: Vec<Challenge<SC>> = preprocessed
-        .values
-        .iter()
-        .map(|&v| Challenge::<SC>::from(v))
-        .collect();
+    let main_ext: Vec<Challenge<SC>> =
+        main.values.iter().map(|&v| Challenge::<SC>::from(v)).collect();
+    let preproc_ext: Vec<Challenge<SC>> =
+        preprocessed.values.iter().map(|&v| Challenge::<SC>::from(v)).collect();
 
     // Pre-build "wrapped" next rows so that row (i+1) mod n can be sliced
     // without branching in the hot loop.
@@ -402,8 +388,7 @@ where
 
         let is_first = if i == 0 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO };
         let is_last = if i == n - 1 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO };
-        let is_transition =
-            if i == n - 1 { Challenge::<SC>::ZERO } else { Challenge::<SC>::ONE };
+        let is_transition = if i == n - 1 { Challenge::<SC>::ZERO } else { Challenge::<SC>::ONE };
 
         let mut folder = VerifierConstraintFolder::<SC> {
             preprocessed: preproc_window,
@@ -451,8 +436,7 @@ where
     assert_eq!(c_evals.len(), 1 << num_vars, "C table must have length 2^m");
 
     // Sample the equality challenge r = (r_1, …, r_m) from the challenger.
-    let r: Vec<EF> =
-        (0..num_vars).map(|_| challenger.sample_algebra_element::<EF>()).collect();
+    let r: Vec<EF> = (0..num_vars).map(|_| challenger.sample_algebra_element::<EF>()).collect();
 
     let mut eq_table = eq_mle_table::<EF>(&r);
     let mut c_table = c_evals.to_vec();
@@ -463,11 +447,7 @@ where
     // Current claim starts as Σ_b eq(r, b) · C(b). For the zerocheck of a
     // vanishing polynomial this should be 0; we compute it anyway so the
     // sanity check inside the loop is meaningful.
-    let mut current_claim: EF = eq_table
-        .iter()
-        .zip(c_table.iter())
-        .map(|(&e, &c)| e * c)
-        .sum();
+    let mut current_claim: EF = eq_table.iter().zip(c_table.iter()).map(|(&e, &c)| e * c).sum();
 
     for _ in 0..num_vars {
         let half = eq_table.len() / 2;
@@ -510,8 +490,7 @@ where
     if proof.rounds.len() != num_vars {
         return None;
     }
-    let r: Vec<EF> =
-        (0..num_vars).map(|_| challenger.sample_algebra_element::<EF>()).collect();
+    let r: Vec<EF> = (0..num_vars).map(|_| challenger.sample_algebra_element::<EF>()).collect();
     let mut current_claim = initial_claim;
     let mut eval_point: Vec<EF> = Vec::with_capacity(num_vars);
 
@@ -596,11 +575,7 @@ mod tests {
     #[test]
     fn eq_mle_table_correct_on_boolean_cube() {
         // eq(r, b) should be non-trivial; verify Σ_b eq(r,b) = 1.
-        let r: Vec<EF> = vec![
-            EF::from_u32(5),
-            EF::from_u32(7),
-            EF::from_u32(11),
-        ];
+        let r: Vec<EF> = vec![EF::from_u32(5), EF::from_u32(7), EF::from_u32(11)];
         let table = eq_mle_table::<EF>(&r);
         let sum: EF = table.iter().copied().sum();
         assert_eq!(sum, EF::ONE, "Σ_b eq(r,b) must equal 1");
@@ -628,11 +603,7 @@ mod tests {
         let m = 3;
         let mut c_evals: Vec<EF> = (0..(1 << m)).map(|i| EF::from_u32(i as u32 + 1)).collect();
         c_evals[0] = EF::from_u32(100); // make it clearly non-zero
-        let r: Vec<EF> = vec![
-            EF::from_u32(13),
-            EF::from_u32(17),
-            EF::from_u32(19),
-        ];
+        let r: Vec<EF> = vec![EF::from_u32(13), EF::from_u32(17), EF::from_u32(19)];
 
         let proof = prove_zerocheck_multilinear::<F, EF>(&c_evals, &r);
         // The proof's first round polynomial will NOT satisfy p0 + p1 = 0, so
@@ -651,23 +622,16 @@ mod tests {
 
         // Prover runs zerocheck with a challenger.
         let mut prover_chal = InnerChallenger::new(inner_perm());
-        let (r_prover, proof) = prove_zerocheck_with_challenger::<F, EF, _>(
-            &c_evals,
-            m,
-            &mut prover_chal,
-        );
+        let (r_prover, proof) =
+            prove_zerocheck_with_challenger::<F, EF, _>(&c_evals, m, &mut prover_chal);
         assert_eq!(proof.rounds.len(), m);
         assert_eq!(proof.eval_point.len(), m);
         assert_eq!(proof.final_claim, EF::ZERO);
 
         // Verifier runs with a fresh challenger initialized identically.
         let mut verifier_chal = InnerChallenger::new(inner_perm());
-        let result = verify_zerocheck_with_challenger::<F, EF, _>(
-            &proof,
-            m,
-            EF::ZERO,
-            &mut verifier_chal,
-        );
+        let result =
+            verify_zerocheck_with_challenger::<F, EF, _>(&proof, m, EF::ZERO, &mut verifier_chal);
         assert!(result.is_some(), "challenger-integrated zerocheck must verify");
         let (r_verifier, eval_point, final_claim) = result.unwrap();
         assert_eq!(r_prover, r_verifier, "prover and verifier must derive same r");
@@ -682,12 +646,8 @@ mod tests {
         // checks using a PCS opening of C at eval_point.
         let m = 4;
         let c_evals: Vec<EF> = (0..(1 << m)).map(|i| EF::from_u32(i as u32 * 7 + 1)).collect();
-        let r: Vec<EF> = vec![
-            EF::from_u32(23),
-            EF::from_u32(29),
-            EF::from_u32(31),
-            EF::from_u32(37),
-        ];
+        let r: Vec<EF> =
+            vec![EF::from_u32(23), EF::from_u32(29), EF::from_u32(31), EF::from_u32(37)];
 
         // Compute the initial claim honestly.
         let eq_tab = eq_mle_table::<EF>(&r);
@@ -712,10 +672,6 @@ mod tests {
         let c_mle = MultilinearExt::new(c_evals);
         let c_at_rp = c_mle.evaluate(&eval_point);
         let eq_at_rp = eq_eval(&r, &eval_point);
-        assert_eq!(
-            final_claim,
-            eq_at_rp * c_at_rp,
-            "final claim must equal eq(r, r') · C(r')"
-        );
+        assert_eq!(final_claim, eq_at_rp * c_at_rp, "final claim must equal eq(r, r') · C(r')");
     }
 }

@@ -111,7 +111,8 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
             dummy_chunk.push(row);
         }
 
-        let num_padded_rows = if num_real_rows == 0 { 0 } else { num_real_rows.next_power_of_two() };
+        let num_padded_rows =
+            if num_real_rows == 0 { 0 } else { num_real_rows.next_power_of_two() };
         for i in num_real_rows..num_padded_rows {
             rows.push(dummy_chunk[i % NUM_ROUNDS]);
         }

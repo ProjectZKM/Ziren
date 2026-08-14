@@ -20,13 +20,13 @@ use alloc::vec::Vec;
 
 use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
 use p3_commit::Mmcs;
-use p3_field::{ExtensionField, Field, TwoAdicField};
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
 use p3_dft::TwoAdicSubgroupDft;
+use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::Matrix;
 
 use super::code::RsCodeWord;
-use super::config::{BATCH_GRINDING_BITS, FriConfig};
+use super::config::{FriConfig, BATCH_GRINDING_BITS};
 use super::encoder::DftEncoder;
 use super::fri::{commit_phase_round, final_poly};
 use super::mle::Mle;
@@ -136,12 +136,7 @@ where
         num_expected_commitments: usize,
     ) -> Self {
         let encoder = DftEncoder::new(fri_config, dft);
-        Self {
-            encoder,
-            mmcs,
-            num_expected_commitments,
-            _ef: core::marker::PhantomData,
-        }
+        Self { encoder, mmcs, num_expected_commitments, _ef: core::marker::PhantomData }
     }
 
     pub fn config(&self) -> &FriConfig<F> {
@@ -153,10 +148,7 @@ where
     /// Each MLE gets its own RS codeword, and all codewords for this
     /// round are committed under a single Merkle digest by stacking
     /// their (already-bit-reversed) values column-wise.
-    pub fn commit_mles(
-        &self,
-        mles: Vec<Arc<Mle<F>>>,
-    ) -> (MT::Commitment, BasefoldProverData<F, MT>)
+    pub fn commit_mles(&self, mles: Vec<Arc<Mle<F>>>) -> (MT::Commitment, BasefoldProverData<F, MT>)
     where
         F: Send + Sync,
         D: Send + Sync,
@@ -189,17 +181,10 @@ where
         // For commitment: stack each codeword as one matrix in the
         // `mmcs.commit` call.  Layout matches what
         // `query_openings_at_indices` will read back.
-        let mats: Vec<RowMajorMatrix<F>> =
-            codewords.iter().map(|c| c.data.clone()).collect();
+        let mats: Vec<RowMajorMatrix<F>> = codewords.iter().map(|c| c.data.clone()).collect();
 
         let (commitment, prover_data) = self.mmcs.commit(mats);
-        (
-            commitment,
-            BasefoldProverData {
-                prover_data,
-                encoded_codewords: codewords,
-            },
-        )
+        (commitment, BasefoldProverData { prover_data, encoded_codewords: codewords })
     }
 
     /// Build the partial-Lagrange evaluation vector at `point`.
@@ -251,10 +236,8 @@ where
         // row writes into a distinct accumulator slot, so par_iter_mut
         // is safe.
         use p3_maybe_rayon::prelude::*;
-        for ((mles, codewords), evals) in mle_rounds
-            .iter()
-            .zip(codeword_rounds.iter())
-            .zip(evaluation_claims_rounds.iter())
+        for ((mles, codewords), evals) in
+            mle_rounds.iter().zip(codeword_rounds.iter()).zip(evaluation_claims_rounds.iter())
         {
             let mut eval_in_round = 0usize;
             for (mle, codeword) in mles.iter().zip(codewords.iter()) {
@@ -296,10 +279,8 @@ where
         // Pack the batched EF codeword back into F-storage (width = EF::DIMENSION).
         let batched_codeword_storage =
             <EF as p3_field::BasedVectorSpace<F>>::flatten_to_base(batched_codeword_ef);
-        let batched_codeword = RsCodeWord::new(RowMajorMatrix::new(
-            batched_codeword_storage,
-            EF::DIMENSION,
-        ));
+        let batched_codeword =
+            RsCodeWord::new(RowMajorMatrix::new(batched_codeword_storage, EF::DIMENSION));
 
         let batched_mle = Mle::from_row_major(RowMajorMatrix::new(batched_mle, 1));
 
@@ -327,9 +308,8 @@ where
         challenger: &mut Challenger,
     ) -> BasefoldProof<F, EF, MT>
     where
-        Challenger: FieldChallenger<F>
-            + GrindingChallenger<Witness = F>
-            + CanObserve<MT::Commitment>,
+        Challenger:
+            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
     {
         let num_variables = eval_point.len();
 
@@ -341,22 +321,16 @@ where
         let batch_grinding_witness = deterministic_grind(challenger, BATCH_GRINDING_BITS);
 
         // (2) Sample batching coefficients via partial-Lagrange basis.
-        let total_polys: usize = mle_rounds
-            .iter()
-            .flat_map(|r| r.iter())
-            .map(|m| m.num_polynomials())
-            .sum();
+        let total_polys: usize =
+            mle_rounds.iter().flat_map(|r| r.iter()).map(|m| m.num_polynomials()).sum();
         let num_batching_vars = total_polys.next_power_of_two().trailing_zeros() as usize;
-        let batching_point: Vec<EF> = (0..num_batching_vars)
-            .map(|_| challenger.sample_algebra_element())
-            .collect();
+        let batching_point: Vec<EF> =
+            (0..num_batching_vars).map(|_| challenger.sample_algebra_element()).collect();
         let batching_coefficients = Self::partial_lagrange(&batching_point);
 
         // (3) Build the batched MLE + codeword + claim.
-        let codeword_rounds: Vec<Vec<Arc<RsCodeWord<F>>>> = prover_data
-            .iter()
-            .map(|d| d.encoded_codewords.clone())
-            .collect();
+        let codeword_rounds: Vec<Vec<Arc<RsCodeWord<F>>>> =
+            prover_data.iter().map(|d| d.encoded_codewords.clone()).collect();
         let (mut current_mle, mut current_codeword, batched_eval) =
             self.batch(&batching_coefficients, &mle_rounds, &codeword_rounds, &evaluation_claims);
 
@@ -391,11 +365,8 @@ where
                 p.extend_from_slice(&eval_point[round + 1..]);
                 current_mle.eval_at(&p)[0]
             };
-            let one_val = if r == EF::ZERO {
-                EF::ZERO
-            } else {
-                (current_eval - zero_val) / r + zero_val
-            };
+            let one_val =
+                if r == EF::ZERO { EF::ZERO } else { (current_eval - zero_val) / r + zero_val };
             let uni_poly = [zero_val, one_val];
             univariate_messages.push(uni_poly);
             for &elem in &uni_poly {
@@ -431,9 +402,8 @@ where
         // (7) Sample query indices.
         let log_codeword_size = num_variables + self.config().log_blowup();
         let num_queries = self.config().num_queries;
-        let query_indices: Vec<usize> = (0..num_queries)
-            .map(|_| challenger.sample_bits(log_codeword_size))
-            .collect();
+        let query_indices: Vec<usize> =
+            (0..num_queries).map(|_| challenger.sample_bits(log_codeword_size)).collect();
 
         // (8) Open the original (per-round) component-poly commitments.
         // Each query index yields one Merkle path; the leaf at that
@@ -453,8 +423,7 @@ where
                     proof: opening.opening_proof,
                 });
             }
-            component_polynomials_query_openings_and_proofs
-                .push(MerkleOpening { leaves });
+            component_polynomials_query_openings_and_proofs.push(MerkleOpening { leaves });
         }
 
         // (9) Open commit-phase round commitments at the (shifted) indices.

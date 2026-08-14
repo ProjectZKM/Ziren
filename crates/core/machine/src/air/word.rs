@@ -3,8 +3,8 @@ use std::array;
 use itertools::Itertools;
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::ByteOpcode;
-use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{air::ByteAirBuilder, Word};
+use zkm_primitives::consts::WORD_SIZE;
 
 pub trait WordAirBuilder: ByteAirBuilder {
     /// Asserts that the two words are equal.

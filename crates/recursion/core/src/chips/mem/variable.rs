@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 use instruction::{HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr};
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
@@ -151,7 +151,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
     fn included(&self, _record: &Self::Record) -> bool {
         true
     }
-
 }
 
 impl<AB> Air<AB> for MemoryChip<AB::F>

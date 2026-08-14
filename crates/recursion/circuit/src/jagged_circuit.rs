@@ -138,12 +138,8 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
 
 /// Type alias bringing together the standard Ziren BaseFold
 /// recursion-circuit configuration (KoalaBear, 8-element digests).
-pub type DefaultJaggedPcsProof<F, EF> = JaggedPcsProofVariable<
-    RecursiveBasefoldProof<F, EF>,
-    [Felt<F>; 8],
-    F,
-    EF,
->;
+pub type DefaultJaggedPcsProof<F, EF> =
+    JaggedPcsProofVariable<RecursiveBasefoldProof<F, EF>, [Felt<F>; 8], F, EF>;
 
 #[cfg(test)]
 mod tests {
@@ -163,11 +159,7 @@ mod tests {
     #[test]
     fn jagged_dimension_metadata_constructs() {
         let meta: JaggedDimensionMetadata<F> = JaggedDimensionMetadata {
-            col_prefix_sums: vec![
-                vec![F::ZERO; 8],
-                vec![F::ONE; 8],
-                vec![F::ZERO; 8],
-            ],
+            col_prefix_sums: vec![vec![F::ZERO; 8], vec![F::ONE; 8], vec![F::ZERO; 8]],
         };
         assert_eq!(meta.col_prefix_sums.len(), 3);
         assert_eq!(meta.col_prefix_sums[0].len(), 8);

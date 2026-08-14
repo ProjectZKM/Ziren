@@ -1,7 +1,7 @@
 use core::borrow::Borrow;
 use std::{borrow::BorrowMut, iter::zip};
 
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 #[cfg(feature = "sys")]
 use p3_field::PrimeCharacteristicRing;
 use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
@@ -268,7 +268,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
     fn included(&self, _record: &Self::Record) -> bool {
         true
     }
-
 }
 
 impl<AB> Air<AB> for ExtAluChip
@@ -285,7 +284,16 @@ where
 
         for (
             ExtAluValueCols { vals },
-            ExtAluAccessCols { addrs, is_add, is_sub, is_mul, is_div, is_div_active, is_div_soundness, mult },
+            ExtAluAccessCols {
+                addrs,
+                is_add,
+                is_sub,
+                is_mul,
+                is_div,
+                is_div_active,
+                is_div_soundness,
+                mult,
+            },
         ) in zip(local.values, prep_local.accesses)
         {
             let in1 = vals.in1.as_extension::<AB>();
@@ -319,7 +327,10 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing, ExtensionField, BasedVectorSpace};
+    use p3_field::{
+        extension::BinomialExtensionField, BasedVectorSpace, ExtensionField,
+        PrimeCharacteristicRing,
+    };
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 

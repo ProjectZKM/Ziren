@@ -148,10 +148,8 @@ mod tests {
         assert_eq!(logup_evals.point.len(), 5);
         assert_eq!(logup_evals.chip_openings.len(), 1);
 
-        let circuit_output: LogUpGkrOutput<F> = LogUpGkrOutput {
-            numerator: vec![F::ZERO; 8],
-            denominator: vec![F::ONE; 8],
-        };
+        let circuit_output: LogUpGkrOutput<F> =
+            LogUpGkrOutput { numerator: vec![F::ZERO; 8], denominator: vec![F::ONE; 8] };
         let round_proof = LogupGkrRoundProof {
             numerator_0: F::ZERO,
             numerator_1: F::ZERO,

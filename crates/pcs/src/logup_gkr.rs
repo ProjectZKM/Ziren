@@ -87,8 +87,7 @@ where
                 // observed into the challenger — is reproducible.  Otherwise
                 // every subsequent GKR alpha/beta (and the whole logup_gkr
                 // proof) varies run-to-run (valid-but-different compress proofs).
-                let w: crate::InnerVal =
-                    crate::basefold::prover::deterministic_grind(c, bits);
+                let w: crate::InnerVal = crate::basefold::prover::deterministic_grind(c, bits);
                 // SAFETY: the TypeId guard proves `F == InnerVal` on this path.
                 return unsafe { core::mem::transmute_copy::<crate::InnerVal, F>(&w) };
             }
@@ -133,10 +132,7 @@ impl<EF: Field> Fraction<EF> {
     #[inline]
     #[must_use]
     pub fn combine(self, rhs: Self) -> Self {
-        Self {
-            num: self.num * rhs.denom + self.denom * rhs.num,
-            denom: self.denom * rhs.denom,
-        }
+        Self { num: self.num * rhs.denom + self.denom * rhs.num, denom: self.denom * rhs.denom }
     }
 }
 
@@ -265,11 +261,7 @@ where
     F: PrimeField,
     EF: ExtensionField<F>,
 {
-    assert_eq!(
-        random_elements.len(),
-        2,
-        "LogUp-GKR expects exactly two challenges [alpha, beta]",
-    );
+    assert_eq!(random_elements.len(), 2, "LogUp-GKR expects exactly two challenges [alpha, beta]",);
     let alpha = random_elements[0];
     let beta = random_elements[1];
     let raw_per_row = sends.len() + receives.len();
@@ -290,8 +282,7 @@ where
         let emit = |lookup: &Lookup<F>, is_send: bool, leaves: &mut Vec<Fraction<EF>>| {
             let mut betas_iter = beta.powers();
             let mut denom = alpha;
-            denom += betas_iter.next().unwrap()
-                * EF::from_u64(lookup.argument_index() as u64);
+            denom += betas_iter.next().unwrap() * EF::from_u64(lookup.argument_index() as u64);
             for value_col in lookup.values.iter() {
                 let v: F = value_col.apply::<F, F>(preproc_row, main_row);
                 let next_beta = betas_iter.next().unwrap();
@@ -420,12 +411,7 @@ where
 
         for _ in 0..sumcheck_vars {
             let round_poly = compute_gkr_round_poly::<EF>(
-                &eq_table,
-                &n_left,
-                &n_right,
-                &d_left,
-                &d_right,
-                lambda,
+                &eq_table, &n_left, &n_right, &d_left, &d_right, lambda,
             );
             debug_assert_eq!(
                 round_poly[0] + round_poly[1],
@@ -449,8 +435,7 @@ where
 
         // After sumcheck each table has length 1.
         debug_assert_eq!(eq_table.len(), 1);
-        let final_evals: [EF; 4] =
-            [n_left[0], n_right[0], d_left[0], d_right[0]];
+        let final_evals: [EF; 4] = [n_left[0], n_right[0], d_left[0], d_right[0]];
 
         // Final-sumcheck consistency: cur_claim should equal
         //   eq(cur_point, r*) · (λ·(N0·D1 + D0·N1) + D0·D1)
@@ -535,10 +520,7 @@ fn compute_gkr_round_poly<EF: Field + Send + Sync>(
             }
             local
         })
-        .reduce(
-            || [EF::ZERO; 4],
-            |a, b| [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]],
-        )
+        .reduce(|| [EF::ZERO; 4], |a, b| [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]])
 }
 
 /// Evaluate a degree-3 polynomial given its values at `X ∈ {0, 1, 2, 3}`
@@ -747,16 +729,13 @@ where
     let emit = |lookup: &Lookup<F>, is_send: bool, out: &mut Vec<Fraction<EF>>| {
         let mut betas_iter = beta.powers();
         let mut denom = alpha;
-        denom += betas_iter.next().unwrap()
-            * EF::from_u64(lookup.argument_index() as u64);
+        denom += betas_iter.next().unwrap() * EF::from_u64(lookup.argument_index() as u64);
         for value_col in lookup.values.iter() {
-            let v: EF =
-                value_col.apply::<EF, EF>(preproc_at_r_row, main_at_r_row);
+            let v: EF = value_col.apply::<EF, EF>(preproc_at_r_row, main_at_r_row);
             let next_beta = betas_iter.next().unwrap();
             denom += next_beta * v;
         }
-        let mut mult: EF =
-            lookup.multiplicity.apply::<EF, EF>(preproc_at_r_row, main_at_r_row);
+        let mut mult: EF = lookup.multiplicity.apply::<EF, EF>(preproc_at_r_row, main_at_r_row);
         if !is_send {
             mult = -mult;
         }
@@ -805,9 +784,9 @@ where
 /// `(a_i·x_i + (1-a_i)(1-x_i))` is correct.
 fn eq_eval_msb_first<EF: Field>(a: &[EF], x: &[EF]) -> EF {
     assert_eq!(a.len(), x.len());
-    a.iter().zip(x.iter()).fold(EF::ONE, |acc, (&ai, &xi)| {
-        acc * (ai * xi + (EF::ONE - ai) * (EF::ONE - xi))
-    })
+    a.iter()
+        .zip(x.iter())
+        .fold(EF::ONE, |acc, (&ai, &xi)| acc * (ai * xi + (EF::ONE - ai) * (EF::ONE - xi)))
 }
 
 fn observe_ext<F, EF, Challenger>(challenger: &mut Challenger, val: EF)
@@ -925,8 +904,8 @@ mod tests {
     /// verifier performs.
     #[test]
     fn logup_gkr_leaf_claim_reconstructs_from_row_mle() {
-        use crate::kb31_poseidon2::{inner_perm, InnerChallenger};
         use crate::air::LookupScope;
+        use crate::kb31_poseidon2::{inner_perm, InnerChallenger};
         use crate::lookup::{Lookup, LookupKind};
         use p3_air::VirtualPairCol;
 
@@ -935,17 +914,12 @@ mod tests {
         // values.
         let mult_expr = VirtualPairCol::<F>::constant(F::ONE);
         let value_expr = VirtualPairCol::<F>::single_main(0);
-        let sends = vec![Lookup::new(
-            vec![value_expr],
-            mult_expr,
-            LookupKind::Byte,
-            LookupScope::Local,
-        )];
+        let sends =
+            vec![Lookup::new(vec![value_expr], mult_expr, LookupKind::Byte, LookupScope::Local)];
         let receives: Vec<Lookup<F>> = vec![];
 
         // Arbitrary trace values (avoid zero to keep denominators non-zero).
-        let trace: Vec<F> =
-            vec![F::from_u32(3), F::from_u32(5), F::from_u32(7), F::from_u32(11)];
+        let trace: Vec<F> = vec![F::from_u32(3), F::from_u32(5), F::from_u32(7), F::from_u32(11)];
         let trace_height = trace.len();
         let main_width = 1;
 
@@ -992,14 +966,9 @@ mod tests {
             &[], // r_int is empty for 1 interaction per row
             1,
         );
+        assert_eq!(num_r, proof.leaf_claim.0, "reconstructed N(r) must match GKR leaf claim num");
         assert_eq!(
-            num_r,
-            proof.leaf_claim.0,
-            "reconstructed N(r) must match GKR leaf claim num"
-        );
-        assert_eq!(
-            denom_r,
-            proof.leaf_claim.1,
+            denom_r, proof.leaf_claim.1,
             "reconstructed D(r) must match GKR leaf claim denom"
         );
     }
@@ -1036,10 +1005,14 @@ mod tests {
         let trace_height = 4usize;
         let main_width = 2usize;
         let trace: Vec<F> = vec![
-            F::from_u32(3), F::from_u32(13),
-            F::from_u32(5), F::from_u32(17),
-            F::from_u32(7), F::from_u32(19),
-            F::from_u32(11), F::from_u32(23),
+            F::from_u32(3),
+            F::from_u32(13),
+            F::from_u32(5),
+            F::from_u32(17),
+            F::from_u32(7),
+            F::from_u32(19),
+            F::from_u32(11),
+            F::from_u32(23),
         ];
 
         let alpha = EF::from_u32(101);
@@ -1047,7 +1020,13 @@ mod tests {
         let random_elements = vec![alpha, beta];
 
         let leaves = build_lookup_leaves::<F, EF>(
-            &sends, &receives, &[], 0, &trace, main_width, trace_height,
+            &sends,
+            &receives,
+            &[],
+            0,
+            &trace,
+            main_width,
+            trace_height,
             &random_elements,
         );
         // 4 rows × ceil_pow2(2) = 8 leaves total.
@@ -1063,9 +1042,8 @@ mod tests {
 
         // Compute row-MLE of each main column at r_row.
         let col_mle = |col: usize| -> EF {
-            let column: Vec<EF> = (0..trace_height)
-                .map(|row| EF::from(trace[row * main_width + col]))
-                .collect();
+            let column: Vec<EF> =
+                (0..trace_height).map(|row| EF::from(trace[row * main_width + col])).collect();
             eval_mle_first_var(&column, r_row)
         };
         let main_at_r_row = [col_mle(0), col_mle(1)];
@@ -1155,9 +1133,8 @@ mod tests {
         // leaf-layer tables at the prover's eval_point.
         use crate::kb31_poseidon2::{inner_perm, InnerChallenger};
 
-        let leaves: Vec<Fraction<EF>> = (0..8)
-            .map(|i| Fraction::new(EF::from_u32(i + 1), EF::from_u32(2 * i + 3)))
-            .collect();
+        let leaves: Vec<Fraction<EF>> =
+            (0..8).map(|i| Fraction::new(EF::from_u32(i + 1), EF::from_u32(2 * i + 3))).collect();
         let mut prover_chal = InnerChallenger::new(inner_perm());
         let proof = prove_logup_gkr::<F, EF, _>(&leaves, &mut prover_chal);
 

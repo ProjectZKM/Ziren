@@ -13,12 +13,12 @@ use std::{borrow::Borrow, marker::PhantomData};
 
 use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
-use zkm_recursion_compiler::ir::{Builder, Felt};
-use zkm_recursion_core::stark::zkm_imm_wrap_vk_mode;
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::{
     shard_level::shard_proof::BasefoldShardProof, InnerChallenge, InnerVal, StarkVerifyingKey,
 };
+use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_recursion_core::stark::zkm_imm_wrap_vk_mode;
 
 use crate::{
     challenger::CanObserveVariable,
@@ -188,11 +188,10 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
 {
-
-    let basefold_vk = crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
-        builder,
-        &vk_legacy,
-    );
+    let basefold_vk = crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<
+        C,
+        SC,
+    >(builder, &vk_legacy);
     let (
         main_commit,
         public_values_raw,
@@ -234,10 +233,10 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             .chips()
             .iter()
             .filter_map(|c| {
-                let w = MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(c);
-                (w > 0).then(|| {
-                    (MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(c), w)
-                })
+                let w =
+                    MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(c);
+                (w > 0)
+                    .then(|| (MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(c), w))
             })
             .collect();
         dims.sort_by(|a, b| a.0.cmp(&b.0));
@@ -254,12 +253,11 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     };
     // The preprocessed round's commitment: the RAW root the BaseFold open binds
     // against, paired with the digest the KEY holds.
-    let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
-        if prep_widths.is_empty() {
-            Vec::new()
-        } else {
-            vec![(preprocessed_round.raw_commit, basefold_vk.preprocessed_commit)]
-        };
+    let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> = if prep_widths.is_empty() {
+        Vec::new()
+    } else {
+        vec![(preprocessed_round.raw_commit, basefold_vk.preprocessed_commit)]
+    };
 
     // Under VK enforcement: per-chip WITNESSED heights from the
     // opened `degree` — same pattern as core/compress/deferred.  Computed
@@ -275,13 +273,11 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // core_basefold.rs.
     let chip_height_felts_pre: Vec<Felt<C::F>> = {
         let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
-        hs.extend(
-            crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
-                builder,
-                &chip_names,
-                &proof_opened_values,
-            ),
-        );
+        hs.extend(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+            builder,
+            &chip_names,
+            &proof_opened_values,
+        ));
         hs
     };
 
@@ -291,21 +287,34 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         // The gnark wrap path — WITNESSED outer BN254 bundle.
         // Routed via the ring dispatch (OUTER impl lifts it value-independently;
         // the INNER impl's arm is dead — inner never produces OuterBundle).
-        LiftedEvalProof::OuterBundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } => {
-            <SC as FieldHasherVariable<C>>::lift_outer_bundle_dispatch(
-                builder,
-                host,
-                basefold_proof.clone(),
-                sumcheck.clone(),
-                jagged_eval.clone(),
-                *expected_eval,
-                *commit_root,
-                max_log_row_count,
-                &column_counts_by_round,
-                None,
-            )
-        }
-        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+        LiftedEvalProof::OuterBundle {
+            host,
+            basefold_proof,
+            sumcheck,
+            jagged_eval,
+            expected_eval,
+            commit_root,
+        } => <SC as FieldHasherVariable<C>>::lift_outer_bundle_dispatch(
+            builder,
+            host,
+            basefold_proof.clone(),
+            sumcheck.clone(),
+            jagged_eval.clone(),
+            *expected_eval,
+            *commit_root,
+            max_log_row_count,
+            &column_counts_by_round,
+            None,
+        ),
+        LiftedEvalProof::Bundle {
+            host,
+            basefold_proof,
+            sumcheck,
+            jagged_eval,
+            expected_eval,
+            commit_root,
+            modified_commitment,
+        } => {
             // Route through the ring-aware trait dispatch so the
             // SC-generic core compiles for BOTH inner ([Felt;8], witnessed
             // bundle) and outer (BN254, dead arm → placeholder).
@@ -341,21 +350,22 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 &column_counts_by_round,
             )
         }
-        LiftedEvalProof::Empty => <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
-            builder,
-            &[],
-            max_log_row_count,
-            &column_counts_by_round,
-        ),
+        LiftedEvalProof::Empty => {
+            <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
+                builder,
+                &[],
+                max_log_row_count,
+                &column_counts_by_round,
+            )
+        }
     };
     // Under VK enforcement: derive from the WITNESSED opened
     // `degree` instead of baking from host-side chip_log_heights
     // (mirrors core/compress/deferred).  chip_log_heights_for_input is
     // still consumed by finalize_carried_opened_values below.
     let empty_log_heights_wrap = std::collections::BTreeMap::<String, u8>::new();
-    let chip_log_heights_for_input = chip_log_heights_per_input
-        .first()
-        .unwrap_or(&empty_log_heights_wrap);
+    let chip_log_heights_for_input =
+        chip_log_heights_per_input.first().unwrap_or(&empty_log_heights_wrap);
     let chip_height_bits = <SC as FieldHasherVariable<C>>::chip_height_bits_dispatch(
         builder,
         &chip_names,
@@ -380,34 +390,30 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         );
     // consume real per-chip cumulative_sums for wrap input.
     let empty_cumsums_wrap = std::collections::BTreeMap::new();
-    let cumsums_for_input = chip_cumulative_sums_per_input
-        .first()
-        .unwrap_or(&empty_cumsums_wrap);
+    let cumsums_for_input = chip_cumulative_sums_per_input.first().unwrap_or(&empty_cumsums_wrap);
     // Use the trace@z openings CARRIED from the host proof and
     // finalize (overwrites the placeholder `degree` with the REAL big-endian
     // height bits so `full_geq` masks padded rows correctly), matching
     // core_basefold.rs:378.  A `degree` left all-zero would make
     // full_geq=1 always → wrong padded-row mask → in-circuit zerocheck
     // closing mismatch in the gnark wrap.
-    let opened_values =
-        crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
-            builder,
-            proof_opened_values,
-            &chip_names,
-            chip_log_heights_for_input,
-            cumsums_for_input,
-            max_log_row_count,
-        );
+    let opened_values = crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
+        builder,
+        proof_opened_values,
+        &chip_names,
+        chip_log_heights_for_input,
+        cumsums_for_input,
+        max_log_row_count,
+    );
     let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
     // Chip columns + each round's stacking-padding columns (see
     // core_basefold.rs for why the pads have to be counted).
     let wrap_real_num_cols: usize = column_counts_by_round.iter().flatten().sum::<usize>()
         + preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
-    let jagged_evaluator_fn =
-        super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
-            builder,
-            wrap_real_num_cols,
-        );
+    let jagged_evaluator_fn = super::compress_basefold::real_jagged_evaluator_fn::<
+        C,
+        SC::FriChallengerVariable,
+    >(builder, wrap_real_num_cols);
     let mut challenger = machine.config().challenger_variable(builder);
 
     // Seed the transcript EXACTLY like the host `StarkMachine::verify`
@@ -432,18 +438,24 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         }
     }
 
-    let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<SC>(
-        max_log_row_count,
-        max_log_row_count as u32,
-    );
+    let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<
+        SC,
+    >(max_log_row_count, max_log_row_count as u32);
 
     // Per-proof verifier override when the bundle path is active.
     // Mirrors core_basefold.rs:418-434 / compress_basefold.rs.
     let per_proof_verifier;
     let active_verifier = match &evaluation_proof {
-        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
-            let bundle_num_vars =
-                host.basefold_proof.basefold_proof.fri_commitments.len();
+        LiftedEvalProof::Bundle {
+            host,
+            basefold_proof,
+            sumcheck,
+            jagged_eval,
+            expected_eval,
+            commit_root,
+            modified_commitment,
+        } => {
+            let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
             per_proof_verifier =
                 crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                     max_log_row_count,
@@ -457,8 +469,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         // witnessed outer bundle's `host` (shape metadata) — same as the
         // Bytes-deserialize override below (blowup=3 rate).
         LiftedEvalProof::OuterBundle { host, .. } => {
-            let bundle_num_vars =
-                host.basefold_proof.basefold_proof.fri_commitments.len();
+            let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
             per_proof_verifier =
                 crate::shard_proof_variable_lift::build_basefold_shard_verifier_wrap::<SC>(
                     max_log_row_count,
@@ -476,10 +487,9 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         // is Option, so a non-outer Bytes payload (placeholder/empty)
         // cleanly falls through to the default verifier.
         LiftedEvalProof::Bytes(bytes) => {
-            if let Some(outer_bundle) =
-                zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
-                    zkm_recursion_core::stark::OuterValMmcs,
-                >::from_bytes(bytes)
+            if let Some(outer_bundle) = zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+                zkm_recursion_core::stark::OuterValMmcs,
+            >::from_bytes(bytes)
             {
                 let bundle_num_vars =
                     outer_bundle.basefold_proof.basefold_proof.fri_commitments.len();
@@ -576,10 +586,7 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
     /// Wrap takes a single `(vk, root-proof)` pair, so the input
     /// shape's first proof_shape drives the dummy proof construction.
     pub fn dummy<A>(
-        machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-            A,
-        >,
+        machine: &zkm_pcs::StarkMachine<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
         shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
@@ -603,7 +610,11 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape, recursion_area_pin)
+                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(
+                    machine,
+                    proof_shape,
+                    recursion_area_pin,
+                )
             })
             .collect();
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(

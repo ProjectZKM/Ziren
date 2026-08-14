@@ -17,12 +17,12 @@ use rayon::slice::ParallelSlice;
 use serde::{Deserialize, Serialize};
 use zkm_core_executor::ZKMReduceProof;
 use zkm_core_machine::utils::log2_strict_usize;
+use zkm_pcs::{
+    inner_perm, koala_bear_poseidon2::MyHash as InnerHash, MachineProof, MachineVerificationError,
+    StarkGenericConfig, DIGEST_SIZE,
+};
 use zkm_recursion_core::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH};
 use zkm_recursion_core::machine::RecursionAir;
-use zkm_pcs::{
-    inner_perm, koala_bear_poseidon2::MyHash as InnerHash, MachineProof,
-    MachineVerificationError, StarkGenericConfig, DIGEST_SIZE,
-};
 
 use super::{HashableKey, InnerSC, ZKMVerifyingKey};
 

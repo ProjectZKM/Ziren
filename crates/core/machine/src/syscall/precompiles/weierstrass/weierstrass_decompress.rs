@@ -11,7 +11,7 @@ use crate::{
 };
 use generic_array::GenericArray;
 use num::{BigUint, One};
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use std::marker::PhantomData;
@@ -215,8 +215,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
                 let decompressed_y = BigUint::from_bytes_le(&event.decompressed_y_bytes);
                 let neg_y = &modulus - &decompressed_y;
 
-                let is_y_eq_sqrt_y_result =
-                    F::from_u8(event.decompressed_y_bytes[0] % 2) == lsb;
+                let is_y_eq_sqrt_y_result = F::from_u8(event.decompressed_y_bytes[0] % 2) == lsb;
                 choice_cols.is_y_eq_sqrt_y_result = F::from_bool(is_y_eq_sqrt_y_result);
 
                 if is_y_eq_sqrt_y_result {
@@ -301,7 +300,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
             }
         }
     }
-
 }
 
 impl<F, E: EllipticCurve> BaseAir<F> for WeierstrassDecompressChip<E> {
@@ -500,15 +498,9 @@ where
         }
 
         let syscall_id = match E::CURVE_TYPE {
-            CurveType::Secp256k1 => {
-                AB::F::from_u32(SyscallCode::SECP256K1_DECOMPRESS.syscall_id())
-            }
-            CurveType::Secp256r1 => {
-                AB::F::from_u32(SyscallCode::SECP256R1_DECOMPRESS.syscall_id())
-            }
-            CurveType::Bls12381 => {
-                AB::F::from_u32(SyscallCode::BLS12381_DECOMPRESS.syscall_id())
-            }
+            CurveType::Secp256k1 => AB::F::from_u32(SyscallCode::SECP256K1_DECOMPRESS.syscall_id()),
+            CurveType::Secp256r1 => AB::F::from_u32(SyscallCode::SECP256R1_DECOMPRESS.syscall_id()),
+            CurveType::Bls12381 => AB::F::from_u32(SyscallCode::BLS12381_DECOMPRESS.syscall_id()),
             _ => panic!("Unsupported curve"),
         };
 

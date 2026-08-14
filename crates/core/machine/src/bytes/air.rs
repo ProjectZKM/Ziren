@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_core_executor::ByteOpcode;
 use zkm_pcs::air::ZKMAirBuilder;
@@ -61,13 +61,9 @@ impl<AB: ZKMAirBuilder<F: Field>> Air<AB> for ByteChip<AB::F> {
                 ByteOpcode::MSB => {
                     builder.receive_byte(field_op, local.msb, local.b, AB::F::ZERO, mult)
                 }
-                ByteOpcode::U16Range => builder.receive_byte(
-                    field_op,
-                    local.value_u16,
-                    AB::F::ZERO,
-                    AB::F::ZERO,
-                    mult,
-                ),
+                ByteOpcode::U16Range => {
+                    builder.receive_byte(field_op, local.value_u16, AB::F::ZERO, AB::F::ZERO, mult)
+                }
             }
         }
     }

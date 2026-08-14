@@ -103,14 +103,8 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     /// `Box` keeps the ShardProof size footprint flat — the
     /// BasefoldShardProof is ~KB of nested structs.
     #[serde(default)]
-    pub basefold_shard_proof: Option<
-        Box<
-            crate::shard_level::shard_proof::BasefoldShardProof<
-                Val<SC>,
-                Challenge<SC>,
-            >,
-        >,
-    >,
+    pub basefold_shard_proof:
+        Option<Box<crate::shard_level::shard_proof::BasefoldShardProof<Val<SC>, Challenge<SC>>>>,
 }
 
 impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {

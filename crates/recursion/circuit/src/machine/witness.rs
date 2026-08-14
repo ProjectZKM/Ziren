@@ -5,11 +5,11 @@ use p3_koala_bear::KoalaBear;
 use p3_symmetric::{Hash, MerkleCap};
 
 use p3_field::PrimeCharacteristicRing;
-use zkm_recursion_compiler::ir::Builder;
 use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
     OpeningProof, StarkVerifyingKey, Word,
 };
+use zkm_recursion_compiler::ir::Builder;
 
 use zkm_recursion_compiler::ir::Felt;
 
@@ -96,8 +96,10 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriParametersVariable<C>>
-    Witnessable<C> for StarkVerifyingKey<SC>
+impl<
+        C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+        SC: KoalaBearFriParametersVariable<C>,
+    > Witnessable<C> for StarkVerifyingKey<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
     OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
@@ -108,9 +110,17 @@ where
         let commitment = self.commit.read(builder);
         let pc_start = self.pc_start.read(builder);
         let initial_global_cumulative_sum = self.initial_global_cumulative_sum.read(builder);
-        let chip_information = self.chip_information.iter().map(|(name, ser_domain, dims)| {
-            (name.clone(), ser_domain.to_coset(), p3_matrix::Dimensions { width: dims.0, height: dims.1 })
-        }).collect();
+        let chip_information = self
+            .chip_information
+            .iter()
+            .map(|(name, ser_domain, dims)| {
+                (
+                    name.clone(),
+                    ser_domain.to_coset(),
+                    p3_matrix::Dimensions { width: dims.0, height: dims.1 },
+                )
+            })
+            .collect();
         // WITNESS the per-prep-chip [name_digest, prep_width] vk.hash
         // inputs so the in-circuit hash is VALUE-INDEPENDENT — a FIXED
         // 2 reads per prep chip regardless of the core vk's heights /
@@ -211,8 +221,8 @@ where
 mod basefold_witness {
     use super::*;
     use crate::machine::{
-        core_basefold::{ZKMCoreBasefoldWitnessValues, ZKMCoreBasefoldWitnessVariable},
         compress_basefold::{ZKMCompressBasefoldWitnessValues, ZKMCompressBasefoldWitnessVariable},
+        core_basefold::{ZKMCoreBasefoldWitnessValues, ZKMCoreBasefoldWitnessVariable},
         deferred_basefold::{ZKMDeferredBasefoldWitnessValues, ZKMDeferredBasefoldWitnessVariable},
         wrap_basefold::{ZKMWrapBasefoldWitnessValues, ZKMWrapBasefoldWitnessVariable},
     };
@@ -272,13 +282,10 @@ mod basefold_witness {
         SC: zkm_pcs::StarkGenericConfig
             + KoalaBearFriParametersVariable<C>
             + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
-        Com<SC>:
-            Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
+        Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
         StarkVerifyingKey<SC>: Witnessable<C, WitnessVariable = VerifyingKeyVariable<C, SC>>,
-        crate::machine::ZKMMerkleProofWitnessValues<SC>: Witnessable<
-            C,
-            WitnessVariable = crate::machine::ZKMMerkleProofWitnessVariable<C, SC>,
-        >,
+        crate::machine::ZKMMerkleProofWitnessValues<SC>:
+            Witnessable<C, WitnessVariable = crate::machine::ZKMMerkleProofWitnessVariable<C, SC>>,
     {
         type WitnessVariable = ZKMCompressBasefoldWitnessVariable<C, SC>;
 
@@ -298,11 +305,8 @@ mod basefold_witness {
             // Mirror chip_log_heights per input (plain u8 map, no
             // witness-stream consumption — host-side metadata threaded
             // into chip_height_bits_from_log_heights at the lift site).
-            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| sp.chip_log_heights.clone())
-                .collect();
+            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_log_heights.clone()).collect();
             // Read vk-merkle witness so verify_compress_basefold can
             // bind each child VK hash to vk_merkle_data.root.
             let vk_merkle_data = self.vk_merkle_data.read(builder);
@@ -337,8 +341,7 @@ mod basefold_witness {
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
     {
-        type WitnessVariable =
-            ZKMDeferredBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
+        type WitnessVariable = ZKMDeferredBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
@@ -354,11 +357,8 @@ mod basefold_witness {
                 })
                 .collect();
             // Mirror chip_log_heights per input (host-side metadata).
-            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| sp.chip_log_heights.clone())
-                .collect();
+            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_log_heights.clone()).collect();
             ZKMDeferredBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_cumulative_sums_per_input,
@@ -421,11 +421,8 @@ mod basefold_witness {
                 })
                 .collect();
             // Mirror chip_log_heights per input (host-side metadata).
-            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| sp.chip_log_heights.clone())
-                .collect();
+            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_log_heights.clone()).collect();
             // Read vk-merkle witness so verify_wrap_basefold can bind
             // the input VK hash against vk_merkle_data.root.
             let vk_merkle_data = self.vk_merkle_data.read(builder);
@@ -477,11 +474,8 @@ mod basefold_witness {
                         .collect::<std::collections::BTreeMap<_, _>>()
                 })
                 .collect();
-            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> = self
-                .vks_and_proofs
-                .iter()
-                .map(|(_, sp)| sp.chip_log_heights.clone())
-                .collect();
+            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_log_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             ZKMWrapBasefoldWitnessVariable {
                 vks_and_proofs,

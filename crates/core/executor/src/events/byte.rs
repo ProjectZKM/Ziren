@@ -190,7 +190,6 @@ impl ByteOpcode {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

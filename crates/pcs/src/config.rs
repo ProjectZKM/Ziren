@@ -182,16 +182,16 @@ pub trait BasefoldRing: StarkGenericConfig {
         + p3_commit::Mmcs<
             crate::jagged_pcs::JaggedVal,
             Commitment: Clone
-                + Send
-                + Sync
-                + 'static
-                + serde::Serialize
-                + for<'d> serde::Deserialize<'d>,
+                            + Send
+                            + Sync
+                            + 'static
+                            + serde::Serialize
+                            + for<'d> serde::Deserialize<'d>,
             Proof: serde::Serialize + for<'d> serde::Deserialize<'d>,
-            ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>:
-                Send + Sync + 'static,
-        >
-        + Clone;
+            ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>: Send
+                                                                                            + Sync
+                                                                                            + 'static,
+        > + Clone;
 
     /// Construct the BaseFold MMCS for this config (perm + hash + compress).
     fn bf_mmcs() -> Self::BfMmcs;
@@ -211,7 +211,6 @@ pub trait BasefoldRing: StarkGenericConfig {
     fn fri_config() -> crate::basefold::config::FriConfig<crate::jagged_pcs::JaggedVal> {
         crate::basefold::config::FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default()
     }
-
 
     /// #H: per-ring projection of the BaseFold commitment to 8 KoalaBear felts
     /// for the `[F;8] main_commitment` FS observe (host path). Inner = MerkleCap
@@ -267,9 +266,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// round is a main-only proof; two are `[preprocessed, main]`.
     fn prove_jagged_open(
         z_row: &[crate::InnerChallenge],
-        rounds: alloc::vec::Vec<
-            crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>,
-        >,
+        rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
 }
@@ -279,9 +276,8 @@ pub trait BasefoldRing: StarkGenericConfig {
 /// downstream crates (e.g. `zkm-core-machine`, which does not depend on
 /// `p3-commit`) can name the `CanObserve<..>` bound the static outer BaseFold
 /// open threads through the shard-prover call chain.
-pub type BfCommitment<SC> = <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
-    crate::jagged_pcs::JaggedVal,
->>::Commitment;
+pub type BfCommitment<SC> =
+    <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment;
 
 #[derive(Clone)]
 pub struct UniConfig<SC>(pub SC);

@@ -2,8 +2,8 @@ use std::array;
 
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
-use zkm_primitives::RC_16_30_U32;
 use zkm_pcs::air::MachineAirBuilder;
+use zkm_primitives::RC_16_30_U32;
 
 use super::{permutation::Poseidon2Cols, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
 
@@ -53,16 +53,17 @@ pub fn external_linear_layer_mut<AF: PrimeCharacteristicRing>(state: &mut [AF; W
     }
 }
 
-pub fn external_linear_layer<AF: PrimeCharacteristicRing + Copy>(state: &[AF; WIDTH]) -> [AF; WIDTH] {
+pub fn external_linear_layer<AF: PrimeCharacteristicRing + Copy>(
+    state: &[AF; WIDTH],
+) -> [AF; WIDTH] {
     let mut state = *state;
     external_linear_layer_mut(&mut state);
     state
 }
 
 pub fn internal_linear_layer_mut<F: PrimeCharacteristicRing>(state: &mut [F; WIDTH]) {
-    let matmul_constants: [F; WIDTH] = core::array::from_fn(|i| {
-        F::from_u32(INTERNAL_DIAG_MONTY_16[i].as_canonical_u32())
-    });
+    let matmul_constants: [F; WIDTH] =
+        core::array::from_fn(|i| F::from_u32(INTERNAL_DIAG_MONTY_16[i].as_canonical_u32()));
     // Implement matmul_internal inline: (1 + diag(v))state
     let sum: F = state.iter().cloned().sum();
     for i in 0..WIDTH {
@@ -86,9 +87,8 @@ where
 
     // Add the round constants.
     let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
-    let add_rc: [AB::Expr; WIDTH] = array::from_fn(|i| {
-        local_state[i].clone() + AB::F::from_u32(RC_16_30_U32[round][i])
-    });
+    let add_rc: [AB::Expr; WIDTH] =
+        array::from_fn(|i| local_state[i].clone() + AB::F::from_u32(RC_16_30_U32[round][i]));
 
     // Apply the sboxes.
     // See `populate_external_round` for why we don't have columns for the sbox output here.

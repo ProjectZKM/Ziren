@@ -463,8 +463,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                             let last_row =
                                 &main_trace.values[main_trace_size - 14..main_trace_size];
                             SepticDigest(SepticCurve {
-                                x: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| last_row[i]),
-                                y: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| last_row[i + 7]),
+                                x: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| {
+                                    last_row[i]
+                                }),
+                                y: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| {
+                                    last_row[i + 7]
+                                }),
                             })
                         };
                         (trace, (global_sum, local_sum))
@@ -642,7 +646,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .iter()
             .map(|(name, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
-                let ser_domain = SerializableDomain::new(domain.first_point(), domain.size().trailing_zeros() as usize);
+                let ser_domain = SerializableDomain::new(
+                    domain.first_point(),
+                    domain.size().trailing_zeros() as usize,
+                );
                 (name.to_owned(), ser_domain, (trace.width(), trace.height()))
             })
             .collect();
@@ -788,7 +795,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .iter()
             .map(|(name, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
-                let ser_domain = SerializableDomain::new(domain.first_point(), domain.size().trailing_zeros() as usize);
+                let ser_domain = SerializableDomain::new(
+                    domain.first_point(),
+                    domain.size().trailing_zeros() as usize,
+                );
                 (name.to_owned(), ser_domain, (trace.width(), trace.height()))
             })
             .collect();
@@ -966,7 +976,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         .shard_chips_named(&shard_proof.basefold().chip_log_heights)
                         .collect::<Vec<_>>();
                     let mut shard_challenger = base_challenger.clone();
-                    shard_challenger.observe_slice(&shard_proof.public_values[0..self.num_pv_elts()]);
+                    shard_challenger
+                        .observe_slice(&shard_proof.public_values[0..self.num_pv_elts()]);
                     Verifier::verify_shard(
                         &self.config,
                         vk,

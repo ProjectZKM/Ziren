@@ -89,10 +89,10 @@ mod tests {
         let parent_ops_before = builder.get_mut_operations().vec.len();
 
         // Map 3 items, each emits 1 ImmF.
-        let _vals: Vec<crate::ir::Felt<F>> = (0..3u32).ir_par_map_collect(
-            &mut builder,
-            |b, i| -> crate::ir::Felt<F> { b.eval(F::from_u32(100 + i)) },
-        );
+        let _vals: Vec<crate::ir::Felt<F>> = (0..3u32)
+            .ir_par_map_collect(&mut builder, |b, i| -> crate::ir::Felt<F> {
+                b.eval(F::from_u32(100 + i))
+            });
 
         let parent_ops_after = builder.get_mut_operations().vec.len();
         // Exactly one new op (the Parallel) was pushed to the parent.
@@ -104,10 +104,7 @@ mod tests {
             DslIr::Parallel(blocks) => {
                 assert_eq!(blocks.len(), 3, "expected 3 sub-blocks");
                 for (i, b) in blocks.iter().enumerate() {
-                    assert!(
-                        !b.ops.is_empty(),
-                        "sub-block {i} should hold at least the eval op"
-                    );
+                    assert!(!b.ops.is_empty(), "sub-block {i} should hold at least the eval op");
                 }
             }
             other => panic!("expected DslIr::Parallel, got {other:?}"),

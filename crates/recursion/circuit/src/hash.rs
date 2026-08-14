@@ -7,6 +7,8 @@ use p3_koala_bear::KoalaBear;
 
 use p3_bn254_fr::Bn254;
 use p3_symmetric::Permutation;
+use zkm_pcs::inner_perm;
+use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{Builder, Config, DslIr, Ext, Felt, Var},
@@ -14,8 +16,6 @@ use zkm_recursion_compiler::{
 use zkm_recursion_core::stark::{outer_perm, OUTER_MULTI_FIELD_CHALLENGER_WIDTH};
 use zkm_recursion_core::{stark::KoalaBearPoseidon2Outer, DIGEST_SIZE};
 use zkm_recursion_core::{HASH_RATE, PERMUTATION_WIDTH};
-use zkm_pcs::inner_perm;
-use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
 
 use crate::{
     challenger::{reduce_32, POSEIDON_2_BB_RATE},

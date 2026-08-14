@@ -166,5 +166,4 @@ impl<F: PrimeField32> MachineAir<F> for LoadWordChip {
             !shard.memory_load_word_events.is_empty()
         }
     }
-
 }

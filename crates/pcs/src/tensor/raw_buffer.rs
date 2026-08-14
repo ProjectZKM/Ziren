@@ -5,13 +5,7 @@
 //! (host stays device-dependency-free); `ziren-gpu` implements `CudaBackend` against
 //! this `Backend`/`RawBuffer`/`Slice`/`DeviceMemory` abstraction.
 
-use core::{
-    alloc::Layout,
-    marker::PhantomData,
-    mem,
-    ptr::NonNull,
-};
-
+use core::{alloc::Layout, marker::PhantomData, mem, ptr::NonNull};
 
 use crate::tensor::Allocator;
 
@@ -74,7 +68,6 @@ impl<T, A: Allocator> RawBuffer<T, A> {
             Err(e) => Err(e),
         }
     }
-
 
     /// Reconstitutes a `RawBuffer` from a pointer, capacity, and allocator.
     ///

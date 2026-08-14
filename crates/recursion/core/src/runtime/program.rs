@@ -106,10 +106,9 @@ impl<F: p3_field::PrimeField64> RecursionProgram<F> {
                 }
                 Instruction::Hint(i) => {
                     i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
-                }
-                // 9d1c21d4 retired these three chips, but their instructions
-                // remain in the ISA and the VM still executes them, so their
-                // addresses still count towards the allocation.
+                } // 9d1c21d4 retired these three chips, but their instructions
+                  // remain in the ISA and the VM still executes them, so their
+                  // addresses still count towards the allocation.
             }
         }
         max_addr.map_or(0, |m| m as usize + 1)

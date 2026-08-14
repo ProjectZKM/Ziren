@@ -139,7 +139,6 @@ pub fn program_cache_audit_enabled() -> bool {
     v == "1" || v.eq_ignore_ascii_case("true")
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,4 +1,4 @@
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_pcs::{
@@ -202,18 +202,16 @@ impl ShaExtendChip {
         let pid = AB::Expr::from_u32(SyscallCode::SHA_EXTEND.syscall_id());
 
         let tuple = |index: AB::Expr| -> Vec<AB::Expr> {
-            vec![
-                pid.clone(),
-                local.shard.into(),
-                local.clk.into(),
-                local.w_ptr.into(),
-                index,
-            ]
+            vec![pid.clone(), local.shard.into(), local.clk.into(), local.w_ptr.into(), index]
         };
 
         // Receive the current index `i`.
         builder.receive(
-            AirLookup::new(tuple(local.i.into()), local.is_real.into(), LookupKind::PrecompileChain),
+            AirLookup::new(
+                tuple(local.i.into()),
+                local.is_real.into(),
+                LookupKind::PrecompileChain,
+            ),
             LookupScope::Local,
         );
 

@@ -10,14 +10,13 @@
 //! Second, we prove the CLO.
 //! we use clo(b) = clz(0xffffffff - b)
 
-use zkm_pcs::air::BaseAirBuilder;
 use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
 use itertools::Itertools;
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
@@ -25,6 +24,7 @@ use zkm_core_executor::{
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_pcs::air::BaseAirBuilder;
 use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
@@ -311,8 +311,7 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{ExecutionRecord, Executor, Instruction, Opcode, Program};
     use zkm_pcs::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-        ZKMCoreOpts,
+        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig, ZKMCoreOpts,
     };
 
     use super::CloClzChip;

@@ -21,6 +21,13 @@ use std::{
 use itertools::Itertools;
 use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
+use zkm_core_machine::mips::MAX_LOG_NUMBER_OF_SHARDS;
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::{
+    air::{LookupScope, PublicValues, POSEIDON_NUM_WORDS},
+    shard_level::shard_proof::BasefoldShardProof,
+    InnerChallenge, InnerVal, StarkVerifyingKey, Word,
+};
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{Builder, Felt, SymbolicFelt},
@@ -29,13 +36,6 @@ use zkm_recursion_core::{
     air::{RecursionPublicValues, PV_DIGEST_NUM_WORDS, RECURSIVE_PROOF_NUM_PV_ELTS},
     DIGEST_SIZE,
 };
-use zkm_pcs::air::MachineAir;
-use zkm_pcs::{
-    air::{LookupScope, PublicValues, POSEIDON_NUM_WORDS},
-    shard_level::shard_proof::BasefoldShardProof,
-    InnerChallenge, InnerVal, StarkVerifyingKey, Word,
-};
-use zkm_core_machine::mips::MAX_LOG_NUMBER_OF_SHARDS;
 
 use crate::{
     machine::{assert_complete, recursion_public_values_digest},
@@ -148,11 +148,9 @@ pub fn verify_core_basefold<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
 {
-    let basefold_shard_verifier =
-        crate::shard_proof_variable_lift::build_basefold_shard_verifier::<SC>(
-            max_log_row_count,
-            max_log_row_count as u32,
-        );
+    let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<
+        SC,
+    >(max_log_row_count, max_log_row_count as u32);
 
     let ZKMCoreBasefoldWitnessVariable {
         vk: vk_legacy,
@@ -162,11 +160,10 @@ pub fn verify_core_basefold<C, SC, A>(
         is_first_shard,
         vk_root,
     } = input;
-    let basefold_vk =
-        crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
-            builder,
-            &vk_legacy,
-        );
+    let basefold_vk = crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<
+        C,
+        SC,
+    >(builder, &vk_legacy);
 
     // ---- Initialize shard-chain state (same layout as legacy core.rs:128-167) ----
     let mut initial_shard: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
@@ -182,8 +179,7 @@ pub fn verify_core_basefold<C, SC, A>(
         unsafe { MaybeUninit::zeroed().assume_init() };
     let mut initial_previous_finalize_addr_bits: [Felt<_>; 32] =
         unsafe { MaybeUninit::zeroed().assume_init() };
-    let mut current_init_addr_bits: [Felt<_>; 32] =
-        unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut current_init_addr_bits: [Felt<_>; 32] = unsafe { MaybeUninit::zeroed().assume_init() };
     let mut current_finalize_addr_bits: [Felt<_>; 32] =
         unsafe { MaybeUninit::zeroed().assume_init() };
 
@@ -715,10 +711,7 @@ pub fn verify_core_basefold<C, SC, A>(
             // is_first_shard consistency.
             builder.assert_felt_eq(is_first_shard * (is_first_shard - C::F::ONE), C::F::ZERO);
             builder.assert_felt_eq(is_first_shard * (initial_shard - C::F::ONE), C::F::ZERO);
-            builder.assert_felt_ne(
-                (SymbolicFelt::ONE - is_first_shard) * initial_shard,
-                C::F::ONE,
-            );
+            builder.assert_felt_ne((SymbolicFelt::ONE - is_first_shard) * initial_shard, C::F::ONE);
 
             // start_pc must match vk.pc_start on the first shard.
             // Use the legacy VK (full API) rather than the lifted basefold VK.
@@ -772,9 +765,8 @@ pub fn verify_core_basefold<C, SC, A>(
         builder.assert_felt_eq(exit_code, C::F::ZERO);
 
         // Memory init/finalize address bits.
-        for (bit, current_bit) in current_init_addr_bits
-            .iter()
-            .zip_eq(public_values.previous_init_addr_bits.iter())
+        for (bit, current_bit) in
+            current_init_addr_bits.iter().zip_eq(public_values.previous_init_addr_bits.iter())
         {
             builder.assert_felt_eq(*bit, *current_bit);
         }
@@ -802,15 +794,13 @@ pub fn verify_core_basefold<C, SC, A>(
                 builder.assert_felt_eq(*prev_bit, *last_bit);
             }
         }
-        for (bit, pub_bit) in current_init_addr_bits
-            .iter_mut()
-            .zip(public_values.last_init_addr_bits.iter())
+        for (bit, pub_bit) in
+            current_init_addr_bits.iter_mut().zip(public_values.last_init_addr_bits.iter())
         {
             *bit = *pub_bit;
         }
-        for (bit, pub_bit) in current_finalize_addr_bits
-            .iter_mut()
-            .zip(public_values.last_finalize_addr_bits.iter())
+        for (bit, pub_bit) in
+            current_finalize_addr_bits.iter_mut().zip(public_values.last_finalize_addr_bits.iter())
         {
             *bit = *pub_bit;
         }
@@ -824,31 +814,26 @@ pub fn verify_core_basefold<C, SC, A>(
                 }
             }
             for is_non_zero in is_non_zero_flags {
-                for (word_current, word_public) in committed_value_digest
-                    .into_iter()
-                    .zip(public_values.committed_value_digest)
+                for (word_current, word_public) in
+                    committed_value_digest.into_iter().zip(public_values.committed_value_digest)
                 {
                     for (byte_current, byte_public) in word_current.into_iter().zip(word_public) {
-                        builder.assert_felt_eq(
-                            is_non_zero * (byte_current - byte_public),
-                            C::F::ZERO,
-                        );
+                        builder
+                            .assert_felt_eq(is_non_zero * (byte_current - byte_public), C::F::ZERO);
                     }
                 }
             }
             if !contains_cpu {
-                for (word_d, pub_word_d) in committed_value_digest
-                    .iter()
-                    .zip(public_values.committed_value_digest.iter())
+                for (word_d, pub_word_d) in
+                    committed_value_digest.iter().zip(public_values.committed_value_digest.iter())
                 {
                     for (d, pub_d) in word_d.0.iter().zip(pub_word_d.0.iter()) {
                         builder.assert_felt_eq(*d, *pub_d);
                     }
                 }
             }
-            for (word_d, pub_word_d) in committed_value_digest
-                .iter_mut()
-                .zip(public_values.committed_value_digest.iter())
+            for (word_d, pub_word_d) in
+                committed_value_digest.iter_mut().zip(public_values.committed_value_digest.iter())
             {
                 for (d, pub_d) in word_d.0.iter_mut().zip(pub_word_d.0.iter()) {
                     *d = *pub_d;
@@ -862,9 +847,8 @@ pub fn verify_core_basefold<C, SC, A>(
                 is_non_zero_flags.push(element);
             }
             for is_non_zero in is_non_zero_flags {
-                for (deferred_current, deferred_public) in deferred_proofs_digest
-                    .iter()
-                    .zip(public_values.deferred_proofs_digest.iter())
+                for (deferred_current, deferred_public) in
+                    deferred_proofs_digest.iter().zip(public_values.deferred_proofs_digest.iter())
                 {
                     builder.assert_felt_eq(
                         is_non_zero * (*deferred_current - *deferred_public),
@@ -873,9 +857,8 @@ pub fn verify_core_basefold<C, SC, A>(
                 }
             }
             if !contains_cpu {
-                for (d, pub_d) in deferred_proofs_digest
-                    .iter()
-                    .zip(public_values.deferred_proofs_digest.iter())
+                for (d, pub_d) in
+                    deferred_proofs_digest.iter().zip(public_values.deferred_proofs_digest.iter())
                 {
                     builder.assert_felt_eq(*d, *pub_d);
                 }
@@ -1030,10 +1013,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             String,
             zkm_pcs::SerializableDomain<p3_koala_bear::KoalaBear>,
             (usize, usize),
-        )> = prep_by_name
-            .into_iter()
-            .map(|(name, (dom, dims))| (name, dom, dims))
-            .collect();
+        )> = prep_by_name.into_iter().map(|(name, (dom, dims))| (name, dom, dims)).collect();
         // (Reverse(height), name) — the prover's preprocessed trace ordering
         // (machine.rs:454).
         // Match `setup`'s preprocessed commit order, which is BY NAME (see
@@ -1048,8 +1028,9 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         let vk = StarkVerifyingKey {
             commit: crate::fri::dummy_commit(),
             pc_start: p3_koala_bear::KoalaBear::ZERO,
-            initial_global_cumulative_sum:
-                zkm_pcs::septic_digest::SepticDigest::<p3_koala_bear::KoalaBear>::zero(),
+            initial_global_cumulative_sum: zkm_pcs::septic_digest::SepticDigest::<
+                p3_koala_bear::KoalaBear,
+            >::zero(),
             chip_information,
             chip_ordering,
         };

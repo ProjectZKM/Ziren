@@ -70,11 +70,7 @@ impl ShmTraceRing {
                 },
             );
         }
-        Ok(Self {
-            shm,
-            capacity,
-            event_size,
-        })
+        Ok(Self { shm, capacity, event_size })
     }
 
     /// Pointer to the ring header (atomic head/tail).
@@ -86,11 +82,7 @@ impl ShmTraceRing {
     /// Pointer to the start of the event-slot region.
     #[must_use]
     pub fn slots_ptr(&self) -> *const u8 {
-        unsafe {
-            self.shm
-                .as_ptr()
-                .add(std::mem::size_of::<ShmTraceRingHeader>())
-        }
+        unsafe { self.shm.as_ptr().add(std::mem::size_of::<ShmTraceRingHeader>()) }
     }
 
     /// Number of event slots.
@@ -134,15 +126,12 @@ impl<'a> ProducerGuard<'a> {
             std::hint::spin_loop();
         }
         let slot_idx = (tail as usize) & (self.ring.capacity - 1);
-        let dst = unsafe {
-            (self.ring.slots_ptr() as *mut u8).add(slot_idx * self.ring.event_size)
-        };
+        let dst =
+            unsafe { (self.ring.slots_ptr() as *mut u8).add(slot_idx * self.ring.event_size) };
         unsafe {
             std::ptr::copy_nonoverlapping(event.as_ptr(), dst, self.ring.event_size);
         }
-        header
-            .tail
-            .store(tail + 1, std::sync::atomic::Ordering::Release);
+        header.tail.store(tail + 1, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -172,14 +161,9 @@ impl<'a> ConsumerGuard<'a> {
             return None;
         }
         let slot_idx = (head as usize) & (self.ring.capacity - 1);
-        let src = unsafe {
-            self.ring.slots_ptr().add(slot_idx * self.ring.event_size)
-        };
-        let slice =
-            unsafe { std::slice::from_raw_parts(src, self.ring.event_size) };
-        header
-            .head
-            .store(head + 1, std::sync::atomic::Ordering::Release);
+        let src = unsafe { self.ring.slots_ptr().add(slot_idx * self.ring.event_size) };
+        let slice = unsafe { std::slice::from_raw_parts(src, self.ring.event_size) };
+        header.head.store(head + 1, std::sync::atomic::Ordering::Release);
         Some(slice)
     }
 }
@@ -233,11 +217,7 @@ impl ShmMemory {
             return Err(std::io::Error::last_os_error());
         }
 
-        Ok(Self {
-            fd: dup,
-            map_ptr,
-            len: size,
-        })
+        Ok(Self { fd: dup, map_ptr, len: size })
     }
 
     /// Pointer to the mapped region.

@@ -56,8 +56,7 @@ fn parse_digest(raw: &str) -> [KB; DIGEST_SIZE] {
 fn main() {
     let args = Args::parse();
 
-    let f = File::open(&args.map)
-        .unwrap_or_else(|e| panic!("open {:?}: {}", args.map, e));
+    let f = File::open(&args.map).unwrap_or_else(|e| panic!("open {:?}: {}", args.map, e));
     let map: BTreeMap<[KB; DIGEST_SIZE], usize> = bincode::deserialize_from(&f)
         .unwrap_or_else(|e| panic!("deserialize {:?}: {}", args.map, e));
     eprintln!("[check] loaded {} keys from {:?}", map.len(), args.map);

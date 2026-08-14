@@ -1,7 +1,7 @@
 use p3_air::AirBuilder;
+use p3_field::BasedVectorSpace;
 use p3_field::Field;
 use p3_field::PrimeCharacteristicRing;
-use p3_field::BasedVectorSpace;
 use p3_field::PrimeField32;
 use zkm_core_executor::ByteOpcode;
 use zkm_derive::AlignedBorrow;
@@ -28,8 +28,9 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
         is_receive: bool,
         kind: u8,
     ) -> (SepticCurve<F>, u8) {
-        let x_start = SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(values.0[i]))
-            + SepticExtension::from(F::from_u32((kind as u32) << 16));
+        let x_start =
+            SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(values.0[i]))
+                + SepticExtension::from(F::from_u32((kind as u32) << 16));
         let (point, offset) = SepticCurve::<F>::lift_x(x_start);
         if !is_receive {
             return (point.neg(), offset);
@@ -74,12 +75,10 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
         for i in 0..8 {
             self.offset_bits[i] = F::ZERO;
         }
-        self.x_coordinate = SepticBlock::<F>::from_base_fn(|i| {
-            F::from_u32(CURVE_WITNESS_DUMMY_POINT_X[i])
-        });
-        self.y_coordinate = SepticBlock::<F>::from_base_fn(|i| {
-            F::from_u32(CURVE_WITNESS_DUMMY_POINT_Y[i])
-        });
+        self.x_coordinate =
+            SepticBlock::<F>::from_base_fn(|i| F::from_u32(CURVE_WITNESS_DUMMY_POINT_X[i]));
+        self.y_coordinate =
+            SepticBlock::<F>::from_base_fn(|i| F::from_u32(CURVE_WITNESS_DUMMY_POINT_Y[i]));
         for i in 0..30 {
             self.y6_bit_decomp[i] = F::ZERO;
         }
@@ -129,10 +128,9 @@ impl<F: Field> GlobalLookupOperation<F> {
         //   x[0] = values[0] + kind * 65536
         //   x[i] = values[i]              for i in 1..6
         //   x[6] = values[6] * 256 + offset
-        builder.when(is_real).assert_eq(
-            x.0[0].clone(),
-            values[0].clone() + kind.into() * AB::Expr::from_u32(65536),
-        );
+        builder
+            .when(is_real)
+            .assert_eq(x.0[0].clone(), values[0].clone() + kind.into() * AB::Expr::from_u32(65536));
         for i in 1..6 {
             builder.when(is_real).assert_eq(x.0[i].clone(), values[i].clone());
         }

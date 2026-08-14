@@ -17,16 +17,16 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_core_machine::shape::CoreShapeConfig;
+use zkm_pcs::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 use zkm_recursion_circuit::machine::{
-    ZKMCompressBasefoldWitnessValues, ZKMCompressWithVkeyShape,
-    ZKMCoreBasefoldWitnessValues, ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape, ZKMRecursionShape,
+    ZKMCompressBasefoldWitnessValues, ZKMCompressWithVkeyShape, ZKMCoreBasefoldWitnessValues,
+    ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape, ZKMRecursionShape,
     ZKMWrapBasefoldWitnessValues,
 };
 use zkm_recursion_core::{
     shape::{RecursionShape, RecursionShapeConfig},
     RecursionProgram,
 };
-use zkm_pcs::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 
 use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver};
 
@@ -56,8 +56,7 @@ pub enum ZKMCompressProgramShape {
     Shrink(ZKMCompressWithVkeyShape),
 }
 
-impl ZKMCompressProgramShape {
-}
+impl ZKMCompressProgramShape {}
 
 #[derive(Debug, Error)]
 pub enum VkBuildError {
@@ -375,10 +374,10 @@ impl ZKMProofShape {
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
-        use zkm_core_machine::mips::MipsAir;
-        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
-        use zkm_pcs::air::MachineAir;
         use crate::CoreSC;
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
 
         // Real chips from the live MIPS machine — needed for two
         // post-processing steps on each `to_ordered_shape()` output:
@@ -591,9 +590,7 @@ impl ZKMProofShape {
             let mut filler_idx: Vec<usize> = heights
                 .iter()
                 .enumerate()
-                .filter(|(_, (n, _))| {
-                    fillers.contains(n) && n != "Program" && n != "Byte"
-                })
+                .filter(|(_, (n, _))| fillers.contains(n) && n != "Program" && n != "Byte")
                 .map(|(i, _)| i)
                 .collect();
             filler_idx.sort_by(|&a, &b| heights[a].0.cmp(&heights[b].0));
@@ -640,20 +637,15 @@ impl ZKMProofShape {
         const MAX_BLOCKS: usize = (zkm_pcs::ELEMENT_THRESHOLD
             >> (zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize))
             + 8;
-        let main_block_targets: Vec<usize> = (1..=4)
-            .chain((1..).map(|k| k * 8).take_while(|b| *b < MAX_BLOCKS))
-            .collect();
+        let main_block_targets: Vec<usize> =
+            (1..=4).chain((1..).map(|k| k * 8).take_while(|b| *b < MAX_BLOCKS)).collect();
 
         let small_shapes: Vec<OrderedShape> = {
             // ONE representative per (chip set, prep blocks, main blocks).
-            let mut by_class: BTreeMap<(Vec<String>, usize, usize), OrderedShape> =
-                BTreeMap::new();
+            let mut by_class: BTreeMap<(Vec<String>, usize, usize), OrderedShape> = BTreeMap::new();
             for cluster in &machine_shape.chip_clusters {
-                let names: Vec<String> = cluster
-                    .iter()
-                    .filter(|n| chips_by_name.contains_key(*n))
-                    .cloned()
-                    .collect();
+                let names: Vec<String> =
+                    cluster.iter().filter(|n| chips_by_name.contains_key(*n)).cloned().collect();
                 if names.is_empty() {
                     continue;
                 }
@@ -701,10 +693,8 @@ impl ZKMProofShape {
         // PV chain.  Emitting just arity-1 makes the enumerated normalize VK
         // set match the runtime exactly (every real single-shard normalize
         // lands in-map) and shrinks the map (4× fewer Recursion shapes).
-        let arity_recursion_shapes: Vec<Self> = small_shapes
-            .iter()
-            .map(|os| Self::Recursion(vec![os.clone()]))
-            .collect();
+        let arity_recursion_shapes: Vec<Self> =
+            small_shapes.iter().map(|os| Self::Recursion(vec![os.clone()])).collect();
 
         // ───────────────────────────────────────────────────────────────
         // Compress / Deferred / Shrink key on
@@ -771,8 +761,7 @@ impl ZKMProofShape {
         };
 
         let arity_compress_shapes: Vec<Self> = {
-            let mut out =
-                Vec::with_capacity(compress_child_classes.len() * reduce_batch_size);
+            let mut out = Vec::with_capacity(compress_child_classes.len() * reduce_batch_size);
             for arity in 1..=reduce_batch_size {
                 for os in &compress_child_classes {
                     out.push(Self::Compress(vec![os.clone(); arity]));
@@ -780,14 +769,10 @@ impl ZKMProofShape {
             }
             out
         };
-        let deferred_shapes: Vec<Self> = compress_child_classes
-            .iter()
-            .map(|os| Self::Deferred(os.clone()))
-            .collect();
-        let shrink_shapes: Vec<Self> = compress_child_classes
-            .iter()
-            .map(|os| Self::Shrink(os.clone()))
-            .collect();
+        let deferred_shapes: Vec<Self> =
+            compress_child_classes.iter().map(|os| Self::Deferred(os.clone())).collect();
+        let shrink_shapes: Vec<Self> =
+            compress_child_classes.iter().map(|os| Self::Shrink(os.clone())).collect();
 
         // `recursion_shape_config` is not consulted for the
         // Compress/Deferred/Shrink tail; retained in the signature for API
@@ -896,36 +881,27 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Arc<RecursionProgram<KoalaBear>> {
         match shape {
             ZKMCompressProgramShape::Recursion(shape) => {
-                let input = ZKMCoreBasefoldWitnessValues::dummy(
-                    self.core_prover.machine(),
-                    &shape,
-                );
+                let input = ZKMCoreBasefoldWitnessValues::dummy(self.core_prover.machine(), &shape);
                 self.recursion_program_basefold(&input)
             }
             ZKMCompressProgramShape::Deferred(shape) => {
-                let input = ZKMDeferredBasefoldWitnessValues::dummy(
-                    self.compress_prover.machine(),
-                    &shape,
-                );
+                let input =
+                    ZKMDeferredBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 self.deferred_program_basefold(&input)
             }
             ZKMCompressProgramShape::Compress(shape) => {
                 // dummy now consumes the full ZKMCompressWithVkeyShape so
                 // its embedded merkle_tree_height sizes the vk-merkle witness.
-                let input = ZKMCompressBasefoldWitnessValues::dummy(
-                    self.compress_prover.machine(),
-                    &shape,
-                );
+                let input =
+                    ZKMCompressBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 self.compose_program_basefold(&input)
             }
             ZKMCompressProgramShape::Shrink(shape) => {
                 // The dummy consumes the full
                 // ZKMCompressWithVkeyShape so its embedded merkle_tree_height
                 // sizes the vk-merkle witness for the wrap stage too.
-                let input = ZKMWrapBasefoldWitnessValues::dummy(
-                    self.compress_prover.machine(),
-                    &shape,
-                );
+                let input =
+                    ZKMWrapBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 self.shrink_program_basefold(&input)
             }
         }
@@ -948,14 +924,12 @@ mod tests {
     #[ignore]
     fn compose_vk_height_dependence() {
         use crate::components::DefaultProverComponents;
-        use zkm_recursion_circuit::machine::{ZKMCompressWithVkeyShape, ZKMCompressShape};
+        use zkm_recursion_circuit::machine::{ZKMCompressShape, ZKMCompressWithVkeyShape};
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
-        let bands: Vec<OrderedShape> = rec_cfg
-            .get_all_shape_combinations(1)
-            .map(|mut v| v.pop().unwrap())
-            .collect();
+        let bands: Vec<OrderedShape> =
+            rec_cfg.get_all_shape_combinations(1).map(|mut v| v.pop().unwrap()).collect();
         eprintln!("[HDEP] bands = {}", bands.len());
 
         let vk_of = |os: &OrderedShape, arity: usize| -> String {
@@ -978,7 +952,11 @@ mod tests {
             for (i, os) in bands.iter().enumerate() {
                 seen.entry(vk_of(os, arity)).or_default().push(i);
             }
-            eprintln!("[HDEP] arity={arity}: {} distinct vks over {} bands", seen.len(), bands.len());
+            eprintln!(
+                "[HDEP] arity={arity}: {} distinct vks over {} bands",
+                seen.len(),
+                bands.len()
+            );
             for (d, idxs) in &seen {
                 eprintln!("[HDEP]   {d} <- bands {idxs:?}");
             }
@@ -992,10 +970,10 @@ mod tests {
     #[ignore]
     fn analyze_recursion_band_structure() {
         use crate::CoreSC;
+        use std::collections::{BTreeMap, BTreeSet};
         use zkm_core_machine::mips::MipsAir;
         use zkm_pcs::air::MachineAir;
         use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
-        use std::collections::{BTreeMap, BTreeSet};
 
         let core_machine = MipsAir::machine(CoreSC::default());
         let chips_by_name: BTreeMap<String, _> =
@@ -1006,11 +984,8 @@ mod tests {
         let mut total_per_shard_shapes = 0usize;
         let mut per_cluster_shape_counts: Vec<usize> = Vec::new();
         for (ci, cluster) in machine_shape.chip_clusters.iter().enumerate() {
-            let names: Vec<String> = cluster
-                .iter()
-                .filter(|n| chips_by_name.contains_key(*n))
-                .cloned()
-                .collect();
+            let names: Vec<String> =
+                cluster.iter().filter(|n| chips_by_name.contains_key(*n)).cloned().collect();
             if names.is_empty() {
                 continue;
             }
@@ -1048,11 +1023,7 @@ mod tests {
         }
         eprintln!("[BAND] TOTAL per-shard OrderedShapes = {total_per_shard_shapes}");
         let s = total_per_shard_shapes;
-        eprintln!(
-            "[BAND] uniform-replication arity 1..=4: {} (= {} per-shard x 4)",
-            s * 4,
-            s
-        );
+        eprintln!("[BAND] uniform-replication arity 1..=4: {} (= {} per-shard x 4)", s * 4, s);
         let per_cluster_uniform: usize = per_cluster_shape_counts.iter().map(|c| c * 4).sum();
         eprintln!("[BAND] per-cluster uniform arity 1..=4 = {per_cluster_uniform}");
         eprintln!("[BAND] nonempty clusters = {}", per_cluster_shape_counts.len());
@@ -1068,11 +1039,11 @@ mod tests {
     #[serial_test::serial]
     fn analyze_recursion_logdense_classes() {
         use crate::components::DefaultProverComponents;
-        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
-        use zkm_pcs::shard_level::shard_proof::EvaluationProof;
-        use zkm_pcs::air::MachineAir;
-        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
         use std::collections::{BTreeMap, BTreeSet};
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
+        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
@@ -1085,11 +1056,8 @@ mod tests {
         let mut total_built = 0usize;
         let mut total_failed = 0usize;
         for (ci, cluster) in machine_shape.chip_clusters.iter().enumerate() {
-            let names: Vec<String> = cluster
-                .iter()
-                .filter(|n| chips_by_name.contains_key(*n))
-                .cloned()
-                .collect();
+            let names: Vec<String> =
+                cluster.iter().filter(|n| chips_by_name.contains_key(*n)).cloned().collect();
             if names.is_empty() {
                 continue;
             }
@@ -1151,10 +1119,7 @@ mod tests {
             "[LD] TOTAL distinct (chip_set, log_dense) classes = {} (built={total_built} failed={total_failed})",
             classes.len()
         );
-        eprintln!(
-            "[LD] uniform-replication arity 1..=4 on classes = {}",
-            classes.len() * 4
-        );
+        eprintln!("[LD] uniform-replication arity 1..=4 on classes = {}", classes.len() * 4);
     }
 
     /// ARITY-ENUM no-regression: the deduped arity-1 Recursion shapes
@@ -1167,10 +1132,10 @@ mod tests {
     #[test]
     fn arity1_classes_cover_full_sweep() {
         use crate::CoreSC;
+        use std::collections::{BTreeMap, BTreeSet};
         use zkm_core_machine::mips::MipsAir;
         use zkm_pcs::air::MachineAir;
         use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
-        use std::collections::{BTreeMap, BTreeSet};
 
         let core_machine = MipsAir::machine(CoreSC::default());
         let chips_by_name: BTreeMap<String, _> =
@@ -1188,17 +1153,18 @@ mod tests {
                     w * (1usize << *log_h)
                 })
                 .sum();
-            if total == 0 { 0 } else { total.next_power_of_two().trailing_zeros() as usize }
+            if total == 0 {
+                0
+            } else {
+                total.next_power_of_two().trailing_zeros() as usize
+            }
         };
 
         // Full un-deduped sweep -> set of (chip_set, log_dense) classes.
         let mut full_classes: BTreeSet<(Vec<String>, usize)> = BTreeSet::new();
         for cluster in &machine_shape.chip_clusters {
-            let names: Vec<String> = cluster
-                .iter()
-                .filter(|n| chips_by_name.contains_key(*n))
-                .cloned()
-                .collect();
+            let names: Vec<String> =
+                cluster.iter().filter(|n| chips_by_name.contains_key(*n)).cloned().collect();
             if names.is_empty() {
                 continue;
             }
@@ -1239,8 +1205,7 @@ mod tests {
                 if batch.len() == 1 {
                     arity1_count += 1;
                     let os = &batch[0];
-                    let mut names: Vec<String> =
-                        os.inner.iter().map(|(n, _)| n.clone()).collect();
+                    let mut names: Vec<String> = os.inner.iter().map(|(n, _)| n.clone()).collect();
                     names.sort();
                     gen_classes.insert((names, log_dense_of(os)));
                 }
@@ -1370,7 +1335,8 @@ mod tests {
             "the machine ceiling ({ceiling}) must sit above the area pin ({pin}); \
              otherwise there is nothing to sweep and this guard is vacuous"
         );
-        let mut kinds: Vec<String> = (1..=REDUCE_BATCH_SIZE).map(|a| format!("Compress({a})")).collect();
+        let mut kinds: Vec<String> =
+            (1..=REDUCE_BATCH_SIZE).map(|a| format!("Compress({a})")).collect();
         kinds.push("Deferred".to_string());
         kinds.push("Shrink".to_string());
         for kind in kinds {
@@ -1397,18 +1363,15 @@ mod tests {
     #[serial_test::serial]
     fn arity_hetero_batch_coverage_probe() {
         use crate::components::DefaultProverComponents;
-        use zkm_recursion_circuit::machine::{ZKMCoreBasefoldWitnessValues, ZKMRecursionShape};
+        use std::collections::{BTreeMap, BTreeSet};
         use zkm_pcs::air::MachineAir;
         use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
-        use std::collections::{BTreeMap, BTreeSet};
+        use zkm_recursion_circuit::machine::{ZKMCoreBasefoldWitnessValues, ZKMRecursionShape};
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
-        let chips_by_name: BTreeMap<String, _> = machine
-            .chips()
-            .iter()
-            .map(|c| (<_ as MachineAir<KoalaBear>>::name(c), c))
-            .collect();
+        let chips_by_name: BTreeMap<String, _> =
+            machine.chips().iter().map(|c| (<_ as MachineAir<KoalaBear>>::name(c), c)).collect();
         let machine_shape = build_mips_machine_shape();
         let log_dense_of = |os: &OrderedShape| -> usize {
             let total: usize = os
@@ -1422,7 +1385,11 @@ mod tests {
                     w * (1usize << *log_h)
                 })
                 .sum();
-            if total == 0 { 0 } else { total.next_power_of_two().trailing_zeros() as usize }
+            if total == 0 {
+                0
+            } else {
+                total.next_power_of_two().trailing_zeros() as usize
+            }
         };
 
         // Pick the main_exec cluster (core chips + Global, NO precompiles,
@@ -1461,21 +1428,26 @@ mod tests {
                     .min_by_key(|c| c.iter().filter(|n| chips_by_name.contains_key(*n)).count())
             })
             .expect("a Cpu-bearing cluster");
-        let names: Vec<String> = cluster
-            .iter()
-            .filter(|n| chips_by_name.contains_key(*n))
-            .cloned()
-            .collect();
+        let names: Vec<String> =
+            cluster.iter().filter(|n| chips_by_name.contains_key(*n)).cloned().collect();
         let fillers: std::collections::HashSet<&String> = names
             .iter()
-            .filter(|n| n.as_str() != "Byte" && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0)
+            .filter(|n| {
+                n.as_str() != "Byte" && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0
+            })
             .collect();
         let mut band_reps: BTreeMap<usize, OrderedShape> = BTreeMap::new();
         for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
             let inner: Vec<(String, usize)> = names
                 .iter()
                 .map(|n| {
-                    let height = if fillers.contains(n) { h } else if n == "Byte" { 16 } else { 1 };
+                    let height = if fillers.contains(n) {
+                        h
+                    } else if n == "Byte" {
+                        16
+                    } else {
+                        1
+                    };
                     (n.clone(), height)
                 })
                 .collect();
@@ -1565,12 +1537,9 @@ mod tests {
         use crate::REDUCE_BATCH_SIZE;
         let core_shape_config = CoreShapeConfig::default();
         let recursion_shape_config = RecursionShapeConfig::default();
-        let all_shapes: BTreeSet<_> = ZKMProofShape::generate(
-            &core_shape_config,
-            &recursion_shape_config,
-            REDUCE_BATCH_SIZE,
-        )
-        .collect();
+        let all_shapes: BTreeSet<_> =
+            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, REDUCE_BATCH_SIZE)
+                .collect();
         let num_shapes = all_shapes.len();
         let enum_height = num_shapes.next_power_of_two().ilog2() as usize;
 
@@ -1591,10 +1560,16 @@ mod tests {
         eprintln!("[VKROOT] REDUCE_BATCH_SIZE={REDUCE_BATCH_SIZE}");
         eprintln!("[VKROOT] num_shapes={num_shapes} (recursion={recursion_count} compress={compress_count} deferred={deferred_count} shrink={shrink_count})");
         eprintln!("[VKROOT] enum_height = ceil(log2({num_shapes})) = {enum_height}");
-        eprintln!("[VKROOT] map_size={map_size}  prod_height = ceil(log2({map_size})) = {prod_height}");
+        eprintln!(
+            "[VKROOT] map_size={map_size}  prod_height = ceil(log2({map_size})) = {prod_height}"
+        );
         eprintln!(
             "[VKROOT] HEIGHTS {}",
-            if enum_height == prod_height { "MATCH ✓ (no height circularity)" } else { "MISMATCH ✗ (every key baked at wrong height)" }
+            if enum_height == prod_height {
+                "MATCH ✓ (no height circularity)"
+            } else {
+                "MISMATCH ✗ (every key baked at wrong height)"
+            }
         );
     }
 

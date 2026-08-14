@@ -68,15 +68,10 @@ where
         .max()
         .unwrap_or(1);
     let beta_seed_dim = max_arity.next_power_of_two().trailing_zeros() as usize;
-    let beta_seed: Vec<EF> = (0..beta_seed_dim)
-        .map(|_| challenger.sample_algebra_element::<EF>())
-        .collect();
+    let beta_seed: Vec<EF> =
+        (0..beta_seed_dim).map(|_| challenger.sample_algebra_element::<EF>()).collect();
     // Expand beta_seed to the partial-lagrange table over {0,1}^beta_seed_dim.
-    let betas = if beta_seed.is_empty() {
-        vec![EF::ONE]
-    } else {
-        eq_mle_table::<EF>(&beta_seed)
-    };
+    let betas = if beta_seed.is_empty() { vec![EF::ONE] } else { eq_mle_table::<EF>(&beta_seed) };
 
     // GKR padding (VERIFY_VK enumerability): the GKR
     // round count is FIXED to `max_log_row_count - 1` regardless of
@@ -176,10 +171,7 @@ where
             }
             weights = next;
         }
-        mle_evals
-            .iter()
-            .zip(weights.iter())
-            .fold(EF::ZERO, |acc, (v, w)| acc + *v * *w)
+        mle_evals.iter().zip(weights.iter()).fold(EF::ZERO, |acc, (v, w)| acc + *v * *w)
     }
     let mut numerator_eval: EF = evaluate_mle::<EF>(&output.numerator, &eval_point);
     let mut denominator_eval: EF = evaluate_mle::<EF>(&output.denominator, &eval_point);
@@ -285,8 +277,7 @@ where
             // shared MLE's real row count.  Falls back to 1 (legacy
             // unexercised-chip) when absent.
             let main_height = pm.metadata_height().unwrap_or(1);
-            let log_main_height =
-                main_height.max(1).next_power_of_two().trailing_zeros() as usize;
+            let log_main_height = main_height.max(1).next_power_of_two().trailing_zeros() as usize;
             let main_eval_point: &[EF] = if eval_point.len() >= log_main_height {
                 &eval_point[eval_point.len() - log_main_height..]
             } else {
@@ -318,11 +309,7 @@ where
                 // Host chip (or width-0 unexercised) — evaluate the shared
                 // MLE's real inner cells (`mt_values`/`mt_width`, == the raw
                 // trace) at the trailing-`log_h` point.
-                evaluate_trace_columns_at_point::<F, EF>(
-                    mt_values,
-                    mt_width,
-                    main_eval_point,
-                )
+                evaluate_trace_columns_at_point::<F, EF>(mt_values, mt_width, main_eval_point)
             };
 
             let prep_ref = prep_trace.real_trace_ref();
@@ -335,11 +322,7 @@ where
                 } else {
                     &eval_point[..]
                 };
-                Some(evaluate_trace_columns_at_point::<F, EF>(
-                    pt.values,
-                    pt.width,
-                    prep_eval_point,
-                ))
+                Some(evaluate_trace_columns_at_point::<F, EF>(pt.values, pt.width, prep_eval_point))
             } else {
                 None
             };
@@ -367,11 +350,7 @@ where
                 Some(Vec::new())
             };
             let prep_evals_full: Option<Vec<EF>> = if let Some(pt) = prep_ref {
-                Some(evaluate_trace_columns_at_point::<F, EF>(
-                    pt.values,
-                    pt.width,
-                    full_eval_point,
-                ))
+                Some(evaluate_trace_columns_at_point::<F, EF>(pt.values, pt.width, full_eval_point))
             } else {
                 None
             };
@@ -416,10 +395,7 @@ where
             denominator: output.denominator,
         },
         round_proofs,
-        logup_evaluations: LogUpEvaluations {
-            point: trace_dim_point,
-            chip_openings,
-        },
+        logup_evaluations: LogUpEvaluations { point: trace_dim_point, chip_openings },
         witness,
     };
 

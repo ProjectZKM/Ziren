@@ -423,9 +423,7 @@ fn bne_loop_jit_matches_interpreter() {
     // 6-instr fixture does not, so we exercise the JIT path directly to
     // validate the codegen rather than gate it.
     use std::ptr;
-    use zkm_core_executor::jit_runner::{
-        build_context, build_jit_function, run_jit, BuildParams,
-    };
+    use zkm_core_executor::jit_runner::{build_context, build_jit_function, run_jit, BuildParams};
     let params = BuildParams {
         program_size: program.instructions.len(),
         memory_size: 4096,
@@ -433,19 +431,14 @@ fn bne_loop_jit_matches_interpreter() {
         pc_start: 0,
         pc_base: 0,
         clk_bump: 4,
-            mem_read_recorder: None,
+        mem_read_recorder: None,
     };
     let jit_fn = build_jit_function(&program, params, None).expect("build_jit_function");
     let mut memory = vec![0u8; 4096];
     let mut trace_buf = vec![0u8; 4096];
     let jump_table_ptr: *const *const u8 = jit_fn.jump_table.as_ptr();
-    let mut ctx = build_context(
-        0,
-        memory.as_mut_ptr(),
-        jump_table_ptr,
-        trace_buf.as_mut_ptr(),
-        [0u32; 36],
-    );
+    let mut ctx =
+        build_context(0, memory.as_mut_ptr(), jump_table_ptr, trace_buf.as_mut_ptr(), [0u32; 36]);
     // Set `delayed_jump_target` to the post-loop sentinel before
     // entering: when the loop exits via the branch falling through,
     // the delay-slot epilogue jumps to ctx.jump_table[exit_idx].  For
@@ -493,15 +486,50 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
     // Stored via SW so both interp and JIT see the same memory state.
     let mut instrs = Vec::with_capacity(16);
     // S0 = BASE   (load via two ADDs since immediates are 16-bit-ish)
-    instrs.push(Instruction::new(Opcode::ADD, Register::S0 as u8, Register::ZERO as u32, BASE, false, true));
+    instrs.push(Instruction::new(
+        Opcode::ADD,
+        Register::S0 as u8,
+        Register::ZERO as u32,
+        BASE,
+        false,
+        true,
+    ));
     // T0 = 0xAABBCCDD
-    instrs.push(Instruction::new(Opcode::ADD, Register::T0 as u8, Register::ZERO as u32, 0xAABB_CCDDu32, false, true));
+    instrs.push(Instruction::new(
+        Opcode::ADD,
+        Register::T0 as u8,
+        Register::ZERO as u32,
+        0xAABB_CCDDu32,
+        false,
+        true,
+    ));
     // T1 = 0x11223344
-    instrs.push(Instruction::new(Opcode::ADD, Register::T1 as u8, Register::ZERO as u32, 0x1122_3344u32, false, true));
+    instrs.push(Instruction::new(
+        Opcode::ADD,
+        Register::T1 as u8,
+        Register::ZERO as u32,
+        0x1122_3344u32,
+        false,
+        true,
+    ));
     // SW t0, 0(s0)
-    instrs.push(Instruction::new(Opcode::SW, Register::T0 as u8, Register::S0 as u32, 0, false, true));
+    instrs.push(Instruction::new(
+        Opcode::SW,
+        Register::T0 as u8,
+        Register::S0 as u32,
+        0,
+        false,
+        true,
+    ));
     // SW t1, 4(s0)
-    instrs.push(Instruction::new(Opcode::SW, Register::T1 as u8, Register::S0 as u32, 4, false, true));
+    instrs.push(Instruction::new(
+        Opcode::SW,
+        Register::T1 as u8,
+        Register::S0 as u32,
+        4,
+        false,
+        true,
+    ));
     // For each i in 0..4: LWL t2, i(s0) with t2 pre-seeded to 0xFFFFFFFF
     //   then save the result to a unique register.
     let dest_lwl = [Register::T2, Register::T3, Register::T4, Register::T5];
@@ -509,19 +537,39 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
     for (i, dst) in dest_lwl.iter().enumerate() {
         // Pre-seed dst = 0xF0F0F0F0 so the merge has observable bits.
         instrs.push(Instruction::new(
-            Opcode::ADD, *dst as u8, Register::ZERO as u32, 0xF0F0_F0F0u32, false, true,
+            Opcode::ADD,
+            *dst as u8,
+            Register::ZERO as u32,
+            0xF0F0_F0F0u32,
+            false,
+            true,
         ));
         // LWL dst, i(s0)
         instrs.push(Instruction::new(
-            Opcode::LWL, *dst as u8, Register::S0 as u32, i as u32, false, true,
+            Opcode::LWL,
+            *dst as u8,
+            Register::S0 as u32,
+            i as u32,
+            false,
+            true,
         ));
     }
     for (i, dst) in dest_lwr.iter().enumerate() {
         instrs.push(Instruction::new(
-            Opcode::ADD, *dst as u8, Register::ZERO as u32, 0x0F0F_0F0Fu32, false, true,
+            Opcode::ADD,
+            *dst as u8,
+            Register::ZERO as u32,
+            0x0F0F_0F0Fu32,
+            false,
+            true,
         ));
         instrs.push(Instruction::new(
-            Opcode::LWR, *dst as u8, Register::S0 as u32, i as u32, false, true,
+            Opcode::LWR,
+            *dst as u8,
+            Register::S0 as u32,
+            i as u32,
+            false,
+            true,
         ));
     }
     let program = Program::new(instrs, 0, 0);
@@ -565,22 +613,8 @@ fn halt_syscall_jit_matches_interpreter() {
     // pc=12: ADD t0, t0, 1  (would-be no-op tail; must NOT execute
     //         after HALT; the gate fires at start of K+1)
     let instrs = vec![
-        Instruction::new(
-            Opcode::ADD,
-            Register::V0 as u8,
-            Register::ZERO as u32,
-            0,
-            false,
-            true,
-        ),
-        Instruction::new(
-            Opcode::ADD,
-            Register::A0 as u8,
-            Register::ZERO as u32,
-            0,
-            false,
-            true,
-        ),
+        Instruction::new(Opcode::ADD, Register::V0 as u8, Register::ZERO as u32, 0, false, true),
+        Instruction::new(Opcode::ADD, Register::A0 as u8, Register::ZERO as u32, 0, false, true),
         Instruction::new(
             Opcode::SYSCALL,
             Register::ZERO as u8,
@@ -627,7 +661,7 @@ fn halt_syscall_jit_matches_interpreter() {
         pc_start: 0,
         pc_base: 0,
         clk_bump: 4,
-            mem_read_recorder: None,
+        mem_read_recorder: None,
     };
     let jit_fn = build_jit_function(
         &program,
@@ -639,13 +673,7 @@ fn halt_syscall_jit_matches_interpreter() {
     let memory_ptr = mem_bridge.as_ptr();
     let mut trace_buf = vec![0u8; 4096];
     let jump_table_ptr: *const *const u8 = jit_fn.jump_table.as_ptr();
-    let mut ctx = build_context(
-        0,
-        memory_ptr,
-        jump_table_ptr,
-        trace_buf.as_mut_ptr(),
-        [0u32; 36],
-    );
+    let mut ctx = build_context(0, memory_ptr, jump_table_ptr, trace_buf.as_mut_ptr(), [0u32; 36]);
     let executor_ptr: *mut Executor = &mut jit_executor;
     let bridge_ptr: *mut JitMemoryBridge = &mut mem_bridge;
     let mut bridge_state = JitBridgeState {
@@ -700,20 +728,15 @@ fn alu_chain_jit_matches_interpreter_for_register_file() {
         pc_start: 0,
         pc_base: 0,
         clk_bump: 4,
-            mem_read_recorder: None,
+        mem_read_recorder: None,
     };
     let jit_fn = build_jit_function(&program, params, None).expect("build_jit_function");
 
     let mut memory = vec![0u8; 4096];
     let jump_table_ptr: *const *const u8 = std::ptr::null();
     let mut trace_buf = vec![0u8; 4096];
-    let mut ctx = build_context(
-        0,
-        memory.as_mut_ptr(),
-        jump_table_ptr,
-        trace_buf.as_mut_ptr(),
-        [0u32; 36],
-    );
+    let mut ctx =
+        build_context(0, memory.as_mut_ptr(), jump_table_ptr, trace_buf.as_mut_ptr(), [0u32; 36]);
     unsafe { run_jit(&jit_fn, &mut ctx) };
 
     // Compare lower-32 register files.  HI/LO and reserved aren't

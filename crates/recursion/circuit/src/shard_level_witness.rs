@@ -13,14 +13,14 @@
 
 use std::collections::BTreeMap;
 
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 use zkm_pcs::septic_curve::SepticCurve;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::septic_extension::SepticExtension;
 use zkm_pcs::shard_level::shard_proof::ChipCumulativeSums;
 use zkm_pcs::shard_level::types as st;
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
-use crate::witness::{Witnessable, WitnessWriter};
+use crate::witness::{WitnessWriter, Witnessable};
 use crate::CircuitConfig;
 use zkm_pcs::{InnerChallenge, InnerVal};
 
@@ -289,8 +289,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     Bytes(Vec<u8>),
     Bundle {
         host: JaggedBasefoldBundle,
-        basefold_proof:
-            RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
+        basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
         // the reduction sumcheck, jagged-eval sub-sumcheck, and
         // expected_eval (q_at_z) — also pre-read from the witness stream.
         sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
@@ -391,10 +390,7 @@ where
         // the lifted form carrying the inline-witnessed basefold proof.
         LiftedEvalProof<C>,
         // per-chip trace@z openings (name order).
-        crate::basefold_chip_opened_values::BasefoldShardOpenedValues<
-            Felt<C::F>,
-            Ext<C::F, C::EF>,
-        >,
+        crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
         // The preprocessed opening round's witnessed inputs.
         PreprocessedRoundWitness<C>,
     );
@@ -445,39 +441,37 @@ where
             outer
         } else {
             match &self.evaluation_proof {
-            HostEvalProof::Empty => LiftedEvalProof::Empty,
-            HostEvalProof::Bytes(b) => LiftedEvalProof::Bytes(b.clone()),
-            HostEvalProof::Bundle(bundle) => {
-                let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
-                let basefold_proof =
-                    crate::basefold_witness::read_basefold_proof_from_stream::<C>(
-                        &host_proof,
+                HostEvalProof::Empty => LiftedEvalProof::Empty,
+                HostEvalProof::Bytes(b) => LiftedEvalProof::Bytes(b.clone()),
+                HostEvalProof::Bundle(bundle) => {
+                    let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
+                    let basefold_proof = crate::basefold_witness::read_basefold_proof_from_stream::<
+                        C,
+                    >(&host_proof, builder);
+                    // read the reduction sumcheck, jagged-eval sub-sumcheck,
+                    // and expected_eval (q_at_z) — same order as `write`.
+                    let sumcheck = read_sumcheck_from_stream::<C>(
+                        &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
                         builder,
                     );
-                // read the reduction sumcheck, jagged-eval sub-sumcheck,
-                // and expected_eval (q_at_z) — same order as `write`.
-                let sumcheck = read_sumcheck_from_stream::<C>(
-                    &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
-                    builder,
-                );
-                let jagged_eval = read_sumcheck_from_stream::<C>(
-                    &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
-                    builder,
-                );
-                let expected_eval = bundle.reduction.q_at_z.read(builder);
-                LiftedEvalProof::Bundle {
-                    host: bundle.clone(),
-                    basefold_proof,
-                    sumcheck,
-                    jagged_eval,
-                    expected_eval,
-                    // RAW root → original_commitments (BaseFold open binds it);
-                    // MODIFIED (main_commitment) → commitments (hash-bind
-                    // assert).  Both witnessed, value-independent.
-                    commit_root: jagged_original_commitment_arr,
-                    modified_commitment: main_commitment_arr,
+                    let jagged_eval = read_sumcheck_from_stream::<C>(
+                        &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+                        builder,
+                    );
+                    let expected_eval = bundle.reduction.q_at_z.read(builder);
+                    LiftedEvalProof::Bundle {
+                        host: bundle.clone(),
+                        basefold_proof,
+                        sumcheck,
+                        jagged_eval,
+                        expected_eval,
+                        // RAW root → original_commitments (BaseFold open binds it);
+                        // MODIFIED (main_commitment) → commitments (hash-bind
+                        // assert).  Both witnessed, value-independent.
+                        commit_root: jagged_original_commitment_arr,
+                        modified_commitment: main_commitment_arr,
+                    }
                 }
-            }
             }
         };
         // lift the host `ShardOpenedValues` (trace@z)
@@ -523,8 +517,7 @@ where
         // bundle here (mirrors the read dispatch).  Returns true when handled
         // (outer config + outer bundle bytes), so the inner Bundle write below
         // is skipped.  Inner configs return false → fall through.
-        let _handled_outer =
-            C::write_outer_eval_bundle::<_>(&self.evaluation_proof, witness);
+        let _handled_outer = C::write_outer_eval_bundle::<_>(&self.evaluation_proof, witness);
         // Write the Bundle's basefold-proof felt/ext values in
         // the SAME position `read` consumes them (between zerocheck and
         // opened_values).  Bytes/Empty write nothing (outer wrap bakes).
@@ -578,11 +571,7 @@ fn basefold_opened_values_from_host(
             // host-side in `quotient[0]` (set by the host prover) — the
             // VirtualGeq threshold for `full_geq`.  Fall back to a 1-elt zero stub if
             // absent (legacy/empty proofs).
-            degree: c
-                .quotient
-                .first()
-                .cloned()
-                .unwrap_or_else(|| vec![InnerChallenge::ZERO]),
+            degree: c.quotient.first().cloned().unwrap_or_else(|| vec![InnerChallenge::ZERO]),
             local_cumulative_sum: c.local_cumulative_sum,
             global_cumulative_sum: c.global_cumulative_sum,
         })
@@ -705,9 +694,7 @@ where
     type WitnessVariable = MerkleOpeningVar<C::F>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        MerkleOpeningVar {
-            leaves: self.leaves.iter().map(|l| l.read(builder)).collect(),
-        }
+        MerkleOpeningVar { leaves: self.leaves.iter().map(|l| l.read(builder)).collect() }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -884,7 +871,11 @@ pub fn host_basefold_proof_to_recursive(
                 "FRI commitment cap must have exactly 1 root (height-0 cap), got {}",
                 cap_roots.len(),
             );
-            RecursiveBasefoldRound { uni_poly: *uni, commitment: cap_roots[0], _phantom_f: core::marker::PhantomData }
+            RecursiveBasefoldRound {
+                uni_poly: *uni,
+                commitment: cap_roots[0],
+                _phantom_f: core::marker::PhantomData,
+            }
         })
         .collect();
 
@@ -894,11 +885,8 @@ pub fn host_basefold_proof_to_recursive(
         .map(host_component_opening_to_recursive)
         .collect();
 
-    let query_phase_openings: Vec<Vec<RecursiveBasefoldOpening<_, _>>> = proof
-        .query_phase_openings_and_proofs
-        .iter()
-        .map(host_query_opening_to_recursive)
-        .collect();
+    let query_phase_openings: Vec<Vec<RecursiveBasefoldOpening<_, _>>> =
+        proof.query_phase_openings_and_proofs.iter().map(host_query_opening_to_recursive).collect();
 
     RecursiveBasefoldProof {
         rounds,
@@ -945,7 +933,6 @@ type OuterDigestRaw = [Bn254; crate::hash::BN254_DIGEST_SIZE];
 fn outer_cap_root(
     commitment: &<OuterValMmcs as p3_commit::Mmcs<InnerVal>>::Commitment,
 ) -> OuterDigestRaw {
-    
     let roots = commitment.roots();
     assert_eq!(
         roots.len(),
@@ -1072,10 +1059,7 @@ fn host_basefold_proof_to_recursive_outer(
 fn host_stacked_basefold_to_recursive_outer(
     proof: &StackedBasefoldProof<InnerVal, InnerChallenge, OuterValMmcs>,
 ) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, OuterDigestRaw> {
-    host_basefold_proof_to_recursive_outer(
-        &proof.basefold_proof,
-        proof.batch_evaluations.clone(),
-    )
+    host_basefold_proof_to_recursive_outer(&proof.basefold_proof, proof.batch_evaluations.clone())
 }
 
 /// WITNESS the OUTER (BN254) jagged-basefold bundle's
@@ -1107,17 +1091,17 @@ where
         HostEvalProof::Bytes(b) => b,
         _ => return None,
     };
-    let bundle = zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
-        OuterValMmcs,
-    >::from_bytes(bytes)?;
+    let bundle =
+        zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<OuterValMmcs>::from_bytes(
+            bytes,
+        )?;
 
     // BaseFold proof (BN254 digests) — witnessed felt/ext + BN254 digests.
     let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
-    let basefold_proof =
-        crate::basefold_witness::read_basefold_proof_outer_from_stream::<C>(
-            &host_basefold_outer,
-            builder,
-        );
+    let basefold_proof = crate::basefold_witness::read_basefold_proof_outer_from_stream::<C>(
+        &host_basefold_outer,
+        builder,
+    );
     // reduction sumcheck + jagged-eval sub-sumcheck (field-typed, ring-agnostic).
     let sumcheck = read_sumcheck_from_stream::<C>(
         &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
@@ -1160,13 +1144,13 @@ where
         HostEvalProof::Bytes(b) => b,
         _ => return false,
     };
-    let bundle = match zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
-        OuterValMmcs,
-    >::from_bytes(bytes)
-    {
-        Some(b) => b,
-        None => return false,
-    };
+    let bundle =
+        match zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<OuterValMmcs>::from_bytes(
+            bytes,
+        ) {
+            Some(b) => b,
+            None => return false,
+        };
     let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
     crate::basefold_witness::write_basefold_proof_outer_to_stream::<C>(
         &host_basefold_outer,
@@ -1219,7 +1203,7 @@ where
 pub fn lift_jagged_basefold_bundle_outer<C>(
     builder: &mut Builder<C>,
     bundle: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<OuterValMmcs>,
-    // Witnessed proof-specific values (replace the const-builds).
+// Witnessed proof-specific values (replace the const-builds).
     preread_basefold_proof: RecursiveBasefoldProof<
         Felt<C::F>,
         Ext<C::F, C::EF>,
@@ -1348,9 +1332,8 @@ where
         preread_commit_root;
     let zero_digest_var: <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable =
         HV::const_digest(builder, <HV as crate::hash::FieldHasher<C::F>>::Digest::default());
-    let mut original_commitments: Vec<
-        <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable,
-    > = Vec::with_capacity(num_rounds);
+    let mut original_commitments: Vec<<HV as crate::hash::FieldHasherVariable<C>>::DigestVariable> =
+        Vec::with_capacity(num_rounds);
     original_commitments.push(first_commit_digest);
     for _ in 1..num_rounds {
         original_commitments.push(zero_digest_var);
@@ -1364,9 +1347,8 @@ where
     let modified_commitments = original_commitments.clone();
 
     // ── jagged_eval_proof = the WITNESSED sub-sumcheck ──
-    let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
-        partial_sumcheck_proof: preread_jagged_eval,
-    };
+    let jagged_eval_proof =
+        JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> { partial_sumcheck_proof: preread_jagged_eval };
 
     // ── REAL: col_prefix_sums with artificial-zero insertion (mirror) ──
     // CRITICAL (mirror of the INNER lift, shard_level_witness.rs:1457): the
@@ -1380,13 +1362,9 @@ where
     // (e.g. 10813456 vs 8388607).  Derive the width from the jagged-eval
     // sumcheck point length, falling back to max_log_row_count+1 only for the
     // dummy/empty jagged_eval.
-    let jagged_eval_point_len =
-        bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
-    let bits_per_entry = if jagged_eval_point_len >= 2 {
-        jagged_eval_point_len / 2
-    } else {
-        max_log_row_count + 1
-    };
+    let jagged_eval_point_len = bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
+    let bits_per_entry =
+        if jagged_eval_point_len >= 2 { jagged_eval_point_len / 2 } else { max_log_row_count + 1 };
     let total_values = bundle.packing.total_values;
     let cap_to_bits = |v: usize| -> usize {
         if bits_per_entry < usize::BITS as usize {
@@ -1443,10 +1421,7 @@ where
         row_counts_src
             .iter()
             .map(|round| {
-                round
-                    .iter()
-                    .map(|&rc| builder.constant(C::F::from_u64(rc as u64)))
-                    .collect()
+                round.iter().map(|&rc| builder.constant(C::F::from_u64(rc as u64))).collect()
             })
             .collect()
     } else {
@@ -1474,10 +1449,7 @@ where
             .padding_heights
             .iter()
             .map(|round| {
-                round
-                    .iter()
-                    .map(|&h| builder.constant(C::F::from_u64(h as u64)))
-                    .collect()
+                round.iter().map(|&h| builder.constant(C::F::from_u64(h as u64))).collect()
             })
             .collect(),
         row_counts,
@@ -1486,7 +1458,6 @@ where
         expected_eval,
     }
 }
-
 
 /// Bytes-input adapter for [`lift_jagged_basefold_bundle`].
 ///
@@ -1535,14 +1506,24 @@ where
             core::array::from_fn(|_| builder.constant(C::F::ZERO))
         } else {
             let raw: [InnerVal; 8] = cap_roots[0];
-            let modified =
-                zkm_pcs::jagged_pcs::jagged_hash_bind_from_packing(raw, &bundle.packing);
+            let modified = zkm_pcs::jagged_pcs::jagged_hash_bind_from_packing(raw, &bundle.packing);
             core::array::from_fn(|i| builder.constant(modified[i]))
         };
         lift_jagged_basefold_bundle::<C, HV>(
-            builder, &bundle, cp, sc, je, ee, cr, mc, &[], &[], max_log_row_count,
+            builder,
+            &bundle,
+            cp,
+            sc,
+            je,
+            ee,
+            cr,
+            mc,
+            &[],
+            &[],
+            max_log_row_count,
             column_counts_by_round,
-            None, None,
+            None,
+            None,
         )
     } else {
         // Empty / malformed bytes — fall back to the all-zero
@@ -1579,11 +1560,7 @@ where
             .univariate_polys
             .iter()
             .map(|poly| UnivariatePolynomial {
-                coefficients: poly
-                    .coefficients
-                    .iter()
-                    .map(|c| builder.constant(*c))
-                    .collect(),
+                coefficients: poly.coefficients.iter().map(|c| builder.constant(*c)).collect(),
             })
             .collect(),
         claimed_sum: builder.constant(host.claimed_sum),
@@ -1715,11 +1692,10 @@ where
     use crate::basefold_verifier::{
         RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldRound,
     };
-    let conv_digest =
-        |root: [InnerVal; 8]| -> <HV as crate::hash::FieldHasher<C::F>>::Digest {
-            let kb: [p3_koala_bear::KoalaBear; 8] = core::array::from_fn(|i| root[i]);
-            HV::digest_from_koalabear_root(kb)
-        };
+    let conv_digest = |root: [InnerVal; 8]| -> <HV as crate::hash::FieldHasher<C::F>>::Digest {
+        let kb: [p3_koala_bear::KoalaBear; 8] = core::array::from_fn(|i| root[i]);
+        HV::digest_from_koalabear_root(kb)
+    };
     RecursiveBasefoldProof {
         rounds: src
             .rounds
@@ -1836,8 +1812,7 @@ where
             round
                 .into_iter()
                 .map(|c| {
-                    let mut merkle_path_digests =
-                        Vec::with_capacity(c.merkle_path_digests.len());
+                    let mut merkle_path_digests = Vec::with_capacity(c.merkle_path_digests.len());
                     for d in c.merkle_path_digests.into_iter() {
                         merkle_path_digests.push(HV::const_digest(builder, d));
                     }
@@ -1892,8 +1867,7 @@ where
     // identity; outer: BN254 default), read the scalar fields, then promote
     // the digests to HV::DigestVariable.
     let host_kb = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
-    let host_hv =
-        rekey_basefold_digests_to_hv::<C, HV, InnerVal, InnerChallenge>(host_kb);
+    let host_hv = rekey_basefold_digests_to_hv::<C, HV, InnerVal, InnerChallenge>(host_kb);
     let raw_var = <_ as Witnessable<C>>::read(&host_hv, builder);
     let bp = proof_digests_to_digestvar::<C, HV>(builder, raw_var);
     let sc = host_sumcheck_to_const_var::<C>(
@@ -1975,8 +1949,8 @@ where
     HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
         + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
-    use zkm_recursion_compiler::circuit::CircuitV2Builder;
     use p3_field::PrimeCharacteristicRing;
+    use zkm_recursion_compiler::circuit::CircuitV2Builder;
 
     let _zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
     let _zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
@@ -1993,11 +1967,9 @@ where
     // desyncing the transcript under host-parity enforcement.
     // The column space is every round's real chips PLUS its one stacking-padding
     // column, which is what the host's flattened `offsets` carries.
-    let total_cols_before_pad: usize = column_counts_by_round
-        .iter()
-        .map(|cc| cc.iter().sum::<usize>())
-        .sum::<usize>()
-        + padding_heights.iter().map(|p| p.len()).sum::<usize>();
+    let total_cols_before_pad: usize =
+        column_counts_by_round.iter().map(|cc| cc.iter().sum::<usize>()).sum::<usize>()
+            + padding_heights.iter().map(|p| p.len()).sum::<usize>();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
     let col_prefix_sums_len = padded_cols + 1;
     let _num_col_variables = padded_cols.trailing_zeros() as usize;
@@ -2025,11 +1997,7 @@ where
         basefold_proof_var.batch_evaluations.clone();
 
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
-        RecursiveBasefoldProof<
-            Felt<C::F>,
-            Ext<C::F, C::EF>,
-            HV::DigestVariable,
-        >,
+        RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
         C::F,
         C::EF,
     > {
@@ -2078,9 +2046,8 @@ where
     // reduction so the in-circuit `real_jagged_evaluator_fn`
     // (compress_basefold.rs) verifies a non-vacuous closing identity.
     // pre-read (witnessed) jagged-eval sub-sumcheck.
-    let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
-        partial_sumcheck_proof: preread_jagged_eval,
-    };
+    let jagged_eval_proof =
+        JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> { partial_sumcheck_proof: preread_jagged_eval };
 
     // ── REAL: col_prefix_sums with artificial-zero insertion ──
     // Walks column_counts_by_round + bundle.packing.offsets in
@@ -2108,13 +2075,9 @@ where
     // felt-assert (acc == final_area) fails (e.g. 201326592 vs 8388607).
     // Derive the width from the jagged-eval sumcheck point length, falling
     // back to max_log_row_count+1 only for the dummy/empty jagged_eval.
-    let jagged_eval_point_len =
-        bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
-    let bits_per_entry = if jagged_eval_point_len >= 2 {
-        jagged_eval_point_len / 2
-    } else {
-        max_log_row_count + 1
-    };
+    let jagged_eval_point_len = bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
+    let bits_per_entry =
+        if jagged_eval_point_len >= 2 { jagged_eval_point_len / 2 } else { max_log_row_count + 1 };
     let total_values = bundle.packing.total_values;
     if bits_per_entry > 31 {
         // The 32-bit-width col_prefix_sum path is exercised.
@@ -2169,8 +2132,7 @@ where
                 bits
             }
         };
-        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> =
-            Vec::with_capacity(col_prefix_sums_len);
+        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
         let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
         // [0] = 0
         let bits0 = num2bits_be(builder, acc);
@@ -2228,8 +2190,7 @@ where
         }
         JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums }
     } else {
-        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> =
-            Vec::with_capacity(col_prefix_sums_len);
+        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
         // [0] = 0 (always)
         col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
         let mut offset_idx: usize = 0;
@@ -2311,10 +2272,7 @@ where
         row_counts_src
             .iter()
             .map(|round| {
-                round
-                    .iter()
-                    .map(|&rc| builder.constant(C::F::from_u64(rc as u64)))
-                    .collect()
+                round.iter().map(|&rc| builder.constant(C::F::from_u64(rc as u64))).collect()
             })
             .collect()
     } else {
@@ -2418,11 +2376,8 @@ pub fn jagged_reduction_to_partial_sumcheck(
         "jagged reduction: at least one round required for claimed_sum",
     );
 
-    let univariate_polys: Vec<UnivariatePolynomial<InnerChallenge>> = proof
-        .rounds
-        .iter()
-        .map(|r| interpolate_3point_evals_at_012(r.evals))
-        .collect();
+    let univariate_polys: Vec<UnivariatePolynomial<InnerChallenge>> =
+        proof.rounds.iter().map(|r| interpolate_3point_evals_at_012(r.evals)).collect();
 
     let claimed_sum = proof.rounds[0].evals[0] + proof.rounds[0].evals[1];
 
@@ -2479,8 +2434,7 @@ mod tests {
             evaluation_proof,
             _opened_values,
             _preprocessed_round,
-        ) =
-            <_ as Witnessable<C>>::read(&proof, &mut builder);
+        ) = <_ as Witnessable<C>>::read(&proof, &mut builder);
         assert_eq!(main_commit.len(), 8);
         assert_eq!(pvs.len(), 8);
         // The `EvaluationProof` lifts to `LiftedEvalProof::Empty` for an
@@ -2493,9 +2447,7 @@ mod tests {
     #[test]
     fn jagged_reduction_round_witnessable_reads() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let host = JaggedReductionRound::<InnerChallenge> {
-            evals: [InnerChallenge::ZERO; 3],
-        };
+        let host = JaggedReductionRound::<InnerChallenge> { evals: [InnerChallenge::ZERO; 3] };
         let var: JaggedReductionRound<Ext<InnerVal, InnerChallenge>> =
             <_ as Witnessable<C>>::read(&host, &mut builder);
         assert_eq!(var.evals.len(), 3);
@@ -2543,9 +2495,7 @@ mod tests {
             values: vec![vec![InnerVal::ZERO; 2]],
             proof: vec![[InnerVal::ZERO; 8]; 2],
         };
-        let host = MerkleOpening::<InnerVal, JaggedMmcs> {
-            leaves: vec![leaf.clone(), leaf],
-        };
+        let host = MerkleOpening::<InnerVal, JaggedMmcs> { leaves: vec![leaf.clone(), leaf] };
         let var = <_ as Witnessable<C>>::read(&host, &mut builder);
         assert_eq!(var.leaves.len(), 2);
     }
@@ -2580,18 +2530,9 @@ mod tests {
         // Each univariate poly's evals at 0/1/2 round-trip to the
         // original [p0, p1, p2].
         for (round, poly) in proof.rounds.iter().zip(psp.univariate_polys.iter()) {
-            assert_eq!(
-                poly.eval_at_point(InnerChallenge::ZERO),
-                round.evals[0],
-            );
-            assert_eq!(
-                poly.eval_at_point(InnerChallenge::ONE),
-                round.evals[1],
-            );
-            assert_eq!(
-                poly.eval_at_point(InnerChallenge::from_u8(2)),
-                round.evals[2],
-            );
+            assert_eq!(poly.eval_at_point(InnerChallenge::ZERO), round.evals[0],);
+            assert_eq!(poly.eval_at_point(InnerChallenge::ONE), round.evals[1],);
+            assert_eq!(poly.eval_at_point(InnerChallenge::from_u8(2)), round.evals[2],);
         }
         // final_eval = last round's poly evaluated at the LAST SAMPLED
         // challenge.  Under the reduction's sample-order (LSB) point that is
@@ -2822,7 +2763,10 @@ mod tests {
     fn lift_evaluation_proof_via_bundle_empty_bytes_falls_back() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_evaluation_proof_via_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &[], 21, &cols);
+        let var = lift_evaluation_proof_via_bundle::<
+            C,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+        >(&mut builder, &[], 21, &cols);
         assert_eq!(var.column_counts, cols);
         assert_eq!(var.original_commitments.len(), 2);
     }
@@ -2841,9 +2785,7 @@ mod tests {
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
         let bundle = JaggedBasefoldBundle {
             reduction: JaggedReductionProof::<InnerChallenge> {
-                rounds: vec![JaggedReductionRound {
-                    evals: [InnerChallenge::ZERO; 3],
-                }],
+                rounds: vec![JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] }],
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
@@ -2871,7 +2813,7 @@ mod tests {
                 total_values: 0,
                 log_dense_size: 0,
                 column_counts: vec![],
-                            round_counts: Vec::new(),
+                round_counts: Vec::new(),
                 padding_heights: Vec::new(),
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
@@ -2886,7 +2828,10 @@ mod tests {
         };
         let bytes = bundle.to_bytes();
         let cols: Vec<Vec<usize>> = vec![vec![3]];
-        let var = lift_evaluation_proof_via_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 21, &cols);
+        let var = lift_evaluation_proof_via_bundle::<
+            C,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+        >(&mut builder, &bytes, 21, &cols);
         assert_eq!(var.column_counts, cols);
         // sumcheck_proof has the real reduction round (1 univariate poly).
         assert_eq!(var.sumcheck_proof.univariate_polys.len(), 1);
@@ -2908,9 +2853,7 @@ mod tests {
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
         let bundle = JaggedBasefoldBundle {
             reduction: JaggedReductionProof::<InnerChallenge> {
-                rounds: vec![JaggedReductionRound {
-                    evals: [InnerChallenge::ZERO; 3],
-                }],
+                rounds: vec![JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] }],
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
@@ -2950,7 +2893,13 @@ mod tests {
         };
         let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
         let rows: Vec<Vec<usize>> = vec![vec![16, 16, 16]];
-        let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 8, &cols, Some(&rows));
+        let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
+            &mut builder,
+            &bundle,
+            8,
+            &cols,
+            Some(&rows),
+        );
         assert_eq!(var.row_counts.len(), 1);
         assert_eq!(var.row_counts[0].len(), 3);
         // col_prefix_sums has padded_cols+1 entries.  With cc=[1,1,1]
@@ -3020,7 +2969,13 @@ mod tests {
         };
         let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
         // None -> derive row_counts from bundle.commit.chip_dims.
-        let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 8, &cols, None);
+        let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
+            &mut builder,
+            &bundle,
+            8,
+            &cols,
+            None,
+        );
         assert_eq!(var.row_counts.len(), 1);
         assert_eq!(var.row_counts[0].len(), 3);
         assert_eq!(var.params.col_prefix_sums.len(), 9);
@@ -3044,8 +2999,7 @@ mod tests {
         let total_values: usize = 48;
 
         // heights from chip_dims (NOT zeros).
-        let heights: Vec<usize> =
-            chip_dims.iter().map(|&(_w, log_h)| 1usize << log_h).collect();
+        let heights: Vec<usize> = chip_dims.iter().map(|&(_w, log_h)| 1usize << log_h).collect();
         assert_eq!(heights, vec![16, 16, 16]);
 
         // Verifier reconciliation (recursive_jagged_pcs.rs:248-272) in usize:
@@ -3094,9 +3048,7 @@ mod tests {
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
         let bundle = JaggedBasefoldBundle {
             reduction: JaggedReductionProof::<InnerChallenge> {
-                rounds: vec![JaggedReductionRound {
-                    evals: [InnerChallenge::ZERO; 3],
-                }],
+                rounds: vec![JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] }],
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
@@ -3135,7 +3087,13 @@ mod tests {
             groups: vec![],
         };
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 21, &cols, None);
+        let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
+            &mut builder,
+            &bundle,
+            21,
+            &cols,
+            None,
+        );
         // column_counts pass through verbatim.
         assert_eq!(var.column_counts, cols);
         // num_rounds == 2 → 2 commitment slots, first from bundle,

@@ -51,7 +51,10 @@ pub mod shm;
 pub mod isolation;
 
 pub use context::JitContext;
-pub use instructions::{ComputeInstructions, ControlFlowInstructions, MemoryInstructions, MipsTranspiler, SystemInstructions, TraceCollector};
+pub use instructions::{
+    ComputeInstructions, ControlFlowInstructions, MemoryInstructions, MipsTranspiler,
+    SystemInstructions, TraceCollector,
+};
 pub use risc::{MipsOperand, MipsRegister};
 
 /// Errors that can occur during JIT compilation or execution.
@@ -171,15 +174,8 @@ impl backends::TranspilerBackend {
         let assembler = self.assembler;
         let buf = assembler.finalize().map_err(|_| JitError::CodeTooLarge)?;
         let buf_ptr = buf.as_ptr();
-        let jump_table = buf_offsets
-            .into_iter()
-            .map(|off| unsafe { buf_ptr.add(off) })
-            .collect();
-        Ok(JitFunction {
-            code: buf,
-            jump_table,
-            pc_start,
-        })
+        let jump_table = buf_offsets.into_iter().map(|off| unsafe { buf_ptr.add(off) }).collect();
+        Ok(JitFunction { code: buf, jump_table, pc_start })
     }
 }
 
@@ -193,4 +189,3 @@ mod tests {
         let _ = std::mem::size_of::<JitContext>();
     }
 }
-

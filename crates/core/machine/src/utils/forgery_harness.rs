@@ -199,10 +199,7 @@ fn stage0_control_fixoff_honest_verifies() {
     setup_logger();
     let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
     let res = verify(&machine, &vk, &proof);
-    eprintln!(
-        "[STAGE0][CONTROL][fibonacci FIX-off] honest verify = {}",
-        reject_tag(&res)
-    );
+    eprintln!("[STAGE0][CONTROL][fibonacci FIX-off] honest verify = {}", reject_tag(&res));
     assert!(res.is_ok(), "honest FIX-off proof must verify (control)");
 }
 
@@ -285,10 +282,7 @@ fn run_forgery(
              redundantly bound (BLOCKER)"
         );
     } else {
-        assert!(
-            res.is_ok(),
-            "[{label}] expected forgery to SURVIVE but it was rejected: {tag}"
-        );
+        assert!(res.is_ok(), "[{label}] expected forgery to SURVIVE but it was rejected: {tag}");
     }
     tag
 }
@@ -457,7 +451,7 @@ fn stage0_forge_overclaim_fibonacci() {
         "fibonacci/overclaim",
         fibonacci_program(),
         ZKMStdin::new(),
-        true,  // MUST reject
+        true, // MUST reject
         overclaim,
     );
     eprintln!("[STAGE0][VERDICT] fibonacci OVER-claim (transcript+degree) => {tag}");
@@ -467,13 +461,8 @@ fn stage0_forge_overclaim_fibonacci() {
 #[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
 fn stage0_forge_underclaim_fibonacci() {
     setup_logger();
-    let tag = run_forgery(
-        "fibonacci/underclaim",
-        fibonacci_program(),
-        ZKMStdin::new(),
-        true,
-        underclaim,
-    );
+    let tag =
+        run_forgery("fibonacci/underclaim", fibonacci_program(), ZKMStdin::new(), true, underclaim);
     eprintln!("[STAGE0][VERDICT] fibonacci UNDER-claim (transcript+degree) => {tag}");
 }
 
@@ -598,13 +587,8 @@ fn stage1_degree_only_overclaim_fibonacci_rejected_on_default() {
 #[ignore = "proves a real FIX-off keccak core proof (multi-second); run with --ignored"]
 fn stage0_forge_overclaim_keccak() {
     setup_logger();
-    let tag = run_forgery(
-        "keccak/overclaim",
-        sha3_chain_program(),
-        ZKMStdin::new(),
-        true,
-        overclaim,
-    );
+    let tag =
+        run_forgery("keccak/overclaim", sha3_chain_program(), ZKMStdin::new(), true, overclaim);
     eprintln!("[STAGE0][VERDICT] keccak OVER-claim (transcript+degree) => {tag}");
 }
 
@@ -612,13 +596,8 @@ fn stage0_forge_overclaim_keccak() {
 #[ignore = "proves a real FIX-off keccak core proof (multi-second); run with --ignored"]
 fn stage0_forge_underclaim_keccak() {
     setup_logger();
-    let tag = run_forgery(
-        "keccak/underclaim",
-        sha3_chain_program(),
-        ZKMStdin::new(),
-        true,
-        underclaim,
-    );
+    let tag =
+        run_forgery("keccak/underclaim", sha3_chain_program(), ZKMStdin::new(), true, underclaim);
     eprintln!("[STAGE0][VERDICT] keccak UNDER-claim (transcript+degree) => {tag}");
 }
 
@@ -711,7 +690,7 @@ fn stage0_forge_count_tamper_column_fibonacci() {
         "fibonacci/count-tamper-column",
         fibonacci_program(),
         ZKMStdin::new(),
-        true,  // MUST reject (hash-bind)
+        true, // MUST reject (hash-bind)
         forge_count_tamper_column,
     );
     eprintln!("[STAGE0][VERDICT] fibonacci COLUMN-count tamper (hash-bind) => {tag}");
@@ -771,8 +750,7 @@ fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, Strin
             }
             // ALL-ZERO degree bits <=> real height 0 (a missing chip).
             if degree.iter().all(|b| *b == Challenge::ZERO) {
-                let name =
-                    sorted_names.get(ci).cloned().unwrap_or_else(|| format!("chip{ci}"));
+                let name = sorted_names.get(ci).cloned().unwrap_or_else(|| format!("chip{ci}"));
                 found.push((si, name.clone()));
                 first.get_or_insert((si, ci, name));
             }
@@ -854,9 +832,7 @@ fn stage1_forge_height0_missing_claims_active_rejected() {
         "[stage1-a] HEIGHT-0 missing chip forged to ACTIVE SURVIVED — the zero-degree \
          model is UNSOUND (SOUNDNESS HOLE / BLOCKER): {tag}"
     );
-    eprintln!(
-        "[STAGE1][VERDICT] (a) HEIGHT-0 missing chip claiming activity REJECTED => {tag}"
-    );
+    eprintln!("[STAGE1][VERDICT] (a) HEIGHT-0 missing chip claiming activity REJECTED => {tag}");
 }
 
 /// ★ FORGERY GATE (b): a real present active chip forged to claim it is

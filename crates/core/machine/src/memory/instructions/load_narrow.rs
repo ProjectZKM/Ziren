@@ -172,9 +172,7 @@ where
         let neg_byte = local.is_lb * local.most_sig_bit;
         let op_a = common.op_a_value;
         builder.when(is_real.clone()).assert_eq(op_a[0], local.val_lo);
-        builder
-            .when(is_real.clone())
-            .assert_eq(op_a[1], local.val_hi + ff.clone() * neg_byte);
+        builder.when(is_real.clone()).assert_eq(op_a[1], local.val_hi + ff.clone() * neg_byte);
         builder.when(is_real.clone()).assert_eq(op_a[2], ff.clone() * neg.clone());
         builder.when(is_real.clone()).assert_eq(op_a[3], ff * neg);
 
@@ -206,9 +204,7 @@ impl LoadNarrowChip {
 
         let mem_value = event.mem_access.value();
         let (val_lo, val_hi) = match event.opcode {
-            Opcode::LB | Opcode::LBU => {
-                (mem_value.to_le_bytes()[addr_ls_two_bits as usize], 0u8)
-            }
+            Opcode::LB | Opcode::LBU => (mem_value.to_le_bytes()[addr_ls_two_bits as usize], 0u8),
             Opcode::LH | Opcode::LHU => {
                 let half = match (addr_ls_two_bits >> 1) % 2 {
                     0 => mem_value & 0x0000FFFF,
@@ -294,5 +290,4 @@ impl<F: PrimeField32> MachineAir<F> for LoadNarrowChip {
             !shard.memory_load_narrow_events.is_empty()
         }
     }
-
 }

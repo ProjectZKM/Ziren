@@ -58,12 +58,7 @@ pub trait FieldChallengerVariable<C: Config, Bit>:
     /// (its prover grind is itself a no-op).  This is DISTINCT from the
     /// BaseFold-open grind (`check_witness`), which the host advances on
     /// BOTH rings — so the two must not share one blanket no-op.
-    fn gkr_check_witness(
-        &mut self,
-        builder: &mut Builder<C>,
-        nb_bits: usize,
-        witness: Felt<C::F>,
-    ) {
+    fn gkr_check_witness(&mut self, builder: &mut Builder<C>, nb_bits: usize, witness: Felt<C::F>) {
         self.check_witness(builder, nb_bits, witness);
     }
 
@@ -432,12 +427,7 @@ impl<C: Config> FieldChallengerVariable<C, Var<C::N>> for MultiField32Challenger
         MultiField32ChallengerVariable::check_witness(self, builder, bits, witness);
     }
 
-    fn gkr_check_witness(
-        &mut self,
-        builder: &mut Builder<C>,
-        nb_bits: usize,
-        witness: Felt<C::F>,
-    ) {
+    fn gkr_check_witness(&mut self, builder: &mut Builder<C>, nb_bits: usize, witness: Felt<C::F>) {
         // OUTER/wrap ring: LogUp-GKR grinding is a no-op (the wrap prover's
         // GKR grind is itself a no-op; host `gkr_check_witness` is gated to
         // the inner challenger).  Leave the challenger UNTOUCHED — distinct
@@ -491,6 +481,7 @@ pub(crate) mod tests {
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
     use zkm_recursion_compiler::{
         circuit::{AsmBuilder, AsmConfig},
         config::OuterConfig,
@@ -501,7 +492,6 @@ pub(crate) mod tests {
         outer_perm, KoalaBearPoseidon2Outer, OuterCompress, OuterHash,
     };
     use zkm_recursion_gnark_ffi::PlonkBn254Prover;
-    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::{
         challenger::{DuplexChallengerVariable, FieldChallengerVariable},

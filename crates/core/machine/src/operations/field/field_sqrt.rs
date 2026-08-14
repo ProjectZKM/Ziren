@@ -144,9 +144,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use p3_air::WindowAccess;
     use num::{BigUint, One};
     use p3_air::BaseAir;
+    use p3_air::WindowAccess;
     use p3_field::{Field, PrimeField32};
     use zkm_core_executor::{ExecutionRecord, Program};
     use zkm_curves::params::{FieldParameters, Limbs};

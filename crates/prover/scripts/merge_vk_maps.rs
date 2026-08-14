@@ -45,8 +45,7 @@ fn main() {
     let mut union: BTreeMap<[KB; DIGEST_SIZE], usize> = BTreeMap::new();
     let mut total_input = 0usize;
     for input in &args.inputs {
-        let f = File::open(input)
-            .unwrap_or_else(|e| panic!("open {:?}: {}", input, e));
+        let f = File::open(input).unwrap_or_else(|e| panic!("open {:?}: {}", input, e));
         let map: BTreeMap<[KB; DIGEST_SIZE], usize> = bincode::deserialize_from(&f)
             .unwrap_or_else(|e| panic!("deserialize {:?}: {}", input, e));
         eprintln!("[merge] {:?}: {} entries", input, map.len());
@@ -83,8 +82,8 @@ fn main() {
     let renumbered: BTreeMap<[KB; DIGEST_SIZE], usize> =
         union.into_keys().enumerate().map(|(i, k)| (k, i)).collect();
 
-    let mut out_file = File::create(&args.output)
-        .unwrap_or_else(|e| panic!("create {:?}: {}", args.output, e));
+    let mut out_file =
+        File::create(&args.output).unwrap_or_else(|e| panic!("create {:?}: {}", args.output, e));
     bincode::serialize_into(&mut out_file, &renumbered)
         .unwrap_or_else(|e| panic!("serialize {:?}: {}", args.output, e));
     eprintln!("[merge] wrote {} entries to {:?}", renumbered.len(), args.output);

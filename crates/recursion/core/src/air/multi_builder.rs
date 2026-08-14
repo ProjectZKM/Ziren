@@ -1,6 +1,4 @@
-use p3_air::{AirBuilder, ExtensionBuilder, FilteredAirBuilder,
-    PermutationAirBuilder,
-};
+use p3_air::{AirBuilder, ExtensionBuilder, FilteredAirBuilder, PermutationAirBuilder};
 use zkm_pcs::air::{LookupScope, MessageBuilder};
 
 /// The MultiBuilder is used for the multi table.  It is used to create a virtual builder for one of

@@ -56,9 +56,7 @@ use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 use crate::challenger::FieldChallengerVariable;
 use crate::jagged_circuit::{JaggedPcsProofVariable, JaggedSumcheckEvalProof};
 use crate::logup_gkr::evaluate_mle_ext;
-use crate::recursive_stacked_pcs::{
-    RecursiveMultilinearPcsVerifier, RecursiveStackedPcsVerifier,
-};
+use crate::recursive_stacked_pcs::{RecursiveMultilinearPcsVerifier, RecursiveStackedPcsVerifier};
 use crate::sumcheck::verify_sumcheck;
 use crate::CircuitConfig;
 
@@ -201,18 +199,15 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // is the number of columns; take the next-power-of-two log.
         let num_cols = params.col_prefix_sums.len() - 1;
         let num_col_variables = num_cols.next_power_of_two().trailing_zeros() as usize;
-        let z_col: Vec<Ext<C::F, C::EF>> = (0..num_col_variables)
-            .map(|_| challenger.sample_ext(builder))
-            .collect();
+        let z_col: Vec<Ext<C::F, C::EF>> =
+            (0..num_col_variables).map(|_| challenger.sample_ext(builder)).collect();
 
         let z_row: &[Ext<C::F, C::EF>] = point;
 
         // (2) Flatten per-round evaluation claims into a single
         // column-claim vector.
-        let mut column_claims: Vec<Ext<C::F, C::EF>> = evaluation_claims
-            .iter()
-            .flat_map(|round| round.iter().copied())
-            .collect();
+        let mut column_claims: Vec<Ext<C::F, C::EF>> =
+            evaluation_claims.iter().flat_map(|round| round.iter().copied()).collect();
 
         // Each opening round is padded out to its committed area by ONE
         // stacking-padding column of zeros (`<stacking-pad:*>` in
@@ -239,8 +234,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // `col_prefix_sums`.
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         for (round_idx, insertion_point) in insertion_points.iter().enumerate().rev() {
-            let pad_cols =
-                padding_row_heights.get(round_idx).map(|p| p.len()).unwrap_or(0);
+            let pad_cols = padding_row_heights.get(round_idx).map(|p| p.len()).unwrap_or(0);
             for _ in 0..pad_cols {
                 column_claims.insert(*insertion_point, zero_ext);
             }
@@ -255,7 +249,6 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // MLE evaluated at `z_col`.
         let sumcheck_claim = evaluate_mle_ext::<C>(builder, &column_claims, &z_col);
         builder.assert_ext_eq(sumcheck_claim, sumcheck_proof.claimed_sum);
-
 
         // (5) Verify the jagged sumcheck.
         // The jagged REDUCTION binds the stride-1 (LSB) variable, as SP1 does, so
@@ -371,8 +364,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
                 // num2bits for every production config).
                 let bits = C::num2bits(builder, main_padding_col_height, cube_log + 1);
                 // low = value of the low `cube_log` bits.
-                let low: Felt<C::F> =
-                    C::bits2num(builder, bits.iter().take(cube_log).copied());
+                let low: Felt<C::F> = C::bits2num(builder, bits.iter().take(cube_log).copied());
                 let high_part: Felt<C::F> = builder.eval(main_padding_col_height - low);
                 let prod: Felt<C::F> = builder.eval(high_part * low);
                 builder.assert_felt_eq(prod, C::F::ZERO);
@@ -399,9 +391,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             }
         }
         let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
-        for (row_count, expected) in
-            repeated_row_counts.iter().zip(prefix_sum_felts.iter())
-        {
+        for (row_count, expected) in repeated_row_counts.iter().zip(prefix_sum_felts.iter()) {
             builder.assert_felt_eq(acc, *expected);
             acc = builder.eval(acc + *row_count);
         }
@@ -409,9 +399,10 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // Final area — Horner-recompose the last `col_prefix_sums`
         // vector into a single felt and assert `acc` equals it.
         let two: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
-        let last_sum = params.col_prefix_sums.last().expect(
-            "jagged-pcs: col_prefix_sums must have at least one entry",
-        );
+        let last_sum = params
+            .col_prefix_sums
+            .last()
+            .expect("jagged-pcs: col_prefix_sums must have at least one entry");
         // Horner-recompose SYMBOLICALLY (SP1 jagged/verifier.rs:158-162:
         // final_area = SymbolicFelt::zero(); `*bit + two*final_area` with NO
         // per-bit eval).  Materialization is deferred to the single
@@ -429,7 +420,6 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         let expected_eval_sym_for_lhs: SymbolicExt<C::F, C::EF> = (*expected_eval).into();
         let lhs: Ext<C::F, C::EF> = builder.eval(jagged_eval_sym * expected_eval_sym_for_lhs);
         builder.assert_ext_eq(lhs, sumcheck_proof.point_and_eval.1);
-
 
         // (9) Verify the dense-trace opening via the stacked PCS.
         let evaluation_point = sumcheck_proof.point_and_eval.0.clone();
@@ -467,11 +457,8 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
     /// Config-generic: `row_count` and `low` are `Felt<C::F>`, so the closing
     /// `assert_felt_eq` works for both the inner (KoalaBear) and outer
     /// (BN254) recursion configs.
-    fn assert_row_count_le_cube<C>(
-        builder: &mut Builder<C>,
-        row_count: Felt<C::F>,
-        cube_log: usize,
-    ) where
+    fn assert_row_count_le_cube<C>(builder: &mut Builder<C>, row_count: Felt<C::F>, cube_log: usize)
+    where
         C: CircuitConfig,
     {
         use p3_field::PrimeCharacteristicRing;
@@ -479,8 +466,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // happen inside num2bits for production configs).
         let bits = C::num2bits(builder, row_count, cube_log + 1);
         // low = value of the low `cube_log` bits = row_count - b_{cube_log}·2^L.
-        let low: Felt<C::F> =
-            C::bits2num(builder, bits.iter().take(cube_log).copied());
+        let low: Felt<C::F> = C::bits2num(builder, bits.iter().take(cube_log).copied());
         // (row_count - low) is b_{cube_log}·2^L ∈ {0, 2^L}; multiplying by
         // `low` and asserting zero forces low == 0 whenever the high bit is
         // set, i.e. row_count ≤ 2^L.
@@ -574,7 +560,9 @@ mod tests {
     #[test]
     fn jagged_pcs_verifier_constructs() {
         let basefold_params = BasefoldVerifierParams::production_default(21);
-        let basefold_verifier = RecursiveBasefoldVerifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>::new(basefold_params);
+        let basefold_verifier = RecursiveBasefoldVerifier::<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+        >::new(basefold_params);
         let stacked = RecursiveStackedPcsVerifier::new(basefold_verifier, 21);
         let jagged = RecursiveJaggedPcsVerifier::new(stacked, 21);
         assert_eq!(jagged.max_log_row_count, 21);
@@ -588,7 +576,9 @@ mod tests {
     #[test]
     fn machine_jagged_pcs_verifier_constructs() {
         let basefold_params = BasefoldVerifierParams::production_default(21);
-        let basefold_verifier = RecursiveBasefoldVerifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>::new(basefold_params);
+        let basefold_verifier = RecursiveBasefoldVerifier::<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+        >::new(basefold_params);
         let stacked = RecursiveStackedPcsVerifier::new(basefold_verifier, 21);
         let jagged = RecursiveJaggedPcsVerifier::new(stacked, 21);
         let machine_jagged =
@@ -605,8 +595,8 @@ mod tests {
     // negative test captures via `#[should_panic]`; honest heights run clean.
 
     use p3_field::PrimeCharacteristicRing;
-    use zkm_recursion_compiler::ir::{Builder, Felt};
     use zkm_pcs::InnerVal;
+    use zkm_recursion_compiler::ir::{Builder, Felt};
 
     /// Run the height guard against a single `row_count` over a cube of
     /// `2^cube_log` rows, executing the resulting circuit end-to-end.
@@ -677,8 +667,10 @@ mod tests {
         let mut builder = Builder::<InnerConfig>::default();
         let h: Felt<InnerVal> = builder.constant(InnerVal::from_u64(height));
         let bits = <InnerConfig as CircuitConfig>::num2bits(&mut builder, h, max_log + 1);
-        let low: Felt<InnerVal> =
-            <InnerConfig as CircuitConfig>::bits2num(&mut builder, bits.iter().take(max_log).copied());
+        let low: Felt<InnerVal> = <InnerConfig as CircuitConfig>::bits2num(
+            &mut builder,
+            bits.iter().take(max_log).copied(),
+        );
         let high_part: Felt<InnerVal> = builder.eval(h - low);
         let prod: Felt<InnerVal> = builder.eval(high_part * low);
         builder.assert_felt_eq(prod, InnerVal::ZERO);

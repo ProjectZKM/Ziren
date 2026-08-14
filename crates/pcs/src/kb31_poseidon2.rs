@@ -2,10 +2,13 @@
 
 use crate::{Com, StarkGenericConfig, ZeroCommitment};
 use p3_challenger::DuplexChallenger;
+use p3_commit::BatchOpening;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::{extension::{BinomialExtensionField, QuinticTrinomialExtensionField}, Field, PrimeCharacteristicRing};
-use p3_commit::BatchOpening;
+use p3_field::{
+    extension::{BinomialExtensionField, QuinticTrinomialExtensionField},
+    Field, PrimeCharacteristicRing,
+};
 use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_merkle_tree::MerkleTreeMmcs;
@@ -117,7 +120,15 @@ pub fn zkm_fri_config() -> FriParameters<InnerChallengeMmcs> {
         Ok(value) => value.parse().unwrap(),
         Err(_) => 84,
     };
-    FriParameters { log_blowup: 1, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
+    FriParameters {
+        log_blowup: 1,
+        log_final_poly_len: 0,
+        max_log_arity: 1,
+        num_queries,
+        commit_proof_of_work_bits: 0,
+        query_proof_of_work_bits: 16,
+        mmcs: challenge_mmcs,
+    }
 }
 
 /// The FRI config for inner recursion.
@@ -132,17 +143,18 @@ pub fn inner_fri_config() -> FriParameters<InnerChallengeMmcs> {
         Ok(value) => value.parse().unwrap(),
         Err(_) => 84,
     };
-    FriParameters { log_blowup: 1, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
+    FriParameters {
+        log_blowup: 1,
+        log_final_poly_len: 0,
+        max_log_arity: 1,
+        num_queries,
+        commit_proof_of_work_bits: 0,
+        query_proof_of_work_bits: 16,
+        mmcs: challenge_mmcs,
+    }
 }
 
 /// The recursion config used for recursive reduce circuit.
-
-
-
-
-
-
-
 
 pub mod koala_bear_poseidon2 {
 
@@ -203,7 +215,15 @@ pub mod koala_bear_poseidon2 {
             Ok(value) => value.parse().unwrap(),
             Err(_) => 84,
         };
-        FriParameters { log_blowup: 1, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
+        FriParameters {
+            log_blowup: 1,
+            log_final_poly_len: 0,
+            max_log_arity: 1,
+            num_queries,
+            commit_proof_of_work_bits: 0,
+            query_proof_of_work_bits: 16,
+            mmcs: challenge_mmcs,
+        }
     }
 
     #[must_use]
@@ -217,7 +237,15 @@ pub mod koala_bear_poseidon2 {
             Ok(value) => value.parse().unwrap(),
             Err(_) => 42,
         };
-        FriParameters { log_blowup: 2, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
+        FriParameters {
+            log_blowup: 2,
+            log_final_poly_len: 0,
+            max_log_arity: 1,
+            num_queries,
+            commit_proof_of_work_bits: 0,
+            query_proof_of_work_bits: 16,
+            mmcs: challenge_mmcs,
+        }
     }
 
     #[must_use]
@@ -231,7 +259,15 @@ pub mod koala_bear_poseidon2 {
             Ok(value) => value.parse().unwrap(),
             Err(_) => 28,
         };
-        FriParameters { log_blowup: 3, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
+        FriParameters {
+            log_blowup: 3,
+            log_final_poly_len: 0,
+            max_log_arity: 1,
+            num_queries,
+            commit_proof_of_work_bits: 0,
+            query_proof_of_work_bits: 16,
+            mmcs: challenge_mmcs,
+        }
     }
 
     enum KoalaBearPoseidon2Type {
@@ -358,7 +394,6 @@ pub mod koala_bear_poseidon2 {
         ) -> Self::PrepPrecomputed {
             inner_prep_precompute(named_preprocessed_traces, use_rev)
         }
-
     }
 
     /// PREPROCESSED-trace setup commit for the inner
@@ -391,10 +426,7 @@ pub mod koala_bear_poseidon2 {
     }
 
     pub fn inner_prep_commit(
-        chip_traces: &[(
-            String,
-            p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
-        )],
+        chip_traces: &[(String, p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
         use_rev: bool,
     ) -> Com<KoalaBearPoseidon2> {
         use crate::config::PrepCommitRoot;
@@ -405,10 +437,7 @@ pub mod koala_bear_poseidon2 {
     /// and jagged packing so the preprocessed round can be OPENED, not just
     /// observed.  See `StarkGenericConfig::PrepPrecomputed`.
     pub fn inner_prep_precompute(
-        chip_traces: &[(
-            String,
-            p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
-        )],
+        chip_traces: &[(String, p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
         use_rev: bool,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
         use crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
@@ -485,21 +514,14 @@ pub mod koala_bear_poseidon2 {
         /// inner body takes both directly — no `Box<dyn Any>` / `downcast_mut`.
         fn prove_jagged_open(
             z_row: &[crate::InnerChallenge],
-            rounds: alloc::vec::Vec<
-                crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>,
-            >,
+            rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
             challenger: &mut Self::Challenger,
         ) -> crate::shard_level::shard_proof::EvaluationProof {
             // ONE jagged proof spanning every round.  A
             // per-round proof would cost a reduction, an eval and an open each.
-            let bundle = crate::jagged_pcs::jagged::prove_jagged_basefold_rounds(
-                &rounds,
-                z_row,
-                challenger,
-            );
+            let bundle =
+                crate::jagged_pcs::jagged::prove_jagged_basefold_rounds(&rounds, z_row, challenger);
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
         }
     }
-
 }
-

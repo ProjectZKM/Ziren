@@ -1,7 +1,7 @@
 use crate::memory::RegisterCols;
 use std::borrow::Borrow;
 
-use p3_air::{WindowAccess, Air, AirBuilder};
+use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::{syscalls::SyscallCode, Opcode};
 use zkm_pcs::{
@@ -94,8 +94,7 @@ where
         builder.when(local.is_real).assert_eq(local.shard, local.frame.shard);
         builder.when(local.is_real).assert_eq(
             local.clk,
-            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
-                + local.frame.clk_16bit_limb,
+            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb + local.frame.clk_16bit_limb,
         );
 
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`
@@ -266,8 +265,7 @@ impl SyscallInstrsChip {
         let is_hint_len = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id.clone()
-                    - AB::Expr::from_u32(SyscallCode::SYSHINTLEN.syscall_id()),
+                syscall_id.clone() - AB::Expr::from_u32(SyscallCode::SYSHINTLEN.syscall_id()),
                 local.is_hint_len,
                 local.is_real.into(),
             );
@@ -450,10 +448,7 @@ impl SyscallInstrsChip {
         let is_commit_deferred_proofs = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id
-                    - AB::Expr::from_u32(
-                        SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id(),
-                    ),
+                syscall_id - AB::Expr::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id()),
                 local.is_commit_deferred_proofs,
                 local.is_real.into(),
             );

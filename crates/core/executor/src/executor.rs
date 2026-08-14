@@ -60,7 +60,8 @@ pub const UNUSED_PC: u32 = 1;
 /// matter what `SHARD_SIZE` says. In practice neither fires first: 100% of measured core
 /// splits on reth / tendermint / goat are `ELEMENT_THRESHOLD` (trace-area) splits — see
 /// `zkm_pcs::opts::ELEMENT_THRESHOLD`.
-const CORE_MAX_LOG_ROW_COUNT: usize = zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
+const CORE_MAX_LOG_ROW_COUNT: usize =
+    zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
 
 /// The per-chip height at which the executor forces a new core shard, mirroring SP1's
 /// `HEIGHT_THRESHOLD` (sp1 crates/core/executor/src/opts.rs:14 = `1 << 22`) and its
@@ -302,13 +303,11 @@ fn upsert_local_mem(
     is_register: bool,
 ) {
     if let Some(m) = override_map {
-        m.entry(addr)
-            .and_modify(|e| e.final_mem_access = record)
-            .or_insert(MemoryLocalEvent {
-                addr,
-                initial_mem_access: prev_record,
-                final_mem_access: record,
-            });
+        m.entry(addr).and_modify(|e| e.final_mem_access = record).or_insert(MemoryLocalEvent {
+            addr,
+            initial_mem_access: prev_record,
+            final_mem_access: record,
+        });
     } else if is_register && (addr as usize) < 36 {
         let slot = &mut reg_slots[addr as usize];
         if let Some(e) = slot {
@@ -321,14 +320,9 @@ fn upsert_local_mem(
             });
         }
     } else {
-        fallback_map
-            .entry(addr)
-            .and_modify(|e| e.final_mem_access = record)
-            .or_insert(MemoryLocalEvent {
-                addr,
-                initial_mem_access: prev_record,
-                final_mem_access: record,
-            });
+        fallback_map.entry(addr).and_modify(|e| e.final_mem_access = record).or_insert(
+            MemoryLocalEvent { addr, initial_mem_access: prev_record, final_mem_access: record },
+        );
     }
 }
 
@@ -715,8 +709,10 @@ impl<'a> Executor<'a> {
         //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
         //     local_memory_access to detect this. *WARNING*: This means that we are counting
         //     on the .is_some() condition to be true only in the SyscallContext.
-        if !self.unconstrained && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some()) {
+        if !self.unconstrained
+            && !self.skip_replay_bookkeeping
+            && (record.shard != shard || local_memory_access.is_some())
+        {
             self.split_acct.add_touched_address();
         }
 
@@ -997,8 +993,10 @@ impl<'a> Executor<'a> {
         //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
         //     local_memory_access to detect this. *WARNING*: This means that we are counting
         //     on the .is_some() condition to be true only in the SyscallContext.
-        if !self.unconstrained && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some()) {
+        if !self.unconstrained
+            && !self.skip_replay_bookkeeping
+            && (record.shard != shard || local_memory_access.is_some())
+        {
             self.split_acct.add_touched_address();
         }
 
@@ -1105,8 +1103,10 @@ impl<'a> Executor<'a> {
         //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
         //     local_memory_access to detect this. *WARNING*: This means that we are counting
         //     on the .is_some() condition to be true only in the SyscallContext.
-        if !self.unconstrained && !self.skip_replay_bookkeeping
-            && (record.shard != shard || local_memory_access.is_some()) {
+        if !self.unconstrained
+            && !self.skip_replay_bookkeeping
+            && (record.shard != shard || local_memory_access.is_some())
+        {
             self.split_acct.add_touched_address();
         }
 
@@ -1401,7 +1401,17 @@ impl<'a> Executor<'a> {
         syscall_code: u32,
     ) {
         self.emit_cpu(
-            clk, pc, next_pc, next_next_pc, recv_next_pc, a, b, c, hi_or_prev_a, record, exit_code,
+            clk,
+            pc,
+            next_pc,
+            next_next_pc,
+            recv_next_pc,
+            a,
+            b,
+            c,
+            hi_or_prev_a,
+            record,
+            exit_code,
         );
 
         if instruction.is_alu_instruction() {
@@ -2760,7 +2770,7 @@ impl<'a> Executor<'a> {
                 start_register_records: next_register_records,
                 pc_start: next_chunk_pc,
                 clk_start: next_chunk_clk,
-                clk_end: u64::MAX,  // sealed at next bump or finalize
+                clk_end: u64::MAX, // sealed at next bump or finalize
                 current_shard: next_current_shard,
                 input_stream_ptr: next_input_ptr,
                 proof_stream_ptr: next_proof_ptr,
@@ -3089,9 +3099,7 @@ impl<'a> Executor<'a> {
                 self.initialize();
             }
 
-            use crate::jit_runner::{
-                build_context, run_jit, BuildParams,
-            };
+            use crate::jit_runner::{build_context, run_jit, BuildParams};
 
             let pc_start = self.state.pc;
             let pc_base = self.program.pc_base;
@@ -3119,7 +3127,9 @@ impl<'a> Executor<'a> {
             let jit_fn_arc = match crate::jit_runner::cached_jit_function(
                 &self.program,
                 params,
-                Some(crate::jit_runner::jit_syscall_handler as crate::jit_runner::JitSyscallHandler),
+                Some(
+                    crate::jit_runner::jit_syscall_handler as crate::jit_runner::JitSyscallHandler,
+                ),
             ) {
                 Ok(f) => f,
                 Err(_) => return Ok(false), // unsupported opcode discovered late → fallback
@@ -3174,13 +3184,8 @@ impl<'a> Executor<'a> {
                 *slot = self.register(crate::Register::from(i as u8));
             }
 
-            let mut ctx = build_context(
-                pc_start,
-                memory_ptr,
-                jump_table_ptr,
-                trace_buf.as_mut_ptr(),
-                regs,
-            );
+            let mut ctx =
+                build_context(pc_start, memory_ptr, jump_table_ptr, trace_buf.as_mut_ptr(), regs);
             // Build the bridge state and hand the syscall trampoline
             // a pointer to it via user_data.  We pre-stash raw
             // pointers because `JitBridgeState` borrows `self` and
@@ -3199,7 +3204,6 @@ impl<'a> Executor<'a> {
             };
             ctx.user_data = &mut bridge_state as *mut _ as *mut std::ffi::c_void;
 
-
             // Producer: capture a whole-program TraceChunk
             // (start registers + pc + clk bounds) via
             // run_jit_capture_trace_chunk when the caller opted in;
@@ -3207,9 +3211,8 @@ impl<'a> Executor<'a> {
             // clk_start/start_registers come from `ctx` at call time
             // (= the program-entry snapshot on the first-cycle run_fast).
             if self.d4_capture_chunk {
-                let chunk = unsafe {
-                    crate::jit_runner::run_jit_capture_trace_chunk(&jit_fn, &mut ctx, 0)
-                };
+                let chunk =
+                    unsafe { crate::jit_runner::run_jit_capture_trace_chunk(&jit_fn, &mut ctx, 0) };
                 self.d4_captured_chunk = Some(chunk);
             } else {
                 unsafe { run_jit(&jit_fn, &mut ctx) };
@@ -3254,10 +3257,10 @@ impl<'a> Executor<'a> {
             // Reconcile all 36 registers including LO/HI/BRK/HEAP.
             use crate::events::MemoryRecord;
             for (i, &v) in ctx.registers[..36].iter().enumerate() {
-                self.state.memory.registers.insert(
-                    i as u32,
-                    MemoryRecord { value: v, shard: 0, timestamp: 0 },
-                );
+                self.state
+                    .memory
+                    .registers
+                    .insert(i as u32, MemoryRecord { value: v, shard: 0, timestamp: 0 });
             }
             self.state.pc = ctx.pc;
             self.state.global_clk = ctx.global_clk;
@@ -3399,8 +3402,7 @@ impl<'a> Executor<'a> {
                 // the initial endpoint's next_pc is row 0's next_pc, and the
                 // final endpoint's next_pc is the last row's next_next_pc.
                 record.public_values.start_next_pc = record.cpu_events[0].next_pc;
-                record.public_values.next_next_pc =
-                    record.cpu_events.last().unwrap().next_next_pc;
+                record.public_values.next_next_pc = record.cpu_events.last().unwrap().next_next_pc;
             }
         }
 
@@ -3688,7 +3690,6 @@ impl<'a> Executor<'a> {
             log::info!("clk = {} pc = 0x{:x?}", self.state.global_clk, self.state.pc);
         }
     }
-
 }
 
 /// Aligns an address to the nearest word below or equal to it.

@@ -5,10 +5,10 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
 use zkm_pcs::septic_digest::SepticDigest;
+use zkm_pcs::{air::MachineAir, StarkMachine, StarkVerifyingKey};
 use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape, Chip, InnerChallenge,
 };
-use zkm_pcs::{air::MachineAir, StarkMachine, StarkVerifyingKey};
 
 use crate::{fri::dummy_commit, hash::FieldHasherVariable, CircuitConfig};
 
@@ -80,15 +80,10 @@ where
         .inner
         .iter()
         .filter_map(|(name, log_height)| {
-            machine
-                .chips()
-                .iter()
-                .find(|c| c.name() == name.as_str())
-                .map(|c| (c, *log_height))
+            machine.chips().iter().find(|c| c.name() == name.as_str()).map(|c| (c, *log_height))
         })
         .collect();
-    let chips: Vec<&Chip<KoalaBear, A>> =
-        chips_and_heights.iter().map(|(c, _)| *c).collect();
+    let chips: Vec<&Chip<KoalaBear, A>> = chips_and_heights.iter().map(|(c, _)| *c).collect();
 
     let chip_log_heights_pairs: Vec<(String, u8)> = chips_and_heights
         .iter()
@@ -106,11 +101,8 @@ where
     // dim=24.  NO-OP (== BASE=22) for every FIX-on shape (≤ band-4, max 21)
     // → the FIX-on vk_map enumeration stays BYTE-IDENTICAL.
     let base_cube = BasefoldShardVerifier::production_default().max_log_row_count;
-    let shape_max_log = chip_log_heights_pairs
-        .iter()
-        .map(|(_n, lh)| *lh as usize)
-        .max()
-        .unwrap_or(0);
+    let shape_max_log =
+        chip_log_heights_pairs.iter().map(|(_n, lh)| *lh as usize).max().unwrap_or(0);
     let max_log_row_count = base_cube.max(shape_max_log);
     if max_log_row_count != base_cube {
         eprintln!(
@@ -151,11 +143,7 @@ where
     // domain has shift = ONE.  For the chips that carry a preprocessed trace
     // (preprocessed_width > 0), the prep height equals the chip height for the
     // program-keyed chips on the shapes we enumerate (Program / Byte etc.).
-    let chip_information: Vec<(
-        String,
-        zkm_pcs::SerializableDomain<KoalaBear>,
-        (usize, usize),
-    )> = {
+    let chip_information: Vec<(String, zkm_pcs::SerializableDomain<KoalaBear>, (usize, usize))> = {
         let mut prep: Vec<(String, usize, usize)> = chip_log_heights_pairs
             .iter()
             .filter_map(|(name, log_h)| {
@@ -175,10 +163,7 @@ where
             .map(|(name, pw, log_h)| {
                 (
                     name,
-                    zkm_pcs::SerializableDomain {
-                        shift: KoalaBear::ONE,
-                        log_size: log_h,
-                    },
+                    zkm_pcs::SerializableDomain { shift: KoalaBear::ONE, log_size: log_h },
                     (pw, 1usize << log_h),
                 )
             })
@@ -225,11 +210,11 @@ pub mod tests {
     };
 
     use test_artifacts::FIBONACCI_ELF;
-    use zkm_recursion_core::{air::Block, machine::RecursionAir, stark::KoalaBearPoseidon2Outer};
     use zkm_pcs::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, InnerVal, MachineProver, ShardProof,
         ZKMCoreOpts,
     };
+    use zkm_recursion_core::{air::Block, machine::RecursionAir, stark::KoalaBearPoseidon2Outer};
 
     use super::*;
     use crate::witness::*;
@@ -252,9 +237,8 @@ pub mod tests {
             ("AddSub".to_string(), 3),
             ("Bitwise".to_string(), 3),
         ]);
-        let (vk, proof) = super::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(
-            &machine, &shape, None,
-        );
+        let (vk, proof) =
+            super::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(&machine, &shape, None);
         assert_eq!(
             vk.chip_ordering.len(),
             shape.inner.len(),

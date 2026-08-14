@@ -1,8 +1,8 @@
 use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_core_executor::{events::ByteRecord, ByteOpcode, ExecutionRecord};
 use zkm_derive::AlignedBorrow;
-use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{air::ZKMAirBuilder, Word};
+use zkm_primitives::consts::WORD_SIZE;
 
 /// A set of columns needed to compute the or of two words.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

@@ -33,8 +33,7 @@ pub trait MleBaseBackend<F>: Backend {
     fn num_non_zero_entries(guts: &Tensor<F, Self>) -> usize;
 
     /// Allocate an uninitialized backing tensor in this backend's layout.
-    fn uninit_mle(&self, num_polynomials: usize, num_non_zero_entries: usize)
-    -> Tensor<F, Self>;
+    fn uninit_mle(&self, num_polynomials: usize, num_non_zero_entries: usize) -> Tensor<F, Self>;
 }
 
 impl<F> MleBaseBackend<F> for CpuBackend {
@@ -56,11 +55,7 @@ impl<F> MleBaseBackend<F> for CpuBackend {
     }
 
     #[inline]
-    fn uninit_mle(
-        &self,
-        num_polynomials: usize,
-        num_non_zero_entries: usize,
-    ) -> Tensor<F, Self> {
+    fn uninit_mle(&self, num_polynomials: usize, num_non_zero_entries: usize) -> Tensor<F, Self> {
         Tensor::with_sizes_in([num_non_zero_entries, num_polynomials], *self)
     }
 }

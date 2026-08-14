@@ -10,7 +10,6 @@ pub const PAGE_ADDR_SIZE: usize = 12;
 pub const PAGE_ADDR_MASK: usize = (1 << PAGE_ADDR_SIZE) - 1;
 pub const PAGE_SIZE: usize = 1 << PAGE_ADDR_SIZE;
 
-
 fn align_size(size: u32) -> Result<u32, ExecutionError> {
     if size & (PAGE_ADDR_MASK as u32) == 0 {
         return Ok(size);
@@ -65,7 +64,6 @@ impl Syscall for SysMmapSyscall {
         Ok(Some(v0))
     }
 }
-
 
 #[cfg(test)]
 mod tests {

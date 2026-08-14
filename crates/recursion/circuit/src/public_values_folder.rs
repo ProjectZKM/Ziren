@@ -30,10 +30,10 @@
 use std::marker::PhantomData;
 
 use p3_air::{AirBuilder, ExtensionBuilder};
-use p3_field::{Algebra, Field, ExtensionField, PrimeCharacteristicRing};
-use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
+use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 use zkm_pcs::air::{AirLookup, LookupScope, MessageBuilder};
 use zkm_pcs::folder::PairWindow;
+use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
 
 /// In-circuit folder for record-level public-values constraints.
 pub struct RecursivePublicValuesConstraintFolder<'a, C: Config> {
@@ -170,10 +170,10 @@ where
 mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
+    use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_compiler::ir::Felt;
-    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;
@@ -187,8 +187,7 @@ mod tests {
         let alpha = builder.constant(EF::ONE);
         let perm_alpha = builder.constant(EF::ONE);
         let beta_powers: Vec<SymbolicExt<F, EF>> = vec![SymbolicExt::ONE];
-        let public_values: Vec<Felt<F>> =
-            (0..4).map(|_| builder.constant(F::ZERO)).collect();
+        let public_values: Vec<Felt<F>> = (0..4).map(|_| builder.constant(F::ZERO)).collect();
 
         let mut folder = RecursivePublicValuesConstraintFolder::<C> {
             perm_challenges: (&perm_alpha, &beta_powers),

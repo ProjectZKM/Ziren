@@ -14,23 +14,26 @@
 //! and rebuilds the `reconstruct_deferred_digest` via poseidon2
 //! over `(current_digest || zkm_vk_digest || committed_value_digest)`.
 
-use std::{array, borrow::{Borrow, BorrowMut}, marker::PhantomData};
+use std::{
+    array,
+    borrow::{Borrow, BorrowMut},
+    marker::PhantomData,
+};
 
 use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
-use zkm_primitives::consts::WORD_SIZE;
-use zkm_recursion_compiler::ir::{Builder, Felt};
-use zkm_recursion_core::{
-    air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
-    DIGEST_SIZE,
-};
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::air::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS};
 use zkm_pcs::septic_curve::SepticCurve;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{
-    shard_level::shard_proof::BasefoldShardProof, InnerChallenge, InnerVal, StarkVerifyingKey,
-    Word,
+    shard_level::shard_proof::BasefoldShardProof, InnerChallenge, InnerVal, StarkVerifyingKey, Word,
+};
+use zkm_primitives::consts::WORD_SIZE;
+use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_recursion_core::{
+    air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
+    DIGEST_SIZE,
 };
 
 use crate::{
@@ -180,17 +183,15 @@ pub fn verify_deferred_basefold<C, SC, A>(
     let mut reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
         start_reconstruct_deferred_digest;
 
-    let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<SC>(
-        max_log_row_count,
-        max_log_row_count as u32,
-    );
+    let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<
+        SC,
+    >(max_log_row_count, max_log_row_count as u32);
 
     for (_deferred_i, (vk_legacy, proof_tuple)) in vks_and_proofs.into_iter().enumerate() {
-        let basefold_vk =
-            crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
-                builder,
-                &vk_legacy,
-            );
+        let basefold_vk = crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<
+            C,
+            SC,
+        >(builder, &vk_legacy);
         let (
             main_commit,
             public_values_raw,
@@ -220,8 +221,11 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .collect();
         // Sort by name to match BTreeMap-ordered opened_values.
         shard_chips.sort_by(|a, b| {
-            MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
-                .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
+            MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a).cmp(&MachineAir::<
+                <SC as zkm_pcs::StarkGenericConfig>::Val,
+            >::name(
+                *b
+            ))
         });
         use p3_air::BaseAir;
         let _preprocessed_widths: Vec<usize> = shard_chips
@@ -239,7 +243,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 .chips()
                 .iter()
                 .filter_map(|c| {
-                    let w = MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(c);
+                    let w =
+                        MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(
+                            c,
+                        );
                     (w > 0).then(|| {
                         (MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(c), w)
                     })
@@ -269,8 +276,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         });
         let basefold_vk_pre =
             crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
-                builder,
-                &vk_legacy,
+                builder, &vk_legacy,
             );
         let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
             if prep_widths.is_empty() {
@@ -282,30 +288,38 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // Bundle lift is the production (and only) path.
         use crate::shard_level_witness::LiftedEvalProof;
         let evaluation_proof_var = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
-                crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
-                    builder,
-                    host,
-                        basefold_proof.clone(),
-                        sumcheck.clone(),
-                        jagged_eval.clone(),
-                        *expected_eval,
-                        *commit_root,
-                        *modified_commitment,
-                    &preceding_commitments,
-                    &preprocessed_round.padding_heights,
-                    max_log_row_count,
-                    &column_counts_by_round,
-                    None,
-                    chip_height_felts_pre.as_deref(),
-                )
-            }
-            LiftedEvalProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+            LiftedEvalProof::Bundle {
+                host,
+                basefold_proof,
+                sumcheck,
+                jagged_eval,
+                expected_eval,
+                commit_root,
+                modified_commitment,
+            } => crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                 builder,
-                bytes,
+                host,
+                basefold_proof.clone(),
+                sumcheck.clone(),
+                jagged_eval.clone(),
+                *expected_eval,
+                *commit_root,
+                *modified_commitment,
+                &preceding_commitments,
+                &preprocessed_round.padding_heights,
                 max_log_row_count,
                 &column_counts_by_round,
+                None,
+                chip_height_felts_pre.as_deref(),
             ),
+            LiftedEvalProof::Bytes(bytes) => {
+                crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                    builder,
+                    bytes,
+                    max_log_row_count,
+                    &column_counts_by_round,
+                )
+            }
             LiftedEvalProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                 builder,
                 &[],
@@ -322,9 +336,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // `degree` instead of baking from host-side chip_log_heights
         // (mirrors core/compress).
         let empty_log_heights_deferred = std::collections::BTreeMap::<String, u8>::new();
-        let chip_log_heights_for_input = chip_log_heights_per_input
-            .get(_deferred_i)
-            .unwrap_or(&empty_log_heights_deferred);
+        let chip_log_heights_for_input =
+            chip_log_heights_per_input.get(_deferred_i).unwrap_or(&empty_log_heights_deferred);
         let _ = chip_log_heights_for_input;
         let chip_height_bits =
             crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
@@ -336,9 +349,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::chip_metadata_from_chips::<SC, A>(&shard_chips);
-        let insertion_points = crate::shard_basefold::BasefoldShardVerifier::<
-            crate::basefold_verifier::RecursiveBasefoldVerifier,
-        >::insertion_points_from_column_counts(&column_counts_by_round);
+        let insertion_points =
+            crate::shard_basefold::BasefoldShardVerifier::<
+                crate::basefold_verifier::RecursiveBasefoldVerifier,
+            >::insertion_points_from_column_counts(&column_counts_by_round);
         let basefold_shard_proof_variable =
             crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC>(
                 main_commit,
@@ -354,19 +368,17 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // rebuild emits all-zero `degree`, breaking the zerocheck embedding
         // factor.
         let empty_cumsums_deferred = std::collections::BTreeMap::new();
-        let cumsums_for_input = chip_cumulative_sums_per_input
-            .get(_deferred_i)
-            .unwrap_or(&empty_cumsums_deferred);
+        let cumsums_for_input =
+            chip_cumulative_sums_per_input.get(_deferred_i).unwrap_or(&empty_cumsums_deferred);
         let empty_log_heights_deferred = std::collections::BTreeMap::new();
-        let opened_values =
-            crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
-                builder,
-                proof_opened_values,
-                &chip_names,
-                &empty_log_heights_deferred,
-                cumsums_for_input,
-                max_log_row_count,
-            );
+        let opened_values = crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
+            builder,
+            proof_opened_values,
+            &chip_names,
+            &empty_log_heights_deferred,
+            cumsums_for_input,
+            max_log_row_count,
+        );
         let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
         let jagged_evaluator_fn =
             super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
@@ -398,9 +410,16 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
         let per_proof_verifier;
         let active_verifier = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
-                let bundle_num_vars =
-                    host.basefold_proof.basefold_proof.fri_commitments.len();
+            LiftedEvalProof::Bundle {
+                host,
+                basefold_proof,
+                sumcheck,
+                jagged_eval,
+                expected_eval,
+                commit_root,
+                modified_commitment,
+            } => {
+                let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
                 // Fixed-height guard: see core_basefold.
                 crate::shard_level_witness::assert_recursion_stacking_height_fixed(
                     bundle_num_vars,
@@ -408,10 +427,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     "deferred_basefold",
                 );
                 per_proof_verifier =
-                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
-                        max_log_row_count,
-                        host.commit.log_stacking_height,
-                        bundle_num_vars,
+                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<
+                        SC,
+                    >(
+                        max_log_row_count, host.commit.log_stacking_height, bundle_num_vars
                     );
                 &per_proof_verifier
             }
@@ -493,10 +512,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
     /// Wraps a basefold compress dummy +
     /// the existing `ZKMMerkleProofWitnessValues::dummy`.
     pub fn dummy<A>(
-        machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-            A,
-        >,
+        machine: &zkm_pcs::StarkMachine<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
         shape: &super::deferred::ZKMDeferredShape,
     ) -> Self
     where
@@ -528,18 +544,11 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             vk_merkle_data,
             is_complete: true,
             zkm_vk_digest: [p3_koala_bear::KoalaBear::ZERO; zkm_recursion_core::DIGEST_SIZE],
-            start_reconstruct_deferred_digest: [
-                p3_koala_bear::KoalaBear::ZERO;
-                zkm_pcs::air::POSEIDON_NUM_WORDS
-            ],
-            committed_value_digest: [
-                zkm_pcs::Word::default();
-                zkm_pcs::air::PV_DIGEST_NUM_WORDS
-            ],
-            deferred_proofs_digest: [
-                p3_koala_bear::KoalaBear::ZERO;
-                zkm_pcs::air::POSEIDON_NUM_WORDS
-            ],
+            start_reconstruct_deferred_digest: [p3_koala_bear::KoalaBear::ZERO;
+                zkm_pcs::air::POSEIDON_NUM_WORDS],
+            committed_value_digest: [zkm_pcs::Word::default(); zkm_pcs::air::PV_DIGEST_NUM_WORDS],
+            deferred_proofs_digest: [p3_koala_bear::KoalaBear::ZERO;
+                zkm_pcs::air::POSEIDON_NUM_WORDS],
             end_pc: p3_koala_bear::KoalaBear::ZERO,
             end_shard: p3_koala_bear::KoalaBear::ZERO,
             end_execution_shard: p3_koala_bear::KoalaBear::ZERO,

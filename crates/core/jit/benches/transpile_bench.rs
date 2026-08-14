@@ -14,8 +14,8 @@ use zkm_core_jit::risc::{MipsOperand, MipsRegister};
 const NUM_INSTRS: usize = 100_000;
 
 fn main() {
-    let mut t = <TranspilerBackend as MipsTranspiler>::new(NUM_INSTRS, 4096, 4096, 0, 0, 4)
-        .expect("init");
+    let mut t =
+        <TranspilerBackend as MipsTranspiler>::new(NUM_INSTRS, 4096, 4096, 0, 0, 4).expect("init");
 
     let start = Instant::now();
     for _ in 0..NUM_INSTRS {
@@ -39,13 +39,6 @@ fn main() {
         transpile_dur,
         transpile_dur.as_nanos() as f64 / NUM_INSTRS as f64
     );
-    eprintln!(
-        "finalize:  {} bytes in {:?}",
-        func.code.len(),
-        finalize_dur
-    );
-    eprintln!(
-        "code/instr: {:.1} bytes",
-        func.code.len() as f64 / NUM_INSTRS as f64
-    );
+    eprintln!("finalize:  {} bytes in {:?}", func.code.len(), finalize_dur);
+    eprintln!("code/instr: {:.1} bytes", func.code.len() as f64 / NUM_INSTRS as f64);
 }

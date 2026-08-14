@@ -71,9 +71,11 @@ where
     // shapes: N=1 has no terminal (rejected here); N=2 uses the
     // F→EF-promoted FirstLayer as the terminal; N≥3 finds the
     // terminal at layers[len-2].
-    assert!(num_row_variables >= 2,
+    assert!(
+        num_row_variables >= 2,
         "build_gkr_circuit requires num_row_variables >= 2 (got {num_row_variables}); \
-         num_row_variables=1 produces no terminal EF layer for output extraction");
+         num_row_variables=1 produces no terminal EF layer for output extraction"
+    );
 
     // `layers` carries `LayerState<F, EF>` so the GPU dispatch path
     // can install `LayerState::Device` entries on the way down. The

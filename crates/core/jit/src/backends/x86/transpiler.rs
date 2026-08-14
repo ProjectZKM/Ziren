@@ -44,7 +44,6 @@ impl MipsTranspiler for TranspilerBackend {
         self.jump_table.push(self.assembler.offset().0);
         self.may_early_exit = false;
 
-
         // Bind a per-PC dynamic label so direct branches/jumps in
         // this program can target it.  Indexing matches jump_table:
         // index N == MIPS PC == pc_base + N * 4.

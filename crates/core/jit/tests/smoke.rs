@@ -19,11 +19,7 @@ fn add_immediate_smoke() {
         .expect("transpiler init");
 
     t.start_instr();
-    t.add(
-        MipsRegister::T0,
-        MipsOperand::Imm(5),
-        MipsOperand::Imm(7),
-    );
+    t.add(MipsRegister::T0, MipsOperand::Imm(5), MipsOperand::Imm(7));
     t.end_instr();
 
     // Add a `ret` so control returns to the caller.  dynasm doesn't
@@ -160,19 +156,11 @@ fn end_to_end_chain_a0_a1_a2() {
 
     // t0 = a0 + a1
     t.start_instr();
-    t.add(
-        MipsRegister::T0,
-        MipsOperand::Reg(MipsRegister::A0),
-        MipsOperand::Reg(MipsRegister::A1),
-    );
+    t.add(MipsRegister::T0, MipsOperand::Reg(MipsRegister::A0), MipsOperand::Reg(MipsRegister::A1));
     t.end_instr();
     // t0 = t0 - a2
     t.start_instr();
-    t.sub(
-        MipsRegister::T0,
-        MipsOperand::Reg(MipsRegister::T0),
-        MipsOperand::Reg(MipsRegister::A2),
-    );
+    t.sub(MipsRegister::T0, MipsOperand::Reg(MipsRegister::T0), MipsOperand::Reg(MipsRegister::A2));
     t.end_instr();
 
     t.emit_spill_all_registers();

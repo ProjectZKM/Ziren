@@ -71,14 +71,16 @@ use std::marker::PhantomData;
 use p3_air::Air;
 use p3_field::{Algebra, TwoAdicField};
 use serde::{Deserialize, Serialize};
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 use zkm_pcs::{air::MachineAir, MachineChip};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
 use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
 use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::challenger::{CanObserveVariable, FieldChallengerVariable};
-use crate::jagged_circuit::{JaggedDimensionMetadata, JaggedSumcheckEvalProof, JaggedPcsProofVariable};
+use crate::jagged_circuit::{
+    JaggedDimensionMetadata, JaggedPcsProofVariable, JaggedSumcheckEvalProof,
+};
 use crate::logup_gkr::{verify_logup_gkr, LogupGkrShardChipMetadata};
 use crate::logup_proof::LogupGkrProof;
 use crate::partial_sumcheck::PartialSumcheckProof;
@@ -263,7 +265,11 @@ impl<P> BasefoldShardVerifier<P> {
             })
             .sum();
         let log2_ceil = |x: usize| -> usize {
-            if x <= 1 { 0 } else { (x - 1).ilog2() as usize + 1 }
+            if x <= 1 {
+                0
+            } else {
+                (x - 1).ilog2() as usize + 1
+            }
         };
         LogupGkrShardChipMetadata {
             beta_seed_dim: log2_ceil(max_arity),
@@ -372,11 +378,7 @@ impl<P> BasefoldShardVerifier<P> {
                 // The BaseFold proof's digests are circuit
                 // variables (witnessed/const-promoted), matching the verifier's
                 // `type Proof` (basefold_verifier.rs).
-                Proof = RecursiveBasefoldProof<
-                    Felt<C::F>,
-                    Ext<C::F, C::EF>,
-                    HV::DigestVariable,
-                >,
+                Proof = RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
             > + Clone,
         EVPV: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
         JE: FnOnce(
@@ -416,10 +418,8 @@ impl<P> BasefoldShardVerifier<P> {
         }
 
         // Observe per-chip count as a felt.
-        let num_chips: Felt<C::F> =
-            builder.eval(<C::F as p3_field::PrimeCharacteristicRing>::from_usize(
-                chip_height_bits.len(),
-            ));
+        let num_chips: Felt<C::F> = builder
+            .eval(<C::F as p3_field::PrimeCharacteristicRing>::from_usize(chip_height_bits.len()));
         challenger.observe(builder, num_chips);
 
         // Observe per-chip (height_felt, name_bytes_as_felts).
@@ -445,10 +445,8 @@ impl<P> BasefoldShardVerifier<P> {
             // Observe the chip name as a length-prefixed byte
             // sequence (length felt + per-byte felts).
             let name_bytes = name.as_bytes();
-            let len_felt: Felt<C::F> =
-                builder.eval(<C::F as p3_field::PrimeCharacteristicRing>::from_usize(
-                    name_bytes.len(),
-                ));
+            let len_felt: Felt<C::F> = builder
+                .eval(<C::F as p3_field::PrimeCharacteristicRing>::from_usize(name_bytes.len()));
             challenger.observe(builder, len_felt);
             for byte in name_bytes {
                 let byte_felt: Felt<C::F> =
@@ -590,8 +588,7 @@ impl<P> BasefoldShardVerifier<P> {
                 evaluation_claims.push(opened_values.chips[i].preprocessed.local.clone());
             }
         }
-        evaluation_claims
-            .extend(opened_values.chips.iter().map(|chip| chip.main.local.clone()));
+        evaluation_claims.extend(opened_values.chips.iter().map(|chip| chip.main.local.clone()));
 
         // ── jagged HASH-BIND re-check (in-circuit) ──────────
         //
@@ -661,12 +658,10 @@ impl<P> BasefoldShardVerifier<P> {
                     if round_col_counts.is_empty() {
                         continue;
                     }
-                    let mut felts_vec: Vec<Felt<C::F>> = Vec::with_capacity(
-                        1 + round_row_counts.len() + round_col_counts.len(),
-                    );
-                    felts_vec.push(
-                        builder.eval(C::F::from_canonical_usize(round_col_counts.len())),
-                    );
+                    let mut felts_vec: Vec<Felt<C::F>> =
+                        Vec::with_capacity(1 + round_row_counts.len() + round_col_counts.len());
+                    felts_vec
+                        .push(builder.eval(C::F::from_canonical_usize(round_col_counts.len())));
                     for &rc in round_row_counts.iter() {
                         felts_vec.push(rc);
                     }
@@ -809,11 +804,10 @@ where
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
     // Helper to build a UnivariatePolynomial of given degree filled
     // with builder-zero Ext coefficients.
-    let zero_uni_poly = |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
-        UnivariatePolynomial {
-            coefficients: (0..=degree).map(|_| zero_ext(b)).collect(),
-        }
-    };
+    let zero_uni_poly =
+        |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
+            UnivariatePolynomial { coefficients: (0..=degree).map(|_| zero_ext(b)).collect() }
+        };
 
     let main_commitment: [Felt<C::F>; 8] = std::array::from_fn(|_| zero_felt(builder));
 
@@ -824,8 +818,7 @@ where
         .chips
         .iter()
         .map(|(name, _)| {
-            let bits =
-                (0..shape.max_log_row_count + 1).map(|_| zero_felt(builder)).collect();
+            let bits = (0..shape.max_log_row_count + 1).map(|_| zero_felt(builder)).collect();
             (name.clone(), bits)
         })
         .collect();
@@ -858,8 +851,7 @@ where
             numerator: (0..2).map(|_| zero_ext(builder)).collect(),
             denominator: (0..2).map(|_| zero_ext(builder)).collect(),
         };
-        let round_proofs: Vec<LogupGkrRoundProof<Ext<C::F, C::EF>>> = (0..shape
-            .logup_gkr_rounds)
+        let round_proofs: Vec<LogupGkrRoundProof<Ext<C::F, C::EF>>> = (0..shape.logup_gkr_rounds)
             .map(|_| LogupGkrRoundProof::<Ext<C::F, C::EF>> {
                 numerator_0: zero_ext(builder),
                 numerator_1: zero_ext(builder),
@@ -882,9 +874,7 @@ where
 
     // Zerocheck proof — univariate_polys of length `zerocheck_rounds`.
     let zerocheck_proof = PartialSumcheckProof::<Ext<C::F, C::EF>> {
-        univariate_polys: (0..shape.zerocheck_rounds)
-            .map(|_| zero_uni_poly(builder, 2))
-            .collect(),
+        univariate_polys: (0..shape.zerocheck_rounds).map(|_| zero_uni_poly(builder, 2)).collect(),
         claimed_sum: zero_ext(builder),
         point_and_eval: (
             (0..shape.zerocheck_rounds).map(|_| zero_ext(builder)).collect(),
@@ -897,7 +887,11 @@ where
         // Inner BaseFold proof.
         // Variable-typed proof (Ext/Felt const-built); digests are
         // now circuit variables ([Felt;8] = inner DigestVariable).
-        let basefold_proof = RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
+        let basefold_proof = RecursiveBasefoldProof::<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; 8],
+        > {
             rounds: (0..shape.basefold_num_variables)
                 .map(|_| RecursiveBasefoldRound::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
                     uni_poly: [zero_ext(builder), zero_ext(builder)],
@@ -908,7 +902,11 @@ where
             final_poly: zero_ext(builder),
             pow_witness: zero_felt(builder),
             batch_grinding_witness: zero_felt(builder),
-            component_openings: vec![vec![RecursiveBasefoldComponentOpening::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
+            component_openings: vec![vec![RecursiveBasefoldComponentOpening::<
+                Felt<C::F>,
+                Ext<C::F, C::EF>,
+                [Felt<C::F>; 8],
+            > {
                 leaf_values: vec![vec![zero_felt(builder)]],
                 merkle_path_bytes: vec![],
                 merkle_path_digests: vec![],
@@ -916,13 +914,15 @@ where
             }]],
             query_phase_openings: (0..shape.basefold_num_variables)
                 .map(|_| {
-                    vec![RecursiveBasefoldOpening::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
-                        position: 0,
-                        sibling_pair: [zero_ext(builder), zero_ext(builder)],
-                        merkle_path_bytes: vec![],
-                        merkle_path_digests: vec![],
-                        _phantom: core::marker::PhantomData,
-                    }]
+                    vec![
+                        RecursiveBasefoldOpening::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
+                            position: 0,
+                            sibling_pair: [zero_ext(builder), zero_ext(builder)],
+                            merkle_path_bytes: vec![],
+                            merkle_path_digests: vec![],
+                            _phantom: core::marker::PhantomData,
+                        },
+                    ]
                 })
                 .collect(),
             batch_evaluations: vec![vec![zero_ext(builder)]],
@@ -965,7 +965,7 @@ where
             pcs_proof: stacked_pcs_proof,
             column_counts: vec![vec![1]],
             padding_row_heights: Vec::new(),
-        row_counts: vec![vec![zero_felt(builder)]],
+            row_counts: vec![vec![zero_felt(builder)]],
             original_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
             modified_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
             expected_eval: zero_ext(builder),
@@ -987,9 +987,9 @@ mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
     use std::marker::PhantomData;
+    use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
-    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;
@@ -1000,16 +1000,11 @@ mod tests {
     #[test]
     fn vk_variable_constructs() {
         let mut builder = AsmBuilder::<F, EF>::default();
-        let pc_start: [Felt<F>; 3] =
-            std::array::from_fn(|_| builder.constant(F::ZERO));
-        let preprocessed_commit: [Felt<F>; 8] =
-            std::array::from_fn(|_| builder.constant(F::ZERO));
+        let pc_start: [Felt<F>; 3] = std::array::from_fn(|_| builder.constant(F::ZERO));
+        let preprocessed_commit: [Felt<F>; 8] = std::array::from_fn(|_| builder.constant(F::ZERO));
         let enable_untrusted = builder.constant(F::ZERO);
-        let _vk = BasefoldVerifyingKeyVariable::<C>::new(
-            pc_start,
-            preprocessed_commit,
-            enable_untrusted,
-        );
+        let _vk =
+            BasefoldVerifyingKeyVariable::<C>::new(pc_start, preprocessed_commit, enable_untrusted);
     }
 
     /// Phantom: ensure C parameter participates in inference.
@@ -1047,9 +1042,7 @@ mod tests {
     ///      )`.
     fn _machine_wiring_reference_pattern<C: CircuitConfig>() {
         use crate::jagged_eval::RecursiveJaggedEvalSumcheckConfig;
-        use crate::jagged_eval_primitives::{
-            emit_branching_program_eval, emit_prefix_sum_check,
-        };
+        use crate::jagged_eval_primitives::{emit_branching_program_eval, emit_prefix_sum_check};
         // Construct the jagged evaluator from the in-tree
         // primitives.  The closures are `fn`-pointer-coercible
         // because `emit_branching_program_eval` /

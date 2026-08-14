@@ -145,11 +145,7 @@ pub struct RecursiveJaggedEvalSumcheckConfig<SC, BP, PSC> {
 
 impl<SC, BP, PSC> RecursiveJaggedEvalSumcheckConfig<SC, BP, PSC> {
     pub fn new(branching_program_eval: BP, prefix_sum_check: PSC) -> Self {
-        Self {
-            branching_program_eval,
-            prefix_sum_check,
-            _marker: PhantomData,
-        }
+        Self { branching_program_eval, prefix_sum_check, _marker: PhantomData }
     }
 }
 
@@ -167,7 +163,7 @@ where
     ) -> SymbolicExt<C::F, C::EF>,
     PSC: Fn(
         &mut Builder<C>,
-        Vec<Felt<C::F>>, // merged prefix sum (current ++ next)
+        Vec<Felt<C::F>>,       // merged prefix sum (current ++ next)
         Vec<Ext<C::F, C::EF>>, // sumcheck reduced point
     ) -> (SymbolicExt<C::F, C::EF>, Felt<C::F>),
 {
@@ -191,10 +187,8 @@ where
 
         // Lift inputs to symbolic for the branching-program /
         // prefix-sum callbacks.
-        let z_row_sym: Vec<SymbolicExt<C::F, C::EF>> =
-            z_row.iter().map(|&x| x.into()).collect();
-        let z_col_sym: Vec<SymbolicExt<C::F, C::EF>> =
-            z_col.iter().map(|&x| x.into()).collect();
+        let z_row_sym: Vec<SymbolicExt<C::F, C::EF>> = z_row.iter().map(|&x| x.into()).collect();
+        let z_col_sym: Vec<SymbolicExt<C::F, C::EF>> = z_col.iter().map(|&x| x.into()).collect();
         let z_trace_sym: Vec<SymbolicExt<C::F, C::EF>> =
             z_trace.iter().map(|&x| x.into()).collect();
 
@@ -213,12 +207,8 @@ where
 
         // Split the sumcheck-reduced point into (first, second)
         // halves for the branching-program evaluation.
-        let proof_point: Vec<SymbolicExt<C::F, C::EF>> = partial_sumcheck_proof
-            .point_and_eval
-            .0
-            .iter()
-            .map(|&x| x.into())
-            .collect();
+        let proof_point: Vec<SymbolicExt<C::F, C::EF>> =
+            partial_sumcheck_proof.point_and_eval.0.iter().map(|&x| x.into()).collect();
         let half = proof_point.len() / 2;
         let (first_half, second_half) = proof_point.split_at(half);
 
@@ -267,9 +257,9 @@ where
 mod tests {
     use super::*;
     use crate::challenger::DuplexChallengerVariable;
+    use zkm_pcs::{InnerChallenge, InnerVal};
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
-    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;

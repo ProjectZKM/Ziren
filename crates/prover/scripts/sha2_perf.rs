@@ -17,8 +17,8 @@ use std::{fs, path::PathBuf, time::Instant};
 use clap::Parser;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
-use zkm_prover::{components::DefaultProverComponents, ZKMProver};
 use zkm_pcs::ZKMProverOpts;
+use zkm_prover::{components::DefaultProverComponents, ZKMProver};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -60,12 +60,8 @@ fn main() {
         .expect("prove_core failed");
     let prove_ms = t_prove.elapsed().as_millis();
 
-    let total_bytes: usize = proof
-        .proof
-        .0
-        .iter()
-        .map(|shard| bincode::serialize(shard).unwrap().len())
-        .sum();
+    let total_bytes: usize =
+        proof.proof.0.iter().map(|shard| bincode::serialize(shard).unwrap().len()).sum();
     let num_shards = proof.proof.0.len();
 
     let t_verify = Instant::now();

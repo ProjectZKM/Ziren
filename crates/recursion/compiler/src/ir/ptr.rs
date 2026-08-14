@@ -166,9 +166,7 @@ impl<N: Field> Add<Usize<N>> for Ptr<N> {
 
     fn add(self, rhs: Usize<N>) -> SymbolicPtr<N> {
         match rhs {
-            Usize::Const(rhs) => {
-                SymbolicPtr { address: self.address + N::from_usize(rhs) }
-            }
+            Usize::Const(rhs) => SymbolicPtr { address: self.address + N::from_usize(rhs) },
             Usize::Var(rhs) => SymbolicPtr { address: self.address + rhs },
         }
     }
@@ -179,9 +177,7 @@ impl<N: Field> Add<Usize<N>> for SymbolicPtr<N> {
 
     fn add(self, rhs: Usize<N>) -> SymbolicPtr<N> {
         match rhs {
-            Usize::Const(rhs) => {
-                SymbolicPtr { address: self.address + N::from_usize(rhs) }
-            }
+            Usize::Const(rhs) => SymbolicPtr { address: self.address + N::from_usize(rhs) },
             Usize::Var(rhs) => SymbolicPtr { address: self.address + rhs },
         }
     }
@@ -192,9 +188,7 @@ impl<N: Field> Sub<Usize<N>> for Ptr<N> {
 
     fn sub(self, rhs: Usize<N>) -> SymbolicPtr<N> {
         match rhs {
-            Usize::Const(rhs) => {
-                SymbolicPtr { address: self.address - N::from_usize(rhs) }
-            }
+            Usize::Const(rhs) => SymbolicPtr { address: self.address - N::from_usize(rhs) },
             Usize::Var(rhs) => SymbolicPtr { address: self.address - rhs },
         }
     }
@@ -205,9 +199,7 @@ impl<N: Field> Sub<Usize<N>> for SymbolicPtr<N> {
 
     fn sub(self, rhs: Usize<N>) -> SymbolicPtr<N> {
         match rhs {
-            Usize::Const(rhs) => {
-                SymbolicPtr { address: self.address - N::from_usize(rhs) }
-            }
+            Usize::Const(rhs) => SymbolicPtr { address: self.address - N::from_usize(rhs) },
             Usize::Var(rhs) => SymbolicPtr { address: self.address - rhs },
         }
     }

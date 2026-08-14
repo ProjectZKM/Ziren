@@ -64,11 +64,7 @@ impl JitResetableMemory for OwnedMemory {
         // Use madvise(MADV_DONTNEED) for a fast page-table reset;
         // touched pages return zero on next access.
         unsafe {
-            libc::madvise(
-                self.map.as_mut_ptr().cast(),
-                self.map.len(),
-                libc::MADV_DONTNEED,
-            );
+            libc::madvise(self.map.as_mut_ptr().cast(), self.map.len(), libc::MADV_DONTNEED);
         }
     }
 }

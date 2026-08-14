@@ -56,11 +56,7 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         // hanging the prover constructor in an effectively-infinite loop.
         // Smallest-possible map (e.g. when `regen_basefold_vks_for_tests`
         // produces only one unique compress VK hash) hits this.
-        let (new_len, height) = if new_len < 2 {
-            (2, 1)
-        } else {
-            (new_len, height)
-        };
+        let (new_len, height) = if new_len < 2 { (2, 1) } else { (new_len, height) };
 
         // Pre-allocate the vector.
         let mut digest_layers = Vec::with_capacity(2 * new_len - 2);
@@ -173,12 +169,12 @@ mod tests {
     use p3_util::log2_ceil_usize;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use zkhash::ark_ff::UniformRand;
+    use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
     use zkm_recursion_compiler::{
         config::InnerConfig,
         ir::{Builder, Felt},
     };
     use zkm_recursion_core::DIGEST_SIZE;
-    use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
 
     use crate::{
         merkle_tree::{verify, MerkleTree},
@@ -198,8 +194,9 @@ mod tests {
         for _ in 0..5 {
             // Test with different number of leaves.
             for j in 2..20 {
-                let leaves: Vec<[F; DIGEST_SIZE]> =
-                    (0..j).map(|_| std::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))).collect();
+                let leaves: Vec<[F; DIGEST_SIZE]> = (0..j)
+                    .map(|_| std::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
+                    .collect();
                 let (root, tree) = MerkleTree::<KoalaBear, HV>::commit(leaves.to_vec());
                 for (i, leaf) in leaves.iter().enumerate() {
                     let (_, proof) = MerkleTree::<KoalaBear, HV>::open(&tree, i);

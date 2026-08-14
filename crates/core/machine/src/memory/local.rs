@@ -3,7 +3,7 @@ use std::{
     mem::size_of,
 };
 
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -185,8 +185,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
                         cols.addr = F::from_u32(event.addr);
                         cols.initial_shard = F::from_u32(event.initial_mem_access.shard);
                         cols.final_shard = F::from_u32(event.final_mem_access.shard);
-                        cols.initial_clk =
-                            F::from_u32(event.initial_mem_access.timestamp);
+                        cols.initial_clk = F::from_u32(event.initial_mem_access.timestamp);
                         cols.final_clk = F::from_u32(event.final_mem_access.timestamp);
                         cols.initial_value = event.initial_mem_access.value.into();
                         cols.final_value = event.final_mem_access.value.into();

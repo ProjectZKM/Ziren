@@ -31,8 +31,8 @@
 
 use std::collections::BTreeMap;
 
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 use zkm_pcs::septic_digest::SepticDigest;
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
 use crate::basefold_chip_opened_values::{
     BasefoldAirOpenedValues, BasefoldChipOpenedValues, BasefoldShardOpenedValues,
@@ -41,16 +41,14 @@ use crate::basefold_verifier::{
     RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldProof,
     RecursiveBasefoldRound,
 };
-use crate::jagged_circuit::{
-    JaggedDimensionMetadata, JaggedSumcheckEvalProof,
-};
+use crate::jagged_circuit::{JaggedDimensionMetadata, JaggedSumcheckEvalProof};
 use crate::logup_proof::{
     ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof, LogupGkrRoundProof,
 };
 use crate::partial_sumcheck::PartialSumcheckProof;
 use crate::univariate::UnivariatePolynomial;
-use crate::witness::Witnessable;
 use crate::witness::WitnessWriter;
+use crate::witness::Witnessable;
 use crate::CircuitConfig;
 use zkm_pcs::{InnerChallenge, InnerVal};
 
@@ -191,10 +189,7 @@ where
             .iter()
             .map(|(name, eval)| (name.clone(), eval.read(builder)))
             .collect();
-        LogUpEvaluations {
-            point: self.point.read(builder),
-            chip_openings,
-        }
+        LogUpEvaluations { point: self.point.read(builder), chip_openings }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -270,12 +265,10 @@ where
         let main = self.main.read(builder);
         let degree = self.degree.read(builder);
         let local_cumulative_sum = self.local_cumulative_sum.read(builder);
-        let x_felts: [Felt<C::F>; 7] = core::array::from_fn(|i| {
-            self.global_cumulative_sum.0.x.0[i].read(builder)
-        });
-        let y_felts: [Felt<C::F>; 7] = core::array::from_fn(|i| {
-            self.global_cumulative_sum.0.y.0[i].read(builder)
-        });
+        let x_felts: [Felt<C::F>; 7] =
+            core::array::from_fn(|i| self.global_cumulative_sum.0.x.0[i].read(builder));
+        let y_felts: [Felt<C::F>; 7] =
+            core::array::from_fn(|i| self.global_cumulative_sum.0.y.0[i].read(builder));
         BasefoldChipOpenedValues {
             preprocessed,
             main,
@@ -365,8 +358,7 @@ where
 
 // ── Recursive BaseFold proof types ───────────────────────────────
 
-impl<C, Dig: Clone> Witnessable<C>
-    for RecursiveBasefoldRound<InnerVal, InnerChallenge, Dig>
+impl<C, Dig: Clone> Witnessable<C> for RecursiveBasefoldRound<InnerVal, InnerChallenge, Dig>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -379,10 +371,7 @@ where
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         RecursiveBasefoldRound {
-            uni_poly: [
-                builder.constant(self.uni_poly[0]),
-                builder.constant(self.uni_poly[1]),
-            ],
+            uni_poly: [builder.constant(self.uni_poly[0]), builder.constant(self.uni_poly[1])],
             commitment: self.commitment.clone(),
             _phantom_f: core::marker::PhantomData,
         }
@@ -393,8 +382,7 @@ where
     }
 }
 
-impl<C, Dig: Clone> Witnessable<C>
-    for RecursiveBasefoldOpening<InnerVal, InnerChallenge, Dig>
+impl<C, Dig: Clone> Witnessable<C> for RecursiveBasefoldOpening<InnerVal, InnerChallenge, Dig>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -448,10 +436,7 @@ impl<C> Witnessable<C> for crate::shard_basefold::BasefoldShardProof<InnerVal, I
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = crate::shard_basefold::BasefoldShardProof<
-        Felt<C::F>,
-        Ext<C::F, C::EF>,
-    >;
+    type WitnessVariable = crate::shard_basefold::BasefoldShardProof<Felt<C::F>, Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let main_commitment: [Felt<C::F>; 8] =
@@ -483,8 +468,7 @@ where
     }
 }
 
-impl<C, Dig: Clone> Witnessable<C>
-    for RecursiveBasefoldProof<InnerVal, InnerChallenge, Dig>
+impl<C, Dig: Clone> Witnessable<C> for RecursiveBasefoldProof<InnerVal, InnerChallenge, Dig>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -683,10 +667,11 @@ pub fn read_basefold_proof_outer_from_stream<C>(
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = p3_bn254_fr::Bn254>,
 {
-    let rd_digest =
-        |d: &[p3_bn254_fr::Bn254; 1], b: &mut Builder<C>| -> [zkm_recursion_compiler::ir::Var<C::N>; 1] {
-            core::array::from_fn(|i| d[i].read(b))
-        };
+    let rd_digest = |d: &[p3_bn254_fr::Bn254; 1],
+                     b: &mut Builder<C>|
+     -> [zkm_recursion_compiler::ir::Var<C::N>; 1] {
+        core::array::from_fn(|i| d[i].read(b))
+    };
     let rounds = host
         .rounds
         .iter()

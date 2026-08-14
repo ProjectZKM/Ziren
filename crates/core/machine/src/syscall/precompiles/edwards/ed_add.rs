@@ -9,7 +9,7 @@ use itertools::Itertools;
 use num::BigUint;
 
 use crate::{air::MemoryAirBuilder, CoreChipError};
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
@@ -197,7 +197,6 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
             !shard.get_precompile_events(SyscallCode::ED_ADD).is_empty()
         }
     }
-
 }
 
 impl<E: EllipticCurve + EdwardsParameters> EdAddAssignChip<E> {
