@@ -667,7 +667,7 @@ where
 // (zkm-gpu-basefold), which calls `FriCudaProver::prove` and falls back to
 // `open_jagged_pcs` on `Err` (returning `(prover_data, eval_point)`
 // ownership so nothing is lost).  The open fn is threaded from the `prover`
-// crate into the `prove_shard_to_basefold` free-fn (through the jagged-eval
+// crate into the `prove_shard_with_data` free-fn (through the jagged-eval
 // producer + `prove_trusted_evaluations` down to
 // `prove_jagged_basefold_single_round`'s open closure).
 
@@ -1145,7 +1145,7 @@ pub mod jagged {
 
     // The device dense-pack + BaseFold commit is the `StarkGpuProver`
     // OVERRIDE of `MachineProver::commit_multilinears`, consumed by
-    // `maybe_auto_precompute_basefold` through the `JaggedEvalProducer` COMMIT
+    // `commit_traces` through the `JaggedEvalProducer` COMMIT
     // seam — no `Option<fn>` crosses this boundary.  The device hook body
     // lives in ziren-gpu `commit_dense::gpu_jagged_precompute_commit_hook`
     // (called DIRECTLY by the override); its recursion-AREA-PIN + provider-read

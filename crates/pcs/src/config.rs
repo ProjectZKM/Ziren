@@ -154,7 +154,7 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 ///   OuterSC — the recursion-core crate depends on stark, not vice versa).
 ///
 /// Both rings run BaseFold.  The higher-level jagged bundle / 8-felt digest
-/// stack (`JaggedBasefoldBundle`, `prove_shard_to_basefold`'s
+/// stack (`JaggedBasefoldBundle`, `prove_shard_with_data`'s
 /// `main_commitment: [Val; 8]`) is still concrete rather than generic over
 /// `BfMmcs::Commitment`; genericizing it is what would let `bf_mmcs()` be
 /// consumed directly.
@@ -227,7 +227,7 @@ pub trait BasefoldRing: StarkGenericConfig {
 
     /// Ring-native jagged BaseFold precompute for the INLINE lazy-commit path.
     ///
-    /// Used by `maybe_auto_precompute_basefold` on the OUTER/wrap ring (whose
+    /// Used by `commit_traces` on the OUTER/wrap ring (whose
     /// `BfMmcs = OuterValMmcs` cannot flow through the inner-only
     /// `commit_multilinears` device seam).  This is a required method — NOT a
     /// default — so the `Self::BfMmcs: Clone + 'static` bounds that

@@ -95,7 +95,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         // COMPRESS/reduce shards share a FIXED recursion trace area
         // (`2^RECURSION_LOG_TRACE_AREA`) so every reduce layer commits against
         // one jagged geometry — mark the machine so the device
-        // `prove_shard_to_basefold` override pins it (`Some(2^27)`).
+        // `prove_shard_with_data` override pins it (`Some(2^27)`).
         StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS).with_recursion_area_pin(true)
     }
 

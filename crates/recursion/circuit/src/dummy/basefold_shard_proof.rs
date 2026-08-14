@@ -8,7 +8,7 @@
 //! # Shape mirror
 //!
 //! Outputs match what
-//! [`zkm_pcs::shard_level::prover::prove_shard_to_basefold`]
+//! [`zkm_pcs::shard_level::prover::prove_shard_with_data`]
 //! produces at the same `(shape, max_log_row_count)` input pair,
 //! so downstream consumers walk identical felt counts.
 
@@ -188,7 +188,7 @@ where
 /// Allocator for [`BasefoldShardProof`] — zero-filled, no real
 /// prove call.  Top-level entry used by
 /// [`crate::stark::dummy_basefold_vk_and_shard_proof`] in place of
-/// the slow `prove_shard_to_basefold` path.
+/// the slow `prove_shard_with_data` path.
 ///
 /// # Inputs
 ///

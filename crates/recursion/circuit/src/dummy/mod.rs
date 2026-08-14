@@ -4,17 +4,17 @@
 //! pattern: every field of the dummy is zero-filled via allocator
 //! helpers — no real prove call.  Used by the recursion-circuit
 //! `dummy_basefold_vk_and_shard_proof` to replace the previous slow
-//! path that drove `prove_shard_to_basefold` against zero traces.
+//! path that drove `prove_shard_with_data` against zero traces.
 //!
 //! The slow path cost ~61.3s per compose-program pre-warm
-//! (REDUCE_BATCH_SIZE iterations * `prove_shard_to_basefold` call).
+//! (REDUCE_BATCH_SIZE iterations * `prove_shard_with_data` call).
 //! The zero-fill allocators run in microseconds — same structural
 //! shape, no prover work.
 //!
 //! # Shape contract
 //!
 //! Allocator outputs must match the wire format that
-//! [`zkm_pcs::shard_level::prover::prove_shard_to_basefold`]
+//! [`zkm_pcs::shard_level::prover::prove_shard_with_data`]
 //! produces, so downstream consumers (witness reader, recursion
 //! program builder) walk identical felt counts:
 //!

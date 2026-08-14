@@ -22,7 +22,7 @@ pub type QuotientOpenedValues<T> = Vec<T>;
 /// `DeviceBuffer` are not `Clone`).  Producer in `commit()` wraps each
 /// matrix in `Arc::new`; `open()` and the basefold side-channel both
 /// hold refcounted handles to the same allocation.
-pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
+pub struct MainTraceData<SC: StarkGenericConfig, M, P> {
     pub traces: Vec<Arc<M>>,
     /// Backend-owned prover data for the main-trace commit: the retained
     /// jagged/BaseFold commitment built at `commit()` time, which
@@ -40,7 +40,7 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     pub rev: bool,
 }
 
-impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
+impl<SC: StarkGenericConfig, M, P> MainTraceData<SC, M, P> {
     pub fn new(
         traces: Vec<Arc<M>>,
         main_data: P,

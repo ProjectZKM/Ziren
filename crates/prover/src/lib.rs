@@ -366,7 +366,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // Default ON.  After the SP1 dummy_shard_proof port (commit
         // 8728b983), the prewarm cost dropped from ~64.8s to ~2.0s
         // (the dummy basefold shard proof is now a struct-only stub
-        // rather than a real `prove_shard_to_basefold` invocation per
+        // rather than a real `prove_shard_with_data` invocation per
         // arity slot), so the universal ~2.4s amortizable
         // compose-compile saving easily justifies the small upfront
         // cost.  This gate is intentionally decoupled from
@@ -1607,11 +1607,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // that side channel.  Mirror the GPU compress orchestrator
         // (ziren-gpu/prover/src/compress_multi_gpu.rs:1496-1865) by
         // re-running the pipeline pieces on the shrink machine and
-        // driving `prove_shard_to_basefold` here, extracting the 8-felt
+        // driving `prove_shard_with_data` here, extracting the 8-felt
         // `main_commitment` from the `MerkleCap` (precomputed_commit =
         // None, since the GPU lacks the precomputed jagged commit the
         // CPU helper expects).  The `device_traces` this drives
-        // `prove_shard_to_basefold` with is NOT unconditionally `None`: it
+        // `prove_shard_with_data` with is NOT unconditionally `None`: it
         // comes from `shrink_prover.shard_device_trace_provider(&data)`
         // below, which is build-dependent.  On CPU components
         // (`ShrinkProver = CpuProver`) the trait default returns `None` — no
@@ -2857,7 +2857,7 @@ pub mod tests {
 
     /// Perf-comparison fixture: prove_core only (Test::Core) on
     /// keccak-sponge ELF.  Multi-shard sha-cluster workload — exercises
-    /// the basefold side channel population path in `prove_shard_to_basefold`
+    /// the basefold side channel population path in `prove_shard_with_data`
     /// without invoking the compose tree.
     /// Use to capture per-shard basefold prove perf for keccak vs fib-1k.
     #[test]
@@ -3630,7 +3630,7 @@ pub mod tests {
         let dummy = ZKMCoreBasefoldWitnessValues::dummy(core_machine, &shape);
         let prog = prover.recursion_program_basefold(&dummy);
         let (pk, _vk) = prover.compress_prover.setup(&prog);
-        let infos = &pk.preprocessed_jagged().packing.chip_infos;
+        let infos = &pk.preprocessed_data().packing.chip_infos;
         eprintln!(
             "[PREPROBE] normalize pk: prep_chip_infos={} pk.traces={} chip_ordering={}",
             infos.len(),
@@ -3655,7 +3655,7 @@ pub mod tests {
         // The dummy child the enumeration builds derives the SAME quantity from
         // the child's MAIN band heights, which is a different number whenever a
         // chip's preprocessed height differs from its main height.
-        let packing = &pk.preprocessed_jagged().packing;
+        let packing = &pk.preprocessed_data().packing;
         let cube = 1usize << ZKMProver::<DefaultProverComponents>::perstage_base_cube();
         let real_cells = packing.total_values;
         let real_area = packing.dense_len;

@@ -645,7 +645,7 @@ where
                                     // per-stage source of truth
                                     // (`StarkMachine::core_rev()` — `true` for the CORE
                                     // MIPS machine) and records it on
-                                    // `ShardMainData.rev` / `PrecomputedJaggedCommit.rev`;
+                                    // `MainTraceData.rev` / `PrecomputedJaggedCommit.rev`;
                                     // `open()` reads it back off the shard data and
                                     // threads it into the zerocheck + jagged reduction,
                                     // so the whole CORE proof is uniformly rev and the

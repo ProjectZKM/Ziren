@@ -254,15 +254,15 @@ mod tests {
     }
 
     /// Produce a real (but empty-trace) BasefoldShardProof via the
-    /// host-side prove_shard_to_basefold path.  Zero-filled traces
-    /// won't satisfy AIR constraints, but prove_shard_to_basefold
+    /// host-side prove_shard_with_data path.  Zero-filled traces
+    /// won't satisfy AIR constraints, but prove_shard_with_data
     /// doesn't verify them — it just emits a wire-shape-correct
     /// proof whose structural invariants match by construction.
     /// That's exactly what the recursion verifier's shape asserts
     /// expect.
     #[allow(clippy::type_complexity)]
     /// Construct a minimal-but-real ZKMCoreBasefoldWitnessValues by
-    /// driving the host-side `prove_shard_to_basefold` path with a
+    /// driving the host-side `prove_shard_with_data` path with a
     /// single zero-filled AddSub trace.  The proof's structural
     /// invariants (numerator/denominator/univariate_polys sizes, etc.)
     /// match by construction — the recursion verifier's shape asserts
@@ -281,7 +281,7 @@ mod tests {
         // normalize circuit verifies.
         //
         // The previous helper hand-rolled a "real" proof by driving
-        // `prove_shard_to_basefold` over a synthetic ONE-CHIP machine (AddSub),
+        // `prove_shard_with_data` over a synthetic ONE-CHIP machine (AddSub),
         // then handed it to a circuit built for the full MipsAir machine.  The
         // two disagree on everything the column layout is derived from: the
         // circuit lays out insertion points for the full machine's rounds
@@ -322,7 +322,7 @@ mod tests {
     /// shard.
     ///
     /// End-to-end structural smoke test: wires the real
-    /// `prove_shard_to_basefold` host path through the normalize
+    /// `prove_shard_with_data` host path through the normalize
     /// basefold program constructor.
     ///
     /// Validates the full shard-level pipeline end-to-end at the

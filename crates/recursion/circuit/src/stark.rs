@@ -14,7 +14,7 @@ use crate::{fri::dummy_commit, hash::FieldHasherVariable, CircuitConfig};
 
 /// Make a dummy basefold-pipeline shard proof for a given proof shape.
 ///
-/// Drives the host-side `prove_shard_to_basefold` with zero-filled
+/// Drives the host-side `prove_shard_with_data` with zero-filled
 /// traces for every chip in `shape`. The resulting proof is
 /// structurally correct (all inner sumcheck/jagged-PCS shapes match
 /// the prover's wire format and the recursion-circuit's shape
@@ -53,7 +53,7 @@ where
     // field (chip log heights, cumulative sums, logup-GKR round
     // proofs, openings, evaluation proof bytes) at the shapes
     // dictated by the input `shape`. This replaces a previous slow
-    // path that drove `prove_shard_to_basefold` against zero traces
+    // path that drove `prove_shard_with_data` against zero traces
     // (~15s per call × REDUCE_BATCH_SIZE during pre-warm); the
     // zero-fill allocator runs in microseconds because no field
     // arithmetic happens.

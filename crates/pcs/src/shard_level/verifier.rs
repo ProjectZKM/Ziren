@@ -170,7 +170,7 @@ impl BasefoldShardVerifier {
         //
         // Observe public values, main commitment, and per-chip
         // metadata.  Order MUST match the prover's ordering at
-        // `shard_level::prover::prove_shard_to_basefold` (transcript
+        // `shard_level::prover::prove_shard_with_data` (transcript
         // prologue):
         //   1. public_values (each felt)
         //   2. main_commitment (8 felts)

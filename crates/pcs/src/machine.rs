@@ -60,7 +60,7 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// fixed jagged geometry, so the device prover pins it.  `false` (the
     /// default) for the CORE, SHRINK and WRAP machines, which prove against
     /// their OWN natural trace area.  This is the per-stage discriminator the
-    /// device `prove_shard_to_basefold` override reads (COMPRESS and SHRINK
+    /// device `prove_shard_with_data` override reads (COMPRESS and SHRINK
     /// share an identical chip set — `shrink_machine == compress_machine` — so
     /// a chip-set signal cannot tell them apart; this flag can).  Inert on the
     /// host CPU path (only the device override consults it).
@@ -103,7 +103,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
 
     /// Whether this machine's device shard proofs pin the recursion trace area
     /// (COMPRESS/reduce only).  Read by the `StarkGpuProver` device
-    /// `prove_shard_to_basefold` override to distinguish COMPRESS (pins to
+    /// `prove_shard_with_data` override to distinguish COMPRESS (pins to
     /// `2^RECURSION_LOG_TRACE_AREA`) from SHRINK/CORE (natural own area).
     #[inline]
     pub const fn pins_recursion_area(&self) -> bool {
@@ -149,7 +149,7 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// deserialized key rebuilds it on first use — same contract as
     /// `preprocessed_mles`.
     #[serde(skip)]
-    preprocessed_jagged: std::sync::OnceLock<std::sync::Arc<SC::PrepPrecomputed>>,
+    preprocessed_data: std::sync::OnceLock<std::sync::Arc<SC::PrepPrecomputed>>,
     /// The row orientation the PREPROCESSED commit was built under at `setup`
     /// (`StarkMachine::core_rev`).
     ///
@@ -178,7 +178,7 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             // Derived cache: the clone rebuilds it on first use rather than
             // deep-copying the MLEs.
             preprocessed_mles: std::sync::OnceLock::new(),
-            preprocessed_jagged: std::sync::OnceLock::new(),
+            preprocessed_data: std::sync::OnceLock::new(),
             prep_rev: self.prep_rev,
             chip_ordering: self.chip_ordering.clone(),
             constraints_map: self.constraints_map.clone(),
@@ -206,7 +206,7 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
             initial_global_cumulative_sum,
             traces,
             preprocessed_mles: std::sync::OnceLock::new(),
-            preprocessed_jagged: std::sync::OnceLock::new(),
+            preprocessed_data: std::sync::OnceLock::new(),
             prep_rev,
             chip_ordering,
             constraints_map,
@@ -235,9 +235,9 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     /// The precomputed preprocessed commit, built on first use from `traces`
     /// under the orientation recorded on the key (`prep_rev`), so a rebuild
     /// always reproduces the commitment the verifying key carries.
-    pub fn preprocessed_jagged(&self) -> &std::sync::Arc<SC::PrepPrecomputed> {
+    pub fn preprocessed_data(&self) -> &std::sync::Arc<SC::PrepPrecomputed> {
         let use_rev = self.prep_rev;
-        self.preprocessed_jagged.get_or_init(|| {
+        self.preprocessed_data.get_or_init(|| {
             let mut names: Vec<(usize, &String)> =
                 self.chip_ordering.iter().map(|(n, i)| (*i, n)).collect();
             names.sort_unstable();
@@ -696,7 +696,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 // Seeded from the very precompute whose root became `commit`
                 // above, so the opening round reuses the committed data
                 // directly instead of rebuilding it from `traces`.
-                preprocessed_jagged: {
+                preprocessed_data: {
                     let cell = std::sync::OnceLock::new();
                     let _ = cell.set(std::sync::Arc::new(prep_precomputed));
                     cell
@@ -838,7 +838,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 initial_global_cumulative_sum,
                 traces,
                 preprocessed_mles: std::sync::OnceLock::new(),
-                preprocessed_jagged: std::sync::OnceLock::new(),
+                preprocessed_data: std::sync::OnceLock::new(),
                 prep_rev: self.core_rev(),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,

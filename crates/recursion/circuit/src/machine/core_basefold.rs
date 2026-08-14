@@ -132,7 +132,7 @@ fn contains_chip(chip_names: &[String], name: &str) -> bool {
 // `input.shard_proof_tuples`. Empty slice falls back to all-zero
 // degree bits (placeholder behavior). Real heights flow from the
 // host-side `BasefoldShardProof.chip_log_heights` populated by
-// `prove_shard_to_basefold`.
+// `prove_shard_with_data`.
 pub fn verify_core_basefold<C, SC, A>(
     builder: &mut Builder<C>,
     input: ZKMCoreBasefoldWitnessVariable<C, SC>,

@@ -24,7 +24,7 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// `main_traces` views are only relabeled to `InnerVal` for the commit build
 /// (a zero-copy slice reinterpret) and returned unchanged — no trace data is
 /// copied or moved.
-pub fn maybe_auto_precompute_basefold<'t, SC, A, P>(
+pub fn commit_traces<'t, SC, A, P>(
     // The COMMIT dispatch seam: `commit_multilinears` goes to the prover's
     // `MachineProver` method, so a `StarkGpuProver` device override is picked up
     // and `CpuProver` takes the host default.
@@ -79,7 +79,7 @@ where
     assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>(),
-        "maybe_auto_precompute_basefold: requires Val==KoalaBear / \
+        "commit_traces: requires Val==KoalaBear / \
          Challenge==KoalaBear^4 (shared by inner + outer rings)",
     );
     // Ring discriminator: the INNER ring (core/compress/shrink) uses the
@@ -103,7 +103,7 @@ where
     assert_eq!(
         chips.len(),
         main_traces.len(),
-        "maybe_auto_precompute_basefold: chips/main_traces must be parallel",
+        "commit_traces: chips/main_traces must be parallel",
     );
     let named_inner: alloc::vec::Vec<crate::jagged_pcs::jagged::ChipTraceView> = chips
         .iter()
@@ -180,7 +180,7 @@ where
             let any: Box<dyn core::any::Any> = Box::new(precomputed);
             *any.downcast().unwrap_or_else(|_| {
                 panic!(
-                    "maybe_auto_precompute_basefold: inner build path produces a \
+                    "commit_traces: inner build path produces a \
                      JaggedMmcs precompute == SC::BfMmcs"
                 )
             })
@@ -308,7 +308,7 @@ where
     // pipeline assembles the shard stages device-natively in ziren-gpu's
     // `shard-prover/src/lib.rs` and never enters this function.
     //
-    // `maybe_auto_precompute_basefold` runs the BaseFold pre-commit when the
+    // `commit_traces` runs the BaseFold pre-commit when the
     // caller supplied no `precomputed_commit`, overrides `main_commitment`
     // with its 8-felt digest, and threads the result into the jagged-PCS
     // opening so the in-band commit observe is skipped.  That skip is
@@ -336,36 +336,36 @@ where
     // recursion normalize VK = f(chip-SET).
     // Every chip is host-resident here, so there is nothing to splice: the
     // shared store IS the commit trace set (an `Arc` bump per chip).
-    let commit_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>> =
+    let trace_views: Vec<crate::multilinear::PaddedMle<Val<SC>>> =
         shared_trace_mles.to_vec();
     let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> =
         chips.iter().map(|_| None).collect();
-    let (commit_traces, main_commitment, precomputed_commit) = match commit_data {
+    let (trace_views, main_commitment, precomputed_commit) = match commit_data {
         // `commit()` already built and retained the jagged commitment —
         // consume it.  The views pass through untouched, exactly as
-        // `maybe_auto_precompute_basefold` returns them unchanged; the digest
+        // `commit_traces` returns them unchanged; the digest
         // and precompute are the identical values that build would have
         // produced (same seam, same inputs, one shard-phase earlier).
         Some(retained) => (
-            commit_traces,
+            trace_views,
             retained.main_commitment,
             retained.precomputed,
         ),
-        None => maybe_auto_precompute_basefold::<SC, A, P>(
+        None => commit_traces::<SC, A, P>(
             prover,
             chips,
-            commit_traces,
+            trace_views,
             dense_rev,
             recursion_area_pin,
         ),
     };
-    // `commit_traces` is kept OWNED (no reborrow): the dims sites below
+    // `trace_views` is kept OWNED (no reborrow): the dims sites below
     // borrow it, and the jagged open at Stage 4 MOVES it in so its per-chip
     // cells become the open's `chip_traces` with NO clone.
 
     let n_chips = chips.len();
     let _shard_span = tracing::info_span!(
-        "prove_shard_to_basefold",
+        "prove_shard_with_data",
         chips = n_chips
     )
     .entered();
@@ -542,7 +542,7 @@ where
 
     let residual_y: Vec<Vec<Challenge<SC>>> = compute_residual_y_openings::<SC, A>(
         chips,
-        &commit_traces,
+        &trace_views,
         preprocessed_traces,
         &trace_at_z,
         &logup_gkr_proof.logup_evaluations,
@@ -568,7 +568,7 @@ where
             // Commit-coverage trace set (BORROWED views over the shared
             // `Arc<Mle>` store) — MUST be the same traces the precompute
             // committed, or the openings won't bind.
-            &commit_traces,
+            &trace_views,
             // Open jagged at the zerocheck-reduced z*.
             &zerocheck_proof.point_and_eval.0,
             challenger,

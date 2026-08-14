@@ -17,14 +17,14 @@ use super::{
 use crate::{
     air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, BasefoldRing,
     Challenger, DebugConstraintBuilder, MachineChip, MachineProof, PcsProverData,
-    ProverConstraintFolder, ShardMainData, ShardProof, StarkVerifyingKey,
+    ProverConstraintFolder, MainTraceData, ShardProof, StarkVerifyingKey,
 };
 
 /// Wrap raw per-chip main traces into the name-keyed `PaddedMle` store
-/// ([`ShardProveData::main_traces`]).
+/// ([`ShardData::main_traces`]).
 ///
 /// THE single definition of the trace wrap, shared by every
-/// `ShardProveData` construction site (host `open` + the ziren-gpu core /
+/// `ShardData` construction site (host `open` + the ziren-gpu core /
 /// pipeline drivers), so the wrap can never drift between them.
 ///
 /// `names` and `traces` are parallel, in chip-index order. Each owned trace is
@@ -92,10 +92,10 @@ where
         .collect()
 }
 
-/// Data bundle for `MachineProver::prove_shard_to_basefold`: the shard's
+/// Data bundle for `MachineProver::prove_shard_with_data`: the shard's
 /// chips, traces, and public values, plus the precomputed preprocessed commit
 /// and the optionally retained commit-time main commitment.
-pub struct ShardProveData<'a, SC, A>
+pub struct ShardData<'a, SC, A>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
     A: MachineAir<Val<SC>>,
@@ -121,7 +121,7 @@ where
     /// The shard's public values.
     pub public_values: Vec<Val<SC>>,
     /// The PRECOMPUTED preprocessed commit, built once by `setup` and held in
-    /// the proving key (`StarkProvingKey::preprocessed_jagged`).
+    /// the proving key (`StarkProvingKey::preprocessed_data`).
     ///
     /// The preprocessed traces are opened as their own ROUND of every shard
     /// proof, against `vk.preprocessed_commit`, so the shard needs the
@@ -256,7 +256,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         record: &A::Record,
         traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-    ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>;
+    ) -> MainTraceData<SC, Self::DeviceMatrix, Self::DeviceProverData>;
 
     /// Attach the BaseFold shard side-channel (`ShardProof::basefold_shard_proof`)
     /// for the SHRINK stage.  Default no-op: the CPU `StarkMachine::open`
@@ -327,7 +327,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn open(
         &self,
         pk: &Self::DeviceProvingKey,
-        data: ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>,
+        data: MainTraceData<SC, Self::DeviceMatrix, Self::DeviceProverData>,
         challenger: &mut SC::Challenger,
     ) -> Result<ShardProof<SC>, Self::Error>;
 
@@ -338,7 +338,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit`]).
     /// A `StarkGpuProver` OVERRIDES this with the device dense-pack + BaseFold
     /// commit body — UNCONDITIONALLY on device, no host fallback.
-    /// Consumed by `maybe_auto_precompute_basefold` through the
+    /// Consumed by `commit_traces` through the
     /// `JaggedEvalProducer` seam: `ProverJaggedEval` routes to
     /// `self.commit_multilinears`; `FreeFnJaggedEval` uses the same host
     /// default.  The caller FORCES the `rev` / `recursion_area_pin` flags onto
@@ -362,7 +362,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     /// [`crate::shard_level::prover::prove_trusted_evaluations`] (CpuProver is
     /// byte-identical).  A `StarkGpuProver` overrides this with a device
     /// body that reads its OWN provider.  `device_traces` is kept on the seam
-    /// (CpuProver's `prove_shard_to_basefold` passes `None`) so the free-fn
+    /// (CpuProver's `prove_shard_with_data` passes `None`) so the free-fn
     /// callers + the CPU path are unchanged; the override is free to ignore the
     /// param and source the provider from `self` instead — the param does NOT
     /// force `None` on the seam, since each prover provides its own body.
@@ -441,11 +441,11 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     /// (`ProverJaggedEval(self)`), so a `StarkGpuProver` that overrides
     /// `prove_trusted_evaluations` has its device body picked up here.  On
     /// `CpuProver` every step delegates to the free-fn → byte-identical to the
-    /// free-fn `prove_shard_to_basefold` path.
+    /// free-fn `prove_shard_with_data` path.
     #[allow(clippy::too_many_arguments)]
-    fn prove_shard_to_basefold(
+    fn prove_shard_with_data(
         &self,
-        data: ShardProveData<'_, SC, A>,
+        data: ShardData<'_, SC, A>,
         challenger: &mut SC::Challenger,
     ) -> crate::shard_level::shard_proof::BasefoldShardProof<Val<SC>, crate::Challenge<SC>>
     where
@@ -482,7 +482,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >,
         Self: Sized,
     {
-        let ShardProveData {
+        let ShardData {
             chips,
             preprocessed_traces,
             preprocessed_commit_data,
@@ -542,7 +542,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 match main_traces.get(&name) {
                     Some(pm) => pm.clone(),
                     None => panic!(
-                        "prove_shard_to_basefold: chip {name} missing from main_traces",
+                        "prove_shard_with_data: chip {name} missing from main_traces",
                     ),
                 }
             })
@@ -559,7 +559,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             dense_rev,
             // Sourced from `pins_recursion_area()` above.
             recursion_area_pin,
-            // INLINE-commit: `maybe_auto_precompute_basefold` builds the jagged
+            // INLINE-commit: `commit_traces` builds the jagged
             // commit during this prove pass (for BOTH the inner and the
             // OUTER/wrap ring).
             self,
@@ -726,7 +726,7 @@ where
         record: &A::Record,
         mut named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-    ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData> {
+    ) -> MainTraceData<SC, Self::DeviceMatrix, Self::DeviceProverData> {
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
@@ -774,7 +774,7 @@ where
         // Build the shard's name-keyed trace-MLE store ONCE — the matrices
         // MOVE into their `Arc<Mle>`s via the zero-copy
         // `Mle::from_row_major` — then commit through the ring-dispatched
-        // builder (`maybe_auto_precompute_basefold`: the inner ring routes
+        // builder (`commit_traces`: the inner ring routes
         // through `self.commit_multilinears`, the wrap ring through
         // `BasefoldRing::precompute_jagged_inline`) and RETAIN
         // {digest, precompute, store} for `open()`.  One build, one store:
@@ -830,7 +830,7 @@ where
                     None
                 };
                 let (_views, main_commitment, precomputed) =
-                    crate::shard_level::prover::maybe_auto_precompute_basefold::<SC, A, _>(
+                    crate::shard_level::prover::commit_traces::<SC, A, _>(
                         self,
                         &chips,
                         views,
@@ -850,7 +850,7 @@ where
             }
         };
 
-        ShardMainData {
+        MainTraceData {
             // The host store lives on `main_data`; there are no raw
             // matrices to carry (device provers use this slot for their
             // resident trace Arcs).
@@ -872,7 +872,7 @@ where
     fn open(
         &self,
         pk: &StarkProvingKey<SC>,
-        data: ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>,
+        data: MainTraceData<SC, Self::DeviceMatrix, Self::DeviceProverData>,
         challenger: &mut <SC as StarkGenericConfig>::Challenger,
     ) -> Result<ShardProof<SC>, Self::Error> {
         let chips = self.machine().shard_chips_ordered(&data.chip_ordering).collect::<Vec<_>>();
@@ -905,7 +905,7 @@ where
         //   - SC == OuterSC (bn254 wrap path with `MultiField32Challenger`)
         //     → fall through to the FRI body below.  Wrap stays on FRI
         //     permanently; the basefold path's inner
-        //     `prove_shard_to_basefold_boxed` has the same TypeId
+        //     `prove_shard_with_data_boxed` has the same TypeId
         //     guard so this outer check matches its assumption.
         //
         // Wrap regression guard: `test_e2e_wrap_fibonacci` (FRI path).
@@ -918,13 +918,13 @@ where
             // snapshot above.
             //
             // Pass `self` so the basefold producer routes through the
-            // trait-method seam (`self.prove_shard_to_basefold` ->
+            // trait-method seam (`self.prove_shard_with_data` ->
             // `self.prove_trusted_evaluations`).
-            let basefold_shard_proof = prove_shard_to_basefold_boxed::<SC, A, _>(
+            let basefold_shard_proof = prove_shard_with_data_boxed::<SC, A, _>(
                 self,
                 &chips,
                 pk.preprocessed_mles(),
-                <SC as crate::BasefoldRing>::prep_open_data(pk.preprocessed_jagged()),
+                <SC as crate::BasefoldRing>::prep_open_data(pk.preprocessed_data()),
                 &pk.chip_ordering,
                 data.public_values.clone(),
                 &basefold_challenger_snapshot,
@@ -1038,12 +1038,12 @@ impl Display for CpuProverError {
 impl Error for CpuProverError {}
 
 // ───────────────────────────────────────────────────────────
-// Helper: drive prove_shard_to_basefold from inside StarkMachine::open()
+// Helper: drive prove_shard_with_data from inside StarkMachine::open()
 // for KoalaBearPoseidon2.  Always invoked — non-KoalaBear configs
 // short-circuit to None via the TypeId gate inside the helper.
 // ───────────────────────────────────────────────────────────
 
-/// Drive [`crate::shard_level::prover::prove_shard_to_basefold`]
+/// Drive [`crate::shard_level::prover::prove_shard_with_data`]
 /// using a cloned challenger so the outer transcript isn't perturbed.
 ///
 /// Returns `Some(Box::new(basefold_proof))` when SC is
@@ -1055,17 +1055,17 @@ impl Error for CpuProverError {}
 /// between the generic `StarkMachine::open` state and the shard-level
 /// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
-fn prove_shard_to_basefold_boxed<SC, A, P>(
+fn prove_shard_with_data_boxed<SC, A, P>(
     // The prover, so the inner
-    // `prove_shard_to_basefold` call routes through `prover`'s trait method
-    // (`prover.prove_shard_to_basefold` -> `self.prove_trusted_evaluations`),
+    // `prove_shard_with_data` call routes through `prover`'s trait method
+    // (`prover.prove_shard_with_data` -> `self.prove_trusted_evaluations`),
     // exposing the override seam.  On `CpuProver` every step delegates to
     // the free-fn → byte-identical.
     prover: &P,
     chips: &[&MachineChip<SC, A>],
     pk_preprocessed_mles: &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>],
     // The proving key's PRECOMPUTED preprocessed commit
-    // (`StarkProvingKey::preprocessed_jagged`, via
+    // (`StarkProvingKey::preprocessed_data`, via
     // `BasefoldRing::prep_open_data`), opened as a round of every shard proof.
     pk_preprocessed_jagged: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
         SC::BfMmcs,
@@ -1074,7 +1074,7 @@ fn prove_shard_to_basefold_boxed<SC, A, P>(
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
     // The commit-time retained jagged commitment, threaded into
-    // `ShardProveData.commit_data` for the driver to consume.
+    // `ShardData.commit_data` for the driver to consume.
     commit_data: Option<RetainedJaggedCommit<SC>>,
 ) -> Option<
     Box<
@@ -1131,15 +1131,15 @@ where
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
                 == TypeId::of::<InnerChallenge>(),
-        "prove_shard_to_basefold_boxed requires Val == KoalaBear and \
+        "prove_shard_with_data_boxed requires Val == KoalaBear and \
          Challenge == KoalaBear^4 (shared by the inner and outer rings); the \
          per-ring jagged open is dispatched downstream in \
          prove_trusted_evaluations",
     );
 
     // Unless `commit_data` already carries it, the BaseFold jagged-PCS commit
-    // is built inside `prove_shard_to_basefold` ->
-    // `maybe_auto_precompute_basefold` (which observes its 8-felt digest as
+    // is built inside `prove_shard_with_data` ->
+    // `commit_traces` (which observes its 8-felt digest as
     // `main_commitment`, and applies the jagged HASH-BIND for the inner ring),
     // so there is no digest to compute up-front here.
 
@@ -1198,9 +1198,9 @@ where
     // Route through the prover's trait method so the jagged
     // open is dispatched via `prover.prove_trusted_evaluations` (the override
     // seam).  On `CpuProver` this delegates step-for-step to the same free-fns
-    // as the free-fn `prove_shard_to_basefold` call → byte-identical.
-    let proof = prover.prove_shard_to_basefold(
-        ShardProveData {
+    // as the free-fn `prove_shard_with_data` call → byte-identical.
+    let proof = prover.prove_shard_with_data(
+        ShardData {
             chips: &chips_reborrow,
             preprocessed_traces: &preprocessed_traces,
             preprocessed_commit_data: pk_preprocessed_jagged,
@@ -1208,7 +1208,7 @@ where
             main_traces: main_traces_named,
             public_values,
             // `max_log_row_count` / `orientation` (Msb) / `dense_rev` and the
-            // recursion AREA PIN are sourced inside `prove_shard_to_basefold`
+            // recursion AREA PIN are sourced inside `prove_shard_with_data`
             // from the traces + self, not threaded here.
             commit_data,
         },
