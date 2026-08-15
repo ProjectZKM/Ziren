@@ -1193,260 +1193,43 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
         Self { vks_and_proofs, vk_merkle_data, is_complete: false }
     }
 
-    /// Hash the STRUCTURAL dimensions of a shard proof's jagged-BaseFold
-    /// evaluation proof into `h`, in `Witnessable::write` order.
+    /// Structural signature of the witness layout — the compose program
+    /// cache key.
     ///
-    /// Split out of [`Self::shape_key`] so the per-group (`G >= 2`) split
-    /// bundle and the group-0 bundle share one traversal.
-    fn hash_evaluation_proof<H: std::hash::Hasher>(
-        proof: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
-        h: &mut H,
-    ) {
-        use std::hash::Hash;
-        use zkm_pcs::shard_level::shard_proof::EvaluationProof as EP;
-        match proof {
-            EP::Empty => 0u8.hash(h),
-            // The `Bytes` arm is CONST-LIFTED (baked), not witnessed, so the
-            // byte length is itself structural.
-            EP::Bytes(b) => {
-                1u8.hash(h);
-                b.len().hash(h);
-            }
-            EP::Bundle(bundle) => {
-                2u8.hash(h);
-                // Group-0 packing.  `log_dense_size` is the driver of every
-                // length below; hash it explicitly so the key NAMES the
-                // dimension even if a derived length is ever refactored away.
-                bundle.packing.log_dense_size.hash(h);
-                bundle.packing.offsets.len().hash(h);
-                bundle.packing.column_counts.len().hash(h);
-
-                Self::hash_stacked_basefold(&bundle.basefold_proof, h);
-
-                // reduction (JaggedReductionProof) — L rounds, L-long point.
-                bundle.reduction.rounds.len().hash(h);
-                bundle.reduction.eval_point.len().hash(h);
-
-                // jagged-eval sub-sumcheck — 2*(L+1) rounds.
-                let je = &bundle.jagged_eval.partial_sumcheck_proof;
-                je.univariate_polys.len().hash(h);
-                for poly in je.univariate_polys.iter() {
-                    poly.coefficients.len().hash(h);
-                }
-                je.point_and_eval.0.len().hash(h);
-
-                // y_per_chip — per-chip per-column row-MLE values.
-                bundle.y_per_chip.len().hash(h);
-                for y in bundle.y_per_chip.iter() {
-                    y.len().hash(h);
-                }
-
-                // Per-round split (G >= 2) extra groups.  Empty on the
-                // default G == 1 path, so the key is unchanged there.
-                bundle.extra_reduction.len().hash(h);
-                for r in bundle.extra_reduction.iter() {
-                    r.rounds.len().hash(h);
-                    r.eval_point.len().hash(h);
-                }
-                bundle.extra_basefold_proof.len().hash(h);
-                for bp in bundle.extra_basefold_proof.iter() {
-                    Self::hash_stacked_basefold(bp, h);
-                }
-                bundle.extra_packing.len().hash(h);
-                for p in bundle.extra_packing.iter() {
-                    p.log_dense_size.hash(h);
-                    p.offsets.len().hash(h);
-                    p.column_counts.len().hash(h);
-                }
-            }
-        }
-    }
-
-    /// Structural dimensions of a `StackedBasefoldProof` — the BaseFold
-    /// round count, query/Merkle path lengths and stacked batch widths, all
-    /// of which are inline-witnessed by `read_basefold_proof_from_stream`.
-    fn hash_stacked_basefold<H: std::hash::Hasher>(
-        stacked: &zkm_pcs::basefold::stacked::StackedBasefoldProof<
-            zkm_pcs::InnerVal,
-            zkm_pcs::InnerChallenge,
-            zkm_pcs::jagged_pcs::JaggedMmcs,
-        >,
-        h: &mut H,
-    ) {
-        use std::hash::Hash;
-        let bf = &stacked.basefold_proof;
-        bf.univariate_messages.len().hash(h);
-        bf.fri_commitments.len().hash(h);
-        for openings in [
-            &bf.component_polynomials_query_openings_and_proofs,
-            &bf.query_phase_openings_and_proofs,
-        ] {
-            openings.len().hash(h);
-            for round in openings.iter() {
-                round.leaves.len().hash(h);
-                for leaf in round.leaves.iter() {
-                    leaf.values.len().hash(h);
-                    for v in leaf.values.iter() {
-                        v.len().hash(h);
-                    }
-                    // Merkle path length tracks the codeword height.
-                    leaf.proof.len().hash(h);
-                }
-            }
-        }
-        // batch_evaluations: outer = commit rounds, inner = num_stripes
-        // = 2^(log_dense_size - log_stacking_height).
-        stacked.batch_evaluations.len().hash(h);
-        for row in stacked.batch_evaluations.iter() {
-            row.len().hash(h);
-        }
-    }
-
-    /// Compute a structural signature of the witness layout.
+    /// `shape_key(a) == shape_key(b)  ⟹  compose_program(a) == compose_program(b)`
+    /// bytewise.  The walk hashes every variable-length collection the
+    /// `Witnessable::write` traversal meets, in write order, so a cache hit
+    /// can only occur when the cached program's `Hint` count matches the next
+    /// input's witness-stream length.  Keying on `arity` alone would not:
+    /// per-input shapes vary widely across calls of equal arity.
     ///
-    /// Two `ZKMCompressBasefoldWitnessValues` produce byte-identical
-    /// recursion programs iff their `shape_key()` values are equal —
-    /// the key hashes every variable-length collection that the
-    /// `Witnessable::write` traversal walks, in write order. This
-    /// makes the per-arity compose program cache sound: cache hits
-    /// only occur when the cached program's `Hint` instruction count
-    /// matches the next input's witness stream length, eliminating
-    /// the `RuntimeError::EmptyWitnessStream` panic that fires when
-    /// two same-arity calls have different per-input shapes (the
-    /// program-cache audit `assert_eq!` documented this as the cache's
-    /// failure mode).
-    ///
-    /// **Not** a cryptographic commitment — a chance 64-bit collision
-    /// would still mis-key the cache (the residency profile's cache
-    /// audit catches those byte-exactly).  What
-    /// the key MUST guarantee is that no *structural* difference is
-    /// silently omitted, which is a coverage property, not a hash-strength
-    /// one.
-    ///
-    /// Walk order MUST mirror BOTH
-    /// `Witnessable::<C>::write` impls the compose witness traverses:
-    /// the compose-level one at
-    /// `crates/recursion/circuit/src/machine/witness.rs:392-403` and the
-    /// per-child `BasefoldShardProof` one at
-    /// `crates/recursion/circuit/src/shard_level_witness.rs:459-497`
-    /// — any change to either requires a matching update here.  The child
-    /// walk is the easy one to miss: it writes the jagged-BaseFold
-    /// `evaluation_proof` bundle and the `opened_values` INLINE, between
-    /// the zerocheck proof and the end of the per-child record.
+    /// Walk order MUST mirror BOTH `Witnessable::<C>::write` impls the
+    /// compose witness traverses: the compose-level one in
+    /// `crates/recursion/circuit/src/machine/witness.rs` and the per-child
+    /// `BasefoldShardProof` one in
+    /// `crates/recursion/circuit/src/shard_level_witness.rs` (delegated to
+    /// [`crate::machine::shape_signature::hash_shard_proof_structure`]).
+    /// Any change to either requires a matching update there.
     pub fn shape_key(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
 
-        // Tag the key with a version so future cache-key changes
-        // invalidate previously-cached programs without silent
-        // collisions.  Bumped when the key gained the `evaluation_proof`
-        // bundle + `opened_values` coverage (previously omitted, which let
-        // two children with different `log_dense_size` collide).
-        0xC0_FE_BA_5F_u32.hash(&mut h);
+        // Version tag — bumping it invalidates previously cached programs
+        // instead of letting an old key silently alias a new walk.  Bumped
+        // when the walk moved to the shared shard-proof traversal, which
+        // additionally covers the BAKED per-round `packing.column_counts` /
+        // `offsets` VALUES (previously only their lengths).
+        0xC0_FE_BA_61_u32.hash(&mut h);
 
-        // vks_and_proofs.len() is the arity.  All per-input shapes
-        // follow.
+        // vks_and_proofs.len() is the arity.  All per-input shapes follow.
         self.vks_and_proofs.len().hash(&mut h);
         for (_vk, sp) in self.vks_and_proofs.iter() {
-            // BasefoldShardProof (zkm_pcs::shard_level::shard_proof)
-            // — Witnessable::write order:
-            //   main_commitment (fixed [F; 8])
-            //   public_values   (Vec<F>)
-            //   logup_gkr_proof (LogupGkrProof)
-            //   zerocheck_proof (PartialSumcheckProof)
-            sp.public_values.len().hash(&mut h);
-
-            // LogupGkrProof::write order:
-            //   circuit_output  (LogUpGkrOutput { numerator, denominator })
-            //   round_proofs    (Vec<LogupGkrRoundProof>)
-            //   logup_evaluations (LogUpEvaluations { point, chip_openings })
-            //   witness         (single F — fixed)
-            let lgkr = &sp.logup_gkr_proof;
-            lgkr.circuit_output.numerator.len().hash(&mut h);
-            lgkr.circuit_output.denominator.len().hash(&mut h);
-            lgkr.round_proofs.len().hash(&mut h);
-            for round in lgkr.round_proofs.iter() {
-                // Each round writes 4 fixed EFs + a sumcheck proof.
-                round.sumcheck_proof.univariate_polys.len().hash(&mut h);
-                for poly in round.sumcheck_proof.univariate_polys.iter() {
-                    poly.coefficients.len().hash(&mut h);
-                }
-                // point_and_eval.0 (point: Vec<EF>) is also variable.
-                round.sumcheck_proof.point_and_eval.0.len().hash(&mut h);
-            }
-            // logup_evaluations
-            lgkr.logup_evaluations.point.len().hash(&mut h);
-            lgkr.logup_evaluations.chip_openings.len().hash(&mut h);
-            for (name, eval) in lgkr.logup_evaluations.chip_openings.iter() {
-                // chip_openings is a BTreeMap — iteration order is
-                // sorted, matching the Witnessable::write traversal.
-                // Hash names to detect chip-set drift.
-                name.hash(&mut h);
-                eval.main_trace_evaluations.len().hash(&mut h);
-                // Option<Vec<EF>> — discriminant + len.
-                match &eval.preprocessed_trace_evaluations {
-                    Some(v) => {
-                        1u8.hash(&mut h);
-                        v.len().hash(&mut h);
-                    }
-                    None => 0u8.hash(&mut h),
-                }
-            }
-
-            // zerocheck_proof (PartialSumcheckProof)
-            sp.zerocheck_proof.univariate_polys.len().hash(&mut h);
-            for poly in sp.zerocheck_proof.univariate_polys.iter() {
-                poly.coefficients.len().hash(&mut h);
-            }
-            sp.zerocheck_proof.point_and_eval.0.len().hash(&mut h);
-
-            // evaluation_proof — the jagged-BaseFold bundle.  The `Bundle`
-            // arm is INLINE-WITNESSED by `read`/`write`
-            // (`shard_level_witness.rs:395-420,469-493`:
-            // `read_basefold_proof_from_stream` + the two sumchecks +
-            // `q_at_z`), so every length below lands in the witness stream and
-            // in the emitted instruction count.
-            //
-            // ALL of these lengths are driven by the commit's
-            // `packing.log_dense_size` (= L): `num_stripes = 2^(L -
-            // log_stacking_height)` sets `batch_evaluations`' inner width, the
-            // reduction runs L rounds over an L-long eval_point, and the
-            // jagged-eval sub-sumcheck runs `2*(L+1)` rounds.  L is
-            // `max(natural_area, RECURSION_LOG_TRACE_AREA)` — a FLOOR, not a
-            // clamp — so a recursion child whose natural jagged area exceeds
-            // `2^27` carries L > 27 and a correspondingly LONGER witness
-            // stream.  Omitting these made two different-L compose inputs
-            // collide on the cache key while building different programs (a
-            // 173.8 MB vs 185.3 MB compose program at L=27 vs L=29), so the
-            // program cache could hand back a wrong-shaped program.
-            Self::hash_evaluation_proof(&sp.evaluation_proof, &mut h);
-
-            // opened_values — written last by
-            // `BasefoldShardProof::write` via
-            // `basefold_opened_values_from_host(..).write(witness)`.
-            sp.opened_values.chips.len().hash(&mut h);
-            for chip in sp.opened_values.chips.iter() {
-                chip.preprocessed.local.len().hash(&mut h);
-                chip.main.local.len().hash(&mut h);
-                // `degree` is carried host-side in `quotient[0]`; its length
-                // is the chip's height bit-width.
-                chip.quotient.first().map(|q| q.len()).unwrap_or(0).hash(&mut h);
-            }
-
-            // chip_cumulative_sums (BTreeMap) — iterated by the
-            // compose-basefold Witnessable impl (witness.rs:395-398)
-            // after the proofs but in the same per-input loop.
-            sp.chip_cumulative_sums.len().hash(&mut h);
-            for (name, _) in sp.chip_cumulative_sums.iter() {
-                name.hash(&mut h);
-                // Each ChipCumulativeSums has fixed shape
-                // (Ext + SepticDigest of [F; 7] × 2) — no varlen.
-            }
+            crate::machine::shape_signature::hash_shard_proof_structure(sp, &mut h);
         }
 
         // vk_merkle_data (ZKMMerkleProofWitnessValues) write order:
-        //   vk_merkle_proofs (Vec<MerkleProof>) — variable both in
-        //                    count and per-proof path length
+        //   vk_merkle_proofs (Vec<MerkleProof>) — variable both in count and
+        //                    per-proof path length
         //   values           (Vec<Digest>) — variable count
         //   root             (Digest — fixed)
         self.vk_merkle_data.vk_merkle_proofs.len().hash(&mut h);

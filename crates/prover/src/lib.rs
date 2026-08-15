@@ -13,7 +13,7 @@
 
 pub mod build;
 pub mod components;
-pub mod residency;
+pub mod program_cache;
 pub mod shapes;
 pub mod types;
 pub mod utils;
@@ -194,31 +194,31 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// dropped.
     pub recursion_pks_basefold_cache: Mutex<RecursionPkCache>,
 
-    /// Per-shape cache for the basefold compose recursion program.
+    /// Per-shape cache for the basefold Normalize recursion program — the
+    /// leaf stage, one node per core shard.
     ///
-    /// **Key**: `ZKMCompressBasefoldWitnessValues::shape_key()` —
-    /// a u64 structural signature that hashes every variable-length
-    /// collection in the witness write traversal (arity, per-input
-    /// chip counts, sumcheck round counts, etc.).  Two inputs sharing
-    /// a cached program iff their shape keys match — which is the
-    /// soundness condition for the cache (cached program's `Hint`
-    /// instruction count must equal the next input's witness stream
-    /// length).
+    /// **Key**: [`ZKMCoreBasefoldWitnessValues::shape_key`].
+    pub normalize_programs_basefold_cache: Mutex<RecursionProgramCache>,
+
+    /// Per-shape cache for the basefold Compose recursion program — every
+    /// interior node of the recursion tree.
     ///
-    /// **Rationale**: keying on `arity` alone is unsound for
-    /// Ziren because per-input shapes vary widely across calls of the same
-    /// arity (lift heights span 5K..328K).
-    /// Re-using a program built for shape A with shape B's witness stream
-    /// triggers `RuntimeError::EmptyWitnessStream` panics under
-    /// `ZIREN_GPU_RESIDENCY=full`.
+    /// **Key**: [`ZKMCompressBasefoldWitnessValues::shape_key`].
     ///
-    /// Opt-in via `ZIREN_GPU_RESIDENCY=full`.  With
-    /// the cache audit on (residency profile `full`) every cache hit rebuilds and
-    /// asserts byte-equality (bincode) — catches the (now-rare)
-    /// failure mode where two inputs collide in `shape_key()` but
-    /// produce different programs.  The audit flag is orthogonal to
-    /// the residency profile (CI/dev tool).
-    pub compose_programs_basefold_cache: Mutex<BTreeMap<u64, Arc<RecursionProgram<KoalaBear>>>>,
+    /// Both caches rest on one invariant, which their key documents and
+    /// `ZIREN_VERIFY_PROGRAM_CACHE=1` checks byte-exactly on every hit:
+    ///
+    /// ```text
+    /// shape_key(a) == shape_key(b)  ⟹  program(a) == program(b)
+    /// ```
+    ///
+    /// The converse is not needed: two keys mapping to one program cost a
+    /// duplicate build, which `recursion_pks_basefold_cache` (keyed by program
+    /// identity) absorbs downstream.  Keying on `arity` alone would break the
+    /// invariant — per-input shapes vary widely across nodes of equal arity,
+    /// and reusing a program built for shape A against shape B's witness
+    /// stream trips `RuntimeError::EmptyWitnessStream`.
+    pub compose_programs_basefold_cache: Mutex<RecursionProgramCache>,
 }
 
 /// Program-identity-keyed recursion proving keys, capped so the retained
@@ -281,6 +281,66 @@ impl RecursionPkCache {
             }
         }
         value
+    }
+}
+
+/// Shape-keyed recursion programs, capped so a workload with a wide shape
+/// spread cannot grow the map without bound.
+///
+/// A recursion tree walks its layers in order and never returns to an
+/// earlier one, so insertion order is also least-likely-to-be-asked-again
+/// order and is what the eviction uses.
+#[derive(Default)]
+pub struct RecursionProgramCache {
+    entries: BTreeMap<u64, Arc<RecursionProgram<KoalaBear>>>,
+    order: std::collections::VecDeque<u64>,
+    pub hits: u64,
+    pub misses: u64,
+}
+
+impl RecursionProgramCache {
+    /// How many distinct programs to retain.  A layer contributes a handful
+    /// of distinct shapes, so a small cap still holds a whole layer; set it
+    /// to 0 to hold nothing, which recovers the build-per-node behaviour for
+    /// measurement.
+    fn capacity() -> usize {
+        std::env::var("ZIREN_RECURSION_PROGRAM_CACHE_SIZE")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(16)
+    }
+
+    fn get(&mut self, key: u64) -> Option<Arc<RecursionProgram<KoalaBear>>> {
+        match self.entries.get(&key) {
+            Some(v) => {
+                self.hits += 1;
+                Some(Arc::clone(v))
+            }
+            None => {
+                self.misses += 1;
+                None
+            }
+        }
+    }
+
+    /// First writer wins: a racing builder for the same shape discards its
+    /// own copy rather than replacing one other nodes already hold.
+    fn insert(
+        &mut self,
+        key: u64,
+        program: Arc<RecursionProgram<KoalaBear>>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        if let Some(v) = self.entries.get(&key) {
+            return Arc::clone(v);
+        }
+        self.entries.insert(key, Arc::clone(&program));
+        self.order.push_back(key);
+        while self.order.len() > Self::capacity() {
+            if let Some(old) = self.order.pop_front() {
+                self.entries.remove(&old);
+            }
+        }
+        program
     }
 }
 
@@ -383,36 +443,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compress_shape_config: recursion_shape_config,
             vk_verification,
             wrap_vk: OnceLock::new(),
-            compose_programs_basefold_cache: Mutex::new(BTreeMap::new()),
+            normalize_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
+            compose_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
             recursion_pks_basefold_cache: Mutex::new(RecursionPkCache::default()),
         };
 
-        // Compose-program pre-warm.
+        // Compose-program pre-warm: for each arity in `1..=REDUCE_BATCH_SIZE`,
+        // synthesize a dummy compose witness and build its compose program at
+        // process startup rather than inside the first user `compress()`.
+        // Each built program lands in the compose cache under its own shape
+        // key, and the walk also warms the compiler's internal tables (block
+        // layout, codegen, shape fixing) that survive across builds.
         //
-        // Arity walk:
-        // for each arity in `1..=REDUCE_BATCH_SIZE`, synthesize a dummy
-        // compose witness and build the compose recursion program.  The
-        // built program is discarded — the goal is to amortize the
-        // first-compose-call JIT/compile cost (DSL → AsmCompiler → shape
-        // fixing) at process startup instead of paying it inside the
-        // first user `compress()` invocation.
-        //
-        // INDEPENDENT of program-cache gating
-        // (`ZIREN_GPU_RESIDENCY=full`, opt-in): the cache stores the
-        // *built* program; pre-warm instead warms the compiler's
-        // internal caches (e.g. SeqBlock layout, plonky3 codegen
-        // tables, shape-fix tables) that survive across builds even
-        // when each per-arity program object is discarded.
-        //
-        // Default ON.  The dummy basefold shard proof is a struct-only
-        // stub rather than a real `prove_shard_with_data` invocation per
-        // arity slot, keeping the prewarm at ~2.0s
-        // (vs ~64.8s with real proves), so the universal ~2.4s amortizable
-        // compose-compile saving easily justifies the small upfront
-        // cost.  This gate is intentionally decoupled from
-        // `ZIREN_GPU_RESIDENCY` — that profile still gates broader
-        // residency features (program cache, compose-pk cache, audit)
-        // which carry their own characterization needs.
+        // The dummy shard proof is a struct-only stub rather than a real
+        // `prove_shard_with_data` per arity slot, which keeps the whole walk
+        // at ~2.0 s.
         prover.prewarm_compose_programs();
 
         prover
@@ -420,13 +465,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Compose-program pre-warm helper.  See call-site comment in
     /// [`Self::uninitialized`] for the rationale.  Walks
-    /// `arity in 1..=REDUCE_BATCH_SIZE`, building (and discarding) a
-    /// dummy compose program per arity to amortize first-compile cost.
-    ///
-    /// Default ON.  The prewarm walk costs ~2.0s total and amortizes
-    /// ~2.4s of compose-compile work that would otherwise be paid
-    /// inside the first user `compress()` invocation, so it is
-    /// universally beneficial and runs by default.
+    /// `arity in 1..=REDUCE_BATCH_SIZE`, building one dummy compose program
+    /// per arity to amortize first-compile cost.  Unconditional: ~2.0 s of
+    /// startup work against ~2.4 s that the first `compress()` would
+    /// otherwise pay.
     ///
     /// Bails when:
     ///   - `compress_shape_config` is None
@@ -470,11 +512,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 &shape,
             );
             let per_arity_start = std::time::Instant::now();
-            // Discard the result — we want the JIT/compile-cache
-            // side-effects, not the program object.  When
-            // program caching is on the program *will* be stored in
-            // `compose_programs_basefold_cache`; that's an additional
-            // benefit but not the pre-warm goal.
+            // Retained by `compose_programs_basefold_cache` under this
+            // witness's shape key; a real node of the same shape then hits.
             let _program = self.compose_program_basefold(&witness);
             tracing::debug!(
                 "compose pre-warm: arity={arity} built in {:?}",
@@ -649,7 +688,25 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Band-snapped through [`Self::fix_recursion_shape`] before proving —
     /// that is what keeps the produced
     /// verifying key inside `ZKMProofShape::generate`'s enumerated space.
+    ///
+    /// Shape-keyed: the leaf layer builds one node per core shard, and those
+    /// nodes collapse onto far fewer distinct programs than there are shards.
+    /// See [`Self::normalize_programs_basefold_cache`].
     pub fn recursion_program_basefold(
+        &self,
+        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        self.cached_program(
+            &self.normalize_programs_basefold_cache,
+            input.shape_key(),
+            "normalize",
+            || self.build_normalize_program_basefold_uncached(input),
+        )
+    }
+
+    /// Uncached body of [`Self::recursion_program_basefold`] — separate so the
+    /// cache audit can rebuild and assert byte-equality.
+    fn build_normalize_program_basefold_uncached(
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
@@ -662,68 +719,62 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
+    /// Shared cache wrapper for the shape-keyed recursion program caches.
+    ///
+    /// Sound exactly when `shape_key` is injective on program bytes; under
+    /// `ZIREN_VERIFY_PROGRAM_CACHE=1` every hit rebuilds and bincode
+    /// byte-compares, which turns that condition into a checked assertion.
+    fn cached_program(
+        &self,
+        cache: &Mutex<RecursionProgramCache>,
+        cache_key: u64,
+        stage: &'static str,
+        build: impl Fn() -> Arc<RecursionProgram<KoalaBear>>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let audit = crate::program_cache::program_cache_audit_enabled();
+        let cached = cache.lock().unwrap().get(cache_key);
+        if let Some(cached) = cached {
+            if audit {
+                let fresh = build();
+                let cached_bytes =
+                    bincode::serialize(&*cached).expect("program cache: serialize cached");
+                let fresh_bytes =
+                    bincode::serialize(&*fresh).expect("program cache: serialize fresh");
+                assert_eq!(
+                    cached_bytes, fresh_bytes,
+                    "{stage} program cache divergence at shape_key={cache_key:#018x}: two \
+                     inputs collided in shape_key but produced different programs — extend \
+                     shape_key to cover the diverging field",
+                );
+            }
+            return cached;
+        }
+        let program = build();
+        cache.lock().unwrap().insert(cache_key, program)
+    }
+
+    /// Hits and misses of both shape-keyed program caches, for the stage
+    /// report: `(normalize_hits, normalize_misses, compose_hits, compose_misses)`.
+    pub fn recursion_program_cache_counts(&self) -> (u64, u64, u64, u64) {
+        let n = self.normalize_programs_basefold_cache.lock().unwrap();
+        let c = self.compose_programs_basefold_cache.lock().unwrap();
+        (n.hits, n.misses, c.hits, c.misses)
+    }
+
     /// Build the Compose (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::compress_program`].
     ///
-    /// Per-shape cache:
-    /// under `ZIREN_GPU_RESIDENCY=full` the program is built once per
-    /// shape key and reused.
-    /// With the cache audit on (orthogonal to the residency
-    /// profile), every cache hit rebuilds and asserts bincode
-    /// byte-equality — catches the failure mode where real input
-    /// shapes vary across calls of the same arity.
+    /// Shape-keyed — see [`Self::compose_programs_basefold_cache`].
     pub fn compose_program_basefold(
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let cache_enabled = crate::residency::program_cache_enabled();
-        let verify_cache = crate::residency::program_cache_audit_enabled();
-        // The cache key is a structural shape signature covering every
-        // variable-length collection in the witness write traversal (not just
-        // arity).  This makes the cache sound for Ziren's heterogeneous-shape
-        // workloads — see `compose_programs_basefold_cache` field docs and
-        // `ZKMCompressBasefoldWitnessValues::shape_key`.
-        let arity = input.vks_and_proofs.len();
-        let cache_key = input.shape_key();
-
-        let program: Arc<RecursionProgram<KoalaBear>> = 'build: {
-            if cache_enabled || verify_cache {
-                let cached = {
-                    let guard = self.compose_programs_basefold_cache.lock().unwrap();
-                    guard.get(&cache_key).cloned()
-                };
-                if let Some(cached) = cached {
-                    if verify_cache {
-                        let fresh = self.build_compose_program_basefold_uncached(input);
-                        let cached_bytes = bincode::serialize(&*cached)
-                            .expect("compose program cache: serialize cached");
-                        let fresh_bytes = bincode::serialize(&*fresh)
-                            .expect("compose program cache: serialize fresh");
-                        assert_eq!(
-                            cached_bytes, fresh_bytes,
-                            "compose program cache divergence at \
-                             shape_key={cache_key:#x} (arity={arity}): two \
-                             inputs collided in shape_key but produced \
-                             different programs — extend shape_key to cover \
-                             the diverging field",
-                        );
-                    }
-                    break 'build cached;
-                }
-            }
-
-            let program = self.build_compose_program_basefold_uncached(input);
-
-            if cache_enabled || verify_cache {
-                let mut guard = self.compose_programs_basefold_cache.lock().unwrap();
-                // Use entry API so a concurrent inserter doesn't get clobbered.
-                break 'build Arc::clone(guard.entry(cache_key).or_insert(program));
-            }
-
-            program
-        };
-
-        program
+        self.cached_program(
+            &self.compose_programs_basefold_cache,
+            input.shape_key(),
+            "compose",
+            || self.build_compose_program_basefold_uncached(input),
+        )
     }
 
     /// Uncached body of [`Self::compose_program_basefold`] — exposed so the
@@ -1868,8 +1919,11 @@ pub mod tests {
             .collect();
 
         let arity = 4usize;
+        // Deliberately the UNCACHED builder: routing through
+        // `compose_program_basefold` would satisfy the byte-equality assertion
+        // from the cache itself rather than from the compiler.
         let prog_bytes = |w: &ZKMCompressBasefoldWitnessValues<InnerSC>| -> Vec<u8> {
-            bincode::serialize(&*prover.compose_program_basefold(w))
+            bincode::serialize(&*prover.build_compose_program_basefold_uncached(w))
                 .expect("serialize compose program")
         };
 
@@ -1975,6 +2029,122 @@ pub mod tests {
              (each builds a differently sized compose program); got {} — the \
              key no longer separates log_dense_size",
             seen.len(),
+        );
+    }
+
+    /// The NORMALIZE program-cache key
+    /// (`ZKMCoreBasefoldWitnessValues::shape_key`) carries the same single
+    /// invariant as the compose one — **equal `shape_key` implies a
+    /// byte-identical normalize program** — since
+    /// `recursion_program_basefold` hands back the cached program on a hit.
+    ///
+    /// The leaf layer is where this matters most: one node per core shard, and
+    /// core shards differ from one another only in their per-chip heights,
+    /// which the normalize circuit is deliberately agnostic to (heights are
+    /// Horner-recomposed from the WITNESSED per-chip `degree`, a fixed
+    /// `max_log_row_count + 1` felts wide).  So bands must NOT split the key
+    /// while the chip SET must.
+    #[test]
+    #[serial]
+    fn normalize_program_cache_key_implies_identical_program() {
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shape::OrderedShape;
+        use crate::shapes::ZKMProofShape;
+        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+
+        // Deliberately the UNCACHED builder: routing through
+        // `recursion_program_basefold` would satisfy the byte-equality
+        // assertion from the cache itself rather than from the compiler.
+        let prog_bytes = |w: &ZKMCoreBasefoldWitnessValues<InnerSC>| -> Vec<u8> {
+            bincode::serialize(&*prover.build_normalize_program_basefold_uncached(w))
+                .expect("serialize normalize program")
+        };
+
+        // Start from an ENUMERATED normalize shape, which is by construction
+        // one `fix_shape` accepts.  Variants only SHRINK a chip, so they stay
+        // inside the same band.
+        let core_shape_config = CoreShapeConfig::default();
+        let recursion_shape_config =
+            RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
+        let base_os = ZKMProofShape::generate(
+            &core_shape_config,
+            &recursion_shape_config,
+            REDUCE_BATCH_SIZE,
+        )
+        .find_map(|s| match s {
+            ZKMProofShape::Recursion(batch) => batch.into_iter().next(),
+            _ => None,
+        })
+        .expect("the enumeration emits normalize shapes");
+        let base: Vec<(String, usize)> = base_os.inner.clone();
+
+        let witness_of = |hs: &[(String, usize)]| -> ZKMCoreBasefoldWitnessValues<InnerSC> {
+            let os = OrderedShape { inner: hs.to_vec() };
+            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
+            ZKMCoreBasefoldWitnessValues::dummy(machine, &shape)
+        };
+
+        // ── (a) The key must COLLIDE, and every collision must be safe ─────
+        // Core shards carry no area pin, so a wide height sweep does split the
+        // key on `log_dense_size`.  What the cache needs is the other
+        // direction: shapes differing only in a dimension the circuit cannot
+        // see must land on ONE key, and that key must imply one program.
+        // Shrinking a single chip moves the per-chip heights (and with them
+        // the packing offsets) without moving `log_dense_size`.
+        let shrink_one = |idx: usize| -> Vec<(String, usize)> {
+            let mut v = base.clone();
+            v[idx].1 = v[idx].1.saturating_sub(1).max(1);
+            v
+        };
+        let candidates: Vec<Vec<(String, usize)>> = std::iter::once(base.clone())
+            .chain((0..base.len().min(4)).map(shrink_one))
+            .collect();
+
+        let mut by_key: std::collections::BTreeMap<u64, Vec<(usize, Vec<u8>)>> =
+            std::collections::BTreeMap::new();
+        for (n, hs) in candidates.iter().enumerate() {
+            let w = witness_of(hs);
+            by_key.entry(w.shape_key()).or_default().push((n, prog_bytes(&w)));
+        }
+        let collided: Vec<_> = by_key.iter().filter(|(_, v)| v.len() > 1).collect();
+        assert!(
+            !collided.is_empty(),
+            "expected at least one shape_key collision across single-chip \
+             height variants — without one the normalize cache can never hit",
+        );
+        for (k, members) in collided {
+            let (first_idx, first) = &members[0];
+            for (idx, bytes) in members.iter().skip(1) {
+                assert_eq!(
+                    first.len(),
+                    bytes.len(),
+                    "NORMALIZE CACHE-KEY UNSOUND: variants {first_idx} and {idx} \
+                     share shape_key {k:#018x} but build normalize programs of \
+                     different LENGTH; extend shape_key to cover whichever \
+                     field diverged",
+                );
+                assert!(
+                    first == bytes,
+                    "NORMALIZE CACHE-KEY UNSOUND: variants {first_idx} and {idx} \
+                     share shape_key {k:#018x} and length but different BYTES",
+                );
+            }
+        }
+
+        // ── (b) THE SPLIT THAT MUST HAPPEN: a different chip SET ───────────
+        // Dropping a chip changes `column_counts_by_round`, which the verifier
+        // BAKES, so the two programs differ and the keys must too.
+        let mut fewer = base.clone();
+        fewer.pop();
+        assert_ne!(
+            witness_of(&fewer).shape_key(),
+            witness_of(&base).shape_key(),
+            "NORMALIZE CACHE-KEY UNSOUND: dropping a chip left the key \
+             unchanged, so a shard missing that chip would be served the \
+             wrong cached program",
         );
     }
 

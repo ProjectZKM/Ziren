@@ -13,6 +13,7 @@ pub mod deferred_basefold;
 pub mod deferred_basefold_recursion;
 mod public_values;
 mod root;
+pub mod shape_signature;
 mod vkey_proof;
 mod witness;
 pub mod wrap_basefold;

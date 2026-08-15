@@ -1047,4 +1047,61 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
         }
     }
+
+    /// Structural signature of the witness layout — the normalize program
+    /// cache key.
+    ///
+    /// `shape_key(a) == shape_key(b)  ⟹  normalize_program(a) == normalize_program(b)`
+    /// bytewise.  The walk hashes every variable-length collection the
+    /// `Witnessable::write` traversal meets, in write order, plus the two
+    /// host-side (compile-time) projections `build_normalize_basefold_program`
+    /// feeds the builder alongside the witness:
+    ///
+    ///   * the per-shard `chip_heights` KEY SET — `verify_core_basefold`
+    ///     filters the machine's chips by these names and derives
+    ///     `column_counts_by_round` from the survivors.  The height VALUES are
+    ///     not baked: both consumers
+    ///     (`chip_height_bits_from_opened_degrees`,
+    ///     `finalize_carried_opened_values`) derive the height bits from the
+    ///     WITNESSED per-chip `degree`, whose width is the fixed
+    ///     `max_log_row_count + 1`.
+    ///   * `vk.chip_information.len()` — the recursion vk hash folds one
+    ///     `[name_digest, prep_width]` pair per preprocessed chip, i.e. two
+    ///     witness reads per entry, so the prep-chip COUNT is structural.
+    ///
+    /// Walk order MUST mirror the core-level `Witnessable::<C>::write` impl in
+    /// `crates/recursion/circuit/src/machine/witness.rs` and the per-shard
+    /// `BasefoldShardProof` one in
+    /// `crates/recursion/circuit/src/shard_level_witness.rs` (delegated to
+    /// [`crate::machine::shape_signature::hash_shard_proof_structure`]).
+    pub fn shape_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+
+        // Version tag — bumping it invalidates previously cached programs
+        // instead of letting an old key silently alias a new walk.
+        0xC0_FE_BA_12_u32.hash(&mut h);
+
+        // vk write order: preprocessed_commit (fixed digest), pc_start,
+        // chip_information (2 reads per entry), chip_ordering.
+        self.vk.chip_information.len().hash(&mut h);
+        self.vk.chip_ordering.len().hash(&mut h);
+
+        self.shard_proofs.len().hash(&mut h);
+        for sp in self.shard_proofs.iter() {
+            crate::machine::shape_signature::hash_shard_proof_structure(sp, &mut h);
+            // Compile-time projection: only the key set is consumed.
+            sp.chip_heights.len().hash(&mut h);
+            for name in sp.chip_heights.keys() {
+                name.hash(&mut h);
+            }
+        }
+
+        // is_complete / is_first_shard are witnessed felts, not baked;
+        // included so the key can never be coarser than the input.
+        self.is_complete.hash(&mut h);
+        self.is_first_shard.hash(&mut h);
+
+        h.finish()
+    }
 }
