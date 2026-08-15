@@ -350,7 +350,7 @@ where
         &self.basefold_prover
     }
 
-    pub fn prove_trusted_evaluation<Challenger>(
+    pub fn prove_trusted_evaluation<Challenger: 'static>(
         &self,
         eval_point: Vec<EF>,
         // BORROWED for the same reason as

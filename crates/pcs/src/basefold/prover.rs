@@ -29,6 +29,63 @@ use super::fri::{commit_phase_round, final_poly};
 use super::mle::Mle;
 use super::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 
+/// An accelerated proof-of-work search, registered for ONE concrete challenger
+/// type.
+///
+/// The accelerator this exists for is a CUDA kernel, and it lives in a crate
+/// that DEPENDS on this one.  It cannot be attached through the type system:
+/// both the trait it would implement and the challenger it would implement it
+/// for would be foreign to that crate, which the orphan rule forbids.  So the
+/// accelerator registers itself once, at prover construction, and
+/// [`deterministic_grind`] looks up its own `C`.  The lookup is `downcast_ref`,
+/// i.e. type-exact — a registration made for a different challenger is simply
+/// not found and the host search below runs unchanged.
+///
+/// The contract an accelerator MUST honour is `deterministic_grind`'s own: it
+/// returns the SMALLEST witness index that passes `check_witness`, and it
+/// leaves the challenger advanced exactly as one `check_witness(bits, witness)`
+/// call would.  Any other witness is still a VALID proof, but a different one —
+/// the witness is part of the proof byte stream.
+struct GrindAccelerator<C: GrindingChallenger>(fn(&mut C, usize) -> C::Witness);
+
+/// One entry per challenger type, so registering a second challenger cannot
+/// silently evict the first.  Written once per challenger at prover
+/// construction and read (never written) from the proving threads, so the
+/// lock is uncontended; the guard is dropped BEFORE the accelerator runs,
+/// because the accelerator is a seconds-long device call.
+static GRIND_ACCELERATORS: std::sync::RwLock<
+    alloc::vec::Vec<alloc::boxed::Box<dyn core::any::Any + Send + Sync>>,
+> = std::sync::RwLock::new(alloc::vec::Vec::new());
+
+/// Register `accelerator` as the proof-of-work search for challenger `C`.
+///
+/// Idempotent per challenger and first-writer-wins: re-registering `C` is a
+/// no-op, so a process cannot switch grinds half way through a proof.  See
+/// [`GrindAccelerator`] for the contract an accelerator must honour.
+pub fn register_grind_accelerator<C>(accelerator: fn(&mut C, usize) -> C::Witness)
+where
+    C: GrindingChallenger + 'static,
+{
+    let mut registered = GRIND_ACCELERATORS.write().expect("grind accelerator registry poisoned");
+    if registered.iter().any(|a| a.is::<GrindAccelerator<C>>()) {
+        return;
+    }
+    registered.push(alloc::boxed::Box::new(GrindAccelerator::<C>(accelerator)));
+}
+
+/// The registered accelerator for `C`, if one was registered for exactly `C`.
+fn grind_accelerator_for<C>() -> Option<fn(&mut C, usize) -> C::Witness>
+where
+    C: GrindingChallenger + 'static,
+{
+    GRIND_ACCELERATORS
+        .read()
+        .expect("grind accelerator registry poisoned")
+        .iter()
+        .find_map(|a| a.downcast_ref::<GrindAccelerator<C>>())
+        .map(|a| a.0)
+}
+
 /// Deterministic counterpart to `<C as GrindingChallenger>::grind(bits)`.
 ///
 /// plonky3's [`p3_challenger::DuplexChallenger::grind`] is
@@ -71,11 +128,17 @@ use super::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 pub(crate) fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::PrimeField64 + p3_field::integers::QuotientMap<u64> + Send + Sync,
-    C: GrindingChallenger<Witness = F>,
+    C: GrindingChallenger<Witness = F> + 'static,
 {
     use p3_maybe_rayon::prelude::*;
     if bits == 0 {
         return F::ZERO;
+    }
+    // An accelerator registered for THIS challenger type replaces the search
+    // below.  See `register_grind_accelerator` for the contract and for why the
+    // dispatch is a registration rather than a trait impl.
+    if let Some(accelerated) = grind_accelerator_for::<C>() {
+        return accelerated(challenger, bits);
     }
     let order = F::ORDER_U64;
     // Parallel search with `find_first` semantics — returns the
@@ -291,7 +354,7 @@ where
     /// variables of every committed MLE (all MLEs in a single proof
     /// must share the same `num_variables`).
     #[allow(clippy::type_complexity)]
-    pub fn prove_trusted_mle_evaluations<Challenger>(
+    pub fn prove_trusted_mle_evaluations<Challenger: 'static>(
         &self,
         eval_point: Vec<EF>,
         mle_rounds: Vec<Vec<Arc<Mle<F>>>>,

@@ -549,7 +549,10 @@ where
     D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
     Challenger: p3_challenger::FieldChallenger<JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = JaggedVal>
-        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
+        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
+        // `'static`: `deterministic_grind` looks the challenger type up in the
+        // grind-accelerator registration, which is keyed by `TypeId`.
+        + 'static,
 {
     let log_stacking_height = rounds[0].log_stacking_height;
     let prover = StackedPcsProver::new(
@@ -604,7 +607,10 @@ where
     D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
     Challenger: p3_challenger::FieldChallenger<JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = JaggedVal>
-        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
+        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>
+        // `'static`: `deterministic_grind` looks the challenger type up in the
+        // grind-accelerator registration, which is keyed by `TypeId`.
+        + 'static,
 {
     let prover = StackedPcsProver::new(
         BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(fri, dft, mmcs, 1),
@@ -1296,7 +1302,10 @@ pub mod jagged {
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + p3_challenger::CanObserve<
                 <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-            >,
+            >
+            // `'static`: `deterministic_grind` looks the challenger type up in
+            // the grind-accelerator registration, which is keyed by `TypeId`.
+            + 'static,
     {
         assert!(!rounds.is_empty(), "prove_jagged_basefold_rounds: no rounds");
 
