@@ -211,6 +211,47 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
         }
     }
 
+    /// Build a proving key whose preprocessed commit has already been computed.
+    ///
+    /// The commit is the expensive half of `setup`, and a caller that just
+    /// built it has no reason to make [`Self::preprocessed_data`] build it a
+    /// second time.  The supplied data MUST be the precompute of exactly these
+    /// `traces` under exactly this `prep_rev` — it is what the preprocessed
+    /// round of every shard proof opens against `commit`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts_with_preprocessed_data(
+        commit: Com<SC>,
+        pc_start: Val<SC>,
+        initial_global_cumulative_sum: SepticDigest<Val<SC>>,
+        traces: Vec<RowMajorMatrix<Val<SC>>>,
+        chip_ordering: HashMap<String, usize>,
+        constraints_map: HashMap<String, usize>,
+        prep_rev: bool,
+        preprocessed_data: std::sync::Arc<SC::PrepPrecomputed>,
+    ) -> Self {
+        let key = Self::from_parts(
+            commit,
+            pc_start,
+            initial_global_cumulative_sum,
+            traces,
+            chip_ordering,
+            constraints_map,
+            prep_rev,
+        );
+        let _ = key.preprocessed_data.set(preprocessed_data);
+        key
+    }
+
+    /// The preprocessed commit's prover data if it has already been built, and
+    /// `None` if it has not — a peek that does NOT trigger the build.
+    ///
+    /// For carrying an already-paid commit onward (host key -> device key ->
+    /// host key) without forcing one on a path that never opens the
+    /// preprocessed round.
+    pub fn preprocessed_data_if_built(&self) -> Option<&std::sync::Arc<SC::PrepPrecomputed>> {
+        self.preprocessed_data.get()
+    }
+
     /// The preprocessed traces in prove-path form, built once per key.
     ///
     /// Each entry is the zero-copy `Mle` view of the corresponding

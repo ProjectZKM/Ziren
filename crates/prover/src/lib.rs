@@ -172,28 +172,27 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// Whether to verify verification keys.
     pub vk_verification: bool,
 
-    /// Per-arity cache for the host-side basefold compose proving-key
-    /// shell (preprocessed traces + chip_ordering) paired with the
-    /// matching verifying key.
+    /// Recursion proving keys, keyed by the identity of the program they
+    /// were built from ([`zkm_recursion_core::setup_digest`]).
     ///
-    /// Distinct from `compose_programs_basefold_cache` (which caches the
-    /// uncompiled recursion program).  This caches the **post-setup**
-    /// host view that the ziren-gpu `RecursionProverWorker::dispatch`
-    /// path materializes per-shard via `pk_to_host()` (after a heavy
-    /// per-chip `generate_preprocessed_trace_host` walk during
-    /// `setup()`).  Reusing it lets dispatch skip both the device
-    /// `setup()` and the `pk_to_host()` D2H sync; the vk is paired so
-    /// downstream `ProvedShard { vk, .. }` can be filled from the
-    /// cache instead of returned from the (skipped) `setup()` call.
+    /// A recursion tree proves one node per core shard plus one per compose
+    /// batch — hundreds of nodes — and the programs behind them repeat: every
+    /// node of a layer is the same circuit over different values.  `setup` is
+    /// a pure function of the program (a per-chip preprocessed trace walk plus
+    /// the preprocessed BaseFold commit), and it is the single most expensive
+    /// thing in the stage, so keying it by program identity turns "once per
+    /// node" into "once per distinct program".
     ///
-    /// Opt-in via `ZIREN_GPU_RESIDENCY=full`.  Default OFF — the
-    /// cache is only sound when
-    /// (program, arity) → (pk, vk) is deterministic, which holds today
-    /// because `compose_program_basefold` is keyed only on arity in
-    /// the program cache and `setup()` is a pure function of the
-    /// program.
-    pub compose_pks_basefold_cache:
-        Mutex<BTreeMap<usize, Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>>>,
+    /// The key is the digest, not the arity: arity does not determine the
+    /// program, because per-input shapes vary across nodes of equal arity and
+    /// a key built for one shape does not open the other's traces.
+    ///
+    /// Bounded — an entry holds the preprocessed traces AND the retained
+    /// BaseFold prover data for a 2^27-cell commit, so an unbounded map would
+    /// grow with the number of distinct shapes a workload happens to produce.
+    /// Insertion order is recorded alongside so the oldest entry is the one
+    /// dropped.
+    pub recursion_pks_basefold_cache: Mutex<RecursionPkCache>,
 
     /// Per-shape cache for the basefold compose recursion program.
     ///
@@ -220,6 +219,69 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// produce different programs.  The audit flag is orthogonal to
     /// the residency profile (CI/dev tool).
     pub compose_programs_basefold_cache: Mutex<BTreeMap<u64, Arc<RecursionProgram<KoalaBear>>>>,
+}
+
+/// Program-identity-keyed recursion proving keys, capped so the retained
+/// BaseFold data cannot grow without bound.
+///
+/// The eviction order is insertion order: a recursion tree walks its layers in
+/// order and never returns to an earlier one, so the oldest key is also the one
+/// least likely to be asked for again.
+#[derive(Default)]
+pub struct RecursionPkCache {
+    entries: BTreeMap<[u8; 32], Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>>,
+    order: std::collections::VecDeque<[u8; 32]>,
+    pub hits: u64,
+    pub misses: u64,
+}
+
+impl RecursionPkCache {
+    /// How many distinct programs' keys to retain.  Every layer of the tree
+    /// contributes at most a handful of distinct programs, so a small cap
+    /// still holds a whole layer's worth; raise it for workloads with an
+    /// unusually wide shape spread, and set it to 0 to hold nothing (which
+    /// recovers the build-a-key-per-node behaviour, for measurement).
+    fn capacity() -> usize {
+        std::env::var("ZIREN_RECURSION_PK_CACHE_SIZE")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(24)
+    }
+
+    fn get(&mut self, key: &[u8; 32]) -> Option<Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>> {
+        match self.entries.get(key) {
+            Some(v) => {
+                self.hits += 1;
+                Some(Arc::clone(v))
+            }
+            None => {
+                self.misses += 1;
+                None
+            }
+        }
+    }
+
+    fn insert(
+        &mut self,
+        key: [u8; 32],
+        pk: StarkProvingKey<InnerSC>,
+        vk: StarkVerifyingKey<InnerSC>,
+    ) -> Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)> {
+        // First writer wins: a racing inserter for the same program discards
+        // its own key rather than replacing a copy other shards may hold.
+        if let Some(v) = self.entries.get(&key) {
+            return Arc::clone(v);
+        }
+        let value = Arc::new((pk, vk));
+        self.entries.insert(key, Arc::clone(&value));
+        self.order.push_back(key);
+        while self.order.len() > Self::capacity() {
+            if let Some(old) = self.order.pop_front() {
+                self.entries.remove(&old);
+            }
+        }
+        value
+    }
 }
 
 impl<C: ZKMProverComponents> ZKMProver<C> {
@@ -322,7 +384,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vk_verification,
             wrap_vk: OnceLock::new(),
             compose_programs_basefold_cache: Mutex::new(BTreeMap::new()),
-            compose_pks_basefold_cache: Mutex::new(BTreeMap::new()),
+            recursion_pks_basefold_cache: Mutex::new(RecursionPkCache::default()),
         };
 
         // Compose-program pre-warm.
@@ -427,51 +489,37 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Returns true when the host-side compose-pk cache is enabled.
-    /// ziren-gpu's `RecursionProverWorker::dispatch` consults this
-    /// gate before short-circuiting its per-shard `setup()` +
-    /// `pk_to_host()` walk in favor of
-    /// `compose_pks_basefold_cache.get(&arity)`.
-    ///
-    /// Resolved via `crate::residency::compose_pk_cache_enabled()` —
-    /// `ZIREN_GPU_RESIDENCY=full` opts in.  Default OFF; see field
-    /// docs for the soundness contract.
-    /// Motivating bottleneck: per-shard repeated `setup()` cost on the
-    /// recursion-phase GPU dispatch path.
-    pub fn compose_pk_cache_enabled() -> bool {
-        crate::residency::compose_pk_cache_enabled()
+    /// The key for `program`, as the recursion pk cache sees it.
+    pub fn recursion_pk_cache_key(program: &RecursionProgram<KoalaBear>) -> [u8; 32] {
+        zkm_recursion_core::setup_digest(program)
     }
 
-    /// Lookup helper for the compose-pk cache.  Returns the cached
-    /// `(pk, vk)` pair for the given arity if one is present.  The
-    /// returned `Arc` is cheap to clone; ziren-gpu's dispatch path
-    /// holds it for the duration of one shard.
-    ///
-    /// Does NOT check `compose_pk_cache_enabled()` — callers gate on
-    /// the env helper first and only consult this when caching is on,
-    /// so disabled callers pay zero mutex cost.
-    pub fn compose_pk_cache_get(
+    /// The cached `(pk, vk)` for a program, if its key has been built before.
+    /// The returned `Arc` is cheap to clone and the GPU dispatch path holds it
+    /// for one node.
+    pub fn recursion_pk_cache_get(
         &self,
-        arity: usize,
+        key: &[u8; 32],
     ) -> Option<Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>> {
-        let guard = self.compose_pks_basefold_cache.lock().unwrap();
-        guard.get(&arity).cloned()
+        self.recursion_pks_basefold_cache.lock().unwrap().get(key)
     }
 
-    /// Insertion helper for the compose-pk cache.  Uses the BTreeMap
-    /// `entry` API so a concurrent inserter for the same arity does
-    /// not get clobbered — the first writer wins and subsequent
-    /// inserters discard their freshly-built pk.  Returns the Arc
-    /// that's actually in the cache (caller's value if first, the
-    /// pre-existing value otherwise) so callers can use the canonical
-    /// pk/vk for the downstream device upload.
-    pub fn compose_pk_cache_insert(
+    /// Publish a freshly built key.  Returns the `Arc` that is actually in the
+    /// cache, so a caller that lost a race uses the canonical key rather than
+    /// its own copy.
+    pub fn recursion_pk_cache_insert(
         &self,
-        arity: usize,
+        key: [u8; 32],
         pk: StarkProvingKey<InnerSC>,
         vk: StarkVerifyingKey<InnerSC>,
     ) -> Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)> {
-        let mut guard = self.compose_pks_basefold_cache.lock().unwrap();
-        Arc::clone(guard.entry(arity).or_insert_with(|| Arc::new((pk, vk))))
+        self.recursion_pks_basefold_cache.lock().unwrap().insert(key, pk, vk)
+    }
+
+    /// Hits and misses since the process started, for the stage report.
+    pub fn recursion_pk_cache_counts(&self) -> (u64, u64) {
+        let g = self.recursion_pks_basefold_cache.lock().unwrap();
+        (g.hits, g.misses)
     }
 
     /// Fully initializes the programs, proving keys, and verifying keys that are normally

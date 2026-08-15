@@ -15,9 +15,12 @@
 //! ZIREN_GPU_RESIDENCY=host   # all residency-side hooks/caches OFF
 //! ```
 //!
-//! `hybrid` is the safe default: program cache OFF, compose-pk cache OFF,
-//! pre-warm OFF, cache audit OFF.  `full` opts INTO all caches + pre-warm.
-//! `host` forces everything off (debugging / no-GPU paths).
+//! `hybrid` is the safe default: program cache OFF, pre-warm OFF, cache audit
+//! OFF.  `full` opts INTO all caches + pre-warm.  `host` forces everything off
+//! (debugging / no-GPU paths).
+//!
+//! The recursion proving-key cache is NOT a residency knob: it is keyed by
+//! program identity, so it is unconditionally correct and unconditionally on.
 //!
 //! Backward compat: legacy env vars are still respected so existing
 //! benches don't break.  If any legacy var is set, the profile decision
@@ -41,15 +44,6 @@ pub enum GpuResidencyProfile {
 }
 
 impl GpuResidencyProfile {
-    /// Returns true when the compose host-pk cache should be consulted
-    /// (host side) and populated (GPU dispatch side).  ON for `full`
-    /// only — `hybrid` keeps it OFF.  The cache is documented as sound
-    /// by the recursion-phase GPU audit; long-lived GPU provers can opt
-    /// into `full` to enable it.
-    pub fn allows_compose_pk_cache(self) -> bool {
-        matches!(self, Self::Full)
-    }
-
     /// Returns true when the per-arity compose recursion program cache
     /// should be used.  ON for `full` only — off by default because
     /// fix_shape proof bloat dominates cache savings on the shape spread
@@ -111,12 +105,6 @@ pub fn resolve_gpu_residency_profile() -> GpuResidencyProfile {
 // profile mapping decides each feature.
 // ---------------------------------------------------------------------
 
-/// Compose host-pk cache — ON only under the `Full` profile; the
-/// default `Hybrid` keeps audited-HEAD default behavior.
-pub fn compose_pk_cache_enabled() -> bool {
-    resolve_gpu_residency_profile().allows_compose_pk_cache()
-}
-
 /// Compose recursion program cache — ON only when the profile allows
 /// it (default = `Hybrid` → OFF).
 pub fn program_cache_enabled() -> bool {
@@ -145,21 +133,18 @@ mod tests {
 
     #[test]
     fn default_profile_matches_audited_head_behavior() {
-        // With no env set, the Hybrid profile MUST keep all four
-        // residency knobs OFF: program cache OFF, compose-pk cache OFF,
-        // pre-warm OFF, audit OFF.
+        // With no env set, the Hybrid profile MUST keep every residency knob
+        // OFF: program cache OFF, pre-warm OFF, audit OFF.
         let profile = GpuResidencyProfile::Hybrid;
         assert!(!profile.allows_program_cache());
         assert!(!profile.allows_program_cache_audit());
         assert!(!profile.allows_compose_prewarm());
-        assert!(!profile.allows_compose_pk_cache());
     }
 
     #[test]
     fn full_profile_enables_all_caches() {
         let profile = GpuResidencyProfile::Full;
         assert!(profile.allows_program_cache());
-        assert!(profile.allows_compose_pk_cache());
         assert!(profile.allows_compose_prewarm());
     }
 
@@ -167,7 +152,6 @@ mod tests {
     fn host_profile_disables_residency_hooks() {
         let profile = GpuResidencyProfile::Host;
         assert!(!profile.allows_program_cache());
-        assert!(!profile.allows_compose_pk_cache());
         assert!(!profile.allows_compose_prewarm());
     }
 }

@@ -25,6 +25,48 @@ pub struct RecursionProgram<F> {
     pub shape: Option<RecursionShape>,
 }
 
+/// The identity a proving key is built from.
+///
+/// `MachineProver::setup` reads exactly three things off a program — the
+/// instruction stream, the shape it was snapped onto, and the memory size —
+/// so two programs with the same digest necessarily produce the same
+/// `(pk, vk)`.  That is what lets a recursion key be looked up instead of
+/// rebuilt: the recursion tree proves hundreds of nodes whose programs
+/// repeat, and rebuilding a key per node is by far the most expensive thing
+/// the compress stage does.
+///
+/// SHA-256 over the canonical serialization, streamed rather than
+/// materialized: the buffer for a multi-million-instruction program would
+/// otherwise be hundreds of megabytes.
+pub fn setup_digest<F: Serialize>(program: &RecursionProgram<F>) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+
+    /// Feeds `serialize_into` straight to the hasher.
+    struct HashWriter(Sha256);
+    impl std::io::Write for HashWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.update(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut w = HashWriter(Sha256::new());
+    // Domain separation, so a future change to what the digest covers cannot
+    // silently match a key built under the old definition.
+    std::io::Write::write_all(&mut w, b"zkm-recursion-setup-digest-v1")
+        .expect("hashing cannot fail");
+    bincode::serialize_into(&mut w, &program.seq_blocks)
+        .expect("a program that was built is serializable");
+    bincode::serialize_into(&mut w, &program.total_memory)
+        .expect("a program that was built is serializable");
+    bincode::serialize_into(&mut w, &program.shape)
+        .expect("a program that was built is serializable");
+    w.0.finalize().into()
+}
+
 impl<F> RecursionProgram<F> {
     /// Iterate over the program's instructions in execution order,
     /// recursing through parallel sub-programs in deterministic vec

@@ -8178,6 +8178,7 @@ dependencies = [
  "rand 0.8.5",
  "range-set-blaze",
  "serde",
+ "sha2",
  "smallvec",
  "static_assertions",
  "thiserror 1.0.69",
