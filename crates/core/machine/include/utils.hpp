@@ -216,24 +216,13 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t to_syscall_id(SyscallCode self) {
     return ((uint32_t)self) & 0x0FFFF;
 }
 
+/// Mirrors `KoalaBearWordRangeChecker::populate`.  The gadget's one column
+/// flags the single case where the lower limbs are constrained, `v[3] ==
+/// 0x7F`; the other case is discharged by a byte lookup, and the byte events
+/// come from the Rust dependency pass, not from here.
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_range_checker(KoalaBearWordRangeChecker<F>& self, const uint32_t value) {
-    for (size_t i = 0; i < 8; ++i) {
-        bool bit = (value & (1u << (i + 24))) != 0;
-        self.most_sig_byte_decomp[i] = F::from_bool(bit);
-    }
-    self.and_most_sig_byte_decomp_0_to_2 =
-        self.most_sig_byte_decomp[0] * self.most_sig_byte_decomp[1];
-    self.and_most_sig_byte_decomp_0_to_3 =
-        self.and_most_sig_byte_decomp_0_to_2 * self.most_sig_byte_decomp[2];
-    self.and_most_sig_byte_decomp_0_to_4 =
-        self.and_most_sig_byte_decomp_0_to_3 * self.most_sig_byte_decomp[3];
-    self.and_most_sig_byte_decomp_0_to_5 =
-        self.and_most_sig_byte_decomp_0_to_4 * self.most_sig_byte_decomp[4];
-    self.and_most_sig_byte_decomp_0_to_6 =
-        self.and_most_sig_byte_decomp_0_to_5 * self.most_sig_byte_decomp[5];
-    self.and_most_sig_byte_decomp_0_to_7 =
-        self.and_most_sig_byte_decomp_0_to_6 * self.most_sig_byte_decomp[6];
+    self.most_sig_byte_is_max = F::from_bool(((value >> 24) & 0xFFu) == 0x7Fu);
 }
 
 template<class F>
