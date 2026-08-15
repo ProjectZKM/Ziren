@@ -183,11 +183,11 @@ impl SyscallInstrsChip {
 
         if op_b_needs_check {
             cols.op_b_check = F::ONE;
-            cols.op_b_range_check.populate(event.arg1);
+            cols.op_b_range_check.populate(_blu, event.arg1);
         }
         if op_c_needs_check {
             cols.op_c_check = F::ONE;
-            cols.op_c_range_check.populate(event.arg2);
+            cols.op_c_range_check.populate(_blu, event.arg2);
         }
     }
 }

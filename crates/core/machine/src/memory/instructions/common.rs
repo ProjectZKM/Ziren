@@ -289,7 +289,7 @@ impl<F: PrimeField32> MemoryInstrCommonCols<F> {
         // op_b, op_c and the resulting address word).
         let memory_addr = self.addr_add.populate(blu, event.b, event.c);
         debug_assert_eq!(memory_addr, event.b.wrapping_add(event.c));
-        self.addr_word_range_checker.populate(memory_addr);
+        self.addr_word_range_checker.populate(blu, memory_addr);
 
         let addr_ls_two_bits = (memory_addr % WORD_SIZE as u32) as u8;
         self.addr_ls_two_bits = F::from_u8(addr_ls_two_bits);

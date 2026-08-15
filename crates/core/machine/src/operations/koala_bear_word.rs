@@ -1,105 +1,83 @@
-use std::array;
-
 use p3_air::AirBuilder;
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use zkm_core_executor::{events::ByteRecord, ByteOpcode};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{air::ZKMAirBuilder, Word};
 
-/// A set of columns needed to compute the add of two words.
+/// Witness that a word is a canonical KoalaBear field element.
+///
+/// KoalaBear's modulus is `P = 0x7F00_0001`, so a word `v` (four byte limbs,
+/// little endian) is canonical exactly when
+///
+/// * `v[3] < 0x7F`, or
+/// * `v[3] == 0x7F` and `v[0] == v[1] == v[2] == 0` (the value `0x7F000000`,
+///   which is `P - 1`).
+///
+/// The single column is the flag for the second case; the first case is
+/// discharged by one byte lookup, gated off on the rows where the flag is set.
+/// That lookup also re-proves `v[3] < 256` on its own (the byte table is only
+/// indexed by byte pairs), so the gadget needs nothing from the caller beyond
+/// `v[0..3]` already being range-checked bytes — the same precondition the
+/// zero-sum branch has always relied on.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct KoalaBearWordRangeChecker<T> {
-    /// Most sig byte LE bit decomposition.
-    pub most_sig_byte_decomp: [T; 8],
+    /// Whether the most significant byte is `0x7F`, the only value for which
+    /// the lower limbs are constrained.  Zero on rows where the check is off.
+    pub most_sig_byte_is_max: T,
+}
 
-    /// The product of the the bits 0 to 2 in `most_sig_byte_decomp`.
-    pub and_most_sig_byte_decomp_0_to_2: T,
+/// The most significant byte of `P - 1`.
+const MOST_SIG_BYTE_MAX: u8 = 0x7F;
 
-    /// The product of the the bits 0 to 3 in `most_sig_byte_decomp`.
-    pub and_most_sig_byte_decomp_0_to_3: T,
-
-    /// The product of the the bits 0 to 4 in `most_sig_byte_decomp`.
-    pub and_most_sig_byte_decomp_0_to_4: T,
-
-    /// The product of the the bits 0 to 5 in `most_sig_byte_decomp`.
-    pub and_most_sig_byte_decomp_0_to_5: T,
-
-    /// The product of the the bits 0 to 6 in `most_sig_byte_decomp`.
-    pub and_most_sig_byte_decomp_0_to_6: T,
-
-    /// The product of the the bits 0 to 7 in `most_sig_byte_decomp`.
-    pub and_most_sig_byte_decomp_0_to_7: T,
+impl<F: PrimeField32> KoalaBearWordRangeChecker<F> {
+    /// Populate the flag and request the byte lookup the AIR sends on this row.
+    /// Only called for rows where the check is real.
+    pub fn populate(&mut self, record: &mut impl ByteRecord, value: u32) {
+        let most_sig_byte = value.to_le_bytes()[3];
+        let is_max = most_sig_byte == MOST_SIG_BYTE_MAX;
+        self.most_sig_byte_is_max = F::from_bool(is_max);
+        if !is_max {
+            record.add_byte_lookup_event(zkm_core_executor::events::ByteLookupEvent {
+                opcode: ByteOpcode::LTU,
+                a1: 1,
+                a2: 0,
+                b: most_sig_byte,
+                c: MOST_SIG_BYTE_MAX,
+            });
+        }
+    }
 }
 
 impl<F: Field> KoalaBearWordRangeChecker<F> {
-    pub fn populate(&mut self, value: u32) {
-        self.most_sig_byte_decomp = array::from_fn(|i| F::from_bool(value & (1 << (i + 24)) != 0));
-        self.and_most_sig_byte_decomp_0_to_2 =
-            self.most_sig_byte_decomp[0] * self.most_sig_byte_decomp[1];
-        self.and_most_sig_byte_decomp_0_to_3 =
-            self.and_most_sig_byte_decomp_0_to_2 * self.most_sig_byte_decomp[2];
-        self.and_most_sig_byte_decomp_0_to_4 =
-            self.and_most_sig_byte_decomp_0_to_3 * self.most_sig_byte_decomp[3];
-        self.and_most_sig_byte_decomp_0_to_5 =
-            self.and_most_sig_byte_decomp_0_to_4 * self.most_sig_byte_decomp[4];
-        self.and_most_sig_byte_decomp_0_to_6 =
-            self.and_most_sig_byte_decomp_0_to_5 * self.most_sig_byte_decomp[5];
-        self.and_most_sig_byte_decomp_0_to_7 =
-            self.and_most_sig_byte_decomp_0_to_6 * self.most_sig_byte_decomp[6];
-    }
-
     pub fn range_check<AB: ZKMAirBuilder>(
         builder: &mut AB,
         value: Word<AB::Var>,
         cols: KoalaBearWordRangeChecker<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let mut recomposed_byte = AB::Expr::ZERO;
-        cols.most_sig_byte_decomp.iter().enumerate().for_each(|(i, value)| {
-            builder.when(is_real.clone()).assert_bool(*value);
-            recomposed_byte = recomposed_byte.clone() + AB::Expr::from_usize(1 << i) * *value;
-        });
+        let is_max: AB::Expr = cols.most_sig_byte_is_max.into();
+        builder.assert_bool(is_max.clone());
+        // The flag may only be set where the check is on, which makes
+        // `is_real - is_max` a boolean and keeps the lookup multiplicity
+        // degree 1 in `is_real`.
+        builder.when_not(is_real.clone()).assert_zero(is_max.clone());
 
-        builder.when(is_real.clone()).assert_eq(recomposed_byte, value[3]);
+        // Case `v[3] == 0x7F`: pin the byte and force the lower limbs to zero,
+        // i.e. `v == P - 1`.
+        builder.when(is_max.clone()).assert_eq(value[3], AB::Expr::from_u8(MOST_SIG_BYTE_MAX));
+        builder.when(is_max.clone()).assert_zero(value[0] + value[1] + value[2]);
 
-        // Range check that value is less than koala bear modulus.  To do this, it is sufficient
-        // to just do comparisons for the most significant byte. KoalaBear's modulus is (in big
-        // endian binary) 01111111_00000000_00000000_00000001.  So we need to check the
-        // following conditions:
-        // 1) if most_sig_byte > 01111111, then fail.
-        // 2) if most_sig_byte == 01111111, then value's lower sig bytes must all be 0.
-        // 3) if most_sig_byte < 01111111, then pass.
-        builder.when(is_real.clone()).assert_zero(cols.most_sig_byte_decomp[7]);
-
-        // Compute the product of the "top bits".
-        builder.when(is_real.clone()).assert_eq(
-            cols.and_most_sig_byte_decomp_0_to_2,
-            cols.most_sig_byte_decomp[0] * cols.most_sig_byte_decomp[1],
+        // Case `v[3] != 0x7F`: `v[3] < 0x7F`, so `v <= 0x7EFFFFFF < P`
+        // regardless of the lower limbs.  Asking the table for the row whose
+        // `LTU` output is ONE is what makes this an assertion rather than a
+        // reported comparison.
+        builder.send_byte(
+            AB::Expr::from_u8(ByteOpcode::LTU as u8),
+            AB::Expr::ONE,
+            value[3],
+            AB::Expr::from_u8(MOST_SIG_BYTE_MAX),
+            is_real - is_max,
         );
-        builder.when(is_real.clone()).assert_eq(
-            cols.and_most_sig_byte_decomp_0_to_3,
-            cols.and_most_sig_byte_decomp_0_to_2 * cols.most_sig_byte_decomp[2],
-        );
-        builder.when(is_real.clone()).assert_eq(
-            cols.and_most_sig_byte_decomp_0_to_4,
-            cols.and_most_sig_byte_decomp_0_to_3 * cols.most_sig_byte_decomp[3],
-        );
-        builder.when(is_real.clone()).assert_eq(
-            cols.and_most_sig_byte_decomp_0_to_5,
-            cols.and_most_sig_byte_decomp_0_to_4 * cols.most_sig_byte_decomp[4],
-        );
-        builder.when(is_real.clone()).assert_eq(
-            cols.and_most_sig_byte_decomp_0_to_6,
-            cols.and_most_sig_byte_decomp_0_to_5 * cols.most_sig_byte_decomp[5],
-        );
-        builder.when(is_real.clone()).assert_eq(
-            cols.and_most_sig_byte_decomp_0_to_7,
-            cols.and_most_sig_byte_decomp_0_to_6 * cols.most_sig_byte_decomp[6],
-        );
-
-        builder
-            .when(is_real)
-            .when(cols.and_most_sig_byte_decomp_0_to_7)
-            .assert_zero(value[0] + value[1] + value[2]);
     }
 }

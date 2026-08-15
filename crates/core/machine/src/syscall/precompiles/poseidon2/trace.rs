@@ -123,8 +123,8 @@ impl Poseidon2PermuteChip {
         // Populate memory columns.
         for i in 0..WIDTH {
             cols.state_mem[i].populate(event.state_records[i], blu);
-            cols.pre_state_range_check_cols[i].populate(event.pre_state[i]);
-            cols.post_state_range_check_cols[i].populate(event.post_state[i]);
+            cols.pre_state_range_check_cols[i].populate(blu, event.pre_state[i]);
+            cols.post_state_range_check_cols[i].populate(blu, event.post_state[i]);
         }
     }
 }

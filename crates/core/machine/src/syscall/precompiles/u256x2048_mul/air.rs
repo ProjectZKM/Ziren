@@ -137,8 +137,8 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
                             .populate(event.lo_ptr_memory, &mut new_byte_lookup_events);
                         cols.hi_ptr_memory
                             .populate(event.hi_ptr_memory, &mut new_byte_lookup_events);
-                        cols.lo_ptr_range_checker.populate(event.lo_ptr_memory.value);
-                        cols.hi_ptr_range_checker.populate(event.hi_ptr_memory.value);
+                        cols.lo_ptr_range_checker.populate(&mut new_byte_lookup_events, event.lo_ptr_memory.value);
+                        cols.hi_ptr_range_checker.populate(&mut new_byte_lookup_events, event.hi_ptr_memory.value);
 
                         // Populate memory columns.
                         for i in 0..WORDS_FIELD_ELEMENT {
