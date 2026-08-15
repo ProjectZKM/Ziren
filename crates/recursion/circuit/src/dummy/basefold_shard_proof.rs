@@ -77,24 +77,19 @@ where
     //
     // **Sizing convention** (matches host prover + in-circuit verifier):
     //
-    // Both the host prover (`first_layer.rs:507-508`) and the recursion
-    // verifier (`shard_basefold.rs::chip_metadata_from_chips`) compute
-    // `num_interaction_variables` as
-    //   `log2_ceil(Σ chip.num_lookups().next_power_of_two())`
-    // — per-chip-padded sum, then log-ceil (NOT a raw sum + log-ceil:
-    // the padded sum is what aligns with the host's column-width padding
-    // pattern, see `shard_basefold.rs:232-244`).
+    // Both the host prover (`first_layer::generate_first_layer`) and the
+    // recursion verifier (`shard_basefold.rs::chip_metadata_from_chips`) size
+    // the global interaction axis as
+    //   `log2_ceil(Σ chip.num_lookups())`
+    // — chips pack raw-contiguously into it, with all padding in one run at
+    // the trailing end.
     //
     // This dummy MUST mirror the verifier's expectation, otherwise the
     // recursion-circuit `evaluate_mle_ext` assertion at
     // `logup_gkr.rs:105` panics with `mle_evals.len() != 1 << dim`
-    // during VK regen / VERIFY_VK=true on shapes where any chip has
-    // a non-power-of-two interaction count (e.g. Recursion shape 0
-    // with [9,9,9]-style chips: raw-sum gives 2^14, padded-sum gives
-    // 2^15 → 16384 vs 32768 left/right mismatch).
-    let total_padded_interactions: usize =
-        chips.iter().map(|chip| chip.num_lookups().max(1).next_power_of_two()).sum();
-    let log_interactions = log2_ceil_usize(total_padded_interactions);
+    // during VK regen / VERIFY_VK=true.
+    let total_chip_interactions: usize = chips.iter().map(|chip| chip.num_lookups()).sum();
+    let log_interactions = log2_ceil_usize(total_chip_interactions);
     let output_size = 1usize << (log_interactions + 1);
 
     let circuit_output = LogUpGkrOutput {

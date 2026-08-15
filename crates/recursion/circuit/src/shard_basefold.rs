@@ -240,25 +240,16 @@ impl<P> BasefoldShardVerifier<P> {
             .map(|interaction| interaction.values.len() + 1)
             .max()
             .unwrap_or(1);
-        // The host's `first_layer::generate_first_layer` computes
-        // `total_padded_interactions = Σ chip.interactions.next_power_of_two()`
-        // and uses `log2(total_padded.next_power_of_two())` as the
-        // global `num_interaction_variables`.  Summing RAW per-chip
-        // counts and taking log2_ceil of that under-counts when chip
-        // widths aren't already powers of two — e.g. chips = [3, 5, 7]
-        // gives raw_sum=15 → log2_ceil=4 (16 cols), but host pads to
-        // 4+8+8=20 → 32 cols, and the shape mismatch fails the
-        // in-circuit verifier at `evaluate_mle_ext: left=1024 right=512`
-        // for fibonacci.  Mirror the host's per-chip-padded calculation
-        // exactly to keep `circuit_output.numerator.len()` aligned
-        // with the verifier's expected dimension.
-        let total_padded_interactions: usize = chips
-            .iter()
-            .map(|chip| {
-                let raw = chip.sends().len() + chip.receives().len();
-                raw.max(1).next_power_of_two()
-            })
-            .sum();
+        // The host's `first_layer::generate_first_layer` sizes the global
+        // interaction axis as `log2_ceil(Σ chip raw interaction count)` —
+        // chips pack raw-contiguously and all padding lands in one run at the
+        // trailing end.  This MUST mirror that sum exactly: any disagreement
+        // shows up as `circuit_output.numerator.len()` disagreeing with the
+        // dimension the in-circuit verifier expects, i.e. an
+        // `evaluate_mle_ext: left=… right=…` failure rather than a soundness
+        // error.
+        let total_chip_interactions: usize =
+            chips.iter().map(|chip| chip.sends().len() + chip.receives().len()).sum();
         let log2_ceil = |x: usize| -> usize {
             if x <= 1 {
                 0
@@ -268,7 +259,7 @@ impl<P> BasefoldShardVerifier<P> {
         };
         LogupGkrShardChipMetadata {
             beta_seed_dim: log2_ceil(max_arity),
-            log_num_interactions: log2_ceil(total_padded_interactions.max(1)),
+            log_num_interactions: log2_ceil(total_chip_interactions.max(1)),
         }
     }
 

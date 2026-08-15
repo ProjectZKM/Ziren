@@ -296,6 +296,8 @@ fn main() {
             let mut shard_padded: Vec<usize> = vec![];
             let mut shard_raw: Vec<usize> = vec![];
             let mut niv_raw_hist: std::collections::BTreeMap<usize, usize> = Default::default();
+            let mut dense_hist: std::collections::BTreeMap<usize, usize> = Default::default();
+            let mut dense_cols: Vec<(usize, u128)> = vec![];
             let mut grid_cells_raw: u128 = 0;
             // The chip SET a shard proves is not the set of chips with events:
             // deferred (precompile / global-memory) events move to their own
@@ -322,6 +324,7 @@ fn main() {
                 num_shards += 1;
                 let mut total_padded = 0usize;
                 let mut total_raw = 0usize;
+                let mut total_values: u128 = 0;
                 let mut max_h = 0usize;
                 let mut per_shard: Vec<(String, usize, usize, usize)> = vec![];
                 // Real per-chip row counts: what the GKR slab actually
@@ -356,6 +359,11 @@ fn main() {
                     total_padded += padded;
                     total_raw += tot;
                     max_h = max_h.max(h);
+                    // Committed cells: the jagged commit pads each chip to a
+                    // power-of-two height, and the size CLASS is
+                    // `ceil(log2(Σ width × padded height))`.
+                    total_values += (p3_air::BaseAir::<KoalaBear>::width(c).max(1) as u128)
+                        * (h.max(1).next_power_of_two() as u128);
                     per_shard.push((name, h, tot, padded));
                 }
                 let nrv = max_h.max(1).next_power_of_two().trailing_zeros().max(2) as usize;
@@ -364,6 +372,13 @@ fn main() {
                 let niv_raw = total_raw.max(1).next_power_of_two().trailing_zeros() as usize;
                 *niv_raw_hist.entry(niv_raw).or_default() += 1;
                 shard_raw.push(total_raw);
+                let log_dense = 128 - (total_values.max(1) - 1).leading_zeros() as usize;
+                *dense_hist.entry(log_dense).or_default() += 1;
+                // Aggregate committed "columns": total cells divided by the
+                // padded row axis, i.e. how many columns wide the shard looks
+                // once every chip is stacked at the tallest chip's height.
+                let agg_cols = total_values / (1u128 << nrv);
+                dense_cols.push((log_dense, agg_cols));
                 grid_cells_raw += 4u128 << (nrv + niv_raw);
                 *niv_hist.entry(niv).or_default() += 1;
                 *nrv_hist.entry(nrv).or_default() += 1;
@@ -403,6 +418,21 @@ fn main() {
             );
             eprintln!("num_interaction_variables (RAW)  = {niv_raw_hist:?}");
             eprintln!("GKR grid cells (RAW axis)        = {grid_cells_raw}");
+            eprintln!("committed log_dense histogram    = {dense_hist:?}");
+            let mut by_class: std::collections::BTreeMap<usize, Vec<u128>> = Default::default();
+            for (c, cols) in &dense_cols {
+                by_class.entry(*c).or_default().push(*cols);
+            }
+            for (c, mut v) in by_class {
+                v.sort_unstable();
+                eprintln!(
+                    "  log_dense={c}: n={} agg_cols min={} median={} max={}",
+                    v.len(),
+                    v[0],
+                    v[v.len() / 2],
+                    v[v.len() - 1]
+                );
+            }
             let mut ranked: Vec<(String, u128, u128, u128, usize)> = paid_cells
                 .iter()
                 .map(|(n, p)| {
