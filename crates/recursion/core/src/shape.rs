@@ -208,15 +208,23 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // positioned to win or lose a match; the list is kept roughly
         // ascending only to read well.
         //
-        // BANDS ARE CHEAP.  A band costs the compress vk enumeration exactly
-        // SIX shapes — `ZKMProofShape::generate` builds compose children by
-        // replicating ONE band across the batch (`vec![band; arity]`), so it
-        // emits arity 1..=`REDUCE_BATCH_SIZE` plus one Deferred and one Shrink
-        // per band, and nothing cartesian.  Measured
-        // (`zkm_prover::tests::enumeration_size_probe`): 2651 shapes against
-        // the `VK_MERKLE_TREE_HEIGHT` capacity of 2^12 = 4096, of which 6×7 =
-        // 42 are the band-derived tail and the other 2609 are the
-        // band-independent normalize shapes.  Room for ~240 bands, not 5.
+        // A band costs the compress vk enumeration exactly SIX shapes —
+        // `ZKMProofShape::generate` builds compose children by replicating ONE
+        // band across the batch (`vec![band; arity]`), so it emits arity
+        // 1..=`REDUCE_BATCH_SIZE` plus one Deferred and one Shrink per band,
+        // and nothing cartesian.
+        //
+        // ⚠ BUT THE BUDGET IS NOT THE BANDS' TO SPEND.  The normalize shapes
+        // dominate the map and their count is driven by `MAX_BLOCKS` in
+        // `zkm_prover::shapes`, which is derived from `ELEMENT_THRESHOLD` — so
+        // raising the shard-area cap consumes vk-merkle capacity.  Measured
+        // (`zkm_prover::tests::enumeration_size_probe`): at the 260,000,000
+        // threshold the map was 2651 of 4096; at 500,000,000 it is **3922 of
+        // 4096**.  That leaves ~174 shapes = room for about **29 more bands**,
+        // not the ~240 the earlier figure implied.  Anything that raises
+        // `ELEMENT_THRESHOLD` or adds bands must re-run that test — it is the
+        // only guard, and the map is now at 96% of a capacity that cannot be
+        // tuned (the tree height is baked into every enumerated program).
         let allowed_shapes = [
             // No tiny bands below 2^17 (pre-basefold, ~10s-of-K-instruction
             // programs): every basefold recursion program
