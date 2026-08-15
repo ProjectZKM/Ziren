@@ -34,6 +34,7 @@ use zkm_core_machine::{
     utils::{run_test, run_test_io, setup_logger},
 };
 use zkm_pcs::air::MachineAir;
+use zkm_pcs::MachineRecord;
 use zkm_pcs::{
     debug_lookups_with_all_chips, koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, LookupKind,
     LookupScope, StarkMachine, ZKMCoreOpts,
@@ -104,7 +105,13 @@ fn main() {
     banner(&cmd, &name);
     // `all` (optional subset list) and `dump` (output dir) don't take a
     // fixture/ELF — resolve lazily.
-    let program = if cmd == "all" || cmd == "dump" { None } else { Some(resolve(&name)) };
+    // `all` / `dump` don't take a fixture, and `lookups static` reports the
+    // compile-time census only — resolve lazily so none of them needs an ELF.
+    let program = if cmd == "all" || cmd == "dump" || (cmd == "lookups" && name == "static") {
+        None
+    } else {
+        Some(resolve(&name))
+    };
     let program = move || program.expect("mode needs a fixture");
 
     match cmd.as_str() {
@@ -184,6 +191,248 @@ fn main() {
                 );
             }
             eprintln!("{:<28} {:>7}", "TOTAL main width", total);
+        }
+        "lookups" => {
+            // Per-chip INTERACTION census, and the GKR cell budget it implies.
+            //
+            // The LogUp-GKR first layer is a dense `2^num_row_variables ×
+            // 2^num_interaction_variables` grid, and every later layer halves
+            // it, so the total folded cell count is ~`2^(nrv + niv + 1)` per
+            // quadrant.  `niv` is NOT log2 of the interaction count: each chip
+            // pads its own interaction count up to a power of two, the padded
+            // counts are summed across the shard's chips, and that sum is
+            // rounded up to a power of two again.  Both roundings are paid in
+            // full — the padded columns are materialised with identity
+            // fractions.  So the census that matters is per-chip
+            // `next_power_of_two(sends + receives)`, and the only way to move
+            // GKR cost is to push the shard-wide sum below a power of two.
+            //
+            // With a program argument the census is weighted by the REAL
+            // per-shard chip sets and heights from an execution, so chips can
+            // be ranked by cells rather than by interaction count.
+            let machine: StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>> =
+                MipsAir::machine(KoalaBearPoseidon2::new());
+            let kinds = ALL_KINDS;
+            eprintln!(
+                "{:<28} {:>6} {:>6} {:>5} {:>5} {:>5} {:>6}  {}",
+                "chip", "main_w", "prep_w", "send", "recv", "tot", "padded", "by kind"
+            );
+            let mut static_rows: Vec<(String, usize, usize, usize, usize, usize, String)> = vec![];
+            for c in machine.chips() {
+                let name = MachineAir::<KoalaBear>::name(c);
+                let sends = c.sends().len();
+                let recvs = c.receives().len();
+                let tot = sends + recvs;
+                let padded = tot.max(1).next_power_of_two();
+                let mut by_kind: Vec<String> = vec![];
+                for k in kinds {
+                    let s = c.sends().iter().filter(|i| i.kind == *k).count();
+                    let r = c.receives().iter().filter(|i| i.kind == *k).count();
+                    if s + r > 0 {
+                        by_kind.push(format!("{k:?}:{s}s/{r}r"));
+                    }
+                }
+                static_rows.push((
+                    name,
+                    p3_air::BaseAir::<KoalaBear>::width(c).max(1),
+                    MachineAir::<KoalaBear>::preprocessed_width(c),
+                    sends,
+                    recvs,
+                    padded,
+                    by_kind.join(" "),
+                ));
+            }
+            static_rows.sort_by(|a, b| b.5.cmp(&a.5).then(a.0.cmp(&b.0)));
+            for (name, w, pw, s, r, padded, kinds_s) in &static_rows {
+                eprintln!(
+                    "{:<28} {:>6} {:>6} {:>5} {:>5} {:>5} {:>6}  {}",
+                    name,
+                    w,
+                    pw,
+                    s,
+                    r,
+                    s + r,
+                    padded,
+                    kinds_s
+                );
+            }
+
+            // Weighted pass: execute and report, per shard, the padded
+            // interaction axis the GKR circuit actually pays for.  Skipped
+            // unless a real program is named, since the static table above
+            // already answers "how wide is each chip".
+            if name == "static" {
+                eprintln!("\n(no program given: static census only)");
+                return;
+            }
+            // One shard per `execute_record` batch: a real workload's full
+            // record set does not fit in host memory (`rt.run()` retains
+            // every shard), and the census only ever needs one at a time.
+            let mut opts = ZKMCoreOpts::default();
+            opts.shard_batch_size = 1;
+            let mut rt = Executor::new(program(), opts);
+            // A third argument names a bincode-serialised `ZKMStdin`, so the
+            // census can run the same input a perf gate does.
+            if let Some(p) = std::env::args().nth(3) {
+                let bytes = std::fs::read(&p).expect("stdin fixture must be readable");
+                let stdin: ZKMStdin =
+                    bincode::deserialize(&bytes).expect("stdin fixture must deserialise");
+                rt.write_vecs(&stdin.buffer);
+                for (proof, vk) in stdin.proofs.iter() {
+                    rt.write_proof(proof.clone(), vk.clone());
+                }
+            }
+            // Per-chip accumulators over every shard: real cells (height ×
+            // raw interactions) versus paid cells (height × padded
+            // interactions).
+            let mut real_cells: std::collections::BTreeMap<String, u128> = Default::default();
+            let mut paid_cells: std::collections::BTreeMap<String, u128> = Default::default();
+            let mut chip_rows: std::collections::BTreeMap<String, u128> = Default::default();
+            let mut chip_appear: std::collections::BTreeMap<String, usize> = Default::default();
+            let mut grid_cells: u128 = 0;
+            let mut niv_hist: std::collections::BTreeMap<usize, usize> = Default::default();
+            let mut nrv_hist: std::collections::BTreeMap<usize, usize> = Default::default();
+            let mut num_shards = 0usize;
+            let mut shard_padded: Vec<usize> = vec![];
+            let mut shard_raw: Vec<usize> = vec![];
+            let mut niv_raw_hist: std::collections::BTreeMap<usize, usize> = Default::default();
+            let mut grid_cells_raw: u128 = 0;
+            // The chip SET a shard proves is not the set of chips with events:
+            // deferred (precompile / global-memory) events move to their own
+            // shards, and the shape config then canonicalises each record to a
+            // whole cluster.  Reproduce that pipeline or the census counts
+            // precompile columns on every core shard.
+            let shape_config = zkm_core_machine::shape::CoreShapeConfig::<KoalaBear>::default();
+            let mut deferred =
+                zkm_core_executor::ExecutionRecord::new(std::sync::Arc::new(resolve(&name)));
+            let split_opts = ZKMCoreOpts::default().split_opts;
+            loop {
+                let (mut records, done) = rt.execute_record(true).expect("execution failed");
+                for rec in records.iter_mut() {
+                    deferred.append(&mut rec.defer());
+                }
+                let mut deferred_shards = deferred.split(done, None, split_opts);
+                records.append(&mut deferred_shards);
+                for rec in records.iter_mut() {
+                    if shape_config.fix_shape(rec).is_ok() {
+                        zkm_core_machine::shape::canonicalize_shape_to_cluster(rec);
+                    }
+                }
+                for rec in &records {
+                num_shards += 1;
+                let mut total_padded = 0usize;
+                let mut total_raw = 0usize;
+                let mut max_h = 0usize;
+                let mut per_shard: Vec<(String, usize, usize, usize)> = vec![];
+                // Real per-chip row counts: what the GKR slab actually
+                // materialises (the padded tail is analytic, never stored),
+                // so cells are `height × num_interactions`.
+                let heights: std::collections::HashMap<String, usize> =
+                    MipsAir::<KoalaBear>::core_heights(rec)
+                        .into_iter()
+                        .map(|(id, h)| (id.as_str().to_string(), h))
+                        .collect();
+                for c in machine.shard_chips(rec) {
+                    let name = MachineAir::<KoalaBear>::name(c);
+                    let h = heights.get(&name).copied().unwrap_or(0).max(
+                        rec.shape
+                            .as_ref()
+                            .and_then(|s| {
+                                std::str::FromStr::from_str(&name).ok().and_then(|id| s.height(&id))
+                            })
+                            .unwrap_or(0),
+                    );
+                    let h = if h > 0 {
+                        h
+                    } else {
+                        match name.as_str() {
+                            "Program" => rec.program.instructions.len(),
+                            "Byte" => 1 << 16,
+                            _ => 0,
+                        }
+                    };
+                    let tot = c.sends().len() + c.receives().len();
+                    let padded = tot.max(1).next_power_of_two();
+                    total_padded += padded;
+                    total_raw += tot;
+                    max_h = max_h.max(h);
+                    per_shard.push((name, h, tot, padded));
+                }
+                let nrv = max_h.max(1).next_power_of_two().trailing_zeros().max(2) as usize;
+                let niv =
+                    total_padded.max(1).next_power_of_two().trailing_zeros() as usize;
+                let niv_raw = total_raw.max(1).next_power_of_two().trailing_zeros() as usize;
+                *niv_raw_hist.entry(niv_raw).or_default() += 1;
+                shard_raw.push(total_raw);
+                grid_cells_raw += 4u128 << (nrv + niv_raw);
+                *niv_hist.entry(niv).or_default() += 1;
+                *nrv_hist.entry(nrv).or_default() += 1;
+                shard_padded.push(total_padded);
+                // Four quadrant MLEs (n0/n1/d0/d1) over a grid that halves
+                // every layer: 4 · 2^(nrv-1) · 2^niv · 2 folded cells.
+                grid_cells += 4u128 << (nrv + niv);
+                for (name, h, tot, padded) in per_shard {
+                    *real_cells.entry(name.clone()).or_default() += h as u128 * tot as u128;
+                    *paid_cells.entry(name.clone()).or_default() +=
+                        h.max(1) as u128 * padded as u128;
+                    *chip_rows.entry(name.clone()).or_default() += h as u128;
+                    *chip_appear.entry(name).or_default() += 1;
+                }
+                }
+                if done {
+                    break;
+                }
+            }
+            shard_padded.sort_unstable();
+            eprintln!("\nshards = {num_shards}");
+            eprintln!(
+                "shard padded-interaction sum: min={} median={} max={}",
+                shard_padded.first().copied().unwrap_or(0),
+                shard_padded.get(shard_padded.len() / 2).copied().unwrap_or(0),
+                shard_padded.last().copied().unwrap_or(0)
+            );
+            eprintln!("num_row_variables histogram      = {nrv_hist:?}");
+            eprintln!("num_interaction_variables hist   = {niv_hist:?}");
+            eprintln!("GKR grid cells (all shards)      = {grid_cells}");
+            shard_raw.sort_unstable();
+            eprintln!(
+                "shard RAW-interaction sum:    min={} median={} max={}",
+                shard_raw.first().copied().unwrap_or(0),
+                shard_raw.get(shard_raw.len() / 2).copied().unwrap_or(0),
+                shard_raw.last().copied().unwrap_or(0)
+            );
+            eprintln!("num_interaction_variables (RAW)  = {niv_raw_hist:?}");
+            eprintln!("GKR grid cells (RAW axis)        = {grid_cells_raw}");
+            let mut ranked: Vec<(String, u128, u128, u128, usize)> = paid_cells
+                .iter()
+                .map(|(n, p)| {
+                    (
+                        n.clone(),
+                        *p,
+                        *real_cells.get(n).unwrap_or(&0),
+                        *chip_rows.get(n).unwrap_or(&0),
+                        *chip_appear.get(n).unwrap_or(&0),
+                    )
+                })
+                .collect();
+            ranked.sort_by(|a, b| b.1.cmp(&a.1));
+            let paid_total: u128 = ranked.iter().map(|r| r.1).sum();
+            eprintln!(
+                "\n{:<28} {:>16} {:>16} {:>7} {:>14} {:>6}",
+                "chip", "paid_cells", "real_cells", "shards", "rows(sum)", "%paid"
+            );
+            for (name, paid, real, rows, appear) in &ranked {
+                eprintln!(
+                    "{:<28} {:>16} {:>16} {:>7} {:>14} {:>5.1}%",
+                    name,
+                    paid,
+                    real,
+                    appear,
+                    rows,
+                    100.0 * *paid as f64 / paid_total as f64
+                );
+            }
+            eprintln!("{:<28} {:>16}", "TOTAL paid (chip cols)", paid_total);
         }
         "rows" => {
             // Per-chip ROW census.  Every row is a REAL instruction now: the

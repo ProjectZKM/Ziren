@@ -1907,13 +1907,12 @@ where
     //
     // CRITICAL packing detail: the GKR `circuit_output` packs each chip's RAW
     // interactions CONTIGUOUSLY (extract.rs:86,118 / round.rs:78-80
-    // `offset += num_interactions` — the RAW count, NOT padded), and ALL
-    // padding lands at the GLOBAL trailing end of the `col` axis.  The
-    // PER-CHIP next-pow2 padding (first_layer.rs:420-421) only sizes the
-    // GLOBAL axis (`num_interaction_variables = log2(Σ next_pow2(raw))`),
-    // it does NOT insert between-chip gaps.  So we pack RAW-contiguous
-    // here and resize the whole vector to the global `2^interaction_dim`
-    // with the identity fraction — byte-matching `extract_outputs`.
+    // `offset += num_interactions` — the RAW count), and ALL padding lands at
+    // the GLOBAL trailing end of the `col` axis: there are no between-chip
+    // gaps, and the global axis is `log2(Σ raw)` rounded up.  So we pack
+    // RAW-contiguous here and resize the whole vector to the global
+    // `2^interaction_dim` with the identity fraction — byte-matching
+    // `extract_outputs`.
     // Iterate `chips` in slice order — the SAME order `generate_first_layer`
     // builds the layer, so the global `col` axis here matches
     // `circuit_output`'s.
@@ -2043,8 +2042,23 @@ where
     // (5) Pad to the full interaction-axis size and evaluate at the
     // interaction point.  Numerator pads with 0, denominator with 1
     // (the identity fraction — extract.rs:73-76 / round.rs:117-123).
-    numerator_values.resize(1usize << interaction_point.len(), Challenge::<SC>::ZERO);
-    denominator_values.resize(1usize << interaction_point.len(), Challenge::<SC>::ONE);
+    //
+    // The axis width comes from the PROOF (`log_num_interactions` is read off
+    // the circuit-output MLE length), so it must be checked before it is used
+    // as a resize target: an axis narrower than the chips' raw interaction
+    // total would TRUNCATE real interactions out of the reconstruction, and a
+    // prover could use that to drop lookups it does not want counted.
+    let axis_width = 1usize << interaction_point.len();
+    if numerator_values.len() > axis_width {
+        return Err(BasefoldVerifyError::LogupGkr(format!(
+            "reconstruction: interaction axis {} is narrower than the chips' raw \
+             interaction total {}",
+            axis_width,
+            numerator_values.len()
+        )));
+    }
+    numerator_values.resize(axis_width, Challenge::<SC>::ZERO);
+    denominator_values.resize(axis_width, Challenge::<SC>::ONE);
 
     let reconstructed_numerator = evaluate_mle_host(&numerator_values, interaction_point);
     let reconstructed_denominator = evaluate_mle_host(&denominator_values, interaction_point);

@@ -190,7 +190,8 @@ fn split_real_msb<F: Clone>(
 /// per chip, each of shape `2^(num_row_variables - 1) × num_interactions`.
 /// `num_row_variables` on the layer is set to `original - 1`
 /// (the row MSB has been fixed).  `num_interaction_variables` is
-/// `log₂(total_interactions.next_power_of_two())`.
+/// `log₂` of the sum of the per-chip raw interaction counts, rounded up
+/// to a power of two.
 // D3c (Option-C divergence): the device interaction-eval seam (the `dev`
 // `ShardDeviceOps` param + the `device_traces` provider it consumed) was
 // REMOVED from this HOST generator — it is now the CpuProver-only host build.
@@ -219,15 +220,16 @@ where
     let mut denominator_0: Vec<RowMajorTable<EF>> = Vec::with_capacity(chips.len());
     let mut numerator_1: Vec<RowMajorTable<F>> = Vec::with_capacity(chips.len());
     let mut denominator_1: Vec<RowMajorTable<EF>> = Vec::with_capacity(chips.len());
-    // Global `num_interaction_variables` is log2 of the sum of *per-chip*
-    // padded widths (each chip pads its raw interaction count to the next
-    // power of two), so `flatten_layer`'s running offset across chips
-    // never overflows the global axis.  Using the sum of *raw* counts
-    // instead under-counts and trips
-    // `round.rs:99 "layer interaction axis too narrow for chip
-    //  contributions: offset {} + chip_cols {} > global {}"`
-    // when chips have padded widths > raw widths.
-    let mut total_padded_interactions: usize = 0;
+    // The global interaction axis must be wide enough to hold every chip's
+    // block, and the blocks are laid out RAW-CONTIGUOUSLY: `flatten_layer`,
+    // `extract_outputs` and the verifier's reconstruction all advance the
+    // running offset by a chip's `num_interactions`, never by a rounded-up
+    // width, and all padding lands in one run at the global trailing end.
+    // So the axis only has to cover the sum of the RAW counts; rounding each
+    // chip up to a power of two first buys no alignment anything relies on,
+    // it only inflates `2^num_interaction_variables` — and every cell of that
+    // axis is materialised on every GKR layer.
+    let mut total_chip_interactions: usize = 0;
 
     for ((chip, pm), prep_trace) in
         chips.iter().zip(shared_trace_mles.iter()).zip(preprocessed_traces.iter())
@@ -290,9 +292,8 @@ where
         // the `PaddedMle` pattern; padding is virtual via
         // `num_interaction_variables` metadata).  Layer-wide global
         // `num_interaction_variables` is computed below from
-        // `total_interactions` (sum of per-chip raw counts).
-        let log_int_padded = num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
-        total_padded_interactions += 1usize << log_int_padded;
+        // `total_chip_interactions` (sum of per-chip raw counts).
+        total_chip_interactions += num_interactions;
         let make_table = |cells: Vec<F>, real_rows: usize| -> RowMajorTable<F> {
             RowMajorTable::from_padded_cells(
                 cells,
@@ -317,7 +318,7 @@ where
     }
 
     let num_interaction_variables =
-        total_padded_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
+        total_chip_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
 
     LogUpGkrCpuLayer {
         numerator_0,
