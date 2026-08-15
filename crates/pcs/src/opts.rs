@@ -43,96 +43,126 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 
 /// The default per-shard trace-AREA cap (raw main-trace cells). A shard closes as
 /// soon as its accumulated un-padded main-trace cell count
-/// `Σ_chip event_counts[chip] × costs[chip]` reaches this, keeping dense
-/// (precompile/CPU-heavy) shards inside the per-shard dense-area budget
-/// (log_dense ≤ 29) that the cycle / 24-bit-clk / height splits alone let run to
-/// log_dense = 30. Env-overridable via `ELEMENT_THRESHOLD`. This is the ONLY
-/// limit that closes a core shard in practice — on reth, tendermint and goat,
-/// 100% of splits are area splits.
+/// `Σ_chip event_counts[chip] × costs[chip]` reaches this. Env-overridable via
+/// `ELEMENT_THRESHOLD`. It closes the large majority of core shards on reth,
+/// tendermint and goat — but NOT all of them any more; see the fences below.
 ///
-/// Calibrated for MIPS trace density (~2.2x denser per cycle than RISC-V):
-/// a `(1 << 28) + (1 << 27)` area does not fit a
-/// 32 GB device: at that value the resident jagged fold+sum kernel CUDA-OOMs on
-/// both tendermint and goat. This is the largest budget measured to fit both,
-/// and the headroom is thin — goat OOMs at `1 << 28`. Re-measure peak VRAM
-/// before raising it.
+/// ## The three fences on a core shard, and which one now binds
+///
+/// 1. **This threshold** (trace area).
+/// 2. **Per-chip height**, `CORE_SHARD_HEIGHT_THRESHOLD` = 4,128,768 rows.
+/// 3. **`clk < 2^24`** (`CORE_SHARD_CLK_24BIT_LIMIT`). At `clk += 5` per
+///    instruction this caps ANY shard at `2^24 / 5 ≈ 3.355 M` cycles. It is the
+///    TERMINAL fence: **no value of this constant can produce a shard larger
+///    than that**, so on reth's 419,960,677 cycles the shard count has a hard
+///    floor of 126 however high this is set.
+///
+/// Fence 3 is live, not theoretical. MEASURED (Aug 15, reth core) at every
+/// threshold from 260,000,000 to 720,000,000: **15 shards are clk-capped**, with
+/// `max(total_values)` pinned at **553,648,128 = 2^22 × 132** — identical to the
+/// byte across a 2.77x range of this constant. The tallest chip pads to `2^22`
+/// rows at the clk cap; 132 is the committed column count.
+///
+/// ⚠ **THOSE 15 SHARDS ARE IN `log_dense = 30`, NOT 29 — INCLUDING AT THE OLD
+/// DEFAULT.** `2^29 = 2^22 × 128`, so the committed width crossed the class
+/// boundary at 128 columns and now sits **3.1% past it**. An earlier revision of
+/// this comment predicted exactly this ("the committed width can grow only
+/// ~1.26% before that shard crosses into `log_dense = 30`") against a then-peak
+/// of 20.43 GiB; the frame architecture has since taken the committed set past
+/// that fence. The claim this comment used to make — that this threshold keeps
+/// dense shards at `log_dense ≤ 29` — is therefore FALSE and has been removed.
+/// Peak is now ~29.7 GiB at the OLD 260,000,000 default, i.e. **this workload
+/// already had little headroom before any of this sweep's changes**. Getting
+/// those 15 shards back to class 29 is a COMMITTED-WIDTH problem (drop 4
+/// columns), not something this threshold can reach.
 ///
 /// ⚠ WHAT DRIVES VRAM IS THE **DISTRIBUTION** OF SHARDS ACROSS jagged-eval SIZE
-/// CLASSES — not the largest shard, and not this value's proximity to a power
-/// of two.
+/// CLASSES — not this value directly, and not the largest shard, which is
+/// invariant here. `log_dense = ceil(log2(total_values))` sizes the
+/// jagged-evaluation sumcheck buffers per shard, and **class 29 costs ~2x class
+/// 28**. `total_values` counts committed `width x PADDED height`, a different
+/// quantity from this threshold.
 ///
-/// `log_dense = ceil(log2(total_values))` sizes the jagged-evaluation sumcheck
-/// buffers per shard, and **class 29 costs ~2x class 28**. `total_values`
-/// counts committed `width x PADDED height`, a different quantity from this
-/// threshold. Raising 251,658,240 -> 390,070,272 moves the expensive-class
-/// share from **11% (228x c28, 33x c29) to 79% (14x c28, 170x c29)** and peak
-/// live VRAM from **20.43 to 26.94 GiB** — with the max shard UNCHANGED.
+/// ⚠ **PEAK VRAM IS NOT MONOTONE IN THIS CONSTANT.** Measured peaks:
+/// 420M → 31,525 MiB, 460M → 31,397, 500M → **31,045**, 560M → 32,005. 500M is
+/// both FASTER and LIGHTER than 420M and 460M. Do not interpolate a
+/// "higher threshold ⇒ more memory" rule, and do not pick a value by
+/// extrapolating from its neighbours — measure the class histogram at the exact
+/// value you intend to ship.
 ///
-/// ⚠ **THE LARGEST SHARD IS HEIGHT-CAPPED, NOT AREA-CAPPED, AND SITS 1.25%
-/// BELOW `2^29`.** `max(total_values)` measured **530,186,240** at ET =
-/// 251,658,240 / 377,487,360 / 390,070,272 / 503,316,480 — identical to the
-/// byte across a 2x range — because `530,186,240 / 2^22 = 126.41` and
-/// `SHARD_SIZE = 2^22 + 1`: it is `SHARD_SIZE x ~126.4 committed columns`. The
-/// committed width can grow only ~1.26% before that shard crosses into
-/// `log_dense = 30` and its buffers double (est. +4 GiB on that shard alone,
-/// taking peak from 20.43 to ~24.4 GiB). Live, not hypothetical: `c5daa904`
-/// took the committed chip set from 23 to 27 when no allowed band fits. **The
-/// lever is `SHARD_SIZE`, not this threshold** — halving the height cap halves
-/// `total_values` and drops the max shard to class 28. Do not derive an
-/// "aligned" threshold from a ratio between the two; there isn't a stable one.
+/// ## The measured ladder (reth core, Aug 15, one binary, solo, GPU-confined)
 ///
-/// The ~5 GiB LogUp-GKR FirstLayer slab is the largest single allocation at
-/// peak (5,007.87 MiB, 18.2%) at 390,070,272, and is **not resident at peak at
-/// all** at this value — so shrinking it only pays if the threshold is raised.
+/// Control interleaved between points (A/B/A/C/A/D order) so drift is visible;
+/// the 260M control held 3746/3704/3702/3661 kHz across the session. Shard
+/// geometry is deterministic in this constant — every replicate at a given value
+/// reproduced its class histogram exactly.
 ///
-/// ## Why 1.55x (390,070,272) was tried and REVERTED (Aug 8)
+/// | T | shards | cyc/shard | runs | mean kHz | peak MiB | rescues |
+/// |---|--------|-----------|------|----------|----------|---------|
+/// | 260M | 275 | 1.527M | 4 | 3703 | 29,797 | 0 |
+/// | 300M | 246 | 1.707M | 1 | 3805 | 30,885 | 0 |
+/// | 340M | 225 | 1.866M | 2 | 3966 | 30,789 | 0 |
+/// | 380M | 209 | 2.009M | 5 | 4068 | 31,045 | 0 |
+/// | 420M | 198 | 2.121M | 3 | 4121 | 31,525 | 0 |
+/// | 460M | 192 | 2.187M | 1 | 4156 | 31,397 | 0 |
+/// | **500M** | **189** | **2.222M** | **4** | **4202** | **31,141** | **0** |
+/// | 560M | 187 | 2.246M | 3 | 4185 | 32,005 | **1 of 3** |
+/// | 640M | 187 | 2.246M | 1 | 2150 | 32,099 | **3 + 214 OOM** |
+/// | 720M | 187 | 2.246M | 1 | 1646 | 32,099 | **3 + 348 OOM** |
 ///
-/// Landed on one run of evidence, taken back out after ~20 runs across two
-/// harnesses, two hosts and two GPUs. It bought reth 281 -> 205 shards and cost
-/// on every axis checked:
-/// - **Throughput**: paired same-binary A/B (env-only arms, ABBA-ordered) gave
-///   **-3.3%** on the two non-anomalous rounds and was not statistically
-///   resolvable pooled. Every paired sign was negative; an independent sweep
-///   had m=1.00 as its fastest arm.
-/// - **Headroom**: **8,003 MiB** free here vs **1,753 MiB** at 1.55x.
-/// - **Reliability**: 0 OOM in 9 runs here; 1.60x OOMed 1 in 4, 1.85x and 2.00x
-///   1 in 2 each, at median box loads of 15 and 13 — so load is not the driver.
-/// - **Peak stability**: fixed-m run-to-run excursion is **+256 MiB** here vs
-///   **~2.4 GiB** at high m — a property of the high-m regime, not the harness.
+/// Class histograms at the ends: 260M = `c28 221 / c29 18 / c30 15`;
+/// 500M = `c28 8 / c29 145 / c30 15`. The c28 mass migrates into c29 while c30
+/// stays pinned at 15 — which is why peak barely moves across that whole range.
 ///
-/// The "+11.84% kHz at m=1.72" result that motivated raising this is not wrong,
-/// it is SUPERSEDED: it rested on ~192 ms/shard of fixed cost, ~82% HOST-side,
-/// which `8cbd8093` then largely removed. With little left to amortise,
-/// fewer-but-larger shards no longer pay. Re-derive the per-shard cost before
-/// reopening this.
+/// **Shard count SATURATES at 187** from 560M upward: that is fence 3 taking
+/// over. Past ~500M this constant buys no further structural reduction, only
+/// memory pressure — 640M and 720M return the same 187 shards while collapsing
+/// throughput by 49% and 61% respectively, thrashing the allocator rescue path.
 ///
-/// ⚠ DO NOT re-measure peak with `nvidia-smi` sampling; the error GROWS with
-/// the threshold (undersample -1 / +895 / +1,375 MiB at 1.00x / 1.40x / 1.50x,
-/// and a 2 s sampler read 28,509 MiB on a run whose in-process ledger showed
-/// 30,855 MiB live). Use the allocation ledger.
+/// ## Why 500,000,000 and not the fastest point
 ///
-/// Changing this moves shard boundaries ⇒ moves core proof bytes and goldens.
-/// The reth core digests either side of the 1.55x experiment, each reproduced
-/// on two harnesses, are `e71cd521cca7977f…` (281 shards, this value) and
-/// `97434314cfa58359…` (205 shards, 390,070,272).
+/// 560M produced this sweep's single fastest run (4245 kHz) and is still
+/// REJECTED: across 3 runs it averages 4185 — *slower* than 500M's 4202 — and
+/// one of the three needed a `#CUDA-ALLOC-RESCUE` (a 2,112 MiB
+/// `jagged_sumcheck.rs` allocation recovered only by device-sync + pool trim)
+/// after two hard `out of memory` returns. A default that completes only via the
+/// rescue path is not a default. This knob has always failed probabilistically
+/// rather than smoothly, so a rescued allocation is counted as a FAILED run.
+/// 500M kept a 96 MiB run-to-run peak excursion (31,045-31,141) over 4 runs.
+///
+/// ⚠ Peak figures here are a 100 ms `nvidia-smi` sampler reading the
+/// `cudaMallocAsync` pool's retained footprint, which the release threshold
+/// keeps monotone — NOT an instantaneous sample of live bytes, and NOT the
+/// in-process allocation ledger the earlier revisions of this comment used
+/// (a 2 s sampler once read 28,509 MiB against a ledger's 30,855 MiB). Treat the
+/// absolute MiB as approximate; the rescue/OOM counts above are process-emitted
+/// and are the load-bearing reliability evidence.
+///
+/// Changing this moves shard boundaries ⇒ moves core proof bytes and goldens, so
+/// md5 equality is NOT a valid gate across a change to this value; verification
+/// passing is.
 ///
 /// Written as a plain decimal on purpose: earlier revisions spelled it
 /// `2^28 - 2^24` and built a "just under a power of two" rule on it, which
 /// measurement refuted twice. The value has no demonstrated power-of-two
 /// structure.
 ///
-/// Raised 251,658,240 → 290,000,000 after the Instruction-bus deletion +
-/// pinned-upload staging (Aug 13): with the per-upload cost pinned away, the
-/// per-shard fixed serial cost dominates, and fewer/bigger shards won a
-/// 4/4-positive +3.7% on reth core.  Then re-derived to 260,000,000 after the
-/// frame slimming: the threshold is a CELL budget, and cutting ~10% of the
-/// cells per cycle packs ~10% more CYCLES per shard at fixed T — 290M then
-/// blows the GKR VRAM margin on 32 GB parts (measured OOM at jagged round 0),
-/// while 260M preserves the tuned cycles-per-shard and measured 2815/2838
-/// vs 2812/2792 at the old default (275 shards, all verified).  If per-cycle
-/// area changes again, rescale T with it.  The env override remains.
+/// History. 251,658,240 → 290,000,000 after the Instruction-bus deletion +
+/// pinned-upload staging (Aug 13), then back to 260,000,000 after the frame
+/// slimming (the threshold is a CELL budget, so cutting ~10% of the cells per
+/// cycle packs ~10% more cycles per shard at fixed T). Raised 260,000,000 →
+/// 500,000,000 (Aug 15) once ~8.7 GB of device residency was freed: that removed
+/// the VRAM wall this constant had been pinned against, and re-sweeping found
+/// **+13.5%** on reth core (3703 → 4202 kHz, 275 → 189 shards) with 0 rescues in
+/// 4 runs. The 1.55x revert recorded below was measured against the OLD residency
+/// and per-shard cost and no longer describes this regime; its lasting lesson —
+/// that this knob fails by OOM-ing a fraction of runs — is why 560M is rejected
+/// above. If per-cycle area changes again, rescale T with it. The env override
+/// remains, and NOTE it also feeds [`ZKMCoreOpts::max`] (hence the recursion
+/// prover), so a change here must be gated on the full core→compress→shrink→wrap
+/// chain, not core alone.
 
-pub const ELEMENT_THRESHOLD: usize = 260_000_000;
+pub const ELEMENT_THRESHOLD: usize = 500_000_000;
 
 /// Options to configure the Ziren prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
