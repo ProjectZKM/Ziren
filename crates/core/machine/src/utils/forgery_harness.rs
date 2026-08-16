@@ -116,9 +116,19 @@ fn verify(
 ) -> Result<(), MachineVerificationError<SC>> {
     let mut challenger = machine.config().challenger();
     machine.verify(vk, proof, &mut challenger)?;
-    // `StarkMachine::verify` is per-shard; without this the harness would
-    // report "accepted" for any forgery that only breaks the CROSS-shard
-    // memory argument.
+    // `StarkMachine::verify` is per-shard, so on its own it is not the whole
+    // verification and this harness's "accepted" would overstate what was
+    // checked.
+    //
+    // Note which adversary this covers.  The prologue observes EVERY public
+    // value, `global_cumulative_sum` included, so mutating a finished proof's
+    // digest desyncs Fiat-Shamir and the per-shard verify already rejects it —
+    // no mutation this harness can construct reaches the line below.  What the
+    // cross-shard sum catches is a dishonest PROVER: individually valid,
+    // FS-consistent shards whose global sends and receives do not cancel.
+    // Exercising that needs a perturbed record fed through proving, which this
+    // harness does not model; the call is here so a future case of that shape
+    // cannot pass by verifying only half the argument.
     crate::utils::global_sum::verify_global_cumulative_sum(vk, &proof.shard_proofs)
 }
 
