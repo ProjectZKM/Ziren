@@ -115,7 +115,11 @@ fn verify(
     proof: &MachineProof<SC>,
 ) -> Result<(), MachineVerificationError<SC>> {
     let mut challenger = machine.config().challenger();
-    machine.verify(vk, proof, &mut challenger)
+    machine.verify(vk, proof, &mut challenger)?;
+    // `StarkMachine::verify` is per-shard; without this the harness would
+    // report "accepted" for any forgery that only breaks the CROSS-shard
+    // memory argument.
+    crate::utils::global_sum::verify_global_cumulative_sum(vk, &proof.shard_proofs)
 }
 
 /// Map a verify result to a short tag naming WHICH substrate check

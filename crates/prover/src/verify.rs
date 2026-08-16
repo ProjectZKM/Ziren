@@ -274,6 +274,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::TooManyShards);
         }
 
+        // Close the cross-shard memory argument.  `StarkMachine::verify` below
+        // is per-shard and is shared with the recursion machines, so the
+        // cross-shard identity lives beside the core public values it is about.
+        zkm_core_machine::utils::global_sum::verify_global_cumulative_sum(&vk.vk, &proof.0)?;
+
         // Verify the shard proof.
         let mut challenger = self.core_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: proof.0.to_vec() };
