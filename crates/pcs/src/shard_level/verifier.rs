@@ -169,7 +169,7 @@ impl BasefoldShardVerifier {
             });
         }
 
-        // ── Stage 1 — Transcript prologue ────────────────────────
+        // ── Transcript prologue ──────────────────────────────────
         //
         // Observe public values, main commitment, and per-chip
         // metadata.  Order MUST match the prover's ordering at
@@ -215,7 +215,7 @@ impl BasefoldShardVerifier {
             }
         }
 
-        // ── Stage 2 — LogUp-GKR sumcheck verification ────────────
+        // ── LogUp-GKR sumcheck verification ──────────────────────
         //
         // Ported from
         //   crates/recursion/circuit/src/logup_gkr.rs::verify_logup_gkr
@@ -284,7 +284,7 @@ impl BasefoldShardVerifier {
             challenger,
         )?;
 
-        // ── Stage 3 — Zerocheck sumcheck verification ────────────
+        // ── Zerocheck sumcheck verification ──────────────────────
         //
         // Samples the same phase challenges as the in-circuit verifier,
         // checks the direct `Σ_b C(b) == 0` sumcheck, and observes the
@@ -306,7 +306,7 @@ impl BasefoldShardVerifier {
             &proof.opened_values,
         )?;
 
-        // ── Stage 3.5 — jagged HASH-BIND re-check ───────
+        // ── Jagged HASH-BIND re-check ───────
         //
         // Recompute
         //   modified' = compress([raw_root, hash(once(len) ++ rc ++ cc)])
@@ -400,7 +400,7 @@ impl BasefoldShardVerifier {
             }
         }
 
-        // ── Stage 4 — Jagged-PCS opening verification ────────────
+        // ── Jagged-PCS opening verification ──────────────────────
         //
         // Delegate to the existing host-side verifier at
         // crate::jagged_pcs::jagged::verify_jagged_basefold_no_observe
@@ -424,7 +424,7 @@ impl BasefoldShardVerifier {
     }
 }
 
-/// Host-side jagged-PCS opening verification (Stage 4).
+/// Host-side jagged-PCS opening verification.
 ///
 /// Deserialises the bundle bytes and delegates to the host-side verifier at
 /// [`crate::jagged_pcs::jagged::verify_jagged_basefold_no_observe`].
@@ -958,7 +958,7 @@ where
     //
     // Single-main-commit: the prover's transcript prologue
     // already observed the BaseFold commit's 8-felt digest as
-    // `main_commitment` (mirrored in Stage 1 above).
+    // `main_commitment` (mirrored in the transcript prologue above).
     // Use the `_no_observe` variant so the verifier doesn't observe
     // the same digest a second time (which would desync the
     // transcript vs the prover).

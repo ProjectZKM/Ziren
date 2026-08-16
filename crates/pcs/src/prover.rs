@@ -539,24 +539,31 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         // chip-SET and hence the vk.
         let trace_views: Vec<crate::multilinear::PaddedMle<Val<SC>>> = shared_trace_mles.to_vec();
         let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips.iter().map(|_| None).collect();
-        let (main_commitment, precomputed_commit) = match commit_data {
-            // `commit()` already built and retained the jagged commitment —
-            // consume it.  The digest and precompute are the identical values
-            // that build would have produced (same seam, same inputs, one
-            // shard-phase earlier).
-            Some(retained) => (retained.main_commitment, retained.precomputed),
-            None => {
-                commit_traces::<SC, A, _>(self, chips, &trace_views, dense_rev, recursion_area_pin)
+        let n_chips = chips.len();
+        let _shard_span = tracing::info_span!("prove shard with data", chips = n_chips).entered();
+
+        let (main_commitment, precomputed_commit) = {
+            let _span = tracing::info_span!("commit traces").entered();
+            match commit_data {
+                // `commit()` already built and retained the jagged commitment —
+                // consume it.  The digest and precompute are the identical values
+                // that build would have produced (same seam, same inputs, one
+                // shard-phase earlier).
+                Some(retained) => (retained.main_commitment, retained.precomputed),
+                None => commit_traces::<SC, A, _>(
+                    self,
+                    chips,
+                    &trace_views,
+                    dense_rev,
+                    recursion_area_pin,
+                ),
             }
         };
         // `trace_views` is kept OWNED (no reborrow): the dims sites below
-        // borrow it, and the jagged open at Stage 4 MOVES it in so its per-chip
+        // borrow it, and the jagged open MOVES it in so its per-chip
         // cells become the open's `chip_traces` with NO clone.
 
-        let n_chips = chips.len();
-        let _shard_span = tracing::info_span!("prove_shard_stages", chips = n_chips).entered();
-
-        // Stage 1 — transcript prologue. Chip metadata observe (count +
+        // Transcript prologue. Chip metadata observe (count +
         // per-chip RAW height + name length + name bytes) binds post-
         // commit challenges to the shard's chip-set identity AND each
         // chip's row count.
@@ -570,10 +577,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         // Observe order (the verifiers replay it exactly):
         //   public_values → main_commitment → num_chips →
         //   per-chip { height_felt, name_len, name_bytes }
-        let _t_phase1 = std::time::Instant::now();
         {
-            let _span = tracing::info_span!("phase_transcript_prologue").entered();
-            // The Stage-1 prologue observes live in a pub helper so the
+            // The prologue observes live in a pub helper so the
             // device-native drivers reproduce the EXACT Fiat-Shamir prologue
             // (order unchanged).
             observe_transcript_prologue::<SC, A>(
@@ -584,17 +589,10 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 shared_trace_mles,
             );
         }
-        tracing::info!(
-            elapsed_ms = _t_phase1.elapsed().as_millis() as u64,
-            chips = n_chips,
-            phase = "transcript",
-            "shard phase done"
-        );
-
-        // Stage 2 — LogUp-GKR.
-        let _t_phase2 = std::time::Instant::now();
+        // LogUp-GKR.
+        let _t_logup_gkr = std::time::Instant::now();
         let logup_gkr_proof = {
-            let _span = tracing::info_span!("phase_logup_gkr").entered();
+            let _span = tracing::info_span!("logup gkr proof").entered();
             prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
                 chips,
                 preprocessed_traces,
@@ -606,23 +604,34 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             )
         };
         tracing::info!(
-            elapsed_ms = _t_phase2.elapsed().as_millis() as u64,
+            elapsed_ms = _t_logup_gkr.elapsed().as_millis() as u64,
             chips = n_chips,
             phase = "logup_gkr",
             "shard phase done"
         );
 
-        // Stage 3 — per-chip zerocheck.  Takes the LogUp-GKR
+        // Per-chip zerocheck.  Takes the LogUp-GKR
         // evaluations so each chip's sumcheck claim chains to its GKR
         // openings (`claimed_sum = λ-RLC(Σ openings·β^k)`), eq-anchored at
         // the shared GKR point.
-        let _t_phase3 = std::time::Instant::now();
+        let _t_zerocheck = std::time::Instant::now();
+        // The per-chip constraint-batching challenge and the GKR-opening batch
+        // challenge are squeezed here, between the two arguments, so the
+        // zerocheck span times the argument and not the transcript draws.
+        // Order is load-bearing: alpha -> gkr_batch_open, then `lambda` inside.
+        let (alpha, gkr_batch_open) =
+            crate::shard_level::zerocheck_prover::sample_zerocheck_batching_challenges::<SC>(
+                challenger,
+            );
+
         let (zerocheck_proof, trace_at_z) = {
-            let _span = tracing::info_span!("phase_zerocheck").entered();
-            prove_shard_zerocheck::<SC, A>(
+            let _span = tracing::info_span!("zerocheck").entered();
+            let (zerocheck_proof, trace_at_z) = prove_shard_zerocheck::<SC, A>(
                 chips,
                 preprocessed_traces,
                 &public_values,
+                alpha,
+                gkr_batch_open,
                 &logup_gkr_proof.logup_evaluations,
                 max_log_row_count,
                 challenger,
@@ -631,33 +640,25 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 shared_trace_mles,
                 // The per-shard rev(zeta) orientation.
                 dense_rev,
-            )
+            );
+
+            // Observe slot 2 — the zerocheck openings (trace@z*), observed after
+            // the zerocheck sumcheck and BEFORE the jagged phase.  Slot 1 (the
+            // GKR openings, trace@ζ) is emitted at the end of the GKR phase
+            // (`row_gkr::top_level::prove_shard_logup_gkr_rows`); see
+            // `observe_logup_gkr_openings` for why the ordering is load-bearing.
+            //
+            // `num_chips` felt, then per chip the length-prefixed
+            // preprocessed-then-main openings in chip-NAME order — the order the
+            // recursion verifier and the host verifier replay.
+            observe_zerocheck_openings_from_residual::<SC, A>(challenger, chips, &trace_at_z);
+
+            (zerocheck_proof, trace_at_z)
         };
         tracing::info!(
-            elapsed_ms = _t_phase3.elapsed().as_millis() as u64,
+            elapsed_ms = _t_zerocheck.elapsed().as_millis() as u64,
             chips = n_chips,
             phase = "zerocheck",
-            "shard phase done"
-        );
-
-        // Observe slot 2 — the zerocheck openings (trace@z*), observed after the
-        // zerocheck sumcheck and BEFORE the jagged phase.  Slot 1 (the GKR
-        // openings, trace@ζ) is emitted at the end of the GKR phase
-        // (`row_gkr::top_level::prove_shard_logup_gkr_rows`); see
-        // `observe_logup_gkr_openings` for why the ordering is load-bearing.
-        //
-        // `num_chips` felt, then per chip the length-prefixed
-        // preprocessed-then-main openings in chip-NAME order — the order the
-        // recursion verifier and the host verifier replay.
-        let _t_phase35 = std::time::Instant::now();
-        {
-            let _span = tracing::info_span!("phase_bridge_3_4").entered();
-            observe_zerocheck_openings_from_residual::<SC, A>(challenger, chips, &trace_at_z);
-        }
-        tracing::info!(
-            elapsed_ms = _t_phase35.elapsed().as_millis() as u64,
-            chips = n_chips,
-            phase = "bridge_3_4",
             "shard phase done"
         );
 
@@ -735,11 +736,11 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             dense_rev,
         );
 
-        // Stage 4 — jagged-PCS opening. Per-chip `r_row` is the trailing
+        // Jagged-PCS opening (prove evaluation claims). Per-chip `r_row` is the trailing
         // log(chip_height) coords of the LogUp-GKR final eval_point.
-        let _t_phase4 = std::time::Instant::now();
+        let _t_prove_eval_claims = std::time::Instant::now();
         let evaluation_proof = {
-            let _span = tracing::info_span!("phase_jagged_pcs").entered();
+            let _span = tracing::info_span!("prove evaluation claims").entered();
             // Dispatch the jagged open through the trait seam (the CpuProver
             // default == `FreeFnJaggedEval` → byte-identical; a device prover
             // routes through its own `prove_trusted_evaluations`).
@@ -762,20 +763,18 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             )
         };
         tracing::info!(
-            elapsed_ms = _t_phase4.elapsed().as_millis() as u64,
+            elapsed_ms = _t_prove_eval_claims.elapsed().as_millis() as u64,
             chips = n_chips,
-            phase = "jagged_pcs",
+            phase = "prove_evaluation_claims",
             "shard phase done"
         );
 
-        // Stage 5 — assembly.
-        let _t_phase5 = std::time::Instant::now();
-        let _phase5_span = tracing::info_span!("phase_assembly").entered();
+        // Shard-proof assembly.
 
         // Per-chip RAW-height map (usize), device-residency aware.  Stored on
         // the proof as `chip_heights` (the felt the prologue observed) AND
         // feeds the `opened_values` degree-bit decomposition below.
-        // MUST agree with the Phase-1 prologue observe + the verifier.
+        // MUST agree with the prologue observe + the verifier.
         let chip_heights = build_chip_heights::<SC, A>(chips, shared_trace_mles);
 
         // Populate `opened_values` with the per-chip trace@z openings from the
@@ -809,13 +808,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             chip_cumulative_sums,
             evaluation_proof,
             orientation,
-        );
-        drop(_phase5_span);
-        tracing::info!(
-            elapsed_ms = _t_phase5.elapsed().as_millis() as u64,
-            chips = n_chips,
-            phase = "assembly",
-            "shard phase done"
         );
         proof
     }

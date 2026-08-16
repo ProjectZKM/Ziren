@@ -621,7 +621,8 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
 // The hash-bind ties the per-chip (row_count, column_count) geometry to the
 // FS-observed commitment via
 //   main_commitment = compress([raw_root, hash(once(len) ++ rc ++ cc)]).
-// The host shard verifier re-check (shard_level/verifier.rs Stage 3.5)
+// The host shard verifier re-check (shard_level/verifier.rs, the jagged
+// HASH-BIND re-check)
 // recomputes this from the bundle's RAW root + packing and asserts it equals
 // `main_commitment`.  Tampering with ANY count (row or column) in the bundle's
 // packing — WITHOUT being able to forge the corresponding raw root — must make

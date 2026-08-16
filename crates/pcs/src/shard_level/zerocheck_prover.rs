@@ -3,7 +3,7 @@
 //!
 //! # Algorithm
 //!
-//!   1. Sample `alpha` (per-chip constraint batching), `gkr_batch_open`
+//!   1. Receive `alpha` (per-chip constraint batching) and `gkr_batch_open`
 //!      (GKR-opening batch powers), `lambda` (inter-chip RLC) — in this
 //!      exact order; the verifier samples the same three.
 //!   2. Build one lazy
@@ -29,7 +29,7 @@ use p3_matrix::dense::RowMajorMatrix;
 /// Shard-level zerocheck prover.
 ///
 /// Pipeline:
-///   1. Sample `alpha` (per-chip constraint batching),
+///   1. Receive `alpha` (per-chip constraint batching) and
 ///      `gkr_batch_open` (transcript alignment with the verifier),
 ///      `lambda` (inter-chip RLC).
 ///   2. Build one lazy `ZeroCheckPoly` per chip (real rows only; the
@@ -37,10 +37,37 @@ use p3_matrix::dense::RowMajorMatrix;
 ///   3. Seed per-chip claims from the GKR openings.
 ///   4. Reduce via `reduce_sumcheck_to_evaluation` (λ-RLC across chips).
 #[allow(clippy::too_many_arguments)]
+/// Squeeze the two batching challenges [`prove_shard_zerocheck`] consumes, in
+/// the order the verifier replays them.
+///
+/// The zerocheck transcript draws three EF elements: `alpha` (per-chip
+/// constraint batching), `gkr_batch_open` (GKR-opening batch powers), then
+/// `lambda` (inter-chip RLC, drawn inside the prove call).  The first two are
+/// arguments so the prove call times the argument rather than the draws;
+/// keeping their squeeze here keeps the ORDER defined in one place, next to
+/// the `lambda` squeeze it must precede.
+pub fn sample_zerocheck_batching_challenges<SC>(
+    challenger: &mut SC::Challenger,
+) -> (Challenge<SC>, Challenge<SC>)
+where
+    SC: StarkGenericConfig,
+{
+    let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    let gkr_batch_open: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    (alpha, gkr_batch_open)
+}
+
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     public_values: &[Val<SC>],
+    // The per-chip constraint-batching challenge (powers-of-alpha) and the
+    // GKR-opening batching challenge.  Both are squeezed by the CALLER, in
+    // this order, immediately before this call; `lambda` is squeezed below.
+    // The transcript therefore sees alpha -> gkr_batch_open -> lambda either
+    // way — hoisting them only moves WHERE they are drawn, not WHEN.
+    alpha: Challenge<SC>,
+    gkr_batch_open: Challenge<SC>,
     logup_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
@@ -66,20 +93,11 @@ where
 {
     let n_chips = chips.len();
 
-    // Sample the per-chip constraint-batching challenge
-    // (powers-of-alpha), the gkr_batch_open challenge (transcript
-    // alignment with verify_zerocheck_host — see verifier.rs:544),
-    // and the inter-chip RLC challenge (lambda).  All
-    // three are sampled at entry for self-containment.
-    //
-    // The gkr_batch_open sample is required for transcript alignment:
-    // verify_zerocheck_host samples three EF elements in this order
-    // (alpha, gkr_batch_open, lambda).  Without sampling
-    // gkr_batch_open here, every subsequent challenge is shifted by
-    // one EF squeeze and downstream sumcheck/jagged-PCS round 0
-    // checks will desync.
-    let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-    let gkr_batch_open: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    // The inter-chip RLC challenge.  `verify_zerocheck_host` squeezes three EF
+    // elements in the order alpha -> gkr_batch_open -> lambda (verifier.rs:544);
+    // the first two arrive as arguments, so this squeeze must be the third or
+    // every subsequent challenge shifts by one and the downstream sumcheck /
+    // jagged-PCS round 0 checks desync.
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
     // ── Per-chip ZeroCheckPoly path ──────────────────────
