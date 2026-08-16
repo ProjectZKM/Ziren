@@ -882,7 +882,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         match shape {
             ZKMCompressProgramShape::Recursion(shape) => {
                 let input = ZKMCoreBasefoldWitnessValues::dummy(self.core_prover.machine(), &shape);
-                self.recursion_program_basefold(&input)
+                self.recursion_program_basefold(&input).0
             }
             ZKMCompressProgramShape::Deferred(shape) => {
                 let input =
@@ -894,7 +894,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // its embedded merkle_tree_height sizes the vk-merkle witness.
                 let input =
                     ZKMCompressBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
-                self.compose_program_basefold(&input)
+                self.compose_program_basefold(&input).0
             }
             ZKMCompressProgramShape::Shrink(shape) => {
                 // The dummy consumes the full

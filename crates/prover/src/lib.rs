@@ -292,7 +292,12 @@ impl RecursionPkCache {
 /// order and is what the eviction uses.
 #[derive(Default)]
 pub struct RecursionProgramCache {
-    entries: BTreeMap<u64, Arc<RecursionProgram<KoalaBear>>>,
+    /// The cached program AND its `setup_digest`.  Hashing a program is not
+    /// cheap -- SHA-256 over the whole serialized instruction stream, ~291 ms
+    /// for a 7.1M-instruction node, 73.7 s summed over a reth compress tree --
+    /// and the digest is a pure function of the bytes, so a cache HIT already
+    /// knows it.  Computed once at insert, beside the `Arc` it describes.
+    entries: BTreeMap<u64, (Arc<RecursionProgram<KoalaBear>>, [u8; 32])>,
     order: std::collections::VecDeque<u64>,
     pub hits: u64,
     pub misses: u64,
@@ -310,11 +315,11 @@ impl RecursionProgramCache {
             .unwrap_or(16)
     }
 
-    fn get(&mut self, key: u64) -> Option<Arc<RecursionProgram<KoalaBear>>> {
+    fn get(&mut self, key: u64) -> Option<(Arc<RecursionProgram<KoalaBear>>, [u8; 32])> {
         match self.entries.get(&key) {
-            Some(v) => {
+            Some((v, d)) => {
                 self.hits += 1;
-                Some(Arc::clone(v))
+                Some((Arc::clone(v), *d))
             }
             None => {
                 self.misses += 1;
@@ -329,18 +334,22 @@ impl RecursionProgramCache {
         &mut self,
         key: u64,
         program: Arc<RecursionProgram<KoalaBear>>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        if let Some(v) = self.entries.get(&key) {
-            return Arc::clone(v);
+    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
+        if let Some((v, d)) = self.entries.get(&key) {
+            return (Arc::clone(v), *d);
         }
-        self.entries.insert(key, Arc::clone(&program));
+        // The program is already shape-fixed here (the uncached builder runs
+        // `fix_recursion_shape` BEFORE wrapping in the `Arc`), so the digest
+        // describes exactly the bytes every later hit hands out.
+        let digest = zkm_recursion_core::setup_digest(&*program);
+        self.entries.insert(key, (Arc::clone(&program), digest));
         self.order.push_back(key);
         while self.order.len() > Self::capacity() {
             if let Some(old) = self.order.pop_front() {
                 self.entries.remove(&old);
             }
         }
-        program
+        (program, digest)
     }
 }
 
@@ -692,10 +701,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Shape-keyed: the leaf layer builds one node per core shard, and those
     /// nodes collapse onto far fewer distinct programs than there are shards.
     /// See [`Self::normalize_programs_basefold_cache`].
+    /// Returns the program AND its `setup_digest` -- the proving-key cache
+    /// key.  Hashing a multi-million-instruction program is ~291 ms, so a
+    /// caller that re-derived it per node paid for one every time, including
+    /// on a cache hit where the digest was already known.
     pub fn recursion_program_basefold(
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
+    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         self.cached_program(
             &self.normalize_programs_basefold_cache,
             input.shape_key(),
@@ -730,10 +743,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         cache_key: u64,
         stage: &'static str,
         build: impl Fn() -> Arc<RecursionProgram<KoalaBear>>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
+    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         let audit = crate::program_cache::program_cache_audit_enabled();
         let cached = cache.lock().unwrap().get(cache_key);
-        if let Some(cached) = cached {
+        if let Some((cached, digest)) = cached {
             if audit {
                 let fresh = build();
                 let cached_bytes =
@@ -747,7 +760,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                      shape_key to cover the diverging field",
                 );
             }
-            return cached;
+            return (cached, digest);
         }
         let program = build();
         cache.lock().unwrap().insert(cache_key, program)
@@ -765,10 +778,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// analog of [`Self::compress_program`].
     ///
     /// Shape-keyed — see [`Self::compose_programs_basefold_cache`].
+    /// Returns the program AND its `setup_digest` -- the proving-key cache
+    /// key.  Hashing a multi-million-instruction program is ~291 ms, so a
+    /// caller that re-derived it per node paid for one every time, including
+    /// on a cache hit where the digest was already known.
     pub fn compose_program_basefold(
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
+    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         self.cached_program(
             &self.compose_programs_basefold_cache,
             input.shape_key(),
@@ -1138,13 +1155,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 ZKMCircuitWitness::CoreBasefold(input) => {
                                     let mut witness_stream = Vec::new();
                                     Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                    (self.recursion_program_basefold(&input), witness_stream)
+                                    (self.recursion_program_basefold(&input).0, witness_stream)
                                 }
                                 ZKMCircuitWitness::ComposeBasefold(input) => {
                                     let mut witness_stream = Vec::new();
                                     Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
                                     (
-                                        self.compose_program_basefold(&input),
+                                        self.compose_program_basefold(&input).0,
                                         witness_stream,
                                     )
                                 }
