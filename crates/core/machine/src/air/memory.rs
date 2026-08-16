@@ -78,7 +78,8 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
     /// sub-cycle positions `1..=4` and `clk` restarts at 0 each shard).
     ///
     /// So `prev_shard` is not witnessed — it *is* `shard` — the `compare_clk` branch collapses to
-    /// the clk comparison, and only the low limb of the timestamp difference is witnessed.  See
+    /// the clk comparison, and only the low limb and the top bit of the timestamp difference are
+    /// witnessed.  See
     /// [`crate::memory::RegisterAccessCols`].
     fn eval_register_access<E: Into<Self::Expr> + Clone>(
         &mut self,
@@ -100,15 +101,24 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         // Verify that the current access time is greater than the previous's.  Because
         // `prev_shard == shard`, this is always a clk comparison:
         //
-        //   assert `0 <= clk - prev_clk - 1 < 2^24`
+        //   assert `0 <= clk - prev_clk - 1 < 2^25`
         //
-        // decomposed as `diff_16bit_limb + diff_8bit_limb * 2^16`.  Only the low limb is a
-        // column; the high limb is recovered as the linear expression below and range-checked as
-        // a byte in place, which is what makes the check cost one column instead of two.
+        // decomposed as `diff_16bit_limb + diff_8bit_limb * 2^16 + diff_24bit_limb * 2^24`.
+        // The 16-bit limb and the top bit are columns; the 8-bit limb is recovered as the linear
+        // expression below and range-checked as a byte in place, which is what keeps the check at
+        // two columns instead of three.
         let diff_minus_one = clk.clone() - prev_clk.clone() - Self::Expr::ONE;
         let diff_16bit_limb: Self::Expr = access.diff_16bit_limb.clone().into();
-        let diff_8bit_limb =
-            (diff_minus_one - diff_16bit_limb.clone()) * Self::F::from_u32(1 << 16).inverse();
+        let diff_24bit_limb: Self::Expr = access.diff_24bit_limb.clone().into();
+
+        // Unconditional: the column is zero on every padding / not-taken row, so this needs no
+        // `do_check` guard and stays degree 2 whatever the caller's guard is.
+        self.assert_bool(diff_24bit_limb.clone());
+
+        let diff_8bit_limb = (diff_minus_one
+            - diff_16bit_limb.clone()
+            - diff_24bit_limb * Self::Expr::from_u32(1 << 24))
+            * Self::F::from_u32(1 << 16).inverse();
 
         self.send_byte(
             Self::Expr::from_u8(ByteOpcode::U16Range as u8),
@@ -202,47 +212,82 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
 
         let current_comp_val = self.if_else(compare_clk.clone(), clk.into(), shard.clone());
 
-        // Assert `current_comp_val > prev_comp_val`. We check this by asserting that
-        // `0 <= current_comp_val-prev_comp_val-1 < 2^24`.
+        // Assert `current_comp_val > prev_comp_val`, by asserting
+        // `0 <= current_comp_val - prev_comp_val - 1 < 2^25`.
         //
-        // The equivalence of these statements comes from the fact that if
-        // `current_comp_val <= prev_comp_val`, then `current_comp_val-prev_comp_val-1 < 0` and will
-        // underflow in the prime field, resulting in a value that is `>= 2^24` as long as both
-        // `current_comp_val, prev_comp_val` are range-checked to be `<2^24` and as long as we're
-        // working in a field larger than `2 * 2^24` (which is true of the KoalaBear and Mersenne31
-        // prime).
+        // Why that is equivalent.  Both comparands are separately bounded to `[0, 2^25)` — the
+        // clk branch by [`Self::eval_range_check_25bits`] on the caller's `clk`, the shard branch
+        // by the `U16Range` check on the shard index.  Write `d = a - b - 1` over the integers,
+        // so `d` lies in `[-2^25, 2^25)`, and let `L` in `[0, 2^25)` be the value the limbs below
+        // reconstruct; the constraint proves `d = L (mod p)`.
+        //  * if `d >= 0`, then `d` and `L` are both in `[0, p)`, so `d = L >= 0`, i.e. `a > b`;
+        //  * if `d < 0`, then `L = d + p >= p - 2^25`, which contradicts `L < 2^25` exactly when
+        //    `p >= 2^26`.
+        // KoalaBear has `p = 2^31 - 2^24 + 1`, so the argument holds for any width `<= 29 bits`
+        // (`2^30 <= p < 2^31`); at 25 bits it carries a factor of ~32 of margin.  The width and
+        // the executor's per-shard `clk` fence (`CORE_SHARD_CLK_LIMIT`) are the same number and
+        // must be changed together.
         let diff_minus_one = current_comp_val - prev_comp_value - Self::Expr::ONE;
 
-        // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb
-        // + mem_access.ts_diff_8bit_limb * 2^16.
-        self.eval_range_check_24bits(
+        // Verify that mem_access.ts_diff = diff_16bit_limb + diff_8bit_limb * 2^16
+        // + diff_24bit_limb * 2^24.
+        self.eval_range_check_25bits(
             diff_minus_one,
             mem_access.diff_16bit_limb.clone(),
             mem_access.diff_8bit_limb.clone(),
+            mem_access.diff_24bit_limb.clone(),
             do_check,
         );
     }
 
-    /// Verifies the inputted value is within 24 bits.
+    /// Verifies the inputted value is within 25 bits.
     ///
-    /// This method verifies that the inputted is less than 2^24 by doing a 16 bit and 8 bit range
-    /// check on it's limbs.  It will also verify that the limbs are correct.  This method is needed
-    /// since the memory access timestamp check (see [Self::eval_memory_access_timestamp]) needs to assume
-    /// the clk is within 24 bits.
-    fn eval_range_check_24bits(
+    /// `value = limb_16 + limb_8 * 2^16 + limb_24 * 2^24`, with `limb_16` checked to 16 bits and
+    /// `limb_8` to 8 bits by the byte table and `limb_24` constrained boolean.
+    ///
+    /// `limb_24` is a column, NOT the residual of the equality.  `value` here is a timestamp
+    /// difference whose comparands come out of an `if_else` on `compare_clk`, so it is already
+    /// degree 2; a residual would make the guarded boolean assertion degree 5 and double the
+    /// chip's quotient degree.  Witnessed, the equality stays exactly the degree it had at 24
+    /// bits and the boolean assertion is degree 2 and needs no guard (the column is zero on
+    /// padding rows).
+    ///
+    /// This is the bound the memory-argument ordering proof
+    /// ([`Self::eval_memory_access_timestamp`]) assumes of both of its comparands, and it is the
+    /// same width that proof range-checks their difference to.  The two must move together:
+    /// widening the timestamp without widening the difference makes the argument INCOMPLETE (a
+    /// legal gap stops fitting the limbs); widening the difference without bounding the
+    /// timestamps makes it UNSOUND.
+    fn eval_range_check_25bits(
         &mut self,
         value: impl Into<Self::Expr>,
         limb_16: impl Into<Self::Expr> + Clone,
         limb_8: impl Into<Self::Expr> + Clone,
+        limb_24: impl Into<Self::Expr> + Clone,
         do_check: impl Into<Self::Expr> + Clone,
     ) {
-        // Verify that value = limb_16 + limb_8 * 2^16.
+        self.assert_bool(limb_24.clone().into());
+
+        // Verify that value = limb_16 + limb_8 * 2^16 + limb_24 * 2^24.
         self.when(do_check.clone()).assert_eq(
             value,
-            limb_16.clone().into() + limb_8.clone().into() * Self::Expr::from_u32(1 << 16),
+            limb_16.clone().into()
+                + limb_8.clone().into() * Self::Expr::from_u32(1 << 16)
+                + limb_24.into() * Self::Expr::from_u32(1 << 24),
         );
 
-        // Send the range checks for the limbs.
+        self.send_timestamp_limb_checks(limb_16, limb_8, do_check);
+    }
+
+    /// The two byte-table range checks that bound a timestamp's low limbs, for callers that build
+    /// the timestamp FROM those limbs (the instruction frame) and so get the reconstruction
+    /// identity for free.  Such a caller still owes `assert_bool` on its top-bit column.
+    fn send_timestamp_limb_checks(
+        &mut self,
+        limb_16: impl Into<Self::Expr>,
+        limb_8: impl Into<Self::Expr>,
+        do_check: impl Into<Self::Expr> + Clone,
+    ) {
         self.send_byte(
             Self::Expr::from_u8(ByteOpcode::U16Range as u8),
             limb_16,

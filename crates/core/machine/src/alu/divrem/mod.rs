@@ -769,11 +769,9 @@ where
             // same coupling as Mul): tie them to the frame exactly there.
             let dd = local.is_div + local.is_divu;
             builder.when(dd.clone()).assert_eq(local.shard, local.frame.shard);
-            builder.when(dd).assert_eq(
-                local.clk,
-                AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
-                    + local.frame.clk_16bit_limb,
-            );
+            builder
+                .when(dd)
+                .assert_eq(local.clk, crate::frame::clk_from_frame::<AB>(&local.frame));
 
             // Write the HI register, the register can only be Register::HI（33）.
             builder.eval_memory_access(

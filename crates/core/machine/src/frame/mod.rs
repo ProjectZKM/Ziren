@@ -46,8 +46,14 @@ pub struct InstructionFrameCols<T> {
     pub shard: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
-    /// The most significant 8 bit limb of clk.
+    /// The middle 8 bit limb of clk.
     pub clk_8bit_limb: T,
+    /// The most significant bit of clk, i.e. bit 24.
+    ///
+    /// A per-shard `clk` runs to `2^25` (`CORE_SHARD_CLK_LIMIT`): the memory-argument ordering
+    /// proof needs every timestamp it compares bounded by the same width it range-checks
+    /// differences to, and this bit is where that bound comes from on an instruction row.
+    pub clk_24bit_limb: T,
 
     /// The decoded instruction, bound to `pc` through the `Program` bus.
     pub instruction: InstructionCols<T>,
@@ -68,6 +74,17 @@ impl<T: Copy> InstructionFrameCols<T> {
     pub fn op_c_val(&self) -> Word<T> {
         *self.op_c_access.value()
     }
+}
+
+/// The frame's `clk`, reassembled from its three limbs.
+///
+/// Chips that keep a private `clk` column for a second memory access (Mul/DivRem's HI write, the
+/// memory chips' data access, the syscall table send) tie it to the frame with this expression —
+/// there is exactly one definition of what `clk` means so the two cannot drift.
+pub fn clk_from_frame<AB: AirBuilder>(frame: &InstructionFrameCols<AB::Var>) -> AB::Expr {
+    AB::Expr::from_u32(1u32 << 24) * frame.clk_24bit_limb
+        + AB::Expr::from_u32(1u32 << 16) * frame.clk_8bit_limb
+        + frame.clk_16bit_limb
 }
 
 /// Evaluate the frame: program fetch, register access, and `(clk, pc)` chaining.
@@ -94,7 +111,7 @@ pub fn eval_instruction_frame<AB>(
 ) where
     AB: ZKMCoreAirBuilder,
 {
-    let clk = AB::Expr::from_u32(1u32 << 16) * frame.clk_8bit_limb + frame.clk_16bit_limb;
+    let clk = clk_from_frame::<AB>(frame);
 
     // ★ On a NON-instruction row every frame column is zero, which would leave
     // the op_b / op_c register-access multiplicities below (`ONE - imm_b`)
@@ -123,8 +140,12 @@ pub fn eval_instruction_frame<AB>(
         AB::Expr::ZERO,
         is_real.clone(),
     );
-    builder.eval_range_check_24bits(
-        clk.clone(),
+    // `clk` is BUILT from these limbs above, so the reconstruction identity is free and only
+    // the limb bounds have to be paid: 16 + 8 bits from the byte table, and the top bit
+    // constrained boolean.  The boolean assertion is unguarded — the column is zero on every
+    // padding / dependency row — which keeps it degree 2.
+    builder.assert_bool(frame.clk_24bit_limb);
+    builder.send_timestamp_limb_checks(
         frame.clk_16bit_limb,
         frame.clk_8bit_limb,
         is_real.clone(),
@@ -235,6 +256,7 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         let clk_8 = ((clk >> 16) & 0xff) as u8;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_8bit_limb = F::from_u8(clk_8);
+        self.clk_24bit_limb = F::from_u32((clk >> 24) & 1);
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::U16Range,
             shard as u16,

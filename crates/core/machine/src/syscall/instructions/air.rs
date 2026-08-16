@@ -92,10 +92,9 @@ where
         // Private shard/clk columns feed the syscall table send: tie them to
         // the frame (the Mul coupling).
         builder.when(local.is_real).assert_eq(local.shard, local.frame.shard);
-        builder.when(local.is_real).assert_eq(
-            local.clk,
-            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb + local.frame.clk_16bit_limb,
-        );
+        builder
+            .when(local.is_real)
+            .assert_eq(local.clk, crate::frame::clk_from_frame::<AB>(&local.frame));
 
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`
         builder.assert_eq::<AB::Var, AB::Expr>(

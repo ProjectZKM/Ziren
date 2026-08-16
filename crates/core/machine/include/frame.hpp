@@ -32,6 +32,7 @@ __ZKM_HOSTDEV__ void populate_raw(
     frame.shard = F::from_canonical_u32(shard);
     frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(clk & 0xffff));
     frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(clk >> 16 & 0xff));
+    frame.clk_24bit_limb = F::from_canonical_u32((clk >> 24) & 1);
 
     cpu::populate_instruction<F>(frame.instruction, instruction);
     (void)recv_next_pc;

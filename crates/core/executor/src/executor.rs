@@ -47,19 +47,20 @@ pub const UNUSED_PC: u32 = 1;
 ///
 ///  1. Every chip's trace height must fit the recursion's per-chip cube cap
 ///     `2^CORE_MAX_LOG_ROW_COUNT` — see [`CORE_SHARD_HEIGHT_THRESHOLD`].
-///  2. Every per-shard `clk` (timestamp) must fit 24 bits (`clk < 2^24`), which the CPU AIR
-///     range-checks for the memory-access timestamp argument — see
-///     `crates/core/machine/src/cpu/air/mod.rs::eval_shard_clk` and `verify_mem_access_ts`.
-///     See [`CORE_SHARD_CLK_24BIT_LIMIT`].
+///  2. Every per-shard `clk` (timestamp) must fit the width the memory argument range-checks
+///     timestamp differences to — see
+///     `crates/core/machine/src/air/memory.rs::eval_range_check_25bits` and
+///     `eval_memory_access_timestamp`, and [`CORE_SHARD_CLK_LIMIT`].
 ///
 /// `SHARD_SIZE` is stored as `cycles * 4` and the cycle exit fires at `clk >= 4 * SHARD_SIZE`,
-/// so a `SHARD_SIZE` of exactly `2^22` would coincide with bound (2). The default is `1 << 24`
-/// (`zkm_pcs::opts::ZKMCoreOpts::default`), i.e. 4x ABOVE that wall, so the cycle exit is
+/// so a `SHARD_SIZE` of exactly `2^22` would coincide with the OLD 24-bit form of bound (2).
+/// The default is `1 << 24` (`zkm_pcs::opts::ZKMCoreOpts::default`), so the cycle exit is
 /// unreachable and bounds (1)/(2) must be — and are — enforced directly here. Because
-/// `clk += 5` per instruction, bound (2) caps any shard at `2^24 / 5 ≈ 3.355 M` cycles no
-/// matter what `SHARD_SIZE` says — and MEASURED, that is the bound that fires: over a
-/// 60-shard reth block the close reasons were clk 52 / area 7 / final 1, with the
-/// clk-closed shards stopping at 470-488 M cells against a 500 M budget.
+/// `clk += 5` per instruction, bound (2) caps any shard at `CORE_SHARD_CLK_LIMIT / 5` cycles no
+/// matter what `SHARD_SIZE` says. At the old 24-bit width that was 3.355 M cycles and it was the
+/// bound that fired: over a 60-shard reth block the close reasons were clk 52 / area 7 / final 1,
+/// with the clk-closed shards stopping at 470-488 M cells against a 500 M budget. At 25 bits it
+/// is 6.71 M cycles and the trace-area bound (1) is the one that binds again.
 const CORE_MAX_LOG_ROW_COUNT: usize =
     zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
 
@@ -75,16 +76,30 @@ const CORE_MAX_LOG_ROW_COUNT: usize =
 const CORE_SHARD_HEIGHT_HEADROOM: u64 = 1 << 16;
 const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SHARD_HEIGHT_HEADROOM;
 
-/// The `clk` (timestamp) ceiling for a single core shard: the CPU AIR range-checks `clk` to 24
-/// bits, so it must stay below `2^24`. Enforced alongside the cycle budget so a large
-/// `SHARD_SIZE` cannot push a shard's `clk` past the range check (which would break the
-/// memory-access timestamp argument and fail the shard verifier).
+/// The `clk` (timestamp) ceiling for a single core shard.
 ///
-/// This is the REAL structural ceiling on a core shard, not `SHARD_SIZE`: at the `1 << 24`
-/// default the cycle exit sits 4x above this limit, so `SHARD_SIZE` is inert and this fence
-/// (`clk < 2^24`, i.e. `2^24 / 5 ≈ 3.355 M` cycles at `clk += 5` per instruction) is what
-/// bounds a shard from above. `ELEMENT_THRESHOLD` closes shards well before either.
-const CORE_SHARD_CLK_24BIT_LIMIT: u32 = 1 << 24;
+/// This is the executor half of ONE argument whose other half is
+/// `MemoryAirBuilder::eval_range_check_25bits`. The memory argument orders two accesses to the
+/// same address by range-checking `current - prev - 1` to `2^25`, which proves `current > prev`
+/// only when BOTH comparands are themselves bounded by `2^25` and the field is large enough that
+/// an underflow cannot land back inside the range (`p >= 2^26`; KoalaBear's
+/// `p = 2^31 - 2^24 + 1` allows widths up to 29 bits). The AIR supplies the bound on each
+/// comparand — 16- and 8-bit limbs from the byte table plus a boolean top bit — and this
+/// constant is what makes it true of the timestamps the executor actually emits.
+///
+/// So the two numbers are the same number. Raising this without widening the range check makes
+/// the argument INCOMPLETE (a legal gap stops fitting the limbs, and the shard becomes
+/// unprovable); widening the range check without a matching bound here makes it UNSOUND.
+///
+/// The margin below the fence is deliberate: the check runs BEFORE the next instruction, which
+/// executes at `clk` and places its register / memory accesses at `clk + 1 ..= clk + 4`
+/// (`MemoryAccessPosition`), while a syscall additionally consumes up to `max_syscall_cycles`
+/// further timestamps. Subtracting both keeps every timestamp that reaches the memory argument
+/// strictly under the fence.
+///
+/// At `clk += 5` per instruction this caps any shard at `2^25 / 5 ≈ 6.71 M` cycles.
+/// `ELEMENT_THRESHOLD` (trace area) closes shards before that on today's workloads.
+const CORE_SHARD_CLK_LIMIT: u32 = 1 << 25;
 
 /// Whether to log one `SHARD_CLOSE` line per closed core shard, naming the
 /// fence that closed it.  Read once; off unless `ZIREN_SHARD_CLOSE_CENSUS` is
@@ -3447,12 +3462,14 @@ impl<'a> Executor<'a> {
         // If there's not enough cycles left for another instruction, move to the next shard.
         let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
 
-        // Hard timestamp bound: keep every shard's `clk` within the CPU AIR's 24-bit range
-        // check (`clk < 2^24`) regardless of `SHARD_SIZE`. The cycle exit above would only
-        // enforce this at `SHARD_SIZE == 2^22` (where `shard_size == 2^24`); the default is
-        // `1 << 24`, so without this check `clk` would run past the range check and fail
-        // verification.
-        let clk_exit = self.max_syscall_cycles + self.state.clk >= CORE_SHARD_CLK_24BIT_LIMIT;
+        // Hard timestamp bound: keep every timestamp this shard can still emit inside the width
+        // the memory argument range-checks its differences to — see [`CORE_SHARD_CLK_LIMIT`].
+        // The next instruction runs at `clk` and its accesses sit at `clk + 1 ..= clk + 4`, and
+        // a syscall consumes up to `max_syscall_cycles` more, so both are subtracted here.
+        let clk_exit = self.state.clk
+            + self.max_syscall_cycles
+            + MemoryAccessPosition::HI as u32
+            >= CORE_SHARD_CLK_LIMIT;
 
         // The `Cpu` chip charges one row per cycle and `clk` advances by 5 per cycle, so this
         // is the chip's exact live height. It is the one input the accumulator does not carry

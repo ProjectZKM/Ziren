@@ -240,10 +240,7 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     // The chips keep private shard/clk columns for the Memory-position access:
     // tie them to the frame (the Mul coupling).
     builder.when(is_real.clone()).assert_eq(cols.shard, cols.frame.shard);
-    builder.when(is_real).assert_eq(
-        cols.clk,
-        AB::Expr::from_u32(1u32 << 16) * cols.frame.clk_8bit_limb + cols.frame.clk_16bit_limb,
-    );
+    builder.when(is_real).assert_eq(cols.clk, crate::frame::clk_from_frame::<AB>(&cols.frame));
 }
 
 /// Constrains that the address is word aligned, for the opcodes that require it.

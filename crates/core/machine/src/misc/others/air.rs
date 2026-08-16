@@ -90,10 +90,9 @@ where
         // The HI-writing group keeps private shard/clk columns for its memory
         // access (the Mul coupling): tie them to the frame exactly there.
         builder.when(is_check_memory.clone()).assert_eq(local.shard, local.frame.shard);
-        builder.when(is_check_memory).assert_eq(
-            local.clk,
-            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb + local.frame.clk_16bit_limb,
-        );
+        builder
+            .when(is_check_memory)
+            .assert_eq(local.clk, crate::frame::clk_from_frame::<AB>(&local.frame));
 
         self.eval_ext(builder, local);
         self.eval_ins(builder, local);

@@ -51,11 +51,12 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 ///
 /// 1. **This threshold** (trace area).
 /// 2. **Per-chip height**, `CORE_SHARD_HEIGHT_THRESHOLD` = 4,128,768 rows.
-/// 3. **`clk < 2^24`** (`CORE_SHARD_CLK_24BIT_LIMIT`). At `clk += 5` per
-///    instruction this caps ANY shard at `2^24 / 5 ≈ 3.355 M` cycles. It is the
-///    TERMINAL fence: **no value of this constant can produce a shard larger
-///    than that**, so on reth's 419,960,677 cycles the shard count has a hard
-///    floor of 126 however high this is set.
+/// 3. **`clk < CORE_SHARD_CLK_LIMIT`**, the width the memory argument range-checks
+///    timestamp differences to. At `clk += 5` per instruction this caps ANY shard
+///    at `CORE_SHARD_CLK_LIMIT / 5` cycles — a TERMINAL fence that no value of this
+///    constant can get past. It was 24 bits (3.355 M cycles, a floor of 126 shards
+///    on reth's 419,960,677 cycles); it is now 25 (6.71 M cycles), which is what
+///    handed the binding role back to fence 1.
 ///
 /// Fence 3 is live, not theoretical. MEASURED (Aug 15, reth core) at every
 /// threshold from 260,000,000 to 720,000,000: **15 shards are clk-capped**, with
@@ -387,7 +388,7 @@ impl Default for ZKMCoreOpts {
             // this value is INERT for any `SHARD_SIZE >= 2^22`. The executor
             // stores it as `cycles * 4` and exits on `clk >= 4 * SHARD_SIZE`,
             // but a second, FIXED exit fires at the timestamp fence
-            // (`CORE_SHARD_CLK_24BIT_LIMIT`, the width of the memory-argument
+            // (`CORE_SHARD_CLK_LIMIT`, the width of the memory-argument
             // timestamp range check).  At 2^22 the cycle budget already equals
             // the 2^24 wall, and at the 2^24 default it is 4x above it, so the
             // cycle exit is unreachable.  A full reth core prove at
