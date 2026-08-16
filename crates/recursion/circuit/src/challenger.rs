@@ -159,16 +159,6 @@ impl<C: Config<F = KoalaBear>> CanObserveVariable<C, Felt<C::F>> for DuplexChall
     fn observe(&mut self, builder: &mut Builder<C>, value: Felt<C::F>) {
         DuplexChallengerVariable::observe(self, builder, value);
     }
-
-    fn observe_slice(
-        &mut self,
-        builder: &mut Builder<C>,
-        values: impl IntoIterator<Item = Felt<C::F>>,
-    ) {
-        for value in values {
-            self.observe(builder, value);
-        }
-    }
 }
 
 impl<C: Config<F = KoalaBear>, const N: usize> CanObserveVariable<C, [Felt<C::F>; N]>
