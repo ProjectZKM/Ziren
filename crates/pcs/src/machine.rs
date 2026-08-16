@@ -71,7 +71,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     /// Creates a new [`StarkMachine`] whose shard proofs use the LEGACY zerocheck
     /// orientation (every recursion / shrink / wrap machine, and test machines).
     pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
-        Self { config, chips, num_pv_elts, core_rev: false, pins_recursion_area: false }
+        Self { config, chips, num_pv_elts, core_rev: true, pins_recursion_area: false }
     }
 
     /// Creates a CORE [`StarkMachine`] whose shard proofs use the
