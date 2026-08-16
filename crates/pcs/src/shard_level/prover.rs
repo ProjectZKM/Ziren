@@ -1294,10 +1294,8 @@ where
 /// [`crate::BasefoldRing::prove_jagged_open`], so the concrete `BfMmcs` /
 /// `Challenger` are supplied by the impl rather than recovered at runtime.
 ///
-/// `pub` so the `MachineProver::prove_trusted_evaluations`
-/// default (CpuProver) + the [`FreeFnJaggedEval`] producer can delegate to this
-/// host body.  The `StarkGpuProver` override lives in ziren-gpu and reads its
-/// own provider; this stays the CPU body.
+/// `pub` so the host shard body reaches it directly.  A device driver has its
+/// own body reading its own provider; this stays the host one.
 pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     // The FIRST opening round — see the trait method.

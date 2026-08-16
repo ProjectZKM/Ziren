@@ -159,21 +159,59 @@ where
         Option<std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>>,
 }
 
+/// The polynomial-commitment component of a shard prover.
+///
+/// Three things belong to the commitment scheme rather than to the prover that
+/// drives it: the storage one committed main trace lives in, the prover-side
+/// data the commit retains for the open to consume, and the error either can
+/// fail with.  Naming them together here means the prover seam names none of
+/// them individually — exchanging the component exchanges all three at once,
+/// which is what a backend swap actually is.
+pub trait ShardPcsProver<SC: StarkGenericConfig>: 'static + Send + Sync {
+    /// Storage for one committed main trace.
+    type Matrix: Matrix<SC::Val>;
+
+    /// What the commit retains for the open.
+    type ProverData;
+
+    /// What a commit or an open can fail with.
+    type Error: Error + Send + Sync;
+}
+
+/// The committed main-trace bundle produced and consumed by a PCS component.
+pub type PcsMainTraceData<SC, PCS> =
+    MainTraceData<SC, <PCS as ShardPcsProver<SC>>::Matrix, <PCS as ShardPcsProver<SC>>::ProverData>;
+
+/// The error a shard PCS component's commit or open can fail with.
+pub type ShardPcsError<SC, PCS> = <PCS as ShardPcsProver<SC>>::Error;
+
+/// The host jagged/BaseFold scheme: traces in row-major host memory, the
+/// commit retained by `commit()` for `open()`, and the host prover's error.
+pub struct HostJaggedPcs<SC>(core::marker::PhantomData<fn() -> SC>);
+
+impl<SC> ShardPcsProver<SC> for HostJaggedPcs<SC>
+where
+    SC: 'static + StarkGenericConfig + BasefoldRing + Send + Sync,
+{
+    type Matrix = RowMajorMatrix<Val<SC>>;
+    // `commit()` builds the jagged/BaseFold main-trace commitment and RETAINS
+    // it here for `open()` to consume.  `None` on the wrap ring (BN254 Mmcs;
+    // single shard), which builds the commit inside the prove pass instead.
+    type ProverData = Option<RetainedJaggedCommit<SC>>;
+    type Error = CpuProverError;
+}
+
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
 pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     'static + Send + Sync
 {
-    /// The type used to store the traces.
-    type DeviceMatrix: Matrix<SC::Val>;
-
-    /// The type used to store the polynomial commitment schemes data.
-    type DeviceProverData;
+    /// The polynomial-commitment component this prover commits and opens with.
+    /// It owns the committed-trace storage, the retained commit data and the
+    /// commit/open error, so none of the three appears on this seam.
+    type Pcs: ShardPcsProver<SC>;
 
     /// The type used to store the proving key.
     type DeviceProvingKey: MachineProvingKey<SC>;
-
-    /// The type used for error handling.
-    type Error: Error + Send + Sync;
 
     /// Create a new prover from a given machine.
     fn new(machine: StarkMachine<SC, A>) -> Self;
@@ -247,7 +285,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         record: &A::Record,
         traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-    ) -> MainTraceData<SC, Self::DeviceMatrix, Self::DeviceProverData>;
+    ) -> PcsMainTraceData<SC, Self::Pcs>;
 
     /// Attach the BaseFold shard side-channel (`ShardProof::basefold_shard_proof`)
     /// for the SHRINK stage.  Default no-op: the CPU `StarkMachine::open`
@@ -281,9 +319,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn open(
         &self,
         pk: &Self::DeviceProvingKey,
-        data: MainTraceData<SC, Self::DeviceMatrix, Self::DeviceProverData>,
+        data: PcsMainTraceData<SC, Self::Pcs>,
         challenger: &mut SC::Challenger,
-    ) -> Result<ShardProof<SC>, Self::Error>;
+    ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>>;
 
     /// Generate a proof for the given records.
     fn prove(
@@ -292,7 +330,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         records: Vec<A::Record>,
         challenger: &mut SC::Challenger,
         opts: <A::Record as MachineRecord>::Config,
-    ) -> Result<MachineProof<SC>, Self::Error>
+    ) -> Result<MachineProof<SC>, ShardPcsError<SC, Self::Pcs>>
     where
         A: for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>;
 }
@@ -366,13 +404,8 @@ where
         p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
     >: Send + Sync + 'static,
 {
-    type DeviceMatrix = RowMajorMatrix<Val<SC>>;
-    // `commit()` builds the jagged/BaseFold main-trace commitment and RETAINS
-    // it here for `open()` to consume.  `None` on the wrap ring (BN254 Mmcs;
-    // single shard), which builds the commit inside the prove pass instead.
-    type DeviceProverData = Option<RetainedJaggedCommit<SC>>;
+    type Pcs = HostJaggedPcs<SC>;
     type DeviceProvingKey = StarkProvingKey<SC>;
-    type Error = CpuProverError;
 
     fn new(machine: StarkMachine<SC, A>) -> Self {
         Self { machine }
@@ -399,7 +432,7 @@ where
         record: &A::Record,
         mut named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-    ) -> MainTraceData<SC, Self::DeviceMatrix, Self::DeviceProverData> {
+    ) -> PcsMainTraceData<SC, Self::Pcs> {
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
@@ -538,9 +571,9 @@ where
     fn open(
         &self,
         pk: &StarkProvingKey<SC>,
-        data: MainTraceData<SC, Self::DeviceMatrix, Self::DeviceProverData>,
+        data: PcsMainTraceData<SC, Self::Pcs>,
         challenger: &mut <SC as StarkGenericConfig>::Challenger,
-    ) -> Result<ShardProof<SC>, Self::Error> {
+    ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>> {
         let chips = self.machine().shard_chips_ordered(&data.chip_ordering).collect::<Vec<_>>();
 
         // Observe the public values.
@@ -589,14 +622,14 @@ where
         mut records: Vec<A::Record>,
         challenger: &mut SC::Challenger,
         opts: <A::Record as MachineRecord>::Config,
-    ) -> Result<MachineProof<SC>, Self::Error>
+    ) -> Result<MachineProof<SC>, ShardPcsError<SC, Self::Pcs>>
     where
         A: for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>,
     {
         // Generate dependencies.
         self.machine()
             .generate_dependencies(&mut records, &opts, None)
-            .map_err(|_| Self::Error {})?;
+            .map_err(|_| CpuProverError)?;
 
         // Observe the preprocessed commitment.
         pk.observe_into(challenger);
@@ -608,7 +641,7 @@ where
                     let t0 = std::time::Instant::now();
                     let named_traces = self.generate_traces(&record).map_err(|e| {
                         tracing::error!("generate traces error: {:?}", e);
-                        Self::Error {}
+                        CpuProverError
                     })?;
                     let trace_gen_ms = t0.elapsed().as_millis();
 

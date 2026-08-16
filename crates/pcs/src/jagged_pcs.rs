@@ -1107,13 +1107,9 @@ pub mod jagged {
     // commit is transcript-critical.
     // ─────────────────────────────────────────────────────────────────
 
-    // The device dense-pack + BaseFold commit is the `StarkGpuProver`
-    // OVERRIDE of `MachineProver::commit_multilinears`, consumed by
-    // `commit_traces` through the `JaggedEvalProducer` COMMIT
-    // seam — no `Option<fn>` crosses this boundary.  The device hook body
-    // lives in ziren-gpu `commit_dense::gpu_jagged_precompute_commit_hook`
-    // (called DIRECTLY by the override); its recursion-AREA-PIN + provider-read
-    // rev(zeta) semantics match the host path byte-identically.
+    // The device commit is built by the device prover's own `commit()`; its
+    // recursion-AREA-PIN + provider-read rev(zeta) semantics match this host
+    // path byte-identically.
 
     // The generic BaseFold precompute body now lives as the DEFAULT
     // `BasefoldRing::commit_multilinears` trait method (no free-fn
