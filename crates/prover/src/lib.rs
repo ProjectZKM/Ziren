@@ -1178,7 +1178,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 let mut runtime =
                                     RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
                                         program.clone(),
-                                        self.compress_prover.config().perm.clone(),
+                                        self.compress_prover.machine().config().perm.clone(),
                                     );
                                 runtime.witness_stream = witness_stream.into();
                                 runtime
@@ -1279,13 +1279,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .in_scope(|| self.compress_prover.setup(&program));
 
                                 // Observe the proving key.
-                                let mut challenger = self.compress_prover.config().challenger();
+                                let mut challenger =
+                                    self.compress_prover.machine().config().challenger();
                                 tracing::debug_span!("observe proving key").in_scope(|| {
                                     pk.observe_into(&mut challenger);
                                 });
 
                                 #[cfg(feature = "debug")]
-                                self.compress_prover.debug_constraints(
+                                self.compress_prover.machine().debug_constraints(
                                     &self.compress_prover.pk_to_host(&pk),
                                     vec![record.clone()],
                                     &mut challenger.clone(),
@@ -1313,7 +1314,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                         &zkm_pcs::MachineProof {
                                             shard_proofs: vec![proof.clone()],
                                         },
-                                        &mut self.compress_prover.config().challenger(),
+                                        &mut self.compress_prover.machine().config().challenger(),
                                     )
                                     .unwrap();
 
@@ -1519,7 +1520,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
-            self.shrink_prover.config().perm.clone(),
+            self.shrink_prover.machine().config().perm.clone(),
         );
         let mut witness_stream = Vec::new();
         Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
@@ -1530,7 +1531,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let (shrink_pk, shrink_vk) = tracing::debug_span!("setup shrink basefold")
             .in_scope(|| self.shrink_prover.setup(&program));
-        let mut challenger = self.shrink_prover.config().challenger();
+        let mut challenger = self.shrink_prover.machine().config().challenger();
 
         // Capture the execution record before it is moved into `prove`
         // so the BaseFold side-channel attach below (GPU host-fallback
@@ -1591,7 +1592,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
-            self.shrink_prover.config().perm.clone(),
+            self.shrink_prover.machine().config().perm.clone(),
         );
         let mut witness_stream = Vec::new();
         Witnessable::<WrapConfig>::write(&input, &mut witness_stream);
@@ -1606,7 +1607,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             tracing::debug!("wrap verifier key set (basefold)");
         }
 
-        let mut wrap_challenger = self.wrap_prover.config().challenger();
+        let mut wrap_challenger = self.wrap_prover.machine().config().challenger();
         let time = std::time::Instant::now();
         let mut wrap_proof = self
             .wrap_prover
@@ -1614,7 +1615,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .unwrap();
         let elapsed = time.elapsed();
         tracing::debug!("wrap_bn254 basefold proving time: {:?}", elapsed);
-        let mut wrap_challenger = self.wrap_prover.config().challenger();
+        let mut wrap_challenger = self.wrap_prover.machine().config().challenger();
         self.wrap_prover.machine().verify(&wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
         tracing::info!("wrapping (basefold) successful");
 
@@ -2047,9 +2048,9 @@ pub mod tests {
     #[test]
     #[serial]
     fn normalize_program_cache_key_implies_identical_program() {
+        use crate::shapes::ZKMProofShape;
         use zkm_pcs::air::MachineAir;
         use zkm_pcs::shape::OrderedShape;
-        use crate::shapes::ZKMProofShape;
         use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
@@ -2069,16 +2070,13 @@ pub mod tests {
         let core_shape_config = CoreShapeConfig::default();
         let recursion_shape_config =
             RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
-        let base_os = ZKMProofShape::generate(
-            &core_shape_config,
-            &recursion_shape_config,
-            REDUCE_BATCH_SIZE,
-        )
-        .find_map(|s| match s {
-            ZKMProofShape::Recursion(batch) => batch.into_iter().next(),
-            _ => None,
-        })
-        .expect("the enumeration emits normalize shapes");
+        let base_os =
+            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, REDUCE_BATCH_SIZE)
+                .find_map(|s| match s {
+                    ZKMProofShape::Recursion(batch) => batch.into_iter().next(),
+                    _ => None,
+                })
+                .expect("the enumeration emits normalize shapes");
         let base: Vec<(String, usize)> = base_os.inner.clone();
 
         let witness_of = |hs: &[(String, usize)]| -> ZKMCoreBasefoldWitnessValues<InnerSC> {
@@ -2099,9 +2097,8 @@ pub mod tests {
             v[idx].1 = v[idx].1.saturating_sub(1).max(1);
             v
         };
-        let candidates: Vec<Vec<(String, usize)>> = std::iter::once(base.clone())
-            .chain((0..base.len().min(4)).map(shrink_one))
-            .collect();
+        let candidates: Vec<Vec<(String, usize)>> =
+            std::iter::once(base.clone()).chain((0..base.len().min(4)).map(shrink_one)).collect();
 
         let mut by_key: std::collections::BTreeMap<u64, Vec<(usize, Vec<u8>)>> =
             std::collections::BTreeMap::new();

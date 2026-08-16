@@ -72,7 +72,7 @@ where
         + p3_challenger::GrindingChallenger<Witness = zkm_pcs::jagged_pcs::JaggedVal>
         + p3_challenger::CanObserve<zkm_pcs::BfCommitment<SC>>,
 {
-    let mut challenger = prover.config().challenger();
+    let mut challenger = prover.machine().config().challenger();
     let prove_span = tracing::debug_span!("prove").entered();
 
     #[cfg(feature = "debug")]
@@ -86,7 +86,7 @@ where
     prove_span.exit();
     let nb_bytes = bincode::serialize(&proof).unwrap().len();
 
-    let mut challenger = prover.config().challenger();
+    let mut challenger = prover.machine().config().challenger();
     prover.machine().verify(&vk, &proof, &mut challenger)?;
 
     Ok(proof)

@@ -211,7 +211,7 @@ where
             });
 
         // Create the challenger and observe the verifying key.
-        let mut challenger = prover.config().challenger();
+        let mut challenger = prover.machine().config().challenger();
         pk.observe_into(&mut challenger);
 
         // Spawn the phase 2 record generator thread.

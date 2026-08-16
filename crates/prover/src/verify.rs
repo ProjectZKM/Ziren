@@ -275,7 +275,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         // Verify the shard proof.
-        let mut challenger = self.core_prover.config().challenger();
+        let mut challenger = self.core_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: proof.0.to_vec() };
         self.core_prover.machine().verify(&vk.vk, &machine_proof, &mut challenger)?;
 
@@ -289,7 +289,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
         let ZKMReduceProof { vk: compress_vk, proof } = proof;
-        let mut challenger = self.compress_prover.config().challenger();
+        let mut challenger = self.compress_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
         self.compress_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
 
@@ -333,7 +333,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: &ZKMReduceProof<KoalaBearPoseidon2>,
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
-        let mut challenger = self.shrink_prover.config().challenger();
+        let mut challenger = self.shrink_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
         self.shrink_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
 
@@ -370,7 +370,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<OuterSC>> {
-        let mut challenger = self.wrap_prover.config().challenger();
+        let mut challenger = self.wrap_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
 
         let wrap_vk = self.wrap_vk.get().expect("Wrap verifier key not set");
