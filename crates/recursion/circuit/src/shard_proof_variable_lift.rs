@@ -72,8 +72,6 @@ pub fn lift_logup_gkr_round_proof<K: Clone>(
 /// recursion-circuit's own [`rc::ChipEvaluation`].
 pub fn lift_chip_evaluation<K: Clone>(src: &st::ChipEvaluation<K>) -> rc::ChipEvaluation<K> {
     rc::ChipEvaluation {
-        main_trace_evaluations: src.main_trace_evaluations.clone(),
-        preprocessed_trace_evaluations: src.preprocessed_trace_evaluations.clone(),
         // Thread the FULL-POINT openings through so the
         // in-circuit LogUp last-layer reconstruction can read them.
         main_trace_evaluations_full: src.main_trace_evaluations_full.clone(),
@@ -271,8 +269,8 @@ pub fn build_basefold_shard_verifier_with_params<HV>(
 /// from the per-chip `LogUpEvaluations.chip_openings` map.
 ///
 /// Per-chip mapping:
-///   - `preprocessed` ← `chip_openings[name].preprocessed_trace_evaluations` (or empty)
-///   - `main` ← `chip_openings[name].main_trace_evaluations`
+///   - `preprocessed` ← `chip_openings[name].preprocessed_trace_evaluations_full` (or empty)
+///   - `main` ← `chip_openings[name].main_trace_evaluations_full`
 ///   - `degree` ← per-chip eval point (size = chip's log_height)
 ///   - `local_cumulative_sum` ← zero placeholder (TBD: derive from
 ///     LogUp-GKR layer output once that flow is finalized)
@@ -301,8 +299,9 @@ where
         .values()
         .map(|opening| {
             let preprocessed_evals =
-                opening.preprocessed_trace_evaluations.as_ref().cloned().unwrap_or_default();
-            let main_evals = opening.main_trace_evaluations.clone();
+                opening.preprocessed_trace_evaluations_full.as_ref().cloned().unwrap_or_default();
+            let main_evals =
+                opening.main_trace_evaluations_full.as_ref().cloned().unwrap_or_default();
             let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
             // `degree` is the bit-decomposition of chip height padded
@@ -363,8 +362,9 @@ where
         .iter()
         .map(|(name, opening)| {
             let preprocessed_evals =
-                opening.preprocessed_trace_evaluations.as_ref().cloned().unwrap_or_default();
-            let main_evals = opening.main_trace_evaluations.clone();
+                opening.preprocessed_trace_evaluations_full.as_ref().cloned().unwrap_or_default();
+            let main_evals =
+                opening.main_trace_evaluations_full.as_ref().cloned().unwrap_or_default();
             let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
             let degree_bits: Vec<Ext<C::F, C::EF>> =

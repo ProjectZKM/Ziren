@@ -1142,18 +1142,6 @@ where
             gkr_batch_open_powers.push(acc_pow);
         }
         // ── SHARD-UNIFORM convention decision (mirror prover) ─
-        // The prover decides rev(zeta)+collapsed-claim per SHARD (every chip
-        // shares the eq-anchor orientation).  Mirror that via the per-machine
-        // `core_rev` flag (true for the CORE machine, false for recursion /
-        // wrap): a core proof is verified rev with the collapsed
-        // (full-opening, no embed) seed, a recursion / wrap proof legacy.
-        // Every core shard emits full openings (`*_full`) for ALL chips, so
-        // the flag alone decides (mirrors the prover's `shard_use_rev`); the
-        // same `verifier_use_rev` also flips the eq-bridge anchor to
-        // `rev(z_gkr)` inside `recompute_zerocheck_rlc_eval_host`.
-        // CAVEAT: a GPU device-fold proof emits `*_full` yet uses the legacy
-        // `zeta` anchor — that path is out of scope for this CPU stage.
-        let verifier_use_rev = core_rev;
         let zerocheck_sum_mod: Challenge<SC> = gkr_evaluations
             .chip_openings
             .values()
@@ -1167,15 +1155,9 @@ where
                 //   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @
                 //               zeta[0..log_h])
                 // so the old `raw(trailing) · embed_LEAD` correction is dropped.
-                // FALLBACK (legacy shard / no `*_full`): the legacy trailing
-                // opening + embed_LEAD, kept in lockstep with the prover's
-                // `!use_rev` branch.
-                let main_full_opt = if verifier_use_rev {
-                    chip_evaluation.main_trace_evaluations_full.as_deref()
-                } else {
-                    None
-                };
-                if let Some(main_full) = main_full_opt {
+                {
+                    let main_full =
+                        chip_evaluation.main_trace_evaluations_full.as_deref().unwrap_or(&[]);
                     let prep_full = chip_evaluation
                         .preprocessed_trace_evaluations_full
                         .as_deref()
@@ -1186,31 +1168,6 @@ where
                         .chain(prep_full.iter().copied())
                         .zip(gkr_batch_open_powers.iter().copied())
                         .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p)
-                } else {
-                    let raw = chip_evaluation
-                        .main_trace_evaluations
-                        .iter()
-                        .copied()
-                        .chain(
-                            chip_evaluation
-                                .preprocessed_trace_evaluations
-                                .as_ref()
-                                .map(|v| v.as_slice())
-                                .unwrap_or(&[])
-                                .iter()
-                                .copied(),
-                        )
-                        .zip(gkr_batch_open_powers.iter().copied())
-                        .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p);
-                    // MIXED-HEIGHT EMBEDDING FACTOR (legacy): re-apply
-                    // Π_high(1 − zeta[k]) over the leading zeta coords above
-                    // this chip's height.
-                    let log_h = chip_evaluation.log_degree as usize;
-                    let high = gkr_evaluations.point.len().saturating_sub(log_h);
-                    let embed_factor = gkr_evaluations.point[..high]
-                        .iter()
-                        .fold(Challenge::<SC>::ONE, |acc, &zk| acc * (Challenge::<SC>::ONE - zk));
-                    raw * embed_factor
                 }
             })
             .fold(Challenge::<SC>::ZERO, |acc, m| acc * lambda + m);
@@ -1953,10 +1910,6 @@ where
                 name
             ))
         })?;
-        let main_trailing: &[Challenge<SC>] = &chip_eval.main_trace_evaluations;
-        let prep_trailing: Option<&[Challenge<SC>]> =
-            chip_eval.preprocessed_trace_evaluations.as_deref();
-
         // ── FULL-POINT OPENING ──
         //
         // Each chip's trace is opened at the FULL `max_log_row_count` point
@@ -1972,9 +1925,8 @@ where
         //   main_full[col] = Σ_{row<height} eq(row, trace_point)·trace[row]
         // is EXACTLY the value `interaction.eval(full_opening)` needs
         // — no per-chip embed lift.  The prover emits this opening in
-        // `main_trace_evaluations_full` (top_level.rs); the older trailing-
-        // `log_h` `main_trace_evaluations` stays for the zerocheck's
-        // bit-reversed sum-modification path.  `geq` (over the REVERSED
+        // `main_trace_evaluations_full` (top_level.rs), and it is the ONLY
+        // opening a chip carries.  `geq` (over the REVERSED
         // `point_extended`, see (3)) is the LSB-first padding mask
         //   geq = Σ_{row ≥ height} eq(row, trace_point).
         //
@@ -1983,29 +1935,15 @@ where
         // perturbs the `padding·geq` mask → the reconstructed num/den
         // diverge from the round walk → reject.
         //
-        // Fallback: if `*_full` is absent (older proof bytes / non-core
-        // stages), use the trailing opening lifted by `1 − geq_legacy`
-        // (`geq_legacy` over the NON-reversed point).
         let (main, prep, geq_for_mask): (
             Vec<Challenge<SC>>,
             Option<Vec<Challenge<SC>>>,
             Challenge<SC>,
-        ) = if let Some(main_full) = chip_eval.main_trace_evaluations_full.as_deref() {
-            (main_full.to_vec(), chip_eval.preprocessed_trace_evaluations_full.clone(), geq_eval)
-        } else {
-            // Legacy trailing-opening lift (zerocheck's convention): geq
-            // over the NON-reversed point, embed = 1 − that geq.
-            let mut pe_legacy: Vec<Challenge<SC>> = Vec::with_capacity(max_log_row_count + 1);
-            pe_legacy.push(Challenge::<SC>::ZERO);
-            pe_legacy.extend_from_slice(trace_point);
-            let geq_legacy = full_geq_host::<Challenge<SC>>(degree, &pe_legacy);
-            let embed_factor = Challenge::<SC>::ONE - geq_legacy;
-            (
-                main_trailing.iter().map(|&v| v * embed_factor).collect(),
-                prep_trailing.map(|p| p.iter().map(|&v| v * embed_factor).collect()),
-                geq_legacy,
-            )
-        };
+        ) = (
+            chip_eval.main_trace_evaluations_full.as_deref().unwrap_or(&[]).to_vec(),
+            chip_eval.preprocessed_trace_evaluations_full.clone(),
+            geq_eval,
+        );
         let geq_eval = geq_for_mask;
 
         // Zero padding openings — the trace eval on a fully padding row

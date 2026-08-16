@@ -80,21 +80,15 @@ pub struct LogupGkrProof<F, EF> {
 /// the zerocheck prover.
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct ChipEvaluation<EF> {
-    /// Evaluations of the main trace at the LogUp sumcheck point.
-    pub main_trace_evaluations: Vec<EF>,
-    /// Evaluations of the preprocessed trace at the same point,
-    /// or `None` if the chip carries no preprocessed columns.
-    pub preprocessed_trace_evaluations: Option<Vec<EF>>,
-    /// FULL-POINT main-trace opening — the chip's main
-    /// columns evaluated at the FULL `max_log_row_count`-coord GKR
-    /// `trace_point` (LSB-first / natural-row).  Mirrors the host
+    /// The chip's main columns evaluated at the SHARED GKR `trace_point`
+    /// (all `max_log_row_count` coords, LSB-first / natural-row).  Mirrors
+    /// the host
     /// `zkm_pcs::shard_level::types::ChipEvaluation::main_trace_evaluations_full`.
-    /// This is the convention the in-circuit LogUp last-layer
-    /// degree-masked reconstruction consumes (the GKR
-    /// leaf is LSB-first natural-row); the trailing-`log_h`
-    /// `main_trace_evaluations` above stays for the zerocheck's
-    /// bit-reversed sum-modification path.  `None` on legacy proof
-    /// bytes / non-core stages where the reconstruction is skipped.
+    /// Every chip opens at this ONE point: it is what the in-circuit LogUp
+    /// last-layer degree-masked reconstruction consumes AND what seeds the
+    /// zerocheck claim, so the second trailing-`log_h` opening each chip used
+    /// to carry -- witnessed and observed here too -- is gone with the legacy
+    /// claim that needed it.
     pub main_trace_evaluations_full: Option<Vec<EF>>,
     /// Companion FULL-POINT preprocessed-trace opening (see
     /// `main_trace_evaluations_full`).

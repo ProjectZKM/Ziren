@@ -144,7 +144,6 @@ where
     // legacy arm).  The GKR opening ALWAYS emits
     // `main_trace_evaluations_full` for every chip (device-only/height-0 →
     // zeros, width-0 → empty).
-    let shard_use_rev = dense_rev;
 
     // The FIRST sumcheck round runs unconditionally in the BASE field
     // (`K = Val<SC>`) — no up-front whole-trace `EF` lift of the widest
@@ -262,30 +261,18 @@ where
         // Under rev(zeta) the claim is seeded from the full-point opening
         // (`main_trace_evaluations_full`), which the (multi-GPU / host) GKR
         // phase populates.
-        let use_rev = shard_use_rev;
-        let claim: Challenge<SC> = if use_rev {
-            let main_full = main_full_opt.expect("use_rev => main_full_opt.is_some()");
+        // The claim is seeded from the SHARED-POINT opening, which already
+        // carries the mixed-height padding factor
+        //   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @ zeta[0..log_h])
+        // so there is no separate embed correction to apply.
+        let claim: Challenge<SC> = {
+            let main_full = main_full_opt.unwrap_or(&[]);
             let prep_full = prep_full_opt.unwrap_or(&[]);
             main_full
                 .iter()
                 .chain(prep_full.iter())
                 .zip(gkr_powers.iter())
                 .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + *o * *p)
-        } else {
-            // Legacy trailing-opening + embed_LEAD (pre-Stage-2 form).
-            let prep_evals: &[Challenge<SC>] =
-                opening.preprocessed_trace_evaluations.as_deref().unwrap_or(&[]);
-            let claim_gkr = opening
-                .main_trace_evaluations
-                .iter()
-                .chain(prep_evals.iter())
-                .zip(gkr_powers.iter())
-                .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + *o * *p);
-            let embed_lead = (num_variables as usize).saturating_sub(log_h);
-            let embed_factor: Challenge<SC> = zeta[..embed_lead]
-                .iter()
-                .fold(Challenge::<SC>::ONE, |acc, &zk| acc * (Challenge::<SC>::ONE - zk));
-            claim_gkr * embed_factor
         };
         chip_sumcheck_claims.push(claim);
 
@@ -322,23 +309,8 @@ where
         // reversal of the eq-anchor), so reversing zeta subsumes the row
         // bit-reversal.  Validated by `orientation_sweep_revzeta`.
         //
-        // Legacy (!use_rev): keep the bit-reversed rows + `zeta` anchor.
-        let main_cells = if use_rev {
-            // use_rev: natural cells.
-            main_cells
-        } else {
-            crate::shard_level::zerocheck_poly::bitrev_rows(&main_cells, main_width, main_height)
-        };
-        let prep_cells = if use_rev {
-            prep_cells
-        } else {
-            prep_cells.map(|c| {
-                crate::shard_level::zerocheck_poly::bitrev_rows(&c, prep_width, main_height)
-            })
-        };
-        // The poly eq-anchor: rev(zeta) under the new convention, else zeta.
-        let zeta_anchor: Vec<Challenge<SC>> =
-            if use_rev { zeta.iter().rev().copied().collect() } else { zeta.to_vec() };
+        // Natural cells, anchored on rev(zeta).
+        let zeta_anchor: Vec<Challenge<SC>> = zeta.iter().rev().copied().collect();
 
         let padded_row_adjustment = compute_padded_row_adjustment::<Val<SC>, Challenge<SC>, A>(
             chip,

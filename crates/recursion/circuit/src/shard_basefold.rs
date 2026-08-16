@@ -809,13 +809,11 @@ where
     // LogUp-GKR proof — round_proofs of length `logup_gkr_rounds`.
     let logup_gkr_proof = {
         let dummy_chip_evaluation = ChipEvaluation::<Ext<C::F, C::EF>> {
-            main_trace_evaluations: vec![zero_ext(builder); 1],
-            preprocessed_trace_evaluations: None,
-            // This coarse IR-side shape fixture
-            // (construction smoke test only — NOT the witness-stream
-            // VK-regen dummy, which is `dummy::basefold_shard_proof`)
-            // carries None; the production reconstruction reads the
-            // `*_full` threaded through the witness path.
+            // This coarse IR-side shape fixture (construction smoke test
+            // only — NOT the witness-stream VK-regen dummy, which is
+            // `dummy::basefold_shard_proof`) carries None; the production
+            // reconstruction reads the `*_full` threaded through the witness
+            // path.
             main_trace_evaluations_full: None,
             preprocessed_trace_evaluations_full: None,
         };

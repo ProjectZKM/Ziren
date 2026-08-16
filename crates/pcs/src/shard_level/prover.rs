@@ -758,14 +758,6 @@ pub fn observe_logup_gkr_openings<F, EF, Challenger>(
     for (_name, opening) in logup_evaluations.chip_openings.iter() {
         observe_length_prefixed_ext::<F, EF, Challenger>(
             challenger,
-            opening.preprocessed_trace_evaluations.as_deref().unwrap_or(&[]),
-        );
-        observe_length_prefixed_ext::<F, EF, Challenger>(
-            challenger,
-            &opening.main_trace_evaluations,
-        );
-        observe_length_prefixed_ext::<F, EF, Challenger>(
-            challenger,
             opening.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]),
         );
         observe_length_prefixed_ext::<F, EF, Challenger>(

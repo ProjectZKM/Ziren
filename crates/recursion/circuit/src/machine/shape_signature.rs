@@ -77,9 +77,9 @@ pub fn hash_shard_proof_structure<H: Hasher>(
         // these names and derives `column_counts_by_round` from the survivors,
         // so chip-set drift changes the emitted ops.
         name.hash(h);
-        eval.main_trace_evaluations.len().hash(h);
+        eval.main_trace_evaluations_full.as_ref().map_or(0, |v| v.len()).hash(h);
         // Option<Vec<EF>> — discriminant + len.
-        match &eval.preprocessed_trace_evaluations {
+        match &eval.preprocessed_trace_evaluations_full {
             Some(v) => {
                 1u8.hash(h);
                 v.len().hash(h);
@@ -216,10 +216,9 @@ fn hash_stacked_basefold<H: Hasher>(
     let bf = &stacked.basefold_proof;
     bf.univariate_messages.len().hash(h);
     bf.fri_commitments.len().hash(h);
-    for openings in [
-        &bf.component_polynomials_query_openings_and_proofs,
-        &bf.query_phase_openings_and_proofs,
-    ] {
+    for openings in
+        [&bf.component_polynomials_query_openings_and_proofs, &bf.query_phase_openings_and_proofs]
+    {
         openings.len().hash(h);
         for round in openings.iter() {
             round.leaves.len().hash(h);
@@ -240,4 +239,3 @@ fn hash_stacked_basefold<H: Hasher>(
         row.len().hash(h);
     }
 }
-

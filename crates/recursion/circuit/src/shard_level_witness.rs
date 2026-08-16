@@ -184,11 +184,6 @@ where
         // reads nothing.  Because read+write share `&self`, the Option
         // discriminants match by construction.
         st::ChipEvaluation {
-            main_trace_evaluations: self.main_trace_evaluations.read(builder),
-            preprocessed_trace_evaluations: self
-                .preprocessed_trace_evaluations
-                .as_ref()
-                .map(|v| v.read(builder)),
             log_degree: self.log_degree,
             // Full-point openings — thread the
             // host's `*_full` Ext values into the circuit so the in-circuit
@@ -205,10 +200,6 @@ where
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.main_trace_evaluations.write(witness);
-        if let Some(prep) = self.preprocessed_trace_evaluations.as_ref() {
-            prep.write(witness);
-        }
         // Emit the FULL-POINT openings in the SAME order
         // `read` consumes them (after main + prep).
         if let Some(main_full) = self.main_trace_evaluations_full.as_ref() {

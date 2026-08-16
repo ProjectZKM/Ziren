@@ -73,30 +73,33 @@ pub struct LogupGkrRoundProof<EF> {
 /// the zerocheck prover.
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct ChipEvaluation<EF> {
-    pub main_trace_evaluations: Vec<EF>,
-    pub preprocessed_trace_evaluations: Option<Vec<EF>>,
     /// `log2(main_trace.height())`; drives the verifier's
     /// padded-row mask. Defaults to 0 on older proof bytes —
     /// verifier treats 0 as uniform-max-log-row-count padding.
     #[serde(default)]
     pub log_degree: u8,
-    /// FULL-POINT main-trace opening: the chip's main
-    /// trace columns evaluated at the FULL `max_log_row_count`-coord
-    /// GKR `trace_point`,
-    /// LSB-first / natural-row.  The existing `main_trace_evaluations`
-    /// is the chip's own trailing-`log_h` opening (consumed by the
-    /// zerocheck's bit-reversed sum-modification path); this field is
-    /// the convention the LogUp last-layer reconstruction needs (the
-    /// GKR leaf is LSB-first natural-row — see
-    /// `verify_logup_gkr_host`).  `None` on older proof bytes /
-    /// non-core stages → the reconstruction is skipped (it is additive).
+    /// The chip's main-trace columns evaluated at the SHARED GKR
+    /// `trace_point` — all `max_log_row_count` coords, LSB-first /
+    /// natural-row, the convention the LogUp last-layer reconstruction
+    /// needs (see `verify_logup_gkr_host`).
+    ///
+    /// Every chip opens at this ONE point.  Each also used to carry a second
+    /// opening at its own trailing-`log_h` coords, which the legacy claim
+    /// rescaled by `embed_LEAD = Π_{k<lead}(1 − zeta[k])`.  The shared-point
+    /// opening already carries that factor —
+    ///   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @ zeta[0..log_h])
+    /// — so the two were redundant, and carrying both cost every chip a second
+    /// eq-table, a second eval-at and a second length-prefixed transcript
+    /// observation, in the prover AND in the recursion circuit that witnesses
+    /// them.
     /// `default = "none_opt_vec"` (not bare `default`) so serde does NOT
     /// add an `EF: Default` bound to the derive (`Option::None` needs no
     /// `EF: Default`).
     #[serde(default = "none_opt_vec")]
     pub main_trace_evaluations_full: Option<Vec<EF>>,
-    /// Companion FULL-POINT preprocessed-trace opening (see
-    /// `main_trace_evaluations_full`).
+    /// Companion preprocessed-trace opening at the same shared point (see
+    /// `main_trace_evaluations_full`).  `None` when the chip has no
+    /// preprocessed columns.
     #[serde(default = "none_opt_vec")]
     pub preprocessed_trace_evaluations_full: Option<Vec<EF>>,
 }

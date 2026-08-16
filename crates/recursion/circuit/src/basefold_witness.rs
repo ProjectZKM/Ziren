@@ -140,11 +140,6 @@ where
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         ChipEvaluation {
-            main_trace_evaluations: self.main_trace_evaluations.read(builder),
-            preprocessed_trace_evaluations: self
-                .preprocessed_trace_evaluations
-                .as_ref()
-                .map(|v| v.read(builder)),
             // Thread the FULL-POINT openings (same read/write order as the
             // host `st::ChipEvaluation` impl in shard_level_witness.rs —
             // main, prep, main_full, prep_full).
@@ -160,10 +155,6 @@ where
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.main_trace_evaluations.write(witness);
-        if let Some(prep) = self.preprocessed_trace_evaluations.as_ref() {
-            prep.write(witness);
-        }
         if let Some(main_full) = self.main_trace_evaluations_full.as_ref() {
             main_full.write(witness);
         }

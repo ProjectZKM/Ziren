@@ -254,39 +254,21 @@ where
     let _extract_span = tracing::info_span!("logup_gkr_output_extract").entered();
     use p3_maybe_rayon::prelude::*;
 
-    // Per-chip device-eval map: always empty
-    // on the host path (the GPU driver calls the `_gpu` batch kernel directly).
-    // Device-only chips therefore fall to the zero-vector below.
-    let batched_main_evals: BTreeMap<String, Vec<EF>> = BTreeMap::new();
-
     let chip_openings: BTreeMap<String, ChipEvaluation<EF>> = chips
         .par_iter()
         .zip(shared_trace_mles.par_iter())
         .zip(preprocessed_traces.par_iter())
         .map(|((chip, pm), prep_trace)| {
-            // Host main-trace cells come from the shared MLE inner
-            // (`guts == the raw trace`); a device-resident chip is a `dummy`
-            // (inner `None`) → empty cells sourced from the provider below.
-            let (mt_values, mt_width): (&[F], usize) = match pm.inner().as_ref() {
-                Some(mle) => (mle.guts().as_slice(), pm.num_polynomials()),
-                None => (&[], 0),
-            };
             // Device-only chip — its real height is baked into the dummy MLE
             // and read via `metadata_height()`; a host chip reads the
             // shared MLE's real row count.  Falls back to 1 (legacy
             // unexercised-chip) when absent.
             let main_height = pm.metadata_height().unwrap_or(1);
             let log_main_height = main_height.max(1).next_power_of_two().trailing_zeros() as usize;
-            let main_eval_point: &[EF] = if eval_point.len() >= log_main_height {
-                &eval_point[eval_point.len() - log_main_height..]
-            } else {
-                &eval_point[..]
-            };
-            // FULL-POINT opening point: the trailing
-            // `max_log_row_count` coords (= the full trace_point), LSB-first.
-            // Used to populate `*_full` for the LogUp last-layer reconstruction
-            // (the GKR leaf is LSB-first natural-row).  Independent of the
-            // per-chip trailing-`log_h` opening above (consumed by zerocheck).
+            // The SHARED opening point: the trailing `max_log_row_count`
+            // coords (= the full trace_point), LSB-first.  Every chip opens
+            // here — the per-chip trailing-`log_h` point is gone with the
+            // legacy claim that needed it.
             let full_eval_point: &[EF] = if eval_point.len() >= max_log_row_count {
                 &eval_point[eval_point.len() - max_log_row_count..]
             } else {
@@ -296,35 +278,7 @@ where
             // chip.width()`, so an unexercised chip must still emit a
             // zero vector of its declared width.
             let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
-            let main_evals = if pm.inner().is_none() && chip_main_width > 0 {
-                // Device-only chip: the host path emits a zero vector
-                // of the declared width; the GPU driver evaluates the
-                // device-resident trace at the GKR point via its own kernel.
-                batched_main_evals
-                    .get(&chip.name().to_string())
-                    .cloned()
-                    .unwrap_or_else(|| vec![EF::ZERO; chip_main_width])
-            } else {
-                // Host chip (or width-0 unexercised) — evaluate the shared
-                // MLE's real inner cells (`mt_values`/`mt_width`, == the raw
-                // trace) at the trailing-`log_h` point.
-                evaluate_trace_columns_at_point::<F, EF>(mt_values, mt_width, main_eval_point)
-            };
-
             let prep_ref = prep_trace.real_trace_ref();
-            let prep_evals = if let Some(pt) = prep_ref {
-                let prep_height = pt.values.len() / pt.width.max(1);
-                let log_prep_height =
-                    prep_height.max(1).next_power_of_two().trailing_zeros() as usize;
-                let prep_eval_point: &[EF] = if eval_point.len() >= log_prep_height {
-                    &eval_point[eval_point.len() - log_prep_height..]
-                } else {
-                    &eval_point[..]
-                };
-                Some(evaluate_trace_columns_at_point::<F, EF>(pt.values, pt.width, prep_eval_point))
-            } else {
-                None
-            };
 
             // FULL-POINT openings at `full_eval_point` (the full
             // trace_point), for the LogUp last-layer reconstruction.  The GKR
@@ -357,8 +311,6 @@ where
             (
                 chip.name().to_string(),
                 ChipEvaluation {
-                    main_trace_evaluations: main_evals,
-                    preprocessed_trace_evaluations: prep_evals,
                     log_degree: u8::try_from(log_main_height).unwrap_or(0),
                     main_trace_evaluations_full: main_evals_full,
                     preprocessed_trace_evaluations_full: prep_evals_full,

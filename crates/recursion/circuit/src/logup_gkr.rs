@@ -719,16 +719,6 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         observe_length_prefixed_ext_slice::<C, FC>(
             builder,
             challenger,
-            chip_evaluation.preprocessed_trace_evaluations.as_deref().unwrap_or(&[]),
-        );
-        observe_length_prefixed_ext_slice::<C, FC>(
-            builder,
-            challenger,
-            &chip_evaluation.main_trace_evaluations,
-        );
-        observe_length_prefixed_ext_slice::<C, FC>(
-            builder,
-            challenger,
             chip_evaluation.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]),
         );
         observe_length_prefixed_ext_slice::<C, FC>(

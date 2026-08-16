@@ -127,12 +127,6 @@ where
                 (
                     name,
                     ChipEvaluation {
-                        main_trace_evaluations: vec![EF::ZERO; main_width],
-                        preprocessed_trace_evaluations: if preprocessed_width > 0 {
-                            Some(vec![EF::ZERO; preprocessed_width])
-                        } else {
-                            None
-                        },
                         // log_degree placeholder — per-chip
                         // height is carried separately by
                         // `BasefoldShardProof.chip_heights`

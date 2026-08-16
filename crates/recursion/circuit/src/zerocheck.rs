@@ -595,72 +595,22 @@ where
                 // assert — the recursion analog of host verifier.rs:921 'GKR
                 // sum-modification identity failed' — not just the
                 // reconstruction (logup_gkr.rs check (i)).
-                if verifier_use_rev {
-                    let main_full = chip_evaluation.main_trace_evaluations_full.as_deref().expect(
-                        "rev claim-collapse requires main_trace_evaluations_full \
+                let main_full = chip_evaluation.main_trace_evaluations_full.as_deref().expect(
+                    "rev claim-collapse requires main_trace_evaluations_full \
                              (FIX-off core proof)",
-                    );
-                    let prep_full = chip_evaluation
-                        .preprocessed_trace_evaluations_full
-                        .as_deref()
-                        .unwrap_or(&[]);
-                    return main_full
-                        .iter()
-                        .copied()
-                        .chain(prep_full.iter().copied())
-                        .zip(gkr_batch_open_challenge_powers.iter().copied())
-                        .map(|(o, power)| {
-                            let o_sym: SymbolicExt<C::F, C::EF> = o.into();
-                            o_sym * power
-                        })
-                        .sum::<SymbolicExt<C::F, C::EF>>();
-                }
-
-                // LEGACY path (rev OFF / no `*_full`): trailing opening + the
-                // degree one-hot mixed-height embed, kept in lock-step with the
-                // host `!verifier_use_rev` branch (verifier.rs:893-918).
-                let raw: SymbolicExt<C::F, C::EF> = chip_evaluation
-                    .main_trace_evaluations
+                );
+                let prep_full =
+                    chip_evaluation.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]);
+                main_full
                     .iter()
                     .copied()
-                    .chain(
-                        chip_evaluation
-                            .preprocessed_trace_evaluations
-                            .as_ref()
-                            .map(|v| v.as_slice())
-                            .unwrap_or(&[])
-                            .iter()
-                            .copied(),
-                    )
+                    .chain(prep_full.iter().copied())
                     .zip(gkr_batch_open_challenge_powers.iter().copied())
-                    .map(|(opening, power)| {
-                        let o_sym: SymbolicExt<C::F, C::EF> = opening.into();
+                    .map(|(o, power)| {
+                        let o_sym: SymbolicExt<C::F, C::EF> = o.into();
                         o_sym * power
                     })
-                    .sum::<SymbolicExt<C::F, C::EF>>();
-
-                // Embedding factor from the degree one-hot prefix.
-                // Deferred materialization: keep the
-                // per-coordinate prefix/factor accumulation in
-                // SymbolicExt (NO builder.eval inside the k-loop) and
-                // let the DSL CSE the products. The degree one-hot
-                // (degree[k] ∈ {0,1}, Σ ≤ 1, asserted in section (4d))
-                // keeps `prefix` a 0/1 step function so each factor
-                // term `(1 − is_high·zeta)` stays effectively linear.
-                // is_high[k] = 1 − Σ_{j≤k} degree[k]; factor = Π_k (1 −
-                // is_high[k]·zeta[k]). Value-identical to the prior
-                // per-coordinate builder.eval form (host verifier.rs
-                // step (G2-b)), just one materialization per chip.
-                let mut prefix: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
-                let mut factor: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
-                for (k, zk) in gkr_evaluations.point.iter().enumerate() {
-                    let dk: SymbolicExt<C::F, C::EF> = opening.degree[k].into();
-                    prefix = prefix + dk;
-                    let is_high: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE - prefix.clone();
-                    let zk_sym: SymbolicExt<C::F, C::EF> = (*zk).into();
-                    factor = factor * (SymbolicExt::ONE - is_high * zk_sym);
-                }
-                raw * factor
+                    .sum::<SymbolicExt<C::F, C::EF>>()
             })
             .collect();
 
