@@ -386,15 +386,22 @@ impl Default for ZKMCoreOpts {
             // MEASURED ("Shard size" sweep, Aug 2026):
             // this value is INERT for any `SHARD_SIZE >= 2^22`. The executor
             // stores it as `cycles * 4` and exits on `clk >= 4 * SHARD_SIZE`,
-            // but a second, FIXED exit fires at `clk >= 2^24`
-            // (`CORE_SHARD_CLK_24BIT_LIMIT`, the CPU AIR's 24-bit `clk` range
-            // check).  At 2^22 the cycle budget already equals that wall, and
-            // at the 2^24 default it is 4x above it, so the cycle exit is
-            // unreachable and 100% of core splits are `ELEMENT_THRESHOLD`
-            // (trace-area) splits.  A full reth core prove at
+            // but a second, FIXED exit fires at the timestamp fence
+            // (`CORE_SHARD_CLK_24BIT_LIMIT`, the width of the memory-argument
+            // timestamp range check).  At 2^22 the cycle budget already equals
+            // the 2^24 wall, and at the 2^24 default it is 4x above it, so the
+            // cycle exit is unreachable.  A full reth core prove at
             // `SHARD_SIZE=4194305` and at the 2^24 default produce the
             // BYTE-IDENTICAL proof.  Raising this further changes nothing;
             // the shard-size lever is `ELEMENT_THRESHOLD` below.
+            //
+            // ⚠ An earlier revision of this comment claimed "100% of core
+            // splits are `ELEMENT_THRESHOLD` splits".  That is MEASURED FALSE:
+            // instrumenting the close reason over a 60-shard reth block gave
+            // clk 52 / area 7 / final 1.  `cpu_exit` is indeed unreachable, but
+            // the exit that replaces it is the TIMESTAMP fence, not the area
+            // one — the area budget was being reached at only ~94% of its
+            // nominal value because the shard had already run out of `clk`.
             shard_size: env::var("SHARD_SIZE")
                 .map_or_else(|_| 1 << 24, |s| s.parse::<usize>().unwrap_or(1 << 24)),
             // Per-shard trace-AREA cap (raw main-trace cells). The

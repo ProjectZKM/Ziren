@@ -57,9 +57,9 @@ pub const UNUSED_PC: u32 = 1;
 /// (`zkm_pcs::opts::ZKMCoreOpts::default`), i.e. 4x ABOVE that wall, so the cycle exit is
 /// unreachable and bounds (1)/(2) must be — and are — enforced directly here. Because
 /// `clk += 5` per instruction, bound (2) caps any shard at `2^24 / 5 ≈ 3.355 M` cycles no
-/// matter what `SHARD_SIZE` says. In practice neither fires first: 100% of measured core
-/// splits on reth / tendermint / goat are `ELEMENT_THRESHOLD` (trace-area) splits — see
-/// `zkm_pcs::opts::ELEMENT_THRESHOLD`.
+/// matter what `SHARD_SIZE` says — and MEASURED, that is the bound that fires: over a
+/// 60-shard reth block the close reasons were clk 52 / area 7 / final 1, with the
+/// clk-closed shards stopping at 470-488 M cells against a 500 M budget.
 const CORE_MAX_LOG_ROW_COUNT: usize =
     zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
 
@@ -1949,9 +1949,14 @@ impl<'a> Executor<'a> {
         if !self.unconstrained && !self.skip_replay_bookkeeping {
             self.report.opcode_counts[instruction.opcode] += 1;
             self.split_acct.add_opcode(instruction.opcode, 1);
-            if instruction.is_memory_load_instruction() {
-                self.split_acct.add_opcode(Opcode::ADD, 2);
-            } else if instruction.is_branch_cmp_instruction() {
+            // NOTE: a memory instruction's `addr_word = op_b_value + op_c_value` is
+            // INLINED into the memory chip's own columns (see
+            // `memory::instructions::common`), so it emits NO `AddSub` row. Charging
+            // 2 rows per load here billed ~100 M rows that never exist -- 3.42x the
+            // real `add_sub_events` count and 21% of the whole area budget -- which
+            // closed shards early on a budget that was mostly fiction. Rows are only
+            // charged where `emit_alu` actually pushes an event.
+            if instruction.is_branch_cmp_instruction() {
                 self.split_acct.add_opcode(Opcode::ADD, 1);
                 self.split_acct.add_opcode(Opcode::SLT, 2);
             } else if instruction.is_mov_cond_instruction() {
