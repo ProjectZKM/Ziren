@@ -226,30 +226,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // only guard, and the map is now at 96% of a capacity that cannot be
         // tuned (the tree height is baked into every enumerated program).
         let allowed_shapes = [
-            // No tiny bands below 2^17 (pre-basefold, ~10s-of-K-instruction
-            // programs): every basefold recursion program
-            // is >= 2^17 per chip, so they never matched and only emitted
-            // unreachable vks into the enumeration.
-            // Basefold normalize-sized shape.  The basefold normalize
-            // program produces ~660K instructions with chip heights:
-            // MemoryConst≈33842, MemoryVar≈11253, BaseAlu≈74980,
-            // ExtAlu≈70969, Poseidon2WideDeg3≈2012,
-            // ExpReverseBitsLen≈24, PublicValues≈4.  Powers-of-two
-            // log_heights with headroom: BaseAlu/ExtAlu→17,
-            // MemoryConst→16, MemoryVar→14 (rounded up to a
-            // minimum of 18 to share with smaller shapes).  This entry
-            // lets `fix_shape` succeed for basefold programs when
-            // that path is enabled; the basefold
-            // builder otherwise skips fix_shape entirely.
-            [
-                (mem_var.clone(), 18),
-                (select.clone(), 18),
-                (mem_const.clone(), 17),
-                (base_alu.clone(), 18),
-                (ext_alu.clone(), 18),
-                (poseidon2_wide.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
             // Bundle-lift compose level h=0. Tendermint bundle-lift's
             // first compose level (lift outputs → arity-4 compose)
             // panics shape.rs:91 with chip heights none of the above
@@ -267,36 +243,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (base_alu.clone(), 18),
                 (ext_alu.clone(), 18),
                 (poseidon2_wide.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            // Bundle-lift compose level h=1+. Each compose tree
-            // level grows: h=0 outputs become h=1 inputs, h=1 compose
-            // verifies them and produces bigger chip heights still.
-            // Tendermint h=1 panic showed roughly 2× h=0:
-            //   MemoryConst≈375959 (log≈19), Select≈315840 (log≈19),
-            //   ExtAlu≈306869 (log≈19), BaseAlu≈182828 (log≈18),
-            //   MemoryVar≈102404 (log≈17), Poseidon2WideDeg3≈59776 (log≈16).
-            // Bigger caps fit h=1 + h=2 + reth/geth deeper trees.
-            [
-                (mem_var.clone(), 19),
-                (select.clone(), 20),
-                (mem_const.clone(), 20),
-                (base_alu.clone(), 19),
-                (ext_alu.clone(), 20),
-                (poseidon2_wide.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            // Component-opening band: the component-opening witnessing (bound
-            // initial_eval + Merkle binding) grew compose programs past
-            // the older caps (observed fib compose: MemoryVar 663k -> 20,
-            // ExtAlu 865k -> 20).  One-bit headroom on the binding dims.
-            [
-                (mem_var.clone(), 20),
-                (select.clone(), 20),
-                (mem_const.clone(), 20),
-                (base_alu.clone(), 20),
-                (ext_alu.clone(), 21),
-                (poseidon2_wide.clone(), 19),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             // SELECT-HEAVY deep compose band (tendermint + goat).  The 100-bit
@@ -321,19 +267,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (base_alu.clone(), 20),
                 (ext_alu.clone(), 19),
                 (poseidon2_wide.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            // Uniform 2^21, for Select-heavy compose trees deeper than
-            // tendermint's.  A strict superset of the band above and a strict
-            // subset of the row cube, so a program that overflows the tuned
-            // band pays 2x rather than jumping straight to the cube.
-            [
-                (mem_var.clone(), 21),
-                (select.clone(), 21),
-                (mem_const.clone(), 21),
-                (base_alu.clone(), 21),
-                (ext_alu.clone(), 21),
-                (poseidon2_wide.clone(), 19),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             // ── ALU-HEAVY COMPOSE LADDER (reth) ────────────────────────────
@@ -387,35 +320,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (mem_var.clone(), 20),
                 (select.clone(), 20),
                 (mem_const.clone(), 19),
-                (base_alu.clone(), 20),
-                (ext_alu.clone(), 20),
-                (poseidon2_wide.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (mem_var.clone(), 20),
-                (select.clone(), 20),
-                (mem_const.clone(), 19),
                 (base_alu.clone(), 21),
                 (ext_alu.clone(), 21),
-                (poseidon2_wide.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (mem_var.clone(), 21),
-                (select.clone(), 20),
-                (mem_const.clone(), 19),
-                (base_alu.clone(), 21),
-                (ext_alu.clone(), 22),
-                (poseidon2_wide.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (mem_var.clone(), 21),
-                (select.clone(), 20),
-                (mem_const.clone(), 20),
-                (base_alu.clone(), 22),
-                (ext_alu.clone(), 22),
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
