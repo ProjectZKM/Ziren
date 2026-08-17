@@ -173,6 +173,19 @@ where
 pub struct BasefoldProverData<F: Field, MT: Mmcs<F>> {
     pub prover_data: MT::ProverData<RowMajorMatrix<F>>,
     pub encoded_codewords: Vec<Arc<RsCodeWord<F>>>,
+    /// The tree's digest layers, first above the leaves to the root, kept
+    /// beside it for a commit whose `prover_data` is LEAFLESS.
+    ///
+    /// A commit that never materialised its codewords on host cannot be opened
+    /// through the MMCS — `open_batch` reads leaf rows — so its opener supplies
+    /// the leaf rows itself and walks these layers for the sibling paths,
+    /// `digest_layers[l][idx ^ 1]` per level, exactly as the MMCS would.  The
+    /// layers are a small fraction of the codewords they describe, which is why
+    /// keeping them is worth what dropping the codewords saves.
+    ///
+    /// EMPTY whenever `prover_data` holds its leaves, which is every commit the
+    /// host prover builds — it opens through the MMCS as before.
+    pub digest_layers: Vec<Vec<[F; 8]>>,
 }
 
 pub struct BasefoldProver<F: Field, EF: ExtensionField<F>, MT: Mmcs<F>, D> {
@@ -244,7 +257,15 @@ where
         let mats: Vec<RowMajorMatrix<F>> = codewords.iter().map(|c| c.data.clone()).collect();
 
         let (commitment, prover_data) = self.mmcs.commit(mats);
-        (commitment, BasefoldProverData { prover_data, encoded_codewords: codewords })
+        (
+            commitment,
+            BasefoldProverData {
+                prover_data,
+                encoded_codewords: codewords,
+                // The host commit keeps its leaves, so its opener uses the MMCS.
+                digest_layers: Vec::new(),
+            },
+        )
     }
 
     /// Build the partial-Lagrange evaluation vector at `point`.
