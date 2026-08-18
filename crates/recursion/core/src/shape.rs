@@ -448,6 +448,42 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         ]
         .map(HashMap::from)
         .to_vec();
+        // Two bands that exist only to keep SIBLING agreement cheap.
+        //
+        // When a node's children must share a band, the group takes the
+        // cheapest band covering all of them — and the six above leave a hole:
+        // bands 2 and 3 cap Poseidon2WideDeg3 at 2^17 while band 0 needs 2^18,
+        // so a group mixing them has nothing between band 3 (227.3M cells) and
+        // the ALU-heavy band 4 (421.5M).  Measured on a reth compress, that is
+        // exactly what happens — `own=[3,0,0,0] -> shared=4` drags three
+        // 148.4M-cell members onto 421.5M, a 2.84x over-pay for one bit of
+        // Poseidon2.  These two are bands 2 and 3 with that one cap raised,
+        // at 201.3M and 274.7M, which covers band 0 without the ALU headroom
+        // nobody in such a group asked for.
+        //
+        // They cost the vk enumeration six shapes each, which the map has room
+        // for (~174 free), and they can only ever be chosen when they are the
+        // cheapest fit — so a program that does not need the extra Poseidon2
+        // bit never lands on one.
+        let mut allowed_shapes = allowed_shapes;
+        allowed_shapes.push(HashMap::from([
+            (mem_var.clone(), 20),
+            (select.clone(), 20),
+            (mem_const.clone(), 19),
+            (base_alu.clone(), 19),
+            (ext_alu.clone(), 19),
+            (poseidon2_wide.clone(), 18),
+            (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+        ]));
+        allowed_shapes.push(HashMap::from([
+            (mem_var.clone(), 20),
+            (select.clone(), 20),
+            (mem_const.clone(), 19),
+            (base_alu.clone(), 20),
+            (ext_alu.clone(), 20),
+            (poseidon2_wide.clone(), 18),
+            (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+        ]));
         // No band may exceed the row cube every recursion stage proves at:
         // `PaddedMle::padded` asserts the padded rows fit `2^cube`, so a taller
         // band is a shape nothing can be snapped onto.
