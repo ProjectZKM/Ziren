@@ -200,6 +200,12 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// **Key**: [`ZKMCoreBasefoldWitnessValues::shape_key`].
     pub normalize_programs_basefold_cache: Mutex<RecursionProgramCache>,
 
+    /// Built-but-unsnapped Normalize / Compose programs, so a band can be
+    /// chosen for a node AFTER its program exists — which is what deciding a
+    /// band by SIBLING agreement requires.
+    pub normalize_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
+    pub compose_programs_unsnapped_cache: Mutex<UnsnappedProgramCache>,
+
     /// Per-shape cache for the basefold Compose recursion program — every
     /// interior node of the recursion tree.
     ///
@@ -290,6 +296,53 @@ impl RecursionPkCache {
 /// A recursion tree walks its layers in order and never returns to an
 /// earlier one, so insertion order is also least-likely-to-be-asked-again
 /// order and is what the eviction uses.
+/// Built-but-unsnapped recursion programs, keyed by input shape.
+///
+/// A program's INSTRUCTIONS do not depend on which band it is snapped onto —
+/// `fix_shape` only sets `program.shape`.  So the expensive half (the build)
+/// can be shared across bands, and choosing a band later costs a clone rather
+/// than a rebuild.  That is what lets a node's band be decided by its SIBLINGS,
+/// which is knowable only after the program exists.
+///
+/// No `setup_digest` here: it describes the bytes of a SHAPED program, and
+/// hashing one is ~291 ms.
+#[derive(Default)]
+pub struct UnsnappedProgramCache {
+    entries: BTreeMap<u64, Arc<RecursionProgram<KoalaBear>>>,
+    order: std::collections::VecDeque<u64>,
+}
+
+impl UnsnappedProgramCache {
+    fn capacity() -> usize {
+        std::env::var("ZIREN_RECURSION_UNSNAPPED_CACHE_SIZE")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(16)
+    }
+
+    fn get(&self, key: u64) -> Option<Arc<RecursionProgram<KoalaBear>>> {
+        self.entries.get(&key).map(Arc::clone)
+    }
+
+    fn insert(
+        &mut self,
+        key: u64,
+        program: Arc<RecursionProgram<KoalaBear>>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        if let Some(v) = self.entries.get(&key) {
+            return Arc::clone(v);
+        }
+        self.entries.insert(key, Arc::clone(&program));
+        self.order.push_back(key);
+        while self.order.len() > Self::capacity() {
+            if let Some(old) = self.order.pop_front() {
+                self.entries.remove(&old);
+            }
+        }
+        program
+    }
+}
+
 #[derive(Default)]
 pub struct RecursionProgramCache {
     /// The cached program AND its `setup_digest`.  Hashing a program is not
@@ -466,6 +519,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vk_verification,
             wrap_vk: OnceLock::new(),
             normalize_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
+            normalize_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
+            compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
             recursion_pks_basefold_cache: Mutex::new(RecursionPkCache::default()),
         };
@@ -721,8 +776,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `None` (`FIX_RECURSION_SHAPES=false`) leaves the program at its organic
     /// heights and gives up vk enumerability with it.
     fn fix_recursion_shape(&self, program: &mut RecursionProgram<KoalaBear>) {
+        self.fix_recursion_shape_kind(program, "unknown");
+    }
+
+    /// [`Self::fix_recursion_shape`], told which stage is asking — see
+    /// [`RecursionShapeConfig::fix_shape_kind`].
+    fn fix_recursion_shape_kind(&self, program: &mut RecursionProgram<KoalaBear>, kind: &str) {
         if let Some(config) = self.compress_shape_config.as_ref() {
-            config.fix_shape(program);
+            config.fix_shape_kind(program, kind);
         }
     }
 
@@ -744,12 +805,122 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
+        self.recursion_program_basefold_at(input, None)
+    }
+
+    /// [`Self::recursion_program_basefold`], snapped onto a CALLER-CHOSEN band.
+    ///
+    /// `None` keeps the program's own choice (the cheapest band it fits).
+    /// `Some(i)` overrides it, which is how a node is made to agree with its
+    /// siblings: a compose program is traced over its children's proof shapes,
+    /// so its verifying key is enumerable only when those shapes agree, and a
+    /// child cannot know what its siblings need.
+    pub fn recursion_program_basefold_at(
+        &self,
+        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+        band: Option<usize>,
+    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         self.cached_program(
             &self.normalize_programs_basefold_cache,
-            input.shape_key(),
+            Self::band_keyed(input.shape_key(), band),
             "normalize",
-            || self.build_normalize_program_basefold_uncached(input),
+            || {
+                let program = self.normalize_program_unsnapped(input);
+                self.snapped(&program, band, "normalize")
+            },
         )
+    }
+
+    /// The band this normalize program would choose for itself.
+    pub fn normalize_band_for(
+        &self,
+        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+    ) -> Option<usize> {
+        let program = self.normalize_program_unsnapped(input);
+        self.band_of(&program)
+    }
+
+    /// The band this compose program would choose for itself.
+    pub fn compose_band_for(
+        &self,
+        input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
+    ) -> Option<usize> {
+        let program = self.compose_program_unsnapped(input);
+        self.band_of(&program)
+    }
+
+    fn band_of(&self, program: &RecursionProgram<KoalaBear>) -> Option<usize> {
+        let config = self.compress_shape_config.as_ref()?;
+        let heights = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::program_heights(
+            program,
+        );
+        config.band_index_for(&heights)
+    }
+
+    /// The cheapest band that can hold every one of `bands` — see
+    /// [`RecursionShapeConfig::dominating_band_index`].
+    pub fn dominating_band(&self, bands: &[usize]) -> Option<usize> {
+        self.compress_shape_config.as_ref()?.dominating_band_index(bands)
+    }
+
+    /// A cache key that separates the same program snapped onto different
+    /// bands, since they are different programs downstream.
+    fn band_keyed(shape_key: u64, band: Option<usize>) -> u64 {
+        match band {
+            None => shape_key,
+            Some(b) => shape_key.rotate_left(17) ^ (0x9E37_79B9_7F4A_7C15_u64.wrapping_mul(b as u64 + 1)),
+        }
+    }
+
+    /// Clone an unsnapped program and fix its shape.
+    fn snapped(
+        &self,
+        program: &Arc<RecursionProgram<KoalaBear>>,
+        band: Option<usize>,
+        kind: &str,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let mut owned = (**program).clone();
+        match (band, self.compress_shape_config.as_ref()) {
+            (Some(index), Some(config)) => config.fix_shape_at(&mut owned, index),
+            _ => self.fix_recursion_shape_kind(&mut owned, kind),
+        }
+        Arc::new(owned)
+    }
+
+    fn normalize_program_unsnapped(
+        &self,
+        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let key = input.shape_key();
+        if let Some(p) = self.normalize_programs_unsnapped_cache.lock().unwrap().get(key) {
+            return p;
+        }
+        let max_log_row_count = Self::pcs_max_log_row_count();
+        let program = Arc::new(build_normalize_basefold_program(
+            self.core_prover.machine(),
+            input,
+            max_log_row_count,
+        ));
+        self.normalize_programs_unsnapped_cache.lock().unwrap().insert(key, program)
+    }
+
+    fn compose_program_unsnapped(
+        &self,
+        input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let key = input.shape_key();
+        if let Some(p) = self.compose_programs_unsnapped_cache.lock().unwrap().get(key) {
+            return p;
+        }
+        let max_log_row_count = Self::pcs_max_log_row_count();
+        let program = Arc::new(build_compose_basefold_recursion_program(
+            self.compress_prover.machine(),
+            input,
+            max_log_row_count,
+            self.vk_verification,
+            PublicValuesOutputDigest::Reduce,
+        ));
+        self.compose_programs_unsnapped_cache.lock().unwrap().insert(key, program)
     }
 
     /// Uncached body of [`Self::recursion_program_basefold`] — separate so the
@@ -763,7 +934,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count = Self::pcs_max_log_row_count();
         let mut program =
             build_normalize_basefold_program(self.core_prover.machine(), input, max_log_row_count);
-        self.fix_recursion_shape(&mut program);
+        self.fix_recursion_shape_kind(&mut program, "normalize");
         Arc::new(program)
     }
 
@@ -821,6 +992,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
+        self.compose_program_basefold_at(input, None)
+    }
+
+    /// [`Self::compose_program_basefold`], snapped onto a caller-chosen band —
+    /// see [`Self::recursion_program_basefold_at`].
+    pub fn compose_program_basefold_at(
+        &self,
+        input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
+        band: Option<usize>,
+    ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         // `ZIREN_COMPOSE_CHILD_DIAG=1`: how many DISTINCT child proof
         // structures each compose node is built over.  The vk enumeration
         // emits compose children as `vec![band; arity]` — all children alike —
@@ -852,9 +1033,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
         self.cached_program(
             &self.compose_programs_basefold_cache,
-            input.shape_key(),
+            Self::band_keyed(input.shape_key(), band),
             "compose",
-            || self.build_compose_program_basefold_uncached(input),
+            || {
+                let program = self.compose_program_unsnapped(input);
+                self.snapped(&program, band, "compose")
+            },
         )
     }
 
@@ -875,7 +1059,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             self.vk_verification,
             PublicValuesOutputDigest::Reduce,
         );
-        self.fix_recursion_shape(&mut program);
+        self.fix_recursion_shape_kind(&mut program, "compose");
         Arc::new(program)
     }
 
@@ -894,7 +1078,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             max_log_row_count,
             self.vk_verification,
         );
-        self.fix_recursion_shape(&mut program);
+        self.fix_recursion_shape_kind(&mut program, "deferred");
         Arc::new(program)
     }
 
@@ -913,7 +1097,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             max_log_row_count,
             self.vk_verification,
         );
-        self.fix_recursion_shape(&mut program);
+        self.fix_recursion_shape_kind(&mut program, "shrink");
         Arc::new(program)
     }
 

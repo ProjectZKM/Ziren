@@ -99,6 +99,15 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     }
 
     pub fn fix_shape(&self, program: &mut RecursionProgram<F>) {
+        self.fix_shape_kind(program, "unknown");
+    }
+
+    /// [`Self::fix_shape`], told which recursion stage is asking.
+    ///
+    /// The kind is what makes the choice legible: a compose node's children all
+    /// come from one stage, so whether those children share a band is a
+    /// property of that stage's band selection, not of any one program.
+    pub fn fix_shape_kind(&self, program: &mut RecursionProgram<F>, kind: &str) {
         let heights = RecursionAir::<F, DEGREE>::heights(program);
         let widths = Self::committed_widths();
 
@@ -118,8 +127,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         // tightly-fitting band can only ever help.
         let mut closest_shape: Option<&HashMap<String, usize>> = None;
         let mut closest_cells = u128::MAX;
+        let mut closest_index = usize::MAX;
 
-        for shape in self.allowed_shapes.iter() {
+        for (index, shape) in self.allowed_shapes.iter().enumerate() {
             // If any of the heights is greater than the shape, continue.
             let fits =
                 heights.iter().all(|(name, height)| *height <= (1 << shape.get(name).unwrap()));
@@ -131,6 +141,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
             if cells < closest_cells {
                 closest_cells = cells;
                 closest_shape = Some(shape);
+                closest_index = index;
             }
         }
 
@@ -142,7 +153,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
                 let mut band: Vec<(String, usize)> =
                     shape.iter().map(|(n, h)| (n.clone(), 1usize << h)).collect();
                 band.sort();
-                eprintln!("FIXSHAPE organic={organic:?} -> band={band:?} cells={closest_cells}");
+                eprintln!(
+                    "FIXSHAPE kind={kind} band_index={closest_index} cells={closest_cells} \
+organic={organic:?} -> band={band:?}"
+                );
             }
             let shape = RecursionShape { inner: shape.clone().into_iter().collect() };
             *program.shape_mut() = Some(shape);
@@ -184,6 +198,92 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
 
     pub fn first(&self) -> Option<&HashMap<String, usize>> {
         self.allowed_shapes.first()
+    }
+
+    /// Every band a program can be snapped onto.
+    pub fn all_shapes(&self) -> &[HashMap<String, usize>] {
+        &self.allowed_shapes
+    }
+
+    /// The cheapest band a program with these heights fits, by index into
+    /// [`Self::all_shapes`].  This is the choice [`Self::fix_shape_kind`] makes
+    /// on its own; exposed so a caller can learn it WITHOUT committing to it.
+    pub fn band_index_for(&self, heights: &[(String, usize)]) -> Option<usize> {
+        let widths = Self::committed_widths();
+        let mut best: Option<(usize, u128)> = None;
+        for (index, shape) in self.allowed_shapes.iter().enumerate() {
+            let fits = heights
+                .iter()
+                .all(|(name, height)| *height <= (1 << shape.get(name).copied().unwrap_or(0)));
+            if !fits {
+                continue;
+            }
+            let cells = Self::band_cells(shape, &widths);
+            if best.map_or(true, |(_, c)| cells < c) {
+                best = Some((index, cells));
+            }
+        }
+        best.map(|(i, _)| i)
+    }
+
+    /// The cheapest band that DOMINATES every band in `indices` — one whose
+    /// per-chip caps are at least as tall as all of theirs.
+    ///
+    /// A compose program is traced over its children's proof shapes, so its
+    /// verifying key is enumerable only when those shapes agree.  Snapping a
+    /// node's children onto a common band is what makes them agree, and this
+    /// picks the cheapest band that can hold all of them.  Bands do not form a
+    /// chain, so this is a search, not a maximum: the answer need not be any of
+    /// the inputs, and may not exist.
+    pub fn dominating_band_index(&self, indices: &[usize]) -> Option<usize> {
+        let widths = Self::committed_widths();
+        let mut required: HashMap<String, usize> = HashMap::new();
+        for i in indices {
+            for (name, log_height) in self.allowed_shapes.get(*i)?.iter() {
+                let slot = required.entry(name.clone()).or_insert(0);
+                *slot = (*slot).max(*log_height);
+            }
+        }
+        let mut best: Option<(usize, u128)> = None;
+        for (index, shape) in self.allowed_shapes.iter().enumerate() {
+            let covers = required
+                .iter()
+                .all(|(name, need)| shape.get(name).copied().unwrap_or(0) >= *need);
+            if !covers {
+                continue;
+            }
+            let cells = Self::band_cells(shape, &widths);
+            if best.map_or(true, |(_, c)| cells < c) {
+                best = Some((index, cells));
+            }
+        }
+        best.map(|(i, _)| i)
+    }
+
+    /// Snap `program` onto band `index` regardless of what it would have chosen
+    /// for itself — the caller has a reason the program cannot see.
+    pub fn fix_shape_at(&self, program: &mut RecursionProgram<F>, index: usize) {
+        let shape = self
+            .allowed_shapes
+            .get(index)
+            .unwrap_or_else(|| panic!("recursion band {index} does not exist"));
+        let heights = RecursionAir::<F, DEGREE>::heights(program);
+        for (name, height) in heights.iter() {
+            let cap = shape.get(name).copied().unwrap_or(0);
+            assert!(
+                *height <= (1 << cap),
+                "recursion band {index} caps {name} at 2^{cap} but the program needs {height}",
+            );
+        }
+        *program.shape_mut() = Some(RecursionShape { inner: shape.clone().into_iter().collect() });
+    }
+
+    /// The organic heights of a built program, for [`Self::band_index_for`].
+    pub fn program_heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {
+        RecursionAir::<F, DEGREE>::heights(program)
+            .iter()
+            .map(|(n, h)| (n.clone(), *h))
+            .collect()
     }
 }
 
