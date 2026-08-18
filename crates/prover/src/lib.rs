@@ -308,6 +308,19 @@ impl RecursionProgramCache {
     /// of distinct shapes, so a small cap still holds a whole layer; set it
     /// to 0 to hold nothing, which recovers the build-per-node behaviour for
     /// measurement.
+    ///
+    /// Holding EVERY shape is not the answer: a reth block reaches ~77 distinct
+    /// programs, and raising the cap to 128 cut program builds only 91 -> 80
+    /// (compress wall 213.8 -> 207.4 s) while peak RSS rose 128.0 -> 156.0 GB.
+    /// A program is large enough that this cap is really a host-memory budget.
+    ///
+    /// Eviction stays INSERTION-ordered.  Renewing an entry on a hit (LRU) was
+    /// measured WORSE — builds 91 -> 104, compress wall 213.8 -> 239.9 s —
+    /// because the access pattern is cyclic rather than reuse-driven: a tree
+    /// walks its layers in order, cycling through more distinct shapes than the
+    /// cache holds, and that is the pattern for which LRU evicts exactly the
+    /// entry wanted next.  The way out is fewer distinct shapes, not a
+    /// different eviction order.
     fn capacity() -> usize {
         std::env::var("ZIREN_RECURSION_PROGRAM_CACHE_SIZE")
             .ok()
