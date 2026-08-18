@@ -19,6 +19,7 @@ pub mod types;
 pub mod utils;
 pub mod verify;
 
+use rayon::prelude::*;
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
@@ -237,6 +238,15 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
 pub struct RecursionPkCache {
     entries: BTreeMap<[u8; 32], Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>>,
     order: std::collections::VecDeque<[u8; 32]>,
+    /// Digests that must never be evicted.
+    ///
+    /// A key costs ~1.4 GiB of host memory, which is why the cache is capped
+    /// far below the ~91 distinct programs a block reaches — so the cap has to
+    /// be spent where it buys the most.  The compose programs are a small FIXED
+    /// set, (band, arity), reached in every block; the normalize ones follow the
+    /// core shard shapes and turn over.  Pinning the first kind means their
+    /// setup is paid once per PROCESS, while the rest keep cycling.
+    pinned: std::collections::BTreeSet<[u8; 32]>,
     pub hits: u64,
     pub misses: u64,
 }
@@ -252,6 +262,14 @@ impl RecursionPkCache {
             .ok()
             .and_then(|v| v.trim().parse::<usize>().ok())
             .unwrap_or(24)
+    }
+
+    /// Mark a digest as never-evict.  Called before the key exists: the
+    /// pre-warm knows WHICH programs are worth keeping without having to build
+    /// their keys, so the first node to need one pays the setup and every later
+    /// block gets it free.
+    fn pin(&mut self, key: [u8; 32]) {
+        self.pinned.insert(key);
     }
 
     fn get(&mut self, key: &[u8; 32]) -> Option<Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>> {
@@ -281,10 +299,19 @@ impl RecursionPkCache {
         let value = Arc::new((pk, vk));
         self.entries.insert(key, Arc::clone(&value));
         self.order.push_back(key);
-        while self.order.len() > Self::capacity() {
-            if let Some(old) = self.order.pop_front() {
-                self.entries.remove(&old);
+        // Evict in insertion order, skipping pinned digests.  A cache made
+        // entirely of pinned entries would spin here, so the walk gives up
+        // once it has seen every entry.
+        let mut examined = 0usize;
+        while self.order.len() > Self::capacity() && examined < self.order.len() {
+            let Some(old) = self.order.pop_front() else { break };
+            if self.pinned.contains(&old) {
+                self.order.push_back(old);
+                examined += 1;
+                continue;
             }
+            self.entries.remove(&old);
+            examined = 0;
         }
         value
     }
@@ -537,34 +564,25 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         prover
     }
 
-    /// Compose-program pre-warm helper.  See call-site comment in
-    /// [`Self::uninitialized`] for the rationale.  Walks
-    /// `arity in 1..=REDUCE_BATCH_SIZE`, building one dummy compose program
-    /// per arity to amortize first-compile cost.  Unconditional: ~2.0 s of
-    /// startup work against ~2.4 s that the first `compress()` would
-    /// otherwise pay.
+    /// Build EVERY compose program a run can reach, once, at construction —
+    /// and its proving key with it.
     ///
-    /// ⚠ WHAT IT DOES NOT DO IS SEED THE CACHE.  Measured on a reth compress
-    /// (measured Aug18): of the keys this builds, **none** match
-    /// any key a real node presents — `compose_hits` is 40 with the pre-warm
-    /// and 40 without, and the proving path still builds all 23 of its own
-    /// programs.  Extending it across every band (24 dummies instead of 4)
-    /// changes nothing except the 20 extra builds: still zero overlap.
+    /// A compose program is a function of (child band, arity): it is traced
+    /// over its children's proof shapes, `fix_shape` has snapped those onto one
+    /// band, and a node's children are made to share one.  Both dimensions are
+    /// small and known before any proving starts, so the whole set is
+    /// enumerable — which is what lets this be a construction cost paid once
+    /// per process instead of a per-node cost paid every block.
     ///
-    /// Two independent reasons, both upstream of this function:
-    ///   * the dummy child is built at the CLAMPED area `Some(RECURSION_LOG_
-    ///     TRACE_AREA)` while a real child takes `max(natural, pin)` — a
-    ///     FLOOR — so every child whose natural area passes the pin has a
-    ///     geometry no dummy here reproduces;
-    ///   * 27 of 63 real compose nodes are built over children of DIFFERENT
-    ///     shapes (25 at arity 4 with two, one with three), which no
-    ///     `vec![shape; arity]` dummy can express at all.
-    ///
-    /// The second is also a vk-enumerability gap: `ZKMProofShape::generate`
-    /// emits compose children as `vec![band; arity]`, so those 27 nodes'
-    /// verifying keys are outside the enumerated space.  Making a node's
-    /// children share a band is the fix for both, and is what would let
-    /// compose programs be built once at construction, keyed by (band, arity).
+    /// Two things had to be true first, and each was measured false before it
+    /// was fixed:
+    ///   * children of one node must agree, or no `vec![band; arity]` dummy
+    ///     describes them — 27 of 63 nodes had children of two or three shapes;
+    ///   * the dummy child must be built at the area a REAL child has.  The
+    ///     recursion area pin is a FLOOR, not a clamp, and every band's
+    ///     committed area passes it, so a dummy pinned at
+    ///     `RECURSION_LOG_TRACE_AREA` described nothing: of 24 pre-warmed keys,
+    ///     NOT ONE matched a key a real node presented.
     ///
     /// Bails when:
     ///   - `compress_shape_config` is None
@@ -581,18 +599,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return;
         };
 
-        // Pull the first allowed recursion shape — replicated across
-        // `arity` slots, this is a valid `ZKMCompressShape` that
-        // survives `fix_shape`.
-        let Some(first_shape_map) = recursion_shape_config.first() else {
+        // Every allowed band, replicated across `arity` slots — the same way
+        // `ZKMProofShape::generate` enumerates compose children, so the pairs
+        // built here are the pairs the vk map contains.
+        let bands = recursion_shape_config.all_shapes();
+        if bands.is_empty() {
             tracing::debug!(
                 "compose pre-warm skipped: recursion_shape_config has no allowed shapes"
             );
             return;
-        };
-
-        let proof_shape: OrderedShape =
-            first_shape_map.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        }
 
         // Use the production merkle tree height — this is what real
         // compose witnesses see at runtime, so the pre-warmed shape
@@ -600,22 +616,38 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let merkle_tree_height = self.recursion_vk_tree.height;
 
         let prewarm_start = std::time::Instant::now();
-        for arity in 1..=REDUCE_BATCH_SIZE {
-            let compress_shape = ZKMCompressShape::from(vec![proof_shape.clone(); arity]);
+        // Independent per pair, and the caches are locked only to look up and
+        // to insert, never across a build.
+        let pairs: Vec<(usize, usize)> = (0..bands.len())
+            .flat_map(|b| (1..=REDUCE_BATCH_SIZE).map(move |a| (b, a)))
+            .collect();
+        let n_pairs = pairs.len();
+        pairs.into_par_iter().for_each(|(band_index, arity)| {
+            let proof_shape: OrderedShape =
+                bands[band_index].iter().map(|(k, v)| (k.clone(), *v)).collect();
+            let compress_shape = ZKMCompressShape::from(vec![proof_shape; arity]);
             let shape = ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height };
             let witness = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy(
                 self.compress_prover.machine(),
                 &shape,
             );
-            let per_arity_start = std::time::Instant::now();
+            let per_pair_start = std::time::Instant::now();
             // Retained by `compose_programs_basefold_cache` under this
             // witness's shape key; a real node of the same shape then hits.
-            let _program = self.compose_program_basefold(&witness);
+            let (_program, digest) = self.compose_program_basefold(&witness);
+            // And claim its KEY, which is the more expensive half: a setup walks
+            // every chip's preprocessed trace and commits the round, ~1.4 GiB of
+            // it coming back to host.  The key itself is built by whichever node
+            // needs it first -- it is a DEVICE key, so making one here would mean
+            // a CUDA context at construction -- but pinning the digest now means
+            // that setup is paid once per PROCESS rather than once per block.
+            self.pin_recursion_pk(digest);
             tracing::debug!(
-                "compose pre-warm: arity={arity} built in {:?}",
-                per_arity_start.elapsed()
+                "compose pre-warm: band={band_index} arity={arity} built in {:?}",
+                per_pair_start.elapsed()
             );
-        }
+        });
+        tracing::debug!("compose pre-warm: {n_pairs} (band, arity) pairs");
         tracing::debug!(
             "compose pre-warm: arity 1..={} done in {:?}",
             REDUCE_BATCH_SIZE,
@@ -642,6 +674,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Publish a freshly built key.  Returns the `Arc` that is actually in the
     /// cache, so a caller that lost a race uses the canonical key rather than
     /// its own copy.
+    /// Keep this program's key for the life of the process — see
+    /// [`RecursionPkCache::pin`].
+    pub fn pin_recursion_pk(&self, key: [u8; 32]) {
+        self.recursion_pks_basefold_cache.lock().unwrap().pin(key);
+    }
+
     pub fn recursion_pk_cache_insert(
         &self,
         key: [u8; 32],

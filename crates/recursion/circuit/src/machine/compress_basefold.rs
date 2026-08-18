@@ -1161,19 +1161,47 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
                 >,
             >,
     {
-        // Recursion-layer area pin (dummy mirror): threaded EXPLICITLY as the
-        // `dummy_basefold_vk_and_shard_proof` `recursion_area_pin` param.
-        // The compose (compress) program verifies
-        // a batch of CHILD proofs that are themselves RECURSION proofs
-        // (normalize / compose outputs), each committed by the recursion prover
-        // at the FIXED pinned area `2^RECURSION_LOG_TRACE_AREA`; passing
-        // `Some(RECURSION_LOG_TRACE_AREA)` builds each child's
-        // `dummy_jagged_basefold_bundle` at the pinned L (= num_stripes 64,
-        // reduction rounds / eval_point 27) — the dummy child bundle then
-        // MATCHES the real pinned child regardless of its natural heights,
-        // collapsing the compose VK to f(chip-set, arity).  (Deferred delegates
-        // here, so it inherits the pin.)
-        let recursion_area_pin = Some(zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA);
+        // Recursion-layer area, threaded EXPLICITLY as the
+        // `dummy_basefold_vk_and_shard_proof` `recursion_area_pin` param: it
+        // sets the child bundle's `num_stripes`, reduction rounds and
+        // eval_point length, so a dummy built at the wrong one describes a
+        // child that no real proof matches.
+        //
+        // ⚠ THE PIN IS A FLOOR, NOT A CLAMP.  `precompute_jagged_basefold_
+        // commit_generic` raises the child's `log_dense_size` to
+        // `max(natural, RECURSION_LOG_TRACE_AREA)`, so only a child whose
+        // natural area is BELOW 2^27 actually lands on the pin.  Passing the
+        // pin unconditionally was measured to describe none of them: every
+        // recursion band's committed area is 148M cells or more, i.e. L = 28
+        // or 29, and of 24 pre-warmed compose keys NOT ONE matched a key a
+        // real node presented.
+        //
+        // So the area is computed from the child's own shape, exactly as
+        // `ZKMProofShape::generate` computes it for the enumeration — the same
+        // `Σ width·2^h` over MAIN widths, rounded up to a power of two, floored
+        // at the pin.
+        let widths: std::collections::BTreeMap<String, usize> = machine
+            .chips()
+            .iter()
+            .map(|c| {
+                (
+                    <_ as zkm_pcs::air::MachineAir<p3_koala_bear::KoalaBear>>::name(c),
+                    p3_air::BaseAir::<p3_koala_bear::KoalaBear>::width(c).max(1),
+                )
+            })
+            .collect();
+        let child_area = |os: &zkm_pcs::shape::OrderedShape| -> usize {
+            let total: u128 = os
+                .inner
+                .iter()
+                .map(|(n, h)| (widths.get(n).copied().unwrap_or(1) as u128) * (1u128 << *h))
+                .sum();
+            let mut l = 0usize;
+            while (1u128 << l) < total {
+                l += 1;
+            }
+            l.max(zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA)
+        };
         let vks_and_proofs: Vec<_> = shape
             .compress_shape
             .proof_shapes
@@ -1182,7 +1210,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
                 crate::stark::dummy_basefold_vk_and_shard_proof::<A>(
                     machine,
                     proof_shape,
-                    recursion_area_pin,
+                    Some(child_area(proof_shape)),
                 )
             })
             .collect();
