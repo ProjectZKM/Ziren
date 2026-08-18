@@ -492,6 +492,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// startup work against ~2.4 s that the first `compress()` would
     /// otherwise pay.
     ///
+    /// ⚠ WHAT IT DOES NOT DO IS SEED THE CACHE.  Measured on a reth compress
+    /// (`ZIREN_COMPOSE_CHILD_DIAG=1`): of the keys this builds, **none** match
+    /// any key a real node presents — `compose_hits` is 40 with the pre-warm
+    /// and 40 without, and the proving path still builds all 23 of its own
+    /// programs.  Extending it across every band (24 dummies instead of 4)
+    /// changes nothing except the 20 extra builds: still zero overlap.
+    ///
+    /// Two independent reasons, both upstream of this function:
+    ///   * the dummy child is built at the CLAMPED area `Some(RECURSION_LOG_
+    ///     TRACE_AREA)` while a real child takes `max(natural, pin)` — a
+    ///     FLOOR — so every child whose natural area passes the pin has a
+    ///     geometry no dummy here reproduces;
+    ///   * 27 of 63 real compose nodes are built over children of DIFFERENT
+    ///     shapes (25 at arity 4 with two, one with three), which no
+    ///     `vec![shape; arity]` dummy can express at all.
+    ///
+    /// The second is also a vk-enumerability gap: `ZKMProofShape::generate`
+    /// emits compose children as `vec![band; arity]`, so those 27 nodes'
+    /// verifying keys are outside the enumerated space.  Making a node's
+    /// children share a band is the fix for both, and is what would let
+    /// compose programs be built once at construction, keyed by (band, arity).
+    ///
     /// Bails when:
     ///   - `compress_shape_config` is None
     ///     (`FIX_RECURSION_SHAPES=false` — no allowed shape to drive
@@ -799,6 +821,35 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
+        // `ZIREN_COMPOSE_CHILD_DIAG=1`: how many DISTINCT child proof
+        // structures each compose node is built over.  The vk enumeration
+        // emits compose children as `vec![band; arity]` — all children alike —
+        // so any node reporting more than one child shape is a node whose vk
+        // no enumerated shape can match.
+        if std::env::var_os("ZIREN_COMPOSE_CHILD_DIAG").is_some() {
+            use std::hash::Hasher;
+            let per_child: Vec<u64> = input
+                .vks_and_proofs
+                .iter()
+                .map(|(_vk, sp)| {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    zkm_recursion_circuit::machine::shape_signature::hash_shard_proof_structure(
+                        sp, &mut h,
+                    );
+                    h.finish()
+                })
+                .collect();
+            let mut distinct = per_child.clone();
+            distinct.sort_unstable();
+            distinct.dedup();
+            eprintln!(
+                "COMPOSE_CHILD_DIAG arity={} distinct_child_shapes={} key={:#018x} children={:?}",
+                per_child.len(),
+                distinct.len(),
+                input.shape_key(),
+                per_child,
+            );
+        }
         self.cached_program(
             &self.compose_programs_basefold_cache,
             input.shape_key(),
