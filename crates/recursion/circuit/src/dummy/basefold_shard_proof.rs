@@ -545,6 +545,27 @@ pub fn dummy_jagged_basefold_bundle(
         .iter()
         .enumerate()
         .map(|(r, pk)| {
+            // ⚠ THE AREA HERE IS STILL NOT THE REAL PROVER'S.  Measured against a
+            // real compose child (`tv/offs/cols`): two of three bands reproduce
+            // exactly, and the third is one COLUMN and eight blocks short — the
+            // dummy lands on 120 stacking blocks (251658240) where the real
+            // child carries 122, re-rounded to 128 (268435456), with 21 columns
+            // against the dummy's 20.  Widening the area by a cell does NOT
+            // close it (measured: the dummy set is unchanged), so the gap is in
+            // the round's RAW cells, not in how they are rounded.
+            //
+            // The way out is to stop deriving it here at all.  SP1 hands its
+            // dummy the packing quantities EXPLICITLY, computed from the shape
+            // with the same formula the prover uses — per round, a `multiple` of
+            // the stacking height and a padding-column count:
+            //
+            //     let main_multiple = Σ(height·width).div_ceil(1 << log_stacking);
+            //     let main_padding_cols = ((main_multiple << log_stacking) - Σ(height·width))
+            //                                 .div_ceil(1 << max_log_row_count).max(1);
+            //
+            // and it has no area pin at all.  Passing those two numbers per
+            // round, rather than re-deriving an area from zero matrices, is what
+            // makes a dummy that matches by construction instead of by luck.
             let mut area = zkm_pcs::jagged::committed_dense_len(pk.total_values, log_stacking);
             if r + 1 == packings.len() {
                 if let Some(target) = recursion_area_pin {
