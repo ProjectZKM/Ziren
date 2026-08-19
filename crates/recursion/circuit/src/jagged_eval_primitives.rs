@@ -140,15 +140,21 @@ fn partial_lagrange_four<C: CircuitConfig>(
 /// 325K of a 1.29M-row child.  The 584 is this function: `num_vars ≈ 29` layers
 /// × the 4-memory-state / 4-branch-state transition below.
 ///
-/// ★ AND HALF OF IT IS REDUNDANT.  `layer_point` is
-/// `[lsb(z_row), lsb(z_trace), lsb(prefix_sum), lsb(next_prefix_sum)]`, but
-/// **`z_row` and `z_trace` are the SAME for every column** — only the two
-/// prefix-sum bits vary.  So `partial_lagrange_four` recomputes a
-/// column-independent half 557 times per layer.  Factoring it as an outer
-/// product of two 2-bit Lagranges, with the `(z_row, z_trace)` half hoisted out
-/// of the caller's per-column loop, leaves only the per-column half and the
-/// combination inside it.  The math is unchanged — it is a shared
-/// subexpression, not a different polynomial.
+/// ⚠ THE REDUNDANCY IS ALREADY GONE — do not re-attempt the hoist.  `layer_point`
+/// is `[lsb(z_row), lsb(z_trace), lsb(prefix_sum), lsb(next_prefix_sum)]` and the
+/// first two are the SAME for every column, so `partial_lagrange_four` looks
+/// like it rebuilds a column-independent half 557 times per layer.  It does not
+/// cost that: splitting it into two 2-bit Lagranges was MEASURED at **370
+/// instructions saved per child, 0.03%** — a constant, not multiplied by the
+/// column count — because the symbolic layer already shares those
+/// subexpressions.  Reverted as not worth the surface.
+///
+/// What the 584 actually is: the SIXTEEN branch-state weights per layer, each a
+/// product of a shared factor with a PER-COLUMN prefix-sum factor.  Those
+/// products are irreducibly per-column — nothing to share — so 16 × ~29 layers
+/// ≈ 464 lands at the measured 584 with the 4 dot-product multiplies on top.
+/// ⇒ this comes down by shrinking the branch-state space, the layer count
+/// (`num_vars` = log of the committed area) or the COLUMN count, not by CSE.
 pub fn emit_branching_program_eval<C: CircuitConfig>(
     _builder: &mut Builder<C>,
     z_row: &[SymbolicExt<C::F, C::EF>],
