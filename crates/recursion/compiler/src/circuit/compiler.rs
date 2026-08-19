@@ -29,8 +29,12 @@ pub struct AsmCompiler<C: Config> {
     pub next_addr: C::F,
     /// Map the frame pointers of the variables to the "physical" addresses.
     pub virtual_to_physical: VecMap<Address<C::F>>,
-    /// Map base or extension field constants to "physical" addresses and mults.
-    pub consts: HashMap<Imm<C::F, C::EF>, (Address<C::F>, C::F)>,
+    /// Map base or extension field constants to their "physical" addresses.
+    ///
+    /// One address per distinct value, for the whole program. Multiplicities
+    /// live in `addr_to_mult` alongside every other address, so a variable
+    /// aliased onto a constant reads through the ordinary `read_vaddr` path.
+    pub consts: HashMap<Imm<C::F, C::EF>, Address<C::F>>,
     /// Map each "physical" address to its read count.
     pub addr_to_mult: VecMap<C::F>,
 }
@@ -142,31 +146,63 @@ where
         }
     }
 
+    /// The single address holding `imm`, allocating it on first use.
+    fn const_addr(&mut self, imm: Imm<C::F, C::EF>) -> Address<C::F> {
+        if let Some(addr) = self.consts.get(&imm) {
+            return *addr;
+        }
+        let addr = Self::alloc(&mut self.next_addr);
+        // Registered here, not in `consts`, so that reads of a variable
+        // aliased onto this constant land on the same counter as reads of
+        // any other address.
+        if let Some(x) = self.addr_to_mult.insert(addr.as_usize(), C::F::ZERO) {
+            panic!("unexpected entry in addr_to_mult: {x:?}");
+        }
+        self.consts.insert(imm, addr);
+        addr
+    }
+
     /// Read a constant (a.k.a. immediate).
     ///
     /// Increments the mult, first creating an entry if it does not yet exist.
     pub fn read_const(&mut self, imm: Imm<C::F, C::EF>) -> Address<C::F> {
-        self.consts
-            .entry(imm)
-            .and_modify(|(_, x)| *x += C::F::ONE)
-            .or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::ONE))
-            .0
+        let addr = self.const_addr(imm);
+        self.read_addr(addr);
+        addr
     }
 
     /// Read a constant (a.k.a. immediate).
     ///
     /// Does not increment the mult. Creates an entry if it does not yet exist.
     pub fn read_ghost_const(&mut self, imm: Imm<C::F, C::EF>) -> Address<C::F> {
-        self.consts.entry(imm).or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::ZERO)).0
+        self.const_addr(imm)
     }
 
-    fn mem_write_const(&mut self, dst: impl Reg<C>, src: Imm<C::F, C::EF>) -> Instruction<C::F> {
-        Instruction::Mem(MemInstr {
-            addrs: MemIo { inner: dst.write(self) },
-            vals: MemIo { inner: src.as_block() },
-            mult: C::F::ZERO,
-            kind: MemAccessKind::Write,
-        })
+    /// Point `vaddr` at the shared address for `imm` instead of giving it an
+    /// address of its own.
+    ///
+    /// This is what makes `ImmF`/`ImmE`/`ImmV` free. Writing a constant into a
+    /// fresh variable used to emit one `Mem` write per occurrence, and a
+    /// compose child emitted 133,602 of them carrying just 274 distinct
+    /// values -- 8.6% of the program, nearly all of it the value zero. The
+    /// constant pool already materialises each distinct value exactly once in
+    /// the prologue, so the variable can simply BE that address.
+    ///
+    /// Sound because a variable is written exactly once: every other write
+    /// path goes through [`Self::write_fp`], which panics on a second write,
+    /// and this one keeps that check. Were a variable rewritten after being
+    /// aliased, it would clobber the shared constant for every other reader.
+    fn alias_const(&mut self, vaddr: usize, imm: Imm<C::F, C::EF>) {
+        use vec_map::Entry;
+        let addr = self.const_addr(imm);
+        match self.virtual_to_physical.entry(vaddr) {
+            Entry::Vacant(entry) => {
+                entry.insert(addr);
+            }
+            Entry::Occupied(entry) => {
+                panic!("unexpected entry: virtual_to_physical[{vaddr:?}] = {:?}", entry.get())
+            }
+        }
     }
 
     fn base_alu(
@@ -419,9 +455,9 @@ where
 
         let mut f = |instr| consumer(Ok(instr));
         match ir_instr {
-            DslIr::ImmV(dst, src) => f(self.mem_write_const(dst, Imm::F(src))),
-            DslIr::ImmF(dst, src) => f(self.mem_write_const(dst, Imm::F(src))),
-            DslIr::ImmE(dst, src) => f(self.mem_write_const(dst, Imm::EF(src))),
+            DslIr::ImmV(dst, src) => self.alias_const(dst.idx as usize, Imm::F(src)),
+            DslIr::ImmF(dst, src) => self.alias_const(dst.idx as usize, Imm::F(src)),
+            DslIr::ImmE(dst, src) => self.alias_const(dst.idx as usize, Imm::EF(src)),
 
             DslIr::AddV(dst, lhs, rhs) => f(self.base_alu(AddF, dst, lhs, rhs)),
             DslIr::AddVI(dst, lhs, rhs) => f(self.base_alu(AddF, dst, lhs, Imm::F(rhs))),
@@ -552,7 +588,8 @@ where
 
         // Replace the mults using the address count data gathered in this previous.
         // Exhaustive match for refactoring purposes.
-        let total_memory = self.addr_to_mult.len() + self.consts.len();
+        // Constants are registered in `addr_to_mult` too, so this already counts them.
+        let total_memory = self.addr_to_mult.len();
         let mut backfill = |(mult, addr): (&mut F, &Address<F>)| {
             *mult = self.addr_to_mult.remove(addr.as_usize()).unwrap()
         };
@@ -625,22 +662,24 @@ where
                 }
             }
         });
-        debug_assert!(self.addr_to_mult.is_empty());
         // Initialize constants.
         let total_consts = self.consts.len();
-        let instrs_consts: Vec<Instruction<C::F>> = self
-            .consts
-            .drain()
-            .sorted_by_key(|x| x.1 .0 .0)
-            .map(|(imm, (addr, mult))| {
+        let consts: Vec<(Imm<C::F, C::EF>, Address<C::F>)> =
+            self.consts.drain().sorted_by_key(|x| x.1 .0).collect();
+        let instrs_consts: Vec<Instruction<C::F>> = consts
+            .into_iter()
+            .map(|(imm, addr)| {
                 Instruction::Mem(MemInstr {
                     addrs: MemIo { inner: addr },
                     vals: MemIo { inner: imm.as_block() },
-                    mult,
+                    mult: self.addr_to_mult.remove(addr.as_usize()).unwrap(),
                     kind: MemAccessKind::Write,
                 })
             })
             .collect();
+        // Every address is accounted for now: the backfill above consumed the
+        // computed ones, and the constants consumed the rest.
+        debug_assert!(self.addr_to_mult.is_empty());
         tracing::debug!("number of consts to initialize: {}", instrs_consts.len());
         // Reset the other fields.
         self.next_addr = Default::default();
