@@ -743,21 +743,17 @@ mod tests {
         chip_openings.insert(
             "Cpu".to_string(),
             zkm_pcs::shard_level::types::ChipEvaluation {
-                main_trace_evaluations: vec![zero, zero, zero],
-                preprocessed_trace_evaluations: Some(vec![zero]),
+                main_trace_evaluations_full: Some(vec![zero, zero, zero]),
+                preprocessed_trace_evaluations_full: Some(vec![zero]),
                 log_degree: 0,
-                main_trace_evaluations_full: None,
-                preprocessed_trace_evaluations_full: None,
             },
         );
         chip_openings.insert(
             "Memory".to_string(),
             zkm_pcs::shard_level::types::ChipEvaluation {
-                main_trace_evaluations: vec![zero, zero],
-                preprocessed_trace_evaluations: None,
-                log_degree: 0,
-                main_trace_evaluations_full: None,
+                main_trace_evaluations_full: Some(vec![zero, zero]),
                 preprocessed_trace_evaluations_full: None,
+                log_degree: 0,
             },
         );
         let opened =
@@ -806,11 +802,9 @@ mod tests {
                 chip_openings: BTreeMap::from([(
                     "Alpha".to_string(),
                     zkm_pcs::shard_level::types::ChipEvaluation {
-                        main_trace_evaluations: vec![v(200), v(201)],
-                        preprocessed_trace_evaluations: Some(vec![v(202)]),
+                        main_trace_evaluations_full: Some(vec![v(200), v(201)]),
+                        preprocessed_trace_evaluations_full: Some(vec![v(202)]),
                         log_degree: 0,
-                        main_trace_evaluations_full: None,
-                        preprocessed_trace_evaluations_full: None,
                     },
                 )]),
             },
@@ -828,8 +822,8 @@ mod tests {
         assert_eq!(lifted.round_proofs[0].sumcheck_proof.claimed_sum, v(7));
         assert_eq!(lifted.logup_evaluations.point, vec![v(100), v(101)]);
         let opening = lifted.logup_evaluations.chip_openings.get("Alpha").unwrap();
-        assert_eq!(opening.main_trace_evaluations, vec![v(200), v(201)]);
-        assert_eq!(opening.preprocessed_trace_evaluations.as_ref().unwrap(), &vec![v(202)]);
+        assert_eq!(opening.main_trace_evaluations_full.as_ref().unwrap(), &vec![v(200), v(201)]);
+        assert_eq!(opening.preprocessed_trace_evaluations_full.as_ref().unwrap(), &vec![v(202)]);
         assert_eq!(lifted.witness, f(50));
     }
 

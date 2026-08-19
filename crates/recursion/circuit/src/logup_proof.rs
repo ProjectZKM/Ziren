@@ -120,10 +120,8 @@ mod tests {
         // the BTreeMap-and-Vec layout.  No real proof data — just
         // shape parity.
         let chip_eval: ChipEvaluation<F> = ChipEvaluation {
-            main_trace_evaluations: vec![F::ZERO; 4],
-            preprocessed_trace_evaluations: Some(vec![F::ONE; 2]),
-            main_trace_evaluations_full: None,
-            preprocessed_trace_evaluations_full: None,
+            main_trace_evaluations_full: Some(vec![F::ZERO; 4]),
+            preprocessed_trace_evaluations_full: Some(vec![F::ONE; 2]),
         };
         let mut openings = BTreeMap::new();
         openings.insert("Cpu".to_string(), chip_eval);

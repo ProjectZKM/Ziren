@@ -864,7 +864,7 @@ mod tests {
         let max_log_row_count = 6usize;
 
         // ── DUMMY side: derive from the dummy bundle's packing. ──
-        let dummy_bundle = dummy_jagged_basefold_bundle(&[], &chip_dims, max_log_row_count, None);
+        let dummy_bundle = dummy_jagged_basefold_bundle(&[], &chip_dims, max_log_row_count);
         let (dummy_rc, dummy_pcc) = derive_row_and_padding_counts(
             &dummy_bundle.packing.column_counts,
             &dummy_bundle.packing.offsets,
