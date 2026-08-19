@@ -252,16 +252,13 @@ where
     //     `num_variables()` on any entry must agree — asserted below.
     let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
     let dense_rev = machine.core_rev();
-    // The recursion-layer AREA PIN, from the per-stage machine
-    // discriminator `StarkMachine::pins_recursion_area()`.
-    // `Some(RECURSION_LOG_TRACE_AREA)` on the COMPRESS/reduce machine (pins
-    // the lazy jagged dense to `2^pin` → constant `num_stripes`); `None` on
-    // CORE / shrink / wrap (NATURAL own-area).
-    let recursion_area_pin = if machine.pins_recursion_area() {
-        Some(crate::jagged_pcs::RECURSION_LOG_TRACE_AREA)
-    } else {
-        None
-    };
+    // No area pin: every stage — core, compress, shrink, wrap — commits its
+    // NATURAL own area.  Compress used to raise its committed dense to
+    // `2^RECURSION_LOG_TRACE_AREA` so that a constant `num_stripes` would
+    // collapse the compose VK to f(chip-set, arity); measured, that floor never
+    // binds — real children commit at 150994944 and 218103808, both past it —
+    // so it fixed no geometry and only padded the small children.
+    let recursion_area_pin = None;
     // The FIXED config cube.  Every `PaddedMle` in the map was built AT
     // this constant (both the `padded_with_zeros` host chips and the
     // `dummy` width-0 chips), so each entry must report it — asserted in

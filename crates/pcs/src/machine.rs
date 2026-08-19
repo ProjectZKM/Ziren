@@ -54,24 +54,13 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// so a core proof is host-verified rev and a recursion/wrap proof legacy.
     core_rev: bool,
 
-    /// Whether this machine's device (`StarkGpuProver`) shard proofs PIN the
-    /// recursion trace area to `2^RECURSION_LOG_TRACE_AREA`.  `true` ONLY for
-    /// the COMPRESS/reduce machine — every compress/reduce shard shares one
-    /// fixed jagged geometry, so the device prover pins it.  `false` (the
-    /// default) for the CORE, SHRINK and WRAP machines, which prove against
-    /// their OWN natural trace area.  This is the per-stage discriminator the
-    /// device `prove_shard_with_data` override reads (COMPRESS and SHRINK
-    /// share an identical chip set — `shrink_machine == compress_machine` — so
-    /// a chip-set signal cannot tell them apart; this flag can).  Inert on the
-    /// host CPU path (only the device override consults it).
-    pins_recursion_area: bool,
 }
 
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     /// Creates a new [`StarkMachine`] whose shard proofs use the LEGACY zerocheck
     /// orientation (every recursion / shrink / wrap machine, and test machines).
     pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
-        Self { config, chips, num_pv_elts, core_rev: true, pins_recursion_area: false }
+        Self { config, chips, num_pv_elts, core_rev: true }
     }
 
     /// Creates a CORE [`StarkMachine`] whose shard proofs use the
@@ -82,7 +71,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
         chips: Vec<Chip<Val<SC>, A>>,
         num_pv_elts: usize,
     ) -> Self {
-        Self { config, chips, num_pv_elts, core_rev: true, pins_recursion_area: false }
+        Self { config, chips, num_pv_elts, core_rev: true }
     }
 
     /// Whether this machine's shard proofs use the rev(zeta) CORE
@@ -90,24 +79,6 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     #[inline]
     pub const fn core_rev(&self) -> bool {
         self.core_rev
-    }
-
-    /// Marks whether this machine's device shard proofs pin the recursion trace
-    /// area to `2^RECURSION_LOG_TRACE_AREA` (see [`Self::pins_recursion_area`]).
-    /// Consuming builder; the COMPRESS machine sets `true`, SHRINK sets `false`.
-    #[inline]
-    pub fn with_recursion_area_pin(mut self, pinned: bool) -> Self {
-        self.pins_recursion_area = pinned;
-        self
-    }
-
-    /// Whether this machine's device shard proofs pin the recursion trace area
-    /// (COMPRESS/reduce only).  Read by the `StarkGpuProver` device
-    /// `prove_shard_with_data` override to distinguish COMPRESS (pins to
-    /// `2^RECURSION_LOG_TRACE_AREA`) from SHRINK/CORE (natural own area).
-    #[inline]
-    pub const fn pins_recursion_area(&self) -> bool {
-        self.pins_recursion_area
     }
 }
 

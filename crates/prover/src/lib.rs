@@ -1541,9 +1541,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
                         if let Ok((index, height, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
-                                // The recursion-layer area pin is sourced from
-                                // `machine().pins_recursion_area()` inside
-                                // `commit()` — nothing to thread here.
 
                                 // Get the keys.
                                 let (pk, vk) = tracing::debug_span!("Setup compress program")

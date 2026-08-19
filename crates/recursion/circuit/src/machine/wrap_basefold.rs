@@ -604,7 +604,7 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         // Pass `Some(RECURSION_LOG_TRACE_AREA)` so the dummy child bundle matches
         // the real pinned compress proof (constant num_stripes / L), keeping
         // the shrink VK enumerable.
-        let recursion_area_pin = Some(zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA);
+        let recursion_area_pin = None;
         let vks_and_proofs: Vec<_> = shape
             .compress_shape
             .proof_shapes

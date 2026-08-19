@@ -90,20 +90,21 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         .map(Chip::new)
         .into_iter()
         .collect::<Vec<_>>();
-        // COMPRESS/reduce shards share a FIXED recursion trace area
-        // (`2^RECURSION_LOG_TRACE_AREA`) so every reduce layer commits against
-        // one jagged geometry — mark the machine so the device
-        // `prove_shard_with_data` override pins it (`Some(2^27)`).
-        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS).with_recursion_area_pin(true)
+        // NO AREA PIN.  Compress used to raise every reduce shard's committed
+        // dense to `2^RECURSION_LOG_TRACE_AREA`, on the premise that one fixed
+        // jagged geometry collapses the compose VK to f(chip-set, arity).  It
+        // does not: the pin is a FLOOR, and measured, every real child's natural
+        // area already passes it — children commit at 150994944 and 218103808
+        // and the floor never binds — so the geometry was never fixed and the
+        // padding only ever cost the SMALL children, which it rounded up to
+        // 2^27 for nothing.  SP1 has no such pin.
+        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
     }
 
     pub fn shrink_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
-        // SHRINK reuses compress's selector-free chip set but proves against its
-        // OWN natural trace area — it must NOT inherit compress's recursion-area
-        // pin (only the compress stage pins).  Clearing the flag
-        // makes the device override yield `recursion_area_pin = None`, matching
-        // the former host free-fn shrink path (which passed `None`).
-        Self::compress_machine(config).with_recursion_area_pin(false)
+        // SHRINK reuses compress's selector-free chip set and, like it, proves
+        // against its own natural trace area.
+        Self::compress_machine(config)
     }
 
     /// A machine with dynamic chip sizes that includes the skinny variant of the Poseidon2 chip.

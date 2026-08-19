@@ -1161,21 +1161,14 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
                 >,
             >,
     {
-        // Recursion-layer area pin, threaded EXPLICITLY as the
-        // `dummy_basefold_vk_and_shard_proof` `recursion_area_pin` param: it
-        // sets the child bundle's `num_stripes`, reduction rounds and
-        // eval_point length, so a dummy built at a different one describes a
-        // child no real proof matches.
-        //
-        // It is the PROVER'S CONSTANT, not a value derived here.  The real
-        // commit does `packing.dense_len.max(1 << RECURSION_LOG_TRACE_AREA)`
-        // (`config.rs`), a FLOOR — so a child whose natural area already passes
-        // 2^27 keeps its own, and one below it rises to the floor.  Computing a
-        // per-shape pin instead was measured WRONG: it pushed band 1, whose
-        // natural area is 150994944, up to 2^28, and the dummy then reported
-        // total_values 385875968 against the real child's 268435456 on
-        // IDENTICAL chip heights.  Mirror the prover; do not re-derive it.
-        let recursion_area_pin = Some(zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA);
+        // NO area pin — the compress machine no longer raises a child's
+        // committed dense to a floor, so the dummy must not either.  Whatever
+        // the dummy passes here has to be exactly what the prover does: it sets
+        // the child bundle's `num_stripes`, reduction rounds and eval_point
+        // length, and a dummy built at a different area describes a child no
+        // real proof matches.  (Measured, when the two disagreed: identical
+        // chip heights, total_values 385875968 against a real 268435456.)
+        let recursion_area_pin = None;
         let vks_and_proofs: Vec<_> = shape
             .compress_shape
             .proof_shapes

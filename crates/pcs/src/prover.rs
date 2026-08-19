@@ -524,11 +524,8 @@ where
                 // Store order (name-sorted BTreeMap) == chips order.
                 let views: Vec<crate::multilinear::PaddedMle<Val<SC>>> =
                     main_store.values().cloned().collect();
-                let recursion_area_pin = if self.machine().pins_recursion_area() {
-                    Some(crate::jagged_pcs::RECURSION_LOG_TRACE_AREA)
-                } else {
-                    None
-                };
+                // No area pin: every stage commits its NATURAL own area.
+                let recursion_area_pin = None;
                 let (main_commitment, precomputed) =
                     crate::shard_level::prover::commit_traces::<SC, A>(
                         &chips,
