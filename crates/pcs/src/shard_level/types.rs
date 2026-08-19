@@ -177,11 +177,9 @@ mod tests {
                 chip_openings: BTreeMap::from([(
                     "Cpu".to_string(),
                     ChipEvaluation {
-                        main_trace_evaluations: vec![v(14)],
-                        preprocessed_trace_evaluations: Some(vec![v(15)]),
                         log_degree: 0,
-                        main_trace_evaluations_full: None,
-                        preprocessed_trace_evaluations_full: None,
+                        main_trace_evaluations_full: Some(vec![v(14)]),
+                        preprocessed_trace_evaluations_full: Some(vec![v(15)]),
                     },
                 )]),
             },
@@ -194,7 +192,7 @@ mod tests {
         assert_eq!(back.round_proofs[0].numerator_0, v(5));
         assert_eq!(back.witness, f(99));
         let opening = back.logup_evaluations.chip_openings.get("Cpu").unwrap();
-        assert_eq!(opening.main_trace_evaluations, vec![v(14)]);
+        assert_eq!(opening.main_trace_evaluations_full, Some(vec![v(14)]));
     }
 
     #[test]

@@ -925,7 +925,6 @@ mod tests {
             &[InnerChallenge::ZERO; 2],
             &[InnerChallenge::ZERO; 5],
             &mut challenger,
-            None,
         );
         assert_eq!(proof.partial_sumcheck_proof.univariate_polys.len(), 14);
         assert_eq!(proof.partial_sumcheck_proof.point_and_eval.0.len(), 14);
@@ -958,7 +957,7 @@ mod tests {
         // half = z_trace.len() so n = 2*3 = 6 → 64-cell hypercube.
 
         let proof =
-            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None);
+            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger);
         let psp = &proof.partial_sumcheck_proof;
 
         // Closed-form claimed_sum.
@@ -1019,7 +1018,7 @@ mod tests {
             InnerChallenge::from_u8(29),
         ];
         let proof =
-            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None);
+            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger);
         let psp = &proof.partial_sumcheck_proof;
         let n = 2 * half_bits;
         assert_eq!(psp.univariate_polys.len(), n);
@@ -1053,7 +1052,7 @@ mod tests {
         let z_trace = vec![InnerChallenge::ZERO; log_m + 1];
 
         let proof =
-            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None);
+            prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger);
 
         // Direct computation via the closed-form evaluator.
         let expected = crate::jagged_branching_program::full_jagged_evaluation(
@@ -1146,7 +1145,7 @@ mod tests {
 
             let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
             let mut ch = InnerChallenger::new(perm);
-            let proof = prove_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace, &mut ch, None);
+            let proof = prove_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace, &mut ch);
             let psp = &proof.partial_sumcheck_proof;
             // sanity: claimed_sum == closed form at rev(z_star).
             assert_eq!(psp.claimed_sum, full_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace));

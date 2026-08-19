@@ -2295,7 +2295,7 @@ mod test {
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
-            &views, false, None,
+            &views, false,
         );
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
@@ -2327,7 +2327,7 @@ mod test {
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
-            &views, false, None,
+            &views, false,
         );
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
@@ -2393,7 +2393,7 @@ mod test {
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
-            &views, false, None,
+            &views, false,
         );
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
@@ -2451,7 +2451,7 @@ mod test {
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
-            &views, false, None,
+            &views, false,
         );
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
