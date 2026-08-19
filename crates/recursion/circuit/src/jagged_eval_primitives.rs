@@ -134,27 +134,19 @@ fn partial_lagrange_four<C: CircuitConfig>(
 /// `z_row`, `z_trace`, `prefix_sum`, `next_prefix_sum` are
 /// LSB-first — index `i` is the `i`-th LSB; positions beyond the
 /// slice length are treated as zero.
-/// ⚠ THIS IS 25% OF THE COMPOSE CIRCUIT.  Measured (`ZKM_DEBUG=1`, cycle-tracker
-/// regions): the jagged-eval region costs `584 · num_cols + ~100K` instructions
-/// per verified child, exactly linear in the column count — 557 columns × 584 =
-/// 325K of a 1.29M-row child.  The 584 is this function: `num_vars ≈ 29` layers
-/// × the 4-memory-state / 4-branch-state transition below.
+/// ⚠ THE PER-COLUMN COST IS *NOT* HERE — this runs ONCE per verified child.
+/// The jagged-eval region costs `584 · num_cols + ~100K` instructions and is
+/// 25% of the compose circuit (`ZKM_DEBUG=1` cycle-tracker regions), but the
+/// linear term belongs to [`emit_prefix_sum_check`], which the caller loops
+/// over every real column; this DP is part of the constant.
 ///
-/// ⚠ THE REDUNDANCY IS ALREADY GONE — do not re-attempt the hoist.  `layer_point`
-/// is `[lsb(z_row), lsb(z_trace), lsb(prefix_sum), lsb(next_prefix_sum)]` and the
-/// first two are the SAME for every column, so `partial_lagrange_four` looks
-/// like it rebuilds a column-independent half 557 times per layer.  It does not
-/// cost that: splitting it into two 2-bit Lagranges was MEASURED at **370
-/// instructions saved per child, 0.03%** — a constant, not multiplied by the
-/// column count — because the symbolic layer already shares those
-/// subexpressions.  Reverted as not worth the surface.
-///
-/// What the 584 actually is: the SIXTEEN branch-state weights per layer, each a
-/// product of a shared factor with a PER-COLUMN prefix-sum factor.  Those
-/// products are irreducibly per-column — nothing to share — so 16 × ~29 layers
-/// ≈ 464 lands at the measured 584 with the 4 dot-product multiplies on top.
-/// ⇒ this comes down by shrinking the branch-state space, the layer count
-/// (`num_vars` = log of the committed area) or the COLUMN count, not by CSE.
+/// ⚠ AND ITS OWN OBVIOUS HOIST IS A MEASURED NULL — do not re-attempt.
+/// `layer_point` is `[lsb(z_row), lsb(z_trace), lsb(prefix_sum),
+/// lsb(next_prefix_sum)]`, whose first two entries do not vary with the column,
+/// so `partial_lagrange_four` looks like it rebuilds a shared half repeatedly.
+/// Splitting it into two 2-bit Lagranges measured **370 instructions saved per
+/// child, 0.03%** — because the symbolic layer already shares those
+/// subexpressions before anything is emitted.  Reverted.
 pub fn emit_branching_program_eval<C: CircuitConfig>(
     _builder: &mut Builder<C>,
     z_row: &[SymbolicExt<C::F, C::EF>],
@@ -229,19 +221,40 @@ pub fn emit_prefix_sum_check<C: CircuitConfig>(
         acc = builder.eval(*bit + acc * two);
     }
 
-    // Full-Lagrange evaluation at the sumcheck point for the bit
-    // vector.  `eq(bits, point) = Π_k ((1-bit_k)(1-p_k) + bit_k * p_k)`
-    // matches [`crate::zerocheck::eq_eval`]'s convention.
+    (emit_prefix_sum_lagrange::<C>(&merged_prefix_sum, &sumcheck_point), acc)
+}
+
+/// The full-Lagrange half of [`emit_prefix_sum_check`], without the Horner
+/// recompose.
+///
+/// ⚠ THIS IS THE COMPOSE CIRCUIT'S ONLY PER-COLUMN COST — it runs once per real
+/// column (557 of them), and the jagged-eval region measures `584 · num_cols +
+/// ~100K` emitted instructions, a quarter of the whole child.  Anything added
+/// here is paid 557 times; anything removed is saved 557 times.
+///
+/// `eq(bits, point) = Π_k ((1-bit_k)(1-p_k) + bit_k·p_k)`, matching
+/// [`crate::zerocheck::eq_eval`]'s convention, but emitted in the factored form
+///
+/// ```text
+///     (1-b)(1-p) + b·p  ==  (1-p) + b·(2p-1)
+/// ```
+///
+/// which is an identity over the ring — it assumes nothing about `b` being a
+/// bit — and costs ONE extension multiply per bit instead of two.  Both `1-p`
+/// and `2p-1` depend only on the sumcheck point, which every column shares.
+pub fn emit_prefix_sum_lagrange<C: CircuitConfig>(
+    merged_prefix_sum: &[Felt<C::F>],
+    sumcheck_point: &[Ext<C::F, C::EF>],
+) -> SymbolicExt<C::F, C::EF> {
+    let one: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
     let mut lagrange: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
     for (bit, point) in merged_prefix_sum.iter().zip(sumcheck_point.iter()) {
         let bit_sym: SymbolicExt<C::F, C::EF> = SymbolicExt::from(*bit);
         let point_sym: SymbolicExt<C::F, C::EF> = (*point).into();
-        let one: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
-        let eq = (one - bit_sym) * (one - point_sym) + bit_sym * point_sym;
+        let eq = (one - point_sym) + bit_sym * (point_sym + point_sym - one);
         lagrange = lagrange * eq;
     }
-
-    (lagrange, acc)
+    lagrange
 }
 
 #[cfg(test)]
@@ -272,6 +285,27 @@ mod tests {
             &prefix_sum,
             &next_prefix_sum,
         );
+    }
+
+    /// The factored `eq` the emitter uses must equal the textbook form for
+    /// EVERY field element, not just for bits: `(1-b)(1-p) + b·p` and
+    /// `(1-p) + b·(2p-1)` are the same polynomial, and the emitter relies on
+    /// that to halve its per-column multiply count.  A divergence here would
+    /// make the recursion verifier bind a different jagged evaluation than the
+    /// host prover computed, which only surfaces once asserts are real.
+    #[test]
+    fn factored_eq_matches_textbook_form() {
+        use p3_field::PrimeCharacteristicRing;
+        let one = EF::ONE;
+        let mut b = EF::from_u32(7);
+        let mut p = EF::from_u32(11);
+        for _ in 0..64 {
+            let textbook = (one - b) * (one - p) + b * p;
+            let factored = (one - p) + b * (p + p - one);
+            assert_eq!(textbook, factored, "eq forms diverge at b={b:?} p={p:?}");
+            b = b * EF::from_u32(31) + one;
+            p = p * EF::from_u32(17) + EF::from_u32(3);
+        }
     }
 
     /// Construction smoke test: prefix-sum check builds both

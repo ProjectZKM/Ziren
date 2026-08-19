@@ -1385,12 +1385,15 @@ where
         // Host parity: no artificial-zero columns; the pow2
         // tail-pad below emits the same `current_offset` entries.
     }
-    while col_prefix_sums.len() < col_prefix_sums_len - 1 {
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-            builder,
-            cap_to_bits(current_offset),
-            bits_per_entry,
-        ));
+    // One decomposition shared by every tail-pad entry -- they are all the
+    // same `current_offset`, so emitting a fresh set of constants per padding
+    // column bought nothing (see the witnessed branch below).
+    if col_prefix_sums.len() < col_prefix_sums_len - 1 {
+        let pad_bits =
+            bit_decompose_usize_to_felts::<C>(builder, cap_to_bits(current_offset), bits_per_entry);
+        while col_prefix_sums.len() < col_prefix_sums_len - 1 {
+            col_prefix_sums.push(pad_bits.clone());
+        }
     }
     if col_prefix_sums.len() < col_prefix_sums_len {
         col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
@@ -2167,9 +2170,19 @@ where
             // `current_offset_felt`, so the per-entry values are unchanged
             // where lengths coincide.
         }
-        while col_prefix_sums.len() < col_prefix_sums_len - 1 {
-            let bits = num2bits_be(builder, current_offset_felt);
-            col_prefix_sums.push(bits);
+        // Tail-pad to the power-of-two column count.  Every padding entry is
+        // the decomposition of the SAME felt, so decompose once and share the
+        // bits: re-deriving them per entry emitted one range-checked 31-bit
+        // decomposition each for the ~470 padding columns, all constrained to
+        // be equal to one another.  Sharing the handles is not an
+        // approximation -- the entries were already the identical value, and
+        // the one decomposition that remains is still range-checked and still
+        // asserted.  Worth 81,840 base-ALU rows per compose child, measured.
+        if col_prefix_sums.len() < col_prefix_sums_len - 1 {
+            let pad_bits = num2bits_be(builder, current_offset_felt);
+            while col_prefix_sums.len() < col_prefix_sums_len - 1 {
+                col_prefix_sums.push(pad_bits.clone());
+            }
         }
         if col_prefix_sums.len() < col_prefix_sums_len {
             // Final = total_values = the running accumulator (Σ w_i·h_i).

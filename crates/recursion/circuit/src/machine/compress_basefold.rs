@@ -1073,13 +1073,29 @@ where
         // applies to col_prefix_sums.last() for its final-area assert.
         // (emit_prefix_sum_check's acc recomposes the full merged LSB-first and is
         // bit-reversed, NOT the prefix sum, so recompose explicitly here.)
+        // The tail-pad entries of `col_prefix_sums` all SHARE one bit
+        // decomposition (the lift emits it once), so consecutive pairs here
+        // often carry byte-identical variable handles -- recomposing them
+        // separately emitted ~470 identical 32-step Horner chains whose results
+        // are equal by construction (40,455 base-ALU rows, measured).  Reuse
+        // the previous felt whenever
+        // the handles match; the step-7 consistency check reads the value, and
+        // an aliased felt carries the same one.
         let two_felt: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
+        let mut prev: Option<(&Vec<Felt<C::F>>, Felt<C::F>)> = None;
         for (_curr_ps, next_ps) in pairs {
+            if let Some((prev_bits, prev_acc)) = prev {
+                if prev_bits == next_ps {
+                    prefix_sum_felts.push(prev_acc);
+                    continue;
+                }
+            }
             let mut ps_acc: Felt<C::F> = builder.constant(C::F::ZERO);
             for bit in next_ps.iter() {
                 ps_acc = builder.eval(*bit + two_felt * ps_acc);
             }
             prefix_sum_felts.push(ps_acc);
+            prev = Some((next_ps, ps_acc));
         }
 
         // Pass 2 — jagged-eval sum over the REAL columns only.  The host prover
@@ -1101,10 +1117,15 @@ where
             let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
             let mut merged: Vec<Felt<C::F>> = curr.clone();
             merged.extend_from_slice(next);
-            let (full_lagrange, _ps) = crate::jagged_eval_primitives::emit_prefix_sum_check::<C>(
-                builder,
-                merged,
-                proof_point_vec.clone(),
+            // Lagrange ONLY.  `emit_prefix_sum_check` also Horner-recomposes the
+            // merged bits into a felt, but pass 1 above already produced every
+            // prefix-sum felt the caller needs, so asking for it here emitted
+            // instructions per column that nothing ever read — 96,918 base-ALU
+            // rows per compose child, measured — and the DSL builder is
+            // imperative, with no dead-code pass to remove them.
+            let full_lagrange = crate::jagged_eval_primitives::emit_prefix_sum_lagrange::<C>(
+                &merged,
+                &proof_point_vec,
             );
             expected_eval = expected_eval + (z_col_lagrange[k] * full_lagrange);
         }
