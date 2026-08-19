@@ -107,6 +107,23 @@ impl<F: Field> FriConfig<F> {
     ///
     /// Accepts integer values in [1, 4].  Any other value (or unset)
     /// falls back to the sound production default.
+    ///
+    /// ⚠ ONLY blowup 2 (the default) survives a RECURSION proof.  Measured:
+    /// at 3 and 4 the recursion verifier panics `index out of bounds: the len
+    /// is 23 but the index is 23` (`basefold_verifier.rs`, the query-index bit
+    /// width does not track the Merkle path length), and at 1 the recursion
+    /// program traps on `DivFAssert 1/0`.  The knob is usable for measuring a
+    /// CORE commit and nothing beyond it.
+    ///
+    /// ⚠ AND BLOWUP IS NOT A SIZE LEVER FOR THE RECURSION CIRCUIT.  Measured at
+    /// a fixed 100 queries, blowup 1 -> 2 GROWS a leaf program 3,617,952 ->
+    /// 3,654,752 instructions (+1.0%) as the Merkle path goes 22 -> 23, which
+    /// puts the path-dependent share of the circuit near 22%.  Raising blowup
+    /// only helps through the query count it buys at equal soundness --
+    /// 124 -> 102 -> 93 for blowup 2 -> 3 -> 4 at 100 bits -- which projects to
+    /// about -3% and -4% of the circuit, against 2x and 4x the prover's
+    /// codeword.  The recursion circuit's size is set by the PCS it verifies,
+    /// not by this parameter.
     pub fn from_env_or_default() -> Self {
         let Ok(val) = std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP") else {
             return Self::default_fri_config();
