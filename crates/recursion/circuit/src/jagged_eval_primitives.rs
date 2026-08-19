@@ -134,6 +134,21 @@ fn partial_lagrange_four<C: CircuitConfig>(
 /// `z_row`, `z_trace`, `prefix_sum`, `next_prefix_sum` are
 /// LSB-first — index `i` is the `i`-th LSB; positions beyond the
 /// slice length are treated as zero.
+/// ⚠ THIS IS 25% OF THE COMPOSE CIRCUIT.  Measured (`ZKM_DEBUG=1`, cycle-tracker
+/// regions): the jagged-eval region costs `584 · num_cols + ~100K` instructions
+/// per verified child, exactly linear in the column count — 557 columns × 584 =
+/// 325K of a 1.29M-row child.  The 584 is this function: `num_vars ≈ 29` layers
+/// × the 4-memory-state / 4-branch-state transition below.
+///
+/// ★ AND HALF OF IT IS REDUNDANT.  `layer_point` is
+/// `[lsb(z_row), lsb(z_trace), lsb(prefix_sum), lsb(next_prefix_sum)]`, but
+/// **`z_row` and `z_trace` are the SAME for every column** — only the two
+/// prefix-sum bits vary.  So `partial_lagrange_four` recomputes a
+/// column-independent half 557 times per layer.  Factoring it as an outer
+/// product of two 2-bit Lagranges, with the `(z_row, z_trace)` half hoisted out
+/// of the caller's per-column loop, leaves only the per-column half and the
+/// combination inside it.  The math is unchanged — it is a shared
+/// subexpression, not a different polynomial.
 pub fn emit_branching_program_eval<C: CircuitConfig>(
     _builder: &mut Builder<C>,
     z_row: &[SymbolicExt<C::F, C::EF>],
