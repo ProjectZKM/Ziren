@@ -724,7 +724,6 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     // `n = 2*half` is CONSTANT across heterogeneous recursion children (the
     // precondition for an enumerable compose VK).  `None` (CORE / shrink / wrap,
     // and every test) => the NATURAL `log_m + 1` (byte-identical to today).
-    recursion_area_pin: Option<usize>,
 ) -> JaggedSumcheckEvalProof<InnerChallenge> {
     // For small workloads: claimed_sum + naive
     // sumcheck via materialization.
@@ -747,22 +746,8 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     let last = prefix_sums.last().copied().unwrap_or(0);
     let log_m =
         if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
-    // RECURSION-LAYER AREA PIN: when the caller passes `Some(_)` (a recursion/compress
-    // commit, whose dense was pinned to `2^RECURSION_LOG_TRACE_AREA`), run the
-    // jagged-eval over the PINNED dense rather than the natural column geometry,
-    // so its dimension is CONSTANT across heterogeneous recursion children (the
-    // precondition for an enumerable compose VK).  `z_trace` is the reduction's
-    // eval_point over the pinned `2^log_dense_size` dense, so
-    // `z_trace.len() == pinned L`; using `half = z_trace.len() + 1` makes
-    // `n = 2*(L+1)` (= 2*28 = 56 at L=27), matching the dummy mirror
-    // (`dummy_jagged_basefold_bundle`, log_m = pinned L).  The prefix sums
-    // (natural, ≤ 2^L) fit in `L+1` bits, so the bigger representation is
-    // faithful (extra high bits zero).  `None` (CORE / shrink / wrap, and every
-    // test) → the NATURAL `log_m + 1` (byte-identical to today).
-    let half = match recursion_area_pin {
-        Some(_) => z_trace.len() + 1,
-        None => log_m + 1,
-    };
+    // The jagged-eval runs over the natural column geometry.
+    let half = log_m + 1;
     let n = 2 * half;
 
     // `z_col_lagrange` (per-column EQ factors).  Hoisted ABOVE the claimed-sum

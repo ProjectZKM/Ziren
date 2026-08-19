@@ -243,27 +243,17 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// DEFAULT body — every ring commits the same way with its own
     /// `bf_mmcs()` / `fri_config()`.  `use_rev` is the per-shard rev(zeta)
     /// orientation, threaded to `materialize_dense_jagged` and recorded on
-    /// the returned commit; `recursion_area_pin` is the recursion-layer
+    /// the returned commit; the
     /// AREA PIN (`Some(target_log)` on a compress commit pins
     /// `log_dense_size` to `max(natural, target_log)`; `None` = NATURAL
     /// own-area packing).
     fn commit_multilinears(
         chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
         use_rev: bool,
-        recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
         use p3_matrix::dense::RowMajorMatrix;
 
         let mut packing = crate::jagged::compute_jagged_metadata::<crate::InnerVal>(chip_traces);
-        // RECURSION-LAYER AREA PIN.  When the
-        // recursion (`compress`) prover passes `Some(target_log)` here, raise
-        // the committed `dense_len` to the pin floor so the dense
-        // materialize + commit run at a FIXED area (`2^pin`) → constant
-        // `num_stripes` → compose VK = f(chip-set, arity).  `None` on every
-        // CORE / shrink / wrap path → NATURAL own-area packing (byte-identical).
-        if let Some(target) = recursion_area_pin {
-            packing.dense_len = packing.dense_len.max(1usize << target);
-        }
         // A round with NO CELLS still has to produce a well-formed commitment.
         // `setup` drops every chip that generates no preprocessed trace, so a
         // machine whose chips all have `preprocessed_width() == 0` reaches here
@@ -301,7 +291,6 @@ pub trait BasefoldRing: StarkGenericConfig {
             commit,
             prover_data,
             rev: use_rev,
-            recursion_area_pin,
         }
     }
 

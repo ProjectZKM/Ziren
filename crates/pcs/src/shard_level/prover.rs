@@ -37,13 +37,6 @@ pub fn commit_traces<SC, A>(
     // `PrecomputedJaggedCommit.rev` so the reduction stays in lockstep — covers
     // BOTH the device-hook and host-fallback build branches.
     use_rev: bool,
-    // The recursion-layer AREA PIN, threaded to the
-    // host-fallback precompute (pins `log_dense_size`) and FORCED onto the built
-    // `PrecomputedJaggedCommit.recursion_area_pin` so the OPEN-path jagged-eval
-    // half reads it back in lockstep.  `Some(RECURSION_LOG_TRACE_AREA)` on the
-    // GPU RECURSION (compress) commit path; `None` on every host / CORE /
-    // shrink / wrap path (byte-identical).
-    recursion_area_pin: Option<usize>,
 ) -> (
     [Val<SC>; 8],
     crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>,
@@ -127,7 +120,6 @@ where
             <crate::koala_bear_poseidon2::KoalaBearPoseidon2 as BasefoldRing>::commit_multilinears(
                 &named_inner,
                 use_rev,
-                recursion_area_pin,
             );
         // Record the per-shard orientation on the built commit.  The producer
         // builds its dense under this SAME `use_rev` but may not stamp the field,
@@ -142,7 +134,6 @@ where
         // built commit (the device hook pins `log_dense_size` device-side under
         // the SAME value, but may not stamp the field) so the OPEN-path
         // jagged-eval half reads it back in lockstep.
-        precomputed.recursion_area_pin = recursion_area_pin;
         let raw_root_inner: [InnerVal; 8] =
             crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
@@ -178,9 +169,9 @@ where
         // ── OUTER/wrap ring (BN254 OuterValMmcs) ───────────────────────
         // Build the ring-native BaseFold precompute via the `BasefoldRing`
         // trait method, INLINE during the prove pass.  The returned commit
-        // already stamps `rev` / `recursion_area_pin`.
+        // already stamps `rev`.
         let precomputed_generic =
-            <SC as BasefoldRing>::commit_multilinears(&named_inner, use_rev, recursion_area_pin);
+            <SC as BasefoldRing>::commit_multilinears(&named_inner, use_rev);
         // Ring-generic digest: NO jagged hash-bind on the outer ring (the
         // BN254 wrap re-binds in its registered hook).
         let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
@@ -252,13 +243,6 @@ where
     //     `num_variables()` on any entry must agree — asserted below.
     let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
     let dense_rev = machine.core_rev();
-    // No area pin: every stage — core, compress, shrink, wrap — commits its
-    // NATURAL own area.  Compress used to raise its committed dense to
-    // `2^RECURSION_LOG_TRACE_AREA` so that a constant `num_stripes` would
-    // collapse the compose VK to f(chip-set, arity); measured, that floor never
-    // binds — real children commit at 150994944 and 218103808, both past it —
-    // so it fixed no geometry and only padded the small children.
-    let recursion_area_pin = None;
     // The FIXED config cube.  Every `PaddedMle` in the map was built AT
     // this constant (both the `padded_with_zeros` host chips and the
     // `dummy` width-0 chips), so each entry must report it — asserted in
@@ -336,7 +320,7 @@ where
             // that build would have produced (same seam, same inputs, one
             // shard-phase earlier).
             Some(retained) => (retained.main_commitment, retained.precomputed),
-            None => commit_traces::<SC, A>(chips, &trace_views, dense_rev, recursion_area_pin),
+            None => commit_traces::<SC, A>(chips, &trace_views, dense_rev),
         }
     };
     // `trace_views` is kept OWNED (no reborrow): the dims sites below

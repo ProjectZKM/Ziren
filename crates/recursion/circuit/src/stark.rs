@@ -38,7 +38,6 @@ pub fn dummy_basefold_vk_and_shard_proof<A>(
     // `Some(RECURSION_LOG_TRACE_AREA)` when the child being built is a
     // RECURSION (compress) proof (pinned dense → constant `jagged_n` / stripes);
     // `None` when it is a CORE/normalize child (NATURAL, byte-identical).
-    recursion_area_pin: Option<usize>,
 ) -> (
     StarkVerifyingKey<KoalaBearPoseidon2>,
     zkm_pcs::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
@@ -108,7 +107,6 @@ where
         &chips,
         &chip_log_heights_pairs,
         max_log_row_count,
-        recursion_area_pin,
     );
 
     // Build a minimal-but-shape-correct VK matching the legacy
@@ -231,7 +229,7 @@ pub mod tests {
             ("Bitwise".to_string(), 3),
         ]);
         let (vk, proof) =
-            super::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(&machine, &shape, None);
+            super::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(&machine, &shape);
         assert_eq!(
             vk.chip_ordering.len(),
             shape.inner.len(),

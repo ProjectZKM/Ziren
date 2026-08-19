@@ -326,9 +326,6 @@ pub mod koala_bear_poseidon2 {
             // the same shard point as main, so both rounds must agree on row
             // order.
             use_rev,
-            // Preprocessed / setup commit is never a recursion prove commit
-            // → no AREA PIN (`None`), byte-identical.
-            None,
         )
     }
 

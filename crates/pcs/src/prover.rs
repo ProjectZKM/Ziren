@@ -524,14 +524,11 @@ where
                 // Store order (name-sorted BTreeMap) == chips order.
                 let views: Vec<crate::multilinear::PaddedMle<Val<SC>>> =
                     main_store.values().cloned().collect();
-                // No area pin: every stage commits its NATURAL own area.
-                let recursion_area_pin = None;
                 let (main_commitment, precomputed) =
                     crate::shard_level::prover::commit_traces::<SC, A>(
                         &chips,
                         &views,
                         self.machine().core_rev(),
-                        recursion_area_pin,
                     );
                 Some(RetainedJaggedCommit {
                     main_commitment,
@@ -646,7 +643,6 @@ where
                     // Generic prove-shard helper: own-chip-set commit (no
                     // canonical-cluster missing-chip injection).  The wrap
                     // STARK proves via this default `prove` → NATURAL own-area
-                    // commit (recursion_area_pin = None).
                     let shard_data = self.commit(&record, named_traces, None);
                     let commit_ms = t1.elapsed().as_millis();
 

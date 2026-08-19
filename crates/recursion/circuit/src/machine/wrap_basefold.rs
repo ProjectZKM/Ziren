@@ -604,7 +604,6 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         // Pass `Some(RECURSION_LOG_TRACE_AREA)` so the dummy child bundle matches
         // the real pinned compress proof (constant num_stripes / L), keeping
         // the shrink VK enumerable.
-        let recursion_area_pin = None;
         let vks_and_proofs: Vec<_> = shape
             .compress_shape
             .proof_shapes
@@ -613,7 +612,6 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
                 crate::stark::dummy_basefold_vk_and_shard_proof::<A>(
                     machine,
                     proof_shape,
-                    recursion_area_pin,
                 )
             })
             .collect();

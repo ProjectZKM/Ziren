@@ -1168,7 +1168,6 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
         // length, and a dummy built at a different area describes a child no
         // real proof matches.  (Measured, when the two disagreed: identical
         // chip heights, total_values 385875968 against a real 268435456.)
-        let recursion_area_pin = None;
         let vks_and_proofs: Vec<_> = shape
             .compress_shape
             .proof_shapes
@@ -1177,7 +1176,6 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
                 crate::stark::dummy_basefold_vk_and_shard_proof::<A>(
                     machine,
                     proof_shape,
-                    recursion_area_pin,
                 )
             })
             .collect();

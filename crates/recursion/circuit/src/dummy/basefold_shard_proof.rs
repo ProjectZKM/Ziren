@@ -192,7 +192,6 @@ pub fn dummy_basefold_shard_proof<F, EF, A>(
     // The recursion-layer AREA PIN this dummy must mirror.
     // `Some(_)` for a RECURSION (compress) child (pinned `jagged_n` / stripes);
     // `None` for CORE/normalize (NATURAL, byte-identical).
-    recursion_area_pin: Option<usize>,
 ) -> BasefoldShardProof<F, EF>
 where
     F: Field + Copy + PrimeCharacteristicRing,
@@ -338,7 +337,6 @@ where
             &prep_dims,
             &chip_dims,
             max_log_row_count,
-            recursion_area_pin,
         ))
     };
 
@@ -380,14 +378,11 @@ where
     // space.
     let cube = 1usize << max_log_row_count;
     let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-    let pad_columns = |real: usize, pin: Option<usize>| -> usize {
+    let pad_columns = |real: usize| -> usize {
         if real == 0 {
             return 1;
         }
-        let mut area = zkm_pcs::jagged::committed_dense_len(real, log_stack);
-        if let Some(target) = pin {
-            area = area.max(1usize << target);
-        }
+        let area = zkm_pcs::jagged::committed_dense_len(real, log_stack);
         area.saturating_sub(real).div_ceil(cube).max(1)
     };
     let heights_by_name: BTreeMap<String, u8> = chip_log_heights_pairs.iter().cloned().collect();
@@ -409,9 +404,9 @@ where
     let mut padding_row_heights: Vec<Vec<F>> = Vec::new();
     if n_prep > 0 {
         // The preprocessed round is committed by `setup`, never area-pinned.
-        padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(true), None)]);
+        padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(true))]);
     }
-    padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(false), recursion_area_pin)]);
+    padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(false))]);
 
     #[allow(clippy::needless_update)]
     BasefoldShardProof {
@@ -476,7 +471,6 @@ pub fn dummy_jagged_basefold_bundle(
     // this dummy mirrors a RECURSION (compress) child (pin `log_dense_size` +
     // `jagged_n` to the pinned L); `None` for CORE/normalize (NATURAL derivation,
     // byte-identical).
-    recursion_area_pin: Option<usize>,
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle {
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
@@ -566,13 +560,8 @@ pub fn dummy_jagged_basefold_bundle(
             // and it has no area pin at all.  Passing those two numbers per
             // round, rather than re-deriving an area from zero matrices, is what
             // makes a dummy that matches by construction instead of by luck.
-            let mut area = zkm_pcs::jagged::committed_dense_len(pk.total_values, log_stacking);
-            if r + 1 == packings.len() {
-                if let Some(target) = recursion_area_pin {
-                    area = area.max(1usize << target);
-                }
-            }
-            area
+            let _ = r;
+            zkm_pcs::jagged::committed_dense_len(pk.total_values, log_stacking)
         })
         .collect();
 
@@ -659,9 +648,8 @@ pub fn dummy_jagged_basefold_bundle(
     // so the dummy child's `jagged_n` equals the real pinned child's — the LAST
     // height-dependent length, collapsing the compose VK to f(chip-set, arity).
     // CORE children (`None`) keep the NATURAL derivation (byte-identical).
-    let log_m = match recursion_area_pin {
-        Some(_) => log_dense_size,
-        None => {
+    let log_m = {
+        {
             if total_values <= 1 {
                 0
             } else {

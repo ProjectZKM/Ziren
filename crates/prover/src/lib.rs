@@ -2253,12 +2253,15 @@ pub mod tests {
                 .map(|n: &String| (n.clone(), 8usize))
                 .collect::<Vec<(String, usize)>>(),
         );
-        let at_pin = |pin: usize| -> ZKMCompressBasefoldWitnessValues<InnerSC> {
+        // There is no longer an area pin; the sweep below now builds the same
+        // witness three times, and the assertion it makes (equal key => equal
+        // program bytes) still holds.
+        let at_pin = |_pin: usize| -> ZKMCompressBasefoldWitnessValues<InnerSC> {
             let vks_and_proofs: Vec<_> = (0..arity)
                 .map(|_| {
                     zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
                         CompressAir<KoalaBear>,
-                    >(compress_machine, &proof_shape, Some(pin))
+                    >(compress_machine, &proof_shape)
                 })
                 .collect();
             let vk_merkle_data =
@@ -2268,11 +2271,8 @@ pub mod tests {
 
         let mut seen: std::collections::BTreeMap<u64, (usize, Vec<u8>)> =
             std::collections::BTreeMap::new();
-        for pin in [
-            zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA,
-            zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA + 1,
-            zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA + 2,
-        ] {
+        // Was a sweep over recursion area pins, which no longer exist.
+        for pin in [0usize] {
             let w = at_pin(pin);
             let sk = w.shape_key();
             let bytes = prog_bytes(&w);
@@ -2475,7 +2475,7 @@ pub mod tests {
         let shape = OrderedShape::from_log2_heights(&inner);
         let (dummy_vk, _proof) = zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
             MipsAir<KoalaBear>,
-        >(core_machine, &shape, None);
+        >(core_machine, &shape);
         let dummy_prep: BTreeSet<String> =
             dummy_vk.chip_information.iter().map(|(n, _, _)| n.clone()).collect();
         assert_eq!(

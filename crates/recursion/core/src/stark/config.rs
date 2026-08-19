@@ -445,9 +445,6 @@ pub mod outer_jagged_hooks {
             &chip_trace_views,
             // The machine's orientation (the wrap machine is LEGACY bitrev).
             use_rev,
-            // setup/preprocessed commit is never
-            // a recursion prove commit → no AREA PIN (`None`), byte-identical.
-            None,
         )
     }
 }
@@ -676,8 +673,6 @@ mod basefold_over_bn254_roundtrip_test {
             &trace_views,
             // use_rev: false on the wrap/BN254 path.
             false,
-            // recursion_area_pin: None => NATURAL own-area packing (this is a wrap-ring test).
-            None,
         );
         let commitment = precompute.commit.original_commitment.clone();
 

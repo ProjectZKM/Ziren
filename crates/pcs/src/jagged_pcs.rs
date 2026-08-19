@@ -77,25 +77,6 @@ pub type JaggedProverData = JaggedProverDataGeneric<JaggedMmcs>;
 /// clamped down for small commits (see [`pick_log_stacking_height`]).
 pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 
-/// RECURSION-LAYER trace-area pin.
-///
-/// Every recursion proof (normalize AND compose) commits its jagged dense at
-/// a FIXED area `2^27`, so the committed codeword always has
-/// `num_stripes = 2^(27 - log_stacking_height) = 2^(27-21) = 64` columns BY
-/// CONSTRUCTION.  With the per-child stripe shape fixed, every compose
-/// child-bundle read is constant-length, so the compose VK collapses to
-/// `f(chip-set, arity)` (the precondition for an enumerable recursion
-/// vk_map).
-///
-/// The CORE (`RiscvAir`) commit is NOT pinned — it stays NATURAL.  The pin is
-/// keyed by which machine is proving: the recursion (`compress`) prover passes
-/// `Some(RECURSION_LOG_TRACE_AREA)` as the `recursion_area_pin` param of
-/// `MachineProver::commit`, so
-/// [`crate::config::BasefoldRing::commit_multilinears`] bumps `packing.log_dense_size` to
-/// `max(natural, RECURSION_LOG_TRACE_AREA)` and record it on
-/// `PrecomputedJaggedCommit.recursion_area_pin` (read back at open); core passes
-/// `None` and is byte-identical to the unpinned path.
-pub const RECURSION_LOG_TRACE_AREA: usize = 27;
 
 /// Interleave batch size for the stacked PCS: number of MLE-column
 /// streams packed into each stripe.  Purely a packing constant — no
@@ -1079,17 +1060,6 @@ pub mod jagged {
         /// commit, in lockstep.  `false` on every recursion / shrink / wrap
         /// commit (byte-identical).
         pub rev: bool,
-        /// The recursion-layer AREA PIN this commit was built under.
-        /// `Some(target_log)` on a
-        /// RECURSION (`compress`) commit: `packing.log_dense_size` was raised to
-        /// `max(natural, target_log)` (a FIXED `2^target_log` committed area →
-        /// constant `num_stripes`), and the step-4 jagged-eval must run over the
-        /// PINNED dense (`prove_jagged_evaluation` `half = z_trace.len() + 1`) so
-        /// its dimension is height-independent.  Recorded on the committed data so
-        /// the OPEN path reads it back in lockstep with the commit.  `None` on
-        /// every CORE / shrink / wrap commit (NATURAL own-area packing,
-        /// byte-identical to legacy).
-        pub recursion_area_pin: Option<usize>,
     }
     /// Concrete inner alias (MT = JaggedMmcs).
     pub type PrecomputedJaggedCommit =
@@ -1177,11 +1147,6 @@ pub mod jagged {
         z_row: &[InnerChallenge],
         area: usize,
         challenger: &mut Ch,
-        // The recursion-layer AREA PIN, read
-        // off the precomputed commit (`PrecomputedJaggedCommit.recursion_area_pin`)
-        // and threaded into `prove_jagged_evaluation` so its half/round-count is
-        // pin-consistent with the (pinned) commit.  `None` on CORE/shrink/wrap.
-        recursion_area_pin: Option<usize>,
         reduce: impl FnOnce(&[InnerChallenge], &mut Ch) -> JaggedReductionProof<InnerChallenge>,
         open: impl FnOnce(Vec<InnerChallenge>, &mut Ch) -> P,
     ) -> (
@@ -1220,7 +1185,6 @@ pub mod jagged {
             &z_col,
             &z_trace_be,
             challenger,
-            recursion_area_pin,
         );
 
         // (5) Point-extend: the BaseFold commit covers `area` cells
@@ -1460,7 +1424,6 @@ pub mod jagged {
             z_row,
             effective_area,
             challenger,
-            rounds[0].precomputed.recursion_area_pin,
             reduce,
             open,
         );
@@ -2245,7 +2208,7 @@ mod test {
     /// row-MLE evaluations the production prover reads off the zerocheck
     /// residual, recomputed here from the traces.  Legacy bitrev row
     /// orientation (`use_rev = false`), in lockstep with each test's
-    /// `commit_multilinears(&views, false, None)` commit — the pairing
+    /// `commit_multilinears(&views, false)` commit — the pairing
     /// the shard prover carries via `PrecomputedJaggedCommit.rev`.
     fn column_claims(
         views: &[ChipTraceView],
