@@ -524,6 +524,19 @@ impl<C: Config> Builder<C> {
         self.push_op(DslIr::CycleTracker(name.to_string()));
     }
 
+    /// Open a named region.  Under `ZKM_DEBUG=1` the circuit compiler
+    /// attributes every instruction it emits to the innermost open region and
+    /// prints the totals, which is how a circuit's cost is traced to the part
+    /// of the verifier that emits it.
+    pub fn cycle_tracker_v2_enter(&mut self, name: String) {
+        self.push_op(DslIr::CycleTrackerV2Enter(name));
+    }
+
+    /// Close the innermost region opened by [`Self::cycle_tracker_v2_enter`].
+    pub fn cycle_tracker_v2_exit(&mut self) {
+        self.push_op(DslIr::CycleTrackerV2Exit);
+    }
+
     pub fn halt(&mut self) {
         self.push_op(DslIr::Halt);
     }

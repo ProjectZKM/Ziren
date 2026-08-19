@@ -250,6 +250,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
 
         // (6) Run the caller-supplied jagged-eval sub-protocol.
         let sumcheck_point = &sumcheck_proof.point_and_eval.0;
+        builder.cycle_tracker_v2_enter("jagged_eval_sumcheck".to_string());
         let (jagged_eval, prefix_sum_felts) = jagged_evaluator_fn(
             builder,
             params,
@@ -289,6 +290,8 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // no-op.  Any over-claim 2^L < row_count < 2^{L+1} trips the product
         // assert; row_count ≥ 2^{L+1} fails `num2bits`.
         let cube_log = z_row.len();
+        builder.cycle_tracker_v2_exit();
+        builder.cycle_tracker_v2_enter("row_count_le_cube".to_string());
         for round in row_counts.iter() {
             for &row_count in round.iter() {
                 Self::assert_row_count_le_cube::<C>(builder, row_count, cube_log);
@@ -407,6 +410,8 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // (9) Verify the dense-trace opening via the stacked PCS.
         let evaluation_point = sumcheck_proof.point_and_eval.0.clone();
         let expected_eval_sym: SymbolicExt<C::F, C::EF> = (*expected_eval).into();
+        builder.cycle_tracker_v2_exit();
+        builder.cycle_tracker_v2_enter("basefold_open".to_string());
         self.stacked_pcs_verifier.verify_untrusted_evaluation::<C, FC>(
             builder,
             original_commitments,
@@ -415,6 +420,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             expected_eval_sym,
             challenger,
         );
+        builder.cycle_tracker_v2_exit();
 
         prefix_sum_felts
     }

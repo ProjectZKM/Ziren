@@ -450,6 +450,7 @@ impl<P> BasefoldShardVerifier<P> {
         // (alpha, beta_seed, pv_challenge), observes the GKR
         // circuit output, and replays each layer's sumcheck via
         // the transcript-bound challenger.
+        builder.cycle_tracker_v2_enter("verify_logup_gkr".to_string());
         verify_logup_gkr::<C, SC, A, FC, EVPV>(
             builder,
             chip_metadata,
@@ -469,6 +470,8 @@ impl<P> BasefoldShardVerifier<P> {
         // reduces the combined-chip constraint identity to a
         // single (point, evaluation) claim, leaving the claimed
         // evaluation for the jagged-PCS opening phase to verify.
+        builder.cycle_tracker_v2_exit();
+        builder.cycle_tracker_v2_enter("verify_zerocheck".to_string());
         BasefoldZerocheckVerifier::<C, SC, A>::verify_zerocheck::<FC>(
             builder,
             shard_chips,
@@ -669,6 +672,8 @@ impl<P> BasefoldShardVerifier<P> {
         // observed separately in phase 1 (= the modified digest).
         let commitments = evaluation_proof.original_commitments.clone();
 
+        builder.cycle_tracker_v2_exit();
+        builder.cycle_tracker_v2_enter("verify_trusted_evaluations".to_string());
         let _prefix_sum_felts = jagged_verifier.verify_trusted_evaluations::<C, FC, JE>(
             builder,
             &commitments,
@@ -679,6 +684,7 @@ impl<P> BasefoldShardVerifier<P> {
             challenger,
             jagged_evaluator_fn,
         );
+        builder.cycle_tracker_v2_exit();
 
         // The returned prefix_sum_felts are consumed by callers
         // that need the per-column row-count prefix witness; the
