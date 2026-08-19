@@ -943,7 +943,7 @@ mod tests {
                 &shape,
             );
             let program = prover.compose_program_basefold(&input);
-            let (_pk, vk) = prover.compress_prover.setup(&program);
+            let (_pk, vk) = prover.compress_prover.setup(&program.0);
             format!("{:?}", vk.hash_koalabear())
         };
 
@@ -1370,7 +1370,7 @@ mod tests {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let d = ZKMCoreBasefoldWitnessValues::dummy(machine, shape);
                 let p = prover.recursion_program_basefold(&d);
-                prover.compress_prover.setup(&p).1.hash_koalabear()
+                prover.compress_prover.setup(&p.0).1.hash_koalabear()
             }))
             .ok()
         };

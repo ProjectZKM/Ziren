@@ -3255,7 +3255,7 @@ pub mod tests {
             );
             let vk_dummy_at_real = prover
                 .compress_prover
-                .setup(&prover.recursion_program_basefold(&dummy_at_real))
+                .setup(&prover.recursion_program_basefold(&dummy_at_real).0)
                 .1
                 .hash_koalabear()
                 .map(|x| x.as_canonical_u32());
@@ -3268,7 +3268,7 @@ pub mod tests {
             };
             let vk_real_1 = prover
                 .compress_prover
-                .setup(&prover.recursion_program_basefold(&real_witness_1))
+                .setup(&prover.recursion_program_basefold(&real_witness_1).0)
                 .1
                 .hash_koalabear()
                 .map(|x| x.as_canonical_u32());
@@ -3537,14 +3537,14 @@ pub mod tests {
                 is_first_shard: true,
                 vk_root: prover.recursion_vk_root,
             };
-            let prog_real = prover.recursion_program_basefold(&real_witness);
+            let prog_real = prover.recursion_program_basefold(&real_witness).0;
             let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();
 
             // ENUMERATED REPRESENTATIVE: uniform dummy batch at the enum class.
             let enum_shape =
                 ZKMRecursionShape { proof_shapes: vec![enum_os.clone(); arity], is_complete: true };
             let enum_dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &enum_shape);
-            let prog_enum = prover.recursion_program_basefold(&enum_dummy);
+            let prog_enum = prover.recursion_program_basefold(&enum_dummy).0;
             let vk_enum = prover.compress_prover.setup(&prog_enum).1.hash_koalabear();
 
             let eq = vk_real == vk_enum;
@@ -3605,7 +3605,7 @@ pub mod tests {
                 compress_machine,
                 &with_vkey,
             );
-            let p = prover.compose_program_basefold(&d);
+            let p = prover.compose_program_basefold(&d).0;
             eprintln!(
                 "[PROGSIZE] merkle_height={} arity={arity} compose_instructions={}",
                 VK_MERKLE_TREE_HEIGHT,
@@ -3695,7 +3695,7 @@ pub mod tests {
             );
             let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
             let d = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
-            let p = prover.recursion_program_basefold(&d);
+            let p = prover.recursion_program_basefold(&d).0;
             use p3_field::PrimeField32;
             prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
         };
@@ -3884,7 +3884,7 @@ pub mod tests {
         let os = OrderedShape::from_log2_heights(&hs);
         let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: true };
         let dummy = ZKMCoreBasefoldWitnessValues::dummy(core_machine, &shape);
-        let prog = prover.recursion_program_basefold(&dummy);
+        let prog = prover.recursion_program_basefold(&dummy).0;
         let (pk, _vk) = prover.compress_prover.setup(&prog);
         let infos = &pk.preprocessed_data().packing.chip_infos;
         eprintln!(
@@ -3986,7 +3986,7 @@ pub mod tests {
                 compress_machine,
                 &with_vkey,
             );
-            let p = prover.compose_program_basefold(&d);
+            let p = prover.compose_program_basefold(&d).0;
             use p3_field::PrimeField32;
             prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
         };
@@ -4035,7 +4035,7 @@ pub mod tests {
             );
             let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
             let d = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
-            let p = prover.recursion_program_basefold(&d);
+            let p = prover.recursion_program_basefold(&d).0;
             use p3_field::PrimeField32;
             prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
         };
@@ -4171,7 +4171,7 @@ pub mod tests {
                 EvaluationProof::Bundle(bd) => bd.packing.log_dense_size,
                 _ => 0,
             };
-            let prog = prover.recursion_program_basefold(&dummy);
+            let prog = prover.recursion_program_basefold(&dummy).0;
             let vk = prover
                 .compress_prover
                 .setup(&prog)
@@ -4279,7 +4279,7 @@ pub mod tests {
                 EvaluationProof::Bundle(bd) => (bd.packing.total_values, bd.packing.log_dense_size),
                 _ => (0, 0),
             };
-            let prog = prover.recursion_program_basefold(&dummy);
+            let prog = prover.recursion_program_basefold(&dummy).0;
             let vk = prover
                 .compress_prover
                 .setup(&prog)
