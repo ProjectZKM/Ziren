@@ -484,66 +484,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             (poseidon2_wide.clone(), 18),
             (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
         ]));
-        // ── TIGHT RUNGS, measured (`ZIREN_FIXSHAPE_DIAG=1`, 32 distinct reth
-        // compose programs) ──────────────────────────────────────────────
-        //
-        // The bands above were fitted to organic heights taken before the
-        // verifier circuit shrank, and they now over-pad by **35.9%** in
-        // committed cells. Two chips carry almost all of it:
-        //
-        //   * `MemoryConst` peaks at **139 rows** across every one of the 32
-        //     programs -- constants are pooled now, so a program materialises
-        //     one address per DISTINCT value instead of one per occurrence --
-        //     while every band above still reserves 2^19 or 2^22 for it.
-        //   * `Poseidon2WideDeg3` is 362 committed cells per row, 4.1x the next
-        //     widest chip, so one spare bit of it costs 10-32% of a whole band.
-        //     Band 0 hands 2^18 to levels whose organic height is 42,868-49,956
-        //     (2^16) -- two bits, a 4x over-pay on the most expensive chip
-        //     there is, and 64.9% of that band's cells.
-        //
-        // Measured required profiles, as (MemoryVar, Select, MemoryConst,
-        // BaseAlu, ExtAlu, Poseidon2) log2 heights and how many of the 32
-        // programs need each:
-        //
-        //   (18,19, 8,17,17,16) x7   (19,20, 8,18,18,17) x7
-        //   (18,19, 8,17,18,16) x1   (19,20, 8,18,19,17) x1
-        //   (20,20, 8,18,19,17) x5   (20,20, 8,18,19,18) x2
-        //   (20,20, 8,19,19,18) x1   (20,21, 8,19,19,18) x7
-        //   (20,21, 8,19,20,18) x1
-        //
-        // The four rungs below cover them, and simulating the assignment over
-        // all 32 gives **-30.9% committed cells** against a -35.9% perfect-fit
-        // floor -- 86% of everything available, for four bands rather than
-        // nine. `MemoryConst` is given 2^12 rather than its measured 2^8: it is
-        // 13 cells per row, so 128x headroom over the observed peak costs
-        // 53,248 cells, and a program that somehow needs more simply falls
-        // through to the generous bands above instead of onto a cliff.
-        //
-        // Nothing here can regress a program: `fix_shape` scores EVERY band a
-        // program fits and keeps the cheapest, the bands above are all still
-        // present, and a node only lands on one of these when it is genuinely
-        // cheaper. The same holds for sibling agreement -- more bands can only
-        // lower the cheapest band covering a group.
-        //
-        // Cost: 24 vk shapes (enumeration 3892 -> 3916 of 4096) and 16 more
-        // (band, arity) pairs for the construction-time pre-warm.
-        for band in [
-            (18, 19, 12, 17, 17, 16),
-            (19, 20, 12, 18, 18, 17),
-            (20, 20, 12, 18, 19, 17),
-            (20, 21, 12, 19, 20, 18),
-        ] {
-            let (mv, sel, mc, ba, ea, p2) = band;
-            allowed_shapes.push(HashMap::from([
-                (mem_var.clone(), mv),
-                (select.clone(), sel),
-                (mem_const.clone(), mc),
-                (base_alu.clone(), ba),
-                (ext_alu.clone(), ea),
-                (poseidon2_wide.clone(), p2),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ]));
-        }
         // No band may exceed the row cube every recursion stage proves at:
         // `PaddedMle::padded` asserts the padded rows fit `2^cube`, so a taller
         // band is a shape nothing can be snapped onto.
