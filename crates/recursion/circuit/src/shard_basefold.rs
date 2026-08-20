@@ -901,7 +901,7 @@ where
                     vec![
                         RecursiveBasefoldOpening::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
                             position: 0,
-                            sibling_pair: [zero_ext(builder), zero_ext(builder)],
+                            block: vec![zero_ext(builder), zero_ext(builder)],
                             merkle_path_bytes: vec![],
                             merkle_path_digests: vec![],
                             _phantom: core::marker::PhantomData,

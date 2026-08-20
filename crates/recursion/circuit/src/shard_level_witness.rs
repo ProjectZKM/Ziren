@@ -814,7 +814,7 @@ fn host_query_opening_to_recursive(
             // basefold_verifier.rs:957-959 for promotion + binding.
             RecursiveBasefoldOpening {
                 position: 0,
-                sibling_pair: [lo, hi],
+                block: vec![lo, hi],
                 merkle_path_bytes: Vec::new(),
                 merkle_path_digests: leaf.proof.clone(),
                 _phantom: core::marker::PhantomData,
@@ -986,7 +986,7 @@ fn host_query_opening_to_recursive_outer(
             .expect("EF parse from D base elements");
             RecursiveBasefoldOpening {
                 position: 0,
-                sibling_pair: [lo, hi],
+                block: vec![lo, hi],
                 merkle_path_bytes: Vec::new(),
                 merkle_path_digests: leaf.proof.clone(),
                 _phantom: core::marker::PhantomData,
@@ -1728,7 +1728,7 @@ where
                     .into_iter()
                     .map(|o| RecursiveBasefoldOpening {
                         position: o.position,
-                        sibling_pair: o.sibling_pair,
+                        block: o.block,
                         merkle_path_bytes: o.merkle_path_bytes,
                         merkle_path_digests: o
                             .merkle_path_digests
@@ -1789,7 +1789,7 @@ where
             }
             round_openings.push(RecursiveBasefoldOpening {
                 position: o.position,
-                sibling_pair: o.sibling_pair,
+                block: o.block,
                 merkle_path_bytes: o.merkle_path_bytes,
                 merkle_path_digests,
                 _phantom: core::marker::PhantomData,
@@ -2657,7 +2657,7 @@ mod tests {
                 hi_basis.iter().copied(),
             )
             .unwrap();
-        assert_eq!(recur[0].sibling_pair, [expected_lo, expected_hi]);
+        assert_eq!(recur[0].block, vec![expected_lo, expected_hi]);
         // merkle_path_digests is populated from leaf.proof.
         assert_eq!(recur[0].merkle_path_digests.len(), 5);
         assert_eq!(recur[0].position, 0);

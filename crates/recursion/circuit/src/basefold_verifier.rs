@@ -182,14 +182,19 @@ pub struct RecursiveBasefoldRound<F, EF, Dig = [F; 8]> {
 }
 
 /// Per-query opening of a commit-phase round's Merkle tree at the
-/// (shifted) query index.  Two EF values (sibling pair on the
-/// codeword domain) + the inclusion path.
+/// (shifted) query index: the round's opened codeword values plus the
+/// inclusion path.
 #[derive(Clone, Debug)]
 pub struct RecursiveBasefoldOpening<F, EF, Dig = [F; 8]> {
     /// Query position in the round's codeword domain.
     pub position: usize,
-    /// Sibling pair — `[evals[0], evals[1]]` at positions `(x, -x)`.
-    pub sibling_pair: [EF; 2],
+    /// The round's opened codeword block — `2^arity` values covering the
+    /// contiguous bit-reversed rows this query descends from.  At arity 1
+    /// this is the familiar sibling pair `[evals[0], evals[1]]` at
+    /// `(x, -x)`, and the witness stream is unchanged: the values are
+    /// written in order with no length prefix, so a two-element block is
+    /// byte-identical to the pair it replaces.
+    pub block: Vec<EF>,
     /// Merkle path bytes (serialized) — kept for backward
     /// compatibility with existing witness-stream layouts.
     pub merkle_path_bytes: Vec<u8>,
@@ -1137,7 +1142,7 @@ where
                     .iter()
                     .map(|round_openings| {
                         let op = &round_openings[query_idx];
-                        [op.sibling_pair[0], op.sibling_pair[1]]
+                        [op.block[0], op.block[1]]
                     })
                     .collect();
 

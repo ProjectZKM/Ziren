@@ -378,10 +378,7 @@ where
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         RecursiveBasefoldOpening {
             position: self.position,
-            sibling_pair: [
-                builder.constant(self.sibling_pair[0]),
-                builder.constant(self.sibling_pair[1]),
-            ],
+            block: self.block.iter().map(|v| builder.constant(*v)).collect(),
             merkle_path_bytes: self.merkle_path_bytes.clone(),
             merkle_path_digests: self.merkle_path_digests.clone(),
             _phantom: core::marker::PhantomData,
@@ -553,10 +550,7 @@ where
                 .iter()
                 .map(|op| RecursiveBasefoldOpening {
                     position: op.position,
-                    sibling_pair: [
-                        op.sibling_pair[0].read(builder),
-                        op.sibling_pair[1].read(builder),
-                    ],
+                    block: op.block.iter().map(|v| v.read(builder)).collect(),
                     merkle_path_bytes: op.merkle_path_bytes.clone(),
                     // Witness each path sibling digest (8 felts).
                     merkle_path_digests: op
@@ -619,8 +613,11 @@ pub fn write_basefold_proof_to_stream<C>(
     }
     for round in host.query_phase_openings.iter() {
         for op in round.iter() {
-            op.sibling_pair[0].write(witness);
-            op.sibling_pair[1].write(witness);
+            // In order, no length prefix — a two-element block writes the
+            // same stream the old fixed pair did.
+            for v in op.block.iter() {
+                v.write(witness);
+            }
             // Write each path sibling digest (8 felts).
             for d in op.merkle_path_digests.iter() {
                 for f in d.iter() {
@@ -679,10 +676,7 @@ where
                 .iter()
                 .map(|op| RecursiveBasefoldOpening {
                     position: op.position,
-                    sibling_pair: [
-                        op.sibling_pair[0].read(builder),
-                        op.sibling_pair[1].read(builder),
-                    ],
+                    block: op.block.iter().map(|v| v.read(builder)).collect(),
                     merkle_path_bytes: op.merkle_path_bytes.clone(),
                     merkle_path_digests: op
                         .merkle_path_digests
@@ -729,8 +723,9 @@ pub fn write_basefold_proof_outer_to_stream<C>(
     host.batch_grinding_witness.write(witness);
     for round in host.query_phase_openings.iter() {
         for op in round.iter() {
-            op.sibling_pair[0].write(witness);
-            op.sibling_pair[1].write(witness);
+            for v in op.block.iter() {
+                v.write(witness);
+            }
             for d in op.merkle_path_digests.iter() {
                 for f in d.iter() {
                     f.write(witness);

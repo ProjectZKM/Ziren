@@ -255,7 +255,7 @@ where
         // query_phase_openings: outer Vec = num_variables (rounds),
         // inner Vec = num_queries.  At basefold_verifier.rs:852 the
         // verifier reads `query_phase_openings[round][query_idx]`
-        // and collects one sibling_pair per round, so outer length
+        // and collects one opened block per round, so outer length
         // must equal num_variables (== max_log_row_count here).
         query_phase_openings: (0..max_log_row_count)
             .map(|_| {
@@ -265,7 +265,7 @@ where
                     HV::DigestVariable,
                 > {
                     position: 0,
-                    sibling_pair: [zero_ext(builder), zero_ext(builder)],
+                    block: vec![zero_ext(builder), zero_ext(builder)],
                     merkle_path_bytes: vec![],
                     merkle_path_digests: vec![],
                     _phantom: core::marker::PhantomData,
