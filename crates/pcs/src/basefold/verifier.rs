@@ -122,8 +122,11 @@ where
             ));
         }
         let num_variables = eval_point.len();
-        if proof.fri_commitments.len() != proof.univariate_messages.len()
-            || proof.fri_commitments.len() != num_variables
+        // One sumcheck message per VARIABLE, but only one commitment per
+        // commit-phase ROUND -- and a round folds `log_folding_arity` of them.
+        if proof.univariate_messages.len() != num_variables
+            || proof.fri_commitments.len()
+                != Self::round_arities(num_variables, self.fri_config.log_folding_arity()).len()
             || proof.univariate_messages.is_empty()
         {
             return Err(BasefoldVerifierError::SumcheckFriLengthMismatch);
@@ -138,15 +141,29 @@ where
         challenger.observe(F::from_usize(num_variables));
 
         // (5) Walk the commit-phase rounds.
+        //
+        // One commitment covers `arity` variables: the prover emits the FIRST
+        // univariate message, then the commitment, then alternates
+        // beta / message for the rest of the group.  Mirror that exactly, or
+        // the transcript diverges.
+        let log_folding_arity = self.fri_config.log_folding_arity();
+        let round_arities = Self::round_arities(num_variables, log_folding_arity);
         let mut betas = Vec::with_capacity(num_variables);
-        for (commitment, poly) in
-            proof.fri_commitments.iter().zip_eq(proof.univariate_messages.iter())
-        {
-            for &elem in poly {
-                challenger.observe_algebra_element(elem);
+        let mut msg = proof.univariate_messages.iter();
+        for (commitment, &arity) in proof.fri_commitments.iter().zip_eq(round_arities.iter()) {
+            for j in 0..arity {
+                let poly = msg.next().ok_or(BasefoldVerifierError::SumcheckFriLengthMismatch)?;
+                for &elem in poly {
+                    challenger.observe_algebra_element(elem);
+                }
+                if j == 0 {
+                    challenger.observe(commitment.clone());
+                }
+                betas.push(challenger.sample_algebra_element::<EF>());
             }
-            challenger.observe(commitment.clone());
-            betas.push(challenger.sample_algebra_element::<EF>());
+        }
+        if msg.next().is_some() {
+            return Err(BasefoldVerifierError::SumcheckFriLengthMismatch);
         }
 
         // First sumcheck consistency: (1-x_0)*p[0] + x_0*p[1] == eval_claim
@@ -279,6 +296,21 @@ where
         Ok(())
     }
 
+    /// How many variables each commit-phase round folds.
+    ///
+    /// `log_folding_arity` per round, with a possibly shorter trailing group so
+    /// the arity need not divide `num_variables`.
+    pub fn round_arities(num_variables: usize, log_folding_arity: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut var = 0;
+        while var < num_variables {
+            let group = core::cmp::min(log_folding_arity.max(1), num_variables - var);
+            out.push(group);
+            var += group;
+        }
+        out
+    }
+
     fn verify_queries(
         &self,
         commitments: &[MT::Commitment],
@@ -288,30 +320,31 @@ where
         query_openings: &[super::proof::MerkleOpening<F, MT>],
         betas: &[EF],
     ) -> Result<(), BasefoldVerifierError> {
-        let log_max_height = commitments.len() + self.fri_config.log_blowup();
+        let arities = Self::round_arities(
+            betas.len(),
+            self.fri_config.log_folding_arity(),
+        );
+        let log_max_height = betas.len() + self.fri_config.log_blowup();
         let mut folded = reduced_openings;
         let mut indices = indices.to_vec();
 
-        // Initial domain element per query: g^{bitrev(index)} on
-        // the full-height subgroup.
-        let mut xis: Vec<F> = indices
-            .iter()
-            .map(|&idx| {
-                F::two_adic_generator(log_max_height)
-                    .exp_u64(reverse_bits_len(idx, log_max_height) as u64)
-            })
-            .collect();
-
-        if commitments.len() != query_openings.len() || commitments.len() != betas.len() {
+        if commitments.len() != query_openings.len() || arities.len() != commitments.len() {
             return Err(BasefoldVerifierError::IncorrectShape(
                 "commit-phase round count mismatch".to_string(),
             ));
         }
 
-        for (round_idx, ((commit, opening), beta)) in (self.fri_config.log_blowup()..log_max_height)
-            .rev()
-            .zip_eq(commitments.iter().zip_eq(query_openings.iter()).zip_eq(betas))
+        // `log_h` is the log height of the codeword this round commits to; it
+        // drops by the round's arity, not by one.
+        let mut log_h = log_max_height;
+        let mut beta_at = 0usize;
+        for (round_ord, ((commit, opening), &arity)) in
+            commitments.iter().zip_eq(query_openings.iter()).zip_eq(arities.iter()).enumerate()
         {
+            let _ = round_ord;
+            let width = (1usize << arity) * EF::DIMENSION;
+            let round_betas = &betas[beta_at..beta_at + arity];
+            beta_at += arity;
             if opening.leaves.len() != indices.len() {
                 return Err(BasefoldVerifierError::IncorrectShape(
                     "query count mismatch in commit-phase opening".to_string(),
@@ -319,53 +352,72 @@ where
             }
 
             // Per-query verification.
-            for (q, ((index, folded_eval), x)) in
-                indices.iter_mut().zip_eq(folded.iter_mut()).zip_eq(xis.iter_mut()).enumerate()
+            for (q, (index, folded_eval)) in
+                indices.iter_mut().zip_eq(folded.iter_mut()).enumerate()
             {
                 let leaf = &opening.leaves[q];
                 let mat_values = leaf.values.first().ok_or_else(|| {
                     BasefoldVerifierError::IncorrectShape("empty commit-phase leaf".to_string())
                 })?;
-                if mat_values.len() != 2 * EF::DIMENSION {
+                if mat_values.len() != width {
                     return Err(BasefoldVerifierError::IncorrectShape(format!(
-                        "commit-phase leaf width {} != 2 * EF::D",
-                        mat_values.len()
+                        "commit-phase leaf width {} != {} (arity {})",
+                        mat_values.len(),
+                        width,
+                        1usize << arity
                     )));
                 }
 
-                let evals: [EF; 2] = mat_values
+                // The leaf is the contiguous block of `2^arity` bit-reversed
+                // codeword rows that this query's value descends from.
+                let mut evals: Vec<EF> = mat_values
                     .chunks_exact(EF::DIMENSION)
                     .map(|c| EF::from_basis_coefficients_iter(c.iter().copied()).unwrap())
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .map_err(|_| {
-                        BasefoldVerifierError::IncorrectShape("leaf eval count != 2".to_string())
-                    })?;
+                    .collect();
 
-                let index_sibling = *index ^ 1;
-                let index_pair = *index >> 1;
-                if evals[*index % 2] != *folded_eval {
+                let mask = (1usize << arity) - 1;
+                let pos = *index & mask;
+                let base = *index & !mask;
+                if evals[pos] != *folded_eval {
                     return Err(BasefoldVerifierError::QueryValueMismatch);
                 }
 
-                // Lagrange interpolation at beta on {x, -x} (sibling has -x).
-                let mut xs = [*x, *x];
-                xs[index_sibling % 2] *= F::two_adic_generator(1);
+                // Domain element of each row in the block.  The codeword is
+                // bit-reversed, so row `base + p` sits at `g^bitrev(base + p)`;
+                // for p = 0,1 this is the familiar {x, -x} pair.
+                let g = F::two_adic_generator(log_h);
+                let mut xs: Vec<F> = (0..=mask)
+                    .map(|p| g.exp_u64(reverse_bits_len(base + p, log_h) as u64))
+                    .collect();
 
-                *folded_eval = evals[0]
-                    + (*beta - EF::from(xs[0])) * (evals[1] - evals[0]) / EF::from(xs[1] - xs[0]);
-
-                *index = index_pair;
-                *x = x.square();
+                // Fold the block down, one level per beta: linear interpolation
+                // through (x, v) and (-x, v') evaluated at beta -- the same
+                // relation the arity-2 protocol uses, applied `arity` times.
+                for &beta in round_betas.iter() {
+                    let half = evals.len() / 2;
+                    let mut next_evals = Vec::with_capacity(half);
+                    let mut next_xs = Vec::with_capacity(half);
+                    for i in 0..half {
+                        let (lo, hi) = (evals[2 * i], evals[2 * i + 1]);
+                        let (xlo, xhi) = (xs[2 * i], xs[2 * i + 1]);
+                        next_evals
+                            .push(lo + (beta - EF::from(xlo)) * (hi - lo) / EF::from(xhi - xlo));
+                        next_xs.push(xlo.square());
+                    }
+                    evals = next_evals;
+                    xs = next_xs;
+                }
+                debug_assert_eq!(evals.len(), 1);
+                *folded_eval = evals[0];
+                *index = base >> arity;
 
                 // Verify the leaf inclusion proof.
-                let dims =
-                    vec![Dimensions { height: 1usize << round_idx, width: 2 * EF::DIMENSION }];
+                let dims = vec![Dimensions { height: 1usize << (log_h - arity), width }];
                 self.mmcs
                     .verify_batch(
                         commit,
                         &dims,
-                        index_pair,
+                        *index,
                         BatchOpeningRef {
                             opened_values: leaf.values.as_slice(),
                             opening_proof: &leaf.proof,
@@ -373,6 +425,7 @@ where
                     )
                     .map_err(|e| BasefoldVerifierError::Mmcs(format!("{e:?}")))?;
             }
+            log_h -= arity;
         }
 
         for &v in &folded {

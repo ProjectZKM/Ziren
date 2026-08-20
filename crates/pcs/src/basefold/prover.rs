@@ -25,7 +25,7 @@ use p3_matrix::Matrix;
 use super::code::RsCodeWord;
 use super::config::{FriConfig, BATCH_GRINDING_BITS};
 use super::encoder::DftEncoder;
-use super::fri::{commit_phase_round, final_poly};
+use super::fri::{codeword_from_ef, commit_round_leaves, fold_codeword_once, final_poly};
 use super::mle::Mle;
 use super::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 
@@ -425,47 +425,77 @@ where
         let mut commit_phase_data: Vec<<MT as Mmcs<F>>::ProverData<RowMajorMatrix<F>>> =
             Vec::with_capacity(num_variables);
         let mut current_eval = batched_eval;
-        for round in 0..num_variables {
-            // Sumcheck round on the *first* remaining variable
-            // (matches `Mle::fold`'s even/odd pairing — same beta is
-            // used as both sumcheck point and FRI fold parameter).
-            //
-            // `r` is the verifier's value for this variable; `g(0)`
-            // and `g(1)` are MLE evals with that variable fixed to 0
-            // and 1 respectively.  `g(1)` is recovered from the
-            // running claim:
-            //   claim = (1 - r) * g(0) + r * g(1)
-            //   ⇒ g(1) = (claim - g(0)) / r + g(0)
-            let r = eval_point[round];
-            let zero_val = {
-                // current_mle has (num_variables - round) variables;
-                // build the eval point by prepending 0 (for var_0 = 0)
-                // and appending the remaining coords of eval_point.
-                let mut p: Vec<EF> = Vec::with_capacity(num_variables - round);
-                p.push(EF::ZERO);
-                p.extend_from_slice(&eval_point[round + 1..]);
-                current_mle.eval_at(&p)[0]
-            };
-            let one_val =
-                if r == EF::ZERO { EF::ZERO } else { (current_eval - zero_val) / r + zero_val };
-            let uni_poly = [zero_val, one_val];
-            univariate_messages.push(uni_poly);
-            for &elem in &uni_poly {
-                challenger.observe_algebra_element(elem);
+        // One FRI round folds `log_folding_arity` variables: it commits ONCE,
+        // with `2^k` codeword rows per Merkle leaf, then runs `k` sumcheck
+        // rounds and `k` folds against that single commitment.  A query
+        // therefore walks `num_variables / k` Merkle paths instead of
+        // `num_variables`, and each is `k` levels shallower, which is where
+        // the recursion verifier's cost lives.
+        //
+        // At `k == 1` the transcript is byte-identical to the classic shape:
+        // univariate message, then commitment, then beta, then fold.
+        let log_folding_arity = self.config().log_folding_arity();
+        // How many variables each FRI round folded, so the query phase knows
+        // how far to shift the index per round.
+        let mut round_arities: Vec<usize> = Vec::new();
+        let mut var = 0usize;
+        while var < num_variables {
+            // A trailing group shorter than the arity folds (and commits) at
+            // its own width, so `num_variables` need not divide the arity.
+            let group = core::cmp::min(log_folding_arity, num_variables - var);
+
+            let mut codeword_ef: Option<Vec<EF>> = None;
+            for j in 0..group {
+                // Sumcheck round on the *first* remaining variable (matches
+                // `Mle::fold`'s even/odd pairing — the same beta is used as
+                // both sumcheck point and FRI fold parameter).
+                //
+                //   claim = (1 - r) * g(0) + r * g(1)
+                //   => g(1) = (claim - g(0)) / r + g(0)
+                let r = eval_point[var + j];
+                let zero_val = {
+                    let mut p: Vec<EF> = Vec::with_capacity(num_variables - var - j);
+                    p.push(EF::ZERO);
+                    p.extend_from_slice(&eval_point[var + j + 1..]);
+                    current_mle.eval_at(&p)[0]
+                };
+                let one_val =
+                    if r == EF::ZERO { EF::ZERO } else { (current_eval - zero_val) / r + zero_val };
+                let uni_poly = [zero_val, one_val];
+                univariate_messages.push(uni_poly);
+                for &elem in &uni_poly {
+                    challenger.observe_algebra_element(elem);
+                }
+
+                // The commitment for the whole group is made after the FIRST
+                // univariate message and before the first beta, exactly as the
+                // one-variable-per-round protocol does.
+                if j == 0 {
+                    let (ef, commitment, data) = commit_round_leaves::<F, EF, MT, _>(
+                        current_codeword,
+                        group,
+                        &self.mmcs,
+                        challenger,
+                    );
+                    fri_commitments.push(commitment);
+                    commit_phase_data.push(data);
+                    codeword_ef = Some(ef);
+                    current_codeword = RsCodeWord::new(RowMajorMatrix::new(Vec::new(), 1));
+                }
+
+                let beta: EF = challenger.sample_algebra_element();
+                codeword_ef = Some(fold_codeword_once::<F, EF>(
+                    codeword_ef.take().expect("codeword committed at j == 0"),
+                    beta,
+                ));
+                current_mle = current_mle.fold(beta);
+                current_eval = uni_poly[0] + beta * uni_poly[1];
             }
-
-            let round = commit_phase_round::<F, EF, MT, _>(
-                current_mle,
-                current_codeword,
-                &self.mmcs,
-                challenger,
-            );
-            fri_commitments.push(round.commitment);
-            commit_phase_data.push(round.prover_data);
-
-            current_mle = round.folded_mle;
-            current_codeword = round.folded_codeword;
-            current_eval = uni_poly[0] + round.beta * uni_poly[1];
+            // One flatten per group, not per fold.
+            current_codeword =
+                codeword_from_ef::<F, EF>(codeword_ef.expect("group folds at least once"));
+            round_arities.push(group);
+            var += group;
         }
 
         // (6) Final poly + grinding witness + observe transcript.
@@ -509,10 +539,14 @@ where
 
         // (9) Open commit-phase round commitments at the (shifted) indices.
         let mut query_phase_openings_and_proofs = Vec::with_capacity(num_variables);
+        // Round r's Merkle tree has one leaf per `2^arity_r` codeword rows, and
+        // each earlier round already shrank the codeword by its own arity, so
+        // the shift ACCUMULATES.  At arity 1 throughout this is the classic
+        // `>>= 1` per round.
         let mut indices = query_indices;
-        for data in commit_phase_data.iter() {
+        for (data, &arity) in commit_phase_data.iter().zip(round_arities.iter()) {
             for ix in indices.iter_mut() {
-                *ix >>= 1;
+                *ix >>= arity;
             }
             let mut leaves = Vec::with_capacity(num_queries);
             for &idx in &indices {

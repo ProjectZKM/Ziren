@@ -29,12 +29,46 @@ pub struct FriConfig<F> {
     pub log_blowup: usize,
     pub num_queries: usize,
     pub proof_of_work_bits: usize,
+    /// log2 of the FRI folding arity: each commit-phase round folds this many
+    /// variables before committing again, so the protocol runs
+    /// `num_variables / log_folding_arity` rounds instead of `num_variables`.
+    ///
+    /// This is the dominant term in the RECURSION VERIFIER's cost, not in the
+    /// prover's.  A query walks one Merkle path per round, and each path level
+    /// costs eight `Select` rows plus one Poseidon2 permutation in-circuit.
+    /// At arity 2 a compose child spends 36,964 path levels -- measured, 23.6%
+    /// of the whole child -- because it runs ~23 rounds whose depths sum to
+    /// ~299.  Folding `k` variables per round cuts the round count to
+    /// `num_variables / k` AND each leaf to `2^k` values, so the depth at each
+    /// round drops by `k` as well.
+    ///
+    /// The extra work is local and small: a query opens a `2^k`-wide coset
+    /// instead of a pair, and folds it `k` times itself.
+    pub log_folding_arity: usize,
     _marker: PhantomData<F>,
 }
 
 impl<F: Field> FriConfig<F> {
     pub const fn new(log_blowup: usize, num_queries: usize, proof_of_work_bits: usize) -> Self {
-        Self { log_blowup, num_queries, proof_of_work_bits, _marker: PhantomData }
+        Self {
+            log_blowup,
+            num_queries,
+            proof_of_work_bits,
+            // Arity 2 -- one variable per round, the classic BaseFold shape.
+            log_folding_arity: 1,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Fold `log_folding_arity` variables per commit-phase round.
+    pub const fn with_log_folding_arity(mut self, log_folding_arity: usize) -> Self {
+        assert!(log_folding_arity >= 1, "folding arity must be at least 2 (log >= 1)");
+        self.log_folding_arity = log_folding_arity;
+        self
+    }
+
+    pub const fn log_folding_arity(&self) -> usize {
+        self.log_folding_arity
     }
 
     pub const fn log_blowup(&self) -> usize {

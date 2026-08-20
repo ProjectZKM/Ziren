@@ -113,6 +113,73 @@ pub fn final_poly<F: Field, EF: ExtensionField<F>>(final_codeword: RsCodeWord<F>
     EF::from_basis_coefficients_iter(storage[..EF::DIMENSION].iter().copied()).unwrap()
 }
 
+/// Commit the current codeword with `1 << log_folding_arity` adjacent rows per
+/// Merkle leaf, and observe the digest.
+///
+/// A leaf holds exactly the values one query needs to perform every fold of
+/// this round locally: the codeword is bit-reversed, adjacent rows fold
+/// together, so after `k` folds the value at index `i` descends from the
+/// contiguous block `[i << k, (i+1) << k)` — which is this leaf.
+///
+/// At `log_folding_arity == 1` this is the classic pair-per-leaf FRI shape and
+/// is byte-identical to what the protocol has always emitted.
+pub fn commit_round_leaves<F, EF, MT, Challenger>(
+    current_codeword: RsCodeWord<F>,
+    log_folding_arity: usize,
+    mmcs: &MT,
+    challenger: &mut Challenger,
+) -> (Vec<EF>, MT::Commitment, MT::ProverData<RowMajorMatrix<F>>)
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F> + TwoAdicField,
+    MT: Mmcs<F, Commitment: Clone>,
+    Challenger: FieldChallenger<F> + CanObserve<MT::Commitment>,
+{
+    let height = current_codeword.data.height();
+    let width = current_codeword.data.width();
+    debug_assert_eq!(width, EF::DIMENSION, "codeword width must equal EF::DIMENSION");
+    let arity = 1usize << log_folding_arity;
+    debug_assert!(height >= arity && height.is_power_of_two());
+
+    // Borrow for the EF view, then move the same storage into the leaves — no
+    // clone of a possibly multi-MB codeword.
+    let codeword_storage = current_codeword.data.values;
+    let codeword_ef: Vec<EF> = codeword_storage
+        .par_chunks_exact(EF::DIMENSION)
+        .map(|chunk| EF::from_basis_coefficients_iter(chunk.iter().copied()).unwrap())
+        .collect();
+
+    let leaves_mat = RowMajorMatrix::new(codeword_storage, arity * width);
+    let (commitment, prover_data) = mmcs.commit(vec![leaves_mat]);
+    challenger.observe(commitment.clone());
+
+    (codeword_ef, commitment, prover_data)
+}
+
+/// One arity-2 fold of an EF codeword.
+///
+/// Applied `log_folding_arity` times per commit-phase round.  Stays in EF
+/// across the whole group; only the group's final result is flattened back to
+/// base storage by [`codeword_from_ef`], so a `k`-fold round pays one
+/// `O(N)` flatten rather than `k`.
+pub fn fold_codeword_once<F, EF>(codeword_ef: Vec<EF>, beta: EF) -> Vec<EF>
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F> + TwoAdicField,
+{
+    fold_even_odd_ext::<F, EF>(codeword_ef, beta)
+}
+
+/// Repack an EF codeword into base-field [`RsCodeWord`] storage.
+pub fn codeword_from_ef<F, EF>(codeword_ef: Vec<EF>) -> RsCodeWord<F>
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F> + TwoAdicField,
+{
+    let storage = <EF as BasedVectorSpace<F>>::flatten_to_base(codeword_ef);
+    RsCodeWord::new(RowMajorMatrix::new(storage, EF::DIMENSION))
+}
+
 /// Arity-2 fold over an EF-valued bit-reversed evaluation vector.
 ///
 /// Inlined from `p3_fri::TwoAdicFriFolding::fold_matrix` (arity-1
