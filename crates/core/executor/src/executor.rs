@@ -86,6 +86,19 @@ const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SH
 /// bounds a shard from above. `ELEMENT_THRESHOLD` closes shards well before either.
 const CORE_SHARD_CLK_24BIT_LIMIT: u32 = 1 << 24;
 
+/// Whether to log one `SHARD_CLOSE` line per closed core shard, naming the
+/// fence that closed it.  Read once; off unless `ZIREN_SHARD_CLOSE_CENSUS` is
+/// `1`/`true`.
+fn shard_close_census_enabled() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| {
+        matches!(
+            std::env::var("ZIREN_SHARD_CLOSE_CENSUS").ok().as_deref(),
+            Some("1") | Some("true")
+        )
+    })
+}
+
 /// How often the offline shape-search tooling (`lde_size_check` / `maximal_shapes`) samples the
 /// live chip heights.
 ///
@@ -3559,6 +3572,33 @@ impl<'a> Executor<'a> {
         }
 
         if cpu_exit || clk_exit || !shape_match_found || height_split || area_split {
+            // Which of the three fences actually closed this shard.  The fences
+            // are not independent -- raising `ELEMENT_THRESHOLD` just hands the
+            // close to the next one up -- so "is the area budget still binding?"
+            // is only answerable by counting closes, never by reading the
+            // constant.  Env-gated (`ZIREN_SHARD_CLOSE_CENSUS=1`) and off by
+            // default: one line per shard is diagnostic volume, not prove-path
+            // volume.
+            if shard_close_census_enabled() {
+                let reason = if clk_exit {
+                    "clk"
+                } else if height_split {
+                    "height"
+                } else if area_split {
+                    "area"
+                } else if cpu_exit {
+                    "cpu"
+                } else {
+                    "shape"
+                };
+                tracing::warn!(
+                    "SHARD_CLOSE reason={reason} shard={} cycles={} area={} max_height={}",
+                    self.state.current_shard,
+                    cpu_cycles,
+                    self.split_acct.trace_area(cpu_cycles),
+                    self.split_acct.max_height(cpu_cycles),
+                );
+            }
             if self.executor_mode == ExecutorMode::Checkpoint {
                 self.state.records_clk.push(self.state.clk);
             }
