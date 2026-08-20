@@ -512,6 +512,49 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
 /// At each level: select left/right halves based on `bit`, hash via
 /// Poseidon2KoalaBear, take the first DIGEST_SIZE felts as the new
 /// running digest.  Returns the recomputed root.
+/// Fold a block of `2^k` codeword values down to one, `k` levels deep.
+///
+/// This is the arity generalisation of the pair fold below.  A commit-phase
+/// round of arity `k` puts `2^k` adjacent bit-reversed codeword rows in one
+/// Merkle leaf, and a query folds that block itself instead of walking `k`
+/// separate rounds — which is what removes `k` levels from every Merkle
+/// path AND cuts the round count by `k`.
+///
+/// `xs[p]` is the domain element of block position `p`.  Adjacent positions
+/// are always a `{+x, -x}` pair at every level (bit-reversal sends the
+/// low bit to the high bit, and `g^(H/2) = -1`), so each level reuses the
+/// same interpolation the arity-2 protocol uses, and the next level's
+/// domain elements are the squares.
+///
+/// At `k == 1` this is exactly one pair fold.
+pub fn fold_block_host_shape<EF: p3_field::Field>(
+    evals: &[EF],
+    xs: &[EF],
+    betas: &[EF],
+) -> EF {
+    assert_eq!(evals.len(), xs.len(), "one domain element per block position");
+    assert_eq!(evals.len(), 1 << betas.len(), "block must be 2^betas.len() wide");
+    let two = EF::ONE + EF::ONE;
+    let mut cur: Vec<EF> = evals.to_vec();
+    let mut cur_xs: Vec<EF> = xs.to_vec();
+    for &beta in betas {
+        let half = cur.len() / 2;
+        let mut next = Vec::with_capacity(half);
+        let mut next_xs = Vec::with_capacity(half);
+        for i in 0..half {
+            let (lo, hi) = (cur[2 * i], cur[2 * i + 1]);
+            let x = cur_xs[2 * i];
+            // Interpolate through (x, lo) and (-x, hi), evaluate at beta.
+            next.push((lo + hi) / two + (lo - hi) * beta / (two * x));
+            next_xs.push(x * x);
+        }
+        cur = next;
+        cur_xs = next_xs;
+    }
+    debug_assert_eq!(cur.len(), 1);
+    cur[0]
+}
+
 pub fn emit_merkle_path<C, const DIGEST_SIZE: usize>(
     builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
     leaf: [zkm_recursion_compiler::prelude::Felt<C::F>; DIGEST_SIZE],
@@ -747,6 +790,113 @@ where
     }
 
     folded
+}
+
+/// In-circuit block fold: the arity generalisation of
+/// [`emit_basefold_query_chain`]'s per-round step.
+///
+/// Folds one commit-phase round's `2^k` opened codeword values down to a single
+/// value using `k` betas, which is what lets a round cover `k` variables
+/// against ONE Merkle leaf.
+///
+/// The domain elements come for free from structure rather than from `2^k`
+/// in-circuit exponentiations.  Within a leaf the positions are
+/// `x_base · zeta^bitrev_k(p)` for the compile-time `2^k`-th root `zeta`, and
+/// the query's own position contributes `zeta^bitrev_k(pos)` — whose exponent
+/// is just the low `k` index bits reversed.  So `x_base` is recovered with `k`
+/// selects and `k` multiplies, and the coset is `2^k` multiplies by constants
+/// (which the constant pool materialises once for the whole program).
+///
+/// Adjacent positions are a `{+x, -x}` pair at every level, so each level is
+/// the same interpolation the arity-2 path already emits.
+#[allow(clippy::too_many_arguments)]
+pub fn emit_basefold_block_fold<C>(
+    builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
+    block: &[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>],
+    x: zkm_recursion_compiler::prelude::Felt<C::F>,
+    index_bits: &[C::Bit],
+    betas: &[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>],
+) -> (zkm_recursion_compiler::prelude::Ext<C::F, C::EF>, zkm_recursion_compiler::prelude::Felt<C::F>)
+where
+    C: crate::CircuitConfig,
+{
+    use core::iter::once;
+    use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
+    use zkm_recursion_compiler::ir::DslIr;
+    type Felt<C> = zkm_recursion_compiler::prelude::Felt<<C as zkm_recursion_compiler::ir::Config>::F>;
+
+    let k = betas.len();
+    assert_eq!(block.len(), 1usize << k, "block must hold 2^k opened values");
+    assert!(index_bits.len() >= k, "index_bits must cover the block's low k bits");
+
+    // zeta = primitive 2^k-th root; bitrev_k over the block positions.
+    let bitrev = |mut v: usize, bits: usize| {
+        let mut r = 0usize;
+        for _ in 0..bits {
+            r = (r << 1) | (v & 1);
+            v >>= 1;
+        }
+        r
+    };
+    let zeta = <C::F as TwoAdicField>::two_adic_generator(k);
+
+    // x_base = x * prod_j (zeta^-2^(k-1-j))^{bit_j}
+    let mut x_base = x;
+    for (j, bit) in index_bits.iter().take(k).enumerate() {
+        let one_f: Felt<C> = builder.constant(C::F::ONE);
+        let step = zeta.exp_u64(1u64 << (k - 1 - j)).inverse();
+        let step_f: Felt<C> = builder.constant(step);
+        let chosen = C::select_chain_f(builder, bit.clone(), once(one_f), once(step_f));
+        let next: Felt<C> = builder.uninit();
+        builder.push_op(DslIr::MulF(next, x_base, chosen[0]));
+        x_base = next;
+    }
+
+    // The coset: xs[p] = x_base * zeta^bitrev_k(p).
+    let mut xs: Vec<Felt<C>> = Vec::with_capacity(block.len());
+    for p in 0..block.len() {
+        let c: Felt<C> = builder.constant(zeta.exp_u64(bitrev(p, k) as u64));
+        let v: Felt<C> = builder.uninit();
+        builder.push_op(DslIr::MulF(v, x_base, c));
+        xs.push(v);
+    }
+
+    // Fold k levels; adjacent entries are (+x, -x) so this is the same
+    // interpolation the pair path uses.
+    let mut cur: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = block.to_vec();
+    let mut cur_xs = xs;
+    for beta in betas.iter() {
+        let half = cur.len() / 2;
+        let mut next = Vec::with_capacity(half);
+        let mut next_xs = Vec::with_capacity(half);
+        for i in 0..half {
+            let (lo, hi) = (cur[2 * i], cur[2 * i + 1]);
+            let xlo = cur_xs[2 * i];
+            let xhi = cur_xs[2 * i + 1];
+
+            let diff: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
+            builder.push_op(DslIr::SubE(diff, hi, lo));
+            let beta_minus: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
+            builder.push_op(DslIr::SubEF(beta_minus, *beta, xlo));
+            let numer: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
+            builder.push_op(DslIr::MulE(numer, beta_minus, diff));
+            let denom: Felt<C> = builder.uninit();
+            builder.push_op(DslIr::SubF(denom, xhi, xlo));
+            let ratio: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
+            builder.push_op(DslIr::DivEF(ratio, numer, denom));
+            let folded: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
+            builder.push_op(DslIr::AddE(folded, lo, ratio));
+            next.push(folded);
+
+            let sq: Felt<C> = builder.uninit();
+            builder.push_op(DslIr::MulF(sq, xlo, xlo));
+            next_xs.push(sq);
+        }
+        cur = next;
+        cur_xs = next_xs;
+    }
+    debug_assert_eq!(cur.len(), 1);
+    (cur[0], cur_xs[0])
 }
 
 /// `RecursiveMultilinearPcsVerifier` impl on [`RecursiveBasefoldVerifier`].
@@ -1202,6 +1352,70 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The block fold MUST equal `k` successive pair folds on the same data.
+    ///
+    /// That equality is the whole justification for raising the folding arity:
+    /// the verifier does the same arithmetic, but against ONE Merkle leaf per
+    /// `k` variables instead of `k` leaves, so it skips `k` levels of path per
+    /// round and `k`-fold fewer rounds.  If this ever diverges, a higher-arity
+    /// proof would verify against a different polynomial than the prover
+    /// folded.
+    #[test]
+    fn block_fold_matches_successive_pair_folds() {
+        use p3_field::{PrimeCharacteristicRing, TwoAdicField};
+        use zkm_pcs::{InnerChallenge, InnerVal};
+        type EF = InnerChallenge;
+
+        let two = EF::from_u32(2);
+        // One pair fold, the arity-2 relation the protocol already uses.
+        let pair = |lo: EF, hi: EF, x: EF, beta: EF| (lo + hi) / two + (lo - hi) * beta / (two * x);
+
+        for k in 1usize..=4 {
+            let n = 1usize << k;
+            // A block of `2^k` values, and a coset of domain elements where
+            // adjacent entries are {+x, -x} at every level.
+            let log_h = k + 3;
+            let g = <InnerVal as TwoAdicField>::two_adic_generator(log_h);
+            let x_base = EF::from(g);
+            let zeta = EF::from(<InnerVal as TwoAdicField>::two_adic_generator(k));
+            let bitrev = |mut v: usize, bits: usize| {
+                let mut r = 0;
+                for _ in 0..bits {
+                    r = (r << 1) | (v & 1);
+                    v >>= 1;
+                }
+                r
+            };
+            let xs: Vec<EF> =
+                (0..n).map(|p| x_base * zeta.exp_u64(bitrev(p, k) as u64)).collect();
+            // Adjacent positions must be sign-flips of each other.
+            for i in 0..n / 2 {
+                assert_eq!(xs[2 * i + 1], -xs[2 * i], "k={k}: block pair must be (+x, -x)");
+            }
+
+            let evals: Vec<EF> = (0..n).map(|i| EF::from_u32(7 + 13 * i as u32)).collect();
+            let betas: Vec<EF> = (0..k).map(|j| EF::from_u32(101 + 37 * j as u32)).collect();
+
+            // Reference: fold the whole block by hand, one level at a time.
+            let mut cur = evals.clone();
+            let mut cur_xs = xs.clone();
+            for &beta in &betas {
+                let half = cur.len() / 2;
+                let mut next = Vec::with_capacity(half);
+                let mut next_xs = Vec::with_capacity(half);
+                for i in 0..half {
+                    next.push(pair(cur[2 * i], cur[2 * i + 1], cur_xs[2 * i], beta));
+                    next_xs.push(cur_xs[2 * i] * cur_xs[2 * i]);
+                }
+                cur = next;
+                cur_xs = next_xs;
+            }
+
+            let got = fold_block_host_shape(&evals, &xs, &betas);
+            assert_eq!(got, cur[0], "k={k}: block fold must equal successive pair folds");
+        }
+    }
 
     #[test]
     fn params_default_consistency() {
