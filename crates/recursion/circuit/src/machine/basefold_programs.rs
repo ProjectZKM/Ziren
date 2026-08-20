@@ -288,11 +288,23 @@ mod tests {
         // single-round, while every real core proof is two-round.  The dummy
         // builder exists precisely to produce a witness whose shape matches
         // what a real proof of that machine carries, so use it.
+        // EVERY chip of the machine, not a two-chip stand-in.
+        //
+        // The circuit lays out its column space from the FULL machine: the
+        // jagged verifier draws `z_col`'s dimension from `col_prefix_sums`
+        // (which spans every chip) while the column claims come from the
+        // shape.  A shape naming a subset makes those disagree, and
+        // `verify_trusted_evaluations` trips
+        // `evaluate_mle_ext`'s "mle eval vector size must be
+        // 2^point.dimension" -- 128 claims against a dimension-8 point.
+        use zkm_pcs::air::MachineAir;
+        let heights: Vec<(String, usize)> = machine
+            .chips()
+            .iter()
+            .map(|c| (<_ as MachineAir<p3_koala_bear::KoalaBear>>::name(c), 3))
+            .collect();
         let shape = super::super::core::ZKMRecursionShape {
-            proof_shapes: vec![OrderedShape::from_log2_heights(&[
-                ("AddSub".to_string(), 3),
-                ("Bitwise".to_string(), 3),
-            ])],
+            proof_shapes: vec![OrderedShape::from_log2_heights(&heights)],
             is_complete: false,
         };
         super::ZKMCoreBasefoldWitnessValues::dummy(machine, &shape)
