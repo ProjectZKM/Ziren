@@ -43,11 +43,18 @@ pub fn assert_recursion_stacking_height_fixed(
 ) {
     use zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
     let expected = DEFAULT_LOG_STACKING_HEIGHT as usize;
+    // `bundle_num_vars` is `fri_commitments.len()`, which is one per
+    // COMMIT-PHASE ROUND — and a round folds `log_folding_arity` variables.
+    // The invariant being guarded is that the stacking height is FIXED (so the
+    // VK stays enumerable), not that there is one commitment per variable.
+    let expected_rounds =
+        expected.div_ceil(zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1));
     assert_eq!(
-        bundle_num_vars, expected,
-        "[{stage}] DE-CLAMP REGRESSION: recursion bundle num_variables \
-         (fri_commitments.len() = {bundle_num_vars}) != DEFAULT_LOG_STACKING_HEIGHT \
-         ({expected}); the prover de-clamp (pick_log_stacking_height fixed at 21) \
+        bundle_num_vars, expected_rounds,
+        "[{stage}] DE-CLAMP REGRESSION: recursion bundle commit rounds \
+         (fri_commitments.len() = {bundle_num_vars}) != \
+         ceil(DEFAULT_LOG_STACKING_HEIGHT / folding_arity) ({expected_rounds}); \
+         the prover de-clamp (pick_log_stacking_height fixed at {expected}) \
          regressed → the recursion VK is no longer enumerable",
     );
     assert_eq!(
@@ -794,27 +801,30 @@ fn host_query_opening_to_recursive(
                 "commit-phase leaf must have exactly one inner matrix",
             );
             let row = &leaf.values[0];
-            assert_eq!(
-                row.len(),
-                2 * D,
-                "commit-phase leaf row must have 2*EF::DIMENSION = {} base elements, got {}",
-                2 * D,
+            assert!(
+                row.len() % D == 0 && !row.is_empty(),
+                "commit-phase leaf row must be a whole number of EF elements \
+                 (a multiple of EF::DIMENSION = {}), got {}",
+                D,
                 row.len(),
             );
-            let lo = <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
-                row[..D].iter().copied(),
-            )
-            .expect("EF parse from D base elements");
-            let hi = <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
-                row[D..2 * D].iter().copied(),
-            )
-            .expect("EF parse from D base elements");
+            // The row is the round's committed leaf: `2^arity` EF values, in
+            // committed order.  At arity 1 that is the classic sibling pair.
+            let block: Vec<InnerChallenge> = row
+                .chunks_exact(D)
+                .map(|c| {
+                    <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+                        c.iter().copied(),
+                    )
+                    .expect("EF parse from D base elements")
+                })
+                .collect();
             // Thread the bundle's MT::Proof structured digests
             // through.  See verifier site at
             // basefold_verifier.rs:957-959 for promotion + binding.
             RecursiveBasefoldOpening {
                 position: 0,
-                block: vec![lo, hi],
+                block,
                 merkle_path_bytes: Vec::new(),
                 merkle_path_digests: leaf.proof.clone(),
                 _phantom: core::marker::PhantomData,
@@ -842,17 +852,29 @@ pub fn host_basefold_proof_to_recursive(
     proof: &BasefoldProof<InnerVal, InnerChallenge, JaggedMmcs>,
     batch_evaluations: Vec<Vec<InnerChallenge>>,
 ) -> RecursiveBasefoldProof<InnerVal, InnerChallenge> {
+    // One univariate message per VARIABLE, one commitment per COMMIT ROUND —
+    // a round covers `log_folding_arity` variables, so these differ once the
+    // arity is raised.  `rounds` stays one entry per variable, with the
+    // members of a group repeating their group's commitment; only the leader
+    // observes it (see `basefold_verifier`'s replay).
+    let commit_for_var: Vec<usize> = {
+        let k = zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1);
+        (0..proof.univariate_messages.len()).map(|v| (v / k).min(proof.fri_commitments.len().saturating_sub(1))).collect()
+    };
     assert_eq!(
-        proof.univariate_messages.len(),
         proof.fri_commitments.len(),
-        "BasefoldProof: univariate_messages.len() != fri_commitments.len()",
+        proof.univariate_messages.len().div_ceil(
+            zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)
+        ),
+        "BasefoldProof: fri_commitments.len() != ceil(univariate_messages.len() / arity)",
     );
 
     let rounds: Vec<RecursiveBasefoldRound<InnerVal, InnerChallenge>> = proof
         .univariate_messages
         .iter()
-        .zip(proof.fri_commitments.iter())
-        .map(|(uni, commit)| {
+        .enumerate()
+        .map(|(v, uni)| {
+            let commit = &proof.fri_commitments[commit_for_var[v]];
             let cap_roots = commit.roots();
             assert_eq!(
                 cap_roots.len(),
@@ -969,24 +991,26 @@ fn host_query_opening_to_recursive_outer(
                 "commit-phase leaf must have exactly one inner matrix",
             );
             let row = &leaf.values[0];
-            assert_eq!(
-                row.len(),
-                2 * D,
-                "commit-phase leaf row must have 2*EF::DIMENSION = {} base elements, got {}",
-                2 * D,
+            assert!(
+                row.len() % D == 0 && !row.is_empty(),
+                "commit-phase leaf row must be a whole number of EF elements \
+                 (a multiple of EF::DIMENSION = {}), got {}",
+                D,
                 row.len(),
             );
-            let lo = <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
-                row[..D].iter().copied(),
-            )
-            .expect("EF parse from D base elements");
-            let hi = <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
-                row[D..2 * D].iter().copied(),
-            )
-            .expect("EF parse from D base elements");
+            // `2^arity` EF values in committed order; a pair at arity 1.
+            let block: Vec<InnerChallenge> = row
+                .chunks_exact(D)
+                .map(|c| {
+                    <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+                        c.iter().copied(),
+                    )
+                    .expect("EF parse from D base elements")
+                })
+                .collect();
             RecursiveBasefoldOpening {
                 position: 0,
-                block: vec![lo, hi],
+                block,
                 merkle_path_bytes: Vec::new(),
                 merkle_path_digests: leaf.proof.clone(),
                 _phantom: core::marker::PhantomData,
@@ -1003,19 +1027,30 @@ fn host_basefold_proof_to_recursive_outer(
     proof: &BasefoldProof<InnerVal, InnerChallenge, OuterValMmcs>,
     batch_evaluations: Vec<Vec<InnerChallenge>>,
 ) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, OuterDigestRaw> {
+    // One univariate message per VARIABLE, one commitment per COMMIT ROUND —
+    // a round covers `log_folding_arity` variables, so these differ once the
+    // arity is raised.  `rounds` stays one entry per variable, with the
+    // members of a group repeating their group's commitment; only the leader
+    // observes it (see `basefold_verifier`'s replay).
+    let commit_for_var: Vec<usize> = {
+        let k = zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1);
+        (0..proof.univariate_messages.len()).map(|v| (v / k).min(proof.fri_commitments.len().saturating_sub(1))).collect()
+    };
     assert_eq!(
-        proof.univariate_messages.len(),
         proof.fri_commitments.len(),
-        "BasefoldProof: univariate_messages.len() != fri_commitments.len()",
+        proof.univariate_messages.len().div_ceil(
+            zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)
+        ),
+        "BasefoldProof: fri_commitments.len() != ceil(univariate_messages.len() / arity)",
     );
 
     let rounds: Vec<RecursiveBasefoldRound<InnerVal, InnerChallenge, OuterDigestRaw>> = proof
         .univariate_messages
         .iter()
-        .zip(proof.fri_commitments.iter())
-        .map(|(uni, commit)| RecursiveBasefoldRound {
+        .enumerate()
+        .map(|(v, uni)| RecursiveBasefoldRound {
             uni_poly: *uni,
-            commitment: outer_cap_root(commit),
+            commitment: outer_cap_root(&proof.fri_commitments[commit_for_var[v]]),
             _phantom_f: core::marker::PhantomData,
         })
         .collect();

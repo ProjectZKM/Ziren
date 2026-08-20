@@ -430,7 +430,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<
                         SC,
                     >(
-                        max_log_row_count, host.commit.log_stacking_height, bundle_num_vars
+                        max_log_row_count,
+                        host.commit.log_stacking_height,
+                        // VARIABLES, not commit rounds.
+                        host.commit.log_stacking_height as usize,
                     );
                 &per_proof_verifier
             }

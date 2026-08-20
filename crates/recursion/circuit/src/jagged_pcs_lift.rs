@@ -257,7 +257,7 @@ where
         // verifier reads `query_phase_openings[round][query_idx]`
         // and collects one opened block per round, so outer length
         // must equal num_variables (== max_log_row_count here).
-        query_phase_openings: (0..max_log_row_count)
+        query_phase_openings: (0..max_log_row_count.div_ceil(zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)))
             .map(|_| {
                 vec![crate::basefold_verifier::RecursiveBasefoldOpening::<
                     Felt<C::F>,
@@ -265,7 +265,9 @@ where
                     HV::DigestVariable,
                 > {
                     position: 0,
-                    block: vec![zero_ext(builder), zero_ext(builder)],
+                    block: (0..(1usize << zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY))
+                        .map(|_| zero_ext(builder))
+                        .collect(),
                     merkle_path_bytes: vec![],
                     merkle_path_digests: vec![],
                     _phantom: core::marker::PhantomData,

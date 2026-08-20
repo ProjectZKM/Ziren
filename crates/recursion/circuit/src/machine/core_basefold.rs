@@ -604,7 +604,9 @@ pub fn verify_core_basefold<C, SC, A>(
                         crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                             max_log_row_count,
                             host.commit.log_stacking_height,
-                            bundle_num_vars,
+                            // VARIABLES, not commit rounds: a round folds
+                            // `log_folding_arity` of them.
+                            host.commit.log_stacking_height as usize,
                         );
                     &per_proof_verifier
                 }

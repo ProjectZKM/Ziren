@@ -18,6 +18,31 @@ use p3_field::Field;
 /// barrier per re-roll attempt, matching the per-query PoW.
 pub const BATCH_GRINDING_BITS: usize = 16;
 
+/// log2 of the FRI folding arity for the INNER (KoalaBear) stages — core,
+/// compress and shrink.
+///
+/// One source of truth: the host `FriConfig`, the GPU prover and the recursion
+/// circuit's `BasefoldVerifierParams` must all agree, or the transcript
+/// diverges.  The wrap (BN254) stage keeps arity 1.
+///
+/// **3 is the measured optimum.** A commit-phase round of arity `k` folds `k`
+/// variables against ONE Merkle leaf of `2^k` rows, so the recursion verifier
+/// walks `num_variables / k` paths instead of `num_variables`, each `k` levels
+/// shallower.  Against that, folding a `2^k` block costs `2^k - 1` fold steps
+/// per round, which grows faster than the path saving:
+///
+/// | k | rounds | merkle rows | fold rows | net vs k=1 |
+/// |---|---|---|---|---|
+/// | 1 | 22 | 306,900 | 30,008 | -- |
+/// | 2 | 11 | 147,312 | 38,192 | -10.7% |
+/// | 3 | 7 | 93,744 | 52,080 | **-13.5%** |
+/// | 4 | 5 | 66,960 | 75,640 | -13.7% |
+/// | 5 | 4 | 51,336 | 121,024 | -11.6% |
+///
+/// The win peaks at 3-4 and REVERSES by 5.  3 takes 98% of what 4 does for
+/// two thirds of the fold cost.
+pub const INNER_LOG_FOLDING_ARITY: usize = 3;
+
 /// FRI sub-protocol parameters used by Basefold's commit / query phase.
 ///
 /// `log_blowup` is the Reed-Solomon rate (codeword length =
@@ -120,7 +145,7 @@ impl<F: Field> FriConfig<F> {
     /// memory-constrained hosts (but that knob DROPS soundness below
     /// 100-bit — see `from_env_or_default`).
     pub const fn default_fri_config() -> Self {
-        Self::new(2, 124, 16)
+        Self::new(2, 124, 16).with_log_folding_arity(INNER_LOG_FOLDING_ARITY)
     }
 
     /// Memory-optimised config override via the

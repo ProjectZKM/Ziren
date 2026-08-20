@@ -637,6 +637,7 @@ pub fn dummy_jagged_basefold_bundle(
     // default this is blowup=2, so the dummy path length must track
     // the config, not a hardcoded `+1`.
     let inner_log_blowup = inner_fri.log_blowup();
+    let inner_log_folding_arity = inner_fri.log_folding_arity();
     // jagged-eval sub-sumcheck dimension `jagged_n = 2*(log_m+1)`.
     //
     // RECURSION-LAYER AREA PIN: when the area pin is active,
@@ -662,8 +663,21 @@ pub fn dummy_jagged_basefold_bundle(
     let zero_cap = || MerkleCap::<F, [F; 8]>::new(vec![[F::ZERO; 8]]);
 
     // ── BaseFold proof (log_stacking rounds; query openings drive the stream) ──
+    // One commit-phase round per `log_folding_arity` variables (trailing group
+    // may be shorter), but still ONE univariate message per variable.
+    let round_arities: Vec<usize> = {
+        let k = inner_log_folding_arity.max(1);
+        let mut out = Vec::new();
+        let mut v = 0usize;
+        while v < log_stacking {
+            let g = core::cmp::min(k, log_stacking - v);
+            out.push(g);
+            v += g;
+        }
+        out
+    };
     let univariate_messages: Vec<[EF; 2]> = vec![[EF::ZERO; 2]; log_stacking];
-    let fri_commitments: Vec<_> = (0..log_stacking).map(|_| zero_cap()).collect();
+    let fri_commitments: Vec<_> = round_arities.iter().map(|_| zero_cap()).collect();
     // query_phase_openings_and_proofs: log_stacking rounds, each Q leaves; round
     // r leaf has its Merkle path against the commit-phase round-r codeword.
     //
@@ -683,18 +697,28 @@ pub fn dummy_jagged_basefold_bundle(
     // Select+Poseidon2 ops than the real program, diverging the normalize VK
     // from the real proof's VK.  Tracking `inner_log_blowup` keeps the dummy
     // faithful.
-    let query_phase_openings_and_proofs: Vec<MerkleOpening<F, JaggedMmcs>> = (0..log_stacking)
-        .map(|r| {
-            let path_len = log_stacking + inner_log_blowup - 1 - r;
-            let leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..num_queries)
-                .map(|_| LeafOpening {
-                    values: vec![vec![F::ZERO; 2 * D]],
-                    proof: vec![[F::ZERO; 8]; path_len],
-                })
-                .collect();
-            MerkleOpening { leaves }
-        })
-        .collect();
+    // With arity `k_r`, round r's leaf covers `2^k_r` codeword rows, so its
+    // tree is `k_r` levels shallower AND the codeword has already shrunk by
+    // every earlier round's arity: the path length is
+    // `log_stacking + blowup - sum(k_i for i <= r)`.  At arity 1 throughout
+    // that is the classic `log_stacking + blowup - 1 - r`.
+    let query_phase_openings_and_proofs: Vec<MerkleOpening<F, JaggedMmcs>> = {
+        let mut consumed = 0usize;
+        round_arities
+            .iter()
+            .map(|&arity| {
+                consumed += arity;
+                let path_len = log_stacking + inner_log_blowup - consumed;
+                let leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..num_queries)
+                    .map(|_| LeafOpening {
+                        values: vec![vec![F::ZERO; (1usize << arity) * D]],
+                        proof: vec![[F::ZERO; 8]; path_len],
+                    })
+                    .collect();
+                MerkleOpening { leaves }
+            })
+            .collect()
+    };
     // Component openings are WITNESSED + consumed (the
     // bound initial_eval + the component Merkle binding), so the dummy
     // must carry the shape-correct zero-filled structure: ONE ROUND PER

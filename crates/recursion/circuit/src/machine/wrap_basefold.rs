@@ -454,12 +454,16 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             commit_root,
             modified_commitment,
         } => {
-            let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
             per_proof_verifier =
                 crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                     max_log_row_count,
                     host.commit.log_stacking_height,
-                    bundle_num_vars,
+                    // VARIABLES, not commit rounds: this arm reads an INNER
+                    // bundle, which folds `log_folding_arity` variables per
+                    // round, so `fri_commitments.len()` is the round count.
+                    // (The OUTER arms below stay at wrap arity 1, where the
+                    // two coincide.)
+                    host.commit.log_stacking_height as usize,
                 );
             &per_proof_verifier
         }

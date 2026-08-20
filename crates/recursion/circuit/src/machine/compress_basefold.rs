@@ -577,7 +577,12 @@ pub fn verify_compress_basefold<C, SC, A>(
                     crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                         max_log_row_count,
                         host.commit.log_stacking_height,
-                        bundle_num_vars,
+                        // VARIABLES, not commit rounds: a round folds
+                        // `log_folding_arity` variables, so
+                        // `fri_commitments.len()` is no longer the variable
+                        // count.  The de-clamp guard above pins the stacking
+                        // height, which IS the variable count.
+                        host.commit.log_stacking_height as usize,
                     );
                 &per_proof_verifier
             }

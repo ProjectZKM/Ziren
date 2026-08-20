@@ -51,6 +51,12 @@ pub struct BasefoldVerifierParams {
     pub batch_grinding_bits: usize,
     /// Total polynomial variables = log2 of dense codeword size.
     pub num_variables: usize,
+    /// log2 of the FRI folding arity — how many variables one commit-phase
+    /// round folds.  MUST equal
+    /// `zkm_pcs::basefold::config::FriConfig::log_folding_arity` and the GPU
+    /// prover's, or the transcript diverges.  1 is the classic
+    /// one-variable-per-round shape.
+    pub log_folding_arity: usize,
 }
 
 impl BasefoldVerifierParams {
@@ -78,6 +84,7 @@ impl BasefoldVerifierParams {
             pow_bits: 16,
             batch_grinding_bits: 16,
             num_variables,
+            log_folding_arity: zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY,
         }
     }
 
@@ -102,6 +109,7 @@ impl BasefoldVerifierParams {
             pow_bits: 22,
             batch_grinding_bits: 16,
             num_variables,
+            log_folding_arity: 1,
         }
     }
 
@@ -113,8 +121,30 @@ impl BasefoldVerifierParams {
 
     /// Total Merkle commits the verifier must observe (one per
     /// commit-phase round, plus the initial commit).
-    pub const fn total_merkle_commits(&self) -> usize {
-        self.num_variables + 1
+    ///
+    /// A round covers `log_folding_arity` variables, so this is NOT
+    /// `num_variables + 1` once the arity is raised.
+    pub fn total_merkle_commits(&self) -> usize {
+        self.num_commit_rounds() + 1
+    }
+
+    /// Commit-phase rounds: `log_folding_arity` variables each, with a
+    /// possibly shorter trailing group.
+    pub fn num_commit_rounds(&self) -> usize {
+        self.num_variables.div_ceil(self.log_folding_arity.max(1))
+    }
+
+    /// How many variables each commit-phase round folds, in order.
+    pub fn round_arities(&self) -> Vec<usize> {
+        let k = self.log_folding_arity.max(1);
+        let mut out = Vec::new();
+        let mut var = 0;
+        while var < self.num_variables {
+            let g = core::cmp::min(k, self.num_variables - var);
+            out.push(g);
+            var += g;
+        }
+        out
     }
 
     /// log2 of the codeword size (= num_variables + log_blowup).
@@ -1090,10 +1120,29 @@ where
                 builder.constant(C::F::from_usize(self.params.num_variables));
             challenger.observe(builder, nvar_felt);
         }
+        // One commitment per COMMIT-PHASE ROUND, which covers
+        // `log_folding_arity` variables.  `proof.rounds` stays one entry per
+        // VARIABLE — the members of a group repeat their group's commitment —
+        // and only the group LEADER observes it, mirroring the prover's
+        // message / commitment / beta / message / beta ... order.  At arity 1
+        // every round leads its own group and this is the classic loop.
+        let group_leader: Vec<bool> = {
+            let arities = self.params.round_arities();
+            let mut flags = vec![false; proof.rounds.len()];
+            let mut at = 0usize;
+            for a in arities {
+                if at < flags.len() {
+                    flags[at] = true;
+                }
+                at += a;
+            }
+            flags
+        };
         let betas: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = proof
             .rounds
             .iter()
-            .map(|round| {
+            .enumerate()
+            .map(|(i, round)| {
                 // observe the round's univariate message (2 EF coeffs)
                 // BEFORE the Merkle commitment, mirroring the prover's
                 // observe_algebra_element(uni_poly) + observe(commitment).
@@ -1101,8 +1150,10 @@ where
                 let p1 = round.uni_poly[1];
                 observe_ext_element::<C, FC>(builder, challenger, p0);
                 observe_ext_element::<C, FC>(builder, challenger, p1);
-                // round.commitment is a witnessed DigestVariable.
-                challenger.observe(builder, round.commitment);
+                if group_leader[i] {
+                    // round.commitment is a witnessed DigestVariable.
+                    challenger.observe(builder, round.commitment);
+                }
                 challenger.sample_ext(builder)
             })
             .collect();
@@ -1137,14 +1188,15 @@ where
                 .num_queries
                 .min(proof.query_phase_openings.first().map(|v| v.len()).unwrap_or(0));
             for query_idx in 0..num_queries {
-                let sibling_pairs: Vec<[Ext<C::F, C::EF>; 2]> = proof
+                // One opened BLOCK per commit-phase round: `2^arity` values,
+                // the contiguous bit-reversed rows this query descends from.
+                // At arity 1 the block is the classic sibling pair.
+                let blocks: Vec<Vec<Ext<C::F, C::EF>>> = proof
                     .query_phase_openings
                     .iter()
-                    .map(|round_openings| {
-                        let op = &round_openings[query_idx];
-                        [op.block[0], op.block[1]]
-                    })
+                    .map(|round_openings| round_openings[query_idx].block.clone())
                     .collect();
+                let round_arities = self.params.round_arities();
 
                 // BOUND initial_eval.  When the proof carries
                 // component openings (the inner production path), the query
@@ -1239,7 +1291,7 @@ where
                     // Materialize the accumulated inner product ONCE per query.
                     builder.eval(acc)
                 } else {
-                    sibling_pairs.first().map(|pair| pair[0]).unwrap_or_else(|| {
+                    blocks.first().map(|b| b[0]).unwrap_or_else(|| {
                         builder.eval(zkm_recursion_compiler::ir::SymbolicExt::<C::F, C::EF>::ZERO)
                     })
                 };
@@ -1255,14 +1307,29 @@ where
                 // Pass the per-round query index bits so the fold
                 // reorders (+x, -x) per round (which sibling is current).  Same
                 // bits used for `initial_x` above (index[round]).
-                let folded = emit_basefold_query_chain::<C>(
-                    builder,
-                    initial_eval,
-                    initial_x,
-                    &query_indices[query_idx],
-                    &sibling_pairs,
-                    &betas,
-                );
+                // Fold each round's block down with that round's betas.  A
+                // round consumes `arity` index bits and `arity` betas, and
+                // hands the next round the squared domain element — which at
+                // arity 1 is exactly the per-round step this replaces.
+                let mut folded = initial_eval;
+                let mut x_cur = initial_x;
+                let mut bit_at = 0usize;
+                let mut beta_at = 0usize;
+                for (round, block) in blocks.iter().enumerate() {
+                    let arity = round_arities.get(round).copied().unwrap_or(1);
+                    let round_betas = &betas[beta_at..beta_at + arity];
+                    beta_at += arity;
+                    let (f, nx) = emit_basefold_block_fold::<C>(
+                        builder,
+                        block,
+                        x_cur,
+                        &query_indices[query_idx][bit_at..],
+                        round_betas,
+                    );
+                    folded = f;
+                    x_cur = nx;
+                    bit_at += arity;
+                }
                 builder.assert_ext_eq(folded, final_poly_ext);
 
                 // Per-round Merkle binding — digest-generic via HV.
@@ -1291,17 +1358,24 @@ where
                     if op.merkle_path_digests.is_empty() {
                         continue;
                     }
-                    // Leaf = hash of the FULL sibling pair row: ext2felt(lo)
-                    // ++ ext2felt(hi) = 8 KoalaBear limbs, in committed order.
-                    let lo_felts = C::ext2felt(builder, sibling_pairs[round_idx][0]);
-                    let hi_felts = C::ext2felt(builder, sibling_pairs[round_idx][1]);
-                    let leaf_felts: Vec<zkm_recursion_compiler::prelude::Felt<C::F>> =
-                        lo_felts.into_iter().chain(hi_felts).collect();
+                    // Leaf = hash of the FULL committed row: every value in
+                    // the block, `ext2felt`'d in committed order.  At arity 1
+                    // that is the 8 limbs of the sibling pair; at arity `k` it
+                    // is `2^k * 4`.
+                    let leaf_felts: Vec<zkm_recursion_compiler::prelude::Felt<C::F>> = blocks
+                        [round_idx]
+                        .iter()
+                        .flat_map(|v| C::ext2felt(builder, *v))
+                        .collect();
                     let mut leaf_digest: HV::DigestVariable = HV::hash(builder, &leaf_felts);
                     // Path direction bits: bits of (orig_query >> (round_idx+1)),
                     // LSB-first.  `query_indices[query_idx]` is LSB-first over
                     // log_codeword_size bits, so slice from `round_idx + 1`.
-                    let path_bits = &query_indices[query_idx][round_idx + 1..];
+                    // The index has been shifted by every earlier round's
+                    // arity plus this one's, not by `round_idx + 1`.
+                    let bits_consumed: usize =
+                        round_arities.iter().take(round_idx + 1).sum();
+                    let path_bits = &query_indices[query_idx][bits_consumed..];
                     let path_len = op.merkle_path_digests.len();
                     for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate() {
                         // Witnessed DigestVariable, no const promotion.
@@ -1340,9 +1414,15 @@ where
                     // host `verify_queries` checks each commit-phase leaf against
                     // `&proof.fri_commitments` (crates/pcs/src/basefold/
                     // verifier.rs:280, 394).
-                    if round_idx < proof.rounds.len() {
+                    // `round_idx` counts COMMIT rounds; `proof.rounds` is
+                    // indexed per VARIABLE, and a group's members all carry
+                    // their group's commitment, so take the group LEADER.  At
+                    // arity 1 the two indices coincide.
+                    let leader: usize =
+                        round_arities.iter().take(round_idx).sum();
+                    if leader < proof.rounds.len() {
                         // commitment is a witnessed DigestVariable.
-                        let round_commit: HV::DigestVariable = proof.rounds[round_idx].commitment;
+                        let round_commit: HV::DigestVariable = proof.rounds[leader].commitment;
                         HV::assert_digest_eq(builder, leaf_digest, round_commit);
                     }
                 }

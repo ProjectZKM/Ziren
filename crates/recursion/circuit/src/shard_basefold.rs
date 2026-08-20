@@ -896,12 +896,14 @@ where
                 merkle_path_digests: vec![],
                 _phantom: core::marker::PhantomData,
             }]],
-            query_phase_openings: (0..shape.basefold_num_variables)
+            query_phase_openings: (0..shape.basefold_num_variables.div_ceil(zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)))
                 .map(|_| {
                     vec![
                         RecursiveBasefoldOpening::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
                             position: 0,
-                            block: vec![zero_ext(builder), zero_ext(builder)],
+                            block: (0..(1usize << zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY))
+                        .map(|_| zero_ext(builder))
+                        .collect(),
                             merkle_path_bytes: vec![],
                             merkle_path_digests: vec![],
                             _phantom: core::marker::PhantomData,
