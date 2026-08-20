@@ -386,10 +386,29 @@ impl RecursionProgramCache {
     /// to 0 to hold nothing, which recovers the build-per-node behaviour for
     /// measurement.
     ///
-    /// Holding EVERY shape is not the answer: a reth block reaches ~77 distinct
-    /// programs, and raising the cap to 128 cut program builds only 91 -> 80
-    /// (compress wall 213.8 -> 207.4 s) while peak RSS rose 128.0 -> 156.0 GB.
-    /// A program is large enough that this cap is really a host-memory budget.
+    /// **128, re-measured.** This cap used to be 16, on a measurement that
+    /// found 128 worth only 213.8 -> 207.4 s for +28 GB of RSS. That verdict
+    /// did not survive the programs getting smaller: after the compose circuit
+    /// lost 22% of its instructions -- and `MemoryConst` collapsed from ~133K
+    /// rows to 278 when constants started sharing one address per distinct
+    /// value -- the SAME knob is worth far more for the SAME memory.
+    /// 12-run ABBA on reth compress, one gpu, arms differing only by cap:
+    ///
+    /// | program / pk cap | compress | peak RSS |
+    /// |---|---|---|
+    /// | 16 / 24 (old) | 180.20 +/- 15.66 s | 147.3 GB |
+    /// | **128 / 24** | **160.60 +/- 4.64 s (-10.9%, t=2.40)** | **174.9 GB** |
+    /// | 128 / 128 | 154.96 +/- 6.14 s (-14.0%) | 292.8 GB |
+    ///
+    /// The PROGRAM cache is the whole win: it buys 78% of what raising both
+    /// buys, for +27.7 GB against +145.6 GB. The pk cache stays at 24 -- a
+    /// preprocessed pk is ~2.4 GiB, so its extra 64 entries cost +118 GB to
+    /// buy the last 3.1 points, which is not a trade worth making. Raise it
+    /// only on a host with memory to burn, via
+    /// `ZIREN_RECURSION_PK_CACHE_SIZE`.
+    ///
+    /// A cache cannot change what is proven, and does not: all 12 runs across
+    /// all three caps emitted one identical compress digest.
     ///
     /// Eviction stays INSERTION-ordered.  Renewing an entry on a hit (LRU) was
     /// measured WORSE — builds 91 -> 104, compress wall 213.8 -> 239.9 s —
@@ -402,7 +421,7 @@ impl RecursionProgramCache {
         std::env::var("ZIREN_RECURSION_PROGRAM_CACHE_SIZE")
             .ok()
             .and_then(|v| v.trim().parse::<usize>().ok())
-            .unwrap_or(16)
+            .unwrap_or(128)
     }
 
     fn get(&mut self, key: u64) -> Option<(Arc<RecursionProgram<KoalaBear>>, [u8; 32])> {
