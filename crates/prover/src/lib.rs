@@ -874,6 +874,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
         band: Option<usize>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
+        // Where normalize program diversity actually comes from.  The cache key
+        // is `(shape_key, band)`, and only counting the two separately can say
+        // which one to attack: the band is a policy we choose, but `shape_key`
+        // folds the per-shard chip-name KEY SET, which is a property of the
+        // workload.  Env-gated (`ZIREN_NORMALIZE_KEY_CENSUS=1`), off by default.
+        if normalize_key_census_enabled() {
+            tracing::warn!(
+                "NORMALIZE_KEY shape_key={:016x} band={:?}",
+                input.shape_key(),
+                band
+            );
+        }
         self.cached_program(
             &self.normalize_programs_basefold_cache,
             Self::band_keyed(input.shape_key(), band),
@@ -4595,4 +4607,17 @@ pub mod tests {
             VK_MERKLE_TREE_HEIGHT
         );
     }
+}
+
+
+/// Whether to log one `NORMALIZE_KEY` line per normalize program request.
+/// Read once; off unless `ZIREN_NORMALIZE_KEY_CENSUS` is `1`/`true`.
+fn normalize_key_census_enabled() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| {
+        matches!(
+            std::env::var("ZIREN_NORMALIZE_KEY_CENSUS").ok().as_deref(),
+            Some("1") | Some("true")
+        )
+    })
 }
