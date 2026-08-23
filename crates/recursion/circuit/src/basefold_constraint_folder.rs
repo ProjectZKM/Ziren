@@ -40,10 +40,10 @@ pub struct BasefoldConstraintFolder<'a, C: Config> {
     /// (the BaseFold pipeline has no next-row concept; the row
     /// duplication satisfies [`p3_air::WindowAccess`] without
     /// exposing a real transition window).
-    pub preprocessed: PairWindow<'a, Ext<C::F, C::EF>>,
+    pub preprocessed: PairWindow<'a, SymbolicExt<C::F, C::EF>>,
     /// Local row of the main trace at the sumcheck point.  Same
     /// `PairWindow` convention as `preprocessed`.
-    pub main: PairWindow<'a, Ext<C::F, C::EF>>,
+    pub main: PairWindow<'a, SymbolicExt<C::F, C::EF>>,
     /// Constraint-folding random scalar.
     pub alpha: Ext<C::F, C::EF>,
     /// Accumulator for the constraint-fold RLC.  After evaluation,
@@ -70,6 +70,19 @@ pub struct BasefoldConstraintFolder<'a, C: Config> {
     pub _marker: PhantomData<C>,
 }
 
+/// Whether a symbolic extension value is the COMPILE-TIME zero (not a runtime
+/// value that happens to be zero).
+fn symbolic_ext_is_zero<C: Config>(x: &SymbolicExt<C::F, C::EF>) -> bool {
+    use p3_field::PrimeCharacteristicRing;
+    match x {
+        SymbolicExt::Const(c) => *c == <C::EF as PrimeCharacteristicRing>::ZERO,
+        SymbolicExt::Base(zkm_recursion_compiler::ir::SymbolicFelt::Const(c)) => {
+            *c == <C::F as PrimeCharacteristicRing>::ZERO
+        }
+        _ => false,
+    }
+}
+
 impl<'a, C: Config> AirBuilder for BasefoldConstraintFolder<'a, C>
 where
     C::F: Field,
@@ -77,9 +90,18 @@ where
 {
     type F = C::F;
     type Expr = SymbolicExt<C::F, C::EF>;
-    type Var = Ext<C::F, C::EF>;
-    type PreprocessedWindow = PairWindow<'a, Ext<C::F, C::EF>>;
-    type MainWindow = PairWindow<'a, Ext<C::F, C::EF>>;
+    // The trace window carries SYMBOLIC values, not `Ext` handles.  For a real
+    // opening every entry is a `Val`, and `Val` arithmetic emits exactly what
+    // `Ext` arithmetic did — the row is byte-identical.  What it buys is the
+    // OTHER caller: the padded-row adjustment evaluates the same AIR on a row
+    // that is all zeros at BUILD time, and a `Const` row folds the whole
+    // constraint polynomial away instead of emitting one instruction per node
+    // of it: over the MIPS chip set a pass drops from 862,662 emitted
+    // instructions to 30,746, and over the recursion chips 3,466 to 473
+    // (`padded_row_adjustment_costs_almost_nothing_on_a_constant_row`).
+    type Var = SymbolicExt<C::F, C::EF>;
+    type PreprocessedWindow = PairWindow<'a, SymbolicExt<C::F, C::EF>>;
+    type MainWindow = PairWindow<'a, SymbolicExt<C::F, C::EF>>;
     type PublicVar = Felt<C::F>;
 
     fn main(&self) -> Self::MainWindow {
@@ -114,8 +136,26 @@ where
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
         let x: SymbolicExt<C::F, C::EF> = x.into();
-        self.accumulator *= self.alpha;
-        self.accumulator += x;
+        // `acc = acc*alpha + x`, with the two steps skipped when they are
+        // provably identities at BUILD time.  The symbolic layer is eager —
+        // every operator pushes an instruction the moment it is applied — so
+        // `0*alpha` and `acc+0` are not free unless they are elided here.
+        //
+        // That matters for the padded-row adjustment, which folds a whole
+        // chip's constraint polynomial over a row that is all zeros at build
+        // time: nearly every term is the compile-time zero, and without this
+        // the Horner chain still emits a multiply and an add for each one.
+        // On a real opening the accumulator turns into a value at the first
+        // constraint and both guards stop firing, so the emitted fold is the
+        // same one as before minus that first constraint's two identities.
+        let acc_is_zero = symbolic_ext_is_zero::<C>(&self.accumulator);
+        if !acc_is_zero {
+            self.accumulator = self.accumulator * self.alpha;
+        }
+        if symbolic_ext_is_zero::<C>(&x) {
+            return;
+        }
+        self.accumulator = if acc_is_zero { x } else { self.accumulator + x };
     }
 
     fn public_values(&self) -> &[Self::PublicVar] {
@@ -167,7 +207,7 @@ where
         PairWindow { local: &[], next: &[] }
     }
 
-    fn permutation_randomness(&self) -> &[Self::Var] {
+    fn permutation_randomness(&self) -> &[Self::RandomVar] {
         // No permutation challenges in the BaseFold pipeline; the
         // per-chip permutation soundness moved to LogUp-GKR.
         &[]
@@ -214,8 +254,10 @@ mod tests {
     fn folder_constructs_and_assert_zero_works() {
         let mut builder = AsmBuilder::<F, EF>::default();
         let alpha = builder.constant(EF::ONE);
-        let preproc_row: Vec<Ext<F, EF>> = (0..2).map(|_| builder.constant(EF::ZERO)).collect();
-        let main_row: Vec<Ext<F, EF>> = (0..3).map(|_| builder.constant(EF::ZERO)).collect();
+        let preproc_row: Vec<SymbolicExt<F, EF>> =
+            (0..2).map(|_| builder.constant::<Ext<F, EF>>(EF::ZERO).into()).collect();
+        let main_row: Vec<SymbolicExt<F, EF>> =
+            (0..3).map(|_| builder.constant::<Ext<F, EF>>(EF::ZERO).into()).collect();
         let public_values: Vec<Felt<F>> = (0..4).map(|_| builder.constant(F::ZERO)).collect();
 
         let local_sum = builder.constant(EF::ZERO);

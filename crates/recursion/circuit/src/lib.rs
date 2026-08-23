@@ -202,6 +202,28 @@ pub trait CircuitConfig: Config {
         second: impl IntoIterator<Item = Ext<<Self as Config>::F, <Self as Config>::EF>> + Clone,
     ) -> Vec<Ext<<Self as Config>::F, <Self as Config>::EF>>;
 
+    /// Selects between two *compile-time constants* on a bit: returns
+    /// `if_zero` when `should_swap` is 0 and `if_one` when it is 1.
+    ///
+    /// The generic form below routes through [`Self::select_chain_f`], which
+    /// materialises both branches as variables and evaluates the full
+    /// `a*(1-b) + c*b` on each — seven instructions for one output, half of
+    /// them for a second output the caller throws away.  With both branches
+    /// known at build time the same value is the affine
+    /// `if_zero + b*(if_one - if_zero)`, i.e. one multiply-by-immediate and
+    /// one add-immediate, so the configs whose `Bit` is a `Felt` override it.
+    fn select_const_f(
+        builder: &mut Builder<Self>,
+        should_swap: Self::Bit,
+        if_zero: <Self as Config>::F,
+        if_one: <Self as Config>::F,
+    ) -> Felt<<Self as Config>::F> {
+        let zero_f: Felt<_> = builder.constant(if_zero);
+        let one_f: Felt<_> = builder.constant(if_one);
+        Self::select_chain_f(builder, should_swap, core::iter::once(zero_f), core::iter::once(one_f))
+            [0]
+    }
+
     fn range_check_felt(builder: &mut Builder<Self>, value: Felt<Self::F>, num_bits: usize) {
         let bits = Self::num2bits(builder, value, 31);
         for bit in bits.into_iter().skip(num_bits) {
@@ -334,6 +356,21 @@ impl CircuitConfig for InnerConfig {
         builder.bits2num_v2_f(bits)
     }
 
+    fn select_const_f(
+        builder: &mut Builder<Self>,
+        should_swap: Self::Bit,
+        if_zero: <Self as Config>::F,
+        if_one: <Self as Config>::F,
+    ) -> Felt<<Self as Config>::F> {
+        // `if_zero + b*(if_one - if_zero)`, both branches being constants.
+        let scaled: Felt<_> = builder.uninit();
+        builder.push_op(DslIr::MulFI(scaled, should_swap, if_one - if_zero));
+        let out: Felt<_> = builder.uninit();
+        builder.push_op(DslIr::AddFI(out, scaled, if_zero));
+        out
+    }
+
+
     fn select_chain_f(
         builder: &mut Builder<Self>,
         should_swap: Self::Bit,
@@ -461,6 +498,21 @@ impl CircuitConfig for WrapConfig {
     ) -> Felt<<Self as Config>::F> {
         builder.bits2num_v2_f(bits)
     }
+
+    fn select_const_f(
+        builder: &mut Builder<Self>,
+        should_swap: Self::Bit,
+        if_zero: <Self as Config>::F,
+        if_one: <Self as Config>::F,
+    ) -> Felt<<Self as Config>::F> {
+        // `if_zero + b*(if_one - if_zero)`, both branches being constants.
+        let scaled: Felt<_> = builder.uninit();
+        builder.push_op(DslIr::MulFI(scaled, should_swap, if_one - if_zero));
+        let out: Felt<_> = builder.uninit();
+        builder.push_op(DslIr::AddFI(out, scaled, if_zero));
+        out
+    }
+
 
     fn select_chain_f(
         builder: &mut Builder<Self>,

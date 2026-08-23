@@ -855,7 +855,6 @@ pub fn emit_basefold_block_fold<C>(
 where
     C: crate::CircuitConfig,
 {
-    use core::iter::once;
     use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
     use zkm_recursion_compiler::ir::DslIr;
     type Felt<C> = zkm_recursion_compiler::prelude::Felt<<C as zkm_recursion_compiler::ir::Config>::F>;
@@ -863,6 +862,9 @@ where
     let k = betas.len();
     assert_eq!(block.len(), 1usize << k, "block must hold 2^k opened values");
     assert!(index_bits.len() >= k, "index_bits must cover the block's low k bits");
+    if k == 0 {
+        return (block[0], x);
+    }
 
     // zeta = primitive 2^k-th root; bitrev_k over the block positions.
     let bitrev = |mut v: usize, bits: usize| {
@@ -874,40 +876,48 @@ where
         r
     };
     let zeta = <C::F as TwoAdicField>::two_adic_generator(k);
+    let neg_two = -(C::F::ONE + C::F::ONE);
 
     // x_base = x * prod_j (zeta^-2^(k-1-j))^{bit_j}
     let mut x_base = x;
     for (j, bit) in index_bits.iter().take(k).enumerate() {
-        let one_f: Felt<C> = builder.constant(C::F::ONE);
         let step = zeta.exp_u64(1u64 << (k - 1 - j)).inverse();
-        let step_f: Felt<C> = builder.constant(step);
-        let chosen = C::select_chain_f(builder, bit.clone(), once(one_f), once(step_f));
+        let factor = C::select_const_f(builder, *bit, C::F::ONE, step);
         let next: Felt<C> = builder.uninit();
-        builder.push_op(DslIr::MulF(next, x_base, chosen[0]));
+        builder.push_op(DslIr::MulF(next, x_base, factor));
         x_base = next;
     }
 
-    // The coset: xs[p] = x_base * zeta^bitrev_k(p).
-    let mut xs: Vec<Felt<C>> = Vec::with_capacity(block.len());
-    for p in 0..block.len() {
-        let c: Felt<C> = builder.constant(zeta.exp_u64(bitrev(p, k) as u64));
+    // Only the EVEN half of the coset is ever a value.
+    //
+    // The coset is `xs[p] = x_base * zeta^bitrev_k(p)`, and reversing `k` bits
+    // sends the pair `(2i, 2i+1)` to `(r, r + 2^(k-1))` for
+    // `r = bitrev_{k-1}(i)`.  `zeta^(2^(k-1)) = -1`, so the odd member of every
+    // pair is exactly the negation of the even one — at this level and, since
+    // the next level's elements are these squared, at every level below.  So
+    // `e[i]` below carries the pair's element and the partner is never
+    // materialised: the interpolation denominator `xhi - xlo` collapses to
+    // `-2*xlo`, one multiply by an immediate.
+    let half0 = 1usize << (k - 1);
+    let mut e: Vec<Felt<C>> = Vec::with_capacity(half0);
+    e.push(x_base); // bitrev_{k-1}(0) == 0
+    for i in 1..half0 {
+        let c = zeta.exp_u64(bitrev(i, k - 1) as u64);
         let v: Felt<C> = builder.uninit();
-        builder.push_op(DslIr::MulF(v, x_base, c));
-        xs.push(v);
+        builder.push_op(DslIr::MulFI(v, x_base, c));
+        e.push(v);
     }
 
     // Fold k levels; adjacent entries are (+x, -x) so this is the same
     // interpolation the pair path uses.
     let mut cur: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = block.to_vec();
-    let mut cur_xs = xs;
     for beta in betas.iter() {
         let half = cur.len() / 2;
+        debug_assert_eq!(e.len(), half);
         let mut next = Vec::with_capacity(half);
-        let mut next_xs = Vec::with_capacity(half);
         for i in 0..half {
             let (lo, hi) = (cur[2 * i], cur[2 * i + 1]);
-            let xlo = cur_xs[2 * i];
-            let xhi = cur_xs[2 * i + 1];
+            let xlo = e[i];
 
             let diff: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
             builder.push_op(DslIr::SubE(diff, hi, lo));
@@ -916,22 +926,29 @@ where
             let numer: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
             builder.push_op(DslIr::MulE(numer, beta_minus, diff));
             let denom: Felt<C> = builder.uninit();
-            builder.push_op(DslIr::SubF(denom, xhi, xlo));
+            builder.push_op(DslIr::MulFI(denom, xlo, neg_two));
             let ratio: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
             builder.push_op(DslIr::DivEF(ratio, numer, denom));
             let folded: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
             builder.push_op(DslIr::AddE(folded, lo, ratio));
             next.push(folded);
-
+        }
+        // `next[i]` sits at `e[i]^2`, so the next level's pair `(2j, 2j+1)`
+        // takes `e[2j]^2` — only the even entries need squaring.  The last
+        // level keeps one, which is the element handed back to the caller.
+        let n_next = if half > 1 { half / 2 } else { 1 };
+        let mut next_e = Vec::with_capacity(n_next);
+        for j in 0..n_next {
+            let src = e[2 * j];
             let sq: Felt<C> = builder.uninit();
-            builder.push_op(DslIr::MulF(sq, xlo, xlo));
-            next_xs.push(sq);
+            builder.push_op(DslIr::MulF(sq, src, src));
+            next_e.push(sq);
         }
         cur = next;
-        cur_xs = next_xs;
+        e = next_e;
     }
     debug_assert_eq!(cur.len(), 1);
-    (cur[0], cur_xs[0])
+    (cur[0], e[0])
 }
 
 /// `RecursiveMultilinearPcsVerifier` impl on [`RecursiveBasefoldVerifier`].
@@ -1176,9 +1193,11 @@ where
 
         // (6) FRI query-phase verification.
         let log_codeword_size = self.params.log_codeword_size();
+        builder.cycle_tracker_v2_enter("bf_query_bits".to_string());
         let query_indices: Vec<Vec<C::Bit>> = (0..self.params.num_queries)
             .map(|_| challenger.sample_bits(builder, log_codeword_size))
             .collect();
+        builder.cycle_tracker_v2_exit();
 
         {
             use zkm_recursion_compiler::prelude::Ext;
@@ -1208,6 +1227,7 @@ where
                 // prover-supplied and unbound.  Empty component openings
                 // (outer placeholder paths) use the fallback below —
                 // structurally decided at program build.
+                builder.cycle_tracker_v2_enter("bf_component_open".to_string());
                 let initial_eval: Ext<C::F, C::EF> = if !proof.component_openings.is_empty() {
                     // Accumulate the step-8 inner product SYMBOLICALLY across the
                     // whole leaf loop and materialize it ONCE per query
@@ -1296,7 +1316,10 @@ where
                     })
                 };
 
+                builder.cycle_tracker_v2_exit();
+
                 use p3_field::TwoAdicField;
+                builder.cycle_tracker_v2_enter("bf_initial_x".to_string());
                 let two_adic_generator: zkm_recursion_compiler::prelude::Felt<C::F> =
                     builder.constant(C::F::two_adic_generator(log_codeword_size));
                 let bits_for_exp: Vec<C::Bit> =
@@ -1311,6 +1334,9 @@ where
                 // round consumes `arity` index bits and `arity` betas, and
                 // hands the next round the squared domain element — which at
                 // arity 1 is exactly the per-round step this replaces.
+                builder.cycle_tracker_v2_exit();
+
+                builder.cycle_tracker_v2_enter("bf_block_fold".to_string());
                 let mut folded = initial_eval;
                 let mut x_cur = initial_x;
                 let mut bit_at = 0usize;
@@ -1331,6 +1357,9 @@ where
                     bit_at += arity;
                 }
                 builder.assert_ext_eq(folded, final_poly_ext);
+                builder.cycle_tracker_v2_exit();
+
+                builder.cycle_tracker_v2_enter("bf_commit_merkle".to_string());
 
                 // Per-round Merkle binding — digest-generic via HV.
                 // Recompute each round's leaf digest from the sibling
@@ -1426,6 +1455,7 @@ where
                         HV::assert_digest_eq(builder, leaf_digest, round_commit);
                     }
                 }
+                builder.cycle_tracker_v2_exit();
             }
         }
 
@@ -1506,7 +1536,14 @@ mod tests {
     fn params_default_consistency() {
         let p = BasefoldVerifierParams::production_default(20);
         assert_eq!(p.total_sumcheck_rounds(), 20);
-        assert_eq!(p.total_merkle_commits(), 21);
+        // Merkle commits follow the FOLDING ARITY, not the variable count: a
+        // commit-phase round covers `log_folding_arity` variables, so there are
+        // `ceil(num_variables / arity)` of them plus the final one.  Asserted
+        // against the arity rather than a literal, because a literal here went
+        // stale the moment the arity moved off 1 (it still read 21).
+        let arity = zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY;
+        assert_eq!(p.num_commit_rounds(), 20usize.div_ceil(arity));
+        assert_eq!(p.total_merkle_commits(), 20usize.div_ceil(arity) + 1);
         // log_codeword_size = num_variables + log_blowup = 20 + 2 = 22.
         // `production_default` uses log_blowup = 2 (rate 1/4) for the
         // provable-100-bit inner query-phase soundness posture (see
@@ -1714,5 +1751,54 @@ mod tests {
         // index = 0b11000000 (bits 6,7 set) in an 8-bit span; path_len=4
         // leaves bits[4..8] = {0,0,1,1} -> reject.
         run_merkle_residual(0b11000000, 8, 4);
+    }
+}
+
+#[cfg(test)]
+mod block_fold_tests {
+    use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
+    use zkm_pcs::InnerVal;
+
+    fn bitrev(mut v: usize, bits: usize) -> usize {
+        let mut r = 0usize;
+        for _ in 0..bits {
+            r = (r << 1) | (v & 1);
+            v >>= 1;
+        }
+        r
+    }
+
+    /// [`super::emit_basefold_block_fold`] never materialises the odd half of a
+    /// round's coset: within a leaf the pair `(2i, 2i+1)` sits at
+    /// `bitrev_k(2i) = r` and `bitrev_k(2i+1) = r + 2^(k-1)`, and
+    /// `zeta^(2^(k-1)) = -1`, so the partner is the negation — at this level and,
+    /// since the next level's elements are these squared, at every level below.
+    /// That is what turns the interpolation denominator into `-2*xlo` and lets
+    /// `e[i]` stand in for the whole pair.
+    #[test]
+    fn coset_pairs_are_negations_at_every_level() {
+        for k in 1..=4usize {
+            let zeta = <InnerVal as TwoAdicField>::two_adic_generator(k);
+            let x_base = InnerVal::from_u32(0x1234_5677);
+            let mut xs: Vec<InnerVal> =
+                (0..(1usize << k)).map(|q| x_base * zeta.exp_u64(bitrev(q, k) as u64)).collect();
+            // The emitter's reduced representation: the even half only.
+            let mut e: Vec<InnerVal> = (0..(1usize << (k - 1)))
+                .map(|i| x_base * zeta.exp_u64(bitrev(i, k - 1) as u64))
+                .collect();
+            for _ in 0..k {
+                let half = xs.len() / 2;
+                assert_eq!(e.len(), half);
+                for i in 0..half {
+                    assert_eq!(e[i], xs[2 * i], "reduced element != even coset entry");
+                    assert_eq!(xs[2 * i + 1], -xs[2 * i], "odd coset entry is not a negation");
+                    assert_eq!(xs[2 * i + 1] - xs[2 * i], -(xs[2 * i] + xs[2 * i]));
+                }
+                let n_next = if half > 1 { half / 2 } else { 1 };
+                xs = (0..half).map(|i| xs[2 * i] * xs[2 * i]).collect();
+                e = (0..n_next).map(|j| e[2 * j] * e[2 * j]).collect();
+            }
+            assert_eq!(xs[0], e[0], "returned domain element diverges");
+        }
     }
 }

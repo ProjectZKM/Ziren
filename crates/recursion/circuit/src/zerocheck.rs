@@ -193,9 +193,12 @@ where
         alpha: Ext<C::F, C::EF>,
         public_values: &'a [Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
-        let preprocessed =
-            PairWindow { local: &opening.preprocessed.local, next: &opening.preprocessed.local };
-        let main = PairWindow { local: &opening.main.local, next: &opening.main.local };
+        let preprocessed_row: Vec<SymbolicExt<C::F, C::EF>> =
+            opening.preprocessed.local.iter().map(|e| (*e).into()).collect();
+        let main_row: Vec<SymbolicExt<C::F, C::EF>> =
+            opening.main.local.iter().map(|e| (*e).into()).collect();
+        let preprocessed = PairWindow { local: &preprocessed_row, next: &preprocessed_row };
+        let main = PairWindow { local: &main_row, next: &main_row };
         // The Ziren host zeroes the cumulative sums in the zerocheck
         // constraint eval (`eval_air_constraints_at_row`, zerocheck_poly.rs:661
         // — "lookup soundness rides on LogUp-GKR, not this zerocheck"). Feed
@@ -251,9 +254,15 @@ where
     ) -> Ext<C::F, C::EF> {
         let main_width = chip.width();
         let preproc_width = chip.preprocessed_width();
-        let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
-        let preproc_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; preproc_width];
-        let main_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; main_width];
+        // COMPILE-TIME zeros, not a materialised `Ext` holding zero.  The whole
+        // point of this function is that the row is known to be all zeros while
+        // the program is being built, so every constraint subexpression over it
+        // folds in the symbolic layer and emits nothing; only the terms that
+        // reach `alpha` or a public value survive.  A row of `Ext` handles
+        // emitted the chip's ENTIRE constraint polynomial a second time.
+        let preproc_row: Vec<SymbolicExt<C::F, C::EF>> =
+            vec![SymbolicExt::ZERO; preproc_width];
+        let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
         // Zero cumulative sums — match the host pra (`compute_padded_row_
         // adjustment` → `eval_air_constraints_at_row`, zero sums).
         let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
@@ -281,9 +290,12 @@ where
         local_cumulative_sum: &'a Ext<C::F, C::EF>,
         global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
     ) -> Ext<C::F, C::EF> {
-        let preprocessed =
-            PairWindow { local: &opening.preprocessed.local, next: &opening.preprocessed.local };
-        let main = PairWindow { local: &opening.main.local, next: &opening.main.local };
+        let preprocessed_row: Vec<SymbolicExt<C::F, C::EF>> =
+            opening.preprocessed.local.iter().map(|e| (*e).into()).collect();
+        let main_row: Vec<SymbolicExt<C::F, C::EF>> =
+            opening.main.local.iter().map(|e| (*e).into()).collect();
+        let preprocessed = PairWindow { local: &preprocessed_row, next: &preprocessed_row };
+        let main = PairWindow { local: &main_row, next: &main_row };
         let mut folder = BasefoldConstraintFolder::<C> {
             preprocessed,
             main,
@@ -317,9 +329,15 @@ where
     ) -> Ext<C::F, C::EF> {
         let main_width = chip.width();
         let preproc_width = chip.preprocessed_width();
-        let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
-        let preproc_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; preproc_width];
-        let main_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; main_width];
+        // COMPILE-TIME zeros, not a materialised `Ext` holding zero.  The whole
+        // point of this function is that the row is known to be all zeros while
+        // the program is being built, so every constraint subexpression over it
+        // folds in the symbolic layer and emits nothing; only the terms that
+        // reach `alpha` or a public value survive.  A row of `Ext` handles
+        // emitted the chip's ENTIRE constraint polynomial a second time.
+        let preproc_row: Vec<SymbolicExt<C::F, C::EF>> =
+            vec![SymbolicExt::ZERO; preproc_width];
+        let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
         let mut folder = BasefoldConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
             main: PairWindow { local: &main_row, next: &main_row },
@@ -513,7 +531,10 @@ where
             }
 
             // (4e) Padded-row mask + adjustment.
+            builder.cycle_tracker_v2_enter("zc_geq".to_string());
             let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
+            builder.cycle_tracker_v2_exit();
+            builder.cycle_tracker_v2_enter("zc_padded_row_adjustment".to_string());
             let padded_row_adjustment = Self::compute_padded_row_adjustment_basefold(
                 builder,
                 chip,
@@ -521,17 +542,21 @@ where
                 alpha,
                 public_values,
             );
+            builder.cycle_tracker_v2_exit();
 
             // (4f) Constraint accumulator at the sumcheck point
             // minus the padded-row contribution.
+            builder.cycle_tracker_v2_enter("zc_eval_constraints".to_string());
             let constraint_eval_ext =
                 Self::eval_constraints_basefold(builder, chip, opening, alpha, public_values);
+            builder.cycle_tracker_v2_exit();
             let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
             let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
             let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val.clone();
 
             // (4g) Batch the chip's openings (main first, then
             // preprocessed) by the pre-computed challenge powers.
+            builder.cycle_tracker_v2_enter("zc_rlc".to_string());
             let openings_batch: SymbolicExt<C::F, C::EF> = opening
                 .main
                 .local
@@ -557,6 +582,7 @@ where
             let new_rlc: SymbolicExt<C::F, C::EF> =
                 rlc_sym * lambda_sym + zerocheck_eq_val * (constraint_eval + openings_batch);
             rlc_eval = builder.eval(new_rlc);
+            builder.cycle_tracker_v2_exit();
         }
 
         // (5) Assert the cross-chip RLC matches the prover's
@@ -874,5 +900,139 @@ mod tests {
         // FORGED preprocessed *_full (3→4).
         let forged_prep_full = vec![EF::from(F::from_u32(4))];
         run_full_claim_binding(&main_full, &forged_prep_full, beta, claimed_sum);
+    }
+}
+
+#[cfg(test)]
+mod padded_row_cost_tests {
+    //! What the padded-row adjustment costs, per chip, as emitted instructions.
+    //!
+    //! `verify_zerocheck` evaluates every chip's constraint polynomial TWICE:
+    //! once at the opened values, and once on an all-zero row to get the
+    //! adjustment that `full_geq` gates onto the padded rows.  The second pass
+    //! is over a row that is known to be zero while the program is being built,
+    //! so it should cost almost nothing — and it does only if the row is a
+    //! COMPILE-TIME constant.  A row of materialised `Ext` handles emits the
+    //! whole polynomial a second time.
+    //!
+    //! `cargo test -p zkm-recursion-circuit --lib padded_row -- --ignored --nocapture`
+    use super::*;
+    use zkm_pcs::folder::PairWindow;
+    use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+    use zkm_pcs::septic_curve::SepticCurve;
+    use zkm_pcs::septic_extension::SepticExtension;
+    use zkm_recursion_compiler::config::InnerConfig;
+    use zkm_recursion_core::machine::RecursionAir;
+
+    type F = p3_koala_bear::KoalaBear;
+    type EF = zkm_pcs::InnerChallenge;
+
+    /// Emitted-instruction count for one `chip.eval` over an all-zero row,
+    /// with the row held either as runtime values or as compile-time zeros.
+    fn count<A>(
+        builder: &mut Builder<InnerConfig>,
+        chip: &zkm_pcs::Chip<F, A>,
+        alpha: Ext<F, EF>,
+        pv: &[Felt<F>],
+        lcs: &Ext<F, EF>,
+        gcs: &SepticDigest<Felt<F>>,
+        runtime_row: bool,
+    ) -> usize
+    where
+        A: zkm_pcs::air::MachineAir<F>
+            + for<'b> p3_air::Air<
+                crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+            >,
+    {
+        let (main_row, prep_row) = if runtime_row {
+            let z: SymbolicExt<F, EF> = builder.eval::<Ext<F, EF>, _>(SymbolicExt::ZERO).into();
+            (vec![z; chip.width()], vec![z; chip.preprocessed_width()])
+        } else {
+            (
+                vec![SymbolicExt::ZERO; chip.width()],
+                vec![SymbolicExt::ZERO; chip.preprocessed_width()],
+            )
+        };
+        let before = builder.get_mut_operations().vec.len();
+        let mut folder =
+            crate::basefold_constraint_folder::BasefoldConstraintFolder::<InnerConfig> {
+                preprocessed: PairWindow { local: &prep_row, next: &prep_row },
+                main: PairWindow { local: &main_row, next: &main_row },
+                alpha,
+                accumulator: SymbolicExt::ZERO,
+                public_values: pv,
+                local_cumulative_sum: lcs,
+                global_cumulative_sum: gcs,
+                _marker: std::marker::PhantomData,
+            };
+        chip.eval(&mut folder);
+        let _: Ext<F, EF> = builder.eval(folder.accumulator);
+        builder.get_mut_operations().vec.len() - before
+    }
+
+    fn probe<A>(
+        label: &str,
+        builder: &mut Builder<InnerConfig>,
+        chips: &[zkm_pcs::Chip<F, A>],
+        alpha: Ext<F, EF>,
+        pv: &[Felt<F>],
+        lcs: &Ext<F, EF>,
+        gcs: &SepticDigest<Felt<F>>,
+    ) -> (usize, usize)
+    where
+        A: zkm_pcs::air::MachineAir<F>
+            + for<'b> p3_air::Air<
+                crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+            >,
+    {
+        let (mut runtime, mut constant) = (0usize, 0usize);
+        for chip in chips.iter() {
+            let r = count(builder, chip, alpha, pv, lcs, gcs, true);
+            let c = count(builder, chip, alpha, pv, lcs, gcs, false);
+            runtime += r;
+            constant += c;
+            println!(
+                "{label} {:>28}  w={:<5} pw={:<4} runtime_row={r:<8} const_row={c}",
+                chip.name(),
+                chip.width(),
+                chip.preprocessed_width()
+            );
+        }
+        println!("{label} TOTAL runtime_row={runtime} const_row={constant}");
+        (runtime, constant)
+    }
+
+    #[test]
+    #[ignore = "sizing probe, prints a per-chip table"]
+    fn padded_row_adjustment_costs_almost_nothing_on_a_constant_row() {
+        let mut builder = Builder::<InnerConfig>::default();
+        let alpha: Ext<F, EF> = builder.constant(EF::default());
+        let lcs: Ext<F, EF> = builder.constant(EF::default());
+        let pv: Vec<Felt<F>> =
+            (0..zkm_pcs::PROOF_MAX_NUM_PVS).map(|_| builder.constant(F::default())).collect();
+        let zero_felt: Felt<F> = builder.constant(F::default());
+        let gcs: SepticDigest<Felt<F>> = SepticDigest(SepticCurve {
+            x: SepticExtension(core::array::from_fn(|_| zero_felt)),
+            y: SepticExtension(core::array::from_fn(|_| zero_felt)),
+        });
+
+        // The compose ring verifies recursion proofs...
+        let recursion = RecursionAir::<F, 3>::compress_machine(KoalaBearPoseidon2::default());
+        let (rec_runtime, rec_const) =
+            probe("RECURSION", &mut builder, recursion.chips(), alpha, &pv, &lcs, &gcs);
+        // ...and the leaf ring verifies a CORE shard proof, whose chip set is
+        // where the cost actually lives.
+        let core = zkm_core_machine::mips::MipsAir::<F>::machine(KoalaBearPoseidon2::default());
+        let (core_runtime, core_const) =
+            probe("CORE", &mut builder, core.chips(), alpha, &pv, &lcs, &gcs);
+
+        assert!(
+            rec_const * 4 < rec_runtime,
+            "constant row must be far cheaper than a runtime row (recursion: {rec_const} vs {rec_runtime})"
+        );
+        assert!(
+            core_const * 10 < core_runtime,
+            "constant row must be far cheaper than a runtime row (core: {core_const} vs {core_runtime})"
+        );
     }
 }

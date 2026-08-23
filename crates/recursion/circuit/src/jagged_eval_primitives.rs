@@ -242,43 +242,76 @@ pub fn emit_prefix_sum_check<C: CircuitConfig>(
 /// which is an identity over the ring — it assumes nothing about `b` being a
 /// bit — and costs ONE extension multiply per bit instead of two.  Both `1-p`
 /// and `2p-1` depend only on the sumcheck point, which every column shares.
-/// The two point-derived factors of `eq`, evaluated ONCE for a sumcheck point.
+/// The point-derived half of the per-column `eq` product, hoisted out of the
+/// column loop.
 ///
-/// `eq(b, p) = (1-p) + b*(2p-1)`.  Both `(1-p)` and `(2p-1)` depend only on the
-/// point, which every column shares, so building them inside the per-column loop
-/// re-emits them 557 times over.  Evaluating them into real `Ext` handles here
-/// makes the per-column body one multiply and one add per bit instead of
-/// rebuilding both factors first -- the same "reuse the handle" trick that took
-/// 40,455 rows off the prefix-sum recompose.
+/// `eq(b, p) = (1-p) + b*(2p-1)` factors as `(2p-1) * (b + (1-p)/(2p-1))`, and
+/// the left half depends only on the sumcheck point, which every column shares.
+/// So it comes out of the product entirely -- and out of the whole column SUM,
+/// which is why the caller applies it once rather than 557 times.  What is left
+/// inside the loop is an add and a multiply per bit instead of a multiply, an
+/// add and a multiply.
+///
+/// `2p-1` is zero only for the single point `p = 1/2` out of the extension
+/// field's `2^124`, and the sumcheck challenges that land here come from the
+/// transcript.  Hitting it costs a proof, not soundness: the in-circuit
+/// division would then constrain `c*0 = 1-p` with `1-p = 1/2 != 0`, which no
+/// witness satisfies.
+pub struct EqFactors<C: CircuitConfig> {
+    /// `ratios[k] = (1-p_k) / (2p_k - 1)`.
+    ratios: Vec<Ext<C::F, C::EF>>,
+    /// `scale_prefix[n] = Prod_{k<n} (2p_k - 1)`, so a product taken over the
+    /// first `n` positions is recovered by one multiply.
+    scale_prefix: Vec<Ext<C::F, C::EF>>,
+}
+
+impl<C: CircuitConfig> EqFactors<C> {
+    pub fn len(&self) -> usize {
+        self.ratios.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ratios.is_empty()
+    }
+
+    /// The shared factor a product over the first `n` positions was divided by.
+    pub fn scale_for_len(&self, n: usize) -> Ext<C::F, C::EF> {
+        self.scale_prefix[n.min(self.ratios.len())]
+    }
+}
+
 pub fn precompute_eq_factors<C: CircuitConfig>(
     builder: &mut Builder<C>,
     sumcheck_point: &[Ext<C::F, C::EF>],
-) -> Vec<(Ext<C::F, C::EF>, Ext<C::F, C::EF>)> {
+) -> EqFactors<C> {
     let one: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
-    sumcheck_point
-        .iter()
-        .map(|p| {
-            let p_sym: SymbolicExt<C::F, C::EF> = (*p).into();
-            let one_minus_p: Ext<C::F, C::EF> = builder.eval(one - p_sym.clone());
-            let two_p_minus_one: Ext<C::F, C::EF> = builder.eval(p_sym.clone() + p_sym - one);
-            (one_minus_p, two_p_minus_one)
-        })
-        .collect()
+    let mut ratios = Vec::with_capacity(sumcheck_point.len());
+    let mut scale_prefix = Vec::with_capacity(sumcheck_point.len() + 1);
+    let mut running: Ext<C::F, C::EF> =
+        builder.constant(<C::EF as PrimeCharacteristicRing>::ONE);
+    scale_prefix.push(running);
+    for p in sumcheck_point.iter() {
+        let p_sym: SymbolicExt<C::F, C::EF> = (*p).into();
+        let one_minus_p: Ext<C::F, C::EF> = builder.eval(one - p_sym.clone());
+        let two_p_minus_one: Ext<C::F, C::EF> = builder.eval(p_sym.clone() + p_sym - one);
+        ratios.push(builder.eval(one_minus_p / two_p_minus_one));
+        running = builder.eval(running * two_p_minus_one);
+        scale_prefix.push(running);
+    }
+    EqFactors { ratios, scale_prefix }
 }
 
-/// [`emit_prefix_sum_lagrange`] against factors already evaluated by
-/// [`precompute_eq_factors`].  Identical value, fewer emitted instructions.
+/// [`emit_prefix_sum_lagrange`] over a point already reduced by
+/// [`precompute_eq_factors`].  Same value up to the shared scale the caller
+/// applies once; strictly fewer emitted instructions.
 pub fn emit_prefix_sum_lagrange_pre<C: CircuitConfig>(
     merged_prefix_sum: &[Felt<C::F>],
-    eq_factors: &[(Ext<C::F, C::EF>, Ext<C::F, C::EF>)],
+    eq_factors: &EqFactors<C>,
 ) -> SymbolicExt<C::F, C::EF> {
     let mut lagrange: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
-    for (bit, (one_minus_p, two_p_minus_one)) in
-        merged_prefix_sum.iter().zip(eq_factors.iter())
-    {
+    for (bit, ratio) in merged_prefix_sum.iter().zip(eq_factors.ratios.iter()) {
         let bit_sym: SymbolicExt<C::F, C::EF> = SymbolicExt::from(*bit);
-        let eq = SymbolicExt::from(*one_minus_p) + bit_sym * SymbolicExt::from(*two_p_minus_one);
-        lagrange = lagrange * eq;
+        lagrange = lagrange * (SymbolicExt::from(*ratio) + bit_sym);
     }
     lagrange
 }
@@ -346,6 +379,27 @@ mod tests {
             assert_eq!(textbook, factored, "eq forms diverge at b={b:?} p={p:?}");
             b = b * EF::from_u32(31) + one;
             p = p * EF::from_u32(17) + EF::from_u32(3);
+        }
+    }
+
+    /// The scaled form the per-column emitter uses must equal the factored one
+    /// for EVERY field element: `(1-p) + b(2p-1)` and `(2p-1)*(b + (1-p)/(2p-1))`
+    /// are the same value whenever `2p-1 != 0`, and the emitter relies on that
+    /// to pull `Prod(2p-1)` out of the whole column sum.
+    #[test]
+    fn scaled_eq_matches_factored_form() {
+        use p3_field::{Field, PrimeCharacteristicRing};
+        let one = EF::ONE;
+        let mut b = EF::from_u32(5);
+        let mut p = EF::from_u32(13);
+        for _ in 0..64 {
+            let tpm = p + p - one;
+            assert_ne!(tpm, EF::ZERO, "test point hit p = 1/2");
+            let factored = (one - p) + b * tpm;
+            let scaled = tpm * (b + (one - p) / tpm);
+            assert_eq!(factored, scaled, "eq forms diverge at b={b:?} p={p:?}");
+            b = b * EF::from_u32(29) + one;
+            p = p * EF::from_u32(19) + EF::from_u32(7);
         }
     }
 

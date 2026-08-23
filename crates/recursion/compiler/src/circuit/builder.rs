@@ -1,6 +1,5 @@
 //! An implementation of Poseidon2 over BN254.
 
-use std::iter::repeat;
 
 use itertools::Itertools;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing};
@@ -173,8 +172,21 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         input: impl IntoIterator<Item = Felt<C::F>>,
     ) -> [Felt<C::F>; DIGEST_SIZE] {
         // debug_assert!(DIGEST_SIZE * N <= WIDTH);
-        let mut pre_iter = input.into_iter().chain(repeat(self.eval(C::F::default())));
-        let pre = core::array::from_fn(move |_| pre_iter.next().unwrap());
+        //
+        // Materialise the pad ONLY if the input is actually short.  Written as
+        // `chain(repeat(self.eval(..)))` the pad was built eagerly as an
+        // argument on EVERY call and then, for the production shape, never
+        // consumed: two DIGEST_SIZE=8 digests already fill WIDTH=16.  The DSL
+        // builder is imperative with no dead-code pass, so each of those was a
+        // real emitted instruction -- one per Merkle path level, ~37k per
+        // compose child, none of them read.
+        let mut collected: Vec<Felt<C::F>> = input.into_iter().take(WIDTH).collect();
+        if collected.len() < WIDTH {
+            let pad = self.eval(C::F::default());
+            collected.resize(WIDTH, pad);
+        }
+        let pre: [Felt<C::F>; WIDTH] =
+            collected.try_into().unwrap_or_else(|_| unreachable!("collected to WIDTH"));
         let post = self.poseidon2_permute_v2(pre);
         let post: [Felt<C::F>; DIGEST_SIZE] = post[..DIGEST_SIZE].try_into().unwrap();
         post
