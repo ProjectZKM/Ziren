@@ -1117,6 +1117,12 @@ where
         // offsets[k+1]) and weight by z_col_lagrange[k].
         let cps = &meta.col_prefix_sums;
         let last_cps = cps.last().expect("col_prefix_sums non-empty");
+        // `eq(b, p) = (1-p) + b*(2p-1)`: both factors depend only on the
+        // sumcheck point, which every column shares.  Built inside the loop they
+        // were re-emitted once per column; evaluated here they are emitted once
+        // and every column reuses the handle.
+        let eq_factors =
+            crate::jagged_eval_primitives::precompute_eq_factors::<C>(builder, &proof_point_vec);
         for k in 0..real_num_cols {
             let curr = &cps[k + 1];
             let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
@@ -1128,10 +1134,11 @@ where
             // instructions per column that nothing ever read — 96,918 base-ALU
             // rows per compose child, measured — and the DSL builder is
             // imperative, with no dead-code pass to remove them.
-            let full_lagrange = crate::jagged_eval_primitives::emit_prefix_sum_lagrange::<C>(
-                &merged,
-                &proof_point_vec,
-            );
+            let full_lagrange =
+                crate::jagged_eval_primitives::emit_prefix_sum_lagrange_pre::<C>(
+                    &merged,
+                    &eq_factors,
+                );
             expected_eval = expected_eval + (z_col_lagrange[k] * full_lagrange);
         }
 

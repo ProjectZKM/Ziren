@@ -242,6 +242,47 @@ pub fn emit_prefix_sum_check<C: CircuitConfig>(
 /// which is an identity over the ring — it assumes nothing about `b` being a
 /// bit — and costs ONE extension multiply per bit instead of two.  Both `1-p`
 /// and `2p-1` depend only on the sumcheck point, which every column shares.
+/// The two point-derived factors of `eq`, evaluated ONCE for a sumcheck point.
+///
+/// `eq(b, p) = (1-p) + b*(2p-1)`.  Both `(1-p)` and `(2p-1)` depend only on the
+/// point, which every column shares, so building them inside the per-column loop
+/// re-emits them 557 times over.  Evaluating them into real `Ext` handles here
+/// makes the per-column body one multiply and one add per bit instead of
+/// rebuilding both factors first -- the same "reuse the handle" trick that took
+/// 40,455 rows off the prefix-sum recompose.
+pub fn precompute_eq_factors<C: CircuitConfig>(
+    builder: &mut Builder<C>,
+    sumcheck_point: &[Ext<C::F, C::EF>],
+) -> Vec<(Ext<C::F, C::EF>, Ext<C::F, C::EF>)> {
+    let one: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
+    sumcheck_point
+        .iter()
+        .map(|p| {
+            let p_sym: SymbolicExt<C::F, C::EF> = (*p).into();
+            let one_minus_p: Ext<C::F, C::EF> = builder.eval(one - p_sym.clone());
+            let two_p_minus_one: Ext<C::F, C::EF> = builder.eval(p_sym.clone() + p_sym - one);
+            (one_minus_p, two_p_minus_one)
+        })
+        .collect()
+}
+
+/// [`emit_prefix_sum_lagrange`] against factors already evaluated by
+/// [`precompute_eq_factors`].  Identical value, fewer emitted instructions.
+pub fn emit_prefix_sum_lagrange_pre<C: CircuitConfig>(
+    merged_prefix_sum: &[Felt<C::F>],
+    eq_factors: &[(Ext<C::F, C::EF>, Ext<C::F, C::EF>)],
+) -> SymbolicExt<C::F, C::EF> {
+    let mut lagrange: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
+    for (bit, (one_minus_p, two_p_minus_one)) in
+        merged_prefix_sum.iter().zip(eq_factors.iter())
+    {
+        let bit_sym: SymbolicExt<C::F, C::EF> = SymbolicExt::from(*bit);
+        let eq = SymbolicExt::from(*one_minus_p) + bit_sym * SymbolicExt::from(*two_p_minus_one);
+        lagrange = lagrange * eq;
+    }
+    lagrange
+}
+
 pub fn emit_prefix_sum_lagrange<C: CircuitConfig>(
     merged_prefix_sum: &[Felt<C::F>],
     sumcheck_point: &[Ext<C::F, C::EF>],

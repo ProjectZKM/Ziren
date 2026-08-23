@@ -37,6 +37,7 @@ pub trait Poseidon2KoalaBearHasherVariable<C: CircuitConfig> {
     /// Applies the Poseidon2 hash function to the given array.
     ///
     /// Reference: [p3_symmetric::PaddingFreeSponge]
+    #[track_caller]
     fn poseidon2_hash(builder: &mut Builder<C>, input: &[Felt<C::F>]) -> [Felt<C::F>; DIGEST_SIZE] {
         // static_assert(RATE < WIDTH)
         let mut state = core::array::from_fn(|_| builder.eval(C::F::ZERO));
@@ -288,6 +289,7 @@ impl FieldHasher<KoalaBear> for KoalaBearPoseidon2 {
 }
 
 impl<C: CircuitConfig<F = KoalaBear>> Poseidon2KoalaBearHasherVariable<C> for KoalaBearPoseidon2 {
+    #[track_caller]
     fn poseidon2_permute(
         builder: &mut Builder<C>,
         input: [Felt<<C>::F>; PERMUTATION_WIDTH],
@@ -312,10 +314,12 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
 {
     type DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE];
 
+    #[track_caller]
     fn hash(builder: &mut Builder<C>, input: &[Felt<<C as Config>::F>]) -> Self::DigestVariable {
         <Self as Poseidon2KoalaBearHasherVariable<C>>::poseidon2_hash(builder, input)
     }
 
+    #[track_caller]
     fn compress(
         builder: &mut Builder<C>,
         input: [Self::DigestVariable; 2],

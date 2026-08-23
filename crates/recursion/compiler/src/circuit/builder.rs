@@ -141,7 +141,9 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     }
 
     /// Applies the Poseidon2 permutation to the given array.
+    #[track_caller]
     fn poseidon2_permute_v2(&mut self, array: [Felt<C::F>; WIDTH]) -> [Felt<C::F>; WIDTH] {
+        poseidon2_census::record(core::panic::Location::caller());
         let output: [Felt<C::F>; WIDTH] = core::array::from_fn(|_| self.uninit());
         self.push_op(DslIr::CircuitV2Poseidon2PermuteKoalaBear(Box::new((output, array))));
         output
@@ -150,6 +152,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     /// Applies the Poseidon2 hash function to the given array.
     ///
     /// Reference: [p3_symmetric::PaddingFreeSponge]
+    #[track_caller]
     fn poseidon2_hash_v2(&mut self, input: &[Felt<C::F>]) -> [Felt<C::F>; DIGEST_SIZE] {
         // static_assert(RATE < WIDTH)
         let mut state = core::array::from_fn(|_| self.eval(C::F::ZERO));
@@ -164,6 +167,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     /// Applies the Poseidon2 compression function to the given array.
     ///
     /// Reference: [p3_symmetric::TruncatedPermutation]
+    #[track_caller]
     fn poseidon2_compress_v2(
         &mut self,
         input: impl IntoIterator<Item = Felt<C::F>>,
@@ -335,5 +339,68 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         let arr = std::iter::from_fn(|| Some(self.uninit())).take(len).collect::<Vec<_>>();
         self.push_op(DslIr::CircuitV2HintExts(arr.clone()));
         arr
+    }
+}
+
+/// Where the recursion circuit's Poseidon2 permutations come from.
+///
+/// Poseidon2 is 1.1% of a recursion program's INSTRUCTIONS but 62% of its
+/// AREA, so basefold prove time on a recursion shard is set by this count while
+/// the VM run is set by ALU.  A circuit change has to name which half it
+/// targets, and that needs the permutations attributed to the code that asks
+/// for them -- the two classic knobs (folding arity, blowup/queries) are
+/// already at their measured optima, and Merkle paths do not account for the
+/// 62%.
+///
+/// `poseidon2_permute_v2` is the single funnel: `poseidon2_hash_v2` and
+/// `poseidon2_compress_v2` both route through it.  All three carry
+/// `#[track_caller]` so `Location::caller()` skips them and resolves to the
+/// real call site.
+///
+/// Off unless `ZIREN_P2_CENSUS` is set.
+pub mod poseidon2_census {
+    use std::collections::BTreeMap;
+    use std::sync::{Mutex, OnceLock};
+
+    static ON: OnceLock<bool> = OnceLock::new();
+    static SITES: OnceLock<Mutex<BTreeMap<String, u64>>> = OnceLock::new();
+
+    #[inline]
+    pub fn enabled() -> bool {
+        *ON.get_or_init(|| std::env::var_os("ZIREN_P2_CENSUS").is_some())
+    }
+
+    #[inline]
+    pub fn record(loc: &'static core::panic::Location<'static>) {
+        if !enabled() {
+            return;
+        }
+        let map = SITES.get_or_init(|| Mutex::new(BTreeMap::new()));
+        let key = format!("{}:{}", loc.file(), loc.line());
+        if let Ok(mut g) = map.lock() {
+            *g.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    /// Print the histogram, most permutations first, and clear it.
+    pub fn dump(tag: &str) {
+        if !enabled() {
+            return;
+        }
+        let Some(map) = SITES.get() else { return };
+        let Ok(mut g) = map.lock() else { return };
+        let mut rows: Vec<(String, u64)> = g.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1));
+        let total: u64 = rows.iter().map(|r| r.1).sum();
+        eprintln!("[P2_CENSUS][{tag}] {total} poseidon2 permutations, by call site");
+        for (site, n) in rows.iter().take(25) {
+            eprintln!(
+                "[P2_CENSUS][{tag}] {:>9} {:>5.1}%  {}",
+                n,
+                100.0 * (*n as f64) / (total.max(1) as f64),
+                site
+            );
+        }
+        g.clear();
     }
 }
