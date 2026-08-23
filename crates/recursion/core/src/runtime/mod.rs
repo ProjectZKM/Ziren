@@ -508,8 +508,13 @@ where
         let next_clk = state.clk + F::from_u32(4);
         let next_pc = state.pc + F::ONE;
         let _offset = ai.offset();
-        let instruction = ai.inner().clone();
-        match instruction {
+        // Matched by REFERENCE.  This used to run on a clone of the
+        // instruction, copying the full width of the enum -- and heap-
+        // allocating the `Vec` variants -- once per executed instruction,
+        // millions of times per node.  Every arm reads `Copy` fields or
+        // borrows; only the two ALU out-of-domain errors need an owned copy,
+        // and they take one where the error is built.
+        match ai.inner() {
             Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
                 state.nb_base_ops += 1;
                 let in1 = self.mr_us(addrs.in1).val[0];
@@ -533,7 +538,7 @@ where
                                     return Err(RuntimeError::DivFOutOfDomain {
                                         in1,
                                         in2,
-                                        instr,
+                                        instr: *instr,
                                         pc: state.pc.as_canonical_u32() as usize,
                                         trace: self.nearest_pc_backtrace_at(
                                             state.pc.as_canonical_u32() as usize,
@@ -544,7 +549,7 @@ where
                         }
                     }
                 };
-                self.mw_us(addrs.out, Block::from(out), mult);
+                self.mw_us(addrs.out, Block::from(out), *mult);
                 unsafe {
                     Self::raw_write_ev(
                         &rec.base_alu_events[_offset],
@@ -574,7 +579,7 @@ where
                                     return Err(RuntimeError::DivEOutOfDomain {
                                         in1: in1_ef,
                                         in2: in2_ef,
-                                        instr,
+                                        instr: *instr,
                                         pc: state.pc.as_canonical_u32() as usize,
                                         trace: self.nearest_pc_backtrace_at(
                                             state.pc.as_canonical_u32() as usize,
@@ -586,7 +591,7 @@ where
                     }
                 };
                 let out = Block::from(out_ef.as_basis_coefficients_slice());
-                self.mw_us(addrs.out, out, mult);
+                self.mw_us(addrs.out, out, *mult);
                 unsafe {
                     Self::raw_write_ev(&rec.ext_alu_events[_offset], ExtAluEvent { out, in1, in2 });
                 }
@@ -600,26 +605,26 @@ where
                 state.nb_memory_ops += 1;
                 match kind {
                     MemAccessKind::Read => {
-                        let mem_entry = self.mr_us(addr);
+                        let mem_entry = self.mr_us(*addr);
                         assert_eq!(
-                            mem_entry.val, val,
+                            mem_entry.val, *val,
                             "stored memory value should be the specified value"
                         );
                     }
-                    MemAccessKind::Write => drop(self.mw_us(addr, val, mult)),
+                    MemAccessKind::Write => drop(self.mw_us(*addr, *val, *mult)),
                 }
                 // mem_const_count is pre-sized by `UnsafeRecord::new`
                 // from the analyzed Mem-instruction count.
                 // No per-instruction increment needed.
             }
             Instruction::Poseidon2(instr) => {
-                let Poseidon2Instr { addrs: Poseidon2Io { input, output }, mults } = *instr;
+                let Poseidon2Instr { addrs: Poseidon2Io { input, output }, mults } = &**instr;
                 state.nb_poseidons += 1;
                 let in_vals = std::array::from_fn(|i| self.mr_us(input[i]).val[0]);
                 let perm_output = self.perm.as_ref().unwrap().permute(in_vals);
 
                 perm_output.iter().zip(output).zip(mults).for_each(|((&val, addr), mult)| {
-                    self.mw_us(addr, Block::from(val), mult);
+                    self.mw_us(*addr, Block::from(val), *mult);
                 });
                 unsafe {
                     Self::raw_write_ev(
@@ -634,13 +639,13 @@ where
                 mult2,
             }) => {
                 state.nb_select += 1;
-                let bit = self.mr_us(bit).val[0];
-                let in1 = self.mr_us(in1).val[0];
-                let in2 = self.mr_us(in2).val[0];
+                let bit = self.mr_us(*bit).val[0];
+                let in1 = self.mr_us(*in1).val[0];
+                let in2 = self.mr_us(*in2).val[0];
                 let out1_val = bit * in2 + (F::ONE - bit) * in1;
                 let out2_val = bit * in1 + (F::ONE - bit) * in2;
-                self.mw_us(out1, Block::from(out1_val), mult1);
-                self.mw_us(out2, Block::from(out2_val), mult2);
+                self.mw_us(*out1, Block::from(out1_val), *mult1);
+                self.mw_us(*out2, Block::from(out2_val), *mult2);
                 unsafe {
                     Self::raw_write_ev(
                         &rec.select_events[_offset],
@@ -650,13 +655,14 @@ where
             }
             Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr }) => {
                 state.nb_bit_decompositions += 1;
-                let num = self.mr_us(input_addr).val[0].as_canonical_u32();
+                let num = self.mr_us(*input_addr).val[0].as_canonical_u32();
                 // Decompose the num into LE bits.
                 let bits = (0..output_addrs_mults.len())
                     .map(|i| Block::from(F::from_u32((num >> i) & 1)))
                     .collect::<Vec<_>>();
                 // Write the bits to the array at dst.
-                for (i, (bit, (addr, mult))) in bits.into_iter().zip(output_addrs_mults).enumerate()
+                for (i, (bit, (addr, mult))) in
+                    bits.into_iter().zip(output_addrs_mults.iter().copied()).enumerate()
                 {
                     self.mw_us(addr, bit, mult);
                     unsafe {
@@ -667,14 +673,15 @@ where
                     }
                 }
             }
-            Instruction::HintAddCurve(HintAddCurveInstr {
-                output_x_addrs_mults,
-                output_y_addrs_mults,
-                input1_x_addrs,
-                input1_y_addrs,
-                input2_x_addrs,
-                input2_y_addrs,
-            }) => {
+            Instruction::HintAddCurve(instr) => {
+                let HintAddCurveInstr {
+                    output_x_addrs_mults,
+                    output_y_addrs_mults,
+                    input1_x_addrs,
+                    input1_y_addrs,
+                    input2_x_addrs,
+                    input2_y_addrs,
+                } = &**instr;
                 let input1_x =
                     SepticExtension::<F>::from_base_fn(|i| self.mr_us(input1_x_addrs[i]).val[0]);
                 let input1_y =
@@ -689,7 +696,7 @@ where
 
                 let _x_count = output_x_addrs_mults.len();
                 for (i, (val, (addr, mult))) in
-                    output.x.0.into_iter().zip(output_x_addrs_mults.into_iter()).enumerate()
+                    output.x.0.into_iter().zip(output_x_addrs_mults.iter().copied()).enumerate()
                 {
                     self.mw_us(addr, Block::from(val), mult);
                     unsafe {
@@ -700,7 +707,7 @@ where
                     }
                 }
                 for (i, (val, (addr, mult))) in
-                    output.y.0.into_iter().zip(output_y_addrs_mults.into_iter()).enumerate()
+                    output.y.0.into_iter().zip(output_y_addrs_mults.iter().copied()).enumerate()
                 {
                     self.mw_us(addr, Block::from(val), mult);
                     unsafe {
@@ -733,7 +740,7 @@ where
             Instruction::Print(PrintInstr { field_elt_type, addr }) => match field_elt_type {
                 FieldEltType::Base => {
                     state.nb_print_f += 1;
-                    let f = self.mr_us(addr).val[0];
+                    let f = self.mr_us(*addr).val[0];
                     match debug_stdout.as_mut() {
                         Some(w) => writeln!(w, "PRINTF={f}").map_err(RuntimeError::DebugPrint)?,
                         None => eprintln!("PRINTF={f}"),
@@ -741,7 +748,7 @@ where
                 }
                 FieldEltType::Extension => {
                     state.nb_print_e += 1;
-                    let ef = self.mr_us(addr).val;
+                    let ef = self.mr_us(*addr).val;
                     match debug_stdout.as_mut() {
                         Some(w) => {
                             writeln!(w, "PRINTEF={ef:?}").map_err(RuntimeError::DebugPrint)?
@@ -752,9 +759,11 @@ where
             },
             Instruction::HintExt2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr }) => {
                 state.nb_bit_decompositions += 1;
-                let fs = self.mr_us(input_addr).val;
+                let fs = self.mr_us(*input_addr).val;
                 // Write the bits to the array at dst.
-                for (i, (f, (addr, mult))) in fs.into_iter().zip(output_addrs_mults).enumerate() {
+                for (i, (f, (addr, mult))) in
+                    fs.into_iter().zip(output_addrs_mults.iter().copied()).enumerate()
+                {
                     let felt = Block::from(f);
                     self.mw_us(addr, felt, mult);
                     unsafe {
@@ -776,7 +785,9 @@ where
                     .as_mut()
                     .expect("witness must be Some at root walker")
                     .drain(0..output_addrs_mults.len());
-                for (i, ((addr, mult), val)) in zip(output_addrs_mults, witness).enumerate() {
+                for (i, ((addr, mult), val)) in
+                    zip(output_addrs_mults.iter().copied(), witness).enumerate()
+                {
                     // Inline [`Self::mw`] to mutably borrow multiple fields of `self`.
                     self.mw_us(addr, val, mult);
                     unsafe {

@@ -19,7 +19,7 @@ use crate::{
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         select::SelectChip,
     },
-    instruction::{HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr},
+    instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr},
     shape::RecursionShape,
     ExpReverseBitsInstr, Instruction, RecursionProgram, D,
 };
@@ -212,13 +212,9 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             // (one per polynomial in the batch); was off-by-default-1. Benign
             // for push-based reserve, but UB-prone for offset writes via
             // UnsafeRecord (uninit slots → bad transmute).
-            Instruction::HintAddCurve(HintAddCurveInstr {
-                output_x_addrs_mults,
-                output_y_addrs_mults,
-                ..
-            }) => {
-                self.mem_var_events += output_x_addrs_mults.len();
-                self.mem_var_events += output_y_addrs_mults.len();
+            Instruction::HintAddCurve(instr) => {
+                self.mem_var_events += instr.output_x_addrs_mults.len();
+                self.mem_var_events += instr.output_y_addrs_mults.len();
             }
             // Populate the new counters so `UnsafeRecord::new` can
             // pre-size these vecs once the runtime walker swaps to

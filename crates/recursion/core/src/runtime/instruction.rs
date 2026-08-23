@@ -13,12 +13,23 @@ pub enum Instruction<F> {
     Poseidon2(Box<Poseidon2Instr<F>>),
     Select(SelectInstr<F>),
     HintBits(HintBitsInstr<F>),
-    HintAddCurve(HintAddCurveInstr<F>),
+    HintAddCurve(Box<HintAddCurveInstr<F>>),
     Print(PrintInstr<F>),
     HintExt2Felts(HintExt2FeltsInstr<F>),
     CommitPublicValues(Box<CommitPublicValuesInstr<F>>),
     Hint(HintInstr<F>),
 }
+
+/// The executor walks millions of these per recursion node and the program
+/// cache holds every distinct program at once, so the enum's WIDTH is a
+/// first-order cost twice over: it sets the memory traffic of the dispatch
+/// loop and it sets the cache's resident size.  A variant is boxed as soon as
+/// it would widen the enum for everyone else -- `HintAddCurve` carries six
+/// `Vec`s (144 bytes) and appears a handful of times in a program of millions.
+const _: () = assert!(
+    std::mem::size_of::<Instruction<u32>>() <= 40,
+    "Instruction grew: box the widest variant rather than widening every instruction",
+);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HintBitsInstr<F> {

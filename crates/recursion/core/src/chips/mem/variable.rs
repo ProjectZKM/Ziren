@@ -1,5 +1,5 @@
 use core::borrow::Borrow;
-use instruction::{HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr};
+use instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr};
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -79,10 +79,12 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
                     output_addrs_mults,
                     input_addr: _, // No receive lookup for the hint operation
                 }) => output_addrs_mults.iter().collect(),
-                Instruction::HintAddCurve(HintAddCurveInstr {
-                    output_x_addrs_mults,
-                    output_y_addrs_mults, .. // No receive lookup for the hint operation
-                }) => output_x_addrs_mults.iter().chain(output_y_addrs_mults.iter()).collect(),
+                // No receive lookup for the hint operation.
+                Instruction::HintAddCurve(instr) => instr
+                    .output_x_addrs_mults
+                    .iter()
+                    .chain(instr.output_y_addrs_mults.iter())
+                    .collect(),
                 _ => vec![],
             })
             .collect::<Vec<_>>();

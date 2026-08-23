@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::machine::RecursionAirEventCount;
 use crate::runtime::instruction::{
-    HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
+    HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
 };
 use crate::runtime::seq_block::{BasicBlock, RawProgram, SeqBlock};
 
@@ -134,13 +134,9 @@ impl<F> RawProgram<Instruction<F>> {
                     output_addrs_mults,
                     input_addr: _,
                 }) => incr(&mut counts.mem_var_events, output_addrs_mults.len()),
-                Instruction::HintAddCurve(HintAddCurveInstr {
-                    output_x_addrs_mults,
-                    output_y_addrs_mults,
-                    ..
-                }) => incr(
+                Instruction::HintAddCurve(instr) => incr(
                     &mut counts.mem_var_events,
-                    output_x_addrs_mults.len() + output_y_addrs_mults.len(),
+                    instr.output_x_addrs_mults.len() + instr.output_y_addrs_mults.len(),
                 ),
                 // Assign event-vec offsets for the two newly-tracked
                 // event types.
