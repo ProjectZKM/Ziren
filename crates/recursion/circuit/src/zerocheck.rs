@@ -531,10 +531,7 @@ where
             }
 
             // (4e) Padded-row mask + adjustment.
-            builder.cycle_tracker_v2_enter("zc_geq".to_string());
             let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
-            builder.cycle_tracker_v2_exit();
-            builder.cycle_tracker_v2_enter("zc_padded_row_adjustment".to_string());
             let padded_row_adjustment = Self::compute_padded_row_adjustment_basefold(
                 builder,
                 chip,
@@ -542,21 +539,17 @@ where
                 alpha,
                 public_values,
             );
-            builder.cycle_tracker_v2_exit();
 
             // (4f) Constraint accumulator at the sumcheck point
             // minus the padded-row contribution.
-            builder.cycle_tracker_v2_enter("zc_eval_constraints".to_string());
             let constraint_eval_ext =
                 Self::eval_constraints_basefold(builder, chip, opening, alpha, public_values);
-            builder.cycle_tracker_v2_exit();
             let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
             let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
             let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val.clone();
 
             // (4g) Batch the chip's openings (main first, then
             // preprocessed) by the pre-computed challenge powers.
-            builder.cycle_tracker_v2_enter("zc_rlc".to_string());
             let openings_batch: SymbolicExt<C::F, C::EF> = opening
                 .main
                 .local
@@ -582,7 +575,6 @@ where
             let new_rlc: SymbolicExt<C::F, C::EF> =
                 rlc_sym * lambda_sym + zerocheck_eq_val * (constraint_eval + openings_batch);
             rlc_eval = builder.eval(new_rlc);
-            builder.cycle_tracker_v2_exit();
         }
 
         // (5) Assert the cross-chip RLC matches the prover's
@@ -904,18 +896,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod padded_row_cost_tests {
-    //! What the padded-row adjustment costs, per chip, as emitted instructions.
-    //!
-    //! `verify_zerocheck` evaluates every chip's constraint polynomial TWICE:
-    //! once at the opened values, and once on an all-zero row to get the
-    //! adjustment that `full_geq` gates onto the padded rows.  The second pass
-    //! is over a row that is known to be zero while the program is being built,
-    //! so it should cost almost nothing — and it does only if the row is a
-    //! COMPILE-TIME constant.  A row of materialised `Ext` handles emits the
-    //! whole polynomial a second time.
-    //!
-    //! `cargo test -p zkm-recursion-circuit --lib padded_row -- --ignored --nocapture`
+mod padded_row_tests {
     use super::*;
     use zkm_pcs::folder::PairWindow;
     use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
@@ -970,41 +951,19 @@ mod padded_row_cost_tests {
         builder.get_mut_operations().vec.len() - before
     }
 
-    fn probe<A>(
-        label: &str,
-        builder: &mut Builder<InnerConfig>,
-        chips: &[zkm_pcs::Chip<F, A>],
-        alpha: Ext<F, EF>,
-        pv: &[Felt<F>],
-        lcs: &Ext<F, EF>,
-        gcs: &SepticDigest<Felt<F>>,
-    ) -> (usize, usize)
-    where
-        A: zkm_pcs::air::MachineAir<F>
-            + for<'b> p3_air::Air<
-                crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
-            >,
-    {
-        let (mut runtime, mut constant) = (0usize, 0usize);
-        for chip in chips.iter() {
-            let r = count(builder, chip, alpha, pv, lcs, gcs, true);
-            let c = count(builder, chip, alpha, pv, lcs, gcs, false);
-            runtime += r;
-            constant += c;
-            println!(
-                "{label} {:>28}  w={:<5} pw={:<4} runtime_row={r:<8} const_row={c}",
-                chip.name(),
-                chip.width(),
-                chip.preprocessed_width()
-            );
-        }
-        println!("{label} TOTAL runtime_row={runtime} const_row={constant}");
-        (runtime, constant)
-    }
-
+    /// `verify_zerocheck` evaluates every chip's constraint polynomial TWICE:
+    /// once at the opened values, and once on an all-zero row for the
+    /// adjustment `full_geq` gates onto the padded rows.  That second row is
+    /// known to be zero while the program is being built, so it has to fold
+    /// away rather than emit the polynomial a second time -- which it only
+    /// does while the folder's `Var` stays symbolic and `assert_zero` elides
+    /// its build-time identities.  Make either concrete again and the padded
+    /// pass silently costs a full constraint evaluation per chip.
+    ///
+    /// A runtime row must still emit what it always did; that half is the
+    /// guarantee the real opening path is untouched.
     #[test]
-    #[ignore = "sizing probe, prints a per-chip table"]
-    fn padded_row_adjustment_costs_almost_nothing_on_a_constant_row() {
+    fn padded_row_adjustment_folds_away_on_a_constant_row() {
         let mut builder = Builder::<InnerConfig>::default();
         let alpha: Ext<F, EF> = builder.constant(EF::default());
         let lcs: Ext<F, EF> = builder.constant(EF::default());
@@ -1016,23 +975,29 @@ mod padded_row_cost_tests {
             y: SepticExtension(core::array::from_fn(|_| zero_felt)),
         });
 
-        // The compose ring verifies recursion proofs...
+        // The compose ring verifies recursion proofs; the leaf ring verifies a
+        // CORE shard proof, whose chip set is where the cost actually lives.
         let recursion = RecursionAir::<F, 3>::compress_machine(KoalaBearPoseidon2::default());
-        let (rec_runtime, rec_const) =
-            probe("RECURSION", &mut builder, recursion.chips(), alpha, &pv, &lcs, &gcs);
-        // ...and the leaf ring verifies a CORE shard proof, whose chip set is
-        // where the cost actually lives.
+        let (mut rec_runtime, mut rec_const) = (0usize, 0usize);
+        for chip in recursion.chips().iter() {
+            rec_runtime += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, true);
+            rec_const += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, false);
+        }
+
         let core = zkm_core_machine::mips::MipsAir::<F>::machine(KoalaBearPoseidon2::default());
-        let (core_runtime, core_const) =
-            probe("CORE", &mut builder, core.chips(), alpha, &pv, &lcs, &gcs);
+        let (mut core_runtime, mut core_const) = (0usize, 0usize);
+        for chip in core.chips().iter() {
+            core_runtime += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, true);
+            core_const += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, false);
+        }
 
         assert!(
             rec_const * 4 < rec_runtime,
-            "constant row must be far cheaper than a runtime row (recursion: {rec_const} vs {rec_runtime})"
+            "recursion: a constant row must be far cheaper ({rec_const} vs {rec_runtime})"
         );
         assert!(
             core_const * 10 < core_runtime,
-            "constant row must be far cheaper than a runtime row (core: {core_const} vs {core_runtime})"
+            "core: a constant row must be far cheaper ({core_const} vs {core_runtime})"
         );
     }
 }

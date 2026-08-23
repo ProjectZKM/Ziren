@@ -98,7 +98,7 @@ where
     // constraint polynomial away instead of emitting one instruction per node
     // of it: over the MIPS chip set a pass drops from 862,662 emitted
     // instructions to 30,746, and over the recursion chips 3,466 to 473
-    // (`padded_row_adjustment_costs_almost_nothing_on_a_constant_row`).
+    // (`padded_row_adjustment_folds_away_on_a_constant_row`).
     type Var = SymbolicExt<C::F, C::EF>;
     type PreprocessedWindow = PairWindow<'a, SymbolicExt<C::F, C::EF>>;
     type MainWindow = PairWindow<'a, SymbolicExt<C::F, C::EF>>;

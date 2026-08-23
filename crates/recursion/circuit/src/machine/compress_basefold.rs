@@ -1037,9 +1037,7 @@ where
 
         // (2) Verify the sub-sumcheck (round polys, challenges, final
         //     point-and-eval consistency all handled inside).
-        builder.cycle_tracker_v2_enter("je_sumcheck".to_string());
         crate::sumcheck::verify_sumcheck::<C, FC>(builder, challenger, partial_sumcheck_proof);
-        builder.cycle_tracker_v2_exit();
 
         // (3) Split the reduced point in half — first half flows into
         //     the BP as `prefix_sum`, second half as `next_prefix_sum`.
@@ -1058,10 +1056,8 @@ where
         // (4) Full partial-Lagrange over z_col.
         let z_col_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
             z_col.iter().map(|e| (*e).into()).collect();
-        builder.cycle_tracker_v2_enter("je_zcol_lagrange".to_string());
         let z_col_lagrange: Vec<SymbolicExt<C::F, C::EF>> =
             crate::logup_gkr::partial_lagrange_symbolic::<C>(&z_col_symbolic);
-        builder.cycle_tracker_v2_exit();
 
         // (5) Per-column accumulation: for each (curr, next) prefix-sum pair,
         //     merge bits, run prefix_sum_check, weight by z_col_lagrange[k].
@@ -1090,7 +1086,6 @@ where
         // the previous felt whenever
         // the handles match; the step-7 consistency check reads the value, and
         // an aliased felt carries the same one.
-        builder.cycle_tracker_v2_enter("je_prefix_felts".to_string());
         let two_felt: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
         let mut prev: Option<(&Vec<Felt<C::F>>, Felt<C::F>)> = None;
         for (_curr_ps, next_ps) in pairs {
@@ -1108,7 +1103,6 @@ where
             prev = Some((next_ps, ps_acc));
         }
 
-        builder.cycle_tracker_v2_exit();
 
         // Pass 2 — jagged-eval sum over the REAL columns only.  The host prover
         // sums over packing.offsets (prove_jagged_evaluation; num_chips =
@@ -1128,7 +1122,6 @@ where
         // sumcheck point, which every column shares.  Built inside the loop they
         // were re-emitted once per column; evaluated here they are emitted once
         // and every column reuses the handle.
-        builder.cycle_tracker_v2_enter("je_columns".to_string());
         let eq_factors =
             crate::jagged_eval_primitives::precompute_eq_factors::<C>(builder, &proof_point_vec);
         // `eq_factors` divided every per-bit factor by `2p-1`; the product of
@@ -1164,7 +1157,6 @@ where
         if let Some(n) = eq_consumed {
             expected_eval = expected_eval * eq_factors.scale_for_len(n);
         }
-        builder.cycle_tracker_v2_exit();
 
         // (6) Multiply by the branching-program evaluation.
         //     BP parameterized by (z_row, z_eval);
@@ -1177,7 +1169,6 @@ where
         let z_eval_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
             z_eval.iter().map(|e| (*e).into()).collect();
 
-        builder.cycle_tracker_v2_enter("je_branching_program".to_string());
         let bp_eval: SymbolicExt<C::F, C::EF> =
             crate::jagged_eval_primitives::emit_branching_program_eval::<C>(
                 builder,
@@ -1187,7 +1178,6 @@ where
                 &second_half_symbolic,
             );
         expected_eval = expected_eval * bp_eval;
-        builder.cycle_tracker_v2_exit();
 
         // (7) Close the identity: accumulated expected_eval must equal
         //     the sumcheck's final point-eval claim.

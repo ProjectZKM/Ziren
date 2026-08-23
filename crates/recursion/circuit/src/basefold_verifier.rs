@@ -1193,11 +1193,9 @@ where
 
         // (6) FRI query-phase verification.
         let log_codeword_size = self.params.log_codeword_size();
-        builder.cycle_tracker_v2_enter("bf_query_bits".to_string());
         let query_indices: Vec<Vec<C::Bit>> = (0..self.params.num_queries)
             .map(|_| challenger.sample_bits(builder, log_codeword_size))
             .collect();
-        builder.cycle_tracker_v2_exit();
 
         {
             use zkm_recursion_compiler::prelude::Ext;
@@ -1227,7 +1225,6 @@ where
                 // prover-supplied and unbound.  Empty component openings
                 // (outer placeholder paths) use the fallback below —
                 // structurally decided at program build.
-                builder.cycle_tracker_v2_enter("bf_component_open".to_string());
                 let initial_eval: Ext<C::F, C::EF> = if !proof.component_openings.is_empty() {
                     // Accumulate the step-8 inner product SYMBOLICALLY across the
                     // whole leaf loop and materialize it ONCE per query
@@ -1316,10 +1313,8 @@ where
                     })
                 };
 
-                builder.cycle_tracker_v2_exit();
 
                 use p3_field::TwoAdicField;
-                builder.cycle_tracker_v2_enter("bf_initial_x".to_string());
                 let two_adic_generator: zkm_recursion_compiler::prelude::Felt<C::F> =
                     builder.constant(C::F::two_adic_generator(log_codeword_size));
                 let bits_for_exp: Vec<C::Bit> =
@@ -1334,9 +1329,7 @@ where
                 // round consumes `arity` index bits and `arity` betas, and
                 // hands the next round the squared domain element — which at
                 // arity 1 is exactly the per-round step this replaces.
-                builder.cycle_tracker_v2_exit();
 
-                builder.cycle_tracker_v2_enter("bf_block_fold".to_string());
                 let mut folded = initial_eval;
                 let mut x_cur = initial_x;
                 let mut bit_at = 0usize;
@@ -1357,9 +1350,7 @@ where
                     bit_at += arity;
                 }
                 builder.assert_ext_eq(folded, final_poly_ext);
-                builder.cycle_tracker_v2_exit();
 
-                builder.cycle_tracker_v2_enter("bf_commit_merkle".to_string());
 
                 // Per-round Merkle binding — digest-generic via HV.
                 // Recompute each round's leaf digest from the sibling
@@ -1455,7 +1446,6 @@ where
                         HV::assert_digest_eq(builder, leaf_digest, round_commit);
                     }
                 }
-                builder.cycle_tracker_v2_exit();
             }
         }
 

@@ -560,12 +560,6 @@ where
         // In debug mode, we perform cycle tracking and keep track of backtraces.
         // Otherwise, we ignore cycle tracking instructions and pass around an empty Vec of traces.
         let debug_mode = zkm_debug_mode();
-        // Per-region instruction counts without the per-instruction print.
-        // The recursion circuit's size IS the compress wall, and the regions
-        // (`jagged_eval_sumcheck`, `verify_zerocheck`, `basefold_open`, ...)
-        // are the only place that says which part of the verifier a program is
-        // made of.  Off unless `ZIREN_DSL_REGION_CENSUS` is `1`/`true`.
-        let region_census = region_census_mode();
         // Compile each IR instruction into a SeqBlock structure.
         // Most ops accumulate into the current Basic block;
         // a `DslIr::Parallel` op flushes the current Basic block and
@@ -576,7 +570,7 @@ where
         let (mut top_seq_blocks, traces) =
             tracing::debug_span!("compile_one loop").in_scope(|| {
                 let mut traces = vec![];
-                let mut span_builder = if debug_mode || region_census {
+                let mut span_builder = if debug_mode {
                     Some(SpanBuilder::<_, &'static str>::new("cycle_tracker".to_string()))
                 } else {
                     None
@@ -586,11 +580,7 @@ where
                 if let Some(span_builder) = span_builder {
                     let cycle_tracker_root_span = span_builder.finish().unwrap();
                     for line in cycle_tracker_root_span.lines() {
-                        if region_census {
-                            tracing::warn!("DSL_REGION {}", line);
-                        } else {
-                            tracing::info!("{}", line);
-                        }
+                        tracing::info!("{}", line);
                     }
                 }
                 (blocks, traces)
@@ -791,15 +781,11 @@ where
                     for outcome in outcomes {
                         match outcome {
                             Outcome::Push(instr) => {
-                                // The region tally is driven by the span builder
-                                // being present, not by `debug_mode`: the
-                                // region census wants the per-region instruction
-                                // counts WITHOUT the per-instruction print.
-                                if let Some(sb) = span_builder.as_deref_mut() {
-                                    sb.item(instr_name(&instr));
-                                }
                                 if debug_mode {
                                     println!("instr: {instr:?}");
+                                    if let Some(sb) = span_builder.as_deref_mut() {
+                                        sb.item(instr_name(&instr));
+                                    }
                                     #[cfg(feature = "debug")]
                                     traces.push(trace.clone());
                                 }
@@ -826,19 +812,6 @@ where
         }
         seq_blocks
     }
-}
-
-/// Whether to tally instructions per cycle-tracker region.  Read once; off
-/// unless `ZIREN_DSL_REGION_CENSUS` is `1`/`true`.
-fn region_census_mode() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        matches!(
-            std::env::var("ZIREN_DSL_REGION_CENSUS").ok().as_deref(),
-            Some("1") | Some("true")
-        )
-    })
 }
 
 /// Used for cycle tracking.
