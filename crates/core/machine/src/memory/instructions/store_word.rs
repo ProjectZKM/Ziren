@@ -87,7 +87,7 @@ where
         builder.when(local.is_sw).assert_word_eq(mem_val, a_val);
 
         // `SC` writes the *previous* `op_a` and sets `op_a = 1`.
-        builder.when(local.is_sc).assert_word_eq(mem_val, common.prev_a_val);
+        builder.when(local.is_sc).assert_word_eq(mem_val, common.prev_a_val());
         builder.when(local.is_sc).assert_one(a_val[0]);
         builder.when(local.is_sc).assert_zero(a_val[1]);
         builder.when(local.is_sc).assert_zero(a_val[2]);
@@ -151,10 +151,9 @@ impl<F: PrimeField32> MachineAir<F> for StoreWordChip {
                 let cols: &mut StoreWordColumns<F> = row.borrow_mut();
                 self.event_to_row(event, cols, blu, &input.program);
             },
-            |row| {
-                let cols: &mut StoreWordColumns<F> = row.borrow_mut();
-                cols.common.frame.populate_dependency();
-            },
+            // A padding row needs no neutralising: the typed frame's register-access
+            // multiplicities are `is_real`, which is zero here already.
+            |_row| {},
         );
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
         Ok(trace)

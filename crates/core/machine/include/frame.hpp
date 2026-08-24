@@ -125,17 +125,36 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_misc(
         event.a_record, event.b_record, event.c_record, instruction, shard);
 }
 
-// `InstructionFrameCols::populate_from_mem` — every memory instruction
-// reads-and-writes op_a; the plain stores (NOT SC) read it immutably.
+// `ITypeFrameCols::populate_from_mem` — every memory instruction is I-type
+// (`op_b` a register, `op_c` an immediate) and reads-and-writes op_a; the plain
+// stores (NOT SC) read it immutably.  This is `populate_raw` with the columns
+// the shape makes constant left out: no `op_c` register access, no immediate
+// flags, and `op_b` written as a bare register index rather than a word.
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_mem(
-    InstructionFrameCols<F>& frame,
+    ITypeFrameCols<F>& frame,
     const MemInstrEvent& event,
     const InstructionFfi& instruction
 ) {
-    populate_raw<F>(
-        frame, event.clk, event.recv_next_pc, event.a, event.b, event.c,
-        event.a_record, event.b_record, event.c_record, instruction, event.shard);
+    frame.shard = F::from_canonical_u32(event.shard);
+    frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
+    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
+    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+
+    frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
+    frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
+    frame.op_b = F::from_canonical_u32(instruction.op_b);
+    write_word_from_u32_v2<F>(frame.op_c, instruction.op_c);
+    frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
+
+    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a);
+    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.b);
+
+    // Record-wins ordering, as in `populate_raw`.
+    memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
+    if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+    }
 }
 
 // `InstructionFrameCols::populate_from_syscall` — the id comes in through

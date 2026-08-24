@@ -35,15 +35,12 @@ populate_common(
     // Every row is a real instruction owning its frame.
     frame::populate_from_mem<F>(cols.frame, event, instruction);
 
-    cols.shard = F::from_canonical_u32(event.shard);
-    assert(cols.shard != F::zero());
-    cols.clk = F::from_canonical_u32(event.clk);
+    assert(cols.frame.shard != F::zero());
     cols.pc = F::from_canonical_u32(event.pc);
     cols.next_pc = F::from_canonical_u32(event.next_pc);
+    // `shard`, `clk`, `op_b`, `op_c` and the previous `op_a` are the frame's
+    // columns now -- `populate_from_mem` above already wrote them.
     write_word_from_u32_v2<F>(cols.op_a_value, event.a);
-    write_word_from_u32_v2<F>(cols.op_b_value, event.b);
-    write_word_from_u32_v2<F>(cols.op_c_value, event.c);
-    write_word_from_u32_v2<F>(cols.prev_a_val, event.prev_a_val);
 
     // Memory consistency columns for the memory access.
     memory::populate_read_write_v2<F>(cols.memory_access, event.mem_access);

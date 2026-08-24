@@ -522,3 +522,267 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         self.instruction.imm_c = F::ONE;
     }
 }
+
+/// The frame for a chip whose every instruction is I-type: `op_b` is a
+/// register and `op_c` is an immediate.
+///
+/// [`InstructionFrameCols`] is 42 columns because it can serve any operand
+/// shape: it carries a register access for `op_c` and a full four-limb word for
+/// `op_b`, plus the two `imm_*` flags that select between them.  A chip that
+/// only ever executes I-type instructions knows all of that statically, so it
+/// pays for none of it:
+///
+/// * `op_c_access` (7 columns) is gone — `op_c` is never a register read, so
+///   its access multiplicity was identically zero.
+/// * `imm_b` / `imm_c` (2 columns) are gone — they are the constants 0 and 1.
+/// * `op_b` narrows from a `Word` to a single column (3 saved): it is a
+///   register index.  Nothing here has to *assert* that the upper three limbs
+///   are zero — the `Program` bus binds all four limbs against the preprocessed
+///   program table, so an index that did not fit a byte would fail to match.
+///
+/// 42 → 30 columns on every row of the chip.  Which chips qualify is a property
+/// of the opcodes they receive, not of the AIR: a chip that sees more than one
+/// operand shape (`AddSub` executes both `ADD` and `ADDI`) must keep the
+/// universal frame or split.
+#[derive(AlignedBorrow, Clone, Copy, Default, Debug)]
+#[repr(C)]
+pub struct ITypeFrameCols<T> {
+    /// The shard this instruction executed in.
+    pub shard: T,
+    /// The least significant 16 bit limb of clk.
+    pub clk_16bit_limb: T,
+    /// The middle 8 bit limb of clk.
+    pub clk_8bit_limb: T,
+    /// The most significant bit of clk, i.e. bit 24.  See
+    /// [`InstructionFrameCols::clk_24bit_limb`] for why it is witnessed.
+    pub clk_24bit_limb: T,
+
+    /// The opcode for this cycle.
+    pub opcode: T,
+    /// The first operand — a register index.
+    pub op_a: T,
+    /// The second operand — a register INDEX, not a word.
+    pub op_b: T,
+    /// The third operand — the immediate itself.
+    pub op_c: Word<T>,
+    /// Whether `op_a` is register 0.
+    pub op_a_0: T,
+
+    /// Register accesses for the two register operands.
+    pub op_a_access: RegisterReadWriteCols<T>,
+    pub op_b_access: RegisterReadCols<T>,
+}
+
+impl<T: Copy> ITypeFrameCols<T> {
+    /// The value of the second operand — the register read.
+    #[inline]
+    pub fn op_b_val(&self) -> Word<T> {
+        *self.op_b_access.value()
+    }
+
+    /// The value of the third operand.  An immediate IS its value: there is no
+    /// register access to consult, which is exactly the column this frame saves.
+    #[inline]
+    pub fn op_c_val(&self) -> Word<T> {
+        self.op_c
+    }
+}
+
+/// The frame's `clk`, reassembled from its three limbs — see
+/// [`clk_from_frame`], which this must agree with exactly.
+pub fn clk_from_i_type_frame<AB: AirBuilder>(frame: &ITypeFrameCols<AB::Var>) -> AB::Expr {
+    AB::Expr::from_u32(1u32 << 24) * frame.clk_24bit_limb
+        + AB::Expr::from_u32(1u32 << 16) * frame.clk_8bit_limb
+        + frame.clk_16bit_limb
+}
+
+/// Rebuild the universal `Program`-bus tuple from the narrow columns.
+///
+/// The preprocessed program table is shared by every chip, so the tuple must
+/// keep its 13 slots — but only 7 of them have to be *columns*.  The rest are
+/// the constants the I-type shape implies.
+fn i_type_instruction<AB: AirBuilder>(
+    frame: &ITypeFrameCols<AB::Var>,
+) -> InstructionCols<AB::Expr> {
+    InstructionCols {
+        opcode: frame.opcode.into(),
+        op_a: frame.op_a.into(),
+        op_b: Word([frame.op_b.into(), AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+        op_c: frame.op_c.map(Into::into),
+        op_a_0: frame.op_a_0.into(),
+        imm_b: AB::Expr::ZERO,
+        imm_c: AB::Expr::ONE,
+    }
+}
+
+/// Evaluate an I-type frame.  Constrains exactly what
+/// [`eval_instruction_frame`] does for an I-type row — the two functions must
+/// be read together, and any rule added to one belongs in the other.
+///
+/// Note what is *absent*: the universal frame forces `imm_b` / `imm_c` high on
+/// a non-instruction row so the `ONE - imm_b` register-access multiplicities
+/// vanish there.  Here the multiplicities are `is_real` directly (the same
+/// degree, since `imm_b` was a column), so a padding row needs no neutralising
+/// at all and the chips' `populate_dependency` calls disappear with it.
+#[allow(clippy::too_many_arguments)]
+pub fn eval_i_type_frame<AB>(
+    builder: &mut AB,
+    frame: &ITypeFrameCols<AB::Var>,
+    pc: AB::Expr,
+    next_pc: AB::Expr,
+    next_next_pc: AB::Expr,
+    recv_next_pc: AB::Expr,
+    num_extra_cycles: AB::Expr,
+    is_real: AB::Expr,
+) where
+    AB: ZKMCoreAirBuilder,
+{
+    let clk = clk_from_i_type_frame::<AB>(frame);
+
+    // The instruction at `pc` must be the one the program committed to.
+    builder.send_program(pc.clone(), i_type_instruction::<AB>(frame), is_real.clone());
+
+    // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
+    builder.send_byte(
+        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
+        frame.shard,
+        AB::Expr::ZERO,
+        AB::Expr::ZERO,
+        is_real.clone(),
+    );
+    builder.assert_bool(frame.clk_24bit_limb);
+    builder.send_timestamp_limb_checks(
+        frame.clk_16bit_limb,
+        frame.clk_8bit_limb,
+        is_real.clone(),
+    );
+
+    // `op_b` is read from the register file; `op_c` is the immediate and needs
+    // no access at all.
+    builder.eval_register_access(
+        frame.shard,
+        clk.clone() + AB::F::from_u32(MemoryAccessPosition::B as u32),
+        frame.op_b,
+        &frame.op_b_access,
+        is_real.clone(),
+    );
+
+    // Writes to register 0 are discarded.
+    builder.when(frame.op_a_0).assert_word_zero(*frame.op_a_access.value());
+
+    builder.eval_register_access(
+        frame.shard,
+        clk.clone() + AB::F::from_u32(MemoryAccessPosition::A as u32),
+        frame.op_a,
+        &frame.op_a_access,
+        is_real.clone(),
+    );
+
+    builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
+
+    // `(clk, pc)` chaining.
+    builder.receive_state(frame.shard, clk.clone(), pc, recv_next_pc, is_real.clone());
+    builder.send_state(
+        frame.shard,
+        clk + AB::Expr::from_u32(5) + num_extra_cycles,
+        next_pc,
+        next_next_pc,
+        is_real,
+    );
+}
+
+impl<F: PrimeField32> ITypeFrameCols<F> {
+    /// Populate the frame for a memory instruction.  Mirrors
+    /// [`InstructionFrameCols::populate_raw`] with the I-type columns dropped —
+    /// notably there is no `op_c` register access to populate, which also means
+    /// no byte events for one.
+    pub fn populate_from_mem(
+        &mut self,
+        event: &MemInstrEvent,
+        program: &Program,
+        blu: &mut impl ByteRecord,
+    ) {
+        let shard = event.shard;
+        self.shard = F::from_u32(shard);
+        let clk_16 = (event.clk & 0xffff) as u16;
+        let clk_8 = ((event.clk >> 16) & 0xff) as u8;
+        self.clk_16bit_limb = F::from_u16(clk_16);
+        self.clk_8bit_limb = F::from_u8(clk_8);
+        self.clk_24bit_limb = F::from_u32((event.clk >> 24) & 1);
+        blu.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::U16Range,
+            shard as u16,
+            0,
+            0,
+            0,
+        ));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
+
+        let instruction = program.fetch(event.pc);
+        // The shape this frame is specialised for.  A chip that ever violates
+        // this would silently commit an instruction the `Program` bus cannot
+        // match, so it is worth asserting where the assumption is made.
+        debug_assert!(
+            !instruction.imm_b && instruction.imm_c,
+            "an I-type frame received a non-I-type instruction: {:?}",
+            instruction.opcode
+        );
+        debug_assert!(instruction.op_b < 256, "op_b is not a register index");
+        // Dropping `op_c_access` also drops the byte events its `populate`
+        // emitted.  That is only sound because an immediate `op_c` never
+        // produces a register read to record — the AIR gave the access
+        // multiplicity `ONE - imm_c = 0`, so any event here was already
+        // unmatched on the byte bus.
+        debug_assert!(
+            matches!(event.c_record.tag, OptionMemoryRecordEnumTag::None),
+            "an I-type frame received a register read for op_c"
+        );
+        self.opcode = instruction.opcode.as_field::<F>();
+        self.op_a = F::from_u32(instruction.op_a as u32);
+        self.op_b = F::from_u32(instruction.op_b);
+        self.op_c = instruction.op_c.into();
+        self.op_a_0 = F::from_bool(instruction.op_a == 0);
+
+        *self.op_a_access.value_mut() = event.a.into();
+        *self.op_b_access.value_mut() = event.b.into();
+        match event.a_record.tag {
+            OptionMemoryRecordEnumTag::Read => {
+                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
+            }
+            OptionMemoryRecordEnumTag::Write => {
+                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
+            }
+            OptionMemoryRecordEnumTag::None => {}
+        }
+        if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
+            self.op_b_access.populate(event.b_record.read, blu);
+        }
+
+        // Read the op_a range check back off the COLUMN, not the event — see
+        // [`InstructionFrameCols::populate_raw`] for the no-link-jump case that
+        // makes the two differ.
+        let a_bytes = self
+            .op_a_access
+            .access
+            .value
+            .0
+            .iter()
+            .map(|x| x.as_canonical_u32())
+            .collect::<Vec<_>>();
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[0] as u8,
+            c: a_bytes[1] as u8,
+        });
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[2] as u8,
+            c: a_bytes[3] as u8,
+        });
+    }
+}

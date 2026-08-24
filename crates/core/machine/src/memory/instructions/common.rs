@@ -47,25 +47,22 @@ pub const NUM_MEMORY_INSTR_COMMON_COLS: usize = size_of::<MemoryInstrCommonCols<
 pub struct MemoryInstrCommonCols<T> {
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
     /// real row (every memory-instruction row is an instruction).
-    pub frame: crate::frame::InstructionFrameCols<T>,
+    pub frame: crate::frame::ITypeFrameCols<T>,
 
     /// The current/next program counter of the instruction.
     pub pc: T,
     pub next_pc: T,
 
-    /// The shard number.
-    pub shard: T,
-    /// The clock cycle number.
-    pub clk: T,
-
     /// The value of the first operand.
+    ///
+    /// This is the only operand the chip still witnesses: on a load whose
+    /// destination is register 0 the write is discarded, so the value the chip
+    /// computes and the value the register access commits legitimately differ.
+    /// `shard`, `clk`, `op_b`, `op_c` and the previous `op_a` are NOT columns —
+    /// the frame already commits them, and duplicating them cost 14 cells on
+    /// every memory row only to assert the copies equal.  See the accessors
+    /// below.
     pub op_a_value: Word<T>,
-    /// The value of the second operand.
-    pub op_b_value: Word<T>,
-    /// The value of the third operand.
-    pub op_c_value: Word<T>,
-    /// The previous value of `op_a` — the `hi` slot of the instruction bus.
-    pub prev_a_val: Word<T>,
 
     /// The effective address `op_b + op_c`, computed INLINE.
     ///
@@ -91,20 +88,41 @@ pub struct MemoryInstrCommonCols<T> {
     pub most_sig_bytes_zero: IsZeroOperation<T>,
 }
 
-impl<T> MemoryInstrCommonCols<T> {
+impl<T: Copy> MemoryInstrCommonCols<T> {
     /// The (unaligned) effective address word.
     #[inline]
-    pub fn addr_word(&self) -> Word<T>
-    where
-        T: Copy,
-    {
+    pub fn addr_word(&self) -> Word<T> {
         self.addr_add.value
+    }
+
+    /// The shard this instruction executed in.
+    #[inline]
+    pub fn shard(&self) -> T {
+        self.frame.shard
+    }
+
+    /// The value of the second operand — the frame's `op_b` register read.
+    #[inline]
+    pub fn op_b_value(&self) -> Word<T> {
+        self.frame.op_b_val()
+    }
+
+    /// The value of the third operand — the address offset.
+    #[inline]
+    pub fn op_c_value(&self) -> Word<T> {
+        self.frame.op_c_val()
+    }
+
+    /// The previous value of `op_a`, as committed by its register access.
+    #[inline]
+    pub fn prev_a_val(&self) -> Word<T> {
+        self.frame.op_a_access.prev_value
     }
 }
 
 /// Constrains everything that is common to all memory instructions:
 ///
-/// 1. `addr_word = op_b_value + op_c_value` (inlined — no `AddSub` row).
+/// 1. `addr_word = op_b + op_c` (inlined — no `AddSub` row).
 /// 2. `addr_word` is a canonical Koala-Bear word whose bytes are range checked.
 /// 3. `addr_word >= NUM_REGISTERS`, so memory instructions cannot alias registers.
 /// 4. `addr_ls_two_bits = addr_word[0] & 0b11`.
@@ -116,14 +134,14 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
     cols: &MemoryInstrCommonCols<AB::Var>,
     is_real: AB::Expr,
 ) -> AB::Expr {
-    // Verify `addr_word = op_b_value + op_c_value` in-place.  `AddOperation::eval`
+    // Verify `addr_word = op_b + op_c` in-place.  `AddOperation::eval`
     // range checks all four bytes of both operands and of the result, which
     // subsumes the explicit `slice_range_check_u8(addr_word[1..3])` the union
     // chip performed.
     AddOperation::<AB::F>::eval(
         builder,
-        cols.op_b_value,
-        cols.op_c_value,
+        cols.op_b_value(),
+        cols.op_c_value(),
         cols.addr_add,
         is_real.clone(),
     );
@@ -175,8 +193,9 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
     let addr_aligned = addr_word.reduce::<AB>() - cols.addr_ls_two_bits;
 
     builder.eval_memory_access(
-        cols.shard,
-        cols.clk + AB::F::from_u32(MemoryAccessPosition::Memory as u32),
+        cols.shard(),
+        crate::frame::clk_from_i_type_frame::<AB>(&cols.frame)
+            + AB::Expr::from_u32(MemoryAccessPosition::Memory as u32),
         addr_aligned.clone(),
         &cols.memory_access,
         is_real,
@@ -205,7 +224,7 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     // `(clk, pc)` chaining.  Memory instructions are sequential, never halt.
     // The plain stores read op_a immutably (the per-chip `op_a_immutable`
     // expr, NOT including SC).
-    crate::frame::eval_instruction_frame(
+    crate::frame::eval_i_type_frame(
         builder,
         &cols.frame,
         cols.pc.into(),
@@ -220,27 +239,19 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     builder
         .when(op_a_immutable.clone() * is_real.clone())
         .assert_word_eq(*cols.frame.op_a_access.value(), cols.frame.op_a_access.prev_value);
+    // Bind this chip's operand column to the frame's register-file view: the
+    // chip must compute on exactly the value the register access commits.  The
+    // load write is gated by op_a_0 (discarded); a STORE's immutable READ of
+    // register 0 must see 0.  The other operands need no binding — the chip
+    // now READS them straight off the frame rather than witnessing a copy.
     builder
-        .when(is_real.clone())
-        .assert_word_eq(cols.prev_a_val, cols.frame.op_a_access.prev_value);
-    // Bind this chip's operand columns to the frame's register-file view:
-    // the chip must compute on exactly the values the register accesses
-    // commit.  The load write is gated by op_a_0 (discarded); a STORE's
-    // immutable READ of register 0 must see 0.
-    builder
-        .when(is_real.clone())
-        .when_not(cols.frame.instruction.op_a_0)
+        .when(is_real)
+        .when_not(cols.frame.op_a_0)
         .assert_word_eq(cols.op_a_value, *cols.frame.op_a_access.value());
     builder
         .when(op_a_immutable)
-        .when(cols.frame.instruction.op_a_0)
+        .when(cols.frame.op_a_0)
         .assert_word_zero(cols.op_a_value);
-    builder.when(is_real.clone()).assert_word_eq(cols.op_b_value, cols.frame.op_b_val());
-    builder.when(is_real.clone()).assert_word_eq(cols.op_c_value, cols.frame.op_c_val());
-    // The chips keep private shard/clk columns for the Memory-position access:
-    // tie them to the frame (the Mul coupling).
-    builder.when(is_real.clone()).assert_eq(cols.shard, cols.frame.shard);
-    builder.when(is_real).assert_eq(cols.clk, crate::frame::clk_from_frame::<AB>(&cols.frame));
 }
 
 /// Constrains that the address is word aligned, for the opcodes that require it.
@@ -269,15 +280,10 @@ impl<F: PrimeField32> MemoryInstrCommonCols<F> {
         // Every memory-instruction row is a real instruction owning its frame.
         self.frame.populate_from_mem(event, program, blu);
 
-        self.shard = F::from_u32(event.shard);
-        debug_assert!(self.shard != F::ZERO);
-        self.clk = F::from_u32(event.clk);
+        debug_assert!(self.frame.shard != F::ZERO);
         self.pc = F::from_u32(event.pc);
         self.next_pc = F::from_u32(event.next_pc);
         self.op_a_value = event.a.into();
-        self.op_b_value = event.b.into();
-        self.op_c_value = event.c.into();
-        self.prev_a_val = event.prev_a_val.into();
 
         // Populate memory accesses for reading from memory.
         self.memory_access.populate(event.mem_access, blu);

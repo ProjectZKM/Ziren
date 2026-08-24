@@ -274,10 +274,9 @@ impl<F: PrimeField32> MachineAir<F> for LoadNarrowChip {
                 let cols: &mut LoadNarrowColumns<F> = row.borrow_mut();
                 self.event_to_row(event, cols, blu, &input.program);
             },
-            |row| {
-                let cols: &mut LoadNarrowColumns<F> = row.borrow_mut();
-                cols.common.frame.populate_dependency();
-            },
+            // A padding row needs no neutralising: the typed frame's register-access
+            // multiplicities are `is_real`, which is zero here already.
+            |_row| {},
         );
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
         Ok(trace)

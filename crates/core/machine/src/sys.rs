@@ -460,10 +460,10 @@ mod parity_tests {
                             crate::sys::$ffi(e, cols, instr);
                         }
                     },
-                    |row: &mut [F]| {
-                        let cols: &mut $ColsTy = row.borrow_mut();
-                        cols.common.frame.populate_dependency();
-                    },
+                    // The memory chips carry a typed I-type frame, whose
+                    // register-access multiplicities are `is_real`: a padding
+                    // row is simply zero and needs no neutralising.
+                    |_row: &mut [F]| {},
                 );
                 assert_traces_eq(
                     &rust,
