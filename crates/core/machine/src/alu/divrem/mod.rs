@@ -747,6 +747,10 @@ where
             eval_instruction_frame(
                 builder,
                 &local.frame,
+                local.is_div * Opcode::DIV.as_field::<AB::F>()
+                    + local.is_divu * Opcode::DIVU.as_field::<AB::F>()
+                    + local.is_mod * Opcode::MOD.as_field::<AB::F>()
+                    + local.is_modu * Opcode::MODU.as_field::<AB::F>(),
                 local.pc.into(),
                 local.next_pc.into(),
                 local.next_pc + AB::Expr::from_u32(4),

@@ -191,6 +191,9 @@ where
         crate::frame::eval_instruction_frame(
             builder,
             &local.frame,
+            local.is_meq * Opcode::MEQ.as_field::<AB::F>()
+                + local.is_mne * Opcode::MNE.as_field::<AB::F>()
+                + local.is_wsbh * Opcode::WSBH.as_field::<AB::F>(),
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),

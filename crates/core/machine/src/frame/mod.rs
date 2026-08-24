@@ -96,6 +96,8 @@ pub fn clk_from_frame<AB: AirBuilder>(frame: &InstructionFrameCols<AB::Var>) -> 
 pub fn eval_instruction_frame<AB>(
     builder: &mut AB,
     frame: &InstructionFrameCols<AB::Var>,
+    // The chip's OWN opcode, as an expression over its selector flags.
+    opcode: AB::Expr,
     // Exprs, not Vars: the control-flow and memory chips carry `next_pc` /
     // `next_next_pc` as `Word` columns and pass `word.reduce::<AB>()`.
     pc: AB::Expr,
@@ -129,6 +131,15 @@ pub fn eval_instruction_frame<AB>(
 
     // The instruction at `pc` must be the one the program committed to.
     builder.send_program(pc.clone(), frame.instruction, is_real.clone());
+
+    // ...and the chip's SELECTORS must be that instruction.  The opcode column
+    // is bound to the program table by the send above, but nothing ties the
+    // selectors to it: without this a row could satisfy every constraint while
+    // computing a different operation than the program holds at `pc`, and a
+    // chip could claim a `pc` belonging to another chip entirely.  The caller
+    // passes the opcode as an expression over its own selectors, so the two
+    // cannot disagree.
+    builder.when(is_real.clone()).assert_eq(frame.instruction.opcode, opcode);
 
     // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
     // Mirrors `CpuChip::eval_shard_clk` — the trace side must add the matching
@@ -628,6 +639,8 @@ fn i_type_instruction<AB: AirBuilder>(
 pub fn eval_i_type_frame<AB>(
     builder: &mut AB,
     frame: &ITypeFrameCols<AB::Var>,
+    // The chip's OWN opcode -- see [`eval_instruction_frame`].
+    opcode: AB::Expr,
     pc: AB::Expr,
     next_pc: AB::Expr,
     next_next_pc: AB::Expr,
@@ -641,6 +654,7 @@ pub fn eval_i_type_frame<AB>(
 
     // The instruction at `pc` must be the one the program committed to.
     builder.send_program(pc.clone(), i_type_instruction::<AB>(frame), is_real.clone());
+    builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
     // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
     builder.send_byte(

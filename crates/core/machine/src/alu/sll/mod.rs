@@ -434,6 +434,7 @@ where
         eval_instruction_frame(
             builder,
             &local.frame,
+            local.is_real * Opcode::SLL.as_field::<AB::F>(),
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),

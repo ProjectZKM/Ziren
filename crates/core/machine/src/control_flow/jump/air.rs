@@ -45,6 +45,9 @@ where
         crate::frame::eval_instruction_frame(
             builder,
             &local.frame,
+            local.is_jump * Opcode::Jump.as_field::<AB::F>()
+                + local.is_jumpi * Opcode::Jumpi.as_field::<AB::F>()
+                + local.is_jumpdirect * Opcode::JumpDirect.as_field::<AB::F>(),
             local.pc.into(),
             local.next_pc.reduce::<AB>(),
             local.next_next_pc.reduce::<AB>(),

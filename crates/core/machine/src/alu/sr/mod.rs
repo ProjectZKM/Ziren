@@ -557,6 +557,9 @@ where
         eval_instruction_frame(
             builder,
             &local.frame,
+            local.is_srl * Opcode::SRL.as_field::<AB::F>()
+                + local.is_sra * Opcode::SRA.as_field::<AB::F>()
+                + local.is_ror * Opcode::ROR.as_field::<AB::F>(),
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),

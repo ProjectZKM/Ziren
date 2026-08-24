@@ -68,6 +68,12 @@ where
         crate::frame::eval_instruction_frame(
             builder,
             &local.frame,
+            local.is_beq * Opcode::BEQ.as_field::<AB::F>()
+                + local.is_bne * Opcode::BNE.as_field::<AB::F>()
+                + local.is_bltz * Opcode::BLTZ.as_field::<AB::F>()
+                + local.is_bgez * Opcode::BGEZ.as_field::<AB::F>()
+                + local.is_blez * Opcode::BLEZ.as_field::<AB::F>()
+                + local.is_bgtz * Opcode::BGTZ.as_field::<AB::F>(),
             local.pc.into(),
             local.next_pc.reduce::<AB>(),
             local.next_next_pc.reduce::<AB>(),

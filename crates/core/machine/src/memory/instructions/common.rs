@@ -218,7 +218,6 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     op_a_immutable: AB::Expr,
     is_real: AB::Expr,
 ) {
-    let _ = opcode;
 
     // A real instruction carries its own program fetch, register access and
     // `(clk, pc)` chaining.  Memory instructions are sequential, never halt.
@@ -227,6 +226,7 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     crate::frame::eval_i_type_frame(
         builder,
         &cols.frame,
+        opcode,
         cols.pc.into(),
         cols.next_pc.into(),
         cols.next_pc + AB::Expr::from_u32(4),

@@ -54,6 +54,14 @@ where
         crate::frame::eval_instruction_frame(
             builder,
             &local.frame,
+            local.is_sext * Opcode::SEXT.as_field::<AB::F>()
+                + local.is_ext * Opcode::EXT.as_field::<AB::F>()
+                + local.is_ins * Opcode::INS.as_field::<AB::F>()
+                + local.is_maddu * Opcode::MADDU.as_field::<AB::F>()
+                + local.is_msubu * Opcode::MSUBU.as_field::<AB::F>()
+                + local.is_madd * Opcode::MADD.as_field::<AB::F>()
+                + local.is_msub * Opcode::MSUB.as_field::<AB::F>()
+                + local.is_teq * Opcode::TEQ.as_field::<AB::F>(),
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
