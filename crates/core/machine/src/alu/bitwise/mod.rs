@@ -313,6 +313,75 @@ mod tests {
         println!("{:?}", trace.values)
     }
 
+    /// Build a 1024-row bitwise trace of `OR`s whose operands share no set
+    /// bits, optionally swapping the chip's opcode SELECTOR to XOR first.
+    ///
+    /// `OR` and `XOR` agree exactly on disjoint operands, so the swap leaves
+    /// every VALUE in the trace untouched -- the result and the byte lookup
+    /// both stay valid.  And the frame takes its opcode from
+    /// `program.fetch(pc)` while the selectors come from the EVENT, so flipping
+    /// the event alone IS the malicious assignment: there is no other column to
+    /// fix up, and the row still claims the `OR` the program holds at that pc.
+    fn or_trace(swap_selector_to_xor: bool) -> RowMajorMatrix<KoalaBear> {
+        let (b, c) = (0b1100u32, 0b0011u32);
+        assert_eq!(b | c, b ^ c, "the forgery needs OR and XOR to agree here");
+
+        // `p3_uni_stark::prove` needs a power-of-two height.
+        let mut instructions = Vec::new();
+        for _ in 0..1024 {
+            instructions.extend(alu_op(Opcode::OR, b, c));
+        }
+        let mut shard = run_instructions(instructions);
+        assert_eq!(shard.bitwise_events.len(), 1024);
+
+        if swap_selector_to_xor {
+            for event in &mut shard.bitwise_events {
+                assert_eq!(event.opcode, Opcode::OR);
+                event.opcode = Opcode::XOR;
+            }
+        }
+
+        BitwiseChip::default().generate_trace(&shard, &mut ExecutionRecord::default()).unwrap()
+    }
+
+    /// The control.  Without it the forgery test below could pass for the wrong
+    /// reason -- any harness mistake also fails.
+    #[test]
+    fn honest_or_trace_proves() {
+        let config = KoalaBearPoseidon2::new();
+        let mut challenger = config.challenger();
+        let chip = BitwiseChip::default();
+        let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(
+            &config,
+            &chip,
+            &mut challenger,
+            or_trace(false),
+        );
+        let mut challenger = config.challenger();
+        uni_stark_verify(&config, &chip, &mut challenger, &proof).unwrap();
+    }
+
+    /// A chip's opcode SELECTORS must be the instruction the program holds at
+    /// `pc`.  Nothing enforced that until the frame began binding them:
+    /// `frame.instruction.opcode` is pinned to the program by the `Program`
+    /// lookup, but the selectors -- which are what actually drive the result --
+    /// floated free of it, so a row could compute XOR while claiming OR.
+    #[test]
+    #[should_panic]
+    fn opcode_substitution_is_rejected() {
+        let config = KoalaBearPoseidon2::new();
+        let mut challenger = config.challenger();
+        let chip = BitwiseChip::default();
+        let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(
+            &config,
+            &chip,
+            &mut challenger,
+            or_trace(true),
+        );
+        let mut challenger = config.challenger();
+        uni_stark_verify(&config, &chip, &mut challenger, &proof).unwrap();
+    }
+
     #[test]
     fn prove_koalabear() {
         let config = KoalaBearPoseidon2::new();
