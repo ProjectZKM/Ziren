@@ -81,15 +81,6 @@ where
             .when(is_real.clone())
             .assert_word_eq(*local.frame.op_a_access.value(), local.frame.op_a_access.prev_value);
 
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit.  UNGATED by op_a_0: a read of register 0 must see 0, which
-        // is exactly what the access value is forced to.
-        builder
-            .when(is_real.clone())
-            .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
-        builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
-        builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
 
         // Evaluate program counter constraints.
         {
@@ -118,7 +109,7 @@ where
             AddOperation::<AB::F>::eval(
                 builder,
                 local.next_pc,
-                local.op_c_value,
+                local.frame.op_c_val(),
                 local.target_add,
                 local.is_branching.into(),
             );
@@ -203,8 +194,8 @@ where
         // untouched: `a_lt_b = (a as i32) < (b as i32)` exactly as before.
         LtOperation::<AB::F>::eval(
             builder,
-            local.op_a_value,
-            local.op_b_value,
+            (*local.frame.op_a_access.value()),
+            local.frame.op_b_val(),
             &local.compare,
             is_real.clone(),
             AB::Expr::ZERO,

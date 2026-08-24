@@ -58,11 +58,7 @@ pub struct LtCols<T> {
     /// The output operand.
     pub a: Word<T>,
 
-    /// The first input operand.
-    pub b: Word<T>,
 
-    /// The second input operand.
-    pub c: Word<T>,
 
     /// Boolean flag to indicate which byte pair differs if the operands are not equal.
     pub byte_flags: [T; 4],
@@ -218,8 +214,6 @@ impl LtChip {
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
         cols.a = Word(a.map(F::from_u8));
-        cols.b = Word(b.map(F::from_u8));
-        cols.c = Word(c.map(F::from_u8));
 
         // If this is SLT, mask the MSB of b & c before computing cols.bits.
         let masked_b = b[3] & 0x7f;
@@ -309,6 +303,9 @@ where
         let local: &LtCols<AB::Var> = (*local).borrow();
 
         let is_real = local.is_slt + local.is_sltu;
+        // The inputs live in the frame's register reads, not in columns here.
+        let op_b = local.frame.op_b_val();
+        let op_c = local.frame.op_c_val();
 
         // We can compute the signed set-less-than as follows:
         // SLT (signed) = b_s * (1 - c_s) + (b_s == c_s) * SLTU(b_<s, c_<s)
@@ -327,11 +324,11 @@ where
         // SLT = b_bit * (1 - c_bit) + (b_bit == c_bit) * SLTU(b_comp, c_comp)
 
         // First, we set up the values of `b_comp` and `c_comp`.
-        let mut b_comp: Word<AB::Expr> = local.b.map(|x| x.into());
-        let mut c_comp: Word<AB::Expr> = local.c.map(|x| x.into());
+        let mut b_comp: Word<AB::Expr> = op_b.map(|x| x.into());
+        let mut c_comp: Word<AB::Expr> = op_c.map(|x| x.into());
 
-        b_comp[3] = local.b[3] * local.is_sltu + local.b_masked * local.is_slt;
-        c_comp[3] = local.c[3] * local.is_sltu + local.c_masked * local.is_slt;
+        b_comp[3] = op_b[3] * local.is_sltu + local.b_masked * local.is_slt;
+        c_comp[3] = op_c[3] * local.is_sltu + local.c_masked * local.is_slt;
 
         // Constrain the `masked_b` and `masked_c` values via lookup.
         //
@@ -339,14 +336,14 @@ where
         builder.send_byte(
             ByteOpcode::AND.as_field::<AB::F>(),
             local.b_masked,
-            local.b[3],
+            op_b[3],
             AB::F::from_u8(0x7f),
             is_real.clone(),
         );
         builder.send_byte(
             ByteOpcode::AND.as_field::<AB::F>(),
             local.c_masked,
-            local.c[3],
+            op_c[3],
             AB::F::from_u8(0x7f),
             is_real.clone(),
         );
@@ -357,8 +354,8 @@ where
 
         // Assert the correctness of `local.msb_b` and `local.msb_c` using the mask.
         let inv_128 = AB::F::from_u32(128).inverse();
-        builder.assert_eq(local.msb_b, (local.b[3] - local.b_masked) * inv_128);
-        builder.assert_eq(local.msb_c, (local.c[3] - local.c_masked) * inv_128);
+        builder.assert_eq(local.msb_b, (op_b[3] - local.b_masked) * inv_128);
+        builder.assert_eq(local.msb_c, (op_c[3] - local.c_masked) * inv_128);
 
         // Constrain that when is_sign_eq = (bit_b == bit_c).
 
@@ -479,8 +476,6 @@ where
             .when(is_real.clone())
             .when_not(local.frame.instruction.op_a_0)
             .assert_word_eq(local.a, *local.frame.op_a_access.value());
-        builder.when(is_real.clone()).assert_word_eq(local.b, local.frame.op_b_val());
-        builder.when(is_real.clone()).assert_word_eq(local.c, local.frame.op_c_val());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and

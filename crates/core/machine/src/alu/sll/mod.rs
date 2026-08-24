@@ -79,11 +79,7 @@ pub struct ShiftLeftCols<T> {
     /// The output operand.
     pub a: Word<T>,
 
-    /// The first input operand.
-    pub b: Word<T>,
 
-    /// The second input operand.
-    pub c: Word<T>,
 
     /// The least significant byte of `c`. Used to verify `shift_by_n_bits` and `shift_by_n_bytes`.
     pub c_least_sig_byte: [T; BYTE_SIZE],
@@ -251,8 +247,6 @@ impl ShiftLeft {
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
         cols.a = Word(a.map(F::from_u8));
-        cols.b = Word(b.map(F::from_u8));
-        cols.c = Word(c.map(F::from_u8));
         cols.is_real = F::ONE;
         for i in 0..BYTE_SIZE {
             cols.c_least_sig_byte[i] = F::from_u32((event.c >> i) & 1);
@@ -313,6 +307,9 @@ where
         let main = builder.main();
         let local = main.current_slice();
         let local: &ShiftLeftCols<AB::Var> = (*local).borrow();
+        // The inputs are the frame's register reads, not columns of this chip.
+        let op_b = local.frame.op_b_val();
+        let op_c = local.frame.op_c_val();
 
         let zero: AB::Expr = AB::F::ZERO.into();
         let one: AB::Expr = AB::F::ONE.into();
@@ -329,7 +326,7 @@ where
             let val: AB::Expr = AB::F::from_u32(1 << i).into();
             c_byte_sum = c_byte_sum.clone() + val * local.c_least_sig_byte[i];
         }
-        builder.assert_eq(c_byte_sum, local.c[0]);
+        builder.assert_eq(c_byte_sum, op_c[0]);
 
         // Check shift_by_n_bits[i] is 1 iff i = num_bits_to_shift.
         let mut num_bits_to_shift = zero.clone();
@@ -356,7 +353,7 @@ where
         // Check bit_shift_result = b * bit_shift_multiplier by using bit_shift_result_carry to
         // carry-propagate.
         for i in 0..WORD_SIZE {
-            let mut v = local.b[i] * local.bit_shift_multiplier
+            let mut v = op_b[i] * local.bit_shift_multiplier
                 - local.bit_shift_result_carry[i] * base.clone();
             if i > 0 {
                 v = v.clone() + local.bit_shift_result_carry[i - 1].into();
@@ -429,8 +426,6 @@ where
             .when(local.is_real)
             .when_not(local.frame.instruction.op_a_0)
             .assert_word_eq(local.a, *local.frame.op_a_access.value());
-        builder.when(local.is_real).assert_word_eq(local.b, local.frame.op_b_val());
-        builder.when(local.is_real).assert_word_eq(local.c, local.frame.op_c_val());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and

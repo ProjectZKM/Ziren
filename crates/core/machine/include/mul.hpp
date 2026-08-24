@@ -34,8 +34,6 @@ namespace zkm_core_machine_sys::mul {
                     },
                 }
             );
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
         }
 
         auto b = u32_to_le_bytes(event.b);
@@ -118,8 +116,6 @@ namespace zkm_core_machine_sys::mul {
         }
         write_word_from_u32_v2<F>(cols.hi, event.hi);
         write_word_from_u32_v2<F>(cols.a, event.a);
-        write_word_from_u32_v2<F>(cols.b, event.b);
-        write_word_from_u32_v2<F>(cols.c, event.c);
         cols.is_real = F::one();
         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
         cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);

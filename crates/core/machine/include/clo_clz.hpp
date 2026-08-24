@@ -21,7 +21,6 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.next_pc = F::from_canonical_u32(event.next_pc);
 
     write_word_from_u32_v2<F>(cols.a, event.a);
-    write_word_from_u32_v2<F>(cols.b, event.b);
 
     cols.is_real = F::one();
     cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);

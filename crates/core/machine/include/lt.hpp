@@ -24,8 +24,6 @@ __ZKM_HOSTDEV__ void event_to_row(
     auto c = u32_to_le_bytes(event.c);
 
     write_word_from_le_bytes<F>(cols.a, a);
-    write_word_from_le_bytes<F>(cols.b, b);
-    write_word_from_le_bytes<F>(cols.c, c);
 
     // If this is SLT, mask the MSB of b & c before computing cols.bits.
     uint8_t masked_b = b[3] & 0x7f;

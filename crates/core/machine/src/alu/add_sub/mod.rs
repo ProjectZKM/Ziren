@@ -56,8 +56,6 @@ pub struct AddSubCols<T> {
     /// The first input operand.  This will be `b` for add operations and `a` for sub operations.
     pub operand_1: Word<T>,
 
-    /// The second input operand.  This will be `c` for both operations.
-    pub operand_2: Word<T>,
 
     /// Flag indicating whether the opcode is `ADD`.
     #[picus(selector)]
@@ -206,7 +204,6 @@ impl AddSubChip {
 
         cols.add_operation.populate(blu, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
-        cols.operand_2 = Word::from(operand_2);
     }
 }
 
@@ -229,7 +226,7 @@ where
         AddOperation::<AB::F>::eval(
             builder,
             local.operand_1,
-            local.operand_2,
+            local.frame.op_c_val(),
             local.add_operation,
             local.is_add + local.is_sub,
         );
@@ -242,8 +239,10 @@ where
         // Bind this chip's operand columns to the frame's register-file view:
         // the chip must compute on exactly the values the register accesses
         // commit (the Instruction bus that used to carry them is gone).  For
-        // ADD `a = operand_1 + operand_2`; for SUB the roles of `a` and `b`
-        // swap (`operand_1 = a`, `add_operation.value = b`).
+        // ADD `a = operand_1 + op_c`; for SUB the roles of `a` and `b` swap
+        // (`operand_1 = a`, `add_operation.value = b`).  `operand_1` stays a
+        // column because it SELECTS between two frame values; the second
+        // operand is always `op_c`, so it is read straight off the frame.
         builder
             .when(local.is_add)
             .when_not(local.frame.instruction.op_a_0)
@@ -256,7 +255,6 @@ where
         builder
             .when(local.is_sub)
             .assert_word_eq(local.add_operation.value, local.frame.op_b_val());
-        builder.when(is_real.clone()).assert_word_eq(local.operand_2, local.frame.op_c_val());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and

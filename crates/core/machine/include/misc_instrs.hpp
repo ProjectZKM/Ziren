@@ -133,11 +133,7 @@ namespace zkm_core_machine_sys::misc_instrs {
         cols.next_pc = F::from_canonical_u32(event.next_pc);
 
         write_word_from_u32_v2<F>(cols.op_a_value, event.a);
-        write_word_from_u32_v2<F>(cols.op_b_value, event.b);
-        write_word_from_u32_v2<F>(cols.op_c_value, event.c);
         write_word_from_u32_v2<F>(cols.prev_a_value, event.prev_a);
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
 
         cols.is_sext = F::from_bool(event.opcode == Opcode::SEXT);
         cols.is_ext = F::from_bool(event.opcode == Opcode::EXT);

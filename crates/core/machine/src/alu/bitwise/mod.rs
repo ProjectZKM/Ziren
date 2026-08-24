@@ -44,13 +44,12 @@ pub struct BitwiseCols<T> {
     pub next_pc: T,
 
     /// The output operand.
+    ///
+    /// Witnessed because it is what the chip COMPUTES: on a row whose
+    /// destination is register 0 the write is discarded, so it legitimately
+    /// differs from the value the register access commits.  The two INPUTS are
+    /// not columns -- they are the frame's register reads, read directly.
     pub a: Word<T>,
-
-    /// The first input operand.
-    pub b: Word<T>,
-
-    /// The second input operand.
-    pub c: Word<T>,
 
     /// If the opcode is NOR.
     #[picus(selector)]
@@ -200,8 +199,6 @@ impl BitwiseChip {
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
         cols.a = Word::from(event.a);
-        cols.b = Word::from(event.b);
-        cols.c = Word::from(event.c);
 
         cols.is_nor = F::from_bool(event.opcode == Opcode::NOR);
         cols.is_xor = F::from_bool(event.opcode == Opcode::XOR);
@@ -244,7 +241,9 @@ where
 
         // Get a multiplicity of `1` only for a true row.
         let mult = local.is_xor + local.is_or + local.is_and + local.is_nor;
-        for ((a, b), c) in local.a.into_iter().zip(local.b).zip(local.c) {
+        for ((a, b), c) in
+            local.a.into_iter().zip(local.frame.op_b_val()).zip(local.frame.op_c_val())
+        {
             builder.send_byte(opcode.clone(), a, b, c, mult.clone());
         }
 
@@ -262,8 +261,6 @@ where
             .when(is_real.clone())
             .when_not(local.frame.instruction.op_a_0)
             .assert_word_eq(local.a, *local.frame.op_a_access.value());
-        builder.when(is_real.clone()).assert_word_eq(local.b, local.frame.op_b_val());
-        builder.when(is_real.clone()).assert_word_eq(local.c, local.frame.op_c_val());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and

@@ -105,16 +105,11 @@ impl SyscallInstrsChip {
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
         cols.state_recv_next_pc = F::from_u32(event.recv_next_pc);
-        cols.shard = F::from_u32(event.shard);
-        cols.clk = F::from_u32(event.clk);
 
         cols.op_a_value = event.a_record.value.into();
-        cols.op_b_value = event.arg1.into();
-        cols.op_c_value = event.arg2.into();
-        cols.prev_a_value = event.a_record.prev_value.into();
         cols.syscall_id = F::from_u32(event.syscall_id);
         let syscall_id = F::from_u32(event.a_record.prev_value & 0xffff);
-        let num_cycles = cols.prev_a_value[3];
+        let num_cycles = cols.frame.op_a_access.prev_value[3];
 
         cols.num_extra_cycles = num_cycles;
         cols.is_halt = F::from_bool(
@@ -164,7 +159,7 @@ impl SyscallInstrsChip {
         if syscall_id == F::from_u32(SyscallCode::COMMIT.syscall_id())
             || syscall_id == F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
         {
-            let digest_idx = cols.op_b_value.to_u32() as usize;
+            let digest_idx = cols.frame.op_b_val().to_u32() as usize;
             cols.index_bitmap[digest_idx] = F::ONE;
         }
 

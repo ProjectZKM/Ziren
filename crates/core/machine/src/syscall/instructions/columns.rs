@@ -15,8 +15,6 @@ pub struct SyscallInstrColumns<T> {
 
     pub pc: T,
     pub next_pc: T,
-    pub shard: T,
-    pub clk: T,
     pub num_extra_cycles: T,
 
     /// The `next_pc` RECEIVED on the `State` bus — a COLUMN because interaction
@@ -37,9 +35,6 @@ pub struct SyscallInstrColumns<T> {
     pub syscall_id: T,
 
     pub op_a_value: Word<T>,
-    pub op_b_value: Word<T>,
-    pub op_c_value: Word<T>,
-    pub prev_a_value: Word<T>,
 
     pub is_enter_unconstrained: IsZeroOperation<T>,
     pub is_hint_len: IsZeroOperation<T>,

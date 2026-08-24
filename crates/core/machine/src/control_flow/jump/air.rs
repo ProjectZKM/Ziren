@@ -61,8 +61,6 @@ where
             .when(is_real.clone())
             .when_not(local.frame.instruction.op_a_0)
             .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
-        builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
-        builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
 
         // Verify that the local.next_pc + 4 is op_a_value for all jump instructions.
         builder.when(is_real.clone()).assert_eq(
@@ -101,7 +99,7 @@ where
         // We now constrain `next_next_pc` for J/JR/JALR.
         builder
             .when(local.is_jump + local.is_jumpi)
-            .assert_word_eq(local.next_next_pc, local.op_b_value);
+            .assert_word_eq(local.next_next_pc, local.frame.op_b_val());
 
         // Verify that the next_next_pc is calculated correctly for BAL
         // instructions, IN-ROW (the AddSub request row is gone).
@@ -109,7 +107,7 @@ where
         crate::operations::AddOperation::<AB::F>::eval(
             builder,
             local.next_pc,
-            local.op_b_value,
+            local.frame.op_b_val(),
             local.target_add,
             local.is_jumpdirect.into(),
         );

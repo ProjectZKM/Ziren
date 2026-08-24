@@ -30,10 +30,6 @@ pub struct JumpColumns<T> {
 
     /// The value of the first operand.
     pub op_a_value: Word<T>,
-    /// The value of the second operand.
-    pub op_b_value: Word<T>,
-    /// The value of the third operand.
-    pub op_c_value: Word<T>,
 
     /// Jump Instructions Selectors.
     #[picus(selector)]

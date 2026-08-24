@@ -27,9 +27,6 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.is_blez = F::from_bool(event.opcode == Opcode::BLEZ);
     cols.is_bgez = F::from_bool(event.opcode == Opcode::BGEZ);
 
-    write_word_from_u32_v2<F>(cols.op_a_value, event.a);
-    write_word_from_u32_v2<F>(cols.op_b_value, event.b);
-    write_word_from_u32_v2<F>(cols.op_c_value, event.c);
 
     bool a_eq_b = false;
     if (event.a == event.b) {

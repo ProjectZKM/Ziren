@@ -116,11 +116,7 @@ impl MiscInstrsChip {
         cols.next_pc = F::from_u32(event.next_pc);
 
         cols.op_a_value = event.a.into();
-        cols.op_b_value = event.b.into();
-        cols.op_c_value = event.c.into();
         cols.prev_a_value = event.prev_a.into();
-        cols.shard = F::from_u32(event.shard);
-        cols.clk = F::from_u32(event.clk);
 
         cols.is_sext = F::from_bool(matches!(event.opcode, Opcode::SEXT));
         cols.is_ext = F::from_bool(matches!(event.opcode, Opcode::EXT));

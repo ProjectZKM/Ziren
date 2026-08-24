@@ -20,8 +20,6 @@ namespace zkm_core_machine_sys::shift_right {
         {
             cols.pc = F::from_canonical_u32(event.pc);
             cols.next_pc = F::from_canonical_u32(event.next_pc);
-            write_word_from_u32_v2<F>(cols.b, event.b);
-            write_word_from_u32_v2<F>(cols.c, event.c);
 
             cols.b_msb = F::from_canonical_u32((event.b >> 31) & 1);
 

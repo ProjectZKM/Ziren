@@ -44,10 +44,6 @@ pub struct MovCondCols<T> {
     /// The value of the second operand.
     pub op_a_value: Word<T>,
     pub prev_a_value: Word<T>,
-    /// The value of the second operand.
-    pub op_b_value: Word<T>,
-    /// The value of the third operand.
-    pub op_c_value: Word<T>,
 
     /// Whether c equals 0.
     pub c_eq_0: IsZeroWordOperation<T>,
@@ -164,8 +160,6 @@ impl MovCondChip {
         cols.next_pc = F::from_u32(event.next_pc);
 
         cols.op_a_value = event.a.into();
-        cols.op_b_value = event.b.into();
-        cols.op_c_value = event.c.into();
         cols.prev_a_value = event.prev_a.into();
 
         cols.c_eq_0.populate(event.c);
@@ -218,12 +212,10 @@ where
             .when(is_real.clone())
             .when_not(local.frame.instruction.op_a_0)
             .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
-        builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
-        builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
 
         IsZeroWordOperation::<AB::F>::eval(
             builder,
-            local.op_c_value.map(|x| x.into()),
+            local.frame.op_c_val().map(|x| x.into()),
             local.c_eq_0,
             is_real.clone(),
         );
@@ -235,7 +227,7 @@ where
             builder
                 .when(local.is_meq)
                 .when(local.c_eq_0.result)
-                .assert_word_eq(local.op_a_value, local.op_b_value);
+                .assert_word_eq(local.op_a_value, local.frame.op_b_val());
 
             builder
                 .when(local.is_meq)
@@ -245,7 +237,7 @@ where
             builder
                 .when(local.is_mne)
                 .when_not(local.c_eq_0.result)
-                .assert_word_eq(local.op_a_value, local.op_b_value);
+                .assert_word_eq(local.op_a_value, local.frame.op_b_val());
 
             builder
                 .when(local.is_mne)
@@ -268,13 +260,13 @@ impl MovCondChip {
         builder: &mut AB,
         local: &MovCondCols<AB::Var>,
     ) {
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[0], local.op_b_value[1]);
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[0], local.frame.op_b_val()[1]);
 
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[1], local.op_b_value[0]);
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[1], local.frame.op_b_val()[0]);
 
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[2], local.op_b_value[3]);
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[2], local.frame.op_b_val()[3]);
 
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[3], local.op_b_value[2]);
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[3], local.frame.op_b_val()[2]);
     }
 }
 

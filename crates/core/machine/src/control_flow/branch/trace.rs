@@ -117,9 +117,6 @@ impl BranchChip {
         cols.is_blez = F::from_bool(matches!(event.opcode, Opcode::BLEZ));
         cols.is_bgez = F::from_bool(matches!(event.opcode, Opcode::BGEZ));
 
-        cols.op_a_value = event.a.into();
-        cols.op_b_value = event.b.into();
-        cols.op_c_value = event.c.into();
 
         let a_eq_b = event.a == event.b;
 

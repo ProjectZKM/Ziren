@@ -85,14 +85,6 @@ where
             .when(local.is_teq)
             .when(local.frame.instruction.op_a_0)
             .assert_word_zero(local.op_a_value);
-        builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
-        builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
-        // The HI-writing group keeps private shard/clk columns for its memory
-        // access (the Mul coupling): tie them to the frame exactly there.
-        builder.when(is_check_memory.clone()).assert_eq(local.shard, local.frame.shard);
-        builder
-            .when(is_check_memory)
-            .assert_eq(local.clk, crate::frame::clk_from_frame::<AB>(&local.frame));
 
         self.eval_ext(builder, local);
         self.eval_ins(builder, local);
@@ -102,8 +94,8 @@ where
         builder
             .when(local.is_sext + local.is_ext + local.is_teq)
             .assert_word_zero(local.prev_a_value);
-        builder.when(local.is_ins + local.is_ext).assert_zero(local.op_c_value[2]);
-        builder.when(local.is_ins + local.is_ext).assert_zero(local.op_c_value[3]);
+        builder.when(local.is_ins + local.is_ext).assert_zero(local.frame.op_c_val()[2]);
+        builder.when(local.is_ins + local.is_ext).assert_zero(local.frame.op_c_val()[3]);
     }
 }
 
@@ -119,7 +111,7 @@ impl MiscInstrsChip {
         IsEqualWordOperation::<AB::F>::eval(
             builder,
             local.op_a_value.map(|x| x.into()),
-            local.op_b_value.map(|x| x.into()),
+            local.frame.op_b_val().map(|x| x.into()),
             sext_cols.a_eq_b,
             local.is_teq.into(),
         );
@@ -136,13 +128,13 @@ impl MiscInstrsChip {
         );
 
         // op_c can be 0 (for seb) and 1(for seh).
-        builder.when(local.is_sext).assert_bool(local.op_c_value[0]);
+        builder.when(local.is_sext).assert_bool(local.frame.op_c_val()[0]);
         builder.when(local.is_sext).assert_bool(sext_cols.is_seb);
         builder.when(local.is_sext).assert_bool(sext_cols.is_seh);
         builder.when(local.is_sext).assert_one(sext_cols.is_seh + sext_cols.is_seb);
 
-        builder.when(local.is_sext).when(sext_cols.is_seb).assert_zero(local.op_c_value[0]);
-        builder.when(local.is_sext).when(sext_cols.is_seh).assert_one(local.op_c_value[0]);
+        builder.when(local.is_sext).when(sext_cols.is_seb).assert_zero(local.frame.op_c_val()[0]);
+        builder.when(local.is_sext).when(sext_cols.is_seh).assert_one(local.frame.op_c_val()[0]);
 
         // For seb, sig_byte is byte 0 of op_a.
         // For seh, sig_byte is byte 1 of op_a.
@@ -150,12 +142,12 @@ impl MiscInstrsChip {
             builder
                 .when(local.is_sext)
                 .when(sext_cols.is_seb)
-                .assert_eq(local.op_b_value[0], sext_cols.sig_byte);
+                .assert_eq(local.frame.op_b_val()[0], sext_cols.sig_byte);
 
             builder
                 .when(local.is_sext)
                 .when(sext_cols.is_seh)
-                .assert_eq(local.op_b_value[1], sext_cols.sig_byte);
+                .assert_eq(local.frame.op_b_val()[1], sext_cols.sig_byte);
         }
 
         // Constraints for result value:
@@ -164,7 +156,7 @@ impl MiscInstrsChip {
         {
             let sign_byte = AB::Expr::from_u8(0xFF) * sext_cols.most_sig_bit;
 
-            builder.when(local.is_sext).assert_eq(local.op_a_value[0], local.op_b_value[0]);
+            builder.when(local.is_sext).assert_eq(local.op_a_value[0], local.frame.op_b_val()[0]);
 
             builder
                 .when(local.is_sext)
@@ -174,7 +166,7 @@ impl MiscInstrsChip {
             builder
                 .when(local.is_sext)
                 .when(sext_cols.is_seh)
-                .assert_eq(local.op_a_value[1], local.op_b_value[1]);
+                .assert_eq(local.op_a_value[1], local.frame.op_b_val()[1]);
 
             builder.when(local.is_sext).assert_eq(local.op_a_value[2], sign_byte.clone());
 
@@ -197,8 +189,8 @@ impl MiscInstrsChip {
         // Prove op_b * op_c IN-ROW (the MULT/MULTU request row is gone).
         crate::operations::MulOperation::<AB::F>::eval(
             builder,
-            local.op_b_value,
-            local.op_c_value,
+            local.frame.op_b_val(),
+            local.frame.op_c_val(),
             &local.maddsub_mul,
             is_sign,
             is_unsign,
@@ -247,8 +239,8 @@ impl MiscInstrsChip {
         );
 
         builder.eval_memory_access(
-            local.shard,
-            local.clk + AB::F::from_u32(MemoryAccessPosition::HI as u32),
+            local.frame.shard,
+            crate::frame::clk_from_frame::<AB>(&local.frame) + AB::F::from_u32(MemoryAccessPosition::HI as u32),
             AB::F::from_u32(33),
             &maddsub_cols.op_hi_access,
             is_real.clone(),
@@ -315,7 +307,7 @@ impl MiscInstrsChip {
             ShiftLeftOperation::<AB::F>::eval(
                 builder,
                 ins_cols.sll_val.map(|x| x.into()),
-                local.op_b_value.map(|x| x.into()),
+                local.frame.op_b_val().map(|x| x.into()),
                 shift_word(AB::Expr::from_u32(31) - ins_cols.msb + ins_cols.lsb),
                 &local.ins_sll,
                 local.is_ins.into(),
@@ -342,7 +334,7 @@ impl MiscInstrsChip {
         }
         // op_c = (msb << 5) + lsb
         builder.when(local.is_ins).assert_eq(
-            local.op_c_value.reduce::<AB>(),
+            local.frame.op_c_val().reduce::<AB>(),
             ins_cols.lsb + ins_cols.msb * AB::Expr::from_u32(32),
         );
 
@@ -390,7 +382,7 @@ impl MiscInstrsChip {
             ShiftLeftOperation::<AB::F>::eval(
                 builder,
                 ext_cols.sll_val.map(|x| x.into()),
-                local.op_b_value.map(|x| x.into()),
+                local.frame.op_b_val().map(|x| x.into()),
                 Word([
                     AB::Expr::from_u32(31) - ext_cols.lsb - ext_cols.msbd,
                     zero(),
@@ -415,7 +407,7 @@ impl MiscInstrsChip {
 
         // op_c = (msbd << 5) + lsb
         builder.when(local.is_ext).assert_eq(
-            local.op_c_value.reduce::<AB>(),
+            local.frame.op_c_val().reduce::<AB>(),
             ext_cols.lsb + ext_cols.msbd * AB::Expr::from_u32(32),
         );
 

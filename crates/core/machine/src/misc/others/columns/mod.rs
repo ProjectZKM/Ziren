@@ -23,10 +23,6 @@ pub struct MiscInstrColumns<T: Copy> {
     /// real row (every Misc row is an instruction).
     pub frame: crate::frame::InstructionFrameCols<T>,
 
-    /// The shard number.
-    pub shard: T,
-    /// The clock cycle number.
-    pub clk: T,
     /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
@@ -34,10 +30,6 @@ pub struct MiscInstrColumns<T: Copy> {
     /// The value of the second operand.
     pub op_a_value: Word<T>,
     pub prev_a_value: Word<T>,
-    /// The value of the second operand.
-    pub op_b_value: Word<T>,
-    /// The value of the third operand.
-    pub op_c_value: Word<T>,
 
     /// Columns for specific type of instructions.
     pub misc_specific_columns: MiscSpecificCols<T>,

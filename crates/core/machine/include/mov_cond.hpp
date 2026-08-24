@@ -20,8 +20,6 @@ namespace zkm_core_machine_sys::mov_cond {
         cols.next_pc = F::from_canonical_u32(event.next_pc);
 
         write_word_from_u32_v2<F>(cols.op_a_value, event.a);
-        write_word_from_u32_v2<F>(cols.op_b_value, event.b);
-        write_word_from_u32_v2<F>(cols.op_c_value, event.c);
         write_word_from_u32_v2<F>(cols.prev_a_value, event.prev_a);
 
         populate_is_zero_word_operaion(cols.c_eq_0, u32_to_word<F>(event.c));

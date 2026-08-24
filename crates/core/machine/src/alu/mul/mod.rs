@@ -91,11 +91,7 @@ pub struct MulCols<T> {
     /// The output operand.
     pub a: Word<T>,
 
-    /// The first input operand.
-    pub b: Word<T>,
 
-    /// The second input operand.
-    pub c: Word<T>,
 
     /// Trace.
     pub carry: [T; PRODUCT_SIZE],
@@ -140,10 +136,6 @@ pub struct MulCols<T> {
     /// its dependency rows are gone).
     pub frame: InstructionFrameCols<T>,
 
-    /// The shard number.
-    pub shard: T,
-    /// The clock cycle number.
-    pub clk: T,
 }
 
 impl<F: PrimeField32> MachineAir<F> for MulChip {
@@ -273,8 +265,6 @@ impl MulChip {
             // instruction chip also has a op_hi_access field that will be populated and that will contribute
             // to the byte lookup dependencies.
             cols.op_hi_access.populate(MemoryRecordEnum::Write(event.hi_record), blu);
-            cols.shard = F::from_u32(event.shard);
-            cols.clk = F::from_u32(event.clk);
         }
 
         let hi_word = event.hi.to_le_bytes();
@@ -347,8 +337,6 @@ impl MulChip {
         cols.product = product.map(F::from_u32);
         cols.hi = Word(hi_word.map(F::from_u8));
         cols.a = Word(a_word.map(F::from_u8));
-        cols.b = Word(b_word.map(F::from_u8));
-        cols.c = Word(c_word.map(F::from_u8));
         cols.is_real = F::ONE;
         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
         cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);
@@ -376,6 +364,9 @@ where
         let main = builder.main();
         let local = main.current_slice();
         let local: &MulCols<AB::Var> = (*local).borrow();
+        // The inputs are the frame's register reads, not columns of this chip.
+        let op_b = local.frame.op_b_val();
+        let op_c = local.frame.op_c_val();
         let base = AB::F::from_u32(1 << 8);
 
         let zero: AB::Expr = AB::F::ZERO.into();
@@ -385,7 +376,7 @@ where
         // Calculate the MSBs.
         let (b_msb, c_msb) = {
             let msb_pairs =
-                [(local.b_msb, local.b[WORD_SIZE - 1]), (local.c_msb, local.c[WORD_SIZE - 1])];
+                [(local.b_msb, op_b[WORD_SIZE - 1]), (local.c_msb, op_c[WORD_SIZE - 1])];
             let opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
             for msb_pair in msb_pairs.iter() {
                 let msb = msb_pair.0;
@@ -405,14 +396,14 @@ where
             (local.b_sign_extend, local.c_sign_extend)
         };
 
-        // Sign extend local.b and local.c whenever appropriate.
+        // Sign extend op_b and op_c whenever appropriate.
         let (b, c) = {
             let mut b: Vec<AB::Expr> = vec![AB::F::ZERO.into(); PRODUCT_SIZE];
             let mut c: Vec<AB::Expr> = vec![AB::F::ZERO.into(); PRODUCT_SIZE];
             for i in 0..PRODUCT_SIZE {
                 if i < WORD_SIZE {
-                    b[i] = local.b[i].into();
-                    c[i] = local.c[i].into();
+                    b[i] = op_b[i].into();
+                    c[i] = op_c[i].into();
                 } else {
                     b[i] = b_sign_extend * byte_mask;
                     c[i] = c_sign_extend * byte_mask;
@@ -507,8 +498,6 @@ where
             .when(local.is_real)
             .when_not(local.frame.instruction.op_a_0)
             .assert_word_eq(local.a, *local.frame.op_a_access.value());
-        builder.when(local.is_real).assert_word_eq(local.b, local.frame.op_b_val());
-        builder.when(local.is_real).assert_word_eq(local.c, local.frame.op_c_val());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining.  MUL/MULT/MULTU are
@@ -523,19 +512,14 @@ where
             AB::Expr::ZERO,
             local.is_real.into(),
         );
-        // Mul keeps its own shard/clk columns for the HI-register write below,
-        // and populates them ONLY on hi-writing rows (MULT/MULTU; plain MUL has
-        // no HI write and leaves them zero).  Tie them to the frame exactly
-        // there, so the memory access cannot decouple from the state chain.
-        builder.when(local.hi_record_is_real).assert_eq(local.shard, local.frame.shard);
-        builder
-            .when(local.hi_record_is_real)
-            .assert_eq(local.clk, crate::frame::clk_from_frame::<AB>(&local.frame));
-
-        // Write the HI register, the register can only be Register::HI（33）.
+        // The HI-register write below rides the frame's shard/clk directly.  Mul
+        // used to keep private copies, tied to the frame on hi-writing rows and
+        // forced zero elsewhere; the access is gated by `hi_record_is_real`, so
+        // the value on a non-writing row was never read in the first place.
         builder.eval_memory_access(
-            local.shard,
-            local.clk + AB::F::from_u32(MemoryAccessPosition::HI as u32),
+            local.frame.shard,
+            crate::frame::clk_from_frame::<AB>(&local.frame)
+                + AB::Expr::from_u32(MemoryAccessPosition::HI as u32),
             AB::F::from_u32(33),
             &local.op_hi_access,
             local.hi_record_is_real,
@@ -550,8 +534,6 @@ where
         // multiply rows any more).
         builder.when(local.is_mult + local.is_multu).assert_one(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
-        builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
-        builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
         builder.when(local.is_mul).assert_word_zero(local.hi);
     }
 }

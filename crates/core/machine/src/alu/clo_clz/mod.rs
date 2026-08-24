@@ -56,8 +56,6 @@ pub struct CloClzCols<T> {
     /// The result
     pub a: Word<T>,
 
-    /// The input operand.
-    pub b: Word<T>,
 
     /// if clo, bb == 0xffffffff - b
     /// if clz, bb == b
@@ -120,7 +118,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             let cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
 
             cols.a = Word::from(event.a);
-            cols.b = Word::from(event.b);
             cols.pc = F::from_u32(event.pc);
             cols.next_pc = F::from_u32(event.next_pc);
             cols.is_real = F::ONE;
@@ -213,7 +210,7 @@ where
 
         // if clz, bb == b, else bb = !b
         {
-            local.b.0.iter().zip_eq(local.bb.0.iter()).for_each(|(a, b)| {
+            local.frame.op_b_val().0.iter().zip_eq(local.bb.0.iter()).for_each(|(a, b)| {
                 builder.when(is_clo.clone()).assert_eq(*a + *b, AB::Expr::from_u32(255));
                 builder.when(local.is_clz).assert_eq(*a, *b);
             });
@@ -247,7 +244,6 @@ where
             .when(local.is_real)
             .when_not(local.frame.instruction.op_a_0)
             .assert_word_eq(local.a, *local.frame.op_a_access.value());
-        builder.when(local.is_real).assert_word_eq(local.b, local.frame.op_b_val());
 
         eval_instruction_frame(
             builder,

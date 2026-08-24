@@ -93,11 +93,7 @@ pub struct ShiftRightCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// The first input operand.
-    pub b: Word<T>,
 
-    /// The second input operand.
-    pub c: Word<T>,
 
     /// A boolean array whose `i`th element indicates whether `num_bits_to_shift = i`.
     pub shift_by_n_bits: [T; BYTE_SIZE],
@@ -268,8 +264,6 @@ impl ShiftRightChip {
         {
             cols.pc = F::from_u32(event.pc);
             cols.next_pc = F::from_u32(event.next_pc);
-            cols.b = Word::from(event.b);
-            cols.c = Word::from(event.c);
 
             cols.b_msb = F::from_u32((event.b >> 31) & 1);
 
@@ -378,12 +372,15 @@ where
         let main = builder.main();
         let local = main.current_slice();
         let local: &ShiftRightCols<AB::Var> = (*local).borrow();
+        // The inputs are the frame's register reads, not columns of this chip.
+        let op_b = local.frame.op_b_val();
+        let op_c = local.frame.op_c_val();
         let zero: AB::Expr = AB::F::ZERO.into();
         let one: AB::Expr = AB::F::ONE.into();
 
         // Check that the MSB of most_significant_byte matches local.b_msb using lookup.
         {
-            let byte = local.b[WORD_SIZE - 1];
+            let byte = op_b[WORD_SIZE - 1];
             let opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
             let msb = local.b_msb;
             builder.send_byte(opcode, msb, byte, zero.clone(), local.is_real);
@@ -397,7 +394,7 @@ where
                 let val: AB::Expr = AB::F::from_u32(1 << i).into();
                 c_byte_sum = c_byte_sum.clone() + val * local.c_least_sig_byte[i];
             }
-            builder.assert_eq(c_byte_sum, local.c[0]);
+            builder.assert_eq(c_byte_sum, op_c[0]);
 
             // Number of bits to shift.
 
@@ -444,11 +441,11 @@ where
             // The leading bytes of b should be 0xff if b's MSB is 1 & opcode = SRA, 0 otherwise.
             let mut sign_extended_b: Vec<AB::Expr> = vec![];
             for i in 0..WORD_SIZE {
-                sign_extended_b.push(local.b[i].into());
+                sign_extended_b.push(op_b[i].into());
             }
             for i in 0..WORD_SIZE {
                 let leading_byte = local.is_sra * local.b_msb * AB::Expr::from_u8(0xff)
-                    + local.is_ror * local.b[i].into();
+                    + local.is_ror * op_b[i].into();
                 sign_extended_b.push(leading_byte.clone());
             }
 
@@ -552,8 +549,6 @@ where
             .when(local.is_real)
             .when_not(local.frame.instruction.op_a_0)
             .assert_word_eq(a_word, *local.frame.op_a_access.value());
-        builder.when(local.is_real).assert_word_eq(local.b, local.frame.op_b_val());
-        builder.when(local.is_real).assert_word_eq(local.c, local.frame.op_c_val());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and

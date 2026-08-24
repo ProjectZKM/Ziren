@@ -46,6 +46,5 @@ __ZKM_HOSTDEV__ void event_to_row(
 
     populate<F>(cols.add_operation, operand_1, operand_2);
     write_word_from_u32_v2<F>(cols.operand_1, operand_1);
-    write_word_from_u32_v2<F>(cols.operand_2, operand_2);
 }
 }  // namespace zkm_core_machine_sys::add_sub

@@ -115,11 +115,7 @@ pub struct DivRemCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// The first input operand.
-    pub b: Word<T>,
 
-    /// The second input operand.
-    pub c: Word<T>,
 
     /// Results of dividing `b` by `c`.
     pub quotient: Word<T>,
@@ -217,10 +213,6 @@ pub struct DivRemCols<T> {
     /// Access to hi register
     pub op_hi_access: MemoryReadWriteCols<T>,
 
-    /// The shard number.
-    pub shard: T,
-    /// The clock cycle number.
-    pub clk: T,
 }
 
 impl<F: PrimeField32> MachineAir<F> for DivRemChip {
@@ -267,8 +259,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
 
             // Initialize cols with basic operands and flags derived from the current event.
             {
-                cols.b = Word::from(event.b);
-                cols.c = Word::from(event.c);
                 cols.pc = F::from_u32(event.pc);
                 cols.next_pc = F::from_u32(event.next_pc);
                 cols.is_divu = F::from_bool(event.opcode == Opcode::DIVU);
@@ -292,8 +282,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                     cols.op_hi_access
                         .populate(MemoryRecordEnum::Write(event.hi_record), &mut blu_events);
                     output.add_byte_lookup_events(blu_events);
-                    cols.shard = F::from_u32(event.shard);
-                    cols.clk = F::from_u32(event.clk);
                 }
             }
 
@@ -448,6 +436,9 @@ where
         let main = builder.main();
         let local = main.current_slice();
         let local: &DivRemCols<AB::Var> = (*local).borrow();
+        // The inputs are the frame's register reads, not columns of this chip.
+        let op_b = local.frame.op_b_val();
+        let op_c = local.frame.op_c_val();
         let base = AB::F::from_u32(1 << 8);
         let one: AB::Expr = AB::F::ONE.into();
         let zero: AB::Expr = AB::F::ZERO.into();
@@ -476,7 +467,7 @@ where
         MulOperation::<AB::F>::eval(
             builder,
             local.quotient,
-            local.c,
+            op_c,
             &local.mul,
             local.is_div + local.is_mod,
             local.is_divu + local.is_modu,
@@ -486,7 +477,7 @@ where
         {
             IsEqualWordOperation::<AB::F>::eval(
                 builder,
-                local.b.map(|x| x.into()),
+                op_b.map(|x| x.into()),
                 Word::from(i32::MIN as u32).map(|x: AB::F| x.into()),
                 local.is_overflow_b,
                 is_real.clone(),
@@ -494,7 +485,7 @@ where
 
             IsEqualWordOperation::<AB::F>::eval(
                 builder,
-                local.c.map(|x| x.into()),
+                op_c.map(|x| x.into()),
                 Word::from(-1i32 as u32).map(|x: AB::F| x.into()),
                 local.is_overflow_c,
                 is_real.clone(),
@@ -541,7 +532,7 @@ where
             for i in 0..LONG_WORD_SIZE {
                 if i < WORD_SIZE {
                     // The lower 4 bytes of the result must match the corresponding bytes in b.
-                    builder.assert_eq(local.b[i], c_times_quotient_plus_remainder[i].clone());
+                    builder.assert_eq(op_b[i], c_times_quotient_plus_remainder[i].clone());
                 } else {
                     // The upper 4 bytes must reflect the sign of b in two's complement:
                     // - All 1s (0xff) for negative b.
@@ -575,7 +566,7 @@ where
             let mut b_byte_sum = zero.clone();
             for i in 0..WORD_SIZE {
                 rem_byte_sum = rem_byte_sum.clone() + local.remainder[i].into();
-                b_byte_sum = b_byte_sum + local.b[i].into();
+                b_byte_sum = b_byte_sum + op_b[i].into();
             }
 
             // 1. If remainder < 0, then b < 0.
@@ -595,7 +586,7 @@ where
             // Calculate whether c is 0.
             IsZeroWordOperation::<AB::F>::eval(
                 builder,
-                local.c.map(|x| x.into()),
+                op_c.map(|x| x.into()),
                 local.is_c_0,
                 is_real.clone(),
             );
@@ -615,7 +606,7 @@ where
             // For each of `c` and `rem`, assert that the absolute value is equal to the original
             // value, if the original value is non-negative or the minimum i32.
             for i in 0..WORD_SIZE {
-                builder.when_not(local.c_neg).assert_eq(local.c[i], local.abs_c[i]);
+                builder.when_not(local.c_neg).assert_eq(op_c[i], local.abs_c[i]);
                 builder
                     .when_not(local.rem_neg)
                     .assert_eq(local.remainder[i], local.abs_remainder[i]);
@@ -625,7 +616,7 @@ where
             // gone).
             AddOperation::<AB::F>::eval(
                 builder,
-                local.c,
+                op_c,
                 local.abs_c,
                 local.neg_c_add,
                 local.c_neg.into(),
@@ -686,8 +677,8 @@ where
         // Check that the MSBs are correct.
         {
             let msb_pairs = [
-                (local.b_msb, local.b[WORD_SIZE - 1]),
-                (local.c_msb, local.c[WORD_SIZE - 1]),
+                (local.b_msb, op_b[WORD_SIZE - 1]),
+                (local.c_msb, op_c[WORD_SIZE - 1]),
                 (local.rem_msb, local.remainder[WORD_SIZE - 1]),
             ];
             let opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
@@ -750,8 +741,6 @@ where
                 .when(local.is_mod + local.is_modu)
                 .when_not(local.frame.instruction.op_a_0)
                 .assert_word_eq(local.remainder, *local.frame.op_a_access.value());
-            builder.when(is_real.clone()).assert_word_eq(local.b, local.frame.op_b_val());
-            builder.when(is_real.clone()).assert_word_eq(local.c, local.frame.op_c_val());
 
             // A real instruction carries its own program fetch, register access
             // and `(clk, pc)` chaining.  DIV/MOD are sequential, never halt.
@@ -765,18 +754,14 @@ where
                 AB::Expr::ZERO,
                 is_real.clone(),
             );
-            // shard/clk are populated only on DIV/DIVU rows (they write HI —
-            // same coupling as Mul): tie them to the frame exactly there.
-            let dd = local.is_div + local.is_divu;
-            builder.when(dd.clone()).assert_eq(local.shard, local.frame.shard);
-            builder
-                .when(dd)
-                .assert_eq(local.clk, crate::frame::clk_from_frame::<AB>(&local.frame));
-
-            // Write the HI register, the register can only be Register::HI（33）.
+            // The HI write rides the frame's shard/clk (same coupling as Mul).
+            // The access is gated to DIV/DIVU rows, so the private copies this
+            // chip used to carry were only ever read where they equalled the
+            // frame anyway.
             builder.eval_memory_access(
-                local.shard,
-                local.clk + AB::F::from_u32(MemoryAccessPosition::HI as u32),
+                local.frame.shard,
+                crate::frame::clk_from_frame::<AB>(&local.frame)
+                    + AB::Expr::from_u32(MemoryAccessPosition::HI as u32),
                 AB::F::from_u32(33),
                 &local.op_hi_access,
                 local.is_div + local.is_divu,

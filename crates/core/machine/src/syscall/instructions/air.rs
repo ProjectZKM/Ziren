@@ -1,3 +1,4 @@
+use crate::frame::clk_from_frame;
 use crate::memory::RegisterCols;
 use std::borrow::Borrow;
 
@@ -84,17 +85,6 @@ where
             .when(local.is_real)
             .when_not(local.frame.instruction.op_a_0)
             .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
-        builder.when(local.is_real).assert_word_eq(local.op_b_value, local.frame.op_b_val());
-        builder.when(local.is_real).assert_word_eq(local.op_c_value, local.frame.op_c_val());
-        builder
-            .when(local.is_real)
-            .assert_word_eq(local.prev_a_value, local.frame.op_a_access.prev_value);
-        // Private shard/clk columns feed the syscall table send: tie them to
-        // the frame (the Mul coupling).
-        builder.when(local.is_real).assert_eq(local.shard, local.frame.shard);
-        builder
-            .when(local.is_real)
-            .assert_eq(local.clk, crate::frame::clk_from_frame::<AB>(&local.frame));
 
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`
         builder.assert_eq::<AB::Var, AB::Expr>(
@@ -124,21 +114,21 @@ where
 #[inline(always)]
 fn get_syscall_id<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Expr {
     // syscall id is stored in byte 0, 1.
-    let syscall_code = local.prev_a_value;
+    let syscall_code = local.frame.op_a_access.prev_value;
     syscall_code[0] + syscall_code[1] * AB::Expr::from_u32(256)
 }
 
 #[inline(always)]
 fn get_send_table<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Var {
     // send_to_table is stored in byte 2
-    let syscall_code = local.prev_a_value;
+    let syscall_code = local.frame.op_a_access.prev_value;
     syscall_code[2]
 }
 
 #[inline(always)]
 fn get_num_extra_cycles<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Var {
     // num_extra_cycles is stored in byte 3.
-    let syscall_code = local.prev_a_value;
+    let syscall_code = local.frame.op_a_access.prev_value;
     syscall_code[3]
 }
 
@@ -172,7 +162,7 @@ impl SyscallInstrsChip {
         // is_sys_linux must be the inverse: 1 iff prev_a_value[1] != 0.
         IsZeroOperation::<AB::F>::eval(
             builder,
-            local.prev_a_value[1].into(),
+            local.frame.op_a_access.prev_value[1].into(),
             local.is_prev_a1_zero,
             local.is_real.into(),
         );
@@ -204,23 +194,23 @@ impl SyscallInstrsChip {
 
         KoalaBearWordRangeChecker::<AB::F>::range_check::<AB>(
             builder,
-            local.op_b_value,
+            local.frame.op_b_val(),
             local.op_b_range_check,
             local.op_b_check.into(),
         );
         KoalaBearWordRangeChecker::<AB::F>::range_check::<AB>(
             builder,
-            local.op_c_value,
+            local.frame.op_c_val(),
             local.op_c_range_check,
             local.op_c_check.into(),
         );
 
         builder.send_syscall(
-            local.shard,
-            local.clk,
+            local.frame.shard,
+            clk_from_frame::<AB>(&local.frame),
             syscall_id.clone(),
-            local.op_b_value.reduce::<AB>(),
-            local.op_c_value.reduce::<AB>(),
+            local.frame.op_b_val().reduce::<AB>(),
+            local.frame.op_c_val().reduce::<AB>(),
             send_to_table,
             LookupScope::Local,
         );
@@ -228,11 +218,11 @@ impl SyscallInstrsChip {
         // Send full Word bytes for linux syscalls to link op_a (result), op_b (a0), op_c (a1)
         // with SysLinuxChip via SyscallChip bridge.
         builder.send_syscall_result(
-            local.shard,
-            local.clk,
+            local.frame.shard,
+            clk_from_frame::<AB>(&local.frame),
             local.op_a_value,
-            local.op_b_value,
-            local.op_c_value,
+            local.frame.op_b_val(),
+            local.frame.op_c_val(),
             local.is_sys_linux,
             LookupScope::Local,
         );
@@ -284,7 +274,7 @@ impl SyscallInstrsChip {
         builder
             .when(local.is_real)
             .when_not(is_enter_unconstrained + is_hint_len + local.is_sys_linux)
-            .assert_word_eq(local.op_a_value, local.prev_a_value);
+            .assert_word_eq(local.op_a_value, local.frame.op_a_access.prev_value);
 
         // is_sys_linux is now bidirectionally constrained via is_prev_a1_zero above.
         // When is_sys_linux = 0, prev_a[1] = 0 follows from the IsZero constraint.
@@ -332,14 +322,14 @@ impl SyscallInstrsChip {
             builder
                 .when(local.is_real)
                 .when(*bit)
-                .assert_eq(local.op_b_value[0], AB::Expr::from_u32(i as u32));
+                .assert_eq(local.frame.op_b_val()[0], AB::Expr::from_u32(i as u32));
         }
         // Verify that the 3 upper bytes of the word_idx are 0.
         for i in 0..3 {
             builder
                 .when(local.is_real)
                 .when(is_commit.clone() + is_commit_deferred_proofs.clone())
-                .assert_zero(local.op_b_value[i + 1]);
+                .assert_zero(local.frame.op_b_val()[i + 1]);
         }
 
         // Retrieve the expected public values digest word to check against the one passed into the
@@ -349,7 +339,7 @@ impl SyscallInstrsChip {
         // to not include the verification check of the expected public values digest word.
         let expected_pv_digest_word = builder.index_word_array(&commit_digest, &local.index_bitmap);
 
-        let digest_word = local.op_c_value;
+        let digest_word = local.frame.op_c_val();
 
         // Verify the public_values_digest_word.
         builder
@@ -381,7 +371,7 @@ impl SyscallInstrsChip {
         // Check that the `op_b_value` reduced is the `public_values.exit_code`.
         builder
             .when(local.is_halt)
-            .assert_eq(local.op_b_value.reduce::<AB>(), public_values.exit_code);
+            .assert_eq(local.frame.op_b_val().reduce::<AB>(), public_values.exit_code);
     }
 
     /// Returns a boolean expression indicating whether the instruction is a HALT instruction.

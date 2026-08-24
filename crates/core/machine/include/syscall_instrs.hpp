@@ -21,16 +21,11 @@ namespace zkm_core_machine_sys::syscall_instrs {
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
         cols.state_recv_next_pc = F::from_canonical_u32(event.recv_next_pc);
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
 
         write_word_from_u32_v2<F>(cols.op_a_value, event.a_record.value);
-        write_word_from_u32_v2<F>(cols.op_b_value, event.arg1);
-        write_word_from_u32_v2<F>(cols.op_c_value, event.arg2);
-        write_word_from_u32_v2<F>(cols.prev_a_value, event.a_record.prev_value);
         cols.syscall_id = F::from_canonical_u32(event.syscall_id);
         F syscall_id = F::from_canonical_u32(event.a_record.prev_value & 0xffff);
-        F num_cycles = cols.prev_a_value._0[3];
+        F num_cycles = cols.frame.op_a_access.prev_value._0[3];
 
         cols.num_extra_cycles = num_cycles;
         cols.is_halt = F::from_bool(
