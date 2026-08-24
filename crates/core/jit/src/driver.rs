@@ -614,7 +614,17 @@ fn lower_one<T: MipsTranspiler>(
         JitOpcode::JumpDirect => {
             // Per executor::execute_jump_direct: link = op_a,
             // target_pc = op_b + next_pc.  Same link write as Jumpi.
-            t.jump_direct(ins.op_b);
+            //
+            // `op_b` is a byte offset RELATIVE to next_pc — unlike
+            // `Jumpi`, whose `op_b` is already absolute.  The lowering
+            // takes an absolute target (it forwards straight to `j`), so
+            // the `+ next_pc` has to happen here, exactly as it does for
+            // the branches above.  Passing the raw offset made the JIT
+            // jump to it as if it were an address: for a program based at
+            // `0x1332a0` a call to `0x136c20` dispatched to `0x3980`,
+            // which is outside the program, so the index computed from it
+            // wrapped and the indirect jump left the table entirely.
+            t.jump_direct(current_pc.wrapping_add(4).wrapping_add(ins.op_b));
             if rd != MipsRegister::Zero {
                 let return_pc = current_pc.wrapping_add(8);
                 t.add(rd, MipsOperand::Imm(return_pc as i64), MipsOperand::Imm(0));

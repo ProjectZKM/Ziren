@@ -85,6 +85,7 @@ impl MipsTranspiler for TranspilerBackend {
         // prologue).  If pending_jump_at_start == 0 we fall through
         // to the next instruction's block, which is the common case.
         let pc_base = self.pc_base;
+        let exit_lbl = self.exit_label.expect("exit label set in `new`");
         dynasm!(self.assembler ; .arch x64
             ; mov eax, DWORD [Rq(super::CONTEXT) + super::PENDING_JUMP_AT_START_OFFSET]
             ; test eax, eax
@@ -93,8 +94,22 @@ impl MipsTranspiler for TranspilerBackend {
             //   eax = (pc - pc_base) / 4
             ; sub eax, DWORD pc_base as i32
             ; shr eax, 2
+            // A guest's computed jump target is not constrained to the
+            // program.  Below `pc_base` the 32-bit subtract above wraps to
+            // a huge index, and an unchecked `jmp [table + idx*8]` then
+            // reads far past the table and lands on garbage — killing the
+            // HOST process on guest input.  Bound it, and record the
+            // target so the host can name it.
+            ; cmp eax, DWORD [Rq(super::CONTEXT) + super::JUMP_TABLE_LEN_OFFSET]
+            ; jae >bad_dispatch
             // jmp QWORD [JUMP_TABLE + rax * 8]
             ; jmp QWORD [Rq(super::JUMP_TABLE) + rax * 8]
+            ; bad_dispatch:
+            ; mov eax, DWORD [Rq(super::CONTEXT) + super::PENDING_JUMP_AT_START_OFFSET]
+            ; mov DWORD [Rq(super::CONTEXT) + super::BAD_JUMP_TARGET_OFFSET], eax
+            ; mov DWORD [Rq(super::CONTEXT) + super::EXIT_CODE_OFFSET],
+                  DWORD super::JIT_EXIT_BAD_JUMP as i32
+            ; jmp =>exit_lbl
             ; no_delayed_jump:
         );
     }

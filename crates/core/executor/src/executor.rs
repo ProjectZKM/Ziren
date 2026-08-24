@@ -382,6 +382,10 @@ pub enum ExecutionError {
     /// The execution failed with an unimplemented instruction.
     #[error("unimplemented instruction {0}")]
     UnsupportedInstruction(u32),
+    /// The JIT's indirect dispatch was handed a jump target outside the
+    /// program.  Carries `(target, last_executed_pc)`.
+    #[error("JIT jump target {0:#010x} is outside the program (last pc {1:#010x})")]
+    JitJumpTargetOutOfRange(u32, u32),
 
     /// The execution failed with a breakpoint.
     #[error("breakpoint encountered")]
@@ -3214,8 +3218,14 @@ impl<'a> Executor<'a> {
                 *slot = self.register(crate::Register::from(i as u8));
             }
 
-            let mut ctx =
-                build_context(pc_start, memory_ptr, jump_table_ptr, trace_buf.as_mut_ptr(), regs);
+            let mut ctx = build_context(
+                pc_start,
+                memory_ptr,
+                jump_table_ptr,
+                jit_fn.jump_table.len(),
+                trace_buf.as_mut_ptr(),
+                regs,
+            );
             // Build the bridge state and hand the syscall trampoline
             // a pointer to it via user_data.  We pre-stash raw
             // pointers because `JitBridgeState` borrows `self` and
@@ -3273,6 +3283,24 @@ impl<'a> Executor<'a> {
             // would produce at that opcode.
             if raw_exit == 0xDEAD_C0DE {
                 return Err(ExecutionError::UnsupportedInstruction(0));
+            }
+            // The JIT's indirect dispatch refused an out-of-range target.
+            // It used to jump through the table anyway, which read past
+            // the end and killed the host process on guest input; now it
+            // bails here and names the target.
+            if raw_exit == zkm_core_jit::backends::x86::JIT_EXIT_BAD_JUMP {
+                tracing::error!(
+                    "JIT bad dispatch: target={:#x} pc_base={:#x} n_instr={} range=[{:#x},{:#x})",
+                    ctx.bad_jump_target,
+                    pc_base,
+                    self.program.instructions.len(),
+                    pc_base,
+                    pc_base as u64 + 4 * self.program.instructions.len() as u64,
+                );
+                return Err(ExecutionError::JitJumpTargetOutOfRange(
+                    ctx.bad_jump_target,
+                    ctx.last_executed_pc,
+                ));
             }
             // Mark `state.exited` if the program halted (any non-error
             // exit_code, including the sentinel-encoded zero).

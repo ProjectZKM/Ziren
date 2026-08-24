@@ -1196,6 +1196,7 @@ mod platform {
         pc_start: u32,
         memory_ptr: *mut u8,
         jump_table_ptr: *const *const u8,
+        jump_table_len: usize,
         trace_buf_ptr: *mut u8,
         registers: [u32; 36],
     ) -> JitContext {
@@ -1223,6 +1224,10 @@ mod platform {
             dirty_log_ptr: std::ptr::null_mut(),
             dirty_log_len: 0,
             dirty_log_cap: 0,
+            // The dispatch bound.  Without it a guest jump target below
+            // `pc_base` indexes far past the table and the host dies.
+            jump_table_len: u32::try_from(jump_table_len).unwrap_or(u32::MAX),
+            bad_jump_target: 0,
         };
         // Mask zero register for safety.
         ctx.registers[0] = 0;
@@ -1456,6 +1461,7 @@ mod platform {
                 0x100,
                 memory.as_mut_ptr(),
                 jump_table.as_ptr(),
+                jump_table.len(),
                 trace_buf.as_mut_ptr(),
                 [0u32; 36],
             );

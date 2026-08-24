@@ -68,6 +68,15 @@ pub(crate) const REGISTERS_OFFSET: i32 = offset_of!(JitContext, registers) as i3
 /// emitted at the top of every block so a syscall handler that sets a
 /// non-zero exit code falls through to the shared epilogue.
 pub(crate) const EXIT_CODE_OFFSET: i32 = offset_of!(JitContext, exit_code) as i32;
+/// Bound for the indirect-dispatch index — see [`JitContext::jump_table_len`].
+pub(crate) const JUMP_TABLE_LEN_OFFSET: i32 = offset_of!(JitContext, jump_table_len) as i32;
+/// Where an out-of-range dispatch target is recorded.
+pub(crate) const BAD_JUMP_TARGET_OFFSET: i32 =
+    offset_of!(JitContext, bad_jump_target) as i32;
+/// `exit_code` written when the dispatch bounds check trips.  The
+/// `0x4000_0000` bit marks it as an ERROR exit rather than a halt, which
+/// is what the host's `state.exited` gate already keys on.
+pub const JIT_EXIT_BAD_JUMP: u32 = 0x4000_0BAD;
 /// Offset of `jump_table` (an `Option<NonNull<*const u8>>` — niche-optimized
 /// to a raw pointer where None == null).  The prologue loads this into
 /// the `JUMP_TABLE` GPR so indirect MIPS jumps can lookup their target.
@@ -268,13 +277,22 @@ impl TranspilerBackend {
     /// `0x22C40` for typical Ziren ELFs) rather than falling through
     /// to instruction index 0.
     pub fn emit_dispatch_to_pc(&mut self, pc_start: u32) {
-        use dynasmrt::{dynasm, DynasmApi};
+        use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
         let pc_base = self.pc_base;
+        let exit_lbl = self.exit_label.expect("exit label set in `new`");
         dynasm!(self.assembler ; .arch x64
             ; mov eax, DWORD pc_start as i32
             ; sub eax, DWORD pc_base as i32
             ; shr eax, 2
+            // Never dispatch through an index the table does not hold —
+            // see `JitContext::jump_table_len`.
+            ; cmp eax, DWORD [Rq(CONTEXT) + JUMP_TABLE_LEN_OFFSET]
+            ; jae >bad_entry_dispatch
             ; jmp QWORD [Rq(JUMP_TABLE) + rax * 8]
+            ; bad_entry_dispatch:
+            ; mov DWORD [Rq(CONTEXT) + BAD_JUMP_TARGET_OFFSET], DWORD pc_start as i32
+            ; mov DWORD [Rq(CONTEXT) + EXIT_CODE_OFFSET], DWORD JIT_EXIT_BAD_JUMP as i32
+            ; jmp =>exit_lbl
         );
     }
 

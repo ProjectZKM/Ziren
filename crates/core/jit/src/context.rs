@@ -120,6 +120,22 @@ pub struct JitContext {
     /// skips the push (degrade gracefully); the syscall trampoline
     /// then falls back to the full-sync path for that syscall.
     pub dirty_log_cap: u64,
+
+    /// Number of entries in [`Self::jump_table`].
+    ///
+    /// The indirect dispatch that implements MIPS jumps indexes that
+    /// table with `(target - pc_base) / 4`.  Nothing constrains a
+    /// guest's computed jump target to lie inside the program, and the
+    /// subtraction is 32-bit, so a target BELOW `pc_base` wraps to a
+    /// huge index -- the load then reads far outside the table and the
+    /// jump lands on garbage, taking the host process down with a
+    /// SIGSEGV.  The JIT bounds-checks against this before dispatching.
+    pub jump_table_len: u32,
+
+    /// Diagnostic: the out-of-range jump target that tripped the bounds
+    /// check, recorded so the host can name it (with
+    /// [`Self::last_executed_pc`]) instead of dying anonymously.
+    pub bad_jump_target: u32,
 }
 
 impl Default for JitContext {
@@ -147,6 +163,8 @@ impl Default for JitContext {
             dirty_log_ptr: std::ptr::null_mut(),
             dirty_log_len: 0,
             dirty_log_cap: 0,
+            jump_table_len: 0,
+            bad_jump_target: 0,
         }
     }
 }

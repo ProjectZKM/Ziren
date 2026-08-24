@@ -171,6 +171,58 @@ fn divu_mfhi_mflo_jit_matches_interpreter() {
 }
 
 /// Parity for MULTU + MFLO + MFHI.
+/// `JumpDirect`'s `op_b` is a byte offset RELATIVE to `next_pc`
+/// (`execute_jump_direct`: `target_pc = op_b.wrapping_add(next_pc)`), unlike
+/// `Jumpi`'s, which is already absolute.  The JIT driver used to hand the raw
+/// offset to a lowering that takes an ABSOLUTE target, so every `JumpDirect`
+/// jumped to the offset itself.  On a real ELF based well above zero that
+/// address is outside the program, the dispatch index wrapped, and the
+/// indirect jump left the jump table — taking the host process down with a
+/// SIGSEGV rather than failing as a guest error.
+///
+/// The jump below skips exactly one instruction.  Land in the wrong place and
+/// `$t0` keeps the value that instruction writes.
+#[test]
+fn jump_direct_target_is_relative_to_next_pc() {
+    use zkm_core_executor::Opcode;
+    let mut instrs = Vec::with_capacity(700);
+    // 0: t0 = 111
+    instrs.push(Instruction::new(Opcode::ADD, Register::T0 as u8, 0, 111, false, true));
+    // 1: JumpDirect, link=$zero, offset=+8 -> target = next_pc + 8 = instr 4.
+    instrs.push(Instruction::new(Opcode::JumpDirect, 0, 8, 0, true, true));
+    // 2: delay slot — RUNS.
+    instrs.push(Instruction::new(Opcode::ADD, Register::T1 as u8, 0, 1, false, true));
+    // 3: SKIPPED by the jump.  If the target is wrong this runs.
+    instrs.push(Instruction::new(Opcode::ADD, Register::T0 as u8, 0, 999, false, true));
+    // 4: landing pad.
+    instrs.push(Instruction::new(Opcode::ADD, Register::T2 as u8, 0, 222, false, true));
+    // Pad past JIT_MIN_INSTR_COUNT so the JIT actually engages.
+    while instrs.len() < 600 {
+        instrs.push(Instruction::new(Opcode::ADD, Register::T3 as u8, 0, 0, false, true));
+    }
+    let program = Program::new(instrs, 0, 0);
+
+    std::env::set_var("ZIREN_DISABLE_JIT", "1");
+    let mut interp = Executor::new(program.clone(), ZKMCoreOpts::default());
+    let _ = interp.run_fast();
+    let (i0, i1, i2) = (
+        interp.register(Register::T0),
+        interp.register(Register::T1),
+        interp.register(Register::T2),
+    );
+    std::env::remove_var("ZIREN_DISABLE_JIT");
+
+    let mut jit = Executor::new(program, ZKMCoreOpts::default());
+    let _ = jit.run_fast();
+    let (j0, j1, j2) =
+        (jit.register(Register::T0), jit.register(Register::T1), jit.register(Register::T2));
+
+    eprintln!("[jump_direct] interp t0={i0} t1={i1} t2={i2}; jit t0={j0} t1={j1} t2={j2}");
+    assert_eq!(i0, 111, "interpreter: the jump must skip the t0=999 instruction");
+    assert_eq!(i1, 1, "interpreter: the delay slot must run");
+    assert_eq!((i0, i1, i2), (j0, j1, j2), "JumpDirect: JIT diverges from the interpreter");
+}
+
 #[test]
 fn multu_mfhi_mflo_jit_matches_interpreter() {
     use zkm_core_executor::Opcode;
@@ -438,7 +490,7 @@ fn bne_loop_jit_matches_interpreter() {
     let mut trace_buf = vec![0u8; 4096];
     let jump_table_ptr: *const *const u8 = jit_fn.jump_table.as_ptr();
     let mut ctx =
-        build_context(0, memory.as_mut_ptr(), jump_table_ptr, trace_buf.as_mut_ptr(), [0u32; 36]);
+        build_context(0, memory.as_mut_ptr(), jump_table_ptr, jit_fn.jump_table.len(), trace_buf.as_mut_ptr(), [0u32; 36]);
     // Set `delayed_jump_target` to the post-loop sentinel before
     // entering: when the loop exits via the branch falling through,
     // the delay-slot epilogue jumps to ctx.jump_table[exit_idx].  For
@@ -673,7 +725,7 @@ fn halt_syscall_jit_matches_interpreter() {
     let memory_ptr = mem_bridge.as_ptr();
     let mut trace_buf = vec![0u8; 4096];
     let jump_table_ptr: *const *const u8 = jit_fn.jump_table.as_ptr();
-    let mut ctx = build_context(0, memory_ptr, jump_table_ptr, trace_buf.as_mut_ptr(), [0u32; 36]);
+    let mut ctx = build_context(0, memory_ptr, jump_table_ptr, jit_fn.jump_table.len(), trace_buf.as_mut_ptr(), [0u32; 36]);
     let executor_ptr: *mut Executor = &mut jit_executor;
     let bridge_ptr: *mut JitMemoryBridge = &mut mem_bridge;
     let mut bridge_state = JitBridgeState {
@@ -736,7 +788,7 @@ fn alu_chain_jit_matches_interpreter_for_register_file() {
     let jump_table_ptr: *const *const u8 = std::ptr::null();
     let mut trace_buf = vec![0u8; 4096];
     let mut ctx =
-        build_context(0, memory.as_mut_ptr(), jump_table_ptr, trace_buf.as_mut_ptr(), [0u32; 36]);
+        build_context(0, memory.as_mut_ptr(), jump_table_ptr, jit_fn.jump_table.len(), trace_buf.as_mut_ptr(), [0u32; 36]);
     unsafe { run_jit(&jit_fn, &mut ctx) };
 
     // Compare lower-32 register files.  HI/LO and reserved aren't
