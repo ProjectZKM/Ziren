@@ -1137,12 +1137,38 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
             return (cached, digest);
         }
+        // Cross-process disk cache (opt-in via ZIREN_PROGRAM_CACHE_DIR): a
+        // fresh process reuses what an earlier one built, so build cost is paid
+        // once per (binary, shape) rather than once per process.  Fingerprinted
+        // by the executable, so a recompile can never serve a stale program.
+        if let Some(program) = crate::program_cache::disk_load::<KoalaBear>(stage, cache_key) {
+            let program = Arc::new(program);
+            if audit {
+                let fresh = build();
+                assert_eq!(
+                    bincode::serialize(&*program).expect("serialize disk-loaded"),
+                    bincode::serialize(&*fresh).expect("serialize fresh"),
+                    "{stage} DISK cache divergence at shape_key={cache_key:#018x}: a cached                      file does not match a fresh build — the binary fingerprint should have                      prevented this",
+                );
+            }
+            return cache.lock().unwrap().insert(cache_key, program);
+        }
         let program = build();
+        crate::program_cache::disk_store(stage, cache_key, &*program);
         cache.lock().unwrap().insert(cache_key, program)
     }
 
     /// Hits and misses of both shape-keyed program caches, for the stage
     /// report: `(normalize_hits, normalize_misses, compose_hits, compose_misses)`.
+    /// `(disk_hits, disk_stores)` for the cross-process program cache.
+    pub fn recursion_program_disk_counts(&self) -> (u64, u64) {
+        use std::sync::atomic::Ordering;
+        (
+            crate::program_cache::DISK_HITS.load(Ordering::Relaxed),
+            crate::program_cache::DISK_STORES.load(Ordering::Relaxed),
+        )
+    }
+
     pub fn recursion_program_cache_counts(&self) -> (u64, u64, u64, u64) {
         let n = self.normalize_programs_basefold_cache.lock().unwrap();
         let c = self.compose_programs_basefold_cache.lock().unwrap();
