@@ -392,7 +392,7 @@ impl Instruction {
             // MTLO: lo = rs
             (0b000000, 0b010011) => Ok(Self::new(Opcode::ADD, 32, rs, 0, false, true)), // MTLO: lo = rs
             // SYNC (nop)
-            (0b000000, 0b001111) => Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true)), // SYNC
+            (0b000000, 0b001111) => Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true)), // SYNC
             // CLZ: rd = count_leading_zeros(rs)
             (0b011100, 0b100000) => Ok(Self::new(Opcode::CLZ, rd, rs, 0, false, true)), // CLZ: rd = count_leading_zeros(rs)
             // CLO: rd = count_leading_ones(rs)
@@ -434,7 +434,7 @@ impl Instruction {
                     ))
                 } else if rt == 0x1f {
                     // SYNCI
-                    Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true))
+                    Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true))
                 } else {
                     Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 }
@@ -545,7 +545,7 @@ impl Instruction {
             // SYSCALL
             (0b000000, 0b001100) => Ok(Self::new(Opcode::SYSCALL, 2, 4, 5, false, false)), // Syscall
             // PREF (nop)
-            (0b110011, _) => Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true)), // Pref
+            (0b110011, _) => Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true)), // Pref
             // TEQ
             (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs as u8, rt, 0, false, true)), // teq
             (0b011111, 0b100000) => {
