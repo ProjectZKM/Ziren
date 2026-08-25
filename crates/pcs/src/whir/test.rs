@@ -109,3 +109,146 @@ fn folds_reduce_the_claim() {
     );
     assert_eq!(out.round_polys.len(), n);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2b: the folding tower.
+// ---------------------------------------------------------------------------
+
+/// A small, internally-consistent tower config: `n` variables folded `ff` at a
+/// time over `num_rounds` rounds, leaving a `final_poly_log_degree`-variable
+/// final polynomial.  PoW bits are zero so the tests run fast.
+fn tower_config(n: usize, ff: usize, num_rounds: usize) -> WhirConfig {
+    use crate::whir::config::RoundConfig;
+    let mut config = WhirConfig::default_whir_config();
+    config.starting_ood_samples = 2;
+    config.starting_log_inv_rate = 1;
+    config.round_parameters = (0..num_rounds)
+        .map(|_| RoundConfig {
+            folding_factor: ff,
+            evaluation_domain_log_size: 0,
+            queries_pow_bits: 0,
+            pow_bits: alloc::vec![0usize; ff],
+            num_queries: 1,
+            ood_samples: 1,
+            log_inv_rate: 1,
+        })
+        .collect();
+    config.final_poly_log_degree = n - ff * num_rounds;
+    config
+}
+
+/// Fold the base MLE by a prefix of the folding randomness, reproducing the
+/// prover's folded polynomial at a round boundary (LSB-first, one variable per
+/// challenge — the same convention `fold_variables` uses).
+fn fold_prefix(mle: &Mle<InnerVal>, randomness: &[InnerChallenge]) -> Mle<InnerChallenge> {
+    let mut folded = mle.fix_last_variable::<InnerChallenge>(randomness[0]);
+    for &r in &randomness[1..] {
+        folded = folded.fix_last_variable::<InnerChallenge>(r);
+    }
+    folded
+}
+
+fn run_tower(
+    n: usize,
+    ff: usize,
+    num_rounds: usize,
+    seed: u64,
+) -> (
+    Mle<InnerVal>,
+    crate::whir::round_prover::RoundedProof<InnerVal, InnerChallenge, InnerValMmcs>,
+) {
+    type F = InnerVal;
+    type EF = InnerChallenge;
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    let values: Vec<F> = (0..(1usize << n)).map(|_| rand_kb(&mut rng)).collect();
+    let mle = Arc::new(Mle::from_row_major(RowMajorMatrix::new(values, 1)));
+
+    let rand_pt = |rng: &mut StdRng| -> Vec<EF> {
+        (0..n)
+            .map(|_| {
+                use p3_field::BasedVectorSpace;
+                <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter((0..4).map(|_| rand_kb(rng)))
+                    .unwrap()
+            })
+            .collect()
+    };
+    let point = rand_pt(&mut rng);
+    let eval = mle.eval_at::<EF>(&point)[0];
+
+    let base_dft = Arc::new(Radix2DitParallel::<F>::default());
+    let ef_dft = Arc::new(Radix2DitParallel::<EF>::default());
+    let mmcs = build_mmcs();
+    let mut challenger = build_challenger();
+
+    let prover = WhirProver::<F, EF, _, _>::new(base_dft, mmcs, tower_config(n, ff, num_rounds));
+    let proof =
+        prover.prove_rounds(ef_dft, &mut challenger, Arc::clone(&mle), point, eval);
+    (Arc::try_unwrap(mle).ok().unwrap(), proof)
+}
+
+/// The tower's reduced claim must equal `Σ_x weight[x]·f_final[x]` — the master
+/// identity that threads through every fold and every re-batch.
+#[test]
+fn tower_claim_invariant() {
+    let (_mle, proof) = run_tower(8, 2, 3, 0xA1);
+    let dot: InnerChallenge = proof
+        .final_weight
+        .iter()
+        .zip(&proof.final_poly)
+        .map(|(&w, &f)| w * f)
+        .sum();
+    assert_eq!(proof.final_claim, dot, "claim must equal Σ weight·f over the final polynomial");
+}
+
+/// The tower folds the ORIGINAL polynomial: the revealed final polynomial,
+/// evaluated at any point, equals `f` evaluated at `[folding_randomness, point]`.
+/// Re-batching changes the claim and weight, never `f`.
+#[test]
+fn tower_folds_original_poly() {
+    type F = InnerVal;
+    type EF = InnerChallenge;
+    let (mle, proof) = run_tower(8, 2, 3, 0xB2);
+
+    let final_vars = proof.final_poly.len().trailing_zeros() as usize;
+    let final_mle = Mle::from_row_major(RowMajorMatrix::new(proof.final_poly.clone(), 1));
+
+    let mut rng = StdRng::seed_from_u64(0xB2_B2);
+    let q: Vec<EF> = (0..final_vars)
+        .map(|_| {
+            use p3_field::BasedVectorSpace;
+            <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter((0..4).map(|_| rand_kb(&mut rng)))
+                .unwrap()
+        })
+        .collect();
+
+    let full_point: Vec<EF> = proof.folding_randomness.iter().copied().chain(q.iter().copied()).collect();
+    assert_eq!(full_point.len(), mle.num_variables() as usize);
+    assert_eq!(
+        final_mle.eval_at::<EF>(&q)[0],
+        mle.eval_at::<EF>(&full_point)[0],
+        "final poly at q must equal f at [folding_randomness, q]"
+    );
+}
+
+/// Each committed round's OOD answer must equal the round's folded polynomial
+/// (the base MLE folded by the challenges consumed up to that commit) evaluated
+/// at the round's OOD point — validating the OOD wiring across the tower.
+#[test]
+fn tower_round_ood_correct() {
+    type EF = InnerChallenge;
+    let (mle, proof) = run_tower(9, 3, 3, 0xC3);
+
+    let ff = 3usize;
+    for (r, round) in proof.rounds.iter().enumerate() {
+        // Round r is committed AFTER folding `(r+1)*ff` variables.
+        let prefix = &proof.folding_randomness[..(r + 1) * ff];
+        let folded = fold_prefix(&mle, prefix);
+        for (pt, &ans) in round.parsed.ood_points.iter().zip(&round.parsed.ood_answers) {
+            assert_eq!(pt.len(), folded.num_variables() as usize, "OOD point over remaining vars");
+            assert_eq!(ans, folded.eval_at::<EF>(pt)[0], "round OOD answer must match folded f");
+        }
+    }
+    // A 3-round tower commits its two intermediate rounds; the last is revealed.
+    assert_eq!(proof.rounds.len(), 2);
+}

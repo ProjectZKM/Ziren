@@ -22,11 +22,20 @@
 //!   `folds_reduce_the_claim` test checks its soundness identity
 //!   (`reduced claim == weight(r)·f(r)`) and that the fold equals partial
 //!   evaluation.  This is the cryptographic core of the WHIR prover.
-//! * Phase 2b: round orchestration — re-encode the folded polynomial at each
-//!   round's rate, Merkle-commit it, draw fresh OOD, and open the previous
-//!   round's codeword at the query indices, interleaved with `folding_factor`
-//!   fold steps.  Assembles [`sumcheck::prove_fold`] + [`prover`] into a full
-//!   [`proof::WhirProof`], reusing BaseFold's query-opening path.
+//! * **Phase 2b (here): the folding tower** —
+//!   [`round_prover::WhirProver::prove_rounds`] chains phase 1 and phase 2a into
+//!   WHIR's multi-round structure: fold `folding_factor` variables, re-encode
+//!   the folded polynomial at the round's rate, Merkle-commit it, draw fresh
+//!   OOD, and fold those constraints into the running claim; repeat, then reveal
+//!   the final small polynomial.  The claim threads through every round by the
+//!   invariant `claim = Σ_x weight[x]·f[x]`; the `tower_*` tests check that
+//!   master identity end to end, per-round OOD correctness, and that the tower
+//!   folds the original polynomial.
+//! * Phase 2c: the STIR query openings — sample query indices into each
+//!   committed codeword, open them, and fold the opened values in as extra
+//!   sumcheck constraints.  Deferred to co-develop with phase 3, since the
+//!   openings are only meaningfully checked by the verifier re-deriving them;
+//!   reuses BaseFold's query-opening path.
 //! * Phase 3: the verifier — replay the sumcheck, check the OOD answers and
 //!   the in-domain query openings, verify the PoW.
 //! * Phase 4: wrap in the jagged layer (`JaggedPcsVerifier<WhirVerifier>`),
@@ -36,6 +45,7 @@
 pub mod config;
 pub mod proof;
 pub mod prover;
+pub mod round_prover;
 pub mod sumcheck;
 
 #[cfg(test)]

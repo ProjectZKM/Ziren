@@ -22,40 +22,124 @@ use p3_field::{ExtensionField, Field};
 use crate::basefold::mle::Mle;
 use crate::whir::proof::{ProofOfWork, SumcheckPoly};
 
+/// The eq table `eq(point, ·)` over the `2^n` hypercube: index `x`'s bit `j`
+/// is variable `j` (LSB = variable 0), matching [`Mle::fix_last_variable`]'s
+/// adjacent-pair fold, so `eq(point)[x] = Π_j (bit_j(x) ? point_j : 1-point_j)`.
+pub(crate) fn eq_table<EF: Field>(n: usize, point: &[EF]) -> Vec<EF> {
+    let mut v = alloc::vec![EF::ONE; 1usize << n];
+    for (x, slot) in v.iter_mut().enumerate() {
+        let mut prod = EF::ONE;
+        for (j, &zj) in point.iter().enumerate() {
+            prod *= if (x >> j) & 1 == 1 { zj } else { EF::ONE - zj };
+        }
+        *slot = prod;
+    }
+    v
+}
+
 /// The batched eq weight over the `2^n` hypercube: `eq(query, ·)` plus
-/// `Σ_i batch^{i+1} · eq(ood_i, ·)`.  Index `x`'s bit `j` is variable `j`
-/// (LSB = variable 0), matching [`Mle::fix_last_variable`]'s adjacent-pair fold.
-fn batched_eq_weight<F, EF>(
+/// `Σ_i batch^{i+1} · eq(ood_i, ·)`.
+pub(crate) fn batched_eq_weight<EF: Field>(
     n: usize,
     query_point: &[EF],
     ood_points: &[Vec<EF>],
     batch: EF,
-) -> Vec<EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    let eq_of = |point: &[EF]| -> Vec<EF> {
-        let mut v = alloc::vec![EF::ONE; 1usize << n];
-        for (x, slot) in v.iter_mut().enumerate() {
-            let mut prod = EF::ONE;
-            for (j, &zj) in point.iter().enumerate() {
-                prod *= if (x >> j) & 1 == 1 { zj } else { EF::ONE - zj };
-            }
-            *slot = prod;
-        }
-        v
-    };
-    let mut weight = eq_of(query_point);
+) -> Vec<EF> {
+    let mut weight = eq_table(n, query_point);
     let mut coeff = batch;
     for ood in ood_points {
-        let e = eq_of(ood);
+        let e = eq_table(n, ood);
         for (w, ei) in weight.iter_mut().zip(&e) {
             *w += coeff * *ei;
         }
         coeff *= batch;
     }
     weight
+}
+
+/// A stateful WHIR folder: holds the (lifted) polynomial, the batched eq
+/// weight, and the running claim, and folds a chosen number of variables at a
+/// time.  The multi-round prover folds `folding_factor` variables, re-encodes,
+/// then folds again; a single call folding all variables is the flat sumcheck.
+pub struct WhirFolder<EF> {
+    /// The polynomial, lifted to EF, over the remaining variables.
+    pub f_vec: Vec<EF>,
+    /// The batched eq weight over the remaining variables.
+    pub weight: Vec<EF>,
+    /// The running (batched) claim.
+    pub claimed_sum: EF,
+}
+
+impl<EF: Field> WhirFolder<EF> {
+    /// Fold a fresh round's OOD constraints into the running weight and claim.
+    ///
+    /// After a re-commit, WHIR draws `ood_points` on the FOLDED polynomial and
+    /// answers them; those constraints join the sumcheck via a fresh batching
+    /// coefficient.  Because `answer_i = Σ_x eq(ood_i)[x]·f[x]`, adding
+    /// `batch^{i+1}·eq(ood_i)` to the weight and `batch^{i+1}·answer_i` to the
+    /// claim preserves the invariant `claim = Σ_x weight[x]·f[x]`.
+    pub fn add_ood_constraints(&mut self, ood_points: &[Vec<EF>], ood_answers: &[EF], batch: EF) {
+        let n = self.f_vec.len().trailing_zeros() as usize;
+        debug_assert_eq!(1usize << n, self.f_vec.len());
+        let mut coeff = batch;
+        for (pt, &ans) in ood_points.iter().zip(ood_answers) {
+            let e = eq_table(n, pt);
+            for (w, ei) in self.weight.iter_mut().zip(&e) {
+                *w += coeff * *ei;
+            }
+            self.claimed_sum += coeff * ans;
+            coeff *= batch;
+        }
+    }
+
+    /// Fold `k` variables, appending one degree-2 message per variable.  Draws
+    /// a challenge per variable and reduces the claim through each.
+    pub fn fold_variables<F, Challenger>(
+        &mut self,
+        k: usize,
+        pow_bits: &[usize],
+        challenger: &mut Challenger,
+        randomness_out: &mut Vec<EF>,
+    ) -> Vec<(SumcheckPoly<EF>, ProofOfWork<F>)>
+    where
+        F: Field,
+        EF: ExtensionField<F>,
+        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    {
+        let mut polys = Vec::with_capacity(k);
+        for round in 0..k {
+            let half = self.f_vec.len() / 2;
+            let mut c0 = EF::ZERO;
+            let mut c2 = EF::ZERO;
+            for i in 0..half {
+                let (flo, fhi) = (self.f_vec[2 * i], self.f_vec[2 * i + 1]);
+                let (wlo, whi) = (self.weight[2 * i], self.weight[2 * i + 1]);
+                c0 += wlo * flo;
+                c2 += (fhi - flo) * (whi - wlo);
+            }
+            let c1 = self.claimed_sum - c0.double() - c2;
+            let g = SumcheckPoly(alloc::vec![c0, c1, c2]);
+
+            challenger.observe_algebra_element(c0);
+            challenger.observe_algebra_element(c1);
+            challenger.observe_algebra_element(c2);
+            let pow = challenger.grind(pow_bits.get(round).copied().unwrap_or(0));
+            let r: EF = challenger.sample_algebra_element();
+
+            self.claimed_sum = c0 + c1 * r + c2 * r * r;
+            for i in 0..half {
+                self.f_vec[i] = self.f_vec[2 * i] + r * (self.f_vec[2 * i + 1] - self.f_vec[2 * i]);
+                self.weight[i] =
+                    self.weight[2 * i] + r * (self.weight[2 * i + 1] - self.weight[2 * i]);
+            }
+            self.f_vec.truncate(half);
+            self.weight.truncate(half);
+
+            polys.push((g, ProofOfWork(pow)));
+            randomness_out.push(r);
+        }
+        polys
+    }
 }
 
 /// The output of the folding sumcheck.
@@ -101,55 +185,21 @@ where
         coeff *= batch;
     }
 
-    // Lift f and the batched weight to EF, uniform through the fold.
-    let mut f_vec: Vec<EF> = f.guts().as_slice().iter().map(|&v| EF::from(v)).collect();
-    let mut weight: Vec<EF> = batched_eq_weight::<F, EF>(n, query_point, ood_points, batch);
-
-    let mut round_polys = Vec::with_capacity(n);
+    // Lift f and the batched weight to EF, then fold every variable.
+    let mut folder = WhirFolder {
+        f_vec: f.guts().as_slice().iter().map(|&v| EF::from(v)).collect(),
+        weight: batched_eq_weight(n, query_point, ood_points, batch),
+        claimed_sum,
+    };
     let mut folding_randomness = Vec::with_capacity(n);
-
-    for _ in 0..n {
-        // Degree-2 round poly g(X)=c0+c1 X+c2 X² over the last variable, split
-        // into adjacent (lo=2i, hi=2i+1) pairs as `fix_last_variable` does:
-        //   c0 = g(0) = Σ_i weight_lo·f_lo
-        //   c2 = Σ_i (f_hi-f_lo)(weight_hi-weight_lo)
-        //   c1 = claim - 2·c0 - c2      (from g(0)+g(1)=claim)
-        let half = f_vec.len() / 2;
-        let mut c0 = EF::ZERO;
-        let mut c2 = EF::ZERO;
-        for i in 0..half {
-            let (flo, fhi) = (f_vec[2 * i], f_vec[2 * i + 1]);
-            let (wlo, whi) = (weight[2 * i], weight[2 * i + 1]);
-            c0 += wlo * flo;
-            c2 += (fhi - flo) * (whi - wlo);
-        }
-        let c1 = claimed_sum - c0.double() - c2;
-        let g = SumcheckPoly(alloc::vec![c0, c1, c2]);
-
-        challenger.observe_algebra_element(c0);
-        challenger.observe_algebra_element(c1);
-        challenger.observe_algebra_element(c2);
-        let pow = challenger.grind(0);
-        let r: EF = challenger.sample_algebra_element();
-
-        // Reduce the claim to g(r) and fold both sides' last variable at r.
-        claimed_sum = c0 + c1 * r + c2 * r * r;
-        for i in 0..half {
-            f_vec[i] = f_vec[2 * i] + r * (f_vec[2 * i + 1] - f_vec[2 * i]);
-            weight[i] = weight[2 * i] + r * (weight[2 * i + 1] - weight[2 * i]);
-        }
-        f_vec.truncate(half);
-        weight.truncate(half);
-
-        round_polys.push((g, ProofOfWork(pow)));
-        folding_randomness.push(r);
-    }
+    let round_polys =
+        folder.fold_variables::<F, _>(n, &[], challenger, &mut folding_randomness);
 
     WhirFold {
         round_polys,
         folding_randomness,
-        final_claim: claimed_sum,
-        folded_f: f_vec[0],
-        folded_weight: weight[0],
+        final_claim: folder.claimed_sum,
+        folded_f: folder.f_vec[0],
+        folded_weight: folder.weight[0],
     }
 }
