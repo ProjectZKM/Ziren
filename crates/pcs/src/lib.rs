@@ -22,6 +22,7 @@ pub mod logup_gkr;
 mod lookup;
 mod machine;
 pub mod multilinear;
+pub mod whir;
 mod opts;
 mod permutation;
 mod proof;
