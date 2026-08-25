@@ -7,7 +7,10 @@ use zkm_core_executor::InstructionFfi;
 
 use crate::alu::{BitwiseCols, BitwiseImmCols, CloClzCols, DivRemCols};
 use crate::{
-    alu::{AddSubCols, AddSubImmCols, LtCols, MulCols, ShiftLeftCols, ShiftRightCols},
+    alu::{
+        AddSubCols, AddSubImmCols, LtCols, LtImmCols, MulCols, ShiftLeftCols, ShiftLeftImmCols,
+        ShiftRightCols, ShiftRightImmCols,
+    },
     control_flow::{BranchColumns, JumpColumns},
     memory::{
         LoadNarrowColumns, LoadWordColumns, MemoryBumpCols, MemoryInitCols, MemoryUnalignedColumns,
@@ -60,6 +63,12 @@ extern "C-unwind" {
         instruction: InstructionFfi,
         shard: u32,
     );
+    pub fn lt_imm_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut LtImmCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
     pub fn bitwise_event_to_row_koalabear(
         event: &AluEvent,
         cols: &mut BitwiseCols<KoalaBear>,
@@ -108,9 +117,21 @@ extern "C-unwind" {
         instruction: InstructionFfi,
         shard: u32,
     );
+    pub fn shift_left_imm_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut ShiftLeftImmCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
     pub fn shift_right_event_to_row_koalabear(
         event: &AluEvent,
         cols: &mut ShiftRightCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
+    pub fn shift_right_imm_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut ShiftRightImmCols<KoalaBear>,
         instruction: InstructionFfi,
         shard: u32,
     );
@@ -192,6 +213,7 @@ mod parity_tests {
 
     use std::borrow::BorrowMut;
 
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_matrix::Matrix;
@@ -203,10 +225,12 @@ mod parity_tests {
     use crate::alu::{
         AddSubChip, AddSubCols, AddSubImmChip, AddSubImmCols, BitwiseChip, BitwiseCols,
         BitwiseImmChip, BitwiseImmCols, CloClzChip, CloClzCols, DivRemChip, DivRemCols, LtChip,
-        LtCols, MulChip, MulCols, ShiftLeft, ShiftLeftCols, ShiftRightChip, ShiftRightCols,
+        LtCols, LtImmChip, LtImmCols, MulChip, MulCols, ShiftLeft, ShiftLeftCols, ShiftLeftImm,
+        ShiftLeftImmCols, ShiftRightChip, ShiftRightCols, ShiftRightImmChip, ShiftRightImmCols,
         NUM_ADD_SUB_COLS, NUM_ADD_SUB_IMM_COLS, NUM_BITWISE_COLS, NUM_BITWISE_IMM_COLS,
-        NUM_CLOCLZ_COLS, NUM_DIVREM_COLS, NUM_LT_COLS, NUM_MUL_COLS, NUM_SHIFT_LEFT_COLS,
-        NUM_SHIFT_RIGHT_COLS,
+        NUM_CLOCLZ_COLS, NUM_DIVREM_COLS, NUM_LT_COLS, NUM_LT_IMM_COLS, NUM_MUL_COLS,
+        NUM_SHIFT_LEFT_COLS, NUM_SHIFT_LEFT_IMM_COLS, NUM_SHIFT_RIGHT_COLS,
+        NUM_SHIFT_RIGHT_IMM_COLS,
     };
     use crate::control_flow::{
         BranchChip, BranchColumns, JumpChip, JumpColumns, NUM_BRANCH_COLS, NUM_JUMP_COLS,
@@ -372,7 +396,17 @@ mod parity_tests {
             LtCols<F>,
             NUM_LT_COLS,
             lt_event_to_row_koalabear,
-            dep_pad!(LtCols<F>)
+            // Typed R-type frame — zero padding.
+            |_row: &mut [F]| {}
+        );
+        check!(
+            LtImmChip::default(),
+            &record.lt_imm_events,
+            LtImmCols<F>,
+            NUM_LT_IMM_COLS,
+            lt_imm_event_to_row_koalabear,
+            // Typed I-type frame — zero padding.
+            |_row: &mut [F]| {}
         );
         check!(
             CloClzChip::default(),
@@ -400,7 +434,21 @@ mod parity_tests {
                 cols.shift_by_n_bits[0] = F::ONE;
                 cols.shift_by_n_bytes[0] = F::ONE;
                 cols.bit_shift_multiplier = F::ONE;
-                cols.frame.populate_dependency();
+                            }
+        );
+        check!(
+            ShiftLeftImm::default(),
+            &record.shift_left_imm_events,
+            ShiftLeftImmCols<F>,
+            NUM_SHIFT_LEFT_IMM_COLS,
+            shift_left_imm_event_to_row_koalabear,
+            |row: &mut [F]| {
+                // Mirrors the chip's padded_row_template; the typed frame
+                // itself needs no neutralising.
+                let cols: &mut ShiftLeftImmCols<F> = row.borrow_mut();
+                cols.shift_by_n_bits[0] = F::ONE;
+                cols.shift_by_n_bytes[0] = F::ONE;
+                cols.bit_shift_multiplier = F::ONE;
             }
         );
         check!(
@@ -415,7 +463,20 @@ mod parity_tests {
                 use p3_field::PrimeCharacteristicRing;
                 cols.shift_by_n_bits[0] = F::ONE;
                 cols.shift_by_n_bytes[0] = F::ONE;
-                cols.frame.populate_dependency();
+                            }
+        );
+        check!(
+            ShiftRightImmChip::default(),
+            &record.shift_right_imm_events,
+            ShiftRightImmCols<F>,
+            NUM_SHIFT_RIGHT_IMM_COLS,
+            shift_right_imm_event_to_row_koalabear,
+            |row: &mut [F]| {
+                // Mirrors the chip's padding branch; the typed frame itself
+                // needs no neutralising.
+                let cols: &mut ShiftRightImmCols<F> = row.borrow_mut();
+                cols.shift_by_n_bits[0] = F::ONE;
+                cols.shift_by_n_bytes[0] = F::ONE;
             }
         );
         check!(
@@ -552,7 +613,7 @@ mod parity_tests {
             // Coverage note: a chip with zero events still validates its
             // padding shape, but not the live instruction frame.
             eprintln!(
-                "{label}[shard {i}] events: add_sub={} add_sub_imm={} bitwise={} bitwise_imm={} lt={} cloclz={} sll={} sr={} \
+                "{label}[shard {i}] events: add_sub={} add_sub_imm={} bitwise={} bitwise_imm={} lt={} lt_imm={} cloclz={} sll={} sll_imm={} sr={} sr_imm={} \
                  mul={} divrem={} branch={} jump={} movcond={} misc={} syscall={} \
                  mem(ln={} lw={} sn={} sw={} un={})",
                 record.add_sub_events.len(),
@@ -560,9 +621,12 @@ mod parity_tests {
                 record.bitwise_events.len(),
                 record.bitwise_imm_events.len(),
                 record.lt_events.len(),
+                record.lt_imm_events.len(),
                 record.cloclz_events.len(),
                 record.shift_left_events.len(),
+                record.shift_left_imm_events.len(),
                 record.shift_right_events.len(),
+                record.shift_right_imm_events.len(),
                 record.mul_events.len(),
                 record.divrem_events.len(),
                 record.branch_events.len(),

@@ -110,14 +110,23 @@ pub struct ExecutionRecord {
     /// A trace of the immediate-form bitwise events (XORI, ORI, ANDI): `op_c`
     /// is an immediate, so they prove on the narrower I-type frame.
     pub bitwise_imm_events: Vec<AluEvent>,
-    /// A trace of the SLL and SLLV events.
+    /// A trace of the register-form (SLLV) shift-left events.
     pub shift_left_events: Vec<AluEvent>,
-    /// A trace of the SRL, SRLV, SRA, and SRAV events.
+    /// A trace of the immediate-form (shamt) shift-left events, on the
+    /// narrower I-type frame.
+    pub shift_left_imm_events: Vec<AluEvent>,
+    /// A trace of the register-form (SRLV/SRAV/ROTRV) shift-right events.
     pub shift_right_events: Vec<AluEvent>,
+    /// A trace of the immediate-form (shamt) shift-right events, on the
+    /// narrower I-type frame.
+    pub shift_right_imm_events: Vec<AluEvent>,
     /// A trace of the DIV, DIVU events.
     pub divrem_events: Vec<CompAluEvent>,
     /// A trace of the SLT, SLTI, SLTU, and SLTIU events.
     pub lt_events: Vec<AluEvent>,
+    /// A trace of the immediate-form compare events (SLTI, SLTIU), on the
+    /// narrower I-type frame.
+    pub lt_imm_events: Vec<AluEvent>,
     /// A trace of the CLO and CLZ events.
     pub cloclz_events: Vec<AluEvent>,
     /// A trace of the narrow (sub-word) loads: `LB`, `LBU`, `LH`, `LHU`.
@@ -225,8 +234,11 @@ impl ExecutionRecord {
         result.bitwise_events.reserve(reservation_size);
         result.bitwise_imm_events.reserve(reservation_size);
         result.shift_left_events.reserve(reservation_size);
+        result.shift_left_imm_events.reserve(reservation_size);
         result.shift_right_events.reserve(reservation_size);
+        result.shift_right_imm_events.reserve(reservation_size);
         result.lt_events.reserve(reservation_size);
+        result.lt_imm_events.reserve(reservation_size);
         result.mul_events.reserve(reservation_size);
         result.divrem_events.reserve(reservation_size);
         result.cloclz_events.reserve(reservation_size);
@@ -495,9 +507,15 @@ impl MachineRecord for ExecutionRecord {
         stats.insert("bitwise_events".to_string(), self.bitwise_events.len());
         stats.insert("bitwise_imm_events".to_string(), self.bitwise_imm_events.len());
         stats.insert("shift_left_events".to_string(), self.shift_left_events.len());
+        stats.insert("shift_left_imm_events".to_string(), self.shift_left_imm_events.len());
         stats.insert("shift_right_events".to_string(), self.shift_right_events.len());
+        stats.insert(
+            "shift_right_imm_events".to_string(),
+            self.shift_right_imm_events.len(),
+        );
         stats.insert("divrem_events".to_string(), self.divrem_events.len());
         stats.insert("lt_events".to_string(), self.lt_events.len());
+        stats.insert("lt_imm_events".to_string(), self.lt_imm_events.len());
         stats.insert("cloclz_events".to_string(), self.cloclz_events.len());
         stats.insert("memory_load_narrow_events".to_string(), self.memory_load_narrow_events.len());
         stats.insert("memory_load_word_events".to_string(), self.memory_load_word_events.len());
@@ -541,9 +559,12 @@ impl MachineRecord for ExecutionRecord {
         self.bitwise_events.append(&mut other.bitwise_events);
         self.bitwise_imm_events.append(&mut other.bitwise_imm_events);
         self.shift_left_events.append(&mut other.shift_left_events);
+        self.shift_left_imm_events.append(&mut other.shift_left_imm_events);
         self.shift_right_events.append(&mut other.shift_right_events);
+        self.shift_right_imm_events.append(&mut other.shift_right_imm_events);
         self.divrem_events.append(&mut other.divrem_events);
         self.lt_events.append(&mut other.lt_events);
+        self.lt_imm_events.append(&mut other.lt_imm_events);
         self.cloclz_events.append(&mut other.cloclz_events);
         self.memory_load_narrow_events.append(&mut other.memory_load_narrow_events);
         self.memory_load_word_events.append(&mut other.memory_load_word_events);

@@ -526,8 +526,22 @@ impl Instruction {
             // SLTU: rd = rs < rt
             (0b000000, 0b101011) => Ok(Self::new(Opcode::SLTU, rd, rs, rt, false, false)), // SLTU: rd = rs < rt
 
-            // LUI: rt = imm << 16
-            (0b001111, _) => Ok(Self::new(Opcode::SLL, rt as u8, offset_ext16, 16, true, true)), // LUI: rt = imm << 16
+            // LUI: rt = imm << 16.  Decoded as an immediate ADD of the
+            // pre-shifted constant rather than an `SLL` whose FIRST operand is
+            // an immediate: the architectural effect (`rt = imm << 16`, one
+            // cycle) is identical, and it keeps every shift-chip row a pure
+            // operand form — `op_b` a register, `op_c` the shamt — which the
+            // typed frames rely on.  (zkVM-internal normalisation, like the
+            // SYNC-class decodes above; the sign-extension bits of the old
+            // `op_b` immediate shifted out anyway.)
+            (0b001111, _) => Ok(Self::new(
+                Opcode::ADD,
+                rt as u8,
+                0,
+                offset_ext16.overflowing_shl(16).0,
+                false,
+                true,
+            )), // LUI: rt = imm << 16
             // AND: rd = rs & rt
             (0b000000, 0b100100) => Ok(Self::new(Opcode::AND, rd, rs, rt, false, false)), // AND: rd = rs & rt
             // OR: rd = rs | rt

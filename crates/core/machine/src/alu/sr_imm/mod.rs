@@ -41,8 +41,6 @@
 //! # inaccurate.
 //! assert a = result[0..WORD_SIZE]
 
-pub(crate) mod utils;
-
 use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
@@ -67,13 +65,13 @@ use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     alu::sr::utils::{nb_bits_to_shift, nb_bytes_to_shift},
     bytes::utils::shr_carry,
-    frame::{eval_r_type_frame, RTypeFrameCols},
+    frame::{eval_i_type_frame, ITypeFrameCols},
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
-/// The number of main trace columns for `ShiftRightChip`.
-pub const NUM_SHIFT_RIGHT_COLS: usize = size_of::<ShiftRightCols<u8>>();
+/// The number of main trace columns for `ShiftRightImmChip`.
+pub const NUM_SHIFT_RIGHT_IMM_COLS: usize = size_of::<ShiftRightImmCols<u8>>();
 
 /// The number of bytes necessary to represent a 64-bit integer.
 const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
@@ -83,12 +81,12 @@ const BYTE_SIZE: usize = 8;
 
 /// A chip that implements bitwise operations for the opcodes SRL and SRA.
 #[derive(Default)]
-pub struct ShiftRightChip;
+pub struct ShiftRightImmChip;
 
 /// The column layout for the chip.
 #[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct ShiftRightCols<T> {
+pub struct ShiftRightImmCols<T> {
     /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
@@ -137,10 +135,10 @@ pub struct ShiftRightCols<T> {
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
     /// real row (every ShiftRight row is an instruction — the Instruction bus
     /// and its dependency rows are gone).
-    pub frame: RTypeFrameCols<T>,
+    pub frame: ITypeFrameCols<T>,
 }
 
-impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
+impl<F: PrimeField32> MachineAir<F> for ShiftRightImmChip {
     type Record = ExecutionRecord;
 
     type Program = Program;
@@ -148,18 +146,18 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
     type Error = CoreChipError;
 
     fn name(&self) -> String {
-        "ShiftRight".to_string()
+        "ShiftRightImm".to_string()
     }
 
     fn picus_info(&self) -> PicusInfo {
-        ShiftRightCols::<u8>::picus_info()
+        ShiftRightImmCols::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let nb_rows = next_multiple_of_32(
-            input.shift_right_events.len(),
+            input.shift_right_imm_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <ShiftRightChip as MachineAir<F>>::name(self).as_str(),
+            <ShiftRightImmChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }
@@ -170,20 +168,20 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
-        let nb_rows = input.shift_right_events.len();
-        let padded_nb_rows = <ShiftRightChip as MachineAir<F>>::num_rows(self, input).unwrap();
-        let mut values = zeroed_f_vec(padded_nb_rows * NUM_SHIFT_RIGHT_COLS);
+        let nb_rows = input.shift_right_imm_events.len();
+        let padded_nb_rows = <ShiftRightImmChip as MachineAir<F>>::num_rows(self, input).unwrap();
+        let mut values = zeroed_f_vec(padded_nb_rows * NUM_SHIFT_RIGHT_IMM_COLS);
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
-        values.chunks_mut(chunk_size * NUM_SHIFT_RIGHT_COLS).enumerate().par_bridge().for_each(
+        values.chunks_mut(chunk_size * NUM_SHIFT_RIGHT_IMM_COLS).enumerate().par_bridge().for_each(
             |(i, rows)| {
-                rows.chunks_mut(NUM_SHIFT_RIGHT_COLS).enumerate().for_each(|(j, row)| {
+                rows.chunks_mut(NUM_SHIFT_RIGHT_IMM_COLS).enumerate().for_each(|(j, row)| {
                     let idx = i * chunk_size + j;
-                    let cols: &mut ShiftRightCols<F> = row.borrow_mut();
+                    let cols: &mut ShiftRightImmCols<F> = row.borrow_mut();
 
                     if idx < nb_rows {
                         let mut byte_lookup_events = Vec::new();
-                        let event = &input.shift_right_events[idx];
+                        let event = &input.shift_right_imm_events[idx];
                         self.event_to_row(
                             event,
                             cols,
@@ -195,7 +193,7 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
                         cols.shift_by_n_bits[0] = F::ONE;
                         cols.shift_by_n_bytes[0] = F::ONE;
                         // A padding row's frame needs no neutralising: the
-                        // typed R-type frame's register-access multiplicities
+                        // typed I-type frame's register-access multiplicities
                         // are `is_real`.
                     }
                 });
@@ -203,7 +201,7 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
         );
 
         // Convert the trace to a row major matrix.
-        Ok(RowMajorMatrix::new(values, NUM_SHIFT_RIGHT_COLS))
+        Ok(RowMajorMatrix::new(values, NUM_SHIFT_RIGHT_IMM_COLS))
     }
 
     fn generate_dependencies(
@@ -211,16 +209,16 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
         input: &Self::Record,
         output: &mut Self::Record,
     ) -> Result<(), Self::Error> {
-        let chunk_size = std::cmp::max(input.shift_right_events.len() / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(input.shift_right_imm_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
-            .shift_right_events
+            .shift_right_imm_events
             .par_chunks(chunk_size)
             .map(|events| {
                 let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::ZERO; NUM_SHIFT_RIGHT_COLS];
-                    let cols: &mut ShiftRightCols<F> = row.as_mut_slice().borrow_mut();
+                    let mut row = [F::ZERO; NUM_SHIFT_RIGHT_IMM_COLS];
+                    let cols: &mut ShiftRightImmCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(
                         event,
                         cols,
@@ -241,17 +239,17 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
         if let Some(shape) = shard.shape.as_ref() {
             shape.included::<F, _>(self)
         } else {
-            !shard.shift_right_events.is_empty()
+            !shard.shift_right_imm_events.is_empty()
         }
     }
 }
 
-impl ShiftRightChip {
+impl ShiftRightImmChip {
     /// Create a row from an event.
     fn event_to_row<F: PrimeField32>(
         &self,
         event: &AluEvent,
-        cols: &mut ShiftRightCols<F>,
+        cols: &mut ShiftRightImmCols<F>,
         blu: &mut impl ByteRecord,
         program: &Program,
         shard: u32,
@@ -357,20 +355,20 @@ impl ShiftRightChip {
     }
 }
 
-impl<F> BaseAir<F> for ShiftRightChip {
+impl<F> BaseAir<F> for ShiftRightImmChip {
     fn width(&self) -> usize {
-        NUM_SHIFT_RIGHT_COLS
+        NUM_SHIFT_RIGHT_IMM_COLS
     }
 }
 
-impl<AB> Air<AB> for ShiftRightChip
+impl<AB> Air<AB> for ShiftRightImmChip
 where
     AB: ZKMCoreAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local = main.current_slice();
-        let local: &ShiftRightCols<AB::Var> = (*local).borrow();
+        let local: &ShiftRightImmCols<AB::Var> = (*local).borrow();
         // The inputs are the frame's register reads, not columns of this chip.
         let op_b = local.frame.op_b_val();
         let op_c = local.frame.op_c_val();
@@ -553,7 +551,7 @@ where
         // register access and `(clk, pc)` chaining (the Instruction bus and
         // its dependency rows are gone).  SRL/SRA/ROR are sequential and can
         // never halt.
-        eval_r_type_frame(
+        eval_i_type_frame(
             builder,
             &local.frame,
             local.is_srl * Opcode::SRL.as_field::<AB::F>()
@@ -571,74 +569,53 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Instruction, Opcode};
     use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
-    use super::ShiftRightChip;
-    use crate::programs::tests::{alu_op, run_instructions};
+    use super::ShiftRightImmChip;
+    use crate::programs::tests::run_instructions;
+    use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
+
+    /// A register seed plus immediate-form (shamt) right shifts on it.
+    fn sr_imm_instructions(reps: usize) -> Vec<Instruction> {
+        let mut instructions =
+            vec![Instruction::new(Opcode::ADD, 29, 0, 0x87654321, false, true)];
+        for i in 0..reps {
+            let sa = (i % 32) as u32;
+            instructions.push(Instruction::new(Opcode::SRL, 31, 29, sa, false, true));
+            instructions.push(Instruction::new(Opcode::SRA, 30, 29, sa, false, true));
+            instructions.push(Instruction::new(Opcode::ROR, 28, 29, sa, false, true));
+        }
+        instructions
+    }
 
     #[test]
     fn generate_trace() {
-        let shard = run_instructions(alu_op(Opcode::SRL, 12, 1));
-        assert!(!shard.shift_right_events.is_empty());
-        let chip = ShiftRightChip::default();
+        let shard = run_instructions(sr_imm_instructions(13));
+        assert!(!shard.shift_right_imm_events.is_empty());
+        assert!(shard.shift_right_events.is_empty());
+        let chip = ShiftRightImmChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 
     #[test]
-    fn prove_koalabear() {
+    fn prove_koala_bear() {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let shifts: Vec<(Opcode, u32, u32)> = vec![
-            (Opcode::SRL, 0xffff8000, 0),
-            (Opcode::SRL, 0xffff8000, 1),
-            (Opcode::SRL, 0xffff8000, 7),
-            (Opcode::SRL, 0xffff8000, 14),
-            (Opcode::SRL, 0xffff8001, 15),
-            (Opcode::SRL, 0xffffffff, 0),
-            (Opcode::SRL, 0xffffffff, 1),
-            (Opcode::SRL, 0xffffffff, 7),
-            (Opcode::SRL, 0xffffffff, 14),
-            (Opcode::SRL, 0xffffffff, 31),
-            (Opcode::SRL, 0x21212121, 0),
-            (Opcode::SRL, 0x21212121, 1),
-            (Opcode::SRL, 0x21212121, 7),
-            (Opcode::SRL, 0x21212121, 14),
-            (Opcode::SRL, 0x21212121, 31),
-            (Opcode::SRL, 0x21212121, 0xffffffe0),
-            (Opcode::SRL, 0x21212121, 0xffffffe1),
-            (Opcode::SRL, 0x21212121, 0xffffffe7),
-            (Opcode::SRL, 0x21212121, 0xffffffee),
-            (Opcode::SRL, 0x21212121, 0xffffffff),
-            (Opcode::SRA, 0x00000000, 0),
-            (Opcode::SRA, 0x80000000, 1),
-            (Opcode::SRA, 0x80000000, 7),
-            (Opcode::SRA, 0x80000000, 14),
-            (Opcode::SRA, 0x80000001, 31),
-            (Opcode::SRA, 0x7fffffff, 0),
-            (Opcode::SRA, 0x7fffffff, 1),
-            (Opcode::SRA, 0x7fffffff, 7),
-            (Opcode::SRA, 0x7fffffff, 14),
-            (Opcode::SRA, 0x7fffffff, 31),
-            (Opcode::SRA, 0x81818181, 0),
-            (Opcode::SRA, 0x81818181, 1),
-            (Opcode::SRA, 0x81818181, 7),
-            (Opcode::SRA, 0x81818181, 14),
-            (Opcode::SRA, 0x81818181, 31),
-        ];
-        let mut instructions = Vec::new();
-        for &(opcode, b, c) in shifts.iter() {
-            instructions.extend(alu_op(opcode, b, c));
-        }
+        // `p3_uni_stark::prove` needs a power-of-two height and
+        // `generate_trace` pads to next_multiple_of_32 only: 341 triples plus
+        // one extra = 1024 immediate-form events.
+        let mut instructions = sr_imm_instructions(341);
+        instructions.push(Instruction::new(Opcode::SRL, 27, 29, 7, false, true));
         let shard = run_instructions(instructions);
-        assert!(!shard.shift_right_events.is_empty());
-        let chip = ShiftRightChip::default();
+        assert_eq!(shard.shift_right_imm_events.len(), 1024);
+
+        let chip = ShiftRightImmChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);

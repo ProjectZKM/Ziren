@@ -22,22 +22,22 @@ use zkm_pcs::{
 
 use crate::{
     air::WordAirBuilder,
-    frame::{eval_r_type_frame, RTypeFrameCols},
+    frame::{eval_i_type_frame, ITypeFrameCols},
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
-/// The number of main trace columns for `LtChip`.
-pub const NUM_LT_COLS: usize = size_of::<LtCols<u8>>();
+/// The number of main trace columns for `LtImmChip`.
+pub const NUM_LT_IMM_COLS: usize = size_of::<LtImmCols<u8>>();
 
 /// A chip that implements bitwise operations for the opcodes SLT and SLTU.
 #[derive(Default)]
-pub struct LtChip;
+pub struct LtImmChip;
 
 /// The column layout for the chip.
 #[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
-pub struct LtCols<T> {
+pub struct LtImmCols<T> {
     /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
@@ -53,7 +53,7 @@ pub struct LtCols<T> {
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
     /// real row (every Lt row is an instruction — DivRem's comparison is
     /// inlined and the Instruction bus is gone).
-    pub frame: RTypeFrameCols<T>,
+    pub frame: ITypeFrameCols<T>,
 
     /// The output operand.
     pub a: Word<T>,
@@ -89,7 +89,7 @@ pub struct LtCols<T> {
     pub comparison_bytes: [T; 2],
 }
 
-impl<F: PrimeField32> MachineAir<F> for LtChip {
+impl<F: PrimeField32> MachineAir<F> for LtImmChip {
     type Record = ExecutionRecord;
 
     type Program = Program;
@@ -97,20 +97,20 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
     type Error = CoreChipError;
 
     fn name(&self) -> String {
-        "Lt".to_string()
+        "LtImm".to_string()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let nb_rows = next_multiple_of_32(
-            input.lt_events.len(),
+            input.lt_imm_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <LtChip as MachineAir<F>>::name(self).as_str(),
+            <LtImmChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }
 
     fn picus_info(&self) -> PicusInfo {
-        LtCols::<u8>::picus_info()
+        LtImmCols::<u8>::picus_info()
     }
 
     fn generate_trace(
@@ -119,19 +119,19 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
-        let padded_nb_rows = <LtChip as MachineAir<F>>::num_rows(self, input).unwrap();
-        let mut values = zeroed_f_vec(padded_nb_rows * NUM_LT_COLS);
-        let chunk_size = std::cmp::max((input.lt_events.len() + 1) / num_cpus::get(), 1);
+        let padded_nb_rows = <LtImmChip as MachineAir<F>>::num_rows(self, input).unwrap();
+        let mut values = zeroed_f_vec(padded_nb_rows * NUM_LT_IMM_COLS);
+        let chunk_size = std::cmp::max((input.lt_imm_events.len() + 1) / num_cpus::get(), 1);
 
-        values.chunks_mut(chunk_size * NUM_LT_COLS).enumerate().par_bridge().for_each(
+        values.chunks_mut(chunk_size * NUM_LT_IMM_COLS).enumerate().par_bridge().for_each(
             |(i, rows)| {
-                rows.chunks_mut(NUM_LT_COLS).enumerate().for_each(|(j, row)| {
+                rows.chunks_mut(NUM_LT_IMM_COLS).enumerate().for_each(|(j, row)| {
                     let idx = i * chunk_size + j;
-                    let cols: &mut LtCols<F> = row.borrow_mut();
+                    let cols: &mut LtImmCols<F> = row.borrow_mut();
 
-                    if idx < input.lt_events.len() {
+                    if idx < input.lt_imm_events.len() {
                         let mut byte_lookup_events = Vec::new();
-                        let event = &input.lt_events[idx];
+                        let event = &input.lt_imm_events[idx];
                         self.event_to_row(
                             event,
                             cols,
@@ -141,7 +141,7 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
                         );
                     } else {
                         // A padding row's frame needs no neutralising: the
-                        // typed R-type frame's register-access multiplicities
+                        // typed I-type frame's register-access multiplicities
                         // are `is_real`.
                     }
                 });
@@ -150,7 +150,7 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
 
         // Convert the trace to a row major matrix.
 
-        Ok(RowMajorMatrix::new(values, NUM_LT_COLS))
+        Ok(RowMajorMatrix::new(values, NUM_LT_IMM_COLS))
     }
 
     fn generate_dependencies(
@@ -158,16 +158,16 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
         input: &Self::Record,
         output: &mut Self::Record,
     ) -> Result<(), Self::Error> {
-        let chunk_size = std::cmp::max(input.lt_events.len() / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(input.lt_imm_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
-            .lt_events
+            .lt_imm_events
             .par_chunks(chunk_size)
             .map(|events| {
                 let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::ZERO; NUM_LT_COLS];
-                    let cols: &mut LtCols<F> = row.as_mut_slice().borrow_mut();
+                    let mut row = [F::ZERO; NUM_LT_IMM_COLS];
+                    let cols: &mut LtImmCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(
                         event,
                         cols,
@@ -188,17 +188,17 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
         if let Some(shape) = shard.shape.as_ref() {
             shape.included::<F, _>(self)
         } else {
-            !shard.lt_events.is_empty()
+            !shard.lt_imm_events.is_empty()
         }
     }
 }
 
-impl LtChip {
+impl LtImmChip {
     /// Create a row from an event.
     fn event_to_row<F: PrimeField32>(
         &self,
         event: &AluEvent,
-        cols: &mut LtCols<F>,
+        cols: &mut LtImmCols<F>,
         blu: &mut impl ByteRecord,
         program: &Program,
         shard: u32,
@@ -286,20 +286,20 @@ impl LtChip {
     }
 }
 
-impl<F> BaseAir<F> for LtChip {
+impl<F> BaseAir<F> for LtImmChip {
     fn width(&self) -> usize {
-        NUM_LT_COLS
+        NUM_LT_IMM_COLS
     }
 }
 
-impl<AB> Air<AB> for LtChip
+impl<AB> Air<AB> for LtImmChip
 where
     AB: ZKMAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local = main.current_slice();
-        let local: &LtCols<AB::Var> = (*local).borrow();
+        let local: &LtImmCols<AB::Var> = (*local).borrow();
 
         let is_real = local.is_slt + local.is_sltu;
         // The inputs live in the frame's register reads, not in columns here.
@@ -480,7 +480,7 @@ where
         // register access and `(clk, pc)` chaining (the Instruction bus and
         // its dependency rows are gone).  SLT/SLTU are sequential and can
         // never halt.
-        eval_r_type_frame(
+        eval_i_type_frame(
             builder,
             &local.frame,
             local.is_slt * Opcode::SLT.as_field::<AB::F>()
@@ -497,72 +497,54 @@ where
 
 #[cfg(test)]
 mod tests {
-
-    use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Instruction, Opcode};
     use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
-    use super::LtChip;
-    use crate::programs::tests::{alu_op, run_instructions};
+    use super::LtImmChip;
+    use crate::programs::tests::run_instructions;
+    use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
+
+    /// A register seed plus immediate-form compares on it (SLTI / SLTIU).
+    fn lt_imm_instructions(reps: usize) -> Vec<Instruction> {
+        let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 1000, false, true)];
+        for i in 0..reps {
+            let imm = (i % 2048) as u32;
+            instructions.push(Instruction::new(Opcode::SLT, 31, 29, imm, false, true));
+            instructions.push(Instruction::new(Opcode::SLTU, 30, 29, imm, false, true));
+        }
+        instructions
+    }
 
     #[test]
     fn generate_trace() {
-        let shard = run_instructions(alu_op(Opcode::SLT, 3, 2));
-        assert!(!shard.lt_events.is_empty());
-        let chip = LtChip::default();
-        let generate_trace = chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
-        let trace: RowMajorMatrix<KoalaBear> = generate_trace;
+        let shard = run_instructions(lt_imm_instructions(20));
+        assert!(!shard.lt_imm_events.is_empty());
+        assert!(shard.lt_events.is_empty());
+        let chip = LtImmChip::default();
+        let trace: RowMajorMatrix<KoalaBear> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 
-    fn prove_koalabear_template(shard: &ExecutionRecord) {
+    #[test]
+    fn prove_koala_bear() {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let chip = LtChip::default();
+        // `p3_uni_stark::prove` needs a power-of-two height and
+        // `generate_trace` pads to next_multiple_of_32 only: 512 pairs = 1024
+        // immediate-form events.
+        let shard = run_instructions(lt_imm_instructions(512));
+        assert_eq!(shard.lt_imm_events.len(), 1024);
+
+        let chip = LtImmChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(shard, &mut ExecutionRecord::default()).unwrap();
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();
         verify(&config, &chip, &mut challenger, &proof).unwrap();
-    }
-
-    #[test]
-    fn prove_koalabear_slt() {
-        const NEG_3: u32 = 0b11111111111111111111111111111101;
-        const NEG_4: u32 = 0b11111111111111111111111111111100;
-        let mut instructions = Vec::new();
-        for (b, c) in [
-            (3, 2),
-            (2, 3),
-            (5, NEG_3),
-            (NEG_3, 5),
-            (NEG_3, NEG_4),
-            (NEG_4, NEG_3),
-            (3, 3),
-            (NEG_3, NEG_3),
-        ] {
-            instructions.extend(alu_op(Opcode::SLT, b, c));
-        }
-        let shard = run_instructions(instructions);
-        assert!(!shard.lt_events.is_empty());
-
-        prove_koalabear_template(&shard);
-    }
-
-    #[test]
-    fn prove_koalabear_sltu() {
-        const LARGE: u32 = 0b11111111111111111111111111111101;
-        let mut instructions = Vec::new();
-        for (b, c) in [(3, 2), (2, 3), (LARGE, 5), (5, LARGE), (0, 0), (LARGE, LARGE)] {
-            instructions.extend(alu_op(Opcode::SLTU, b, c));
-        }
-        let shard = run_instructions(instructions);
-        assert!(!shard.lt_events.is_empty());
-
-        prove_koalabear_template(&shard);
     }
 }

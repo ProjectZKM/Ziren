@@ -103,12 +103,22 @@ pub enum MipsAirId {
     BitwiseImm = 61,
     /// The mul chip.
     Mul = 31,
-    /// The shift right chip.
+    /// The shift right chip — the register form.
     ShiftRight = 32,
-    /// The shift left chip.
+    /// The immediate-form (shamt) shift right chip, on the narrower I-type
+    /// frame.  Declared beside its register sibling for the declaration-order
+    /// zip against `MipsAir::chips()`.
+    ShiftRightImm = 63,
+    /// The shift left chip — the register form.
     ShiftLeft = 33,
-    /// The lt chip.
+    /// The immediate-form (shamt) shift left chip, on the narrower I-type
+    /// frame.
+    ShiftLeftImm = 62,
+    /// The lt chip — the register form.
     Lt = 34,
+    /// The immediate-form compare chip (`SLTI` / `SLTIU`), on the narrower
+    /// I-type frame.
+    LtImm = 64,
     /// The CloClz chip.
     CloClz = 35,
     /// The branch chip.
@@ -164,7 +174,10 @@ impl MipsAirId {
             MipsAirId::Bitwise,
             MipsAirId::BitwiseImm,
             MipsAirId::ShiftLeft,
+            MipsAirId::ShiftLeftImm,
             MipsAirId::ShiftRight,
+            MipsAirId::ShiftRightImm,
+            MipsAirId::LtImm,
             MipsAirId::DivRem,
             MipsAirId::MemoryLocal,
             MipsAirId::MemoryBump,
@@ -226,8 +239,11 @@ impl MipsAirId {
             Self::BitwiseImm => "BitwiseImm",
             Self::Mul => "Mul",
             Self::ShiftRight => "ShiftRight",
+            Self::ShiftRightImm => "ShiftRightImm",
             Self::ShiftLeft => "ShiftLeft",
+            Self::ShiftLeftImm => "ShiftLeftImm",
             Self::Lt => "Lt",
+            Self::LtImm => "LtImm",
             Self::CloClz => "CloClz",
             Self::Branch => "Branch",
             Self::Jump => "Jump",

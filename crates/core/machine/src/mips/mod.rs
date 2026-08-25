@@ -30,7 +30,8 @@ pub(crate) mod mips_chips {
     pub use crate::{
         alu::{
             AddSubChip, AddSubImmChip, BitwiseChip, BitwiseImmChip, CloClzChip, DivRemChip,
-            LtChip, MulChip, ShiftLeft, ShiftRightChip,
+            LtChip, LtImmChip, MulChip, ShiftLeft, ShiftLeftImm, ShiftRightChip,
+            ShiftRightImmChip,
         },
         bytes::ByteChip,
         control_flow::{BranchChip, JumpChip},
@@ -98,12 +99,18 @@ pub enum MipsAir<F: PrimeField32> {
     DivRem(DivRemChip),
     /// An AIR for MIPS Lt instruction.
     Lt(LtChip),
+    /// An AIR for the immediate-form MIPS compare instructions.
+    LtImm(LtImmChip),
     /// An AIR for MIPS CLO and CLZ instruction.
     CloClz(CloClzChip),
     /// An AIR for MIPS SLL instruction.
     ShiftLeft(ShiftLeft),
+    /// An AIR for the immediate-form (shamt) MIPS SLL instruction.
+    ShiftLeftImm(ShiftLeftImm),
     /// An AIR for MIPS SRL and SRA instruction.
     ShiftRight(ShiftRightChip),
+    /// An AIR for the immediate-form (shamt) MIPS shift right instructions.
+    ShiftRightImm(ShiftRightImmChip),
     /// A lookup table for byte operations.
     ByteLookup(ByteChip<F>),
     /// An AIR for MIPS Branch instructions.
@@ -423,13 +430,25 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(shift_right.name(), shift_right.cost());
         chips.push(shift_right);
 
+        let shift_right_imm = Chip::new(MipsAir::ShiftRightImm(ShiftRightImmChip::default()));
+        costs.insert(shift_right_imm.name(), shift_right_imm.cost());
+        chips.push(shift_right_imm);
+
         let shift_left = Chip::new(MipsAir::ShiftLeft(ShiftLeft::default()));
         costs.insert(shift_left.name(), shift_left.cost());
         chips.push(shift_left);
 
+        let shift_left_imm = Chip::new(MipsAir::ShiftLeftImm(ShiftLeftImm::default()));
+        costs.insert(shift_left_imm.name(), shift_left_imm.cost());
+        chips.push(shift_left_imm);
+
         let lt = Chip::new(MipsAir::Lt(LtChip::default()));
         costs.insert(lt.name(), lt.cost());
         chips.push(lt);
+
+        let lt_imm = Chip::new(MipsAir::LtImm(LtImmChip::default()));
+        costs.insert(lt_imm.name(), lt_imm.cost());
+        chips.push(lt_imm);
 
         let clo_clz = Chip::new(MipsAir::CloClz(CloClzChip::default()));
         costs.insert(clo_clz.name(), clo_clz.cost());
@@ -548,8 +567,11 @@ impl<F: PrimeField32> MipsAir<F> {
             (MipsAirId::BitwiseImm, record.bitwise_imm_events.len()),
             (MipsAirId::Mul, record.mul_events.len()),
             (MipsAirId::ShiftRight, record.shift_right_events.len()),
+            (MipsAirId::ShiftRightImm, record.shift_right_imm_events.len()),
             (MipsAirId::ShiftLeft, record.shift_left_events.len()),
+            (MipsAirId::ShiftLeftImm, record.shift_left_imm_events.len()),
             (MipsAirId::Lt, record.lt_events.len()),
+            (MipsAirId::LtImm, record.lt_imm_events.len()),
             (
                 MipsAirId::MemoryLocal,
                 record
@@ -616,9 +638,12 @@ impl<F: PrimeField32> MipsAir<F> {
             MipsAir::Mul(MulChip::default()),
             MipsAir::DivRem(DivRemChip::default()),
             MipsAir::Lt(LtChip::default()),
+            MipsAir::LtImm(LtImmChip::default()),
             MipsAir::CloClz(CloClzChip::default()),
             MipsAir::ShiftLeft(ShiftLeft::default()),
+            MipsAir::ShiftLeftImm(ShiftLeftImm::default()),
             MipsAir::ShiftRight(ShiftRightChip::default()),
+            MipsAir::ShiftRightImm(ShiftRightImmChip::default()),
             MipsAir::Branch(BranchChip::default()),
             MipsAir::Jump(JumpChip::default()),
             MipsAir::SyscallInstrs(SyscallInstrsChip::default()),
@@ -831,9 +856,12 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Program(_) => unreachable!("Invalid for core chip"),
             Self::Mul(_) => unreachable!("Invalid for core chip"),
             Self::Lt(_) => unreachable!("Invalid for core chip"),
+            Self::LtImm(_) => unreachable!("Invalid for core chip"),
             Self::CloClz(_) => unreachable!("Invalid for core chip"),
             Self::ShiftRight(_) => unreachable!("Invalid for core chip"),
+            Self::ShiftRightImm(_) => unreachable!("Invalid for core chip"),
             Self::ShiftLeft(_) => unreachable!("Invalid for core chip"),
+            Self::ShiftLeftImm(_) => unreachable!("Invalid for core chip"),
             Self::ByteLookup(_) => unreachable!("Invalid for core chip"),
             Self::SyscallCore(_) => unreachable!("Invalid for core chip"),
             Self::SyscallPrecompile(_) => unreachable!("Invalid for syscall precompile chip"),

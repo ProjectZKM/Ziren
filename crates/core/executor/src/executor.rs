@@ -1652,14 +1652,28 @@ impl<'a> Executor<'a> {
                     self.record.bitwise_events.push(event);
                 }
             }
+            // The shifts and compares split by operand form like ADD/SUB
+            // above; the immediate form of a shift carries the 5-bit shamt.
             Opcode::SLL => {
-                self.record.shift_left_events.push(event);
+                if imm_c {
+                    self.record.shift_left_imm_events.push(event);
+                } else {
+                    self.record.shift_left_events.push(event);
+                }
             }
             Opcode::SRL | Opcode::SRA | Opcode::ROR => {
-                self.record.shift_right_events.push(event);
+                if imm_c {
+                    self.record.shift_right_imm_events.push(event);
+                } else {
+                    self.record.shift_right_events.push(event);
+                }
             }
             Opcode::SLT | Opcode::SLTU => {
-                self.record.lt_events.push(event);
+                if imm_c {
+                    self.record.lt_imm_events.push(event);
+                } else {
+                    self.record.lt_events.push(event);
+                }
             }
             Opcode::MUL | Opcode::MULT | Opcode::MULTU => {
                 self.record.mul_events.push(event_comp);

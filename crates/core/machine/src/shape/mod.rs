@@ -360,8 +360,11 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 | MipsAirId::BitwiseImm
                 | MipsAirId::Mul
                 | MipsAirId::ShiftRight
+                | MipsAirId::ShiftRightImm
                 | MipsAirId::ShiftLeft
+                | MipsAirId::ShiftLeftImm
                 | MipsAirId::Lt
+                | MipsAirId::LtImm
                 | MipsAirId::CloClz
                 | MipsAirId::MemoryGlobalInit
                 | MipsAirId::MemoryGlobalFinalize
@@ -419,8 +422,11 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::BitwiseImm,
             MipsAirId::Mul,
             MipsAirId::ShiftRight,
+            MipsAirId::ShiftRightImm,
             MipsAirId::ShiftLeft,
+            MipsAirId::ShiftLeftImm,
             MipsAirId::Lt,
+            MipsAirId::LtImm,
             MipsAirId::MemoryLocal,
             MipsAirId::MemoryBump,
             MipsAirId::CloClz,
@@ -491,8 +497,11 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::BitwiseImm,
             MipsAirId::Mul,
             MipsAirId::ShiftRight,
+            MipsAirId::ShiftRightImm,
             MipsAirId::ShiftLeft,
+            MipsAirId::ShiftLeftImm,
             MipsAirId::Lt,
+            MipsAirId::LtImm,
             MipsAirId::MemoryLocal,
             MipsAirId::MemoryBump,
             MipsAirId::CloClz,
@@ -1302,6 +1311,10 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
     let lt_log_height = shape.log2_height(&MipsAirId::Lt);
     maybe_log2_heights.insert(MipsAirId::Lt, heuristic(lt_log_height, 0));
 
+    // The immediate-form halves share their register halves' bands.
+    let lt_imm_log_height = shape.log2_height(&MipsAirId::LtImm);
+    maybe_log2_heights.insert(MipsAirId::LtImm, heuristic(lt_imm_log_height, 0));
+
     let memory_local_log_height = shape.log2_height(&MipsAirId::MemoryLocal);
     maybe_log2_heights.insert(MipsAirId::MemoryLocal, heuristic(memory_local_log_height, 0));
 
@@ -1325,8 +1338,14 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
     let shift_right_log_height = shape.log2_height(&MipsAirId::ShiftRight);
     maybe_log2_heights.insert(MipsAirId::ShiftRight, heuristic(shift_right_log_height, 1));
 
+    let shift_right_imm_log_height = shape.log2_height(&MipsAirId::ShiftRightImm);
+    maybe_log2_heights.insert(MipsAirId::ShiftRightImm, heuristic(shift_right_imm_log_height, 1));
+
     let shift_left_log_height = shape.log2_height(&MipsAirId::ShiftLeft);
     maybe_log2_heights.insert(MipsAirId::ShiftLeft, heuristic(shift_left_log_height, 1));
+
+    let shift_left_imm_log_height = shape.log2_height(&MipsAirId::ShiftLeftImm);
+    maybe_log2_heights.insert(MipsAirId::ShiftLeftImm, heuristic(shift_left_imm_log_height, 1));
 
     let cloclz_log_height = shape.log2_height(&MipsAirId::CloClz);
     maybe_log2_heights.insert(MipsAirId::CloClz, heuristic(cloclz_log_height, 0));

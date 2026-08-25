@@ -35,6 +35,11 @@ pub fn estimate_mips_lde_size(
     cells += (num_events_per_air[MipsAirId::BitwiseImm]).next_power_of_two()
         * costs_per_air[&MipsAirId::BitwiseImm];
 
+    // Compute the immediate-form shift and compare chip contributions.
+    for air in [MipsAirId::ShiftLeftImm, MipsAirId::ShiftRightImm, MipsAirId::LtImm] {
+        cells += (num_events_per_air[air]).next_power_of_two() * costs_per_air[&air];
+    }
+
     // Compute the mul chip contribution.
     cells +=
         (num_events_per_air[MipsAirId::Mul]).next_power_of_two() * costs_per_air[&MipsAirId::Mul];
@@ -266,6 +271,9 @@ pub const fn mips_imm_air_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
     Some(match opcode {
         Opcode::ADD | Opcode::SUB => MipsAirId::AddSubImm,
         Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => MipsAirId::BitwiseImm,
+        Opcode::SLL => MipsAirId::ShiftLeftImm,
+        Opcode::SRL | Opcode::SRA | Opcode::ROR => MipsAirId::ShiftRightImm,
+        Opcode::SLT | Opcode::SLTU => MipsAirId::LtImm,
         _ => return None,
     })
 }
@@ -454,6 +462,9 @@ pub fn pad_mips_event_counts(
         // bounded by one row per cycle.
         MipsAirId::AddSubImm => *v += num_cycles,
         MipsAirId::BitwiseImm => *v += num_cycles,
+        MipsAirId::ShiftLeftImm => *v += num_cycles,
+        MipsAirId::ShiftRightImm => *v += num_cycles,
+        MipsAirId::LtImm => *v += num_cycles,
         MipsAirId::Mul => *v += 4 * num_cycles,
         MipsAirId::Bitwise => *v += 3 * num_cycles,
         MipsAirId::ShiftLeft => *v += num_cycles,

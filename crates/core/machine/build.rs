@@ -139,6 +139,7 @@ mod sys {
             .include_item("JumpEvent")
             .include_item("KoalaBear")
             .include_item("LtCols")
+            .include_item("LtImmCols")
             .include_item("MEMORY_LOCAL_INITIAL_DIGEST_POS")
             .include_item("MemInstrEvent")
             .include_item("MemoryInitializeFinalizeEvent")
@@ -168,7 +169,9 @@ mod sys {
             .include_item("SepticCurve")
             .include_item("SepticExtension")
             .include_item("ShiftLeftCols")
+            .include_item("ShiftLeftImmCols")
             .include_item("ShiftRightCols")
+            .include_item("ShiftRightImmCols")
             .include_item("SyscallCode") // Required for populating the CPU columns for ECALL.
             .include_item("SyscallInstrColumns")
             .exclude_item("GLOBAL_CPU_BACKEND")

@@ -58,6 +58,16 @@ extern void lt_event_to_row_koalabear(
     lt::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
 }
 
+extern void lt_imm_event_to_row_koalabear(
+    const AluEvent* event,
+    LtImmCols<KoalaBearP3>* cols,
+    const InstructionFfi instruction,
+    const uint32_t shard
+) {
+    LtImmCols<kb31_t>* cols_kb31 = reinterpret_cast<LtImmCols<kb31_t>*>(cols);
+    lt_imm::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
+}
+
 extern void bitwise_event_to_row_koalabear(
     const AluEvent* event,
     BitwiseCols<KoalaBearP3>* cols,
@@ -138,6 +148,16 @@ extern void shift_left_event_to_row_koalabear(
     shift_left::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
 }
 
+extern void shift_left_imm_event_to_row_koalabear(
+    const AluEvent* event,
+    ShiftLeftImmCols<KoalaBearP3>* cols,
+    const InstructionFfi instruction,
+    const uint32_t shard
+) {
+    ShiftLeftImmCols<kb31_t>* cols_kb31 = reinterpret_cast<ShiftLeftImmCols<kb31_t>*>(cols);
+    shift_left_imm::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
+}
+
 extern void shift_right_event_to_row_koalabear(
     const AluEvent* event,
     ShiftRightCols<KoalaBearP3>* cols,
@@ -146,6 +166,16 @@ extern void shift_right_event_to_row_koalabear(
 ) {
     ShiftRightCols<kb31_t>* cols_kb31 = reinterpret_cast<ShiftRightCols<kb31_t>*>(cols);
     shift_right::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
+}
+
+extern void shift_right_imm_event_to_row_koalabear(
+    const AluEvent* event,
+    ShiftRightImmCols<KoalaBearP3>* cols,
+    const InstructionFfi instruction,
+    const uint32_t shard
+) {
+    ShiftRightImmCols<kb31_t>* cols_kb31 = reinterpret_cast<ShiftRightImmCols<kb31_t>*>(cols);
+    shift_right_imm::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
 }
 
 extern void mul_event_to_row_koalabear(

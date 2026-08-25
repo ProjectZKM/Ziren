@@ -5,16 +5,16 @@
 #include "utils.hpp"
 #include "kb31_septic_extension_t.hpp"
 
-namespace zkm_core_machine_sys::shift_left {
+namespace zkm_core_machine_sys::shift_left_imm {
     template<class F>
     __ZKM_HOSTDEV__ void event_to_row(
     const AluEvent& event,
-    ShiftLeftCols<F>& cols,
+    ShiftLeftImmCols<F>& cols,
     const InstructionFfi& instruction,
     const uint32_t shard
 ) {
     // Every row is a real instruction owning its frame.
-    frame::populate_from_alu_r<F>(cols.frame, event, instruction, shard);
+    frame::populate_from_alu_imm<F>(cols.frame, event, instruction, shard);
 
         auto a = u32_to_le_bytes(event.a);
         auto b = u32_to_le_bytes(event.b);
@@ -62,4 +62,4 @@ namespace zkm_core_machine_sys::shift_left {
             );
         }
     }
-}  // namespace zkm::shift_left
+}  // namespace zkm::shift_left_imm

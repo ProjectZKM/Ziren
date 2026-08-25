@@ -5,16 +5,16 @@
 #include "prelude.hpp"
 #include "utils.hpp"
 
-namespace zkm_core_machine_sys::lt {
+namespace zkm_core_machine_sys::lt_imm {
 template<class F>
 __ZKM_HOSTDEV__ void event_to_row(
     const AluEvent& event,
-    LtCols<F>& cols,
+    LtImmCols<F>& cols,
     const InstructionFfi& instruction,
     const uint32_t shard
 ) {
     // Every row is a real instruction owning its frame.
-    frame::populate_from_alu_r<F>(cols.frame, event, instruction, shard);
+    frame::populate_from_alu_imm<F>(cols.frame, event, instruction, shard);
 
     cols.pc = F::from_canonical_u32(event.pc);
     cols.next_pc = F::from_canonical_u32(event.next_pc);
@@ -78,4 +78,4 @@ __ZKM_HOSTDEV__ void event_to_row(
 
     assert(cols.a._0[0] == cols.bit_b * (F::one() - cols.bit_c) + cols.is_sign_eq * cols.sltu);
 }
-}  // namespace zkm::lt
+}  // namespace zkm::lt_imm
