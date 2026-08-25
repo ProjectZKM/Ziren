@@ -53,7 +53,7 @@ use zkm_primitives::consts::WORD_SIZE;
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     alu::mul::utils::get_msb,
-    frame::{eval_instruction_frame, InstructionFrameCols},
+    frame::{eval_r_type_frame, RTypeFrameCols},
     memory::{MemoryCols, MemoryReadWriteCols},
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
@@ -134,7 +134,7 @@ pub struct MulCols<T> {
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
     /// real row (every Mul row is an instruction — the Instruction bus and
     /// its dependency rows are gone).
-    pub frame: InstructionFrameCols<T>,
+    pub frame: RTypeFrameCols<T>,
 
 }
 
@@ -190,10 +190,9 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
                             input.public_values.execution_shard,
                         );
                     } else {
-                        // Padding rows carry no instruction: neutralise the
-                        // frame or its register-access multiplicities break the
-                        // Memory bus.
-                        cols.frame.populate_dependency();
+                        // A padding row's frame needs no neutralising: the
+                        // typed R-type frame's register-access multiplicities
+                        // are `is_real`.
                     }
                 });
             },
@@ -496,13 +495,13 @@ where
         // commit (the Instruction bus that used to carry them is gone).
         builder
             .when(local.is_real)
-            .when_not(local.frame.instruction.op_a_0)
+            .when_not(local.frame.op_a_0)
             .assert_word_eq(local.a, *local.frame.op_a_access.value());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining.  MUL/MULT/MULTU are
         // sequential and never halt.
-        eval_instruction_frame(
+        eval_r_type_frame(
             builder,
             &local.frame,
             local.is_mul * Opcode::MUL.as_field::<AB::F>()
@@ -521,7 +520,7 @@ where
         // the value on a non-writing row was never read in the first place.
         builder.eval_memory_access(
             local.frame.shard,
-            crate::frame::clk_from_frame::<AB>(&local.frame)
+            crate::frame::clk_from_r_type_frame::<AB>(&local.frame)
                 + AB::Expr::from_u32(MemoryAccessPosition::HI as u32),
             AB::F::from_u32(33),
             &local.op_hi_access,
@@ -616,8 +615,7 @@ mod tests {
                             );
                         }
                     } else {
-                        // Mirror `generate_trace`'s padding: neutralise the frame.
-                        cols.frame.populate_dependency();
+                        // Typed R-type frame: padding rows stay zero.
                     }
                 });
             },

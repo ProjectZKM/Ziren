@@ -1130,4 +1130,89 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
             c: a_bytes[3] as u8,
         });
     }
+
+    /// `CompAluEvent` variant of [`Self::populate_from_alu`] — the two event
+    /// types carry identically named frame fields, exactly as with the
+    /// universal frame's pair.
+    pub fn populate_from_comp_alu(
+        &mut self,
+        event: &CompAluEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.shard = F::from_u32(shard);
+        let clk_16 = (event.clk & 0xffff) as u16;
+        let clk_8 = ((event.clk >> 16) & 0xff) as u8;
+        self.clk_16bit_limb = F::from_u16(clk_16);
+        self.clk_8bit_limb = F::from_u8(clk_8);
+        self.clk_24bit_limb = F::from_u32((event.clk >> 24) & 1);
+        blu.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::U16Range,
+            shard as u16,
+            0,
+            0,
+            0,
+        ));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
+
+        let instruction = program.fetch(event.pc);
+        debug_assert!(
+            !instruction.imm_b && !instruction.imm_c,
+            "an R-type frame received a non-R-type instruction: {:?}",
+            instruction.opcode
+        );
+        debug_assert!(instruction.op_b < 256, "op_b is not a register index");
+        debug_assert!(instruction.op_c < 256, "op_c is not a register index");
+        self.opcode = instruction.opcode.as_field::<F>();
+        self.op_a = F::from_u32(instruction.op_a as u32);
+        self.op_b = F::from_u32(instruction.op_b);
+        self.op_c = F::from_u32(instruction.op_c);
+        self.op_a_0 = F::from_bool(instruction.op_a == 0);
+
+        *self.op_a_access.value_mut() = event.a.into();
+        *self.op_b_access.value_mut() = event.b.into();
+        *self.op_c_access.value_mut() = event.c.into();
+        match event.a_record.tag {
+            OptionMemoryRecordEnumTag::Read => {
+                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
+            }
+            OptionMemoryRecordEnumTag::Write => {
+                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
+            }
+            OptionMemoryRecordEnumTag::None => {}
+        }
+        if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
+            self.op_b_access.populate(event.b_record.read, blu);
+        }
+        if let OptionMemoryRecordEnumTag::Read = event.c_record.tag {
+            self.op_c_access.populate(event.c_record.read, blu);
+        }
+
+        // Column-read-back for the op_a range check — see
+        // [`Self::populate_from_alu`].
+        let a_bytes = self
+            .op_a_access
+            .access
+            .value
+            .0
+            .iter()
+            .map(|x| x.as_canonical_u32())
+            .collect::<Vec<_>>();
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[0] as u8,
+            c: a_bytes[1] as u8,
+        });
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[2] as u8,
+            c: a_bytes[3] as u8,
+        });
+    }
 }

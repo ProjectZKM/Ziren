@@ -14,7 +14,7 @@ namespace zkm_core_machine_sys::shift_left {
     const uint32_t shard
 ) {
     // Every row is a real instruction owning its frame.
-    frame::populate_from_alu_r<F>(cols.frame, event, instruction, shard);
+    frame::populate_from_alu_r<AluEvent, F>(cols.frame, event, instruction, shard);
 
         auto a = u32_to_le_bytes(event.a);
         auto b = u32_to_le_bytes(event.b);

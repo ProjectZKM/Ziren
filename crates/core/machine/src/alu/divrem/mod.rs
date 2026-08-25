@@ -86,7 +86,7 @@ use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
-    frame::{eval_instruction_frame, InstructionFrameCols},
+    frame::{eval_r_type_frame, RTypeFrameCols},
     memory::MemoryCols,
     operations::{
         AddOperation, IsEqualWordOperation, IsZeroWordOperation, LtOperation, MulOperation,
@@ -171,7 +171,7 @@ pub struct DivRemCols<T> {
 
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
     /// real row (every DivRem row is an instruction).
-    pub frame: InstructionFrameCols<T>,
+    pub frame: RTypeFrameCols<T>,
 
     /// Flag to indicate whether the division operation overflows.
     ///
@@ -401,9 +401,9 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             || {
                 let mut row = [F::ZERO; NUM_DIVREM_COLS];
                 let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
-                // Padding rows carry no instruction: neutralise the frame or
-                // its register-access multiplicities break the Memory bus.
-                cols.frame.populate_dependency();
+                        // A padding row's frame needs no neutralising: the
+                        // typed R-type frame's register-access multiplicities
+                        // are `is_real`.
                 row
             },
             input.fixed_log2_rows::<F, _>(self),
@@ -735,16 +735,16 @@ where
             // the remainder.
             builder
                 .when(local.is_div + local.is_divu)
-                .when_not(local.frame.instruction.op_a_0)
+                .when_not(local.frame.op_a_0)
                 .assert_word_eq(local.quotient, *local.frame.op_a_access.value());
             builder
                 .when(local.is_mod + local.is_modu)
-                .when_not(local.frame.instruction.op_a_0)
+                .when_not(local.frame.op_a_0)
                 .assert_word_eq(local.remainder, *local.frame.op_a_access.value());
 
             // A real instruction carries its own program fetch, register access
             // and `(clk, pc)` chaining.  DIV/MOD are sequential, never halt.
-            eval_instruction_frame(
+            eval_r_type_frame(
                 builder,
                 &local.frame,
                 local.is_div * Opcode::DIV.as_field::<AB::F>()
@@ -764,7 +764,7 @@ where
             // frame anyway.
             builder.eval_memory_access(
                 local.frame.shard,
-                crate::frame::clk_from_frame::<AB>(&local.frame)
+                crate::frame::clk_from_r_type_frame::<AB>(&local.frame)
                     + AB::Expr::from_u32(MemoryAccessPosition::HI as u32),
                 AB::F::from_u32(33),
                 &local.op_hi_access,

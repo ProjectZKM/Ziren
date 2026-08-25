@@ -29,7 +29,7 @@ use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
-    frame::{eval_instruction_frame, InstructionFrameCols},
+    frame::{eval_i_type_frame, ITypeFrameCols},
     operations::ShiftRightOperation,
     utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,
@@ -77,7 +77,7 @@ pub struct CloClzCols<T> {
 
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
     /// real row (every CloClz row is an instruction).
-    pub frame: InstructionFrameCols<T>,
+    pub frame: ITypeFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for CloClzChip {
@@ -165,8 +165,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             || {
                 let mut row = [F::ZERO; NUM_CLOCLZ_COLS];
                 let cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
-                cols.frame.populate_dependency();
-                row
+                                row
             },
             input.fixed_log2_rows::<F, _>(self),
             <CloClzChip as MachineAir<F>>::name(self).as_str(),
@@ -242,10 +241,10 @@ where
         // commit (the Instruction bus that used to carry them is gone).
         builder
             .when(local.is_real)
-            .when_not(local.frame.instruction.op_a_0)
+            .when_not(local.frame.op_a_0)
             .assert_word_eq(local.a, *local.frame.op_a_access.value());
 
-        eval_instruction_frame(
+        eval_i_type_frame(
             builder,
             &local.frame,
             local.is_clz * Opcode::CLZ.as_field::<AB::F>()

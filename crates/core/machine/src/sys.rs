@@ -414,12 +414,8 @@ mod parity_tests {
             CloClzCols<F>,
             NUM_CLOCLZ_COLS,
             clo_clz_event_to_row_koalabear,
-            |row: &mut [F]| {
-                let cols: &mut CloClzCols<F> = row.borrow_mut();
-                // Mirrors clo_clz's padding: only the frame is neutralised
-                // (the inlined shift is gated on `is_real - is_bb_zero`).
-                cols.frame.populate_dependency();
-            }
+            // Typed R-type frame — zero padding.
+            |_row: &mut [F]| {}
         );
         check!(
             ShiftLeft::default(),
@@ -485,7 +481,8 @@ mod parity_tests {
             MulCols<F>,
             NUM_MUL_COLS,
             mul_event_to_row_koalabear,
-            dep_pad!(MulCols<F>)
+            // Typed R-type frame — zero padding.
+            |_row: &mut [F]| {}
         );
         check!(
             DivRemChip::default(),
@@ -493,7 +490,8 @@ mod parity_tests {
             DivRemCols<F>,
             NUM_DIVREM_COLS,
             div_rem_event_to_row_koalabear,
-            dep_pad!(DivRemCols<F>)
+            // Typed R-type frame — zero padding.
+            |_row: &mut [F]| {}
         );
         check!(
             BranchChip::default(),

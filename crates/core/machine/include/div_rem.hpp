@@ -20,7 +20,7 @@ namespace zkm_core_machine_sys::div_rem {
     const uint32_t shard
 ) {
     // Every DivRem row is a real instruction owning its frame.
-    frame::populate_from_alu<CompAluEvent, F>(cols.frame, event, instruction, shard);
+    frame::populate_from_alu_r<CompAluEvent, F>(cols.frame, event, instruction, shard);
 
         assert(
             event.opcode == Opcode::DIVU

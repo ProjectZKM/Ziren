@@ -36,7 +36,7 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.next_pc = F::from_canonical_u32(event.next_pc);
 
     // Every row is a real instruction owning its frame.
-    frame::populate_from_alu_r<F>(cols.frame, event, instruction, shard);
+    frame::populate_from_alu_r<AluEvent, F>(cols.frame, event, instruction, shard);
 
     bool is_add = event.opcode == Opcode::ADD;
     cols.is_add = F::from_bool(is_add);

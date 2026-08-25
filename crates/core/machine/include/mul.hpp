@@ -15,7 +15,7 @@ namespace zkm_core_machine_sys::mul {
     const uint32_t shard
 ) {
     // Every row is a real instruction owning its frame.
-    frame::populate_from_alu<CompAluEvent, F>(cols.frame, event, instruction, shard);
+    frame::populate_from_alu_r<CompAluEvent, F>(cols.frame, event, instruction, shard);
 
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);

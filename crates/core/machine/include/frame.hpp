@@ -157,13 +157,15 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_mem(
     }
 }
 
-// `RTypeFrameCols::populate_from_alu` — a register-form ALU instruction
-// reads op_b and op_c and reads-and-writes op_a; all three operands are bare
-// register indices, so there are no immediate flags and no operand words.
-template<class F>
+// `RTypeFrameCols::populate_from_alu` (also `populate_from_comp_alu` — the
+// two event types carry identically named frame fields) — a register-form ALU
+// instruction reads op_b and op_c and reads-and-writes op_a; all three
+// operands are bare register indices, so there are no immediate flags and no
+// operand words.
+template<class E, class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_r(
     RTypeFrameCols<F>& frame,
-    const AluEvent& event,
+    const E& event,
     const InstructionFfi& instruction,
     const uint32_t shard
 ) {
