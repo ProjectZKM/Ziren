@@ -13,6 +13,16 @@ extern void add_sub_event_to_row_koalabear(
     add_sub::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
 }
 
+extern void add_sub_imm_event_to_row_koalabear(
+    const AluEvent* event,
+    AddSubImmCols<KoalaBearP3>* cols,
+    const InstructionFfi instruction,
+    const uint32_t shard
+) {
+    AddSubImmCols<kb31_t>* cols_kb31 = reinterpret_cast<AddSubImmCols<kb31_t>*>(cols);
+    add_sub_imm::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
+}
+
 extern void memory_local_event_to_row_koalabear(const MemoryLocalEvent* event, SingleMemoryLocal<KoalaBearP3>* cols) {
     SingleMemoryLocal<kb31_t>* cols_kb31 = reinterpret_cast<SingleMemoryLocal<kb31_t>*>(cols);
     memory_local::event_to_row<kb31_t, kb31_septic_extension_t>(event, cols_kb31);

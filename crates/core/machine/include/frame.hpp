@@ -157,6 +157,72 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_mem(
     }
 }
 
+// `RTypeFrameCols::populate_from_alu` — a register-form ALU instruction
+// reads op_b and op_c and reads-and-writes op_a; all three operands are bare
+// register indices, so there are no immediate flags and no operand words.
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_r(
+    RTypeFrameCols<F>& frame,
+    const AluEvent& event,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
+    frame.shard = F::from_canonical_u32(shard);
+    frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
+    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
+    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+
+    frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
+    frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
+    frame.op_b = F::from_canonical_u32(instruction.op_b);
+    frame.op_c = F::from_canonical_u32(instruction.op_c);
+    frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
+
+    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a);
+    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.b);
+    write_word_from_u32_v2<F>(frame.op_c_access.access.value, event.c);
+
+    // Record-wins ordering, as in `populate_raw`.
+    memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
+    if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+    }
+    if (event.c_record.tag == OptionMemoryRecordEnumTag::Read) {
+        memory::populate_register_read<F>(frame.op_c_access, event.c_record.read);
+    }
+}
+
+// `ITypeFrameCols::populate_from_alu` — an immediate-form ALU instruction on
+// the I-type frame.  Identical to `populate_from_mem` except the event type:
+// an `AluEvent` carries no shard of its own, so it arrives as a parameter.
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_imm(
+    ITypeFrameCols<F>& frame,
+    const AluEvent& event,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
+    frame.shard = F::from_canonical_u32(shard);
+    frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
+    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
+    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+
+    frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
+    frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
+    frame.op_b = F::from_canonical_u32(instruction.op_b);
+    write_word_from_u32_v2<F>(frame.op_c, instruction.op_c);
+    frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
+
+    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a);
+    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.b);
+
+    // Record-wins ordering, as in `populate_raw`.
+    memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
+    if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+    }
+}
+
 // `InstructionFrameCols::populate_from_syscall` — the id comes in through
 // op_a, the result goes out; `hi_or_prev_a` and `num_extra_cycles` read back
 // the POPULATED column, exactly as the Rust side does.

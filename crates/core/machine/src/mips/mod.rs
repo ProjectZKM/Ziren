@@ -29,8 +29,8 @@ use zkm_pcs::{
 pub(crate) mod mips_chips {
     pub use crate::{
         alu::{
-            AddSubChip, BitwiseChip, CloClzChip, DivRemChip, LtChip, MulChip, ShiftLeft,
-            ShiftRightChip,
+            AddSubChip, AddSubImmChip, BitwiseChip, CloClzChip, DivRemChip, LtChip, MulChip,
+            ShiftLeft, ShiftRightChip,
         },
         bytes::ByteChip,
         control_flow::{BranchChip, JumpChip},
@@ -84,8 +84,10 @@ pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
 pub enum MipsAir<F: PrimeField32> {
     /// An AIR that contains a preprocessed program table and a lookup for the instructions.
     Program(ProgramChip),
-    /// An AIR for the MIPS Add and SUB instruction.
+    /// An AIR for the register-form MIPS ADD and SUB instructions.
     Add(AddSubChip),
+    /// An AIR for the immediate-form MIPS ADD and SUB instructions.
+    AddImm(AddSubImmChip),
     /// An AIR for MIPS Bitwise instructions.
     Bitwise(BitwiseChip),
     /// An AIR for MIPS Mul instruction.
@@ -399,6 +401,10 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(add_sub.name(), add_sub.cost());
         chips.push(add_sub);
 
+        let add_sub_imm = Chip::new(MipsAir::AddImm(AddSubImmChip::default()));
+        costs.insert(add_sub_imm.name(), add_sub_imm.cost());
+        chips.push(add_sub_imm);
+
         let bitwise = Chip::new(MipsAir::Bitwise(BitwiseChip::default()));
         costs.insert(bitwise.name(), bitwise.cost());
         chips.push(bitwise);
@@ -531,6 +537,7 @@ impl<F: PrimeField32> MipsAir<F> {
             (MipsAirId::SyscallInstrs, record.syscall_events.len()),
             (MipsAirId::DivRem, record.divrem_events.len()),
             (MipsAirId::AddSub, record.add_sub_events.len()),
+            (MipsAirId::AddSubImm, record.add_sub_imm_events.len()),
             (MipsAirId::Bitwise, record.bitwise_events.len()),
             (MipsAirId::Mul, record.mul_events.len()),
             (MipsAirId::ShiftRight, record.shift_right_events.len()),
@@ -596,6 +603,7 @@ impl<F: PrimeField32> MipsAir<F> {
     pub(crate) fn get_all_core_airs() -> Vec<Self> {
         vec![
             MipsAir::Add(AddSubChip::default()),
+            MipsAir::AddImm(AddSubImmChip::default()),
             MipsAir::Bitwise(BitwiseChip::default()),
             MipsAir::Mul(MulChip::default()),
             MipsAir::DivRem(DivRemChip::default()),
@@ -802,6 +810,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::KeccakSpongeControl(_) => SyscallCode::KECCAK_SPONGE,
             Self::SysLinux(_) => SyscallCode::SYS_LINUX,
             Self::Add(_) => unreachable!("Invalid for core chip"),
+            Self::AddImm(_) => unreachable!("Invalid for core chip"),
             Self::Bitwise(_) => unreachable!("Invalid for core chip"),
             Self::DivRem(_) => unreachable!("Invalid for core chip"),
             Self::MemoryGlobalInit(_) => unreachable!("Invalid for memory init/final"),

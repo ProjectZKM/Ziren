@@ -118,6 +118,7 @@ impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {
 /// circuit's execution-shard detection (`core_basefold.rs`).
 pub const EXECUTION_CHIP_NAMES: &[&str] = &[
     "AddSub",
+    "AddSubImm",
     "Bitwise",
     "ShiftLeft",
     "ShiftRight",

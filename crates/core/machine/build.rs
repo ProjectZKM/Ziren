@@ -118,6 +118,7 @@ mod sys {
             .include_item("PRODUCT_SIZE")
             .include_item("AddOperation")
             .include_item("AddSubCols")
+            .include_item("AddSubImmCols")
             .include_item("AluEvent")
             .include_item("BitwiseCols")
             .include_item("BranchColumns")

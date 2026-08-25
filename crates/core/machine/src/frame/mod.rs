@@ -799,6 +799,93 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             c: a_bytes[3] as u8,
         });
     }
+
+    /// Populate the frame for an immediate-form ALU instruction.  Mirrors
+    /// [`Self::populate_from_mem`], but an `AluEvent` carries no shard of its
+    /// own, so the shard arrives as a parameter exactly as it does in
+    /// [`RTypeFrameCols::populate_from_alu`].
+    pub fn populate_from_alu(
+        &mut self,
+        event: &AluEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.shard = F::from_u32(shard);
+        let clk_16 = (event.clk & 0xffff) as u16;
+        let clk_8 = ((event.clk >> 16) & 0xff) as u8;
+        self.clk_16bit_limb = F::from_u16(clk_16);
+        self.clk_8bit_limb = F::from_u8(clk_8);
+        self.clk_24bit_limb = F::from_u32((event.clk >> 24) & 1);
+        blu.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::U16Range,
+            shard as u16,
+            0,
+            0,
+            0,
+        ));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
+
+        let instruction = program.fetch(event.pc);
+        // The shape this frame is specialised for — see
+        // [`Self::populate_from_mem`] for why this is asserted here.
+        debug_assert!(
+            !instruction.imm_b && instruction.imm_c,
+            "an I-type frame received a non-I-type instruction: {:?}",
+            instruction.opcode
+        );
+        debug_assert!(instruction.op_b < 256, "op_b is not a register index");
+        debug_assert!(
+            matches!(event.c_record.tag, OptionMemoryRecordEnumTag::None),
+            "an I-type frame received a register read for op_c"
+        );
+        self.opcode = instruction.opcode.as_field::<F>();
+        self.op_a = F::from_u32(instruction.op_a as u32);
+        self.op_b = F::from_u32(instruction.op_b);
+        self.op_c = instruction.op_c.into();
+        self.op_a_0 = F::from_bool(instruction.op_a == 0);
+
+        *self.op_a_access.value_mut() = event.a.into();
+        *self.op_b_access.value_mut() = event.b.into();
+        match event.a_record.tag {
+            OptionMemoryRecordEnumTag::Read => {
+                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
+            }
+            OptionMemoryRecordEnumTag::Write => {
+                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
+            }
+            OptionMemoryRecordEnumTag::None => {}
+        }
+        if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
+            self.op_b_access.populate(event.b_record.read, blu);
+        }
+
+        // Column-read-back for the op_a range check, as in
+        // [`Self::populate_from_mem`].
+        let a_bytes = self
+            .op_a_access
+            .access
+            .value
+            .0
+            .iter()
+            .map(|x| x.as_canonical_u32())
+            .collect::<Vec<_>>();
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[0] as u8,
+            c: a_bytes[1] as u8,
+        });
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[2] as u8,
+            c: a_bytes[3] as u8,
+        });
+    }
 }
 
 /// The frame for a chip whose every instruction is R-type: `op_b` and `op_c`
@@ -1016,5 +1103,31 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
         if let OptionMemoryRecordEnumTag::Read = event.c_record.tag {
             self.op_c_access.populate(event.c_record.read, blu);
         }
+
+        // Read the op_a range check back off the COLUMN, not the event — see
+        // [`InstructionFrameCols::populate_raw`] for the no-link-jump case
+        // that makes the two differ.
+        let a_bytes = self
+            .op_a_access
+            .access
+            .value
+            .0
+            .iter()
+            .map(|x| x.as_canonical_u32())
+            .collect::<Vec<_>>();
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[0] as u8,
+            c: a_bytes[1] as u8,
+        });
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[2] as u8,
+            c: a_bytes[3] as u8,
+        });
     }
 }

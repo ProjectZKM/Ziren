@@ -22,8 +22,9 @@ populate(AddOperation<F>& op, const uint32_t a_u32, const uint32_t b_u32) {
     return expected;
 }
 
-// Mirrors `AddSubChip::event_to_row`.  Every row is a real instruction
-// owning its frame (the Instruction bus and its dependency rows are gone).
+// Mirrors `AddSubChip::event_to_row`.  Every row is a real REGISTER-form
+// instruction owning its R-type frame (the immediate forms prove in
+// `add_sub_imm.hpp`).
 template<class F>
 __ZKM_HOSTDEV__ void event_to_row(
     const AluEvent& event,
@@ -35,7 +36,7 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.next_pc = F::from_canonical_u32(event.next_pc);
 
     // Every row is a real instruction owning its frame.
-    frame::populate_from_alu<AluEvent, F>(cols.frame, event, instruction, shard);
+    frame::populate_from_alu_r<F>(cols.frame, event, instruction, shard);
 
     bool is_add = event.opcode == Opcode::ADD;
     cols.is_add = F::from_bool(is_add);

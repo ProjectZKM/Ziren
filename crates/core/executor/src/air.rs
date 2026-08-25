@@ -89,8 +89,12 @@ pub enum MipsAirId {
     SyscallPrecompile = 27,
     /// The div rem chip.
     DivRem = 28,
-    /// The add sub chip.
+    /// The add sub chip — the register form.
     AddSub = 29,
+    /// The immediate-form add sub chip (`ADDI` / `ADDIU`), on the narrower
+    /// I-type frame.  Declared beside `AddSub` because `MipsAirId::iter()`
+    /// yields declaration order and must match `MipsAir::chips()`.
+    AddSubImm = 60,
     /// The bitwise chip.
     Bitwise = 30,
     /// The mul chip.
@@ -151,6 +155,7 @@ impl MipsAirId {
         vec![
             MipsAirId::Cpu,
             MipsAirId::AddSub,
+            MipsAirId::AddSubImm,
             MipsAirId::Mul,
             MipsAirId::Bitwise,
             MipsAirId::ShiftLeft,
@@ -211,6 +216,7 @@ impl MipsAirId {
             Self::SyscallPrecompile => "SyscallPrecompile",
             Self::DivRem => "DivRem",
             Self::AddSub => "AddSub",
+            Self::AddSubImm => "AddSubImm",
             Self::Bitwise => "Bitwise",
             Self::Mul => "Mul",
             Self::ShiftRight => "ShiftRight",

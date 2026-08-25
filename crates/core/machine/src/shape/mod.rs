@@ -355,6 +355,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 | MipsAirId::SyscallInstrs
                 | MipsAirId::DivRem
                 | MipsAirId::AddSub
+                | MipsAirId::AddSubImm
                 | MipsAirId::Bitwise
                 | MipsAirId::Mul
                 | MipsAirId::ShiftRight
@@ -412,6 +413,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::SyscallInstrs,
             MipsAirId::DivRem,
             MipsAirId::AddSub,
+            MipsAirId::AddSubImm,
             MipsAirId::Bitwise,
             MipsAirId::Mul,
             MipsAirId::ShiftRight,
@@ -482,6 +484,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::SyscallInstrs,
             MipsAirId::DivRem,
             MipsAirId::AddSub,
+            MipsAirId::AddSubImm,
             MipsAirId::Bitwise,
             MipsAirId::Mul,
             MipsAirId::ShiftRight,
@@ -1286,6 +1289,12 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
 
     let addsub_log_height = shape.log2_height(&MipsAirId::AddSub);
     maybe_log2_heights.insert(MipsAirId::AddSub, heuristic(addsub_log_height, 0));
+
+    // The immediate-form half of the split shares the register half's band:
+    // each half's rows are a subset of the pre-split chip's, so the old cap
+    // covers both.
+    let addsubimm_log_height = shape.log2_height(&MipsAirId::AddSubImm);
+    maybe_log2_heights.insert(MipsAirId::AddSubImm, heuristic(addsubimm_log_height, 0));
 
     let lt_log_height = shape.log2_height(&MipsAirId::Lt);
     maybe_log2_heights.insert(MipsAirId::Lt, heuristic(lt_log_height, 0));

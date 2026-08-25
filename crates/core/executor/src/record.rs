@@ -98,8 +98,11 @@ pub struct ExecutionRecord {
     pub program: Arc<Program>,
     /// A trace of the CPU events which get emitted during execution.
     pub cpu_events: Vec<CpuEvent>,
-    /// A trace of the ADD, ADDU, ADDI, ADDIU, SUB and SUBU events.
+    /// A trace of the register-form ADD, ADDU, SUB and SUBU events.
     pub add_sub_events: Vec<AluEvent>,
+    /// A trace of the immediate-form ADD/SUB events (ADDI, ADDIU): `op_c` is
+    /// an immediate, so they prove on the narrower I-type frame.
+    pub add_sub_imm_events: Vec<AluEvent>,
     /// A trace of the MUL, MULT and MULTU events.
     pub mul_events: Vec<CompAluEvent>,
     /// A trace of the XOR, OR, AND and NOR events.
@@ -175,7 +178,8 @@ impl ExecutionRecord {
     #[cfg(feature = "pre-alloc")]
     pub fn new(program: Arc<Program>) -> Self {
         let cpu_events = Vec::with_capacity(1 << 22);
-        let add_sub_events = Vec::with_capacity(1 << 22);
+        let add_sub_events = Vec::with_capacity(1 << 21);
+        let add_sub_imm_events = Vec::with_capacity(1 << 22);
         let memory_load_word_events = Vec::with_capacity(1 << 21);
         let memory_store_word_events = Vec::with_capacity(1 << 21);
         Self {
@@ -184,6 +188,7 @@ impl ExecutionRecord {
             memory_load_word_events,
             memory_store_word_events,
             add_sub_events,
+            add_sub_imm_events,
             ..Default::default()
         }
     }
@@ -213,6 +218,7 @@ impl ExecutionRecord {
         // CPU + ALU family — touch every (or nearly every) cycle.
         result.cpu_events.reserve(reservation_size);
         result.add_sub_events.reserve(reservation_size);
+        result.add_sub_imm_events.reserve(reservation_size);
         result.bitwise_events.reserve(reservation_size);
         result.shift_left_events.reserve(reservation_size);
         result.shift_right_events.reserve(reservation_size);
@@ -480,6 +486,7 @@ impl MachineRecord for ExecutionRecord {
         let mut stats = HashMap::new();
         stats.insert("cpu_events".to_string(), self.cpu_events.len());
         stats.insert("add_sub_events".to_string(), self.add_sub_events.len());
+        stats.insert("add_sub_imm_events".to_string(), self.add_sub_imm_events.len());
         stats.insert("mul_events".to_string(), self.mul_events.len());
         stats.insert("bitwise_events".to_string(), self.bitwise_events.len());
         stats.insert("shift_left_events".to_string(), self.shift_left_events.len());
@@ -524,6 +531,7 @@ impl MachineRecord for ExecutionRecord {
     fn append(&mut self, other: &mut ExecutionRecord) {
         self.cpu_events.append(&mut other.cpu_events);
         self.add_sub_events.append(&mut other.add_sub_events);
+        self.add_sub_imm_events.append(&mut other.add_sub_imm_events);
         self.mul_events.append(&mut other.mul_events);
         self.bitwise_events.append(&mut other.bitwise_events);
         self.shift_left_events.append(&mut other.shift_left_events);

@@ -27,6 +27,10 @@ pub fn estimate_mips_lde_size(
     cells += (num_events_per_air[MipsAirId::AddSub]).next_power_of_two()
         * costs_per_air[&MipsAirId::AddSub];
 
+    // Compute the immediate-form addsub chip contribution.
+    cells += (num_events_per_air[MipsAirId::AddSubImm]).next_power_of_two()
+        * costs_per_air[&MipsAirId::AddSubImm];
+
     // Compute the mul chip contribution.
     cells +=
         (num_events_per_air[MipsAirId::Mul]).next_power_of_two() * costs_per_air[&MipsAirId::Mul];
@@ -114,7 +118,12 @@ pub fn estimate_mips_event_counts(
     // Compute the number of events in the cpu chip.
     events_counts[MipsAirId::Cpu] = cpu_cycles;
 
-    // Compute the number of events in the add sub chip.
+    // Compute the number of events in the add sub chip.  Opcode counts cannot
+    // see the operand FORM, so the immediate-form rows (which really land on
+    // the narrower `AddSubImm`) are billed to the wider register-form air —
+    // a conservative over-estimate.  The live accumulator routes them exactly
+    // (see the executor's bookkeeping block); this pure function survives only
+    // for its equivalence test and the offline shape tooling.
     events_counts[MipsAirId::AddSub] = opcode_counts[Opcode::ADD] + opcode_counts[Opcode::SUB];
 
     // Compute the number of events in the mul chip.
@@ -350,6 +359,14 @@ impl ShardSplitAccumulator {
         // sub-operations in-row (the Instruction bus is gone).
     }
 
+    /// Charge `count` rows directly to `air`, for the rows the opcode->air map
+    /// cannot place: ADD/SUB split into two chips by operand form, which only
+    /// the executor's decoded instruction can see.
+    #[inline]
+    pub fn add_air(&mut self, air: MipsAirId, count: u64) {
+        self.bump(air, count);
+    }
+
     /// Record one newly-touched address, charging the `MemoryLocal` and `Global` chips.
     #[inline]
     pub fn add_touched_address(&mut self) {
@@ -415,6 +432,10 @@ pub fn pad_mips_event_counts(
     event_counts.iter_mut().for_each(|(k, v)| match k {
         MipsAirId::Cpu => *v += num_cycles,
         MipsAirId::AddSub => *v += 5 * num_cycles,
+        // Only real immediate-form ADD/SUB instructions land here (the
+        // synthetic charges all bill the register-form air), so the growth is
+        // bounded by one row per cycle.
+        MipsAirId::AddSubImm => *v += num_cycles,
         MipsAirId::Mul => *v += 4 * num_cycles,
         MipsAirId::Bitwise => *v += 3 * num_cycles,
         MipsAirId::ShiftLeft => *v += num_cycles,

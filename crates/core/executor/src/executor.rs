@@ -1447,6 +1447,7 @@ impl<'a> Executor<'a> {
             self.emit_alu_event(
                 clk,
                 instruction.opcode,
+                instruction.imm_c,
                 hi_or_prev_a,
                 a,
                 b,
@@ -1571,6 +1572,7 @@ impl<'a> Executor<'a> {
         &mut self,
         clk: u32,
         opcode: Opcode,
+        imm_c: bool,
         hi_or_prev_a: Option<u32>,
         a: u32,
         b: u32,
@@ -1631,8 +1633,15 @@ impl<'a> Executor<'a> {
         };
 
         match opcode {
+            // ADD/SUB split by operand form: the immediate form (ADDI/ADDIU —
+            // after decoder normalisation `imm_b` is never set here) proves on
+            // the narrower I-type frame in its own chip.
             Opcode::ADD | Opcode::SUB => {
-                self.record.add_sub_events.push(event);
+                if imm_c {
+                    self.record.add_sub_imm_events.push(event);
+                } else {
+                    self.record.add_sub_events.push(event);
+                }
             }
             Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => {
                 self.record.bitwise_events.push(event);
@@ -1980,7 +1989,15 @@ impl<'a> Executor<'a> {
         // rows are counted, so the accumulator cannot drift from the executor.
         if !self.unconstrained && !self.skip_replay_bookkeeping {
             self.report.opcode_counts[instruction.opcode] += 1;
-            self.split_acct.add_opcode(instruction.opcode, 1);
+            // ADD/SUB rows land on one of two chips by operand form; the
+            // opcode->air map cannot see the form, so route here.  The
+            // synthetic charges below (a branch's internal add, etc.) stay on
+            // the register-form air.
+            if matches!(instruction.opcode, Opcode::ADD | Opcode::SUB) && instruction.imm_c {
+                self.split_acct.add_air(MipsAirId::AddSubImm, 1);
+            } else {
+                self.split_acct.add_opcode(instruction.opcode, 1);
+            }
             // NOTE: a memory instruction's `addr_word = op_b_value + op_c_value` is
             // INLINED into the memory chip's own columns (see
             // `memory::instructions::common`), so it emits NO `AddSub` row. Charging

@@ -50,6 +50,7 @@ fn core_base_chips() -> &'static [&'static str] {
     &[
         "Cpu",
         "AddSub",
+        "AddSubImm",
         "Bitwise",
         "Mul",
         "DivRem",
