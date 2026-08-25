@@ -71,10 +71,9 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
                             input.public_values.execution_shard,
                         );
                     } else {
-                        // Padding rows carry no instruction: neutralise the
-                        // frame or its register-access multiplicities break the
-                        // Memory bus.
-                        cols.frame.populate_dependency();
+                        // A padding row's frame needs no neutralising: the
+                        // typed I-type frame's register-access multiplicities
+                        // are `is_real`.
                     }
                 });
                 blu

@@ -499,7 +499,8 @@ mod parity_tests {
             BranchColumns<F>,
             NUM_BRANCH_COLS,
             branch_event_to_row_koalabear,
-            dep_pad!(BranchColumns<F>)
+            // Typed I-type frame — zero padding.
+            |_row: &mut [F]| {}
         );
         check!(
             JumpChip::default(),
@@ -531,7 +532,8 @@ mod parity_tests {
             SyscallInstrColumns<F>,
             NUM_SYSCALL_INSTR_COLS,
             syscall_instrs_event_to_row_koalabear,
-            dep_pad!(SyscallInstrColumns<F>)
+            // Typed R-type frame — zero padding.
+            |_row: &mut [F]| {}
         );
 
         // The five memory chips: the FFI takes no shard (the event carries it).

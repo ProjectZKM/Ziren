@@ -194,13 +194,15 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_r(
     }
 }
 
-// `ITypeFrameCols::populate_from_alu` — an immediate-form ALU instruction on
-// the I-type frame.  Identical to `populate_from_mem` except the event type:
-// an `AluEvent` carries no shard of its own, so it arrives as a parameter.
-template<class F>
+// `ITypeFrameCols::populate_from_alu` (also `populate_from_branch` — the
+// AluEvent-shaped events carry identically named frame fields) — an
+// immediate-form instruction on the I-type frame.  Identical to
+// `populate_from_mem` except the event type: these events carry no shard of
+// their own, so it arrives as a parameter.
+template<class E, class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_imm(
     ITypeFrameCols<F>& frame,
-    const AluEvent& event,
+    const E& event,
     const InstructionFfi& instruction,
     const uint32_t shard
 ) {
@@ -275,6 +277,47 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_syscall(
         frame, event.clk, event.recv_next_pc, event.a_record.value, event.arg1,
         event.arg2, a_record, event.b_record, event.c_record, instruction,
         event.shard);
+}
+
+// `RTypeFrameCols::populate_from_syscall` — SYSCALL is register-form; the id
+// comes in through op_a, the result goes out.  Mirrors the universal variant.
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_syscall_r(
+    RTypeFrameCols<F>& frame,
+    const SyscallEvent& event,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
+    frame.shard = F::from_canonical_u32(shard);
+    frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
+    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
+    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+
+    frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
+    frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
+    frame.op_b = F::from_canonical_u32(instruction.op_b);
+    frame.op_c = F::from_canonical_u32(instruction.op_c);
+    frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
+
+    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a_record.value);
+    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.arg1);
+    write_word_from_u32_v2<F>(frame.op_c_access.access.value, event.arg2);
+
+    // Record-wins ordering, as in `populate_raw`.
+    OptionMemoryRecordEnum a_record = {};
+    if (event.a_record_is_real) {
+        a_record.tag = OptionMemoryRecordEnumTag::Write;
+        a_record.write = event.a_record;
+    } else {
+        a_record.tag = OptionMemoryRecordEnumTag::None;
+    }
+    memory::populate_register_read_write<F>(frame.op_a_access, a_record);
+    if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+    }
+    if (event.c_record.tag == OptionMemoryRecordEnumTag::Read) {
+        memory::populate_register_read<F>(frame.op_c_access, event.c_record.read);
+    }
 }
 
 // `InstructionFrameCols::populate_dependency` — neutralise the frame on a row

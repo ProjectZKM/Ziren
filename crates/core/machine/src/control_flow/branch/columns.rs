@@ -12,7 +12,9 @@ pub const NUM_BRANCH_COLS: usize = size_of::<BranchColumns<u8>>();
 pub struct BranchColumns<T> {
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
     /// real row (every Branch row is an instruction).
-    pub frame: crate::frame::InstructionFrameCols<T>,
+    /// I-type across all six opcodes: `op_b` is a register (the zero-compare
+    /// decodes read register 0), `op_c` the branch offset immediate.
+    pub frame: crate::frame::ITypeFrameCols<T>,
 
     /// The current program counter.
     pub pc: T,

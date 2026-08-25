@@ -11,7 +11,9 @@ pub const NUM_SYSCALL_INSTR_COLS: usize = size_of::<SyscallInstrColumns<u8>>();
 pub struct SyscallInstrColumns<T> {
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
     /// real row (every Syscall row is an instruction).
-    pub frame: crate::frame::InstructionFrameCols<T>,
+    /// Register-form: SYSCALL's three operands are the fixed registers
+    /// `$v0` / `$a0` / `$a1`, so the R-type frame carries bare indices.
+    pub frame: crate::frame::RTypeFrameCols<T>,
 
     pub pc: T,
     pub next_pc: T,

@@ -403,23 +403,28 @@ impl Instruction {
             (0x00, 0x09) => Ok(Self::new(Opcode::Jump, rd, rs, 0, false, true)), // JALR
             (0x01, _) => {
                 if rt == 1 {
-                    // BGEZ
+                    // BGEZ.  The zero comparand is READ FROM REGISTER 0
+                    // rather than carried as an immediate (zkVM-internal
+                    // normalisation, like the SYNC-class decodes): the value
+                    // compared is identically zero, and it makes every branch
+                    // I-type — `op_b` a register, `op_c` the offset — which
+                    // the typed frame relies on.
                     Ok(Self::new(
                         Opcode::BGEZ,
                         rs as u8,
                         0u32,
                         offset_ext16.overflowing_shl(2).0,
-                        true,
+                        false,
                         true,
                     ))
                 } else if rt == 0 {
-                    // BLTZ
+                    // BLTZ — zero comparand from register 0, as above.
                     Ok(Self::new(
                         Opcode::BLTZ,
                         rs as u8,
                         0u32,
                         offset_ext16.overflowing_shl(2).0,
-                        true,
+                        false,
                         true,
                     ))
                 } else if rt == 0x11 && rs == 0 {
@@ -461,22 +466,22 @@ impl Instruction {
                 false,
                 true,
             )),
-            // BLEZ
+            // BLEZ — zero comparand from register 0 (see BGEZ).
             (0x06, _) => Ok(Self::new(
                 Opcode::BLEZ,
                 rs as u8,
                 0u32,
                 offset_ext16.overflowing_shl(2).0,
-                true,
+                false,
                 true,
             )),
-            // BGTZ
+            // BGTZ — zero comparand from register 0 (see BGEZ).
             (0x07, _) => Ok(Self::new(
                 Opcode::BGTZ,
                 rs as u8,
                 0u32,
                 offset_ext16.overflowing_shl(2).0,
-                true,
+                false,
                 true,
             )),
 

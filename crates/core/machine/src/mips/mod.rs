@@ -1024,7 +1024,7 @@ pub mod tests {
             for operand in operands.iter() {
                 let instructions = vec![
                     Instruction::new(Opcode::ADD, 29, 0, *operand, false, true),
-                    Instruction::new(*branch_op, 29, 0, 100, true, true),
+                    Instruction::new(*branch_op, 29, 0, 100, false, true),
                 ];
                 let program = Program::new(instructions, 0, 0);
                 run_test::<CpuProver<_, _>>(program).unwrap();

@@ -811,12 +811,70 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         shard: u32,
         blu: &mut impl ByteRecord,
     ) {
+        debug_assert!(
+            matches!(event.c_record.tag, OptionMemoryRecordEnumTag::None),
+            "an I-type frame received a register read for op_c"
+        );
+        self.populate_i_raw(
+            event.clk,
+            event.pc,
+            event.a,
+            event.b,
+            event.a_record,
+            event.b_record,
+            program,
+            shard,
+            blu,
+        );
+    }
+
+    /// `BranchEvent` variant — every branch is I-type once the zero-compare
+    /// decodes read register 0 for their comparand.
+    pub fn populate_from_branch(
+        &mut self,
+        event: &BranchEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        debug_assert!(
+            matches!(event.c_record.tag, OptionMemoryRecordEnumTag::None),
+            "an I-type frame received a register read for op_c"
+        );
+        self.populate_i_raw(
+            event.clk,
+            event.pc,
+            event.a,
+            event.b,
+            event.a_record,
+            event.b_record,
+            program,
+            shard,
+            blu,
+        );
+    }
+
+    /// The shared population body for the AluEvent-shaped events — see
+    /// [`Self::populate_from_mem`] for the contract.
+    #[allow(clippy::too_many_arguments)]
+    fn populate_i_raw(
+        &mut self,
+        clk: u32,
+        pc: u32,
+        a: u32,
+        b: u32,
+        a_record: zkm_core_executor::events::OptionMemoryRecordEnum,
+        b_record: zkm_core_executor::events::OptionMemoryReadRecord,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
         self.shard = F::from_u32(shard);
-        let clk_16 = (event.clk & 0xffff) as u16;
-        let clk_8 = ((event.clk >> 16) & 0xff) as u8;
+        let clk_16 = (clk & 0xffff) as u16;
+        let clk_8 = ((clk >> 16) & 0xff) as u8;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_8bit_limb = F::from_u8(clk_8);
-        self.clk_24bit_limb = F::from_u32((event.clk >> 24) & 1);
+        self.clk_24bit_limb = F::from_u32((clk >> 24) & 1);
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::U16Range,
             shard as u16,
@@ -827,7 +885,7 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
 
-        let instruction = program.fetch(event.pc);
+        let instruction = program.fetch(pc);
         // The shape this frame is specialised for — see
         // [`Self::populate_from_mem`] for why this is asserted here.
         debug_assert!(
@@ -836,29 +894,25 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             instruction.opcode
         );
         debug_assert!(instruction.op_b < 256, "op_b is not a register index");
-        debug_assert!(
-            matches!(event.c_record.tag, OptionMemoryRecordEnumTag::None),
-            "an I-type frame received a register read for op_c"
-        );
         self.opcode = instruction.opcode.as_field::<F>();
         self.op_a = F::from_u32(instruction.op_a as u32);
         self.op_b = F::from_u32(instruction.op_b);
         self.op_c = instruction.op_c.into();
         self.op_a_0 = F::from_bool(instruction.op_a == 0);
 
-        *self.op_a_access.value_mut() = event.a.into();
-        *self.op_b_access.value_mut() = event.b.into();
-        match event.a_record.tag {
+        *self.op_a_access.value_mut() = a.into();
+        *self.op_b_access.value_mut() = b.into();
+        match a_record.tag {
             OptionMemoryRecordEnumTag::Read => {
-                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
+                self.op_a_access.populate(MemoryRecordEnum::Read(a_record.read), blu)
             }
             OptionMemoryRecordEnumTag::Write => {
-                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
+                self.op_a_access.populate(MemoryRecordEnum::Write(a_record.write), blu)
             }
             OptionMemoryRecordEnumTag::None => {}
         }
-        if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
-            self.op_b_access.populate(event.b_record.read, blu);
+        if let OptionMemoryRecordEnumTag::Read = b_record.tag {
+            self.op_b_access.populate(b_record.read, blu);
         }
 
         // Column-read-back for the op_a range check, as in
@@ -1053,12 +1107,99 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
         shard: u32,
         blu: &mut impl ByteRecord,
     ) {
+        self.populate_r_raw(
+            event.clk,
+            event.pc,
+            event.a,
+            event.b,
+            event.c,
+            event.a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            shard,
+            blu,
+        );
+    }
+
+    /// `CompAluEvent` variant of [`Self::populate_from_alu`] — the two event
+    /// types carry identically named frame fields, exactly as with the
+    /// universal frame's pair.
+    pub fn populate_from_comp_alu(
+        &mut self,
+        event: &CompAluEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.populate_r_raw(
+            event.clk,
+            event.pc,
+            event.a,
+            event.b,
+            event.c,
+            event.a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            shard,
+            blu,
+        );
+    }
+
+    /// `SyscallEvent` variant — SYSCALL is register-form (`$v0`, `$a0`, `$a1`
+    /// are all register indices); the id comes in through `op_a`, the result
+    /// goes out.  Mirrors [`InstructionFrameCols::populate_from_syscall`].
+    pub fn populate_from_syscall(
+        &mut self,
+        event: &SyscallEvent,
+        program: &Program,
+        blu: &mut impl ByteRecord,
+    ) {
+        let a_record: zkm_core_executor::events::OptionMemoryRecordEnum = if event.a_record_is_real
+        {
+            Some(MemoryRecordEnum::Write(event.a_record)).into()
+        } else {
+            None.into()
+        };
+        self.populate_r_raw(
+            event.clk,
+            event.pc,
+            event.a_record.value,
+            event.arg1,
+            event.arg2,
+            a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            event.shard,
+            blu,
+        );
+    }
+
+    /// The shared population body — see [`Self::populate_from_alu`] for the
+    /// contract.
+    #[allow(clippy::too_many_arguments)]
+    fn populate_r_raw(
+        &mut self,
+        clk: u32,
+        pc: u32,
+        a: u32,
+        b: u32,
+        c: u32,
+        a_record: zkm_core_executor::events::OptionMemoryRecordEnum,
+        b_record: zkm_core_executor::events::OptionMemoryReadRecord,
+        c_record: zkm_core_executor::events::OptionMemoryReadRecord,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
         self.shard = F::from_u32(shard);
-        let clk_16 = (event.clk & 0xffff) as u16;
-        let clk_8 = ((event.clk >> 16) & 0xff) as u8;
+        let clk_16 = (clk & 0xffff) as u16;
+        let clk_8 = ((clk >> 16) & 0xff) as u8;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_8bit_limb = F::from_u8(clk_8);
-        self.clk_24bit_limb = F::from_u32((event.clk >> 24) & 1);
+        self.clk_24bit_limb = F::from_u32((clk >> 24) & 1);
         blu.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::U16Range,
             shard as u16,
@@ -1069,7 +1210,7 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
 
-        let instruction = program.fetch(event.pc);
+        let instruction = program.fetch(pc);
         // The shape this frame is specialised for — see
         // [`ITypeFrameCols::populate_from_mem`] for why this is asserted here.
         debug_assert!(
@@ -1085,23 +1226,23 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
         self.op_c = F::from_u32(instruction.op_c);
         self.op_a_0 = F::from_bool(instruction.op_a == 0);
 
-        *self.op_a_access.value_mut() = event.a.into();
-        *self.op_b_access.value_mut() = event.b.into();
-        *self.op_c_access.value_mut() = event.c.into();
-        match event.a_record.tag {
+        *self.op_a_access.value_mut() = a.into();
+        *self.op_b_access.value_mut() = b.into();
+        *self.op_c_access.value_mut() = c.into();
+        match a_record.tag {
             OptionMemoryRecordEnumTag::Read => {
-                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
+                self.op_a_access.populate(MemoryRecordEnum::Read(a_record.read), blu)
             }
             OptionMemoryRecordEnumTag::Write => {
-                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
+                self.op_a_access.populate(MemoryRecordEnum::Write(a_record.write), blu)
             }
             OptionMemoryRecordEnumTag::None => {}
         }
-        if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
-            self.op_b_access.populate(event.b_record.read, blu);
+        if let OptionMemoryRecordEnumTag::Read = b_record.tag {
+            self.op_b_access.populate(b_record.read, blu);
         }
-        if let OptionMemoryRecordEnumTag::Read = event.c_record.tag {
-            self.op_c_access.populate(event.c_record.read, blu);
+        if let OptionMemoryRecordEnumTag::Read = c_record.tag {
+            self.op_c_access.populate(c_record.read, blu);
         }
 
         // Read the op_a range check back off the COLUMN, not the event — see
@@ -1130,92 +1271,8 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
             c: a_bytes[3] as u8,
         });
     }
-
-    /// `CompAluEvent` variant of [`Self::populate_from_alu`] — the two event
-    /// types carry identically named frame fields, exactly as with the
-    /// universal frame's pair.
-    pub fn populate_from_comp_alu(
-        &mut self,
-        event: &CompAluEvent,
-        program: &Program,
-        shard: u32,
-        blu: &mut impl ByteRecord,
-    ) {
-        self.shard = F::from_u32(shard);
-        let clk_16 = (event.clk & 0xffff) as u16;
-        let clk_8 = ((event.clk >> 16) & 0xff) as u8;
-        self.clk_16bit_limb = F::from_u16(clk_16);
-        self.clk_8bit_limb = F::from_u8(clk_8);
-        self.clk_24bit_limb = F::from_u32((event.clk >> 24) & 1);
-        blu.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
-        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
-        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
-
-        let instruction = program.fetch(event.pc);
-        debug_assert!(
-            !instruction.imm_b && !instruction.imm_c,
-            "an R-type frame received a non-R-type instruction: {:?}",
-            instruction.opcode
-        );
-        debug_assert!(instruction.op_b < 256, "op_b is not a register index");
-        debug_assert!(instruction.op_c < 256, "op_c is not a register index");
-        self.opcode = instruction.opcode.as_field::<F>();
-        self.op_a = F::from_u32(instruction.op_a as u32);
-        self.op_b = F::from_u32(instruction.op_b);
-        self.op_c = F::from_u32(instruction.op_c);
-        self.op_a_0 = F::from_bool(instruction.op_a == 0);
-
-        *self.op_a_access.value_mut() = event.a.into();
-        *self.op_b_access.value_mut() = event.b.into();
-        *self.op_c_access.value_mut() = event.c.into();
-        match event.a_record.tag {
-            OptionMemoryRecordEnumTag::Read => {
-                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
-            }
-            OptionMemoryRecordEnumTag::Write => {
-                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
-            }
-            OptionMemoryRecordEnumTag::None => {}
-        }
-        if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
-            self.op_b_access.populate(event.b_record.read, blu);
-        }
-        if let OptionMemoryRecordEnumTag::Read = event.c_record.tag {
-            self.op_c_access.populate(event.c_record.read, blu);
-        }
-
-        // Column-read-back for the op_a range check — see
-        // [`Self::populate_from_alu`].
-        let a_bytes = self
-            .op_a_access
-            .access
-            .value
-            .0
-            .iter()
-            .map(|x| x.as_canonical_u32())
-            .collect::<Vec<_>>();
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[0] as u8,
-            c: a_bytes[1] as u8,
-        });
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a_bytes[2] as u8,
-            c: a_bytes[3] as u8,
-        });
-    }
 }
+
 /// The frame for a chip whose every instruction is a SHAMT form: `op_b` a
 /// register and `op_c` a 5-bit shift amount.  Relative to [`ITypeFrameCols`]
 /// the immediate needs only ONE column — the `Program` bus binds it to the

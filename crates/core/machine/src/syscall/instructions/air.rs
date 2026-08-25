@@ -1,4 +1,4 @@
-use crate::frame::clk_from_frame;
+use crate::frame::clk_from_r_type_frame;
 use crate::memory::RegisterCols;
 use std::borrow::Borrow;
 
@@ -57,7 +57,7 @@ where
         // `(clk, pc)` chaining.  On the halt row `next_pc` is the exit signal 0
         // and the sent lookahead 0 + 4 = 4, exactly the tuple the legacy Cpu row
         // sent — the PV final endpoint receives it.
-        crate::frame::eval_instruction_frame(
+        crate::frame::eval_r_type_frame(
             builder,
             &local.frame,
             local.is_real * Opcode::SYSCALL.as_field::<AB::F>(),
@@ -84,7 +84,7 @@ where
         // PREVIOUS value.
         builder
             .when(local.is_real)
-            .when_not(local.frame.instruction.op_a_0)
+            .when_not(local.frame.op_a_0)
             .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
 
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`
@@ -208,7 +208,7 @@ impl SyscallInstrsChip {
 
         builder.send_syscall(
             local.frame.shard,
-            clk_from_frame::<AB>(&local.frame),
+            clk_from_r_type_frame::<AB>(&local.frame),
             syscall_id.clone(),
             local.frame.op_b_val().reduce::<AB>(),
             local.frame.op_c_val().reduce::<AB>(),
@@ -220,7 +220,7 @@ impl SyscallInstrsChip {
         // with SysLinuxChip via SyscallChip bridge.
         builder.send_syscall_result(
             local.frame.shard,
-            clk_from_frame::<AB>(&local.frame),
+            clk_from_r_type_frame::<AB>(&local.frame),
             local.op_a_value,
             local.frame.op_b_val(),
             local.frame.op_c_val(),

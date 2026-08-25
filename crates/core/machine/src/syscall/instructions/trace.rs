@@ -65,10 +65,9 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
                         let event = &input.syscall_events[idx];
                         self.event_to_row(event, cols, &mut blu, &input.program);
                     } else {
-                        // Padding rows carry no instruction: neutralise the
-                        // frame or its register-access multiplicities break the
-                        // Memory bus.
-                        cols.frame.populate_dependency();
+                        // A padding row's frame needs no neutralising: the
+                        // typed R-type frame's register-access multiplicities
+                        // are `is_real`.
                     }
                 });
                 blu

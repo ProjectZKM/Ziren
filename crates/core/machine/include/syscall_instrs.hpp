@@ -15,7 +15,7 @@ namespace zkm_core_machine_sys::syscall_instrs {
     ) {
         (void)shard;
         // Every row is a real instruction owning its frame.
-        frame::populate_from_syscall<F>(cols.frame, event, instruction);
+        frame::populate_from_syscall_r<F>(cols.frame, event, instruction, event.shard);
 
         cols.is_real = F::one();
         cols.pc = F::from_canonical_u32(event.pc);

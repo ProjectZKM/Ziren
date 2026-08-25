@@ -65,7 +65,7 @@ where
         // A real instruction carries its own program fetch, register access and
         // `(clk, pc)` chaining.  A branch's next_next_pc is the TARGET (or the
         // fallthrough), already a constrained Word column; branches never halt.
-        crate::frame::eval_instruction_frame(
+        crate::frame::eval_i_type_frame(
             builder,
             &local.frame,
             local.is_beq * Opcode::BEQ.as_field::<AB::F>()

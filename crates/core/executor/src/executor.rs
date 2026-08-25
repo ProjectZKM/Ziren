@@ -1955,8 +1955,11 @@ impl<'a> Executor<'a> {
     fn branch_rr(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
         let (src1, src2, target) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
-        let b = if instruction.opcode.only_one_operand() {
-            0
+        // Every branch READS its second comparand: the zero-compare decodes
+        // carry register 0 there (see the BGEZ decode note), so the read is
+        // identically zero and the typed frame's op_b access is real.
+        let b = if instruction.imm_b {
+            instruction.op_b
         } else {
             self.rr_cpu(src2, MemoryAccessPosition::B)
         };

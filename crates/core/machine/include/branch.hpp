@@ -16,7 +16,7 @@ __ZKM_HOSTDEV__ void event_to_row(
     const uint32_t shard
 ) {
     // Every row is a real instruction owning its frame.
-    frame::populate_from_branch<F>(cols.frame, event, instruction, shard);
+    frame::populate_from_alu_imm<BranchEvent, F>(cols.frame, event, instruction, shard);
 
     cols.pc = F::from_canonical_u32(event.pc);
 
