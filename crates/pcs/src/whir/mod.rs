@@ -16,9 +16,17 @@
 //!   Merkle-commit + OOD sampling that is WHIR's commitment.  The
 //!   `commit_ood_answers_are_correct` test checks the OOD answers equal the
 //!   committed polynomial's evaluations at the drawn points.
-//! * Phase 2: the folding prover — the per-round constrained sumcheck that
-//!   folds `folding_factor` variables while binding the OOD + query
-//!   constraints, with PoW grinding, producing a [`proof::WhirProof`].
+//! * **Phase 2a (here): the folding sumcheck** — [`sumcheck::prove_fold`]
+//!   runs the eq-weighted, OOD-batched degree-2 sumcheck that folds the
+//!   committed polynomial to a point, with per-round PoW grinding.  The
+//!   `folds_reduce_the_claim` test checks its soundness identity
+//!   (`reduced claim == weight(r)·f(r)`) and that the fold equals partial
+//!   evaluation.  This is the cryptographic core of the WHIR prover.
+//! * Phase 2b: round orchestration — re-encode the folded polynomial at each
+//!   round's rate, Merkle-commit it, draw fresh OOD, and open the previous
+//!   round's codeword at the query indices, interleaved with `folding_factor`
+//!   fold steps.  Assembles [`sumcheck::prove_fold`] + [`prover`] into a full
+//!   [`proof::WhirProof`], reusing BaseFold's query-opening path.
 //! * Phase 3: the verifier — replay the sumcheck, check the OOD answers and
 //!   the in-domain query openings, verify the PoW.
 //! * Phase 4: wrap in the jagged layer (`JaggedPcsVerifier<WhirVerifier>`),
@@ -28,6 +36,7 @@
 pub mod config;
 pub mod proof;
 pub mod prover;
+pub mod sumcheck;
 
 #[cfg(test)]
 mod test;
