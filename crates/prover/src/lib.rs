@@ -911,13 +911,22 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .collect();
             names.sort_unstable();
             names.dedup();
+            // Heights too, not just the key set: the log-height profile is
+            // what actually drives the diversity, so pricing any attempt to
+            // normalise it needs the raw numbers per shard.
+            let heights: Vec<String> = input
+                .shard_proofs
+                .iter()
+                .flat_map(|sp| sp.chip_heights.iter().map(|(n, h)| format!("{n}:{h}")))
+                .collect();
             tracing::warn!(
-                "NORMALIZE_KEY shape_key={:016x} band={:?} first={} nchips={} chips={}",
+                "NORMALIZE_KEY shape_key={:016x} band={:?} first={} nchips={} chips={} heights={}",
                 input.shape_key(),
                 band,
                 input.is_first_shard,
                 names.len(),
                 names.join(","),
+                heights.join(","),
             );
         }
         self.cached_program(
