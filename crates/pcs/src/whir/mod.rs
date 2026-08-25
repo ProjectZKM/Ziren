@@ -55,6 +55,7 @@
 
 pub mod config;
 pub mod full_prover;
+pub mod monomial;
 pub mod proof;
 pub mod prover;
 pub mod round_prover;
