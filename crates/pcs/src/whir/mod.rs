@@ -31,22 +31,35 @@
 //!   invariant `claim = Σ_x weight[x]·f[x]`; the `tower_*` tests check that
 //!   master identity end to end, per-round OOD correctness, and that the tower
 //!   folds the original polynomial.
-//! * Phase 2c: the STIR query openings — sample query indices into each
-//!   committed codeword, open them, and fold the opened values in as extra
-//!   sumcheck constraints.  Deferred to co-develop with phase 3, since the
-//!   openings are only meaningfully checked by the verifier re-deriving them;
-//!   reuses BaseFold's query-opening path.
-//! * Phase 3: the verifier — replay the sumcheck, check the OOD answers and
-//!   the in-domain query openings, verify the PoW.
+//! * **Phase 2c (here): the full prover + query openings** —
+//!   [`full_prover::WhirProver::prove`] runs the complete prover and assembles
+//!   a [`proof::WhirProof`]: the tower, plus per round it commits each folded
+//!   codeword with `2^folding_factor` interleaved rows per Merkle leaf, samples
+//!   `num_queries` indices into the previous codeword's domain, opens those
+//!   cosets, and folds each to a `stir_value`, grinding the real PoW.  This is
+//!   the prover whose work the WHIR-vs-BaseFold benchmark (`bench_whir_vs_
+//!   basefold`) times.
+//! * **Phase 3 (here): the verifier** — [`verifier::WhirVerifier::verify_
+//!   rounds`] replays the transcript, checks every sumcheck message and PoW,
+//!   re-samples the OOD points, and checks the terminal identity
+//!   `claim == Σ_constraints c·eq(p[..k],cfr)·final_poly(p[k..])` — the
+//!   verifier-side reconstruction of `Σ_x weight[x]·final_poly[x]`.  The
+//!   `tower_roundtrip_verifies` test proves→verifies and rejects tampering.
+//!   REMAINING: the STIR query authentication (Merkle-open each codeword at the
+//!   sampled indices + fold the coset into a constraint via the monomial
+//!   point-map) — the interleaved-encode / point-map is the deep piece; the
+//!   full prover already emits the openings.
 //! * Phase 4: wrap in the jagged layer (`JaggedPcsVerifier<WhirVerifier>`),
 //!   replacing BaseFold in the shard-level PCS.
 //! * Phase 5: the recursion-circuit WHIR verifier (upstream's is `#![cfg(test)]`).
 
 pub mod config;
+pub mod full_prover;
 pub mod proof;
 pub mod prover;
 pub mod round_prover;
 pub mod sumcheck;
+pub mod verifier;
 
 #[cfg(test)]
 mod test;

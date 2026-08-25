@@ -252,3 +252,179 @@ fn tower_round_ood_correct() {
     // A 3-round tower commits its two intermediate rounds; the last is revealed.
     assert_eq!(proof.rounds.len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Performance: WHIR prover vs BaseFold prover, identical inputs.
+// ---------------------------------------------------------------------------
+
+/// Build a WHIR config for `n` variables, uniform folding factor `ff`, a
+/// per-round query schedule, and OOD samples — folding down to a
+/// `final`-variable polynomial.
+fn whir_config_for(n: usize, ff: usize, queries: &[usize], ood: usize, rate: usize, pow: usize) -> WhirConfig {
+    use crate::whir::config::RoundConfig;
+    let final_log = n - ff * queries.len();
+    let mut config = WhirConfig::default_whir_config();
+    config.starting_ood_samples = ood;
+    config.starting_log_inv_rate = rate;
+    config.round_parameters = queries
+        .iter()
+        .map(|&nq| RoundConfig {
+            folding_factor: ff,
+            evaluation_domain_log_size: 0,
+            queries_pow_bits: pow,
+            pow_bits: alloc::vec![0usize; ff],
+            num_queries: nq,
+            ood_samples: ood,
+            log_inv_rate: rate,
+        })
+        .collect();
+    config.final_poly_log_degree = final_log;
+    config.final_queries = *queries.last().unwrap();
+    config.final_pow_bits = pow;
+    config
+}
+
+/// Median wall time of `iters` runs of `f`, in milliseconds.
+fn median_ms(iters: usize, mut f: impl FnMut()) -> f64 {
+    use std::time::Instant;
+    let mut ts: Vec<f64> = (0..iters)
+        .map(|_| {
+            let t = Instant::now();
+            f();
+            t.elapsed().as_secs_f64() * 1e3
+        })
+        .collect();
+    ts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ts[ts.len() / 2]
+}
+
+#[test]
+#[ignore = "perf benchmark; run with --ignored --nocapture"]
+fn bench_whir_vs_basefold() {
+    use crate::basefold::{BasefoldProver, FriConfig};
+
+    type F = InnerVal;
+    type EF = InnerChallenge;
+
+    let iters = 5usize;
+    for &n in &[18usize, 20] {
+        let ff = 4usize;
+        // Fold n down to a 2-var final poly: (n-2)/ff rounds.
+        let n_rounds = (n - 2) / ff;
+        let queries: Vec<usize> = (0..n_rounds)
+            .map(|i| 124usize >> i) // 124, 62, 31, ... : BaseFold's budget, halving as the codeword shrinks
+            .collect();
+
+        let mut rng = StdRng::seed_from_u64(0x5EED ^ n as u64);
+        let values: Vec<F> = (0..(1usize << n)).map(|_| rand_kb(&mut rng)).collect();
+        let mle = Arc::new(Mle::from_row_major(RowMajorMatrix::new(values, 1)));
+        let point: Vec<EF> = (0..n)
+            .map(|_| {
+                use p3_field::BasedVectorSpace;
+                <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter((0..4).map(|_| rand_kb(&mut rng)))
+                    .unwrap()
+            })
+            .collect();
+        let eval = mle.eval_at::<EF>(&point)[0];
+
+        // ---- BaseFold prover (its designed params: blowup 2, 124 queries). ----
+        let bf_cfg = FriConfig::<F>::default_fri_config();
+        let bf_mmcs = build_mmcs();
+        let bf_dft = Arc::new(Radix2DitParallel::<F>::default());
+        let bf_prover = BasefoldProver::<F, EF, _, _>::new(bf_cfg, bf_dft, bf_mmcs, 1);
+        // Time commit+prove TOTAL — WHIR's `prove` includes the starting
+        // encode+commit, so BaseFold must include `commit_mles` for parity.
+        let bf_ms = median_ms(iters, || {
+            let mut ch = build_challenger();
+            let (_bc, bf_data) = bf_prover.commit_mles(vec![Arc::clone(&mle)]);
+            let _ = bf_prover.prove_trusted_mle_evaluations(
+                point.clone(),
+                vec![vec![Arc::clone(&mle)]],
+                vec![vec![eval]],
+                &[&bf_data],
+                &mut ch,
+            );
+        });
+
+        // ---- WHIR prover (its designed params: OOD + fewer queries). ----
+        let whir_cfg = whir_config_for(n, ff, &queries, 2, 2, 16); // rate 2 + pow 16, matched to BaseFold
+        let whir_mmcs = build_mmcs();
+        let base_dft = Arc::new(Radix2DitParallel::<F>::default());
+        let ef_dft = Arc::new(Radix2DitParallel::<EF>::default());
+        let whir_prover = WhirProver::<F, EF, _, _>::new(base_dft, whir_mmcs, whir_cfg);
+        let whir_ms = median_ms(iters, || {
+            let mut ch = build_challenger();
+            let _ = whir_prover.prove(
+                Arc::clone(&ef_dft),
+                &mut ch,
+                Arc::clone(&mle),
+                point.clone(),
+                eval,
+            );
+        });
+
+        println!(
+            "n={n:2} ({} pts): BaseFold {bf_ms:8.2} ms  |  WHIR {whir_ms:8.2} ms  |  ratio {:.3}x  ({} WHIR rounds, queries {:?})",
+            1usize << n,
+            whir_ms / bf_ms,
+            n_rounds,
+            queries,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: the tower verifier (sumcheck + OOD + terminal identity).
+// ---------------------------------------------------------------------------
+
+/// Prove with one challenger, verify with a fresh one replaying the transcript;
+/// the honest proof must verify, and tampering must be rejected.
+#[test]
+fn tower_roundtrip_verifies() {
+    use crate::whir::verifier::{WhirVerifier, WhirVerifierError};
+
+    type F = InnerVal;
+    type EF = InnerChallenge;
+
+    let (n, ff, num_rounds) = (9usize, 3usize, 3usize);
+    let mut rng = StdRng::seed_from_u64(0x2E57);
+    let values: Vec<F> = (0..(1usize << n)).map(|_| rand_kb(&mut rng)).collect();
+    let mle = Arc::new(Mle::from_row_major(RowMajorMatrix::new(values, 1)));
+    let point: Vec<EF> = (0..n)
+        .map(|_| {
+            use p3_field::BasedVectorSpace;
+            <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter((0..4).map(|_| rand_kb(&mut rng)))
+                .unwrap()
+        })
+        .collect();
+    let eval = mle.eval_at::<EF>(&point)[0];
+
+    let base_dft = Arc::new(Radix2DitParallel::<F>::default());
+    let ef_dft = Arc::new(Radix2DitParallel::<EF>::default());
+    let cfg = tower_config(n, ff, num_rounds);
+
+    let prover = WhirProver::<F, EF, _, _>::new(base_dft, build_mmcs(), cfg.clone());
+    let mut p_chal = build_challenger();
+    let proof =
+        prover.prove_rounds(Arc::clone(&ef_dft), &mut p_chal, Arc::clone(&mle), point.clone(), eval);
+
+    let verifier = WhirVerifier::<F, EF, _>::new(build_mmcs(), cfg);
+
+    // Honest proof verifies.
+    let mut v_chal = build_challenger();
+    assert_eq!(verifier.verify_rounds(&mut v_chal, &point, eval, &proof), Ok(()));
+
+    // Wrong evaluation claim is rejected — it changes the initial claim, so
+    // the very first sumcheck message g(0)+g(1)==claim already fails.
+    let mut v_chal = build_challenger();
+    assert!(verifier.verify_rounds(&mut v_chal, &point, eval + EF::ONE, &proof).is_err());
+
+    // Tampering with the final polynomial is rejected.
+    let mut bad = proof;
+    bad.final_poly[0] += EF::ONE;
+    let mut v_chal = build_challenger();
+    assert_eq!(
+        verifier.verify_rounds(&mut v_chal, &point, eval, &bad),
+        Err(WhirVerifierError::TerminalMismatch),
+    );
+}
