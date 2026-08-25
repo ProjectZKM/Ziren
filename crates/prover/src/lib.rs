@@ -875,15 +875,49 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         band: Option<usize>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         // Where normalize program diversity actually comes from.  The cache key
-        // is `(shape_key, band)`, and only counting the two separately can say
-        // which one to attack: the band is a policy we choose, but `shape_key`
-        // folds the per-shard chip-name KEY SET, which is a property of the
-        // workload.  Env-gated (`ZIREN_NORMALIZE_KEY_CENSUS=1`), off by default.
+        // is `(shape_key, band)`.  Measured on a reth block: 187 leaves ->
+        // 48 distinct `shape_key`s -> 61 distinct `(shape_key, band)` pairs,
+        // which is 61 program builds and 61 setups on a stage where build +
+        // setup is 40% of all node work.
+        //
+        // The decomposition matters, because the obvious reading is wrong.
+        // The chip NAME SET — the only part of the per-shard proof this key
+        // projects by name — accounts for just EIGHT of those 48; the dominant
+        // set (24 chips, 126 leaves) alone carries 26.  The rest is per-chip
+        // LOG HEIGHTS, which reach the key structurally through the round
+        // counts and through `opened_values.chips[].quotient[0].len()`.  So
+        // collapsing leaf diversity means normalising core shard SHAPES, not
+        // chip sets.
+        //
+        // The band accounts for the remaining 13 (61 - 48): a group that does
+        // not already agree is forced onto its dominating band, so one shape
+        // snapped onto three bands is three builds.  ⚠ Removing that forcing
+        // is a MEASURED REGRESSION — leaving the group unsnapped hands the
+        // compose parent mixed children, and two paired runs put compress at
+        // 33.2 s against 26.8 s, with MORE programs built (81 vs 77), not
+        // fewer.  The forcing pays for itself downstream; do not retry it.
+        //
+        // Env-gated (`ZIREN_NORMALIZE_KEY_CENSUS=1`), off by default.
         if normalize_key_census_enabled() {
+            // The chip NAME SET is what `shape_key` folds (heights are
+            // deliberately excluded), so print it: knowing WHICH chips differ
+            // between shards is the difference between "a handful of rare
+            // precompiles" and "genuinely wide", and only the first is cheap
+            // to collapse.
+            let mut names: Vec<&str> = input
+                .shard_proofs
+                .iter()
+                .flat_map(|sp| sp.chip_heights.keys().map(String::as_str))
+                .collect();
+            names.sort_unstable();
+            names.dedup();
             tracing::warn!(
-                "NORMALIZE_KEY shape_key={:016x} band={:?}",
+                "NORMALIZE_KEY shape_key={:016x} band={:?} first={} nchips={} chips={}",
                 input.shape_key(),
-                band
+                band,
+                input.is_first_shard,
+                names.len(),
+                names.join(","),
             );
         }
         self.cached_program(
