@@ -880,14 +880,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // which is 61 program builds and 61 setups on a stage where build +
         // setup is 40% of all node work.
         //
-        // The decomposition matters, because the obvious reading is wrong.
-        // The chip NAME SET — the only part of the per-shard proof this key
-        // projects by name — accounts for just EIGHT of those 48; the dominant
-        // set (24 chips, 126 leaves) alone carries 26.  The rest is per-chip
-        // LOG HEIGHTS, which reach the key structurally through the round
-        // counts and through `opened_values.chips[].quotient[0].len()`.  So
-        // collapsing leaf diversity means normalising core shard SHAPES, not
-        // chip sets.
+        // The decomposition matters, because two obvious readings are both
+        // wrong.  The chip NAME SET — the only part of the per-shard proof this
+        // key projects by name — accounts for just EIGHT of the 48.
+        //
+        // ⚠ The rest is NOT per-chip log heights, though the `quotient[0]`
+        // length in the signature invites that reading.  Censused against the
+        // raw per-shard heights: leaves that SHARE a `shape_key` have different
+        // per-chip log profiles AND different max log height.  A 64-bit hash
+        // over 48 values does not collide, so equal keys mean equal hashed
+        // inputs — heights therefore do not determine the key, and padding
+        // shards to uniform heights would NOT collapse it.  (`chipset +
+        // ceil(area / 2^22)` lands at 47 distinct, temptingly close to 48, and
+        // is likewise not implied by the key.)
+        //
+        // What is left is the jagged geometry the signature bakes in —
+        // per-round `packing.column_counts` / `offsets` VALUES — which is what
+        // a census would have to dump to attribute the remaining 40.
         //
         // The band accounts for the remaining 13 (61 - 48): a group that does
         // not already agree is forced onto its dominating band, so one shape
