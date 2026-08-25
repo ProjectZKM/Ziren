@@ -68,6 +68,16 @@ extern void bitwise_event_to_row_koalabear(
     bitwise::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
 }
 
+extern void bitwise_imm_event_to_row_koalabear(
+    const AluEvent* event,
+    BitwiseImmCols<KoalaBearP3>* cols,
+    const InstructionFfi instruction,
+    const uint32_t shard
+) {
+    BitwiseImmCols<kb31_t>* cols_kb31 = reinterpret_cast<BitwiseImmCols<kb31_t>*>(cols);
+    bitwise_imm::event_to_row<kb31_t>(*event, *cols_kb31, instruction, shard);
+}
+
 extern void clo_clz_event_to_row_koalabear(
     const AluEvent* event,
     CloClzCols<KoalaBearP3>* cols,

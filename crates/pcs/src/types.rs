@@ -120,6 +120,7 @@ pub const EXECUTION_CHIP_NAMES: &[&str] = &[
     "AddSub",
     "AddSubImm",
     "Bitwise",
+    "BitwiseImm",
     "ShiftLeft",
     "ShiftRight",
     "Lt",

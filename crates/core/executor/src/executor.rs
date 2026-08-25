@@ -1643,8 +1643,14 @@ impl<'a> Executor<'a> {
                     self.record.add_sub_events.push(event);
                 }
             }
+            // Bitwise splits by operand form like ADD/SUB above; NOR has no
+            // immediate form, so only XORI/ORI/ANDI ever take this branch.
             Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => {
-                self.record.bitwise_events.push(event);
+                if imm_c {
+                    self.record.bitwise_imm_events.push(event);
+                } else {
+                    self.record.bitwise_events.push(event);
+                }
             }
             Opcode::SLL => {
                 self.record.shift_left_events.push(event);
@@ -1989,12 +1995,17 @@ impl<'a> Executor<'a> {
         // rows are counted, so the accumulator cannot drift from the executor.
         if !self.unconstrained && !self.skip_replay_bookkeeping {
             self.report.opcode_counts[instruction.opcode] += 1;
-            // ADD/SUB rows land on one of two chips by operand form; the
-            // opcode->air map cannot see the form, so route here.  The
-            // synthetic charges below (a branch's internal add, etc.) stay on
-            // the register-form air.
-            if matches!(instruction.opcode, Opcode::ADD | Opcode::SUB) && instruction.imm_c {
-                self.split_acct.add_air(MipsAirId::AddSubImm, 1);
+            // Form-split ALU rows land on one of two chips by operand form;
+            // the opcode->air map cannot see the form, so route here via the
+            // immediate-form map.  The synthetic charges below (a branch's
+            // internal add, etc.) stay on the register-form airs.
+            let imm_air = if instruction.imm_c {
+                crate::mips_imm_air_from_opcode(instruction.opcode)
+            } else {
+                None
+            };
+            if let Some(air) = imm_air {
+                self.split_acct.add_air(air, 1);
             } else {
                 self.split_acct.add_opcode(instruction.opcode, 1);
             }

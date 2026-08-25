@@ -95,8 +95,12 @@ pub enum MipsAirId {
     /// I-type frame.  Declared beside `AddSub` because `MipsAirId::iter()`
     /// yields declaration order and must match `MipsAir::chips()`.
     AddSubImm = 60,
-    /// The bitwise chip.
+    /// The bitwise chip — the register form.
     Bitwise = 30,
+    /// The immediate-form bitwise chip (`XORI` / `ORI` / `ANDI`), on the
+    /// narrower I-type frame.  Declared beside `Bitwise` for the
+    /// declaration-order zip against `MipsAir::chips()`.
+    BitwiseImm = 61,
     /// The mul chip.
     Mul = 31,
     /// The shift right chip.
@@ -158,6 +162,7 @@ impl MipsAirId {
             MipsAirId::AddSubImm,
             MipsAirId::Mul,
             MipsAirId::Bitwise,
+            MipsAirId::BitwiseImm,
             MipsAirId::ShiftLeft,
             MipsAirId::ShiftRight,
             MipsAirId::DivRem,
@@ -218,6 +223,7 @@ impl MipsAirId {
             Self::AddSub => "AddSub",
             Self::AddSubImm => "AddSubImm",
             Self::Bitwise => "Bitwise",
+            Self::BitwiseImm => "BitwiseImm",
             Self::Mul => "Mul",
             Self::ShiftRight => "ShiftRight",
             Self::ShiftLeft => "ShiftLeft",

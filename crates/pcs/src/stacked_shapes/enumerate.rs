@@ -52,6 +52,7 @@ fn core_base_chips() -> &'static [&'static str] {
         "AddSub",
         "AddSubImm",
         "Bitwise",
+        "BitwiseImm",
         "Mul",
         "DivRem",
         "Lt",

@@ -7,8 +7,8 @@ use zkm_pcs::air::BaseAirBuilder;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
-use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
+use p3_air::{Air, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
@@ -23,24 +23,25 @@ use zkm_pcs::{
 
 use crate::{
     air::WordAirBuilder,
-    frame::{eval_r_type_frame, RTypeFrameCols},
+    frame::{eval_i_type_frame, ITypeFrameCols},
     utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,
 };
 
-/// The number of main trace columns for `BitwiseChip`.
-pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
+/// The number of main trace columns for `BitwiseImmChip`.
+pub const NUM_BITWISE_IMM_COLS: usize = size_of::<BitwiseImmCols<u8>>();
 
-/// A chip that implements bitwise operations for the register-form opcodes
-/// XOR, OR, AND and NOR.  The immediate forms (XORI, ORI, ANDI — NOR has
-/// none) prove on the narrower I-type frame in [`super::BitwiseImmChip`].
+/// A chip that implements bitwise operations for the immediate-form opcodes
+/// XORI, ORI and ANDI: `op_b` is a register, `op_c` is an immediate.  The
+/// register forms (and NOR, which has no immediate form) prove in
+/// [`super::BitwiseChip`].
 #[derive(Default)]
-pub struct BitwiseChip;
+pub struct BitwiseImmChip;
 
 /// The column layout for the chip.
 #[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
-pub struct BitwiseCols<T> {
+pub struct BitwiseImmCols<T> {
     /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
@@ -50,12 +51,8 @@ pub struct BitwiseCols<T> {
     /// Witnessed because it is what the chip COMPUTES: on a row whose
     /// destination is register 0 the write is discarded, so it legitimately
     /// differs from the value the register access commits.  The two INPUTS are
-    /// not columns -- they are the frame's register reads, read directly.
+    /// not columns -- the register read and the immediate come off the frame.
     pub a: Word<T>,
-
-    /// If the opcode is NOR.
-    #[picus(selector)]
-    pub is_nor: T,
 
     /// If the opcode is XOR.
     #[picus(selector)]
@@ -70,13 +67,12 @@ pub struct BitwiseCols<T> {
     pub is_and: T,
 
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
-    /// real row (every Bitwise row is an instruction — the Instruction bus
-    /// and its dependency rows are gone).  Register-form only, so the R-type
-    /// frame carries bare register indices instead of operand words.
-    pub frame: RTypeFrameCols<T>,
+    /// real row.  Immediate-form only, so the I-type frame carries the
+    /// immediate itself in `op_c` and needs no register access for it.
+    pub frame: ITypeFrameCols<T>,
 }
 
-impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
+impl<F: PrimeField32> MachineAir<F> for BitwiseImmChip {
     type Record = ExecutionRecord;
 
     type Program = Program;
@@ -84,18 +80,18 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
     type Error = CoreChipError;
 
     fn name(&self) -> String {
-        "Bitwise".to_string()
+        "BitwiseImm".to_string()
     }
 
     fn picus_info(&self) -> PicusInfo {
-        BitwiseCols::<u8>::picus_info()
+        BitwiseImmCols::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let nb_rows = next_multiple_of_32(
-            input.bitwise_events.len(),
+            input.bitwise_imm_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <BitwiseChip as MachineAir<F>>::name(self).as_str(),
+            <BitwiseImmChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }
@@ -106,11 +102,11 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let mut rows = input
-            .bitwise_events
+            .bitwise_imm_events
             .par_iter()
             .map(|event| {
-                let mut row = [F::ZERO; NUM_BITWISE_COLS];
-                let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
+                let mut row = [F::ZERO; NUM_BITWISE_IMM_COLS];
+                let cols: &mut BitwiseImmCols<F> = row.as_mut_slice().borrow_mut();
                 let mut blu = Vec::new();
                 self.event_to_row(
                     event,
@@ -126,16 +122,19 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         // Pad the trace to a power of two.
         pad_rows_mult32(
             &mut rows,
-            // A padding row needs no neutralising: the R-type frame's
+            // A padding row needs no neutralising: the I-type frame's
             // register-access multiplicities are `is_real`, which an all-zero
             // row leaves at zero.
-            || [F::ZERO; NUM_BITWISE_COLS],
+            || [F::ZERO; NUM_BITWISE_IMM_COLS],
             input.fixed_log2_rows::<F, _>(self),
-            <BitwiseChip as MachineAir<F>>::name(self).as_str(),
+            <BitwiseImmChip as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.
-        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_BITWISE_COLS))
+        Ok(RowMajorMatrix::new(
+            rows.into_iter().flatten().collect::<Vec<_>>(),
+            NUM_BITWISE_IMM_COLS,
+        ))
     }
 
     fn generate_dependencies(
@@ -143,16 +142,16 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         input: &Self::Record,
         output: &mut Self::Record,
     ) -> Result<(), Self::Error> {
-        let chunk_size = std::cmp::max(input.bitwise_events.len() / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(input.bitwise_imm_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
-            .bitwise_events
+            .bitwise_imm_events
             .par_chunks(chunk_size)
             .map(|events| {
                 let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::ZERO; NUM_BITWISE_COLS];
-                    let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
+                    let mut row = [F::ZERO; NUM_BITWISE_IMM_COLS];
+                    let cols: &mut BitwiseImmCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(
                         event,
                         cols,
@@ -173,22 +172,25 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         if let Some(shape) = shard.shape.as_ref() {
             shape.included::<F, _>(self)
         } else {
-            !shard.bitwise_events.is_empty()
+            !shard.bitwise_imm_events.is_empty()
         }
     }
 }
 
-impl BitwiseChip {
+impl BitwiseImmChip {
     /// Create a row from an event.
     fn event_to_row<F: PrimeField32>(
         &self,
         event: &AluEvent,
-        cols: &mut BitwiseCols<F>,
+        cols: &mut BitwiseImmCols<F>,
         blu: &mut impl ByteRecord,
         program: &Program,
         shard: u32,
     ) {
-        // Every Bitwise row is a real instruction owning its frame.
+        // NOR has no immediate form, so it can never reach this chip.
+        debug_assert_ne!(event.opcode, Opcode::NOR, "NOR has no immediate form");
+
+        // Every BitwiseImm row is a real instruction owning its frame.
         cols.frame.populate_from_alu(event, program, shard, blu);
 
         let a = event.a.to_le_bytes();
@@ -199,7 +201,6 @@ impl BitwiseChip {
         cols.next_pc = F::from_u32(event.next_pc);
         cols.a = Word::from(event.a);
 
-        cols.is_nor = F::from_bool(event.opcode == Opcode::NOR);
         cols.is_xor = F::from_bool(event.opcode == Opcode::XOR);
         cols.is_or = F::from_bool(event.opcode == Opcode::OR);
         cols.is_and = F::from_bool(event.opcode == Opcode::AND);
@@ -217,61 +218,56 @@ impl BitwiseChip {
     }
 }
 
-impl<F> BaseAir<F> for BitwiseChip {
+impl<F> BaseAir<F> for BitwiseImmChip {
     fn width(&self) -> usize {
-        NUM_BITWISE_COLS
+        NUM_BITWISE_IMM_COLS
     }
 }
 
-impl<AB> Air<AB> for BitwiseChip
+impl<AB> Air<AB> for BitwiseImmChip
 where
     AB: ZKMAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local = main.current_slice();
-        let local: &BitwiseCols<AB::Var> = (*local).borrow();
+        let local: &BitwiseImmCols<AB::Var> = (*local).borrow();
 
         // Get the opcode for the operation.
         let opcode = local.is_xor * ByteOpcode::XOR.as_field::<AB::F>()
             + local.is_or * ByteOpcode::OR.as_field::<AB::F>()
-            + local.is_and * ByteOpcode::AND.as_field::<AB::F>()
-            + local.is_nor * ByteOpcode::NOR.as_field::<AB::F>();
+            + local.is_and * ByteOpcode::AND.as_field::<AB::F>();
 
         // Get a multiplicity of `1` only for a true row.
-        let mult = local.is_xor + local.is_or + local.is_and + local.is_nor;
+        let mult = local.is_xor + local.is_or + local.is_and;
         for ((a, b), c) in
             local.a.into_iter().zip(local.frame.op_b_val()).zip(local.frame.op_c_val())
         {
             builder.send_byte(opcode.clone(), a, b, c, mult.clone());
         }
 
-        let is_real = local.is_xor + local.is_or + local.is_and + local.is_nor;
+        let is_real = local.is_xor + local.is_or + local.is_and;
         builder.assert_bool(local.is_xor);
         builder.assert_bool(local.is_or);
         builder.assert_bool(local.is_and);
-        builder.assert_bool(local.is_nor);
         builder.assert_bool(is_real.clone());
 
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
+        // Bind this chip's operand columns to the frame's register-file view,
+        // exactly as the register-form chip does.
         builder
             .when(is_real.clone())
             .when_not(local.frame.op_a_0)
             .assert_word_eq(local.a, *local.frame.op_a_access.value());
 
         // Every real row is an instruction carrying its own program fetch,
-        // register access and `(clk, pc)` chaining (the Instruction bus and
-        // its dependency rows are gone).  Bitwise ops are sequential and can
-        // never halt.
-        eval_r_type_frame(
+        // register access and `(clk, pc)` chaining.  Bitwise ops are
+        // sequential and can never halt.
+        eval_i_type_frame(
             builder,
             &local.frame,
             local.is_xor * Opcode::XOR.as_field::<AB::F>()
                 + local.is_or * Opcode::OR.as_field::<AB::F>()
-                + local.is_and * Opcode::AND.as_field::<AB::F>()
-                + local.is_nor * Opcode::NOR.as_field::<AB::F>(),
+                + local.is_and * Opcode::AND.as_field::<AB::F>(),
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
@@ -286,99 +282,40 @@ where
 mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Instruction, Opcode};
     use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::utils::{uni_stark_prove, uni_stark_verify};
 
-    use super::BitwiseChip;
-    use crate::programs::tests::{alu_op, run_instructions};
+    use super::BitwiseImmChip;
+    use crate::programs::tests::run_instructions;
 
-    fn bitwise_record() -> ExecutionRecord {
-        let mut instructions = Vec::new();
-        for opcode in [Opcode::XOR, Opcode::OR, Opcode::AND, Opcode::NOR] {
-            instructions.extend(alu_op(opcode, 10, 19));
+    /// A register seed plus immediate-form bitwise ops on it.
+    fn bitwise_imm_instructions(reps: usize) -> Vec<Instruction> {
+        let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 0b1100, false, true)];
+        for _ in 0..reps {
+            instructions.push(Instruction::new(Opcode::XOR, 28, 29, 0b0011, false, true));
+            instructions.push(Instruction::new(Opcode::OR, 27, 29, 0b0101, false, true));
+            instructions.push(Instruction::new(Opcode::AND, 26, 29, 0b0110, false, true));
         }
-        run_instructions(instructions)
+        instructions
     }
 
     #[test]
     fn generate_trace() {
-        let shard = bitwise_record();
-        assert!(!shard.bitwise_events.is_empty());
-        let chip = BitwiseChip::default();
+        let shard = run_instructions(bitwise_imm_instructions(4));
+        assert!(!shard.bitwise_imm_events.is_empty());
+        assert!(shard.bitwise_events.is_empty());
+        let chip = BitwiseImmChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 
-    /// Build a 1024-row bitwise trace of `OR`s whose operands share no set
-    /// bits, optionally swapping the chip's opcode SELECTOR to XOR first.
-    ///
-    /// `OR` and `XOR` agree exactly on disjoint operands, so the swap leaves
-    /// every VALUE in the trace untouched -- the result and the byte lookup
-    /// both stay valid.  And the frame takes its opcode from
-    /// `program.fetch(pc)` while the selectors come from the EVENT, so flipping
-    /// the event alone IS the malicious assignment: there is no other column to
-    /// fix up, and the row still claims the `OR` the program holds at that pc.
-    fn or_trace(swap_selector_to_xor: bool) -> RowMajorMatrix<KoalaBear> {
-        let (b, c) = (0b1100u32, 0b0011u32);
-        assert_eq!(b | c, b ^ c, "the forgery needs OR and XOR to agree here");
-
-        // `p3_uni_stark::prove` needs a power-of-two height.
-        let mut instructions = Vec::new();
-        for _ in 0..1024 {
-            instructions.extend(alu_op(Opcode::OR, b, c));
-        }
-        let mut shard = run_instructions(instructions);
-        assert_eq!(shard.bitwise_events.len(), 1024);
-
-        if swap_selector_to_xor {
-            for event in &mut shard.bitwise_events {
-                assert_eq!(event.opcode, Opcode::OR);
-                event.opcode = Opcode::XOR;
-            }
-        }
-
-        BitwiseChip::default().generate_trace(&shard, &mut ExecutionRecord::default()).unwrap()
-    }
-
-    /// The control.  Without it the forgery test below could pass for the wrong
-    /// reason -- any harness mistake also fails.
     #[test]
-    fn honest_or_trace_proves() {
-        let config = KoalaBearPoseidon2::new();
-        let mut challenger = config.challenger();
-        let chip = BitwiseChip::default();
-        let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(
-            &config,
-            &chip,
-            &mut challenger,
-            or_trace(false),
-        );
-        let mut challenger = config.challenger();
-        uni_stark_verify(&config, &chip, &mut challenger, &proof).unwrap();
-    }
-
-    /// A chip's opcode SELECTORS must be the instruction the program holds at
-    /// `pc`.  Nothing enforced that until the frame began binding them:
-    /// `frame.instruction.opcode` is pinned to the program by the `Program`
-    /// lookup, but the selectors -- which are what actually drive the result --
-    /// floated free of it, so a row could compute XOR while claiming OR.
-    #[test]
-    #[should_panic]
-    fn opcode_substitution_is_rejected() {
-        let config = KoalaBearPoseidon2::new();
-        let mut challenger = config.challenger();
-        let chip = BitwiseChip::default();
-        let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(
-            &config,
-            &chip,
-            &mut challenger,
-            or_trace(true),
-        );
-        let mut challenger = config.challenger();
-        uni_stark_verify(&config, &chip, &mut challenger, &proof).unwrap();
+    fn measure_bitwiseimm_degree() {
+        let chip = zkm_pcs::Chip::<KoalaBear, _>::new(BitwiseImmChip::default());
+        println!("BITWISEIMM_LOG_QUOTIENT_DEGREE={}", chip.log_quotient_degree());
     }
 
     #[test]
@@ -388,16 +325,13 @@ mod tests {
 
         // `p3_uni_stark::prove` requires a power-of-two height;
         // `generate_trace` pads to `next_multiple_of_32` only, so keep the
-        // bitwise event count a power of two: 4 ops x 256 reps = 1024 rows.
-        let mut instructions = Vec::new();
-        for _ in 0..256 {
-            for opcode in [Opcode::XOR, Opcode::OR, Opcode::AND, Opcode::NOR] {
-                instructions.extend(alu_op(opcode, 10, 19));
-            }
-        }
+        // immediate-form event count a power of two: 3 ops x 341 reps + one
+        // extra = 1024 rows.
+        let mut instructions = bitwise_imm_instructions(341);
+        instructions.push(Instruction::new(Opcode::XOR, 25, 29, 0b1010, false, true));
         let shard = run_instructions(instructions);
-        assert_eq!(shard.bitwise_events.len(), 1024);
-        let chip = BitwiseChip::default();
+        assert_eq!(shard.bitwise_imm_events.len(), 1024);
+        let chip = BitwiseImmChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof =

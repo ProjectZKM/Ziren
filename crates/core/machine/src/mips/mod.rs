@@ -29,8 +29,8 @@ use zkm_pcs::{
 pub(crate) mod mips_chips {
     pub use crate::{
         alu::{
-            AddSubChip, AddSubImmChip, BitwiseChip, CloClzChip, DivRemChip, LtChip, MulChip,
-            ShiftLeft, ShiftRightChip,
+            AddSubChip, AddSubImmChip, BitwiseChip, BitwiseImmChip, CloClzChip, DivRemChip,
+            LtChip, MulChip, ShiftLeft, ShiftRightChip,
         },
         bytes::ByteChip,
         control_flow::{BranchChip, JumpChip},
@@ -88,8 +88,10 @@ pub enum MipsAir<F: PrimeField32> {
     Add(AddSubChip),
     /// An AIR for the immediate-form MIPS ADD and SUB instructions.
     AddImm(AddSubImmChip),
-    /// An AIR for MIPS Bitwise instructions.
+    /// An AIR for the register-form MIPS Bitwise instructions.
     Bitwise(BitwiseChip),
+    /// An AIR for the immediate-form MIPS Bitwise instructions.
+    BitwiseImm(BitwiseImmChip),
     /// An AIR for MIPS Mul instruction.
     Mul(MulChip),
     /// An AIR for MIPS Div and Rem instructions.
@@ -409,6 +411,10 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(bitwise.name(), bitwise.cost());
         chips.push(bitwise);
 
+        let bitwise_imm = Chip::new(MipsAir::BitwiseImm(BitwiseImmChip::default()));
+        costs.insert(bitwise_imm.name(), bitwise_imm.cost());
+        chips.push(bitwise_imm);
+
         let mul = Chip::new(MipsAir::Mul(MulChip::default()));
         costs.insert(mul.name(), mul.cost());
         chips.push(mul);
@@ -539,6 +545,7 @@ impl<F: PrimeField32> MipsAir<F> {
             (MipsAirId::AddSub, record.add_sub_events.len()),
             (MipsAirId::AddSubImm, record.add_sub_imm_events.len()),
             (MipsAirId::Bitwise, record.bitwise_events.len()),
+            (MipsAirId::BitwiseImm, record.bitwise_imm_events.len()),
             (MipsAirId::Mul, record.mul_events.len()),
             (MipsAirId::ShiftRight, record.shift_right_events.len()),
             (MipsAirId::ShiftLeft, record.shift_left_events.len()),
@@ -605,6 +612,7 @@ impl<F: PrimeField32> MipsAir<F> {
             MipsAir::Add(AddSubChip::default()),
             MipsAir::AddImm(AddSubImmChip::default()),
             MipsAir::Bitwise(BitwiseChip::default()),
+            MipsAir::BitwiseImm(BitwiseImmChip::default()),
             MipsAir::Mul(MulChip::default()),
             MipsAir::DivRem(DivRemChip::default()),
             MipsAir::Lt(LtChip::default()),
@@ -812,6 +820,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Add(_) => unreachable!("Invalid for core chip"),
             Self::AddImm(_) => unreachable!("Invalid for core chip"),
             Self::Bitwise(_) => unreachable!("Invalid for core chip"),
+            Self::BitwiseImm(_) => unreachable!("Invalid for core chip"),
             Self::DivRem(_) => unreachable!("Invalid for core chip"),
             Self::MemoryGlobalInit(_) => unreachable!("Invalid for memory init/final"),
             Self::MemoryGlobalFinal(_) => unreachable!("Invalid for memory init/final"),

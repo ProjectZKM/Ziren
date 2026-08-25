@@ -3,6 +3,7 @@
 #include "add_sub.hpp"
 #include "add_sub_imm.hpp"
 #include "bitwise.hpp"
+#include "bitwise_imm.hpp"
 #include "branch.hpp"
 #include "clo_clz.hpp"
 #include "div_rem.hpp"

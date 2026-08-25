@@ -5,7 +5,7 @@ use zkm_core_executor::events::{
 };
 use zkm_core_executor::InstructionFfi;
 
-use crate::alu::{BitwiseCols, CloClzCols, DivRemCols};
+use crate::alu::{BitwiseCols, BitwiseImmCols, CloClzCols, DivRemCols};
 use crate::{
     alu::{AddSubCols, AddSubImmCols, LtCols, MulCols, ShiftLeftCols, ShiftRightCols},
     control_flow::{BranchColumns, JumpColumns},
@@ -63,6 +63,12 @@ extern "C-unwind" {
     pub fn bitwise_event_to_row_koalabear(
         event: &AluEvent,
         cols: &mut BitwiseCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
+    pub fn bitwise_imm_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut BitwiseImmCols<KoalaBear>,
         instruction: InstructionFfi,
         shard: u32,
     );
@@ -196,10 +202,11 @@ mod parity_tests {
 
     use crate::alu::{
         AddSubChip, AddSubCols, AddSubImmChip, AddSubImmCols, BitwiseChip, BitwiseCols,
-        CloClzChip, CloClzCols, DivRemChip, DivRemCols, LtChip, LtCols, MulChip, MulCols,
-        ShiftLeft, ShiftLeftCols, ShiftRightChip, ShiftRightCols, NUM_ADD_SUB_COLS,
-        NUM_ADD_SUB_IMM_COLS, NUM_BITWISE_COLS, NUM_CLOCLZ_COLS, NUM_DIVREM_COLS, NUM_LT_COLS,
-        NUM_MUL_COLS, NUM_SHIFT_LEFT_COLS, NUM_SHIFT_RIGHT_COLS,
+        BitwiseImmChip, BitwiseImmCols, CloClzChip, CloClzCols, DivRemChip, DivRemCols, LtChip,
+        LtCols, MulChip, MulCols, ShiftLeft, ShiftLeftCols, ShiftRightChip, ShiftRightCols,
+        NUM_ADD_SUB_COLS, NUM_ADD_SUB_IMM_COLS, NUM_BITWISE_COLS, NUM_BITWISE_IMM_COLS,
+        NUM_CLOCLZ_COLS, NUM_DIVREM_COLS, NUM_LT_COLS, NUM_MUL_COLS, NUM_SHIFT_LEFT_COLS,
+        NUM_SHIFT_RIGHT_COLS,
     };
     use crate::control_flow::{
         BranchChip, BranchColumns, JumpChip, JumpColumns, NUM_BRANCH_COLS, NUM_JUMP_COLS,
@@ -347,7 +354,17 @@ mod parity_tests {
             BitwiseCols<F>,
             NUM_BITWISE_COLS,
             bitwise_event_to_row_koalabear,
-            dep_pad!(BitwiseCols<F>)
+            // Typed R-type frame — zero padding.
+            |_row: &mut [F]| {}
+        );
+        check!(
+            BitwiseImmChip::default(),
+            &record.bitwise_imm_events,
+            BitwiseImmCols<F>,
+            NUM_BITWISE_IMM_COLS,
+            bitwise_imm_event_to_row_koalabear,
+            // Typed I-type frame — zero padding.
+            |_row: &mut [F]| {}
         );
         check!(
             LtChip::default(),
@@ -535,12 +552,13 @@ mod parity_tests {
             // Coverage note: a chip with zero events still validates its
             // padding shape, but not the live instruction frame.
             eprintln!(
-                "{label}[shard {i}] events: add_sub={} add_sub_imm={} bitwise={} lt={} cloclz={} sll={} sr={} \
+                "{label}[shard {i}] events: add_sub={} add_sub_imm={} bitwise={} bitwise_imm={} lt={} cloclz={} sll={} sr={} \
                  mul={} divrem={} branch={} jump={} movcond={} misc={} syscall={} \
                  mem(ln={} lw={} sn={} sw={} un={})",
                 record.add_sub_events.len(),
                 record.add_sub_imm_events.len(),
                 record.bitwise_events.len(),
+                record.bitwise_imm_events.len(),
                 record.lt_events.len(),
                 record.cloclz_events.len(),
                 record.shift_left_events.len(),

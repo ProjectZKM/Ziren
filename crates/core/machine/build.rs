@@ -121,6 +121,7 @@ mod sys {
             .include_item("AddSubImmCols")
             .include_item("AluEvent")
             .include_item("BitwiseCols")
+            .include_item("BitwiseImmCols")
             .include_item("BranchColumns")
             .include_item("BranchEvent")
             .include_item("CloClzCols")

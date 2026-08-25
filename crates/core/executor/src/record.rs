@@ -105,8 +105,11 @@ pub struct ExecutionRecord {
     pub add_sub_imm_events: Vec<AluEvent>,
     /// A trace of the MUL, MULT and MULTU events.
     pub mul_events: Vec<CompAluEvent>,
-    /// A trace of the XOR, OR, AND and NOR events.
+    /// A trace of the register-form XOR, OR, AND and NOR events.
     pub bitwise_events: Vec<AluEvent>,
+    /// A trace of the immediate-form bitwise events (XORI, ORI, ANDI): `op_c`
+    /// is an immediate, so they prove on the narrower I-type frame.
+    pub bitwise_imm_events: Vec<AluEvent>,
     /// A trace of the SLL and SLLV events.
     pub shift_left_events: Vec<AluEvent>,
     /// A trace of the SRL, SRLV, SRA, and SRAV events.
@@ -220,6 +223,7 @@ impl ExecutionRecord {
         result.add_sub_events.reserve(reservation_size);
         result.add_sub_imm_events.reserve(reservation_size);
         result.bitwise_events.reserve(reservation_size);
+        result.bitwise_imm_events.reserve(reservation_size);
         result.shift_left_events.reserve(reservation_size);
         result.shift_right_events.reserve(reservation_size);
         result.lt_events.reserve(reservation_size);
@@ -489,6 +493,7 @@ impl MachineRecord for ExecutionRecord {
         stats.insert("add_sub_imm_events".to_string(), self.add_sub_imm_events.len());
         stats.insert("mul_events".to_string(), self.mul_events.len());
         stats.insert("bitwise_events".to_string(), self.bitwise_events.len());
+        stats.insert("bitwise_imm_events".to_string(), self.bitwise_imm_events.len());
         stats.insert("shift_left_events".to_string(), self.shift_left_events.len());
         stats.insert("shift_right_events".to_string(), self.shift_right_events.len());
         stats.insert("divrem_events".to_string(), self.divrem_events.len());
@@ -534,6 +539,7 @@ impl MachineRecord for ExecutionRecord {
         self.add_sub_imm_events.append(&mut other.add_sub_imm_events);
         self.mul_events.append(&mut other.mul_events);
         self.bitwise_events.append(&mut other.bitwise_events);
+        self.bitwise_imm_events.append(&mut other.bitwise_imm_events);
         self.shift_left_events.append(&mut other.shift_left_events);
         self.shift_right_events.append(&mut other.shift_right_events);
         self.divrem_events.append(&mut other.divrem_events);

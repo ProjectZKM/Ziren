@@ -357,6 +357,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 | MipsAirId::AddSub
                 | MipsAirId::AddSubImm
                 | MipsAirId::Bitwise
+                | MipsAirId::BitwiseImm
                 | MipsAirId::Mul
                 | MipsAirId::ShiftRight
                 | MipsAirId::ShiftLeft
@@ -415,6 +416,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::AddSub,
             MipsAirId::AddSubImm,
             MipsAirId::Bitwise,
+            MipsAirId::BitwiseImm,
             MipsAirId::Mul,
             MipsAirId::ShiftRight,
             MipsAirId::ShiftLeft,
@@ -486,6 +488,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::AddSub,
             MipsAirId::AddSubImm,
             MipsAirId::Bitwise,
+            MipsAirId::BitwiseImm,
             MipsAirId::Mul,
             MipsAirId::ShiftRight,
             MipsAirId::ShiftLeft,
@@ -1311,6 +1314,10 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
 
     let bitwise_log_height = shape.log2_height(&MipsAirId::Bitwise);
     maybe_log2_heights.insert(MipsAirId::Bitwise, heuristic(bitwise_log_height, 1));
+
+    // The immediate-form half shares the register half's band — see AddSubImm.
+    let bitwiseimm_log_height = shape.log2_height(&MipsAirId::BitwiseImm);
+    maybe_log2_heights.insert(MipsAirId::BitwiseImm, heuristic(bitwiseimm_log_height, 1));
 
     let mul_log_height = shape.log2_height(&MipsAirId::Mul);
     maybe_log2_heights.insert(MipsAirId::Mul, heuristic(mul_log_height, 1));

@@ -1,6 +1,7 @@
 pub mod add_sub;
 pub mod add_sub_imm;
 pub mod bitwise;
+pub mod bitwise_imm;
 mod clo_clz;
 pub mod divrem;
 pub mod lt;
@@ -11,6 +12,7 @@ pub mod sr;
 pub use add_sub::*;
 pub use add_sub_imm::*;
 pub use bitwise::*;
+pub use bitwise_imm::*;
 pub use clo_clz::*;
 pub use divrem::*;
 pub use lt::*;

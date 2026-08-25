@@ -31,6 +31,10 @@ pub fn estimate_mips_lde_size(
     cells += (num_events_per_air[MipsAirId::AddSubImm]).next_power_of_two()
         * costs_per_air[&MipsAirId::AddSubImm];
 
+    // Compute the immediate-form bitwise chip contribution.
+    cells += (num_events_per_air[MipsAirId::BitwiseImm]).next_power_of_two()
+        * costs_per_air[&MipsAirId::BitwiseImm];
+
     // Compute the mul chip contribution.
     cells +=
         (num_events_per_air[MipsAirId::Mul]).next_power_of_two() * costs_per_air[&MipsAirId::Mul];
@@ -253,6 +257,19 @@ pub const fn mips_air_id_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
     })
 }
 
+/// The immediate-form sibling of [`mips_air_id_from_opcode`]: the air an
+/// `imm_c` instruction's row lands on, for the opcodes whose chip is split by
+/// operand form.  `None` means the opcode has no split — bill via
+/// [`mips_air_id_from_opcode`] as before.
+#[must_use]
+pub const fn mips_imm_air_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
+    Some(match opcode {
+        Opcode::ADD | Opcode::SUB => MipsAirId::AddSubImm,
+        Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => MipsAirId::BitwiseImm,
+        _ => return None,
+    })
+}
+
 /// Exact, incrementally-maintained per-shard trace area and tallest-chip height.
 ///
 /// Each event bumps the owning chip's height and adds that chip's width to a running area, so
@@ -436,6 +453,7 @@ pub fn pad_mips_event_counts(
         // synthetic charges all bill the register-form air), so the growth is
         // bounded by one row per cycle.
         MipsAirId::AddSubImm => *v += num_cycles,
+        MipsAirId::BitwiseImm => *v += num_cycles,
         MipsAirId::Mul => *v += 4 * num_cycles,
         MipsAirId::Bitwise => *v += 3 * num_cycles,
         MipsAirId::ShiftLeft => *v += num_cycles,
