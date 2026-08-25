@@ -1216,3 +1216,229 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
         });
     }
 }
+/// The frame for a chip whose every instruction is a SHAMT form: `op_b` a
+/// register and `op_c` a 5-bit shift amount.  Relative to [`ITypeFrameCols`]
+/// the immediate needs only ONE column — the `Program` bus binds it to the
+/// decoded `op_c` and pins the upper limbs of the bus tuple to zero, so the
+/// scalar is exact with no extra range check.
+#[derive(AlignedBorrow, Clone, Copy, Default, Debug)]
+#[repr(C)]
+pub struct ShamtFrameCols<T> {
+    /// The shard this instruction executed in.
+    pub shard: T,
+    /// The least significant 16 bit limb of clk.
+    pub clk_16bit_limb: T,
+    /// The middle 8 bit limb of clk.
+    pub clk_8bit_limb: T,
+    /// The most significant bit of clk, i.e. bit 24.  See
+    /// [`InstructionFrameCols::clk_24bit_limb`] for why it is witnessed.
+    pub clk_24bit_limb: T,
+
+    /// The opcode for this cycle.
+    pub opcode: T,
+    /// The first operand — a register index.
+    pub op_a: T,
+    /// The second operand — a register INDEX, not a word.
+    pub op_b: T,
+    /// The third operand — the shift amount itself, as a bare scalar.
+    pub op_c: T,
+    /// Whether `op_a` is register 0.
+    pub op_a_0: T,
+
+    /// Register accesses for the two register operands.
+    pub op_a_access: RegisterReadWriteCols<T>,
+    pub op_b_access: RegisterReadCols<T>,
+}
+
+impl<T: Copy> ShamtFrameCols<T> {
+    /// The value of the second operand — the register read.
+    #[inline]
+    pub fn op_b_val(&self) -> Word<T> {
+        *self.op_b_access.value()
+    }
+}
+
+/// The frame's `clk` — see [`clk_from_frame`].
+pub fn clk_from_shamt_frame<AB: AirBuilder>(frame: &ShamtFrameCols<AB::Var>) -> AB::Expr {
+    AB::Expr::from_u32(1u32 << 24) * frame.clk_24bit_limb
+        + AB::Expr::from_u32(1u32 << 16) * frame.clk_8bit_limb
+        + frame.clk_16bit_limb
+}
+
+/// Rebuild the universal `Program`-bus tuple from the narrow columns — the
+/// shamt constants are `imm_b = 0`, `imm_c = 1`, and the immediate's upper
+/// limbs zero (a shamt is 5 bits, so the decoded `op_c` lives entirely in the
+/// low limb; the bus equality is what makes the scalar exact).
+fn shamt_instruction<AB: AirBuilder>(frame: &ShamtFrameCols<AB::Var>) -> InstructionCols<AB::Expr> {
+    InstructionCols {
+        opcode: frame.opcode.into(),
+        op_a: frame.op_a.into(),
+        op_b: Word([frame.op_b.into(), AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+        op_c: Word([frame.op_c.into(), AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+        op_a_0: frame.op_a_0.into(),
+        imm_b: AB::Expr::ZERO,
+        imm_c: AB::Expr::ONE,
+    }
+}
+
+/// Evaluate a shamt frame.  Constrains exactly what [`eval_i_type_frame`]
+/// does — the two must be read together, and any rule added to one belongs in
+/// the other.  Register-access multiplicities are `is_real` directly, so a
+/// padding row needs no neutralising.
+#[allow(clippy::too_many_arguments)]
+pub fn eval_shamt_frame<AB>(
+    builder: &mut AB,
+    frame: &ShamtFrameCols<AB::Var>,
+    // The chip's OWN opcode -- see [`eval_instruction_frame`].
+    opcode: AB::Expr,
+    pc: AB::Expr,
+    next_pc: AB::Expr,
+    next_next_pc: AB::Expr,
+    recv_next_pc: AB::Expr,
+    num_extra_cycles: AB::Expr,
+    is_real: AB::Expr,
+) where
+    AB: ZKMCoreAirBuilder,
+{
+    let clk = clk_from_shamt_frame::<AB>(frame);
+
+    // The instruction at `pc` must be the one the program committed to.
+    builder.send_program(pc.clone(), shamt_instruction::<AB>(frame), is_real.clone());
+    builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
+
+    // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
+    builder.send_byte(
+        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
+        frame.shard,
+        AB::Expr::ZERO,
+        AB::Expr::ZERO,
+        is_real.clone(),
+    );
+    builder.assert_bool(frame.clk_24bit_limb);
+    builder.send_timestamp_limb_checks(
+        frame.clk_16bit_limb,
+        frame.clk_8bit_limb,
+        is_real.clone(),
+    );
+
+    // `op_b` is read from the register file; the shamt needs no access.
+    builder.eval_register_access(
+        frame.shard,
+        clk.clone() + AB::F::from_u32(MemoryAccessPosition::B as u32),
+        frame.op_b,
+        &frame.op_b_access,
+        is_real.clone(),
+    );
+
+    // Writes to register 0 are discarded.
+    builder.when(frame.op_a_0).assert_word_zero(*frame.op_a_access.value());
+
+    builder.eval_register_access(
+        frame.shard,
+        clk.clone() + AB::F::from_u32(MemoryAccessPosition::A as u32),
+        frame.op_a,
+        &frame.op_a_access,
+        is_real.clone(),
+    );
+
+    builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
+
+    // `(clk, pc)` chaining.
+    builder.receive_state(frame.shard, clk.clone(), pc, recv_next_pc, is_real.clone());
+    builder.send_state(
+        frame.shard,
+        clk + AB::Expr::from_u32(5) + num_extra_cycles,
+        next_pc,
+        next_next_pc,
+        is_real,
+    );
+}
+
+impl<F: PrimeField32> ShamtFrameCols<F> {
+    /// Populate the frame for a shamt-form shift.  Mirrors
+    /// [`ITypeFrameCols::populate_from_alu`] with the immediate collapsed to
+    /// its low limb.
+    pub fn populate_from_alu(
+        &mut self,
+        event: &AluEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.shard = F::from_u32(shard);
+        let clk_16 = (event.clk & 0xffff) as u16;
+        let clk_8 = ((event.clk >> 16) & 0xff) as u8;
+        self.clk_16bit_limb = F::from_u16(clk_16);
+        self.clk_8bit_limb = F::from_u8(clk_8);
+        self.clk_24bit_limb = F::from_u32((event.clk >> 24) & 1);
+        blu.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::U16Range,
+            shard as u16,
+            0,
+            0,
+            0,
+        ));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
+
+        let instruction = program.fetch(event.pc);
+        // The shape this frame is specialised for — see
+        // [`ITypeFrameCols::populate_from_mem`] for why this is asserted here.
+        debug_assert!(
+            !instruction.imm_b && instruction.imm_c,
+            "a shamt frame received a non-immediate instruction: {:?}",
+            instruction.opcode
+        );
+        debug_assert!(instruction.op_b < 256, "op_b is not a register index");
+        debug_assert!(instruction.op_c < 32, "op_c is not a 5-bit shift amount");
+        debug_assert!(
+            matches!(event.c_record.tag, OptionMemoryRecordEnumTag::None),
+            "a shamt frame received a register read for op_c"
+        );
+        self.opcode = instruction.opcode.as_field::<F>();
+        self.op_a = F::from_u32(instruction.op_a as u32);
+        self.op_b = F::from_u32(instruction.op_b);
+        self.op_c = F::from_u32(instruction.op_c);
+        self.op_a_0 = F::from_bool(instruction.op_a == 0);
+
+        *self.op_a_access.value_mut() = event.a.into();
+        *self.op_b_access.value_mut() = event.b.into();
+        match event.a_record.tag {
+            OptionMemoryRecordEnumTag::Read => {
+                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
+            }
+            OptionMemoryRecordEnumTag::Write => {
+                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
+            }
+            OptionMemoryRecordEnumTag::None => {}
+        }
+        if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
+            self.op_b_access.populate(event.b_record.read, blu);
+        }
+
+        // Column-read-back for the op_a range check, as in
+        // [`ITypeFrameCols::populate_from_mem`].
+        let a_bytes = self
+            .op_a_access
+            .access
+            .value
+            .0
+            .iter()
+            .map(|x| x.as_canonical_u32())
+            .collect::<Vec<_>>();
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[0] as u8,
+            c: a_bytes[1] as u8,
+        });
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[2] as u8,
+            c: a_bytes[3] as u8,
+        });
+    }
+}

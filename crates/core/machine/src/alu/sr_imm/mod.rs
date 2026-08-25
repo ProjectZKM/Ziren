@@ -65,7 +65,7 @@ use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     alu::sr::utils::{nb_bits_to_shift, nb_bytes_to_shift},
     bytes::utils::shr_carry,
-    frame::{eval_i_type_frame, ITypeFrameCols},
+    frame::{eval_shamt_frame, ShamtFrameCols},
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
@@ -133,9 +133,9 @@ pub struct ShiftRightImmCols<T> {
     pub is_real: T,
 
     /// Program fetch, register access and `(clk, pc)` chaining; live on every
-    /// real row (every ShiftRight row is an instruction — the Instruction bus
+    /// real row.  Shamt form: the immediate is one scalar column (every ShiftRight row is an instruction — the Instruction bus
     /// and its dependency rows are gone).
-    pub frame: ITypeFrameCols<T>,
+    pub frame: ShamtFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for ShiftRightImmChip {
@@ -371,7 +371,7 @@ where
         let local: &ShiftRightImmCols<AB::Var> = (*local).borrow();
         // The inputs are the frame's register reads, not columns of this chip.
         let op_b = local.frame.op_b_val();
-        let op_c = local.frame.op_c_val();
+        let op_c = local.frame.op_c;
         let zero: AB::Expr = AB::F::ZERO.into();
         let one: AB::Expr = AB::F::ONE.into();
 
@@ -391,7 +391,7 @@ where
                 let val: AB::Expr = AB::F::from_u32(1 << i).into();
                 c_byte_sum = c_byte_sum.clone() + val * local.c_least_sig_byte[i];
             }
-            builder.assert_eq(c_byte_sum, op_c[0]);
+            builder.assert_eq(c_byte_sum, op_c);
 
             // Number of bits to shift.
 
@@ -551,7 +551,7 @@ where
         // register access and `(clk, pc)` chaining (the Instruction bus and
         // its dependency rows are gone).  SRL/SRA/ROR are sequential and can
         // never halt.
-        eval_i_type_frame(
+        eval_shamt_frame(
             builder,
             &local.frame,
             local.is_srl * Opcode::SRL.as_field::<AB::F>()

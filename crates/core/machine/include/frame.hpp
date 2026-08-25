@@ -225,6 +225,36 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_imm(
     }
 }
 
+// `ShamtFrameCols::populate_from_alu` — a shamt-form shift on the shamt
+// frame: `op_b` a register, the immediate collapsed to its low limb.
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_shamt(
+    ShamtFrameCols<F>& frame,
+    const AluEvent& event,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
+    frame.shard = F::from_canonical_u32(shard);
+    frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
+    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
+    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+
+    frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
+    frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
+    frame.op_b = F::from_canonical_u32(instruction.op_b);
+    frame.op_c = F::from_canonical_u32(instruction.op_c);
+    frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
+
+    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a);
+    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.b);
+
+    // Record-wins ordering, as in `populate_raw`.
+    memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
+    if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+    }
+}
+
 // `InstructionFrameCols::populate_from_syscall` — the id comes in through
 // op_a, the result goes out; `hi_or_prev_a` and `num_extra_cycles` read back
 // the POPULATED column, exactly as the Rust side does.
