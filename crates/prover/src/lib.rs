@@ -880,23 +880,25 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // which is 61 program builds and 61 setups on a stage where build +
         // setup is 40% of all node work.
         //
-        // The decomposition matters, because two obvious readings are both
-        // wrong.  The chip NAME SET — the only part of the per-shard proof this
-        // key projects by name — accounts for just EIGHT of the 48.
+        // The driver, decomposed by dumping the signature's own dimensions
+        // (PACK + STRIPES below) and asking at each step which projection the
+        // key DETERMINES.  On a reth block, 187 leaves -> 48 keys -> 47 distinct
+        // structural signatures (the 48th key is a hash collision onto a shared
+        // program) -> 60 distinct (signature, band) pairs actually built:
         //
-        // ⚠ The rest is NOT per-chip log heights, though the `quotient[0]`
-        // length in the signature invites that reading.  Censused against the
-        // raw per-shard heights: leaves that SHARE a `shape_key` have different
-        // per-chip log profiles AND different max log height.  A 64-bit hash
-        // over 48 values does not collide, so equal keys mean equal hashed
-        // inputs — heights therefore do not determine the key, and padding
-        // shards to uniform heights would NOT collapse it.  (`chipset +
-        // ceil(area / 2^22)` lands at 47 distinct, temptingly close to 48, and
-        // is likewise not implied by the key.)
+        //   chip set alone                      ->  8
+        //   + jagged packing (log_dense_size,   -> 28
+        //     column_counts)
+        //   + basefold query-round STRIPE COUNT -> 47   <- the driver
         //
-        // What is left is the jagged geometry the signature bakes in —
-        // per-round `packing.column_counts` / `offsets` VALUES — which is what
-        // a census would have to dump to attribute the remaining 40.
+        // The stripe count is 2^(L - log_stacking_height): the shard's
+        // committed AREA in stacking blocks, a finer measure than L (at L=28 it
+        // ranges 80..120).  It is exactly SP1's
+        // `main_area.next_multiple_of(1 << log_stacking_height)`.  So leaf
+        // program diversity is driven by committed area, and normalising it
+        // means quantising that area more coarsely — NOT padding per-chip
+        // heights (which do not determine the key: leaves sharing a key have
+        // different per-chip logs) and NOT collapsing chip sets (8 of 48).
         //
         // The band accounts for the remaining 13 (61 - 48): a group that does
         // not already agree is forced onto its dominating band, so one shape
@@ -928,13 +930,62 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .iter()
                 .flat_map(|sp| sp.chip_heights.iter().map(|(n, h)| format!("{n}:{h}")))
                 .collect();
+            // The jagged packing, which the signature says drives every length
+            // in the evaluation proof: `log_dense_size` (L) sets the reduction
+            // and jagged-eval round counts, `column_counts` is hashed by VALUE.
+            let packing: Vec<String> = input
+                .shard_proofs
+                .iter()
+                .map(|sp| match &sp.evaluation_proof {
+                    zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(b) => format!(
+                        "L={} noff={} cc={:?}",
+                        b.packing.log_dense_size,
+                        b.packing.offsets.len(),
+                        b.packing.column_counts,
+                    ),
+                    other => format!("{}", if matches!(other, zkm_pcs::shard_level::shard_proof::EvaluationProof::Empty) { "empty" } else { "bytes" }),
+                })
+                .collect();
+            // The basefold query-round Merkle LEAF COUNT — the dimension that
+            // actually splits the diversity.  It is 2^(L - log_stacking_height),
+            // i.e. the shard's committed area in stacking stripes, a FINER
+            // measure than L alone (at L=28 it ranges 80..120).  This is SP1's
+            // `main_area.next_multiple_of(1 << log_stacking_height)`.
+            let rounds: Vec<String> = input
+                .shard_proofs
+                .iter()
+                .map(|sp| match &sp.evaluation_proof {
+                    zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(b) => {
+                        // Per-commit-round batch widths.  The inner length is
+                        // `num_stripes = 2^(log_dense_size - log_stacking_height)`
+                        // (see `batch_evaluations` in the signature) — the
+                        // shard's committed area in stacking stripes.
+                        format!(
+                            "stripes={:?}",
+                            b.basefold_proof
+                                .batch_evaluations
+                                .iter()
+                                .map(|r| r.len())
+                                .collect::<Vec<_>>(),
+                        )
+                    }
+                    _ => "nobundle".to_string(),
+                })
+                .collect();
+            // ONE line per leaf: the three dumps are separate `warn!`s
+            // otherwise, and two leaf preparers logging at once interleave
+            // them, misaligning the pack/rounds/key triples (measured: 4 of
+            // 187 broke).  A single record cannot interleave.
             tracing::warn!(
-                "NORMALIZE_KEY shape_key={:016x} band={:?} first={} nchips={} chips={} heights={}",
+                "NORMALIZE_KEY shape_key={:016x} band={:?} first={} nchips={} chips={} \
+                 PACK[{}] STRIPES[{}] heights={}",
                 input.shape_key(),
                 band,
                 input.is_first_shard,
                 names.len(),
                 names.join(","),
+                packing.join(" | "),
+                rounds.join(" | "),
                 heights.join(","),
             );
         }
