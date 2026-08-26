@@ -309,6 +309,12 @@ pub enum DslIr<C: Config> {
     CircuitSelectE(Var<C::N>, Ext<C::F, C::EF>, Ext<C::F, C::EF>, Ext<C::F, C::EF>),
     /// Converts an ext to a slice of felts (D=4). Should only be used when target is a gnark circuit.
     CircuitExt2Felt([Felt<C::F>; 4], Ext<C::F, C::EF>),
+    /// Converts an ext to a slice of felts (D=4) on the `Ext2Felt` CHIP: the
+    /// chip receives the input block and sends the limbs from the same trace
+    /// cells, so the call site needs no monomial re-binding.  Only valid for
+    /// programs proven on the compress machine (normalize/compose/deferred);
+    /// shrink/wrap programs keep `CircuitExt2Felt` + the DSL binding.
+    CircuitV2Ext2Felt([Felt<C::F>; 4], Ext<C::F, C::EF>),
     /// Converts a slice of felts to an ext (D=4). Should only be used when target is a gnark circuit.
     CircuitFelts2Ext([Felt<C::F>; 4], Ext<C::F, C::EF>),
     /// Converts an ext to a slice of felts (D=5). Should only be used when target is a gnark circuit.

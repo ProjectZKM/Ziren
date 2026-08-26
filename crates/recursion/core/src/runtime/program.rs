@@ -137,7 +137,7 @@ impl<F: p3_field::PrimeField64> RecursionProgram<F> {
                     i.output_y_addrs_mults.iter().for_each(|(a, _)| see(a));
                 }
                 Instruction::Print(i) => see(&i.addr),
-                Instruction::HintExt2Felts(i) => {
+                Instruction::HintExt2Felts(i) | Instruction::Ext2Felts(i) => {
                     see(&i.input_addr);
                     i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
                 }

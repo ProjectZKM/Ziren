@@ -12,6 +12,7 @@ use crate::{
     chips::{
         alu_base::BaseAluChip,
         alu_ext::ExtAluChip,
+        ext2felt::Ext2FeltChip,
         mem::{MemoryConstChip, MemoryVarChip},
         poseidon2_wide::Poseidon2WideChip,
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
@@ -35,6 +36,15 @@ pub struct RecursionShape {
 }
 
 impl RecursionShape {
+    /// Drop one chip's entry.  Used by the shrink stage to erase the
+    /// `Ext2Felt` cap the shared bands carry: `shrink_machine` is frozen
+    /// without that chip, and keeping its shape byte-identical to the
+    /// pre-chip form is what keeps the wrap R1CS (and the gnark ceremony)
+    /// untouched.
+    pub fn remove(&mut self, chip_name: &str) {
+        self.inner.remove(chip_name);
+    }
+
     pub fn clone_into_hash_map(&self) -> HashMap<String, usize> {
         self.inner.iter().map(|(k, v)| (k.clone(), *v)).collect()
     }
@@ -74,6 +84,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
             RecursionAir::<F, DEGREE>::ExtAlu(ExtAluChip),
             RecursionAir::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
             RecursionAir::<F, DEGREE>::Select(SelectChip),
+            RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()),
             RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip),
         ]
         .into_iter()
@@ -300,6 +311,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             RecursionAir::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::<DEGREE>).name();
         let select = RecursionAir::<F, DEGREE>::Select(SelectChip).name();
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
+        let ext2felt = RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()).name();
 
         // Specify allowed shapes.
         //
@@ -343,6 +355,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (base_alu.clone(), 18),
                 (ext_alu.clone(), 18),
                 (poseidon2_wide.clone(), 18),
+                (ext2felt.clone(), 17),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             // SELECT-HEAVY deep compose band (tendermint + goat).  The 100-bit
@@ -367,6 +380,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (base_alu.clone(), 20),
                 (ext_alu.clone(), 19),
                 (poseidon2_wide.clone(), 18),
+                (ext2felt.clone(), 17),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             // ── ALU-HEAVY COMPOSE LADDER (reth) ────────────────────────────
@@ -405,6 +419,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (base_alu.clone(), 19),
                 (ext_alu.clone(), 19),
                 (poseidon2_wide.clone(), 17),
+                (ext2felt.clone(), 17),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             [
@@ -414,6 +429,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (base_alu.clone(), 20),
                 (ext_alu.clone(), 20),
                 (poseidon2_wide.clone(), 17),
+                (ext2felt.clone(), 17),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             [
@@ -423,6 +439,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (base_alu.clone(), 21),
                 (ext_alu.clone(), 21),
                 (poseidon2_wide.clone(), 18),
+                (ext2felt.clone(), 17),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             // CAPPED AT THE ROW CUBE.  Every recursion stage proves at a
@@ -443,6 +460,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (base_alu.clone(), 22),
                 (ext_alu.clone(), 22),
                 (poseidon2_wide.clone(), 20),
+                (ext2felt.clone(), 17),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
         ]
@@ -473,6 +491,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             (base_alu.clone(), 19),
             (ext_alu.clone(), 19),
             (poseidon2_wide.clone(), 18),
+            (ext2felt.clone(), 17),
             (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
         ]));
         allowed_shapes.push(HashMap::from([
@@ -482,6 +501,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             (base_alu.clone(), 20),
             (ext_alu.clone(), 20),
             (poseidon2_wide.clone(), 18),
+            (ext2felt.clone(), 17),
             (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
         ]));
         // No band may exceed the row cube every recursion stage proves at:

@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
 };
 use zkm_core_executor::ZKMContext;
+use zkm_primitives::types::RecursionProgramType;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_recursion_circuit::{
     hash::FieldHasherVariable,
@@ -254,7 +255,9 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
             .max_log_row_count;
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();
-    let mut builder = Builder::<OuterConfig>::default();
+    // Gnark-target circuit: the BN254 backend compiles `CircuitExt2Felt`
+    // directly, so the builder must stay on the legacy (non-chip) path.
+    let mut builder = Builder::<OuterConfig>::new(RecursionProgramType::Wrap);
 
     // Template vk for the commit/pc_start binding.
     let template_vk = template_input.vks_and_proofs.first().unwrap().0.clone();

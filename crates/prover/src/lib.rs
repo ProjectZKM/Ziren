@@ -44,7 +44,7 @@ use zkm_pcs::{
     ZKMProverOpts, DIGEST_SIZE,
 };
 use zkm_pcs::{shape::OrderedShape, MachineProvingKey};
-use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues};
+use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues, types::RecursionProgramType};
 use zkm_recursion_circuit::{
     hash::FieldHasher,
     machine::{
@@ -1264,6 +1264,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             self.vk_verification,
         );
         self.fix_recursion_shape_kind(&mut program, "shrink");
+        // The bands carry an `Ext2Felt` cap for the compress machine, but
+        // `shrink_machine` is frozen without that chip; erase the entry so
+        // the shrink shape — and through it the wrap R1CS — is byte-identical
+        // to the pre-chip form.  (Every band carries the SAME cap, so band
+        // selection is unaffected; shrink programs emit no `Ext2Felts`.)
+        if let Some(shape) = program.shape_mut() {
+            shape.remove("Ext2Felt");
+        }
         Arc::new(program)
     }
 
@@ -1298,7 +1306,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count = Self::pcs_max_log_row_count();
 
         let builder_span = tracing::debug_span!("build wrap-bn254-basefold program").entered();
-        let mut builder = Builder::<WrapConfig>::default();
+        // `wrap_machine` has no `Ext2Felt` chip: keep the legacy binding.
+        let mut builder = Builder::<WrapConfig>::new(RecursionProgramType::Wrap);
         let input_var = input.read(&mut builder);
         verify_wrap_basefold::<WrapConfig, InnerSC, _>(
             &mut builder,

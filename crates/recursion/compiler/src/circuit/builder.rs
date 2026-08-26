@@ -7,6 +7,7 @@ use p3_koala_bear::KoalaBear;
 use zkm_pcs::septic_curve::SepticCurve;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::septic_extension::SepticExtension;
+use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_core::air::RecursionPublicValues;
 use zkm_recursion_core::{chips::poseidon2_wide::WIDTH, D, DIGEST_SIZE, HASH_RATE};
 
@@ -229,16 +230,33 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     /// Decomposes an ext into its felt coordinates.
     fn ext2felt_v2(&mut self, ext: Ext<C::F, C::EF>) -> [Felt<C::F>; D] {
         let felts = core::array::from_fn(|_| self.uninit());
-        self.push_op(DslIr::CircuitExt2Felt(felts, ext));
-        // Verify that the decomposed extension element is correct.
-        let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
-        for i in 0..D {
-            let felt = felts[i];
-            let monomial: Ext<C::F, C::EF> = self.constant(C::EF::ith_basis_element(i).unwrap());
-            reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);
-        }
+        match self.program_type {
+            // Programs proven on the compress machine have the `Ext2Felt`
+            // chip: it receives the input block and sends the limbs from the
+            // SAME trace cells, so the decomposition is sound with no DSL
+            // binding at all (the ~14-op monomial reconstruction below).
+            RecursionProgramType::Core
+            | RecursionProgramType::Deferred
+            | RecursionProgramType::Compress => {
+                self.push_op(DslIr::CircuitV2Ext2Felt(felts, ext));
+            }
+            // Shrink/wrap machines are FROZEN without the chip (the wrap
+            // R1CS — and the gnark ceremony — is built over the shrink
+            // proof's structure), so their programs keep the hint + binding.
+            RecursionProgramType::Shrink | RecursionProgramType::Wrap => {
+                self.push_op(DslIr::CircuitExt2Felt(felts, ext));
+                // Verify that the decomposed extension element is correct.
+                let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
+                for i in 0..D {
+                    let felt = felts[i];
+                    let monomial: Ext<C::F, C::EF> =
+                        self.constant(C::EF::ith_basis_element(i).unwrap());
+                    reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);
+                }
 
-        self.assert_ext_eq(reconstructed_ext, ext);
+                self.assert_ext_eq(reconstructed_ext, ext);
+            }
+        }
 
         felts
     }

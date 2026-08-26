@@ -451,6 +451,19 @@ where
         })
     }
 
+    fn ext2felts_constrained(
+        &mut self,
+        felts: [impl Reg<C>; D],
+        ext: impl Reg<C>,
+    ) -> Instruction<C::F> {
+        // Unlike the hint form, the chip RECEIVES the input block, so the
+        // read is counted (it consumes one multiplicity of the write).
+        Instruction::Ext2Felts(HintExt2FeltsInstr {
+            output_addrs_mults: felts.map(|r| (r.write(self), C::F::ZERO)),
+            input_addr: ext.read(self),
+        })
+    }
+
     fn hint(&mut self, output: &[impl Reg<C>]) -> Instruction<C::F> {
         Instruction::Hint(HintInstr {
             output_addrs_mults: output.iter().map(|r| (r.write(self), C::F::ZERO)).collect(),
@@ -566,6 +579,7 @@ where
             DslIr::CircuitV2HintFelts(output) => f(self.hint(&output)),
             DslIr::CircuitV2HintExts(output) => f(self.hint(&output)),
             DslIr::CircuitExt2Felt(felts, ext) => f(self.ext2felts(felts, ext)),
+            DslIr::CircuitV2Ext2Felt(felts, ext) => f(self.ext2felts_constrained(felts, ext)),
             DslIr::CycleTrackerV2Enter(name) => {
                 consumer(Err(CompileOneErr::CycleTrackerEnter(name)))
             }
@@ -673,6 +687,9 @@ where
                             .for_each(|(addr, mult)| backfill((mult, addr)));
                     }
                     Instruction::HintExt2Felts(HintExt2FeltsInstr {
+                        output_addrs_mults, ..
+                    })
+                    | Instruction::Ext2Felts(HintExt2FeltsInstr {
                         output_addrs_mults, ..
                     }) => {
                         output_addrs_mults
@@ -861,6 +878,7 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::HintBits(_) => "HintBits",
         Instruction::Print(_) => "Print",
         Instruction::HintExt2Felts(_) => "HintExt2Felts",
+        Instruction::Ext2Felts(_) => "Ext2Felts",
         Instruction::Hint(_) => "Hint",
         Instruction::HintAddCurve(_) => "HintAddCurve",
         Instruction::CommitPublicValues(_) => "CommitPublicValues",

@@ -774,6 +774,18 @@ where
                     }
                 }
             }
+            Instruction::Ext2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr }) => {
+                state.nb_bit_decompositions += 1;
+                let fs = self.mr_us(*input_addr).val;
+                for (f, (addr, mult)) in fs.into_iter().zip(output_addrs_mults.iter().copied()) {
+                    self.mw_us(addr, Block::from(f), mult);
+                }
+                // One event carrying the whole input block; the Ext2Felt
+                // chip receives it and sends the limbs from the same cells.
+                unsafe {
+                    Self::raw_write_ev(&rec.ext2felt_events[_offset], MemEvent { inner: fs });
+                }
+            }
             Instruction::Hint(HintInstr { output_addrs_mults }) => {
                 // Check that enough Blocks can be read, so `drain` does not panic.
                 if witness.as_mut().expect("witness must be Some at root walker").len()

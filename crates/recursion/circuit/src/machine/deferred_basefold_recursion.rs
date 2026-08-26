@@ -37,6 +37,7 @@ use p3_koala_bear::KoalaBear;
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
 use zkm_pcs::StarkMachine;
+use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_compiler::circuit::AsmCompiler;
 use zkm_recursion_compiler::config::InnerConfig;
 use zkm_recursion_compiler::ir::Builder;
@@ -65,7 +66,7 @@ where
         >,
 {
     let builder_span = tracing::debug_span!("build deferred-basefold-recursion program").entered();
-    let mut builder = Builder::<InnerConfig>::default();
+    let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Deferred);
     let input_var = input.read(&mut builder);
     verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,

@@ -11,6 +11,7 @@ use crate::{
     chips::{
         alu_base::{BaseAluChip, NUM_BASE_ALU_ENTRIES_PER_ROW},
         alu_ext::{ExtAluChip, NUM_EXT_ALU_ENTRIES_PER_ROW},
+        ext2felt::Ext2FeltChip,
         mem::{
             constant::NUM_CONST_MEM_ENTRIES_PER_ROW, variable::NUM_VAR_MEM_ENTRIES_PER_ROW,
             MemoryConstChip, MemoryVarChip,
@@ -38,6 +39,7 @@ pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: u
     ExtAlu(ExtAluChip),
     Poseidon2Wide(Poseidon2WideChip<DEGREE>),
     Select(SelectChip),
+    Ext2Felt(Ext2FeltChip<F>),
     PublicValues(PublicValuesChip),
 }
 
@@ -52,6 +54,8 @@ pub struct RecursionAirEventCount {
     pub batch_fri_events: usize,
     pub select_events: usize,
     pub exp_reverse_bits_len_events: usize,
+    /// One per `Ext2Felts` instruction (the constrained decomposition chip).
+    pub ext2felt_events: usize,
     /// Counter for commit_pv_hash events (CommitPublicValues match arm
     /// in `Runtime::run`). Populated by
     /// `AddAssign<&Instruction>` so `UnsafeRecord::new` can pre-size
@@ -85,6 +89,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             // `wrap_machine` / `machine_*_with_all_chips`, which use the
             // row-selector STARK prover.
             RecursionAir::Select(SelectChip),
+            RecursionAir::Ext2Felt(Ext2FeltChip::default()),
             RecursionAir::PublicValues(PublicValuesChip),
         ]
         .map(Chip::new)
@@ -102,9 +107,24 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
     }
 
     pub fn shrink_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
-        // SHRINK reuses compress's selector-free chip set and, like it, proves
-        // against its own natural trace area.
-        Self::compress_machine(config)
+        // SHRINK's chip set is FROZEN at the pre-`Ext2Felt` compress set: the
+        // shrink proof's structure is what the BN254 wrap R1CS — and through
+        // it the gnark ceremony — is built over, so a chip added to compress
+        // must NOT appear here.  Shrink programs correspondingly keep the
+        // legacy `HintExt2Felts` + monomial re-binding (see `ext2felt_v2`).
+        let chips = [
+            RecursionAir::MemoryConst(MemoryConstChip::default()),
+            RecursionAir::MemoryVar(MemoryVarChip::default()),
+            RecursionAir::BaseAlu(BaseAluChip),
+            RecursionAir::ExtAlu(ExtAluChip),
+            RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
+            RecursionAir::Select(SelectChip),
+            RecursionAir::PublicValues(PublicValuesChip),
+        ]
+        .map(Chip::new)
+        .into_iter()
+        .collect::<Vec<_>>();
+        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
     }
 
     /// A machine with dynamic chip sizes that includes the skinny variant of the Poseidon2 chip.
@@ -179,6 +199,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             ),
             (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), heights.poseidon2_wide_events),
             (Self::Select(SelectChip), heights.select_events),
+            (Self::Ext2Felt(Ext2FeltChip::default()), heights.ext2felt_events),
             (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
         ]
         .map(|(chip, log_height)| (chip.name(), log_height))
@@ -208,6 +229,7 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
                 output_addrs_mults,
                 input_addr: _, // No receive lookup for the hint operation
             }) => self.mem_var_events += output_addrs_mults.len(),
+            Instruction::Ext2Felts(_) => self.ext2felt_events += 1,
             // FriFold runtime emits ps_at_z.len() events per instruction
             // (one per polynomial in the batch); was off-by-default-1. Benign
             // for push-based reserve, but UB-prone for offset writes via

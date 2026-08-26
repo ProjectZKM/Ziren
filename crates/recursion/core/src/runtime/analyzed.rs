@@ -134,6 +134,9 @@ impl<F> RawProgram<Instruction<F>> {
                     output_addrs_mults,
                     input_addr: _,
                 }) => incr(&mut counts.mem_var_events, output_addrs_mults.len()),
+                // One event per instruction: the event carries the input
+                // block; the addresses ride the preprocessed trace.
+                Instruction::Ext2Felts(_) => incr(&mut counts.ext2felt_events, 1),
                 Instruction::HintAddCurve(instr) => incr(
                     &mut counts.mem_var_events,
                     instr.output_x_addrs_mults.len() + instr.output_y_addrs_mults.len(),
