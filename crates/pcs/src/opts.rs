@@ -416,7 +416,16 @@ impl Default for ZKMCoreOpts {
                 |_| default_shard_batch_size,
                 |s| s.parse::<usize>().unwrap_or(default_shard_batch_size),
             ),
-            split_opts: SplitOpts::new(MAX_DEFERRED_SPLIT_THRESHOLD),
+            // Deferred / memory / precompile shard packing.  The
+            // SPLIT_THRESHOLD env OVERRIDES the default (mirrors `max()` and
+            // the ELEMENT_THRESHOLD pattern above), clamped so it can only
+            // PACK MORE per shard, never less.
+            split_opts: SplitOpts::new(
+                env::var("SPLIT_THRESHOLD")
+                    .map(|s| s.parse::<usize>().unwrap_or(MAX_DEFERRED_SPLIT_THRESHOLD))
+                    .unwrap_or(MAX_DEFERRED_SPLIT_THRESHOLD)
+                    .max(MAX_DEFERRED_SPLIT_THRESHOLD),
+            ),
             trace_gen_workers: env::var("TRACE_GEN_WORKERS").map_or_else(
                 |_| DEFAULT_TRACE_GEN_WORKERS,
                 |s| s.parse::<usize>().unwrap_or(DEFAULT_TRACE_GEN_WORKERS),
