@@ -14,7 +14,6 @@
 
 use crate::memory::RegisterCols;
 use std::mem::size_of;
-use zkm_pcs::air::BaseAirBuilder;
 
 use hashbrown::HashMap;
 use p3_air::AirBuilder;
@@ -33,7 +32,7 @@ use zkm_primitives::consts::WORD_SIZE;
 use crate::air::WordAirBuilder;
 use crate::{
     air::ZKMCoreAirBuilder,
-    memory::MemoryReadWriteCols,
+
     operations::{AddOperation, IsZeroOperation, KoalaBearWordRangeChecker},
     utils::zeroed_f_vec,
 };
@@ -53,17 +52,6 @@ pub struct MemoryInstrCommonCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// The value of the first operand.
-    ///
-    /// This is the only operand the chip still witnesses: on a load whose
-    /// destination is register 0 the write is discarded, so the value the chip
-    /// computes and the value the register access commits legitimately differ.
-    /// `shard`, `clk`, `op_b`, `op_c` and the previous `op_a` are NOT columns —
-    /// the frame already commits them, and duplicating them cost 14 cells on
-    /// every memory row only to assert the copies equal.  See the accessors
-    /// below.
-    pub op_a_value: Word<T>,
-
     /// The effective address `op_b + op_c`, computed INLINE.
     ///
     /// `addr_add.value` is the (unaligned) address word; the three carry bits
@@ -79,9 +67,6 @@ pub struct MemoryInstrCommonCols<T> {
 
     /// Gadget to verify that the address word is within the Koala-Bear field.
     pub addr_word_range_checker: KoalaBearWordRangeChecker<T>,
-
-    /// Memory consistency columns for the memory access.
-    pub memory_access: MemoryReadWriteCols<T>,
 
     /// This is used to check if the most significant three bytes of the memory address are all
     /// zero.
@@ -118,6 +103,18 @@ impl<T: Copy> MemoryInstrCommonCols<T> {
     pub fn prev_a_val(&self) -> Word<T> {
         self.frame.op_a_access.prev_value
     }
+
+    /// The committed value of `op_a` — the frame's register access, directly.
+    ///
+    /// There is no separate `op_a_value` column any more.  The frame pins this
+    /// word to ZERO when `op_a` is register 0 (`eval_i_type_frame`), so a
+    /// chip binding a computed value to it must either gate on `op_a_0` or
+    /// absorb the `(1 - op_a_0)` factor into the bound expression; a STORE's
+    /// read needs neither (storing register 0 stores 0).
+    #[inline]
+    pub fn a_val(&self) -> Word<T> {
+        *self.frame.op_a_access.value()
+    }
 }
 
 /// Constrains everything that is common to all memory instructions:
@@ -132,6 +129,7 @@ impl<T: Copy> MemoryInstrCommonCols<T> {
 pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
     builder: &mut AB,
     cols: &MemoryInstrCommonCols<AB::Var>,
+    memory_access: &impl crate::memory::MemoryCols<AB::Var>,
     is_real: AB::Expr,
 ) -> AB::Expr {
     // Verify `addr_word = op_b + op_c` in-place.  `AddOperation::eval`
@@ -197,7 +195,7 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
         crate::frame::clk_from_i_type_frame::<AB>(&cols.frame)
             + AB::Expr::from_u32(MemoryAccessPosition::Memory as u32),
         addr_aligned.clone(),
-        &cols.memory_access,
+        memory_access,
         is_real,
     );
 
@@ -239,19 +237,10 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     builder
         .when(op_a_immutable.clone() * is_real.clone())
         .assert_word_eq(*cols.frame.op_a_access.value(), cols.frame.op_a_access.prev_value);
-    // Bind this chip's operand column to the frame's register-file view: the
-    // chip must compute on exactly the value the register access commits.  The
-    // load write is gated by op_a_0 (discarded); a STORE's immutable READ of
-    // register 0 must see 0.  The other operands need no binding — the chip
-    // now READS them straight off the frame rather than witnessing a copy.
-    builder
-        .when(is_real)
-        .when_not(cols.frame.op_a_0)
-        .assert_word_eq(cols.op_a_value, *cols.frame.op_a_access.value());
-    builder
-        .when(op_a_immutable)
-        .when(cols.frame.op_a_0)
-        .assert_word_zero(cols.op_a_value);
+    // No `op_a_value` binding remains: the chips compute directly on the
+    // frame's committed register access (`a_val()`), and the frame itself
+    // pins that word to zero on register-0 rows.
+    let _ = is_real;
 }
 
 /// Constrains that the address is word aligned, for the opcodes that require it.
@@ -283,10 +272,8 @@ impl<F: PrimeField32> MemoryInstrCommonCols<F> {
         debug_assert!(self.frame.shard != F::ZERO);
         self.pc = F::from_u32(event.pc);
         self.next_pc = F::from_u32(event.next_pc);
-        self.op_a_value = event.a.into();
-
-        // Populate memory accesses for reading from memory.
-        self.memory_access.populate(event.mem_access, blu);
+        // The memory access is populated per chip (loads carry read-only
+        // consistency columns; stores carry read-write ones).
 
         // Inline effective-address addition (this also emits the u8 range checks for
         // op_b, op_c and the resulting address word).

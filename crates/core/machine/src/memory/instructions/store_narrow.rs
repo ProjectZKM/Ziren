@@ -45,6 +45,9 @@ pub struct StoreNarrowColumns<T> {
     /// The columns shared by all memory instructions.
     pub common: MemoryInstrCommonCols<T>,
 
+    /// Memory consistency columns.  Narrow stores read-modify-write.
+    pub memory_access: crate::memory::MemoryReadWriteCols<T>,
+
     /// Whether this is a store byte instruction.
     #[picus(selector)]
     pub is_sb: T,
@@ -84,7 +87,7 @@ where
         builder.assert_bool(local.is_sh);
         builder.assert_bool(is_real.clone());
 
-        eval_memory_common(builder, common, is_real.clone());
+        eval_memory_common(builder, common, &local.memory_access, is_real.clone());
 
         let offset_is_zero = eval_offset_flags(
             builder,
@@ -95,9 +98,11 @@ where
         );
 
         let one = AB::Expr::ONE;
-        let a_val = common.op_a_value;
-        let mem_val = *common.memory_access.value();
-        let prev_mem_val = *common.memory_access.prev_value();
+        // The store data is the frame's committed `op_a` read; register 0
+        // reads as zero by the frame's own pin.
+        let a_val = common.a_val();
+        let mem_val = *local.memory_access.value();
+        let prev_mem_val = *local.memory_access.prev_value();
 
         // `SB`: the stored byte replaces the byte at the offset, the rest is unchanged.
         let sb_expected_stored_value = Word([
@@ -147,6 +152,7 @@ impl StoreNarrowChip {
         program: &zkm_core_executor::Program,
     ) {
         let addr_ls_two_bits = cols.common.populate(event, blu, program);
+        cols.memory_access.populate(event.mem_access, blu);
         populate_offset_flags(
             addr_ls_two_bits,
             &mut cols.ls_bits_is_one,

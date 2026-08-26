@@ -46,6 +46,10 @@ pub struct MemoryUnalignedColumns<T> {
     /// The columns shared by all memory instructions.
     pub common: MemoryInstrCommonCols<T>,
 
+    /// Memory consistency columns.  `SWL`/`SWR` read-modify-write, so the
+    /// read-write form is needed (the loads simply leave value == prev).
+    pub memory_access: crate::memory::MemoryReadWriteCols<T>,
+
     /// Whether this is a load word left instruction.
     #[picus(selector)]
     pub is_lwl: T,
@@ -65,6 +69,13 @@ pub struct MemoryUnalignedColumns<T> {
     pub ls_bits_is_two: T,
     /// Whether the least significant two bits of the address are three.
     pub ls_bits_is_three: T,
+
+    /// `is_lwl * (1 - op_a_0)` — gates the LWL register bind so a register-0
+    /// destination (whose commit the frame pins to zero) is exempt without
+    /// raising the bind's degree past the chip's existing maximum.
+    pub lwl_gate: T,
+    /// `is_lwr * (1 - op_a_0)` — the LWR twin of `lwl_gate`.
+    pub lwr_gate: T,
 }
 
 impl<F> BaseAir<F> for MemoryUnalignedChip {
@@ -93,7 +104,7 @@ where
         builder.assert_bool(local.is_swr);
         builder.assert_bool(is_real.clone());
 
-        eval_memory_common(builder, common, is_real.clone());
+        eval_memory_common(builder, common, &local.memory_access, is_real.clone());
 
         let offset_is_zero = eval_offset_flags(
             builder,
@@ -106,13 +117,19 @@ where
         // The loads must not change the memory value.
         builder
             .when(local.is_lwl + local.is_lwr)
-            .assert_word_eq(*common.memory_access.value(), *common.memory_access.prev_value());
+            .assert_word_eq(*local.memory_access.value(), *local.memory_access.prev_value());
+
+        // The load-side register binds run against the frame's committed
+        // `op_a` access; the gates carry the `(1 - op_a_0)` factor as witness
+        // columns so the binds keep their existing degree.
+        builder.assert_eq(local.lwl_gate, local.is_lwl * (AB::Expr::ONE - common.frame.op_a_0));
+        builder.assert_eq(local.lwr_gate, local.is_lwr * (AB::Expr::ONE - common.frame.op_a_0));
 
         let one = AB::Expr::ONE;
-        let a_val = common.op_a_value;
+        let a_val = common.a_val();
         let prev_a_val = common.prev_a_val();
-        let mem_val = *common.memory_access.value();
-        let prev_mem_val = *common.memory_access.prev_value();
+        let mem_val = *local.memory_access.value();
+        let prev_mem_val = *local.memory_access.prev_value();
 
         // `LWR`: merge the bytes at and above the offset into the low bytes of `op_a`.
         let lwr_expected_load_value = Word([
@@ -130,7 +147,7 @@ where
             mem_val[3] * offset_is_zero.clone()
                 + prev_a_val[3] * (one.clone() - offset_is_zero.clone()),
         ]);
-        builder.when(local.is_lwr).assert_word_eq(a_val, lwr_expected_load_value);
+        builder.when(local.lwr_gate).assert_word_eq(a_val, lwr_expected_load_value);
 
         // `LWL`: merge the bytes at and below the offset into the high bytes of `op_a`.
         let lwl_expected_load_value = Word([
@@ -149,7 +166,7 @@ where
                 + mem_val[1] * local.ls_bits_is_one
                 + mem_val[0] * offset_is_zero.clone(),
         ]);
-        builder.when(local.is_lwl).assert_word_eq(a_val, lwl_expected_load_value);
+        builder.when(local.lwl_gate).assert_word_eq(a_val, lwl_expected_load_value);
 
         // `SWL`: store the high bytes of `op_a` at and below the offset.
         let swl_expected_stored_value = Word([
@@ -210,6 +227,7 @@ impl MemoryUnalignedChip {
         program: &zkm_core_executor::Program,
     ) {
         let addr_ls_two_bits = cols.common.populate(event, blu, program);
+        cols.memory_access.populate(event.mem_access, blu);
         populate_offset_flags(
             addr_ls_two_bits,
             &mut cols.ls_bits_is_one,
@@ -220,6 +238,10 @@ impl MemoryUnalignedChip {
         cols.is_lwr = F::from_bool(matches!(event.opcode, Opcode::LWR));
         cols.is_swl = F::from_bool(matches!(event.opcode, Opcode::SWL));
         cols.is_swr = F::from_bool(matches!(event.opcode, Opcode::SWR));
+        // `op_a_0` was just populated by the frame from the fetched instruction.
+        let op_a_not_zero = F::ONE - cols.common.frame.op_a_0;
+        cols.lwl_gate = cols.is_lwl * op_a_not_zero;
+        cols.lwr_gate = cols.is_lwr * op_a_not_zero;
         debug_assert!(matches!(
             event.opcode,
             Opcode::LWL | Opcode::LWR | Opcode::SWL | Opcode::SWR

@@ -12,6 +12,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeField32;
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MemInstrEvent},
@@ -45,6 +46,10 @@ pub struct StoreWordColumns<T> {
     /// The columns shared by all memory instructions.
     pub common: MemoryInstrCommonCols<T>,
 
+    /// Memory consistency columns.  Stores WRITE, so the previous value is a
+    /// separate word from the written one.
+    pub memory_access: crate::memory::MemoryReadWriteCols<T>,
+
     /// Whether this is a store word instruction.
     #[picus(selector)]
     pub is_sw: T,
@@ -77,21 +82,27 @@ where
         builder.assert_bool(local.is_sc);
         builder.assert_bool(is_real.clone());
 
-        eval_memory_common(builder, common, is_real.clone());
+        eval_memory_common(builder, common, &local.memory_access, is_real.clone());
         assert_word_aligned(builder, common, is_real.clone());
 
-        let a_val = common.op_a_value;
-        let mem_val = *common.memory_access.value();
+        // The store data is the frame's committed `op_a` read directly; the
+        // frame pins it to ZERO for register 0, which is exactly what storing
+        // register 0 must store.
+        let a_val = common.a_val();
+        let mem_val = *local.memory_access.value();
 
         // `SW` writes `op_a` unmasked.
         builder.when(local.is_sw).assert_word_eq(mem_val, a_val);
 
-        // `SC` writes the *previous* `op_a` and sets `op_a = 1`.
+        // `SC` writes the *previous* `op_a` and sets `op_a = 1`.  The success
+        // flag write is discarded for register 0 (the frame pins the commit to
+        // zero there), so the flag shape is only asserted off register 0.
         builder.when(local.is_sc).assert_word_eq(mem_val, common.prev_a_val());
-        builder.when(local.is_sc).assert_one(a_val[0]);
-        builder.when(local.is_sc).assert_zero(a_val[1]);
-        builder.when(local.is_sc).assert_zero(a_val[2]);
-        builder.when(local.is_sc).assert_zero(a_val[3]);
+        let sc_flag_gate = local.is_sc * (AB::Expr::ONE - common.frame.op_a_0);
+        builder.when(sc_flag_gate.clone()).assert_one(a_val[0]);
+        builder.when(sc_flag_gate.clone()).assert_zero(a_val[1]);
+        builder.when(sc_flag_gate.clone()).assert_zero(a_val[2]);
+        builder.when(sc_flag_gate).assert_zero(a_val[3]);
 
         let opcode = local.is_sw * Opcode::SW.as_field::<AB::F>()
             + local.is_sc * Opcode::SC.as_field::<AB::F>();
@@ -110,6 +121,7 @@ impl StoreWordChip {
         program: &zkm_core_executor::Program,
     ) {
         cols.common.populate(event, blu, program);
+        cols.memory_access.populate(event.mem_access, blu);
         cols.is_sw = F::from_bool(matches!(event.opcode, Opcode::SW));
         cols.is_sc = F::from_bool(matches!(event.opcode, Opcode::SC));
         debug_assert!(matches!(event.opcode, Opcode::SW | Opcode::SC));

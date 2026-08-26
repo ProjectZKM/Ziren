@@ -46,6 +46,10 @@ pub struct LoadWordColumns<T> {
     /// The columns shared by all memory instructions.
     pub common: MemoryInstrCommonCols<T>,
 
+    /// Memory consistency columns.  Loads are pure READS, so the read-only
+    /// form is used: value and previous value are the SAME columns.
+    pub memory_access: crate::memory::MemoryReadCols<T>,
+
     /// Whether this is a load word instruction.
     #[picus(selector)]
     pub is_lw: T,
@@ -79,18 +83,21 @@ where
         builder.assert_bool(local.is_ll);
         builder.assert_bool(is_real.clone());
 
-        eval_memory_common(builder, common, is_real.clone());
+        eval_memory_common(builder, common, &local.memory_access, is_real.clone());
         assert_word_aligned(builder, common, is_real.clone());
 
-        // Loads must not change the memory value.
-        builder
-            .when(is_real.clone())
-            .assert_word_eq(*common.memory_access.value(), *common.memory_access.prev_value());
+        // Loads must not change the memory value: structural now — the
+        // read-only consistency columns alias value and previous value.
 
-        // The full word is loaded into `op_a`.
-        builder
-            .when(is_real.clone())
-            .assert_word_eq(*common.memory_access.value(), common.op_a_value);
+        // The full word is loaded into `op_a`.  The frame pins the committed
+        // register value to ZERO when `op_a` is register 0 (the write is
+        // discarded), so the memory value is bound through a `(1 - op_a_0)`
+        // factor rather than a gate — same constraint degree.
+        let not_a0 = AB::Expr::ONE - common.frame.op_a_0;
+        builder.when(is_real.clone()).assert_word_eq(
+            common.a_val().map(Into::into),
+            local.memory_access.value().map(|x| x * not_a0.clone()),
+        );
 
         let opcode = local.is_lw * Opcode::LW.as_field::<AB::F>()
             + local.is_ll * Opcode::LL.as_field::<AB::F>();
@@ -109,6 +116,11 @@ impl LoadWordChip {
         program: &zkm_core_executor::Program,
     ) {
         cols.common.populate(event, blu, program);
+        let zkm_core_executor::events::MemoryRecordEnum::Read(read_record) = event.mem_access
+        else {
+            unreachable!("loads carry read records");
+        };
+        cols.memory_access.populate(read_record, blu);
         cols.is_lw = F::from_bool(matches!(event.opcode, Opcode::LW));
         cols.is_ll = F::from_bool(matches!(event.opcode, Opcode::LL));
         debug_assert!(matches!(event.opcode, Opcode::LW | Opcode::LL));

@@ -38,12 +38,10 @@ populate_common(
     assert(cols.frame.shard != F::zero());
     cols.pc = F::from_canonical_u32(event.pc);
     cols.next_pc = F::from_canonical_u32(event.next_pc);
-    // `shard`, `clk`, `op_b`, `op_c` and the previous `op_a` are the frame's
-    // columns now -- `populate_from_mem` above already wrote them.
-    write_word_from_u32_v2<F>(cols.op_a_value, event.a);
-
-    // Memory consistency columns for the memory access.
-    memory::populate_read_write_v2<F>(cols.memory_access, event.mem_access);
+    // `shard`, `clk`, `op_b`, `op_c` and BOTH `op_a` values are the frame's
+    // columns now -- `populate_from_mem` above already wrote them.  The memory
+    // consistency columns are populated per chip (loads carry the read-only
+    // form).
 
     // Inline effective-address addition: `addr_add.value = op_b + op_c`.
     const uint32_t memory_addr = add_sub::populate<F>(cols.addr_add, event.b, event.c);
@@ -77,6 +75,9 @@ load_narrow_event_to_row(
     const InstructionFfi& instruction
 ) {
     const uint8_t addr_ls_two_bits = populate_common<F>(cols.common, event, instruction);
+    // Loads are pure reads: mirror `MemoryReadCols::populate`.
+    assert(event.mem_access.tag == MemoryRecordEnum::Tag::Read);
+    memory::populate_read<F>(cols.memory_access, event.mem_access.read._0);
     populate_offset_flags<F>(
         cols.ls_bits_is_one, cols.ls_bits_is_two, cols.ls_bits_is_three, addr_ls_two_bits);
 
@@ -102,11 +103,23 @@ load_narrow_event_to_row(
 
     if (event.opcode == Opcode::LB || event.opcode == Opcode::LH) {
         const uint8_t most_sig_byte = (event.opcode == Opcode::LB) ? val_lo : val_hi;
+        const uint8_t most_sig_bit = (uint8_t)(most_sig_byte >> 7);
         cols.most_sig_byte = F::from_canonical_u8(most_sig_byte);
-        cols.most_sig_bit = F::from_canonical_u8((uint8_t)(most_sig_byte >> 7));
+        cols.most_sig_bit = F::from_canonical_u8(most_sig_bit);
+        if (most_sig_bit == 1) {
+            if (event.opcode == Opcode::LB) {
+                cols.sign_fill_byte = F::from_canonical_u8(0xFF);
+            }
+            cols.sign_fill = F::from_canonical_u8(0xFF);
+        } else {
+            cols.sign_fill_byte = F::zero();
+            cols.sign_fill = F::zero();
+        }
     } else {
         cols.most_sig_byte = F::zero();
         cols.most_sig_bit = F::zero();
+        cols.sign_fill_byte = F::zero();
+        cols.sign_fill = F::zero();
     }
 
     cols.is_lb = F::from_bool(event.opcode == Opcode::LB);
@@ -124,6 +137,9 @@ load_word_event_to_row(
     const InstructionFfi& instruction
 ) {
     populate_common<F>(cols.common, event, instruction);
+    // Loads are pure reads: mirror `MemoryReadCols::populate`.
+    assert(event.mem_access.tag == MemoryRecordEnum::Tag::Read);
+    memory::populate_read<F>(cols.memory_access, event.mem_access.read._0);
     cols.is_lw = F::from_bool(event.opcode == Opcode::LW);
     cols.is_ll = F::from_bool(event.opcode == Opcode::LL);
 }
@@ -137,6 +153,7 @@ store_narrow_event_to_row(
     const InstructionFfi& instruction
 ) {
     const uint8_t addr_ls_two_bits = populate_common<F>(cols.common, event, instruction);
+    memory::populate_read_write_v2<F>(cols.memory_access, event.mem_access);
     populate_offset_flags<F>(
         cols.ls_bits_is_one, cols.ls_bits_is_two, cols.ls_bits_is_three, addr_ls_two_bits);
     cols.is_sb = F::from_bool(event.opcode == Opcode::SB);
@@ -152,6 +169,7 @@ store_word_event_to_row(
     const InstructionFfi& instruction
 ) {
     populate_common<F>(cols.common, event, instruction);
+    memory::populate_read_write_v2<F>(cols.memory_access, event.mem_access);
     cols.is_sw = F::from_bool(event.opcode == Opcode::SW);
     cols.is_sc = F::from_bool(event.opcode == Opcode::SC);
 }
@@ -165,12 +183,17 @@ unaligned_event_to_row(
     const InstructionFfi& instruction
 ) {
     const uint8_t addr_ls_two_bits = populate_common<F>(cols.common, event, instruction);
+    memory::populate_read_write_v2<F>(cols.memory_access, event.mem_access);
     populate_offset_flags<F>(
         cols.ls_bits_is_one, cols.ls_bits_is_two, cols.ls_bits_is_three, addr_ls_two_bits);
     cols.is_lwl = F::from_bool(event.opcode == Opcode::LWL);
     cols.is_lwr = F::from_bool(event.opcode == Opcode::LWR);
     cols.is_swl = F::from_bool(event.opcode == Opcode::SWL);
     cols.is_swr = F::from_bool(event.opcode == Opcode::SWR);
+    // Mirror the Rust gates: `is_lwX * (1 - op_a_0)`.
+    const bool op_a_nz = instruction.op_a != 0;
+    cols.lwl_gate = F::from_bool(event.opcode == Opcode::LWL && op_a_nz);
+    cols.lwr_gate = F::from_bool(event.opcode == Opcode::LWR && op_a_nz);
 }
 
 }  // namespace zkm_core_machine_sys::memory_instrs
