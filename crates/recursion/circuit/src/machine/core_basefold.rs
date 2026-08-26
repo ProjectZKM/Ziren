@@ -269,6 +269,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 proof_opened_values,
                 preprocessed_round,
             ) = proof_tuple;
+            builder.cycle_tracker_v2_enter("leaf_lift".to_string());
             let chip_names: Vec<String> =
                 logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
@@ -613,6 +614,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 _ => basefold_shard_verifier_ref,
             };
 
+            builder.cycle_tracker_v2_exit();
             active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
                 builder,
                 basefold_vk_ref,
@@ -653,6 +655,7 @@ pub fn verify_core_basefold<C, SC, A>(
     // 0, exit_code == 0) and the per-shard anchors (is_first binds, start_pc ==
     // vk.pc_start, select_global_cumulative_sum, shard range-check) are KEPT —
     // they have NO compress analog.
+    builder.cycle_tracker_v2_enter("leaf_seq_chain".to_string());
     {
         let i = 0usize;
         let (public_values_raw, shard_globals) = verify_outputs
@@ -877,6 +880,7 @@ pub fn verify_core_basefold<C, SC, A>(
         global_cumulative_sums.extend(shard_globals);
     }
 
+    builder.cycle_tracker_v2_exit();
     let global_cumulative_sum = builder.sum_digest_v2(global_cumulative_sums);
 
     builder.assert_felt_eq(exit_code, C::F::ZERO);

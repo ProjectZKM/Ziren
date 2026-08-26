@@ -560,6 +560,10 @@ where
         // In debug mode, we perform cycle tracking and keep track of backtraces.
         // Otherwise, we ignore cycle tracking instructions and pass around an empty Vec of traces.
         let debug_mode = zkm_debug_mode();
+        // ── REGION CENSUS ── env-gated compile-time tally of instructions per
+        // cycle-tracker region: the span builder runs WITHOUT debug_mode's
+        // per-instruction println/backtraces, and the map prints greppably.
+        let region_census = std::env::var_os("ZIREN_RECURSION_REGION_CENSUS").is_some();
         // Compile each IR instruction into a SeqBlock structure.
         // Most ops accumulate into the current Basic block;
         // a `DslIr::Parallel` op flushes the current Basic block and
@@ -570,7 +574,7 @@ where
         let (mut top_seq_blocks, traces) =
             tracing::debug_span!("compile_one loop").in_scope(|| {
                 let mut traces = vec![];
-                let mut span_builder = if debug_mode {
+                let mut span_builder = if debug_mode || region_census {
                     Some(SpanBuilder::<_, &'static str>::new("cycle_tracker".to_string()))
                 } else {
                     None
@@ -579,8 +583,16 @@ where
                     self.compile_block(operations, debug_mode, &mut traces, span_builder.as_mut());
                 if let Some(span_builder) = span_builder {
                     let cycle_tracker_root_span = span_builder.finish().unwrap();
-                    for line in cycle_tracker_root_span.lines() {
-                        tracing::info!("{}", line);
+                    if region_census {
+                        eprintln!("REGION_CENSUS_BEGIN");
+                        for line in cycle_tracker_root_span.lines() {
+                            eprintln!("REGION_CENSUS {}", line);
+                        }
+                        eprintln!("REGION_CENSUS_END");
+                    } else {
+                        for line in cycle_tracker_root_span.lines() {
+                            tracing::info!("{}", line);
+                        }
                     }
                 }
                 (blocks, traces)
@@ -781,11 +793,13 @@ where
                             Outcome::Push(instr) => {
                                 if debug_mode {
                                     println!("instr: {instr:?}");
-                                    if let Some(sb) = span_builder.as_deref_mut() {
-                                        sb.item(instr_name(&instr));
-                                    }
                                     #[cfg(feature = "debug")]
                                     traces.push(trace.clone());
+                                }
+                                // Tally whenever the span builder is present
+                                // (debug_mode OR the region census).
+                                if let Some(sb) = span_builder.as_deref_mut() {
+                                    sb.item(instr_name(&instr));
                                 }
                                 current_basic.push(instr);
                             }
