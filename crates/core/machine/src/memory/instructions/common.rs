@@ -132,11 +132,12 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
     memory_access: &impl crate::memory::MemoryCols<AB::Var>,
     is_real: AB::Expr,
 ) -> AB::Expr {
-    // Verify `addr_word = op_b + op_c` in-place.  `AddOperation::eval`
-    // range checks all four bytes of both operands and of the result, which
-    // subsumes the explicit `slice_range_check_u8(addr_word[1..3])` the union
-    // chip performed.
-    AddOperation::<AB::F>::eval(
+    // Verify `addr_word = op_b + op_c` in-place.  The OPERANDS need no
+    // re-check — `op_b` is a register-file read (every write into the file is
+    // range checked, so the multiset argument carries byte shape to every
+    // read) and `op_c` is the program-table immediate (committed in the vk) —
+    // so only the fresh address word is range checked.
+    AddOperation::<AB::F>::eval_check_value_only(
         builder,
         cols.op_b_value(),
         cols.op_c_value(),
@@ -275,9 +276,9 @@ impl<F: PrimeField32> MemoryInstrCommonCols<F> {
         // The memory access is populated per chip (loads carry read-only
         // consistency columns; stores carry read-write ones).
 
-        // Inline effective-address addition (this also emits the u8 range checks for
-        // op_b, op_c and the resulting address word).
-        let memory_addr = self.addr_add.populate(blu, event.b, event.c);
+        // Inline effective-address addition (emits the u8 range checks for the
+        // resulting address word only — the operands are pre-checked).
+        let memory_addr = self.addr_add.populate_check_value_only(blu, event.b, event.c);
         debug_assert_eq!(memory_addr, event.b.wrapping_add(event.c));
         self.addr_word_range_checker.populate(blu, memory_addr);
 

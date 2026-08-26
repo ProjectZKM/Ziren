@@ -16,15 +16,11 @@ use zkm_core_executor::{
     ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_pcs::{
-    air::{MachineAir, PicusInfo, ZKMAirBuilder},
-    Word,
-};
+use zkm_pcs::air::{MachineAir, PicusInfo, ZKMAirBuilder};
 
 use crate::{
     air::WordAirBuilder,
     frame::{eval_i_type_frame, ITypeFrameCols},
-    operations::AddOperation,
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
@@ -53,12 +49,17 @@ pub struct AddSubImmCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// Instance of `AddOperation` to handle addition logic in `AddSubImmChip`'s ALU operations.
-    /// It's result will be `a` for the add operation and `b` for the sub operation.
-    pub add_operation: AddOperation<T>,
+    /// The carry bits of the byte-wise addition this row verifies: for ADD
+    /// `b + c == a`, for SUB `a + c == b`.  No result/operand mirrors and no
+    /// byte range checks — every word is a frame access or the program-table
+    /// immediate, all byte-shaped already (see the register-form chip).
+    pub carry: [T; 3],
 
-    /// The first input operand.  This will be `b` for add operations and `a` for sub operations.
-    pub operand_1: Word<T>,
+    /// `is_add * (1 - op_a_0)`; a discarded register-0 result ungates the
+    /// equation (the frame pins the commit to zero).
+    pub add_gate: T,
+    /// `is_sub * (1 - op_a_0)`.
+    pub sub_gate: T,
 
     /// Flag indicating whether the opcode is `ADD`.
     #[picus(selector)]
@@ -201,8 +202,11 @@ impl AddSubImmChip {
         let operand_1 = if is_add { event.b } else { event.a };
         let operand_2 = event.c;
 
-        cols.add_operation.populate(blu, operand_1, operand_2);
-        cols.operand_1 = Word::from(operand_1);
+        cols.carry = crate::operations::word_add_carries(operand_1, operand_2);
+        let not_a0 = F::ONE - cols.frame.op_a_0;
+        cols.add_gate = cols.is_add * not_a0;
+        cols.sub_gate = cols.is_sub * not_a0;
+        let _ = blu;
     }
 }
 
@@ -221,37 +225,32 @@ where
         let local = main.current_slice();
         let local: &AddSubImmCols<AB::Var> = (*local).borrow();
 
-        // Evaluate the addition operation.
-        AddOperation::<AB::F>::eval(
-            builder,
-            local.operand_1,
-            local.frame.op_c_val(),
-            local.add_operation,
-            local.is_add + local.is_sub,
-        );
-
         let is_real = local.is_add + local.is_sub;
         builder.assert_bool(local.is_add);
         builder.assert_bool(local.is_sub);
         builder.assert_bool(is_real.clone());
 
-        // Bind this chip's operand columns to the frame's register-file view,
-        // exactly as the register-form chip does; the only difference is that
-        // the second operand is the frame's IMMEDIATE rather than a register
-        // read.  For ADD `a = operand_1 + op_c`; for SUB the roles of `a` and
-        // `b` swap (`operand_1 = a`, `add_operation.value = b`).
-        builder
-            .when(local.is_add)
-            .when_not(local.frame.op_a_0)
-            .assert_word_eq(local.add_operation.value, *local.frame.op_a_access.value());
-        builder.when(local.is_add).assert_word_eq(local.operand_1, local.frame.op_b_val());
-        builder
-            .when(local.is_sub)
-            .when_not(local.frame.op_a_0)
-            .assert_word_eq(local.operand_1, *local.frame.op_a_access.value());
-        builder
-            .when(local.is_sub)
-            .assert_word_eq(local.add_operation.value, local.frame.op_b_val());
+        // The addition runs DIRECTLY on the frame's words — the second
+        // operand is the frame's IMMEDIATE rather than a register read; see
+        // the register-form chip for the byte-shape argument.
+        builder.assert_eq(
+            local.add_gate,
+            local.is_add * (AB::Expr::ONE - local.frame.op_a_0),
+        );
+        builder.assert_eq(
+            local.sub_gate,
+            local.is_sub * (AB::Expr::ONE - local.frame.op_a_0),
+        );
+        builder.assert_bool(local.carry[0]);
+        builder.assert_bool(local.carry[1]);
+        builder.assert_bool(local.carry[2]);
+        let av = *local.frame.op_a_access.value();
+        let bv = local.frame.op_b_val();
+        let cv = local.frame.op_c_val();
+        // ADD: `a = b + c`.
+        crate::operations::eval_word_add_gated(builder, local.add_gate, bv, cv, av, local.carry);
+        // SUB: `a = b - c`, verified as `b = a + c`.
+        crate::operations::eval_word_add_gated(builder, local.sub_gate, av, cv, bv, local.carry);
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining.  ADD/SUB are sequential,

@@ -16,15 +16,11 @@ use zkm_core_executor::{
     ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_pcs::{
-    air::{MachineAir, PicusInfo, ZKMAirBuilder},
-    Word,
-};
+use zkm_pcs::air::{MachineAir, PicusInfo, ZKMAirBuilder};
 
 use crate::{
     air::WordAirBuilder,
     frame::{eval_r_type_frame, RTypeFrameCols},
-    operations::AddOperation,
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
@@ -51,12 +47,22 @@ pub struct AddSubCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// Instance of `AddOperation` to handle addition logic in `AddSubChip`'s ALU operations.
-    /// It's result will be `a` for the add operation and `b` for the sub operation.
-    pub add_operation: AddOperation<T>,
+    /// The carry bits of the byte-wise addition this row verifies: for ADD
+    /// `b + c == a`, for SUB `a + c == b` (i.e. `a = b - c`).  The two cases
+    /// are disjoint, so they share the columns.  There is no separate result
+    /// or operand word — every word involved is a frame register access, all
+    /// of them byte-shaped already (the frame checks its `op_a` commit; the
+    /// reads inherit byte shape from their checked writers through the
+    /// register file), so the row adds NO byte range checks either.
+    pub carry: [T; 3],
 
-    /// The first input operand.  This will be `b` for add operations and `a` for sub operations.
-    pub operand_1: Word<T>,
+    /// `is_add * (1 - op_a_0)` — a discarded register-0 result leaves the
+    /// equation ungated (the frame pins the commit to zero, which the true
+    /// sum need not equal).  Materialized to keep the carry constraints at
+    /// degree 3.
+    pub add_gate: T,
+    /// `is_sub * (1 - op_a_0)`.
+    pub sub_gate: T,
 
 
     /// Flag indicating whether the opcode is `ADD`.
@@ -201,8 +207,11 @@ impl AddSubChip {
         let operand_1 = if is_add { event.b } else { event.a };
         let operand_2 = event.c;
 
-        cols.add_operation.populate(blu, operand_1, operand_2);
-        cols.operand_1 = Word::from(operand_1);
+        cols.carry = crate::operations::word_add_carries(operand_1, operand_2);
+        let not_a0 = F::ONE - cols.frame.op_a_0;
+        cols.add_gate = cols.is_add * not_a0;
+        cols.sub_gate = cols.is_sub * not_a0;
+        let _ = blu;
     }
 }
 
@@ -221,39 +230,32 @@ where
         let local = main.current_slice();
         let local: &AddSubCols<AB::Var> = (*local).borrow();
 
-        // Evaluate the addition operation.
-        AddOperation::<AB::F>::eval(
-            builder,
-            local.operand_1,
-            local.frame.op_c_val(),
-            local.add_operation,
-            local.is_add + local.is_sub,
-        );
-
         let is_real = local.is_add + local.is_sub;
         builder.assert_bool(local.is_add);
         builder.assert_bool(local.is_sub);
         builder.assert_bool(is_real.clone());
 
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).  For
-        // ADD `a = operand_1 + op_c`; for SUB the roles of `a` and `b` swap
-        // (`operand_1 = a`, `add_operation.value = b`).  `operand_1` stays a
-        // column because it SELECTS between two frame values; the second
-        // operand is always `op_c`, so it is read straight off the frame.
-        builder
-            .when(local.is_add)
-            .when_not(local.frame.op_a_0)
-            .assert_word_eq(local.add_operation.value, *local.frame.op_a_access.value());
-        builder.when(local.is_add).assert_word_eq(local.operand_1, local.frame.op_b_val());
-        builder
-            .when(local.is_sub)
-            .when_not(local.frame.op_a_0)
-            .assert_word_eq(local.operand_1, *local.frame.op_a_access.value());
-        builder
-            .when(local.is_sub)
-            .assert_word_eq(local.add_operation.value, local.frame.op_b_val());
+        // The addition runs DIRECTLY on the frame's register accesses — no
+        // operand or result mirror columns, and no byte range checks (see the
+        // column doc).  A discarded register-0 result ungates the equation.
+        builder.assert_eq(
+            local.add_gate,
+            local.is_add * (AB::Expr::ONE - local.frame.op_a_0),
+        );
+        builder.assert_eq(
+            local.sub_gate,
+            local.is_sub * (AB::Expr::ONE - local.frame.op_a_0),
+        );
+        builder.assert_bool(local.carry[0]);
+        builder.assert_bool(local.carry[1]);
+        builder.assert_bool(local.carry[2]);
+        let av = *local.frame.op_a_access.value();
+        let bv = local.frame.op_b_val();
+        let cv = local.frame.op_c_val();
+        // ADD: `a = b + c`.
+        crate::operations::eval_word_add_gated(builder, local.add_gate, bv, cv, av, local.carry);
+        // SUB: `a = b - c`, verified as `b = a + c`.
+        crate::operations::eval_word_add_gated(builder, local.sub_gate, av, cv, bv, local.carry);
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and

@@ -30,7 +30,9 @@ __ZKM_HOSTDEV__ void event_to_row(
     auto operand_1 = is_add ? event.b : event.a;
     auto operand_2 = event.c;
 
-    add_sub::populate<F>(cols.add_operation, operand_1, operand_2);
-    write_word_from_u32_v2<F>(cols.operand_1, operand_1);
+    add_sub::populate_carries<F>(cols.carry, operand_1, operand_2);
+    const F not_a0 = F::one() - cols.frame.op_a_0;
+    cols.add_gate = cols.is_add * not_a0;
+    cols.sub_gate = cols.is_sub * not_a0;
 }
 }  // namespace zkm_core_machine_sys::add_sub_imm
