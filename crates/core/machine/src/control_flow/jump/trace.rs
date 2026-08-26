@@ -114,7 +114,6 @@ impl JumpChip {
         cols.is_jumpi = F::from_bool(matches!(event.opcode, Opcode::Jumpi));
         cols.is_jumpdirect = F::from_bool(matches!(event.opcode, Opcode::JumpDirect));
 
-        cols.op_a_value = event.a.into();
         cols.op_a_range_checker.populate(blu, event.a);
         cols.next_pc = Word::from(event.next_pc);
         cols.next_pc_range_checker.populate(blu, event.next_pc);

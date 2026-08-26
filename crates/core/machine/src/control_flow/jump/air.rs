@@ -5,7 +5,7 @@ use zkm_pcs::air::BaseAirBuilder;
 use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::Opcode;
-use zkm_pcs::{air::ZKMAirBuilder, Word};
+use zkm_pcs::air::ZKMAirBuilder;
 
 use crate::air::WordAirBuilder;
 
@@ -56,29 +56,24 @@ where
             is_real.clone(),
         );
 
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit.  Gated by op_a_0: a no-link jump discards the link write,
-        // and the chip's link column keeps the logical value.
-        builder
-            .when(is_real.clone())
-            .when_not(local.frame.instruction.op_a_0)
-            .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
-
-        // Verify that the local.next_pc + 4 is op_a_value for all jump instructions.
-        builder.when(is_real.clone()).assert_eq(
-            local.op_a_value.reduce::<AB>(),
+        // The link value lives directly in the frame's committed `op_a`
+        // register access — there is no separate link column any more.  A
+        // no-link jump discards the write and the frame pins the commit to
+        // ZERO, so the link equation is gated by `op_a_0`; on those rows the
+        // committed zero still passes the word range check below.
+        let link = *local.frame.op_a_access.value();
+        builder.when(is_real.clone()).when_not(local.frame.instruction.op_a_0).assert_eq(
+            link.reduce::<AB>(),
             local.next_pc.reduce::<AB>() + AB::F::from_u32(4),
         );
 
-        // Range check op_a, next_pc, and next_next_pc.
+        // Range check the link, next_pc, and next_next_pc.
         // SAFETY: `is_real` is already checked to be boolean.
-        // `op_a_value` is checked to be a valid word, as it matches the one in the CpuChip.
-        // In the CpuChip's `eval_registers`, it's checked that this is valid word saved in op_a when `op_a_0 = 0`
-        // Combined with the `op_a_value = next_pc + 4` check above, this fully constrains `op_a_value`.
+        // The frame range checks the committed word's BYTES; the KoalaBear
+        // check on top makes the `reduce()` binding above canonical.
         KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,
-            local.op_a_value,
+            link,
             local.op_a_range_checker,
             is_real.clone(),
         );

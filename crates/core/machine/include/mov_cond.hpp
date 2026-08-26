@@ -19,13 +19,30 @@ namespace zkm_core_machine_sys::mov_cond {
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
 
-        write_word_from_u32_v2<F>(cols.op_a_value, event.a);
-        write_word_from_u32_v2<F>(cols.prev_a_value, event.prev_a);
-
-        populate_is_zero_word_operaion(cols.c_eq_0, u32_to_word<F>(event.c));
-
         cols.is_meq = F::from_bool(event.opcode == Opcode::MEQ);
         cols.is_mne = F::from_bool(event.opcode == Opcode::MNE);
         cols.is_wsbh = F::from_bool(event.opcode == Opcode::WSBH);
+
+        // Mirrors misc/mov_cond/mod.rs: the c == 0 limb IsZeros and the
+        // fired-move selector, on the conditional-move rows only.
+        if (event.opcode != Opcode::WSBH) {
+            const auto cb = u32_to_le_bytes(event.c);
+            const F c_lo = F::from_canonical_u32((uint32_t)cb[0] + ((uint32_t)cb[1] << 8));
+            const F c_hi = F::from_canonical_u32((uint32_t)cb[2] + ((uint32_t)cb[3] << 8));
+            if (c_lo == F::zero()) {
+                cols.c_eq_lo = F::one();
+            } else {
+                cols.c_eq_lo_inv = c_lo.reciprocal();
+            }
+            if (c_hi == F::zero()) {
+                cols.c_eq_hi = F::one();
+            } else {
+                cols.c_eq_hi_inv = c_hi.reciprocal();
+            }
+            cols.c_eq_0 = cols.c_eq_lo * cols.c_eq_hi;
+            const bool fired =
+                (event.opcode == Opcode::MEQ) ? (event.c == 0) : (event.c != 0);
+            cols.sel_moved = F::from_bool(fired);
+        }
     }
 }  // namespace zkm::mov_cond

@@ -28,8 +28,6 @@ pub struct JumpColumns<T> {
     pub next_next_pc: Word<T>,
     pub next_next_pc_range_checker: KoalaBearWordRangeChecker<T>,
 
-    /// The value of the first operand.
-    pub op_a_value: Word<T>,
 
     /// Jump Instructions Selectors.
     #[picus(selector)]

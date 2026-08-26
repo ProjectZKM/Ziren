@@ -7,7 +7,7 @@ use core::{
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
-use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
@@ -17,12 +17,11 @@ use zkm_core_executor::{
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_pcs::{
     air::{BaseAirBuilder, MachineAir, ZKMAirBuilder},
-    {PicusInfo, Word},
+    PicusInfo,
 };
 
 use crate::{air::WordAirBuilder, CoreChipError};
 
-use crate::operations::IsZeroWordOperation;
 
 use crate::utils::{next_multiple_of_32, zeroed_f_vec};
 
@@ -41,12 +40,20 @@ pub struct MovCondCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// The value of the second operand.
-    pub op_a_value: Word<T>,
-    pub prev_a_value: Word<T>,
+    /// `op_c == 0`, via IsZeros over its two 16-bit limbs (`c0 + 256*c1`
+    /// and `c2 + 256*c3`): with byte-shaped words each limb is in
+    /// `[0, 65535]`, so it vanishes in the field iff both bytes do.  The
+    /// old per-byte `IsZeroWordOperation` spent 11 columns on the same fact.
+    pub c_eq_lo: T,
+    pub c_eq_lo_inv: T,
+    pub c_eq_hi: T,
+    pub c_eq_hi_inv: T,
+    /// `c_eq_lo * c_eq_hi`, materialized.
+    pub c_eq_0: T,
 
-    /// Whether c equals 0.
-    pub c_eq_0: IsZeroWordOperation<T>,
+    /// `is_meq * c_eq_0 + is_mne * (1 - c_eq_0)` — whether the conditional
+    /// move fires, materialized so the register binds stay at degree <= 3.
+    pub sel_moved: T,
 
     /// Flag indicating whether the opcode is `MNE`.
     #[picus(selector)]
@@ -159,14 +166,32 @@ impl MovCondChip {
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
 
-        cols.op_a_value = event.a.into();
-        cols.prev_a_value = event.prev_a.into();
-
-        cols.c_eq_0.populate(event.c);
-
         cols.is_meq = F::from_bool(matches!(event.opcode, Opcode::MEQ));
         cols.is_mne = F::from_bool(matches!(event.opcode, Opcode::MNE));
         cols.is_wsbh = F::from_bool(matches!(event.opcode, Opcode::WSBH));
+
+        if !matches!(event.opcode, Opcode::WSBH) {
+            let cb = event.c.to_le_bytes();
+            let c_lo = F::from_u32(cb[0] as u32 + ((cb[1] as u32) << 8));
+            let c_hi = F::from_u32(cb[2] as u32 + ((cb[3] as u32) << 8));
+            if c_lo == F::ZERO {
+                cols.c_eq_lo = F::ONE;
+            } else {
+                cols.c_eq_lo_inv = c_lo.inverse();
+            }
+            if c_hi == F::ZERO {
+                cols.c_eq_hi = F::ONE;
+            } else {
+                cols.c_eq_hi_inv = c_hi.inverse();
+            }
+            cols.c_eq_0 = cols.c_eq_lo * cols.c_eq_hi;
+            let fired = match event.opcode {
+                Opcode::MEQ => event.c == 0,
+                Opcode::MNE => event.c != 0,
+                _ => unreachable!(),
+            };
+            cols.sel_moved = F::from_bool(fired);
+        }
     }
 }
 
@@ -201,55 +226,47 @@ where
             AB::Expr::ZERO,
             is_real.clone(),
         );
-        // Bind `prev_a_value` to the access's previous value EXACTLY on the
-        // rows that use it (MNE/MEQ keep the old value on a failed condition);
-        // WSBH is a plain write whose prev column is unused.
+        // `op_c == 0` via the two 16-bit limb IsZeros, live on the
+        // conditional-move rows only (WSBH ignores `op_c`).
+        let mov = local.is_mne + local.is_meq;
+        let cv = local.frame.op_c_val();
+        let two_pow_8 = AB::Expr::from_u32(1 << 8);
+        let c_lo = cv[0] + cv[1] * two_pow_8.clone();
+        let c_hi = cv[2] + cv[3] * two_pow_8;
+        builder.when(mov.clone()).assert_zero(local.c_eq_lo * c_lo.clone());
         builder
-            .when(local.is_mne + local.is_meq)
-            .assert_word_eq(local.prev_a_value, local.frame.op_a_access.prev_value);
-
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit; the op_a write is gated by op_a_0 (discarded).
+            .when(mov.clone())
+            .assert_eq(local.c_eq_lo, AB::Expr::ONE - c_lo * local.c_eq_lo_inv);
+        builder.when(mov.clone()).assert_zero(local.c_eq_hi * c_hi.clone());
         builder
-            .when(is_real.clone())
-            .when_not(local.frame.instruction.op_a_0)
-            .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
+            .when(mov.clone())
+            .assert_eq(local.c_eq_hi, AB::Expr::ONE - c_hi * local.c_eq_hi_inv);
+        builder.when(mov.clone()).assert_eq(local.c_eq_0, local.c_eq_lo * local.c_eq_hi);
 
-        IsZeroWordOperation::<AB::F>::eval(
-            builder,
-            local.frame.op_c_val().map(|x| x.into()),
-            local.c_eq_0,
-            is_real.clone(),
+        // Whether the conditional move fires.  Unguarded: every term carries
+        // a selector, so the padding row's zeros satisfy it.
+        builder.assert_eq(
+            local.sel_moved,
+            local.is_meq * local.c_eq_0 + local.is_mne * (AB::Expr::ONE - local.c_eq_0),
         );
 
-        // Constraints for condition move result:
-        // op_a = op_b, when condition is true.
-        // Otherwise, op_a remains unchanged.
+        // Conditional-move semantics, straight against the frame's committed
+        // register access.  A fired move copies `op_b` (unless the write is a
+        // discarded register-0 write, which the frame pins to zero); a failed
+        // one carries the previous value through unchanged — register 0's
+        // previous value IS zero, so that case needs no gate.
         {
+            let av = *local.frame.op_a_access.value();
             builder
-                .when(local.is_meq)
-                .when(local.c_eq_0.result)
-                .assert_word_eq(local.op_a_value, local.frame.op_b_val());
-
+                .when(local.sel_moved)
+                .when_not(local.frame.instruction.op_a_0)
+                .assert_word_eq(av, local.frame.op_b_val());
             builder
-                .when(local.is_meq)
-                .when_not(local.c_eq_0.result)
-                .assert_word_eq(local.op_a_value, local.prev_a_value);
-
-            builder
-                .when(local.is_mne)
-                .when_not(local.c_eq_0.result)
-                .assert_word_eq(local.op_a_value, local.frame.op_b_val());
-
-            builder
-                .when(local.is_mne)
-                .when(local.c_eq_0.result)
-                .assert_word_eq(local.op_a_value, local.prev_a_value);
+                .when(mov - local.sel_moved)
+                .assert_word_eq(av, local.frame.op_a_access.prev_value);
         }
 
         self.eval_wsbh(builder, local);
-        builder.when(local.is_wsbh).assert_word_zero(local.prev_a_value);
         builder.assert_bool(local.is_mne);
         builder.assert_bool(local.is_meq);
         builder.assert_bool(local.is_wsbh);
@@ -263,13 +280,16 @@ impl MovCondChip {
         builder: &mut AB,
         local: &MovCondCols<AB::Var>,
     ) {
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[0], local.frame.op_b_val()[1]);
-
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[1], local.frame.op_b_val()[0]);
-
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[2], local.frame.op_b_val()[3]);
-
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[3], local.frame.op_b_val()[2]);
+        // The swapped bytes, bound to the committed register write through a
+        // `(1 - op_a_0)` factor (a register-0 destination is discarded and
+        // pinned to zero by the frame) — same degree as the old plain bind.
+        let av = *local.frame.op_a_access.value();
+        let bv = local.frame.op_b_val();
+        let not_a0 = AB::Expr::ONE - local.frame.instruction.op_a_0;
+        builder.when(local.is_wsbh).assert_eq(av[0], not_a0.clone() * bv[1]);
+        builder.when(local.is_wsbh).assert_eq(av[1], not_a0.clone() * bv[0]);
+        builder.when(local.is_wsbh).assert_eq(av[2], not_a0.clone() * bv[3]);
+        builder.when(local.is_wsbh).assert_eq(av[3], not_a0 * bv[2]);
     }
 }
 

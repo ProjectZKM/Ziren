@@ -22,7 +22,6 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.is_jumpi = F::from_bool(event.opcode == Opcode::Jumpi);
     cols.is_jumpdirect = F::from_bool(event.opcode == Opcode::JumpDirect);
 
-    write_word_from_u32_v2<F>(cols.op_a_value, event.a);
     populate_range_checker(cols.op_a_range_checker, event.a);
     write_word_from_u32_v2<F>(cols.next_pc, event.next_pc);
     populate_range_checker(cols.next_pc_range_checker, event.next_pc);
