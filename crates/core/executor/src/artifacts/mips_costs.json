@@ -44,7 +44,7 @@
   "Secp256k1AddAssign": 1523,
   "AddSub": 43,
   "Poseidon2Permute": 573,
-  "Mul": 83,
+  "Mul": 79,
   "ShaExtend": 8208,
   "Bls12381AddAssign": 2291,
   "ShiftLeftImm": 59,

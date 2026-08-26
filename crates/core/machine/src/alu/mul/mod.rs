@@ -89,7 +89,6 @@ pub struct MulCols<T> {
     pub hi: Word<T>,
 
     /// The output operand.
-    pub a: Word<T>,
 
 
 
@@ -267,7 +266,6 @@ impl MulChip {
         }
 
         let hi_word = event.hi.to_le_bytes();
-        let a_word = event.a.to_le_bytes();
         let b_word = event.b.to_le_bytes();
         let c_word = event.c.to_le_bytes();
 
@@ -335,7 +333,6 @@ impl MulChip {
 
         cols.product = product.map(F::from_u32);
         cols.hi = Word(hi_word.map(F::from_u8));
-        cols.a = Word(a_word.map(F::from_u8));
         cols.is_real = F::ONE;
         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
         cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);
@@ -440,7 +437,6 @@ where
         {
             let has_hi = local.is_mult + local.is_multu;
             for i in 0..WORD_SIZE {
-                builder.assert_eq(product[i], local.a[i]);
                 builder.when(has_hi.clone()).assert_eq(product[i + WORD_SIZE], local.hi[i]);
             }
         }
@@ -490,13 +486,14 @@ where
 
         let _ = opcode;
 
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
-        builder
-            .when(local.is_real)
-            .when_not(local.frame.op_a_0)
-            .assert_word_eq(local.a, *local.frame.op_a_access.value());
+        // Bind the product's LOW WORD to the frame's register-file view
+        // directly — the old `a` column was a pure mirror of `product[0..4]`.
+        // A discarded register-0 write is frame-pinned to zero, so the bind
+        // gates on `op_a_0` exactly as before.
+        builder.when(local.is_real).when_not(local.frame.op_a_0).assert_word_eq(
+            Word([local.product[0], local.product[1], local.product[2], local.product[3]]),
+            *local.frame.op_a_access.value(),
+        );
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining.  MUL/MULT/MULTU are

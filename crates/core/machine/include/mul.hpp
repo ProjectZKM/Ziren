@@ -115,7 +115,6 @@ namespace zkm_core_machine_sys::mul {
             cols.product[i] = F::from_canonical_u32(product[i]);
         }
         write_word_from_u32_v2<F>(cols.hi, event.hi);
-        write_word_from_u32_v2<F>(cols.a, event.a);
         cols.is_real = F::one();
         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
         cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);
