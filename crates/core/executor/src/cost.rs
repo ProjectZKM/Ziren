@@ -410,15 +410,21 @@ impl ShardSplitAccumulator {
     /// `cpu_cycles` is the executed-cycle count (`clk / 5`); see the type-level note on why
     /// it is passed in rather than accumulated.
     /// With the Cpu chip gone its width is absent from `costs` (EnumMap defaults it
-    /// to 0), so the `cpu_cycles` term contributes NO area; it still participates in
-    /// the HEIGHT cap, which also bounds the 24-bit clk decomposition every frame
-    /// range-checks.
+    /// to 0), so the `cpu_cycles` term contributes NO area.  It no longer participates
+    /// in the HEIGHT cap either: the cap's job is keeping every REAL chip under the
+    /// recursion row cube, and the Cpu pseudo-term only bounded clk — which the
+    /// executor's `clk_exit` fence (`CORE_SHARD_CLK_LIMIT`, the width the frame's
+    /// 25-bit clk decomposition range-checks) bounds independently and terminally.
+    /// Measured Aug24 (block 21M): the pseudo-term closed 43 of 48 shards while the
+    /// tallest REAL chip sat at 25% of the cap.  Removing it moves shards to the
+    /// AREA fence — see `ELEMENT_THRESHOLD` for the budget that keeps the biggest
+    /// shard's LogUp-GKR slab on a 32 GiB card.  Measured on reth (Aug26): 164
+    /// shards -> 132, combined 158.7 -> 142.0 s.
     #[inline]
     #[must_use]
     pub fn check_shard_limit(&self, cpu_cycles: u64) -> (bool, bool) {
         let area = self.trace_area + cpu_cycles * self.costs[MipsAirId::Cpu];
-        let max_height = if cpu_cycles > self.max_height { cpu_cycles } else { self.max_height };
-        (area >= self.element_threshold, max_height >= self.height_threshold)
+        (area >= self.element_threshold, self.max_height >= self.height_threshold)
     }
 
     /// The live trace area, including the `Cpu` contribution. For diagnostics only.
@@ -594,9 +600,14 @@ mod tests {
         acc.add_opcode(Opcode::ADD, 1);
         assert_eq!(acc.check_shard_limit(2), (true, false));
 
-        // Height budget, independent of area. `NUM_REGISTERS` seeded rows sit below it.
-        let acc = ShardSplitAccumulator::new(&costs, u64::MAX, 100);
-        assert_eq!(acc.check_shard_limit(99), (false, false));
-        assert_eq!(acc.check_shard_limit(100), (false, true));
+        // Height budget, independent of area — and of CYCLES: the Cpu pseudo-term
+        // is gone (clk is bounded by the executor's terminal `clk_exit` fence),
+        // so only a REAL chip's rows can trip the height half.
+        let mut acc = ShardSplitAccumulator::new(&costs, u64::MAX, 100);
+        assert_eq!(acc.check_shard_limit(1_000_000), (false, false));
+        for _ in 0..100 {
+            acc.add_opcode(Opcode::ADD, 1);
+        }
+        assert_eq!(acc.check_shard_limit(1_000_000), (false, true));
     }
 }
