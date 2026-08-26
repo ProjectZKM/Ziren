@@ -274,6 +274,19 @@ where
         f(self.base_alu(DivFAssert, out, diff, Imm::F(C::F::ZERO)));
     }
 
+    /// `base_assert_eq(lhs, 0)` without the copy: `SubF(diff, lhs, 0)` is the
+    /// identity map, so bind `lhs` to the assertion divide directly.  The AIR
+    /// constraint is unchanged (`in2 * out == in1` with `in2 = 0` forces
+    /// `in1 == 0`), and the runtime sees the same `0/0` case an honest
+    /// `base_assert_eq` already produces — one instruction instead of two, on
+    /// the most common assert in the tree (booleanity, padded-row and digest
+    /// zero checks).
+    fn base_assert_zero(&mut self, lhs: impl Reg<C>, mut f: impl FnMut(Instruction<C::F>)) {
+        use BaseAluOpcode::*;
+        let [out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
+        f(self.base_alu(DivFAssert, out, lhs, Imm::F(C::F::ZERO)));
+    }
+
     fn base_assert_ne(
         &mut self,
         lhs: impl Reg<C>,
@@ -298,6 +311,14 @@ where
 
         f(self.ext_alu(SubE, diff, lhs, rhs));
         f(self.ext_alu(DivEAssert, out, diff, Imm::EF(C::EF::ZERO)));
+    }
+
+    /// Ext twin of `base_assert_zero`: `ext_assert_eq(lhs, 0)` as the single
+    /// assertion divide, the `SubE` copy elided.
+    fn ext_assert_zero(&mut self, lhs: impl Reg<C>, mut f: impl FnMut(Instruction<C::F>)) {
+        use ExtAluOpcode::*;
+        let [out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
+        f(self.ext_alu(DivEAssert, out, lhs, Imm::EF(C::EF::ZERO)));
     }
 
     fn ext_assert_ne(
@@ -512,8 +533,11 @@ where
             DslIr::AssertEqV(lhs, rhs) => self.base_assert_eq(lhs, rhs, f),
             DslIr::AssertEqF(lhs, rhs) => self.base_assert_eq(lhs, rhs, f),
             DslIr::AssertEqE(lhs, rhs) => self.ext_assert_eq(lhs, rhs, f),
+            DslIr::AssertEqVI(lhs, rhs) if rhs == C::F::ZERO => self.base_assert_zero(lhs, f),
             DslIr::AssertEqVI(lhs, rhs) => self.base_assert_eq(lhs, Imm::F(rhs), f),
+            DslIr::AssertEqFI(lhs, rhs) if rhs == C::F::ZERO => self.base_assert_zero(lhs, f),
             DslIr::AssertEqFI(lhs, rhs) => self.base_assert_eq(lhs, Imm::F(rhs), f),
+            DslIr::AssertEqEI(lhs, rhs) if rhs == C::EF::ZERO => self.ext_assert_zero(lhs, f),
             DslIr::AssertEqEI(lhs, rhs) => self.ext_assert_eq(lhs, Imm::EF(rhs), f),
 
             DslIr::AssertNeV(lhs, rhs) => self.base_assert_ne(lhs, rhs, f),
