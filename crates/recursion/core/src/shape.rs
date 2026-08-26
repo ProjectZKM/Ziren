@@ -384,6 +384,25 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (ext2felt.clone(), 16),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
+            // The band above with one more bit on the ALU / MemoryVar
+            // dimensions.  At the area-fenced shard sizes (`ELEMENT_THRESHOLD`
+            // 460M, Aug26) the taller core shards push 17 of 49 leaf classes
+            // and 10 compose levels JUST past the 2^18 ALU caps (measured
+            // maxima: BaseAlu 294,560, ExtAlu 306,344, MemoryVar 341,011 -
+            // 447,323), and the next band that fit cost 118.1M committed
+            // cells against this rung's 95.5M.  Poseidon2 stays at 2^17
+            // (maxima ~116K) - at 362 cells/row that one cap is most of any
+            // band's area.
+            [
+                (mem_var.clone(), 19),
+                (select.clone(), 19),
+                (mem_const.clone(), 12),
+                (base_alu.clone(), 19),
+                (ext_alu.clone(), 19),
+                (poseidon2_wide.clone(), 17),
+                (ext2felt.clone(), 16),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
             // SELECT-HEAVY deep compose band (tendermint + goat).  The 100-bit
             // BaseFold params (inner blowup 1->2, 94->124 queries, +1 Merkle
             // level) grew the compose-tree verify circuit past the
