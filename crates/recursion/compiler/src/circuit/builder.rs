@@ -17,6 +17,7 @@ pub trait CircuitV2Builder<C: Config> {
         bits: impl IntoIterator<Item = Felt<<C as Config>::F>>,
     ) -> Felt<C::F>;
     fn num2bits_v2_f(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>>;
+    fn hint_bits_boolean_v2(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>>;
     fn exp_reverse_bits_v2(&mut self, input: Felt<C::F>, power_bits: Vec<Felt<C::F>>)
         -> Felt<C::F>;
     fn batch_fri_v2(
@@ -113,6 +114,32 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         // Check that the original number matches the bit decomposition.
         self.assert_felt_eq(x, num);
 
+        output
+    }
+
+    /// Hint the low `num_bits` bits of `num` WITHOUT binding them back to
+    /// `num`: booleanity is asserted per bit, and nothing else — no
+    /// recomposition assert and no modulus range check.
+    ///
+    /// Sound ONLY when the caller separately pins the bit vector's VALUE — the
+    /// jagged verifier does, through the step-(7) prefix-sum walk (every
+    /// column's Horner-recomposed prefix sum is asserted against the running
+    /// row-count total) and the final-area assert.  `num_bits <= 30` is a hard
+    /// requirement: a 30-bit boolean vector's value is at most 2^30 - 1, below
+    /// the KoalaBear modulus, so bits -> felt is injective and the walk's felt
+    /// equation pins the bits exactly; at 31 bits two boolean vectors can map
+    /// to one felt (wraparound) and the caller must use `num2bits_v2_f`.
+    fn hint_bits_boolean_v2(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>> {
+        assert!(
+            num_bits <= 30,
+            "hint_bits_boolean_v2: {num_bits} bits could wrap the modulus; \
+             use num2bits_v2_f"
+        );
+        let output = std::iter::from_fn(|| Some(self.uninit())).take(num_bits).collect::<Vec<_>>();
+        self.push_op(DslIr::CircuitV2HintBitsF(output.clone(), num));
+        for &bit in output.iter() {
+            self.assert_felt_eq(bit * (bit - C::F::ONE), C::F::ZERO);
+        }
         output
     }
 

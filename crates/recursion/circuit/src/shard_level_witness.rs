@@ -2143,7 +2143,25 @@ where
         // landing on bands 1-4 + core) ⇒ byte-identical there.
         let num2bits_be = |b: &mut Builder<C>, v: Felt<C::F>| -> Vec<Felt<C::F>> {
             let dec_bits = bits_per_entry.min(31);
-            let mut bits = b.num2bits_v2_f(v, dec_bits);
+            // LEAN DECOMPOSITION — hint + booleanity only, no recomposition
+            // assert and no modulus check.  The bits' VALUE is pinned
+            // downstream instead: the jagged verifier's step-(7) prefix-sum
+            // walk asserts every column's Horner-recomposed entry against the
+            // running row-count total, and the final entry against the
+            // committed area — the same binding SP1 relies on for its
+            // witnessed prefix-sum points.  Paying the in-`num2bits`
+            // recomposition here as well bound each entry TWICE; measured, the
+            // duplicate was ~119 base-ALU ops per real column, the single
+            // largest slice of the leaf program (leaf_lift, 415-736K instrs).
+            // At <= 30 bits a boolean vector's value cannot wrap the modulus,
+            // so the walk's felt equation pins the bits exactly; the 31-bit
+            // widths (band-5 total areas past 2^30) keep the full-strength
+            // path.
+            let mut bits = if dec_bits <= 30 {
+                b.hint_bits_boolean_v2(v, dec_bits)
+            } else {
+                b.num2bits_v2_f(v, dec_bits)
+            };
             bits.reverse(); // big-endian (MSB first), matching the baked path
             if bits_per_entry > dec_bits {
                 // Prepend zero MSBs so the layout width == bits_per_entry,
