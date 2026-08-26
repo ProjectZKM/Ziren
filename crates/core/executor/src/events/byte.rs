@@ -94,6 +94,14 @@ pub trait ByteRecord {
         ls.iter().for_each(|x| self.add_u16_range_check(*x));
     }
 
+    /// Adds `ByteLookupEvent`s to verify that all the field elements in the input slice fit in
+    /// a u16.
+    fn add_u16_range_checks_field<F: PrimeField32>(&mut self, field_values: &[F]) {
+        self.add_u16_range_checks(
+            &field_values.iter().map(|x| x.as_canonical_u32() as u16).collect::<Vec<_>>(),
+        );
+    }
+
     /// Adds a `ByteLookupEvent` to compute the bitwise OR of the two input values.
     fn lookup_or(&mut self, b: u8, c: u8) {
         self.add_byte_lookup_event(ByteLookupEvent {

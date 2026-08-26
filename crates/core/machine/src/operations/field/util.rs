@@ -55,11 +55,3 @@ pub fn compute_root_quotient_and_shift<F: PrimeField32>(
     // Shifting the witness polynomial to make it positive
     p_quotient_coefficients.into_iter().map(|x| x + F::from_u64(offset_u64)).collect::<Vec<F>>()
 }
-
-#[inline]
-pub fn split_u16_limbs_to_u8_limbs<F: PrimeField32>(slice: &[F]) -> (Vec<F>, Vec<F>) {
-    (
-        slice.iter().map(|x| x.as_canonical_u64() as u8).map(|x| F::from_u8(x)).collect(),
-        slice.iter().map(|x| (x.as_canonical_u64() >> 8) as u8).map(|x| F::from_u8(x)).collect(),
-    )
-}

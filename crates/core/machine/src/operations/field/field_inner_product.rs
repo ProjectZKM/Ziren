@@ -9,7 +9,7 @@ use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::{Polynomial, ZKMAirBuilder};
 
 use super::{
-    util::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
+    util::compute_root_quotient_and_shift,
     util_air::eval_field_operation,
 };
 use crate::air::WordAirBuilder;
@@ -26,8 +26,9 @@ pub struct FieldInnerProductCols<T, P: FieldParameters> {
     /// The result of `a inner product b`, where a, b are vectors of field elements
     pub result: Limbs<T, P::Limbs>,
     pub(crate) carry: Limbs<T, P::Limbs>,
-    pub(crate) witness_low: Limbs<T, P::Witness>,
-    pub(crate) witness_high: Limbs<T, P::Witness>,
+    /// The root-quotient witness, offset-shifted into `[0, 2^16)`; u16-checked (see
+    /// `FieldOpCols::witness`).
+    pub(crate) witness: Limbs<T, P::Witness>,
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldInnerProductCols<F, P> {
@@ -69,18 +70,16 @@ impl<F: PrimeField32, P: FieldParameters> FieldInnerProductCols<F, P> {
             P::NB_BITS_PER_LIMB as u32,
             P::NB_WITNESS_LIMBS,
         );
-        let (p_witness_low, p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
+
 
         self.result = p_result.into();
         self.carry = p_carry.into();
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        self.witness = Limbs(p_witness.try_into().unwrap());
 
         // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
+        record.add_u16_range_checks_field(&self.witness.0);
 
         result.clone()
     }
@@ -118,16 +117,14 @@ where
         let p_limbs = Polynomial::from_iter(P::modulus_field_iter::<AB::F>().map(AB::Expr::from));
         let p_vanishing = &p_inner_product_minus_result - &(&p_carry * &p_limbs);
 
-        let p_witness_low = self.witness_low.0.iter().into();
-        let p_witness_high = self.witness_high.0.iter().into();
+        let p_witness = self.witness.0.iter().into();
 
-        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high);
+        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness);
 
         // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_low.0, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_high.0, is_real);
+        builder.slice_range_check_u16(&self.witness.0, is_real);
     }
 }
 

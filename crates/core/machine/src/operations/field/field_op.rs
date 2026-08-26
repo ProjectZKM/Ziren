@@ -11,7 +11,7 @@ use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::{Polynomial, ZKMAirBuilder};
 
 use super::{
-    util::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
+    util::compute_root_quotient_and_shift,
     util_air::eval_field_operation,
 };
 use zkm_curves::params::{FieldParameters, Limbs};
@@ -37,8 +37,10 @@ pub struct FieldOpCols<T, P: FieldParameters> {
     /// The result of `a op b`, where a, b are field elements
     pub result: Limbs<T, P::Limbs>,
     pub carry: Limbs<T, P::Limbs>,
-    pub(crate) witness_low: Limbs<T, P::Witness>,
-    pub(crate) witness_high: Limbs<T, P::Witness>,
+    /// The root-quotient witness, offset-shifted into `[0, 2^16)`; one u16-checked limb per
+    /// coefficient (one column and one lookup where a (low, high) byte pair used to be two of
+    /// each).
+    pub(crate) witness: Limbs<T, P::Witness>,
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
@@ -79,20 +81,17 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             P::NB_WITNESS_LIMBS,
         );
 
-        let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
+        let mut p_witness = p_witness;
 
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness_low.resize(P::Witness::USIZE, F::ZERO);
-        p_witness_high.resize(P::Witness::USIZE, F::ZERO);
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        p_witness.resize(P::Witness::USIZE, F::from_canonical_u32(P::WITNESS_OFFSET as u32));
+        self.witness = Limbs(p_witness.try_into().unwrap());
 
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
+        record.add_u16_range_checks_field(&self.witness.0);
 
         (result, carry)
     }
@@ -142,15 +141,13 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             P::NB_BITS_PER_LIMB as u32,
             P::NB_WITNESS_LIMBS,
         );
-        let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
+        let mut p_witness = p_witness;
 
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness_low.resize(P::Witness::USIZE, F::ZERO);
-        p_witness_high.resize(P::Witness::USIZE, F::ZERO);
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        p_witness.resize(P::Witness::USIZE, F::from_canonical_u32(P::WITNESS_OFFSET as u32));
+        self.witness = Limbs(p_witness.try_into().unwrap());
 
         result
     }
@@ -175,7 +172,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             // If doing the subtraction operation, a - b = result, equivalent to a = result + b.
             FieldOperation::Sub => {
                 let result = (modulus.clone() + a - b) % modulus;
-                // We populate the carry, witness_low, witness_high as if we were doing an addition
+                // We populate the carry and witness as if we were doing an addition
                 // with result + b. But we populate `result` with the actual result
                 // of the subtraction because those columns are expected to contain
                 // the result by the user. Note that this reversal means we have to
@@ -203,7 +200,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
                             (a * b.modpow(&(modulus.clone() - 2u32), &modulus.clone())) % modulus.clone();
                     }
                 }
-                // We populate the carry, witness_low, witness_high as if we were doing a
+                // We populate the carry and witness as if we were doing a
                 // multiplication with result * b. But we populate `result` with the
                 // actual result of the multiplication because those columns are
                 // expected to contain the result by the user. Note that this
@@ -219,8 +216,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
+        record.add_u16_range_checks_field(&self.witness.0);
 
         result
     }
@@ -345,15 +341,13 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_carry: Polynomial<<AB as AirBuilder>::Expr> = self.carry.into();
         let p_op_minus_result: Polynomial<AB::Expr> = p_op - &p_result;
         let p_vanishing = p_op_minus_result - &(&p_carry * &p_modulus);
-        let p_witness_low = self.witness_low.0.iter().into();
-        let p_witness_high = self.witness_high.0.iter().into();
-        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high);
+        let p_witness = self.witness.0.iter().into();
+        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness);
 
         // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
-        builder.slice_range_check_u8(p_witness_low.coefficients(), is_real.clone());
-        builder.slice_range_check_u8(p_witness_high.coefficients(), is_real);
+        builder.slice_range_check_u16(&self.witness.0, is_real);
     }
 
     #[allow(clippy::too_many_arguments)]
