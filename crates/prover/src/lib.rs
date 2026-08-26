@@ -68,7 +68,7 @@ use zkm_recursion_compiler::{
 };
 use zkm_recursion_core::{
     air::RecursionPublicValues, hash_vkey_with_part_vk, machine::RecursionAir,
-    runtime::ExecutionRecord, shape::RecursionShapeConfig, stark::KoalaBearPoseidon2Outer,
+    runtime::ExecutionRecord, shape::{RecursionShape, RecursionShapeConfig}, stark::KoalaBearPoseidon2Outer,
     RecursionProgram, Runtime as RecursionRuntime,
 };
 pub use zkm_recursion_gnark_ffi::proof::{DvSnarkBn254Proof, Groth16Bn254Proof, PlonkBn254Proof};
@@ -1263,16 +1263,51 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             max_log_row_count,
             self.vk_verification,
         );
-        self.fix_recursion_shape_kind(&mut program, "shrink");
-        // The bands carry an `Ext2Felt` cap for the compress machine, but
-        // `shrink_machine` is frozen without that chip; erase the entry so
-        // the shrink shape — and through it the wrap R1CS — is byte-identical
-        // to the pre-chip form.  (Every band carries the SAME cap, so band
-        // selection is unaffected; shrink programs emit no `Ext2Felts`.)
-        if let Some(shape) = program.shape_mut() {
-            shape.remove("Ext2Felt");
+        // The shrink shape is FROZEN, not band-snapped: the wrap R1CS — and
+        // through it the gnark ceremony — is built over a shrink proof of
+        // exactly these heights, while the band tables are a PERF surface
+        // that must stay retunable.  Probed Aug26 over every child band:
+        // `fix_shape` chose this same shape for all of them, with 2.5-12x
+        // organic-to-cap margins.  The Ext2Felt chip is absent by design
+        // (`shrink_machine` is frozen without it; shrink programs keep the
+        // legacy hint + binding, see `ext2felt_v2`).
+        let shape = Self::shrink_shape();
+        let caps = shape.clone_into_hash_map();
+        for (name, height) in ShrinkAir::<KoalaBear>::heights(&program) {
+            match caps.get(&name) {
+                Some(cap) => assert!(
+                    height <= (1 << cap),
+                    "shrink program needs {name} height {height}, frozen cap is 2^{cap} — \
+                     the frozen shrink shape no longer fits; changing it re-runs the ceremony",
+                ),
+                None => assert!(
+                    height == 0,
+                    "shrink program emits {height} {name} rows but the frozen shrink shape \
+                     has no {name} entry — a shrink builder took a compress-only path",
+                ),
+            }
         }
+        *program.shape_mut() = Some(shape);
         Arc::new(program)
+    }
+
+    /// The FROZEN shrink proof shape (per-chip log2 heights).  See
+    /// [`Self::shrink_program_basefold`] — do not edit without re-running
+    /// the gnark ceremony.
+    fn shrink_shape() -> RecursionShape {
+        [
+            ("BaseAlu", 18),
+            ("ExtAlu", 18),
+            ("MemoryConst", 19),
+            ("MemoryVar", 18),
+            ("Poseidon2WideDeg3", 18),
+            ("PublicValues", 4),
+            ("Select", 19),
+        ]
+        .into_iter()
+        .map(|(n, h)| (n.to_string(), h))
+        .collect::<std::collections::BTreeMap<_, _>>()
+        .into()
     }
 
     /// Build the bn254-Wrap (basefold) recursion program — terminal

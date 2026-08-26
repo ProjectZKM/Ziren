@@ -36,15 +36,6 @@ pub struct RecursionShape {
 }
 
 impl RecursionShape {
-    /// Drop one chip's entry.  Used by the shrink stage to erase the
-    /// `Ext2Felt` cap the shared bands carry: `shrink_machine` is frozen
-    /// without that chip, and keeping its shape byte-identical to the
-    /// pre-chip form is what keeps the wrap R1CS (and the gnark ceremony)
-    /// untouched.
-    pub fn remove(&mut self, chip_name: &str) {
-        self.inner.remove(chip_name);
-    }
-
     pub fn clone_into_hash_map(&self) -> HashMap<String, usize> {
         self.inner.iter().map(|(k, v)| (k.clone(), *v)).collect()
     }
@@ -286,6 +277,23 @@ organic={organic:?} -> band={band:?}"
                 "recursion band {index} caps {name} at 2^{cap} but the program needs {height}",
             );
         }
+        // Same diagnostic as `fix_shape_kind` — a forced snap was previously
+        // invisible, which hid the organic heights of every leaf (leaves are
+        // always band-forced for sibling agreement).
+        if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
+            let widths = Self::committed_widths();
+            let cells = Self::band_cells(shape, &widths);
+            let mut organic: Vec<(String, usize)> =
+                heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
+            organic.sort();
+            let mut band: Vec<(String, usize)> =
+                shape.iter().map(|(n, h)| (n.clone(), 1usize << h)).collect();
+            band.sort();
+            eprintln!(
+                "FIXSHAPE kind=forced band_index={index} cells={cells} \
+organic={organic:?} -> band={band:?}"
+            );
+        }
         *program.shape_mut() = Some(RecursionShape { inner: shape.clone().into_iter().collect() });
     }
 
@@ -337,6 +345,24 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // `ELEMENT_THRESHOLD` or adds bands must re-run that test — it is the
         // only guard, and the map is now at 96% of a capacity that cannot be
         // tuned (the tree height is baked into every enumerated program).
+        // Aug26 RETUNE (reth diag, `ZIREN_FIXSHAPE_DIAG=1`, forced+chosen
+        // maxima over 101 distinct programs after the Ext2Felt chip landed):
+        //   - MemoryConst is 12 on every non-cube band: the constant cache
+        //     collapsed the pool to ~280 distinct writes (observed organic max
+        //     213), and the old 2^19 cap was 6.7M cells of pure padding per
+        //     program.  The 2^19s in the older comments below predate the
+        //     cache.
+        //   - Band 0's Poseidon2WideDeg3 drops to 17: leaf max 67,177 and
+        //     compose max 68,686 fit 2^17 at ~1.9x, and at 362 committed
+        //     cells/row the old 2^18 cap was 63% of the whole band.
+        //   - Ext2Felt is 16 on the bands reth was observed on (0/2/6, max
+        //     42,548) and stays 17 elsewhere (deferred programs on band 7
+        //     measured 68,288).
+        // A program that stops fitting a lowered cap falls to the next
+        // cheapest band that fits — the fits-check keeps this safe; only the
+        // padding economics change.  The SHRINK shape is unaffected: it is
+        // FROZEN in `zkm_prover::ZKMProver::shrink_shape`, decoupled from
+        // these tables.
         let allowed_shapes = [
             // Bundle-lift compose level h=0. Tendermint bundle-lift's
             // first compose level (lift outputs → arity-4 compose)
@@ -351,11 +377,11 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             [
                 (mem_var.clone(), 18),
                 (select.clone(), 19),
-                (mem_const.clone(), 19),
+                (mem_const.clone(), 12),
                 (base_alu.clone(), 18),
                 (ext_alu.clone(), 18),
-                (poseidon2_wide.clone(), 18),
-                (ext2felt.clone(), 17),
+                (poseidon2_wide.clone(), 17),
+                (ext2felt.clone(), 16),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             // SELECT-HEAVY deep compose band (tendermint + goat).  The 100-bit
@@ -376,7 +402,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             [
                 (mem_var.clone(), 20),
                 (select.clone(), 21),
-                (mem_const.clone(), 19),
+                (mem_const.clone(), 12),
                 (base_alu.clone(), 20),
                 (ext_alu.clone(), 19),
                 (poseidon2_wide.clone(), 18),
@@ -415,17 +441,17 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             [
                 (mem_var.clone(), 20),
                 (select.clone(), 20),
-                (mem_const.clone(), 19),
+                (mem_const.clone(), 12),
                 (base_alu.clone(), 19),
                 (ext_alu.clone(), 19),
                 (poseidon2_wide.clone(), 17),
-                (ext2felt.clone(), 17),
+                (ext2felt.clone(), 16),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             [
                 (mem_var.clone(), 20),
                 (select.clone(), 20),
-                (mem_const.clone(), 19),
+                (mem_const.clone(), 12),
                 (base_alu.clone(), 20),
                 (ext_alu.clone(), 20),
                 (poseidon2_wide.clone(), 17),
@@ -435,7 +461,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             [
                 (mem_var.clone(), 20),
                 (select.clone(), 20),
-                (mem_const.clone(), 19),
+                (mem_const.clone(), 12),
                 (base_alu.clone(), 21),
                 (ext_alu.clone(), 21),
                 (poseidon2_wide.clone(), 18),
@@ -487,17 +513,17 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         allowed_shapes.push(HashMap::from([
             (mem_var.clone(), 20),
             (select.clone(), 20),
-            (mem_const.clone(), 19),
+            (mem_const.clone(), 12),
             (base_alu.clone(), 19),
             (ext_alu.clone(), 19),
             (poseidon2_wide.clone(), 18),
-            (ext2felt.clone(), 17),
+            (ext2felt.clone(), 16),
             (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
         ]));
         allowed_shapes.push(HashMap::from([
             (mem_var.clone(), 20),
             (select.clone(), 20),
-            (mem_const.clone(), 19),
+            (mem_const.clone(), 12),
             (base_alu.clone(), 20),
             (ext_alu.clone(), 20),
             (poseidon2_wide.clone(), 18),
