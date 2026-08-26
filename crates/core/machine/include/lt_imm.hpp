@@ -23,7 +23,6 @@ __ZKM_HOSTDEV__ void event_to_row(
     auto b = u32_to_le_bytes(event.b);
     auto c = u32_to_le_bytes(event.c);
 
-    write_word_from_le_bytes<F>(cols.a, a);
 
     // If this is SLT, mask the MSB of b & c before computing cols.bits.
     uint8_t masked_b = b[3] & 0x7f;
@@ -76,6 +75,5 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.bit_b = cols.msb_b * cols.is_slt;
     cols.bit_c = cols.msb_c * cols.is_slt;
 
-    assert(cols.a._0[0] == cols.bit_b * (F::one() - cols.bit_c) + cols.is_sign_eq * cols.sltu);
 }
 }  // namespace zkm::lt_imm

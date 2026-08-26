@@ -51,7 +51,12 @@ pub struct BitwiseCols<T> {
     /// destination is register 0 the write is discarded, so it legitimately
     /// differs from the value the register access commits.  The two INPUTS are
     /// not columns -- they are the frame's register reads, read directly.
-    pub a: Word<T>,
+    /// `(is_xor + is_or + is_and + is_nor) * (1 - op_a_0)` — the byte-lookup
+    /// multiplicity.  The result word is the frame's committed `op_a` access
+    /// directly; a register-0 destination is discarded (frame-pinned to
+    /// zero), so its rows send NO lookups and verify nothing — exactly the
+    /// old behaviour, minus the 4-column result mirror.
+    pub lookup_gate: T,
 
     /// If the opcode is NOR.
     #[picus(selector)]
@@ -197,22 +202,26 @@ impl BitwiseChip {
 
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
-        cols.a = Word::from(event.a);
 
         cols.is_nor = F::from_bool(event.opcode == Opcode::NOR);
         cols.is_xor = F::from_bool(event.opcode == Opcode::XOR);
         cols.is_or = F::from_bool(event.opcode == Opcode::OR);
         cols.is_and = F::from_bool(event.opcode == Opcode::AND);
 
-        for ((b_a, b_b), b_c) in a.into_iter().zip(b).zip(c) {
-            let byte_event = ByteLookupEvent {
-                opcode: ByteOpcode::from(event.opcode),
-                a1: b_a as u16,
-                a2: 0,
-                b: b_b,
-                c: b_c,
-            };
-            blu.add_byte_lookup_event(byte_event);
+        // The lookups run against the committed result; a discarded
+        // register-0 write sends none (mirrors the gated multiplicity).
+        if cols.frame.op_a_0 == F::ZERO {
+            cols.lookup_gate = F::ONE;
+            for ((b_a, b_b), b_c) in a.into_iter().zip(b).zip(c) {
+                let byte_event = ByteLookupEvent {
+                    opcode: ByteOpcode::from(event.opcode),
+                    a1: b_a as u16,
+                    a2: 0,
+                    b: b_b,
+                    c: b_c,
+                };
+                blu.add_byte_lookup_event(byte_event);
+            }
         }
     }
 }
@@ -238,28 +247,26 @@ where
             + local.is_and * ByteOpcode::AND.as_field::<AB::F>()
             + local.is_nor * ByteOpcode::NOR.as_field::<AB::F>();
 
-        // Get a multiplicity of `1` only for a true row.
-        let mult = local.is_xor + local.is_or + local.is_and + local.is_nor;
-        for ((a, b), c) in
-            local.a.into_iter().zip(local.frame.op_b_val()).zip(local.frame.op_c_val())
+        let is_real = local.is_xor + local.is_or + local.is_and + local.is_nor;
+        // The lookup multiplicity: real rows whose result write is NOT a
+        // discarded register-0 write (a zero-multiplicity entry contributes
+        // nothing regardless of its tuple values, so the pinned-zero result
+        // word on those rows is harmless).
+        builder.assert_eq(
+            local.lookup_gate,
+            is_real.clone() * (AB::Expr::ONE - local.frame.op_a_0),
+        );
+        let av = *local.frame.op_a_access.value();
+        for ((a, b), c) in av.into_iter().zip(local.frame.op_b_val()).zip(local.frame.op_c_val())
         {
-            builder.send_byte(opcode.clone(), a, b, c, mult.clone());
+            builder.send_byte(opcode.clone(), a, b, c, local.lookup_gate);
         }
 
-        let is_real = local.is_xor + local.is_or + local.is_and + local.is_nor;
         builder.assert_bool(local.is_xor);
         builder.assert_bool(local.is_or);
         builder.assert_bool(local.is_and);
         builder.assert_bool(local.is_nor);
         builder.assert_bool(is_real.clone());
-
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
-        builder
-            .when(is_real.clone())
-            .when_not(local.frame.op_a_0)
-            .assert_word_eq(local.a, *local.frame.op_a_access.value());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and

@@ -78,7 +78,6 @@ pub struct ShiftLeftImmCols<T> {
     pub next_pc: T,
 
     /// The output operand.
-    pub a: Word<T>,
 
 
 
@@ -246,7 +245,6 @@ impl ShiftLeftImm {
         let c = event.c.to_le_bytes();
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
-        cols.a = Word(a.map(F::from_u8));
         cols.is_real = F::ONE;
         for i in 0..BYTE_SIZE {
             cols.c_least_sig_byte[i] = F::from_u32((event.c >> i) & 1);
@@ -375,16 +373,25 @@ where
                 .assert_eq(num_bytes_to_shift.clone(), AB::F::from_usize(i));
         }
 
-        // The bytes of a must match those of bit_shift_result, taking into account the byte
-        // shifting.
+        // The result binds DIRECTLY to the frame's committed `op_a` register
+        // access, taking the byte shifting into account — there is no result
+        // mirror column.  The frame pins the commit to ZERO for a register-0
+        // destination (the write is discarded), so the value-carrying bytes
+        // bind through a `(1 - op_a_0)` factor; the shifted-in zero bytes are
+        // zero in BOTH cases and bind directly.
+        let av = *local.frame.op_a_access.value();
+        let not_a0 = AB::Expr::ONE - local.frame.op_a_0;
         for num_bytes_to_shift in 0..WORD_SIZE {
             let mut shifting = builder.when(local.shift_by_n_bytes[num_bytes_to_shift]);
             for i in 0..WORD_SIZE {
                 if i < num_bytes_to_shift {
                     // The first num_bytes_to_shift bytes must be zero.
-                    shifting.assert_eq(local.a[i], zero.clone());
+                    shifting.assert_eq(av[i], zero.clone());
                 } else {
-                    shifting.assert_eq(local.a[i], local.bit_shift_result[i - num_bytes_to_shift]);
+                    shifting.assert_eq(
+                        av[i],
+                        not_a0.clone() * local.bit_shift_result[i - num_bytes_to_shift],
+                    );
                 }
             }
         }
@@ -418,14 +425,6 @@ where
         );
 
         builder.assert_bool(local.is_real);
-
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
-        builder
-            .when(local.is_real)
-            .when_not(local.frame.op_a_0)
-            .assert_word_eq(local.a, *local.frame.op_a_access.value());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and

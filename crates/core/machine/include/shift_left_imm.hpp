@@ -18,7 +18,6 @@ namespace zkm_core_machine_sys::shift_left_imm {
 
         auto a = u32_to_le_bytes(event.a);
         auto b = u32_to_le_bytes(event.b);
-        write_word_from_le_bytes<F>(cols.a, a);
 
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);

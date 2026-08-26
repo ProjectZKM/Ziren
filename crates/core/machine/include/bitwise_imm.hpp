@@ -22,10 +22,12 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.pc = F::from_canonical_u32(event.pc);
     cols.next_pc = F::from_canonical_u32(event.next_pc);
 
-    write_word_from_u32_v2<F>(cols.a, event.a);
-
     cols.is_xor = F::from_bool(event.opcode == Opcode::XOR);
     cols.is_or = F::from_bool(event.opcode == Opcode::OR);
     cols.is_and = F::from_bool(event.opcode == Opcode::AND);
+
+    // No result mirror; see bitwise.hpp.
+    cols.lookup_gate = (F::one() - cols.frame.op_a_0)
+        * (cols.is_xor + cols.is_or + cols.is_and);
 }
 }  // namespace zkm_core_machine_sys::bitwise_imm

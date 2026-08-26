@@ -56,7 +56,6 @@ pub struct LtImmCols<T> {
     pub frame: ITypeFrameCols<T>,
 
     /// The output operand.
-    pub a: Word<T>,
 
 
 
@@ -212,7 +211,6 @@ impl LtImmChip {
 
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
-        cols.a = Word(a.map(F::from_u8));
 
         // If this is SLT, mask the MSB of b & c before computing cols.bits.
         let masked_b = b[3] & 0x7f;
@@ -274,7 +272,10 @@ impl LtImmChip {
         cols.bit_b = cols.msb_b * cols.is_slt;
         cols.bit_c = cols.msb_c * cols.is_slt;
 
-        assert_eq!(cols.a[0], cols.bit_b * (F::ONE - cols.bit_c) + cols.is_sign_eq * cols.sltu);
+        debug_assert_eq!(
+            F::from_bool(event.a == 1),
+            cols.bit_b * (F::ONE - cols.bit_c) + cols.is_sign_eq * cols.sltu
+        );
 
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::LTU,
@@ -368,17 +369,21 @@ where
             .when_not(local.is_sign_eq)
             .assert_one(local.bit_b + local.bit_c);
 
-        // Assert the final result `a` is correct.
-
-        // Check that `a[0]` is set correctly.
+        // Assert the final result is correct, directly on the frame's
+        // committed `op_a` register access — there is no result mirror
+        // column.  The frame pins the commit to ZERO when `op_a` is
+        // register 0 (the write is discarded), so the low byte binds through
+        // a `(1 - op_a_0)` factor; the three high bytes are zero in BOTH
+        // cases and bind directly.
+        let av = *local.frame.op_a_access.value();
         builder.assert_eq(
-            local.a[0],
-            local.bit_b * (AB::Expr::ONE - local.bit_c) + local.is_sign_eq * local.sltu,
+            av[0],
+            (AB::Expr::ONE - local.frame.op_a_0)
+                * (local.bit_b * (AB::Expr::ONE - local.bit_c) + local.is_sign_eq * local.sltu),
         );
-        // Check the 3 most significant bytes of 'a' are zero.
-        builder.assert_zero(local.a[1]);
-        builder.assert_zero(local.a[2]);
-        builder.assert_zero(local.a[3]);
+        builder.assert_zero(av[1]);
+        builder.assert_zero(av[2]);
+        builder.assert_zero(av[3]);
 
         // Verify that the byte equality flags are set correctly, i.e. all are boolean and only
         // at most a single byte flag is set.
@@ -467,14 +472,6 @@ where
         // *remark*: this is not strictly necessary since it's also covered by the bus multiplicity
         // but this is included here to make sure the condition is met.
         builder.assert_bool(local.is_slt + local.is_sltu);
-
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
-        builder
-            .when(is_real.clone())
-            .when_not(local.frame.op_a_0)
-            .assert_word_eq(local.a, *local.frame.op_a_access.value());
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and
