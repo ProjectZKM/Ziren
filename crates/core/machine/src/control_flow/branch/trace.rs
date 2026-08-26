@@ -3,6 +3,7 @@ use std::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
+use zkm_core_executor::ByteOpcode;
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
@@ -122,8 +123,41 @@ impl BranchChip {
         let a_lt_b = (event.a as i32) < (event.b as i32);
         let a_gt_b = (event.a as i32) > (event.b as i32);
 
-        cols.a_lt_b = F::from_bool(a_lt_b);
-        cols.a_gt_b = F::from_bool(a_gt_b);
+        // Equality gadget: IsZero of the two 16-bit limb differences.
+        let ab = event.a.to_le_bytes();
+        let bb = event.b.to_le_bytes();
+        let limb_diff = |lo: usize| {
+            F::from_u8(ab[lo]) - F::from_u8(bb[lo])
+                + (F::from_u8(ab[lo + 1]) - F::from_u8(bb[lo + 1])) * F::from_u32(1 << 8)
+        };
+        let d_lo = limb_diff(0);
+        let d_hi = limb_diff(2);
+        if d_lo == F::ZERO {
+            cols.eq_lo = F::ONE;
+        } else {
+            cols.eq_lo_inv = d_lo.inverse();
+        }
+        if d_hi == F::ZERO {
+            cols.eq_hi = F::ONE;
+        } else {
+            cols.eq_hi_inv = d_hi.inverse();
+        }
+        cols.a_eq_b = cols.eq_lo * cols.eq_hi;
+        debug_assert_eq!(cols.a_eq_b == F::ONE, a_eq_b);
+
+        // Sign bit + a>0, bound (and looked up) only on the zero-compare rows.
+        if matches!(event.opcode, Opcode::BLTZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BGEZ) {
+            let msb = (event.a >> 31) & 1;
+            cols.msb_a = F::from_u32(msb);
+            cols.a_gt_0 = F::from_bool(msb == 0 && !a_eq_b);
+            blu.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::MSB,
+                a1: msb as u16,
+                a2: 0,
+                b: ab[3],
+                c: 0,
+            });
+        }
 
         let branching = match event.opcode {
             Opcode::BEQ => a_eq_b,
@@ -140,9 +174,7 @@ impl BranchChip {
         cols.next_pc_range_checker.populate(blu, event.next_pc);
         cols.next_next_pc_range_checker.populate(blu, event.next_next_pc);
         cols.is_branching = F::from_bool(branching);
-        // The inlined comparison and (when taken) target addition, with their
-        // byte events.
-        cols.compare.populate(blu, event.a, event.b, true);
+        // The (when taken) target addition, with its byte events.
         if branching {
             cols.target_add.populate(blu, event.next_pc, event.c);
         } else {

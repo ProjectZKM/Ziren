@@ -4,14 +4,11 @@ use std::borrow::Borrow;
 use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::Opcode;
-use zkm_pcs::{
-    air::{BaseAirBuilder, ZKMAirBuilder},
-    Word,
-};
+use zkm_pcs::air::{BaseAirBuilder, ZKMAirBuilder};
 
 use crate::{
     air::WordAirBuilder,
-    operations::{AddOperation, KoalaBearWordRangeChecker, LtOperation},
+    operations::{AddOperation, KoalaBearWordRangeChecker},
 };
 
 use super::{BranchChip, BranchColumns};
@@ -145,73 +142,67 @@ where
             builder.when(is_real.clone()).assert_bool(local.is_branching);
         }
 
-        // Evaluate branching value constraints.
-        {
-            // When the opcode is BEQ and we are branching, assert that a_gt_b + a_lt_b is false.
-            builder
-                .when(local.is_beq * local.is_branching)
-                .assert_zero(local.a_gt_b + local.a_lt_b);
+        // ── The comparison helpers ───────────────────────────────────────
+        //
+        // A branch needs only EQUALITY (BEQ/BNE — and, since the zero-compare
+        // opcodes read register 0 as `op_b`, `a_eq_b` doubles as `a == 0`
+        // there) and the SIGN BIT of `op_a`.  Equality is two `IsZero`s over
+        // the 16-bit limb differences: with byte-shaped words each difference
+        // lies in `[-65535, 65535]`, so it vanishes in the field iff both of
+        // its byte differences do.  (`op_a`'s bytes are range checked by the
+        // frame; `op_b`'s value inherits byte shape from its writer through
+        // the register file, exactly as the old `LtOperation` assumed.)
+        let av = *local.frame.op_a_access.value();
+        let bv = local.frame.op_b_val();
+        let two_pow_8 = AB::Expr::from_u32(1 << 8);
+        let d_lo = (av[0] - bv[0]) + (av[1] - bv[1]) * two_pow_8.clone();
+        let d_hi = (av[2] - bv[2]) + (av[3] - bv[3]) * two_pow_8;
 
-            // When the opcode is BEQ and we are not branching, assert that either a_gt_b or a_lt_b
-            // is true.
-            builder
-                .when(local.is_beq)
-                .when_not(local.is_branching)
-                .assert_one(local.a_gt_b + local.a_lt_b);
+        // The standard IsZero pattern, guarded on real rows.
+        builder.when(is_real.clone()).assert_zero(local.eq_lo * d_lo.clone());
+        builder
+            .when(is_real.clone())
+            .assert_eq(local.eq_lo, AB::Expr::ONE - d_lo * local.eq_lo_inv);
+        builder.when(is_real.clone()).assert_zero(local.eq_hi * d_hi.clone());
+        builder
+            .when(is_real.clone())
+            .assert_eq(local.eq_hi, AB::Expr::ONE - d_hi * local.eq_hi_inv);
+        builder.when(is_real.clone()).assert_eq(local.a_eq_b, local.eq_lo * local.eq_hi);
 
-            // When the opcode is BNE and we are branching, assert that either a_gt_b or a_lt_b is
-            // true.
-            builder.when(local.is_bne * local.is_branching).assert_one(local.a_gt_b + local.a_lt_b);
-
-            // When the opcode is BNE and we are not branching, assert that a_gt_b + a_lt_b is false.
-            builder
-                .when(local.is_bne)
-                .when_not(local.is_branching)
-                .assert_zero(local.a_gt_b + local.a_lt_b);
-
-            // When the opcode is BLTZ and we are branching, assert that a_lt_b is true.
-            builder.when(local.is_bltz * local.is_branching).assert_one(local.a_lt_b);
-
-            // When the opcode is BLTZ and we are not branching, assert a_lt_b is false.
-            builder.when(local.is_bltz).when_not(local.is_branching).assert_zero(local.a_lt_b);
-
-            // When the opcode is BLEZ and we are branching, assert that either a_gt_b is false
-            builder.when(local.is_blez * local.is_branching).assert_zero(local.a_gt_b);
-
-            // When the opcode is BLEZ and we are not branching, assert that a_gt_b is true.
-            builder.when(local.is_blez).when_not(local.is_branching).assert_one(local.a_gt_b);
-
-            // When the opcode is BGTZ and we are branching, assert that a_gt_b is true.
-            builder.when(local.is_bgtz * local.is_branching).assert_one(local.a_gt_b);
-
-            // When the opcode is BGTZ and we are not branching, assert that a_gt_b is false.
-            builder.when(local.is_bgtz).when_not(local.is_branching).assert_zero(local.a_gt_b);
-
-            // When the opcode is BGEZ and we are branching, assert that a_lt_b is false.
-            builder.when(local.is_bgez * local.is_branching).assert_zero(local.a_lt_b);
-
-            // When the opcode is BGEZ and we are not branching, assert that a_lt_b is true.
-            builder.when(local.is_bgez).when_not(local.is_branching).assert_one(local.a_lt_b);
-        }
-
-        // The SIGNED comparison of op_a and op_b, proven IN-ROW — one gadget
-        // yields lt / eq / gt by trichotomy, replacing the two SLT request
-        // rows the chip used to push onto the `Lt` chip.  MIPS semantics are
-        // untouched: `a_lt_b = (a as i32) < (b as i32)` exactly as before.
-        LtOperation::<AB::F>::eval(
-            builder,
-            (*local.frame.op_a_access.value()),
-            local.frame.op_b_val(),
-            &local.compare,
-            is_real.clone(),
+        // The sign bit, bound by one MSB byte lookup on exactly the rows that
+        // consult it (each row has at most one selector on, so the
+        // multiplicity is boolean).
+        let zero_ops = local.is_bltz + local.is_blez + local.is_bgtz + local.is_bgez;
+        builder.send_byte(
+            AB::Expr::from_u8(zkm_core_executor::ByteOpcode::MSB as u8),
+            local.msb_a,
+            av[3],
             AB::Expr::ZERO,
+            zero_ops.clone(),
         );
-        builder.assert_eq(local.a_lt_b, local.compare.lt);
-        // gt = 1 − lt − eq (true 32-bit equality: masked bytes AND sign bits
-        // agree), on real rows.
-        builder.when(is_real.clone()).assert_eq(
-            local.a_gt_b,
-            AB::Expr::ONE - local.compare.lt - local.compare.is_comp_eq * local.compare.is_sign_eq,
-        );
+        // `a > 0` signed on a zero-compare row: not negative and not zero.
+        builder
+            .when(zero_ops)
+            .assert_eq(local.a_gt_0, (AB::Expr::ONE - local.msb_a) * (AB::Expr::ONE - local.a_eq_b));
+
+        // ── The branching decision, per opcode ───────────────────────────
+        // BEQ branches iff a == b.
+        builder.when(local.is_beq * local.is_branching).assert_one(local.a_eq_b);
+        builder.when(local.is_beq).when_not(local.is_branching).assert_zero(local.a_eq_b);
+        // BNE branches iff a != b.
+        builder.when(local.is_bne * local.is_branching).assert_zero(local.a_eq_b);
+        builder.when(local.is_bne).when_not(local.is_branching).assert_one(local.a_eq_b);
+        // BLTZ branches iff a < 0, i.e. the sign bit.
+        builder.when(local.is_bltz * local.is_branching).assert_one(local.msb_a);
+        builder.when(local.is_bltz).when_not(local.is_branching).assert_zero(local.msb_a);
+        // BLEZ branches iff a <= 0, i.e. NOT (a > 0).
+        builder.when(local.is_blez * local.is_branching).assert_zero(local.a_gt_0);
+        builder.when(local.is_blez).when_not(local.is_branching).assert_one(local.a_gt_0);
+        // BGTZ branches iff a > 0.
+        builder.when(local.is_bgtz * local.is_branching).assert_one(local.a_gt_0);
+        builder.when(local.is_bgtz).when_not(local.is_branching).assert_zero(local.a_gt_0);
+        // BGEZ branches iff a >= 0, i.e. NOT the sign bit.
+        builder.when(local.is_bgez * local.is_branching).assert_zero(local.msb_a);
+        builder.when(local.is_bgez).when_not(local.is_branching).assert_one(local.msb_a);
     }
 }

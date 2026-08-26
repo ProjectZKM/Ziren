@@ -51,7 +51,7 @@
   "SyscallPrecompile": 11,
   "Secp256r1AddAssign": 2081,
   "Uint256MulMod": 504,
-  "Branch": 74,
+  "Branch": 62,
   "Bls12381DoubleAssign": 3464,
   "MovCond": 66,
   "StoreNarrow": 62,

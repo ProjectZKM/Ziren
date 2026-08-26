@@ -2,7 +2,7 @@ use std::mem::size_of;
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_pcs::{PicusInfo, Word};
 
-use crate::operations::{AddOperation, KoalaBearWordRangeChecker, LtOperation};
+use crate::operations::{AddOperation, KoalaBearWordRangeChecker};
 
 pub const NUM_BRANCH_COLS: usize = size_of::<BranchColumns<u8>>();
 
@@ -54,20 +54,34 @@ pub struct BranchColumns<T> {
     ///
     /// > is_beq & a_eq_b ||
     /// > is_bne & !a_eq_b ||
-    /// > is_bltz & a_lt_0 ||
+    /// > is_bltz & msb_a ||
     /// > is_bgtz & a_gt_0 ||
-    /// > is_blez & (a_lt_0  | a_eq_0) ||
-    /// > is_bgez & (a_gt_0  | a_eq_0)
+    /// > is_blez & !a_gt_0 ||
+    /// > is_bgez & !msb_a
     pub is_branching: T,
 
-    /// Whether a is greater than b.
-    pub a_gt_b: T,
+    /// A branch only ever needs EQUALITY of `op_a`/`op_b` (BEQ/BNE) and the
+    /// SIGN of `op_a` (the zero-compares read register 0 as `op_b`, so
+    /// `a_eq_b` doubles as `a == 0` there).  The general 17-column signed
+    /// `LtOperation` this chip used to carry — plus its two AND and one LTU
+    /// byte lookups per row — is replaced by the 7 columns below and a single
+    /// MSB lookup on the zero-compare rows.
+    ///
+    /// Equality is two `IsZero`s over the 16-bit limb differences
+    /// `(a0-b0) + 256*(a1-b1)` and `(a2-b2) + 256*(a3-b3)`: with byte-shaped
+    /// words each difference is in `[-65535, 65535]`, so it vanishes in the
+    /// field iff both byte differences do.
+    pub eq_lo: T,
+    pub eq_lo_inv: T,
+    pub eq_hi: T,
+    pub eq_hi_inv: T,
+    /// `eq_lo * eq_hi`, materialized so every consumer stays at degree <= 3.
+    pub a_eq_b: T,
 
-    /// Whether a is less than b.
-    pub a_lt_b: T,
-
-    /// The inlined SIGNED comparison of `op_a` and `op_b` — one gadget yields
-    /// lt / eq / gt, replacing the two SLT
-    /// request rows the chip used to push onto the `Lt` chip.
-    pub compare: LtOperation<T>,
+    /// The sign bit of `op_a` (bit 31), bound by an MSB byte lookup on the
+    /// zero-compare rows — the only rows that consult it.
+    pub msb_a: T,
+    /// `(1 - msb_a) * (1 - a_eq_b)` — `op_a > 0` signed, materialized.
+    /// Meaningful only on the zero-compare rows, where `op_b` is register 0.
+    pub a_gt_0: T,
 }
