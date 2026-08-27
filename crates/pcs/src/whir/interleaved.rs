@@ -161,16 +161,35 @@ impl<EF: p3_field::Field> WhirFolder<EF> {
         batch: EF,
         start_coeff: EF,
     ) -> EF {
+        use p3_maybe_rayon::prelude::*;
+        // Per-constraint batching coefficients (the transcript order the
+        // serial loop produced) — tiny, serial.
+        let mut coeffs = Vec::with_capacity(points_lsb.len());
         let mut coeff = start_coeff;
-        for (pt, &val) in points_lsb.iter().zip(values) {
-            let t = mono_table_lsb(pt);
-            debug_assert_eq!(t.len(), self.weight.len());
-            for (w, ti) in self.weight.iter_mut().zip(&t) {
-                *w += coeff * *ti;
-            }
+        for &val in values {
+            coeffs.push(coeff);
             self.claimed_sum += coeff * val;
             coeff *= batch;
         }
+        // The weight absorption was the whir open's measured host hot spot:
+        // 84 round-0 STIR constraints x a 2^17 monomial table build + FMA
+        // each (~22M serial EF ops per shard, ~0.3-0.5 s x 304 shards on a
+        // combined reth).  Build the tables in parallel over constraints,
+        // then absorb in one parallel pass over the weight index.  Bitwise
+        // identical: EF addition is associative-exact (no floats), and the
+        // per-index accumulation order over j matches the serial loop's.
+        let tables: Vec<Vec<EF>> =
+            points_lsb.par_iter().map(|pt| mono_table_lsb(pt)).collect();
+        for t in &tables {
+            debug_assert_eq!(t.len(), self.weight.len());
+        }
+        self.weight.par_iter_mut().enumerate().for_each(|(i, w)| {
+            let mut acc = EF::ZERO;
+            for (c, t) in coeffs.iter().zip(&tables) {
+                acc += *c * t[i];
+            }
+            *w += acc;
+        });
         coeff
     }
 }
