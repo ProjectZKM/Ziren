@@ -118,19 +118,14 @@ pub fn lift_logup_gkr_proof<F: Clone, K: Clone>(
 /// - `evaluation_proof`: lifted by [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
 /// - `chip_height_bits`: per-chip name + bit-decomposed height
 ///   coordinates, supplied by the caller.
-pub fn assemble_basefold_shard_proof_variable<C, HV>(
+pub fn assemble_basefold_shard_proof_variable<C, HV, PP>(
     main_commitment: [Felt<C::F>; 8],
     public_values: Vec<Felt<C::F>>,
     logup_gkr_proof: &st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
     zerocheck_proof: &st::PartialSumcheckProof<Ext<C::F, C::EF>>,
-    evaluation_proof: JaggedPcsProofVariable<
-        RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
-        HV::DigestVariable,
-        C::F,
-        C::EF,
-    >,
+    evaluation_proof: JaggedPcsProofVariable<PP, HV::DigestVariable, C::F, C::EF>,
     chip_height_bits: Vec<(String, Vec<Felt<C::F>>)>,
-) -> BasefoldShardProofVariable<C, HV>
+) -> BasefoldShardProofVariable<C, HV, PP>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     HV: crate::hash::FieldHasherVariable<C>,
@@ -918,6 +913,7 @@ mod tests {
         let assembled = assemble_basefold_shard_proof_variable::<
             InnerConfig,
             zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+            _,
         >(
             main_commit,
             public_values,

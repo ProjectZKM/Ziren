@@ -163,6 +163,19 @@ fn hash_evaluation_proof<H: Hasher>(proof: &EvaluationProof, h: &mut H) {
 
             hash_stacked_basefold(&bundle.basefold_proof, h);
 
+            // Jagged-WHIR gate: a whir bundle takes a DIFFERENT leaf branch
+            // (WhirBundle lift + stacked-WHIR verify) with its own witness
+            // layout, so its full structural shape must split the key.  On
+            // the default BaseFold path this hashes a single 0u8 — cached
+            // keys change once (version-tag-equivalent), never alias.
+            match &bundle.whir_proof {
+                None => 0u8.hash(h),
+                Some(wp) => {
+                    3u8.hash(h);
+                    hash_stacked_whir(wp, h);
+                }
+            }
+
             // reduction (JaggedReductionProof) — L rounds, L-long point.
             bundle.reduction.rounds.len().hash(h);
             bundle.reduction.eval_point.len().hash(h);
@@ -237,5 +250,51 @@ fn hash_stacked_basefold<H: Hasher>(
     stacked.batch_evaluations.len().hash(h);
     for row in stacked.batch_evaluations.iter() {
         row.len().hash(h);
+    }
+}
+
+/// Structural dimensions of a `StackedWhirProof` — round/message/opening
+/// shapes, all inline-witnessed by `read_stacked_whir_from_stream`.
+fn hash_stacked_whir<H: Hasher>(
+    wp: &zkm_pcs::whir::stacked::StackedWhirProof<
+        InnerVal,
+        InnerChallenge,
+        zkm_pcs::jagged_pcs::JaggedMmcs,
+    >,
+    h: &mut H,
+) {
+    let whir = &wp.whir_proof;
+    whir.round_sumcheck_polys.len().hash(h);
+    for r in whir.round_sumcheck_polys.iter() {
+        r.len().hash(h);
+        for m in r.iter() {
+            m.0.len().hash(h);
+        }
+    }
+    whir.round_ood_answers.len().hash(h);
+    for r in whir.round_ood_answers.iter() {
+        r.len().hash(h);
+    }
+    whir.round_commitments.len().hash(h);
+    whir.round_query_openings.len().hash(h);
+    for op in whir.round_query_openings.iter() {
+        op.leaves.len().hash(h);
+        for leaf in op.leaves.iter() {
+            leaf.values.len().hash(h);
+            for v in leaf.values.iter() {
+                v.len().hash(h);
+            }
+            leaf.proof.len().hash(h);
+        }
+    }
+    whir.final_poly.len().hash(h);
+    whir.final_sumcheck_polys.len().hash(h);
+    for m in whir.final_sumcheck_polys.iter() {
+        m.0.len().hash(h);
+    }
+    whir.folding_pow.len().hash(h);
+    wp.batch_evaluations.len().hash(h);
+    for r in wp.batch_evaluations.iter() {
+        r.len().hash(h);
     }
 }

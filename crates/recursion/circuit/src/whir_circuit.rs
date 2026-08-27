@@ -281,11 +281,25 @@ pub fn write_stacked_whir_to_stream<C>(
     }
 }
 
-/// In-circuit verifier for a stacked-WHIR batched opening.
-#[derive(Clone)]
-pub struct RecursiveStackedWhirVerifier {
+/// In-circuit verifier for a stacked-WHIR batched opening.  Generic over
+/// the Merkle hasher `HV` exactly like
+/// [`crate::basefold_verifier::RecursiveBasefoldVerifier`]; defaults to the
+/// inner KoalaBear Poseidon2 ring (the only ring that verifies WHIR core
+/// proofs — recursion shards stay BaseFold).
+pub struct RecursiveStackedWhirVerifier<HV = zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     pub config: WhirConfig,
     pub log_stacking_height: u32,
+    pub _hasher: core::marker::PhantomData<HV>,
+}
+
+impl<HV> Clone for RecursiveStackedWhirVerifier<HV> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            log_stacking_height: self.log_stacking_height,
+            _hasher: core::marker::PhantomData,
+        }
+    }
 }
 
 /// `g^index` for a compile-time base `g` and an LSB-first index bit vector:
@@ -334,7 +348,7 @@ enum TerminalConstraint<C: zkm_recursion_compiler::ir::Config> {
     Monomial { point: Vec<Ext<C::F, C::EF>>, coeff: Ext<C::F, C::EF>, vars: usize },
 }
 
-impl RecursiveStackedWhirVerifier {
+impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
     /// Monomial-basis multilinear evaluation `Σ_i coeffs[i]·Π_j pt[j]^bit_j(i)`
     /// (LSB-first) — mirror of the host `mono_eval_lsb`.
     fn mono_eval_lsb<C: CircuitConfig>(
@@ -379,6 +393,7 @@ impl RecursiveStackedWhirVerifier {
         commitments: &[HV::DigestVariable],
         round_stripe_counts: &[usize],
         stack_point: &[Ext<C::F, C::EF>],
+        batch_evaluations: &[Vec<Ext<C::F, C::EF>>],
         proof: &RecursiveStackedWhirProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
         challenger: &mut FC,
     ) where
@@ -394,9 +409,9 @@ impl RecursiveStackedWhirVerifier {
 
         // ── Structural shape checks (compile-time). ──
         assert_eq!(proof.final_poly.len(), 1usize << final_log, "whir final_poly len");
-        assert_eq!(proof.batch_evaluations.len(), round_stripe_counts.len(), "whir round count");
+        assert_eq!(batch_evaluations.len(), round_stripe_counts.len(), "whir round count");
         assert_eq!(commitments.len(), round_stripe_counts.len(), "whir commitment count");
-        for (evals, &cnt) in proof.batch_evaluations.iter().zip(round_stripe_counts) {
+        for (evals, &cnt) in batch_evaluations.iter().zip(round_stripe_counts) {
             assert_eq!(evals.len(), cnt, "whir stripe count");
         }
         assert_eq!(
@@ -405,7 +420,7 @@ impl RecursiveStackedWhirVerifier {
         );
 
         // ── Replay claim batching: observe echoed evals, draw λ. ──
-        for round in &proof.batch_evaluations {
+        for round in batch_evaluations {
             for &e in round {
                 observe_ext_element::<C, FC>(builder, challenger, e);
             }
@@ -415,7 +430,7 @@ impl RecursiveStackedWhirVerifier {
         let mut lam = one;
         let mut lambda_powers_per_round: Vec<Vec<Ext<C::F, C::EF>>> = Vec::new();
         let mut claim_sym = SymbolicExt::<C::F, C::EF>::ZERO;
-        for round in &proof.batch_evaluations {
+        for round in batch_evaluations {
             let mut powers = Vec::with_capacity(round.len());
             for &e in round {
                 claim_sym = claim_sym + SymbolicExt::from(lam) * e;
@@ -667,6 +682,59 @@ impl RecursiveStackedWhirVerifier {
     }
 }
 
+/// Wires the stacked-WHIR verifier into the shared stacked-PCS layer:
+/// [`crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier`] does the
+/// batch-point interpolation bind (the in-circuit mirror of the host
+/// `verify_jagged_whir_rounds` StackingMismatch check plus the FS point
+/// extension), then delegates here with the wrapper-carried
+/// `batch_evaluations` — the ONE witnessed copy both the interpolation and
+/// this verifier's λ-batching consume.
+///
+/// The per-round stripe counts come from the `batch_evaluations` SHAPE
+/// (compile-time program structure); each round-0 Merkle leaf hashes exactly
+/// `stripe_count` rows, so a mis-shaped count fails the digest bind against
+/// the FS-observed (main) / vk-pinned (preprocessed) commitment.
+impl<C, FC, HV> crate::recursive_stacked_pcs::RecursiveMultilinearPcsVerifier<C, FC>
+    for RecursiveStackedWhirVerifier<HV>
+where
+    C: CircuitConfig,
+    FC: FieldChallengerVariable<C, C::Bit> + CanObserveVariable<C, HV::DigestVariable>,
+    HV: FieldHasherVariable<C>,
+{
+    type Commitment = HV::DigestVariable;
+    type Proof = RecursiveStackedWhirProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>;
+
+    fn observe_commitment(
+        &self,
+        builder: &mut Builder<C>,
+        challenger: &mut FC,
+        commitment: &Self::Commitment,
+    ) {
+        challenger.observe(builder, *commitment);
+    }
+
+    fn verify_untrusted_evaluations(
+        &self,
+        builder: &mut Builder<C>,
+        commitments: &[Self::Commitment],
+        stack_point: &[Ext<C::F, C::EF>],
+        batch_evaluations: &[Vec<Ext<C::F, C::EF>>],
+        proof: &Self::Proof,
+        challenger: &mut FC,
+    ) {
+        let counts: Vec<usize> = batch_evaluations.iter().map(|r| r.len()).collect();
+        self.verify::<C, FC, HV>(
+            builder,
+            commitments,
+            &counts,
+            stack_point,
+            batch_evaluations,
+            proof,
+            challenger,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -783,13 +851,19 @@ mod tests {
             stack_point.iter().map(|x| x.read(&mut builder)).collect();
         let proof_var = read_stacked_whir_from_stream(&host_mirror, &mut builder);
         let mut challenger = DuplexChallengerVariable::new(&mut builder);
-        let verifier =
-            RecursiveStackedWhirVerifier { config: cfg, log_stacking_height: lsh as u32 };
+        let verifier = RecursiveStackedWhirVerifier::<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+        > {
+            config: cfg,
+            log_stacking_height: lsh as u32,
+            _hasher: core::marker::PhantomData,
+        };
         verifier.verify::<InnerConfig, _, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
             &mut builder,
             &commit_vars,
             &[3, 2],
             &stack_point_vars,
+            &proof_var.batch_evaluations.clone(),
             &proof_var,
             &mut challenger,
         );

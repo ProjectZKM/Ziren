@@ -136,6 +136,14 @@ pub struct BasefoldShardProof<F, EF> {
 pub struct BasefoldShardProofVariable<
     C: CircuitConfig,
     HV: crate::hash::FieldHasherVariable<C> = zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+    PP = RecursiveBasefoldProof<
+        Felt<<C as zkm_recursion_compiler::ir::Config>::F>,
+        Ext<
+            <C as zkm_recursion_compiler::ir::Config>::F,
+            <C as zkm_recursion_compiler::ir::Config>::EF,
+        >,
+        <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable,
+    >,
 > {
     /// Commitment digest to the main trace.  The main trace is
     /// committed with the INNER KoalaBear MMCS on EVERY ring (only the
@@ -156,12 +164,7 @@ pub struct BasefoldShardProofVariable<
     /// the per-round original commitments are `HV::DigestVariable`-typed
     /// (digests are witnessed/const-promoted to circuit
     /// variables, not raw host `FieldHasher::Digest`).
-    pub evaluation_proof: JaggedPcsProofVariable<
-        RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
-        HV::DigestVariable,
-        C::F,
-        C::EF,
-    >,
+    pub evaluation_proof: JaggedPcsProofVariable<PP, HV::DigestVariable, C::F, C::EF>,
 }
 
 /// In-circuit verifying-key variable for the BaseFold pipeline.
@@ -327,7 +330,7 @@ impl<P> BasefoldShardVerifier<P> {
         &self,
         builder: &mut Builder<C>,
         vk: &BasefoldVerifyingKeyVariable<C>,
-        proof: &'a BasefoldShardProofVariable<C, HV>,
+        proof: &'a BasefoldShardProofVariable<C, HV, P::Proof>,
         shard_chips: &[&MachineChip<SC, A>],
         chip_metadata: &LogupGkrShardChipMetadata,
         opened_values: &'a BasefoldShardOpenedValuesVariable<C>,
@@ -357,15 +360,7 @@ impl<P> BasefoldShardVerifier<P> {
         HV: crate::hash::FieldHasherVariable<C>
             + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
         HV::DigestVariable: Copy,
-        P: RecursiveMultilinearPcsVerifier<
-                C,
-                FC,
-                Commitment = HV::DigestVariable,
-                // The BaseFold proof's digests are circuit
-                // variables (witnessed/const-promoted), matching the verifier's
-                // `type Proof` (basefold_verifier.rs).
-                Proof = RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
-            > + Clone,
+        P: RecursiveMultilinearPcsVerifier<C, FC, Commitment = HV::DigestVariable> + Clone,
         EVPV: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
         JE: FnOnce(
             &mut Builder<C>,

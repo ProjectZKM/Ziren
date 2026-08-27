@@ -351,6 +351,11 @@ pub fn verify_compress_basefold<C, SC, A>(
         // Bundle lift is the production (and only) path.
         use crate::shard_level_witness::LiftedEvalProof;
         let evaluation_proof_var = match &evaluation_proof {
+            // Recursion shards are always BaseFold; only the CORE (leaf)
+            // path can carry a jagged-WHIR bundle.
+            crate::shard_level_witness::LiftedEvalProof::WhirBundle { .. } => {
+                unreachable!("recursion proofs never carry a jagged-WHIR bundle")
+            }
             LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
                 crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                     builder,
@@ -450,7 +455,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::insertion_points_from_column_counts(&_column_counts_by_round);
         let _basefold_shard_proof_variable =
-            crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC>(
+            crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
                 main_commit,
                 public_values,
                 &logup_gkr_proof,

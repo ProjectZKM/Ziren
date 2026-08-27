@@ -309,6 +309,24 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         // stream felts).
         modified_commitment: [Felt<C::F>; 8],
     },
+    // The jagged-WHIR gate (`ZIREN_CORE_PCS=whir`): the bundle's batched
+    // open is a stacked-WHIR proof instead of a BaseFold one.  Same shared
+    // pieces as `Bundle` (reduction sumcheck, jagged-eval sub-sumcheck,
+    // q_at_z, commit roots); only the inner PCS proof type differs.  Core
+    // (leaf) proofs only — recursion shards stay BaseFold.
+    WhirBundle {
+        host: JaggedBasefoldBundle,
+        whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; 8],
+        >,
+        sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
+        jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
+        expected_eval: Ext<C::F, C::EF>,
+        commit_root: [Felt<C::F>; 8],
+        modified_commitment: [Felt<C::F>; 8],
+    },
     // The gnark wrap path.  The host carries the outer bundle
     // (`JaggedBasefoldBundleGeneric<OuterValMmcs>`, BN254 commitments) as
     // `EvaluationProof::Bytes`.  Rather than BAKE its proof-specific values in
@@ -441,8 +459,35 @@ where
             match &self.evaluation_proof {
                 HostEvalProof::Empty => LiftedEvalProof::Empty,
                 HostEvalProof::Bytes(b) => LiftedEvalProof::Bytes(b.clone()),
+                HostEvalProof::Bundle(bundle) if bundle.whir_proof.is_some() => {
+                    // Jagged-WHIR bundle: witness the stacked-WHIR proof at
+                    // the eval-proof position, then the SAME shared pieces
+                    // (sumcheck, jagged_eval, q_at_z) as the BaseFold arm.
+                    let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive(
+                        bundle.whir_proof.as_ref().unwrap(),
+                    );
+                    let whir_proof =
+                        crate::whir_circuit::read_stacked_whir_from_stream::<C>(&whir_host, builder);
+                    let sumcheck = read_sumcheck_from_stream::<C>(
+                        &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+                        builder,
+                    );
+                    let jagged_eval = read_sumcheck_from_stream::<C>(
+                        &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+                        builder,
+                    );
+                    let expected_eval = bundle.reduction.q_at_z.read(builder);
+                    LiftedEvalProof::WhirBundle {
+                        host: bundle.clone(),
+                        whir_proof,
+                        sumcheck,
+                        jagged_eval,
+                        expected_eval,
+                        commit_root: jagged_original_commitment_arr,
+                        modified_commitment: main_commitment_arr,
+                    }
+                }
                 HostEvalProof::Bundle(bundle) => {
-                    assert!(bundle.whir_proof.is_none(), "WHIR core proof in bundle: the recursion circuit cannot lift a WHIR opening yet (ZIREN_CORE_PCS=whir is host-verify only)");
                     let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
                     let basefold_proof = crate::basefold_witness::read_basefold_proof_from_stream::<
                         C,
@@ -523,9 +568,14 @@ where
         if let zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) =
             &self.evaluation_proof
         {
-            assert!(bundle.whir_proof.is_none(), "WHIR core proof in bundle: the recursion circuit cannot lift a WHIR opening yet (ZIREN_CORE_PCS=whir is host-verify only)");
-            let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
-            crate::basefold_witness::write_basefold_proof_to_stream::<C>(&host_proof, witness);
+            if let Some(whir) = &bundle.whir_proof {
+                // Jagged-WHIR bundle (mirrors the WhirBundle read arm).
+                let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive(whir);
+                crate::whir_circuit::write_stacked_whir_to_stream::<C>(&whir_host, witness);
+            } else {
+                let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
+                crate::basefold_witness::write_basefold_proof_to_stream::<C>(&host_proof, witness);
+            }
             // write sumcheck, jagged_eval, expected_eval (same order as read).
             write_sumcheck_to_stream::<C>(
                 &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
@@ -1921,15 +1971,21 @@ where
     (bp, sc, je, ee, cr)
 }
 
-pub fn lift_jagged_basefold_bundle<C, HV>(
+pub fn lift_jagged_bundle_generic<C, HV, PP>(
     builder: &mut Builder<C>,
     bundle: &JaggedBasefoldBundle,
-    // the basefold proof's felt/ext values, PRE-READ from the
+    // the inner PCS proof's felt/ext values, PRE-READ from the
     // witness stream in `BasefoldShardProof::read`.  This is what makes the
     // recursion program value-independent: the proof values are witness
     // inputs, not baked constants.  Digests are witnessed too ([Felt;8] =
-    // inner DigestVariable), so no rekey is needed below.
-    preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
+    // inner DigestVariable), so no rekey is needed below.  Generic over the
+    // inner PCS proof type (`RecursiveBasefoldProof` on the BaseFold path,
+    // `RecursiveStackedWhirProof` under the jagged-WHIR gate) — the lift
+    // only threads it into the stacked wrapper's `pcs_proof` slot.
+    preread_pcs_proof: PP,
+    // the SAME witnessed per-round per-stripe evaluations the stacked layer
+    // interpolates (reuse, don't re-read → no double-consume).
+    preread_batch_evaluations: Vec<Vec<Ext<C::F, C::EF>>>,
     // pre-read (witnessed) reduction sumcheck, jagged-eval
     // sub-sumcheck, and expected_eval — replace the lift's const-builds.
     preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
@@ -1968,12 +2024,7 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     // `bundle.packing.offsets` / `bundle.commit.chip_dims`.  When `None`,
     // falls back to the legacy baked path (callers not yet wired / empty).
     chip_height_felts: Option<&[Felt<C::F>]>,
-) -> JaggedPcsProofVariable<
-    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
-    HV::DigestVariable,
-    C::F,
-    C::EF,
->
+) -> JaggedPcsProofVariable<PP, HV::DigestVariable, C::F, C::EF>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
@@ -2019,20 +2070,9 @@ where
     // values already came off the witness stream in BasefoldShardProof::read.
     // Digests are witnessed too ([Felt;8] = inner DigestVariable), so the
     // proof is already in HV::DigestVariable form — no rekey needed.
-    let basefold_proof_var = preread_basefold_proof;
-
-    // ── batch_evaluations for the stacked layer = the SAME witnessed
-    // values (reuse, don't re-read/re-const → no double-consume) ──
-    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> =
-        basefold_proof_var.batch_evaluations.clone();
-
-    let stacked_pcs_proof = RecursiveStackedPcsProof::<
-        RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
-        C::F,
-        C::EF,
-    > {
-        batch_evaluations: batch_evaluations_ext,
-        pcs_proof: basefold_proof_var,
+    let stacked_pcs_proof = RecursiveStackedPcsProof::<PP, C::F, C::EF> {
+        batch_evaluations: preread_batch_evaluations,
+        pcs_proof: preread_pcs_proof,
     };
 
     // ── REAL: original_commitments[0] = the witnessed commit cap root ──
@@ -3164,4 +3204,55 @@ mod tests {
         // sumcheck_proof has one univariate poly (one reduction round).
         assert_eq!(var.sumcheck_proof.univariate_polys.len(), 1);
     }
+}
+
+/// BaseFold-typed wrapper over [`lift_jagged_bundle_generic`] — the
+/// historical entry point every BaseFold caller uses.  Extracts the
+/// stacked-layer batch evaluations from the pre-read proof (they ride
+/// inside `RecursiveBasefoldProof`) and delegates.
+#[allow(clippy::too_many_arguments)]
+pub fn lift_jagged_basefold_bundle<C, HV>(
+    builder: &mut Builder<C>,
+    bundle: &JaggedBasefoldBundle,
+    preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
+    preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
+    preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
+    preread_expected_eval: Ext<C::F, C::EF>,
+    preread_commit_root: [Felt<C::F>; 8],
+    preread_modified_commitment: [Felt<C::F>; 8],
+    preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
+    padding_heights: &[Vec<Felt<C::F>>],
+    max_log_row_count: usize,
+    column_counts_by_round: &[Vec<usize>],
+    row_counts_by_round: Option<&[Vec<usize>]>,
+    chip_height_felts: Option<&[Felt<C::F>]>,
+) -> JaggedPcsProofVariable<
+    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
+    HV::DigestVariable,
+    C::F,
+    C::EF,
+>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+{
+    let batch_evaluations = preread_basefold_proof.batch_evaluations.clone();
+    lift_jagged_bundle_generic::<C, HV, _>(
+        builder,
+        bundle,
+        preread_basefold_proof,
+        batch_evaluations,
+        preread_sumcheck,
+        preread_jagged_eval,
+        preread_expected_eval,
+        preread_commit_root,
+        preread_modified_commitment,
+        preceding_commitments,
+        padding_heights,
+        max_log_row_count,
+        column_counts_by_round,
+        row_counts_by_round,
+        chip_height_felts,
+    )
 }

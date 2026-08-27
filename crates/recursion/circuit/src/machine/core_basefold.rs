@@ -352,9 +352,34 @@ pub fn verify_core_basefold<C, SC, A>(
 
             // Bundle lift is the production (and only) path.
             use crate::shard_level_witness::LiftedEvalProof;
+            // The jagged-WHIR gate: a WhirBundle lifts to a WHIR-typed
+            // evaluation-proof variable (same jagged metadata, different
+            // inner PCS proof) and takes the WHIR verify branch below.
+            let mut whir_evaluation_proof_var = None;
             let evaluation_proof_var = match &evaluation_proof {
+                LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+                    whir_evaluation_proof_var =
+                        Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
+                            builder,
+                            host,
+                            whir_proof.clone(),
+                            whir_proof.batch_evaluations.clone(),
+                            sumcheck.clone(),
+                            jagged_eval.clone(),
+                            *expected_eval,
+                            *commit_root,
+                            *modified_commitment,
+                            &preceding_commitments,
+                            &preprocessed_round.padding_heights,
+                            max_log_row_count,
+                            &column_counts_by_round_pre,
+                            None,
+                            cps_heights,
+                        ));
+                    None
+                }
                 LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
-                    crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
+                    Some(crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                         builder,
                         host,
                         basefold_proof.clone(),
@@ -369,20 +394,24 @@ pub fn verify_core_basefold<C, SC, A>(
                         &column_counts_by_round_pre,
                         None,
                         cps_heights,
-                    )
+                    ))
                 }
-                LiftedEvalProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-                    builder,
-                    bytes,
-                    max_log_row_count,
-                    &column_counts_by_round_pre,
-                ),
-                LiftedEvalProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-                    builder,
-                    &[],
-                    max_log_row_count,
-                    &column_counts_by_round_pre,
-                ),
+                LiftedEvalProof::Bytes(bytes) => {
+                    Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                        builder,
+                        bytes,
+                        max_log_row_count,
+                        &column_counts_by_round_pre,
+                    ))
+                }
+                LiftedEvalProof::Empty => {
+                    Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                        builder,
+                        &[],
+                        max_log_row_count,
+                        &column_counts_by_round_pre,
+                    ))
+                }
                 // OuterBundle is only produced for the gnark wrap
                 // (OuterConfig); the core path is inner-only → unreachable.
                 LiftedEvalProof::OuterBundle { .. } => {
@@ -447,15 +476,26 @@ pub fn verify_core_basefold<C, SC, A>(
             let insertion_points = crate::shard_basefold::BasefoldShardVerifier::<
                 crate::basefold_verifier::RecursiveBasefoldVerifier,
             >::insertion_points_from_column_counts(&column_counts_by_round);
-            let basefold_shard_proof_variable =
-                crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC>(
+            let basefold_shard_proof_variable = evaluation_proof_var.map(|epv| {
+                crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
                     main_commit,
                     public_values_raw.clone(),
                     &logup_gkr_proof,
                     &zerocheck_proof,
-                    evaluation_proof_var,
+                    epv,
+                    chip_height_bits.clone(),
+                )
+            });
+            let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
+                crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
+                    main_commit,
+                    public_values_raw.clone(),
+                    &logup_gkr_proof,
+                    &zerocheck_proof,
+                    epv,
                     chip_height_bits,
-                );
+                )
+            });
             // chip_heights_per_shard is consumed above; the height bits
             // derive from the witnessed opened degrees.
             let empty_cumsums = std::collections::BTreeMap::new();
@@ -580,6 +620,54 @@ pub fn verify_core_basefold<C, SC, A>(
             // separately.  The `assert_num_vars_le_max` binding below binds
             // the witnessed round count to `[0, MAX]`, so the soundness
             // primitive is in place regardless.
+            // ── The jagged-WHIR verify branch ──
+            // A WhirBundle proof runs verify_shard with the stacked-WHIR
+            // inner PCS verifier; everything above (transcript prologue, GKR,
+            // zerocheck, jagged metadata) is shared.  Branch taken at
+            // program-BUILD time (per proof shape), like the per-proof
+            // BaseFold verifier rebuild below.
+            if let Some(whir_pv) = &whir_shard_proof_variable {
+                let lsh = match &evaluation_proof {
+                    LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+                    _ => unreachable!("whir proof variable implies a WhirBundle"),
+                };
+                let whir_verifier = crate::shard_basefold::BasefoldShardVerifier::<
+                    crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
+                > {
+                    stacked_pcs_verifier:
+                        crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
+                            crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
+                                config: zkm_pcs::whir::jagged::whir_config_for_stack(
+                                    lsh as usize,
+                                    7,
+                                    0,
+                                ),
+                                log_stacking_height: lsh,
+                                _hasher: core::marker::PhantomData,
+                            },
+                            lsh,
+                        ),
+                    max_log_row_count,
+                };
+                builder.cycle_tracker_v2_exit();
+                whir_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
+                    builder,
+                    basefold_vk_ref,
+                    whir_pv,
+                    &shard_chips,
+                    &chip_metadata,
+                    &opened_values,
+                    &insertion_points,
+                    &mut challenger,
+                    machine.num_pv_elts(),
+                    // NORMALIZE verifies the rev CORE proof -> rev.
+                    true,
+                    eval_public_values_fn,
+                    jagged_evaluator_fn,
+                );
+            } else {
+            let basefold_shard_proof_variable =
+                basefold_shard_proof_variable.expect("non-whir proof lifts to the BaseFold variable");
             let per_proof_verifier;
             let active_verifier = match &evaluation_proof {
                 LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
@@ -630,6 +718,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 eval_public_values_fn,
                 jagged_evaluator_fn,
             );
+            }
 
             // Extract Global-scoped per-chip cumulative sums for the
             // sequential aggregate. shard_chips is sorted to match
