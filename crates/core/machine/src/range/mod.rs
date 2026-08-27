@@ -11,7 +11,12 @@ use zkm_pcs::air::{MachineAir, ZKMAirBuilder};
 use crate::{utils::zeroed_f_vec, CoreChipError};
 
 /// 1 + sum over bits of 2^bits slots, laid out at row index `2^bits + a`.
-pub const NUM_RANGE_ROWS: usize = 1 << 17;
+/// Sized for `bits <= MAX_RANGE_BITS` — the only widths the machine emits
+/// (the 9-bit clk/diff high limbs); 16-bit checks already have `U16Range`.
+/// 2^10 rows instead of SP1's 2^17: the table rides in EVERY shard, so its
+/// height is a per-shard fixed cost worth keeping tiny.
+pub const MAX_RANGE_BITS: usize = 9;
+pub const NUM_RANGE_ROWS: usize = 1 << (MAX_RANGE_BITS + 1);
 
 pub const NUM_RANGE_PREPROCESSED_COLS: usize = size_of::<RangePreprocessedCols<u8>>();
 pub const NUM_RANGE_MULT_COLS: usize = size_of::<RangeMultCols<u8>>();
@@ -43,7 +48,7 @@ impl<F: Field> RangeChip<F> {
     fn preprocessed_trace() -> RowMajorMatrix<F> {
         let mut values = zeroed_f_vec::<F>(NUM_RANGE_PREPROCESSED_COLS * NUM_RANGE_ROWS);
         // Row 0 is (0, 0); rows [2^bits, 2^{bits+1}) hold (a, bits).
-        for bits in 0..=16usize {
+        for bits in 0..=MAX_RANGE_BITS {
             for a in 0..(1usize << bits) {
                 let row = (1usize << bits) + a;
                 let cols: &mut RangePreprocessedCols<F> = values

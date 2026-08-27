@@ -550,7 +550,7 @@ impl<F: PrimeField32> MipsAir<F> {
         vec![
             (MipsAirId::Program, program.instructions.len()),
             (MipsAirId::Byte, 1 << 16),
-            (MipsAirId::Range, 1 << 17),
+            (MipsAirId::Range, 1 << 10),
         ]
     }
 
