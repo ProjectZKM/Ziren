@@ -292,7 +292,25 @@ pub trait BasefoldRing: StarkGenericConfig {
         // interleaved MLEs (the step-4 jagged reduction reads them); its
         // Merkle tree goes unused in WHIR mode.  Cost: a second commit —
         // acceptable for the gated experimental path.
-        let whir_data = if crate::whir::core_pcs_is_whir() {
+        //
+        // CORE MACHINE ONLY: recursion shards must stay BaseFold — the
+        // compose/shrink/wrap circuits verify BaseFold recursion proofs, and
+        // a WHIR recursion bundle panics the compose program build (measured:
+        // the keccak multi-shard e2e trips `unreachable!` in
+        // compress_basefold without this gate; single-leaf runs mask it
+        // because compress short-circuits compose and the host verifier
+        // accepts either PCS).  `use_rev` does NOT discriminate — the
+        // NORMALIZE machine also proves in the rev orientation.  The chip
+        // NAMES do: "Byte" is a MIPS-machine chip present in EVERY core
+        // round (setup commits its preprocessed table, every shard commits
+        // its multiplicities) and in NO recursion machine (BaseAlu/ExtAlu/
+        // Poseidon2/... namespace).  Commit and open stay consistent
+        // per-proof because the open dispatches on the whir_data this
+        // decision populates; a proof this gate routes to BaseFold verifies
+        // as BaseFold end-to-end (per-proof dispatch), so correctness never
+        // rests on the marker.
+        let is_core_machine = chip_traces.iter().any(|(name, _)| name == "Byte");
+        let whir_data = if is_core_machine && crate::whir::core_pcs_is_whir() {
             let dense_traces = alloc::vec![(
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(
