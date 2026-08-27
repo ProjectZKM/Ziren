@@ -60,6 +60,6 @@
   "Secp256r1DoubleAssign": 1614,
   "SyscallCore": 11,
   "Bls12381FpOpAssign": 486,
-  "MiscInstrs": 444,
+  "MiscInstrs": 437,
   "ShaCompress": 20000
 }

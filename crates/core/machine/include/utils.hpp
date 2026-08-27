@@ -270,54 +270,10 @@ populate_is_equal_word_operaion(IsEqualWordOperation<F>& self, uint32_t a_u32, u
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint64_t
 populate_add_double_operaion(AddDoubleOperation<F>& self, uint64_t a_u64, uint64_t b_u64) {
+    // Carries are recovered in the AIR now — values only.
     uint64_t expected = a_u64 + b_u64;
     write_word_from_u32_v2<F>(self.value, (uint32_t)expected);
     write_word_from_u32_v2<F>(self.value_hi, (uint32_t)(expected >> 32));
-
-    auto a = u64_to_le_bytes(a_u64);
-    auto b = u64_to_le_bytes(b_u64);
-
-    uint8_t carry[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    for (int i = 0; i < 7; i++) {
-        self.carry[i] = F::zero();
-    }
-
-    if ((uint32_t)a[0] + (uint32_t)b[0] > 255) {
-        carry[0] = 1;
-        self.carry[0] = F::one();
-    }
-    if ((uint32_t)a[1] + (uint32_t)b[1] + (uint32_t)carry[0] > 255) {
-        carry[1] = 1;
-        self.carry[1] = F::one();
-    }
-    if ((uint32_t)a[2] + (uint32_t)b[2] + (uint32_t)carry[1] > 255) {
-        carry[2] = 1;
-        self.carry[2] = F::one();
-    }
-
-    if ((uint32_t)a[3] + (uint32_t)b[3] + (uint32_t)carry[2] > 255) {
-        carry[3] = 1;
-        self.carry[3] = F::one();
-    }
-
-    if ((uint32_t)a[4] + (uint32_t)b[4] + (uint32_t)carry[3] > 255) {
-        carry[4] = 1;
-        self.carry[4] = F::one();
-    }
-
-    if ((uint32_t)a[5] + (uint32_t)b[5] + (uint32_t)carry[4] > 255) {
-        carry[5] = 1;
-        self.carry[5] = F::one();
-    }
-
-    if ((uint32_t)a[6] + (uint32_t)b[6] + (uint32_t)carry[5] > 255) {
-        carry[6] = 1;
-        self.carry[6] = F::one();
-    }
-
-    uint32_t base = 256;
-    uint32_t overflow = (uint32_t)a[0] + (uint32_t)b[0] - (uint32_t)u64_to_le_bytes(expected)[0];
-    assert(overflow * (overflow - base) == 0);
     return expected;
 }
 
