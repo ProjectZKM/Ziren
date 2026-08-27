@@ -10,8 +10,7 @@
 //!
 //! Reproducibility: every run prints a header naming the program, the commit,
 //! and the environment variables that are known to change proof bytes, so a
-//! result can be reproduced exactly.  `SHAPE_CHECK_FREQUENCY` in particular is
-//! byte-moving and is therefore always reported.
+//! result can be reproduced exactly.
 //!
 //! ```text
 //! cargo run --release -p zkm-core-machine --example playground -- buses fibonacci
@@ -61,9 +60,9 @@ const ALL_KINDS: &[LookupKind] = &[
 
 /// Environment variables that change what gets proven or how it is shaped.
 /// Printed on every run so a reported result carries the config that produced
-/// it -- `SHAPE_CHECK_FREQUENCY` alone flips the proof digest.
+/// it.  (`SHAPE_CHECK_FREQUENCY` is retired: shard limits are exact on every
+/// cycle, so no frequency knob influences the proof digest.)
 const REPRO_ENV: &[&str] = &[
-    "SHAPE_CHECK_FREQUENCY",
     "SHARD_SIZE",
     "SHARD_BATCH_SIZE",
     "TRACE_GEN_WORKERS",
