@@ -27,10 +27,6 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.is_add = F::from_bool(is_add);
     cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
 
-    auto operand_1 = is_add ? event.b : event.a;
-    auto operand_2 = event.c;
-
-    add_sub::populate_carries<F>(cols.carry, operand_1, operand_2);
     const F not_a0 = F::one() - cols.frame.op_a_0;
     cols.add_gate = cols.is_add * not_a0;
     cols.sub_gate = cols.is_sub * not_a0;

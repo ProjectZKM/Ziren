@@ -11,11 +11,10 @@ use crate::air::WordAirBuilder;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct AddOperation<T> {
-    /// The result of `a + b`.
+    /// The result of `a + b`.  The ONLY column: the carries are recovered in
+    /// the AIR as the linear expressions `(a_i + b_i - value_i + carry_in) / 256`
+    /// and asserted boolean (SP1's AddOperation shape).
     pub value: Word<T>,
-
-    /// Trace.
-    pub carry: [T; 3],
 }
 
 impl<F: Field> AddOperation<F> {
@@ -48,27 +47,6 @@ impl<F: Field> AddOperation<F> {
     fn populate_carries(&mut self, a_u32: u32, b_u32: u32) -> u32 {
         let expected = a_u32.wrapping_add(b_u32);
         self.value = Word::from(expected);
-
-        let a = a_u32.to_le_bytes();
-        let b = b_u32.to_le_bytes();
-
-        let mut carry = [0u8, 0u8, 0u8];
-        if (a[0] as u32) + (b[0] as u32) > 255 {
-            carry[0] = 1;
-            self.carry[0] = F::ONE;
-        }
-        if (a[1] as u32) + (b[1] as u32) + (carry[0] as u32) > 255 {
-            carry[1] = 1;
-            self.carry[1] = F::ONE;
-        }
-        if (a[2] as u32) + (b[2] as u32) + (carry[1] as u32) > 255 {
-            carry[2] = 1;
-            self.carry[2] = F::ONE;
-        }
-
-        let overflow =
-            (a[3] as u32) + (b[3] as u32) + (carry[2] as u32) - (expected.to_le_bytes()[3] as u32);
-        debug_assert!(overflow == 0 || overflow == 256);
         expected
     }
 
@@ -79,34 +57,20 @@ impl<F: Field> AddOperation<F> {
         cols: AddOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let one = AB::Expr::ONE;
-        let base = AB::F::from_u32(256);
+        let base_inv = AB::F::from_u32(256).inverse();
 
         let mut builder_is_real = builder.when(is_real.clone());
 
-        // For each limb, assert that difference between the carried result and the non-carried
-        // result is either zero or the base.
-        let overflow_0 = a[0] + b[0] - cols.value[0];
-        let overflow_1 = a[1] + b[1] - cols.value[1] + cols.carry[0];
-        let overflow_2 = a[2] + b[2] - cols.value[2] + cols.carry[1];
-        let overflow_3 = a[3] + b[3] - cols.value[3] + cols.carry[2];
-
-        builder_is_real.assert_zero(overflow_3.clone() * (overflow_3 - base));
-
-        // If the carry is one, then the overflow must be the base.
-        builder_is_real.assert_zero(cols.carry[0] * (overflow_0.clone() - base));
-        builder_is_real.assert_zero(cols.carry[1] * (overflow_1.clone() - base));
-        builder_is_real.assert_zero(cols.carry[2] * (overflow_2.clone() - base));
-
-        // If the carry is not one, then the overflow must be zero.
-        builder_is_real.assert_zero((cols.carry[0] - one.clone()) * overflow_0);
-        builder_is_real.assert_zero((cols.carry[1] - one.clone()) * overflow_1);
-        builder_is_real.assert_zero((cols.carry[2] - one) * overflow_2);
-
-        // Assert that the carry is either zero or one.
-        builder_is_real.assert_bool(cols.carry[0]);
-        builder_is_real.assert_bool(cols.carry[1]);
-        builder_is_real.assert_bool(cols.carry[2]);
+        // Recover each carry as a LINEAR expression and force it boolean:
+        //   256 * carry_out = a_i + b_i - value_i + carry_in
+        // With a, b, value byte-shaped and carry_in boolean, the equation has
+        // a unique boolean solution per limb; the final carry-out is the
+        // discarded bit-32 overflow of the wrapping add.
+        let mut carry = AB::Expr::ZERO;
+        for i in 0..zkm_primitives::consts::WORD_SIZE {
+            carry = (a[i] + b[i] - cols.value[i] + carry) * base_inv;
+            builder_is_real.assert_bool(carry.clone());
+        }
         builder_is_real.assert_bool(is_real.clone());
 
         // Range check each byte.
@@ -133,80 +97,20 @@ impl<F: Field> AddOperation<F> {
         cols: AddOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let one = AB::Expr::ONE;
-        let base = AB::F::from_u32(256);
+        let base_inv = AB::F::from_u32(256).inverse();
 
         let mut builder_is_real = builder.when(is_real.clone());
 
-        let overflow_0 = a[0] + b[0] - cols.value[0];
-        let overflow_1 = a[1] + b[1] - cols.value[1] + cols.carry[0];
-        let overflow_2 = a[2] + b[2] - cols.value[2] + cols.carry[1];
-        let overflow_3 = a[3] + b[3] - cols.value[3] + cols.carry[2];
-
-        builder_is_real.assert_zero(overflow_3.clone() * (overflow_3 - base));
-        builder_is_real.assert_zero(cols.carry[0] * (overflow_0.clone() - base));
-        builder_is_real.assert_zero(cols.carry[1] * (overflow_1.clone() - base));
-        builder_is_real.assert_zero(cols.carry[2] * (overflow_2.clone() - base));
-        builder_is_real.assert_zero((cols.carry[0] - one.clone()) * overflow_0);
-        builder_is_real.assert_zero((cols.carry[1] - one.clone()) * overflow_1);
-        builder_is_real.assert_zero((cols.carry[2] - one) * overflow_2);
-        builder_is_real.assert_bool(cols.carry[0]);
-        builder_is_real.assert_bool(cols.carry[1]);
-        builder_is_real.assert_bool(cols.carry[2]);
+        // Recovered linear carries, exactly as in [`Self::eval`]; only the
+        // fresh RESULT word is range checked (operands already byte-shaped).
+        let mut carry = AB::Expr::ZERO;
+        for i in 0..zkm_primitives::consts::WORD_SIZE {
+            carry = (a[i] + b[i] - cols.value[i] + carry) * base_inv;
+            builder_is_real.assert_bool(carry.clone());
+        }
         builder_is_real.assert_bool(is_real.clone());
 
         builder.slice_range_check_u8(&cols.value.0, is_real);
     }
 }
 
-/// The three carry bits of the byte-wise addition `x + y`, for populating the
-/// shared carry columns [`eval_word_add_gated`] constrains.
-pub fn word_add_carries<F: p3_field::PrimeField32>(x: u32, y: u32) -> [F; 3] {
-    let a = x.to_le_bytes();
-    let b = y.to_le_bytes();
-    let mut carry = [0u32; 3];
-    if (a[0] as u32) + (b[0] as u32) > 255 {
-        carry[0] = 1;
-    }
-    if (a[1] as u32) + (b[1] as u32) + carry[0] > 255 {
-        carry[1] = 1;
-    }
-    if (a[2] as u32) + (b[2] as u32) + carry[1] > 255 {
-        carry[2] = 1;
-    }
-    carry.map(F::from_u32)
-}
-
-/// Assert `x + y == z` byte-wise under `gate`, against shared carry columns —
-/// NO value column and NO range checks: all three words must already be
-/// byte-shaped (frame register accesses / program immediates).
-///
-/// `gate` must be a DEGREE-1 boolean (a column, or a sum of disjoint selector
-/// columns): every constraint here multiplies it by two degree-1 factors.
-/// Two callers with disjoint gates may share one `carry` array — only the
-/// active caller's equation binds it.
-pub fn eval_word_add_gated<AB: ZKMAirBuilder>(
-    builder: &mut AB,
-    gate: impl Into<AB::Expr>,
-    x: Word<AB::Var>,
-    y: Word<AB::Var>,
-    z: Word<AB::Var>,
-    carry: [AB::Var; 3],
-) {
-    let one = AB::Expr::ONE;
-    let base = AB::F::from_u32(256);
-    let mut b = builder.when(gate.into());
-
-    let overflow_0 = x[0] + y[0] - z[0];
-    let overflow_1 = x[1] + y[1] - z[1] + carry[0];
-    let overflow_2 = x[2] + y[2] - z[2] + carry[1];
-    let overflow_3 = x[3] + y[3] - z[3] + carry[2];
-
-    b.assert_zero(overflow_3.clone() * (overflow_3 - base));
-    b.assert_zero(carry[0] * (overflow_0.clone() - base));
-    b.assert_zero(carry[1] * (overflow_1.clone() - base));
-    b.assert_zero(carry[2] * (overflow_2.clone() - base));
-    b.assert_zero((carry[0] - one.clone()) * overflow_0);
-    b.assert_zero((carry[1] - one.clone()) * overflow_1);
-    b.assert_zero((carry[2] - one) * overflow_2);
-}

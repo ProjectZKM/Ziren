@@ -8,7 +8,7 @@ use zkm_pcs::air::BaseAirBuilder;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
-use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32, Field};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
@@ -46,15 +46,6 @@ pub struct AddSubCols<T> {
     /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
-
-    /// The carry bits of the byte-wise addition this row verifies: for ADD
-    /// `b + c == a`, for SUB `a + c == b` (i.e. `a = b - c`).  The two cases
-    /// are disjoint, so they share the columns.  There is no separate result
-    /// or operand word — every word involved is a frame register access, all
-    /// of them byte-shaped already (the frame checks its `op_a` commit; the
-    /// reads inherit byte shape from their checked writers through the
-    /// register file), so the row adds NO byte range checks either.
-    pub carry: [T; 3],
 
     /// `is_add * (1 - op_a_0)` — a discarded register-0 result leaves the
     /// equation ungated (the frame pins the commit to zero, which the true
@@ -203,11 +194,6 @@ impl AddSubChip {
         cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
         cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
 
-        let is_add = event.opcode == Opcode::ADD;
-        let operand_1 = if is_add { event.b } else { event.a };
-        let operand_2 = event.c;
-
-        cols.carry = crate::operations::word_add_carries(operand_1, operand_2);
         let not_a0 = F::ONE - cols.frame.op_a_0;
         cols.add_gate = cols.is_add * not_a0;
         cols.sub_gate = cols.is_sub * not_a0;
@@ -246,16 +232,29 @@ where
             local.sub_gate,
             local.is_sub * (AB::Expr::ONE - local.frame.op_a_0),
         );
-        builder.assert_bool(local.carry[0]);
-        builder.assert_bool(local.carry[1]);
-        builder.assert_bool(local.carry[2]);
         let av = *local.frame.op_a_access.value();
         let bv = local.frame.op_b_val();
         let cv = local.frame.op_c_val();
+        // The carries are RECOVERED linear expressions, boolean-asserted under
+        // the case gate (no carry columns): `256*c_out = x_i + y_i - z_i + c_in`
+        // with all words byte-shaped has a unique boolean solution.
+        let base_inv = AB::F::from_u32(256).inverse();
         // ADD: `a = b + c`.
-        crate::operations::eval_word_add_gated(builder, local.add_gate, bv, cv, av, local.carry);
+        let mut carry = AB::Expr::ZERO;
+        for i in 0..4 {
+            carry = (bv[i] + cv[i] - av[i] + carry) * base_inv;
+            builder
+                .when(local.add_gate)
+                .assert_zero(carry.clone() * (carry.clone() - AB::Expr::ONE));
+        }
         // SUB: `a = b - c`, verified as `b = a + c`.
-        crate::operations::eval_word_add_gated(builder, local.sub_gate, av, cv, bv, local.carry);
+        let mut carry = AB::Expr::ZERO;
+        for i in 0..4 {
+            carry = (av[i] + cv[i] - bv[i] + carry) * base_inv;
+            builder
+                .when(local.sub_gate)
+                .assert_zero(carry.clone() * (carry.clone() - AB::Expr::ONE));
+        }
 
         // Every real row is an instruction carrying its own program fetch,
         // register access and `(clk, pc)` chaining (the Instruction bus and
