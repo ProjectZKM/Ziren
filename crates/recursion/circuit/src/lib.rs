@@ -49,6 +49,7 @@ pub mod symbolic;
 pub mod univariate;
 pub(crate) mod utils;
 pub mod witness;
+pub mod whir_circuit;
 pub mod zerocheck;
 
 pub use types::*;
