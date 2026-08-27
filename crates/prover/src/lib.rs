@@ -3158,8 +3158,8 @@ pub mod tests {
     /// Validates the wrap path end-to-end: compress + shrink +
     /// wrap_bn254 + verify_wrap_bn254 — without the heavy PLONK
     /// artifact build that follows.
-    /// Jagged-WHIR gate e2e (`ZIREN_CORE_PCS=whir`): prove the core shards
-    /// under the stacked-WHIR inner PCS, then run normalize + compose over
+    /// Jagged-WHIR e2e: prove the core shards under the stacked-WHIR inner
+    /// PCS (the core-machine default), then run normalize + compose over
     /// them — the LEAF program verifies the WHIR core proofs in-circuit
     /// (WhirBundle witness lift + RecursiveStackedWhirVerifier), while the
     /// recursion shards themselves stay BaseFold.
@@ -3169,7 +3169,6 @@ pub mod tests {
     fn test_e2e_compress_whir_core() -> Result<()> {
         let elf = test_artifacts::FIBONACCI_ELF;
         setup_logger();
-        std::env::set_var("ZIREN_CORE_PCS", "whir");
         // The WHIR leaf program is a NEW recursion program shape whose vk is
         // not in the enumerated vk_map yet (that regen is the production
         // query-budget phase); verify the recursion chain itself, not the
@@ -3184,7 +3183,6 @@ pub mod tests {
             opts,
             Test::Compress,
         );
-        std::env::remove_var("ZIREN_CORE_PCS");
         std::env::remove_var("VERIFY_VK");
         result
     }

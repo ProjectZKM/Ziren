@@ -997,11 +997,8 @@ pub mod tests {
     #[test]
     fn test_simple_prove_whir_inner_pcs() {
         utils::setup_logger();
-        // Prove + verify a shard with the jagged-WHIR inner PCS.  The gate is
-        // process-global; a concurrently-running prove test would merely also
-        // exercise the WHIR path (the verifier dispatches on the proof
-        // itself), so no serialization guard is needed.
-        std::env::set_var("ZIREN_CORE_PCS", "whir");
+        // Prove + verify a shard with the jagged-WHIR inner PCS — the
+        // core-machine default (the verifier dispatches on the proof itself).
         let program = simple_program();
         let runtime = {
             let mut runtime = zkm_core_executor::Executor::new(program, ZKMCoreOpts::default());
@@ -1012,7 +1009,6 @@ pub mod tests {
         // programs no longer fit a preprocessed band anyway.
         let result =
             crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None);
-        std::env::remove_var("ZIREN_CORE_PCS");
         // Verified, AND actually under WHIR: a silently-false `whir_mode`
         // would prove plain BaseFold and pass anyway, so pin the dispatch.
         for sp in &result.unwrap().shard_proofs {

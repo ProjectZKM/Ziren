@@ -892,7 +892,7 @@ pub mod jagged {
         /// Group-0 BaseFold open proof.
         pub basefold_proof: StackedBasefoldProof<InnerVal, InnerChallenge, MT>,
         /// Group-0 WHIR open proof — `Some` when the shard was proven under
-        /// the jagged-WHIR inner PCS (`ZIREN_CORE_PCS=whir`); the
+        /// the jagged-WHIR inner PCS (the core-machine default); the
         /// `basefold_proof` slot then holds an empty placeholder.  The
         /// verifier dispatches on this field.
         #[serde(default)]
@@ -1060,7 +1060,7 @@ pub mod jagged {
         pub commit: crate::jagged_pcs::JaggedCommitGeneric<MT>,
         pub prover_data: crate::jagged_pcs::JaggedProverDataGeneric<MT>,
         /// WHIR-committed data when the shard runs the jagged-WHIR inner PCS
-        /// (`ZIREN_CORE_PCS=whir`); `prover_data` then carries the SAME
+        /// (the core-machine default); `prover_data` then carries the SAME
         /// width-1 polynomials as `interleaved_mles` (the reduction reads
         /// them) over a placeholder Merkle tree.
         pub whir_data: Option<crate::whir::jagged::JaggedWhirProverDataGeneric<MT>>,
@@ -1415,16 +1415,16 @@ pub mod jagged {
         // jagged-WHIR sibling; the WHIR proof is captured into `whir_slot`
         // and the closure returns an EMPTY BaseFold placeholder so the shared
         // reduction core's return type stays fixed.
-        let whir_mode = rounds.iter().all(|r| r.precomputed.whir_data.is_some())
-            && rounds.iter().any(|r| r.precomputed.whir_data.is_some());
-        if crate::whir::core_pcs_is_whir() && !whir_mode {
-            // The gate is ON but a round lacks WHIR data: the open falls back
-            // to BaseFold while the caller may have observed a WHIR root —
-            // an inconsistent proof.  Surface which round is missing.
+        let whir_any = rounds.iter().any(|r| r.precomputed.whir_data.is_some());
+        let whir_mode = whir_any && rounds.iter().all(|r| r.precomputed.whir_data.is_some());
+        if whir_any && !whir_mode {
+            // A round lacks WHIR data while another carries it: the open
+            // falls back to BaseFold while the caller may have observed a
+            // WHIR root — an inconsistent proof.  Surface which is missing.
             let flags: alloc::vec::Vec<bool> =
                 rounds.iter().map(|r| r.precomputed.whir_data.is_some()).collect();
             eprintln!(
-                "[whir open] gate ON but whir_mode=false: per-round whir_data presence = {flags:?}                  (round order: preceding/preprocessed first, main last)"
+                "[whir open] MIXED rounds, falling back to BaseFold: per-round whir_data presence = {flags:?}                  (round order: preceding/preprocessed first, main last)"
             );
         }
         let whir_slot: core::cell::RefCell<
@@ -1721,7 +1721,7 @@ pub mod jagged {
             crate::jagged_pcs::JaggedMmcs,
         >,
         // `Some` dispatches the batched open to the jagged-WHIR verifier
-        // (the shard was proven under `ZIREN_CORE_PCS=whir`).
+        // (the shard was proven under the jagged-WHIR core PCS).
         whir_proof: Option<
             &crate::whir::stacked::StackedWhirProof<
                 InnerVal,

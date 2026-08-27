@@ -286,12 +286,11 @@ pub trait BasefoldRing: StarkGenericConfig {
                     crate::jagged_pcs::JaggedDft,
                 >(dense_traces, Self::bf_mmcs(), dft, Self::fri_config())
             };
-        // The experimental jagged-WHIR gate: ALSO commit the same dense
+        // Core machines prove under jagged-WHIR: ALSO commit the same dense
         // polynomial under WHIR and let ITS root be the observed commitment.
         // The BaseFold commit above is kept purely for `prover_data`'s
         // interleaved MLEs (the step-4 jagged reduction reads them); its
-        // Merkle tree goes unused in WHIR mode.  Cost: a second commit —
-        // acceptable for the gated experimental path.
+        // Merkle tree goes unused in WHIR mode.
         //
         // CORE MACHINE ONLY: recursion shards must stay BaseFold — the
         // compose/shrink/wrap circuits verify BaseFold recursion proofs, and
@@ -310,7 +309,7 @@ pub trait BasefoldRing: StarkGenericConfig {
         // as BaseFold end-to-end (per-proof dispatch), so correctness never
         // rests on the marker.
         let is_core_machine = chip_traces.iter().any(|(name, _)| name == "Byte");
-        let whir_data = if is_core_machine && crate::whir::core_pcs_is_whir() {
+        let whir_data = if is_core_machine {
             let dense_traces = alloc::vec![(
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(

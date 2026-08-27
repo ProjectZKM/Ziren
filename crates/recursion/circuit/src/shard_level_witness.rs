@@ -309,7 +309,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         // stream felts).
         modified_commitment: [Felt<C::F>; 8],
     },
-    // The jagged-WHIR gate (`ZIREN_CORE_PCS=whir`): the bundle's batched
+    // The jagged-WHIR core PCS (the core-machine default): the bundle's batched
     // open is a stacked-WHIR proof instead of a BaseFold one.  Same shared
     // pieces as `Bundle` (reduction sumcheck, jagged-eval sub-sumcheck,
     // q_at_z, commit roots); only the inner PCS proof type differs.  Core
@@ -1173,7 +1173,7 @@ where
         )?;
 
     // BaseFold proof (BN254 digests) — witnessed felt/ext + BN254 digests.
-    assert!(bundle.whir_proof.is_none(), "WHIR core proof in bundle: the recursion circuit cannot lift a WHIR opening yet (ZIREN_CORE_PCS=whir is host-verify only)");
+    assert!(bundle.whir_proof.is_none(), "WHIR proof in an OUTER-lift bundle: the outer circuit lifts recursion (BaseFold) proofs only — a core proof leaked past the leaf");
     let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
     let basefold_proof = crate::basefold_witness::read_basefold_proof_outer_from_stream::<C>(
         &host_basefold_outer,
@@ -1228,7 +1228,7 @@ where
             Some(b) => b,
             None => return false,
         };
-    assert!(bundle.whir_proof.is_none(), "WHIR core proof in bundle: the recursion circuit cannot lift a WHIR opening yet (ZIREN_CORE_PCS=whir is host-verify only)");
+    assert!(bundle.whir_proof.is_none(), "WHIR proof in an OUTER-lift bundle: the outer circuit lifts recursion (BaseFold) proofs only — a core proof leaked past the leaf");
     let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
     crate::basefold_witness::write_basefold_proof_outer_to_stream::<C>(
         &host_basefold_outer,
