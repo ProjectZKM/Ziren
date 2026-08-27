@@ -77,6 +77,9 @@ impl<F: Field> ByteChip<F> {
                         col.nor = F::from_u8(nor);
                         ByteLookupEvent::new(*opcode, nor as u16, 0, b, c)
                     }
+                    ByteOpcode::Range => {
+                        unreachable!("Range is not a byte-table op")
+                    }
                     ByteOpcode::SLL => {
                         let sll = b << (c & 7);
                         col.sll = F::from_u8(sll);

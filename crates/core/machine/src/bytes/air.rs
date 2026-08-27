@@ -41,6 +41,8 @@ impl<AB: ZKMAirBuilder<F: Field>> Air<AB> for ByteChip<AB::F> {
                 ByteOpcode::NOR => {
                     builder.receive_byte(field_op, local.nor, local.b, local.c, mult)
                 }
+                // Served by the dedicated `RangeChip`, never by the byte table.
+                ByteOpcode::Range => unreachable!("Range is not a byte-table op"),
                 ByteOpcode::SLL => {
                     builder.receive_byte(field_op, local.sll, local.b, local.c, mult)
                 }

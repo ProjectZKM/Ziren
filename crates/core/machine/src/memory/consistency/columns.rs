@@ -84,16 +84,11 @@ pub struct RegisterAccessCols<T> {
     /// The clk of the previous access to this register.  Always in the current shard.
     pub prev_clk: T,
 
-    /// The least significant 16 bit limb of `clk - prev_clk - 1`.
+    /// The least significant 16 bit limb of `clk - prev_clk - 1`.  The 9-bit
+    /// high limb (a per-shard `clk` runs to `2^25`) is recovered as a linear
+    /// expression and checked against the parametric range table — ONE
+    /// witnessed limb per access.
     pub diff_16bit_limb: T,
-
-    /// The most significant bit of `clk - prev_clk - 1`, i.e. bit 24.
-    ///
-    /// A per-shard `clk` runs to `2^25` (`CORE_SHARD_CLK_LIMIT`), so the gap between two
-    /// accesses to the same register can need 25 bits.  Unlike [`MemoryAccessCols`], which
-    /// carries the same bit as its own column, the register form spends it on recovering the
-    /// 8-bit limb instead, which is what keeps this at two witnessed limbs rather than three.
-    pub diff_24bit_limb: T,
 }
 
 /// Register read access.

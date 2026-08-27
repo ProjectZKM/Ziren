@@ -75,15 +75,13 @@ impl<F: PrimeField32> RegisterAccessCols<F> {
         let diff_minus_one = timestamp.wrapping_sub(prev_timestamp).wrapping_sub(1);
         let diff_16bit_limb = (diff_minus_one & 0xffff) as u16;
         self.diff_16bit_limb = F::from_u16(diff_16bit_limb);
-        let diff_8bit_limb = (diff_minus_one >> 16) & 0xff;
-        self.diff_24bit_limb = F::from_u32((diff_minus_one >> 24) & 1);
 
         // Add a byte table lookup with the 16Range op.
         output.add_u16_range_check(diff_16bit_limb);
 
-        // Add a byte table lookup with the U8Range op.  The middle limb is a linear expression in
-        // the AIR, not a column, but it is still range-checked.
-        output.add_u8_range_check(0, diff_8bit_limb as u8);
+        // The 9-bit high limb is a recovered linear expression in the AIR, not
+        // a column; it is checked against the parametric range table.
+        output.add_bit_range_check(((diff_minus_one >> 16) & 0x1ff) as u16, 9);
     }
 }
 

@@ -34,6 +34,7 @@ pub(crate) mod mips_chips {
             ShiftRightImmChip,
         },
         bytes::ByteChip,
+        range::RangeChip,
         control_flow::{BranchChip, JumpChip},
         memory::{
             LoadNarrowChip, LoadWordChip, MemoryGlobalChip, MemoryUnalignedChip, StoreNarrowChip,
@@ -113,6 +114,8 @@ pub enum MipsAir<F: PrimeField32> {
     ShiftRightImm(ShiftRightImmChip),
     /// A lookup table for byte operations.
     ByteLookup(ByteChip<F>),
+    /// The parametric bit-width range table.
+    RangeLookup(RangeChip<F>),
     /// An AIR for MIPS Branch instructions.
     Branch(BranchChip),
     /// An AIR for MIPS Jump instructions.
@@ -516,6 +519,10 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(byte.name(), byte.cost());
         chips.push(byte);
 
+        let range = Chip::new(MipsAir::RangeLookup(RangeChip::default()));
+        costs.insert(range.name(), range.cost());
+        chips.push(range);
+
         let sys_linux = Chip::new(MipsAir::SysLinux(SysLinuxChip::default()));
         costs.insert(sys_linux.name(), sys_linux.cost());
         chips.push(sys_linux);
@@ -540,7 +547,11 @@ impl<F: PrimeField32> MipsAir<F> {
 
     /// Get the heights of the preprocessed chips for a given program.
     pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(MipsAirId, usize)> {
-        vec![(MipsAirId::Program, program.instructions.len()), (MipsAirId::Byte, 1 << 16)]
+        vec![
+            (MipsAirId::Program, program.instructions.len()),
+            (MipsAirId::Byte, 1 << 16),
+            (MipsAirId::Range, 1 << 17),
+        ]
     }
 
     /// Get the heights of the chips for a given execution record.
@@ -685,6 +696,7 @@ impl<F: PrimeField32> MipsAir<F> {
         // Remove the preprocessed chips.
         airs.remove(&Self::Program(ProgramChip::default()));
         airs.remove(&Self::ByteLookup(ByteChip::default()));
+        airs.remove(&Self::RangeLookup(RangeChip::default()));
 
         // Remove the `PrecompileChain` bus-control chips: they are never matched
         // independently — instead `get_precompile_shapes` appends each control to
@@ -863,6 +875,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::ShiftLeft(_) => unreachable!("Invalid for core chip"),
             Self::ShiftLeftImm(_) => unreachable!("Invalid for core chip"),
             Self::ByteLookup(_) => unreachable!("Invalid for core chip"),
+            Self::RangeLookup(_) => unreachable!("Invalid for core chip"),
             Self::SyscallCore(_) => unreachable!("Invalid for core chip"),
             Self::SyscallPrecompile(_) => unreachable!("Invalid for syscall precompile chip"),
             Self::Branch(_) => unreachable!("Invalid for core chip"),

@@ -55,9 +55,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_register_access(
     self.prev_clk = F::from_canonical_u32(prev_timestamp);
 
     const uint32_t diff_minus_one = timestamp - prev_timestamp - 1;
-    const uint16_t diff_16bit_limb = (uint16_t)(diff_minus_one & 0xffff);
-    self.diff_16bit_limb = F::from_canonical_u16(diff_16bit_limb).val;
-    self.diff_24bit_limb = F::from_canonical_u32((diff_minus_one >> 24) & 1);
+    self.diff_16bit_limb = F::from_canonical_u16((uint16_t)(diff_minus_one & 0xffff)).val;
 }
 
 template<class F>

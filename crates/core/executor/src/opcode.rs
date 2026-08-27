@@ -210,4 +210,7 @@ pub enum ByteOpcode {
     U16Range = 8,
     /// Bitwise NOR.
     NOR = 9,
+    /// Parametric bit-width range check: `a1 < 2^b`, `b <= 16`.  Served by the
+    /// dedicated `RangeChip` table, NOT the byte table.
+    Range = 10,
 }

@@ -57,6 +57,18 @@ pub trait ByteRecord {
         });
     }
 
+    /// Adds a `ByteLookupEvent` to verify `a < 2^bits` (`bits <= 16`) against
+    /// the dedicated range table.
+    fn add_bit_range_check(&mut self, a: u16, bits: u8) {
+        self.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::Range,
+            a1: a,
+            a2: 0,
+            b: bits,
+            c: 0,
+        });
+    }
+
     /// Adds a `ByteLookupEvent` to verify `a` is indeed u16.
     fn add_u16_range_check(&mut self, a: u16) {
         self.add_byte_lookup_event(ByteLookupEvent {

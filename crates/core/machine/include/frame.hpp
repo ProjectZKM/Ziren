@@ -31,8 +31,7 @@ __ZKM_HOSTDEV__ void populate_raw(
 ) {
     frame.shard = F::from_canonical_u32(shard);
     frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(clk & 0xffff));
-    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(clk >> 16 & 0xff));
-    frame.clk_24bit_limb = F::from_canonical_u32((clk >> 24) & 1);
+    frame.clk_high_limb = F::from_canonical_u16((uint16_t)((clk >> 16) & 0x1ff));
 
     cpu::populate_instruction<F>(frame.instruction, instruction);
     (void)recv_next_pc;
@@ -138,8 +137,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_mem(
 ) {
     frame.shard = F::from_canonical_u32(event.shard);
     frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
-    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
-    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+    frame.clk_high_limb = F::from_canonical_u16((uint16_t)((event.clk >> 16) & 0x1ff));
 
     frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
     frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
@@ -171,8 +169,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_r(
 ) {
     frame.shard = F::from_canonical_u32(shard);
     frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
-    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
-    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+    frame.clk_high_limb = F::from_canonical_u16((uint16_t)((event.clk >> 16) & 0x1ff));
 
     frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
     frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
@@ -208,8 +205,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_imm(
 ) {
     frame.shard = F::from_canonical_u32(shard);
     frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
-    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
-    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+    frame.clk_high_limb = F::from_canonical_u16((uint16_t)((event.clk >> 16) & 0x1ff));
 
     frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
     frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
@@ -238,8 +234,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_shamt(
 ) {
     frame.shard = F::from_canonical_u32(shard);
     frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
-    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
-    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+    frame.clk_high_limb = F::from_canonical_u16((uint16_t)((event.clk >> 16) & 0x1ff));
 
     frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
     frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
@@ -290,8 +285,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_syscall_r(
 ) {
     frame.shard = F::from_canonical_u32(shard);
     frame.clk_16bit_limb = F::from_canonical_u16((uint16_t)(event.clk & 0xffff));
-    frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(event.clk >> 16 & 0xff));
-    frame.clk_24bit_limb = F::from_canonical_u32((event.clk >> 24) & 1);
+    frame.clk_high_limb = F::from_canonical_u16((uint16_t)((event.clk >> 16) & 0x1ff));
 
     frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
     frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);

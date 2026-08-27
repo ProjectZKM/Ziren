@@ -17,6 +17,7 @@
 pub mod air;
 pub mod alu;
 pub mod bytes;
+pub mod range;
 pub mod control_flow;
 pub mod frame;
 pub mod global;

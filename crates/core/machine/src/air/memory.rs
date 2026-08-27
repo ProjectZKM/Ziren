@@ -103,21 +103,13 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         //
         //   assert `0 <= clk - prev_clk - 1 < 2^25`
         //
-        // decomposed as `diff_16bit_limb + diff_8bit_limb * 2^16 + diff_24bit_limb * 2^24`.
-        // The 16-bit limb and the top bit are columns; the 8-bit limb is recovered as the linear
-        // expression below and range-checked as a byte in place, which is what keeps the check at
-        // two columns instead of three.
+        // decomposed as `diff_16bit_limb + diff_high * 2^16`.  Only the 16-bit
+        // limb is a column; the 9-bit high limb is recovered as the linear
+        // expression below and checked against the parametric range table.
         let diff_minus_one = clk.clone() - prev_clk.clone() - Self::Expr::ONE;
         let diff_16bit_limb: Self::Expr = access.diff_16bit_limb.clone().into();
-        let diff_24bit_limb: Self::Expr = access.diff_24bit_limb.clone().into();
 
-        // Unconditional: the column is zero on every padding / not-taken row, so this needs no
-        // `do_check` guard and stays degree 2 whatever the caller's guard is.
-        self.assert_bool(diff_24bit_limb.clone());
-
-        let diff_8bit_limb = (diff_minus_one
-            - diff_16bit_limb.clone()
-            - diff_24bit_limb * Self::Expr::from_u32(1 << 24))
+        let diff_high_limb = (diff_minus_one - diff_16bit_limb.clone())
             * Self::F::from_u32(1 << 16).inverse();
 
         self.send_byte(
@@ -128,10 +120,10 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
             do_check.clone(),
         );
         self.send_byte(
-            Self::Expr::from_u8(ByteOpcode::U8Range as u8),
+            Self::Expr::from_u8(ByteOpcode::Range as u8),
+            diff_high_limb,
+            Self::Expr::from_u8(9),
             Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            diff_8bit_limb,
             do_check.clone(),
         );
 
@@ -277,6 +269,33 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         );
 
         self.send_timestamp_limb_checks(limb_16, limb_8, do_check);
+    }
+
+    /// The range checks that bound a 25-bit timestamp split as
+    /// `limb_16 + limb_high * 2^16` with `limb_high < 2^9`: a U16Range on the
+    /// low limb and a parametric `Range(_, 9)` on the high one — no witnessed
+    /// top bit at all.  For callers that build the timestamp FROM the limbs
+    /// (the instruction frames) and so get the reconstruction identity free.
+    fn send_timestamp_range_checks(
+        &mut self,
+        limb_16: impl Into<Self::Expr>,
+        limb_high: impl Into<Self::Expr>,
+        do_check: impl Into<Self::Expr> + Clone,
+    ) {
+        self.send_byte(
+            Self::Expr::from_u8(ByteOpcode::U16Range as u8),
+            limb_16,
+            Self::Expr::ZERO,
+            Self::Expr::ZERO,
+            do_check.clone(),
+        );
+        self.send_byte(
+            Self::Expr::from_u8(ByteOpcode::Range as u8),
+            limb_high,
+            Self::Expr::from_u8(9),
+            Self::Expr::ZERO,
+            do_check,
+        );
     }
 
     /// The two byte-table range checks that bound a timestamp's low limbs, for callers that build

@@ -159,6 +159,8 @@ pub enum MipsAirId {
     BooleanCircuitGarble = 50,
     /// The BooleanCircuitGarble control chip (bookends the `PrecompileChain` state bus).
     BooleanCircuitGarbleControl = 52,
+    /// The parametric bit-width range table.
+    Range = 65,
 }
 
 impl MipsAirId {
@@ -260,6 +262,7 @@ impl MipsAirId {
             Self::MemoryBump => "MemoryBump",
             Self::Global => "Global",
             Self::Byte => "Byte",
+            Self::Range => "Range",
             Self::SysLinux => "SysLinux",
             Self::MovCond => "MovCond",
             Self::BooleanCircuitGarble => "BooleanCircuitGarble",
