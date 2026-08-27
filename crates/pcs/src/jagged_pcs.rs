@@ -1417,6 +1417,16 @@ pub mod jagged {
         // reduction core's return type stays fixed.
         let whir_mode = rounds.iter().all(|r| r.precomputed.whir_data.is_some())
             && rounds.iter().any(|r| r.precomputed.whir_data.is_some());
+        if crate::whir::core_pcs_is_whir() && !whir_mode {
+            // The gate is ON but a round lacks WHIR data: the open falls back
+            // to BaseFold while the caller may have observed a WHIR root —
+            // an inconsistent proof.  Surface which round is missing.
+            let flags: alloc::vec::Vec<bool> =
+                rounds.iter().map(|r| r.precomputed.whir_data.is_some()).collect();
+            eprintln!(
+                "[whir open] gate ON but whir_mode=false: per-round whir_data presence = {flags:?}                  (round order: preceding/preprocessed first, main last)"
+            );
+        }
         let whir_slot: core::cell::RefCell<
             Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
         > = core::cell::RefCell::new(None);
