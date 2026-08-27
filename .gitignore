@@ -25,3 +25,4 @@ docs/whitepaper/*
 # untrack root-level design memos (keep on disk, exclude README)
 docs/*.md
 !docs/README.md
+.chainstack
