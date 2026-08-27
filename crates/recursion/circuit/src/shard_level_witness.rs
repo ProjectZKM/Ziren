@@ -442,6 +442,7 @@ where
                 HostEvalProof::Empty => LiftedEvalProof::Empty,
                 HostEvalProof::Bytes(b) => LiftedEvalProof::Bytes(b.clone()),
                 HostEvalProof::Bundle(bundle) => {
+                    assert!(bundle.whir_proof.is_none(), "WHIR core proof in bundle: the recursion circuit cannot lift a WHIR opening yet (ZIREN_CORE_PCS=whir is host-verify only)");
                     let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
                     let basefold_proof = crate::basefold_witness::read_basefold_proof_from_stream::<
                         C,
@@ -522,6 +523,7 @@ where
         if let zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) =
             &self.evaluation_proof
         {
+            assert!(bundle.whir_proof.is_none(), "WHIR core proof in bundle: the recursion circuit cannot lift a WHIR opening yet (ZIREN_CORE_PCS=whir is host-verify only)");
             let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
             crate::basefold_witness::write_basefold_proof_to_stream::<C>(&host_proof, witness);
             // write sumcheck, jagged_eval, expected_eval (same order as read).
@@ -1121,6 +1123,7 @@ where
         )?;
 
     // BaseFold proof (BN254 digests) — witnessed felt/ext + BN254 digests.
+    assert!(bundle.whir_proof.is_none(), "WHIR core proof in bundle: the recursion circuit cannot lift a WHIR opening yet (ZIREN_CORE_PCS=whir is host-verify only)");
     let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
     let basefold_proof = crate::basefold_witness::read_basefold_proof_outer_from_stream::<C>(
         &host_basefold_outer,
@@ -1175,6 +1178,7 @@ where
             Some(b) => b,
             None => return false,
         };
+    assert!(bundle.whir_proof.is_none(), "WHIR core proof in bundle: the recursion circuit cannot lift a WHIR opening yet (ZIREN_CORE_PCS=whir is host-verify only)");
     let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
     crate::basefold_witness::write_basefold_proof_outer_to_stream::<C>(
         &host_basefold_outer,
@@ -2843,6 +2847,7 @@ mod tests {
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
+            whir_proof: None,
             basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
                 basefold_proof: BasefoldProof {
                     univariate_messages: vec![],
@@ -2911,6 +2916,7 @@ mod tests {
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
+            whir_proof: None,
             basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
                 basefold_proof: BasefoldProof {
                     univariate_messages: vec![],
@@ -2986,6 +2992,7 @@ mod tests {
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
+            whir_proof: None,
             basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
                 basefold_proof: BasefoldProof {
                     univariate_messages: vec![],
@@ -3106,6 +3113,7 @@ mod tests {
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
+            whir_proof: None,
             basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
                 basefold_proof: BasefoldProof {
                     univariate_messages: vec![],

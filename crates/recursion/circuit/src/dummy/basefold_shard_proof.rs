@@ -773,6 +773,7 @@ pub fn dummy_jagged_basefold_bundle(
     JaggedBasefoldBundle {
         reduction,
         basefold_proof: stacked,
+        whir_proof: None,
         // One claim vector per COLUMN GROUP — the real chips of every round
         // followed by that round's stacking-padding columns, each carrying one
         // claim per column (a padding column carries a single zero claim).

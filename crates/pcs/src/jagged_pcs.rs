@@ -891,6 +891,13 @@ pub mod jagged {
         pub reduction: JaggedReductionProof<InnerChallenge>,
         /// Group-0 BaseFold open proof.
         pub basefold_proof: StackedBasefoldProof<InnerVal, InnerChallenge, MT>,
+        /// Group-0 WHIR open proof — `Some` when the shard was proven under
+        /// the jagged-WHIR inner PCS (`ZIREN_CORE_PCS=whir`); the
+        /// `basefold_proof` slot then holds an empty placeholder.  The
+        /// verifier dispatches on this field.
+        #[serde(default)]
+        pub whir_proof:
+            Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
         /// Per-chip per-column row-MLE values, FLAT in name-sorted chip order
         /// (NOT grouped) — the `groups` index map below partitions it.  Shared
         /// across all groups.
@@ -1052,6 +1059,11 @@ pub mod jagged {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
         pub commit: crate::jagged_pcs::JaggedCommitGeneric<MT>,
         pub prover_data: crate::jagged_pcs::JaggedProverDataGeneric<MT>,
+        /// WHIR-committed data when the shard runs the jagged-WHIR inner PCS
+        /// (`ZIREN_CORE_PCS=whir`); `prover_data` then carries the SAME
+        /// width-1 polynomials as `interleaved_mles` (the reduction reads
+        /// them) over a placeholder Merkle tree.
+        pub whir_data: Option<crate::whir::jagged::JaggedWhirProverDataGeneric<MT>>,
         /// The per-shard rev(zeta) orientation the dense commit was
         /// materialized under (from the per-stage `StarkMachine::core_rev()`
         /// source of truth — `true` only on the CORE MIPS path).  Recorded on
@@ -1256,7 +1268,11 @@ pub mod jagged {
         fri: crate::basefold::FriConfig<crate::jagged_pcs::JaggedVal>,
     ) -> JaggedBasefoldBundleGeneric<MT>
     where
-        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
+        MT: p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+                Commitment: Clone,
+                ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>: 'static,
+            > + Clone,
         D: p3_dft::TwoAdicSubgroupDft<crate::jagged_pcs::JaggedVal> + Send + Sync,
         Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
@@ -1395,18 +1411,60 @@ pub mod jagged {
         };
 
         // ── ONE batched open across every round's committed data ──────────
+        // In WHIR mode (every round carries `whir_data`) the open runs the
+        // jagged-WHIR sibling; the WHIR proof is captured into `whir_slot`
+        // and the closure returns an EMPTY BaseFold placeholder so the shared
+        // reduction core's return type stays fixed.
+        let whir_mode = rounds.iter().all(|r| r.precomputed.whir_data.is_some())
+            && rounds.iter().any(|r| r.precomputed.whir_data.is_some());
+        let whir_slot: core::cell::RefCell<
+            Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
+        > = core::cell::RefCell::new(None);
         let open = |extended_eval_point: Vec<InnerChallenge>, challenger: &mut Challenger| {
             let _open_span = tracing::info_span!("jagged_basefold_open").entered();
-            let datas: Vec<&crate::jagged_pcs::JaggedProverDataGeneric<MT>> =
-                rounds.iter().map(|r| &r.precomputed.prover_data).collect();
-            crate::jagged_pcs::open_jagged_pcs_rounds_generic::<Challenger, MT, D>(
-                &datas,
-                extended_eval_point,
-                challenger,
-                mmcs,
-                dft,
-                fri,
-            )
+            if whir_mode {
+                let wdatas: Vec<&crate::whir::jagged::JaggedWhirProverDataGeneric<MT>> = rounds
+                    .iter()
+                    .map(|r| r.precomputed.whir_data.as_ref().expect("whir_mode"))
+                    .collect();
+                let lsh = wdatas[0].log_stacking_height as usize;
+                let cfg = crate::whir::jagged::whir_config_for_stack(lsh, 7, 0);
+                let ef_dft = alloc::sync::Arc::new(p3_dft::Radix2DitParallel::<
+                    InnerChallenge,
+                >::default());
+                let proof = crate::whir::jagged::open_jagged_whir_rounds_generic::<
+                    Challenger,
+                    MT,
+                    D,
+                    _,
+                >(
+                    &wdatas, extended_eval_point, challenger, mmcs, dft, ef_dft, cfg
+                );
+                *whir_slot.borrow_mut() = Some(proof);
+                StackedBasefoldProof {
+                    basefold_proof: crate::basefold::proof::BasefoldProof {
+                        univariate_messages: Vec::new(),
+                        fri_commitments: Vec::new(),
+                        component_polynomials_query_openings_and_proofs: Vec::new(),
+                        query_phase_openings_and_proofs: Vec::new(),
+                        final_poly: InnerChallenge::ZERO,
+                        pow_witness: InnerVal::ZERO,
+                        batch_grinding_witness: InnerVal::ZERO,
+                    },
+                    batch_evaluations: Vec::new(),
+                }
+            } else {
+                let datas: Vec<&crate::jagged_pcs::JaggedProverDataGeneric<MT>> =
+                    rounds.iter().map(|r| &r.precomputed.prover_data).collect();
+                crate::jagged_pcs::open_jagged_pcs_rounds_generic::<Challenger, MT, D>(
+                    &datas,
+                    extended_eval_point,
+                    challenger,
+                    mmcs,
+                    dft,
+                    fri,
+                )
+            }
         };
 
         // The batched open's point spans the stack coords plus enough batch
@@ -1461,6 +1519,7 @@ pub mod jagged {
         JaggedBasefoldBundleGeneric::<MT> {
             reduction,
             basefold_proof: proof,
+            whir_proof: whir_slot.into_inner(),
             y_per_chip,
             commit: main.precomputed.commit.clone(),
             packing: packing_meta,
@@ -1616,6 +1675,7 @@ pub mod jagged {
                 bundle.jagged_eval_g(g),
                 bundle.commit_g(g),
                 bundle.basefold_proof_g(g),
+                if g == 0 { bundle.whir_proof.as_ref() } else { None },
                 challenger,
                 // Only the FIRST group carries the vk-pinned rounds; with the
                 // batched shape there is exactly one group.
@@ -1649,6 +1709,15 @@ pub mod jagged {
             InnerVal,
             InnerChallenge,
             crate::jagged_pcs::JaggedMmcs,
+        >,
+        // `Some` dispatches the batched open to the jagged-WHIR verifier
+        // (the shard was proven under `ZIREN_CORE_PCS=whir`).
+        whir_proof: Option<
+            &crate::whir::stacked::StackedWhirProof<
+                InnerVal,
+                InnerChallenge,
+                crate::jagged_pcs::JaggedMmcs,
+            >,
         >,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         // Rounds committed BEFORE this one whose commitments come from the
@@ -1813,6 +1882,32 @@ pub mod jagged {
         commitments.push(commit.original_commitment.clone());
         let mut areas: Vec<usize> = preceding_rounds.iter().map(|(_, a)| *a).collect();
         areas.push(commit.area);
+        if let Some(wp) = whir_proof {
+            let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+            let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+            let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+            let mmcs = crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0);
+            let cfg = crate::whir::jagged::whir_config_for_stack(
+                commit.log_stacking_height as usize,
+                7,
+                0,
+            );
+            let res = crate::whir::jagged::verify_jagged_whir_rounds(
+                mmcs,
+                cfg,
+                commit.log_stacking_height,
+                &commitments,
+                &areas,
+                &extended_z_star,
+                wp,
+                q_at_z_adj,
+                challenger,
+            );
+            if let Err(e) = &res {
+                eprintln!("[whir verify] whir opening REJECTED: {:?}", e);
+            }
+            return res.is_ok();
+        }
         let res = crate::jagged_pcs::verify_jagged_pcs_rounds(
             &commitments,
             &areas,

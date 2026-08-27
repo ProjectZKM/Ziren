@@ -981,6 +981,52 @@ pub mod tests {
     }
 
     #[test]
+    fn test_simple_prove_no_shape() {
+        // BaseFold control twin of the WHIR test below: same program, same
+        // `shape_config: None` harness, default inner PCS.
+        utils::setup_logger();
+        let program = simple_program();
+        let runtime = {
+            let mut runtime = zkm_core_executor::Executor::new(program, ZKMCoreOpts::default());
+            runtime.run().unwrap();
+            runtime
+        };
+        crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None).unwrap();
+    }
+
+    #[test]
+    fn test_simple_prove_whir_inner_pcs() {
+        utils::setup_logger();
+        // Prove + verify a shard with the jagged-WHIR inner PCS.  The gate is
+        // process-global; a concurrently-running prove test would merely also
+        // exercise the WHIR path (the verifier dispatches on the proof
+        // itself), so no serialization guard is needed.
+        std::env::set_var("ZIREN_CORE_PCS", "whir");
+        let program = simple_program();
+        let runtime = {
+            let mut runtime = zkm_core_executor::Executor::new(program, ZKMCoreOpts::default());
+            runtime.run().unwrap();
+            runtime
+        };
+        // `shape_config: None`: WHIR needs no shape banding, and the tiny test
+        // programs no longer fit a preprocessed band anyway.
+        let result =
+            crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None);
+        std::env::remove_var("ZIREN_CORE_PCS");
+        // Verified, AND actually under WHIR: a silently-false `whir_mode`
+        // would prove plain BaseFold and pass anyway, so pin the dispatch.
+        for sp in &result.unwrap().shard_proofs {
+            let bsp = sp.basefold_shard_proof.as_ref().expect("shard-level proof");
+            match &bsp.evaluation_proof {
+                zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(b) => {
+                    assert!(b.whir_proof.is_some(), "shard was proven under BaseFold");
+                }
+                _ => panic!("expected a Bundle evaluation proof"),
+            }
+        }
+    }
+
+    #[test]
     fn test_beq_branching_prove() {
         utils::setup_logger();
         let instructions = vec![

@@ -286,10 +286,47 @@ pub trait BasefoldRing: StarkGenericConfig {
                     crate::jagged_pcs::JaggedDft,
                 >(dense_traces, Self::bf_mmcs(), dft, Self::fri_config())
             };
+        // The experimental jagged-WHIR gate: ALSO commit the same dense
+        // polynomial under WHIR and let ITS root be the observed commitment.
+        // The BaseFold commit above is kept purely for `prover_data`'s
+        // interleaved MLEs (the step-4 jagged reduction reads them); its
+        // Merkle tree goes unused in WHIR mode.  Cost: a second commit —
+        // acceptable for the gated experimental path.
+        let whir_data = if crate::whir::core_pcs_is_whir() {
+            let dense_traces = alloc::vec![(
+                alloc::string::String::from("<jagged-dense>"),
+                RowMajorMatrix::new(
+                    crate::basefold::stacked::dense_from_interleaved_mles::<crate::InnerVal>(
+                        &prover_data.stacked_data.interleaved_mles,
+                        prover_data.area,
+                    ),
+                    1,
+                ),
+            )];
+            let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+            let cfg = crate::whir::jagged::whir_config_for_stack(
+                prover_data.log_stacking_height as usize,
+                7,
+                0,
+            );
+            let (wcommit, wdata) = crate::whir::jagged::commit_jagged_whir_generic::<
+                Self::BfMmcs,
+                crate::jagged_pcs::JaggedDft,
+            >(dense_traces, Self::bf_mmcs(), dft, cfg);
+            debug_assert_eq!(wcommit.area, prover_data.area);
+            Some((wcommit, wdata))
+        } else {
+            None
+        };
+        let (commit, whir_data) = match whir_data {
+            Some((wcommit, wdata)) => (wcommit, Some(wdata)),
+            None => (commit, None),
+        };
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric {
             packing,
             commit,
             prover_data,
+            whir_data,
             rev: use_rev,
         }
     }

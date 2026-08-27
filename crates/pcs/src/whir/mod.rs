@@ -67,3 +67,10 @@ pub mod verifier;
 
 #[cfg(test)]
 mod test;
+
+/// The experimental inner-PCS gate: `ZIREN_CORE_PCS=whir` proves shards under
+/// jagged-WHIR instead of jagged-BaseFold.  Prover-side only — the verifier
+/// dispatches on the proof itself (`bundle.whir_proof`).
+pub fn core_pcs_is_whir() -> bool {
+    std::env::var("ZIREN_CORE_PCS").map(|v| v == "whir").unwrap_or(false)
+}
