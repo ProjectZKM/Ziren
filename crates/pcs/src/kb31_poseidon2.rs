@@ -342,6 +342,8 @@ pub mod koala_bear_poseidon2 {
     // (InnerHash/InnerCompress over the shared `poseidon2_init` perm) so the
     // generic BaseFold cores can be driven through this trait.
     impl crate::config::BasefoldRing for KoalaBearPoseidon2 {
+        const WHIR_INNER_PCS: bool = true;
+
         fn prep_open_data(
             prep: &Self::PrepPrecomputed,
         ) -> &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {

@@ -287,11 +287,31 @@ pub fn verify_deferred_basefold<C, SC, A>(
 
         // Bundle lift is the production (and only) path.
         use crate::shard_level_witness::LiftedEvalProof;
+        // ONE PCS down the tree: deferred children (compress-stage proofs)
+        // prove under jagged-WHIR like every inner-ring shard — same
+        // whir/basefold split as compress_basefold.
+        let mut whir_evaluation_proof_var = None;
         let evaluation_proof_var = match &evaluation_proof {
-            // Recursion shards are always BaseFold; only the CORE (leaf)
-            // path can carry a jagged-WHIR bundle.
-            crate::shard_level_witness::LiftedEvalProof::WhirBundle { .. } => {
-                unreachable!("recursion proofs never carry a jagged-WHIR bundle")
+            crate::shard_level_witness::LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+                whir_evaluation_proof_var =
+                    Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
+                        builder,
+                        host,
+                        whir_proof.clone(),
+                        whir_proof.batch_evaluations.clone(),
+                        sumcheck.clone(),
+                        jagged_eval.clone(),
+                        *expected_eval,
+                        *commit_root,
+                        *modified_commitment,
+                        &preceding_commitments,
+                        &preprocessed_round.padding_heights,
+                        max_log_row_count,
+                        &column_counts_by_round,
+                        None,
+                        chip_height_felts_pre.as_deref(),
+                    ));
+                None
             }
             LiftedEvalProof::Bundle {
                 host,
@@ -301,7 +321,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 expected_eval,
                 commit_root,
                 modified_commitment,
-            } => crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
+            } => Some(crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                 builder,
                 host,
                 basefold_proof.clone(),
@@ -316,21 +336,21 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 &column_counts_by_round,
                 None,
                 chip_height_felts_pre.as_deref(),
-            ),
+            )),
             LiftedEvalProof::Bytes(bytes) => {
-                crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                     builder,
                     bytes,
                     max_log_row_count,
                     &column_counts_by_round,
-                )
+                ))
             }
-            LiftedEvalProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+            LiftedEvalProof::Empty => Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                 builder,
                 &[],
                 max_log_row_count,
                 &column_counts_by_round,
-            ),
+            )),
             // OuterBundle is gnark-wrap-only (OuterConfig);
             // the deferred path is inner-only → unreachable.
             LiftedEvalProof::OuterBundle { .. } => {
@@ -358,15 +378,26 @@ pub fn verify_deferred_basefold<C, SC, A>(
             crate::shard_basefold::BasefoldShardVerifier::<
                 crate::basefold_verifier::RecursiveBasefoldVerifier,
             >::insertion_points_from_column_counts(&column_counts_by_round);
-        let basefold_shard_proof_variable =
+        let basefold_shard_proof_variable = evaluation_proof_var.map(|epv| {
             crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
                 main_commit,
                 public_values_raw.clone(),
                 &logup_gkr_proof,
                 &zerocheck_proof,
-                evaluation_proof_var,
+                epv,
+                chip_height_bits.clone(),
+            )
+        });
+        let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
+            crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
+                main_commit,
+                public_values_raw.clone(),
+                &logup_gkr_proof,
+                &zerocheck_proof,
+                epv,
                 chip_height_bits,
-            );
+            )
+        });
         // consume real per-chip cumulative_sums.
         // Use the CARRIED trace@z openings with REAL degree bits (mirror of
         // core_basefold.rs:417 and compress_basefold.rs) — a chip_openings
@@ -411,6 +442,45 @@ pub fn verify_deferred_basefold<C, SC, A>(
             }
         }
 
+        // ── The jagged-WHIR verify branch (mirror of compress_basefold) ──
+        if let Some(whir_pv) = &whir_shard_proof_variable {
+            let lsh = match &evaluation_proof {
+                LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+                _ => unreachable!("whir proof variable implies a WhirBundle"),
+            };
+            let whir_verifier = crate::shard_basefold::BasefoldShardVerifier::<
+                crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
+            > {
+                stacked_pcs_verifier:
+                    crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
+                        crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
+                            config: zkm_pcs::whir::jagged::core_whir_config(lsh as usize),
+                            log_stacking_height: lsh,
+                            _hasher: core::marker::PhantomData,
+                        },
+                        lsh,
+                    ),
+                max_log_row_count,
+            };
+            whir_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
+                builder,
+                &basefold_vk,
+                whir_pv,
+                &shard_chips,
+                &chip_metadata,
+                &opened_values,
+                &insertion_points,
+                &mut challenger,
+                machine.num_pv_elts(),
+                // One row orientation for every machine (see `wrap_basefold`).
+                true,
+                eval_public_values_fn,
+                jagged_evaluator_fn,
+            );
+        } else {
+        let basefold_shard_proof_variable = basefold_shard_proof_variable
+            .as_ref()
+            .expect("non-whir child lifts to the BaseFold variable");
         // Per-proof override when bundle path is active.
         // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
         let per_proof_verifier;
@@ -460,6 +530,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             eval_public_values_fn,
             jagged_evaluator_fn,
         );
+        }
 
         // Interpret the deferred proof's public values as RecursionPublicValues.
         let current_public_values: &RecursionPublicValues<Felt<C::F>> =

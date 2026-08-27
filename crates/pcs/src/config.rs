@@ -187,6 +187,16 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// capability bounds the generic BaseFold prover needs are NOT expressible
     /// as implied bounds, so they live on the shard-prover call chain instead
     /// (see `prove_trusted_evaluations`).
+    /// Whether this ring's machines commit under the jagged-WHIR inner
+    /// PCS.  The INNER ring (the core machine and every recursion stage
+    /// below wrap: normalize/compose/shrink) is WHIR — ONE PCS family down
+    /// the whole proof tree, the SP1 proving path; the OUTER/wrap ring
+    /// stays BaseFold (its proof is consumed by the gnark circuit, which
+    /// has no WHIR verifier yet — SP1's snapshot keeps wrap on BaseFold
+    /// too).  The verifier needs no flag: it dispatches per proof on
+    /// `bundle.whir_proof`.
+    const WHIR_INNER_PCS: bool;
+
     type BfMmcs: p3_commit::Mmcs<Val<Self>, Commitment: Clone>
         + p3_commit::Mmcs<
             crate::jagged_pcs::JaggedVal,
@@ -286,30 +296,20 @@ pub trait BasefoldRing: StarkGenericConfig {
                     crate::jagged_pcs::JaggedDft,
                 >(dense_traces, Self::bf_mmcs(), dft, Self::fri_config())
             };
-        // Core machines prove under jagged-WHIR: ALSO commit the same dense
-        // polynomial under WHIR and let ITS root be the observed commitment.
-        // The BaseFold commit above is kept purely for `prover_data`'s
-        // interleaved MLEs (the step-4 jagged reduction reads them); its
-        // Merkle tree goes unused in WHIR mode.
+        // INNER-ring machines prove under jagged-WHIR: ALSO commit the same
+        // dense polynomial under WHIR and let ITS root be the observed
+        // commitment.  The BaseFold commit above is kept purely for
+        // `prover_data`'s interleaved MLEs (the step-4 jagged reduction
+        // reads them); its Merkle tree goes unused in WHIR mode.
         //
-        // CORE MACHINE ONLY: recursion shards must stay BaseFold — the
-        // compose/shrink/wrap circuits verify BaseFold recursion proofs, and
-        // a WHIR recursion bundle panics the compose program build (measured:
-        // the keccak multi-shard e2e trips `unreachable!` in
-        // compress_basefold without this gate; single-leaf runs mask it
-        // because compress short-circuits compose and the host verifier
-        // accepts either PCS).  `use_rev` does NOT discriminate — the
-        // NORMALIZE machine also proves in the rev orientation.  The chip
-        // NAMES do: "Byte" is a MIPS-machine chip present in EVERY core
-        // round (setup commits its preprocessed table, every shard commits
-        // its multiplicities) and in NO recursion machine (BaseAlu/ExtAlu/
-        // Poseidon2/... namespace).  Commit and open stay consistent
-        // per-proof because the open dispatches on the whir_data this
-        // decision populates; a proof this gate routes to BaseFold verifies
-        // as BaseFold end-to-end (per-proof dispatch), so correctness never
-        // rests on the marker.
-        let is_core_machine = chip_traces.iter().any(|(name, _)| name == "Byte");
-        let whir_data = if is_core_machine {
+        // ONE PCS down the whole tree (core, normalize, compose, shrink) —
+        // the SP1 proving path.  Only the OUTER/
+        // wrap ring keeps BaseFold (its proof feeds the gnark circuit).
+        // Commit and open stay consistent per-proof because the open
+        // dispatches on the whir_data this decision populates; a proof this
+        // routes to BaseFold verifies as BaseFold end-to-end (per-proof
+        // dispatch), so correctness never rests on the flag.
+        let whir_data = if Self::WHIR_INNER_PCS {
             let dense_traces = alloc::vec![(
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(

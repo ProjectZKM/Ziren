@@ -113,7 +113,8 @@ pub fn verify_wrap_basefold<C, SC, A>(
             C,
             DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8],
             Val = InnerVal,
-        > + FieldHasherVariable<C>,
+        > + FieldHasherVariable<C, DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8]>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
     SC::FriChallengerVariable: crate::challenger::FieldChallengerVariable<C, C::Bit>,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     A: MachineAir<SC::Val>
@@ -283,11 +284,32 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
 
     // Bundle lift is the production (and only) path.
     use crate::shard_level_witness::LiftedEvalProof;
+    // ONE PCS down the tree: the SHRINK proof this wrap verifies proves
+    // under jagged-WHIR like every inner-ring shard.  The OUTER (gnark)
+    // instantiation of this generic never receives a WhirBundle — its
+    // input is the wrap machine's own OUTER BaseFold proof.
+    let mut whir_evaluation_proof_var = None;
     let evaluation_proof_var = match &evaluation_proof {
-        // Recursion shards are always BaseFold; only the CORE (leaf)
-        // path can carry a jagged-WHIR bundle.
-        crate::shard_level_witness::LiftedEvalProof::WhirBundle { .. } => {
-            unreachable!("recursion proofs never carry a jagged-WHIR bundle")
+        crate::shard_level_witness::LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+            whir_evaluation_proof_var =
+                Some(<SC as FieldHasherVariable<C>>::lift_whir_bundle_dispatch(
+                    builder,
+                    host,
+                    whir_proof.clone(),
+                    whir_proof.batch_evaluations.clone(),
+                    sumcheck.clone(),
+                    jagged_eval.clone(),
+                    *expected_eval,
+                    *commit_root,
+                    *modified_commitment,
+                    &preceding_commitments,
+                    &preprocessed_round.padding_heights,
+                    max_log_row_count,
+                    &column_counts_by_round,
+                    None,
+                    Some(&chip_height_felts_pre),
+                ));
+            None
         }
         // The gnark wrap path — WITNESSED outer BN254 bundle.
         // Routed via the ring dispatch (OUTER impl lifts it value-independently;
@@ -299,7 +321,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             jagged_eval,
             expected_eval,
             commit_root,
-        } => <SC as FieldHasherVariable<C>>::lift_outer_bundle_dispatch(
+        } => Some(<SC as FieldHasherVariable<C>>::lift_outer_bundle_dispatch(
             builder,
             host,
             basefold_proof.clone(),
@@ -310,7 +332,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             max_log_row_count,
             &column_counts_by_round,
             None,
-        ),
+        )),
         LiftedEvalProof::Bundle {
             host,
             basefold_proof,
@@ -323,7 +345,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             // Route through the ring-aware trait dispatch so the
             // SC-generic core compiles for BOTH inner ([Felt;8], witnessed
             // bundle) and outer (BN254, dead arm → placeholder).
-            <SC as FieldHasherVariable<C>>::lift_bundle_dispatch(
+            Some(<SC as FieldHasherVariable<C>>::lift_bundle_dispatch(
                 builder,
                 host,
                 basefold_proof.clone(),
@@ -338,7 +360,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 &column_counts_by_round,
                 None,
                 Some(&chip_height_felts_pre),
-            )
+            ))
         }
         LiftedEvalProof::Bytes(bytes) => {
             // Ring-aware dispatch.  SC is the field hasher (HV); its impl
@@ -348,20 +370,20 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             // recursion wrap. The OUTER path lifts the real BN254 round
             // commitments (an all-zero placeholder would fail Groth16 setup
             // constraints).
-            <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
+            Some(<SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
                 builder,
                 bytes,
                 max_log_row_count,
                 &column_counts_by_round,
-            )
+            ))
         }
         LiftedEvalProof::Empty => {
-            <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
+            Some(<SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
                 builder,
                 &[],
                 max_log_row_count,
                 &column_counts_by_round,
-            )
+            ))
         }
     };
     // Under VK enforcement: derive from the WITNESSED opened
@@ -383,15 +405,26 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let insertion_points = crate::shard_basefold::BasefoldShardVerifier::<
         crate::basefold_verifier::RecursiveBasefoldVerifier,
     >::insertion_points_from_column_counts(&column_counts_by_round);
-    let basefold_shard_proof_variable =
+    let basefold_shard_proof_variable = evaluation_proof_var.map(|epv| {
         crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
             main_commit,
             public_values_raw.clone(),
             &logup_gkr_proof,
             &zerocheck_proof,
-            evaluation_proof_var,
+            epv,
+            chip_height_bits.clone(),
+        )
+    });
+    let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
+        crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
+            main_commit,
+            public_values_raw.clone(),
+            &logup_gkr_proof,
+            &zerocheck_proof,
+            epv,
             chip_height_bits,
-        );
+        )
+    });
     // consume real per-chip cumulative_sums for wrap input.
     let empty_cumsums_wrap = std::collections::BTreeMap::new();
     let cumsums_for_input = chip_cumulative_sums_per_input.first().unwrap_or(&empty_cumsums_wrap);
@@ -446,6 +479,44 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         SC,
     >(max_log_row_count, max_log_row_count as u32);
 
+    // ── The jagged-WHIR verify branch (mirror of compress_basefold) ──
+    if let Some(whir_pv) = &whir_shard_proof_variable {
+        let lsh = match &evaluation_proof {
+            LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+            _ => unreachable!("whir proof variable implies a WhirBundle"),
+        };
+        let whir_verifier = crate::shard_basefold::BasefoldShardVerifier::<
+            crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
+        > {
+            stacked_pcs_verifier: crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
+                crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
+                    config: zkm_pcs::whir::jagged::core_whir_config(lsh as usize),
+                    log_stacking_height: lsh,
+                    _hasher: core::marker::PhantomData,
+                },
+                lsh,
+            ),
+            max_log_row_count,
+        };
+        whir_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
+            builder,
+            &basefold_vk,
+            whir_pv,
+            &shard_chips,
+            &chip_metadata,
+            &opened_values,
+            &insertion_points,
+            &mut challenger,
+            machine.num_pv_elts(),
+            // One row orientation for every machine.
+            true,
+            eval_public_values_fn,
+            jagged_evaluator_fn,
+        );
+    } else {
+    let basefold_shard_proof_variable = basefold_shard_proof_variable
+        .as_ref()
+        .expect("non-whir input lifts to the BaseFold variable");
     // Per-proof verifier override when the bundle path is active.
     // Mirrors core_basefold.rs:418-434 / compress_basefold.rs.
     let per_proof_verifier;
@@ -538,6 +609,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         eval_public_values_fn,
         jagged_evaluator_fn,
     );
+    }
 
     // Interpret public values as RootPublicValues.
     let public_values: &RootPublicValues<Felt<C::F>> = public_values_raw.as_slice().borrow();

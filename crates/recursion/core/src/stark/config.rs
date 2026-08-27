@@ -202,6 +202,8 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
 // `prove_trusted_evaluations` / `verify_jagged_pcs_host` dispatch statically
 // through this impl.
 impl BasefoldRing for KoalaBearPoseidon2Outer {
+    const WHIR_INNER_PCS: bool = false;
+
     fn prep_open_data(
         prep: &Self::PrepPrecomputed,
     ) -> &zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
