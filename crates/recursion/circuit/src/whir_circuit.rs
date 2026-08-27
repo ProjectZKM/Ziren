@@ -404,8 +404,10 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
         let lsh = self.log_stacking_height as usize;
         let ff = self.config.round_parameters[0].folding_factor;
         let num_rounds = self.config.round_parameters.len();
+        let folds: Vec<usize> =
+            self.config.round_parameters.iter().map(|rp| rp.folding_factor).collect();
         let n = lsh;
-        let final_log = n - ff * num_rounds;
+        let final_log = n - folds.iter().sum::<usize>();
 
         // ── Structural shape checks (compile-time). ──
         assert_eq!(proof.final_poly.len(), 1usize << final_log, "whir final_poly len");
@@ -452,8 +454,9 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
 
         let mut prev_domain_log = (lsh - ff) + self.config.starting_log_inv_rate;
         let mut prev_round0 = true;
-        let mut all_fr: Vec<Ext<C::F, C::EF>> = Vec::with_capacity(ff * num_rounds);
+        let mut all_fr: Vec<Ext<C::F, C::EF>> = Vec::with_capacity(n - final_log);
         let mut pow_flat = 0usize;
+        let mut folded_vars = 0usize;
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
             let msgs: &[[Ext<C::F, C::EF>; 3]] = if r + 1 == num_rounds {
                 &proof.final_sumcheck_polys
@@ -484,13 +487,14 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                 all_fr.push(rc);
                 this_round_randomness.push(rc);
             }
+            folded_vars += round_cfg.folding_factor;
 
             if r + 1 == num_rounds {
                 break;
             }
 
             challenger.observe(builder, proof.round_commitments[r]);
-            let rem = n - (r + 1) * ff;
+            let rem = n - folded_vars;
             let ood_answers = &proof.round_ood_answers[r];
             assert_eq!(ood_answers.len(), round_cfg.ood_samples, "whir ood count");
             let mut ood_points: Vec<Vec<Ext<C::F, C::EF>>> = Vec::with_capacity(ood_answers.len());
@@ -539,7 +543,11 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                     acc.into_iter().map(|a| builder.eval(a)).collect()
                 } else {
                     let leaf = &openings.leaves[qi];
-                    assert_eq!(leaf.ef_values.len(), 1usize << ff, "whir ef leaf width");
+                        assert_eq!(
+                        leaf.ef_values.len(),
+                        1usize << round_cfg.folding_factor,
+                        "whir ef leaf width"
+                    );
                     let leaf_felts: Vec<Felt<C::F>> = leaf
                         .ef_values
                         .iter()
@@ -582,7 +590,9 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             }
             claim = builder.eval(claim_add);
 
-            prev_domain_log = (rem - ff) + round_cfg.log_inv_rate;
+            prev_domain_log =
+                (rem - self.config.round_parameters[r + 1].folding_factor)
+                    + round_cfg.log_inv_rate;
             prev_round0 = false;
         }
 
@@ -596,11 +606,12 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             "whir final query count"
         );
         let g_final = C::F::two_adic_generator(prev_domain_log);
-        let last_randomness = all_fr[all_fr.len() - ff..].to_vec();
+        let last_ff = *folds.last().unwrap();
+        let last_randomness = all_fr[all_fr.len() - last_ff..].to_vec();
         for q in 0..self.config.final_queries {
             let bits = challenger.sample_bits(builder, prev_domain_log);
             let virt_leaf: Vec<Ext<C::F, C::EF>> = if prev_round0 {
-                let mut acc = vec![SymbolicExt::<C::F, C::EF>::ZERO; 1usize << ff];
+                let mut acc = vec![SymbolicExt::<C::F, C::EF>::ZERO; 1usize << last_ff];
                 for (ri, commitment) in commitments.iter().enumerate() {
                     let leaf = &final_openings.leaves[q * leaves_per_query + ri];
                     assert_eq!(leaf.values.len(), round_stripe_counts[ri], "whir final rows");
@@ -616,7 +627,7 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                 acc.into_iter().map(|a| builder.eval(a)).collect()
             } else {
                 let leaf = &final_openings.leaves[q];
-                assert_eq!(leaf.ef_values.len(), 1usize << ff, "whir final leaf width");
+                assert_eq!(leaf.ef_values.len(), 1usize << last_ff, "whir final leaf width");
                 let leaf_felts: Vec<Felt<C::F>> = leaf
                     .ef_values
                     .iter()
@@ -782,8 +793,17 @@ mod tests {
             &mut RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
         ),
     ) {
-        let (lsh, ff) = (9usize, 3usize);
-        let cfg = whir_config_for_stack(lsh, ff, 0);
+        let lsh = 9usize;
+        run_whir_circuit_roundtrip_with(lsh, whir_config_for_stack(lsh, 3, 0), tamper);
+    }
+
+    fn run_whir_circuit_roundtrip_with(
+        lsh: usize,
+        cfg: zkm_pcs::whir::config::WhirConfig,
+        tamper: impl FnOnce(
+            &mut RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
+        ),
+    ) {
         let mut rng = StdRng::seed_from_u64(0x57AC);
 
         let dft = Arc::new(Radix2DitParallel::<F>::default());
@@ -884,6 +904,18 @@ mod tests {
     }
 
     /// POSITIVE: an honest stacked-WHIR proof verifies in-circuit.
+    #[test]
+    fn whir_circuit_roundtrip_mixed_fold_schedule() {
+        // Per-round fold factors differ (round-0 leaves 2^2, later 2^3) and
+        // the final polynomial has 2^4 coefficients — the shape of the
+        // production core config's [4,7,7]+final schedule at test scale.
+        run_whir_circuit_roundtrip_with(
+            9,
+            zkm_pcs::whir::jagged::whir_config_for_fold_schedule(9, &[2, 3], 4),
+            |_| {},
+        );
+    }
+
     #[test]
     fn whir_circuit_roundtrip_verifies() {
         run_whir_circuit_roundtrip(|_| {});

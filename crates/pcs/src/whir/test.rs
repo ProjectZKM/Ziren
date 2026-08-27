@@ -753,3 +753,130 @@ fn jagged_whir_roundtrip_matches_basefold_layout() {
     )
     .is_err());
 }
+
+#[test]
+fn jagged_whir_roundtrip_mixed_fold_schedule() {
+    use crate::basefold::{FriConfig, StackedPcsProver, BasefoldProver};
+    use crate::jagged_pcs::{JaggedDft, JaggedMmcs, DEFAULT_BATCH_SIZE};
+    use crate::whir::jagged::{
+        commit_jagged_whir_generic, open_jagged_whir_rounds_generic, verify_jagged_whir_rounds,
+        whir_config_for_fold_schedule,
+    };
+
+    type F = InnerVal;
+    type EF = InnerChallenge;
+
+    let lsh = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+    // The production-shaped MIXED schedule: round 0 folds fewer vars
+    // (smaller round-0 query leaves), final poly is 2^3 coefficients.
+    let cfg = whir_config_for_fold_schedule(lsh, &[4, 7, 7], 3);
+
+    // Production-shaped input: ONE width-1 dense polynomial, 3 stacking blocks.
+    let mut rng = StdRng::seed_from_u64(0x1A66ED);
+    let dense_len = 3usize << lsh;
+    let dense: Vec<F> = (0..dense_len).map(|_| rand_kb(&mut rng)).collect();
+    let chip_traces =
+        vec![(String::from("dense"), RowMajorMatrix::new(dense.clone(), 1))];
+
+    let (commit, prover_data) = commit_jagged_whir_generic(
+        chip_traces.clone(),
+        build_mmcs(),
+        Arc::new(Radix2DitParallel::<F>::default()),
+        cfg.clone(),
+    );
+    assert_eq!(commit.area, dense_len);
+    let stripe_count = commit.area >> lsh;
+
+    // The extended point: stack + batch coordinates.
+    let batch_dim = stripe_count.next_power_of_two().trailing_zeros() as usize;
+    let point: Vec<EF> = (0..lsh + batch_dim)
+        .map(|_| {
+            use p3_field::BasedVectorSpace;
+            <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
+                (0..4).map(|_| rand_kb(&mut rng)),
+            )
+            .unwrap()
+        })
+        .collect();
+    let stack_point = &point[..lsh];
+    let batch_point = &point[lsh..];
+
+    // Layout parity: BaseFold's stacked flat evaluations == ours.
+    let bf_prover = StackedPcsProver::new(
+        BasefoldProver::<F, EF, InnerValMmcs, Radix2DitParallel<F>>::new(
+            FriConfig::<F>::new(1, 0, 0),
+            Arc::new(Radix2DitParallel::<F>::default()),
+            build_mmcs(),
+            1,
+        ),
+        lsh as u32,
+        DEFAULT_BATCH_SIZE,
+    );
+    let (_bfc, bf_data) = bf_prover.commit_multilinears(vec![Arc::new(Mle::from_row_major(
+        RowMajorMatrix::new(dense.clone(), 1),
+    ))]);
+    let bf_flat: Vec<EF> = bf_prover.round_batch_evaluations(stack_point, &bf_data);
+    let whir_flat: Vec<EF> = prover_data
+        .stacked_data
+        .stripes
+        .iter()
+        .map(|s| s.eval_at::<EF>(stack_point)[0])
+        .collect();
+    assert_eq!(bf_flat, whir_flat, "stacked layout parity broken");
+
+    // The claim the jagged layer would bind.
+    let mut current = whir_flat.clone();
+    current.resize(1usize << batch_dim, EF::ZERO);
+    for &r in batch_point {
+        let half = current.len() / 2;
+        for i in 0..half {
+            let lo = current[2 * i];
+            let hi = current[2 * i + 1];
+            current[i] = lo + r * (hi - lo);
+        }
+        current.truncate(half);
+    }
+    let evaluation_claim = current[0];
+
+    // Open + verify.
+    let mut p_chal = build_challenger();
+    let proof = open_jagged_whir_rounds_generic(
+        &[&prover_data],
+        point.clone(),
+        &mut p_chal,
+        build_mmcs(),
+        Arc::new(Radix2DitParallel::<F>::default()),
+        Arc::new(Radix2DitParallel::<EF>::default()),
+        cfg.clone(),
+    );
+    let mut v_chal = build_challenger();
+    assert_eq!(
+        verify_jagged_whir_rounds(
+            build_mmcs(),
+            cfg.clone(),
+            lsh as u32,
+            &[commit.original_commitment.clone()],
+            &[commit.area],
+            &point,
+            &proof,
+            evaluation_claim,
+            &mut v_chal,
+        ),
+        Ok(())
+    );
+
+    // A wrong claim is a StackingMismatch.
+    let mut v_chal = build_challenger();
+    assert!(verify_jagged_whir_rounds(
+        build_mmcs(),
+        cfg,
+        lsh as u32,
+        &[commit.original_commitment],
+        &[commit.area],
+        &point,
+        &proof,
+        evaluation_claim + EF::ONE,
+        &mut v_chal,
+    )
+    .is_err());
+}

@@ -327,8 +327,11 @@ where
             }
 
             // Commit the folded polynomial (single EF poly, interleaved).
+            // Leaf width follows the NEXT round's folding factor - that
+            // round's stir fold consumes one leaf per query.
+            let next_ff = self.config.round_parameters[r + 1].folding_factor;
             let rem = folder.f_vec.len().trailing_zeros() as usize;
-            let width = 1usize << ff;
+            let width = 1usize << next_ff;
             let mut padded = folder.f_vec.clone();
             padded.resize(padded.len() << round_cfg.log_inv_rate, EF::ZERO);
             let ef_mat =
@@ -339,7 +342,7 @@ where
                 .flat_map(|e| e.as_basis_coefficients_slice().to_vec())
                 .collect();
             let leaves = RowMajorMatrix::new(base_vals, width * EF::DIMENSION);
-            let this_domain_log = (rem - ff) + round_cfg.log_inv_rate;
+            let this_domain_log = (rem - next_ff) + round_cfg.log_inv_rate;
             let (commitment, this_data) = self.mmcs.commit(alloc::vec![leaves]);
             challenger.observe(commitment.clone());
             round_commitments.push(commitment);
@@ -389,7 +392,8 @@ where
                                 }
                                 all
                             };
-                        let mut virt_leaf = alloc::vec![EF::ZERO; 1usize << ff];
+                        let mut virt_leaf =
+                            alloc::vec![EF::ZERO; 1usize << round_cfg.folding_factor];
                         let mut lam = EF::ONE;
                         for leaf in &opened {
                             for stripe_row in &leaf.values {
@@ -542,8 +546,10 @@ where
         let lsh = self.log_stacking_height as usize;
         let ff = self.config.round_parameters[0].folding_factor;
         let num_rounds = self.config.round_parameters.len();
+        let folds: alloc::vec::Vec<usize> =
+            self.config.round_parameters.iter().map(|rp| rp.folding_factor).collect();
         let n = lsh;
-        let final_log = n - ff * num_rounds;
+        let final_log = n - folds.iter().sum::<usize>();
         let whir = &proof.whir_proof;
         if whir.final_poly.len() != 1usize << final_log {
             return Err(WhirVerifierError::IncorrectShape("final_poly".into()));
@@ -606,8 +612,9 @@ where
 
         let mut prev_domain_log = (lsh - ff) + self.config.starting_log_inv_rate;
         let mut prev_round0 = true;
-        let mut all_fr: Vec<EF> = Vec::with_capacity(ff * num_rounds);
+        let mut all_fr: Vec<EF> = Vec::with_capacity(n - final_log);
         let mut pow_flat = 0usize;
+        let mut folded_vars = 0usize;
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
             let msgs: &[SumcheckPoly<EF>] = if r + 1 == num_rounds {
                 &whir.final_sumcheck_polys
@@ -642,13 +649,14 @@ where
                 all_fr.push(rc);
                 this_round_randomness.push(rc);
             }
+            folded_vars += round_cfg.folding_factor;
 
             if r + 1 == num_rounds {
                 break;
             }
 
             challenger.observe(whir.round_commitments[r].clone());
-            let rem = n - (r + 1) * ff;
+            let rem = n - folded_vars;
             let ood_answers = &whir.round_ood_answers[r];
             let mut ood_points: Vec<Vec<EF>> = Vec::with_capacity(ood_answers.len());
             for ans in ood_answers.iter() {
@@ -677,7 +685,8 @@ where
             let mut stir_values: Vec<EF> = Vec::with_capacity(indices.len());
             for (qi, &idx) in indices.iter().enumerate() {
                 let virt_leaf: Vec<EF> = if prev_round0 {
-                    let mut virt_leaf = alloc::vec![EF::ZERO; 1usize << ff];
+                    let mut virt_leaf =
+                        alloc::vec![EF::ZERO; 1usize << round_cfg.folding_factor];
                     for (ri, commitment) in commitments.iter().enumerate() {
                         let leaf = &openings.leaves[qi * leaves_per_query + ri];
                         let stripe_count = round_stripe_counts[ri];
@@ -686,7 +695,7 @@ where
                         }
                         let dims: Vec<p3_matrix::Dimensions> = (0..stripe_count)
                             .map(|_| p3_matrix::Dimensions {
-                                width: 1usize << ff,
+                                width: 1usize << round_cfg.folding_factor,
                                 height: 1usize << prev_domain_log,
                             })
                             .collect();
@@ -709,7 +718,7 @@ where
                 } else {
                     let leaf = &openings.leaves[qi];
                     let dims = alloc::vec![p3_matrix::Dimensions {
-                        width: (1usize << ff) * EF::DIMENSION,
+                        width: (1usize << round_cfg.folding_factor) * EF::DIMENSION,
                         height: 1usize << prev_domain_log,
                     }];
                     let opened = p3_commit::BatchOpeningRef {
@@ -743,7 +752,9 @@ where
                 cc *= round_batch;
             }
 
-            prev_domain_log = (rem - ff) + round_cfg.log_inv_rate;
+            prev_domain_log =
+                (rem - self.config.round_parameters[r + 1].folding_factor)
+                    + round_cfg.log_inv_rate;
             prev_round0 = false;
         }
 
@@ -758,17 +769,18 @@ where
             return Err(WhirVerifierError::IncorrectShape("final query count".into()));
         }
         let g_final = EF::two_adic_generator(prev_domain_log);
-        let last_randomness = &all_fr[all_fr.len() - ff..];
+        let last_ff = *folds.last().unwrap();
+        let last_randomness = &all_fr[all_fr.len() - last_ff..];
         for q in 0..self.config.final_queries {
             let idx = challenger.sample_bits(prev_domain_log) & final_mask;
             let virt_leaf: Vec<EF> = if prev_round0 {
-                let mut virt_leaf = alloc::vec![EF::ZERO; 1usize << ff];
+                let mut virt_leaf = alloc::vec![EF::ZERO; 1usize << last_ff];
                 for (ri, commitment) in commitments.iter().enumerate() {
                     let leaf = &final_openings.leaves[q * leaves_per_query + ri];
                     let stripe_count = round_stripe_counts[ri];
                     let dims: Vec<p3_matrix::Dimensions> = (0..stripe_count)
                         .map(|_| p3_matrix::Dimensions {
-                            width: 1usize << ff,
+                            width: 1usize << last_ff,
                             height: 1usize << prev_domain_log,
                         })
                         .collect();
@@ -789,7 +801,7 @@ where
             } else {
                 let leaf = &final_openings.leaves[q];
                 let dims = alloc::vec![p3_matrix::Dimensions {
-                    width: (1usize << ff) * EF::DIMENSION,
+                    width: (1usize << last_ff) * EF::DIMENSION,
                     height: 1usize << prev_domain_log,
                 }];
                 let opened = p3_commit::BatchOpeningRef {

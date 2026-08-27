@@ -80,9 +80,10 @@ where
             + CanObserve<MT::Commitment>,
     {
         let n = point.len();
-        let ff = self.config.round_parameters[0].folding_factor;
         let num_rounds = self.config.round_parameters.len();
-        let final_log = n - ff * num_rounds;
+        let folds: alloc::vec::Vec<usize> =
+            self.config.round_parameters.iter().map(|rp| rp.folding_factor).collect();
+        let final_log = n - folds.iter().sum::<usize>();
         if proof.final_poly.len() != 1usize << final_log {
             return Err(WhirVerifierError::IncorrectShape(alloc::format!(
                 "final_poly len {} != 2^{final_log}",
@@ -113,7 +114,8 @@ where
 
         // ---- Per-round sumcheck + OOD replay. ----
         let mut flat = 0usize;
-        let mut all_fr: Vec<EF> = Vec::with_capacity(ff * num_rounds);
+        let mut all_fr: Vec<EF> = Vec::with_capacity(n - final_log);
+        let mut folded_vars = 0usize;
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
             for var in 0..round_cfg.folding_factor {
                 let (poly, pow) = &proof.round_polys[flat];
@@ -139,6 +141,7 @@ where
                 claim = c0 + c1 * rc + c2 * rc * rc;
                 all_fr.push(rc);
             }
+            folded_vars += round_cfg.folding_factor;
 
             if r + 1 == num_rounds {
                 break;
@@ -147,7 +150,7 @@ where
             // Round commitment + OOD (the tower does NOT commit the last round).
             let round = &proof.rounds[r];
             challenger.observe(round.parsed.commitment[0].clone());
-            let rem = n - (r + 1) * ff;
+            let rem = n - folded_vars;
             for (k, ans) in round.parsed.ood_answers.iter().enumerate() {
                 let pt: Vec<EF> = (0..rem).map(|_| challenger.sample_algebra_element()).collect();
                 if pt != round.parsed.ood_points[k] {

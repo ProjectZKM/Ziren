@@ -308,14 +308,17 @@ where
             }
 
             // (2) Interleaved-encode the folded polynomial and commit it.
+            // Leaf width follows the NEXT round's folding factor - that
+            // round's stir fold consumes one leaf per query.
+            let next_ff = self.config.round_parameters[r + 1].folding_factor;
             let rem = folder.f_vec.len().trailing_zeros() as usize;
             let leaves = encode_interleaved_ef::<F, EF, _>(
                 &folder.f_vec,
-                ff,
+                next_ff,
                 round_cfg.log_inv_rate,
                 ef_dft.as_ref(),
             );
-            let this_domain_log = (rem - ff) + round_cfg.log_inv_rate;
+            let this_domain_log = (rem - next_ff) + round_cfg.log_inv_rate;
             let (commitment, prover_data) = self.mmcs.commit(alloc::vec![leaves]);
             challenger.observe(commitment.clone());
             round_commitments.push(commitment);
@@ -351,7 +354,7 @@ where
                 let leaf = &opening.opened_values[0];
                 stir_values.push(leaf_stir_value::<F, EF>(
                     leaf,
-                    ff,
+                    round_cfg.folding_factor,
                     prev_base,
                     &this_round_randomness,
                 ));
@@ -470,7 +473,9 @@ where
         let n = point.len();
         let ff = self.config.round_parameters[0].folding_factor;
         let num_rounds = self.config.round_parameters.len();
-        let final_log = n - ff * num_rounds;
+        let folds: alloc::vec::Vec<usize> =
+            self.config.round_parameters.iter().map(|rp| rp.folding_factor).collect();
+        let final_log = n - folds.iter().sum::<usize>();
         if proof.final_poly.len() != 1usize << final_log {
             return Err(WhirVerifierError::IncorrectShape(alloc::format!(
                 "final_poly len {} != 2^{final_log}",
@@ -503,7 +508,8 @@ where
         let mut prev_domain_log = (n - ff) + self.config.starting_log_inv_rate;
         let mut prev_base = true;
         let mut prev_commitment = self.start_commitment.clone();
-        let mut all_fr: Vec<EF> = Vec::with_capacity(ff * num_rounds);
+        let mut all_fr: Vec<EF> = Vec::with_capacity(n - final_log);
+        let mut folded_vars = 0usize;
         let mut pow_flat = 0usize;
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
             let msgs: &[SumcheckPoly<EF>] = if r + 1 == num_rounds {
@@ -539,6 +545,7 @@ where
                 all_fr.push(rc);
                 this_round_randomness.push(rc);
             }
+            folded_vars += round_cfg.folding_factor;
 
             if r + 1 == num_rounds {
                 break;
@@ -546,7 +553,7 @@ where
 
             // Commitment + OOD replay.
             challenger.observe(proof.round_commitments[r].clone());
-            let rem = n - (r + 1) * ff;
+            let rem = n - folded_vars;
             let ood_answers = &proof.round_ood_answers[r];
             let mut ood_points: Vec<Vec<EF>> = Vec::with_capacity(ood_answers.len());
             for ans in ood_answers.iter() {
@@ -571,7 +578,11 @@ where
                 return Err(WhirVerifierError::IncorrectShape("query opening count".into()));
             }
             let leaf_width =
-                if prev_base { 1usize << ff } else { (1usize << ff) * EF::DIMENSION };
+                if prev_base {
+                    1usize << round_cfg.folding_factor
+                } else {
+                    (1usize << round_cfg.folding_factor) * EF::DIMENSION
+                };
             let dims = alloc::vec![p3_matrix::Dimensions {
                 width: leaf_width,
                 height: 1usize << prev_domain_log,
@@ -589,7 +600,7 @@ where
                     .map_err(|_| WhirVerifierError::IncorrectShape("merkle".into()))?;
                 stir_values.push(leaf_stir_value::<F, EF>(
                     &leaf.values[0],
-                    ff,
+                    round_cfg.folding_factor,
                     prev_base,
                     &this_round_randomness,
                 ));
@@ -610,7 +621,9 @@ where
                 cc *= round_batch;
             }
 
-            prev_domain_log = (rem - ff) + round_cfg.log_inv_rate;
+            prev_domain_log =
+                (rem - self.config.round_parameters[r + 1].folding_factor)
+                    + round_cfg.log_inv_rate;
             prev_base = false;
             prev_commitment = proof.round_commitments[r].clone();
         }
@@ -626,13 +639,18 @@ where
         if final_openings.leaves.len() != self.config.final_queries {
             return Err(WhirVerifierError::IncorrectShape("final query count".into()));
         }
-        let leaf_width = if prev_base { 1usize << ff } else { (1usize << ff) * EF::DIMENSION };
+        let last_ff = *folds.last().unwrap();
+        let leaf_width = if prev_base {
+            1usize << last_ff
+        } else {
+            (1usize << last_ff) * EF::DIMENSION
+        };
         let dims = alloc::vec![p3_matrix::Dimensions {
             width: leaf_width,
             height: 1usize << prev_domain_log,
         }];
         let g_final = EF::two_adic_generator(prev_domain_log);
-        let last_randomness = &all_fr[all_fr.len() - ff..];
+        let last_randomness = &all_fr[all_fr.len() - last_ff..];
         for leaf in &final_openings.leaves {
             let idx = challenger.sample_bits(prev_domain_log) & final_mask;
             let opened = p3_commit::BatchOpeningRef {
@@ -642,7 +660,8 @@ where
             self.mmcs
                 .verify_batch(&prev_commitment, &dims, idx, opened)
                 .map_err(|_| WhirVerifierError::IncorrectShape("final merkle".into()))?;
-            let folded = leaf_stir_value::<F, EF>(&leaf.values[0], ff, prev_base, last_randomness);
+            let folded =
+                leaf_stir_value::<F, EF>(&leaf.values[0], last_ff, prev_base, last_randomness);
             let expected = mono_eval_lsb(
                 &proof.final_poly,
                 &map_to_pow_lsb(g_final.exp_u64(idx as u64), final_log),

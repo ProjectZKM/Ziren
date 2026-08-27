@@ -57,11 +57,34 @@ pub struct JaggedWhirProverDataGeneric<MT: Mmcs<JaggedVal>> {
 pub fn whir_config_for_stack(lsh: usize, ff: usize, final_log: usize) -> WhirConfig {
     assert!(lsh > final_log && (lsh - final_log) % ff == 0, "lsh must fold evenly");
     let num_rounds = (lsh - final_log) / ff;
+    whir_config_for_fold_schedule(lsh, &alloc::vec![ff; num_rounds], final_log)
+}
+
+/// The general (per-round) fold schedule: round `r` folds `folds[r]`
+/// variables; `final_log` remain for the revealed final polynomial.  Each
+/// round's committed codeword packs `2^folds[r+1]` positions per Merkle leaf
+/// (the NEXT round's stir fold consumes one leaf per query), so a SMALLER
+/// round-0 factor shrinks round-0 query leaves — which for the stacked form
+/// span EVERY stripe's coset row — without touching the round count, the
+/// rate escalation, or the query budgets (all round-indexed).
+pub fn whir_config_for_fold_schedule(
+    lsh: usize,
+    folds: &[usize],
+    final_log: usize,
+) -> WhirConfig {
+    assert!(!folds.is_empty() && folds.iter().all(|&f| f > 0));
+    assert_eq!(
+        folds.iter().sum::<usize>() + final_log,
+        lsh,
+        "fold schedule must consume lsh exactly"
+    );
     let mut config = WhirConfig::default_whir_config();
     config.starting_ood_samples = 0; // stacked WHIR: OOD rides in round constraints
     config.starting_log_inv_rate = 1;
-    config.round_parameters = (0..num_rounds)
-        .map(|r| RoundConfig {
+    config.round_parameters = folds
+        .iter()
+        .enumerate()
+        .map(|(r, &ff)| RoundConfig {
             folding_factor: ff,
             evaluation_domain_log_size: 0,
             queries_pow_bits: 0,
@@ -91,7 +114,25 @@ pub fn whir_config_for_stack(lsh: usize, ff: usize, final_log: usize) -> WhirCon
 /// Folding PoW stays 0 like upstream production (soundness rides on the
 /// query PoW).
 pub fn core_whir_config(lsh: usize) -> WhirConfig {
-    let mut config = whir_config_for_stack(lsh, 7, 0);
+    // Round-0 folds FEWER variables than the later rounds.  A round-0 query
+    // authenticates one coset row from EVERY stripe of every round — `chunks
+    // x 2^ff0` felts — and re-hashing those rows is the recursion leaf's
+    // dominant cost (measured: at reth areas the uniform ff=7 schedule gives
+    // ~28K felts/query x 84 queries ≈ 2.4M felts ⇒ a ~640M-cell leaf that
+    // cannot fit a 32GB card).  ff0=4 cuts that term 8x; later rounds query
+    // a single folded poly (leaf = 2^7 felts, chunk-independent) so their
+    // factor stays 7.  Query counts, rates, and PoW are round-indexed and
+    // unchanged.  lsh=21: folds [4,7,7], final poly 2^3 coefficients.
+    const ROUND0_FF: usize = 4;
+    let mut rem = lsh
+        .checked_sub(ROUND0_FF)
+        .expect("stacking height must exceed the round-0 folding factor");
+    let mut folds = alloc::vec![ROUND0_FF];
+    while rem > 6 {
+        folds.push(7);
+        rem -= 7;
+    }
+    let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
     let num_rounds = config.round_parameters.len();
     let queries = [84usize, 21, 12, 9, 9, 9, 9];
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
