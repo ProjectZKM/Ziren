@@ -637,11 +637,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     stacked_pcs_verifier:
                         crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
                             crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
-                                config: zkm_pcs::whir::jagged::whir_config_for_stack(
-                                    lsh as usize,
-                                    7,
-                                    0,
-                                ),
+                                config: zkm_pcs::whir::jagged::core_whir_config(lsh as usize),
                                 log_stacking_height: lsh,
                                 _hasher: core::marker::PhantomData,
                             },

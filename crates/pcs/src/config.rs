@@ -304,11 +304,8 @@ pub trait BasefoldRing: StarkGenericConfig {
                 ),
             )];
             let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-            let cfg = crate::whir::jagged::whir_config_for_stack(
-                prover_data.log_stacking_height as usize,
-                7,
-                0,
-            );
+            let cfg =
+                crate::whir::jagged::core_whir_config(prover_data.log_stacking_height as usize);
             let (wcommit, wdata) = crate::whir::jagged::commit_jagged_whir_generic::<
                 Self::BfMmcs,
                 crate::jagged_pcs::JaggedDft,

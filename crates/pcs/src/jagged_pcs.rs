@@ -1428,7 +1428,7 @@ pub mod jagged {
                     .map(|r| r.precomputed.whir_data.as_ref().expect("whir_mode"))
                     .collect();
                 let lsh = wdatas[0].log_stacking_height as usize;
-                let cfg = crate::whir::jagged::whir_config_for_stack(lsh, 7, 0);
+                let cfg = crate::whir::jagged::core_whir_config(lsh);
                 let ef_dft = alloc::sync::Arc::new(p3_dft::Radix2DitParallel::<
                     InnerChallenge,
                 >::default());
@@ -1887,11 +1887,8 @@ pub mod jagged {
             let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
             let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
             let mmcs = crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0);
-            let cfg = crate::whir::jagged::whir_config_for_stack(
-                commit.log_stacking_height as usize,
-                7,
-                0,
-            );
+            let cfg =
+                crate::whir::jagged::core_whir_config(commit.log_stacking_height as usize);
             let res = crate::whir::jagged::verify_jagged_whir_rounds(
                 mmcs,
                 cfg,

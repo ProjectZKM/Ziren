@@ -48,9 +48,12 @@ pub struct JaggedWhirProverDataGeneric<MT: Mmcs<JaggedVal>> {
 }
 
 /// The WHIR configuration for a given stacking height: fold `ff` variables a
-/// round until `final_log` remain.  Query/PoW budgets are the caller's to
-/// tune; these defaults mirror the flat scheme's test shape and are NOT the
-/// production soundness budget.
+/// round until `final_log` remain, with the upstream escalating-rate
+/// schedule (round r's folded codeword commits at `1 + 3(r+1)` bits of
+/// blowup — the poly shrinks `2^ff`-fold per round, so the deeper, smaller
+/// codewords afford lower rates and correspondingly fewer queries).
+/// Query/PoW budgets here are the TEST shape; the production budget is
+/// [`core_whir_config`].
 pub fn whir_config_for_stack(lsh: usize, ff: usize, final_log: usize) -> WhirConfig {
     assert!(lsh > final_log && (lsh - final_log) % ff == 0, "lsh must fold evenly");
     let num_rounds = (lsh - final_log) / ff;
@@ -58,19 +61,48 @@ pub fn whir_config_for_stack(lsh: usize, ff: usize, final_log: usize) -> WhirCon
     config.starting_ood_samples = 0; // stacked WHIR: OOD rides in round constraints
     config.starting_log_inv_rate = 1;
     config.round_parameters = (0..num_rounds)
-        .map(|_| RoundConfig {
+        .map(|r| RoundConfig {
             folding_factor: ff,
             evaluation_domain_log_size: 0,
             queries_pow_bits: 0,
             pow_bits: alloc::vec![0usize; ff],
             num_queries: 4,
             ood_samples: 1,
-            log_inv_rate: 1,
+            log_inv_rate: 1 + 3 * (r + 1),
         })
         .collect();
     config.final_poly_log_degree = final_log;
     config.final_queries = 4;
     config.final_pow_bits = 0;
+    config
+}
+
+/// The PRODUCTION jagged-WHIR budget for a core-shard stack of height
+/// `2^lsh`: the upstream production schedule mapped onto the stacked
+/// three-round ff=7 structure.  Each round targets ~100 bits — queries x
+/// per-query bits (the PREVIOUS codeword's log-inv-rate; ~1 bit/query at
+/// the rate-1 start) plus a 16-bit query PoW grind:
+///
+///   round 0:  84 queries into the rate-1    stripe trees   (84 + 16)
+///   round 1:  21 queries into the rate-2^-4 codeword       (84 + 16)
+///   final  :  12 queries into the rate-2^-7 codeword       (84 + 16)
+///
+/// OOD samples are 2 per committed round (upstream production carries 2).
+/// Folding PoW stays 0 like upstream production (soundness rides on the
+/// query PoW).
+pub fn core_whir_config(lsh: usize) -> WhirConfig {
+    let mut config = whir_config_for_stack(lsh, 7, 0);
+    let num_rounds = config.round_parameters.len();
+    let queries = [84usize, 21, 12, 9, 9, 9, 9];
+    for (r, rp) in config.round_parameters.iter_mut().enumerate() {
+        rp.num_queries = queries[r.min(queries.len() - 1)];
+        rp.queries_pow_bits = 16;
+        rp.ood_samples = 2;
+    }
+    // The final queries open the LAST committed codeword (committed by
+    // round num_rounds-2); its rate is that round's log_inv_rate.
+    config.final_queries = queries[(num_rounds - 1).min(queries.len() - 1)];
+    config.final_pow_bits = 16;
     config
 }
 
