@@ -56,6 +56,7 @@
 pub mod config;
 pub mod full_prover;
 pub mod interleaved;
+pub mod jagged;
 pub mod monomial;
 pub mod proof;
 pub mod prover;
