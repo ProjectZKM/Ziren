@@ -60,6 +60,7 @@ pub mod monomial;
 pub mod proof;
 pub mod prover;
 pub mod round_prover;
+pub mod stacked;
 pub mod sumcheck;
 pub mod verifier;
 

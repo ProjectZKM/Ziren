@@ -524,3 +524,98 @@ fn interleaved_roundtrip_verifies() {
         Err(WhirVerifierError::IncorrectShape("merkle".into())),
     );
 }
+
+// ---------------------------------------------------------------------------
+// Stacked (multi-stripe, multi-round) WHIR round trip.
+// ---------------------------------------------------------------------------
+
+/// Two committed rounds of unequal stripe counts, batched into one WHIR
+/// instance; honest verify + tamper rejection on a stripe leaf.
+#[test]
+fn stacked_roundtrip_verifies() {
+    use crate::whir::stacked::{StackedWhirProver, StackedWhirVerifier};
+
+    type F = InnerVal;
+    type EF = InnerChallenge;
+
+    let (lsh, ff, num_rounds) = (9usize, 3usize, 3usize);
+    let mut rng = StdRng::seed_from_u64(0x57AC);
+
+    let mut cfg = tower_config(lsh, ff, num_rounds);
+    cfg.starting_ood_samples = 0; // stacked WHIR: OOD rides in round constraints
+    for r in cfg.round_parameters.iter_mut() {
+        r.num_queries = 4;
+    }
+    cfg.final_queries = 4;
+
+    let dft = Arc::new(Radix2DitParallel::<F>::default());
+    let ef_dft = Arc::new(Radix2DitParallel::<EF>::default());
+    let prover =
+        StackedWhirProver::<F, EF, _, _>::new(build_mmcs(), dft, cfg.clone(), lsh as u32);
+
+    let mk_stripe = |rng: &mut StdRng| {
+        let v: Vec<F> = (0..(1usize << lsh)).map(|_| rand_kb(rng)).collect();
+        Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, 1)))
+    };
+    let round_a = prover.commit_stripes(vec![mk_stripe(&mut rng), mk_stripe(&mut rng), mk_stripe(&mut rng)]);
+    let round_b = prover.commit_stripes(vec![mk_stripe(&mut rng), mk_stripe(&mut rng)]);
+
+    let stack_point: Vec<EF> = (0..lsh)
+        .map(|_| {
+            use p3_field::BasedVectorSpace;
+            <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
+                (0..4).map(|_| rand_kb(&mut rng)),
+            )
+            .unwrap()
+        })
+        .collect();
+
+    let mut p_chal = build_challenger();
+    let proof = prover.prove_trusted_evaluation(
+        Arc::clone(&ef_dft),
+        stack_point.clone(),
+        &[&round_a, &round_b],
+        &mut p_chal,
+    );
+
+    let verifier = StackedWhirVerifier::<F, EF, _>::new(build_mmcs(), cfg.clone(), lsh as u32);
+    let commitments = vec![round_a.commitment.clone(), round_b.commitment.clone()];
+
+    // Honest proof verifies.
+    let mut v_chal = build_challenger();
+    assert_eq!(
+        verifier.verify_trusted_evaluation(&commitments, &[3, 2], &stack_point, &proof, &mut v_chal),
+        Ok(())
+    );
+
+    // The echoed stripe evaluations must be the REAL ones.
+    for (d, evals) in [&round_a, &round_b].iter().zip(&proof.batch_evaluations) {
+        for (s, &e) in d.stripes.iter().zip(evals) {
+            assert_eq!(s.eval_at::<EF>(&stack_point)[0], e);
+        }
+    }
+
+    // Tampering an echoed claim is rejected (the sumcheck opens on it).
+    let mut bad = proof.clone();
+    bad.batch_evaluations[0][1] += EF::ONE;
+    let mut v_chal = build_challenger();
+    assert!(verifier
+        .verify_trusted_evaluation(&commitments, &[3, 2], &stack_point, &bad, &mut v_chal)
+        .is_err());
+
+    // Tampering a stripe-leaf opening is rejected (Merkle authentication).
+    let mut bad = proof.clone();
+    bad.whir_proof.round_query_openings[0].leaves[0].values[0][0] += F::ONE;
+    let mut v_chal = build_challenger();
+    assert!(verifier
+        .verify_trusted_evaluation(&commitments, &[3, 2], &stack_point, &bad, &mut v_chal)
+        .is_err());
+
+    // Tampering the final polynomial is rejected.
+    let mut bad = proof.clone();
+    bad.whir_proof.final_poly[0] += EF::ONE;
+    let mut v_chal = build_challenger();
+    assert!(verifier
+        .verify_trusted_evaluation(&commitments, &[3, 2], &stack_point, &bad, &mut v_chal)
+        .is_err());
+}
