@@ -428,3 +428,99 @@ fn tower_roundtrip_verifies() {
         Err(WhirVerifierError::TerminalMismatch),
     );
 }
+
+// ---------------------------------------------------------------------------
+// Interleaved scheme (STIR-authenticated) round trip.
+// ---------------------------------------------------------------------------
+
+/// The interleaved prover/verifier round trip: honest proof verifies; a wrong
+/// claim, a tampered final polynomial, AND a tampered STIR leaf are rejected —
+/// the last is what the flat scheme could not check.
+#[test]
+fn interleaved_roundtrip_verifies() {
+    use crate::whir::interleaved::WhirInterleavedVerifier;
+    use crate::whir::verifier::WhirVerifierError;
+    use p3_field::PrimeCharacteristicRing;
+
+    type F = InnerVal;
+    type EF = InnerChallenge;
+
+    let (n, ff, num_rounds) = (9usize, 3usize, 3usize);
+    let mut rng = StdRng::seed_from_u64(0xA11CE);
+    let values: Vec<F> = (0..(1usize << n)).map(|_| rand_kb(&mut rng)).collect();
+    let mle = Arc::new(Mle::from_row_major(RowMajorMatrix::new(values, 1)));
+    let point: Vec<EF> = (0..n)
+        .map(|_| {
+            use p3_field::BasedVectorSpace;
+            <EF as BasedVectorSpace<F>>::from_basis_coefficients_iter(
+                (0..4).map(|_| rand_kb(&mut rng)),
+            )
+            .unwrap()
+        })
+        .collect();
+    let eval = mle.eval_at::<EF>(&point)[0];
+
+    let base_dft = Arc::new(Radix2DitParallel::<F>::default());
+    let ef_dft = Arc::new(Radix2DitParallel::<EF>::default());
+    let mut cfg = tower_config(n, ff, num_rounds);
+    for r in cfg.round_parameters.iter_mut() {
+        r.num_queries = 4;
+    }
+    cfg.final_queries = 4;
+
+    let prover = WhirProver::<F, EF, _, _>::new(base_dft, build_mmcs(), cfg.clone());
+    let mut p_chal = build_challenger();
+    let proof = prover.prove_interleaved(
+        Arc::clone(&ef_dft),
+        &mut p_chal,
+        Arc::clone(&mle),
+        point.clone(),
+        eval,
+    );
+
+    // The verifier needs the starting commitment + OOD data; re-derive them by
+    // replaying the prover's commit phase (in the PCS integration these come
+    // from the commitment object).
+    let commit_prover = WhirProver::<F, EF, _, _>::new(
+        Arc::new(Radix2DitParallel::<F>::default()),
+        build_mmcs(),
+        cfg.clone(),
+    );
+    let mut c_chal = build_challenger();
+    let commitment = commit_prover.commit_interleaved_public(&mut c_chal, Arc::clone(&mle));
+
+    let make_verifier = || {
+        WhirInterleavedVerifier::<F, EF, _>::new(
+            build_mmcs(),
+            cfg.clone(),
+            commitment.0.clone(),
+            commitment.1.clone(),
+            commitment.2.clone(),
+        )
+    };
+
+    // Honest proof verifies.
+    let verifier = make_verifier();
+    let mut v_chal = build_challenger();
+    assert_eq!(verifier.verify(&mut v_chal, &point, eval, &proof), Ok(()));
+
+    // Wrong evaluation claim rejected at the first sumcheck message.
+    let mut v_chal = build_challenger();
+    assert!(verifier.verify(&mut v_chal, &point, eval + EF::ONE, &proof).is_err());
+
+    // Tampered final polynomial rejected.
+    let mut bad = proof.clone();
+    bad.final_poly[0] += EF::ONE;
+    let mut v_chal = build_challenger();
+    assert!(verifier.verify(&mut v_chal, &point, eval, &bad).is_err());
+
+    // Tampered STIR leaf rejected (Merkle authentication) — the check the flat
+    // scheme lacked.
+    let mut bad = proof.clone();
+    bad.round_query_openings[0].leaves[0].values[0][0] += F::ONE;
+    let mut v_chal = build_challenger();
+    assert_eq!(
+        verifier.verify(&mut v_chal, &point, eval, &bad),
+        Err(WhirVerifierError::IncorrectShape("merkle".into())),
+    );
+}
