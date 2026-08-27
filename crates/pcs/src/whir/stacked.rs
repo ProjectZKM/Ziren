@@ -55,6 +55,41 @@ pub struct StackedWhirProof<F: p3_field::Field, EF: ExtensionField<F>, MT: Mmcs<
     pub batch_evaluations: Vec<Vec<EF>>,
 }
 
+/// Device backend for the FIRST folding batch of the stacked-WHIR open.
+///
+/// The stacked open touches stacking-height-sized (`2^lsh`) data in exactly
+/// four places: the per-stripe evaluations at the stack point, the λ-combined
+/// virtual polynomial + eq weight, the first `folding_factor` degree-2 fold
+/// variables, and the round-0 query openings of the stripe trees.  Everything
+/// after the first fold batch operates on `2^(lsh-ff)`-sized vectors, which
+/// are host-trivial.  This trait carries exactly those four pieces so a GPU
+/// prover can keep the big vectors device-resident while the TRANSCRIPT
+/// logic stays in the one host implementation below (an engine of `None`
+/// is byte-identical to the pure-host path).
+///
+/// Pair convention throughout: lo = index `2i`, hi = `2i+1`, matching
+/// [`crate::basefold::mle::Mle::fix_last_variable`] and [`WhirFolder`].
+pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
+    /// Per-round per-stripe evaluations at the stack point — the same shape
+    /// (round-major, stripe-minor) the host computes from `d.stripes`.
+    fn stripe_evals(&mut self, stack_point: &[EF]) -> Vec<Vec<EF>>;
+    /// Build the λ-combined virtual polynomial and the eq(stack_point)
+    /// weight, both of length `2^lsh`, on the backend.
+    fn init(&mut self, lambda: EF, stack_point: &[EF]);
+    /// `(c0, c2)` of the CURRENT variable: `c0 = Σ w_lo·f_lo`,
+    /// `c2 = Σ (f_hi−f_lo)(w_hi−w_lo)`.
+    fn c0_c2(&mut self) -> (EF, EF);
+    /// Fold both vectors by the sampled challenge (halving their length).
+    fn apply_rc(&mut self, rc: EF);
+    /// Materialize `(f, weight)` after the `folding_factor` folds.
+    fn extract(&mut self) -> (Vec<EF>, Vec<EF>);
+    /// Round-0 query opening of the stripe trees at `index`: one
+    /// [`LeafOpening`] per committed round, in round order, each carrying
+    /// every stripe's row (the exact shape `mmcs.open_batch` returns on the
+    /// host path).
+    fn open_query(&mut self, index: usize) -> Vec<LeafOpening<F, MT>>;
+}
+
 pub struct StackedWhirProver<F: p3_field::Field, EF, MT: Mmcs<F>, D> {
     pub mmcs: MT,
     pub dft: Arc<D>,
@@ -115,16 +150,42 @@ where
             + GrindingChallenger<Witness = F>
             + CanObserve<MT::Commitment>,
     {
+        self.prove_trusted_evaluation_with_engine(ef_dft, stack_point, prover_data, challenger, None)
+    }
+
+    /// [`Self::prove_trusted_evaluation`] with an optional
+    /// [`WhirRound0Engine`] carrying the stacking-height-sized work.  With
+    /// `None` this IS the plain host path, byte-for-byte; with an engine the
+    /// TRANSCRIPT stays identical (the engine only computes what the host
+    /// vectors would have).
+    pub fn prove_trusted_evaluation_with_engine<EFDft, Challenger>(
+        &self,
+        ef_dft: Arc<EFDft>,
+        stack_point: Vec<EF>,
+        prover_data: &[&StackedWhirProverData<F, MT>],
+        challenger: &mut Challenger,
+        mut engine: Option<&mut dyn WhirRound0Engine<F, EF, MT>>,
+    ) -> StackedWhirProof<F, EF, MT>
+    where
+        EFDft: TwoAdicSubgroupDft<EF>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>,
+    {
         let lsh = self.log_stacking_height as usize;
         let ff = self.ff();
         let num_rounds = self.config.round_parameters.len();
         debug_assert_eq!(stack_point.len(), lsh);
 
         // Per-round per-stripe claims at the stack point (echoed in the proof).
-        let batch_evaluations: Vec<Vec<EF>> = prover_data
-            .iter()
-            .map(|d| d.stripes.iter().map(|s| s.eval_at::<EF>(&stack_point)[0]).collect())
-            .collect();
+        let batch_evaluations: Vec<Vec<EF>> = if let Some(e) = engine.as_deref_mut() {
+            e.stripe_evals(&stack_point)
+        } else {
+            prover_data
+                .iter()
+                .map(|d| d.stripes.iter().map(|s| s.eval_at::<EF>(&stack_point)[0]).collect())
+                .collect()
+        };
         for round in &batch_evaluations {
             for &e in round {
                 challenger.observe_algebra_element(e);
@@ -132,27 +193,47 @@ where
         }
 
         // λ batches all stripes of all rounds into one virtual polynomial.
+        // The claim is the same λ-combination of the echoed evaluations; the
+        // materialized `virt` vector is host-mode only (the engine holds it).
         let lambda: EF = challenger.sample_algebra_element();
-        let mut virt: Vec<EF> = alloc::vec![EF::ZERO; 1usize << lsh];
         let mut claim = EF::ZERO;
         let mut lam = EF::ONE;
-        for (d, evals) in prover_data.iter().zip(&batch_evaluations) {
-            for (stripe, &e) in d.stripes.iter().zip(evals) {
-                for (v, &s) in virt.iter_mut().zip(stripe.guts().as_slice()) {
-                    *v += lam * s;
-                }
+        for evals in &batch_evaluations {
+            for &e in evals {
                 claim += lam * e;
                 lam *= lambda;
             }
         }
+        let virt: Vec<EF> = if engine.is_none() {
+            let mut virt: Vec<EF> = alloc::vec![EF::ZERO; 1usize << lsh];
+            let mut lam = EF::ONE;
+            for d in prover_data.iter() {
+                for stripe in d.stripes.iter() {
+                    for (v, &st) in virt.iter_mut().zip(stripe.guts().as_slice()) {
+                        *v += lam * st;
+                    }
+                    lam *= lambda;
+                }
+            }
+            virt
+        } else {
+            Vec::new()
+        };
 
         // ---- WHIR on the virtual polynomial. ----
-        // Starting OOD on `virt`.
+        // Starting OOD on `virt`.  An engine carries no starting-OOD path:
+        // the stacked configuration pins `starting_ood_samples = 0` (OOD
+        // rides in round constraints), so the loop below is empty there and
+        // `virt_mle` is never evaluated.
         let n = lsh;
+        assert!(
+            engine.is_none() || self.config.starting_ood_samples == 0,
+            "WhirRound0Engine requires starting_ood_samples == 0 (stacked config)"
+        );
         let mut start_ood_points = Vec::with_capacity(self.config.starting_ood_samples);
         let mut start_ood_answers = Vec::with_capacity(self.config.starting_ood_samples);
-        let virt_mle = Mle::<EF>::from_row_major(RowMajorMatrix::new(virt.clone(), 1));
         for _ in 0..self.config.starting_ood_samples {
+            let virt_mle = Mle::<EF>::from_row_major(RowMajorMatrix::new(virt.clone(), 1));
             let pt: Vec<EF> = (0..n).map(|_| challenger.sample_algebra_element()).collect();
             let ans = virt_mle.eval_at::<EF>(&pt)[0];
             challenger.observe_algebra_element(ans);
@@ -166,18 +247,26 @@ where
             claimed_sum += coeff * a;
             coeff *= batch;
         }
-        let mut weight = eq_table(n, &stack_point);
-        {
-            let mut c = batch;
-            for pt in &start_ood_points {
-                let e = eq_table(n, pt);
-                for (w, ei) in weight.iter_mut().zip(&e) {
-                    *w += c * *ei;
+        let mut folder = if let Some(e) = engine.as_deref_mut() {
+            // The engine holds virt + eq(stack_point) device-side; the host
+            // folder starts EMPTY and receives the folded (small) vectors
+            // after the first fold batch.
+            e.init(lambda, &stack_point);
+            WhirFolder { f_vec: Vec::new(), weight: Vec::new(), claimed_sum }
+        } else {
+            let mut weight = eq_table(n, &stack_point);
+            {
+                let mut c = batch;
+                for pt in &start_ood_points {
+                    let eqt = eq_table(n, pt);
+                    for (w, ei) in weight.iter_mut().zip(&eqt) {
+                        *w += c * *ei;
+                    }
+                    c *= batch;
                 }
-                c *= batch;
             }
-        }
-        let mut folder = WhirFolder { f_vec: virt, weight, claimed_sum };
+            WhirFolder { f_vec: virt, weight, claimed_sum }
+        };
 
         let mut prev_domain_log = (lsh - ff) + self.config.starting_log_inv_rate;
         // Round 0 queries the STRIPE trees (multi-matrix, base field); later
@@ -192,12 +281,42 @@ where
 
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
             let mut this_round_randomness = Vec::new();
-            let polys = folder.fold_variables::<F, _>(
-                round_cfg.folding_factor,
-                &round_cfg.pow_bits,
-                challenger,
-                &mut this_round_randomness,
-            );
+            let polys = if r == 0 && engine.is_some() {
+                // First fold batch on the engine: SAME transcript as
+                // `WhirFolder::fold_variables`, with (c0, c2) and the folds
+                // computed device-side.  The folded (small) vectors then
+                // seed the host folder for every later round.
+                let e = engine.as_deref_mut().unwrap();
+                let mut out = Vec::with_capacity(round_cfg.folding_factor);
+                for var in 0..round_cfg.folding_factor {
+                    let (c0, c2) = e.c0_c2();
+                    let c1 = folder.claimed_sum - c0.double() - c2;
+                    challenger.observe_algebra_element(c0);
+                    challenger.observe_algebra_element(c1);
+                    challenger.observe_algebra_element(c2);
+                    let pow =
+                        challenger.grind(round_cfg.pow_bits.get(var).copied().unwrap_or(0));
+                    let rc: EF = challenger.sample_algebra_element();
+                    folder.claimed_sum = c0 + c1 * rc + c2 * rc * rc;
+                    e.apply_rc(rc);
+                    this_round_randomness.push(rc);
+                    out.push((
+                        SumcheckPoly(alloc::vec![c0, c1, c2]),
+                        ProofOfWork(pow),
+                    ));
+                }
+                let (f, w) = e.extract();
+                folder.f_vec = f;
+                folder.weight = w;
+                out
+            } else {
+                folder.fold_variables::<F, _>(
+                    round_cfg.folding_factor,
+                    &round_cfg.pow_bits,
+                    challenger,
+                    &mut this_round_randomness,
+                )
+            };
             round_sumcheck_polys.push(polys.iter().map(|(p, _)| p.clone()).collect());
             for (_, pow) in &polys {
                 folding_pow.push(pow.clone());
@@ -253,29 +372,33 @@ where
                 let (virt_leaf, opened) = match &prev_single {
                     None => {
                         // Round 0: open every stripe row of every round tree
-                        // and λ-combine.
+                        // and λ-combine.  With an engine the openings come off
+                        // the device-resident trees; the λ-combination is the
+                        // same host arithmetic either way.
+                        let opened: Vec<LeafOpening<F, MT>> =
+                            if let Some(e) = engine.as_deref_mut() {
+                                e.open_query(idx)
+                            } else {
+                                let mut all = Vec::with_capacity(prover_data.len());
+                                for d in prover_data.iter() {
+                                    let opening = self.mmcs.open_batch(idx, &d.prover_data);
+                                    all.push(LeafOpening {
+                                        values: opening.opened_values,
+                                        proof: opening.opening_proof,
+                                    });
+                                }
+                                all
+                            };
                         let mut virt_leaf = alloc::vec![EF::ZERO; 1usize << ff];
                         let mut lam = EF::ONE;
-                        let mut all_leaves: Vec<Vec<Vec<F>>> = Vec::new();
-                        let mut all_proofs = Vec::new();
-                        for d in prover_data.iter() {
-                            let opening = self.mmcs.open_batch(idx, &d.prover_data);
-                            for stripe_row in &opening.opened_values {
-                                for (v, &s) in virt_leaf.iter_mut().zip(stripe_row.iter()) {
-                                    *v += lam * s;
+                        for leaf in &opened {
+                            for stripe_row in &leaf.values {
+                                for (v, &st) in virt_leaf.iter_mut().zip(stripe_row.iter()) {
+                                    *v += lam * st;
                                 }
                                 lam *= lambda;
                             }
-                            all_leaves.push(opening.opened_values);
-                            all_proofs.push(opening.opening_proof);
                         }
-                        // Flatten: one LeafOpening per ROUND TREE (its values
-                        // hold every stripe's row).
-                        let opened: Vec<LeafOpening<F, MT>> = all_leaves
-                            .into_iter()
-                            .zip(all_proofs)
-                            .map(|(values, proof)| LeafOpening { values, proof })
-                            .collect();
                         (virt_leaf, opened)
                     }
                     Some(data) => {
@@ -332,6 +455,13 @@ where
                     });
                 }
                 None => {
+                    // Single-round shape: the final queries open the stripe
+                    // trees directly.  The engine path pins num_rounds >= 2
+                    // (production shape), so this arm stays host-only.
+                    assert!(
+                        engine.is_none(),
+                        "WhirRound0Engine requires >= 2 rounds (final queries open a folded codeword)"
+                    );
                     for d in prover_data.iter() {
                         let opening = self.mmcs.open_batch(idx, &d.prover_data);
                         final_leaves.push(LeafOpening {

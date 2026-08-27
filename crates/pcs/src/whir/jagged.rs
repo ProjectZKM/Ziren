@@ -195,6 +195,36 @@ where
         + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
         + 'static,
 {
+    open_jagged_whir_rounds_generic_with_engine::<Challenger, MT, D, EFD>(
+        rounds, eval_point, challenger, mmcs, dft, ef_dft, config, None,
+    )
+}
+
+/// [`open_jagged_whir_rounds_generic`] with an optional
+/// [`crate::whir::stacked::WhirRound0Engine`] carrying the
+/// stacking-height-sized work (see the trait docs); `None` is the plain
+/// host path.
+#[allow(clippy::too_many_arguments)]
+pub fn open_jagged_whir_rounds_generic_with_engine<Challenger, MT, D, EFD>(
+    rounds: &[&JaggedWhirProverDataGeneric<MT>],
+    eval_point: Vec<JaggedChallenge>,
+    challenger: &mut Challenger,
+    mmcs: MT,
+    dft: Arc<D>,
+    ef_dft: Arc<EFD>,
+    config: WhirConfig,
+    engine: Option<&mut dyn crate::whir::stacked::WhirRound0Engine<JaggedVal, JaggedChallenge, MT>>,
+) -> StackedWhirProof<JaggedVal, JaggedChallenge, MT>
+where
+    MT: Mmcs<JaggedVal, Commitment: Clone, ProverData<RowMajorMatrix<JaggedVal>>: 'static>
+        + Clone,
+    D: TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
+    EFD: TwoAdicSubgroupDft<JaggedChallenge>,
+    Challenger: FieldChallenger<JaggedVal>
+        + GrindingChallenger<Witness = JaggedVal>
+        + CanObserve<<MT as Mmcs<JaggedVal>>::Commitment>
+        + 'static,
+{
     let log_stacking_height = rounds[0].log_stacking_height;
     let prover = StackedWhirProver::<JaggedVal, JaggedChallenge, MT, D>::new(
         mmcs,
@@ -205,7 +235,7 @@ where
     let stack_point: Vec<JaggedChallenge> =
         eval_point[..log_stacking_height as usize].to_vec();
     let stacked: Vec<&_> = rounds.iter().map(|r| &r.stacked_data).collect();
-    prover.prove_trusted_evaluation(ef_dft, stack_point, &stacked, challenger)
+    prover.prove_trusted_evaluation_with_engine(ef_dft, stack_point, &stacked, challenger, engine)
 }
 
 /// Verify a jagged-WHIR batched open: bind the claim by interpolating the
