@@ -88,6 +88,12 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     /// every stripe's row (the exact shape `mmcs.open_batch` returns on the
     /// host path).
     fn open_query(&mut self, index: usize) -> Vec<LeafOpening<F, MT>>;
+    /// All round-0 query openings at once — `indices.len()` entries, each the
+    /// [`Self::open_query`] result for that index.  A device backend overrides
+    /// this to batch the leaf-row gather + path walk over every query.
+    fn open_queries(&mut self, indices: &[usize]) -> Vec<Vec<LeafOpening<F, MT>>> {
+        indices.iter().map(|&i| self.open_query(i)).collect()
+    }
 }
 
 pub struct StackedWhirProver<F: p3_field::Field, EF, MT: Mmcs<F>, D> {
@@ -371,6 +377,14 @@ where
             let mut leaves_open = Vec::with_capacity(indices.len());
             let mut stir_points: Vec<Vec<EF>> = Vec::with_capacity(indices.len());
             let mut stir_values = Vec::with_capacity(indices.len());
+            // Round 0 with an engine: fetch every query's openings in ONE
+            // batched call (device gather + path walk over all indices),
+            // then serve the loop from the batch.
+            let mut engine_batch: Option<alloc::collections::VecDeque<Vec<LeafOpening<F, MT>>>> =
+                match (&prev_single, engine.as_deref_mut()) {
+                    (None, Some(e)) => Some(e.open_queries(&indices).into()),
+                    _ => None,
+                };
             for &idx in &indices {
                 let (virt_leaf, opened) = match &prev_single {
                     None => {
@@ -379,8 +393,8 @@ where
                         // the device-resident trees; the λ-combination is the
                         // same host arithmetic either way.
                         let opened: Vec<LeafOpening<F, MT>> =
-                            if let Some(e) = engine.as_deref_mut() {
-                                e.open_query(idx)
+                            if let Some(batch) = engine_batch.as_mut() {
+                                batch.pop_front().expect("one batch entry per query index")
                             } else {
                                 let mut all = Vec::with_capacity(prover_data.len());
                                 for d in prover_data.iter() {
