@@ -124,6 +124,18 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     ) -> bool {
         false
     }
+    /// Absorb batched EQ (OOD) constraints into `weight` on the backend:
+    /// `weight[i] += Σ_c coeffs[c] · eq(points[c], i)` with the host
+    /// [`crate::whir::sumcheck`] `eq_table` convention (LSB-first, bit k
+    /// pairs with coordinate k).  `false` declines to the host absorption.
+    fn absorb_ood(
+        &mut self,
+        _weight: &mut [EF],
+        _points_lsb: &[Vec<EF>],
+        _coeffs: &[EF],
+    ) -> bool {
+        false
+    }
 }
 
 /// Env-gated (`ZIREN_WHIR_OPEN_TIMING=1`) section timers for the stacked
@@ -144,6 +156,8 @@ mod open_timing {
     pub static QLATER: AtomicU64 = AtomicU64::new(0);
     pub static FGRIND: AtomicU64 = AtomicU64::new(0);
     pub static FOPEN: AtomicU64 = AtomicU64::new(0);
+    pub static CENGINE: AtomicU64 = AtomicU64::new(0);
+    pub static CHOST: AtomicU64 = AtomicU64::new(0);
     pub static OPENS: AtomicU64 = AtomicU64::new(0);
 
     pub fn enabled() -> bool {
@@ -171,9 +185,10 @@ mod open_timing {
         if n % 32 == 0 {
             let g = |a: &AtomicU64| a.load(Ordering::Relaxed) as f64 / 1e9;
             eprintln!(
-                "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s | qgrind={:.2}s qr0={:.2}s qlater={:.2}s fgrind={:.2}s fopen={:.2}s",
+                "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s | qgrind={:.2}s qr0={:.2}s qlater={:.2}s fgrind={:.2}s fopen={:.2}s cengine={:.2}s chost={:.2}s",
                 g(&ENGINE), g(&FOLDS), g(&COMMITS), g(&OOD), g(&QUERIES), g(&CONSTRAINTS), g(&FINAL),
-                g(&GRINDQ), g(&QR0), g(&QLATER), g(&FGRIND), g(&FOPEN)
+                g(&GRINDQ), g(&QR0), g(&QLATER), g(&FGRIND), g(&FOPEN),
+                g(&CENGINE), g(&CHOST)
             );
         }
     }
@@ -605,19 +620,33 @@ where
             drop(_t_q);
             let _t_c = open_timing::Timer::new(&open_timing::CONSTRAINTS);
             let round_batch: EF = challenger.sample_algebra_element();
-            folder.add_ood_constraints(&ood_points, &ood_answers, round_batch);
+            // OOD eq-table absorption goes to the backend when one is
+            // present (value-identical); the transcript half stays host.
+            let ood_coeffs = folder.ood_coeffs(&ood_answers, round_batch);
+            let ood_absorbed = {
+                let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
+                engine.as_deref_mut().map_or(false, |e| {
+                    e.absorb_ood(&mut folder.weight, &ood_points, &ood_coeffs)
+                })
+            };
+            if !ood_absorbed {
+                let _t_h = open_timing::Timer::new(&open_timing::CHOST);
+                folder.absorb_eq_tables(&ood_points, &ood_coeffs);
+            }
             let start_coeff = round_batch.exp_u64((ood_points.len() + 1) as u64);
             // The weight absorption goes to the backend when one is present
             // (value-identical - field ops are exact in any order); the
             // transcript half stays host either way.
             let (mono_coeffs, _) =
                 folder.monomial_coeffs(&stir_values, round_batch, start_coeff);
-            let absorbed = engine
-                .as_deref_mut()
-                .map_or(false, |e| {
+            let absorbed = {
+                let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
+                engine.as_deref_mut().map_or(false, |e| {
                     e.absorb_monomials(&mut folder.weight, &stir_points, &mono_coeffs)
-                });
+                })
+            };
             if !absorbed {
+                let _t_h = open_timing::Timer::new(&open_timing::CHOST);
                 folder.absorb_monomial_tables(&stir_points, &mono_coeffs);
             }
 

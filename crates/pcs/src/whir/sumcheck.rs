@@ -79,16 +79,35 @@ impl<EF: Field> WhirFolder<EF> {
     /// `batch^{i+1}·eq(ood_i)` to the weight and `batch^{i+1}·answer_i` to the
     /// claim preserves the invariant `claim = Σ_x weight[x]·f[x]`.
     pub fn add_ood_constraints(&mut self, ood_points: &[Vec<EF>], ood_answers: &[EF], batch: EF) {
+        let coeffs = self.ood_coeffs(ood_answers, batch);
+        self.absorb_eq_tables(ood_points, &coeffs);
+    }
+
+    /// The transcript half of [`Self::add_ood_constraints`]: fold the OOD
+    /// ANSWERS into the claimed sum and return the per-constraint batching
+    /// coefficients (`batch, batch^2, ..`).  Split out so a device backend
+    /// can take over the eq-table absorption.
+    pub fn ood_coeffs(&mut self, ood_answers: &[EF], batch: EF) -> Vec<EF> {
+        let mut coeffs = Vec::with_capacity(ood_answers.len());
+        let mut coeff = batch;
+        for &ans in ood_answers {
+            coeffs.push(coeff);
+            self.claimed_sum += coeff * ans;
+            coeff *= batch;
+        }
+        coeffs
+    }
+
+    /// The weight half of [`Self::add_ood_constraints`]: absorb the batched
+    /// eq tables into the weight.
+    pub fn absorb_eq_tables(&mut self, points: &[Vec<EF>], coeffs: &[EF]) {
         let n = self.f_vec.len().trailing_zeros() as usize;
         debug_assert_eq!(1usize << n, self.f_vec.len());
-        let mut coeff = batch;
-        for (pt, &ans) in ood_points.iter().zip(ood_answers) {
+        for (pt, &coeff) in points.iter().zip(coeffs) {
             let e = eq_table(n, pt);
             for (w, ei) in self.weight.iter_mut().zip(&e) {
                 *w += coeff * *ei;
             }
-            self.claimed_sum += coeff * ans;
-            coeff *= batch;
         }
     }
 
