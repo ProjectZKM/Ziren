@@ -111,6 +111,19 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     fn open_folded_queries(&mut self, _indices: &[usize]) -> Vec<LeafOpening<F, MT>> {
         unreachable!("open_folded_queries without a commit_folded tree")
     }
+    /// Absorb batched MONOMIAL constraints into `weight` on the backend:
+    /// `weight[i] += Σ_c coeffs[c] · Π_{k: bit k of i} points_lsb[c][n-1-k]`
+    /// (the [`crate::whir::interleaved::mono_table_lsb`] convention).  Field
+    /// ops are exact, so any evaluation order is value-identical to the host
+    /// tables.  `false` declines to the host absorption.
+    fn absorb_monomials(
+        &mut self,
+        _weight: &mut [EF],
+        _points_lsb: &[Vec<EF>],
+        _coeffs: &[EF],
+    ) -> bool {
+        false
+    }
 }
 
 /// Env-gated (`ZIREN_WHIR_OPEN_TIMING=1`) section timers for the stacked
@@ -594,7 +607,19 @@ where
             let round_batch: EF = challenger.sample_algebra_element();
             folder.add_ood_constraints(&ood_points, &ood_answers, round_batch);
             let start_coeff = round_batch.exp_u64((ood_points.len() + 1) as u64);
-            folder.add_monomial_constraints(&stir_points, &stir_values, round_batch, start_coeff);
+            // The weight absorption goes to the backend when one is present
+            // (value-identical - field ops are exact in any order); the
+            // transcript half stays host either way.
+            let (mono_coeffs, _) =
+                folder.monomial_coeffs(&stir_values, round_batch, start_coeff);
+            let absorbed = engine
+                .as_deref_mut()
+                .map_or(false, |e| {
+                    e.absorb_monomials(&mut folder.weight, &stir_points, &mono_coeffs)
+                });
+            if !absorbed {
+                folder.absorb_monomial_tables(&stir_points, &mono_coeffs);
+            }
 
             prev_domain_log = this_domain_log;
             prev_single = this_tree;
