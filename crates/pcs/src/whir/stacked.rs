@@ -107,6 +107,13 @@ mod open_timing {
     pub static QUERIES: AtomicU64 = AtomicU64::new(0);
     pub static CONSTRAINTS: AtomicU64 = AtomicU64::new(0);
     pub static FINAL: AtomicU64 = AtomicU64::new(0);
+    // Sub-sections (NESTED inside QUERIES / FINAL — they double-count
+    // against their umbrella; umbrella minus subs = residual assembly).
+    pub static GRINDQ: AtomicU64 = AtomicU64::new(0);
+    pub static QR0: AtomicU64 = AtomicU64::new(0);
+    pub static QLATER: AtomicU64 = AtomicU64::new(0);
+    pub static FGRIND: AtomicU64 = AtomicU64::new(0);
+    pub static FOPEN: AtomicU64 = AtomicU64::new(0);
     pub static OPENS: AtomicU64 = AtomicU64::new(0);
 
     pub fn enabled() -> bool {
@@ -134,8 +141,9 @@ mod open_timing {
         if n % 32 == 0 {
             let g = |a: &AtomicU64| a.load(Ordering::Relaxed) as f64 / 1e9;
             eprintln!(
-                "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s",
-                g(&ENGINE), g(&FOLDS), g(&COMMITS), g(&OOD), g(&QUERIES), g(&CONSTRAINTS), g(&FINAL)
+                "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s | qgrind={:.2}s qr0={:.2}s qlater={:.2}s fgrind={:.2}s fopen={:.2}s",
+                g(&ENGINE), g(&FOLDS), g(&COMMITS), g(&OOD), g(&QUERIES), g(&CONSTRAINTS), g(&FINAL),
+                g(&GRINDQ), g(&QR0), g(&QLATER), g(&FGRIND), g(&FOPEN)
             );
         }
     }
@@ -423,7 +431,10 @@ where
             drop(_t_ood);
             let _t_q = open_timing::Timer::new(&open_timing::QUERIES);
             // Query PoW + indices into the PREVIOUS codeword.
-            folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
+            {
+                let _t_g = open_timing::Timer::new(&open_timing::GRINDQ);
+                folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
+            }
             let mask = (1usize << prev_domain_log) - 1;
             let indices: Vec<usize> = (0..round_cfg.num_queries)
                 .map(|_| challenger.sample_bits(prev_domain_log) & mask)
@@ -441,6 +452,11 @@ where
                     (None, Some(e)) => Some(e.open_queries(&indices).into()),
                     _ => None,
                 };
+            let _t_qkind = open_timing::Timer::new(if prev_single.is_none() {
+                &open_timing::QR0
+            } else {
+                &open_timing::QLATER
+            });
             for &idx in &indices {
                 let (virt_leaf, opened) = match &prev_single {
                     None => {
@@ -503,6 +519,7 @@ where
             }
             round_query_openings.push(MerkleOpening { leaves: leaves_open });
 
+            drop(_t_qkind);
             drop(_t_q);
             let _t_c = open_timing::Timer::new(&open_timing::CONSTRAINTS);
             let round_batch: EF = challenger.sample_algebra_element();
@@ -518,8 +535,12 @@ where
         // Final queries against the last committed codeword (or, when no round
         // ever commits, the stripe trees).
         let final_poly = folder.f_vec.clone();
-        let final_pow = ProofOfWork(challenger.grind(self.config.final_pow_bits));
+        let final_pow = {
+            let _t_g = open_timing::Timer::new(&open_timing::FGRIND);
+            ProofOfWork(challenger.grind(self.config.final_pow_bits))
+        };
         let final_mask = (1usize << prev_domain_log) - 1;
+        let _t_fopen = open_timing::Timer::new(&open_timing::FOPEN);
         let mut final_leaves = Vec::with_capacity(self.config.final_queries);
         for _ in 0..self.config.final_queries {
             let idx = challenger.sample_bits(prev_domain_log) & final_mask;
@@ -555,6 +576,7 @@ where
             round_sumcheck_polys.pop().unwrap_or_default();
 
         {
+            drop(_t_fopen);
             drop(_t_final);
             open_timing::tick_open();
         }
