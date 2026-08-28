@@ -96,6 +96,51 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     }
 }
 
+/// Env-gated (`ZIREN_WHIR_OPEN_TIMING=1`) section timers for the stacked
+/// open — process-global sums, dumped every 32 opens.  Diagnostic only.
+mod open_timing {
+    use core::sync::atomic::{AtomicU64, Ordering};
+    pub static ENGINE: AtomicU64 = AtomicU64::new(0);
+    pub static FOLDS: AtomicU64 = AtomicU64::new(0);
+    pub static COMMITS: AtomicU64 = AtomicU64::new(0);
+    pub static OOD: AtomicU64 = AtomicU64::new(0);
+    pub static QUERIES: AtomicU64 = AtomicU64::new(0);
+    pub static CONSTRAINTS: AtomicU64 = AtomicU64::new(0);
+    pub static FINAL: AtomicU64 = AtomicU64::new(0);
+    pub static OPENS: AtomicU64 = AtomicU64::new(0);
+
+    pub fn enabled() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var("ZIREN_WHIR_OPEN_TIMING").is_ok())
+    }
+
+    pub struct Timer(std::time::Instant, &'static AtomicU64);
+    impl Timer {
+        pub fn new(slot: &'static AtomicU64) -> Option<Self> {
+            enabled().then(|| Timer(std::time::Instant::now(), slot))
+        }
+    }
+    impl Drop for Timer {
+        fn drop(&mut self) {
+            self.1.fetch_add(self.0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+    }
+
+    pub fn tick_open() {
+        if !enabled() {
+            return;
+        }
+        let n = OPENS.fetch_add(1, Ordering::Relaxed) + 1;
+        if n % 32 == 0 {
+            let g = |a: &AtomicU64| a.load(Ordering::Relaxed) as f64 / 1e9;
+            eprintln!(
+                "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s",
+                g(&ENGINE), g(&FOLDS), g(&COMMITS), g(&OOD), g(&QUERIES), g(&CONSTRAINTS), g(&FINAL)
+            );
+        }
+    }
+}
+
 pub struct StackedWhirProver<F: p3_field::Field, EF, MT: Mmcs<F>, D> {
     pub mmcs: MT,
     pub dft: Arc<D>,
@@ -286,6 +331,11 @@ where
         let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
 
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
+            let _t_fold = open_timing::Timer::new(if r == 0 {
+                &open_timing::ENGINE
+            } else {
+                &open_timing::FOLDS
+            });
             let mut this_round_randomness = Vec::new();
             let polys = if r == 0 && engine.is_some() {
                 // First fold batch on the engine: SAME transcript as
@@ -332,6 +382,8 @@ where
                 break;
             }
 
+            drop(_t_fold);
+            let _t_commit = open_timing::Timer::new(&open_timing::COMMITS);
             // Commit the folded polynomial (single EF poly, interleaved).
             // Leaf width follows the NEXT round's folding factor - that
             // round's stir fold consumes one leaf per query.
@@ -353,6 +405,8 @@ where
             challenger.observe(commitment.clone());
             round_commitments.push(commitment);
 
+            drop(_t_commit);
+            let _t_ood = open_timing::Timer::new(&open_timing::OOD);
             // Fresh OOD on the folded polynomial.
             let folded = Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1));
             let mut ood_points = Vec::with_capacity(round_cfg.ood_samples);
@@ -366,6 +420,8 @@ where
             }
             round_ood_answers.push(ood_answers.clone());
 
+            drop(_t_ood);
+            let _t_q = open_timing::Timer::new(&open_timing::QUERIES);
             // Query PoW + indices into the PREVIOUS codeword.
             folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
             let mask = (1usize << prev_domain_log) - 1;
@@ -447,6 +503,8 @@ where
             }
             round_query_openings.push(MerkleOpening { leaves: leaves_open });
 
+            drop(_t_q);
+            let _t_c = open_timing::Timer::new(&open_timing::CONSTRAINTS);
             let round_batch: EF = challenger.sample_algebra_element();
             folder.add_ood_constraints(&ood_points, &ood_answers, round_batch);
             let start_coeff = round_batch.exp_u64((ood_points.len() + 1) as u64);
@@ -456,6 +514,7 @@ where
             prev_single = Some(this_data);
         }
 
+        let _t_final = open_timing::Timer::new(&open_timing::FINAL);
         // Final queries against the last committed codeword (or, when no round
         // ever commits, the stripe trees).
         let final_poly = folder.f_vec.clone();
@@ -495,6 +554,10 @@ where
         let final_sumcheck_polys: Vec<SumcheckPoly<EF>> =
             round_sumcheck_polys.pop().unwrap_or_default();
 
+        {
+            drop(_t_final);
+            open_timing::tick_open();
+        }
         StackedWhirProof {
             whir_proof: WhirProof {
                 round_sumcheck_polys,
