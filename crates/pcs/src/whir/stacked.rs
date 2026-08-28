@@ -397,7 +397,7 @@ where
             let base_vals: Vec<F> = ef_mat
                 .values
                 .iter()
-                .flat_map(|e| e.as_basis_coefficients_slice().to_vec())
+                .flat_map(|e| e.as_basis_coefficients_slice().iter().copied())
                 .collect();
             let leaves = RowMajorMatrix::new(base_vals, width * EF::DIMENSION);
             let this_domain_log = (rem - next_ff) + round_cfg.log_inv_rate;

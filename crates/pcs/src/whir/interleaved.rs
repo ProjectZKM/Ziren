@@ -113,7 +113,7 @@ where
     let base: Vec<F> = ef_mat
         .values
         .iter()
-        .flat_map(|e| e.as_basis_coefficients_slice().to_vec())
+        .flat_map(|e| e.as_basis_coefficients_slice().iter().copied())
         .collect();
     RowMajorMatrix::new(base, width * EF::DIMENSION)
 }
