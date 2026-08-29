@@ -1167,22 +1167,54 @@ where
         // the previous felt whenever
         // the handles match; the step-7 consistency check reads the value, and
         // an aliased felt carries the same one.
+        // The distinct chains are emitted in PARALLEL, then replayed onto the
+        // columns.  This is the largest base-ALU region in the recursion tree
+        // -- 40.0M of `jagged_eval_sumcheck`'s 96.8M instructions, per the
+        // region census -- and it was walked strictly serially while the
+        // prover was using ~8 of the box's 124 cores.  Each chain reads one
+        // witnessed bit vector and nothing else, so they commute.
+        //
+        // The consecutive-alias dedup is PRESERVED, and it has to be decided
+        // first because it determines which chains exist at all: phase A walks
+        // the columns host-side (no builder, so it emits nothing) to collect
+        // the distinct bit vectors and each column's slot, phase B emits only
+        // those chains, phase C replays the slots.  Same ops, same aliasing,
+        // same values.
+        //
+        // CHUNKED rather than one block per column: `ir_par_map_collect`
+        // allocates a `DslIrBlock` per item, so a per-column block count is a
+        // memory hazard on a padded bundle (it aborted a build at 6.8 GB).
+        // Capping the block count keeps it bounded at any column count.
         let two_felt: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
-        let mut prev: Option<(&Vec<Felt<C::F>>, Felt<C::F>)> = None;
+        let mut slot_of: Vec<usize> = Vec::with_capacity(meta.col_prefix_sums.len());
+        let mut distinct: Vec<&Vec<Felt<C::F>>> = Vec::new();
         for (_curr_ps, next_ps) in pairs {
-            if let Some((prev_bits, prev_acc)) = prev {
-                if prev_bits == next_ps {
-                    prefix_sum_felts.push(prev_acc);
-                    continue;
-                }
+            match distinct.last() {
+                Some(prev_bits) if *prev_bits == next_ps => {}
+                _ => distinct.push(next_ps),
             }
-            let mut ps_acc: Felt<C::F> = builder.constant(C::F::ZERO);
-            for bit in next_ps.iter() {
-                ps_acc = builder.eval(*bit + two_felt * ps_acc);
-            }
-            prefix_sum_felts.push(ps_acc);
-            prev = Some((next_ps, ps_acc));
+            slot_of.push(distinct.len() - 1);
         }
+        const PAR_BLOCKS: usize = 64;
+        let group_len = distinct.len().div_ceil(PAR_BLOCKS).max(1);
+        let accs: Vec<Felt<C::F>> = distinct
+            .chunks(group_len)
+            .ir_par_map_collect::<Vec<_>, _, _>(builder, |b, group| {
+                group
+                    .iter()
+                    .map(|bits| {
+                        let mut ps_acc: Felt<C::F> = b.constant(C::F::ZERO);
+                        for bit in bits.iter() {
+                            ps_acc = b.eval(*bit + two_felt * ps_acc);
+                        }
+                        ps_acc
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .into_iter()
+            .flatten()
+            .collect();
+        prefix_sum_felts.extend(slot_of.iter().map(|&s| accs[s]));
 
 
         // Pass 2 — jagged-eval sum over the REAL columns only.  The host prover
