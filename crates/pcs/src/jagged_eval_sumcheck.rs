@@ -94,6 +94,22 @@ pub struct JaggedEvalSetup<'a> {
 pub trait JaggedEvalRoundEngine {
     /// `(y_0, y_{1/2})` for the current internal round (round counter starts 0).
     fn compute_round_evals(&mut self) -> (InnerChallenge, InnerChallenge);
+
+    /// Device-resident Fiat-Shamir fast path: run EVERY round on the
+    /// engine's device — round polys, transcript observes/samples, and
+    /// folds — and return `(coeffs flat 3n, alphas in round order)`.
+    /// The caller REPLAYS the observes/samples into its own challenger
+    /// and asserts the sampled alphas match, so the transcript stays
+    /// host-derived and a diverging engine asserts instead of emitting a
+    /// wrong proof.  Declining (`None`, the default) keeps the per-round
+    /// host loop.
+    fn run_all_rounds_fs(
+        &mut self,
+        _claimed_sum: InnerChallenge,
+        _sponge: &DuplexSnapshot,
+    ) -> Option<(Vec<InnerChallenge>, Vec<InnerChallenge>)> {
+        None
+    }
     /// Fold the running EQ product against `alpha`; advance to the next round.
     fn fold(&mut self, alpha: InnerChallenge);
     /// The closed-form `claimed_sum` this sumcheck reduces to, computed by the
@@ -103,6 +119,16 @@ pub trait JaggedEvalRoundEngine {
     fn claimed_sum(&mut self) -> Option<InnerChallenge> {
         None
     }
+}
+
+/// Host snapshot of the duplex challenger at sumcheck entry, handed to a
+/// device engine that runs the whole transcript on the GPU (the fields
+/// mirror `p3_challenger::DuplexChallenger`; KoalaBear values upload as
+/// their raw Monty words).
+pub struct DuplexSnapshot {
+    pub state: [InnerVal; 16],
+    pub input: Vec<InnerVal>,
+    pub output: Vec<InnerVal>,
 }
 
 type JaggedEvalEngineFactory =
@@ -634,7 +660,7 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
 /// values on any mismatch (the `..._VERIFY` sub-gate).  Because field arithmetic
 /// is exact, a correct engine yields a BYTE-IDENTICAL transcript + proof.
 #[allow(clippy::too_many_arguments)]
-fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger<InnerVal>>(
+fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger<InnerVal> + 'static>(
     engine: &mut dyn JaggedEvalRoundEngine,
     z_row: &[InnerChallenge],
     z_trace: &[InnerChallenge],
@@ -660,6 +686,50 @@ fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger
     } else {
         None
     };
+
+    // Device-resident Fiat-Shamir fast path (concrete challenger only, and
+    // never in verify mode — the shadow prover needs the per-round loop).
+    // The snapshot is taken AFTER the claimed-sum observe in the caller, so
+    // the device sponge starts at exactly this transcript position.
+    if !verify {
+        if let Some(dc) = (challenger as &mut dyn core::any::Any)
+            .downcast_mut::<InnerChallenger>()
+        {
+            let snap = DuplexSnapshot {
+                state: dc.sponge_state,
+                input: dc.input_buffer.clone(),
+                output: dc.output_buffer.clone(),
+            };
+            if let Some((coeffs, alphas)) = engine.run_all_rounds_fs(claimed_sum, &snap) {
+                assert_eq!(coeffs.len(), 3 * n, "device-FS coeff count");
+                assert_eq!(alphas.len(), n, "device-FS alpha count");
+                let mut univariate_polys = Vec::with_capacity(n);
+                let mut current_claim = claimed_sum;
+                let mut rhos_out: Vec<InnerChallenge> = Vec::with_capacity(n);
+                for round in 0..n {
+                    let poly = UnivariatePolynomial::new(
+                        coeffs[3 * round..3 * round + 3].to_vec(),
+                    );
+                    for &c in &poly.coefficients {
+                        dc.observe_algebra_element(c);
+                    }
+                    let alpha: InnerChallenge = dc.sample_algebra_element();
+                    assert_eq!(
+                        alpha, alphas[round],
+                        "device-FS transcript divergence at round {round}"
+                    );
+                    current_claim = poly.eval_at_point(alpha);
+                    univariate_polys.push(poly);
+                    rhos_out.insert(0, alpha);
+                }
+                return PartialSumcheckProof {
+                    univariate_polys,
+                    claimed_sum,
+                    point_and_eval: (rhos_out, current_claim),
+                };
+            }
+        }
+    }
 
     let mut univariate_polys = Vec::with_capacity(n);
     let mut current_claim = claimed_sum;
@@ -711,7 +781,7 @@ fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger
 
 #[allow(clippy::too_many_arguments)]
 // Generic over the challenger (FieldChallenger only) so the BN254 wrap reuses it.
-pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
+pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal> + 'static>(
     prefix_sums: &[usize],
     z_row: &[InnerChallenge],
     z_col: &[InnerChallenge],
