@@ -1240,13 +1240,13 @@ where
         // `eq_factors` divided every per-bit factor by `2p-1`; the product of
         // those divisors is shared by every column, so it comes out of the
         // whole SUM and is applied once, below.
+        // The per-column eq-factor consumption check, hoisted out: it reads
+        // only lengths, so it needs no builder and no emitted op.
         let mut eq_consumed: Option<usize> = None;
         for k in 0..real_num_cols {
-            let curr = &cps[k + 1];
-            let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
-            let mut merged: Vec<Felt<C::F>> = curr.clone();
-            merged.extend_from_slice(next);
-            let consumed = merged.len().min(eq_factors.len());
+            let merged_len = cps[k + 1].len()
+                + if k + 1 < real_num_cols { cps[k + 2].len() } else { last_cps.len() };
+            let consumed = merged_len.min(eq_factors.len());
             match eq_consumed {
                 None => eq_consumed = Some(consumed),
                 Some(prev) => assert_eq!(
@@ -1254,18 +1254,53 @@ where
                     "jagged eval: column {k} consumes {consumed} eq factors, not {prev}"
                 ),
             }
-            // Lagrange ONLY.  `emit_prefix_sum_check` also Horner-recomposes the
-            // merged bits into a felt, but pass 1 above already produced every
-            // prefix-sum felt the caller needs, so asking for it here emitted
-            // instructions per column that nothing ever read -- 96,918 base-ALU
-            // rows per compose child, measured -- and the DSL builder is
-            // imperative, with no dead-code pass to remove them.
-            let full_lagrange =
-                crate::jagged_eval_primitives::emit_prefix_sum_lagrange_pre::<C>(
-                    &merged,
-                    &eq_factors,
-                );
-            expected_eval = expected_eval + (z_col_lagrange[k] * full_lagrange);
+        }
+
+        // CHUNKED PARALLEL partial sums.
+        //
+        // `emit_prefix_sum_lagrange_pre` is SYMBOLIC -- it takes no builder and
+        // emits nothing -- so the whole column sum used to flatten in the ONE
+        // `builder.eval(expected_eval)` that closes this function, emitting all
+        // ~56.7M of the region's ext-ALU ops in a single serial run while the
+        // prover held ~8 of the box's 124 cores.  Materializing a partial sum
+        // per chunk moves that flattening INSIDE the parallel blocks.  Summing
+        // the partials afterwards is exact -- field addition is associative --
+        // so `expected_eval` is value-identical, and it is only ever compared
+        // for equality against the sumcheck claim.
+        //
+        // Chunk count capped for the same reason as pass 1: one block per
+        // column would allocate a `DslIrBlock` per column.
+        const PAR_BLOCKS_PASS2: usize = 64;
+        let group_len_p2 = real_num_cols.div_ceil(PAR_BLOCKS_PASS2).max(1);
+        let all_k: Vec<usize> = (0..real_num_cols).collect();
+        let partials: Vec<Ext<C::F, C::EF>> = all_k
+            .chunks(group_len_p2)
+            .ir_par_map_collect::<Vec<_>, _, _>(builder, |b, group| {
+                let mut acc: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
+                for &k in group {
+                    let curr = &cps[k + 1];
+                    let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
+                    let mut merged: Vec<Felt<C::F>> = curr.clone();
+                    merged.extend_from_slice(next);
+                    // Lagrange ONLY.  `emit_prefix_sum_check` also
+                    // Horner-recomposes the merged bits into a felt, but pass 1
+                    // above already produced every prefix-sum felt the caller
+                    // needs, so asking for it here emitted instructions per
+                    // column that nothing ever read -- 96,918 base-ALU rows per
+                    // compose child, measured -- and the DSL builder is
+                    // imperative, with no dead-code pass to remove them.
+                    let full_lagrange =
+                        crate::jagged_eval_primitives::emit_prefix_sum_lagrange_pre::<C>(
+                            &merged,
+                            &eq_factors,
+                        );
+                    acc = acc + (z_col_lagrange[k] * full_lagrange);
+                }
+                let partial: Ext<C::F, C::EF> = b.eval(acc);
+                partial
+            });
+        for partial in partials {
+            expected_eval = expected_eval + partial;
         }
         if let Some(n) = eq_consumed {
             expected_eval = expected_eval * eq_factors.scale_for_len(n);
