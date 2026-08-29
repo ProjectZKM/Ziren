@@ -158,6 +158,12 @@ mod open_timing {
     pub static FOPEN: AtomicU64 = AtomicU64::new(0);
     pub static CENGINE: AtomicU64 = AtomicU64::new(0);
     pub static CHOST: AtomicU64 = AtomicU64::new(0);
+    // The PROLOGUE — everything before the round loop, previously untimed.
+    // The seven umbrellas above summed to 18.0 s against a census-measured
+    // 28.4 s of host time in `basefold_open`, so the largest single slice of
+    // the open was the part no timer covered.
+    pub static PEVALS: AtomicU64 = AtomicU64::new(0);
+    pub static PINIT: AtomicU64 = AtomicU64::new(0);
     pub static OPENS: AtomicU64 = AtomicU64::new(0);
 
     pub fn enabled() -> bool {
@@ -189,6 +195,10 @@ mod open_timing {
                 g(&ENGINE), g(&FOLDS), g(&COMMITS), g(&OOD), g(&QUERIES), g(&CONSTRAINTS), g(&FINAL),
                 g(&GRINDQ), g(&QR0), g(&QLATER), g(&FGRIND), g(&FOPEN),
                 g(&CENGINE), g(&CHOST)
+            );
+            eprintln!(
+                "#WHIR-OPEN-TIMING n={n} pevals={:.2}s pinit={:.2}s",
+                g(&PEVALS), g(&PINIT)
             );
         }
     }
@@ -282,6 +292,7 @@ where
         debug_assert_eq!(stack_point.len(), lsh);
 
         // Per-round per-stripe claims at the stack point (echoed in the proof).
+        let _t_pevals = open_timing::Timer::new(&open_timing::PEVALS);
         let batch_evaluations: Vec<Vec<EF>> = if let Some(e) = engine.as_deref_mut() {
             e.stripe_evals(&stack_point)
         } else {
@@ -299,6 +310,8 @@ where
         // λ batches all stripes of all rounds into one virtual polynomial.
         // The claim is the same λ-combination of the echoed evaluations; the
         // materialized `virt` vector is host-mode only (the engine holds it).
+        drop(_t_pevals);
+        let _t_pinit = open_timing::Timer::new(&open_timing::PINIT);
         let lambda: EF = challenger.sample_algebra_element();
         let mut claim = EF::ZERO;
         let mut lam = EF::ONE;
@@ -390,6 +403,7 @@ where
         let mut round_query_openings: Vec<MerkleOpening<F, MT>> = Vec::new();
         let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
 
+        drop(_t_pinit);
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
             let _t_fold = open_timing::Timer::new(if r == 0 {
                 &open_timing::ENGINE
