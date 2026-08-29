@@ -1316,6 +1316,34 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
         Self { vks_and_proofs, vk_merkle_data, is_complete: false }
     }
 
+    /// One line naming every component [`Self::shape_key`] hashes.
+    ///
+    /// Diagnostic only (call sites gate on `ZIREN_SHAPE_KEY_DIAG`).  The
+    /// compose pre-warm builds a key per (band, arity) yet real nodes still
+    /// miss, and the hash alone cannot say which component diverged.
+    pub fn shape_diag(&self) -> String {
+        let mut s = format!("arity={}", self.vks_and_proofs.len());
+        for (i, (_vk, sp)) in self.vks_and_proofs.iter().enumerate() {
+            for (name, v) in
+                crate::machine::shape_signature::describe_shard_proof_structure(sp)
+            {
+                s.push_str(&format!(" c{i}.{name}={v}"));
+            }
+        }
+        s.push_str(&format!(
+            " merkle_proofs={} paths={:?} values={} complete={}",
+            self.vk_merkle_data.vk_merkle_proofs.len(),
+            self.vk_merkle_data
+                .vk_merkle_proofs
+                .iter()
+                .map(|p| p.path.len())
+                .collect::<Vec<_>>(),
+            self.vk_merkle_data.values.len(),
+            self.is_complete,
+        ));
+        s
+    }
+
     /// Structural signature of the witness layout — the compose program
     /// cache key.
     ///

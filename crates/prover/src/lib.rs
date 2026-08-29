@@ -378,6 +378,14 @@ pub struct RecursionProgramCache {
     order: std::collections::VecDeque<u64>,
     pub hits: u64,
     pub misses: u64,
+    /// Builds thrown away because another thread finished the SAME shape first.
+    ///
+    /// `cached_program` releases the cache lock before calling `build()`, so
+    /// concurrent nodes of one shape each construct a full program and all but
+    /// one discard it in [`Self::insert`].  That is pure waste, and its size
+    /// decides whether a single-flight gate is worth the nested-blocking risk
+    /// of holding a lock across the build — so count it before building one.
+    pub dup_builds: u64,
 }
 
 impl RecursionProgramCache {
@@ -445,6 +453,7 @@ impl RecursionProgramCache {
         program: Arc<RecursionProgram<KoalaBear>>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         if let Some((v, d)) = self.entries.get(&key) {
+            self.dup_builds += 1;
             return (Arc::clone(v), *d);
         }
         // The program is already shape-fixed here (the uncached builder runs
@@ -650,6 +659,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 self.compress_prover.machine(),
                 &shape,
             );
+            if std::env::var("ZIREN_SHAPE_KEY_DIAG").is_ok() {
+                eprintln!(
+                    "SHAPEDIAG prewarm band={band_index} arity={arity} key={:016x} {}",
+                    witness.shape_key(),
+                    witness.shape_diag()
+                );
+            }
             let per_pair_start = std::time::Instant::now();
             // Retained by `compose_programs_basefold_cache` under this
             // witness's shape key; a real node of the same shape then hits.
@@ -1169,6 +1185,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
     }
 
+    /// `(normalize_dup_builds, compose_dup_builds)` — see
+    /// [`RecursionProgramCache::dup_builds`].
+    pub fn recursion_program_dup_builds(&self) -> (u64, u64) {
+        let n = self.normalize_programs_basefold_cache.lock().unwrap();
+        let c = self.compose_programs_basefold_cache.lock().unwrap();
+        (n.dup_builds, c.dup_builds)
+    }
+
     pub fn recursion_program_cache_counts(&self) -> (u64, u64, u64, u64) {
         let n = self.normalize_programs_basefold_cache.lock().unwrap();
         let c = self.compose_programs_basefold_cache.lock().unwrap();
@@ -1197,6 +1221,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
         band: Option<usize>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
+        if std::env::var("ZIREN_SHAPE_KEY_DIAG").is_ok() {
+            eprintln!(
+                "SHAPEDIAG runtime band={band:?} key={:016x} {}",
+                Self::band_keyed(input.shape_key(), band),
+                input.shape_diag()
+            );
+        }
         self.cached_program(
             &self.compose_programs_basefold_cache,
             Self::band_keyed(input.shape_key(), band),
