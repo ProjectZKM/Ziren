@@ -231,8 +231,15 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     /// original cells byte-for-byte).
     pub fn preprocessed_mles(&self) -> &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>] {
         self.preprocessed_mles.get_or_init(|| {
+            // PARALLEL over chips: each entry deep-copies one preprocessed
+            // trace (`from_row_major` takes ownership, so the clone is
+            // unavoidable while the key also keeps `traces`), and the walk is
+            // pure per-chip memory traffic with no shared state.  Serially
+            // this was the largest un-attributed block of `setup` on a
+            // pk-cache miss — ~5 s across a combined reth's 67 misses.
+            use p3_maybe_rayon::prelude::*;
             self.traces
-                .iter()
+                .par_iter()
                 .map(|t| std::sync::Arc::new(crate::basefold::Mle::from_row_major(t.clone())))
                 .collect()
         })
