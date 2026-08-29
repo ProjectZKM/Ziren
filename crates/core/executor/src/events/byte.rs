@@ -9,6 +9,17 @@ use crate::{ByteOpcode, Opcode};
 /// The number of different byte operations.
 pub const NUM_BYTE_OPS: usize = 10;
 
+/// Multiplicity map for byte lookups, on a trivial (Fx) hasher.
+///
+/// The key is 6 bytes and the map takes millions of inserts per shard;
+/// SipHash on it measured ~5% of prove-path host cycles (perf, combined
+/// reth).  Iteration order is unspecified under EITHER hasher (std's
+/// RandomState already randomizes per process), so no consumer may depend
+/// on it — the byte-table tracegen scatters multiplicities into fixed rows
+/// and every merge is a commutative add.
+pub type ByteLookupMap =
+    std::collections::HashMap<ByteLookupEvent, usize, rustc_hash::FxBuildHasher>;
+
 /// Byte Lookup Event.
 ///
 /// This object encapsulates the information needed to prove a byte lookup operation. This includes
@@ -35,7 +46,7 @@ pub trait ByteRecord {
     /// Adds a list of sharded [`ByteLookupEvent`]s to the record.
     fn add_byte_lookup_events_from_maps(
         &mut self,
-        new_blu_events_vec: Vec<&HashMap<ByteLookupEvent, usize>>,
+        new_blu_events_vec: Vec<&crate::events::ByteLookupMap>,
     );
 
     /// Adds a list of `ByteLookupEvent`s to the record.
@@ -143,7 +154,7 @@ impl ByteRecord for Vec<ByteLookupEvent> {
 
     fn add_byte_lookup_events_from_maps(
         &mut self,
-        new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
+        new_events: Vec<&crate::events::ByteLookupMap>,
     ) {
         for new_blu_map in new_events {
             for (blu_event, count) in new_blu_map.iter() {
@@ -153,7 +164,7 @@ impl ByteRecord for Vec<ByteLookupEvent> {
     }
 }
 
-impl ByteRecord for HashMap<ByteLookupEvent, usize> {
+impl ByteRecord for crate::events::ByteLookupMap {
     #[inline]
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
         self.entry(blu_event).and_modify(|e| *e += 1).or_insert(1);
@@ -161,7 +172,7 @@ impl ByteRecord for HashMap<ByteLookupEvent, usize> {
 
     fn add_byte_lookup_events_from_maps(
         &mut self,
-        new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
+        new_events: Vec<&crate::events::ByteLookupMap>,
     ) {
         for new_blu_map in new_events {
             for (blu_event, count) in new_blu_map.iter() {

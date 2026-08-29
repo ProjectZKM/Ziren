@@ -7812,6 +7812,7 @@ dependencies = [
  "p3-symmetric",
  "rand 0.8.5",
  "rayon-scan",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "sha2",

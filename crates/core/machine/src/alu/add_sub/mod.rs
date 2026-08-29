@@ -145,7 +145,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
             .chunks(chunk_size)
             .par_bridge()
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                     let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();

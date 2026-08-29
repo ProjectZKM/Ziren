@@ -163,7 +163,7 @@ impl<F: PrimeField32> MachineAir<F> for LtImmChip {
             .lt_imm_events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_LT_IMM_COLS];
                     let cols: &mut LtImmCols<F> = row.as_mut_slice().borrow_mut();

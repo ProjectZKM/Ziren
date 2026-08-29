@@ -10,6 +10,7 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
+rustc-hash = { workspace = true }
 zkm-primitives = { workspace = true }
 zkm-curves = { workspace = true }
 zkm-pcs = { workspace = true }

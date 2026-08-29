@@ -158,7 +158,7 @@ impl<F: PrimeField32> MachineAir<F> for LoadWordChip {
             &input.memory_load_word_events,
             padded_nb_rows,
             NUM_LOAD_WORD_COLS,
-            |event, row, blu: &mut HashMap<ByteLookupEvent, usize>| {
+            |event, row, blu: &mut zkm_core_executor::events::ByteLookupMap| {
                 let cols: &mut LoadWordColumns<F> = row.borrow_mut();
                 self.event_to_row(event, cols, blu, &input.program);
             },

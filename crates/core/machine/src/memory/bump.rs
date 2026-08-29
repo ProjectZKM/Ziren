@@ -113,7 +113,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryBumpChip {
             .bump_memory_events
             .chunks(1)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 for event in events {
                     bump_row_blu_events(event, &mut blu);
                     // The shadow read's own timestamp comparison limbs.

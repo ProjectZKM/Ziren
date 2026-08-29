@@ -148,7 +148,7 @@ pub struct ExecutionRecord {
     /// A trace of the misc events.
     pub misc_events: Vec<MiscEvent>,
     /// A trace of the byte lookups that are needed.
-    pub byte_lookups: HashMap<ByteLookupEvent, usize>,
+    pub byte_lookups: crate::events::ByteLookupMap,
     /// A trace of the precompile events.
     pub precompile_events: PrecompileEvents,
     // /// A trace of the global memory initialize events.
@@ -693,7 +693,7 @@ impl ByteRecord for ExecutionRecord {
     #[inline]
     fn add_byte_lookup_events_from_maps(
         &mut self,
-        new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
+        new_events: Vec<&crate::events::ByteLookupMap>,
     ) {
         for new_blu_map in new_events {
             for (blu_event, count) in new_blu_map.iter() {

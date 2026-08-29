@@ -59,7 +59,7 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
             .enumerate()
             .par_bridge()
             .map(|(i, rows)| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 rows.chunks_mut(NUM_MISC_INSTR_COLS).enumerate().for_each(|(j, row)| {
                     let idx = i * chunk_size + j;
                     let cols: &mut MiscInstrColumns<F> = row.borrow_mut();
