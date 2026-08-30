@@ -553,56 +553,39 @@ where
             } else {
                 &open_timing::QLATER
             });
+            // PHASE 1 -- fetch each query's leaf openings, IN ORDER.  The
+            // engine serves them from a queue and the host path walks Merkle
+            // trees, so this half is inherently sequential.  It is also the
+            // cheap half: the cost of `qr0` is the combine below.
+            let stripes_mode = matches!(prev_single, PrevTree::Stripes);
+            let mut per_query: Vec<Vec<LeafOpening<F, MT>>> =
+                Vec::with_capacity(indices.len());
             for &idx in &indices {
-                let (virt_leaf, opened) = match &prev_single {
+                let opened: Vec<LeafOpening<F, MT>> = match &prev_single {
                     PrevTree::Stripes => {
-                        // Round 0: open every stripe row of every round tree
-                        // and λ-combine.  With an engine the openings come off
-                        // the device-resident trees; the λ-combination is the
-                        // same host arithmetic either way.
-                        let opened: Vec<LeafOpening<F, MT>> =
-                            if let Some(batch) = engine_batch.as_mut() {
-                                batch.pop_front().expect("one batch entry per query index")
-                            } else {
-                                let mut all = Vec::with_capacity(prover_data.len());
-                                for d in prover_data.iter() {
-                                    let opening = self.mmcs.open_batch(idx, &d.prover_data);
-                                    all.push(LeafOpening {
-                                        values: opening.opened_values,
-                                        proof: opening.opening_proof,
-                                    });
-                                }
-                                all
-                            };
-                        let mut virt_leaf =
-                            alloc::vec![EF::ZERO; 1usize << round_cfg.folding_factor];
-                        let mut lam = EF::ONE;
-                        for leaf in &opened {
-                            for stripe_row in &leaf.values {
-                                for (v, &st) in virt_leaf.iter_mut().zip(stripe_row.iter()) {
-                                    *v += lam * st;
-                                }
-                                lam *= lambda;
+                        // Round 0: open every stripe row of every round tree.
+                        // With an engine the openings come off the
+                        // device-resident trees.
+                        if let Some(batch) = engine_batch.as_mut() {
+                            batch.pop_front().expect("one batch entry per query index")
+                        } else {
+                            let mut all = Vec::with_capacity(prover_data.len());
+                            for d in prover_data.iter() {
+                                let opening = self.mmcs.open_batch(idx, &d.prover_data);
+                                all.push(LeafOpening {
+                                    values: opening.opened_values,
+                                    proof: opening.opening_proof,
+                                });
                             }
+                            all
                         }
-                        (virt_leaf, opened)
                     }
                     PrevTree::Host(data) => {
                         let opening = self.mmcs.open_batch(idx, data);
-                        let leaf = &opening.opened_values[0];
-                        let virt_leaf: Vec<EF> = leaf
-                            .chunks_exact(EF::DIMENSION)
-                            .map(|c| {
-                                EF::from_basis_coefficients_iter(c.iter().copied()).unwrap()
-                            })
-                            .collect();
-                        (
-                            virt_leaf,
-                            alloc::vec![LeafOpening {
-                                values: opening.opened_values,
-                                proof: opening.opening_proof,
-                            }],
-                        )
+                        alloc::vec![LeafOpening {
+                            values: opening.opened_values,
+                            proof: opening.opening_proof,
+                        }]
                     }
                     PrevTree::Engine => {
                         let opening = engine_folded_batch
@@ -610,21 +593,59 @@ where
                             .expect("PrevTree::Engine requires the batched openings")
                             .pop_front()
                             .expect("one batch entry per query index");
-                        let leaf = &opening.values[0];
-                        let virt_leaf: Vec<EF> = leaf
-                            .chunks_exact(EF::DIMENSION)
-                            .map(|c| {
-                                EF::from_basis_coefficients_iter(c.iter().copied()).unwrap()
-                            })
-                            .collect();
-                        (virt_leaf, alloc::vec![opening])
+                        alloc::vec![opening]
                     }
                 };
-                let stir = Mle::from_row_major(RowMajorMatrix::new(virt_leaf, 1))
-                    .eval_at::<EF>(&this_round_randomness)[0];
+                per_query.push(opened);
+            }
+
+            // PHASE 2 -- the lambda-combine and the MLE evaluation are pure
+            // field arithmetic over one query's leaves: independent across
+            // queries and touching no `Mmcs`.  Borrowing only `values` keeps
+            // `MT::Proof` out of the parallel walk, so no `Sync` bound has to
+            // be added to the signature.
+            let stir_values_new: Vec<EF> = {
+                use p3_maybe_rayon::prelude::*;
+                let value_views: Vec<Vec<&Vec<Vec<F>>>> = per_query
+                    .iter()
+                    .map(|leaves| leaves.iter().map(|l| &l.values).collect())
+                    .collect();
+                let ff_len = 1usize << round_cfg.folding_factor;
+                value_views
+                    .par_iter()
+                    .map(|leaves| {
+                        let virt_leaf: Vec<EF> = if stripes_mode {
+                            let mut acc = alloc::vec![EF::ZERO; ff_len];
+                            let mut lam = EF::ONE;
+                            for values in leaves.iter() {
+                                for stripe_row in values.iter() {
+                                    for (v, &st) in acc.iter_mut().zip(stripe_row.iter()) {
+                                        *v += lam * st;
+                                    }
+                                    lam *= lambda;
+                                }
+                            }
+                            acc
+                        } else {
+                            leaves[0][0]
+                                .chunks_exact(EF::DIMENSION)
+                                .map(|c| {
+                                    EF::from_basis_coefficients_iter(c.iter().copied()).unwrap()
+                                })
+                                .collect()
+                        };
+                        Mle::from_row_major(RowMajorMatrix::new(virt_leaf, 1))
+                            .eval_at::<EF>(&this_round_randomness)[0]
+                    })
+                    .collect()
+            };
+
+            for (&idx, stir) in indices.iter().zip(stir_values_new) {
                 stir_values.push(stir);
                 stir_points.push(map_to_pow_lsb(EF::from(g_prev.exp_u64(idx as u64)), rem));
-                for o in opened {
+            }
+            for leaves in per_query {
+                for o in leaves {
                     leaves_open.push(o);
                 }
             }
