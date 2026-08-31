@@ -57,12 +57,20 @@ pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) -> Result<(), E
     } else if fd == FD_PUBLIC_VALUES {
         rt.state.public_values_stream.extend_from_slice(slice);
     } else if fd == FD_HINT {
-        rt.state.input_stream.push(slice.to_vec());
+        // On a replay seeded with the recorded stream this entry is already
+        // there; pushing it again would double it and desync the cursor.
+        if !rt.hint_stream_prerecorded {
+            rt.state.input_stream.push(slice.to_vec());
+        }
     } else if let Some(mut hook) = rt.hook_registry.get(fd) {
-        let res = hook.invoke_hook(rt.hook_env(), slice)?;
-        // Add result vectors to the beginning of the stream.
-        let ptr = rt.state.input_stream_ptr;
-        rt.state.input_stream.splice(ptr..ptr, res);
+        // Likewise for hook results — and re-invoking the hook would repeat
+        // its side effects once per parallel replay worker.
+        if !rt.hint_stream_prerecorded {
+            let res = hook.invoke_hook(rt.hook_env(), slice)?;
+            // Add result vectors to the beginning of the stream.
+            let ptr = rt.state.input_stream_ptr;
+            rt.state.input_stream.splice(ptr..ptr, res);
+        }
     } else {
         tracing::warn!("tried to write to unknown file descriptor {fd}");
     }

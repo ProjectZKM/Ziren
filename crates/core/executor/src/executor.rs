@@ -287,12 +287,33 @@ pub struct Executor<'a> {
     /// Default false; TracingVM workers set true.
     pub skip_replay_bookkeeping: bool,
 
+    /// The hint stream was RECORDED by a prior pass and pre-seeded, so the
+    /// syscalls that would produce it must not run again.
+    ///
+    /// `FD_HINT` pushes onto `state.input_stream` and a registered hook splices
+    /// its results in at the cursor (`syscalls::write::write_fd`).  On a replay
+    /// seeded with the finished stream those entries are already present, so
+    /// re-producing them would double every hint and shift the cursor -- and
+    /// would re-run each hook's side effects once per parallel worker.
+    ///
+    /// Default false; TracingVM workers set true when a stream is seeded.
+    pub hint_stream_prerecorded: bool,
+
     /// In-flight buffer for the current
     /// chunk's mem_reads oracle. Populated by `mr()` whenever the
     /// `minimal_trace_collector` is `Some`. Drained at `bump_record()`
     /// when the chunk closes — the accumulated entries become the
     /// previous chunk's `mem_reads` field (Arc<[MemValue]>).
     pub recording_chunk_mem_reads: Vec<crate::minimal_trace::MemValue>,
+
+    /// Replay source for user-memory accesses: the chunk's oracle as a CURSOR.
+    ///
+    /// When set, `mr` / `mw` take the next entry as the pre-access record and
+    /// never read a value out of `state.memory` -- the oracle IS the memory,
+    /// which is SP1's replay design (`vm.rs:604`).  Registers are excluded (the
+    /// producer records only `addr >= NUM_REGISTERS`); they come from the
+    /// chunk's `start_register_records`.
+    pub replay_mem: Option<crate::minimal_trace::ReplayMem>,
 
     /// Producer: when set, the JIT fast-path
     /// (`try_run_fast_jit`) captures a whole-program
@@ -550,7 +571,9 @@ impl<'a> Executor<'a> {
             lde_size_threshold: 0,
             minimal_trace_collector: None,
             skip_replay_bookkeeping: false,
+            hint_stream_prerecorded: false,
             recording_chunk_mem_reads: Vec::new(),
+            replay_mem: None,
             d4_capture_chunk: false,
             d4_captured_chunk: None,
         }
@@ -694,6 +717,10 @@ impl<'a> Executor<'a> {
         timestamp: u32,
         local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
+        // SP1 parity: under replay the oracle IS the memory.  Popped BEFORE
+        // `page_table.entry(addr)` takes `&mut self.state.memory` — the borrow
+        // checker will not allow the call afterwards.
+        let replay_prev = self.take_replay_mem(addr);
         // Get the memory record entry.
         let entry = self.state.memory.page_table.entry(addr);
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
@@ -745,7 +772,16 @@ impl<'a> Executor<'a> {
             self.split_acct.add_touched_address();
         }
 
-        let prev_record = *record;
+        // Replaying: the popped entry is the pre-access state, and it also
+        // corrects `record` so this access's own read value comes from the
+        // oracle rather than from whatever the (unseeded) page table held.
+        let prev_record = match replay_prev {
+            Some(mv) => {
+                *record = mv;
+                mv
+            }
+            None => *record,
+        };
         record.shard = shard;
         record.timestamp = timestamp;
 
@@ -766,10 +802,14 @@ impl<'a> Executor<'a> {
         // (>= NUM_REGISTERS). Register reads are reproducible from the
         // chunk's start_registers; recording them would double the
         // oracle size for no benefit.
-        if self.minimal_trace_collector.is_some()
-            && !self.unconstrained
-            && addr >= NUM_REGISTERS as u32
-        {
+        // NOT `&& !self.unconstrained`: an address first touched inside an
+        // unconstrained (hint) block is otherwise absent from the oracle, and
+        // the Stage-2 replay -- whose `uninitialized_memory` is empty -- then
+        // reads 0 for it and computes the hint on zeros.  Recording it is safe
+        // because the consumer keeps the FIRST entry per address and this is
+        // the PRE-access record, which unconstrained writes (rolled back via
+        // `unconstrained_state.memory_diff`) cannot yet have altered.
+        if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
                 clk: self.state.global_clk,
                 addr,
@@ -977,6 +1017,10 @@ impl<'a> Executor<'a> {
         timestamp: u32,
         local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
+        // SP1 parity: under replay the oracle IS the memory.  Popped BEFORE
+        // `page_table.entry(addr)` takes `&mut self.state.memory` — the borrow
+        // checker will not allow the call afterwards.
+        let replay_prev = self.take_replay_mem(addr);
         // Get the memory record entry.
         let entry = self.state.memory.page_table.entry(addr);
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
@@ -1029,7 +1073,16 @@ impl<'a> Executor<'a> {
             self.split_acct.add_touched_address();
         }
 
-        let prev_record = *record;
+        // Replaying: the popped entry is the pre-access state, and it also
+        // corrects `record` so this access's own read value comes from the
+        // oracle rather than from whatever the (unseeded) page table held.
+        let prev_record = match replay_prev {
+            Some(mv) => {
+                *record = mv;
+                mv
+            }
+            None => *record,
+        };
         record.value = value;
         record.shard = shard;
         record.timestamp = timestamp;
@@ -1049,10 +1102,14 @@ impl<'a> Executor<'a> {
         // Option B: record the previous value for the
         // oracle (writes need this so the worker sees the same
         // prev_value when constructing its MemoryWriteRecord).
-        if self.minimal_trace_collector.is_some()
-            && !self.unconstrained
-            && addr >= NUM_REGISTERS as u32
-        {
+        // NOT `&& !self.unconstrained`: an address first touched inside an
+        // unconstrained (hint) block is otherwise absent from the oracle, and
+        // the Stage-2 replay -- whose `uninitialized_memory` is empty -- then
+        // reads 0 for it and computes the hint on zeros.  Recording it is safe
+        // because the consumer keeps the FIRST entry per address and this is
+        // the PRE-access record, which unconstrained writes (rolled back via
+        // `unconstrained_state.memory_diff`) cannot yet have altered.
+        if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
                 clk: self.state.global_clk,
                 addr,
@@ -1160,10 +1217,14 @@ impl<'a> Executor<'a> {
         // Option B: record the previous value for the
         // oracle (writes need this so the worker sees the same
         // prev_value when constructing its MemoryWriteRecord).
-        if self.minimal_trace_collector.is_some()
-            && !self.unconstrained
-            && addr >= NUM_REGISTERS as u32
-        {
+        // NOT `&& !self.unconstrained`: an address first touched inside an
+        // unconstrained (hint) block is otherwise absent from the oracle, and
+        // the Stage-2 replay -- whose `uninitialized_memory` is empty -- then
+        // reads 0 for it and computes the hint on zeros.  Recording it is safe
+        // because the consumer keeps the FIRST entry per address and this is
+        // the PRE-access record, which unconstrained writes (rolled back via
+        // `unconstrained_state.memory_diff`) cannot yet have altered.
+        if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
                 clk: self.state.global_clk,
                 addr,
@@ -2791,6 +2852,40 @@ impl<'a> Executor<'a> {
         }
 
         Ok(done)
+    }
+
+    /// Serve one user-memory access from the replay cursor.
+    ///
+    /// `None` when not replaying, or for a register address.  Exhaustion means
+    /// the replay issued more accesses than the producer recorded -- a lockstep
+    /// break, reported once rather than silently degrading to a zero read.
+    #[inline]
+    fn take_replay_mem(&mut self, addr: u32) -> Option<MemoryRecord> {
+        if addr < NUM_REGISTERS as u32 {
+            return None;
+        }
+        let cursor = self.replay_mem.as_mut()?;
+        let Some(mv) = cursor.entries.get(cursor.pos).copied() else {
+            static ONCE: std::sync::Once = std::sync::Once::new();
+            let pos = cursor.pos;
+            let len = cursor.entries.len();
+            ONCE.call_once(|| {
+                tracing::error!(
+                    "replay memory oracle exhausted at access {pos} of {len} (addr {addr:#x}) \
+                     — the replay is not in lockstep with the producer",
+                );
+            });
+            return None;
+        };
+        cursor.pos += 1;
+        debug_assert_eq!(
+            mv.addr, addr,
+            "replay memory cursor desync at access {}: oracle says {:#x}, replay asked {:#x}",
+            cursor.pos - 1,
+            mv.addr,
+            addr,
+        );
+        Some(MemoryRecord { value: mv.value, shard: mv.shard, timestamp: mv.timestamp })
     }
 
     /// Bump the record.
