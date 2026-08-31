@@ -147,6 +147,21 @@ pub struct TraceChunk {
     pub mem_reads: Arc<[MemValue]>,
 }
 
+/// A chunk's `mem_reads` under replay: a cursor, not a lookup table.
+///
+/// The producer pushes one entry per user-memory access in issue order, so the
+/// Nth access of a deterministic replay consumes the Nth entry.  This is SP1's
+/// `MemReads` (`sp1-gpu/crates/cuda`/`core/jit/src/risc.rs:285`) in safe Rust --
+/// theirs is a raw pointer pair into an mmap; ours is a shared `Arc` slice,
+/// which is what matters here (no per-worker clone).
+#[derive(Debug, Clone)]
+pub struct ReplayMem {
+    /// The chunk's oracle, shared across replay workers.
+    pub entries: Arc<[MemValue]>,
+    /// How many accesses have been served.
+    pub pos: usize,
+}
+
 impl TraceChunk {
     /// Convenience constructor for tests.
     #[must_use]

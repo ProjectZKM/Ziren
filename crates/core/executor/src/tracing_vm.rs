@@ -40,7 +40,9 @@
 //! the API once the lifter lands.
 
 use crate::{
+    air::MaximalShapes,
     minimal_trace::{MinimalTrace, TraceChunk},
+    subproof::NoOpSubproofVerifier,
     ExecutionError, ExecutionRecord, ExecutionState, Executor, Program,
 };
 use std::sync::Arc;
@@ -62,13 +64,31 @@ pub struct TracingVM<'a> {
     /// `ExecutionRecord::new_preallocated` sized for the
     /// chunk's cycle count.
     pub record: &'a mut ExecutionRecord,
+    /// The producer's maximal shapes, mirrored onto every replay
+    /// sub-executor.  `trace_checkpoint` sets this from the shape config and
+    /// the executor consults it in `inc_shard_if_need`, so a replay without it
+    /// can pick a different shard boundary than the pass that emitted the
+    /// chunk.  `None` matches the production path, where the shape config is
+    /// itself `None`.
+    pub maximal_shapes: Option<MaximalShapes>,
 }
 
 impl<'a> TracingVM<'a> {
     /// Construct a new TracingVM bound to the given record.
     #[must_use]
     pub fn new(program: Arc<Program>, opts: ZKMCoreOpts, record: &'a mut ExecutionRecord) -> Self {
-        Self { program, opts, record }
+        Self { program, opts, record, maximal_shapes: None }
+    }
+
+    /// Same, with the producer's maximal shapes carried onto the replay.
+    #[must_use]
+    pub fn new_with_shapes(
+        program: Arc<Program>,
+        opts: ZKMCoreOpts,
+        record: &'a mut ExecutionRecord,
+        maximal_shapes: Option<MaximalShapes>,
+    ) -> Self {
+        Self { program, opts, record, maximal_shapes }
     }
 
     /// Re-execute the program from `chunk.pc_start` / `chunk.clk_start` up
@@ -140,7 +160,8 @@ impl<'a> TracingVM<'a> {
             }
         }
         // Seed the shared streams at the chunk-start cursor positions.
-        if !input_stream.is_empty() {
+        let stream_prerecorded = !input_stream.is_empty();
+        if stream_prerecorded {
             state.input_stream = input_stream.to_vec();
             state.input_stream_ptr = chunk.input_stream_ptr as usize;
         }
@@ -153,6 +174,12 @@ impl<'a> TracingVM<'a> {
         // Spawn the sub-Executor and let it walk the chunk.
         let program = (*self.program).clone();
         let mut sub = Executor::recover(program, state, self.opts);
+        // Mirror `trace_checkpoint`: the same shard-boundary inputs, and a
+        // no-op deferred-proof verifier because the checkpoint pass already
+        // verified them (re-verifying here would redo the work and warn).
+        sub.maximal_shapes = self.maximal_shapes.clone();
+        const NOOP: &NoOpSubproofVerifier = &NoOpSubproofVerifier;
+        sub.subproof_verifier = Some(NOOP);
 
         // Seed sub-Executor memory from the chunk's mem_reads oracle. Each
         // entry carries the FULL pre-access record (value+shard+timestamp)
@@ -161,14 +188,17 @@ impl<'a> TracingVM<'a> {
         // prev_shard/prev_timestamp byte-exactly. `or_insert` keeps
         // first-seen. For the terminal chunk, the full final memory is
         // also seeded below so postprocess can finalize every address.
+        // The oracle is a CURSOR, not a seed.  Seeding a page table kept only
+        // the FIRST entry per address, so any address whose value changed
+        // within the shard replayed against a stale one, and any address the
+        // producer reached by a path the seed did not cover (hint blocks, the
+        // uninitialized image) read as zero.  Consuming positionally removes
+        // both failure modes: the Nth access gets the Nth recorded record.
         if !chunk.mem_reads.is_empty() {
-            for mv in chunk.mem_reads.iter() {
-                sub.state.memory.page_table.entry(mv.addr).or_insert(MemoryRecord {
-                    value: mv.value,
-                    shard: mv.shard,
-                    timestamp: mv.timestamp,
-                });
-            }
+            sub.replay_mem = Some(crate::minimal_trace::ReplayMem {
+                entries: chunk.mem_reads.clone(),
+                pos: 0,
+            });
         }
 
         // bound this worker to chunk.clk_end. Without
@@ -187,6 +217,10 @@ impl<'a> TracingVM<'a> {
         // These are estimation/report counters, not trace events, so
         // they don't affect the reconstructed records' bytes.
         sub.skip_replay_bookkeeping = true;
+        // The seeded stream already contains every hint and hook result the
+        // producer generated, so the syscalls that would produce them must not
+        // run again — see `Executor::hint_stream_prerecorded`.
+        sub.hint_stream_prerecorded = stream_prerecorded;
         // The global memory init/finalize argument iterates EVERY touched
         // address at program halt — data the sparse per-shard oracle
         // can't supply. So we suppress the sub-executor's own
@@ -351,6 +385,23 @@ pub fn drive_tracing_vm_parallel_with_streams(
         zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
     )],
 ) -> Result<Vec<ExecutionRecord>, ExecutionError> {
+    drive_tracing_vm_parallel_with_shapes(program, opts, trace, input_stream, proof_stream, None)
+}
+
+/// As [`drive_tracing_vm_parallel_with_streams`], with the producer's maximal
+/// shapes carried onto every replay worker.
+#[allow(clippy::type_complexity)]
+pub fn drive_tracing_vm_parallel_with_shapes(
+    program: Arc<Program>,
+    opts: ZKMCoreOpts,
+    trace: &MinimalTrace,
+    input_stream: &[Vec<u8>],
+    proof_stream: &[(
+        crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+        zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+    )],
+    maximal_shapes: Option<MaximalShapes>,
+) -> Result<Vec<ExecutionRecord>, ExecutionError> {
     use p3_maybe_rayon::prelude::*;
 
     // Pre-allocate one record per chunk so the parallel section can
@@ -372,7 +423,12 @@ pub fn drive_tracing_vm_parallel_with_streams(
         .par_iter()
         .zip(records.par_iter_mut())
         .map(|(chunk, record)| {
-            let mut vm = TracingVM::new(program.clone(), opts, record);
+            let mut vm = TracingVM::new_with_shapes(
+                program.clone(),
+                opts,
+                record,
+                maximal_shapes.clone(),
+            );
             vm.execute_from_chunk_with_streams(chunk, input_stream, proof_stream)
         })
         .collect();
