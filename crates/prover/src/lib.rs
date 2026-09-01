@@ -14,6 +14,7 @@
 pub mod build;
 pub mod components;
 pub mod program_cache;
+pub mod compress_tree;
 pub mod shapes;
 pub mod types;
 pub mod utils;
@@ -1297,17 +1298,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// [`Self::shrink_program_basefold`] — do not edit without re-running
     /// the gnark ceremony.
     fn shrink_shape() -> RecursionShape {
+        // Row counts, not log2 heights — a `RecursionShape` pins rows exactly
+        // (`next_multiple_of_32_rows`). Spelled `1 << n` because that is what
+        // these were, and shrink is FROZEN: changing it re-runs the ceremony.
         [
-            ("BaseAlu", 18),
-            ("ExtAlu", 18),
-            ("MemoryConst", 19),
-            ("MemoryVar", 18),
-            ("Poseidon2WideDeg3", 18),
-            ("PublicValues", 4),
-            ("Select", 19),
+            ("BaseAlu", 1 << 18),
+            ("ExtAlu", 1 << 18),
+            ("MemoryConst", 1 << 19),
+            ("MemoryVar", 1 << 18),
+            ("Poseidon2WideDeg3", 1 << 18),
+            ("PublicValues", 1 << 4),
+            ("Select", 1 << 19),
         ]
         .into_iter()
-        .map(|(n, h)| (n.to_string(), h))
+        .map(|(n, rows)| (n.to_string(), rows))
         .collect::<std::collections::BTreeMap<_, _>>()
         .into()
     }
