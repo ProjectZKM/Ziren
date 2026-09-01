@@ -182,15 +182,19 @@ fn main() {
 
     let mut answer = candidate.clone();
 
-    // Chip-by-chip in the candidate, reduce the log-height corresponding to that chip until the
-    // shape is no longer big enough to support all the core shapes. Then, record the log height for
+    // Chip-by-chip in the candidate, halve the row count corresponding to that chip until the
+    // shape is no longer big enough to support all the core shapes. Then, record the row count for
     // that chip into answer.
+    //
+    // The map holds ROW COUNTS now, not log2 heights, so the old `-= 1` step
+    // (one log2 level) is a halving here — otherwise the search would walk one
+    // row at a time through a million of them.
     for (key, value) in candidate.iter() {
         if key != "PublicValues" {
             let mut done = false;
             let mut new_val = *value;
             while !done {
-                new_val -= 1;
+                new_val /= 2;
                 answer.insert(key.clone(), new_val);
                 prover.compress_shape_config = Some(RecursionShapeConfig::from_hash_map(&answer));
                 done = !check_shapes(
@@ -200,7 +204,7 @@ fn main() {
                     &prover,
                 );
             }
-            answer.insert(key.clone(), new_val + 1);
+            answer.insert(key.clone(), new_val * 2);
         }
     }
 
@@ -212,7 +216,7 @@ fn main() {
             let mut done = false;
             let mut new_val = *value;
             while !done {
-                new_val -= 1;
+                new_val /= 2;
                 no_precompile_answer.insert(key.clone(), new_val);
                 prover.compress_shape_config =
                     Some(RecursionShapeConfig::from_hash_map(&no_precompile_answer));
@@ -223,7 +227,7 @@ fn main() {
                     &prover,
                 );
             }
-            no_precompile_answer.insert(key.clone(), new_val + 1);
+            no_precompile_answer.insert(key.clone(), new_val * 2);
         }
     }
 
@@ -254,9 +258,9 @@ fn main() {
     for (key, value) in shrink_shape.clone().iter() {
         if key != "PublicValues" {
             let mut done = false;
-            let mut new_val = *value + 1;
+            let mut new_val = *value * 2;
             while !done {
-                new_val -= 1;
+                new_val /= 2;
                 shrink_shape.insert(key.clone(), new_val);
                 prover.compress_shape_config = Some(RecursionShapeConfig::from_hash_map(&answer));
                 done = catch_unwind(AssertUnwindSafe(|| {
@@ -272,7 +276,7 @@ fn main() {
                 }))
                 .is_err();
             }
-            shrink_shape.insert(key.clone(), new_val + 1);
+            shrink_shape.insert(key.clone(), new_val * 2);
         }
     }
 

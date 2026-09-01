@@ -4,7 +4,7 @@ use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
-use zkm_core_machine::utils::pad_rows_fixed;
+use zkm_core_machine::utils::pad_rows_exact;
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::MachineAir;
 
@@ -83,11 +83,11 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             })
             .collect::<Vec<_>>();
 
-        // Pad the rows to the next power of two.
-        pad_rows_fixed(
+        // Pad the rows out to the shape (or the next multiple of 32).
+        pad_rows_exact(
             &mut rows,
             || [F::ZERO; NUM_MEM_PREPROCESSED_INIT_COLS],
-            program.fixed_log2_rows(self),
+            program.fixed_rows(self),
             <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
         );
 
@@ -123,11 +123,11 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
         let mut rows =
             std::iter::repeat_n([F::ZERO; NUM_MEM_INIT_COLS], num_rows).collect::<Vec<_>>();
 
-        // Pad the rows to the next power of two.
-        pad_rows_fixed(
+        // Pad the rows out to the shape (or the next multiple of 32).
+        pad_rows_exact(
             &mut rows,
             || [F::ZERO; NUM_MEM_INIT_COLS],
-            input.fixed_log2_rows(self),
+            input.fixed_rows(self),
             <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
         );
 

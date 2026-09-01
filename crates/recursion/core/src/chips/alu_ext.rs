@@ -9,7 +9,7 @@ use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
-use zkm_core_machine::utils::next_power_of_two;
+use zkm_core_machine::utils::next_multiple_of_32_rows;
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::{ExtensionAirBuilder, MachineAir};
 
@@ -84,13 +84,11 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
         let nb_rows = instrs_len.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
-        let fixed_log2_rows = program.fixed_log2_rows(self);
-        Some(match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => {
-                next_power_of_two(nb_rows, None, <ExtAluChip as MachineAir<F>>::name(self).as_str())
-            }
-        })
+        Some(next_multiple_of_32_rows(
+            nb_rows,
+            program.fixed_rows(self),
+            <ExtAluChip as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]
@@ -193,13 +191,11 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.ext_alu_events;
         let nb_rows = events.len().div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
-        let fixed_log2_rows = input.fixed_log2_rows(self);
-        Some(match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => {
-                next_power_of_two(nb_rows, None, <ExtAluChip as MachineAir<F>>::name(self).as_str())
-            }
-        })
+        Some(next_multiple_of_32_rows(
+            nb_rows,
+            input.fixed_rows(self),
+            <ExtAluChip as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]

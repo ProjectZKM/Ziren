@@ -5,7 +5,7 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
-use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
+use zkm_core_machine::utils::{next_multiple_of_32_rows, pad_rows_exact};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::MachineAir;
 
@@ -90,14 +90,11 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .collect::<Vec<_>>();
 
         let nb_rows = accesses.len().div_ceil(NUM_VAR_MEM_ENTRIES_PER_ROW);
-        let padded_nb_rows = match program.fixed_log2_rows(self) {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(
-                nb_rows,
-                None,
-                <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
-            ),
-        };
+        let padded_nb_rows = next_multiple_of_32_rows(
+            nb_rows,
+            program.fixed_rows(self),
+            <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
+        );
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_MEM_PREPROCESSED_INIT_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
@@ -138,11 +135,11 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             })
             .collect::<Vec<_>>();
 
-        // Pad the rows to the next power of two.
-        pad_rows_fixed(
+        // Pad the rows out to the shape (or the next multiple of 32).
+        pad_rows_exact(
             &mut rows,
             || [F::ZERO; NUM_MEM_INIT_COLS],
-            input.fixed_log2_rows(self),
+            input.fixed_rows(self),
             <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
         );
 

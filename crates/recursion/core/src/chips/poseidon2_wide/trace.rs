@@ -10,7 +10,7 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use tracing::instrument;
-use zkm_core_machine::utils::next_power_of_two;
+use zkm_core_machine::utils::next_multiple_of_32_rows;
 
 use zkm_pcs::air::MachineAir;
 #[cfg(not(feature = "sys"))]
@@ -66,14 +66,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.poseidon2_events;
-        match input.fixed_log2_rows(self) {
-            Some(log2_rows) => Some(1 << log2_rows),
-            None => Some(next_power_of_two(
-                events.len(),
-                None,
-                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
-            )),
-        }
+        Some(next_multiple_of_32_rows(
+            events.len(),
+            input.fixed_rows(self),
+            <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]
@@ -179,14 +176,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
-        Some(match program.fixed_log2_rows(self) {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(
-                instrs_len,
-                None,
-                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
-            ),
-        })
+        Some(next_multiple_of_32_rows(
+            instrs_len,
+            program.fixed_rows(self),
+            <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]

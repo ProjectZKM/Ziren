@@ -94,9 +94,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     fn band_cells(shape: &HashMap<String, usize>, widths: &BTreeMap<String, usize>) -> u128 {
         shape
             .iter()
-            .map(|(name, log_height)| {
-                (widths.get(name).copied().unwrap_or(1) as u128) << *log_height
-            })
+            .map(|(name, rows)| (widths.get(name).copied().unwrap_or(1) as u128) * (*rows as u128))
             .sum()
     }
 
@@ -133,8 +131,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
 
         for (index, shape) in self.allowed_shapes.iter().enumerate() {
             // If any of the heights is greater than the shape, continue.
-            let fits =
-                heights.iter().all(|(name, height)| *height <= (1 << shape.get(name).unwrap()));
+            let fits = heights.iter().all(|(name, height)| *height <= *shape.get(name).unwrap());
             if !fits {
                 continue;
             }
@@ -153,7 +150,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
                     heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
                 organic.sort();
                 let mut band: Vec<(String, usize)> =
-                    shape.iter().map(|(n, h)| (n.clone(), 1usize << h)).collect();
+                    shape.iter().map(|(n, h)| (n.clone(), *h)).collect();
                 band.sort();
                 eprintln!(
                     "FIXSHAPE kind={kind} band_index={closest_index} cells={closest_cells} \
@@ -167,17 +164,26 @@ organic={organic:?} -> band={band:?}"
         }
     }
 
+    /// A shape's per-chip ROW counts as the log2 heights an [`OrderedShape`]
+    /// speaks.
+    ///
+    /// The enumeration and dummy-proof path (`OrderedShape`, and the
+    /// `(String, u8)` pairs `dummy/basefold_shard_proof.rs` takes) is still
+    /// written in log2 heights, so the row counts a shape now carries are
+    /// bridged here.  It is exact for the power-of-two shapes shipped today;
+    /// teaching that path exact rows is what a single tight shape needs, and is
+    /// the next step of the port.
+    pub fn as_log2_ordered_shape(shape: &HashMap<String, usize>) -> OrderedShape {
+        shape.iter().map(|(name, rows)| (name.clone(), rows.next_power_of_two().ilog2() as usize))
+            .collect()
+    }
+
     pub fn get_all_shape_combinations(
         &self,
         batch_size: usize,
     ) -> impl Iterator<Item = Vec<OrderedShape>> + '_ {
         (0..batch_size)
-            .map(|_| {
-                self.allowed_shapes
-                    .iter()
-                    .cloned()
-                    .map(|map| map.into_iter().collect::<OrderedShape>())
-            })
+            .map(|_| self.allowed_shapes.iter().map(Self::as_log2_ordered_shape))
             .multi_cartesian_product()
     }
 
@@ -189,8 +195,10 @@ organic={organic:?} -> band={band:?}"
                 map.insert(key.clone(), *current.max(shape.get(key).unwrap()));
             }
         }
-        map.values_mut().for_each(|x| *x += 2);
-        map.insert("PublicValues".to_string(), 4);
+        // "Extra room" on a ROW count is multiplicative, not `+= 2`: the map
+        // used to hold log2 heights, where `+= 2` meant 4x.  Keep that headroom.
+        map.values_mut().for_each(|x| *x = (*x * 4).next_multiple_of(32));
+        map.insert("PublicValues".to_string(), 1 << PUB_VALUES_LOG_HEIGHT);
         Self { allowed_shapes: vec![map], _marker: PhantomData }
     }
 
@@ -214,9 +222,8 @@ organic={organic:?} -> band={band:?}"
         let widths = Self::committed_widths();
         let mut best: Option<(usize, u128)> = None;
         for (index, shape) in self.allowed_shapes.iter().enumerate() {
-            let fits = heights
-                .iter()
-                .all(|(name, height)| *height <= (1 << shape.get(name).copied().unwrap_or(0)));
+            let fits =
+                heights.iter().all(|(name, height)| *height <= shape.get(name).copied().unwrap_or(0));
             if !fits {
                 continue;
             }
@@ -241,9 +248,9 @@ organic={organic:?} -> band={band:?}"
         let widths = Self::committed_widths();
         let mut required: HashMap<String, usize> = HashMap::new();
         for i in indices {
-            for (name, log_height) in self.allowed_shapes.get(*i)?.iter() {
+            for (name, rows) in self.allowed_shapes.get(*i)?.iter() {
                 let slot = required.entry(name.clone()).or_insert(0);
-                *slot = (*slot).max(*log_height);
+                *slot = (*slot).max(*rows);
             }
         }
         let mut best: Option<(usize, u128)> = None;
@@ -273,8 +280,8 @@ organic={organic:?} -> band={band:?}"
         for (name, height) in heights.iter() {
             let cap = shape.get(name).copied().unwrap_or(0);
             assert!(
-                *height <= (1 << cap),
-                "recursion band {index} caps {name} at 2^{cap} but the program needs {height}",
+                *height <= cap,
+                "recursion band {index} caps {name} at {cap} rows but the program needs {height}",
             );
         }
         // Same diagnostic as `fix_shape_kind` — a forced snap was previously
@@ -287,7 +294,7 @@ organic={organic:?} -> band={band:?}"
                 heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
             organic.sort();
             let mut band: Vec<(String, usize)> =
-                shape.iter().map(|(n, h)| (n.clone(), 1usize << h)).collect();
+                shape.iter().map(|(n, h)| (n.clone(), *h)).collect();
             band.sort();
             eprintln!(
                 "FIXSHAPE kind=forced band_index={index} cells={cells} \
@@ -322,6 +329,15 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let ext2felt = RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()).name();
 
         // Specify allowed shapes.
+        //
+        // ⚠ These are ROW COUNTS, not log2 heights — the `1 << n` spellings keep
+        // the retune history below readable, but a chip is now padded to exactly
+        // the number written here (`next_multiple_of_32_rows`).  Powers of two
+        // are what the bands happened to be; nothing requires it any more, which
+        // is the whole point: a single shape tight enough for every program is
+        // what makes a compose program a function of its ARITY alone (SP1's
+        // `Compose(arity)`), and that is what lets adjacent ranges merge at any
+        // depth instead of behind a per-layer barrier.
         //
         // ORDER IS COSMETIC.  `fix_shape` scores every band a program fits and
         // keeps the cheapest by committed cells, so a band never has to be
@@ -375,14 +391,14 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // compose programs prefer this smaller cap and pay less
             // padding.
             [
-                (mem_var.clone(), 18),
-                (select.clone(), 19),
-                (mem_const.clone(), 12),
-                (base_alu.clone(), 18),
-                (ext_alu.clone(), 18),
-                (poseidon2_wide.clone(), 17),
-                (ext2felt.clone(), 16),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+                (mem_var.clone(), 1 << 18),
+                (select.clone(), 1 << 19),
+                (mem_const.clone(), 1 << 12),
+                (base_alu.clone(), 1 << 18),
+                (ext_alu.clone(), 1 << 18),
+                (poseidon2_wide.clone(), 1 << 17),
+                (ext2felt.clone(), 1 << 16),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ],
             // The band above with one more bit on the ALU / MemoryVar
             // dimensions.  At the area-fenced shard sizes (`ELEMENT_THRESHOLD`
@@ -394,14 +410,14 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // (maxima ~116K) - at 362 cells/row that one cap is most of any
             // band's area.
             [
-                (mem_var.clone(), 19),
-                (select.clone(), 19),
-                (mem_const.clone(), 12),
-                (base_alu.clone(), 19),
-                (ext_alu.clone(), 19),
-                (poseidon2_wide.clone(), 17),
-                (ext2felt.clone(), 16),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+                (mem_var.clone(), 1 << 19),
+                (select.clone(), 1 << 19),
+                (mem_const.clone(), 1 << 12),
+                (base_alu.clone(), 1 << 19),
+                (ext_alu.clone(), 1 << 19),
+                (poseidon2_wide.clone(), 1 << 17),
+                (ext2felt.clone(), 1 << 16),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ],
             // SELECT-HEAVY deep compose band (tendermint + goat).  The 100-bit
             // BaseFold params (inner blowup 1->2, 94->124 queries, +1 Merkle
@@ -419,14 +435,14 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // ALU-heavy reth ladder below: here it is the TALLEST chip, there
             // it sits at 2^19 while the ALUs run to 2^22.
             [
-                (mem_var.clone(), 20),
-                (select.clone(), 21),
-                (mem_const.clone(), 12),
-                (base_alu.clone(), 20),
-                (ext_alu.clone(), 19),
-                (poseidon2_wide.clone(), 18),
-                (ext2felt.clone(), 17),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+                (mem_var.clone(), 1 << 20),
+                (select.clone(), 1 << 21),
+                (mem_const.clone(), 1 << 12),
+                (base_alu.clone(), 1 << 20),
+                (ext_alu.clone(), 1 << 19),
+                (poseidon2_wide.clone(), 1 << 18),
+                (ext2felt.clone(), 1 << 17),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ],
             // ── ALU-HEAVY COMPOSE LADDER (reth) ────────────────────────────
             //
@@ -458,34 +474,34 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // `fix_shape`, so a level takes one of these only when it is
             // genuinely cheaper than the Select-heavy profiles.
             [
-                (mem_var.clone(), 20),
-                (select.clone(), 20),
-                (mem_const.clone(), 12),
-                (base_alu.clone(), 19),
-                (ext_alu.clone(), 19),
-                (poseidon2_wide.clone(), 17),
-                (ext2felt.clone(), 16),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+                (mem_var.clone(), 1 << 20),
+                (select.clone(), 1 << 20),
+                (mem_const.clone(), 1 << 12),
+                (base_alu.clone(), 1 << 19),
+                (ext_alu.clone(), 1 << 19),
+                (poseidon2_wide.clone(), 1 << 17),
+                (ext2felt.clone(), 1 << 16),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ],
             [
-                (mem_var.clone(), 20),
-                (select.clone(), 20),
-                (mem_const.clone(), 12),
-                (base_alu.clone(), 20),
-                (ext_alu.clone(), 20),
-                (poseidon2_wide.clone(), 17),
-                (ext2felt.clone(), 17),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+                (mem_var.clone(), 1 << 20),
+                (select.clone(), 1 << 20),
+                (mem_const.clone(), 1 << 12),
+                (base_alu.clone(), 1 << 20),
+                (ext_alu.clone(), 1 << 20),
+                (poseidon2_wide.clone(), 1 << 17),
+                (ext2felt.clone(), 1 << 17),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ],
             [
-                (mem_var.clone(), 20),
-                (select.clone(), 20),
-                (mem_const.clone(), 12),
-                (base_alu.clone(), 21),
-                (ext_alu.clone(), 21),
-                (poseidon2_wide.clone(), 18),
-                (ext2felt.clone(), 17),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+                (mem_var.clone(), 1 << 20),
+                (select.clone(), 1 << 20),
+                (mem_const.clone(), 1 << 12),
+                (base_alu.clone(), 1 << 21),
+                (ext_alu.clone(), 1 << 21),
+                (poseidon2_wide.clone(), 1 << 18),
+                (ext2felt.clone(), 1 << 17),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ],
             // CAPPED AT THE ROW CUBE.  Every recursion stage proves at a
             // FIXED `max_log_row_count` (22 — `ZKMProver::pcs_max_log_row_count`),
@@ -499,14 +515,14 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // was pinned; a program whose ORGANIC height really exceeded the
             // cube could not be proven at all, so nothing is lost by capping.
             [
-                (mem_var.clone(), 22),
-                (select.clone(), 21),
-                (mem_const.clone(), 22),
-                (base_alu.clone(), 22),
-                (ext_alu.clone(), 22),
-                (poseidon2_wide.clone(), 20),
-                (ext2felt.clone(), 17),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+                (mem_var.clone(), 1 << 22),
+                (select.clone(), 1 << 21),
+                (mem_const.clone(), 1 << 22),
+                (base_alu.clone(), 1 << 22),
+                (ext_alu.clone(), 1 << 22),
+                (poseidon2_wide.clone(), 1 << 20),
+                (ext2felt.clone(), 1 << 17),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ],
         ]
         .map(HashMap::from)
@@ -530,24 +546,24 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // bit never lands on one.
         let mut allowed_shapes = allowed_shapes;
         allowed_shapes.push(HashMap::from([
-            (mem_var.clone(), 20),
-            (select.clone(), 20),
-            (mem_const.clone(), 12),
-            (base_alu.clone(), 19),
-            (ext_alu.clone(), 19),
-            (poseidon2_wide.clone(), 18),
-            (ext2felt.clone(), 16),
-            (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            (mem_var.clone(), 1 << 20),
+            (select.clone(), 1 << 20),
+            (mem_const.clone(), 1 << 12),
+            (base_alu.clone(), 1 << 19),
+            (ext_alu.clone(), 1 << 19),
+            (poseidon2_wide.clone(), 1 << 18),
+            (ext2felt.clone(), 1 << 16),
+            (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
         ]));
         allowed_shapes.push(HashMap::from([
-            (mem_var.clone(), 20),
-            (select.clone(), 20),
-            (mem_const.clone(), 12),
-            (base_alu.clone(), 20),
-            (ext_alu.clone(), 20),
-            (poseidon2_wide.clone(), 18),
-            (ext2felt.clone(), 17),
-            (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            (mem_var.clone(), 1 << 20),
+            (select.clone(), 1 << 20),
+            (mem_const.clone(), 1 << 12),
+            (base_alu.clone(), 1 << 20),
+            (ext_alu.clone(), 1 << 20),
+            (poseidon2_wide.clone(), 1 << 18),
+            (ext2felt.clone(), 1 << 17),
+            (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
         ]));
         // No band may exceed the row cube every recursion stage proves at:
         // `PaddedMle::padded` asserts the padded rows fit `2^cube`, so a taller
@@ -555,10 +571,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let cube = zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
             .max_log_row_count;
         for shape in allowed_shapes.iter() {
-            for (name, log_height) in shape.iter() {
+            for (name, rows) in shape.iter() {
                 assert!(
-                    *log_height <= cube,
-                    "recursion band {name} = 2^{log_height} exceeds the row cube 2^{cube}",
+                    *rows <= (1 << cube),
+                    "recursion band {name} = {rows} rows exceeds the row cube 2^{cube}",
                 );
             }
         }

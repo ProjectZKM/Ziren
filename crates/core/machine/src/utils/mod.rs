@@ -135,6 +135,55 @@ pub fn next_multiple_of_32(n: usize, fixed_power: Option<usize>, chip: &str) -> 
     }
 }
 
+/// Padded height for a chip whose shape pins an EXACT row count rather than a
+/// log2 one: the next multiple of 32 that is `>= n` and `>= 32`, or the pinned
+/// count itself when the shape supplies one.
+///
+/// This is the recursion side of [`next_multiple_of_32`].  A recursion shape
+/// used to carry per-chip LOG heights, so a shaped chip padded to `1 << log`
+/// and a single shape covering every program would have charged up to 2x on
+/// every chip.  Pinning the row count directly is what lets ONE shape be tight
+/// enough for all of them, which in turn is what makes a compose program a
+/// function of its arity alone.
+///
+/// Panics if the pinned count cannot hold `n` — a shape that does not fit is a
+/// programming error, not something to silently grow past.
+///
+/// The UNSHAPED branch still rounds to a power of two, unlike the core-side
+/// [`next_multiple_of_32`]. That is measured, not conservative: the recursion
+/// prove path calls `log2_strict_usize` on trace heights
+/// (`recursion/circuit/src/merkle_tree.rs:49`, `pcs/src/basefold/fri.rs:192`),
+/// and padding an unshaped recursion trace to a multiple of 32 fails four
+/// `zkm-recursion-core` unit tests with "Not a power of two"
+/// (`alu_base::four_ops`, `alu_ext::four_ops`, `select::prove_select`,
+/// `machine::field_norm`). Production recursion is always shaped, so the
+/// exact-row branch is the one the port needs; freeing the unshaped branch
+/// means clearing those call sites first.
+pub fn next_multiple_of_32_rows(n: usize, fixed_rows: Option<usize>, chip: &str) -> usize {
+    match fixed_rows {
+        Some(rows) => {
+            assert!(
+                n <= rows,
+                "chip {chip}: shape pins {rows} rows but the trace needs {n}",
+            );
+            rows
+        }
+        None => next_power_of_two(n, None, chip),
+    }
+}
+
+/// [`pad_rows_fixed`] with [`next_multiple_of_32_rows`] padding.
+pub fn pad_rows_exact<R: Clone>(
+    rows: &mut Vec<R>,
+    row_fn: impl Fn() -> R,
+    fixed_rows: Option<usize>,
+    chip: &str,
+) {
+    let nb_rows = rows.len();
+    let dummy_row = row_fn();
+    rows.resize(next_multiple_of_32_rows(nb_rows, fixed_rows, chip), dummy_row);
+}
+
 /// [`pad_rows_fixed`] with [`next_multiple_of_32`] padding.
 pub fn pad_rows_mult32<R: Clone>(
     rows: &mut Vec<R>,

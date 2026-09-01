@@ -6,7 +6,7 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use std::borrow::BorrowMut;
-use zkm_core_machine::utils::next_power_of_two;
+use zkm_core_machine::utils::next_multiple_of_32_rows;
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::MachineAir;
 
@@ -56,15 +56,11 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
-        let fixed_log2_rows = program.fixed_log2_rows(self);
-        Some(match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(
-                instrs_len,
-                None,
-                <SelectChip as MachineAir<F>>::name(self).as_str(),
-            ),
-        })
+        Some(next_multiple_of_32_rows(
+            instrs_len,
+            program.fixed_rows(self),
+            <SelectChip as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]
@@ -151,9 +147,9 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.select_events;
-        Some(next_power_of_two(
+        Some(next_multiple_of_32_rows(
             events.len(),
-            input.fixed_log2_rows(self),
+            input.fixed_rows(self),
             <SelectChip as MachineAir<F>>::name(self).as_str(),
         ))
     }

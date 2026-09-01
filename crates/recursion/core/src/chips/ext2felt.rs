@@ -5,7 +5,7 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use std::{borrow::BorrowMut, marker::PhantomData};
-use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
+use zkm_core_machine::utils::{next_multiple_of_32_rows, pad_rows_exact};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::MachineAir;
 
@@ -96,14 +96,11 @@ impl<F: PrimeField32> MachineAir<F> for Ext2FeltChip<F> {
             .collect::<Vec<_>>();
 
         let nb_rows = instrs.len();
-        let padded_nb_rows = match program.fixed_log2_rows(self) {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(
-                nb_rows,
-                None,
-                <Ext2FeltChip<F> as MachineAir<F>>::name(self).as_str(),
-            ),
-        };
+        let padded_nb_rows = next_multiple_of_32_rows(
+            nb_rows,
+            program.fixed_rows(self),
+            <Ext2FeltChip<F> as MachineAir<F>>::name(self).as_str(),
+        );
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT2FELT_PREPROCESSED_COLS];
 
         let populate_len = instrs.len() * NUM_EXT2FELT_PREPROCESSED_COLS;
@@ -149,10 +146,10 @@ impl<F: PrimeField32> MachineAir<F> for Ext2FeltChip<F> {
             })
             .collect::<Vec<_>>();
 
-        pad_rows_fixed(
+        pad_rows_exact(
             &mut rows,
             || [F::ZERO; NUM_EXT2FELT_COLS],
-            input.fixed_log2_rows(self),
+            input.fixed_rows(self),
             <Ext2FeltChip<F> as MachineAir<F>>::name(self).as_str(),
         );
 

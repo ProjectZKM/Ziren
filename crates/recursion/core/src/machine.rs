@@ -158,19 +158,22 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
     }
 
     pub fn shrink_shape() -> RecursionShape {
+        // Row counts, not log2 heights — a recursion shape pins rows exactly
+        // (`next_multiple_of_32_rows`).  Written as `1 << n` because that is
+        // what these were, and shrink is FROZEN: nothing re-tunes it.
         let shape: std::collections::BTreeMap<String, usize> = [
-            (Self::MemoryVar(MemoryVarChip::default()), 18),
-            (Self::Select(SelectChip), 18),
-            (Self::MemoryConst(MemoryConstChip::default()), 17),
+            (Self::MemoryVar(MemoryVarChip::default()), 1 << 18),
+            (Self::Select(SelectChip), 1 << 18),
+            (Self::MemoryConst(MemoryConstChip::default()), 1 << 17),
             // BatchFRI / ExpReverseBitsLen are no longer in the BaseFold
             // compress/shrink *machine* (see `compress_machine`), but their
-            (Self::BaseAlu(BaseAluChip), 17),
-            (Self::ExtAlu(ExtAluChip), 15),
-            (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 16),
-            (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
+            (Self::BaseAlu(BaseAluChip), 1 << 17),
+            (Self::ExtAlu(ExtAluChip), 1 << 15),
+            (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 1 << 16),
+            (Self::PublicValues(PublicValuesChip), 1 << PUB_VALUES_LOG_HEIGHT),
         ]
         .into_iter()
-        .map(|(chip, log_height)| (chip.name(), log_height))
+        .map(|(chip, rows)| (chip.name(), rows))
         .collect();
         RecursionShape { inner: shape }
     }

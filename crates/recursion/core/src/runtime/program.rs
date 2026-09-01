@@ -166,8 +166,11 @@ impl<F: Field> MachineProgram<F> for RecursionProgram<F> {
 }
 
 impl<F: Field> RecursionProgram<F> {
+    /// The EXACT row count this program's shape pins for `air`, if it has a
+    /// shape.  A recursion shape carries row counts, not log2 heights — see
+    /// [`zkm_core_machine::utils::next_multiple_of_32_rows`].
     #[inline]
-    pub fn fixed_log2_rows<A: MachineAir<F>>(&self, air: &A) -> Option<usize> {
+    pub fn fixed_rows<A: MachineAir<F>>(&self, air: &A) -> Option<usize> {
         self.shape
             .as_ref()
             .map(|shape| {

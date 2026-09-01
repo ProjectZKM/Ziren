@@ -642,8 +642,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .collect();
         let n_pairs = pairs.len();
         pairs.into_par_iter().for_each(|(band_index, arity)| {
-            let proof_shape: OrderedShape =
-                bands[band_index].iter().map(|(k, v)| (k.clone(), *v)).collect();
+            let proof_shape =
+                RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_log2_ordered_shape(
+                    &bands[band_index],
+                );
             let compress_shape = ZKMCompressShape::from(vec![proof_shape; arity]);
             let shape = ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height };
             let witness = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy(
@@ -1276,8 +1278,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         for (name, height) in ShrinkAir::<KoalaBear>::heights(&program) {
             match caps.get(&name) {
                 Some(cap) => assert!(
-                    height <= (1 << cap),
-                    "shrink program needs {name} height {height}, frozen cap is 2^{cap} — \
+                    height <= *cap,
+                    "shrink program needs {name} height {height}, frozen cap is {cap} rows — \
                      the frozen shrink shape no longer fits; changing it re-runs the ceremony",
                 ),
                 None => assert!(
@@ -4168,8 +4170,8 @@ pub mod tests {
             .iter()
             .map(|c| {
                 let name = <_ as MachineAir<KoalaBear>>::name(c);
-                let log_h = band.get(&name).copied().unwrap_or(0);
-                c.preprocessed_width() * (1usize << log_h)
+                let rows = band.get(&name).copied().unwrap_or(0);
+                c.preprocessed_width() * rows
             })
             .sum();
         let dummy_area = zkm_pcs::jagged::committed_dense_len(
