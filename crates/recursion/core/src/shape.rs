@@ -379,192 +379,61 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // padding economics change.  The SHRINK shape is unaffected: it is
         // FROZEN in `zkm_prover::ZKMProver::shrink_shape`, decoupled from
         // these tables.
-        let allowed_shapes = [
-            // Bundle-lift compose level h=0. Tendermint bundle-lift's
-            // first compose level (lift outputs → arity-4 compose)
-            // panics shape.rs:91 with chip heights none of the above
-            // shapes fit. Observed:
-            //   MemoryConst≈149290 (log≈18), Select≈157920 (log≈18),
-            //   BaseAlu≈91431 (log≈17), ExtAlu≈93619 (log≈17).
-            // Caps with 1-bit headroom on binding dimensions for reth/
-            // geth headroom. Placed before the larger cap below so h=0
-            // compose programs prefer this smaller cap and pay less
-            // padding.
-            [
-                (mem_var.clone(), 1 << 18),
-                (select.clone(), 1 << 19),
-                (mem_const.clone(), 1 << 12),
-                (base_alu.clone(), 1 << 18),
-                (ext_alu.clone(), 1 << 18),
-                (poseidon2_wide.clone(), 1 << 17),
-                (ext2felt.clone(), 1 << 16),
-                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-            ],
-            // The band above with one more bit on the ALU / MemoryVar
-            // dimensions.  At the area-fenced shard sizes (`ELEMENT_THRESHOLD`
-            // 460M, Aug26) the taller core shards push 17 of 49 leaf classes
-            // and 10 compose levels JUST past the 2^18 ALU caps (measured
-            // maxima: BaseAlu 294,560, ExtAlu 306,344, MemoryVar 341,011 -
-            // 447,323), and the next band that fit cost 118.1M committed
-            // cells against this rung's 95.5M.  Poseidon2 stays at 2^17
-            // (maxima ~116K) - at 362 cells/row that one cap is most of any
-            // band's area.
-            [
-                (mem_var.clone(), 1 << 19),
-                (select.clone(), 1 << 19),
-                (mem_const.clone(), 1 << 12),
-                (base_alu.clone(), 1 << 19),
-                (ext_alu.clone(), 1 << 19),
-                (poseidon2_wide.clone(), 1 << 17),
-                (ext2felt.clone(), 1 << 16),
-                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-            ],
-            // SELECT-HEAVY deep compose band (tendermint + goat).  The 100-bit
-            // BaseFold params (inner blowup 1->2, 94->124 queries, +1 Merkle
-            // level) grew the compose-tree verify circuit past the
-            // component-opening band, and every compose level converges to the
-            // same maxima for both programs (47-shard TM and 10-shard goat
-            // produce identical compose vectors once inputs are fixed-shape).
-            // Measured maxima over tendermint's whole compose tree
-            // (`ZIREN_FIXSHAPE_DIAG=1`): Select 1,182,816 (2^21),
-            // MemoryVar 778,723 (2^20), BaseAlu 521,377 (2^20),
-            // ExtAlu 448,221 (2^19), MemoryConst 275,464 (2^19),
-            // Poseidon2WideDeg3 172,988 (2^18).  Caps sit exactly one power of
-            // two above each, so the deepest level pads ~1.9x instead of ~8x.
-            // Select is the dimension that separates this profile from the
-            // ALU-heavy reth ladder below: here it is the TALLEST chip, there
-            // it sits at 2^19 while the ALUs run to 2^22.
-            [
-                (mem_var.clone(), 1 << 20),
-                (select.clone(), 1 << 21),
-                (mem_const.clone(), 1 << 12),
-                (base_alu.clone(), 1 << 20),
-                (ext_alu.clone(), 1 << 19),
-                (poseidon2_wide.clone(), 1 << 18),
-                (ext2felt.clone(), 1 << 17),
-                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-            ],
-            // ── ALU-HEAVY COMPOSE LADDER (reth) ────────────────────────────
-            //
-            // reth's compose tree has a profile none of the bands above fit
-            // without gross over-pad: BaseAlu/ExtAlu climb from 2^19 to 2^22
-            // while Select stays pinned at 295,616 rows (2^19) and
-            // Poseidon2WideDeg3 never passes 94,556 (2^17).  The bands above
-            // are all Select-heavy — the cheapest of them that fits a level
-            // whose ExtAlu is 2^21 is the uniform 2^21 band, which pads Select
-            // 7.1x and MemoryConst 5.9x, and one level whose ExtAlu overshot
-            // 2^21 by 0.5% had nothing left but the row cube and padded 2.2x
-            // overall.  Committed area is what every device buffer is sized
-            // from, so that over-pad WAS the compress-stage VRAM ceiling: the
-            // jagged sumcheck's two fold tables are `2^log_dense` EF4 each, and
-            // at the cube band a single one asked for 8576 MiB.
-            //
-            // Measured organic heights, one rung per level family
-            // (`ZIREN_FIXSHAPE_DIAG=1` over a 275-shard reth core proof):
-            //   BaseAlu   414,870 / 499,692 /   986,148 / 1,691,933
-            //   ExtAlu    384,077 / 598,386 /   963,739 / 2,106,820
-            //   MemoryVar 275,575 / 294,148 /   420,213 /   674,004
-            //   MemConst  107,246 / 120,672 /   205,098 /   354,448
-            //   Poseidon2  50,464 /  54,182 /    67,531 /    94,556
-            //   Select    295,616 (every level)
-            // The rungs cap MemoryConst/MemoryVar/Select generously — they are
-            // 13, 12 and 13 cells per row, so a spare bit costs almost nothing
-            // — and Poseidon2WideDeg3/ExtAlu tightly, at 362 and 88 cells per
-            // row.  Each rung is scored against every other band by
-            // `fix_shape`, so a level takes one of these only when it is
-            // genuinely cheaper than the Select-heavy profiles.
-            [
-                (mem_var.clone(), 1 << 20),
-                (select.clone(), 1 << 20),
-                (mem_const.clone(), 1 << 12),
-                (base_alu.clone(), 1 << 19),
-                (ext_alu.clone(), 1 << 19),
-                (poseidon2_wide.clone(), 1 << 17),
-                (ext2felt.clone(), 1 << 16),
-                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (mem_var.clone(), 1 << 20),
-                (select.clone(), 1 << 20),
-                (mem_const.clone(), 1 << 12),
-                (base_alu.clone(), 1 << 20),
-                (ext_alu.clone(), 1 << 20),
-                (poseidon2_wide.clone(), 1 << 17),
-                (ext2felt.clone(), 1 << 17),
-                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (mem_var.clone(), 1 << 20),
-                (select.clone(), 1 << 20),
-                (mem_const.clone(), 1 << 12),
-                (base_alu.clone(), 1 << 21),
-                (ext_alu.clone(), 1 << 21),
-                (poseidon2_wide.clone(), 1 << 18),
-                (ext2felt.clone(), 1 << 17),
-                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-            ],
-            // CAPPED AT THE ROW CUBE.  Every recursion stage proves at a
-            // FIXED `max_log_row_count` (22 — `ZKMProver::pcs_max_log_row_count`),
-            // and a chip's trace is wrapped as `PaddedMle::padded(inner, cube,
-            // ..)`, which asserts the padded rows fit `2^cube`.  A band taller
-            // than the cube therefore cannot be padded TO: measured, tendermint
-            // compose snapped onto the old `base_alu = 23` entry and died with
-            // "PaddedMle::padded: real rows 8388608 exceed 2^num_variables
-            // 4194304" (`crates/pcs/src/multilinear/padded.rs:155`).  The old
-            // 23/24 caps came from a natural-height sweep taken before the cube
-            // was pinned; a program whose ORGANIC height really exceeded the
-            // cube could not be proven at all, so nothing is lost by capping.
-            [
-                (mem_var.clone(), 1 << 22),
-                (select.clone(), 1 << 21),
-                (mem_const.clone(), 1 << 22),
-                (base_alu.clone(), 1 << 22),
-                (ext_alu.clone(), 1 << 22),
-                (poseidon2_wide.clone(), 1 << 20),
-                (ext2felt.clone(), 1 << 17),
-                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-            ],
-        ]
-        .map(HashMap::from)
-        .to_vec();
-        // Two bands that exist only to keep SIBLING agreement cheap.
+        // THE recursion shape — one, not a list of bands.
         //
-        // When a node's children must share a band, the group takes the
-        // cheapest band covering all of them — and the six above leave a hole:
-        // bands 2 and 3 cap Poseidon2WideDeg3 at 2^17 while band 0 needs 2^18,
-        // so a group mixing them has nothing between band 3 (227.3M cells) and
-        // the ALU-heavy band 4 (421.5M).  Measured on a reth compress, that is
-        // exactly what happens — `own=[3,0,0,0] -> shared=4` drags three
-        // 148.4M-cell members onto 421.5M, a 2.84x over-pay for one bit of
-        // Poseidon2.  These two are bands 2 and 3 with that one cap raised,
-        // at 201.3M and 274.7M, which covers band 0 without the ALU headroom
-        // nobody in such a group asked for.
+        // SP1 pads every recursion proof to a single shape
+        // (`crates/prover/compress_shape.json`), and that is what makes a
+        // compose program a function of its ARITY alone:
+        // `get_all_shape_combinations` yields exactly one combination per batch
+        // size, so the enumeration emits `Compose(1..=REDUCE_BATCH_SIZE)` +
+        // Deferred + Shrink — the same set SP1 enumerates. A tree whose nodes
+        // share one program per arity can merge adjacent proof RANGES at any
+        // depth, instead of draining one layer before starting the next.
         //
-        // They cost the vk enumeration six shapes each, which the map has room
-        // for (~174 free), and they can only ever be chosen when they are the
-        // cheapest fit — so a program that does not need the extra Poseidon2
-        // bit never lands on one.
-        let mut allowed_shapes = allowed_shapes;
-        allowed_shapes.push(HashMap::from([
-            (mem_var.clone(), 1 << 20),
-            (select.clone(), 1 << 20),
+        // WHICH shape is decided by a FIXED POINT, and it is measured, not
+        // argued: a compose program is traced over its children, so raising the
+        // shape raises the organic heights of the program that verifies it.
+        // The shape has to hold still under one round of that.
+        // `ZIREN_FIXSHAPE_DIAG=1` on the pre-warm (9 bands x arities 1..=4)
+        // gives both sides:
+        //
+        //   children at the old band 0 (MemoryVar 2^18) -> arity-4 compose
+        //     needs MemoryVar 321_545 and Select 488_448.  NOT a fixed point:
+        //     measured by trying it, `no shape found for heights` at
+        //     `fix_shape` on the first arity-4 pre-warm pair.
+        //   children at the shape below      -> arity-4 compose needs
+        //     MemoryVar 447_323 · Select 488_448 · ExtAlu 295_245 ·
+        //     BaseAlu 282_019 · Poseidon2WideDeg3 116_424 · Ext2Felt 42_548 ·
+        //     MemoryConst 213.  All fit.  FIXED POINT.
+        //
+        // It costs 134_926_512 committed cells against band 0's 95_080_624 —
+        // but it is the ONLY self-consistent single shape among the nine, and
+        // it replaces all of them, including the 2^22 row-cube band at ~4x.
+        //
+        // ⚠ Every cap here is a power of two only because the dummy-proof path
+        // (`OrderedShape`, and the `(String, u8)` pairs
+        // `dummy/basefold_shard_proof.rs` takes) still speaks log2 heights, so
+        // `as_log2_ordered_shape` has to be exact.  The organic maxima above
+        // are 15-45% below these caps; teaching that path exact row counts
+        // recovers that, and the chips already pad to whatever row count is
+        // written here (`next_multiple_of_32_rows`).
+        //
+        // ⚠ reth's normalize verifies far larger core shards than the fibonacci
+        // e2e this was gated on. If it overflows, RAISE THE CAPS here — do not
+        // restore the band list. A second shape is a second compose program per
+        // arity, and the layer barrier comes back with it.
+        let allowed_shapes = [[
+            (mem_var.clone(), 1 << 19),
+            (select.clone(), 1 << 19),
             (mem_const.clone(), 1 << 12),
             (base_alu.clone(), 1 << 19),
             (ext_alu.clone(), 1 << 19),
-            (poseidon2_wide.clone(), 1 << 18),
+            (poseidon2_wide.clone(), 1 << 17),
             (ext2felt.clone(), 1 << 16),
             (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-        ]));
-        allowed_shapes.push(HashMap::from([
-            (mem_var.clone(), 1 << 20),
-            (select.clone(), 1 << 20),
-            (mem_const.clone(), 1 << 12),
-            (base_alu.clone(), 1 << 20),
-            (ext_alu.clone(), 1 << 20),
-            (poseidon2_wide.clone(), 1 << 18),
-            (ext2felt.clone(), 1 << 17),
-            (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-        ]));
+        ]]
+        .map(HashMap::from)
+        .to_vec();
         // No band may exceed the row cube every recursion stage proves at:
         // `PaddedMle::padded` asserts the padded rows fit `2^cube`, so a taller
         // band is a shape nothing can be snapped onto.
