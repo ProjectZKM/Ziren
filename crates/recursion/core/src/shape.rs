@@ -427,9 +427,18 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             (select.clone(), 1 << 19),
             (mem_const.clone(), 1 << 12),
             (base_alu.clone(), 1 << 19),
-            (ext_alu.clone(), 1 << 19),
+            // ⚠ MEASURED on reth compress, which is what the fibonacci gate
+            // could not reach: a normalize program verifying a reth core shard
+            // needs ExtAlu 529_408 — 5_120 rows OVER 2^19, a 1% miss that
+            // aborted the run at `fix_shape`'s "no shape found for heights".
+            // Its whole profile was MemoryConst 132 · MemoryVar 179_632 ·
+            // BaseAlu 406_700 · ExtAlu 529_408 · Poseidon2WideDeg3 34_849 ·
+            // Select 27_504 · Ext2Felt 58_994.
+            (ext_alu.clone(), 1 << 20),
             (poseidon2_wide.clone(), 1 << 17),
-            (ext2felt.clone(), 1 << 16),
+            // Ext2Felt was at 58_994 of 65_536 on that same program — 90% of
+            // the cap. Raised with it rather than waiting for the next abort.
+            (ext2felt.clone(), 1 << 17),
             (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
         ]]
         .map(HashMap::from)
