@@ -122,10 +122,10 @@ const SHRINK_DEGREE: usize = 3;
 const WRAP_DEGREE: usize = 9;
 
 const CORE_CACHE_SIZE: usize = 5;
-/// Tree-reduce arity for the compress stage. The tree-reduce worker pre-computes
-/// `layer_sizes` and emits partial batches when the source layer is
-/// exhausted, so any arity ≥ 2 reaches the root cleanly. Larger
-/// arity → fewer compress invocations
+/// Tree-reduce arity for the compress stage. The reduction merges adjacent
+/// shard ranges and emits a run the moment it reaches this size, or when the
+/// run covers the whole chain with nothing left in flight, so any arity ≥ 2
+/// reaches the root cleanly. Larger arity → fewer compress invocations
 /// (`(N-1)/(k-1)` total) and amortizes per-shard fixed overhead
 /// (Merkle binding, witness assembly, program build).
 pub const REDUCE_BATCH_SIZE: usize = 4;
@@ -1547,24 +1547,44 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let first_layer_inputs =
             self.get_first_layer_inputs(vk, shard_proofs, &deferred_proofs, first_layer_batch_size);
 
-        // Pre-compute the input count at each height of the tree so the
-        // next-layer worker can flush a partial batch when its layer is
-        // exhausted (otherwise an arity > 2 tree with leftovers wedges
-        // waiting for items that will never arrive). `layer_sizes[h]` is
-        // the number of inputs the worker will receive at height `h`;
-        // height 0 is the first-layer input count, and the deepest entry
-        // is the final layer that still needs reduction (≤ batch_size).
+        // Give every first-level input the span of execution it attests to,
+        // in emission order, and the reduction becomes a question about
+        // ADJACENCY rather than about depth.
+        //
+        // `ShardChain` hands the spans out one after another so the chain is
+        // contiguous by construction; the tree then only ever merges
+        // neighbours, which is exactly the contiguous in-order run the compose
+        // program's shard-chain continuity assert requires. That is what
+        // retires the per-height reorder buffers this loop used to carry: they
+        // existed to rebuild chain order out of prove-pool completion order,
+        // and the range already is chain order.
+        //
+        // Ziren's first level is core shards followed by deferred proofs (see
+        // `get_first_layer_inputs`), so the chain advances the shard
+        // coordinate and then the deferred one. SP1 orders precompiles first
+        // because their range is degenerate; Ziren has no separate precompile
+        // shards at this level, so the question does not arise here.
         let num_first_layer_inputs = first_layer_inputs.len();
-        let mut layer_sizes: Vec<usize> = vec![num_first_layer_inputs];
-        while *layer_sizes.last().unwrap() > batch_size {
-            let last = *layer_sizes.last().unwrap();
-            layer_sizes.push(last.div_ceil(batch_size));
-        }
-        // Tree height = number of reductions to produce the root.
-        // With one first-layer input, height = 0 (passthrough); otherwise
-        // every layer in `layer_sizes` needs one reduction step (the last
-        // one a partial batch if `last < batch_size`).
-        let expected_height = if num_first_layer_inputs == 1 { 0 } else { layer_sizes.len() };
+        let mut chain = crate::compress_tree::ShardChain::new();
+        let first_layer_inputs: Vec<(crate::compress_tree::ShardRange, ZKMCircuitWitness)> =
+            first_layer_inputs
+                .into_iter()
+                .map(|input| {
+                    let range = match &input {
+                        ZKMCircuitWitness::DeferredBasefold(_) => chain.deferred(),
+                        _ => chain.core(),
+                    };
+                    (range, input)
+                })
+                .collect();
+        // What the root must cover. A run that reaches it with nothing left in
+        // flight IS the root — the tree has no other way to know it is done,
+        // because a short run at the end of the chain and a short run waiting
+        // for its neighbour look identical from the range alone.
+        let full_range = chain.full_range();
+        // One input is a passthrough: `get_first_layer_inputs` already built it
+        // with `is_complete`, so there is nothing to reduce.
+        let passthrough = num_first_layer_inputs == 1;
 
         // Generate the proofs.
         let span = tracing::Span::current().clone();
@@ -1573,19 +1593,19 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
             // Spawn a worker that sends the first layer inputs to a bounded channel.
             //
-            // No turn-based sync here: the per-height pending lists in the
-            // next-layer worker (see `pending: Vec<Vec<Item>>` below) are
-            // arrival-order tolerant, so workers can race to drain `input_rx`
-            // without preserving first-layer index order.
-            let (input_tx, input_rx) = sync_channel::<(usize, usize, ZKMCircuitWitness)>(
-                opts.recursion_opts.checkpoints_channel_capacity,
-            );
+            // Workers race to drain `input_rx` and finish in any order; each
+            // proof carries the span it attests to, so the reduction tree
+            // recovers chain order from the range rather than from arrival.
+            let (input_tx, input_rx) =
+                sync_channel::<(crate::compress_tree::ShardRange, ZKMCircuitWitness)>(
+                    opts.recursion_opts.checkpoints_channel_capacity,
+                );
             let input_tx = Arc::new(Mutex::new(input_tx));
             {
                 let input_tx = Arc::clone(&input_tx);
                 s.spawn(move || {
-                    for (index, input) in first_layer_inputs.into_iter().enumerate() {
-                        input_tx.lock().unwrap().send((index, 0, input)).unwrap();
+                    for (range, input) in first_layer_inputs.into_iter() {
+                        input_tx.lock().unwrap().send((range, input)).unwrap();
                     }
                 });
             }
@@ -1593,8 +1613,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // Spawn workers who generate the records and traces.
             let (record_and_trace_tx, record_and_trace_rx) =
                 sync_channel::<(
-                    usize,
-                    usize,
+                    crate::compress_tree::ShardRange,
                     Arc<RecursionProgram<KoalaBear>>,
                     ExecutionRecord<KoalaBear>,
                     Vec<(String, RowMajorMatrix<KoalaBear>)>,
@@ -1610,7 +1629,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     let _span = span.enter();
                     loop {
                         let received = { input_rx.lock().unwrap().recv() };
-                        if let Ok((index, height, input)) = received {
+                        if let Ok((range, input)) = received {
                             // Get the program and witness stream.
                             let (program, witness_stream) = tracing::debug_span!(
                                 "get program and witness stream"
@@ -1724,7 +1743,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             record_and_trace_tx
                                 .lock()
                                 .unwrap()
-                                .send((index, height, program, record, traces))
+                                .send((range, program, record, traces))
                                 .unwrap();
                         } else {
                             break Ok(());
@@ -1735,9 +1754,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
             // Spawn workers who generate the compress proofs.
             let (proofs_tx, proofs_rx) =
-                sync_channel::<(usize, usize, StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>)>(
-                    num_first_layer_inputs * 2,
-                );
+                sync_channel::<(
+                    crate::compress_tree::ShardRange,
+                    StarkVerifyingKey<InnerSC>,
+                    ShardProof<InnerSC>,
+                )>(num_first_layer_inputs * 2);
             let proofs_tx = Arc::new(Mutex::new(proofs_tx));
             let proofs_rx = Arc::new(Mutex::new(proofs_rx));
             let mut prover_handles = Vec::new();
@@ -1749,7 +1770,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     let _span = span.enter();
                     loop {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
-                        if let Ok((index, height, program, record, traces)) = received {
+                        if let Ok((range, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
 
                                 // Get the keys.
@@ -1797,10 +1818,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .unwrap();
 
                                 // Send the proof. Order in proofs_rx is whatever
-                                // the prove pool finishes in; the next-layer
-                                // worker buckets by `height` so arrival order
-                                // does not affect tree-reduce correctness.
-                                proofs_tx.lock().unwrap().send((index, height, vk, proof)).unwrap();
+                                // the prove pool finishes in; the proof carries
+                                // its shard range, so the reduction tree does
+                                // not care.
+                                proofs_tx.lock().unwrap().send((range, vk, proof)).unwrap();
                             });
                         } else {
                             break;
@@ -1810,149 +1831,96 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 prover_handles.push(handle);
             }
 
-            // Spawn a worker that generates inputs for the next layer.
+            // Spawn a worker that reduces finished proofs into the next
+            // input, keyed by SHARD RANGE.
             //
-            // The worker buckets incoming proofs by height and emits a
-            // ComposeBasefold reduction whenever a height bucket has
-            // either accumulated `batch_size` items or its source layer
-            // has delivered everything it will. Per-height bucketing
-            // means cross-layer arrivals (e.g. a height-1 prove output
-            // landing while we're still collecting height-0 items) don't
-            // wedge the bucket they don't belong in, which the previous
-            // single-`batch` design did at any arity > 2.
-            let layer_sizes_worker = layer_sizes.clone();
+            // This used to bucket proofs by tree HEIGHT: a bucket emitted once
+            // it held `batch_size` items or its source layer was exhausted, and
+            // each bucket kept a reorder buffer to rebuild chain order out of
+            // prove-pool completion order. That has a barrier in it — nothing
+            // at height h+1 can start until the whole of layer h has drained —
+            // and the barrier costs the most exactly where the machine is
+            // widest, because the top layers hold fewer nodes than there are
+            // workers.
+            //
+            // Ported from SP1 (`worker/controller/compress.rs`): a landing
+            // proof looks for the run ending where it begins, or beginning
+            // where it ends, merges, and dispatches the moment the merged run
+            // reaches the arity. Nothing is keyed by depth, so a pair can
+            // reduce while its neighbours are still being proven, and levels
+            // overlap freely. Chain order is not maintained, it is structural —
+            // a merged run is contiguous by construction, which is the property
+            // the compose program's continuity asserts want.
             let handle = {
                 let input_tx = Arc::clone(&input_tx);
                 let proofs_rx = Arc::clone(&proofs_rx);
-                let span = tracing::debug_span!("generate next layer inputs");
+                let span = tracing::debug_span!("reduce proofs");
                 s.spawn(move || {
                     let _span = span.enter();
-                    let mut count = num_first_layer_inputs;
-                    type Item = (usize, usize, StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>);
-                    // PRESERVE CHAIN ORDER. The compose program's
-                    // shard-chain continuity asserts
-                    // (compress_basefold.rs: input_{k+1}.start_{pc,
-                    // shard} == input_k.next_{pc,shard}) require every batch
-                    // to be a CONTIGUOUS, IN-ORDER segment of the proof
-                    // chain.  Proofs arrive on `proofs_rx` in prove-pool
-                    // completion order, so each height keeps a REORDER
-                    // BUFFER (`pending[h]`, keyed by index) plus the layer's
-                    // expected index order (`expected_order[h]`): items move
-                    // to `ready[h]` only in chain order, and chunks are cut
-                    // from `ready`.  (A plain arrival-order `Vec` is
-                    // "tolerant" only while the chain asserts are vacuous
-                    // DivFs — armed, an out-of-order batch like [s1,s3,s2]
-                    // honestly trips the runtime at the continuity assert.)
-                    let mut pending: Vec<std::collections::BTreeMap<usize, Item>> =
-                        (0..layer_sizes_worker.len()).map(|_| Default::default()).collect();
-                    let mut expected_order: Vec<std::collections::VecDeque<usize>> =
-                        (0..layer_sizes_worker.len()).map(|_| Default::default()).collect();
-                    if !layer_sizes_worker.is_empty() {
-                        expected_order[0].extend(0..layer_sizes_worker[0]);
-                    }
-                    let mut ready: Vec<Vec<Item>> =
-                        (0..layer_sizes_worker.len()).map(|_| Vec::new()).collect();
-                    let mut received_at_height: Vec<usize> = vec![0usize; layer_sizes_worker.len()];
-                    let mut done = false;
+                    type Item = (StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>);
+                    let mut tree =
+                        crate::compress_tree::CompressTree::<Item>::new(batch_size);
+                    // Everything dispatched and not yet landed. The tree needs
+                    // it to tell "this run is short because the chain ends
+                    // here" from "this run is short because more is coming" —
+                    // the range alone cannot distinguish those.
+                    let mut in_flight = num_first_layer_inputs;
                     loop {
-                        if expected_height == 0 || done {
+                        if passthrough {
                             break;
                         }
                         let received = { proofs_rx.lock().unwrap().recv() };
-                        let (index, height, vk, proof) = match received {
+                        let (range, vk, proof) = match received {
                             Ok(v) => v,
                             Err(_) => break,
                         };
-                        // Items at `expected_height` are the root produced
-                        // by the final reduction; the main thread reads
-                        // those off `proofs_rx` directly. Anything beyond
-                        // is unexpected — drop it on the floor (drains the
-                        // channel so the prove pool can shut down cleanly).
-                        if height >= layer_sizes_worker.len() {
-                            continue;
-                        }
-                        pending[height].insert(index, (index, height, vk, proof));
-                        received_at_height[height] += 1;
-
-                        // Move the in-order prefix from the reorder buffer
-                        // into the ready queue.
-                        while let Some(&next_idx) = expected_order[height].front() {
-                            if let Some(item) = pending[height].remove(&next_idx) {
-                                ready[height].push(item);
-                                expected_order[height].pop_front();
-                            } else {
-                                break;
+                        in_flight -= 1;
+                        let reduction =
+                            tree.insert(range, (vk, proof), in_flight, Some(full_range));
+                        let (run, is_complete) = match reduction {
+                            crate::compress_tree::Reduction::Emit { proofs, is_complete } => {
+                                (proofs, is_complete)
                             }
-                        }
+                            crate::compress_tree::Reduction::Wait => continue,
+                        };
+                        let next_range = run.range();
 
-                        let layer_exhausted =
-                            received_at_height[height] >= layer_sizes_worker[height];
+                        // Basefold is the only path; every input must
+                        // carry a basefold side-channel. Missing
+                        // side-channel is an upstream bug, not a
+                        // fall-through condition.
+                        let bf_vks_and_proofs: Vec<_> = run
+                            .into_proofs()
+                            .map(|(vk, proof)| {
+                                let bf = *proof
+                                    .basefold_shard_proof
+                                    .as_ref()
+                                    .expect(
+                                        "compress reduce worker: input proof missing \
+                                         basefold side-channel — legacy FRI path removed",
+                                    )
+                                    .clone();
+                                (vk, bf)
+                            })
+                            .collect();
+                        // Bundle the vk-merkle witness so the compose
+                        // program can read vk_root from input rather than
+                        // baking it as a compile-time constant.
+                        let vks_only: Vec<StarkVerifyingKey<InnerSC>> =
+                            bf_vks_and_proofs.iter().map(|(vk, _)| vk.clone()).collect();
+                        let vk_merkle_data = self.make_basefold_merkle_proofs(&vks_only);
+                        let compose_values = ZKMCompressBasefoldWitnessValues {
+                            vks_and_proofs: bf_vks_and_proofs,
+                            vk_merkle_data,
+                            is_complete,
+                        };
+                        let input = ZKMCircuitWitness::ComposeBasefold(compose_values);
 
-                        // Drain ready[height] in chunks of up to
-                        // `batch_size`. Once the source layer is exhausted
-                        // we also flush the final partial chunk.
-                        while !ready[height].is_empty()
-                            && (ready[height].len() >= batch_size || layer_exhausted)
-                        {
-                            let take = ready[height].len().min(batch_size);
-                            let chunk: Vec<Item> = ready[height].drain(..take).collect();
-                            let next_input_height = height + 1;
-                            // is_complete iff this emission produces the
-                            // root and there's nothing else queued at this
-                            // height (covers both N-power-of-arity and
-                            // partial-final-chunk cases).
-                            let is_complete = next_input_height == expected_height
-                                && ready[height].is_empty()
-                                && pending[height].is_empty();
-                            // Register this emission's index in the next
-                            // layer's expected chain order (the reorder
-                            // buffer drains in this order).
-                            if next_input_height < expected_order.len() {
-                                expected_order[next_input_height].push_back(count);
-                            }
+                        in_flight += 1;
+                        input_tx.lock().unwrap().send((next_range, input)).unwrap();
 
-                            // Basefold is the only path; every input must
-                            // carry a basefold side-channel. Missing
-                            // side-channel is an upstream bug, not a
-                            // fall-through condition.
-                            let bf_vks_and_proofs: Vec<_> = chunk
-                                .into_iter()
-                                .map(|(_, _, vk, proof)| {
-                                    let bf = *proof
-                                        .basefold_shard_proof
-                                        .as_ref()
-                                        .expect(
-                                            "compress next-layer worker: input proof missing \
-                                             basefold side-channel — legacy FRI path removed",
-                                        )
-                                        .clone();
-                                    (vk, bf)
-                                })
-                                .collect();
-                            // Bundle the vk-merkle witness so the compose
-                            // program can read vk_root from input rather than
-                            // baking it as a compile-time constant.
-                            let vks_only: Vec<StarkVerifyingKey<InnerSC>> =
-                                bf_vks_and_proofs.iter().map(|(vk, _)| vk.clone()).collect();
-                            let vk_merkle_data = self.make_basefold_merkle_proofs(&vks_only);
-                            let compose_values = ZKMCompressBasefoldWitnessValues {
-                                vks_and_proofs: bf_vks_and_proofs,
-                                vk_merkle_data,
-                                is_complete,
-                            };
-                            let input = ZKMCircuitWitness::ComposeBasefold(compose_values);
-
-                            input_tx
-                                .lock()
-                                .unwrap()
-                                .send((count, next_input_height, input))
-                                .unwrap();
-                            count += 1;
-
-                            if is_complete {
-                                done = true;
-                                break;
-                            }
+                        if is_complete {
+                            break;
                         }
                     }
                 })
@@ -1967,7 +1935,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
             handle.join().unwrap();
 
-            let (_, _, vk, proof) = proofs_rx.lock().unwrap().recv().unwrap();
+            let (_, vk, proof) = proofs_rx.lock().unwrap().recv().unwrap();
             (vk, proof)
         });
 
