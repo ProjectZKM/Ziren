@@ -253,7 +253,7 @@ fn run_follow(rpc_url: &str, start_block: &str, save_only: bool, execute_only: b
             let block_tag = format!("0x{next_block:x}");
             println!("\n=== Processing block {block_tag} ===");
 
-            let (_, data) = fetch_one(rpc_url, &block_tag, save_only || true);
+            let (_, data) = fetch_one(rpc_url, &block_tag, save_only);
 
             if !save_only {
                 if !run_data(data, execute_only, &block_tag, report_path) {
