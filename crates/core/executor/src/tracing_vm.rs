@@ -772,6 +772,25 @@ mod tests {
             sum(&records_b, |r| r.memory_store_word_events.len()),
             "memory store event count"
         );
+
+        // CONTENT, not just counts. Counts matching proves nothing about a
+        // read-modify-write store: a narrow store whose containing word was
+        // read as zero emits exactly as many events, each carrying a wrong
+        // written value. Measured on reth, that divergence reached the memory
+        // argument and made the global cumulative sum non-zero while every
+        // event count still agreed.
+        let flat_a: Vec<&crate::events::CpuEvent> =
+            records_a.iter().flat_map(|r| r.cpu_events.iter()).collect();
+        let flat_b: Vec<&crate::events::CpuEvent> =
+            records_b.iter().flat_map(|r| r.cpu_events.iter()).collect();
+        assert_eq!(flat_a.len(), flat_b.len(), "cpu event count (flat)");
+        for (i, (x, y)) in flat_a.iter().zip(flat_b.iter()).enumerate() {
+            assert_eq!(
+                format!("{x:?}"),
+                format!("{y:?}"),
+                "cpu event {i} differs between the sequential run and the replay"
+            );
+        }
     }
 
     /// Streaming and batched production must yield the SAME chunk sequence.

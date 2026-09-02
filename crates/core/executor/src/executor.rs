@@ -665,9 +665,32 @@ impl<'a> Executor<'a> {
     }
 
     /// Get the current value of a word.
+    ///
+    /// # Replay
+    ///
+    /// Under replay the page table is empty by design -- the `mem_reads` oracle
+    /// is a CURSOR, not a seed -- so a direct read here returns 0. That is
+    /// invisible for a plain load (those go through `mr`), but a narrow or
+    /// unaligned store reads the containing word THROUGH THIS FUNCTION and
+    /// merges its byte into it, so a zero here silently writes the byte alone:
+    /// `(mem & mask) | val` with `mem == 0`.
+    ///
+    /// This read is not itself a recorded access, so it must not advance the
+    /// cursor. It does not need to: the write it feeds is the very next
+    /// recorded access on the same address, and the oracle entry for it holds
+    /// that address's PRE-access value -- which is exactly what this returns.
+    /// So peek at the cursor head without consuming it, and only when the
+    /// address matches, which leaves every other caller on the old path.
     #[must_use]
     #[inline]
     pub fn word(&mut self, addr: u32) -> u32 {
+        if let Some(cursor) = self.replay_mem.as_ref() {
+            if let Some(mv) = cursor.entries.get(cursor.pos) {
+                if mv.addr == addr {
+                    return mv.value;
+                }
+            }
+        }
         #[allow(clippy::single_match_else)]
         let record = self.state.memory.page_table.get(addr);
 
