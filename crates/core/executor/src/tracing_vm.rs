@@ -530,6 +530,85 @@ mod tests {
         }
     }
 
+    /// Stream a REAL ELF's chunks and replay them: same events as running it
+    /// straight through.
+    ///
+    /// The other producer tests use synthetic ADD programs, which touch no user
+    /// memory and consume no hints -- so they exercise the plumbing and none of
+    /// what the oracle and the hint window are FOR. Fibonacci does real loads
+    /// and stores, so this is the first test where a chunk replayed from its
+    /// own captured window has to reconstruct memory it did not execute up to.
+    #[test]
+    fn streamed_replay_matches_sequential_on_a_real_elf() {
+        use crate::minimal_trace::MinimalTrace;
+        use crate::Executor;
+
+        // sha3-chain, not fibonacci: fibonacci fits in two chunks even at a
+        // small shard size, and the point is to replay chunks that start deep
+        // inside the program.
+        let program = crate::programs::tests::sha3_chain_program();
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 1 << 12;
+
+        // A: straight through.
+        let mut a = Executor::new(program.clone(), opts);
+        a.write_stdin(&[1u8; 32]);
+        a.write_stdin(&1u32);
+        a.run().expect("sequential run");
+        let records_a = std::mem::take(&mut a.records);
+
+        // B: stream the chunks out as they seal, then replay them.
+        let mut b = Executor::new(program.clone(), opts);
+        b.write_stdin(&[1u8; 32]);
+        b.write_stdin(&1u32);
+        b.minimal_trace_collector = Some(MinimalTrace::default());
+        let mut chunks = Vec::new();
+        loop {
+            let (_state, done) = b.execute_state(false).expect("execute_state");
+            if done {
+                b.seal_minimal_trace_final_memory();
+            }
+            chunks.append(&mut b.drain_sealed_chunks());
+            if done {
+                break;
+            }
+        }
+        assert!(chunks.len() > 2, "only {} chunk(s); raise the cycle count", chunks.len());
+        // Every chunk carries its own hint window, so the replay takes the
+        // sliced path -- the whole-program stream below is deliberately empty.
+        assert!(
+            chunks.iter().all(|c| c.input_stream_slice.is_some()),
+            "a streamed chunk went out without its hint window"
+        );
+        let trace = MinimalTrace { chunks, ..Default::default() };
+        let records_b =
+            drive_tracing_vm_parallel(Arc::new(program), opts, &trace).expect("replay");
+
+        let sum = |rs: &[crate::ExecutionRecord], f: fn(&crate::ExecutionRecord) -> usize| {
+            rs.iter().map(f).sum::<usize>()
+        };
+        assert_eq!(
+            sum(&records_a, |r| r.cpu_events.len()),
+            sum(&records_b, |r| r.cpu_events.len()),
+            "cpu event count"
+        );
+        assert_eq!(
+            sum(&records_a, |r| r.add_sub_events.len()),
+            sum(&records_b, |r| r.add_sub_events.len()),
+            "add/sub event count"
+        );
+        assert_eq!(
+            sum(&records_a, |r| r.memory_load_word_events.len()),
+            sum(&records_b, |r| r.memory_load_word_events.len()),
+            "memory load event count"
+        );
+        assert_eq!(
+            sum(&records_a, |r| r.memory_store_word_events.len()),
+            sum(&records_b, |r| r.memory_store_word_events.len()),
+            "memory store event count"
+        );
+    }
+
     /// Streaming and batched production must yield the SAME chunk sequence.
     ///
     /// The streaming producer is only a safe swap for the batched one if
