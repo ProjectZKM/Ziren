@@ -160,7 +160,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
     pub fn slice_unsafe(&mut self, addr: u32, len: usize) -> Vec<u32> {
         let mut values = Vec::with_capacity(len);
         for i in 0..len {
-            values.push(self.rt.word(addr + i as u32 * 4));
+            values.push(self.rt.word_traced(addr + i as u32 * 4));
         }
         values
     }

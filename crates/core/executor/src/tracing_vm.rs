@@ -793,6 +793,78 @@ mod tests {
         }
     }
 
+    /// The replay's PRECOMPILE events must match the sequential run's --
+    /// `p` included, the point an EC add reads without a memory record.
+    ///
+    /// The record-level replay checks compare post-`defer` records, so a
+    /// precompile event that carried the wrong operand went unnoticed until a
+    /// worker built a deferred shard from replayed events. Under replay the
+    /// page table is empty, and `slice_unsafe` (the operand a precompile
+    /// overwrites) read 0 or a stale write; the event's memory records were
+    /// right, its `p` was not.
+    #[test]
+    fn replayed_precompile_events_match_sequential() {
+        use crate::minimal_trace::MinimalTrace;
+        use crate::syscalls::SyscallCode;
+        use crate::Executor;
+        use std::collections::BTreeMap;
+
+        let program = crate::programs::tests::secp256r1_add_program();
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 1 << 12;
+
+        let mut a = Executor::new(program.clone(), opts);
+        a.run().expect("sequential run");
+        let records_a = std::mem::take(&mut a.records);
+
+        let mut b = Executor::new(program.clone(), opts);
+        b.minimal_trace_collector = Some(MinimalTrace::default());
+        let mut chunks = Vec::new();
+        loop {
+            let (_state, done) = b.execute_state(false).expect("execute_state");
+            if done {
+                b.seal_minimal_trace_final_memory();
+            }
+            chunks.append(&mut b.drain_sealed_chunks());
+            if done {
+                break;
+            }
+        }
+        let trace = MinimalTrace { chunks, ..Default::default() };
+        let records_b =
+            drive_tracing_vm_parallel(Arc::new(program), opts, &trace).expect("replay");
+
+        // Per code, every event in stream order, serialized: the bytes a
+        // worker would store for the controller.
+        let flatten = |rs: &[crate::ExecutionRecord]| -> BTreeMap<SyscallCode, Vec<Vec<u8>>> {
+            let mut out: BTreeMap<SyscallCode, Vec<Vec<u8>>> = BTreeMap::new();
+            for r in rs {
+                for (code, events) in r.precompile_events.iter() {
+                    let dst = out.entry(*code).or_default();
+                    for e in events {
+                        dst.push(bincode::serialize(e).unwrap());
+                    }
+                }
+            }
+            out
+        };
+        let (ev_a, ev_b) = (flatten(&records_a), flatten(&records_b));
+        let n: usize = ev_a.values().map(Vec::len).sum();
+        assert!(n > 0, "the program issued no precompile events");
+        assert_eq!(
+            ev_a.keys().collect::<Vec<_>>(),
+            ev_b.keys().collect::<Vec<_>>(),
+            "precompile codes"
+        );
+        for (code, a) in &ev_a {
+            let b = &ev_b[code];
+            assert_eq!(a.len(), b.len(), "{code:?}: event count");
+            for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+                assert!(x == y, "{code:?}: event {i} differs between the sequential run and the replay");
+            }
+        }
+    }
+
     /// Streaming and batched production must yield the SAME chunk sequence.
     ///
     /// The streaming producer is only a safe swap for the batched one if

@@ -711,6 +711,39 @@ impl<'a> Executor<'a> {
         }
     }
 
+    /// A syscall's read of a word it is about to overwrite and so does not
+    /// record (`SyscallContext::slice_unsafe`): the value the producer saw
+    /// still has to reach the replay, whose page table is empty. SP1's
+    /// `mr_slice_unsafe`: the producer traces each word into the chunk's
+    /// oracle, the replay consumes it. Not an access -- no record is touched
+    /// -- so the entry carries the address's current record as it stands.
+    ///
+    /// Without this the replay read 0 (or a stale write) for the point a
+    /// `SECP256K1_ADD` overwrites: the event's `p` was wrong while its memory
+    /// records were right, which the chip's `populate` caught only when the
+    /// stale `p` happened to equal `q` (division by zero in the slope).
+    #[must_use]
+    #[inline]
+    pub fn word_traced(&mut self, addr: u32) -> u32 {
+        if self.replay_mem.is_some() {
+            if let Some(record) = self.take_replay_mem(addr) {
+                return record.value;
+            }
+        }
+        let value = self.word(addr);
+        if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+            let record = self.state.memory.page_table.get(addr).copied().unwrap_or_default();
+            self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
+                clk: self.state.global_clk,
+                addr,
+                value,
+                shard: record.shard,
+                timestamp: record.timestamp,
+            });
+        }
+        value
+    }
+
     /// Get the current value of a byte.
     #[must_use]
     pub fn byte(&mut self, addr: u32) -> u8 {
