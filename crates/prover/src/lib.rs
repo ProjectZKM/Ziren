@@ -637,26 +637,38 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let prewarm_start = std::time::Instant::now();
         // Independent per pair, and the caches are locked only to look up and
-        // to insert, never across a build.
-        let pairs: Vec<(usize, usize)> = (0..bands.len())
-            .flat_map(|b| (1..=REDUCE_BATCH_SIZE).map(move |a| (b, a)))
+        // to insert, never across a build.  `is_complete` is part of the
+        // shape key, so the root -- the one node that sets it, at whichever
+        // arity the shard count leaves it -- is its own program: warm both.
+        let pairs: Vec<(usize, usize, bool)> = (0..bands.len())
+            .flat_map(|b| {
+                (1..=REDUCE_BATCH_SIZE)
+                    .flat_map(move |a| [(b, a, false), (b, a, true)])
+            })
             .collect();
         let n_pairs = pairs.len();
-        pairs.into_par_iter().for_each(|(band_index, arity)| {
+        pairs.into_par_iter().for_each(|(band_index, arity, is_complete)| {
             let proof_shape =
                 RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_log2_ordered_shape(
                     &bands[band_index],
                 );
             let compress_shape = ZKMCompressShape::from(vec![proof_shape; arity]);
             let shape = ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height };
-            let witness = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy(
+            let mut witness = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy(
                 self.compress_prover.machine(),
                 &shape,
             );
+            witness.is_complete = is_complete;
             let per_pair_start = std::time::Instant::now();
-            // Retained by `compose_programs_basefold_cache` under this
-            // witness's shape key; a real node of the same shape then hits.
-            let (_program, digest) = self.compose_program_basefold(&witness);
+            // Retained by `compose_programs_basefold_cache` under the key a
+            // real node of this shape asks for: the compress drivers snap a
+            // node onto the band its siblings settle on
+            // (`dominating_band` over each one's own band), and the cache
+            // separates bands, so an entry warmed without one was never hit
+            // -- every worker rebuilt the first node of each arity, 0.7-1.3 s
+            // apiece, three of them on the tail's critical chain.
+            let band = self.compose_band_for(&witness).and_then(|b| self.dominating_band(&[b]));
+            let (_program, digest) = self.compose_program_basefold_at(&witness, band);
             // And claim its KEY, which is the more expensive half: a setup walks
             // every chip's preprocessed trace and commits the round, ~1.4 GiB of
             // it coming back to host.  The key itself is built by whichever node
@@ -665,7 +677,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // that setup is paid once per PROCESS rather than once per block.
             self.pin_recursion_pk(digest);
             tracing::debug!(
-                "compose pre-warm: band={band_index} arity={arity} built in {:?}",
+                "compose pre-warm: band={band_index} arity={arity} is_complete={is_complete} \
+                 snapped onto {band:?} in {:?}",
                 per_pair_start.elapsed()
             );
         });

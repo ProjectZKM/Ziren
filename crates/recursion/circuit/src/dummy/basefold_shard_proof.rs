@@ -751,6 +751,37 @@ pub fn dummy_jagged_basefold_bundle(
         batch_evaluations: round_stripes.iter().map(|stripes| vec![EF::ZERO; *stripes]).collect(),
     };
 
+    // ── The PCS the production config commits under ──
+    // `KoalaBearPoseidon2::WHIR_INNER_PCS` routes every inner proof (core,
+    // normalize, compose, shrink) through jagged-WHIR: the open captures a
+    // `StackedWhirProof` and leaves the BaseFold proof EMPTY
+    // (jagged_pcs.rs `whir_mode`), and the recursion program takes the
+    // WhirBundle lift branch.  A dummy on the BaseFold shape therefore
+    // compiles a program no real node runs: its `shape_key` never matched
+    // a real child's (MEASURED on reth: the compose pre-warm's arity-4 key
+    // was never hit, so the first arity-4 node on every worker rebuilt its
+    // program, 1.25 s, and the root 0.71 s), and every vk enumerated from
+    // this dummy was the vk of the wrong program.
+    let whir_mode =
+        <zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as zkm_pcs::BasefoldRing>::WHIR_INNER_PCS;
+    let (stacked, whir_proof) = if whir_mode {
+        let empty = StackedBasefoldProof::<F, EF, JaggedMmcs> {
+            basefold_proof: BasefoldProof::<F, EF, JaggedMmcs> {
+                univariate_messages: Vec::new(),
+                fri_commitments: Vec::new(),
+                component_polynomials_query_openings_and_proofs: Vec::new(),
+                query_phase_openings_and_proofs: Vec::new(),
+                final_poly: EF::ZERO,
+                pow_witness: F::ZERO,
+                batch_grinding_witness: F::ZERO,
+            },
+            batch_evaluations: Vec::new(),
+        };
+        (empty, Some(dummy_stacked_whir_proof(log_stacking, &round_stripes)))
+    } else {
+        (stacked, None)
+    };
+
     // ── Reduction sumcheck (L rounds, degree-2 → evals=[EF;3]) ──
     let reduction = JaggedReductionProof::<EF> {
         rounds: vec![JaggedReductionRound { evals: [EF::ZERO; 3] }; l.max(1)],
@@ -773,7 +804,7 @@ pub fn dummy_jagged_basefold_bundle(
     JaggedBasefoldBundle {
         reduction,
         basefold_proof: stacked,
-        whir_proof: None,
+        whir_proof,
         // One claim vector per COLUMN GROUP — the real chips of every round
         // followed by that round's stacking-padding columns, each carrying one
         // claim per column (a padding column carries a single zero claim).
@@ -805,6 +836,137 @@ pub fn dummy_jagged_basefold_bundle(
         extra_packing: Vec::new(),
         extra_jagged_eval: Vec::new(),
         groups: Vec::new(),
+    }
+}
+
+/// A zero-filled `StackedWhirProof` with the lengths the stacked WHIR
+/// prover emits for a stack of height `2^log_stacking` whose rounds carry
+/// `round_stripes` stripes each, under the production
+/// [`zkm_pcs::whir::jagged::core_whir_config`] schedule.
+///
+/// Every length mirrors `StackedWhirProver::prove_trusted_evaluation_with_engine`
+/// (crates/pcs/src/whir/stacked.rs); the lift + `hash_stacked_whir` read all
+/// of them.  With `R = round_parameters.len()` and `ff_r` round r's fold:
+/// * `round_sumcheck_polys[r]`, `r < R-1`: `ff_r` degree-2 polys (3 coeffs);
+///   the LAST round's polys are popped into `final_sumcheck_polys`.
+/// * `round_ood_answers[r]` / `round_commitments[r]`, `r < R-1`: the folded
+///   poly is committed and OOD-sampled after every round but the last.
+/// * `round_query_openings[r]`, `r < R-1`: `num_queries_r` queries into the
+///   PREVIOUS codeword.  Round 0 opens the stripe trees: one `LeafOpening`
+///   per committed round per query, holding that round's every stripe row
+///   (`2^ff_0` felts, the interleave width), against the tree of height
+///   `log_stacking + starting_log_inv_rate - ff_0`.  Round `r >= 1` opens the
+///   single EF codeword committed by round `r-1`: one leaf of `2^ff_r * D`
+///   felts against `(rem_{r-1} - ff_r) + log_inv_rate_{r-1}` levels, where
+///   `rem_{r-1} = log_stacking - sum(ff_0..=ff_{r-1})`.
+/// * a final `MerkleOpening` of `final_queries` leaves into the last
+///   committed codeword (round `R-2`'s), same leaf/path law as round `R-1`.
+/// * `final_poly`: `2^(log_stacking - sum ff)` coefficients.
+/// * `folding_pow`: one per folded variable plus one query grind per
+///   committed round, `sum ff + (R - 1)`.
+/// * `batch_evaluations[r]`: `round_stripes[r]` claims.
+///
+/// Validated against a real reth compose child at `log_stacking = 21`
+/// (folds `[4, 7, 7]`, 40 + 56 stripes): `rsp=[[3;4],[3;7]] ood=[2,2] rc=2
+/// rq=[(168 x [16;40|56] / 18), (21 x [512] / 14), (12 x [512] / 10)] fp=8
+/// fsp=[3;7] pow=20 be=[40,56]`.
+fn dummy_stacked_whir_proof(
+    log_stacking: usize,
+    round_stripes: &[usize],
+) -> zkm_pcs::whir::stacked::StackedWhirProof<
+    zkm_pcs::InnerVal,
+    zkm_pcs::InnerChallenge,
+    zkm_pcs::jagged_pcs::JaggedMmcs,
+> {
+    use p3_symmetric::MerkleCap;
+    use zkm_pcs::basefold::proof::{LeafOpening, MerkleOpening};
+    use zkm_pcs::jagged_pcs::JaggedMmcs;
+    use zkm_pcs::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
+    use zkm_pcs::whir::stacked::StackedWhirProof;
+    use zkm_pcs::{InnerChallenge, InnerVal};
+
+    type F = InnerVal;
+    type EF = InnerChallenge;
+    const D: usize = 4;
+
+    let config = zkm_pcs::whir::jagged::core_whir_config(log_stacking);
+    let rounds = &config.round_parameters;
+    let num_rounds = rounds.len();
+    let ff0 = rounds[0].folding_factor;
+    let zero_cap = || MerkleCap::<F, [F; 8]>::new(vec![[F::ZERO; 8]]);
+    let poly = || SumcheckPoly(vec![EF::ZERO; 3]);
+
+    let mut round_sumcheck_polys: Vec<Vec<SumcheckPoly<EF>>> = Vec::new();
+    let mut round_ood_answers: Vec<Vec<EF>> = Vec::new();
+    let mut round_commitments = Vec::new();
+    let mut round_query_openings: Vec<MerkleOpening<F, JaggedMmcs>> = Vec::new();
+    let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
+
+    // The codeword the NEXT round's queries open: its Merkle depth and, for
+    // the single-poly rounds, its leaf width.
+    let mut prev_domain_log = (log_stacking - ff0) + config.starting_log_inv_rate;
+    let mut prev_leaf: Option<usize> = None; // None = the stripe trees
+    let mut rem = log_stacking;
+    for (r, rc) in rounds.iter().enumerate() {
+        round_sumcheck_polys.push((0..rc.folding_factor).map(|_| poly()).collect());
+        folding_pow.extend((0..rc.folding_factor).map(|_| ProofOfWork(F::ZERO)));
+        rem -= rc.folding_factor;
+        if r + 1 == num_rounds {
+            break;
+        }
+        let next_ff = rounds[r + 1].folding_factor;
+        round_commitments.push(zero_cap());
+        round_ood_answers.push(vec![EF::ZERO; rc.ood_samples]);
+        folding_pow.push(ProofOfWork(F::ZERO));
+        let leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..rc.num_queries)
+            .flat_map(|_| match prev_leaf {
+                None => round_stripes
+                    .iter()
+                    .map(|stripes| LeafOpening {
+                        values: vec![vec![F::ZERO; 1 << ff0]; *stripes],
+                        proof: vec![[F::ZERO; 8]; prev_domain_log],
+                    })
+                    .collect::<Vec<_>>(),
+                Some(width) => vec![LeafOpening {
+                    values: vec![vec![F::ZERO; width]],
+                    proof: vec![[F::ZERO; 8]; prev_domain_log],
+                }],
+            })
+            .collect();
+        round_query_openings.push(MerkleOpening { leaves });
+        prev_domain_log = (rem - next_ff) + rc.log_inv_rate;
+        prev_leaf = Some((1 << next_ff) * D);
+    }
+    let final_leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..config.final_queries)
+        .flat_map(|_| match prev_leaf {
+            None => round_stripes
+                .iter()
+                .map(|stripes| LeafOpening {
+                    values: vec![vec![F::ZERO; 1 << ff0]; *stripes],
+                    proof: vec![[F::ZERO; 8]; prev_domain_log],
+                })
+                .collect::<Vec<_>>(),
+            Some(width) => vec![LeafOpening {
+                values: vec![vec![F::ZERO; width]],
+                proof: vec![[F::ZERO; 8]; prev_domain_log],
+            }],
+        })
+        .collect();
+    round_query_openings.push(MerkleOpening { leaves: final_leaves });
+    let final_sumcheck_polys = round_sumcheck_polys.pop().unwrap_or_default();
+
+    StackedWhirProof {
+        whir_proof: WhirProof {
+            round_sumcheck_polys,
+            round_ood_answers,
+            round_commitments,
+            round_query_openings,
+            final_poly: vec![EF::ZERO; 1 << rem],
+            final_sumcheck_polys,
+            folding_pow,
+            final_pow: ProofOfWork(F::ZERO),
+        },
+        batch_evaluations: round_stripes.iter().map(|s| vec![EF::ZERO; *s]).collect(),
     }
 }
 
