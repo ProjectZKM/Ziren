@@ -95,22 +95,22 @@ impl<'a> TracingVM<'a> {
     /// to `chunk.clk_end`, emitting every event the prover needs into
     /// `self.record`.
     ///
-    /// # scaffold behaviour
+    /// Builds a fresh `ExecutionState` from the chunk header, recovers an
+    /// `Executor`, runs it to the chunk's end clock, and swaps the executor's
+    /// record into ours. The recovered Executor walks the same per-opcode emit
+    /// path as the single-threaded loop, so the record is byte-equivalent (up
+    /// to `HashMap` ordering, which the prover does not rely on).
     ///
-    /// Today this builds a fresh `ExecutionState` from the chunk header,
-    /// recovers an `Executor`, runs it to completion or to the chunk's
-    /// end clock, and then swaps the executor's record into ours.
+    /// `chunk.mem_reads` IS consulted, as a positional cursor: the Nth user
+    /// memory access of the replay consumes the Nth recorded entry. That is
+    /// what lets a chunk starting mid-program reconstruct memory it never
+    /// executed up to, and it is why the oracle must not be treated as a
+    /// per-address lookup -- see `mem_reads` on `TraceChunk`.
     ///
-    /// Correctness: the recovered Executor walks the same per-opcode
-    /// emit path as the legacy single-thread loop, so the produced
-    /// `ExecutionRecord` is byte-equivalent (up to determinism of
-    /// `HashMap` ordering, which the prover does not rely on).
-    ///
-    /// Perf: this version does NOT consult `chunk.mem_reads`, so each
-    /// shard reruns its memory reads from `self.program.image` rather
-    /// than the oracle. Once a future revision wires the oracle and the bespoke
-    /// per-opcode lifter, this method's body shrinks to a tight inner
-    /// loop. For now it exists to validate the *parallel* story below.
+    /// Streams: a chunk carrying its own `input_stream_slice` is self
+    /// contained, so this is the whole call the consumer needs. Use
+    /// [`Self::execute_from_chunk_with_streams`] only for a legacy chunk
+    /// without one, which has to be handed the whole program's streams.
     pub fn execute_from_chunk(&mut self, chunk: &TraceChunk) -> Result<(), ExecutionError> {
         self.execute_from_chunk_with_streams(chunk, &[], &[])
     }
