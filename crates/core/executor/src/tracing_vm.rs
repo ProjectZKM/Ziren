@@ -375,6 +375,35 @@ impl<'a> TracingVM<'a> {
 /// drop-in: useful for nailing down the API and shaking out the
 /// per-shard `ExecutionState` capture before the lifter lands.
 ///
+/// Replay ONE chunk into its own `ExecutionRecord`.
+///
+/// This is the whole consumer side for a distributed prover: a worker that has
+/// the program and a chunk needs nothing else to produce the record for that
+/// shard, so the trace generation happens on the worker rather than on the
+/// one process that hands work out. SP1 draws the same line -- its shard task
+/// carries a chunk and the worker calls its own `trace_chunk`.
+///
+/// The record is pre-allocated at `chunk.num_cycles() / 8`, the same
+/// reservation the parallel driver uses.
+///
+/// # Errors
+///
+/// Returns the replay's `ExecutionError` if the chunk does not walk cleanly --
+/// in practice a chunk whose oracle does not match the program it is replayed
+/// against.
+pub fn trace_chunk(
+    program: Arc<Program>,
+    opts: ZKMCoreOpts,
+    chunk: &TraceChunk,
+    maximal_shapes: Option<MaximalShapes>,
+) -> Result<ExecutionRecord, ExecutionError> {
+    let reservation = (chunk.num_cycles() as usize / 8).max(1);
+    let mut record = ExecutionRecord::new_preallocated(program.clone(), reservation);
+    let mut vm = TracingVM::new_with_shapes(program, opts, &mut record, maximal_shapes);
+    vm.execute_from_chunk(chunk)?;
+    Ok(record)
+}
+
 /// # Reservation sizing
 ///
 /// Each record is pre-allocated via `ExecutionRecord::new_preallocated`
@@ -527,6 +556,61 @@ mod tests {
                 &stream[from..to],
                 "chunk {i}: captured hint window differs from the finished stream"
             );
+        }
+    }
+
+    /// `trace_chunk` on each chunk in turn == the parallel driver's records.
+    ///
+    /// The distributed path replays ONE chunk per worker with nothing else in
+    /// hand, so the single-chunk entry point has to stand on its own rather
+    /// than only work as part of a whole-program batch.
+    #[test]
+    fn trace_chunk_matches_the_parallel_driver() {
+        use crate::minimal_trace::MinimalTrace;
+        use crate::Executor;
+
+        let program = crate::programs::tests::sha3_chain_program();
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 1 << 12;
+
+        let mut exec = Executor::new(program.clone(), opts);
+        exec.write_stdin(&[1u8; 32]);
+        exec.write_stdin(&1u32);
+        exec.minimal_trace_collector = Some(MinimalTrace::default());
+        let mut chunks = Vec::new();
+        loop {
+            let (_state, done) = exec.execute_state(false).expect("execute_state");
+            if done {
+                exec.seal_minimal_trace_final_memory();
+            }
+            chunks.append(&mut exec.drain_sealed_chunks());
+            if done {
+                break;
+            }
+        }
+        assert!(chunks.len() > 2, "only {} chunk(s)", chunks.len());
+
+        let program = Arc::new(program);
+        // One at a time, the way a worker would.
+        let one_at_a_time: Vec<_> = chunks
+            .iter()
+            .map(|c| trace_chunk(program.clone(), opts, c, None).expect("trace_chunk"))
+            .collect();
+
+        let trace = MinimalTrace { chunks, ..Default::default() };
+        let batched = drive_tracing_vm_parallel(program, opts, &trace).expect("driver");
+
+        assert_eq!(one_at_a_time.len(), batched.len(), "record count");
+        for (i, (a, b)) in one_at_a_time.iter().zip(batched.iter()).enumerate() {
+            assert_eq!(a.cpu_events.len(), b.cpu_events.len(), "chunk {i}: cpu events");
+            assert_eq!(a.add_sub_events.len(), b.add_sub_events.len(), "chunk {i}: add/sub");
+            assert_eq!(
+                a.memory_load_word_events.len(),
+                b.memory_load_word_events.len(),
+                "chunk {i}: loads"
+            );
+            assert_eq!(a.public_values.start_pc, b.public_values.start_pc, "chunk {i}: start_pc");
+            assert_eq!(a.public_values.next_pc, b.public_values.next_pc, "chunk {i}: next_pc");
         }
     }
 
