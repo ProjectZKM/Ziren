@@ -232,37 +232,51 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
 /// Program-identity-keyed recursion proving keys, capped so the retained
 /// BaseFold data cannot grow without bound.
 ///
-/// The eviction order is insertion order: a recursion tree walks its layers in
-/// order and never returns to an earlier one, so the oldest key is also the one
-/// least likely to be asked for again.
+/// Eviction is least-recently-used.  A prover process is long-lived — the
+/// multi-GPU core workers stay up across blocks — and consecutive blocks reach
+/// largely the same programs (the compose set is fixed; the normalize set
+/// follows the core shard shapes, which recur across blocks 62-91% of the
+/// time), so once the cap holds a block's working set the key asked for
+/// longest ago is the one least likely to be asked for again.  Below the
+/// working set no order helps: a block walks its programs cyclically, and
+/// both LRU and insertion order then evict each key just before its next
+/// use — a repeated block hits ZERO times, which is what the old cap of 24
+/// did (see [`RecursionPkCache::capacity`]).  The program cache keeps
+/// insertion order for exactly that regime, see [`RecursionProgramCache`].
 #[derive(Default)]
 pub struct RecursionPkCache {
     entries: BTreeMap<[u8; 32], Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>>,
+    /// Least-recently-used first.
     order: std::collections::VecDeque<[u8; 32]>,
     /// Digests that must never be evicted.
     ///
-    /// A key costs ~1.4 GiB of host memory, which is why the cache is capped
-    /// far below the ~91 distinct programs a block reaches — so the cap has to
-    /// be spent where it buys the most.  The compose programs are a small FIXED
-    /// set, (band, arity), reached in every block; the normalize ones follow the
-    /// core shard shapes and turn over.  Pinning the first kind means their
-    /// setup is paid once per PROCESS, while the rest keep cycling.
+    /// The compose programs are a small FIXED set, (band, arity), reached in
+    /// every block; pinning them means their setup is paid once per PROCESS
+    /// whatever the cap does to the normalize keys.
     pinned: std::collections::BTreeSet<[u8; 32]>,
     pub hits: u64,
     pub misses: u64,
 }
 
 impl RecursionPkCache {
-    /// How many distinct programs' keys to retain.  Every layer of the tree
-    /// contributes at most a handful of distinct programs, so a small cap
-    /// still holds a whole layer's worth; raise it for workloads with an
-    /// unusually wide shape spread, and set it to 0 to hold nothing (which
-    /// recovers the build-a-key-per-node behaviour, for measurement).
+    /// How many distinct programs' keys to retain.
+    ///
+    /// The default holds a whole block's working set: a reth block reaches
+    /// ~91 distinct programs in one process, or ~45 per single-device core
+    /// worker at 2 GPUs.  Below that a repeated block misses on every
+    /// normalize node, and a miss is a full `setup` on the card thread:
+    /// MEASURED on reth at 2 GPUs, cap 24 -> 38 misses per worker per block =
+    /// 4.3-5.0 s of a ~89 s core stage; above the working set the repeated
+    /// blocks miss 0 times and run 83.6-87.6 s (7 blocks, 4 runs).  The price
+    /// is host memory — each retained key is a few hundred MiB of preprocessed
+    /// traces plus their MLE form, and a 2-GPU worker sat at 80-92 GiB RSS —
+    /// which the boxes this prover targets have.  Set it to 0 to hold nothing
+    /// (which recovers the build-a-key-per-node behaviour, for measurement).
     fn capacity() -> usize {
         std::env::var("ZIREN_RECURSION_PK_CACHE_SIZE")
             .ok()
             .and_then(|v| v.trim().parse::<usize>().ok())
-            .unwrap_or(24)
+            .unwrap_or(96)
     }
 
     /// Mark a digest as never-evict.  Called before the key exists: the
@@ -277,6 +291,13 @@ impl RecursionPkCache {
         match self.entries.get(key) {
             Some(v) => {
                 self.hits += 1;
+                // Touch: a hit makes this the most recently used key.  The
+                // order holds at most the cap's worth of digests, so the
+                // linear scan is nothing next to the node it serves.
+                if let Some(pos) = self.order.iter().position(|k| k == key) {
+                    self.order.remove(pos);
+                    self.order.push_back(*key);
+                }
                 Some(Arc::clone(v))
             }
             None => {
@@ -300,9 +321,9 @@ impl RecursionPkCache {
         let value = Arc::new((pk, vk));
         self.entries.insert(key, Arc::clone(&value));
         self.order.push_back(key);
-        // Evict in insertion order, skipping pinned digests.  A cache made
-        // entirely of pinned entries would spin here, so the walk gives up
-        // once it has seen every entry.
+        // Evict least recently used first, skipping pinned digests.  A cache
+        // made entirely of pinned entries would spin here, so the walk gives
+        // up once it has seen every entry.
         let mut examined = 0usize;
         while self.order.len() > Self::capacity() && examined < self.order.len() {
             let Some(old) = self.order.pop_front() else { break };
@@ -402,11 +423,12 @@ impl RecursionProgramCache {
     /// | 128 / 128 | 154.96 +/- 6.14 s (-14.0%) | 292.8 GB |
     ///
     /// The PROGRAM cache is the whole win: it buys 78% of what raising both
-    /// buys, for +27.7 GB against +145.6 GB. The pk cache stays at 24 -- a
-    /// preprocessed pk is ~2.4 GiB, so its extra 64 entries cost +118 GB to
-    /// buy the last 3.1 points, which is not a trade worth making. Raise it
-    /// only on a host with memory to burn, via
-    /// `ZIREN_RECURSION_PK_CACHE_SIZE`.
+    /// buys, for +27.7 GB against +145.6 GB. On that measurement the pk cache
+    /// stayed at 24. It has since been raised to hold a block's working set
+    /// (see [`RecursionPkCache::capacity`]): a PERSISTENT prover — the
+    /// multi-GPU core workers — re-proves block after block, and at 24 every
+    /// repeated block paid a full `setup` per normalize node again, which the
+    /// single-block measurement here could not see.
     ///
     /// A cache cannot change what is proven, and does not: all 12 runs across
     /// all three caps emitted one identical compress digest.
@@ -417,7 +439,9 @@ impl RecursionProgramCache {
     /// walks its layers in order, cycling through more distinct shapes than the
     /// cache holds, and that is the pattern for which LRU evicts exactly the
     /// entry wanted next.  The way out is fewer distinct shapes, not a
-    /// different eviction order.
+    /// different eviction order.  (The pk cache is LRU because its cap sits
+    /// ABOVE the per-block working set, where the order only decides which of
+    /// an EARLIER block's keys go when the corpus drifts.)
     fn capacity() -> usize {
         std::env::var("ZIREN_RECURSION_PROGRAM_CACHE_SIZE")
             .ok()
