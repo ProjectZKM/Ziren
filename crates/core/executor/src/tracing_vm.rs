@@ -579,6 +579,67 @@ mod tests {
         }
     }
 
+    /// A chunk whose end lands inside an unconstrained block still replays.
+    ///
+    /// `enter_unconstrained` PARKS the live record in `unconstrained_state` and
+    /// keeps incrementing the clock, so a replay bounded by `max_cycles` used to
+    /// abort inside the block and hand back an EMPTY record for a shard that had
+    /// really executed millions of cycles. Measured on reth: 4 of 126 chunks,
+    /// with the oracle 99.97% consumed and `exit_reason="clk_end"`.
+    ///
+    /// This is the guard for that: the unconstrained program's chunks must
+    /// replay to the same events as running it straight through, and in
+    /// particular none of them may come back empty.
+    #[test]
+    fn chunks_ending_in_unconstrained_still_replay() {
+        use crate::minimal_trace::MinimalTrace;
+        use crate::Executor;
+
+        let program = crate::programs::tests::unconstrained_program();
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 1 << 12;
+
+        let mut a = Executor::new(program.clone(), opts);
+        a.run().expect("sequential run");
+        let records_a = std::mem::take(&mut a.records);
+
+        let mut b = Executor::new(program.clone(), opts);
+        b.minimal_trace_collector = Some(MinimalTrace::default());
+        let mut chunks = Vec::new();
+        loop {
+            let (_state, done) = b.execute_state(false).expect("execute_state");
+            if done {
+                b.seal_minimal_trace_final_memory();
+            }
+            chunks.append(&mut b.drain_sealed_chunks());
+            if done {
+                break;
+            }
+        }
+
+        let program = Arc::new(program);
+        for (i, c) in chunks.iter().enumerate() {
+            let r = trace_chunk(program.clone(), opts, c, None).expect("trace_chunk");
+            assert!(
+                !r.cpu_events.is_empty(),
+                "chunk {i} ({} cycles) replayed to an EMPTY record — the bound fired \
+                 inside an unconstrained block and the parked record was lost",
+                c.num_cycles()
+            );
+        }
+
+        let trace = MinimalTrace { chunks, ..Default::default() };
+        let records_b = drive_tracing_vm_parallel(program, opts, &trace).expect("replay");
+        let sum = |rs: &[crate::ExecutionRecord], f: fn(&crate::ExecutionRecord) -> usize| {
+            rs.iter().map(f).sum::<usize>()
+        };
+        assert_eq!(
+            sum(&records_a, |r| r.cpu_events.len()),
+            sum(&records_b, |r| r.cpu_events.len()),
+            "cpu event count"
+        );
+    }
+
     /// `trace_chunk` on each chunk in turn == the parallel driver's records.
     ///
     /// The distributed path replays ONE chunk per worker with nothing else in

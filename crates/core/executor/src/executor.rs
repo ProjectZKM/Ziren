@@ -2836,8 +2836,20 @@ impl<'a> Executor<'a> {
         self.state.global_clk += 1;
 
         // If the cycle limit is exceeded, return an error.
+        //
+        // Never mid-unconstrained. `enter_unconstrained` PARKS the live record
+        // in `unconstrained_state` and only `exit_unconstrained` puts it back,
+        // so aborting inside the block throws the shard's whole record away --
+        // the caller gets an empty record for a shard that really executed. The
+        // clock is rolled back on exit too, so a block near the bound pushes
+        // `global_clk` transiently past it and trips this on cycles that never
+        // counted.
+        //
+        // It is also where a shard boundary could never fall: `execute`'s split
+        // is guarded by `!self.unconstrained` for the same reason. Deferring to
+        // the end of the block matches that, and blocks are bounded.
         if let Some(max_cycles) = self.max_cycles {
-            if self.state.global_clk >= max_cycles {
+            if self.state.global_clk >= max_cycles && !self.unconstrained {
                 return Err(ExecutionError::ExceededCycleLimit(max_cycles));
             }
         }
