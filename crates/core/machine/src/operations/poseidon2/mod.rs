@@ -15,7 +15,7 @@ pub const RATE: usize = WIDTH / 2;
 pub const NUM_EXTERNAL_ROUNDS: usize = 8;
 
 /// The number of internal rounds.
-pub const NUM_INTERNAL_ROUNDS: usize = 13;
+pub const NUM_INTERNAL_ROUNDS: usize = 20;
 
 /// The total number of rounds.
 pub const NUM_ROUNDS: usize = NUM_EXTERNAL_ROUNDS + NUM_INTERNAL_ROUNDS;
