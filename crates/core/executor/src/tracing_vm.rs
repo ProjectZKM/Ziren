@@ -160,11 +160,29 @@ impl<'a> TracingVM<'a> {
             }
         }
         // Seed the shared streams at the chunk-start cursor positions.
-        let stream_prerecorded = !input_stream.is_empty();
-        if stream_prerecorded {
-            state.input_stream = input_stream.to_vec();
-            state.input_stream_ptr = chunk.input_stream_ptr as usize;
-        }
+        //
+        // A chunk that carries its own hint window is seeded from THAT, cursor
+        // at 0. The whole-stream branch below copies the entire program's
+        // stream into every worker, which is O(workers x program) host memory
+        // for data each worker reads a few entries of; the slice is the window
+        // this chunk actually consumes. `Some(vec![])` still means
+        // prerecorded -- a chunk that consumed no hints must not re-run the
+        // hint and hook syscalls.
+        let stream_prerecorded = match chunk.input_stream_slice.as_ref() {
+            Some(slice) => {
+                state.input_stream = slice.clone();
+                state.input_stream_ptr = 0;
+                true
+            }
+            None => {
+                let prerecorded = !input_stream.is_empty();
+                if prerecorded {
+                    state.input_stream = input_stream.to_vec();
+                    state.input_stream_ptr = chunk.input_stream_ptr as usize;
+                }
+                prerecorded
+            }
+        };
         if !proof_stream.is_empty() {
             state.proof_stream = proof_stream.to_vec();
             state.proof_stream_ptr = chunk.proof_stream_ptr as usize;
@@ -467,6 +485,129 @@ mod tests {
     /// production producer in `prove.rs` uses `execute_state` which
     /// runs in `ExecutorMode::Checkpoint`, NOT `Trace`. The mem_reads
     /// oracle population in `mr`/`mw` is gated only on
+    /// Every chunk's captured hint window must equal the same window of the
+    /// finished stream.
+    ///
+    /// This is the invariant that makes streaming possible at all: the
+    /// producer commits to `[ptr_i, ptr_i+1)` when chunk `i` closes, long
+    /// before the program ends, and that is only sound because nothing
+    /// rewrites the stream behind the cursor. If a future change makes a
+    /// syscall insert before the cursor, this is where it surfaces.
+    #[test]
+    fn hint_slices_match_the_finished_stream() {
+        use crate::instruction::Instruction;
+        use crate::minimal_trace::MinimalTrace;
+        use crate::opcode::Opcode;
+        use crate::Executor;
+
+        let pc_base = 0x1000_0000u32;
+        let insns: Vec<Instruction> =
+            (0..4000).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 1 << 10;
+        let mut exec = Executor::new(Program::new(insns, pc_base, pc_base), opts);
+        exec.minimal_trace_collector = Some(MinimalTrace::default());
+        while !exec.execute_state(false).expect("execute_state").1 {}
+        exec.seal_minimal_trace_final_memory();
+        let stream = exec.state.input_stream.clone();
+        let chunks = exec.minimal_trace_collector.take().unwrap().chunks;
+
+        assert!(chunks.len() > 1, "test program produced only {} chunk(s)", chunks.len());
+        for (i, c) in chunks.iter().enumerate() {
+            let Some(slice) = c.input_stream_slice.as_ref() else {
+                // Only the terminal chunk may still be open-ended; every chunk
+                // sealed by a `bump_record` must have committed its window.
+                assert_eq!(i, chunks.len() - 1, "chunk {i} sealed without a hint window");
+                continue;
+            };
+            let from = c.input_stream_ptr as usize;
+            let to = (from + slice.len()).min(stream.len());
+            assert_eq!(
+                slice.as_slice(),
+                &stream[from..to],
+                "chunk {i}: captured hint window differs from the finished stream"
+            );
+        }
+    }
+
+    /// Streaming and batched production must yield the SAME chunk sequence.
+    ///
+    /// The streaming producer is only a safe swap for the batched one if
+    /// draining after every `execute_state` changes nothing but WHEN a chunk
+    /// becomes available -- so this runs one program both ways and compares the
+    /// sealed sequences field by field, `shard_index` included (the field a
+    /// naive drain silently restarts at 0, because it used to be
+    /// `chunks.len()`).
+    #[test]
+    fn streamed_chunks_match_batched_chunks() {
+        use crate::instruction::Instruction;
+        use crate::minimal_trace::MinimalTrace;
+        use crate::opcode::Opcode;
+        use crate::Executor;
+
+        fn program() -> Program {
+            let pc_base = 0x1000_0000u32;
+            // Enough cycles to cross several shard boundaries at a small
+            // shard size, so there is more than one chunk to compare.
+            let insns: Vec<Instruction> = (0..4000)
+                .map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true))
+                .collect();
+            Program::new(insns, pc_base, pc_base)
+        }
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 1 << 10;
+
+        // Batched: run to completion, then take the whole collector.
+        let mut exec = Executor::new(program(), opts);
+        exec.minimal_trace_collector = Some(MinimalTrace::default());
+        while !exec.execute_state(false).expect("execute_state").1 {}
+        exec.seal_minimal_trace_final_memory();
+        let batched = exec.minimal_trace_collector.take().unwrap().chunks;
+
+        // Streamed: drain after every turn, and once more after the seal.
+        let mut exec = Executor::new(program(), opts);
+        exec.minimal_trace_collector = Some(MinimalTrace::default());
+        let mut streamed = Vec::new();
+        loop {
+            let (_state, done) = exec.execute_state(false).expect("execute_state");
+            // Seal BEFORE the final drain, or the terminal chunk leaves without
+            // its final-memory image. See `drain_sealed_chunks`.
+            if done {
+                exec.seal_minimal_trace_final_memory();
+            }
+            streamed.append(&mut exec.drain_sealed_chunks());
+            if done {
+                break;
+            }
+        }
+        assert!(
+            exec.minimal_trace_collector.as_ref().unwrap().chunks.is_empty(),
+            "streaming left chunks behind in the collector"
+        );
+
+        assert_eq!(streamed.len(), batched.len(), "chunk count differs");
+        assert!(batched.len() > 1, "test program produced only {} chunk(s)", batched.len());
+        for (i, (st, ba)) in streamed.iter().zip(batched.iter()).enumerate() {
+            assert_eq!(st.shard_index, ba.shard_index, "chunk {i}: shard_index");
+            assert_eq!(st.pc_start, ba.pc_start, "chunk {i}: pc_start");
+            assert_eq!(st.clk_start, ba.clk_start, "chunk {i}: clk_start");
+            assert_eq!(st.clk_end, ba.clk_end, "chunk {i}: clk_end");
+            assert_eq!(st.current_shard, ba.current_shard, "chunk {i}: current_shard");
+            assert_eq!(st.start_registers, ba.start_registers, "chunk {i}: start_registers");
+            assert_eq!(
+                st.start_register_records, ba.start_register_records,
+                "chunk {i}: start_register_records"
+            );
+            assert_eq!(st.input_stream_ptr, ba.input_stream_ptr, "chunk {i}: input_stream_ptr");
+            assert_eq!(&*st.mem_reads, &*ba.mem_reads, "chunk {i}: mem_reads oracle");
+            assert_eq!(st.final_memory, ba.final_memory, "chunk {i}: final_memory");
+            assert_eq!(
+                st.final_uninit_memory, ba.final_uninit_memory,
+                "chunk {i}: final_uninit_memory"
+            );
+        }
+    }
+
     /// `!self.unconstrained` (no mode check), so it MUST work in
     /// Checkpoint mode for the producer wiring to be useful. This test
     /// runs a synthetic loadful program through execute_state with
@@ -756,6 +897,7 @@ mod tests {
 
         let mut vm = TracingVM::new(program.clone(), opts, &mut record);
         let chunk = TraceChunk {
+            input_stream_slice: None,
             shard_index: 0,
             start_registers: vec![0u32; 36],
             start_register_records: Vec::new(),

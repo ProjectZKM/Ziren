@@ -1306,6 +1306,7 @@ mod platform {
             .collect();
 
         crate::minimal_trace::TraceChunk {
+            input_stream_slice: None,
             shard_index,
             start_registers,
             // JIT path carries value-only registers (no shard/timestamp).

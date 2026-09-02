@@ -2929,6 +2929,16 @@ impl<'a> Executor<'a> {
                 let drained: Vec<crate::minimal_trace::MemValue> =
                     std::mem::take(&mut self.recording_chunk_mem_reads);
                 prev.mem_reads = std::sync::Arc::from(drained);
+                // The hint window this chunk consumed. Final as of now: the
+                // cursor has passed it, and neither `FD_HINT` (pushes at the
+                // end) nor a hook (splices at the cursor) rewrites behind it.
+                let from = prev.input_stream_ptr as usize;
+                let to = self.state.input_stream_ptr.min(self.state.input_stream.len());
+                prev.input_stream_slice = Some(if from < to {
+                    self.state.input_stream[from..to].to_vec()
+                } else {
+                    Vec::new()
+                });
             } else {
                 // First bump: no prior chunk to seal. The current
                 // recording buffer accumulated reads from before chunk 0
@@ -2939,13 +2949,14 @@ impl<'a> Executor<'a> {
             // Open the next chunk. clk_end is finalized at the next bump
             // (or at the end of execution via finalize_minimal_trace).
             trace.chunks.push(TraceChunk {
-                shard_index: trace.chunks.len() as u32,
+                shard_index: trace.next_shard_index(),
                 start_registers: next_registers,
                 start_register_records: next_register_records,
                 pc_start: next_chunk_pc,
                 clk_start: next_chunk_clk,
                 clk_end: u64::MAX, // sealed at next bump or finalize
                 current_shard: next_current_shard,
+                input_stream_slice: None,
                 input_stream_ptr: next_input_ptr,
                 proof_stream_ptr: next_proof_ptr,
                 public_values_stream_ptr: next_pv_ptr,
@@ -3028,6 +3039,64 @@ impl<'a> Executor<'a> {
                 last.final_uninit_memory = final_uninit;
             }
         }
+    }
+
+    /// Take every chunk that is already SEALED, leaving the still-open one in
+    /// the collector.
+    ///
+    /// This is the streaming half of the minimal-trace producer, and the whole
+    /// reason it exists: the batched path materialises every chunk (and, in the
+    /// consumer, every `ExecutionRecord`) before any of them is used, which is
+    /// a whole-program peak nobody needs. Draining after each
+    /// [`Self::execute_state`] hands a shard's chunk downstream the moment its
+    /// boundary is crossed and bounds the live set by the dispatch window
+    /// instead of the program length.
+    ///
+    /// A chunk is sealed once the NEXT `bump_record` patches its `clk_end`, so
+    /// the open chunk is always the last one.
+    ///
+    /// # Ordering -- the terminal chunk
+    ///
+    /// When `execute_state` reports `done`, call
+    /// [`Self::seal_minimal_trace_final_memory`] BEFORE the final drain:
+    ///
+    /// ```ignore
+    /// loop {
+    ///     let (_state, done) = exec.execute_state(false)?;
+    ///     if done { exec.seal_minimal_trace_final_memory(); }
+    ///     ship(exec.drain_sealed_chunks());
+    ///     if done { break; }
+    /// }
+    /// ```
+    ///
+    /// The last turn can leave the terminal chunk already sealed by a trailing
+    /// `bump_record`, and `seal_minimal_trace_final_memory` stamps the
+    /// whole-memory image onto `chunks.last_mut()` -- so draining first hands
+    /// out a terminal chunk with an EMPTY `final_memory`, and the replay then
+    /// silently emits no global memory init/finalize events for the last shard.
+    ///
+    /// Degenerate zero-cycle chunks are dropped here on the same rule
+    /// `MinimalTrace::finalize` uses, but they still consume a `shard_index`,
+    /// so an index is skipped rather than reused -- exactly what the batched
+    /// path's `retain` does.
+    ///
+    /// Returns an empty `Vec` when the collector is disabled.
+    pub fn drain_sealed_chunks(&mut self) -> Vec<crate::minimal_trace::TraceChunk> {
+        let Some(trace) = self.minimal_trace_collector.as_mut() else {
+            return Vec::new();
+        };
+        let keep =
+            usize::from(trace.chunks.last().is_some_and(|c| c.clk_end == u64::MAX));
+        if trace.chunks.len() <= keep {
+            return Vec::new();
+        }
+        let still_open = trace.chunks.split_off(trace.chunks.len() - keep);
+        let mut sealed = std::mem::replace(&mut trace.chunks, still_open);
+        // Count what LEAVES the vec, degenerate chunks included, so the indices
+        // the next stamp hands out continue the stamped sequence.
+        trace.emitted += sealed.len() as u32;
+        sealed.retain(|c| c.clk_end > c.clk_start);
+        sealed
     }
 
     /// Execute up to `self.shard_batch_size` cycles, returning the events emitted and whether the
@@ -3127,7 +3196,7 @@ impl<'a> Executor<'a> {
         // Open chunk 0 for the collector. Subsequent
         // bump_record calls seal the open chunk and open the next.
         if let Some(trace) = self.minimal_trace_collector.as_mut() {
-            if trace.chunks.is_empty() {
+            if trace.emitted == 0 && trace.chunks.is_empty() {
                 use crate::minimal_trace::TraceChunk;
                 let mut start_regs = vec![0u32; 36];
                 let mut start_reg_records = vec![(0u32, 0u32, 0u32); 36];
@@ -3145,6 +3214,7 @@ impl<'a> Executor<'a> {
                     clk_start: 0,
                     // chunk 0 starts at the program's first shard.
                     current_shard: self.state.current_shard,
+                    input_stream_slice: None,
                     input_stream_ptr: self.state.input_stream_ptr as u32,
                     proof_stream_ptr: self.state.proof_stream_ptr as u32,
                     public_values_stream_ptr: self.state.public_values_stream_ptr as u32,
@@ -3235,6 +3305,7 @@ impl<'a> Executor<'a> {
             // Interpreter-fallback: no JIT capture ran. Synthesise the
             // header from the pre/post snapshot; mem_reads stays empty.
             crate::minimal_trace::TraceChunk {
+                input_stream_slice: None,
                 shard_index: 0,
                 start_registers,
                 start_register_records: Vec::new(),

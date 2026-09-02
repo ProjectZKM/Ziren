@@ -133,6 +133,26 @@ pub struct TraceChunk {
     /// (hint) image `(addr, value)`, needed for `initialize` events of
     /// hint-written addresses. Terminal chunk only.
     pub final_uninit_memory: Vec<(u32, u32)>,
+    /// The hint-stream entries THIS chunk consumes, `None` on the legacy
+    /// whole-stream path.
+    ///
+    /// A streaming producer cannot hand out the finished `input_stream` with
+    /// chunk 0 -- the program has not run yet. It does not have to: `FD_HINT`
+    /// pushes at the END of the vector and a hook splices at the CURSOR
+    /// (`syscalls/write.rs`), so nothing ever rewrites a position the cursor
+    /// has already passed. The window `[input_stream_ptr, next chunk's
+    /// input_stream_ptr)` is therefore final the moment this chunk closes, and
+    /// is captured then.
+    ///
+    /// The consumer seeds this slice with the cursor at 0 instead of copying
+    /// the whole program's stream per worker -- which is also what makes the
+    /// replay's memory bounded rather than O(workers x program).
+    ///
+    /// `Some(vec![])` (a chunk that consumed no hints) is NOT the same as
+    /// `None`: it still means "prerecorded", so the replay must not re-run the
+    /// hint and hook syscalls.
+    #[serde(default)]
+    pub input_stream_slice: Option<Vec<Vec<u8>>>,
     /// Oracle of memory reads observed by Stage 1. May be empty when the
     /// JIT emit path was not configured to record memory; in that case
     /// Stage 2 falls back to direct guest-memory reads.
@@ -179,6 +199,7 @@ impl TraceChunk {
             public_values_stream_ptr: 0,
             final_memory: Vec::new(),
             final_uninit_memory: Vec::new(),
+            input_stream_slice: None,
             mem_reads: Arc::from(Vec::<MemValue>::new()),
         }
     }
@@ -203,6 +224,15 @@ pub struct MinimalTrace {
     pub public_values: Vec<u32>,
     /// Total cycle count, for sanity checks / accounting.
     pub total_cycles: u64,
+    /// How many chunks have already been drained by
+    /// [`crate::Executor::drain_sealed_chunks`].
+    ///
+    /// The streaming producer hands each sealed chunk to a worker and drops it,
+    /// so `chunks.len()` is no longer the number stamped so far and cannot
+    /// number the next one. This counter keeps `shard_index` monotonic across
+    /// drains; it stays `0` on the batched path, where nothing is removed, so
+    /// the indices there are byte-identical to before.
+    pub emitted: u32,
 }
 
 impl MinimalTrace {
@@ -210,6 +240,12 @@ impl MinimalTrace {
     #[must_use]
     pub fn num_shards(&self) -> usize {
         self.chunks.len()
+    }
+
+    /// Index the next stamped chunk should carry.
+    #[must_use]
+    pub fn next_shard_index(&self) -> u32 {
+        self.emitted + self.chunks.len() as u32
     }
 
     /// Append a chunk and update the running cycle accumulator.
