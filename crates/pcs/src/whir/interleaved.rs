@@ -113,7 +113,7 @@ where
     let base: Vec<F> = ef_mat
         .values
         .iter()
-        .flat_map(|e| e.as_basis_coefficients_slice().to_vec())
+        .flat_map(|e| e.as_basis_coefficients_slice().iter().copied())
         .collect();
     RowMajorMatrix::new(base, width * EF::DIMENSION)
 }
@@ -161,23 +161,42 @@ impl<EF: p3_field::Field> WhirFolder<EF> {
         batch: EF,
         start_coeff: EF,
     ) -> EF {
-        use p3_maybe_rayon::prelude::*;
-        // Per-constraint batching coefficients (the transcript order the
-        // serial loop produced) — tiny, serial.
-        let mut coeffs = Vec::with_capacity(points_lsb.len());
+        let (coeffs, next) = self.monomial_coeffs(values, batch, start_coeff);
+        self.absorb_monomial_tables(points_lsb, &coeffs);
+        next
+    }
+
+    /// The transcript half of [`Self::add_monomial_constraints`]: fold the
+    /// constraint VALUES into the claimed sum and return the per-constraint
+    /// batching coefficients (plus the next coefficient) — tiny, serial.
+    /// Split out so a device backend can take over the weight absorption.
+    pub fn monomial_coeffs(
+        &mut self,
+        values: &[EF],
+        batch: EF,
+        start_coeff: EF,
+    ) -> (Vec<EF>, EF) {
+        let mut coeffs = Vec::with_capacity(values.len());
         let mut coeff = start_coeff;
         for &val in values {
             coeffs.push(coeff);
             self.claimed_sum += coeff * val;
             coeff *= batch;
         }
-        // The weight absorption was the whir open's measured host hot spot:
-        // 84 round-0 STIR constraints x a 2^17 monomial table build + FMA
-        // each (~22M serial EF ops per shard, ~0.3-0.5 s x 304 shards on a
-        // combined reth).  Build the tables in parallel over constraints,
-        // then absorb in one parallel pass over the weight index.  Bitwise
-        // identical: EF addition is associative-exact (no floats), and the
-        // per-index accumulation order over j matches the serial loop's.
+        (coeffs, coeff)
+    }
+
+    /// The weight half of [`Self::add_monomial_constraints`]: absorb the
+    /// batched monomial tables into the weight.
+    ///
+    /// This was the whir open's measured host hot spot: 84 round-0 STIR
+    /// constraints x a 2^17 monomial table build + FMA each (~22M serial EF
+    /// ops per shard, ~0.3-0.5 s x 304 shards on a combined reth).  Build
+    /// the tables in parallel over constraints, then absorb in one parallel
+    /// pass over the weight index.  Bitwise identical: EF addition is
+    /// associative-exact (no floats), so any grouping gives the same value.
+    pub fn absorb_monomial_tables(&mut self, points_lsb: &[Vec<EF>], coeffs: &[EF]) {
+        use p3_maybe_rayon::prelude::*;
         let tables: Vec<Vec<EF>> =
             points_lsb.par_iter().map(|pt| mono_table_lsb(pt)).collect();
         for t in &tables {
@@ -190,7 +209,6 @@ impl<EF: p3_field::Field> WhirFolder<EF> {
             }
             *w += acc;
         });
-        coeff
     }
 }
 

@@ -321,9 +321,9 @@ pub(crate) fn generate_memory_trace<F: PrimeField32>(
     events: &[MemInstrEvent],
     padded_nb_rows: usize,
     num_cols: usize,
-    event_to_row: impl Fn(&MemInstrEvent, &mut [F], &mut HashMap<ByteLookupEvent, usize>) + Sync + Send,
+    event_to_row: impl Fn(&MemInstrEvent, &mut [F], &mut zkm_core_executor::events::ByteLookupMap) + Sync + Send,
     pad_row: impl Fn(&mut [F]) + Sync + Send,
-) -> (RowMajorMatrix<F>, Vec<HashMap<ByteLookupEvent, usize>>) {
+) -> (RowMajorMatrix<F>, Vec<zkm_core_executor::events::ByteLookupMap>) {
     let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
     let mut values = zeroed_f_vec(padded_nb_rows * num_cols);
 
@@ -332,7 +332,7 @@ pub(crate) fn generate_memory_trace<F: PrimeField32>(
         .enumerate()
         .par_bridge()
         .map(|(i, rows)| {
-            let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+            let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
             rows.chunks_mut(num_cols).enumerate().for_each(|(j, row)| {
                 let idx = i * chunk_size + j;
                 if idx < events.len() {

@@ -94,6 +94,114 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     fn open_queries(&mut self, indices: &[usize]) -> Vec<Vec<LeafOpening<F, MT>>> {
         indices.iter().map(|&i| self.open_query(i)).collect()
     }
+    /// Encode + merkle-commit the post-round-0 folded polynomial (the round-1
+    /// codeword) on the backend: pad by `1 << log_inv_rate`, interleaved DFT
+    /// with `1 << next_ff` EF values per leaf row, flatten each row to
+    /// `(1 << next_ff) * EF::DIMENSION` base values, commit.  MUST produce
+    /// the same commitment bytes as the host `mmcs.commit` on the same input
+    /// (the verifier cannot tell them apart).  `None` declines to the host
+    /// path; a backend that returns `Some` must also serve
+    /// [`Self::open_folded_queries`] for that tree.
+    fn commit_folded(&mut self, _next_ff: usize, _log_inv_rate: usize) -> Option<MT::Commitment> {
+        None
+    }
+    /// Round-1-codeword query openings against the tree built by
+    /// [`Self::commit_folded`] — one single-matrix [`LeafOpening`] per index,
+    /// shape-identical to the host `mmcs.open_batch` on the equivalent tree.
+    fn open_folded_queries(&mut self, _indices: &[usize]) -> Vec<LeafOpening<F, MT>> {
+        unreachable!("open_folded_queries without a commit_folded tree")
+    }
+    /// Absorb batched MONOMIAL constraints into `weight` on the backend:
+    /// `weight[i] += Σ_c coeffs[c] · Π_{k: bit k of i} points_lsb[c][n-1-k]`
+    /// (the [`crate::whir::interleaved::mono_table_lsb`] convention).  Field
+    /// ops are exact, so any evaluation order is value-identical to the host
+    /// tables.  `false` declines to the host absorption.
+    fn absorb_monomials(
+        &mut self,
+        _weight: &mut [EF],
+        _points_lsb: &[Vec<EF>],
+        _coeffs: &[EF],
+    ) -> bool {
+        false
+    }
+    /// Absorb batched EQ (OOD) constraints into `weight` on the backend:
+    /// `weight[i] += Σ_c coeffs[c] · eq(points[c], i)` with the host
+    /// [`crate::whir::sumcheck`] `eq_table` convention (LSB-first, bit k
+    /// pairs with coordinate k).  `false` declines to the host absorption.
+    fn absorb_ood(
+        &mut self,
+        _weight: &mut [EF],
+        _points_lsb: &[Vec<EF>],
+        _coeffs: &[EF],
+    ) -> bool {
+        false
+    }
+}
+
+/// Env-gated (`ZIREN_WHIR_OPEN_TIMING=1`) section timers for the stacked
+/// open — process-global sums, dumped every 32 opens.  Diagnostic only.
+mod open_timing {
+    use core::sync::atomic::{AtomicU64, Ordering};
+    pub static ENGINE: AtomicU64 = AtomicU64::new(0);
+    pub static FOLDS: AtomicU64 = AtomicU64::new(0);
+    pub static COMMITS: AtomicU64 = AtomicU64::new(0);
+    pub static OOD: AtomicU64 = AtomicU64::new(0);
+    pub static QUERIES: AtomicU64 = AtomicU64::new(0);
+    pub static CONSTRAINTS: AtomicU64 = AtomicU64::new(0);
+    pub static FINAL: AtomicU64 = AtomicU64::new(0);
+    // Sub-sections (NESTED inside QUERIES / FINAL — they double-count
+    // against their umbrella; umbrella minus subs = residual assembly).
+    pub static GRINDQ: AtomicU64 = AtomicU64::new(0);
+    pub static QR0: AtomicU64 = AtomicU64::new(0);
+    pub static QLATER: AtomicU64 = AtomicU64::new(0);
+    pub static FGRIND: AtomicU64 = AtomicU64::new(0);
+    pub static FOPEN: AtomicU64 = AtomicU64::new(0);
+    pub static CENGINE: AtomicU64 = AtomicU64::new(0);
+    pub static CHOST: AtomicU64 = AtomicU64::new(0);
+    // The PROLOGUE — everything before the round loop, previously untimed.
+    // The seven umbrellas above summed to 18.0 s against a census-measured
+    // 28.4 s of host time in `basefold_open`, so the largest single slice of
+    // the open was the part no timer covered.
+    pub static PEVALS: AtomicU64 = AtomicU64::new(0);
+    pub static PINIT: AtomicU64 = AtomicU64::new(0);
+    pub static OPENS: AtomicU64 = AtomicU64::new(0);
+
+    pub fn enabled() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var("ZIREN_WHIR_OPEN_TIMING").is_ok())
+    }
+
+    pub struct Timer(std::time::Instant, &'static AtomicU64);
+    impl Timer {
+        pub fn new(slot: &'static AtomicU64) -> Option<Self> {
+            enabled().then(|| Timer(std::time::Instant::now(), slot))
+        }
+    }
+    impl Drop for Timer {
+        fn drop(&mut self) {
+            self.1.fetch_add(self.0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+    }
+
+    pub fn tick_open() {
+        if !enabled() {
+            return;
+        }
+        let n = OPENS.fetch_add(1, Ordering::Relaxed) + 1;
+        if n % 32 == 0 {
+            let g = |a: &AtomicU64| a.load(Ordering::Relaxed) as f64 / 1e9;
+            eprintln!(
+                "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s | qgrind={:.2}s qr0={:.2}s qlater={:.2}s fgrind={:.2}s fopen={:.2}s cengine={:.2}s chost={:.2}s",
+                g(&ENGINE), g(&FOLDS), g(&COMMITS), g(&OOD), g(&QUERIES), g(&CONSTRAINTS), g(&FINAL),
+                g(&GRINDQ), g(&QR0), g(&QLATER), g(&FGRIND), g(&FOPEN),
+                g(&CENGINE), g(&CHOST)
+            );
+            eprintln!(
+                "#WHIR-OPEN-TIMING n={n} pevals={:.2}s pinit={:.2}s",
+                g(&PEVALS), g(&PINIT)
+            );
+        }
+    }
 }
 
 pub struct StackedWhirProver<F: p3_field::Field, EF, MT: Mmcs<F>, D> {
@@ -184,6 +292,7 @@ where
         debug_assert_eq!(stack_point.len(), lsh);
 
         // Per-round per-stripe claims at the stack point (echoed in the proof).
+        let _t_pevals = open_timing::Timer::new(&open_timing::PEVALS);
         let batch_evaluations: Vec<Vec<EF>> = if let Some(e) = engine.as_deref_mut() {
             e.stripe_evals(&stack_point)
         } else {
@@ -201,6 +310,8 @@ where
         // λ batches all stripes of all rounds into one virtual polynomial.
         // The claim is the same λ-combination of the echoed evaluations; the
         // materialized `virt` vector is host-mode only (the engine holds it).
+        drop(_t_pevals);
+        let _t_pinit = open_timing::Timer::new(&open_timing::PINIT);
         let lambda: EF = challenger.sample_algebra_element();
         let mut claim = EF::ZERO;
         let mut lam = EF::ONE;
@@ -276,8 +387,15 @@ where
 
         let mut prev_domain_log = (lsh - ff) + self.config.starting_log_inv_rate;
         // Round 0 queries the STRIPE trees (multi-matrix, base field); later
-        // rounds query the single folded EF codeword.
-        let mut prev_single: Option<MT::ProverData<RowMajorMatrix<F>>> = None;
+        // rounds query the single folded EF codeword.  The round-1 codeword's
+        // tree may live on the ENGINE (device commit); every later round's is
+        // a host tree.
+        enum PrevTree<D> {
+            Stripes,
+            Engine,
+            Host(D),
+        }
+        let mut prev_single: PrevTree<MT::ProverData<RowMajorMatrix<F>>> = PrevTree::Stripes;
 
         let mut round_sumcheck_polys: Vec<Vec<SumcheckPoly<EF>>> = Vec::new();
         let mut round_ood_answers: Vec<Vec<EF>> = Vec::new();
@@ -285,7 +403,13 @@ where
         let mut round_query_openings: Vec<MerkleOpening<F, MT>> = Vec::new();
         let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
 
+        drop(_t_pinit);
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
+            let _t_fold = open_timing::Timer::new(if r == 0 {
+                &open_timing::ENGINE
+            } else {
+                &open_timing::FOLDS
+            });
             let mut this_round_randomness = Vec::new();
             let polys = if r == 0 && engine.is_some() {
                 // First fold batch on the engine: SAME transcript as
@@ -332,27 +456,53 @@ where
                 break;
             }
 
+            drop(_t_fold);
+            let _t_commit = open_timing::Timer::new(&open_timing::COMMITS);
             // Commit the folded polynomial (single EF poly, interleaved).
             // Leaf width follows the NEXT round's folding factor - that
             // round's stir fold consumes one leaf per query.
             let next_ff = self.config.round_parameters[r + 1].folding_factor;
             let rem = folder.f_vec.len().trailing_zeros() as usize;
-            let width = 1usize << next_ff;
-            let mut padded = folder.f_vec.clone();
-            padded.resize(padded.len() << round_cfg.log_inv_rate, EF::ZERO);
-            let ef_mat =
-                ef_dft.dft_batch(RowMajorMatrix::new(padded, width)).to_row_major_matrix();
-            let base_vals: Vec<F> = ef_mat
-                .values
-                .iter()
-                .flat_map(|e| e.as_basis_coefficients_slice().to_vec())
-                .collect();
-            let leaves = RowMajorMatrix::new(base_vals, width * EF::DIMENSION);
             let this_domain_log = (rem - next_ff) + round_cfg.log_inv_rate;
-            let (commitment, this_data) = self.mmcs.commit(alloc::vec![leaves]);
-            challenger.observe(commitment.clone());
-            round_commitments.push(commitment);
+            // The ROUND-1 codeword (r == 0) is the big one and the engine
+            // still holds the folded vector device-side: let it encode +
+            // commit there.  A backend commitment is byte-identical to the
+            // host mmcs commit, so the transcript cannot tell.  Later
+            // rounds' codewords are 2^ff-times smaller - always host.
+            let engine_commit = if r == 0 {
+                engine
+                    .as_deref_mut()
+                    .and_then(|e| e.commit_folded(next_ff, round_cfg.log_inv_rate))
+            } else {
+                None
+            };
+            let this_tree = match engine_commit {
+                Some(commitment) => {
+                    challenger.observe(commitment.clone());
+                    round_commitments.push(commitment);
+                    PrevTree::Engine
+                }
+                None => {
+                    let width = 1usize << next_ff;
+                    let mut padded = folder.f_vec.clone();
+                    padded.resize(padded.len() << round_cfg.log_inv_rate, EF::ZERO);
+                    let ef_mat =
+                        ef_dft.dft_batch(RowMajorMatrix::new(padded, width)).to_row_major_matrix();
+                    let base_vals: Vec<F> = ef_mat
+                        .values
+                        .iter()
+                        .flat_map(|e| e.as_basis_coefficients_slice().iter().copied())
+                        .collect();
+                    let leaves = RowMajorMatrix::new(base_vals, width * EF::DIMENSION);
+                    let (commitment, this_data) = self.mmcs.commit(alloc::vec![leaves]);
+                    challenger.observe(commitment.clone());
+                    round_commitments.push(commitment);
+                    PrevTree::Host(this_data)
+                }
+            };
 
+            drop(_t_commit);
+            let _t_ood = open_timing::Timer::new(&open_timing::OOD);
             // Fresh OOD on the folded polynomial.
             let folded = Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1));
             let mut ood_points = Vec::with_capacity(round_cfg.ood_samples);
@@ -366,8 +516,13 @@ where
             }
             round_ood_answers.push(ood_answers.clone());
 
+            drop(_t_ood);
+            let _t_q = open_timing::Timer::new(&open_timing::QUERIES);
             // Query PoW + indices into the PREVIOUS codeword.
-            folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
+            {
+                let _t_g = open_timing::Timer::new(&open_timing::GRINDQ);
+                folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
+            }
             let mask = (1usize << prev_domain_log) - 1;
             let indices: Vec<usize> = (0..round_cfg.num_queries)
                 .map(|_| challenger.sample_bits(prev_domain_log) & mask)
@@ -382,97 +537,189 @@ where
             // then serve the loop from the batch.
             let mut engine_batch: Option<alloc::collections::VecDeque<Vec<LeafOpening<F, MT>>>> =
                 match (&prev_single, engine.as_deref_mut()) {
-                    (None, Some(e)) => Some(e.open_queries(&indices).into()),
+                    (PrevTree::Stripes, Some(e)) => Some(e.open_queries(&indices).into()),
                     _ => None,
                 };
+            // Round-1-codeword queries against an ENGINE-committed tree:
+            // fetched in one batched call, served from the queue below.
+            let mut engine_folded_batch: Option<
+                alloc::collections::VecDeque<LeafOpening<F, MT>>,
+            > = match (&prev_single, engine.as_deref_mut()) {
+                (PrevTree::Engine, Some(e)) => Some(e.open_folded_queries(&indices).into()),
+                _ => None,
+            };
+            let _t_qkind = open_timing::Timer::new(if matches!(prev_single, PrevTree::Stripes) {
+                &open_timing::QR0
+            } else {
+                &open_timing::QLATER
+            });
+            // PHASE 1 -- fetch each query's leaf openings, IN ORDER.  The
+            // engine serves them from a queue and the host path walks Merkle
+            // trees, so this half is inherently sequential.  It is also the
+            // cheap half: the cost of `qr0` is the combine below.
+            let stripes_mode = matches!(prev_single, PrevTree::Stripes);
+            let mut per_query: Vec<Vec<LeafOpening<F, MT>>> =
+                Vec::with_capacity(indices.len());
             for &idx in &indices {
-                let (virt_leaf, opened) = match &prev_single {
-                    None => {
-                        // Round 0: open every stripe row of every round tree
-                        // and λ-combine.  With an engine the openings come off
-                        // the device-resident trees; the λ-combination is the
-                        // same host arithmetic either way.
-                        let opened: Vec<LeafOpening<F, MT>> =
-                            if let Some(batch) = engine_batch.as_mut() {
-                                batch.pop_front().expect("one batch entry per query index")
-                            } else {
-                                let mut all = Vec::with_capacity(prover_data.len());
-                                for d in prover_data.iter() {
-                                    let opening = self.mmcs.open_batch(idx, &d.prover_data);
-                                    all.push(LeafOpening {
-                                        values: opening.opened_values,
-                                        proof: opening.opening_proof,
-                                    });
-                                }
-                                all
-                            };
-                        let mut virt_leaf =
-                            alloc::vec![EF::ZERO; 1usize << round_cfg.folding_factor];
-                        let mut lam = EF::ONE;
-                        for leaf in &opened {
-                            for stripe_row in &leaf.values {
-                                for (v, &st) in virt_leaf.iter_mut().zip(stripe_row.iter()) {
-                                    *v += lam * st;
-                                }
-                                lam *= lambda;
+                let opened: Vec<LeafOpening<F, MT>> = match &prev_single {
+                    PrevTree::Stripes => {
+                        // Round 0: open every stripe row of every round tree.
+                        // With an engine the openings come off the
+                        // device-resident trees.
+                        if let Some(batch) = engine_batch.as_mut() {
+                            batch.pop_front().expect("one batch entry per query index")
+                        } else {
+                            let mut all = Vec::with_capacity(prover_data.len());
+                            for d in prover_data.iter() {
+                                let opening = self.mmcs.open_batch(idx, &d.prover_data);
+                                all.push(LeafOpening {
+                                    values: opening.opened_values,
+                                    proof: opening.opening_proof,
+                                });
                             }
+                            all
                         }
-                        (virt_leaf, opened)
                     }
-                    Some(data) => {
+                    PrevTree::Host(data) => {
                         let opening = self.mmcs.open_batch(idx, data);
-                        let leaf = &opening.opened_values[0];
-                        let virt_leaf: Vec<EF> = leaf
-                            .chunks_exact(EF::DIMENSION)
-                            .map(|c| {
-                                EF::from_basis_coefficients_iter(c.iter().copied()).unwrap()
-                            })
-                            .collect();
-                        (
-                            virt_leaf,
-                            alloc::vec![LeafOpening {
-                                values: opening.opened_values,
-                                proof: opening.opening_proof,
-                            }],
-                        )
+                        alloc::vec![LeafOpening {
+                            values: opening.opened_values,
+                            proof: opening.opening_proof,
+                        }]
+                    }
+                    PrevTree::Engine => {
+                        let opening = engine_folded_batch
+                            .as_mut()
+                            .expect("PrevTree::Engine requires the batched openings")
+                            .pop_front()
+                            .expect("one batch entry per query index");
+                        alloc::vec![opening]
                     }
                 };
-                let stir = Mle::from_row_major(RowMajorMatrix::new(virt_leaf, 1))
-                    .eval_at::<EF>(&this_round_randomness)[0];
+                per_query.push(opened);
+            }
+
+            // PHASE 2 -- the lambda-combine and the MLE evaluation are pure
+            // field arithmetic over one query's leaves: independent across
+            // queries and touching no `Mmcs`.  Borrowing only `values` keeps
+            // `MT::Proof` out of the parallel walk, so no `Sync` bound has to
+            // be added to the signature.
+            let stir_values_new: Vec<EF> = {
+                use p3_maybe_rayon::prelude::*;
+                let value_views: Vec<Vec<&Vec<Vec<F>>>> = per_query
+                    .iter()
+                    .map(|leaves| leaves.iter().map(|l| &l.values).collect())
+                    .collect();
+                let ff_len = 1usize << round_cfg.folding_factor;
+                value_views
+                    .par_iter()
+                    .map(|leaves| {
+                        let virt_leaf: Vec<EF> = if stripes_mode {
+                            let mut acc = alloc::vec![EF::ZERO; ff_len];
+                            let mut lam = EF::ONE;
+                            for values in leaves.iter() {
+                                for stripe_row in values.iter() {
+                                    for (v, &st) in acc.iter_mut().zip(stripe_row.iter()) {
+                                        *v += lam * st;
+                                    }
+                                    lam *= lambda;
+                                }
+                            }
+                            acc
+                        } else {
+                            leaves[0][0]
+                                .chunks_exact(EF::DIMENSION)
+                                .map(|c| {
+                                    EF::from_basis_coefficients_iter(c.iter().copied()).unwrap()
+                                })
+                                .collect()
+                        };
+                        Mle::from_row_major(RowMajorMatrix::new(virt_leaf, 1))
+                            .eval_at::<EF>(&this_round_randomness)[0]
+                    })
+                    .collect()
+            };
+
+            for (&idx, stir) in indices.iter().zip(stir_values_new) {
                 stir_values.push(stir);
                 stir_points.push(map_to_pow_lsb(EF::from(g_prev.exp_u64(idx as u64)), rem));
-                for o in opened {
+            }
+            for leaves in per_query {
+                for o in leaves {
                     leaves_open.push(o);
                 }
             }
             round_query_openings.push(MerkleOpening { leaves: leaves_open });
 
+            drop(_t_qkind);
+            drop(_t_q);
+            let _t_c = open_timing::Timer::new(&open_timing::CONSTRAINTS);
             let round_batch: EF = challenger.sample_algebra_element();
-            folder.add_ood_constraints(&ood_points, &ood_answers, round_batch);
+            // OOD eq-table absorption goes to the backend when one is
+            // present (value-identical); the transcript half stays host.
+            let ood_coeffs = folder.ood_coeffs(&ood_answers, round_batch);
+            let ood_absorbed = {
+                let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
+                engine.as_deref_mut().map_or(false, |e| {
+                    e.absorb_ood(&mut folder.weight, &ood_points, &ood_coeffs)
+                })
+            };
+            if !ood_absorbed {
+                let _t_h = open_timing::Timer::new(&open_timing::CHOST);
+                folder.absorb_eq_tables(&ood_points, &ood_coeffs);
+            }
             let start_coeff = round_batch.exp_u64((ood_points.len() + 1) as u64);
-            folder.add_monomial_constraints(&stir_points, &stir_values, round_batch, start_coeff);
+            // The weight absorption goes to the backend when one is present
+            // (value-identical - field ops are exact in any order); the
+            // transcript half stays host either way.
+            let (mono_coeffs, _) =
+                folder.monomial_coeffs(&stir_values, round_batch, start_coeff);
+            let absorbed = {
+                let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
+                engine.as_deref_mut().map_or(false, |e| {
+                    e.absorb_monomials(&mut folder.weight, &stir_points, &mono_coeffs)
+                })
+            };
+            if !absorbed {
+                let _t_h = open_timing::Timer::new(&open_timing::CHOST);
+                folder.absorb_monomial_tables(&stir_points, &mono_coeffs);
+            }
 
             prev_domain_log = this_domain_log;
-            prev_single = Some(this_data);
+            prev_single = this_tree;
         }
 
+        let _t_final = open_timing::Timer::new(&open_timing::FINAL);
         // Final queries against the last committed codeword (or, when no round
         // ever commits, the stripe trees).
         let final_poly = folder.f_vec.clone();
-        let final_pow = ProofOfWork(challenger.grind(self.config.final_pow_bits));
+        let final_pow = {
+            let _t_g = open_timing::Timer::new(&open_timing::FGRIND);
+            ProofOfWork(challenger.grind(self.config.final_pow_bits))
+        };
         let final_mask = (1usize << prev_domain_log) - 1;
+        let _t_fopen = open_timing::Timer::new(&open_timing::FOPEN);
         let mut final_leaves = Vec::with_capacity(self.config.final_queries);
         for _ in 0..self.config.final_queries {
             let idx = challenger.sample_bits(prev_domain_log) & final_mask;
             match &prev_single {
-                Some(data) => {
+                PrevTree::Host(data) => {
                     let opening = self.mmcs.open_batch(idx, data);
                     final_leaves.push(LeafOpening {
                         values: opening.opened_values,
                         proof: opening.opening_proof,
                     });
                 }
-                None => {
+                PrevTree::Engine => {
+                    // Reachable only on a 2-round shape with a backend commit
+                    // (production is 3 rounds, so the final tree is host).
+                    let mut got = engine
+                        .as_deref_mut()
+                        .expect("PrevTree::Engine requires the engine")
+                        .open_folded_queries(&[idx]);
+                    final_leaves.push(got.pop().expect("one opening per index"));
+                }
+                PrevTree::Stripes => {
                     // Single-round shape: the final queries open the stripe
                     // trees directly.  The engine path pins num_rounds >= 2
                     // (production shape), so this arm stays host-only.
@@ -495,6 +742,11 @@ where
         let final_sumcheck_polys: Vec<SumcheckPoly<EF>> =
             round_sumcheck_polys.pop().unwrap_or_default();
 
+        {
+            drop(_t_fopen);
+            drop(_t_final);
+            open_timing::tick_open();
+        }
         StackedWhirProof {
             whir_proof: WhirProof {
                 round_sumcheck_polys,

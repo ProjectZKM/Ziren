@@ -118,7 +118,7 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
             .chunks(chunk_size)
             .par_bridge()
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {
                     blu.add_u16_range_check(event.message[0].try_into().unwrap());
                 });

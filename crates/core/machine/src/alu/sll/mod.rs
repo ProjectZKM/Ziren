@@ -197,7 +197,7 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             .shift_left_events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_SHIFT_LEFT_COLS];
                     let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();

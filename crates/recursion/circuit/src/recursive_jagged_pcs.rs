@@ -39,7 +39,7 @@
 //! Construction smoke tests cover the type composition.
 
 use p3_field::PrimeCharacteristicRing;
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter, SymbolicExt};
 
 use crate::challenger::FieldChallengerVariable;
 use crate::jagged_circuit::{JaggedPcsProofVariable, JaggedSumcheckEvalProof};
@@ -292,11 +292,20 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         let cube_log = z_row.len();
         builder.cycle_tracker_v2_exit();
         builder.cycle_tracker_v2_enter("row_count_le_cube".to_string());
-        for round in row_counts.iter() {
-            for &row_count in round.iter() {
+        // PARALLEL over chips.  Every guard is an independent
+        // `num2bits(row_count, cube_log + 1)` decomposition plus a product
+        // assert: it reads one witnessed felt, touches no accumulator, and
+        // draws nothing from the challenger, so the per-chip bodies commute
+        // and the walker is free to run them concurrently.  The count is one
+        // per chip per round (~100 for a compose child) and each body is
+        // ~25 ops, which makes this one of the larger straight-line stretches
+        // the recursion VM otherwise walks single-threaded.
+        row_counts
+            .iter()
+            .flat_map(|round| round.iter().copied())
+            .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, row_count| {
                 Self::assert_row_count_le_cube::<C>(builder, row_count, cube_log);
-            }
-        }
+            });
 
         // (6.6) MAIN-PADDING-COLUMN HEIGHT BIT-BOUND.
         //
@@ -377,6 +386,15 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
                 repeated_row_counts.extend(pads.iter().copied());
             }
         }
+        // NOT parallelized, deliberately.  The accumulator is pinned to
+        // `prefix_sum_felts` at every index by the assert below, so the chain
+        // COULD be rewritten as independent local checks
+        // `expected_{i+1} == expected_i + row_i`.  But there is one link per
+        // COLUMN, and `ir_par_map_collect` allocates a `DslIrBlock` per item:
+        // at this granularity that vector alone is multi-gigabyte and aborts
+        // the program build (measured — a 6.8 GB allocation failure).  Parallel
+        // blocks here have to stay per-CHIP (~100), the granularity every other
+        // parallel site in this file uses.
         let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
         for (row_count, expected) in repeated_row_counts.iter().zip(prefix_sum_felts.iter()) {
             builder.assert_felt_eq(acc, *expected);

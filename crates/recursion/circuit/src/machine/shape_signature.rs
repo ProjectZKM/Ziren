@@ -122,6 +122,30 @@ pub fn hash_shard_proof_structure<H: Hasher>(
     }
 }
 
+/// The same structural dimensions [`hash_shard_proof_structure`] hashes, as
+/// readable numbers instead of one opaque `u64`.
+///
+/// Diagnostic only, and called only behind `ZIREN_SHAPE_KEY_DIAG`: a shape-key
+/// mismatch between a pre-warmed dummy and the real node it was meant to serve
+/// is invisible in the hash, so this reports the components that feed it and
+/// lets the two be diffed field by field.
+pub fn describe_shard_proof_structure(
+    sp: &BasefoldShardProof<InnerVal, InnerChallenge>,
+) -> Vec<(&'static str, usize)> {
+    let lgkr = &sp.logup_gkr_proof;
+    vec![
+        ("public_values", sp.public_values.len()),
+        ("gkr_numerator", lgkr.circuit_output.numerator.len()),
+        ("gkr_round_proofs", lgkr.round_proofs.len()),
+        ("gkr_point", lgkr.logup_evaluations.point.len()),
+        ("gkr_chip_openings", lgkr.logup_evaluations.chip_openings.len()),
+        ("zc_univariate_polys", sp.zerocheck_proof.univariate_polys.len()),
+        ("zc_point", sp.zerocheck_proof.point_and_eval.0.len()),
+        ("opened_chips", sp.opened_values.chips.len()),
+        ("chip_cumulative_sums", sp.chip_cumulative_sums.len()),
+    ]
+}
+
 /// Hash the structural dimensions of a shard proof's jagged-BaseFold
 /// evaluation proof, in `Witnessable::write` order.
 ///

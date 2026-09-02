@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 
 use zkm_pcs::shard_level::types as st;
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter};
 
 use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::jagged_circuit::JaggedPcsProofVariable;
@@ -613,10 +613,14 @@ where
     let mut sorted_names: Vec<String> = chip_names.to_vec();
     sorted_names.sort();
 
+    // PARALLEL over chips.  Each body Horner-recomposes ONE chip's degree
+    // bits, projects with `ext2felt`, and re-decomposes with `num2bits_v2_f`
+    // (~22 + ~22 ops); the chain inside a chip is real, but nothing crosses
+    // between chips, so the ~100 per-chip stretches need not run single-file.
     sorted_names
         .into_iter()
         .enumerate()
-        .map(|(idx, name)| {
+        .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (idx, name)| {
             // The witnessed per-chip degree bits (big-endian bits of the
             // RAW height).  Fall back to a single zero stub when absent
             // (empty/legacy proofs) → height = 0.
@@ -653,7 +657,6 @@ where
             bits.reverse();
             (name, bits)
         })
-        .collect()
 }
 
 /// Per-chip HEIGHT felts (`2^log_h`) derived from the WITNESSED per-chip
@@ -682,10 +685,12 @@ where
 
     let mut sorted_names: Vec<String> = chip_names.to_vec();
     sorted_names.sort();
+    // PARALLEL over chips — same independence as
+    // `chip_height_bits_from_opened_degrees` above.
     sorted_names
         .into_iter()
         .enumerate()
-        .map(|(idx, _name)| {
+        .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (idx, _name)| {
             let degree: &[Ext<C::F, C::EF>] =
                 opened_values.chips.get(idx).map(|c| c.degree.as_slice()).unwrap_or(&[]);
             if degree.is_empty() {
@@ -699,7 +704,6 @@ where
             }
             C::ext2felt(builder, acc)[0]
         })
-        .collect()
 }
 
 #[cfg(test)]

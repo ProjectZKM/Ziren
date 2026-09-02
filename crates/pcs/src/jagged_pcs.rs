@@ -1167,7 +1167,7 @@ pub mod jagged {
         P,
     )
     where
-        Ch: FieldChallenger<InnerVal>,
+        Ch: FieldChallenger<InnerVal> + 'static,
     {
         // (4) Sample `z_col` (one challenge per column variable) at the
         // verifier-matching transcript position — after the commit observe,

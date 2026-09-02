@@ -9,7 +9,6 @@ use crate::{air::Block, Address};
 #[derive(Debug, Clone, Default, Copy)]
 pub struct MemoryEntry<F> {
     pub val: Block<F>,
-    pub mult: F,
 }
 
 pub trait Memory<F> {
@@ -43,7 +42,7 @@ pub trait Memory<F> {
     ///
     /// # Panics
     /// Panics if the address is already assigned.
-    fn mw(&mut self, addr: Address<F>, val: Block<F>, mult: F) -> &mut MemoryEntry<F>;
+    fn mw(&mut self, addr: Address<F>, val: Block<F>, _mult: F) -> &mut MemoryEntry<F>;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -61,13 +60,13 @@ impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
         }
     }
 
-    fn mw(&mut self, addr: Address<F>, val: Block<F>, mult: F) -> &mut MemoryEntry<F> {
+    fn mw(&mut self, addr: Address<F>, val: Block<F>, _mult: F) -> &mut MemoryEntry<F> {
         let index = addr.as_usize();
         match self.0.entry(index) {
             Entry::Occupied(entry) => {
                 panic!("tried to write to assigned address {}: {:?}", index, entry.get())
             }
-            Entry::Vacant(entry) => entry.insert(MemoryEntry { val, mult }),
+            Entry::Vacant(entry) => entry.insert(MemoryEntry { val }),
         }
     }
 }
@@ -91,7 +90,7 @@ impl<F: PrimeField64> Memory<F> for MemVec<F> {
         }
     }
 
-    fn mw(&mut self, addr: Address<F>, val: Block<F>, mult: F) -> &mut MemoryEntry<F> {
+    fn mw(&mut self, addr: Address<F>, val: Block<F>, _mult: F) -> &mut MemoryEntry<F> {
         let addr_usize = addr.as_usize();
         self.0.extend(std::iter::repeat_n(None, (addr_usize + 1).saturating_sub(self.0.len())));
         match &mut self.0[addr_usize] {
@@ -99,7 +98,7 @@ impl<F: PrimeField64> Memory<F> for MemVec<F> {
                 "tried to write to assigned address: {entry:?}\nbacktrace: {:?}",
                 backtrace::Backtrace::new()
             ),
-            entry @ None => entry.insert(MemoryEntry { val, mult }),
+            entry @ None => entry.insert(MemoryEntry { val }),
         }
     }
 }
@@ -123,16 +122,14 @@ unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
 ///
 /// Additive type, not yet wired into the runtime.
 ///
-/// `MemoryEntry` still carries `mult` for binary compatibility with the
-/// existing chip preprocessed layout. Audit established that
-/// `MemoryEntry::mult` is **never read** at runtime — chips read mult
-/// from the instruction-side preprocessed columns, not from
-/// `MemoryEntry`. The `mr_mult` decrement was therefore dead, and was
-/// removed (along with `mr_mult` from the `Memory` trait). `ParMemVec`
-/// consequently needs no thread-safe mult-update path: with no shared
-/// counter to alias, parallel reads of disjoint addresses are race-free
-/// without atomics. `mr_unchecked` returns `&MemoryEntry<F>` and only
-/// `val` is consumed downstream.
+/// `MemoryEntry` is the VALUE alone — 16 bytes, the exact shape SP1's
+/// recursion memory uses.  The `mult` field it used to carry was never
+/// read at runtime (chips read multiplicities from the instruction-side
+/// preprocessed columns), so storing it cost a fifth of every entry's
+/// memory traffic in a VM measured bandwidth-bound; the `mw` APIs keep an
+/// ignored `_mult` parameter so the fifteen instruction-arm call sites
+/// stay untouched.  With no shared counter to alias, parallel reads of
+/// disjoint addresses are race-free without atomics.
 #[derive(Debug, Default)]
 pub struct ParMemVec<F>(Vec<SyncUnsafeCell<MaybeUninit<MemoryEntry<F>>>>);
 
@@ -181,22 +178,22 @@ impl<F: PrimeField64> ParMemVec<F> {
     }
 
     /// Write to a cell. Caller-asserted exclusive access via `&mut self`.
-    pub fn mw(&mut self, addr: Address<F>, val: Block<F>, mult: F) {
+    pub fn mw(&mut self, addr: Address<F>, val: Block<F>, _mult: F) {
         // SAFETY: exclusive access via `&mut self` precludes any data race.
-        unsafe { self.mw_unchecked(addr, val, mult) }
+        unsafe { self.mw_unchecked(addr, val, _mult) }
     }
 
     /// # Safety
     /// Caller must ensure no other thread reads OR writes to the same
     /// address concurrently. Each address must be written exactly once
     /// (RawProgram single-write invariant).
-    pub unsafe fn mw_unchecked(&self, addr: Address<F>, val: Block<F>, mult: F) {
+    pub unsafe fn mw_unchecked(&self, addr: Address<F>, val: Block<F>, _mult: F) {
         match self.0.get(addr.as_usize()) {
             Some(cell) => {
                 // SAFETY: per the RawProgram disjoint-address invariant,
                 // no other thread aliases this cell.
                 let slot: &mut MaybeUninit<MemoryEntry<F>> = unsafe { &mut *cell.0.get() };
-                slot.write(MemoryEntry { val, mult });
+                slot.write(MemoryEntry { val });
             }
             None => panic!(
                 "ParMemVec::mw_unchecked: address {} out of bounds (len={})",
@@ -227,7 +224,6 @@ mod par_mem_vec_tests {
             mem.mw_unchecked(addr, val, k(2));
             let entry = mem.mr_unchecked(addr);
             assert_eq!(entry.val.0[0], k(7));
-            assert_eq!(entry.mult, k(2));
         }
     }
 

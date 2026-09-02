@@ -57,7 +57,7 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
             .enumerate()
             .par_bridge()
             .map(|(i, rows)| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 rows.chunks_mut(NUM_BRANCH_COLS).enumerate().for_each(|(j, row)| {
                     let idx = i * chunk_size + j;
                     let cols: &mut BranchColumns<F> = row.borrow_mut();
@@ -102,7 +102,7 @@ impl BranchChip {
         &self,
         event: &BranchEvent,
         cols: &mut BranchColumns<F>,
-        blu: &mut HashMap<ByteLookupEvent, usize>,
+        blu: &mut zkm_core_executor::events::ByteLookupMap,
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {

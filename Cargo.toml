@@ -50,6 +50,7 @@ debug-assertions = true
 
 
 [workspace.dependencies]
+rustc-hash = "2.1.0"
 p3-air = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
 p3-field = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
 p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }

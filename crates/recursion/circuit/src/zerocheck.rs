@@ -22,7 +22,7 @@ use p3_field::{Algebra, PrimeCharacteristicRing, TwoAdicField};
 use zkm_pcs::folder::PairWindow;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError};
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter, SymbolicExt};
 
 use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
@@ -465,7 +465,11 @@ where
         } else {
             gkr_evaluations.point.iter().map(|x| (*x).into()).collect()
         };
-        let zerocheck_eq_val = eq_eval::<C>(&gkr_point_symbolic, &point_symbolic);
+        // Materialized ONCE: this factor multiplies every chip's
+        // contribution, so leaving it symbolic inlined the whole
+        // `eq_eval` product into all N per-chip expressions.
+        let zerocheck_eq_val: Ext<C::F, C::EF> =
+            builder.eval(eq_eval::<C>(&gkr_point_symbolic, &point_symbolic));
 
         // (3) Pre-compute the GKR-batch-open challenge powers,
         // sized for the widest chip's combined preprocessed+main
@@ -488,9 +492,19 @@ where
         // claimed evaluation at the sumcheck-reduced point).
         let mut rlc_eval: Ext<C::F, C::EF> = zero_ext;
 
-        for (_idx, (chip, opening)) in
-            shard_chips.iter().zip(opened_values.chips.iter()).enumerate()
-        {
+        // PARALLEL per-chip contributions.  Everything here is pure
+        // compute — `alpha`, `lambda` and `zerocheck_eq_val` are drawn
+        // above and the body emits no challenger op — and the bulk of it
+        // is `eval_constraints_basefold`, the single largest instruction
+        // block of a recursion program.  Each chip becomes its own
+        // `SeqBlock::Parallel` sub-program, which the recursion VM walks
+        // with rayon; the cross-chip Horner fold stays serial below and
+        // consumes the contributions in chip order, so the accumulated
+        // RLC is unchanged.
+        let chip_contributions: Vec<Ext<C::F, C::EF>> = shard_chips
+            .iter()
+            .zip(opened_values.chips.iter())
+            .ir_par_map_collect(builder, |builder, (chip, opening)| {
             let degree = &opening.degree;
 
             // (4a) Shape sanity check on the chip's openings.
@@ -568,13 +582,18 @@ where
                 })
                 .sum();
 
-            // (4h) Fold this chip's contribution into the cross-
-            // chip RLC.
+            // (4h) This chip's contribution to the cross-chip RLC.
+            let eq_sym: SymbolicExt<C::F, C::EF> = zerocheck_eq_val.into();
+            let contribution: Ext<C::F, C::EF> =
+                builder.eval(eq_sym * (constraint_eval + openings_batch));
+            contribution
+        });
+
+        // (4i) Cross-chip Horner fold, in chip order.
+        for contribution in chip_contributions {
             let rlc_sym: SymbolicExt<C::F, C::EF> = rlc_eval.into();
             let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
-            let new_rlc: SymbolicExt<C::F, C::EF> =
-                rlc_sym * lambda_sym + zerocheck_eq_val * (constraint_eval + openings_batch);
-            rlc_eval = builder.eval(new_rlc);
+            rlc_eval = builder.eval(rlc_sym * lambda_sym + contribution);
         }
 
         // (5) Assert the cross-chip RLC matches the prover's

@@ -40,7 +40,7 @@ impl<F: PrimeField32> MachineAir<F> for BooleanCircuitGarbleChip {
         let blu_batches = events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|(_, event)| {
                     let event = if let PrecompileEvent::BooleanCircuitGarble(event) = event {
                         event

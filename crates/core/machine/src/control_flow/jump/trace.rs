@@ -56,7 +56,7 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
             .enumerate()
             .par_bridge()
             .map(|(i, rows)| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 rows.chunks_mut(NUM_JUMP_COLS).enumerate().for_each(|(j, row)| {
                     let idx = i * chunk_size + j;
                     let cols: &mut JumpColumns<F> = row.borrow_mut();
@@ -102,7 +102,7 @@ impl JumpChip {
         &self,
         event: &JumpEvent,
         cols: &mut JumpColumns<F>,
-        blu: &mut HashMap<ByteLookupEvent, usize>,
+        blu: &mut zkm_core_executor::events::ByteLookupMap,
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {

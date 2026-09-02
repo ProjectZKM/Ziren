@@ -1167,22 +1167,54 @@ where
         // the previous felt whenever
         // the handles match; the step-7 consistency check reads the value, and
         // an aliased felt carries the same one.
+        // The distinct chains are emitted in PARALLEL, then replayed onto the
+        // columns.  This is the largest base-ALU region in the recursion tree
+        // -- 40.0M of `jagged_eval_sumcheck`'s 96.8M instructions, per the
+        // region census -- and it was walked strictly serially while the
+        // prover was using ~8 of the box's 124 cores.  Each chain reads one
+        // witnessed bit vector and nothing else, so they commute.
+        //
+        // The consecutive-alias dedup is PRESERVED, and it has to be decided
+        // first because it determines which chains exist at all: phase A walks
+        // the columns host-side (no builder, so it emits nothing) to collect
+        // the distinct bit vectors and each column's slot, phase B emits only
+        // those chains, phase C replays the slots.  Same ops, same aliasing,
+        // same values.
+        //
+        // CHUNKED rather than one block per column: `ir_par_map_collect`
+        // allocates a `DslIrBlock` per item, so a per-column block count is a
+        // memory hazard on a padded bundle (it aborted a build at 6.8 GB).
+        // Capping the block count keeps it bounded at any column count.
         let two_felt: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
-        let mut prev: Option<(&Vec<Felt<C::F>>, Felt<C::F>)> = None;
+        let mut slot_of: Vec<usize> = Vec::with_capacity(meta.col_prefix_sums.len());
+        let mut distinct: Vec<&Vec<Felt<C::F>>> = Vec::new();
         for (_curr_ps, next_ps) in pairs {
-            if let Some((prev_bits, prev_acc)) = prev {
-                if prev_bits == next_ps {
-                    prefix_sum_felts.push(prev_acc);
-                    continue;
-                }
+            match distinct.last() {
+                Some(prev_bits) if *prev_bits == next_ps => {}
+                _ => distinct.push(next_ps),
             }
-            let mut ps_acc: Felt<C::F> = builder.constant(C::F::ZERO);
-            for bit in next_ps.iter() {
-                ps_acc = builder.eval(*bit + two_felt * ps_acc);
-            }
-            prefix_sum_felts.push(ps_acc);
-            prev = Some((next_ps, ps_acc));
+            slot_of.push(distinct.len() - 1);
         }
+        const PAR_BLOCKS: usize = 64;
+        let group_len = distinct.len().div_ceil(PAR_BLOCKS).max(1);
+        let accs: Vec<Felt<C::F>> = distinct
+            .chunks(group_len)
+            .ir_par_map_collect::<Vec<_>, _, _>(builder, |b, group| {
+                group
+                    .iter()
+                    .map(|bits| {
+                        let mut ps_acc: Felt<C::F> = b.constant(C::F::ZERO);
+                        for bit in bits.iter() {
+                            ps_acc = b.eval(*bit + two_felt * ps_acc);
+                        }
+                        ps_acc
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .into_iter()
+            .flatten()
+            .collect();
+        prefix_sum_felts.extend(slot_of.iter().map(|&s| accs[s]));
 
 
         // Pass 2 — jagged-eval sum over the REAL columns only.  The host prover
@@ -1208,13 +1240,13 @@ where
         // `eq_factors` divided every per-bit factor by `2p-1`; the product of
         // those divisors is shared by every column, so it comes out of the
         // whole SUM and is applied once, below.
+        // The per-column eq-factor consumption check, hoisted out: it reads
+        // only lengths, so it needs no builder and no emitted op.
         let mut eq_consumed: Option<usize> = None;
         for k in 0..real_num_cols {
-            let curr = &cps[k + 1];
-            let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
-            let mut merged: Vec<Felt<C::F>> = curr.clone();
-            merged.extend_from_slice(next);
-            let consumed = merged.len().min(eq_factors.len());
+            let merged_len = cps[k + 1].len()
+                + if k + 1 < real_num_cols { cps[k + 2].len() } else { last_cps.len() };
+            let consumed = merged_len.min(eq_factors.len());
             match eq_consumed {
                 None => eq_consumed = Some(consumed),
                 Some(prev) => assert_eq!(
@@ -1222,18 +1254,53 @@ where
                     "jagged eval: column {k} consumes {consumed} eq factors, not {prev}"
                 ),
             }
-            // Lagrange ONLY.  `emit_prefix_sum_check` also Horner-recomposes the
-            // merged bits into a felt, but pass 1 above already produced every
-            // prefix-sum felt the caller needs, so asking for it here emitted
-            // instructions per column that nothing ever read -- 96,918 base-ALU
-            // rows per compose child, measured -- and the DSL builder is
-            // imperative, with no dead-code pass to remove them.
-            let full_lagrange =
-                crate::jagged_eval_primitives::emit_prefix_sum_lagrange_pre::<C>(
-                    &merged,
-                    &eq_factors,
-                );
-            expected_eval = expected_eval + (z_col_lagrange[k] * full_lagrange);
+        }
+
+        // CHUNKED PARALLEL partial sums.
+        //
+        // `emit_prefix_sum_lagrange_pre` is SYMBOLIC -- it takes no builder and
+        // emits nothing -- so the whole column sum used to flatten in the ONE
+        // `builder.eval(expected_eval)` that closes this function, emitting all
+        // ~56.7M of the region's ext-ALU ops in a single serial run while the
+        // prover held ~8 of the box's 124 cores.  Materializing a partial sum
+        // per chunk moves that flattening INSIDE the parallel blocks.  Summing
+        // the partials afterwards is exact -- field addition is associative --
+        // so `expected_eval` is value-identical, and it is only ever compared
+        // for equality against the sumcheck claim.
+        //
+        // Chunk count capped for the same reason as pass 1: one block per
+        // column would allocate a `DslIrBlock` per column.
+        const PAR_BLOCKS_PASS2: usize = 64;
+        let group_len_p2 = real_num_cols.div_ceil(PAR_BLOCKS_PASS2).max(1);
+        let all_k: Vec<usize> = (0..real_num_cols).collect();
+        let partials: Vec<Ext<C::F, C::EF>> = all_k
+            .chunks(group_len_p2)
+            .ir_par_map_collect::<Vec<_>, _, _>(builder, |b, group| {
+                let mut acc: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
+                for &k in group {
+                    let curr = &cps[k + 1];
+                    let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
+                    let mut merged: Vec<Felt<C::F>> = curr.clone();
+                    merged.extend_from_slice(next);
+                    // Lagrange ONLY.  `emit_prefix_sum_check` also
+                    // Horner-recomposes the merged bits into a felt, but pass 1
+                    // above already produced every prefix-sum felt the caller
+                    // needs, so asking for it here emitted instructions per
+                    // column that nothing ever read -- 96,918 base-ALU rows per
+                    // compose child, measured -- and the DSL builder is
+                    // imperative, with no dead-code pass to remove them.
+                    let full_lagrange =
+                        crate::jagged_eval_primitives::emit_prefix_sum_lagrange_pre::<C>(
+                            &merged,
+                            &eq_factors,
+                        );
+                    acc = acc + (z_col_lagrange[k] * full_lagrange);
+                }
+                let partial: Ext<C::F, C::EF> = b.eval(acc);
+                partial
+            });
+        for partial in partials {
+            expected_eval = expected_eval + partial;
         }
         if let Some(n) = eq_consumed {
             expected_eval = expected_eval * eq_factors.scale_for_len(n);
@@ -1314,6 +1381,34 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             shape.merkle_tree_height,
         );
         Self { vks_and_proofs, vk_merkle_data, is_complete: false }
+    }
+
+    /// One line naming every component [`Self::shape_key`] hashes.
+    ///
+    /// Diagnostic only (call sites gate on `ZIREN_SHAPE_KEY_DIAG`).  The
+    /// compose pre-warm builds a key per (band, arity) yet real nodes still
+    /// miss, and the hash alone cannot say which component diverged.
+    pub fn shape_diag(&self) -> String {
+        let mut s = format!("arity={}", self.vks_and_proofs.len());
+        for (i, (_vk, sp)) in self.vks_and_proofs.iter().enumerate() {
+            for (name, v) in
+                crate::machine::shape_signature::describe_shard_proof_structure(sp)
+            {
+                s.push_str(&format!(" c{i}.{name}={v}"));
+            }
+        }
+        s.push_str(&format!(
+            " merkle_proofs={} paths={:?} values={} complete={}",
+            self.vk_merkle_data.vk_merkle_proofs.len(),
+            self.vk_merkle_data
+                .vk_merkle_proofs
+                .iter()
+                .map(|p| p.path.len())
+                .collect::<Vec<_>>(),
+            self.vk_merkle_data.values.len(),
+            self.is_complete,
+        ));
+        s
     }
 
     /// Structural signature of the witness layout — the compose program
