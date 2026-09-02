@@ -247,14 +247,14 @@ impl<'a> TracingVM<'a> {
         // chunk. Non-terminal chunks never reach postprocess (they exit
         // via ExceededCycleLimit, not `done`), so this is a no-op there.
         sub.emit_global_memory_events = false;
-        loop {
+        let exit_reason = loop {
             match sub.execute() {
-                Ok(true) => break, // natural halt within the chunk
+                Ok(true) => break "halt", // natural halt within the chunk
                 Ok(false) => {}
-                Err(ExecutionError::ExceededCycleLimit(_)) => break, // shard boundary
+                Err(ExecutionError::ExceededCycleLimit(_)) => break "clk_end", // shard boundary
                 Err(e) => return Err(e),
             }
-        }
+        };
         // bump the worker's live record into its
         // records vec. When `ExceededCycleLimit` triggers, the normal
         // trailing bump_record path in execute() is bypassed, leaving
@@ -263,6 +263,26 @@ impl<'a> TracingVM<'a> {
         // shard inside each worker.
         if !sub.record.cpu_events.is_empty() {
             sub.bump_record();
+        }
+        // A chunk that covers cycles but replays to nothing is always a bug --
+        // silently proving an empty shard is far worse than a loud warning, and
+        // the caller sees only an empty record with no way to tell why.
+        if sub.records.iter().all(|r| r.cpu_events.is_empty()) && chunk.num_cycles() > 0 {
+            tracing::warn!(
+                target: "tracing_vm",
+                shard_index = chunk.shard_index,
+                current_shard = chunk.current_shard,
+                exit_reason,
+                chunk_pc_start = chunk.pc_start,
+                sub_pc = sub.state.pc,
+                clk_start = chunk.clk_start,
+                clk_end = chunk.clk_end,
+                sub_clk = sub.state.global_clk,
+                oracle = chunk.mem_reads.len(),
+                oracle_pos = sub.replay_mem.as_ref().map_or(0, |m| m.pos),
+                hints = chunk.input_stream_slice.as_ref().map_or(0, Vec::len),
+                "replay produced no cpu events for a non-empty chunk"
+            );
         }
 
         // Capture the shard-end public-value inputs BEFORE draining: the
