@@ -943,6 +943,60 @@ mod tests {
         }
     }
 
+    /// `execute_minimal` (Simple mode, no checkpoint) must seal the SAME chunk
+    /// sequence as `execute_state` (Checkpoint mode): the controller ships
+    /// what the former produces, and every replay test above validates the
+    /// latter. A program with loads, stores, a syscall and hint reads, so the
+    /// `mem_reads` oracle and the stream cursors are exercised, not just the
+    /// register file.
+    #[test]
+    fn minimal_chunks_match_checkpoint_chunks() {
+        use crate::minimal_trace::MinimalTrace;
+        use crate::Executor;
+
+        let program = crate::programs::tests::sha3_chain_program();
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 1 << 12;
+        opts.shard_batch_size = 2;
+
+        let run = |minimal: bool| {
+            let mut exec = Executor::new(program.clone(), opts);
+            exec.write_stdin(&[1u8; 32]);
+            exec.write_stdin(&1u32);
+            exec.minimal_trace_collector = Some(MinimalTrace::default());
+            let mut chunks = Vec::new();
+            loop {
+                let done = if minimal {
+                    exec.execute_minimal().expect("execute_minimal")
+                } else {
+                    exec.execute_state(false).expect("execute_state").1
+                };
+                if done {
+                    exec.seal_minimal_trace_final_memory();
+                }
+                chunks.append(&mut exec.drain_sealed_chunks());
+                if done {
+                    break;
+                }
+            }
+            (chunks, exec.report.total_instruction_count(), exec.state.public_values_stream)
+        };
+        let (ckpt, ckpt_cycles, ckpt_pvs) = run(false);
+        let (min, min_cycles, min_pvs) = run(true);
+
+        assert!(ckpt.len() > 1, "test program produced only {} chunk(s)", ckpt.len());
+        assert_eq!(min_cycles, ckpt_cycles, "cycle count");
+        assert_eq!(min_pvs, ckpt_pvs, "public values stream");
+        assert_eq!(min.len(), ckpt.len(), "chunk count");
+        assert!(
+            ckpt.iter().any(|c| !c.mem_reads.is_empty()),
+            "no chunk recorded a user-memory read; the oracle is not exercised"
+        );
+        for (i, (m, c)) in min.iter().zip(ckpt.iter()).enumerate() {
+            assert_eq!(m, c, "chunk {i} differs between execute_minimal and execute_state");
+        }
+    }
+
     /// `!self.unconstrained` (no mode check), so it MUST work in
     /// Checkpoint mode for the producer wiring to be useful. This test
     /// runs a synthetic loadful program through execute_state with

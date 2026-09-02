@@ -3252,6 +3252,42 @@ impl<'a> Executor<'a> {
         Ok((checkpoint, done))
     }
 
+    /// Execute up to `self.shard_batch_size` shards for the minimal-trace
+    /// collector alone, returning whether the program ended.
+    ///
+    /// SP1's `MinimalExecutor::execute_chunk`: the controller that ships
+    /// `TraceChunk`s to workers needs the chunks and nothing else, and its
+    /// executor keeps no checkpoint. [`Self::execute_state`] is the
+    /// `trace_checkpoint` producer -- it snapshots the state, records every
+    /// first touch into `memory_checkpoint` and assembles an
+    /// [`ExecutionState`] per call -- which is bookkeeping the chunk
+    /// producer paid for and dropped (10% of its wall on reth, chunks
+    /// byte-identical either way). This runs in [`ExecutorMode::Simple`]: no
+    /// events, no checkpoint, the collector's per-shard seal and `mem_reads`
+    /// oracle are mode-independent.
+    ///
+    /// Drain with [`Self::drain_sealed_chunks`] after every call, sealing
+    /// with [`Self::seal_minimal_trace_final_memory`] first when done, exactly
+    /// as for `execute_state`.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the program execution fails.
+    pub fn execute_minimal(&mut self) -> Result<bool, ExecutionError> {
+        self.executor_mode = ExecutorMode::Simple;
+        self.emit_global_memory_events = false;
+        let done = self.execute()?;
+        // Simple mode emits no events, but `bump_record` still parks an empty
+        // record per shard and `mr`/`mw` still note first touches for the
+        // checkpoint nobody builds here; both would otherwise grow for the
+        // whole program.
+        if !done {
+            self.records.clear();
+        }
+        self.uninitialized_memory_checkpoint.clear();
+        Ok(done)
+    }
+
     fn initialize(&mut self) {
         self.state.clk = 0;
         self.state.records_clk_index = 0;
