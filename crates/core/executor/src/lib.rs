@@ -1,6 +1,9 @@
 mod air;
 mod context;
 mod cost;
+/// Deferred-shard planning over event references (the controller's mirror
+/// of `ExecutionRecord::split`).
+pub mod deferred_plan;
 pub mod events;
 mod executor;
 pub mod hook;

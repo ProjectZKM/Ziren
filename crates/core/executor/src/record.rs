@@ -25,7 +25,7 @@ use crate::{
         MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum, MiscEvent, MovCondEvent,
         PrecompileEvent, PrecompileEvents, SyscallEvent,
     },
-    syscalls::{precompiles::keccak::sponge::GENERAL_BLOCK_SIZE_U32S, SyscallCode},
+    syscalls::SyscallCode,
     MipsAirId, Program,
 };
 
@@ -293,13 +293,9 @@ impl ExecutionRecord {
         let precompile_events = take(&mut self.precompile_events);
 
         for (syscall_code, events) in precompile_events.into_iter() {
-            let threshold = match syscall_code {
-                SyscallCode::KECCAK_SPONGE => opts.keccak,
-                SyscallCode::SHA_EXTEND => opts.sha_extend,
-                SyscallCode::SHA_COMPRESS => opts.sha_compress,
-                SyscallCode::BOOLEAN_CIRCUIT_GARBLE => opts.boolean_circuit_garble,
-                _ => opts.deferred,
-            };
+            // Shared with `deferred_plan`: a controller that only sees event
+            // weights must cut exactly where this does.
+            let threshold = crate::deferred_plan::precompile_split_threshold(syscall_code, &opts);
 
             let mut shards_input = Vec::new();
             let remainder = match syscall_code {
@@ -308,10 +304,9 @@ impl ExecutionRecord {
                     let mut current_len = 0;
 
                     for (syscall_event, event) in events {
-                        if let PrecompileEvent::KeccakSponge(event) = &event {
-                            // Here, input_len_u32s must be a multiple of GENERAL_BLOCK_SIZE_U32S.
-                            let input_len = event.input_len_u32s as usize / GENERAL_BLOCK_SIZE_U32S;
-
+                        if let Some(input_len) =
+                            crate::deferred_plan::precompile_split_weight(syscall_code, &event)
+                        {
                             if current_len + input_len > threshold && !current_shard.is_empty() {
                                 let mut record = ExecutionRecord::new(self.program.clone());
                                 record.precompile_events.insert(syscall_code, current_shard);
@@ -330,10 +325,9 @@ impl ExecutionRecord {
                     let mut current_len = 0;
 
                     for (syscall_event, event) in events {
-                        if let PrecompileEvent::BooleanCircuitGarble(event) = &event {
-                            // Here, input_len_u32s must be a multiple of GENERAL_BLOCK_SIZE_U32S.
-                            let input_len = event.num_gates() + 1;
-
+                        if let Some(input_len) =
+                            crate::deferred_plan::precompile_split_weight(syscall_code, &event)
+                        {
                             if current_len + input_len > threshold && !current_shard.is_empty() {
                                 let mut record = ExecutionRecord::new(self.program.clone());
                                 record.precompile_events.insert(syscall_code, current_shard);

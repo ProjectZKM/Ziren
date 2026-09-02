@@ -237,8 +237,9 @@ impl PrecompileEvents {
         self.events.into_iter()
     }
 
+    /// The events by syscall code (hash-map order: not stable across runs).
     #[inline]
-    pub(crate) fn iter(
+    pub fn iter(
         &self,
     ) -> impl Iterator<Item = (&SyscallCode, &Vec<(SyscallEvent, PrecompileEvent)>)> {
         self.events.iter()
