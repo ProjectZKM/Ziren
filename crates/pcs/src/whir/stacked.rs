@@ -55,17 +55,30 @@ pub struct StackedWhirProof<F: p3_field::Field, EF: ExtensionField<F>, MT: Mmcs<
     pub batch_evaluations: Vec<Vec<EF>>,
 }
 
-/// Device backend for the FIRST folding batch of the stacked-WHIR open.
+/// Device backend for the folding rounds of the stacked-WHIR open.
 ///
 /// The stacked open touches stacking-height-sized (`2^lsh`) data in exactly
 /// four places: the per-stripe evaluations at the stack point, the λ-combined
 /// virtual polynomial + eq weight, the first `folding_factor` degree-2 fold
-/// variables, and the round-0 query openings of the stripe trees.  Everything
-/// after the first fold batch operates on `2^(lsh-ff)`-sized vectors, which
-/// are host-trivial.  This trait carries exactly those four pieces so a GPU
-/// prover can keep the big vectors device-resident while the TRANSCRIPT
-/// logic stays in the one host implementation below (an engine of `None`
-/// is byte-identical to the pure-host path).
+/// variables, and the round-0 query openings of the stripe trees.  This trait
+/// carries those four pieces so a GPU prover can keep the big vectors
+/// device-resident while the TRANSCRIPT logic stays in the one host
+/// implementation below (an engine of `None` is byte-identical to the
+/// pure-host path).
+///
+/// The rounds AFTER the first fold batch are not host-trivial either: at the
+/// production stack (`lsh = 21`, folds `[4, 7, 7]`) the post-round-0 vectors
+/// hold `2^17` EF values, and the host round-1 fold, the host encode + Merkle
+/// commit of its codeword, the OOD `eval_at` on the folded vector and the
+/// host↔device copies of the weight for the constraint absorption measured
+/// ~25 ms per open on a multi-GPU worker lane (`ZIREN_WHIR_OPEN_TIMING`:
+/// folds 6.5 + ood 9.4 + commits/absorb ~10 ms of a 73 ms open).  An engine
+/// may therefore keep the vectors resident past round 0
+/// ([`Self::keep_resident`]): it then folds the following rounds through the
+/// same `c0_c2`/`apply_rc` calls, answers the OOD samples
+/// ([`Self::eval_resident`]), absorbs the round constraints into its resident
+/// weight, and commits every round's codeword ([`Self::commit_folded`]) until
+/// the host extracts the (by then small) vectors.
 ///
 /// Pair convention throughout: lo = index `2i`, hi = `2i+1`, matching
 /// [`crate::basefold::mle::Mle::fix_last_variable`] and [`WhirFolder`].
@@ -81,8 +94,27 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     fn c0_c2(&mut self) -> (EF, EF);
     /// Fold both vectors by the sampled challenge (halving their length).
     fn apply_rc(&mut self, rc: EF);
-    /// Materialize `(f, weight)` after the `folding_factor` folds.
+    /// Materialize `(f, weight)` after the `folding_factor` folds.  Called
+    /// once, after the fold batch of the round in which the engine stops
+    /// keeping the vectors resident (see [`Self::keep_resident`]).
     fn extract(&mut self) -> (Vec<EF>, Vec<EF>);
+    /// Whether the engine would rather keep folding `len`-entry vectors
+    /// device-side than hand them to the host after this round's fold
+    /// batch.  `false` (the default) extracts after round 0.  An engine
+    /// answering `true` keeps serving `c0_c2`/`apply_rc` for the next round,
+    /// [`Self::eval_resident`] for its OOD samples, the two `absorb_*`
+    /// methods against its resident weight (they MUST accept then), and
+    /// [`Self::commit_folded`] from the resident polynomial.
+    fn keep_resident(&self, _len: usize) -> bool {
+        false
+    }
+    /// `f(point)` for the resident folded polynomial — the value
+    /// `Mle::eval_at(point)` returns on the vector [`Self::extract`] would
+    /// hand out (LSB-first: coordinate `k` pairs with bit `k`).  Only called
+    /// while the engine keeps the vectors resident.
+    fn eval_resident(&mut self, _point_lsb: &[EF]) -> EF {
+        unreachable!("eval_resident on an engine that never keeps vectors resident")
+    }
     /// Round-0 query opening of the stripe trees at `index`: one
     /// [`LeafOpening`] per committed round, in round order, each carrying
     /// every stripe's row (the exact shape `mmcs.open_batch` returns on the
@@ -94,20 +126,27 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     fn open_queries(&mut self, indices: &[usize]) -> Vec<Vec<LeafOpening<F, MT>>> {
         indices.iter().map(|&i| self.open_query(i)).collect()
     }
-    /// Encode + merkle-commit the post-round-0 folded polynomial (the round-1
-    /// codeword) on the backend: pad by `1 << log_inv_rate`, interleaved DFT
-    /// with `1 << next_ff` EF values per leaf row, flatten each row to
-    /// `(1 << next_ff) * EF::DIMENSION` base values, commit.  MUST produce
-    /// the same commitment bytes as the host `mmcs.commit` on the same input
-    /// (the verifier cannot tell them apart).  `None` declines to the host
-    /// path; a backend that returns `Some` must also serve
-    /// [`Self::open_folded_queries`] for that tree.
+    /// Encode + merkle-commit the folded polynomial after this round's fold
+    /// batch (the NEXT round's codeword) on the backend: pad by
+    /// `1 << log_inv_rate`, interleaved DFT with `1 << next_ff` EF values per
+    /// leaf row, flatten each row to `(1 << next_ff) * EF::DIMENSION` base
+    /// values, commit.  MUST produce the same commitment bytes as the host
+    /// `mmcs.commit` on the same input (the verifier cannot tell them
+    /// apart).  Called at EVERY committing round: the source is the resident
+    /// polynomial while the engine keeps one, else the vector the last
+    /// `extract` handed out.  `None` declines to the host path (the host
+    /// extracts first if the vectors are still resident); a backend that
+    /// returns `Some` must also serve [`Self::open_folded_queries`] for that
+    /// tree.  Trees are opened in commit order — the round-`r+1` queries open
+    /// the round-`r` tree while the round-`r+1` tree already exists, so a
+    /// backend keeps a queue.
     fn commit_folded(&mut self, _next_ff: usize, _log_inv_rate: usize) -> Option<MT::Commitment> {
         None
     }
-    /// Round-1-codeword query openings against the tree built by
+    /// Query openings against the OLDEST unopened tree built by
     /// [`Self::commit_folded`] — one single-matrix [`LeafOpening`] per index,
     /// shape-identical to the host `mmcs.open_batch` on the equivalent tree.
+    /// Called once per tree (the round's STIR queries, or the final queries).
     fn open_folded_queries(&mut self, _indices: &[usize]) -> Vec<LeafOpening<F, MT>> {
         unreachable!("open_folded_queries without a commit_folded tree")
     }
@@ -115,7 +154,9 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     /// `weight[i] += Σ_c coeffs[c] · Π_{k: bit k of i} points_lsb[c][n-1-k]`
     /// (the [`crate::whir::interleaved::mono_table_lsb`] convention).  Field
     /// ops are exact, so any evaluation order is value-identical to the host
-    /// tables.  `false` declines to the host absorption.
+    /// tables.  `false` declines to the host absorption.  While the engine
+    /// keeps the vectors resident `weight` is the host's EMPTY placeholder:
+    /// the absorption targets the resident weight and MUST be accepted.
     fn absorb_monomials(
         &mut self,
         _weight: &mut [EF],
@@ -127,7 +168,8 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     /// Absorb batched EQ (OOD) constraints into `weight` on the backend:
     /// `weight[i] += Σ_c coeffs[c] · eq(points[c], i)` with the host
     /// [`crate::whir::sumcheck`] `eq_table` convention (LSB-first, bit k
-    /// pairs with coordinate k).  `false` declines to the host absorption.
+    /// pairs with coordinate k).  `false` declines to the host absorption;
+    /// resident-weight rule as for [`Self::absorb_monomials`].
     fn absorb_ood(
         &mut self,
         _weight: &mut [EF],
@@ -387,9 +429,8 @@ where
 
         let mut prev_domain_log = (lsh - ff) + self.config.starting_log_inv_rate;
         // Round 0 queries the STRIPE trees (multi-matrix, base field); later
-        // rounds query the single folded EF codeword.  The round-1 codeword's
-        // tree may live on the ENGINE (device commit); every later round's is
-        // a host tree.
+        // rounds query the single folded EF codeword, whose tree lives on the
+        // ENGINE (device commit) or the host.
         enum PrevTree<D> {
             Stripes,
             Engine,
@@ -403,6 +444,13 @@ where
         let mut round_query_openings: Vec<MerkleOpening<F, MT>> = Vec::new();
         let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
 
+        // `resident`: the engine holds (f, weight) device-side; the host
+        // folder's vectors are empty until `extract`.  `cur_log`: the
+        // remaining variables (the vectors' log length), tracked here since
+        // the host vectors are absent while resident.
+        let mut resident = engine.is_some();
+        let mut cur_log = lsh;
+
         drop(_t_pinit);
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
             let _t_fold = open_timing::Timer::new(if r == 0 {
@@ -411,11 +459,11 @@ where
                 &open_timing::FOLDS
             });
             let mut this_round_randomness = Vec::new();
-            let polys = if r == 0 && engine.is_some() {
-                // First fold batch on the engine: SAME transcript as
+            let polys = if resident {
+                // Fold batch on the engine: SAME transcript as
                 // `WhirFolder::fold_variables`, with (c0, c2) and the folds
-                // computed device-side.  The folded (small) vectors then
-                // seed the host folder for every later round.
+                // computed device-side.  Once the engine lets go, the folded
+                // (small) vectors seed the host folder for the later rounds.
                 let e = engine.as_deref_mut().unwrap();
                 let mut out = Vec::with_capacity(round_cfg.folding_factor);
                 for var in 0..round_cfg.folding_factor {
@@ -435,9 +483,6 @@ where
                         ProofOfWork(pow),
                     ));
                 }
-                let (f, w) = e.extract();
-                folder.f_vec = f;
-                folder.weight = w;
                 out
             } else {
                 folder.fold_variables::<F, _>(
@@ -451,6 +496,16 @@ where
             for (_, pow) in &polys {
                 folding_pow.push(pow.clone());
             }
+            cur_log -= round_cfg.folding_factor;
+            if resident {
+                let e = engine.as_deref_mut().unwrap();
+                if r + 1 == num_rounds || !e.keep_resident(1usize << cur_log) {
+                    let (f, w) = e.extract();
+                    folder.f_vec = f;
+                    folder.weight = w;
+                    resident = false;
+                }
+            }
 
             if r + 1 == num_rounds {
                 break;
@@ -462,20 +517,17 @@ where
             // Leaf width follows the NEXT round's folding factor - that
             // round's stir fold consumes one leaf per query.
             let next_ff = self.config.round_parameters[r + 1].folding_factor;
-            let rem = folder.f_vec.len().trailing_zeros() as usize;
+            let rem = cur_log;
             let this_domain_log = (rem - next_ff) + round_cfg.log_inv_rate;
-            // The ROUND-1 codeword (r == 0) is the big one and the engine
-            // still holds the folded vector device-side: let it encode +
-            // commit there.  A backend commitment is byte-identical to the
-            // host mmcs commit, so the transcript cannot tell.  Later
-            // rounds' codewords are 2^ff-times smaller - always host.
-            let engine_commit = if r == 0 {
-                engine
-                    .as_deref_mut()
-                    .and_then(|e| e.commit_folded(next_ff, round_cfg.log_inv_rate))
-            } else {
-                None
-            };
+            // The engine encodes + commits the codeword from its resident
+            // polynomial, or from the vector it handed out at `extract`
+            // (the host commit of the round-1 vector -- an interleaved DFT
+            // plus a 2^10-row Merkle tree at the production stack -- is
+            // host time on the prover's critical path).  A backend
+            // commitment is byte-identical to the host mmcs commit, so the
+            // transcript cannot tell.
+            let engine_commit =
+                engine.as_deref_mut().and_then(|e| e.commit_folded(next_ff, round_cfg.log_inv_rate));
             let this_tree = match engine_commit {
                 Some(commitment) => {
                     challenger.observe(commitment.clone());
@@ -483,6 +535,15 @@ where
                     PrevTree::Engine
                 }
                 None => {
+                    if resident {
+                        // The engine declined the shape: the host commits,
+                        // so it needs the vectors from here on.
+                        let e = engine.as_deref_mut().unwrap();
+                        let (f, w) = e.extract();
+                        folder.f_vec = f;
+                        folder.weight = w;
+                        resident = false;
+                    }
                     let width = 1usize << next_ff;
                     let mut padded = folder.f_vec.clone();
                     padded.resize(padded.len() << round_cfg.log_inv_rate, EF::ZERO);
@@ -503,13 +564,20 @@ where
 
             drop(_t_commit);
             let _t_ood = open_timing::Timer::new(&open_timing::OOD);
-            // Fresh OOD on the folded polynomial.
-            let folded = Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1));
+            // Fresh OOD on the folded polynomial (answered by the engine
+            // while it holds the vector: the host `eval_at` on the 2^17
+            // post-round-0 vector was ~9 ms per open).
+            let folded = (!resident).then(|| {
+                Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1))
+            });
             let mut ood_points = Vec::with_capacity(round_cfg.ood_samples);
             let mut ood_answers = Vec::with_capacity(round_cfg.ood_samples);
             for _ in 0..round_cfg.ood_samples {
                 let pt: Vec<EF> = (0..rem).map(|_| challenger.sample_algebra_element()).collect();
-                let ans = folded.eval_at::<EF>(&pt)[0];
+                let ans = match folded.as_ref() {
+                    Some(m) => m.eval_at::<EF>(&pt)[0],
+                    None => engine.as_deref_mut().unwrap().eval_resident(&pt),
+                };
                 challenger.observe_algebra_element(ans);
                 ood_points.push(pt);
                 ood_answers.push(ans);
@@ -665,6 +733,7 @@ where
                 })
             };
             if !ood_absorbed {
+                assert!(!resident, "WhirRound0Engine declined absorb_ood while resident");
                 let _t_h = open_timing::Timer::new(&open_timing::CHOST);
                 folder.absorb_eq_tables(&ood_points, &ood_coeffs);
             }
@@ -681,6 +750,7 @@ where
                 })
             };
             if !absorbed {
+                assert!(!resident, "WhirRound0Engine declined absorb_monomials while resident");
                 let _t_h = open_timing::Timer::new(&open_timing::CHOST);
                 folder.absorb_monomial_tables(&stir_points, &mono_coeffs);
             }
@@ -700,8 +770,18 @@ where
         let final_mask = (1usize << prev_domain_log) - 1;
         let _t_fopen = open_timing::Timer::new(&open_timing::FOPEN);
         let mut final_leaves = Vec::with_capacity(self.config.final_queries);
-        for _ in 0..self.config.final_queries {
-            let idx = challenger.sample_bits(prev_domain_log) & final_mask;
+        // The indices are drawn up front: no opening feeds the transcript,
+        // so an engine tree is opened in ONE batched call.
+        let final_indices: Vec<usize> = (0..self.config.final_queries)
+            .map(|_| challenger.sample_bits(prev_domain_log) & final_mask)
+            .collect();
+        if let PrevTree::Engine = &prev_single {
+            final_leaves = engine
+                .as_deref_mut()
+                .expect("PrevTree::Engine requires the engine")
+                .open_folded_queries(&final_indices);
+        }
+        for &idx in &final_indices {
             match &prev_single {
                 PrevTree::Host(data) => {
                     let opening = self.mmcs.open_batch(idx, data);
@@ -710,15 +790,7 @@ where
                         proof: opening.opening_proof,
                     });
                 }
-                PrevTree::Engine => {
-                    // Reachable only on a 2-round shape with a backend commit
-                    // (production is 3 rounds, so the final tree is host).
-                    let mut got = engine
-                        .as_deref_mut()
-                        .expect("PrevTree::Engine requires the engine")
-                        .open_folded_queries(&[idx]);
-                    final_leaves.push(got.pop().expect("one opening per index"));
-                }
+                PrevTree::Engine => {}
                 PrevTree::Stripes => {
                     // Single-round shape: the final queries open the stripe
                     // trees directly.  The engine path pins num_rounds >= 2
