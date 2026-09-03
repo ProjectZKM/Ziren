@@ -1761,23 +1761,7 @@ impl<'a> Executor<'a> {
         record: MemoryAccessRecord,
         exit_code: u32,
     ) {
-        self.record.cpu_events.push(CpuEvent {
-            clk,
-            pc,
-            next_pc,
-            next_next_pc,
-            recv_next_pc,
-            a,
-            a_record: record.a,
-            b,
-            b_record: record.b,
-            c,
-            c_record: record.c,
-            hi: hi_or_prev_a,
-            hi_record: record.hi,
-            memory_record: record.memory,
-            exit_code,
-        });
+        self.record.cpu_events.push(CpuEvent { clk, pc, next_pc, next_next_pc, exit_code });
     }
 
     /// Emit an ALU event.

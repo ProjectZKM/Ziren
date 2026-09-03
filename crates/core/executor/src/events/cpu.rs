@@ -21,31 +21,6 @@ pub struct CpuEvent {
     pub next_pc: u32,
     /// The next after the next program counter.
     pub next_next_pc: u32,
-    /// The program counter RECEIVED on the Option-2 State bus = the value
-    /// `state.next_pc` held at instruction entry = the predecessor's
-    /// `next_next_pc`.  Equals `next_pc` for every instruction EXCEPT the
-    /// halt (ecall-exit), whose `next_pc` is overridden to 0 as the exit
-    /// signal SENT to the PV endpoint while it still RECEIVES the real
-    /// predecessor continuation here.
-    pub recv_next_pc: u32,
-    /// The first operand.
-    pub a: u32,
-    /// The first operand memory record.
-    pub a_record: Option<MemoryRecordEnum>,
-    /// The second operand.
-    pub b: u32,
-    /// The second operand memory record.
-    pub b_record: Option<MemoryRecordEnum>,
-    /// The third operand.
-    pub c: u32,
-    /// The third operand memory record.
-    pub c_record: Option<MemoryRecordEnum>,
-    /// The fourth operand.
-    pub hi: Option<u32>,
-    /// The fourth operand memory record.
-    pub hi_record: Option<MemoryRecordEnum>,
-    /// The memory record.
-    pub memory_record: Option<MemoryRecordEnum>,
     /// The exit code.
     pub exit_code: u32,
 }
@@ -82,24 +57,12 @@ pub struct CpuEventFfi {
     pub hi: OptionU32,
 }
 
-impl From<&CpuEvent> for CpuEventFfi {
-    fn from(event: &CpuEvent) -> Self {
-        Self {
-            clk: event.clk,
-            pc: event.pc,
-            next_pc: event.next_pc,
-            next_next_pc: event.next_next_pc,
-            recv_next_pc: event.recv_next_pc,
-            a: event.a,
-            a_record: event.a_record.into(),
-            b: event.b,
-            b_record: event.b_record.into(),
-            c: event.c,
-            c_record: event.c_record.into(),
-            hi: event.hi.into(),
-        }
-    }
-}
+// NOTE: there is deliberately no `From<&CpuEvent> for CpuEventFfi`. The Cpu
+// chip is gone -- `MipsAirId::Cpu` survives only as the virtual cycles axis for
+// shard splitting -- so nothing builds a `CpuEventFfi` any more, and `CpuEvent`
+// itself now carries only the fields something still READS: its `len()` for the
+// cycles axis, `pc` for the Program chip's per-instruction multiplicity, and
+// the first/last endpoints for the shard's public values.
 
 /// FFI mirror of `Option<MemoryRecordEnum>` that carries ONLY the read arm.
 ///

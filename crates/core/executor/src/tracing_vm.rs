@@ -1299,14 +1299,14 @@ mod tests {
         for (i, (a, b)) in cpu_a.iter().zip(cpu_b.iter()).enumerate() {
             // The clk/pc fields are the load-bearing identity for the
             // event — drift here means the worker diverged from the
-            // sequential timeline. The remaining fields are the actual
-            // computational outputs; drift there means semantic bug.
+            // sequential timeline. The operands used to be checked here too;
+            // they now live only in the per-chip events (`add_sub_events` and
+            // friends, compared below), which is where the computational
+            // outputs actually are.
             assert_eq!(a.clk, b.clk, "cpu_events[{i}] clk: seq={} par={}", a.clk, b.clk);
             assert_eq!(a.pc, b.pc, "cpu_events[{i}] pc: seq={:#x} par={:#x}", a.pc, b.pc);
             assert_eq!(a.next_pc, b.next_pc, "cpu_events[{i}] next_pc");
-            assert_eq!(a.a, b.a, "cpu_events[{i}] a");
-            assert_eq!(a.b, b.b, "cpu_events[{i}] b");
-            assert_eq!(a.c, b.c, "cpu_events[{i}] c");
+            assert_eq!(a.next_next_pc, b.next_next_pc, "cpu_events[{i}] next_next_pc");
             assert_eq!(a.exit_code, b.exit_code, "cpu_events[{i}] exit_code");
         }
 
