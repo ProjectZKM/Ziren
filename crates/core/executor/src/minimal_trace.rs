@@ -49,16 +49,28 @@ use std::sync::Arc;
 
 /// One memory-read observation emitted by the Stage-1 fast runner.
 ///
-/// Uses MIPS-native `u32` words.
+/// Uses MIPS-native `u32` words. This is the PRE-access `MemoryRecord` and
+/// nothing else: the replay consumes entries positionally (`ReplayMem`), so
+/// the issuing clk and the address are redundant -- the Nth access of a
+/// deterministic replay IS the Nth entry. SP1's `MemValue` is `{clk, value}`
+/// for the same reason; ours carries `shard` because the MIPS memory argument
+/// keys on (shard, timestamp). 12 bytes, `Pod`: a chunk's oracle serializes as
+/// one raw byte run (reth: ~1.7M entries per shard, 210M per block), not
+/// field by field.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(C)]
 pub struct MemValue {
-    /// Clock cycle at which the read was issued.
-    pub clk: u64,
-    /// Guest address of the read.
-    pub addr: u32,
-    /// Value observed by the JIT (= oracle answer for the TracingVM).
+    /// Value observed by the producer (= oracle answer for the TracingVM).
     pub value: u32,
+    /// full memory record: the `timestamp` field of the
+    /// pre-access `MemoryRecord`. Feeds `prev_timestamp`. `0` on the
+    /// JIT-recorder path.
+    ///
+    /// `timestamp` precedes `shard` so that `(timestamp, shard)` is the
+    /// little-endian image of one `u64` `(shard << 32) | clk` -- the
+    /// register a JIT producer keeps its per-shard clock in, stamped onto a
+    /// guest memory entry with a single 8-byte store.
+    pub timestamp: u32,
     /// full memory record: the `shard` field of the
     /// `MemoryRecord` at this address *before* the access (i.e. the
     /// shard of the last prior write). Load-bearing: the memory
@@ -66,10 +78,46 @@ pub struct MemValue {
     /// reconstructed from this. `0` on the JIT-recorder path (the JIT
     /// does not track per-address shard bookkeeping — see the shard-bookkeeping gap below).
     pub shard: u32,
-    /// full memory record: the `timestamp` field of the
-    /// pre-access `MemoryRecord`. Feeds `prev_timestamp`. `0` on the
-    /// JIT-recorder path.
-    pub timestamp: u32,
+}
+
+// SAFETY: `repr(C)`, three `u32`s, no padding, every bit pattern valid.
+unsafe impl bytemuck::Zeroable for MemValue {}
+unsafe impl bytemuck::Pod for MemValue {}
+
+/// `mem_reads` as one raw byte run (bincode: length + memcpy).
+fn ser_mem_reads<S: serde::Serializer>(v: &Arc<Vec<MemValue>>, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_bytes(bytemuck::cast_slice::<MemValue, u8>(v))
+}
+
+/// Inverse of [`ser_mem_reads`]; copies into an aligned `Vec` (the byte run
+/// a slice reader hands back is only byte-aligned).
+fn de_mem_reads<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Arc<Vec<MemValue>>, D::Error> {
+    struct V;
+    impl<'de> serde::de::Visitor<'de> for V {
+        type Value = Arc<Vec<MemValue>>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("mem_reads byte run")
+        }
+        fn visit_bytes<E: serde::de::Error>(self, b: &[u8]) -> Result<Self::Value, E> {
+            let n = b.len() / std::mem::size_of::<MemValue>();
+            if n * std::mem::size_of::<MemValue>() != b.len() {
+                return Err(E::custom("mem_reads byte run is not a whole number of entries"));
+            }
+            let mut v: Vec<MemValue> = Vec::with_capacity(n);
+            // SAFETY: `MemValue: Pod` (every bit pattern is a value), the
+            // destination has room for `b.len()` bytes and does not overlap
+            // the source.
+            unsafe {
+                std::ptr::copy_nonoverlapping(b.as_ptr(), v.as_mut_ptr().cast::<u8>(), b.len());
+                v.set_len(n);
+            }
+            Ok(Arc::new(v))
+        }
+        fn visit_byte_buf<E: serde::de::Error>(self, b: Vec<u8>) -> Result<Self::Value, E> {
+            self.visit_bytes(&b)
+        }
+    }
+    d.deserialize_bytes(V)
 }
 
 /// One per-shard checkpoint emitted by the Stage-1 fast runner.
@@ -161,10 +209,10 @@ pub struct TraceChunk {
     /// sequential producer, Stage 2 pre-loads its sub-Executor's
     /// page_table from these entries before replaying, eliminating the
     /// need for chunks to carry full memory state. The Arc is built at
-    /// chunk-close time; during in-flight chunk construction the
-    /// executor writes into a sibling `Vec<MemValue>` and converts on
-    /// finalize.
-    pub mem_reads: Arc<[MemValue]>,
+    /// chunk-close time by moving the executor's recording `Vec` in (no
+    /// copy of the ~20 MB oracle at the seal).
+    #[serde(serialize_with = "ser_mem_reads", deserialize_with = "de_mem_reads")]
+    pub mem_reads: Arc<Vec<MemValue>>,
 }
 
 /// A chunk's `mem_reads` under replay: a cursor, not a lookup table.
@@ -177,7 +225,7 @@ pub struct TraceChunk {
 #[derive(Debug, Clone)]
 pub struct ReplayMem {
     /// The chunk's oracle, shared across replay workers.
-    pub entries: Arc<[MemValue]>,
+    pub entries: Arc<Vec<MemValue>>,
     /// How many accesses have been served.
     pub pos: usize,
 }
@@ -200,7 +248,7 @@ impl TraceChunk {
             final_memory: Vec::new(),
             final_uninit_memory: Vec::new(),
             input_stream_slice: None,
-            mem_reads: Arc::from(Vec::<MemValue>::new()),
+            mem_reads: Arc::new(Vec::new()),
         }
     }
 
@@ -302,10 +350,12 @@ mod tests {
         let mut c = TraceChunk::empty(7, 0x4000, 100);
         c.clk_end = 200;
         c.start_registers[5] = 0xdead_beef;
-        c.mem_reads = Arc::from(vec![
-            MemValue { clk: 110, addr: 0x8000, value: 0x1111, shard: 0, timestamp: 0 },
-            MemValue { clk: 120, addr: 0x8004, value: 0x2222, shard: 0, timestamp: 0 },
-        ]);
+        let reads = vec![
+            MemValue { value: 0x1111, shard: 3, timestamp: 0x0102_0304 },
+            MemValue { value: 0x2222, shard: 0, timestamp: u32::MAX },
+            MemValue { value: u32::MAX, shard: 7, timestamp: 0 },
+        ];
+        c.mem_reads = Arc::new(reads.clone());
         trace.push_chunk(c);
         trace.public_values = vec![1, 2, 3, 4];
 
@@ -314,9 +364,27 @@ mod tests {
 
         assert_eq!(round.num_shards(), 1);
         assert_eq!(round.chunks[0].shard_index, 7);
-        assert_eq!(round.chunks[0].mem_reads.len(), 2);
-        assert_eq!(round.chunks[0].mem_reads[0].value, 0x1111);
+        assert_eq!(*round.chunks[0].mem_reads, reads);
         assert_eq!(round.public_values, vec![1, 2, 3, 4]);
+
+        // The reader may hand the byte run back through either visitor.
+        let owned: MinimalTrace = bincode::deserialize_from(std::io::Cursor::new(&bytes)).unwrap();
+        assert_eq!(*owned.chunks[0].mem_reads, reads);
+    }
+
+    #[test]
+    fn mem_reads_serialize_as_one_byte_run() {
+        assert_eq!(std::mem::size_of::<MemValue>(), 12);
+        let mut c = TraceChunk::empty(0, 0, 0);
+        let n = 1000;
+        c.mem_reads = Arc::new((0..n as u32).map(|i| MemValue { value: i, shard: 1, timestamp: i }).collect());
+        let bytes = bincode::serialize(&c).unwrap();
+        let empty = bincode::serialize(&TraceChunk::empty(0, 0, 0)).unwrap();
+        // length prefix + 12 B per entry, no per-field framing
+        assert_eq!(bytes.len() - empty.len(), n * 12);
+        let round: TraceChunk = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(round.mem_reads, c.mem_reads);
+        assert!(bincode::deserialize::<TraceChunk>(&bytes[..bytes.len() - 1]).is_err());
     }
 
     #[test]

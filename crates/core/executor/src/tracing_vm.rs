@@ -1299,7 +1299,7 @@ mod tests {
             public_values_stream_ptr: 0,
             final_memory: Vec::new(),
             final_uninit_memory: Vec::new(),
-            mem_reads: Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
+            mem_reads: Arc::new(Vec::new()),
         };
         // Bound MUST trigger ExceededCycleLimit which execute_from_chunk
         // catches; otherwise the test would fail with a leaked error or

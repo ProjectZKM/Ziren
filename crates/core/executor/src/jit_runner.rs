@@ -1293,8 +1293,6 @@ mod platform {
         let mem_reads: Vec<crate::minimal_trace::MemValue> = take_recorded_mem_reads()
             .into_iter()
             .map(|r| crate::minimal_trace::MemValue {
-                clk: r.clk,
-                addr: r.addr,
                 value: r.value,
                 // the JIT recorder does not track per-address
                 // shard/timestamp bookkeeping — the shard-bookkeeping gap that
@@ -1320,7 +1318,7 @@ mod platform {
             public_values_stream_ptr: 0,
             final_memory: Vec::new(),
             final_uninit_memory: Vec::new(),
-            mem_reads: std::sync::Arc::from(mem_reads),
+            mem_reads: std::sync::Arc::new(mem_reads),
         }
     }
 
@@ -1547,9 +1545,9 @@ mod tests {
 //       thread-local lifecycle, drain semantics). Landing it standalone
 //       lets the codegen wiring be a 1-line `.call` emit later.
 
-/// Single memory-read oracle entry, matching
-/// `crate::minimal_trace::MemValue` layout. Re-exported here so
-/// codegen doesn't need to depend on minimal_trace directly.
+/// Single memory-read oracle entry as the recorder hook receives it
+/// (`(clk, addr, value)`); the chunk keeps only the `value` (see
+/// `crate::minimal_trace::MemValue`).
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct JitMemReadRecord {

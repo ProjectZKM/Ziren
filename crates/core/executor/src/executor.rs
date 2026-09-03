@@ -303,7 +303,7 @@ pub struct Executor<'a> {
     /// chunk's mem_reads oracle. Populated by `mr()` whenever the
     /// `minimal_trace_collector` is `Some`. Drained at `bump_record()`
     /// when the chunk closes — the accumulated entries become the
-    /// previous chunk's `mem_reads` field (Arc<[MemValue]>).
+    /// previous chunk's `mem_reads` field (moved, not copied).
     pub recording_chunk_mem_reads: Vec<crate::minimal_trace::MemValue>,
 
     /// Replay source for user-memory accesses: the chunk's oracle as a CURSOR.
@@ -666,31 +666,15 @@ impl<'a> Executor<'a> {
 
     /// Get the current value of a word.
     ///
-    /// # Replay
-    ///
-    /// Under replay the page table is empty by design -- the `mem_reads` oracle
-    /// is a CURSOR, not a seed -- so a direct read here returns 0. That is
-    /// invisible for a plain load (those go through `mr`), but a narrow or
-    /// unaligned store reads the containing word THROUGH THIS FUNCTION and
-    /// merges its byte into it, so a zero here silently writes the byte alone:
-    /// `(mem & mask) | val` with `mem == 0`.
-    ///
-    /// This read is not itself a recorded access, so it must not advance the
-    /// cursor. It does not need to: the write it feeds is the very next
-    /// recorded access on the same address, and the oracle entry for it holds
-    /// that address's PRE-access value -- which is exactly what this returns.
-    /// So peek at the cursor head without consuming it, and only when the
-    /// address matches, which leaves every other caller on the old path.
+    /// Under replay an address the chunk has not touched yet is absent from
+    /// the page table (the `mem_reads` oracle is a CURSOR, not a seed) and
+    /// reads 0 here; every recorded access goes through `mr`/`mw` and takes
+    /// its pre-access record from the cursor instead. The one unrecorded read
+    /// that feeds a recorded value -- the containing word a narrow store
+    /// merges into -- is served by [`Self::peek_replay_word`].
     #[must_use]
     #[inline]
     pub fn word(&mut self, addr: u32) -> u32 {
-        if let Some(cursor) = self.replay_mem.as_ref() {
-            if let Some(mv) = cursor.entries.get(cursor.pos) {
-                if mv.addr == addr {
-                    return mv.value;
-                }
-            }
-        }
         #[allow(clippy::single_match_else)]
         let record = self.state.memory.page_table.get(addr);
 
@@ -734,14 +718,29 @@ impl<'a> Executor<'a> {
         if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
             let record = self.state.memory.page_table.get(addr).copied().unwrap_or_default();
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
-                clk: self.state.global_clk,
-                addr,
                 value,
                 shard: record.shard,
                 timestamp: record.timestamp,
             });
         }
         value
+    }
+
+    /// Under replay, the PRE-access value of the address the very next
+    /// recorded access touches, without consuming the cursor entry.
+    ///
+    /// A narrow or unaligned store reads the containing word (an unrecorded
+    /// read) and merges its bytes into it; under replay that word may be
+    /// absent from the page table, and a zero there silently writes the bytes
+    /// alone: `(mem & mask) | val` with `mem == 0`. The write it feeds is the
+    /// very next recorded access on that same address, so the cursor head IS
+    /// the word's pre-access value. `None` off replay (or on an exhausted
+    /// oracle, reported by the consuming read that follows).
+    #[must_use]
+    #[inline]
+    fn peek_replay_word(&self) -> Option<u32> {
+        let cursor = self.replay_mem.as_ref()?;
+        cursor.entries.get(cursor.pos).map(|mv| mv.value)
     }
 
     /// Get the current value of a byte.
@@ -867,8 +866,6 @@ impl<'a> Executor<'a> {
         // `unconstrained_state.memory_diff`) cannot yet have altered.
         if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
-                clk: self.state.global_clk,
-                addr,
                 // full record: the PRE-access record (value +
                 // shard + timestamp). The consumer keeps the FIRST entry
                 // per address = the shard-start memory state, so the
@@ -1167,8 +1164,6 @@ impl<'a> Executor<'a> {
         // `unconstrained_state.memory_diff`) cannot yet have altered.
         if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
-                clk: self.state.global_clk,
-                addr,
                 // full pre-access record (value + shard + timestamp).
                 value: prev_record.value,
                 shard: prev_record.shard,
@@ -1282,8 +1277,6 @@ impl<'a> Executor<'a> {
         // `unconstrained_state.memory_diff`) cannot yet have altered.
         if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
-                clk: self.state.global_clk,
-                addr,
                 // full pre-access record (value + shard + timestamp).
                 value: prev_record.value,
                 shard: prev_record.shard,
@@ -2746,7 +2739,11 @@ impl<'a> Executor<'a> {
         let addr = rs.wrapping_add(offset_ext);
         let aligned_addr = addr & 0xFFFF_FFFC;
 
-        let mem = self.word(aligned_addr);
+        // The `mw_cpu` below is the next recorded access, on this address.
+        let mem = match self.peek_replay_word() {
+            Some(mem) => mem,
+            None => self.word(aligned_addr),
+        };
 
         let val = match instruction.opcode {
             Opcode::SB => {
@@ -2946,13 +2943,6 @@ impl<'a> Executor<'a> {
             return None;
         };
         cursor.pos += 1;
-        debug_assert_eq!(
-            mv.addr, addr,
-            "replay memory cursor desync at access {}: oracle says {:#x}, replay asked {:#x}",
-            cursor.pos - 1,
-            mv.addr,
-            addr,
-        );
         Some(MemoryRecord { value: mv.value, shard: mv.shard, timestamp: mv.timestamp })
     }
 
@@ -2994,9 +2984,14 @@ impl<'a> Executor<'a> {
                 // Option B: stamp the recorded mem_reads
                 // oracle entries onto the chunk that just closed. Drain
                 // the recording buffer so the next chunk starts fresh.
-                let drained: Vec<crate::minimal_trace::MemValue> =
-                    std::mem::take(&mut self.recording_chunk_mem_reads);
-                prev.mem_reads = std::sync::Arc::from(drained);
+                // The next chunk's buffer is sized like this one so the
+                // oracle grows without a realloc copy per doubling.
+                let cap = self.recording_chunk_mem_reads.len();
+                let drained = std::mem::replace(
+                    &mut self.recording_chunk_mem_reads,
+                    Vec::with_capacity(cap),
+                );
+                prev.mem_reads = std::sync::Arc::new(drained);
                 // The hint window this chunk consumed. Final as of now: the
                 // cursor has passed it, and neither `FD_HINT` (pushes at the
                 // end) nor a hook (splices at the cursor) rewrites behind it.
@@ -3030,7 +3025,7 @@ impl<'a> Executor<'a> {
                 public_values_stream_ptr: next_pv_ptr,
                 final_memory: Vec::new(),
                 final_uninit_memory: Vec::new(),
-                mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
+                mem_reads: std::sync::Arc::new(Vec::new()),
             });
             trace.total_cycles = next_chunk_clk;
         }
@@ -3325,7 +3320,7 @@ impl<'a> Executor<'a> {
                     clk_end: u64::MAX,
                     final_memory: Vec::new(),
                     final_uninit_memory: Vec::new(),
-                    mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
+                    mem_reads: std::sync::Arc::new(Vec::new()),
                 });
             }
         }
@@ -3422,7 +3417,7 @@ impl<'a> Executor<'a> {
                 public_values_stream_ptr: 0,
                 final_memory: Vec::new(),
                 final_uninit_memory: Vec::new(),
-                mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
+                mem_reads: std::sync::Arc::new(Vec::new()),
             }
         });
         Ok(chunk)
