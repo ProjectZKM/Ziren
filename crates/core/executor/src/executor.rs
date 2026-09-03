@@ -99,7 +99,7 @@ const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SH
 ///
 /// At `clk += 5` per instruction this caps any shard at `2^25 / 5 ≈ 6.71 M` cycles.
 /// `ELEMENT_THRESHOLD` (trace area) closes shards before that on today's workloads.
-const CORE_SHARD_CLK_LIMIT: u32 = 1 << 25;
+pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 25;
 
 /// Whether to log one `SHARD_CLOSE` line per closed core shard, naming the
 /// fence that closed it.  Read once; off unless `ZIREN_SHARD_CLOSE_CENSUS` is
@@ -286,6 +286,12 @@ pub struct Executor<'a> {
     /// the worker's `report`/`local_counts` outputs are discarded.
     /// Default false; TracingVM workers set true.
     pub skip_replay_bookkeeping: bool,
+
+    /// Run every instruction in the interpreter even when the native
+    /// minimal-trace producer would take the program. Only the A/B tests
+    /// that compare the two set this.
+    #[doc(hidden)]
+    pub force_interpreter: bool,
 
     /// The hint stream was RECORDED by a prior pass and pre-seeded, so the
     /// syscalls that would produce it must not run again.
@@ -581,6 +587,7 @@ impl<'a> Executor<'a> {
             lde_size_threshold: 0,
             minimal_trace_collector: None,
             skip_replay_bookkeeping: false,
+            force_interpreter: false,
             hint_stream_prerecorded: false,
             flat_mem: None,
             recording_chunk_mem_reads: Vec::new(),
@@ -2195,57 +2202,7 @@ impl<'a> Executor<'a> {
         // rows are counted, so the accumulator cannot drift from the executor.
         if !self.unconstrained && !self.skip_replay_bookkeeping {
             self.report.opcode_counts[instruction.opcode] += 1;
-            // Form-split ALU rows land on one of two chips by operand form;
-            // the opcode->air map cannot see the form, so route here via the
-            // immediate-form map.  The synthetic charges below (a branch's
-            // internal add, etc.) stay on the register-form airs.
-            let imm_air = if instruction.imm_c {
-                crate::mips_imm_air_from_opcode(instruction.opcode)
-            } else {
-                None
-            };
-            if let Some(air) = imm_air {
-                self.split_acct.add_air(air, 1);
-            } else {
-                self.split_acct.add_opcode(instruction.opcode, 1);
-            }
-            // NOTE: a memory instruction's `addr_word = op_b_value + op_c_value` is
-            // INLINED into the memory chip's own columns (see
-            // `memory::instructions::common`), so it emits NO `AddSub` row. Charging
-            // 2 rows per load here billed ~100 M rows that never exist -- 3.42x the
-            // real `add_sub_events` count and 21% of the whole area budget -- which
-            // closed shards early on a budget that was mostly fiction. Rows are only
-            // charged where `emit_alu` actually pushes an event.
-            if instruction.is_branch_cmp_instruction() {
-                self.split_acct.add_opcode(Opcode::ADD, 1);
-                self.split_acct.add_opcode(Opcode::SLT, 2);
-            } else if instruction.is_mov_cond_instruction() {
-                self.split_acct.add_opcode(Opcode::ADD, 1);
-            } else if instruction.opcode == Opcode::EXT {
-                self.split_acct.add_opcode(Opcode::SLL, 1);
-                self.split_acct.add_opcode(Opcode::SRL, 1);
-            } else if instruction.is_cloclz_instruction() {
-                self.split_acct.add_opcode(Opcode::SRL, 1);
-            } else if instruction.is_maddsubu_instruction() {
-                self.split_acct.add_opcode(Opcode::MULTU, 1);
-            } else if instruction.opcode == Opcode::INS {
-                self.split_acct.add_opcode(Opcode::ROR, 2);
-                self.split_acct.add_opcode(Opcode::SLL, 1);
-                self.split_acct.add_opcode(Opcode::SRL, 2);
-                self.split_acct.add_opcode(Opcode::ADD, 1);
-            } else if instruction.opcode == Opcode::DIV {
-                self.split_acct.add_opcode(Opcode::MULT, 2);
-                self.split_acct.add_opcode(Opcode::ADD, 2);
-                self.split_acct.add_opcode(Opcode::SLTU, 1);
-            } else if instruction.opcode == Opcode::DIVU {
-                self.split_acct.add_opcode(Opcode::MULTU, 2);
-                self.split_acct.add_opcode(Opcode::ADD, 2);
-                self.split_acct.add_opcode(Opcode::SLTU, 1);
-            } else if instruction.is_maddsub_instruction() {
-                self.split_acct.add_opcode(Opcode::MULT, 1);
-            } else if instruction.opcode == Opcode::JumpDirect {
-                self.split_acct.add_opcode(Opcode::ADD, 1);
-            }
+            charge_instruction(&mut self.split_acct, instruction);
         }
 
         if instruction.is_alu_instruction() {
@@ -2947,7 +2904,7 @@ impl<'a> Executor<'a> {
     /// Executes one cycle of the program, returning whether the program has finished.
     #[inline]
     #[allow(clippy::too_many_lines)]
-    fn execute_cycle(&mut self) -> Result<bool, ExecutionError> {
+    pub(crate) fn execute_cycle(&mut self) -> Result<bool, ExecutionError> {
         // Fetch the instruction at the current program counter.
         let instruction = self.fetch();
 
@@ -3811,6 +3768,15 @@ impl<'a> Executor<'a> {
         // set.
         let mut done = false;
         let mut num_shards_executed = 0;
+
+        // The native minimal-trace producer takes the whole batch when this
+        // executor is in the configuration it models (the parent's
+        // `execute_minimal` on the flat memory); it interprets the
+        // instructions it does not lower and fences the shards itself. On
+        // any other configuration it declines and the loop below runs.
+        if let Some(batch_done) = crate::jit_producer::run(self, &mut num_shards_executed)? {
+            done = batch_done;
+        } else {
         loop {
             if self.execute_cycle()? {
                 done = true;
@@ -3829,6 +3795,7 @@ impl<'a> Executor<'a> {
                     break;
                 }
             }
+        }
         }
 
         // Option 2 State bus: stamp the final shard's last_timestamp.  No
@@ -3895,7 +3862,22 @@ impl<'a> Executor<'a> {
     }
 
     #[inline]
-    fn inc_shard_if_need(&mut self) -> bool {
+    /// Whether [`Self::inc_shard_if_need`] would close the shard right now,
+    /// without closing it. Mirrors the four production limits it tests; the
+    /// offline shape block cannot fire here because the producer only runs
+    /// with `lde_size_check` off and `maximal_shapes` unset.
+    pub(crate) fn shard_fence_due(&self) -> bool {
+        let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
+        let clk_exit = self.state.clk
+            + self.max_syscall_cycles
+            + MemoryAccessPosition::HI as u32
+            >= CORE_SHARD_CLK_LIMIT;
+        let (area_split, height_split) =
+            self.split_acct.check_shard_limit((self.state.clk / 5) as u64);
+        cpu_exit || clk_exit || area_split || height_split
+    }
+
+    pub(crate) fn inc_shard_if_need(&mut self) -> bool {
         if self.executor_mode == ExecutorMode::Trace && !self.state.records_clk.is_empty() {
             let records_clk_index = self.state.records_clk_index as usize;
             if records_clk_index < self.state.records_clk.len()
@@ -4063,12 +4045,20 @@ impl<'a> Executor<'a> {
                 } else {
                     "shape"
                 };
+                let counts = self.split_acct.event_counts(cpu_cycles);
+                let mut census: Vec<String> = counts
+                    .iter()
+                    .filter(|(_, &n)| n != 0)
+                    .map(|(air, n)| format!("{air}:{n}"))
+                    .collect();
+                census.sort();
                 tracing::warn!(
-                    "SHARD_CLOSE reason={reason} shard={} cycles={} area={} max_height={}",
+                    "SHARD_CLOSE reason={reason} shard={} cycles={} area={} max_height={} counts={}",
                     self.state.current_shard,
                     cpu_cycles,
                     self.split_acct.trace_area(cpu_cycles),
                     self.split_acct.max_height(cpu_cycles),
+                    census.join(","),
                 );
             }
             if self.executor_mode == ExecutorMode::Checkpoint {
@@ -4209,6 +4199,66 @@ impl<'a> Executor<'a> {
 #[must_use]
 pub const fn align(addr: u32) -> u32 {
     addr - addr % 4
+}
+
+/// Charge `instruction`'s rows to the shard accumulator: one row on its own
+/// chip (form-split ALU rows land by operand form), plus the rows it induces
+/// on the chips it depends on. The interpreter charges every instruction it
+/// executes here, and the JIT producer tabulates the same charges per
+/// `(opcode, imm_c)` to subtract from its budgets natively; it is the only
+/// place opcode-driven rows are counted, so the two cannot drift.
+pub(crate) fn charge_instruction(acct: &mut ShardSplitAccumulator, instruction: &Instruction) {
+    // Form-split ALU rows land on one of two chips by operand form;
+    // the opcode->air map cannot see the form, so route here via the
+    // immediate-form map.  The synthetic charges below (a branch's
+    // internal add, etc.) stay on the register-form airs.
+    let imm_air = if instruction.imm_c {
+        crate::mips_imm_air_from_opcode(instruction.opcode)
+    } else {
+        None
+    };
+    if let Some(air) = imm_air {
+        acct.add_air(air, 1);
+    } else {
+        acct.add_opcode(instruction.opcode, 1);
+    }
+    // NOTE: a memory instruction's `addr_word = op_b_value + op_c_value` is
+    // INLINED into the memory chip's own columns (see
+    // `memory::instructions::common`), so it emits NO `AddSub` row. Charging
+    // 2 rows per load here billed ~100 M rows that never exist -- 3.42x the
+    // real `add_sub_events` count and 21% of the whole area budget -- which
+    // closed shards early on a budget that was mostly fiction. Rows are only
+    // charged where `emit_alu` actually pushes an event.
+    if instruction.is_branch_cmp_instruction() {
+        acct.add_opcode(Opcode::ADD, 1);
+        acct.add_opcode(Opcode::SLT, 2);
+    } else if instruction.is_mov_cond_instruction() {
+        acct.add_opcode(Opcode::ADD, 1);
+    } else if instruction.opcode == Opcode::EXT {
+        acct.add_opcode(Opcode::SLL, 1);
+        acct.add_opcode(Opcode::SRL, 1);
+    } else if instruction.is_cloclz_instruction() {
+        acct.add_opcode(Opcode::SRL, 1);
+    } else if instruction.is_maddsubu_instruction() {
+        acct.add_opcode(Opcode::MULTU, 1);
+    } else if instruction.opcode == Opcode::INS {
+        acct.add_opcode(Opcode::ROR, 2);
+        acct.add_opcode(Opcode::SLL, 1);
+        acct.add_opcode(Opcode::SRL, 2);
+        acct.add_opcode(Opcode::ADD, 1);
+    } else if instruction.opcode == Opcode::DIV {
+        acct.add_opcode(Opcode::MULT, 2);
+        acct.add_opcode(Opcode::ADD, 2);
+        acct.add_opcode(Opcode::SLTU, 1);
+    } else if instruction.opcode == Opcode::DIVU {
+        acct.add_opcode(Opcode::MULTU, 2);
+        acct.add_opcode(Opcode::ADD, 2);
+        acct.add_opcode(Opcode::SLTU, 1);
+    } else if instruction.is_maddsub_instruction() {
+        acct.add_opcode(Opcode::MULT, 1);
+    } else if instruction.opcode == Opcode::JumpDirect {
+        acct.add_opcode(Opcode::ADD, 1);
+    }
 }
 
 #[cfg(test)]

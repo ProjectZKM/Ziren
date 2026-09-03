@@ -451,6 +451,52 @@ impl ShardSplitAccumulator {
         counts[MipsAirId::Cpu] = cpu_cycles;
         counts
     }
+
+    /// The producer's slot for `air`: its index in the `EnumMap` order (declaration order,
+    /// NOT the discriminant), which is what `heights` is laid out in.
+    #[must_use]
+    pub fn slot(air: MipsAirId) -> usize {
+        <MipsAirId as enum_map::Enum>::into_usize(air)
+    }
+
+    /// Main-trace width of `air`.
+    #[must_use]
+    pub fn cost(&self, air: MipsAirId) -> u64 {
+        self.costs[air]
+    }
+
+    /// Hand the live budgets to the JIT producer as remaining amounts: `area_left =
+    /// element_threshold - trace_area`, `height_left[slot(air)] = height_threshold -
+    /// heights[air]`, plus the touched-address count. The producer charges by subtracting and
+    /// fences at `<= 0`, which is exactly `check_shard_limit`'s `>=`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `height_left` has fewer than `MipsAirId::LENGTH` slots.
+    pub fn export_budgets(&self, area_left: &mut i64, height_left: &mut [i64], touched: &mut u64) {
+        *area_left = self.element_threshold as i64 - self.trace_area as i64;
+        for (air, &height) in &self.heights {
+            height_left[Self::slot(air)] = self.height_threshold as i64 - height as i64;
+        }
+        *touched = self.touched_addresses;
+    }
+
+    /// Take the budgets back from the producer (the inverse of [`Self::export_budgets`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `height_left` has fewer than `MipsAirId::LENGTH` slots.
+    pub fn import_budgets(&mut self, area_left: i64, height_left: &[i64], touched: u64) {
+        self.trace_area = (self.element_threshold as i64 - area_left) as u64;
+        self.max_height = 0;
+        for (air, height) in &mut self.heights {
+            *height = (self.height_threshold as i64 - height_left[Self::slot(air)]) as u64;
+            if *height > self.max_height {
+                self.max_height = *height;
+            }
+        }
+        self.touched_addresses = touched;
+    }
 }
 
 /// Pads the event counts to account for the worst case jump in events across N cycles.

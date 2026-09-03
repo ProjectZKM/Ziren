@@ -1228,6 +1228,9 @@ mod platform {
             // `pc_base` indexes far past the table and the host dies.
             jump_table_len: u32::try_from(jump_table_len).unwrap_or(u32::MAX),
             bad_jump_target: 0,
+            // The producer's fields (`reg_stamps`, oracle pointers, budgets)
+            // are unused by this driver; it never reads them.
+            ..JitContext::default()
         };
         // Mask zero register for safety.
         ctx.registers[0] = 0;

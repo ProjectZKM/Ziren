@@ -10,6 +10,10 @@ use std::ptr::NonNull;
 /// Number of MIPS registers (32 GPRs + HI + LO + 2 reserved).
 pub const NUM_REGISTERS: usize = 36;
 
+/// Slots in [`JitContext::height_left`]: an upper bound on the executor's
+/// `MipsAirId` count (65 today). The executor asserts its count fits.
+pub const PRODUCER_HEIGHT_SLOTS: usize = 72;
+
 /// C-ABI struct passed to JIT'd `extern "C" fn(*mut JitContext)`.
 ///
 /// All fields are `#[repr(C)]` so x86 backend offsets are stable.
@@ -136,6 +140,42 @@ pub struct JitContext {
     /// check, recorded so the host can name it (with
     /// [`Self::last_executed_pc`]) instead of dying anonymously.
     pub bad_jump_target: u32,
+
+    // ---- minimal-trace producer state (`backends::x86::producer`) ----
+    //
+    // The producer keeps three of these pinned while its code runs
+    // (`clk_shard` in R15, `oracle_tail` in RSI, `area_left` in R8) and
+    // spills them here around the host trampoline and at every exit; the
+    // rest are read and written in place.
+    /// Per-register `(shard << 32) | timestamp` of the last access: the
+    /// producer's image of the register file's `MemoryRecord::{shard,
+    /// timestamp}`, which `bump_record` seals into every chunk.
+    pub reg_stamps: [u64; NUM_REGISTERS],
+    /// Oracle write cursor: the next free byte of the host's
+    /// `recording_chunk_mem_reads` vector.
+    pub oracle_tail: *mut u8,
+    /// One 12-byte oracle entry before the end of that vector's capacity.
+    /// A push with the tail above this would overflow, so the producer
+    /// exits with `JIT_EXIT_ORACLE_FULL` first and the host grows the
+    /// vector.
+    pub oracle_end: *mut u8,
+    /// `(current_shard << 32) | (clk + 3)`: the A-position stamp of the
+    /// instruction about to execute.
+    pub clk_shard: u64,
+    /// `element_threshold - trace_area` of the split accumulator; the area
+    /// fence is `<= 0` after an instruction's charge.
+    pub area_left: i64,
+    /// `height_threshold - heights[air]` per air, in the accumulator's
+    /// `EnumMap` slot order; the height fence is `<= 0` after a charge.
+    pub height_left: [i64; PRODUCER_HEIGHT_SLOTS],
+    /// The accumulator's `touched_addresses`.
+    pub touched: u64,
+    /// `clk_shard`'s low half at which the clock fence trips, i.e. the
+    /// clk-based shard bound plus 3.
+    pub clk_limit: u32,
+    /// The current shard, as a 32-bit operand for the memory hook's
+    /// first-touch comparison.
+    pub shard: u32,
 }
 
 impl Default for JitContext {
@@ -165,6 +205,15 @@ impl Default for JitContext {
             dirty_log_cap: 0,
             jump_table_len: 0,
             bad_jump_target: 0,
+            reg_stamps: [0; NUM_REGISTERS],
+            oracle_tail: std::ptr::null_mut(),
+            oracle_end: std::ptr::null_mut(),
+            clk_shard: 0,
+            area_left: 0,
+            height_left: [0; PRODUCER_HEIGHT_SLOTS],
+            touched: 0,
+            clk_limit: 0,
+            shard: 0,
         }
     }
 }

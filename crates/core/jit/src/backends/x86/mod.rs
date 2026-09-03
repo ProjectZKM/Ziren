@@ -8,6 +8,7 @@ use std::mem::offset_of;
 use crate::context::JitContext;
 
 mod instruction_impl;
+pub mod producer;
 mod transpiler;
 
 /// First scratch register (callee-saved).
@@ -95,6 +96,43 @@ pub(crate) const PENDING_JUMP_AT_START_OFFSET: i32 =
 /// SYSCALL emission so the host handler can recover the syscall's
 /// guest PC — ENTER_UNCONSTRAINED needs it to snapshot `state.pc`.
 pub(crate) const LAST_EXECUTED_PC_OFFSET: i32 = offset_of!(JitContext, last_executed_pc) as i32;
+
+// The minimal-trace producer's fields (see [`producer`]).
+/// Offset of `reg_stamps`.
+pub(crate) const REG_STAMPS_OFFSET: i32 = offset_of!(JitContext, reg_stamps) as i32;
+/// Offset of `oracle_tail`.
+pub(crate) const ORACLE_TAIL_OFFSET: i32 = offset_of!(JitContext, oracle_tail) as i32;
+/// Offset of `oracle_end`.
+pub(crate) const ORACLE_END_OFFSET: i32 = offset_of!(JitContext, oracle_end) as i32;
+/// Offset of `clk_shard`.
+pub(crate) const CLK_SHARD_OFFSET: i32 = offset_of!(JitContext, clk_shard) as i32;
+/// Offset of `area_left`.
+pub(crate) const AREA_LEFT_OFFSET: i32 = offset_of!(JitContext, area_left) as i32;
+/// Offset of `height_left`.
+pub(crate) const HEIGHT_LEFT_OFFSET: i32 = offset_of!(JitContext, height_left) as i32;
+/// Offset of `touched`.
+pub(crate) const TOUCHED_OFFSET: i32 = offset_of!(JitContext, touched) as i32;
+/// Offset of `clk_limit`.
+pub(crate) const CLK_LIMIT_OFFSET: i32 = offset_of!(JitContext, clk_limit) as i32;
+/// Offset of `shard`.
+pub(crate) const SHARD_OFFSET: i32 = offset_of!(JitContext, shard) as i32;
+
+/// Producer `exit_code`s. The `0x5000_0000` prefix keeps them apart from
+/// the halt sentinels and [`JIT_EXIT_BAD_JUMP`]; none of these is an
+/// error by itself -- the host decides what each means at `ctx.pc`.
+///
+/// The shard fence: the instruction that just completed (`ctx.pc` is its
+/// successor) put the shard at one of the executor's split bounds.
+pub const JIT_EXIT_SHARD_FENCE: u32 = 0x5000_0001;
+/// The oracle vector is full; `ctx.pc` is the memory instruction that
+/// could not push (nothing of it executed).
+pub const JIT_EXIT_ORACLE_FULL: u32 = 0x5000_0002;
+/// Execution fell off the end of the program (`ctx.pc` is one past it).
+pub const JIT_EXIT_FALL_OFF: u32 = 0x5000_0003;
+/// The host trampoline (a syscall or a trapping instruction handed to the
+/// interpreter) ended the run: the program finished, or the interpreter
+/// step was a fence, or it failed. The host knows which.
+pub const JIT_EXIT_HOST: u32 = 0x5000_0004;
 
 /// Where each MIPS register physically lives during JIT execution.
 ///
@@ -291,6 +329,28 @@ impl TranspilerBackend {
             ; jmp QWORD [Rq(JUMP_TABLE) + rax * 8]
             ; bad_entry_dispatch:
             ; mov DWORD [Rq(CONTEXT) + BAD_JUMP_TARGET_OFFSET], DWORD pc_start as i32
+            ; mov DWORD [Rq(CONTEXT) + EXIT_CODE_OFFSET], DWORD JIT_EXIT_BAD_JUMP as i32
+            ; jmp =>exit_lbl
+        );
+    }
+
+    /// Emit an indirect jump to the JIT entry for the MIPS pc held in
+    /// `ctx.pc` -- the resume dispatch of a function that is re-entered
+    /// wherever its last exit left off.
+    pub fn emit_dispatch_to_ctx_pc(&mut self) {
+        use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
+        let pc_base = self.pc_base;
+        let exit_lbl = self.exit_label.expect("exit label set in `new`");
+        dynasm!(self.assembler ; .arch x64
+            ; mov eax, DWORD [Rq(CONTEXT) + PC_OFFSET]
+            ; sub eax, DWORD pc_base as i32
+            ; shr eax, 2
+            ; cmp eax, DWORD [Rq(CONTEXT) + JUMP_TABLE_LEN_OFFSET]
+            ; jae >bad_entry_dispatch
+            ; jmp QWORD [Rq(JUMP_TABLE) + rax * 8]
+            ; bad_entry_dispatch:
+            ; mov eax, DWORD [Rq(CONTEXT) + PC_OFFSET]
+            ; mov DWORD [Rq(CONTEXT) + BAD_JUMP_TARGET_OFFSET], eax
             ; mov DWORD [Rq(CONTEXT) + EXIT_CODE_OFFSET], DWORD JIT_EXIT_BAD_JUMP as i32
             ; jmp =>exit_lbl
         );

@@ -275,7 +275,7 @@ pub enum DriverError {
 /// The caller is expected to wrap this with `start_instr()` /
 /// `end_instr()` brackets — see [`drive_instructions`] for the
 /// canonical loop.
-fn lower_one<T: MipsTranspiler>(
+pub(crate) fn lower_one<T: MipsTranspiler>(
     t: &mut T,
     ins: DriverInstruction,
     current_pc: u32,

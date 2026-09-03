@@ -24,6 +24,10 @@ mod io;
 /// the JIT itself isn't available and callers should fall back to
 /// [`Executor::run`].
 pub mod jit_runner;
+/// Native minimal-trace producer: the parent runs the guest as one JIT
+/// function and the interpreter only handles the instructions it does not
+/// lower. See the module docs.
+pub mod jit_producer;
 pub mod memory;
 /// Minimal-trace skeleton for the MinimalTrace + TracingVM split.
 /// Defines the per-shard checkpoint format the JIT

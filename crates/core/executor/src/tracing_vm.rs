@@ -968,9 +968,80 @@ mod tests {
         );
     }
 
+    /// A/B the native minimal-trace producer against the interpreter on the
+    /// SAME path (`execute_minimal`, flat memory, collector on): the chunks
+    /// the workers replay, the cycle count and the public values must be
+    /// identical. This is the gate the producer landed on — the checkpoint
+    /// comparison above only pins the producer to a DIFFERENT executor
+    /// configuration, so it cannot see a flat-memory-specific divergence.
+    #[test]
+    fn producer_chunks_match_the_interpreter() {
+        producer_chunks_match_the_interpreter_on(
+            crate::programs::tests::sha3_chain_program(),
+            true,
+        );
+        producer_chunks_match_the_interpreter_on(
+            crate::programs::tests::unconstrained_program(),
+            false,
+        );
+    }
+
+    fn producer_chunks_match_the_interpreter_on(program: Program, sha3_stdin: bool) {
+        use crate::minimal_trace::MinimalTrace;
+        use crate::Executor;
+        use std::sync::atomic::Ordering;
+
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 1 << 12;
+        opts.shard_batch_size = 2;
+
+        let run = |force_interpreter: bool| {
+            let mut exec = Executor::new(program.clone(), opts);
+            exec.force_interpreter = force_interpreter;
+            if sha3_stdin {
+                exec.write_stdin(&[1u8; 32]);
+                exec.write_stdin(&1u32);
+            }
+            exec.minimal_trace_collector = Some(MinimalTrace::default());
+            let mut chunks = Vec::new();
+            loop {
+                let done = exec.execute_minimal().expect("execute_minimal");
+                if done {
+                    exec.seal_minimal_trace_final_memory();
+                }
+                chunks.append(&mut exec.drain_sealed_chunks());
+                if done {
+                    break;
+                }
+            }
+            (chunks, exec.report.total_instruction_count(), exec.state.public_values_stream)
+        };
+
+        let (interp, interp_cycles, interp_pvs) = run(true);
+        let before = crate::jit_producer::PRODUCER_BATCHES.load(Ordering::Relaxed);
+        let (native, native_cycles, native_pvs) = run(false);
+        assert!(
+            crate::jit_producer::PRODUCER_BATCHES.load(Ordering::Relaxed) > before,
+            "the native producer declined this program; this is an interpreter/interpreter A/B"
+        );
+
+        assert!(interp.len() > 1, "test program produced only {} chunk(s)", interp.len());
+        assert!(
+            interp.iter().any(|c| !c.mem_reads.is_empty()),
+            "no chunk recorded a user-memory read; the oracle is not exercised"
+        );
+        assert_eq!(native_cycles, interp_cycles, "cycle count");
+        assert_eq!(native_pvs, interp_pvs, "public values stream");
+        assert_eq!(native.len(), interp.len(), "chunk count");
+        for (i, (n, c)) in native.iter().zip(interp.iter()).enumerate() {
+            assert_eq!(n, c, "chunk {i} differs between the producer and the interpreter");
+        }
+    }
+
     fn minimal_chunks_match_checkpoint_chunks_on(program: Program, sha3_stdin: bool) {
         use crate::minimal_trace::MinimalTrace;
         use crate::Executor;
+        use std::sync::atomic::Ordering;
 
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 1 << 12;
@@ -1000,8 +1071,13 @@ mod tests {
             }
             (chunks, exec.report.total_instruction_count(), exec.state.public_values_stream)
         };
+        let before = crate::jit_producer::PRODUCER_BATCHES.load(Ordering::Relaxed);
         let (ckpt, ckpt_cycles, ckpt_pvs) = run(false);
         let (min, min_cycles, min_pvs) = run(true);
+        assert!(
+            crate::jit_producer::PRODUCER_BATCHES.load(Ordering::Relaxed) > before,
+            "the native producer declined this program; the comparison is interpreter-vs-interpreter"
+        );
 
         assert!(ckpt.len() > 1, "test program produced only {} chunk(s)", ckpt.len());
         assert!(
