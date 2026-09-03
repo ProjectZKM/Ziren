@@ -17,7 +17,7 @@
 //!
 //! | Cluster              | Chip family                                              |
 //! |----------------------|----------------------------------------------------------|
-//! | `cluster_preprocessed` | `Program`, `Byte` — always present                     |
+//! | `cluster_preprocessed` | `Program`, `Byte`, `Range` — always present            |
 //! | `cluster_core_base`  | CPU + ALU + mem-instrs + syscall-core (plumbing)         |
 //! | `cluster_memory`     | `cluster_core_base` ∪ memory init/finalize + global      |
 //! | `cluster_keccak`     | core + KeccakSponge                                      |
@@ -40,8 +40,17 @@ use super::types::{consts, CoreProofShape, MachineShape};
 
 /// The small set of always-present chip names shared by every
 /// cluster (preprocessed-only chips).
+///
+/// `Range` is the parametric bit-width lookup table
+/// (`crates/core/machine/src/range`): like `Byte` it is preprocessed and
+/// `included()` on EVERY shard at its fixed 2^10 height, so every real
+/// core shard commits it and the normalize program's chip set — hence its
+/// vk — carries it.  Leaving it out of the clusters made every enumerated
+/// normalize shape two preprocessed columns short of the real proof's
+/// column space (`recursive_jagged_pcs.rs` insertion index 11849 > len
+/// 11847) and put every real normalize vk outside the map.
 fn preprocessed_chips() -> &'static [&'static str] {
-    &["Program", "Byte"]
+    &["Program", "Byte", "Range"]
 }
 
 /// Baseline core-CPU chip set that every workload includes.  This is
@@ -342,6 +351,7 @@ mod tests {
         for cluster in &ms.chip_clusters {
             assert!(cluster.contains("Program"), "cluster missing Program: {:?}", cluster);
             assert!(cluster.contains("Byte"), "cluster missing Byte: {:?}", cluster);
+            assert!(cluster.contains("Range"), "cluster missing Range: {:?}", cluster);
         }
     }
 

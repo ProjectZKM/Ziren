@@ -559,6 +559,12 @@ impl ZKMProofShape {
         // a function of the two block counts and nothing finer, ANY shape
         // landing in the class reproduces the real proof's key — the
         // distribution across fillers is free.
+        // The two lookup TABLES sit at their fixed heights on every shard:
+        // Byte at 2^16 and Range at 2^10 (`NUM_RANGE_ROWS`).  Both are
+        // preprocessed AND `included()` unconditionally, so a real shard
+        // commits them in both rounds at exactly these heights — they are
+        // never fillers.
+        const RANGE_LOG_HEIGHT: usize = zkm_core_machine::range::NUM_RANGE_ROWS.ilog2() as usize;
         let shape_at_class = |names: &[String],
                               fillers: &std::collections::HashSet<&String>,
                               prog_h: usize,
@@ -569,6 +575,8 @@ impl ZKMProofShape {
                 .map(|n| {
                     let h = if n == "Byte" {
                         16
+                    } else if n == "Range" {
+                        RANGE_LOG_HEIGHT
                     } else if n == "Program" {
                         prog_h
                     } else {
@@ -590,7 +598,9 @@ impl ZKMProofShape {
             let mut filler_idx: Vec<usize> = heights
                 .iter()
                 .enumerate()
-                .filter(|(_, (n, _))| fillers.contains(n) && n != "Program" && n != "Byte")
+                .filter(|(_, (n, _))| {
+                    fillers.contains(n) && n != "Program" && n != "Byte" && n != "Range"
+                })
                 .map(|(i, _)| i)
                 .collect();
             filler_idx.sort_by(|&a, &b| heights[a].0.cmp(&heights[b].0));
@@ -653,6 +663,7 @@ impl ZKMProofShape {
                     .iter()
                     .filter(|n| {
                         n.as_str() != "Byte"
+                            && n.as_str() != "Range"
                             && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0
                     })
                     .collect();

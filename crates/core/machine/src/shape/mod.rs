@@ -149,9 +149,12 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// cluster, and `canonicalize_shape` would have injected it anyway.
     fn raw_chip_set_cluster_shape(&self, record: &ExecutionRecord) -> Option<Shape<MipsAirId>> {
         let mut shape: Shape<MipsAirId> = Shape::from_log2_heights(&[]);
-        // Preprocessed chips are present on every shard.
+        // Preprocessed chips are present on every shard (Program, the Byte
+        // table and the Range table — `MipsAir::preprocessed_heights`).
         shape.insert(MipsAirId::Program, 1);
         shape.insert(MipsAirId::Byte, 1);
+        shape.insert(MipsAirId::Range, 1);
+        let num_preprocessed = shape.len();
         let mut heights = MipsAir::<F>::core_heights(record);
         heights.extend(MipsAir::<F>::memory_heights(record));
         for (air, height) in heights {
@@ -168,7 +171,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 }
             }
         }
-        if shape.len() <= 2 {
+        if shape.len() <= num_preprocessed {
             // Nothing but the preprocessed chips — no cluster to speak of.
             return None;
         }
@@ -1585,9 +1588,17 @@ pub mod tests {
         let mut got_v: Vec<(String, usize)> =
             got.iter().map(|(id, h)| (id.to_string(), *h)).collect();
         got_v.sort();
+        // The typed-ALU split gave every ALU chip an `Imm` twin that sits in
+        // the same cluster band (0 raw events lifts to the band height like
+        // any other cluster member), and the `Range` table is injected by
+        // `canonicalize_shape` at the placeholder height 1 (it is a
+        // preprocessed chip present on every shard; the FIX-off commit reads
+        // only the NAME).
         let mut want: Vec<(String, usize)> = vec![
             ("AddSub", 13),
+            ("AddSubImm", 13),
             ("Bitwise", 12),
+            ("BitwiseImm", 11),
             ("Branch", 11),
             ("Byte", 16),
             ("CloClz", 10),
@@ -1596,6 +1607,7 @@ pub mod tests {
             ("Global", 9),
             ("Jump", 10),
             ("Lt", 12),
+            ("LtImm", 12),
             ("LoadNarrow", 10),
             ("LoadWord", 10),
             ("StoreNarrow", 10),
@@ -1607,8 +1619,11 @@ pub mod tests {
             ("MovCond", 10),
             ("Mul", 10),
             ("Program", 19),
+            ("Range", 1),
             ("ShiftLeft", 9),
+            ("ShiftLeftImm", 9),
             ("ShiftRight", 9),
+            ("ShiftRightImm", 9),
             ("SyscallCore", 10),
             ("SyscallInstrs", 10),
         ]
@@ -1996,21 +2011,30 @@ pub mod tests {
         canonicalize_shape_to_cluster(&mut record);
 
         let canon = record.shape.as_ref().unwrap();
-        // The four event-driven chips must now be present (at log-height 1)
-        // while the originals are untouched.
-        for must in [
+        // The event-driven chips (the optional ones, the typed-ALU `Imm`
+        // twins) and the always-present `Range` table must now be present
+        // (at log-height 1) while the originals are untouched.
+        let must = [
             MipsAirId::CloClz,
             MipsAirId::DivRem,
             MipsAirId::SyscallCore,
             MipsAirId::SyscallInstrs,
             MipsAirId::MemoryBump,
-        ] {
-            assert!(canon.contains(&must), "canonicalize must add {must:?}");
+            MipsAirId::AddSubImm,
+            MipsAirId::BitwiseImm,
+            MipsAirId::LtImm,
+            MipsAirId::ShiftLeftImm,
+            MipsAirId::ShiftRightImm,
+            MipsAirId::Range,
+        ];
+        for id in must {
+            assert!(canon.contains(&id), "canonicalize must add {id:?}");
         }
         assert_eq!(
             canon.len(),
-            raw_len + 5,
-            "canonicalized main_exec must add exactly the 5 optional chips, got {}",
+            raw_len + must.len(),
+            "canonicalized main_exec must add exactly the {} missing cluster chips, got {}",
+            must.len(),
             canon.len()
         );
         // Originals preserved at their real heights.

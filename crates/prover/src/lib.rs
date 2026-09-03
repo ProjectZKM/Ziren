@@ -551,7 +551,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // cd Ziren
             // cargo run -r --bin build_compress_vks -- --num-compiler-workers 32 --count-setup-workers 32 --build-dir crates/prover
             // ```
-            // It takes several days.
+            // The enumeration is ~3.7k recursion shapes at ~5 s each on a
+            // 124-core box (~5 h serial); split it over machines with
+            // `--start/--end` (or `crates/prover/scripts/parallel_vk_regen.sh`) and union
+            // the partial maps with `merge_vk_maps`.
             bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap()
         } else {
             // VERIFY_VK=false: the dummy map is a placeholder (membership is
