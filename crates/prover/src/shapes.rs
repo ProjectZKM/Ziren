@@ -44,7 +44,13 @@ pub enum ZKMProofShape {
     /// verifier asserts len==1.
     Recursion(Vec<OrderedShape>),
     Compress(Vec<OrderedShape>),
-    Deferred(OrderedShape),
+    /// Deferred proofs are batched `REDUCE_BATCH_SIZE` at a time
+    /// (`get_recursion_deferred_inputs_basefold` chunks by the reduce batch
+    /// size), so the deferred program — and its VK — is a function of the
+    /// BATCH ARITY exactly like `Compress`.  Enumerating only arity 1 left
+    /// every multi-proof deferred node out of the allowlist ("vk not allowed"
+    /// in `test_e2e_with_deferred_proofs`).
+    Deferred(Vec<OrderedShape>),
     Shrink(OrderedShape),
 }
 
@@ -744,8 +750,8 @@ impl ZKMProofShape {
         //   * L in (pin, L_MAX] covers the over-floor children, where
         //     L_MAX is the largest natural area the recursion machine can
         //     reach with every chip at the `CORE_MAX_LOG_ROW_COUNT` cube.
-        // Per class we emit Compress at every arity plus one Deferred and one
-        // Shrink.  Since the geometry is a function of L alone, ANY height
+        // Per class we emit Compress AND Deferred at every arity, plus one
+        // Shrink (shrink always folds a single child).  Since the geometry is a function of L alone, ANY height
         // profile landing at a given L yields the same program — so a single
         // greedy representative per L is exact, not approximate.
         // The children a compose/deferred/shrink program can be built over are
@@ -780,8 +786,17 @@ impl ZKMProofShape {
             }
             out
         };
-        let deferred_shapes: Vec<Self> =
-            compress_child_classes.iter().map(|os| Self::Deferred(os.clone())).collect();
+        // Deferred batches up to `reduce_batch_size` proofs per node, so it
+        // needs the same per-arity sweep Compress gets.
+        let deferred_shapes: Vec<Self> = {
+            let mut out = Vec::with_capacity(compress_child_classes.len() * reduce_batch_size);
+            for arity in 1..=reduce_batch_size {
+                for os in &compress_child_classes {
+                    out.push(Self::Deferred(vec![os.clone(); arity]));
+                }
+            }
+            out
+        };
         let shrink_shapes: Vec<Self> =
             compress_child_classes.iter().map(|os| Self::Shrink(os.clone())).collect();
 
@@ -821,11 +836,9 @@ impl ZKMProofShape {
             .chain((1..=reduce_batch_size).flat_map(|batch_size| {
                 recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
             }))
-            .chain(
-                recursion_shape_config
-                    .get_all_shape_combinations(1)
-                    .map(|mut x| Self::Deferred(x.pop().unwrap())),
-            )
+            .chain((1..=reduce_batch_size).flat_map(|batch_size| {
+                recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Deferred)
+            }))
             .chain(
                 recursion_shape_config
                     .get_all_shape_combinations(1)
@@ -853,8 +866,8 @@ impl ZKMCompressProgramShape {
                 // the batch verified by build_normalize_basefold_program.
                 Self::Recursion(ZKMRecursionShape { proof_shapes, is_complete: false })
             }
-            ZKMProofShape::Deferred(proof_shape) => {
-                Self::Deferred(ZKMDeferredShape::new(vec![proof_shape].into(), height))
+            ZKMProofShape::Deferred(proof_shapes) => {
+                Self::Deferred(ZKMDeferredShape::new(proof_shapes.into(), height))
             }
             ZKMProofShape::Compress(proof_shapes) => Self::Compress(ZKMCompressWithVkeyShape {
                 compress_shape: proof_shapes.into(),
