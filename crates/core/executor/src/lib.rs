@@ -6,6 +6,9 @@ mod cost;
 pub mod deferred_plan;
 pub mod events;
 mod executor;
+/// Flat guest memory for the minimal-trace producer (one 16-byte
+/// `{value, timestamp, shard}` entry per word, COW unconstrained blocks).
+pub mod flat_mem;
 pub mod hook;
 mod instruction;
 mod io;

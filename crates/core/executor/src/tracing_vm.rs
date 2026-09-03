@@ -949,20 +949,39 @@ mod tests {
     /// latter. A program with loads, stores, a syscall and hint reads, so the
     /// `mem_reads` oracle and the stream cursors are exercised, not just the
     /// register file.
+    ///
+    /// `execute_minimal` also runs on the FLAT guest memory (`flat_mem`) where
+    /// `execute_state` runs on the paged table, so this is the byte-identity
+    /// gate of the flat producer: its records, touched charges (= shard
+    /// boundaries), oracle and final memory against the paged executor's.
+    /// Run on a program with hint reads and one with unconstrained blocks
+    /// (a COW view in the flat memory, a `memory_diff` in the paged table).
     #[test]
     fn minimal_chunks_match_checkpoint_chunks() {
+        minimal_chunks_match_checkpoint_chunks_on(
+            crate::programs::tests::sha3_chain_program(),
+            true,
+        );
+        minimal_chunks_match_checkpoint_chunks_on(
+            crate::programs::tests::unconstrained_program(),
+            false,
+        );
+    }
+
+    fn minimal_chunks_match_checkpoint_chunks_on(program: Program, sha3_stdin: bool) {
         use crate::minimal_trace::MinimalTrace;
         use crate::Executor;
 
-        let program = crate::programs::tests::sha3_chain_program();
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 1 << 12;
         opts.shard_batch_size = 2;
 
         let run = |minimal: bool| {
             let mut exec = Executor::new(program.clone(), opts);
-            exec.write_stdin(&[1u8; 32]);
-            exec.write_stdin(&1u32);
+            if sha3_stdin {
+                exec.write_stdin(&[1u8; 32]);
+                exec.write_stdin(&1u32);
+            }
             exec.minimal_trace_collector = Some(MinimalTrace::default());
             let mut chunks = Vec::new();
             loop {
@@ -985,6 +1004,10 @@ mod tests {
         let (min, min_cycles, min_pvs) = run(true);
 
         assert!(ckpt.len() > 1, "test program produced only {} chunk(s)", ckpt.len());
+        assert!(
+            ckpt.last().is_some_and(|c| !c.final_memory.is_empty()),
+            "the terminal chunk carries no final memory"
+        );
         assert_eq!(min_cycles, ckpt_cycles, "cycle count");
         assert_eq!(min_pvs, ckpt_pvs, "public values stream");
         assert_eq!(min.len(), ckpt.len(), "chunk count");

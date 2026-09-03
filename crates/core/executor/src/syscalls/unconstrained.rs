@@ -28,6 +28,12 @@ impl Syscall for EnterUnconstrainedSyscall {
             executor_mode: ctx.rt.executor_mode,
         };
         ctx.rt.executor_mode = ExecutorMode::Simple;
+        // Flat producer: the block runs on a copy-on-write view of the
+        // memory, discarded at EXIT (`mr`/`mw` keep no `memory_diff` for
+        // it). Registers are not flat and stay on the diff.
+        if let Some(flat) = ctx.rt.flat_mem.as_deref_mut() {
+            flat.enter_unconstrained().expect("flat memory: unconstrained COW view");
+        }
         Ok(Some(1))
     }
 }
@@ -62,6 +68,9 @@ impl Syscall for ExitUnconstrainedSyscall {
             ctx.rt.memory_accesses = std::mem::take(&mut ctx.rt.unconstrained_state.op_record);
             ctx.rt.executor_mode = ctx.rt.unconstrained_state.executor_mode;
             ctx.rt.unconstrained = false;
+            if let Some(flat) = ctx.rt.flat_mem.as_deref_mut() {
+                flat.exit_unconstrained();
+            }
         }
         ctx.rt.unconstrained_state = ForkState::default();
         Ok(Some(0))

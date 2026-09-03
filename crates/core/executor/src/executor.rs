@@ -299,6 +299,16 @@ pub struct Executor<'a> {
     /// Default false; TracingVM workers set true when a stream is seeded.
     pub hint_stream_prerecorded: bool,
 
+    /// Flat guest memory of the minimal-trace PRODUCER, `Some` from the
+    /// first [`Self::execute_minimal`] on (Linux). While set,
+    /// `state.memory.page_table` is EMPTY and every user word lives here:
+    /// [`Self::mr`], [`Self::mw`], [`Self::word`] and
+    /// [`Self::word_traced`] take their flat branch first, an unconstrained
+    /// block is a copy-on-write view of it, and
+    /// [`Self::seal_minimal_trace_final_memory`] walks its committed pages.
+    /// Registers stay in `state.memory.registers`. See [`crate::flat_mem`].
+    pub flat_mem: Option<Box<crate::flat_mem::FlatMem>>,
+
     /// In-flight buffer for the current
     /// chunk's mem_reads oracle. Populated by `mr()` whenever the
     /// `minimal_trace_collector` is `Some`. Drained at `bump_record()`
@@ -572,6 +582,7 @@ impl<'a> Executor<'a> {
             minimal_trace_collector: None,
             skip_replay_bookkeeping: false,
             hint_stream_prerecorded: false,
+            flat_mem: None,
             recording_chunk_mem_reads: Vec::new(),
             replay_mem: None,
             d4_capture_chunk: false,
@@ -675,6 +686,14 @@ impl<'a> Executor<'a> {
     #[must_use]
     #[inline]
     pub fn word(&mut self, addr: u32) -> u32 {
+        // Flat producer: the entry's word, whatever its access state. For a
+        // hinted but never-accessed word this is the hint, where the paged
+        // table (which holds hints in `uninitialized_memory` until the first
+        // access) reads 0; the replay's `peek_replay_word` sees the hint
+        // too, so the flat answer is the one the worker reproduces.
+        if let Some(flat) = self.flat_mem.as_deref() {
+            return flat.get(addr).value;
+        }
         #[allow(clippy::single_match_else)]
         let record = self.state.memory.page_table.get(addr);
 
@@ -713,6 +732,13 @@ impl<'a> Executor<'a> {
             if let Some(record) = self.take_replay_mem(addr) {
                 return record.value;
             }
+        }
+        if let Some(flat) = self.flat_mem.as_deref() {
+            let e = *flat.get(addr);
+            if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+                self.recording_chunk_mem_reads.push(e.mem_value());
+            }
+            return e.value;
         }
         let value = self.word(addr);
         if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
@@ -772,6 +798,28 @@ impl<'a> Executor<'a> {
         timestamp: u32,
         local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
+        // Flat producer: the entry IS the record. A never-accessed word
+        // already holds its image/hint/0 value with shard 0, so there is no
+        // vacant case; the checkpoint and `memory_diff` bookkeeping below is
+        // for the checkpoint executor and the paged unconstrained rollback,
+        // neither of which the producer has (an unconstrained block is a COW
+        // view of the flat memory). Same touched charge, same oracle push.
+        if let Some(flat) = self.flat_mem.as_deref_mut() {
+            let e = flat.get_mut(addr);
+            let prev = e.mem_value();
+            if !self.unconstrained
+                && !self.skip_replay_bookkeeping
+                && (prev.shard != shard || local_memory_access.is_some())
+            {
+                self.split_acct.add_touched_address();
+            }
+            e.shard = shard;
+            e.timestamp = timestamp;
+            if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+                self.recording_chunk_mem_reads.push(prev);
+            }
+            return MemoryReadRecord::new(prev.value, shard, timestamp, prev.shard, prev.timestamp);
+        }
         // SP1 parity: under replay the oracle IS the memory.  Popped BEFORE
         // `page_table.entry(addr)` takes `&mut self.state.memory` — the borrow
         // checker will not allow the call afterwards.
@@ -1070,6 +1118,31 @@ impl<'a> Executor<'a> {
         timestamp: u32,
         local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
+        // Flat producer: see `mr`.
+        if let Some(flat) = self.flat_mem.as_deref_mut() {
+            let e = flat.get_mut(addr);
+            let prev = e.mem_value();
+            if !self.unconstrained
+                && !self.skip_replay_bookkeeping
+                && (prev.shard != shard || local_memory_access.is_some())
+            {
+                self.split_acct.add_touched_address();
+            }
+            e.value = value;
+            e.shard = shard;
+            e.timestamp = timestamp;
+            if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+                self.recording_chunk_mem_reads.push(prev);
+            }
+            return MemoryWriteRecord::new(
+                value,
+                shard,
+                timestamp,
+                prev.value,
+                prev.shard,
+                prev.timestamp,
+            );
+        }
         // SP1 parity: under replay the oracle IS the memory.  Popped BEFORE
         // `page_table.entry(addr)` takes `&mut self.state.memory` — the borrow
         // checker will not allow the call afterwards.
@@ -3080,9 +3153,22 @@ impl<'a> Executor<'a> {
                 final_memory.push((addr, r.value, r.shard, r.timestamp));
             }
         }
-        for addr in self.state.memory.page_table.keys() {
-            let r = self.state.memory.page_table.get(addr).unwrap();
-            final_memory.push((addr, r.value, r.shard, r.timestamp));
+        if let Some(flat) = self.flat_mem.as_deref() {
+            // The paged table holds the image plus every accessed word; a
+            // committed flat page holds those and also hint-seeded and
+            // read-faulted words, filtered out by their access state.
+            // Ascending address order either way.
+            let image = &self.program.image;
+            flat.for_each_committed(|addr, e| {
+                if e.shard != 0 || e.timestamp != 0 || image.contains_key(&addr) {
+                    final_memory.push((addr, e.value, e.shard, e.timestamp));
+                }
+            });
+        } else {
+            for addr in self.state.memory.page_table.keys() {
+                let r = self.state.memory.page_table.get(addr).unwrap();
+                final_memory.push((addr, r.value, r.shard, r.timestamp));
+            }
         }
         let mut final_uninit: Vec<(u32, u32)> = Vec::new();
         for addr in 0..NUM_REGISTERS as u32 {
@@ -3271,6 +3357,20 @@ impl<'a> Executor<'a> {
     pub fn execute_minimal(&mut self) -> Result<bool, ExecutionError> {
         self.executor_mode = ExecutorMode::Simple;
         self.emit_global_memory_events = false;
+        // The producer's memory is the flat array (SP1's `sp1_jit` layout),
+        // mapped before `initialize` lays the image down. Only the producer:
+        // a replay's oracle IS its memory, and a program already under way
+        // on the paged table stays there.
+        if self.state.global_clk == 0
+            && self.flat_mem.is_none()
+            && self.minimal_trace_collector.is_some()
+            && self.replay_mem.is_none()
+        {
+            match crate::flat_mem::FlatMem::new() {
+                Ok(flat) => self.flat_mem = Some(Box::new(flat)),
+                Err(err) => tracing::warn!("flat guest memory unavailable ({err}); paged"),
+            }
+        }
         let done = self.execute()?;
         // Simple mode emits no events, but `bump_record` still parks an empty
         // record per shard and `mr`/`mw` still note first touches for the
@@ -3288,8 +3388,25 @@ impl<'a> Executor<'a> {
         self.state.records_clk_index = 0;
 
         tracing::debug!("loading memory image");
-        for (&addr, value) in &self.program.image {
-            self.state.memory.insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
+        if let Some(flat) = self.flat_mem.as_deref_mut() {
+            // The image also carries the initial register file (sp, brk,
+            // heap), which `Memory::insert` routes to `registers`.
+            for (&addr, value) in &self.program.image {
+                if addr < NUM_REGISTERS as u32 {
+                    self.state
+                        .memory
+                        .insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
+                } else {
+                    *flat.get_mut(addr) =
+                        crate::flat_mem::FlatEntry { value: *value, timestamp: 0, shard: 0, _pad: 0 };
+                }
+            }
+        } else {
+            for (&addr, value) in &self.program.image {
+                self.state
+                    .memory
+                    .insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
+            }
         }
 
         // Open chunk 0 for the collector. Subsequent
