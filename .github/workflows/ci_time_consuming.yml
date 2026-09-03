@@ -17,8 +17,8 @@ jobs:
       - run: export PATH=~/.cargo/bin:$PATH
       - run: |
           source ~/.zkm-toolchain/env
-          cargo test -r -p zkm-core-machine
+          cargo test -r -p zkm-core-machine -- --test-threads=8
           for pkg in zkm-sdk zkm-verifier; do
-            RUSTFLAGS="-C target-cpu=native" cargo test -r -p $pkg
+            RUSTFLAGS="-C target-cpu=native" cargo test -r -p $pkg -- --test-threads=8
           done
-          RUSTFLAGS="-C target-cpu=native" cargo test -r --features imm-wrap-vk --features ark -- --ignored test_verify_groth16_imm_wrap_vk
+          RUSTFLAGS="-C target-cpu=native" cargo test -r --features imm-wrap-vk --features ark -- --ignored --test-threads=8 test_verify_groth16_imm_wrap_vk
