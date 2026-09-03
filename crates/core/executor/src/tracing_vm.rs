@@ -189,9 +189,10 @@ impl<'a> TracingVM<'a> {
         }
         state.public_values_stream_ptr = chunk.public_values_stream_ptr as usize;
 
-        // Spawn the sub-Executor and let it walk the chunk.
-        let program = (*self.program).clone();
-        let mut sub = Executor::recover(program, state, self.opts);
+        // Spawn the sub-Executor and let it walk the chunk. The program goes
+        // in by `Arc`: the executor wraps it in one anyway, and a deep clone
+        // here is 800K instructions plus the image PER SHARD.
+        let mut sub = Executor::recover_shared(self.program.clone(), state, self.opts);
         // Mirror `trace_checkpoint`: the same shard-boundary inputs, and a
         // no-op deferred-proof verifier because the checkpoint pass already
         // verified them (re-verifying here would redo the work and warn).

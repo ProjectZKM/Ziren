@@ -514,8 +514,27 @@ impl<'a> Executor<'a> {
     /// This function may panic if it fails to create the trace file if `TRACE_FILE` is set.
     #[must_use]
     pub fn with_context(program: Program, opts: ZKMCoreOpts, context: ZKMContext<'a>) -> Self {
-        // Create a shared reference to the program.
-        let program = Arc::new(program);
+        Self::with_context_shared(Arc::new(program), opts, context)
+    }
+
+    /// As [`Self::with_context`], for a caller that already holds the program
+    /// behind an `Arc`.
+    ///
+    /// The executor keeps the program in an `Arc` regardless, so a caller that
+    /// has one is otherwise forced to deep-clone a whole `Program` — 800K
+    /// instructions plus the image for reth — only for it to be re-wrapped
+    /// here. The replay path builds one sub-executor per shard, so that clone
+    /// was per shard.
+    ///
+    /// # Panics
+    ///
+    /// This function may panic if it fails to create the trace file if `TRACE_FILE` is set.
+    #[must_use]
+    pub fn with_context_shared(
+        program: Arc<Program>,
+        opts: ZKMCoreOpts,
+        context: ZKMContext<'a>,
+    ) -> Self {
 
         // Create a default record with the program. Pre-allocate hot event Vecs
         // sized at `shard_size / 8`, avoiding the
@@ -620,7 +639,18 @@ impl<'a> Executor<'a> {
     /// Recover runtime state from a program and existing execution state.
     #[must_use]
     pub fn recover(program: Program, state: ExecutionState, opts: ZKMCoreOpts) -> Self {
-        let mut runtime = Self::new(program, opts);
+        Self::recover_shared(Arc::new(program), state, opts)
+    }
+
+    /// As [`Self::recover`], for a caller that already holds an `Arc<Program>`
+    /// — see [`Self::with_context_shared`].
+    #[must_use]
+    pub fn recover_shared(
+        program: Arc<Program>,
+        state: ExecutionState,
+        opts: ZKMCoreOpts,
+    ) -> Self {
+        let mut runtime = Self::with_context_shared(program, opts, ZKMContext::default());
         runtime.state = state;
         // Disable deferred proof verification since we're recovering from a checkpoint, and the
         // checkpoint creator already had a chance to check the proofs.
