@@ -428,23 +428,24 @@ pub fn build_producer(
             // fencing path, and the shard closes one instruction light. (That
             // was the original shape here, and it cost the shard-closing
             // instruction its row on all 124 clk-fenced reth shards.)
-            if area != 0 {
-                dynasm!(t.assembler ; .arch x64 ; sub Rq(AREA_LEFT), DWORD area);
-            }
+            // Heights first, area last, so the area's own `sub` leaves the
+            // flags this checks -- one instruction cheaper than a separate
+            // `test` on the hottest block in the producer.
             for h in heights {
                 let off = HEIGHT_LEFT_OFFSET + i32::from(h.slot) * 8;
                 dynasm!(t.assembler ; .arch x64
                     ; sub QWORD [Rq(CONTEXT) + off], DWORD i32::from(h.count)
                 );
             }
-            dynasm!(t.assembler ; .arch x64
-                ; cmp Rd(CLK_SHARD), DWORD [Rq(CONTEXT) + CLK_LIMIT_OFFSET]
-                ; jae =>fence
-            );
-            // A charge of 0 leaves the budget where the last check found it,
-            // so only a charged budget (or one the predecessor charged, or the
-            // touch stub's) needs re-testing.
-            if area != 0 || memory || plan.delay_slot {
+            if area != 0 {
+                dynasm!(t.assembler ; .arch x64
+                    ; sub Rq(AREA_LEFT), DWORD area
+                    ; jle =>fence
+                );
+            } else if memory || plan.delay_slot {
+                // A charge of 0 leaves the budget where the last check found
+                // it, so an uncharged area only needs re-testing when the
+                // touch stub or the predecessor moved it.
                 dynasm!(t.assembler ; .arch x64
                     ; test Rq(AREA_LEFT), Rq(AREA_LEFT)
                     ; jle =>fence
@@ -477,6 +478,10 @@ pub fn build_producer(
                     }
                 }
             }
+            dynasm!(t.assembler ; .arch x64
+                ; cmp Rd(CLK_SHARD), DWORD [Rq(CONTEXT) + CLK_LIMIT_OFFSET]
+                ; jae =>fence
+            );
             cold.push(Cold::Fence {
                 label: fence,
                 pc_next: pc.wrapping_add(4),
