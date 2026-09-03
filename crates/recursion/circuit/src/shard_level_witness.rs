@@ -1314,17 +1314,25 @@ where
     use zkm_recursion_core::stark::KoalaBearPoseidon2Outer as HV;
 
     // ── REAL per-chip shaping from the OUTER bundle's packing ──
-    // Mirror the host outer verify hook `build_jagged_verify_inputs`
-    // (crates/pcs/src/jagged_pcs.rs): the per-chip column_count comes
-    // from `bundle.packing.column_counts`, and the per-chip row_count
-    // (column height) is the offsets sentinel-walk difference at each
-    // chip's first column.  The caller-supplied `column_counts_by_round`
-    // (= vec![main_widths]) and `bundle.commit.chip_dims` (a single
-    // cap-tree entry) do NOT reconcile the ~1300-column packing, so we
-    // recover the true per-column structure here.  The result is used
-    // for col_prefix_sums, the returned column_counts, AND row_counts so
-    // step-7's per-column accumulation (recursive_jagged_pcs.rs:271)
-    // reproduces `bundle.packing.offsets` exactly.
+    // `packing.round_counts` carries `(row_count, column_count)` for the REAL
+    // chips of each committed round, in round order and with NO stacking
+    // padding — which is exactly the shape this lift must hand the verifier,
+    // because the pads travel separately as `padding_row_heights`.
+    //
+    // `packing.column_counts` is the FLATTENED column space and ALSO carries
+    // the `<stacking-pad:*>` groups (jagged_pcs.rs pushes one JaggedChipInfo
+    // per pad column).  Using it as the chip list therefore (a) double-counts
+    // every pad — once as a "chip" whose sentinel-walk height is the pad
+    // height, once as `padding_row_heights` — and (b) collapses the
+    // preprocessed + main rounds into one, which puts the round-boundary pads
+    // at the wrong column index.  MEASURED on the wrap bundle: 17 groups /
+    // 413 columns whose heights already sum to `total_values` (2^25), plus
+    // pads of [2, 1] columns worth 9,368,144 more rows, so step-7's
+    // `acc == final_area` assert failed 40,072,032 vs 33,554,432 inside the
+    // gnark outer circuit.
+    //
+    // The sentinel walk over `column_counts` stays as the fallback for a
+    // degenerate / legacy bundle that carries no `round_counts`.
     let packing_column_counts: Vec<usize> = bundle.packing.column_counts.clone();
     let packing_row_counts: Vec<usize> = {
         let offsets = &bundle.packing.offsets;
@@ -1348,13 +1356,18 @@ where
         }
         heights
     };
-    // Single-round packing shape (the wrap STARK commits one main round).
-    // Fall back to the caller-supplied shape only if packing carries no
-    // per-chip column metadata (degenerate / scaffolding bundles).
-    let real_column_counts_by_round: Vec<Vec<usize>> = if packing_column_counts.is_empty() {
+    let round_counts = &bundle.packing.round_counts;
+    let real_column_counts_by_round: Vec<Vec<usize>> = if !round_counts.is_empty() {
+        round_counts.iter().map(|r| r.iter().map(|&(_, cc)| cc).collect()).collect()
+    } else if packing_column_counts.is_empty() {
         column_counts_by_round.to_vec()
     } else {
         vec![packing_column_counts.clone()]
+    };
+    let real_row_counts_by_round: Vec<Vec<usize>> = if !round_counts.is_empty() {
+        round_counts.iter().map(|r| r.iter().map(|&(rc, _)| rc).collect()).collect()
+    } else {
+        vec![packing_row_counts.clone(); real_column_counts_by_round.len()]
     };
     let column_counts_by_round: &[Vec<usize>] = &real_column_counts_by_round;
     // ── Padding shape (mirror of lift_jagged_basefold_bundle) ──
@@ -1457,9 +1470,13 @@ where
     col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
     let mut offset_idx: usize = 0;
     let mut current_offset: usize = 0;
-    for cc in column_counts_by_round.iter() {
-        let real_in_round = cc.iter().sum::<usize>();
-        for _ in 0..real_in_round {
+    for (round_idx, cc) in column_counts_by_round.iter().enumerate() {
+        // Walk the round's REAL columns AND its stacking-pad columns: the
+        // packing's `offsets` are one flat column space in exactly that order,
+        // so a walk that skips the pads slides every later prefix sum.
+        let cols_in_round = cc.iter().sum::<usize>()
+            + bundle.packing.padding_heights.get(round_idx).map(|p| p.len()).unwrap_or(0);
+        for _ in 0..cols_in_round {
             if offset_idx < bundle.packing.offsets.len() {
                 current_offset = bundle.packing.offsets[offset_idx];
                 offset_idx += 1;
@@ -1508,11 +1525,12 @@ where
             })
             .collect()
     } else {
-        let heights: Vec<Felt<C::F>> = packing_row_counts
+        real_row_counts_by_round
             .iter()
-            .map(|&h| builder.constant(C::F::from_u64(h as u64)))
-            .collect();
-        column_counts_by_round.iter().map(|_| heights.clone()).collect()
+            .map(|round| {
+                round.iter().map(|&h| builder.constant(C::F::from_u64(h as u64))).collect()
+            })
+            .collect()
     };
 
     // ── expected_eval = the WITNESSED q_at_z ──
