@@ -109,7 +109,14 @@ impl BasefoldVerifierParams {
             pow_bits: 22,
             batch_grinding_bits: 16,
             num_variables,
-            log_folding_arity: 1,
+            // The wrap prover commits at `wrap_fri_config()`'s arity (1 — one
+            // commitment per variable), NOT `INNER_LOG_FOLDING_ARITY`; the
+            // outer witness conversion (`host_basefold_proof_to_recursive_outer`)
+            // reads the same constant.
+            log_folding_arity: zkm_pcs::basefold::config::FriConfig::<
+                zkm_pcs::jagged_pcs::JaggedVal,
+            >::wrap_fri_config()
+            .log_folding_arity(),
         }
     }
 

@@ -1080,20 +1080,22 @@ fn host_basefold_proof_to_recursive_outer(
     batch_evaluations: Vec<Vec<InnerChallenge>>,
 ) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, OuterDigestRaw> {
     // One univariate message per VARIABLE, one commitment per COMMIT ROUND —
-    // a round covers `log_folding_arity` variables, so these differ once the
-    // arity is raised.  `rounds` stays one entry per variable, with the
-    // members of a group repeating their group's commitment; only the leader
-    // observes it (see `basefold_verifier`'s replay).
-    let commit_for_var: Vec<usize> = {
-        let k = zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1);
-        (0..proof.univariate_messages.len()).map(|v| (v / k).min(proof.fri_commitments.len().saturating_sub(1))).collect()
-    };
+    // a round covers `log_folding_arity` variables.  The WRAP prover commits
+    // at `FriConfig::wrap_fri_config()` (arity 1, one commitment per
+    // variable), NOT at `INNER_LOG_FOLDING_ARITY` (3) — the outer BN254
+    // verifier (`BasefoldVerifierParams::wrap_default`) replays arity 1 too.
+    // Reading the inner arity here made this assert fire (21 commitments vs
+    // ceil(21 / 3) = 7) on every `Test::All` / gnark witness build.
+    let k = zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
+        .log_folding_arity()
+        .max(1);
+    let commit_for_var: Vec<usize> = (0..proof.univariate_messages.len())
+        .map(|v| (v / k).min(proof.fri_commitments.len().saturating_sub(1)))
+        .collect();
     assert_eq!(
         proof.fri_commitments.len(),
-        proof.univariate_messages.len().div_ceil(
-            zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)
-        ),
-        "BasefoldProof: fri_commitments.len() != ceil(univariate_messages.len() / arity)",
+        proof.univariate_messages.len().div_ceil(k),
+        "BasefoldProof (wrap): fri_commitments.len() != ceil(univariate_messages.len() / wrap arity {k})",
     );
 
     let rounds: Vec<RecursiveBasefoldRound<InnerVal, InnerChallenge, OuterDigestRaw>> = proof
