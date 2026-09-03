@@ -38,7 +38,15 @@ pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) -> Result<(), E
                 None => {
                     let flush_s = update_io_buf(ctx, fd, s);
                     if !flush_s.is_empty() {
-                        flush_s.into_iter().for_each(|line| println!("stdout: {line}"));
+                        // NOT `println!`: a multi-GPU core worker speaks its
+                        // IPC frames on stdout, so one guest `print!` puts
+                        // "stdout: ..." in the middle of a frame and the parent
+                        // reads the text as a length prefix. That is a real
+                        // reth block (23694455 emits guest stdout) aborting the
+                        // parent with `memory allocation of 2322296605591762035
+                        // bytes failed` -- 0x203a74756f647473, the eight bytes
+                        // of "stdout: ".
+                        flush_s.into_iter().for_each(|line| tracing::info!("stdout: {line}"));
                     }
                 }
             }
@@ -49,7 +57,8 @@ pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) -> Result<(), E
         if let Ok(s) = core::str::from_utf8(slice) {
             let flush_s = update_io_buf(ctx, fd, s);
             if !flush_s.is_empty() {
-                flush_s.into_iter().for_each(|line| println!("stderr: {line}"));
+                // See the `FD_STDOUT` note above: never stdout from here.
+                flush_s.into_iter().for_each(|line| tracing::info!("stderr: {line}"));
             }
         } else {
             eprintln!("Warning: Stderr Received invalid UTF-8 data in slice: {slice:?}");

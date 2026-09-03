@@ -4080,11 +4080,13 @@ impl<'a> Executor<'a> {
         for (fd, buf) in &self.io_buf {
             if !buf.is_empty() {
                 match fd {
+                    // Never `println!` here: stdout is the multi-GPU worker's
+                    // IPC frame channel (see `syscalls::write::write_fd`).
                     1 => {
-                        println!("stdout: {buf}");
+                        tracing::info!("stdout: {buf}");
                     }
                     2 => {
-                        println!("stderr: {buf}");
+                        tracing::info!("stderr: {buf}");
                     }
                     _ => {}
                 }
