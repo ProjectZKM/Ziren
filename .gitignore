@@ -1,6 +1,8 @@
 target
 crates/test-artifacts/guests/target/
 crates/test-artifacts/guests/Cargo.lock
+crates/test-artifacts/guests-imm-wrap-vk/target/
+crates/test-artifacts/guests-imm-wrap-vk/Cargo.lock
 .idea
 .vscode
 *.log
