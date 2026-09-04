@@ -391,25 +391,24 @@ impl Default for ZKMCoreOpts {
             // default is pinned to 2^24. The memory heuristic still governs
             // shard_batch_size + the split divisor below.
             //
-            // MEASURED ("Shard size" sweep, Aug 2026):
-            // this value is INERT for any `SHARD_SIZE >= 2^22`. The executor
-            // stores it as `cycles * 4` and exits on `clk >= 4 * SHARD_SIZE`,
-            // but a second, FIXED exit fires at the timestamp fence
-            // (`CORE_SHARD_CLK_LIMIT`, the width of the memory-argument
-            // timestamp range check).  At 2^22 the cycle budget already equals
-            // the 2^24 wall, and at the 2^24 default it is 4x above it, so the
-            // cycle exit is unreachable.  A full reth core prove at
-            // `SHARD_SIZE=4194305` and at the 2^24 default produce the
-            // BYTE-IDENTICAL proof.  Raising this further changes nothing;
-            // the shard-size lever is `ELEMENT_THRESHOLD` below.
+            // WHICH FENCE ACTUALLY CLOSES A SHARD has changed twice, so
+            // MEASURE it (`ZIREN_SHARD_CLOSE_CENSUS=1` prints one
+            // `SHARD_CLOSE reason=` line per shard) before reasoning about it:
             //
-            // ⚠ An earlier revision of this comment claimed "100% of core
-            // splits are `ELEMENT_THRESHOLD` splits".  That is MEASURED FALSE:
-            // instrumenting the close reason over a 60-shard reth block gave
-            // clk 52 / area 7 / final 1.  `cpu_exit` is indeed unreachable, but
-            // the exit that replaces it is the TIMESTAMP fence, not the area
-            // one — the area budget was being reached at only ~94% of its
-            // nominal value because the shard had already run out of `clk`.
+            //  * While the memory argument range-checked timestamps to 24 bits,
+            //    the TIMESTAMP fence fired first and this budget was inert —
+            //    over a 60-shard reth block the reasons were clk 52 / area 7 /
+            //    final 1.
+            //  * With that fence widened to 25 bits (`CORE_SHARD_CLK_LIMIT`,
+            //    6.71 M cycles) this budget is what binds again. MEASURED
+            //    Sep 2026, reth at `SHARD_SIZE=4194305`: **227 of 227 shards
+            //    close on `reason=cpu`**, at 3,355,435 cycles, with the trace
+            //    area at 432 M of its 460 M cap and the tallest chip at
+            //    3,355,436 of 4,128,768 rows.
+            //
+            // So the shard-size lever is this value, and lifting it hands the
+            // shard to `element_threshold` (~3.57 M cycles) and then to the
+            // per-chip height cap (~4.13 M cycles, one row per cycle).
             shard_size: env::var("SHARD_SIZE")
                 .map_or_else(|_| 1 << 24, |s| s.parse::<usize>().unwrap_or(1 << 24)),
             // Per-shard trace-AREA cap (raw main-trace cells). The

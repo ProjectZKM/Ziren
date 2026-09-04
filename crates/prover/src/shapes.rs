@@ -633,13 +633,17 @@ impl ZKMProofShape {
         // those are the only counts a commitment can land on.
         //
         // The ceiling is the PROVER's own per-shard area cap, not the
-        // verifier's outer guard.  `ELEMENT_THRESHOLD` closes a core shard at
-        // 251,658,240 main-trace cells — exactly 120 stacking blocks — and it
-        // is what closes every shard in practice (100% of splits on reth,
-        // tendermint and goat are area splits, `pcs/src/opts.rs:28`).  A shard
-        // therefore cannot commit a main round past that, and enumerating up to
-        // the AreaOutOfBounds guard at 2^30 cells instead would quadruple the
-        // map for classes no prover can reach.
+        // verifier's outer guard: a shard is closed at `ELEMENT_THRESHOLD`
+        // main-trace cells at the latest, so it cannot commit a main round past
+        // that, and enumerating up to the AreaOutOfBounds guard at 2^30 cells
+        // instead would quadruple the map for classes no prover can reach.
+        //
+        // It is a CEILING, not the fence that fires: MEASURED (Sep 2026,
+        // `ZIREN_SHARD_CLOSE_CENSUS=1`) 227 of 227 reth shards close on the
+        // CYCLE budget at 3,355,435 cycles, with the area at 432 M of the
+        // 460 M cap. Enumerating to the cap is still right — it is what a
+        // larger `SHARD_SIZE` would reach — but do not read this as "every
+        // split is an area split".
         //
         // The splitter closes a shard WHEN it reaches the threshold, so the
         // event that closes it can carry the total slightly past; one extra
