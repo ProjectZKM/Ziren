@@ -377,6 +377,25 @@ impl<P> CompressTree<P> {
             Reduction::Wait
         }
     }
+
+    /// Re-check the waiting runs after `full_range` becomes known.
+    ///
+    /// [`Self::insert`] decides completeness at landing time, so a run that
+    /// finished BEFORE the driver knew how far the execution went is left
+    /// waiting for a neighbour that will never come — nothing lands again to
+    /// re-examine it. A driver that learns the full range late calls this once
+    /// it does.
+    pub fn settle(&mut self, in_flight: usize, full_range: Option<ShardRange>) -> Reduction<P> {
+        if in_flight != 0 || self.map.len() != 1 {
+            return Reduction::Wait;
+        }
+        let start = *self.map.keys().next().expect("checked len == 1");
+        if !full_range.is_some_and(|full| self.map[&start].range == full) {
+            return Reduction::Wait;
+        }
+        let run = self.map.remove(&start).expect("just looked it up");
+        Reduction::Emit { proofs: run, is_complete: true }
+    }
 }
 
 #[cfg(test)]
@@ -555,5 +574,37 @@ mod tests {
             }
             Reduction::Wait => panic!("a closed gap should reduce"),
         }
+    }
+
+    /// A run that covered everything before the driver knew the full range is
+    /// stuck until `settle` looks at it again.
+    #[test]
+    fn settle_releases_a_run_that_completed_before_the_range_was_known() {
+        let mut tree = CompressTree::<u64>::new(4);
+        // Two leaves land with no full range yet: they merge and wait.
+        assert!(matches!(tree.insert(r(1, 2), 1, 1, None), Reduction::Wait));
+        assert!(matches!(tree.insert(r(2, 3), 2, 0, None), Reduction::Wait));
+        assert_eq!(tree.pending_runs(), 1);
+        // Nothing else will land; the driver now knows the range was 1..3.
+        match tree.settle(0, Some(r(1, 3))) {
+            Reduction::Emit { proofs, is_complete } => {
+                assert!(is_complete);
+                assert_eq!(proofs.len(), 2);
+            }
+            Reduction::Wait => panic!("settle left the root waiting"),
+        }
+        assert_eq!(tree.pending_runs(), 0);
+    }
+
+    /// It must not fire while a reduction is still out, or while the waiting
+    /// runs do not yet cover the whole execution.
+    #[test]
+    fn settle_waits_while_work_is_outstanding_or_the_range_is_short() {
+        let mut tree = CompressTree::<u64>::new(4);
+        assert!(matches!(tree.insert(r(1, 2), 1, 1, None), Reduction::Wait));
+        assert!(matches!(tree.settle(1, Some(r(1, 2))), Reduction::Wait));
+        assert!(matches!(tree.settle(0, Some(r(1, 9))), Reduction::Wait));
+        assert!(matches!(tree.settle(0, None), Reduction::Wait));
+        assert_eq!(tree.pending_runs(), 1);
     }
 }
