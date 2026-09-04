@@ -173,10 +173,13 @@ impl<C: Config> Builder<C> {
 
     /// Checks that the LE bit decomposition of a number is less than the koalabear modulus.
     ///
-    /// SAFETY: This function assumes that the num_bits values are already verified to be boolean.
-    /// The koalabear modulus in LE bits is: 100_000_000_000_000_000_000_000_111_111_1.
-    /// To check that the num_bits array is less than that value, we first check if the most
-    /// significant bits are all 1.  If it is, then we assert that the other bits are all 0.
+    /// SAFETY: This function assumes that the `num_bits` values are already verified to be
+    /// boolean. The koalabear modulus in LE bits (with index 0 the least significant bit) is:
+    /// 1_000_000_000_000_000_000_000_000_111_111_1.
+    /// To check that the `num_bits` array is less than this value, we take the product of the
+    /// 7 most significant bits (indices NUM_BITS - 7..NUM_BITS). If they are all 1, we then
+    /// enforce that all 24 least significant bits (indices 0..NUM_BITS - 7) are 0; otherwise,
+    /// no additional constraint is required.
     fn less_than_bb_modulus(&mut self, num_bits: Array<C, Var<C::N>>) {
         let one: Var<_> = self.eval(C::N::ONE);
         let zero: Var<_> = self.eval(C::N::ZERO);
