@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Read;
-use test_artifacts::HELLO_WORLD_ELF;
+use test_artifacts::{HELLO_WORLD_ELF, HELLO_WORLD_IMM_WRAP_VK_ELF};
 use zkm_prover::build::groth16_bn254_artifacts_dev_dir;
 use zkm_sdk::install::try_install_circuit_artifacts;
 use zkm_sdk::{HashableKey, ProverClient, ZKMStdin, ZKM_CIRCUIT_VERSION};
@@ -39,15 +39,15 @@ fn test_verify_groth16() {
     }
 }
 
+// cargo test -r --features ark -- --ignored test_verify_groth16_imm_wrap_vk
 #[test]
 #[ignore]
-// ZKM_IMM_WRAP_VK=1 cargo test -r --features ark -- --ignored test_verify_groth16_imm_wrap_vk
-// or
-// cargo test -r --features imm-wrap-vk --features ark -- --ignored test_verify_groth16_imm_wrap_vk
 fn test_verify_groth16_imm_wrap_vk() {
+    std::env::set_var("ZKM_IMM_WRAP_VK", "1");
+
     // Set up the pk and vk.
     let client = ProverClient::cpu();
-    let (pk, vk) = client.setup(HELLO_WORLD_ELF);
+    let (pk, vk) = client.setup(HELLO_WORLD_IMM_WRAP_VK_ELF);
 
     // Generate the Groth16 proof.
     let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
