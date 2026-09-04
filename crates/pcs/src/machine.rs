@@ -907,10 +907,38 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .collect::<Vec<_>>();
 
+        // `ZIREN_DEPS_CENSUS=1`: per-chip cost of this pass.  It is the largest
+        // item in a core worker's shard prepare and ~21 chips reach it through
+        // the DEFAULT impl, which runs a full host `generate_trace` and throws
+        // the matrix away -- this says which of them that actually costs.
+        let census = std::env::var("ZIREN_DEPS_CENSUS").is_ok_and(|v| v != "0");
+        let mut census_rows: Vec<(String, u128)> = Vec::new();
         for record in records.iter_mut() {
             for chip in chips.iter() {
+                // A chip the shard does not INCLUDE gets no trace and no
+                // lookups in the proof -- `shard_chips` filters on exactly this
+                // predicate -- so running its dependencies can only produce
+                // events nothing will match.  In practice it produced none and
+                // simply allocated: the default `generate_dependencies` is
+                // `generate_trace`, which builds a PADDED trace matrix and
+                // throws it away.  MEASURED on a reth shard at 8 GPU, where the
+                // real tracegen runs on the DEVICE and this pass does not:
+                // `Bls12381FpOpAssign` 50.8 ms, `MemoryGlobalFinalize` 15.9 ms,
+                // `MemoryGlobalInit` 10.8 ms -- 79 ms of an 82 ms pass, for
+                // chips with no events at all, against 125-227 us for the chips
+                // actually doing work (`LoadWord`, `AddSub`, `StoreWord`).
+                //
+                // Checking it HERE rather than hoisting the filter is
+                // load-bearing: `included` is evaluated against the record as
+                // it stands, and `GlobalChip` (58th) is only included once the
+                // syscall and memory chips ahead of it have appended their
+                // `global_lookup_events` in this very loop.
+                if !chip.included(record) {
+                    continue;
+                }
                 let span = tracing::debug_span!("chip dependencies", chip = chip.name());
                 let _enter = span.enter();
+                let t_chip = std::time::Instant::now();
 
                 let mut output = A::Record::default();
                 if let Err(e) = chip.generate_dependencies(record, &mut output) {
@@ -922,6 +950,21 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     return Err(e);
                 }
                 record.append(&mut output);
+                if census {
+                    census_rows.push((chip.name(), t_chip.elapsed().as_micros()));
+                }
+            }
+            if census {
+                census_rows.sort_by(|a, b| b.1.cmp(&a.1));
+                let total: u128 = census_rows.iter().map(|r| r.1).sum();
+                let top = census_rows
+                    .iter()
+                    .take(12)
+                    .map(|(n, us)| format!("{n}={}us", us))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                eprintln!(">>> DEPS_CENSUS total_us={total} {top}");
+                census_rows.clear();
             }
         }
         Ok(())
