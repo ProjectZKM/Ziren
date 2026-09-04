@@ -58,9 +58,13 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_register_access(
     self.diff_16bit_limb = F::from_canonical_u16((uint16_t)(diff_minus_one & 0xffff)).val;
 }
 
+// Takes the NARROW register record the instruction events carry: a register
+// access is witnessed by its value and its two timestamps and nothing else, so
+// there is nothing here the wide `MemoryReadRecord` would have added.  The
+// caller has already checked the tag.
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void
-populate_register_read(RegisterReadCols<F>& self, const MemoryReadRecord& record) {
+populate_register_read(RegisterReadCols<F>& self, const OptionMemoryReadRecord& record) {
     populate_register_access<F>(self.access, record.timestamp, record.prev_timestamp, record.value);
 }
 
@@ -72,30 +76,16 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_register_read_write(
     if (record.tag == OptionMemoryRecordEnumTag::None) {
         return;
     }
-    switch (record.tag) {
-        case OptionMemoryRecordEnumTag::Read:
-            write_word_from_u32_v2<F>(self.prev_value, record.read.value);
-            populate_register_access<F>(
-                self.access,
-                record.read.timestamp,
-                record.read.prev_timestamp,
-                record.read.value
-            );
-            break;
-        case OptionMemoryRecordEnumTag::Write:
-            write_word_from_u32_v2<F>(self.prev_value, record.write.prev_value);
-            populate_register_access<F>(
-                self.access,
-                record.write.timestamp,
-                record.write.prev_timestamp,
-                record.write.value
-            );
-            break;
-        default:
-            // Unreachable. `None` case guarded above.
-            assert(false);
-            break;
-    }
+    // No read/write branch left: the two arms differed only in what went into
+    // `prev_value`, and the conversion to `OptionMemoryRecordEnum` resolved it
+    // (a read leaves the previous value equal to its own value).
+    write_word_from_u32_v2<F>(self.prev_value, record.prev_value);
+    populate_register_access<F>(
+        self.access,
+        record.timestamp,
+        record.prev_timestamp,
+        record.value
+    );
 }
 
 template<class F>
@@ -114,49 +104,6 @@ populate_read(MemoryReadCols<F>& self, const MemoryReadRecord& record) {
     populate_access<F>(self.access, current_record, prev_record);
 }
 
-template<class F>
-__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_read_write(
-    MemoryReadWriteCols<F>& self,
-    const OptionMemoryRecordEnum& record
-) {
-    if (record.tag == OptionMemoryRecordEnumTag::None) {
-        return;
-    }
-    MemoryRecord current_record;
-    MemoryRecord prev_record;
-    switch (record.tag) {
-        case OptionMemoryRecordEnumTag::Read:
-            current_record = {
-                .shard = record.read.shard,
-                .timestamp = record.read.timestamp,
-                .value = record.read.value,
-            };
-            prev_record = {
-                .shard = record.read.prev_shard,
-                .timestamp = record.read.prev_timestamp,
-                .value = record.read.value,
-            };
-            break;
-        case OptionMemoryRecordEnumTag::Write:
-            current_record = {
-                .shard = record.write.shard,
-                .timestamp = record.write.timestamp,
-                .value = record.write.value,
-            };
-            prev_record = {
-                .shard = record.write.prev_shard,
-                .timestamp = record.write.prev_timestamp,
-                .value = record.write.prev_value,
-            };
-            break;
-        default:
-            // Unreachable. `None` case guarded above.
-            assert(false);
-            break;
-    }
-    write_word_from_u32_v2<F>(self.prev_value, prev_record.value);
-    populate_access<F>(self.access, current_record, prev_record);
-}
 
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_read_write_v2(

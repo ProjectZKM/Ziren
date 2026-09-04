@@ -280,20 +280,14 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         *self.op_a_access.value_mut() = a.into();
         *self.op_b_access.value_mut() = b.into();
         *self.op_c_access.value_mut() = c.into();
-        match a_record.tag {
-            OptionMemoryRecordEnumTag::Read => {
-                self.op_a_access.populate(MemoryRecordEnum::Read(a_record.read), blu)
-            }
-            OptionMemoryRecordEnumTag::Write => {
-                self.op_a_access.populate(MemoryRecordEnum::Write(a_record.write), blu)
-            }
-            OptionMemoryRecordEnumTag::None => {}
+        if !matches!(a_record.tag, OptionMemoryRecordEnumTag::None) {
+            self.op_a_access.populate_register(a_record, blu);
         }
         if let OptionMemoryRecordEnumTag::Read = b_record.tag {
-            self.op_b_access.populate(b_record.read, blu);
+            self.op_b_access.populate_register(b_record, blu);
         }
         if let OptionMemoryRecordEnumTag::Read = c_record.tag {
-            self.op_c_access.populate(c_record.read, blu);
+            self.op_c_access.populate_register(c_record, blu);
         }
 
         // The op_a word range check reads back the COLUMN value, exactly as
@@ -721,17 +715,11 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
 
         *self.op_a_access.value_mut() = event.a.into();
         *self.op_b_access.value_mut() = event.b.into();
-        match event.a_record.tag {
-            OptionMemoryRecordEnumTag::Read => {
-                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
-            }
-            OptionMemoryRecordEnumTag::Write => {
-                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
-            }
-            OptionMemoryRecordEnumTag::None => {}
+        if !matches!(event.a_record.tag, OptionMemoryRecordEnumTag::None) {
+            self.op_a_access.populate_register(event.a_record, blu);
         }
         if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
-            self.op_b_access.populate(event.b_record.read, blu);
+            self.op_b_access.populate_register(event.b_record, blu);
         }
 
         // Read the op_a range check back off the COLUMN, not the event — see
@@ -862,17 +850,11 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
 
         *self.op_a_access.value_mut() = a.into();
         *self.op_b_access.value_mut() = b.into();
-        match a_record.tag {
-            OptionMemoryRecordEnumTag::Read => {
-                self.op_a_access.populate(MemoryRecordEnum::Read(a_record.read), blu)
-            }
-            OptionMemoryRecordEnumTag::Write => {
-                self.op_a_access.populate(MemoryRecordEnum::Write(a_record.write), blu)
-            }
-            OptionMemoryRecordEnumTag::None => {}
+        if !matches!(a_record.tag, OptionMemoryRecordEnumTag::None) {
+            self.op_a_access.populate_register(a_record, blu);
         }
         if let OptionMemoryRecordEnumTag::Read = b_record.tag {
-            self.op_b_access.populate(b_record.read, blu);
+            self.op_b_access.populate_register(b_record, blu);
         }
 
         // Column-read-back for the op_a range check, as in
@@ -1184,20 +1166,14 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
         *self.op_a_access.value_mut() = a.into();
         *self.op_b_access.value_mut() = b.into();
         *self.op_c_access.value_mut() = c.into();
-        match a_record.tag {
-            OptionMemoryRecordEnumTag::Read => {
-                self.op_a_access.populate(MemoryRecordEnum::Read(a_record.read), blu)
-            }
-            OptionMemoryRecordEnumTag::Write => {
-                self.op_a_access.populate(MemoryRecordEnum::Write(a_record.write), blu)
-            }
-            OptionMemoryRecordEnumTag::None => {}
+        if !matches!(a_record.tag, OptionMemoryRecordEnumTag::None) {
+            self.op_a_access.populate_register(a_record, blu);
         }
         if let OptionMemoryRecordEnumTag::Read = b_record.tag {
-            self.op_b_access.populate(b_record.read, blu);
+            self.op_b_access.populate_register(b_record, blu);
         }
         if let OptionMemoryRecordEnumTag::Read = c_record.tag {
-            self.op_c_access.populate(c_record.read, blu);
+            self.op_c_access.populate_register(c_record, blu);
         }
 
         // Read the op_a range check back off the COLUMN, not the event — see
@@ -1410,17 +1386,11 @@ impl<F: PrimeField32> ShamtFrameCols<F> {
 
         *self.op_a_access.value_mut() = event.a.into();
         *self.op_b_access.value_mut() = event.b.into();
-        match event.a_record.tag {
-            OptionMemoryRecordEnumTag::Read => {
-                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
-            }
-            OptionMemoryRecordEnumTag::Write => {
-                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
-            }
-            OptionMemoryRecordEnumTag::None => {}
+        if !matches!(event.a_record.tag, OptionMemoryRecordEnumTag::None) {
+            self.op_a_access.populate_register(event.a_record, blu);
         }
         if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
-            self.op_b_access.populate(event.b_record.read, blu);
+            self.op_b_access.populate_register(event.b_record, blu);
         }
 
         // Column-read-back for the op_a range check, as in

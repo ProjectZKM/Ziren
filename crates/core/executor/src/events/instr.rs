@@ -205,7 +205,7 @@ pub struct MemInstrEvent {
 /// register accesses, and the replay -- which is the serial critical path of a
 /// worker -- is ~92% event emission.  Pin it so a field cannot creep back in
 /// without someone deciding it is worth the bytes.
-const _: () = assert!(core::mem::size_of::<MemInstrEvent>() == 136);
+const _: () = assert!(core::mem::size_of::<MemInstrEvent>() == 100);
 
 impl MemInstrEvent {
     /// Create a new [`MemInstrEvent`].

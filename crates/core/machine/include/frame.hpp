@@ -45,10 +45,10 @@ __ZKM_HOSTDEV__ void populate_raw(
     // AIR range-checks the COLUMN, so record-wins is the correct order.
     memory::populate_register_read_write<F>(frame.op_a_access, a_record);
     if (b_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_register_read<F>(frame.op_b_access, b_record.read);
+        memory::populate_register_read<F>(frame.op_b_access, b_record);
     }
     if (c_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_register_read<F>(frame.op_c_access, c_record.read);
+        memory::populate_register_read<F>(frame.op_c_access, c_record);
     }
 }
 
@@ -151,7 +151,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_mem(
     // Record-wins ordering, as in `populate_raw`.
     memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
     if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record);
     }
 }
 
@@ -184,10 +184,10 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_r(
     // Record-wins ordering, as in `populate_raw`.
     memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
     if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record);
     }
     if (event.c_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_register_read<F>(frame.op_c_access, event.c_record.read);
+        memory::populate_register_read<F>(frame.op_c_access, event.c_record);
     }
 }
 
@@ -219,7 +219,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_imm(
     // Record-wins ordering, as in `populate_raw`.
     memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
     if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record);
     }
 }
 
@@ -248,7 +248,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_shamt(
     // Record-wins ordering, as in `populate_raw`.
     memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
     if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record);
     }
 }
 
@@ -264,7 +264,10 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_syscall(
     OptionMemoryRecordEnum a_record = {};
     if (event.a_record_is_real) {
         a_record.tag = OptionMemoryRecordEnumTag::Write;
-        a_record.write = event.a_record;
+        a_record.value = event.a_record.value;
+        a_record.timestamp = event.a_record.timestamp;
+        a_record.prev_timestamp = event.a_record.prev_timestamp;
+        a_record.prev_value = event.a_record.prev_value;
     } else {
         a_record.tag = OptionMemoryRecordEnumTag::None;
     }
@@ -301,16 +304,19 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_syscall_r(
     OptionMemoryRecordEnum a_record = {};
     if (event.a_record_is_real) {
         a_record.tag = OptionMemoryRecordEnumTag::Write;
-        a_record.write = event.a_record;
+        a_record.value = event.a_record.value;
+        a_record.timestamp = event.a_record.timestamp;
+        a_record.prev_timestamp = event.a_record.prev_timestamp;
+        a_record.prev_value = event.a_record.prev_value;
     } else {
         a_record.tag = OptionMemoryRecordEnumTag::None;
     }
     memory::populate_register_read_write<F>(frame.op_a_access, a_record);
     if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_register_read<F>(frame.op_b_access, event.b_record.read);
+        memory::populate_register_read<F>(frame.op_b_access, event.b_record);
     }
     if (event.c_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_register_read<F>(frame.op_c_access, event.c_record.read);
+        memory::populate_register_read<F>(frame.op_c_access, event.c_record);
     }
 }
 

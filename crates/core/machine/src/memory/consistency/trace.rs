@@ -9,6 +9,25 @@ use super::{
 };
 
 impl<F: PrimeField32> RegisterReadCols<F> {
+    /// Populate from the NARROW register record the instruction events carry.
+    ///
+    /// A register access is witnessed by its value and its two timestamps and
+    /// nothing else, so this is the whole of `populate` for a register — see
+    /// [`OptionMemoryReadRecord`], which carries exactly those.  The caller has
+    /// already established the access is real.
+    pub fn populate_register(
+        &mut self,
+        record: zkm_core_executor::events::OptionMemoryReadRecord,
+        output: &mut impl ByteRecord,
+    ) {
+        self.access.populate_register_access(
+            record.timestamp,
+            record.prev_timestamp,
+            record.value,
+            output,
+        );
+    }
+
     pub fn populate(&mut self, record: MemoryReadRecord, output: &mut impl ByteRecord) {
         self.access.populate_access(
             record.timestamp,
@@ -22,6 +41,27 @@ impl<F: PrimeField32> RegisterReadCols<F> {
 }
 
 impl<F: PrimeField32> RegisterReadWriteCols<F> {
+    /// Narrow twin of [`Self::populate`] — see
+    /// [`RegisterReadCols::populate_register`].
+    ///
+    /// There is no read/write branch left: the two arms differed only in what
+    /// went into `prev_value`, and the conversion to
+    /// [`OptionMemoryRecordEnum`] already resolved that (a read's previous
+    /// value is its own value).  The caller has established the access is real.
+    pub fn populate_register(
+        &mut self,
+        record: zkm_core_executor::events::OptionMemoryRecordEnum,
+        output: &mut impl ByteRecord,
+    ) {
+        self.prev_value = record.prev_value.into();
+        self.access.populate_register_access(
+            record.timestamp,
+            record.prev_timestamp,
+            record.value,
+            output,
+        );
+    }
+
     pub fn populate(&mut self, record: MemoryRecordEnum, output: &mut impl ByteRecord) {
         match record {
             MemoryRecordEnum::Read(r) => {
@@ -51,6 +91,29 @@ impl<F: PrimeField32> RegisterReadWriteCols<F> {
 }
 
 impl<F: PrimeField32> RegisterAccessCols<F> {
+    /// Populate a register access from the columns it actually witnesses.
+    ///
+    /// [`Self::populate_access`] additionally takes `shard` / `prev_shard` to
+    /// assert they are equal; the narrow record has neither, because that
+    /// assertion moved to the conversion that drops them.
+    pub(crate) fn populate_register_access(
+        &mut self,
+        timestamp: u32,
+        prev_timestamp: u32,
+        value: u32,
+        output: &mut impl ByteRecord,
+    ) {
+        self.value = value.into();
+        self.prev_clk = F::from_u32(prev_timestamp);
+
+        let diff_minus_one = timestamp.wrapping_sub(prev_timestamp).wrapping_sub(1);
+        let diff_16bit_limb = (diff_minus_one & 0xffff) as u16;
+        self.diff_16bit_limb = F::from_u16(diff_16bit_limb);
+
+        output.add_u16_range_check(diff_16bit_limb);
+        output.add_bit_range_check(((diff_minus_one >> 16) & 0x1ff) as u16, 9);
+    }
+
     /// Populate a register access.
     ///
     /// `prev_shard` is only taken to assert the `MemoryBump` invariant in debug builds — it is not
