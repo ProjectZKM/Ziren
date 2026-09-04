@@ -1680,15 +1680,7 @@ impl<'a> Executor<'a> {
         } else if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
         {
-            self.emit_mem_instr_event(
-                instruction.opcode,
-                a,
-                b,
-                c,
-                hi_or_prev_a.unwrap_or(0),
-                recv_next_pc,
-                &record,
-            );
+            self.emit_mem_instr_event(instruction.opcode, a, b, c, &record);
         } else if instruction.is_branch_instruction() {
             self.emit_branch_event(
                 clk,
@@ -1900,10 +1892,16 @@ impl<'a> Executor<'a> {
         a: u32,
         b: u32,
         c: u32,
-        prev_a_val: u32,
-        recv_next_pc: u32,
         record: &MemoryAccessRecord,
     ) {
+        // Every memory instruction is I-type, so `op_c` is an immediate and
+        // never produces a register read.  `MemInstrEvent` therefore has no
+        // `c_record`; this is the assertion `ITypeFrameCols::populate_from_mem`
+        // used to make per ROW, hoisted to the one place that could violate it.
+        debug_assert!(
+            record.c.is_none(),
+            "a memory instruction produced a register read for op_c: {opcode:?}"
+        );
         // A REAL instruction: carry the frame (see AluEvent).
         let event = MemInstrEvent {
             shard: self.shard(),
@@ -1915,12 +1913,9 @@ impl<'a> Executor<'a> {
             b,
             c,
             mem_access: self.memory_accesses.memory.expect("Must have memory access"),
-            prev_a_val,
             is_instruction: 1,
-            recv_next_pc,
             a_record: record.a.into(),
             b_record: record.b.into(),
-            c_record: record.c.into(),
         };
 
         // Partition the event by access width/direction: each memory chip owns the

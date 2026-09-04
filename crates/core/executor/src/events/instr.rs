@@ -184,18 +184,28 @@ pub struct MemInstrEvent {
     pub c: u32,
     /// The memory access record for memory operations.
     pub mem_access: MemoryRecordEnum,
-    /// The memory access record for memory operations.
-    pub prev_a_val: u32,
 
     /// ── instruction frame (see `AluEvent`) ───────────────────────────
     pub is_instruction: u32,
-    /// The `next_pc` RECEIVED on the `State` bus.
-    pub recv_next_pc: u32,
-    /// Register memory records for the three operands.
+    /// Register memory records for the two operands a memory instruction has.
+    ///
+    /// There is no `c_record`: every memory instruction is I-TYPE, so `op_c` is
+    /// an immediate and never produces a register read. `ITypeFrameCols` has no
+    /// `op_c_access` column to populate from one, and both the host and the CUDA
+    /// frame populate read only these two -- the field this struct used to carry
+    /// existed solely to be `debug_assert!`ed `None`. That assertion now lives at
+    /// the emit site, where it costs nothing per cycle.
     pub a_record: OptionMemoryRecordEnum,
     pub b_record: OptionMemoryReadRecord,
-    pub c_record: OptionMemoryReadRecord,
 }
+
+/// The executor writes one of these per memory instruction and the replay
+/// writes them again, so the struct's SIZE is the point: at ~1.2 M memory
+/// instructions per reth shard it is the second largest event stream after the
+/// register accesses, and the replay -- which is the serial critical path of a
+/// worker -- is ~92% event emission.  Pin it so a field cannot creep back in
+/// without someone deciding it is worth the bytes.
+const _: () = assert!(core::mem::size_of::<MemInstrEvent>() == 136);
 
 impl MemInstrEvent {
     /// Create a new [`MemInstrEvent`].
@@ -211,7 +221,6 @@ impl MemInstrEvent {
         b: u32,
         c: u32,
         mem_access: MemoryRecordEnum,
-        prev_a_val: u32,
     ) -> Self {
         Self {
             shard,
@@ -223,12 +232,9 @@ impl MemInstrEvent {
             b,
             c,
             mem_access,
-            prev_a_val,
             is_instruction: 0,
-            recv_next_pc: 0,
             a_record: None.into(),
             b_record: None.into(),
-            c_record: None.into(),
         }
     }
 }

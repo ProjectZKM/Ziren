@@ -459,33 +459,6 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         );
     }
 
-    /// `MemInstrEvent` variant of [`Self::populate_from_alu`].  Every memory
-    /// instruction reads-and-writes op_a (`is_rw_a = 1` — loads write it,
-    /// stores carry the previous value through), and the plain stores
-    /// (SB/SH/SW/SWL/SWR, but NOT SC, which writes the success flag) read it
-    /// immutably.
-    pub fn populate_from_mem(
-        &mut self,
-        event: &MemInstrEvent,
-        program: &Program,
-        blu: &mut impl ByteRecord,
-    ) {
-        self.populate_raw(
-            event.clk,
-            event.pc,
-            event.recv_next_pc,
-            event.a,
-            event.b,
-            event.c,
-            event.a_record,
-            event.b_record,
-            event.c_record,
-            program,
-            event.shard,
-            blu,
-        );
-    }
-
     /// `SyscallEvent` variant of [`Self::populate_from_alu`].  A syscall
     /// reads-and-writes op_a (the id comes in, the result goes out), so
     /// `is_rw_a = 1` and `hi_or_prev_a` is the op_a PREVIOUS value — read back
@@ -738,11 +711,8 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         // emitted.  That is only sound because an immediate `op_c` never
         // produces a register read to record — the AIR gave the access
         // multiplicity `ONE - imm_c = 0`, so any event here was already
-        // unmatched on the byte bus.
-        debug_assert!(
-            matches!(event.c_record.tag, OptionMemoryRecordEnumTag::None),
-            "an I-type frame received a register read for op_c"
-        );
+        // unmatched on the byte bus.  `MemInstrEvent` no longer carries a
+        // `c_record` at all; `Executor::emit_mem_instr_event` asserts it.
         self.opcode = instruction.opcode.as_field::<F>();
         self.op_a = F::from_u32(instruction.op_a as u32);
         self.op_b = F::from_u32(instruction.op_b);
