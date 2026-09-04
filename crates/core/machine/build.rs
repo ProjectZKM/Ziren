@@ -125,7 +125,6 @@ mod sys {
             .include_item("BranchColumns")
             .include_item("BranchEvent")
             .include_item("CloClzCols")
-            .include_item("CpuEventFfi")
             .include_item("CompAluEvent")
             .include_item("DivRemCols")
             .include_item("Ghost")

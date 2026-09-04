@@ -338,8 +338,6 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     Some((z_star, proof.q_at_z, w_at_z))
 }
 
-// ZIREN_PHASE1_ACCEPTANCE_GATE
-//
 // Acceptance gate for the jagged/zerocheck closing identity.
 //
 // For a MIXED-HEIGHT packing, the host jagged reduction's closing weight

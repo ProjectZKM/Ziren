@@ -55,7 +55,7 @@ use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
 use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 
 // ===========================================================================
-// Device jagged-eval round-engine seam (ZIREN_GPU_JAGGED_EVAL_DEVICE).
+// Device jagged-eval round-engine seam: `ziren-gpu` installs an engine here.
 //
 // The structural jagged-eval sumcheck's per-round polynomial COMPUTE (the
 // branching-program eval over all columns, ~O(N × num_cols) host work) can be
@@ -651,7 +651,7 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
 }
 
 /// Engine-driven variant of [`structural_jagged_eval_sumcheck`] used on the
-/// `ziren-gpu` device path (`ZIREN_GPU_JAGGED_EVAL_DEVICE`).  The per-round
+/// `ziren-gpu` device path, installed through the engine seam.  The per-round
 /// polynomial evals + fold are delegated to `engine` (a device kernel); the
 /// challenger observe/sample/interpolate stay HOST-side and identical to the
 /// host prover.  With `verify = true`, a shadow host [`StructuralJaggedEvalProver`]
@@ -744,7 +744,7 @@ fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger
             let (h_0, h_half) = hp.compute_round_evals();
             assert!(
                 h_0 == y_0 && h_half == y_half,
-                "ZIREN_GPU_JAGGED_EVAL_DEVICE_VERIFY: round {round} mismatch \
+                "jagged-eval shadow-host verify: round {round} mismatch \
                  (n={n}, num_cols={}): host y_0={h_0:?} y_half={h_half:?} \
                  device y_0={y_0:?} y_half={y_half:?}",
                 merged_prefix_sums.len(),
@@ -769,7 +769,7 @@ fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger
     }
 
     if let Some(hp) = host_prover.as_ref() {
-        assert!(hp.rhos == rhos_out, "ZIREN_GPU_JAGGED_EVAL_DEVICE_VERIFY: final rhos mismatch");
+        assert!(hp.rhos == rhos_out, "jagged-eval shadow-host verify: final rhos mismatch");
     }
 
     PartialSumcheckProof {
@@ -832,7 +832,7 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal> + 'st
     // Production path (any size) — the structural prover.
     // O(N × num_cols) per the fold structure; feasible at all scales.
     //
-    // ZIREN_GPU_JAGGED_EVAL_DEVICE seam: when `ziren-gpu` has installed a device
+    // Engine seam: when `ziren-gpu` has installed a device
     // round-engine factory for this thread, off-load the per-round polynomial
     // COMPUTE to the device (the challenger stays host-side).  With NO factory
     // installed (default / pure-host), fall through to the exact legacy host

@@ -1649,19 +1649,7 @@ impl<'a> Executor<'a> {
         exit_code: u32,
         syscall_code: u32,
     ) {
-        self.emit_cpu(
-            clk,
-            pc,
-            next_pc,
-            next_next_pc,
-            recv_next_pc,
-            a,
-            b,
-            c,
-            hi_or_prev_a,
-            record,
-            exit_code,
-        );
+        self.emit_cpu(clk, pc, next_pc, next_next_pc, exit_code);
 
         if instruction.is_alu_instruction() {
             self.emit_alu_event(
@@ -1735,22 +1723,19 @@ impl<'a> Executor<'a> {
     }
 
     /// Emit a CPU event.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// The Cpu CHIP is gone -- `MipsAirId::Cpu` survives only as the virtual
+    /// cycles axis for shard splitting -- so this takes the five fields
+    /// something still reads and nothing else.  It used to take the operands
+    /// and the whole `MemoryAccessRecord` too, costing a move per cycle for no
+    /// reader.
     #[inline]
     fn emit_cpu(
         &mut self,
         clk: u32,
         pc: u32,
         next_pc: u32,
-        // this is added for branch instruction
         next_next_pc: u32,
-        // Option-2 State bus: entry next_pc (predecessor's next_next_pc).
-        recv_next_pc: u32,
-        a: u32,
-        b: u32,
-        c: u32,
-        hi_or_prev_a: Option<u32>,
-        record: MemoryAccessRecord,
         exit_code: u32,
     ) {
         self.record.cpu_events.push(CpuEvent { clk, pc, next_pc, next_next_pc, exit_code });
@@ -1795,9 +1780,8 @@ impl<'a> Executor<'a> {
             next_next_pc,
             recv_next_pc,
             a_record: record.a.into(),
-            // `OptionMemoryReadRecord` is the narrow read-only mirror and
-            // converts straight from `Option<MemoryRecordEnum>`, matching how
-            // `CpuEventFfi` handles op_b / op_c.
+            // `OptionMemoryReadRecord` is the read-only form: op_b and op_c
+            // are never written, so a write arm would be dead per cycle.
             b_record: record.b.into(),
             c_record: record.c.into(),
         };
