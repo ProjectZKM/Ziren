@@ -54,7 +54,7 @@ rows_L = 4194304
 rows_T = 0
 num_columns_S = 105
 num_lookups_M = 22637
-grinding_bits_lookup = 16
+grinding_bits_lookup = 0
 multilinear_fingerprint = true
 
 
@@ -96,7 +96,7 @@ rows_L = 1048576
 rows_T = 0
 num_columns_S = 5
 num_lookups_M = 71
-grinding_bits_lookup = 16
+grinding_bits_lookup = 0
 multilinear_fingerprint = true
 
 
@@ -134,5 +134,5 @@ rows_L = 1048576
 rows_T = 0
 num_columns_S = 5
 num_lookups_M = 66
-grinding_bits_lookup = 16
+grinding_bits_lookup = 0
 multilinear_fingerprint = true

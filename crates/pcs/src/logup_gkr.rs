@@ -21,7 +21,7 @@ use p3_field::Field;
 /// for a witness that, once absorbed, makes the challenger emit
 /// `GKR_GRINDING_BITS` leading zero bits; the verifier re-checks the witness
 /// before sampling any GKR challenge.
-pub const GKR_GRINDING_BITS: usize = 16;
+pub const GKR_GRINDING_BITS: usize = 0;
 
 /// Config-aware GKR proof-of-work grinding.
 ///
