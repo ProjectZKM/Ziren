@@ -311,6 +311,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
         }
 
+        crate::vk_collect_record(&compress_vk.hash_koalabear());
         if self.vk_verification
             && !self.recursion_vk_map.contains_key(&compress_vk.hash_koalabear())
         {
@@ -356,6 +357,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
         }
 
+        crate::vk_collect_record(&proof.vk.hash_koalabear());
         if self.vk_verification && !self.recursion_vk_map.contains_key(&proof.vk.hash_koalabear()) {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }

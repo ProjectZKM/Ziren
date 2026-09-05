@@ -23,7 +23,7 @@ pub mod verify;
 use rayon::prelude::*;
 use std::{
     borrow::Borrow,
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     env,
     num::NonZeroUsize,
     path::Path,
@@ -120,6 +120,52 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 /// it is a map that rejects real proofs, which is what 2^11 (2048) did.
 /// `tests::enumeration_size_probe` asserts the fit.
 pub const VK_MERKLE_TREE_HEIGHT: usize = 12;
+
+/// Digest sink for `ZIREN_VK_COLLECT=<path>`.
+///
+/// `ZKMProofShape::generate` does not reach every compose/normalize shape a
+/// real workload produces — reth trips `vk not allowed` on a key that is in
+/// neither this branch's 3500-key map nor canonical's 1.25M-key one — and a
+/// full regen is ~15 h.  With this set, every recursion VK the prover actually
+/// touches is recorded and the path is rewritten in `vk_map.bin` wire format,
+/// so ONE workload run yields exactly the keys the map is missing.  Merge the
+/// result into `crates/prover/vk_map.bin` with the `merge_vk_maps` bin.
+///
+/// Collection is independent of `vk_verification`: the digests are identical
+/// either way (only the leaf-index lookup differs), so the capture run is a
+/// normal `VERIFY_VK=false` prove.
+static VK_COLLECT: std::sync::OnceLock<Option<VkCollectSink>> = std::sync::OnceLock::new();
+
+struct VkCollectSink {
+    path: std::path::PathBuf,
+    seen: std::sync::Mutex<BTreeSet<[KoalaBear; DIGEST_SIZE]>>,
+}
+
+/// Record one recursion VK digest if `ZIREN_VK_COLLECT` is set. Rewrites the
+/// file only when the digest is new, so the cost is per distinct key, not per
+/// compose node.
+pub fn vk_collect_record(digest: &[KoalaBear; DIGEST_SIZE]) {
+    let sink = VK_COLLECT.get_or_init(|| {
+        env::var("ZIREN_VK_COLLECT").ok().map(|path| VkCollectSink {
+            path: path.into(),
+            seen: std::sync::Mutex::new(BTreeSet::new()),
+        })
+    });
+    let Some(sink) = sink.as_ref() else { return };
+    let mut seen = sink.seen.lock().unwrap();
+    if !seen.insert(*digest) {
+        return;
+    }
+    // Same wire format as vk_map.bin: BTreeMap<digest, leaf index>. The
+    // indices here are placeholders; `merge_vk_maps` renumbers on union.
+    let map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
+        seen.iter().copied().enumerate().map(|(i, d)| (d, i)).collect();
+    match std::fs::File::create(&sink.path).map(|mut f| bincode::serialize_into(&mut f, &map)) {
+        Ok(Ok(())) => tracing::info!("[VK-COLLECT] {} keys -> {:?}", seen.len(), sink.path),
+        Ok(Err(e)) => tracing::warn!("[VK-COLLECT] serialize {:?}: {e}", sink.path),
+        Err(e) => tracing::warn!("[VK-COLLECT] create {:?}: {e}", sink.path),
+    }
+}
 
 const COMPRESS_DEGREE: usize = 3;
 const SHRINK_DEGREE: usize = 3;
@@ -2295,6 +2341,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         vks: &[StarkVerifyingKey<InnerSC>],
     ) -> ZKMMerkleProofWitnessValues<InnerSC> {
         let num_vks = self.recursion_vk_map.len();
+        for vk in vks.iter() {
+            vk_collect_record(&vk.hash_koalabear());
+        }
         let vk_indices: Vec<usize> = if self.vk_verification {
             vks.iter()
                 .map(|vk| {
