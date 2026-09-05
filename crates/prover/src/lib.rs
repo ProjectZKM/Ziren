@@ -146,9 +146,21 @@ struct VkCollectSink {
 /// compose node.
 pub fn vk_collect_record(digest: &[KoalaBear; DIGEST_SIZE]) {
     let sink = VK_COLLECT.get_or_init(|| {
-        env::var("ZIREN_VK_COLLECT").ok().map(|path| VkCollectSink {
-            path: path.into(),
-            seen: std::sync::Mutex::new(BTreeSet::new()),
+        env::var("ZIREN_VK_COLLECT").ok().map(|path| {
+            let path: std::path::PathBuf = path.into();
+            // Seed from whatever the file already holds so coverage ACCUMULATES
+            // across processes. Each block reaches a different set of shard log
+            // classes, so a single run is never the whole set; without this a
+            // server restart would silently truncate the keys gathered so far.
+            let seed: BTreeSet<[KoalaBear; DIGEST_SIZE]> = std::fs::File::open(&path)
+                .ok()
+                .and_then(|f| {
+                    bincode::deserialize_from::<_, BTreeMap<[KoalaBear; DIGEST_SIZE], usize>>(f).ok()
+                })
+                .map(|m| m.into_keys().collect())
+                .unwrap_or_default();
+            tracing::info!("[VK-COLLECT] seeded {} keys from {:?}", seed.len(), path);
+            VkCollectSink { path, seen: std::sync::Mutex::new(seed) }
         })
     });
     let Some(sink) = sink.as_ref() else { return };
