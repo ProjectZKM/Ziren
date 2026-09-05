@@ -1,4 +1,4 @@
-# 📊 Ziren (v2.0 (feat/upgrade-plonky3 fdcb6a07))
+# 📊 Ziren (v2.0 (feat/upgrade-plonky3 1114ad77, UDR-100 schedule))
 
 How to read this report:
 - Table rows correspond to security regimes
@@ -10,7 +10,7 @@ How to read this report:
 
 | Metric | Value | Relevant circuit | Notes |
 | --- | --- | --- | --- |
-| Final bits of security | **27 bits** | [core](#core) | Regime: UDR |
+| Final bits of security | **100 bits** | [core](#core) | Regime: UDR |
 | Final proof size (worst case) | **975 KiB** | [wrap](#wrap) | |
 
 ## Circuits
@@ -27,21 +27,21 @@ How to read this report:
 - Hash size (bits): 248
 - Field: KoalaBear⁴
 - Iterations (M): 3
-- Folding factors (k_i): [4, 7, 7]
+- Folding factors (k_i): [3, 6, 6]
 - Constraint degree: 3
 - Batch size: 32
 - Batching: Affine
-- Queries per iteration: [84, 21, 12]
+- Queries per iteration: [124, 88, 85]
 - OOD samples per iteration: [2, 2]
 - Total grinding overhead log2: 17.59
 - Trace length: 4194304
 - Trace width: 36489
 
-**Proof Size:** 268 KiB (expected) / 290 KiB (worst case)
+**Proof Size:** 383 KiB (expected) / 450 KiB (worst case)
 
-| regime | total | logup-gkr | OOD(i=1) | OOD(i=2) | Shift(i=1) | Shift(i=2) | batching | fin | fold(i=0,s=1) | fold(i=0,s=2) | fold(i=0,s=3) | fold(i=0,s=4) | fold(i=1,s=1) | fold(i=1,s=2) | fold(i=1,s=3) | fold(i=1,s=4) | fold(i=1,s=5) | fold(i=1,s=6) | fold(i=1,s=7) | fold(i=2,s=1) | fold(i=2,s=2) | fold(i=2,s=3) | fold(i=2,s=4) | fold(i=2,s=5) | fold(i=2,s=6) | fold(i=2,s=7) | reduce to dense PCS | zerocheck |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UDR | 27 | 96 | 215 | 229 | 50 | 35 | 103 | 27 | 104 | 105 | 106 | 107 | 105 | 106 | 107 | 108 | 109 | 110 | 111 | 108 | 109 | 110 | 111 | 112 | 113 | 114 | 116 | 109 |
+| regime | total | logup-gkr | OOD(i=1) | OOD(i=2) | Shift(i=1) | Shift(i=2) | batching | fin | fold(i=0,s=1) | fold(i=0,s=2) | fold(i=0,s=3) | fold(i=1,s=1) | fold(i=1,s=2) | fold(i=1,s=3) | fold(i=1,s=4) | fold(i=1,s=5) | fold(i=1,s=6) | fold(i=2,s=1) | fold(i=2,s=2) | fold(i=2,s=3) | fold(i=2,s=4) | fold(i=2,s=5) | fold(i=2,s=6) | reduce to dense PCS | zerocheck |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| UDR | 100 | 100 | 213 | 225 | 100 | 100 | 102 | 100 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 109 |
 
 
 ## compress
@@ -52,21 +52,21 @@ How to read this report:
 - Hash size (bits): 248
 - Field: KoalaBear⁴
 - Iterations (M): 3
-- Folding factors (k_i): [4, 7, 7]
+- Folding factors (k_i): [3, 6, 6]
 - Constraint degree: 3
 - Batch size: 32
 - Batching: Affine
-- Queries per iteration: [84, 21, 12]
+- Queries per iteration: [124, 88, 85]
 - OOD samples per iteration: [2, 2]
 - Total grinding overhead log2: 17.59
 - Trace length: 1048576
 - Trace width: 392
 
-**Proof Size:** 268 KiB (expected) / 290 KiB (worst case)
+**Proof Size:** 383 KiB (expected) / 450 KiB (worst case)
 
-| regime | total | logup-gkr | OOD(i=1) | OOD(i=2) | Shift(i=1) | Shift(i=2) | batching | fin | fold(i=0,s=1) | fold(i=0,s=2) | fold(i=0,s=3) | fold(i=0,s=4) | fold(i=1,s=1) | fold(i=1,s=2) | fold(i=1,s=3) | fold(i=1,s=4) | fold(i=1,s=5) | fold(i=1,s=6) | fold(i=1,s=7) | fold(i=2,s=1) | fold(i=2,s=2) | fold(i=2,s=3) | fold(i=2,s=4) | fold(i=2,s=5) | fold(i=2,s=6) | fold(i=2,s=7) | reduce to dense PCS | zerocheck |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UDR | 27 | 108 | 215 | 229 | 50 | 35 | 103 | 27 | 104 | 105 | 106 | 107 | 105 | 106 | 107 | 108 | 109 | 110 | 111 | 108 | 109 | 110 | 111 | 112 | 113 | 114 | 116 | 115 |
+| regime | total | logup-gkr | OOD(i=1) | OOD(i=2) | Shift(i=1) | Shift(i=2) | batching | fin | fold(i=0,s=1) | fold(i=0,s=2) | fold(i=0,s=3) | fold(i=1,s=1) | fold(i=1,s=2) | fold(i=1,s=3) | fold(i=1,s=4) | fold(i=1,s=5) | fold(i=1,s=6) | fold(i=2,s=1) | fold(i=2,s=2) | fold(i=2,s=3) | fold(i=2,s=4) | fold(i=2,s=5) | fold(i=2,s=6) | reduce to dense PCS | zerocheck |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| UDR | 100 | 112 | 213 | 225 | 100 | 100 | 102 | 100 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 115 |
 
 
 ## wrap
@@ -93,5 +93,5 @@ How to read this report:
 
 | regime | total | logup-gkr | batching | commit round 1 | commit round 10 | commit round 11 | commit round 12 | commit round 13 | commit round 14 | commit round 15 | commit round 16 | commit round 17 | commit round 18 | commit round 19 | commit round 2 | commit round 20 | commit round 21 | commit round 3 | commit round 4 | commit round 5 | commit round 6 | commit round 7 | commit round 8 | commit round 9 | query phase | reduce to dense PCS | zerocheck |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UDR | 100 | 108 | 114 | 102 | 111 | 112 | 113 | 114 | 115 | 116 | 117 | 118 | 119 | 120 | 103 | 120 | 121 | 104 | 105 | 106 | 107 | 108 | 109 | 110 | 100 | 116 | 115 |
+| UDR | 100 | 112 | 114 | 102 | 111 | 112 | 113 | 114 | 115 | 116 | 117 | 118 | 119 | 120 | 103 | 120 | 121 | 104 | 105 | 106 | 107 | 108 | 109 | 110 | 100 | 116 | 115 |
 
