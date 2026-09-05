@@ -1,4 +1,4 @@
-# 📊 Ziren (v2.0 (feat/upgrade-plonky3 1114ad77, UDR-100 schedule))
+# 📊 Ziren (v2.0 (feat/upgrade-plonky3 1114ad77, UDR-64 schedule))
 
 How to read this report:
 - Table rows correspond to security regimes
@@ -10,7 +10,7 @@ How to read this report:
 
 | Metric | Value | Relevant circuit | Notes |
 | --- | --- | --- | --- |
-| Final bits of security | **100 bits** | [core](#core) | Regime: UDR |
+| Final bits of security | **64 bits** | [core](#core) | Regime: UDR |
 | Final proof size (worst case) | **975 KiB** | [wrap](#wrap) | |
 
 ## Circuits
@@ -31,17 +31,17 @@ How to read this report:
 - Constraint degree: 3
 - Batch size: 32
 - Batching: Affine
-- Queries per iteration: [124, 88, 85]
+- Queries per iteration: [71, 51, 49]
 - OOD samples per iteration: [2, 2]
 - Total grinding overhead log2: 17.59
 - Trace length: 4194304
 - Trace width: 36489
 
-**Proof Size:** 383 KiB (expected) / 450 KiB (worst case)
+**Proof Size:** 228 KiB (expected) / 262 KiB (worst case)
 
 | regime | total | logup-gkr | OOD(i=1) | OOD(i=2) | Shift(i=1) | Shift(i=2) | batching | fin | fold(i=0,s=1) | fold(i=0,s=2) | fold(i=0,s=3) | fold(i=1,s=1) | fold(i=1,s=2) | fold(i=1,s=3) | fold(i=1,s=4) | fold(i=1,s=5) | fold(i=1,s=6) | fold(i=2,s=1) | fold(i=2,s=2) | fold(i=2,s=3) | fold(i=2,s=4) | fold(i=2,s=5) | fold(i=2,s=6) | reduce to dense PCS | zerocheck |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UDR | 100 | 100 | 213 | 225 | 100 | 100 | 102 | 100 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 109 |
+| UDR | 64 | 100 | 213 | 225 | 64 | 64 | 102 | 64 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 109 |
 
 
 ## compress
@@ -56,17 +56,17 @@ How to read this report:
 - Constraint degree: 3
 - Batch size: 32
 - Batching: Affine
-- Queries per iteration: [124, 88, 85]
+- Queries per iteration: [71, 51, 49]
 - OOD samples per iteration: [2, 2]
 - Total grinding overhead log2: 17.59
 - Trace length: 1048576
 - Trace width: 392
 
-**Proof Size:** 383 KiB (expected) / 450 KiB (worst case)
+**Proof Size:** 228 KiB (expected) / 262 KiB (worst case)
 
 | regime | total | logup-gkr | OOD(i=1) | OOD(i=2) | Shift(i=1) | Shift(i=2) | batching | fin | fold(i=0,s=1) | fold(i=0,s=2) | fold(i=0,s=3) | fold(i=1,s=1) | fold(i=1,s=2) | fold(i=1,s=3) | fold(i=1,s=4) | fold(i=1,s=5) | fold(i=1,s=6) | fold(i=2,s=1) | fold(i=2,s=2) | fold(i=2,s=3) | fold(i=2,s=4) | fold(i=2,s=5) | fold(i=2,s=6) | reduce to dense PCS | zerocheck |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UDR | 100 | 112 | 213 | 225 | 100 | 100 | 102 | 100 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 115 |
+| UDR | 64 | 112 | 213 | 225 | 64 | 64 | 102 | 64 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 115 |
 
 
 ## wrap

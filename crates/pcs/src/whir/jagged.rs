@@ -131,7 +131,13 @@ pub fn core_whir_config(lsh: usize) -> WhirConfig {
     // a single folded poly (leaf = 2^7 felts, chunk-independent) so their
     // factor stays 7.  Query counts, rates, and PoW are round-indexed and
     // unchanged.  lsh=21: folds [4,7,7], final poly 2^3 coefficients.
-    // Provable (unique-decoding) 100-bit schedule — see docs/soundness/.
+    // Provable (unique-decoding) 64-bit schedule — see docs/soundness/.
+    // Per round: queries x (-log2((1+rho)/2)) + PoW = 71x0.678+16, 51x0.956+16,
+    // 49x0.994+16 ~ 64.  (The Johnson regime is capped at 65 bits by the
+    // field's fold terms whatever the query count, so 64 is what both
+    // accountings agree on.)  Round-0 queries drive the compress proof size
+    // (79% of its bytes) and the recursion verifier's work; 124 -> 71 was the
+    // 100 -> 64 bit decision of Sep 5.
     const ROUND0_FF: usize = 3;
     const START_LOG_INV_RATE: usize = 2;
     let mut rem = lsh
@@ -150,7 +156,7 @@ pub fn core_whir_config(lsh: usize) -> WhirConfig {
         rp.log_inv_rate = START_LOG_INV_RATE + 3 * (r + 1);
     }
     let num_rounds = config.round_parameters.len();
-    let queries = [124usize, 88, 85, 85, 85, 85, 85];
+    let queries = [71usize, 51, 49, 49, 49, 49, 49];
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.num_queries = queries[r.min(queries.len() - 1)];
         rp.queries_pow_bits = 16;
