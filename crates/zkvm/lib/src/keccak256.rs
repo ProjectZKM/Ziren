@@ -39,22 +39,32 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
     const STRIDE: usize = RATE_WORDS + 2;
 
     let blocks = data.len() / RATE + 1;
-    let mut words = vec![0u32; blocks * STRIDE];
+    let total = blocks * STRIDE;
+    // Every word is written below (data words, the two stride words per
+    // block, the tail and padding of the last block), so the buffer is not
+    // zero-filled first: on a reth block that memset was ~5.5 M cycles.
+    let mut words: Vec<u32> = Vec::with_capacity(total);
+    // SAFETY: capacity is `total`, and each of the `total` u32 slots is
+    // written exactly once before `words` is read.
+    unsafe { words.set_len(total) };
 
     let mut full = data.chunks_exact(RATE);
     let mut base = 0;
     for block in &mut full {
-        let out = &mut words[base..base + RATE_WORDS];
+        let out = &mut words[base..base + STRIDE];
         for (w, chunk) in block.chunks_exact(4).enumerate() {
             out[w] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
+        out[RATE_WORDS] = 0;
+        out[RATE_WORDS + 1] = 0;
         base += STRIDE;
     }
 
-    // The last block: the leftover bytes, then 0x01 right after them and
-    // 0x80 in the block's final byte (the same byte when 135 bytes are left).
+    // The last block: the leftover bytes, then 0x01 right after them, zeros,
+    // and 0x80 in the block's final byte (the same byte when 135 bytes are
+    // left).
     let rem = full.remainder();
-    let out = &mut words[base..base + RATE_WORDS];
+    let out = &mut words[base..base + STRIDE];
     let mut tail = rem.chunks_exact(4);
     let mut w = 0;
     for chunk in &mut tail {
@@ -66,6 +76,9 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
         last |= (byte as u32) << (8 * k);
     }
     out[w] = last | (1u32 << (8 * (rem.len() % 4)));
+    for slot in out[w + 1..].iter_mut() {
+        *slot = 0;
+    }
     out[RATE_WORDS - 1] |= 0x80u32 << 24;
     words
 }

@@ -31,6 +31,37 @@ bcmp:
 	sltiu	$1, $6, 4
 	bnez	$1, .Lmemcmp_bytes
 	nop
+	sltiu	$1, $6, 16
+	bnez	$1, .Lmemcmp_words
+	nop
+.Lmemcmp_words4:
+	# four words per iteration while >= 16 bytes remain (U256 compares are
+	# exactly 32 bytes: two iterations, one loop overhead each)
+	lw	$7, 0($4)
+	lw	$8, 0($5)
+	bne	$7, $8, .Lmemcmp_bytes
+	nop
+	lw	$7, 4($4)
+	lw	$8, 4($5)
+	bne	$7, $8, .Lmemcmp_diff4
+	nop
+	lw	$7, 8($4)
+	lw	$8, 8($5)
+	bne	$7, $8, .Lmemcmp_diff8
+	nop
+	lw	$7, 12($4)
+	lw	$8, 12($5)
+	bne	$7, $8, .Lmemcmp_diff12
+	nop
+	addiu	$4, $4, 16
+	addiu	$5, $5, 16
+	addiu	$6, $6, -16
+	sltiu	$1, $6, 16
+	beqz	$1, .Lmemcmp_words4
+	nop
+	sltiu	$1, $6, 4
+	bnez	$1, .Lmemcmp_bytes
+	nop
 .Lmemcmp_words:
 	lw	$7, 0($4)
 	lw	$8, 0($5)
@@ -42,6 +73,20 @@ bcmp:
 	sltiu	$1, $6, 4
 	beqz	$1, .Lmemcmp_words
 	nop
+	b	.Lmemcmp_bytes
+	nop
+.Lmemcmp_diff12:
+	addiu	$4, $4, 4
+	addiu	$5, $5, 4
+	addiu	$6, $6, -4
+.Lmemcmp_diff8:
+	addiu	$4, $4, 4
+	addiu	$5, $5, 4
+	addiu	$6, $6, -4
+.Lmemcmp_diff4:
+	addiu	$4, $4, 4
+	addiu	$5, $5, 4
+	addiu	$6, $6, -4
 .Lmemcmp_bytes:
 	beqz	$6, .Lmemcmp_eq
 	nop
