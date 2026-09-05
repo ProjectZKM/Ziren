@@ -2,10 +2,13 @@
 //!
 //! # Status
 //!
-//! This file lays the **foundation** for the jagged-eval protocol.
-//! [`JaggedSumcheckEvalProof`] is the wire-format struct;
-//! [`prove_jagged_evaluation`] is a stub that returns a structurally-
-//! valid placeholder.  The sumcheck body is not yet implemented.
+//! [`JaggedSumcheckEvalProof`] is the wire-format struct and
+//! [`prove_jagged_evaluation`] runs the full `2(log_m + 1)`-variable
+//! sumcheck (the empty [`JaggedSumcheckEvalProof::dummy`] is returned only
+//! for a shard with no columns).  The recursion circuit verifies it in
+//! `crates/recursion/circuit/src/jagged_eval.rs`: it observes the claimed
+//! sum, verifies the sumcheck, and re-derives the expected final value from
+//! the public prefix sums and the branching program.
 //!
 //! # Math (what the real body must compute)
 //!

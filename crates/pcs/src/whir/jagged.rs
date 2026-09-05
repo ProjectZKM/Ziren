@@ -101,18 +101,26 @@ pub fn whir_config_for_fold_schedule(
 }
 
 /// The PRODUCTION jagged-WHIR budget for a core-shard stack of height
-/// `2^lsh`: the upstream production schedule mapped onto the stacked
-/// three-round ff=7 structure.  Each round targets ~100 bits — queries x
-/// per-query bits (the PREVIOUS codeword's log-inv-rate; ~1 bit/query at
-/// the rate-1 start) plus a 16-bit query PoW grind:
+/// `2^lsh`: **100 bits PROVABLE in the unique-decoding regime**, per round
+/// (ethereum/soundcalc, `docs/soundness/ziren.soundcalc.toml`).  Under the
+/// unique-decoding bound a query is worth `-log2((1+rho)/2)` bits — at most
+/// ~1 bit at ANY rate — so every round must clear ~84 bits of queries on its
+/// own plus the 16-bit query PoW:
 ///
-///   round 0:  84 queries into the rate-1    stripe trees   (84 + 16)
-///   round 1:  21 queries into the rate-2^-4 codeword       (84 + 16)
-///   final  :  12 queries into the rate-2^-7 codeword       (84 + 16)
+///   round 0: 124 queries into the rate-2^-2 stripe trees  (124·0.678 + 16 = 100)
+///   round 1:  93 queries into the rate-2^-5 codeword      ( 93·0.978 + 16 = 107)
+///   final  :  85 queries into the rate-2^-8 codeword      ( 85·0.997 + 16 = 100)
 ///
-/// OOD samples are 2 per committed round (upstream production carries 2).
-/// Folding PoW stays 0 like upstream production (soundness rides on the
-/// query PoW).
+/// The previous schedule (rate 1/2, 84/21/12 queries, folds [4,7,7]) counted
+/// log-inv-rate bits per query — the capacity accounting — and was 27 bits
+/// provable (final round 12·0.99 + 16), 53 under the Johnson bound.
+///
+/// Later rounds fold 6 (not 7) so the recursion leaf's Merkle-leaf hashing
+/// (queries x opened felts) stays near the old budget: 124·40·2^3 + 93·4·2^6
+/// + 85·4·2^6 ≈ 85 K felts vs 71 K before.  Wider queries at rate 1/4 double
+/// the round-0 codeword; the round-0 fold drops 4 -> 3 so a query leaf
+/// (`stripes x 2^ff0`) halves.  OOD samples 2 per committed round; folding
+/// PoW 0 (soundness rides on the query PoW).
 pub fn core_whir_config(lsh: usize) -> WhirConfig {
     // Round-0 folds FEWER variables than the later rounds.  A round-0 query
     // authenticates one coset row from EVERY stripe of every round — `chunks
@@ -123,18 +131,26 @@ pub fn core_whir_config(lsh: usize) -> WhirConfig {
     // a single folded poly (leaf = 2^7 felts, chunk-independent) so their
     // factor stays 7.  Query counts, rates, and PoW are round-indexed and
     // unchanged.  lsh=21: folds [4,7,7], final poly 2^3 coefficients.
-    const ROUND0_FF: usize = 4;
+    // Provable (unique-decoding) 100-bit schedule — see docs/soundness/.
+    const ROUND0_FF: usize = 3;
+    const START_LOG_INV_RATE: usize = 2;
     let mut rem = lsh
         .checked_sub(ROUND0_FF)
         .expect("stacking height must exceed the round-0 folding factor");
     let mut folds = alloc::vec![ROUND0_FF];
     while rem > 6 {
-        folds.push(7);
-        rem -= 7;
+        folds.push(6);
+        rem -= 6;
     }
     let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
+    // Rate 1/4 at the start, escalating by 3 bits per committed round
+    // (`START + 3(r+1)`): 21 + 2 = 23 <= KoalaBear's two-adicity of 24.
+    config.starting_log_inv_rate = START_LOG_INV_RATE;
+    for (r, rp) in config.round_parameters.iter_mut().enumerate() {
+        rp.log_inv_rate = START_LOG_INV_RATE + 3 * (r + 1);
+    }
     let num_rounds = config.round_parameters.len();
-    let queries = [84usize, 21, 12, 9, 9, 9, 9];
+    let queries = [124usize, 93, 85, 85, 85, 85, 85];
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.num_queries = queries[r.min(queries.len() - 1)];
         rp.queries_pow_bits = 16;

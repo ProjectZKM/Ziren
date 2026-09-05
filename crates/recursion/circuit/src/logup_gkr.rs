@@ -255,7 +255,7 @@ where
 /// lockstep with the host prover's `zkm_pcs::logup_gkr::GKR_GRINDING_BITS`
 /// (= 12); the in-circuit verifier re-checks the same witness the host
 /// ground, so a mismatch would reject honest proofs.
-pub const GKR_GRINDING_BITS: usize = 12;
+pub const GKR_GRINDING_BITS: usize = 16;
 
 /// Per-shard chip introspection input to [`verify_logup_gkr`].
 ///
