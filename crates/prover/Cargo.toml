@@ -64,6 +64,10 @@ name = "soundcalc_census"
 path = "scripts/soundcalc_census.rs"
 
 [[bin]]
+name = "proof_size_census"
+path = "scripts/proof_size_census.rs"
+
+[[bin]]
 name = "collect_basefold_vks"
 path = "scripts/collect_basefold_vks.rs"
 
