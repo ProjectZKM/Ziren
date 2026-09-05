@@ -117,6 +117,17 @@ fn main() {
                 );
                 for (i, o) in p.round_query_openings.iter().enumerate() {
                     r.row(&format!("        round {i} ({} leaves)", o.leaves.len()), sz(o));
+                    for (li, l) in o.leaves.iter().take(2).enumerate() {
+                        r.row(
+                            &format!(
+                                "          leaf {li}: {} matrices, {} opened felts, {} path nodes",
+                                l.values.len(),
+                                l.values.iter().map(|v| v.len()).sum::<usize>(),
+                                l.proof.len()
+                            ),
+                            sz(l),
+                        );
+                    }
                     if let Some(l) = o.leaves.first() {
                         r.row(
                             &format!(
