@@ -108,7 +108,7 @@ pub fn whir_config_for_fold_schedule(
 /// own plus the 16-bit query PoW:
 ///
 ///   round 0: 124 queries into the rate-2^-2 stripe trees  (124·0.678 + 16 = 100)
-///   round 1:  93 queries into the rate-2^-5 codeword      ( 93·0.978 + 16 = 107)
+///   round 1:  88 queries into the rate-2^-5 codeword      ( 88·0.978 + 16 = 102)
 ///   final  :  85 queries into the rate-2^-8 codeword      ( 85·0.997 + 16 = 100)
 ///
 /// The previous schedule (rate 1/2, 84/21/12 queries, folds [4,7,7]) counted
@@ -116,8 +116,8 @@ pub fn whir_config_for_fold_schedule(
 /// provable (final round 12·0.99 + 16), 53 under the Johnson bound.
 ///
 /// Later rounds fold 6 (not 7) so the recursion leaf's Merkle-leaf hashing
-/// (queries x opened felts) stays near the old budget: 124·40·2^3 + 93·4·2^6
-/// + 85·4·2^6 ≈ 85 K felts vs 71 K before.  Wider queries at rate 1/4 double
+/// (queries x opened felts) stays near the old budget: 124·40·2^3 + 88·4·2^6
+/// + 85·4·2^6 ≈ 84 K felts vs 71 K before.  Wider queries at rate 1/4 double
 /// the round-0 codeword; the round-0 fold drops 4 -> 3 so a query leaf
 /// (`stripes x 2^ff0`) halves.  OOD samples 2 per committed round; folding
 /// PoW 0 (soundness rides on the query PoW).
@@ -150,7 +150,7 @@ pub fn core_whir_config(lsh: usize) -> WhirConfig {
         rp.log_inv_rate = START_LOG_INV_RATE + 3 * (r + 1);
     }
     let num_rounds = config.round_parameters.len();
-    let queries = [124usize, 93, 85, 85, 85, 85, 85];
+    let queries = [124usize, 88, 85, 85, 85, 85, 85];
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.num_queries = queries[r.min(queries.len() - 1)];
         rp.queries_pow_bits = 16;
