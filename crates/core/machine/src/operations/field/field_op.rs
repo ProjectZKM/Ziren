@@ -389,7 +389,7 @@ mod tests {
     use p3_air::Air;
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
-    use p3_matrix::{dense::RowMajorMatrix, Matrix};
+    use p3_matrix::dense::RowMajorMatrix;
     use rand::thread_rng;
     use std::mem::size_of;
     use zkm_core_executor::events::ByteRecord;

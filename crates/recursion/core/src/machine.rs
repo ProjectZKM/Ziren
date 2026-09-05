@@ -21,8 +21,7 @@ use crate::{
         select::SelectChip,
     },
     instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr},
-    shape::RecursionShape,
-    ExpReverseBitsInstr, Instruction, RecursionProgram, D,
+    shape::RecursionShape, Instruction, RecursionProgram, D,
 };
 
 #[derive(zkm_derive::MachineAir)]
@@ -352,7 +351,7 @@ pub mod tests {
     use crate::machine::RecursionAir;
     use p3_field::{
         extension::{BinomialExtensionField, HasFrobenius},
-        BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing,
+        BasedVectorSpace, Field, PrimeCharacteristicRing,
     };
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use rand::prelude::*;

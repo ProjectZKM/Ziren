@@ -2,7 +2,7 @@
 
 
 use itertools::Itertools;
-use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::septic_curve::SepticCurve;
 use zkm_pcs::septic_digest::SepticDigest;

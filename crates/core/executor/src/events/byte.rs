@@ -1,6 +1,5 @@
 use std::hash::Hash;
 
-use hashbrown::HashMap;
 use p3_field::{Field, PrimeField32};
 use serde::{Deserialize, Serialize};
 

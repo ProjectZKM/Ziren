@@ -4,14 +4,13 @@ use core::{
     mem::size_of,
 };
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, MovCondEvent},
+    events::{ByteRecord, MovCondEvent},
     ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};

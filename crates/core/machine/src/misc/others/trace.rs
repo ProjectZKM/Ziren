@@ -1,6 +1,5 @@
 use std::borrow::BorrowMut;
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

@@ -168,7 +168,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_util::log2_ceil_usize;
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use zkhash::ark_ff::UniformRand;
+    
     use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
     use zkm_recursion_compiler::{
         config::InnerConfig,

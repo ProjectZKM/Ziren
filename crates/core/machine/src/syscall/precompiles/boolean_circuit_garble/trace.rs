@@ -5,7 +5,6 @@ use crate::syscall::precompiles::boolean_circuit_garble::{
     BooleanCircuitGarbleChip, GATE_INFO_BYTES, OR_GATE_ID,
 };
 use crate::CoreChipError;
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -14,7 +13,7 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::prelude::ParallelSlice;
 use std::borrow::BorrowMut;
 use zkm_core_executor::events::{
-    BooleanCircuitGarbleEvent, ByteLookupEvent, ByteRecord, PrecompileEvent,
+    BooleanCircuitGarbleEvent, ByteRecord, PrecompileEvent,
 };
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_core_executor::{ExecutionRecord, Program};

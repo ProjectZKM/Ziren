@@ -1,5 +1,5 @@
 use core::iter::once;
-use p3_air::{AirBuilder, WindowAccess};
+use p3_air::AirBuilder;
 use p3_field::PrimeCharacteristicRing;
 use zkm_pcs::{
     air::{AirLookup, BaseAirBuilder, LookupScope, MachineAirBuilder},

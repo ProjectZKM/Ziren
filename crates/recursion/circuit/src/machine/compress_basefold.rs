@@ -642,7 +642,10 @@ pub fn verify_compress_basefold<C, SC, A>(
             .expect("non-whir child lifts to the BaseFold variable");
         let per_proof_verifier;
         let active_verifier = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+            // Only `host` is needed here -- this arm sizes the
+            // per-proof verifier; the proof's own fields are read
+            // where the verification actually happens.
+            LiftedEvalProof::Bundle { host, .. } => {
                 let bundle_num_vars =
                     host.basefold_proof.basefold_proof.fri_commitments.len();
                 // Fixed-height guard: every recursion bundle must commit at the
@@ -1466,7 +1469,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zkm_recursion_compiler::circuit::AsmBuilder;
+    
     use zkm_recursion_compiler::config::InnerConfig;
 
     type C = InnerConfig;

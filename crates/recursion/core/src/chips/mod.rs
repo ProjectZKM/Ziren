@@ -9,7 +9,7 @@ pub mod select;
 pub mod test_fixtures {
     use std::{array, borrow::Borrow};
 
-    use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+    use p3_field::{Field, PrimeCharacteristicRing};
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::Permutation;
     use rand::{rngs::StdRng, Rng, SeedableRng};

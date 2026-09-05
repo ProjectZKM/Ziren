@@ -1,6 +1,6 @@
 use p3_commit::{LagrangeSelectors, PolynomialSpace};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
-use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, TwoAdicField};
 use zkm_recursion_compiler::prelude::*;
 
 /// Reference: [p3_commit::PolynomialSpace]

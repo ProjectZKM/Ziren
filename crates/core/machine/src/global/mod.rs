@@ -1,4 +1,3 @@
-use hashbrown::HashMap;
 use std::{borrow::Borrow, mem::transmute};
 
 use p3_air::{Air, BaseAir, WindowAccess};
@@ -12,7 +11,7 @@ use rayon::iter::{
 use rayon_scan::ScanParallelIterator;
 use std::borrow::BorrowMut;
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, GlobalLookupEvent},
+    events::{ByteRecord, GlobalLookupEvent},
     ExecutionRecord, Program,
 };
 use zkm_pcs::{

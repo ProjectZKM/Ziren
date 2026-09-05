@@ -4,7 +4,6 @@ use core::{
     mem::size_of,
 };
 
-use hashbrown::HashMap;
 use itertools::{izip, Itertools};
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
@@ -21,7 +20,6 @@ use zkm_pcs::{
 };
 
 use crate::{
-    air::WordAirBuilder,
     frame::{eval_i_type_frame, ITypeFrameCols},
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,

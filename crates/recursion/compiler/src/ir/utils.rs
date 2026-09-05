@@ -1,4 +1,4 @@
-use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use std::ops::{Add, Mul, MulAssign};
 
 use super::{Array, Builder, Config, DslIr, Ext, Felt, SymbolicExt, Usize, Var, Variable};

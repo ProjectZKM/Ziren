@@ -27,7 +27,7 @@ use zkm_core_executor::events::{
 };
 use zkm_core_executor::{ByteOpcode, Program};
 use zkm_derive::AlignedBorrow;
-use zkm_pcs::{air::ZKMAirBuilder, Word};
+use zkm_pcs::Word;
 
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder, ZKMCoreAirBuilder},

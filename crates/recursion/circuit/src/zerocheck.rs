@@ -27,7 +27,6 @@ use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter, SymbolicExt};
 use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
 use crate::challenger::FieldChallengerVariable;
-use crate::logup_gkr::observe_ext_slice;
 use crate::logup_proof::LogUpEvaluations;
 use crate::partial_sumcheck::PartialSumcheckProof;
 use crate::sumcheck::verify_sumcheck;

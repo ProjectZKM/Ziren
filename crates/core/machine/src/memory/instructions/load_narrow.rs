@@ -14,7 +14,6 @@ use std::{
     mem::size_of,
 };
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
@@ -27,7 +26,7 @@ use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_pcs::{air::MachineAir, PicusInfo};
 
 use crate::{
-    air::{WordAirBuilder, ZKMCoreAirBuilder},
+    air::ZKMCoreAirBuilder,
     memory::MemoryCols,
     utils::next_multiple_of_32,
     CoreChipError,

@@ -68,7 +68,7 @@ mod test {
     use alloc::vec::Vec;
 
     use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-    use p3_field::{ExtensionField, PrimeCharacteristicRing, TwoAdicField};
+    use p3_field::{PrimeCharacteristicRing, TwoAdicField};
     use p3_matrix::dense::RowMajorMatrix;
     use p3_matrix::Matrix;
     use rand::rngs::StdRng;

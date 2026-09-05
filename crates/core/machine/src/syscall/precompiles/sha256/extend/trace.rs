@@ -1,11 +1,10 @@
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use std::borrow::BorrowMut;
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, PrecompileEvent, ShaExtendEvent},
+    events::{ByteRecord, PrecompileEvent, ShaExtendEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };

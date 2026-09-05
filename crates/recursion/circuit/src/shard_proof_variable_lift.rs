@@ -16,7 +16,6 @@ use std::collections::BTreeMap;
 use zkm_pcs::shard_level::types as st;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter};
 
-use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::jagged_circuit::JaggedPcsProofVariable;
 use crate::logup_proof as rc;
 use crate::partial_sumcheck::PartialSumcheckProof as RcPartialSumcheckProof;

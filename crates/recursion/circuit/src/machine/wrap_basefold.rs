@@ -21,7 +21,6 @@ use zkm_recursion_compiler::ir::{Builder, Felt};
 use zkm_recursion_core::stark::zkm_imm_wrap_vk_mode;
 
 use crate::{
-    challenger::CanObserveVariable,
     hash::{FieldHasher, FieldHasherVariable},
     machine::{
         compress::PublicValuesOutputDigest, recursion_public_values_digest,
@@ -521,15 +520,10 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // Mirrors core_basefold.rs:418-434 / compress_basefold.rs.
     let per_proof_verifier;
     let active_verifier = match &evaluation_proof {
-        LiftedEvalProof::Bundle {
-            host,
-            basefold_proof,
-            sumcheck,
-            jagged_eval,
-            expected_eval,
-            commit_root,
-            modified_commitment,
-        } => {
+        // Only `host` is needed here -- this arm sizes the
+        // per-proof verifier; the proof's own fields are read
+        // where the verification actually happens.
+        LiftedEvalProof::Bundle { host, .. } => {
             per_proof_verifier =
                 crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                     max_log_row_count,

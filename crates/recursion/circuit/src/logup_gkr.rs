@@ -834,7 +834,7 @@ mod tests {
     // degree-masked num/den arithmetic — the genuine height anchor.
 
     use p3_air::VirtualPairCol;
-    use p3_field::Field;
+    
     use zkm_pcs::air::LookupScope;
     use zkm_pcs::{Lookup, LookupKind};
 

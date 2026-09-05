@@ -1,6 +1,5 @@
 use std::borrow::BorrowMut;
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use zkm_core_executor::ByteOpcode;

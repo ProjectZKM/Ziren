@@ -25,7 +25,6 @@ use zkm_core_executor::{
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{air::ZKMAirBuilder, Word};
 
-use crate::air::WordAirBuilder;
 
 /// Columns for one signed/unsigned less-than comparison of two words.
 ///

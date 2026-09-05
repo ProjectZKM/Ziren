@@ -388,7 +388,7 @@ mod tests {
     /// to pull `Prod(2p-1)` out of the whole column sum.
     #[test]
     fn scaled_eq_matches_factored_form() {
-        use p3_field::{Field, PrimeCharacteristicRing};
+        use p3_field::PrimeCharacteristicRing;
         let one = EF::ONE;
         let mut b = EF::from_u32(5);
         let mut p = EF::from_u32(13);

@@ -35,20 +35,18 @@ use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
-use zkm_pcs::air::BaseAirBuilder;
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
-use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
-    events::{AluEvent, ByteLookupEvent, ByteRecord},
+    events::{AluEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_pcs::{air::MachineAir, PicusInfo, Word};
+use zkm_pcs::{air::MachineAir, PicusInfo};
 use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{

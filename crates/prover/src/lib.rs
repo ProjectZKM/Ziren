@@ -44,7 +44,11 @@ use zkm_pcs::{
     ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
     ZKMProverOpts, DIGEST_SIZE,
 };
-use zkm_pcs::{shape::OrderedShape, MachineProvingKey};
+use zkm_pcs::MachineProvingKey;
+// Used only by the `#[cfg(test)]` shape-cardinality census below; the
+// non-test build has no reader, which is why it needs the gate.
+#[cfg(test)]
+use zkm_pcs::shape::OrderedShape;
 use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues, types::RecursionProgramType};
 use zkm_recursion_circuit::{
     hash::FieldHasher,
@@ -2566,7 +2570,7 @@ pub mod tests {
     #[serial]
     fn normalize_program_cache_key_implies_identical_program() {
         use crate::shapes::ZKMProofShape;
-        use zkm_pcs::air::MachineAir;
+        
         use zkm_pcs::shape::OrderedShape;
         use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
 

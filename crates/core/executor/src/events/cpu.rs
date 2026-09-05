@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::OptionU32;
 
 use super::memory::MemoryRecordEnum;
 

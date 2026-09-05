@@ -38,7 +38,6 @@ use p3_field::{ExtensionField, PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::Poseidon2ExternalLayerKoalaBear;
 use p3_poseidon2::Poseidon2;
 use p3_symmetric::{CryptographicPermutation, Permutation};
-use p3_util::reverse_bits_len;
 use thiserror::Error;
 
 use zkm_pcs::septic_curve::SepticCurve;
@@ -293,10 +292,6 @@ where
         }
     }
 
-    fn nearest_pc_backtrace(&self) -> Option<(usize, Trace)> {
-        let trap_pc = self.pc.as_canonical_u32() as usize;
-        self.nearest_pc_backtrace_at(trap_pc)
-    }
 
     /// `&self` memory-read helper that wraps the
     /// `unsafe { mr_unchecked }` discipline. Soundness comes from

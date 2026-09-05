@@ -4,7 +4,6 @@ use core::{
 };
 use std::{fmt::Debug, marker::PhantomData};
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use num::BigUint;
 
@@ -14,7 +13,7 @@ use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, EllipticCurveAddEvent, FieldOperation, PrecompileEvent},
+    events::{ByteRecord, EllipticCurveAddEvent, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };

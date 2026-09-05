@@ -15,13 +15,12 @@
 use crate::memory::RegisterCols;
 use std::mem::size_of;
 
-use hashbrown::HashMap;
 use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_pcs::{air::ZKMAirBuilder, PicusInfo, Word};
+use zkm_pcs::{PicusInfo, Word};
 
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MemInstrEvent, MemoryAccessPosition},

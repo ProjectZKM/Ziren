@@ -4,7 +4,6 @@ use crate::syscall::precompiles::poseidon2::columns::{Poseidon2MemCols, NUM_COLS
 use crate::syscall::precompiles::poseidon2::Poseidon2PermuteChip;
 use crate::utils::pad_rows_fixed;
 use crate::CoreChipError;
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -12,7 +11,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rayon::prelude::ParallelSlice;
 use std::borrow::BorrowMut;
 use zkm_core_executor::events::{
-    ByteLookupEvent, ByteRecord, Poseidon2PermuteEvent, PrecompileEvent,
+    ByteRecord, Poseidon2PermuteEvent, PrecompileEvent,
 };
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_core_executor::{ExecutionRecord, Program};

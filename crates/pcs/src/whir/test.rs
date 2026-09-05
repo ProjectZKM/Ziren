@@ -632,7 +632,7 @@ fn stacked_roundtrip_verifies() {
 #[test]
 fn jagged_whir_roundtrip_matches_basefold_layout() {
     use crate::basefold::{FriConfig, StackedPcsProver, BasefoldProver};
-    use crate::jagged_pcs::{JaggedDft, JaggedMmcs, DEFAULT_BATCH_SIZE};
+    use crate::jagged_pcs::DEFAULT_BATCH_SIZE;
     use crate::whir::jagged::{
         commit_jagged_whir_generic, open_jagged_whir_rounds_generic, verify_jagged_whir_rounds,
         whir_config_for_stack,
@@ -757,7 +757,7 @@ fn jagged_whir_roundtrip_matches_basefold_layout() {
 #[test]
 fn jagged_whir_roundtrip_mixed_fold_schedule() {
     use crate::basefold::{FriConfig, StackedPcsProver, BasefoldProver};
-    use crate::jagged_pcs::{JaggedDft, JaggedMmcs, DEFAULT_BATCH_SIZE};
+    use crate::jagged_pcs::DEFAULT_BATCH_SIZE;
     use crate::whir::jagged::{
         commit_jagged_whir_generic, open_jagged_whir_rounds_generic, verify_jagged_whir_rounds,
         whir_config_for_fold_schedule,

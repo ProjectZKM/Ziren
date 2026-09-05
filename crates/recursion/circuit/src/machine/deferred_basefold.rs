@@ -37,7 +37,6 @@ use zkm_recursion_core::{
 };
 
 use crate::{
-    challenger::CanObserveVariable,
     hash::{FieldHasher, FieldHasherVariable},
     machine::{
         assert_recursion_public_values_valid, recursion_public_values_digest,
@@ -485,15 +484,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
         let per_proof_verifier;
         let active_verifier = match &evaluation_proof {
-            LiftedEvalProof::Bundle {
-                host,
-                basefold_proof,
-                sumcheck,
-                jagged_eval,
-                expected_eval,
-                commit_root,
-                modified_commitment,
-            } => {
+            // Only `host` is needed here -- this arm sizes the
+            // per-proof verifier; the proof's own fields are read
+            // where the verification actually happens.
+            LiftedEvalProof::Bundle { host, .. } => {
                 let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
                 // Fixed-height guard: see core_basefold.
                 crate::shard_level_witness::assert_recursion_stacking_height_fixed(

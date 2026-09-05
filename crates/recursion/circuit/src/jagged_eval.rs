@@ -26,7 +26,6 @@ use std::marker::PhantomData;
 use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
-use crate::challenger::FieldChallengerVariable;
 use crate::jagged_circuit::{JaggedDimensionMetadata, JaggedSumcheckEvalProof};
 use crate::CircuitConfig;
 

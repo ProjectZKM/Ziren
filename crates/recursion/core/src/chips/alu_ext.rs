@@ -324,7 +324,7 @@ where
 mod tests {
     use machine::tests::run_recursion_test_machines;
     use p3_field::{
-        extension::BinomialExtensionField, BasedVectorSpace, ExtensionField,
+        extension::BinomialExtensionField, BasedVectorSpace,
         PrimeCharacteristicRing,
     };
     use p3_koala_bear::KoalaBear;

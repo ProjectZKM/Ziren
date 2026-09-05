@@ -894,6 +894,7 @@ fn fold_cells<K: Field, EF: ExtensionField<K>>(
 /// the poly makes its big-endian boolean-cube sum equal the LSB-first GKR-batch
 /// claim, restoring `claim == cube-sum` without touching `zeta`, the GKR
 /// openings, or the claim.
+#[cfg(test)]
 pub(crate) fn bitrev_rows<EF: Field>(cells: &[EF], ncols: usize, height: usize) -> Vec<EF> {
     if height <= 1 || ncols == 0 {
         return cells.to_vec();

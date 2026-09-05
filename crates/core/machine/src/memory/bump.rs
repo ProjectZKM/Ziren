@@ -3,7 +3,6 @@ use std::{
     mem::size_of,
 };
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;

@@ -666,7 +666,10 @@ pub fn verify_core_basefold<C, SC, A>(
                 basefold_shard_proof_variable.expect("non-whir proof lifts to the BaseFold variable");
             let per_proof_verifier;
             let active_verifier = match &evaluation_proof {
-                LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+                // Only `host` is needed here -- this arm sizes the
+                // per-proof verifier; the proof's own fields are read
+                // where the verification actually happens.
+                LiftedEvalProof::Bundle { host, .. } => {
                     let bundle_num_vars =
                         host.basefold_proof.basefold_proof.fri_commitments.len();
                     // Fixed-height guard: enumerability rests on every

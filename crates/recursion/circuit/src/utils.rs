@@ -1,6 +1,4 @@
-use p3_bn254_fr::Bn254;
-use p3_field::{PrimeCharacteristicRing, PrimeField32};
-use p3_koala_bear::KoalaBear;
+use p3_field::PrimeCharacteristicRing;
 
 use zkm_recursion_compiler::ir::{Builder, Config, Felt, Var};
 use zkm_recursion_core::DIGEST_SIZE;

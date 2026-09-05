@@ -2236,7 +2236,7 @@ mod test {
     // both sides (the shard-level Phase 1 prologue analog).
     // ════════════════════════════════════════════════════════════════
 
-    use crate::config::BasefoldRing;
+    
     use crate::jagged_pcs::jagged::{
         build_jagged_verify_inputs, prove_jagged_basefold_rounds,
         verify_jagged_basefold_no_observe, ChipTraceView, JaggedBasefoldBundle, JaggedOpenRound,

@@ -45,7 +45,6 @@ use crate::challenger::FieldChallengerVariable;
 use crate::jagged_circuit::{JaggedPcsProofVariable, JaggedSumcheckEvalProof};
 use crate::logup_gkr::evaluate_mle_ext;
 use crate::recursive_stacked_pcs::{RecursiveMultilinearPcsVerifier, RecursiveStackedPcsVerifier};
-use crate::sumcheck::verify_sumcheck;
 use crate::CircuitConfig;
 
 /// In-circuit jagged-PCS verifier.
@@ -553,7 +552,7 @@ impl<'a, P> RecursiveMachineJaggedPcsVerifier<'a, P> {
 mod tests {
     use super::*;
     use crate::basefold_verifier::{BasefoldVerifierParams, RecursiveBasefoldVerifier};
-    use crate::challenger::DuplexChallengerVariable;
+    
     use zkm_recursion_compiler::config::InnerConfig;
 
     type C = InnerConfig;

@@ -3,9 +3,7 @@ use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
-use zkm_pcs::air::BaseAirBuilder;
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
@@ -16,13 +14,9 @@ use zkm_core_executor::{
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_pcs::{
-    air::{MachineAir, PicusInfo, ZKMAirBuilder},
-    Word,
-};
+use zkm_pcs::air::{MachineAir, PicusInfo, ZKMAirBuilder};
 
 use crate::{
-    air::WordAirBuilder,
     frame::{eval_i_type_frame, ITypeFrameCols},
     utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,

@@ -424,7 +424,7 @@ mod tests {
     };
     use p3_symmetric::Permutation;
     use rand::Rng;
-    use zkhash::ark_ff::UniformRand;
+    
     use zkm_core_machine::operations::poseidon2::trace::populate_perm;
     use zkm_pcs::{air::MachineAir, inner_perm};
 

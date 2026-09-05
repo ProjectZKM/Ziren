@@ -37,7 +37,6 @@ use core::{
 };
 use zkm_pcs::air::BaseAirBuilder;
 
-use hashbrown::HashMap;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;

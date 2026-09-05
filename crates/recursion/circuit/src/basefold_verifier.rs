@@ -1753,7 +1753,7 @@ mod tests {
 
 #[cfg(test)]
 mod block_fold_tests {
-    use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
+    use p3_field::{PrimeCharacteristicRing, TwoAdicField};
     use zkm_pcs::InnerVal;
 
     fn bitrev(mut v: usize, bits: usize) -> usize {

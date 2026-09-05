@@ -8,13 +8,12 @@ use std::{
     mem::size_of,
 };
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, MemInstrEvent},
+    events::{ByteRecord, MemInstrEvent},
     ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};

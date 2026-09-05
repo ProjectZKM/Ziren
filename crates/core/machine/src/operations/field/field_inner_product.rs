@@ -150,7 +150,7 @@ mod tests {
     use p3_air::Air;
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
-    use p3_matrix::{dense::RowMajorMatrix, Matrix};
+    use p3_matrix::dense::RowMajorMatrix;
     use rand::thread_rng;
     use zkm_curves::edwards::ed25519::Ed25519BaseField;
     use zkm_derive::AlignedBorrow;

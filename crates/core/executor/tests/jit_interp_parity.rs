@@ -474,7 +474,7 @@ fn bne_loop_jit_matches_interpreter() {
     // only if the program clears the `JIT_MIN_INSTR_COUNT` gate.  This
     // 6-instr fixture does not, so we exercise the JIT path directly to
     // validate the codegen rather than gate it.
-    use std::ptr;
+    
     use zkm_core_executor::jit_runner::{build_context, build_jit_function, run_jit, BuildParams};
     let params = BuildParams {
         program_size: program.instructions.len(),
