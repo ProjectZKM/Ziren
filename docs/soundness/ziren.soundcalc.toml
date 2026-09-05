@@ -1,0 +1,138 @@
+# Ziren (feat/upgrade-plonky3 @ fdcb6a07, Sep 5 2026).
+# Machine census from `cargo run -r -p zkm-prover --bin soundcalc_census`;
+# PCS parameters from crates/pcs (whir/jagged.rs core_whir_config,
+# basefold/config.rs wrap_fri_config, jagged_pcs.rs stacking constants).
+# Recursion topology: core → compress (normalize + arity-4 compose) → shrink → wrap.
+# shrink shares the compress machine and PCS (see FriConfig docs) and is folded
+# into the `compress` circuit here.
+
+[zkevm]
+name = "Ziren"
+field = "KoalaBear^4"
+version = "2.0 (feat/upgrade-plonky3 fdcb6a07)"
+hash_size_bits = 248
+
+# ---------------------------------------------------------------------------
+# core: jagged/stacked PCS over WHIR (WHIR_INNER_PCS = true).
+#   stacking height 2^21 (DEFAULT_LOG_STACKING_HEIGHT), batch 32, shards up to
+#   2^22 rows (CORE_MAX_LOG_ROW_COUNT).  WHIR folds [4, 7, 7] from 21 variables,
+#   starting rate 2^-1; round r commits at log_inv_rate 1 + 3(r+1) = 4, 7
+#   (Ziren's escalation, NOT WHIR's k-1 default — overridden below);
+#   84 / 21 / 12 queries with a 16-bit query PoW per round, 2 OOD samples per
+#   committed round, no folding PoW.  Lookups: LogUp-GKR, 12-bit grind.
+[[circuits]]
+protocol_family = "JAGGED"
+dense_pcs = "whir"
+name = "core"
+udr_only = true
+trace_length = 4194304 # 2^22
+trace_columns = 36489
+dense_length = 2097152 # 2^21
+log_degree = 21
+dense_batch = 32
+num_constraints = 23555
+air_max_degree = 3
+opening_points = 1
+power_batching = false
+multilinear_batching = true
+log_inv_rate = 1
+num_iterations = 3
+folding_factors = [4, 7, 7]
+whir_log_inv_rates = [1, 4, 7, 7]
+constraint_degree = 3
+num_queries = [84, 21, 12]
+num_ood_samples = [2, 2]
+grinding_batching_phase = 0
+grinding_bits_folding = [[0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]]
+grinding_bits_queries = [16, 16, 16]
+grinding_bits_ood = [0, 0]
+
+[[circuits.lookups]]
+name = "logup-gkr"
+logup_type = "multivariate"
+rows_L = 4194304
+rows_T = 0
+num_columns_S = 105
+num_lookups_M = 22637
+grinding_bits_lookup = 12
+multilinear_fingerprint = true
+
+
+# ---------------------------------------------------------------------------
+# compress (normalize / compose / deferred / shrink): the recursion machine
+# on the same KoalaBearPoseidon2 config and WHIR schedule.  Largest band
+# height 2^20 (ExtAlu).
+[[circuits]]
+protocol_family = "JAGGED"
+dense_pcs = "whir"
+name = "compress"
+udr_only = true
+trace_length = 1048576 # 2^20
+trace_columns = 392
+dense_length = 2097152 # 2^21
+log_degree = 21
+dense_batch = 32
+num_constraints = 396
+air_max_degree = 3
+opening_points = 1
+power_batching = false
+multilinear_batching = true
+log_inv_rate = 1
+num_iterations = 3
+folding_factors = [4, 7, 7]
+whir_log_inv_rates = [1, 4, 7, 7]
+constraint_degree = 3
+num_queries = [84, 21, 12]
+num_ood_samples = [2, 2]
+grinding_batching_phase = 0
+grinding_bits_folding = [[0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]]
+grinding_bits_queries = [16, 16, 16]
+grinding_bits_ood = [0, 0]
+
+[[circuits.lookups]]
+name = "logup-gkr"
+logup_type = "multivariate"
+rows_L = 1048576
+rows_T = 0
+num_columns_S = 5
+num_lookups_M = 71
+grinding_bits_lookup = 12
+multilinear_fingerprint = true
+
+
+# ---------------------------------------------------------------------------
+# wrap: the outer (BN254-Poseidon Merkle) machine, jagged over BaseFold at
+# wrap_fri_config() = (log_blowup 3, 94 queries, 22-bit query PoW), folding
+# arity 1 per round (one commitment per variable), 16-bit batching grind
+# (BATCH_GRINDING_BITS).  Constraint degree 9 (WRAP_DEGREE).
+[[circuits]]
+protocol_family = "JAGGED"
+name = "wrap"
+hash_size_bits = 254
+udr_only = true
+blowup_factor = 8
+rho = 0.125
+trace_length = 1048576 # 2^20
+trace_columns = 247
+dense_length = 2097152 # 2^21
+dense_batch = 32
+num_constraints = 255
+air_max_degree = 9
+opening_points = 1
+power_batching = false
+multilinear_batching = true
+num_queries = 94
+fri_folding_factors = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+fri_early_stop_degree = 8
+grinding_batching_phase = 16
+grinding_query_phase = 22
+
+[[circuits.lookups]]
+name = "logup-gkr"
+logup_type = "multivariate"
+rows_L = 1048576
+rows_T = 0
+num_columns_S = 5
+num_lookups_M = 66
+grinding_bits_lookup = 12
+multilinear_fingerprint = true

@@ -11,6 +11,7 @@ categories = { workspace = true }
 
 [dependencies]
 p3-air = { workspace = true }
+p3-uni-stark = { workspace = true }
 p3-matrix = { workspace = true }
 zkm-recursion-compiler = { workspace = true }
 zkm-recursion-core = { workspace = true }
@@ -57,6 +58,10 @@ path = "scripts/build_groth16_bn254.rs"
 [[bin]]
 name = "build_compress_vks"
 path = "scripts/build_compress_vks.rs"
+
+[[bin]]
+name = "soundcalc_census"
+path = "scripts/soundcalc_census.rs"
 
 [[bin]]
 name = "collect_basefold_vks"
