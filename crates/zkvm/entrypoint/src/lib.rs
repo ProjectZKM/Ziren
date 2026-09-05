@@ -184,6 +184,7 @@ mod zkvm {
 
     core::arch::global_asm!(include_str!("memset.s"));
     core::arch::global_asm!(include_str!("memcpy.s"));
+    core::arch::global_asm!(include_str!("memcmp.s"));
 
     core::arch::global_asm!(
         r#"
