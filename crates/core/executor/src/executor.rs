@@ -49,7 +49,7 @@ pub const UNUSED_PC: u32 = 1;
 ///     `2^CORE_MAX_LOG_ROW_COUNT` — see [`CORE_SHARD_HEIGHT_THRESHOLD`].
 ///  2. Every per-shard `clk` (timestamp) must fit the width the memory argument range-checks
 ///     timestamp differences to — see
-///     `crates/core/machine/src/air/memory.rs::eval_range_check_25bits` and
+///     `crates/core/machine/src/air/memory.rs::send_timestamp_range_checks` and
 ///     `eval_memory_access_timestamp`, and [`CORE_SHARD_CLK_LIMIT`].
 ///
 /// `SHARD_SIZE` is stored as `cycles * 4` and the cycle exit fires at `clk >= 4 * SHARD_SIZE`,
@@ -79,9 +79,10 @@ const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SH
 /// The `clk` (timestamp) ceiling for a single core shard.
 ///
 /// This is the executor half of ONE argument whose other half is
-/// `MemoryAirBuilder::eval_range_check_25bits`. The memory argument orders two accesses to the
-/// same address by range-checking `current - prev - 1` to `2^25`, which proves `current > prev`
-/// only when BOTH comparands are themselves bounded by `2^25` and the field is large enough that
+/// `MemoryAirBuilder::send_timestamp_range_checks` (`TIMESTAMP_HIGH_LIMB_BITS`). The memory
+/// argument orders two accesses to the same address by range-checking `current - prev - 1` to
+/// `2^26`, which proves `current > prev`
+/// only when BOTH comparands are themselves bounded by `2^26` and the field is large enough that
 /// an underflow cannot land back inside the range (`p >= 2^26`; KoalaBear's
 /// `p = 2^31 - 2^24 + 1` allows widths up to 29 bits). The AIR supplies the bound on each
 /// comparand — 16- and 8-bit limbs from the byte table plus a boolean top bit — and this
@@ -97,9 +98,11 @@ const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SH
 /// further timestamps. Subtracting both keeps every timestamp that reaches the memory argument
 /// strictly under the fence.
 ///
-/// At `clk += 5` per instruction this caps any shard at `2^25 / 5 ≈ 6.71 M` cycles.
-/// `ELEMENT_THRESHOLD` (trace area) closes shards before that on today's workloads.
-pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 25;
+/// At `clk += 5` per instruction this caps any shard at `2^26 / 5 ≈ 13.4 M` cycles.
+/// Measured Sep 6 at 25 bits (8 M shards, reth): the clk fence closed 29 of 48 execution shards
+/// at 6.71 M cycles with only ~363 M of the 460 M-cell area budget used, so the width was the
+/// binding fence; at 26 bits `ELEMENT_THRESHOLD` (trace area) binds again.
+pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 26;
 
 /// Whether to log one `SHARD_CLOSE` line per closed core shard, naming the
 /// fence that closed it.  Read once; off unless `ZIREN_SHARD_CLOSE_CENSUS` is

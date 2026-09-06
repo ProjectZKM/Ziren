@@ -30,7 +30,10 @@ use zkm_derive::AlignedBorrow;
 use zkm_pcs::Word;
 
 use crate::{
-    air::{MemoryAirBuilder, WordAirBuilder, ZKMCoreAirBuilder},
+    air::{
+        MemoryAirBuilder, WordAirBuilder, ZKMCoreAirBuilder, TIMESTAMP_HIGH_LIMB_BITS,
+        TIMESTAMP_HIGH_LIMB_MASK,
+    },
     instruction::InstructionCols,
     memory::{RegisterCols, RegisterReadCols, RegisterReadWriteCols},
 };
@@ -48,12 +51,11 @@ pub struct InstructionFrameCols<T> {
     pub clk_16bit_limb: T,
     /// The middle 8 bit limb of clk.
     pub clk_high_limb: T,
-    /// The most significant bit of clk, i.e. bit 24.
-    ///
-    /// A per-shard `clk` runs to `2^25` (`CORE_SHARD_CLK_LIMIT`): the memory-argument ordering
+    /// (A per-shard `clk` runs to `2^26` = `CORE_SHARD_CLK_LIMIT`: the memory-argument ordering
     /// proof needs every timestamp it compares bounded by the same width it range-checks
-    /// differences to, and this bit is where that bound comes from on an instruction row.
-
+    /// differences to, and the `TIMESTAMP_HIGH_LIMB_BITS`-bit range check on `clk_high_limb` is
+    /// where that bound comes from on an instruction row.)
+    ///
     /// The decoded instruction, bound to `pc` through the `Program` bus.
     pub instruction: InstructionCols<T>,
 
@@ -256,7 +258,7 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
     ) {
         self.shard = F::from_u32(shard);
         let clk_16 = (clk & 0xffff) as u16;
-        let clk_high = ((clk >> 16) & 0x1ff) as u16;
+        let clk_high = ((clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
         blu.add_byte_lookup_event(ByteLookupEvent::new(
@@ -267,7 +269,13 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             0,
         ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
-        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::Range, clk_high, 0, 9, 0));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::Range,
+            clk_high,
+            0,
+            TIMESTAMP_HIGH_LIMB_BITS,
+            0,
+        ));
 
         self.instruction.populate(&program.fetch(pc));
         let _ = recv_next_pc;
@@ -668,7 +676,7 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         let shard = event.shard;
         self.shard = F::from_u32(shard);
         let clk_16 = (event.clk & 0xffff) as u16;
-        let clk_high = ((event.clk >> 16) & 0x1ff) as u16;
+        let clk_high = ((event.clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
         blu.add_byte_lookup_event(ByteLookupEvent::new(
@@ -679,7 +687,13 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             0,
         ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
-        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::Range, clk_high, 0, 9, 0));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::Range,
+            clk_high,
+            0,
+            TIMESTAMP_HIGH_LIMB_BITS,
+            0,
+        ));
 
         let instruction = program.fetch(event.pc);
         // The shape this frame is specialised for.  A chip that ever violates
@@ -810,7 +824,7 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
     ) {
         self.shard = F::from_u32(shard);
         let clk_16 = (clk & 0xffff) as u16;
-        let clk_high = ((clk >> 16) & 0x1ff) as u16;
+        let clk_high = ((clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
         blu.add_byte_lookup_event(ByteLookupEvent::new(
@@ -821,7 +835,13 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             0,
         ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
-        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::Range, clk_high, 0, 9, 0));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::Range,
+            clk_high,
+            0,
+            TIMESTAMP_HIGH_LIMB_BITS,
+            0,
+        ));
 
         let instruction = program.fetch(pc);
         // The shape this frame is specialised for — see
@@ -1119,7 +1139,7 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
     ) {
         self.shard = F::from_u32(shard);
         let clk_16 = (clk & 0xffff) as u16;
-        let clk_high = ((clk >> 16) & 0x1ff) as u16;
+        let clk_high = ((clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
         blu.add_byte_lookup_event(ByteLookupEvent::new(
@@ -1130,7 +1150,13 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
             0,
         ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
-        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::Range, clk_high, 0, 9, 0));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::Range,
+            clk_high,
+            0,
+            TIMESTAMP_HIGH_LIMB_BITS,
+            0,
+        ));
 
         let instruction = program.fetch(pc);
         // The shape this frame is specialised for — see
@@ -1331,7 +1357,7 @@ impl<F: PrimeField32> ShamtFrameCols<F> {
     ) {
         self.shard = F::from_u32(shard);
         let clk_16 = (event.clk & 0xffff) as u16;
-        let clk_high = ((event.clk >> 16) & 0x1ff) as u16;
+        let clk_high = ((event.clk >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_high_limb = F::from_u16(clk_high);
         blu.add_byte_lookup_event(ByteLookupEvent::new(
@@ -1342,7 +1368,13 @@ impl<F: PrimeField32> ShamtFrameCols<F> {
             0,
         ));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
-        blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::Range, clk_high, 0, 9, 0));
+        blu.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::Range,
+            clk_high,
+            0,
+            TIMESTAMP_HIGH_LIMB_BITS,
+            0,
+        ));
 
         let instruction = program.fetch(event.pc);
         // The shape this frame is specialised for — see
