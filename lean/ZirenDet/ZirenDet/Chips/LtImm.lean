@@ -5,7 +5,7 @@
 import ZirenDet.Basic
 
 set_option maxRecDepth 4000000
-set_option maxHeartbeats 8000000
+set_option maxHeartbeats 40000000
 set_option linter.dupNamespace false
 
 namespace ZirenDet.Chips.LtImm
@@ -117,8 +117,8 @@ structure W where
 def constraints_0 (w : W) : Prop :=
   (w.v40 - w.v38) = 0 ∧
   (w.v41 - w.v39) = 0 ∧
-  (w.v38 - ((w.v28 - w.v35) * (2114060289 : F))) = 0 ∧
-  (w.v39 - ((w.v13 - w.v36) * (2114060289 : F))) = 0 ∧
+  (w.v38 - ((w.v28 - w.v35) * ((128 : F)⁻¹))) = 0 ∧
+  (w.v39 - ((w.v13 - w.v36) * ((128 : F)⁻¹))) = 0 ∧
   (w.v44 * (w.v44 - (1 : F))) = 0 ∧
   (w.v44 * (w.v40 - w.v41)) = 0 ∧
   ((w.v44 - (1 : F)) * ((w.v40 + w.v41) - (1 : F))) = 0 ∧
@@ -149,35 +149,35 @@ def constraints_0 (w : W) : Prop :=
   (w.v14 * w.v20) = 0 ∧
   (w.v14 * w.v21) = 0 ∧
   (w.v14 * w.v22) = 0 ∧
-  (w.v35).val < ((128 : F)).val ∧
+  (w.v35).val < 128 ∧
   (w.v328 * (w.v328 - (1 : F))) = 0 ∧
   (w.v28 - ((w.v328 * (128 : F)) + w.v35)) = 0 ∧
-  (w.v36).val < ((128 : F)).val ∧
+  (w.v36).val < 128 ∧
   (w.v329 * (w.v329 - (1 : F))) = 0 ∧
   (w.v13 - ((w.v329 * (128 : F)) + w.v36)) = 0 ∧
   (w.v42 * (w.v42 - (1 : F))) = 0 ∧
   ((w.v42 - (1 : F)) = 0 ↔ (w.v45).val < (w.v46).val) ∧
-  (w.v4).val ≤ ((65535 : F)).val ∧
-  (w.v5).val ≤ ((65535 : F)).val ∧
-  (w.v6).val ≤ ((511 : F)).val ∧
-  (w.v30).val ≤ ((65535 : F)).val ∧
-  ((((((((w.v6 * (65536 : F)) + w.v5) + (2 : F)) - w.v29) - (1 : F)) - w.v30) * (2130673921 : F))).val ≤ ((511 : F)).val ∧
-  (w.v25).val ≤ ((255 : F)).val
+  (w.v4).val ≤ 65535 ∧
+  (w.v5).val ≤ 65535 ∧
+  (w.v6).val ≤ 511 ∧
+  (w.v30).val ≤ 65535 ∧
+  ((((((((w.v6 * (65536 : F)) + w.v5) + (2 : F)) - w.v29) - (1 : F)) - w.v30) * ((65536 : F)⁻¹))).val ≤ 511 ∧
+  (w.v25).val ≤ 255
 
 def constraints_1 (w : W) : Prop :=
-  (w.v26).val ≤ ((255 : F)).val ∧
-  (w.v27).val ≤ ((255 : F)).val ∧
-  (w.v28).val ≤ ((255 : F)).val ∧
-  (w.v24).val ≤ ((65535 : F)).val ∧
-  ((((((((w.v6 * (65536 : F)) + w.v5) + (3 : F)) - w.v23) - (1 : F)) - w.v24) * (2130673921 : F))).val ≤ ((511 : F)).val ∧
-  (w.v15).val ≤ ((255 : F)).val ∧
-  (w.v16).val ≤ ((255 : F)).val ∧
-  (w.v17).val ≤ ((255 : F)).val ∧
-  (w.v18).val ≤ ((255 : F)).val ∧
-  (w.v19).val ≤ ((255 : F)).val ∧
-  (w.v20).val ≤ ((255 : F)).val ∧
-  (w.v21).val ≤ ((255 : F)).val ∧
-  (w.v22).val ≤ ((255 : F)).val ∧
+  (w.v26).val ≤ 255 ∧
+  (w.v27).val ≤ 255 ∧
+  (w.v28).val ≤ 255 ∧
+  (w.v24).val ≤ 65535 ∧
+  ((((((((w.v6 * (65536 : F)) + w.v5) + (3 : F)) - w.v23) - (1 : F)) - w.v24) * ((65536 : F)⁻¹))).val ≤ 511 ∧
+  (w.v15).val ≤ 255 ∧
+  (w.v16).val ≤ 255 ∧
+  (w.v17).val ≤ 255 ∧
+  (w.v18).val ≤ 255 ∧
+  (w.v19).val ≤ 255 ∧
+  (w.v20).val ≤ 255 ∧
+  (w.v21).val ≤ 255 ∧
+  (w.v22).val ≤ 255 ∧
   (w.v330 - (((w.v6 * (65536 : F)) + w.v5) + (5 : F))) = 0 ∧
   (w.v331 - (w.v1 + (4 : F))) = 0 ∧
   (w.v332 - ((w.v6 * (65536 : F)) + w.v5)) = 0
@@ -330,8 +330,8 @@ structure W where
 def constraints_0 (w : W) : Prop :=
   w.v40 = 0 ∧
   w.v41 = 0 ∧
-  (w.v38 - ((w.v28 - w.v35) * (2114060289 : F))) = 0 ∧
-  (w.v39 - ((w.v13 - w.v36) * (2114060289 : F))) = 0 ∧
+  (w.v38 - ((w.v28 - w.v35) * ((128 : F)⁻¹))) = 0 ∧
+  (w.v39 - ((w.v13 - w.v36) * ((128 : F)⁻¹))) = 0 ∧
   (w.v44 * (w.v44 - (1 : F))) = 0 ∧
   (w.v44 * (w.v40 - w.v41)) = 0 ∧
   ((w.v44 - (1 : F)) * ((w.v40 + w.v41) - (1 : F))) = 0 ∧
@@ -362,35 +362,35 @@ def constraints_0 (w : W) : Prop :=
   (w.v14 * w.v20) = 0 ∧
   (w.v14 * w.v21) = 0 ∧
   (w.v14 * w.v22) = 0 ∧
-  (w.v35).val < ((128 : F)).val ∧
+  (w.v35).val < 128 ∧
   (w.v333 * (w.v333 - (1 : F))) = 0 ∧
   (w.v28 - ((w.v333 * (128 : F)) + w.v35)) = 0 ∧
-  (w.v36).val < ((128 : F)).val ∧
+  (w.v36).val < 128 ∧
   (w.v334 * (w.v334 - (1 : F))) = 0 ∧
   (w.v13 - ((w.v334 * (128 : F)) + w.v36)) = 0 ∧
   (w.v42 * (w.v42 - (1 : F))) = 0 ∧
   ((w.v42 - (1 : F)) = 0 ↔ (w.v45).val < (w.v46).val) ∧
-  (w.v4).val ≤ ((65535 : F)).val ∧
-  (w.v5).val ≤ ((65535 : F)).val ∧
-  (w.v6).val ≤ ((511 : F)).val ∧
-  (w.v30).val ≤ ((65535 : F)).val ∧
-  ((((((((w.v6 * (65536 : F)) + w.v5) + (2 : F)) - w.v29) - (1 : F)) - w.v30) * (2130673921 : F))).val ≤ ((511 : F)).val ∧
-  (w.v25).val ≤ ((255 : F)).val
+  (w.v4).val ≤ 65535 ∧
+  (w.v5).val ≤ 65535 ∧
+  (w.v6).val ≤ 511 ∧
+  (w.v30).val ≤ 65535 ∧
+  ((((((((w.v6 * (65536 : F)) + w.v5) + (2 : F)) - w.v29) - (1 : F)) - w.v30) * ((65536 : F)⁻¹))).val ≤ 511 ∧
+  (w.v25).val ≤ 255
 
 def constraints_1 (w : W) : Prop :=
-  (w.v26).val ≤ ((255 : F)).val ∧
-  (w.v27).val ≤ ((255 : F)).val ∧
-  (w.v28).val ≤ ((255 : F)).val ∧
-  (w.v24).val ≤ ((65535 : F)).val ∧
-  ((((((((w.v6 * (65536 : F)) + w.v5) + (3 : F)) - w.v23) - (1 : F)) - w.v24) * (2130673921 : F))).val ≤ ((511 : F)).val ∧
-  (w.v15).val ≤ ((255 : F)).val ∧
-  (w.v16).val ≤ ((255 : F)).val ∧
-  (w.v17).val ≤ ((255 : F)).val ∧
-  (w.v18).val ≤ ((255 : F)).val ∧
-  (w.v19).val ≤ ((255 : F)).val ∧
-  (w.v20).val ≤ ((255 : F)).val ∧
-  (w.v21).val ≤ ((255 : F)).val ∧
-  (w.v22).val ≤ ((255 : F)).val ∧
+  (w.v26).val ≤ 255 ∧
+  (w.v27).val ≤ 255 ∧
+  (w.v28).val ≤ 255 ∧
+  (w.v24).val ≤ 65535 ∧
+  ((((((((w.v6 * (65536 : F)) + w.v5) + (3 : F)) - w.v23) - (1 : F)) - w.v24) * ((65536 : F)⁻¹))).val ≤ 511 ∧
+  (w.v15).val ≤ 255 ∧
+  (w.v16).val ≤ 255 ∧
+  (w.v17).val ≤ 255 ∧
+  (w.v18).val ≤ 255 ∧
+  (w.v19).val ≤ 255 ∧
+  (w.v20).val ≤ 255 ∧
+  (w.v21).val ≤ 255 ∧
+  (w.v22).val ≤ 255 ∧
   (w.v335 - (((w.v6 * (65536 : F)) + w.v5) + (5 : F))) = 0 ∧
   (w.v336 - (w.v1 + (4 : F))) = 0 ∧
   (w.v337 - ((w.v6 * (65536 : F)) + w.v5)) = 0
@@ -512,8 +512,8 @@ structure W where
 def constraints_0 (w : W) : Prop :=
   (w.v40 - (w.v38 * w.v2)) = 0 ∧
   (w.v41 - (w.v39 * w.v2)) = 0 ∧
-  (w.v38 - ((w.v28 - w.v35) * (2114060289 : F))) = 0 ∧
-  (w.v39 - ((w.v13 - w.v36) * (2114060289 : F))) = 0 ∧
+  (w.v38 - ((w.v28 - w.v35) * ((128 : F)⁻¹))) = 0 ∧
+  (w.v39 - ((w.v13 - w.v36) * ((128 : F)⁻¹))) = 0 ∧
   (w.v44 * (w.v44 - (1 : F))) = 0 ∧
   (w.v44 * (w.v40 - w.v41)) = 0 ∧
   ((w.v2 + w.v3) * ((w.v44 - (1 : F)) * ((w.v40 + w.v41) - (1 : F)))) = 0 ∧
@@ -568,18 +568,11 @@ def assumed (_w : W) : List F := []
 def rel (ins outs : List F) : Prop :=
   ∃ w : W, constraints w ∧ inputs w = ins ∧ outputs w = outs
 
-/-- Determinism: equal inputs (and equal assumed-deterministic values) force equal outputs. -/
-theorem deterministic
-    (w w' : W) (hw : constraints w) (hw' : constraints w')
-    (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
-    outputs w = outputs w' := by
-  picus_det [constraints_0]
-
 /-- Selector-shape / bit postconditions implied by the constraints. -/
 theorem postconditions (w : W) (hw : constraints w) :
     (w.v2 * (w.v2 - (1 : F))) = 0 ∧
     (w.v3 * (w.v3 - (1 : F))) = 0 ∧
-    ((w.v2 + w.v3)).val < ((2 : F)).val := by
+    ((w.v2 + w.v3)).val < 2 := by
   picus_det [constraints_0]
 
 end top

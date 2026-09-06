@@ -5,7 +5,7 @@
 import ZirenDet.Basic
 
 set_option maxRecDepth 4000000
-set_option maxHeartbeats 8000000
+set_option maxHeartbeats 40000000
 set_option linter.dupNamespace false
 
 namespace ZirenDet.Chips.MemoryLocal
@@ -258,13 +258,13 @@ def constraints_0 (w : W) : Prop :=
   (w.v361 - (w.v13 * w.v13)) = 0 ∧
   (w.v362 - (w.v0 * w.v13)) = 0 ∧
   (w.v363 - (w.v9 * w.v13)) = 0 ∧
-  ((w.v9 * w.v13)).val ≤ ((255 : F)).val ∧
+  ((w.v9 * w.v13)).val ≤ 255 ∧
   (w.v364 - (w.v10 * w.v13)) = 0 ∧
-  ((w.v10 * w.v13)).val ≤ ((255 : F)).val ∧
+  ((w.v10 * w.v13)).val ≤ 255 ∧
   (w.v365 - (w.v11 * w.v13)) = 0 ∧
-  ((w.v11 * w.v13)).val ≤ ((255 : F)).val ∧
+  ((w.v11 * w.v13)).val ≤ 255 ∧
   (w.v366 - (w.v12 * w.v13)) = 0 ∧
-  ((w.v12 * w.v13)).val ≤ ((255 : F)).val ∧
+  ((w.v12 * w.v13)).val ≤ 255 ∧
   (w.v367 - (w.v15 * w.v27)) = 0 ∧
   (w.v368 - (w.v17 * w.v27)) = 0 ∧
   (w.v369 - (w.v14 * w.v27)) = 0 ∧
@@ -283,15 +283,15 @@ def constraints_0 (w : W) : Prop :=
   (w.v382 - (w.v27 * w.v27)) = 0 ∧
   (w.v383 - (w.v14 * w.v27)) = 0 ∧
   (w.v384 - (w.v23 * w.v27)) = 0 ∧
-  ((w.v23 * w.v27)).val ≤ ((255 : F)).val
+  ((w.v23 * w.v27)).val ≤ 255
 
 def constraints_1 (w : W) : Prop :=
   (w.v385 - (w.v24 * w.v27)) = 0 ∧
-  ((w.v24 * w.v27)).val ≤ ((255 : F)).val ∧
+  ((w.v24 * w.v27)).val ≤ 255 ∧
   (w.v386 - (w.v25 * w.v27)) = 0 ∧
-  ((w.v25 * w.v27)).val ≤ ((255 : F)).val ∧
+  ((w.v25 * w.v27)).val ≤ 255 ∧
   (w.v387 - (w.v26 * w.v27)) = 0 ∧
-  ((w.v26 * w.v27)).val ≤ ((255 : F)).val ∧
+  ((w.v26 * w.v27)).val ≤ 255 ∧
   (w.v388 - (w.v29 * w.v41)) = 0 ∧
   (w.v389 - (w.v31 * w.v41)) = 0 ∧
   (w.v390 - (w.v28 * w.v41)) = 0 ∧
@@ -310,13 +310,13 @@ def constraints_1 (w : W) : Prop :=
   (w.v403 - (w.v41 * w.v41)) = 0 ∧
   (w.v404 - (w.v28 * w.v41)) = 0 ∧
   (w.v405 - (w.v37 * w.v41)) = 0 ∧
-  ((w.v37 * w.v41)).val ≤ ((255 : F)).val ∧
+  ((w.v37 * w.v41)).val ≤ 255 ∧
   (w.v406 - (w.v38 * w.v41)) = 0 ∧
-  ((w.v38 * w.v41)).val ≤ ((255 : F)).val ∧
+  ((w.v38 * w.v41)).val ≤ 255 ∧
   (w.v407 - (w.v39 * w.v41)) = 0 ∧
-  ((w.v39 * w.v41)).val ≤ ((255 : F)).val ∧
+  ((w.v39 * w.v41)).val ≤ 255 ∧
   (w.v408 - (w.v40 * w.v41)) = 0 ∧
-  ((w.v40 * w.v41)).val ≤ ((255 : F)).val ∧
+  ((w.v40 * w.v41)).val ≤ 255 ∧
   (w.v409 - (w.v43 * w.v55)) = 0 ∧
   (w.v410 - (w.v45 * w.v55)) = 0 ∧
   (w.v411 - (w.v42 * w.v55)) = 0 ∧
@@ -337,13 +337,13 @@ def constraints_1 (w : W) : Prop :=
 
 def constraints_2 (w : W) : Prop :=
   (w.v426 - (w.v51 * w.v55)) = 0 ∧
-  ((w.v51 * w.v55)).val ≤ ((255 : F)).val ∧
+  ((w.v51 * w.v55)).val ≤ 255 ∧
   (w.v427 - (w.v52 * w.v55)) = 0 ∧
-  ((w.v52 * w.v55)).val ≤ ((255 : F)).val ∧
+  ((w.v52 * w.v55)).val ≤ 255 ∧
   (w.v428 - (w.v53 * w.v55)) = 0 ∧
-  ((w.v53 * w.v55)).val ≤ ((255 : F)).val ∧
+  ((w.v53 * w.v55)).val ≤ 255 ∧
   (w.v429 - (w.v54 * w.v55)) = 0 ∧
-  ((w.v54 * w.v55)).val ≤ ((255 : F)).val ∧
+  ((w.v54 * w.v55)).val ≤ 255 ∧
   (w.v430 - (w.v0 * w.v13)) = 0 ∧
   (w.v431 - (w.v5 * w.v13)) = 0 ∧
   (w.v432 - (w.v6 * w.v13)) = 0 ∧

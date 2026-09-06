@@ -5,7 +5,7 @@
 import ZirenDet.Basic
 
 set_option maxRecDepth 4000000
-set_option maxHeartbeats 8000000
+set_option maxHeartbeats 40000000
 set_option linter.dupNamespace false
 
 namespace ZirenDet.Chips.SysLinux
@@ -446,10 +446,10 @@ def constraints_3 (w : W) : Prop :=
   (w.v70 * (w.v84 - ((((((w.v77 + (w.v78 * (2 : F))) + (w.v79 * (4 : F))) + (w.v80 * (8 : F))) * (16 : F)) + ((w.v70 * ((1 : F) - w.v82)) * (16 : F))) - (w.v87 * (256 : F))))) = 0 ∧
   (w.v70 * (w.v85 - ((w.v9 + w.v87) - (w.v88 * (256 : F))))) = 0 ∧
   (w.v70 * (w.v86 - (w.v10 + w.v88))) = 0 ∧
-  (w.v70 * ((((w.v15 + w.v83) - w.v89) * (2122383361 : F)) * ((((w.v15 + w.v83) - w.v89) * (2122383361 : F)) - (1 : F)))) = 0 ∧
-  (w.v70 * (((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * (2122383361 : F))) * (2122383361 : F)) * (((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * (2122383361 : F))) * (2122383361 : F)) - (1 : F)))) = 0 ∧
-  (w.v70 * (((((w.v17 + w.v85) - w.v91) + ((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * (2122383361 : F))) * (2122383361 : F))) * (2122383361 : F)) * (((((w.v17 + w.v85) - w.v91) + ((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * (2122383361 : F))) * (2122383361 : F))) * (2122383361 : F)) - (1 : F)))) = 0 ∧
-  (w.v70 * (((((w.v18 + w.v86) - w.v92) + ((((w.v17 + w.v85) - w.v91) + ((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * (2122383361 : F))) * (2122383361 : F))) * (2122383361 : F))) * (2122383361 : F)) * (((((w.v18 + w.v86) - w.v92) + ((((w.v17 + w.v85) - w.v91) + ((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * (2122383361 : F))) * (2122383361 : F))) * (2122383361 : F))) * (2122383361 : F)) - (1 : F)))) = 0 ∧
+  (w.v70 * ((((w.v15 + w.v83) - w.v89) * ((256 : F)⁻¹)) * ((((w.v15 + w.v83) - w.v89) * ((256 : F)⁻¹)) - (1 : F)))) = 0 ∧
+  (w.v70 * (((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * ((256 : F)⁻¹))) * ((256 : F)⁻¹)) * (((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * ((256 : F)⁻¹))) * ((256 : F)⁻¹)) - (1 : F)))) = 0 ∧
+  (w.v70 * (((((w.v17 + w.v85) - w.v91) + ((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * ((256 : F)⁻¹))) * ((256 : F)⁻¹))) * ((256 : F)⁻¹)) * (((((w.v17 + w.v85) - w.v91) + ((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * ((256 : F)⁻¹))) * ((256 : F)⁻¹))) * ((256 : F)⁻¹)) - (1 : F)))) = 0 ∧
+  (w.v70 * (((((w.v18 + w.v86) - w.v92) + ((((w.v17 + w.v85) - w.v91) + ((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * ((256 : F)⁻¹))) * ((256 : F)⁻¹))) * ((256 : F)⁻¹))) * ((256 : F)⁻¹)) * (((((w.v18 + w.v86) - w.v92) + ((((w.v17 + w.v85) - w.v91) + ((((w.v16 + w.v84) - w.v90) + (((w.v15 + w.v83) - w.v89) * ((256 : F)⁻¹))) * ((256 : F)⁻¹))) * ((256 : F)⁻¹))) * ((256 : F)⁻¹)) - (1 : F)))) = 0 ∧
   (w.v70 * (w.v70 * (w.v70 - (1 : F)))) = 0 ∧
   (w.v70 * (w.v19 - w.v89)) = 0
 
@@ -486,114 +486,114 @@ def constraints_4 (w : W) : Prop :=
   (w.v39 * (w.v0 - w.v37)) = 0 ∧
   (w.v42 * (w.v42 - (1 : F))) = 0 ∧
   (((((w.v39 * w.v1) + (((1 : F) - w.v39) * w.v0)) - ((w.v39 * w.v38) + (((1 : F) - w.v39) * w.v37))) - (1 : F)) - ((w.v40 + (w.v41 * (65536 : F))) + (w.v42 * (16777216 : F)))) = 0 ∧
-  ((w.v26 * w.v52)).val ≤ ((65535 : F)).val ∧
-  ((w.v27 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v15 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v16 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v17 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v18 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v19 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v20 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v21 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v22 * w.v52)).val ≤ ((255 : F)).val ∧
+  ((w.v26 * w.v52)).val ≤ 65535 ∧
+  ((w.v27 * w.v52)).val ≤ 255 ∧
+  ((w.v15 * w.v52)).val ≤ 255 ∧
+  ((w.v16 * w.v52)).val ≤ 255 ∧
+  ((w.v17 * w.v52)).val ≤ 255 ∧
+  ((w.v18 * w.v52)).val ≤ 255 ∧
+  ((w.v19 * w.v52)).val ≤ 255 ∧
+  ((w.v20 * w.v52)).val ≤ 255 ∧
+  ((w.v21 * w.v52)).val ≤ 255 ∧
+  ((w.v22 * w.v52)).val ≤ 255 ∧
   (w.v438 - (w.v15 * w.v52)) = 0 ∧
-  ((w.v15 * w.v52)).val ≤ ((255 : F)).val ∧
+  ((w.v15 * w.v52)).val ≤ 255 ∧
   (w.v439 - (w.v16 * w.v52)) = 0 ∧
-  ((w.v16 * w.v52)).val ≤ ((255 : F)).val ∧
+  ((w.v16 * w.v52)).val ≤ 255 ∧
   (w.v440 - (w.v17 * w.v52)) = 0 ∧
-  ((w.v17 * w.v52)).val ≤ ((255 : F)).val
+  ((w.v17 * w.v52)).val ≤ 255
 
 def constraints_5 (w : W) : Prop :=
   (w.v441 - (w.v18 * w.v52)) = 0 ∧
-  ((w.v18 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v3 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v4 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v5 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v6 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v19 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v20 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v21 * w.v52)).val ≤ ((255 : F)).val ∧
-  ((w.v22 * w.v52)).val ≤ ((255 : F)).val ∧
+  ((w.v18 * w.v52)).val ≤ 255 ∧
+  ((w.v3 * w.v52)).val ≤ 255 ∧
+  ((w.v4 * w.v52)).val ≤ 255 ∧
+  ((w.v5 * w.v52)).val ≤ 255 ∧
+  ((w.v6 * w.v52)).val ≤ 255 ∧
+  ((w.v19 * w.v52)).val ≤ 255 ∧
+  ((w.v20 * w.v52)).val ≤ 255 ∧
+  ((w.v21 * w.v52)).val ≤ 255 ∧
+  ((w.v22 * w.v52)).val ≤ 255 ∧
   (w.v99 * (w.v99 - (1 : F))) = 0 ∧
   ((w.v99 - (1 : F)) = 0 ↔ (w.v98).val < (w.v97).val) ∧
   (((1 : F) - w.v99) * (((1 : F) - w.v99) - (1 : F))) = 0 ∧
   ((((1 : F) - w.v99) - (1 : F)) = 0 ↔ (w.v97).val < (w.v98).val) ∧
-  ((w.v26 * w.v58)).val ≤ ((65535 : F)).val ∧
-  ((w.v27 * w.v58)).val ≤ ((255 : F)).val ∧
-  ((w.v15 * w.v58)).val ≤ ((255 : F)).val ∧
-  ((w.v16 * w.v58)).val ≤ ((255 : F)).val ∧
-  ((w.v17 * w.v58)).val ≤ ((255 : F)).val ∧
-  ((w.v18 * w.v58)).val ≤ ((255 : F)).val ∧
-  ((w.v19 * w.v58)).val ≤ ((255 : F)).val ∧
-  ((w.v20 * w.v58)).val ≤ ((255 : F)).val ∧
-  ((w.v21 * w.v58)).val ≤ ((255 : F)).val ∧
-  ((w.v22 * w.v58)).val ≤ ((255 : F)).val ∧
+  ((w.v26 * w.v58)).val ≤ 65535 ∧
+  ((w.v27 * w.v58)).val ≤ 255 ∧
+  ((w.v15 * w.v58)).val ≤ 255 ∧
+  ((w.v16 * w.v58)).val ≤ 255 ∧
+  ((w.v17 * w.v58)).val ≤ 255 ∧
+  ((w.v18 * w.v58)).val ≤ 255 ∧
+  ((w.v19 * w.v58)).val ≤ 255 ∧
+  ((w.v20 * w.v58)).val ≤ 255 ∧
+  ((w.v21 * w.v58)).val ≤ 255 ∧
+  ((w.v22 * w.v58)).val ≤ 255 ∧
   (w.v442 - (w.v15 * w.v58)) = 0 ∧
-  ((w.v15 * w.v58)).val ≤ ((255 : F)).val ∧
+  ((w.v15 * w.v58)).val ≤ 255 ∧
   (w.v443 - (w.v16 * w.v58)) = 0 ∧
-  ((w.v16 * w.v58)).val ≤ ((255 : F)).val ∧
+  ((w.v16 * w.v58)).val ≤ 255 ∧
   (w.v444 - (w.v17 * w.v58)) = 0 ∧
-  ((w.v17 * w.v58)).val ≤ ((255 : F)).val ∧
+  ((w.v17 * w.v58)).val ≤ 255 ∧
   (w.v445 - (w.v18 * w.v58)) = 0 ∧
-  ((w.v18 * w.v58)).val ≤ ((255 : F)).val ∧
-  ((w.v3 * w.v59)).val ≤ ((255 : F)).val ∧
-  ((w.v4 * w.v59)).val ≤ ((255 : F)).val ∧
-  ((w.v5 * w.v59)).val ≤ ((255 : F)).val ∧
-  ((w.v6 * w.v59)).val ≤ ((255 : F)).val ∧
-  ((w.v7 * w.v59)).val ≤ ((255 : F)).val ∧
-  ((w.v8 * w.v59)).val ≤ ((255 : F)).val ∧
-  ((w.v9 * w.v59)).val ≤ ((255 : F)).val ∧
-  ((w.v10 * w.v59)).val ≤ ((255 : F)).val ∧
-  ((w.v83 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v84 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v85 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v86 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v15 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v16 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v17 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v18 * w.v70)).val ≤ ((255 : F)).val
+  ((w.v18 * w.v58)).val ≤ 255 ∧
+  ((w.v3 * w.v59)).val ≤ 255 ∧
+  ((w.v4 * w.v59)).val ≤ 255 ∧
+  ((w.v5 * w.v59)).val ≤ 255 ∧
+  ((w.v6 * w.v59)).val ≤ 255 ∧
+  ((w.v7 * w.v59)).val ≤ 255 ∧
+  ((w.v8 * w.v59)).val ≤ 255 ∧
+  ((w.v9 * w.v59)).val ≤ 255 ∧
+  ((w.v10 * w.v59)).val ≤ 255 ∧
+  ((w.v83 * w.v70)).val ≤ 255 ∧
+  ((w.v84 * w.v70)).val ≤ 255 ∧
+  ((w.v85 * w.v70)).val ≤ 255 ∧
+  ((w.v86 * w.v70)).val ≤ 255 ∧
+  ((w.v15 * w.v70)).val ≤ 255 ∧
+  ((w.v16 * w.v70)).val ≤ 255 ∧
+  ((w.v17 * w.v70)).val ≤ 255 ∧
+  ((w.v18 * w.v70)).val ≤ 255
 
 def constraints_6 (w : W) : Prop :=
-  ((w.v83 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v84 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v85 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v86 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v89 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v90 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v91 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v92 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v26 * w.v70)).val ≤ ((65535 : F)).val ∧
-  ((w.v27 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v15 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v16 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v17 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v18 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v19 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v20 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v21 * w.v70)).val ≤ ((255 : F)).val ∧
-  ((w.v22 * w.v70)).val ≤ ((255 : F)).val ∧
+  ((w.v83 * w.v70)).val ≤ 255 ∧
+  ((w.v84 * w.v70)).val ≤ 255 ∧
+  ((w.v85 * w.v70)).val ≤ 255 ∧
+  ((w.v86 * w.v70)).val ≤ 255 ∧
+  ((w.v89 * w.v70)).val ≤ 255 ∧
+  ((w.v90 * w.v70)).val ≤ 255 ∧
+  ((w.v91 * w.v70)).val ≤ 255 ∧
+  ((w.v92 * w.v70)).val ≤ 255 ∧
+  ((w.v26 * w.v70)).val ≤ 65535 ∧
+  ((w.v27 * w.v70)).val ≤ 255 ∧
+  ((w.v15 * w.v70)).val ≤ 255 ∧
+  ((w.v16 * w.v70)).val ≤ 255 ∧
+  ((w.v17 * w.v70)).val ≤ 255 ∧
+  ((w.v18 * w.v70)).val ≤ 255 ∧
+  ((w.v19 * w.v70)).val ≤ 255 ∧
+  ((w.v20 * w.v70)).val ≤ 255 ∧
+  ((w.v21 * w.v70)).val ≤ 255 ∧
+  ((w.v22 * w.v70)).val ≤ 255 ∧
   (w.v446 - (w.v15 * w.v70)) = 0 ∧
-  ((w.v15 * w.v70)).val ≤ ((255 : F)).val ∧
+  ((w.v15 * w.v70)).val ≤ 255 ∧
   (w.v447 - (w.v16 * w.v70)) = 0 ∧
-  ((w.v16 * w.v70)).val ≤ ((255 : F)).val ∧
+  ((w.v16 * w.v70)).val ≤ 255 ∧
   (w.v448 - (w.v17 * w.v70)) = 0 ∧
-  ((w.v17 * w.v70)).val ≤ ((255 : F)).val ∧
+  ((w.v17 * w.v70)).val ≤ 255 ∧
   (w.v449 - (w.v18 * w.v70)) = 0 ∧
-  ((w.v18 * w.v70)).val ≤ ((255 : F)).val ∧
-  (w.v40).val ≤ ((65535 : F)).val ∧
-  (w.v41).val ≤ ((255 : F)).val ∧
-  (w.v29).val ≤ ((255 : F)).val ∧
-  (w.v30).val ≤ ((255 : F)).val ∧
-  (w.v31).val ≤ ((255 : F)).val ∧
-  (w.v32).val ≤ ((255 : F)).val ∧
-  (w.v33).val ≤ ((255 : F)).val ∧
-  (w.v34).val ≤ ((255 : F)).val ∧
-  (w.v35).val ≤ ((255 : F)).val ∧
-  (w.v36).val ≤ ((255 : F)).val ∧
-  (w.v29).val ≤ ((255 : F)).val ∧
-  (w.v30).val ≤ ((255 : F)).val ∧
-  (w.v31).val ≤ ((255 : F)).val ∧
-  (w.v32).val ≤ ((255 : F)).val ∧
+  ((w.v18 * w.v70)).val ≤ 255 ∧
+  (w.v40).val ≤ 65535 ∧
+  (w.v41).val ≤ 255 ∧
+  (w.v29).val ≤ 255 ∧
+  (w.v30).val ≤ 255 ∧
+  (w.v31).val ≤ 255 ∧
+  (w.v32).val ≤ 255 ∧
+  (w.v33).val ≤ 255 ∧
+  (w.v34).val ≤ 255 ∧
+  (w.v35).val ≤ 255 ∧
+  (w.v36).val ≤ 255 ∧
+  (w.v29).val ≤ 255 ∧
+  (w.v30).val ≤ 255 ∧
+  (w.v31).val ≤ 255 ∧
+  (w.v32).val ≤ 255 ∧
   (w.v450 - (w.v19 * w.v52)) = 0 ∧
   (w.v451 - (w.v20 * w.v52)) = 0 ∧
   (w.v452 - (w.v21 * w.v52)) = 0 ∧
@@ -616,10 +616,10 @@ def constraints_7 (w : W) : Prop :=
   (w.v467 - (w.v5 + (w.v6 * (256 : F)))) = 0 ∧
   (w.v468 - (w.v7 + (w.v8 * (256 : F)))) = 0 ∧
   (w.v469 - (w.v9 + (w.v10 * (256 : F)))) = 0 ∧
-  ((w.v3 + (w.v4 * (256 : F)))).val ≤ ((65535 : F)).val ∧
-  ((w.v5 + (w.v6 * (256 : F)))).val ≤ ((65535 : F)).val ∧
-  ((w.v7 + (w.v8 * (256 : F)))).val ≤ ((65535 : F)).val ∧
-  ((w.v9 + (w.v10 * (256 : F)))).val ≤ ((65535 : F)).val
+  ((w.v3 + (w.v4 * (256 : F)))).val ≤ 65535 ∧
+  ((w.v5 + (w.v6 * (256 : F)))).val ≤ 65535 ∧
+  ((w.v7 + (w.v8 * (256 : F)))).val ≤ 65535 ∧
+  ((w.v9 + (w.v10 * (256 : F)))).val ≤ 65535
 
 def constraints (w : W) : Prop :=
   constraints_0 w ∧
@@ -632,15 +632,15 @@ def constraints (w : W) : Prop :=
   constraints_7 w
 
 /-- Interface provenance (which lookup each port comes from).
-  inputs:  v438 = mem_read[0].val[0], v439 = mem_read[0].val[1], v440 = mem_read[0].val[2], v441 = mem_read[0].val[3], v442 = mem_read[1].val[0], v443 = mem_read[1].val[1], v444 = mem_read[1].val[2], v445 = mem_read[1].val[3], v446 = mem_read[2].val[0], v447 = mem_read[2].val[1], v448 = mem_read[2].val[2], v449 = mem_read[2].val[3], v29 = mem_read[3].val[0], v30 = mem_read[3].val[1], v31 = mem_read[3].val[2], v32 = mem_read[3].val[3], v2 = syscall_recv[0], v462 = syscall_recv[1], v463 = syscall_recv[2], v466 = syscall_result.arg[0], v467 = syscall_result.arg[1], v468 = syscall_result.arg[2], v469 = syscall_result.arg[3]
+  inputs:  v438 = mem_read[0].val[0], v439 = mem_read[0].val[1], v440 = mem_read[0].val[2], v441 = mem_read[0].val[3], v442 = mem_read[1].val[0], v443 = mem_read[1].val[1], v444 = mem_read[1].val[2], v445 = mem_read[1].val[3], v446 = mem_read[2].val[0], v447 = mem_read[2].val[1], v448 = mem_read[2].val[2], v449 = mem_read[2].val[3], v29 = mem_read[3].val[0], v30 = mem_read[3].val[1], v31 = mem_read[3].val[2], v32 = mem_read[3].val[3], v0 = syscall_recv[0], v1 = syscall_recv[1], v2 = syscall_recv[2], v462 = syscall_recv[3], v463 = syscall_recv[4], v466 = syscall_result.arg[0], v467 = syscall_result.arg[1], v468 = syscall_result.arg[2], v469 = syscall_result.arg[3]
   outputs: v450 = mem_write[0].val[0], v451 = mem_write[0].val[1], v452 = mem_write[0].val[2], v453 = mem_write[0].val[3], v454 = mem_write[1].val[0], v455 = mem_write[1].val[1], v456 = mem_write[1].val[2], v457 = mem_write[1].val[3], v458 = mem_write[2].val[0], v459 = mem_write[2].val[1], v460 = mem_write[2].val[2], v461 = mem_write[2].val[3], v33 = mem_write[3].val[0], v34 = mem_write[3].val[1], v35 = mem_write[3].val[2], v36 = mem_write[3].val[3], v464 = syscall_result.result[0], v465 = syscall_result.result[1] -/
-def input_origins : List String := ["mem_read[0].val[0]", "mem_read[0].val[1]", "mem_read[0].val[2]", "mem_read[0].val[3]", "mem_read[1].val[0]", "mem_read[1].val[1]", "mem_read[1].val[2]", "mem_read[1].val[3]", "mem_read[2].val[0]", "mem_read[2].val[1]", "mem_read[2].val[2]", "mem_read[2].val[3]", "mem_read[3].val[0]", "mem_read[3].val[1]", "mem_read[3].val[2]", "mem_read[3].val[3]", "syscall_recv[0]", "syscall_recv[1]", "syscall_recv[2]", "syscall_result.arg[0]", "syscall_result.arg[1]", "syscall_result.arg[2]", "syscall_result.arg[3]"]
+def input_origins : List String := ["mem_read[0].val[0]", "mem_read[0].val[1]", "mem_read[0].val[2]", "mem_read[0].val[3]", "mem_read[1].val[0]", "mem_read[1].val[1]", "mem_read[1].val[2]", "mem_read[1].val[3]", "mem_read[2].val[0]", "mem_read[2].val[1]", "mem_read[2].val[2]", "mem_read[2].val[3]", "mem_read[3].val[0]", "mem_read[3].val[1]", "mem_read[3].val[2]", "mem_read[3].val[3]", "syscall_recv[0]", "syscall_recv[1]", "syscall_recv[2]", "syscall_recv[3]", "syscall_recv[4]", "syscall_result.arg[0]", "syscall_result.arg[1]", "syscall_result.arg[2]", "syscall_result.arg[3]"]
 def output_origins : List String := ["mem_write[0].val[0]", "mem_write[0].val[1]", "mem_write[0].val[2]", "mem_write[0].val[3]", "mem_write[1].val[0]", "mem_write[1].val[1]", "mem_write[1].val[2]", "mem_write[1].val[3]", "mem_write[2].val[0]", "mem_write[2].val[1]", "mem_write[2].val[2]", "mem_write[2].val[3]", "mem_write[3].val[0]", "mem_write[3].val[1]", "mem_write[3].val[2]", "mem_write[3].val[3]", "syscall_result.result[0]", "syscall_result.result[1]"]
 def in_mem_read_0_val (w : W) : List F := [w.v438, w.v439, w.v440, w.v441]
 def in_mem_read_1_val (w : W) : List F := [w.v442, w.v443, w.v444, w.v445]
 def in_mem_read_2_val (w : W) : List F := [w.v446, w.v447, w.v448, w.v449]
 def in_mem_read_3_val (w : W) : List F := [w.v29, w.v30, w.v31, w.v32]
-def in_syscall_recv (w : W) : List F := [w.v2, w.v462, w.v463]
+def in_syscall_recv (w : W) : List F := [w.v0, w.v1, w.v2, w.v462, w.v463]
 def in_syscall_result_arg (w : W) : List F := [w.v466, w.v467, w.v468, w.v469]
 def out_mem_write_0_val (w : W) : List F := [w.v450, w.v451, w.v452, w.v453]
 def out_mem_write_1_val (w : W) : List F := [w.v454, w.v455, w.v456, w.v457]
@@ -649,7 +649,7 @@ def out_mem_write_3_val (w : W) : List F := [w.v33, w.v34, w.v35, w.v36]
 def out_syscall_result_result (w : W) : List F := [w.v464, w.v465]
 
 def inputs (w : W) : List F :=
-  [w.v438, w.v439, w.v440, w.v441, w.v442, w.v443, w.v444, w.v445, w.v446, w.v447, w.v448, w.v449, w.v29, w.v30, w.v31, w.v32, w.v2, w.v462, w.v463, w.v466, w.v467, w.v468, w.v469]
+  [w.v438, w.v439, w.v440, w.v441, w.v442, w.v443, w.v444, w.v445, w.v446, w.v447, w.v448, w.v449, w.v29, w.v30, w.v31, w.v32, w.v0, w.v1, w.v2, w.v462, w.v463, w.v466, w.v467, w.v468, w.v469]
 def outputs (w : W) : List F :=
   [w.v450, w.v451, w.v452, w.v453, w.v454, w.v455, w.v456, w.v457, w.v458, w.v459, w.v460, w.v461, w.v33, w.v34, w.v35, w.v36, w.v464, w.v465]
 def assumed (_w : W) : List F := []

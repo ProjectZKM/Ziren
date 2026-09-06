@@ -5,7 +5,7 @@
 import ZirenDet.Basic
 
 set_option maxRecDepth 4000000
-set_option maxHeartbeats 8000000
+set_option maxHeartbeats 40000000
 set_option linter.dupNamespace false
 
 namespace ZirenDet.Chips.BooleanCircuitGarble
@@ -884,200 +884,200 @@ def constraints_4 (w : W) : Prop :=
   ((w.v7 * (7 : F)) - (((w.v24 + (w.v25 * (256 : F))) + (w.v26 * (65536 : F))) + (w.v27 * (16777216 : F)))) = 0 ∧
   (w.v812 - (w.v4 + (1 : F))) = 0 ∧
   (w.v813 - (w.v3 + (68 : F))) = 0 ∧
-  (w.v31).val ≤ ((65535 : F)).val ∧
-  (w.v32).val ≤ ((255 : F)).val ∧
-  (w.v24).val ≤ ((255 : F)).val
+  (w.v31).val ≤ 65535 ∧
+  (w.v32).val ≤ 255 ∧
+  (w.v24).val ≤ 255
 
 def constraints_5 (w : W) : Prop :=
-  (w.v25).val ≤ ((255 : F)).val ∧
-  (w.v26).val ≤ ((255 : F)).val ∧
-  (w.v27).val ≤ ((255 : F)).val ∧
-  (w.v24).val ≤ ((255 : F)).val ∧
-  (w.v25).val ≤ ((255 : F)).val ∧
-  (w.v26).val ≤ ((255 : F)).val ∧
-  (w.v27).val ≤ ((255 : F)).val ∧
-  (w.v41).val ≤ ((65535 : F)).val ∧
-  (w.v42).val ≤ ((255 : F)).val ∧
-  (w.v34).val ≤ ((255 : F)).val ∧
-  (w.v35).val ≤ ((255 : F)).val ∧
-  (w.v36).val ≤ ((255 : F)).val ∧
-  (w.v37).val ≤ ((255 : F)).val ∧
+  (w.v25).val ≤ 255 ∧
+  (w.v26).val ≤ 255 ∧
+  (w.v27).val ≤ 255 ∧
+  (w.v24).val ≤ 255 ∧
+  (w.v25).val ≤ 255 ∧
+  (w.v26).val ≤ 255 ∧
+  (w.v27).val ≤ 255 ∧
+  (w.v41).val ≤ 65535 ∧
+  (w.v42).val ≤ 255 ∧
+  (w.v34).val ≤ 255 ∧
+  (w.v35).val ≤ 255 ∧
+  (w.v36).val ≤ 255 ∧
+  (w.v37).val ≤ 255 ∧
   (w.v814 - (w.v3 + (4 : F))) = 0 ∧
-  (w.v34).val ≤ ((255 : F)).val ∧
-  (w.v35).val ≤ ((255 : F)).val ∧
-  (w.v36).val ≤ ((255 : F)).val ∧
-  (w.v37).val ≤ ((255 : F)).val ∧
-  (w.v51).val ≤ ((65535 : F)).val ∧
-  (w.v52).val ≤ ((255 : F)).val ∧
-  (w.v44).val ≤ ((255 : F)).val ∧
-  (w.v45).val ≤ ((255 : F)).val ∧
-  (w.v46).val ≤ ((255 : F)).val ∧
-  (w.v47).val ≤ ((255 : F)).val ∧
+  (w.v34).val ≤ 255 ∧
+  (w.v35).val ≤ 255 ∧
+  (w.v36).val ≤ 255 ∧
+  (w.v37).val ≤ 255 ∧
+  (w.v51).val ≤ 65535 ∧
+  (w.v52).val ≤ 255 ∧
+  (w.v44).val ≤ 255 ∧
+  (w.v45).val ≤ 255 ∧
+  (w.v46).val ≤ 255 ∧
+  (w.v47).val ≤ 255 ∧
   (w.v815 - (w.v3 + (8 : F))) = 0 ∧
-  (w.v44).val ≤ ((255 : F)).val ∧
-  (w.v45).val ≤ ((255 : F)).val ∧
-  (w.v46).val ≤ ((255 : F)).val ∧
-  (w.v47).val ≤ ((255 : F)).val ∧
-  (w.v61).val ≤ ((65535 : F)).val ∧
-  (w.v62).val ≤ ((255 : F)).val ∧
-  (w.v54).val ≤ ((255 : F)).val ∧
-  (w.v55).val ≤ ((255 : F)).val ∧
-  (w.v56).val ≤ ((255 : F)).val ∧
-  (w.v57).val ≤ ((255 : F)).val ∧
+  (w.v44).val ≤ 255 ∧
+  (w.v45).val ≤ 255 ∧
+  (w.v46).val ≤ 255 ∧
+  (w.v47).val ≤ 255 ∧
+  (w.v61).val ≤ 65535 ∧
+  (w.v62).val ≤ 255 ∧
+  (w.v54).val ≤ 255 ∧
+  (w.v55).val ≤ 255 ∧
+  (w.v56).val ≤ 255 ∧
+  (w.v57).val ≤ 255 ∧
   (w.v816 - (w.v3 + (12 : F))) = 0 ∧
-  (w.v54).val ≤ ((255 : F)).val ∧
-  (w.v55).val ≤ ((255 : F)).val ∧
-  (w.v56).val ≤ ((255 : F)).val ∧
-  (w.v57).val ≤ ((255 : F)).val ∧
-  (w.v71).val ≤ ((65535 : F)).val ∧
-  (w.v72).val ≤ ((255 : F)).val ∧
-  (w.v64).val ≤ ((255 : F)).val ∧
-  (w.v65).val ≤ ((255 : F)).val ∧
-  (w.v66).val ≤ ((255 : F)).val ∧
-  (w.v67).val ≤ ((255 : F)).val ∧
+  (w.v54).val ≤ 255 ∧
+  (w.v55).val ≤ 255 ∧
+  (w.v56).val ≤ 255 ∧
+  (w.v57).val ≤ 255 ∧
+  (w.v71).val ≤ 65535 ∧
+  (w.v72).val ≤ 255 ∧
+  (w.v64).val ≤ 255 ∧
+  (w.v65).val ≤ 255 ∧
+  (w.v66).val ≤ 255 ∧
+  (w.v67).val ≤ 255 ∧
   (w.v817 - (w.v3 + (16 : F))) = 0 ∧
-  (w.v64).val ≤ ((255 : F)).val
+  (w.v64).val ≤ 255
 
 def constraints_6 (w : W) : Prop :=
-  (w.v65).val ≤ ((255 : F)).val ∧
-  (w.v66).val ≤ ((255 : F)).val ∧
-  (w.v67).val ≤ ((255 : F)).val ∧
-  (w.v81).val ≤ ((65535 : F)).val ∧
-  (w.v82).val ≤ ((255 : F)).val ∧
-  (w.v74).val ≤ ((255 : F)).val ∧
-  (w.v75).val ≤ ((255 : F)).val ∧
-  (w.v76).val ≤ ((255 : F)).val ∧
-  (w.v77).val ≤ ((255 : F)).val ∧
+  (w.v65).val ≤ 255 ∧
+  (w.v66).val ≤ 255 ∧
+  (w.v67).val ≤ 255 ∧
+  (w.v81).val ≤ 65535 ∧
+  (w.v82).val ≤ 255 ∧
+  (w.v74).val ≤ 255 ∧
+  (w.v75).val ≤ 255 ∧
+  (w.v76).val ≤ 255 ∧
+  (w.v77).val ≤ 255 ∧
   (w.v818 - (w.v3 + (20 : F))) = 0 ∧
-  (w.v74).val ≤ ((255 : F)).val ∧
-  (w.v75).val ≤ ((255 : F)).val ∧
-  (w.v76).val ≤ ((255 : F)).val ∧
-  (w.v77).val ≤ ((255 : F)).val ∧
-  (w.v91).val ≤ ((65535 : F)).val ∧
-  (w.v92).val ≤ ((255 : F)).val ∧
-  (w.v84).val ≤ ((255 : F)).val ∧
-  (w.v85).val ≤ ((255 : F)).val ∧
-  (w.v86).val ≤ ((255 : F)).val ∧
-  (w.v87).val ≤ ((255 : F)).val ∧
+  (w.v74).val ≤ 255 ∧
+  (w.v75).val ≤ 255 ∧
+  (w.v76).val ≤ 255 ∧
+  (w.v77).val ≤ 255 ∧
+  (w.v91).val ≤ 65535 ∧
+  (w.v92).val ≤ 255 ∧
+  (w.v84).val ≤ 255 ∧
+  (w.v85).val ≤ 255 ∧
+  (w.v86).val ≤ 255 ∧
+  (w.v87).val ≤ 255 ∧
   (w.v819 - (w.v3 + (24 : F))) = 0 ∧
-  (w.v84).val ≤ ((255 : F)).val ∧
-  (w.v85).val ≤ ((255 : F)).val ∧
-  (w.v86).val ≤ ((255 : F)).val ∧
-  (w.v87).val ≤ ((255 : F)).val ∧
-  (w.v101).val ≤ ((65535 : F)).val ∧
-  (w.v102).val ≤ ((255 : F)).val ∧
-  (w.v94).val ≤ ((255 : F)).val ∧
-  (w.v95).val ≤ ((255 : F)).val ∧
-  (w.v96).val ≤ ((255 : F)).val ∧
-  (w.v97).val ≤ ((255 : F)).val ∧
+  (w.v84).val ≤ 255 ∧
+  (w.v85).val ≤ 255 ∧
+  (w.v86).val ≤ 255 ∧
+  (w.v87).val ≤ 255 ∧
+  (w.v101).val ≤ 65535 ∧
+  (w.v102).val ≤ 255 ∧
+  (w.v94).val ≤ 255 ∧
+  (w.v95).val ≤ 255 ∧
+  (w.v96).val ≤ 255 ∧
+  (w.v97).val ≤ 255 ∧
   (w.v820 - (w.v3 + (28 : F))) = 0 ∧
-  (w.v94).val ≤ ((255 : F)).val ∧
-  (w.v95).val ≤ ((255 : F)).val ∧
-  (w.v96).val ≤ ((255 : F)).val ∧
-  (w.v97).val ≤ ((255 : F)).val ∧
-  (w.v111).val ≤ ((65535 : F)).val ∧
-  (w.v112).val ≤ ((255 : F)).val ∧
-  (w.v104).val ≤ ((255 : F)).val ∧
-  (w.v105).val ≤ ((255 : F)).val ∧
-  (w.v106).val ≤ ((255 : F)).val ∧
-  (w.v107).val ≤ ((255 : F)).val ∧
+  (w.v94).val ≤ 255 ∧
+  (w.v95).val ≤ 255 ∧
+  (w.v96).val ≤ 255 ∧
+  (w.v97).val ≤ 255 ∧
+  (w.v111).val ≤ 65535 ∧
+  (w.v112).val ≤ 255 ∧
+  (w.v104).val ≤ 255 ∧
+  (w.v105).val ≤ 255 ∧
+  (w.v106).val ≤ 255 ∧
+  (w.v107).val ≤ 255 ∧
   (w.v821 - (w.v3 + (32 : F))) = 0 ∧
-  (w.v104).val ≤ ((255 : F)).val ∧
-  (w.v105).val ≤ ((255 : F)).val ∧
-  (w.v106).val ≤ ((255 : F)).val ∧
-  (w.v107).val ≤ ((255 : F)).val ∧
-  (w.v121).val ≤ ((65535 : F)).val
+  (w.v104).val ≤ 255 ∧
+  (w.v105).val ≤ 255 ∧
+  (w.v106).val ≤ 255 ∧
+  (w.v107).val ≤ 255 ∧
+  (w.v121).val ≤ 65535
 
 def constraints_7 (w : W) : Prop :=
-  (w.v122).val ≤ ((255 : F)).val ∧
-  (w.v114).val ≤ ((255 : F)).val ∧
-  (w.v115).val ≤ ((255 : F)).val ∧
-  (w.v116).val ≤ ((255 : F)).val ∧
-  (w.v117).val ≤ ((255 : F)).val ∧
+  (w.v122).val ≤ 255 ∧
+  (w.v114).val ≤ 255 ∧
+  (w.v115).val ≤ 255 ∧
+  (w.v116).val ≤ 255 ∧
+  (w.v117).val ≤ 255 ∧
   (w.v822 - (w.v3 + (36 : F))) = 0 ∧
-  (w.v114).val ≤ ((255 : F)).val ∧
-  (w.v115).val ≤ ((255 : F)).val ∧
-  (w.v116).val ≤ ((255 : F)).val ∧
-  (w.v117).val ≤ ((255 : F)).val ∧
-  (w.v131).val ≤ ((65535 : F)).val ∧
-  (w.v132).val ≤ ((255 : F)).val ∧
-  (w.v124).val ≤ ((255 : F)).val ∧
-  (w.v125).val ≤ ((255 : F)).val ∧
-  (w.v126).val ≤ ((255 : F)).val ∧
-  (w.v127).val ≤ ((255 : F)).val ∧
+  (w.v114).val ≤ 255 ∧
+  (w.v115).val ≤ 255 ∧
+  (w.v116).val ≤ 255 ∧
+  (w.v117).val ≤ 255 ∧
+  (w.v131).val ≤ 65535 ∧
+  (w.v132).val ≤ 255 ∧
+  (w.v124).val ≤ 255 ∧
+  (w.v125).val ≤ 255 ∧
+  (w.v126).val ≤ 255 ∧
+  (w.v127).val ≤ 255 ∧
   (w.v823 - (w.v3 + (40 : F))) = 0 ∧
-  (w.v124).val ≤ ((255 : F)).val ∧
-  (w.v125).val ≤ ((255 : F)).val ∧
-  (w.v126).val ≤ ((255 : F)).val ∧
-  (w.v127).val ≤ ((255 : F)).val ∧
-  (w.v141).val ≤ ((65535 : F)).val ∧
-  (w.v142).val ≤ ((255 : F)).val ∧
-  (w.v134).val ≤ ((255 : F)).val ∧
-  (w.v135).val ≤ ((255 : F)).val ∧
-  (w.v136).val ≤ ((255 : F)).val ∧
-  (w.v137).val ≤ ((255 : F)).val ∧
+  (w.v124).val ≤ 255 ∧
+  (w.v125).val ≤ 255 ∧
+  (w.v126).val ≤ 255 ∧
+  (w.v127).val ≤ 255 ∧
+  (w.v141).val ≤ 65535 ∧
+  (w.v142).val ≤ 255 ∧
+  (w.v134).val ≤ 255 ∧
+  (w.v135).val ≤ 255 ∧
+  (w.v136).val ≤ 255 ∧
+  (w.v137).val ≤ 255 ∧
   (w.v824 - (w.v3 + (44 : F))) = 0 ∧
-  (w.v134).val ≤ ((255 : F)).val ∧
-  (w.v135).val ≤ ((255 : F)).val ∧
-  (w.v136).val ≤ ((255 : F)).val ∧
-  (w.v137).val ≤ ((255 : F)).val ∧
-  (w.v151).val ≤ ((65535 : F)).val ∧
-  (w.v152).val ≤ ((255 : F)).val ∧
-  (w.v144).val ≤ ((255 : F)).val ∧
-  (w.v145).val ≤ ((255 : F)).val ∧
-  (w.v146).val ≤ ((255 : F)).val ∧
-  (w.v147).val ≤ ((255 : F)).val ∧
+  (w.v134).val ≤ 255 ∧
+  (w.v135).val ≤ 255 ∧
+  (w.v136).val ≤ 255 ∧
+  (w.v137).val ≤ 255 ∧
+  (w.v151).val ≤ 65535 ∧
+  (w.v152).val ≤ 255 ∧
+  (w.v144).val ≤ 255 ∧
+  (w.v145).val ≤ 255 ∧
+  (w.v146).val ≤ 255 ∧
+  (w.v147).val ≤ 255 ∧
   (w.v825 - (w.v3 + (48 : F))) = 0 ∧
-  (w.v144).val ≤ ((255 : F)).val ∧
-  (w.v145).val ≤ ((255 : F)).val ∧
-  (w.v146).val ≤ ((255 : F)).val ∧
-  (w.v147).val ≤ ((255 : F)).val ∧
-  (w.v161).val ≤ ((65535 : F)).val ∧
-  (w.v162).val ≤ ((255 : F)).val ∧
-  (w.v154).val ≤ ((255 : F)).val ∧
-  (w.v155).val ≤ ((255 : F)).val ∧
-  (w.v156).val ≤ ((255 : F)).val
+  (w.v144).val ≤ 255 ∧
+  (w.v145).val ≤ 255 ∧
+  (w.v146).val ≤ 255 ∧
+  (w.v147).val ≤ 255 ∧
+  (w.v161).val ≤ 65535 ∧
+  (w.v162).val ≤ 255 ∧
+  (w.v154).val ≤ 255 ∧
+  (w.v155).val ≤ 255 ∧
+  (w.v156).val ≤ 255
 
 def constraints_8 (w : W) : Prop :=
-  (w.v157).val ≤ ((255 : F)).val ∧
+  (w.v157).val ≤ 255 ∧
   (w.v826 - (w.v3 + (52 : F))) = 0 ∧
-  (w.v154).val ≤ ((255 : F)).val ∧
-  (w.v155).val ≤ ((255 : F)).val ∧
-  (w.v156).val ≤ ((255 : F)).val ∧
-  (w.v157).val ≤ ((255 : F)).val ∧
-  (w.v171).val ≤ ((65535 : F)).val ∧
-  (w.v172).val ≤ ((255 : F)).val ∧
-  (w.v164).val ≤ ((255 : F)).val ∧
-  (w.v165).val ≤ ((255 : F)).val ∧
-  (w.v166).val ≤ ((255 : F)).val ∧
-  (w.v167).val ≤ ((255 : F)).val ∧
+  (w.v154).val ≤ 255 ∧
+  (w.v155).val ≤ 255 ∧
+  (w.v156).val ≤ 255 ∧
+  (w.v157).val ≤ 255 ∧
+  (w.v171).val ≤ 65535 ∧
+  (w.v172).val ≤ 255 ∧
+  (w.v164).val ≤ 255 ∧
+  (w.v165).val ≤ 255 ∧
+  (w.v166).val ≤ 255 ∧
+  (w.v167).val ≤ 255 ∧
   (w.v827 - (w.v3 + (56 : F))) = 0 ∧
-  (w.v164).val ≤ ((255 : F)).val ∧
-  (w.v165).val ≤ ((255 : F)).val ∧
-  (w.v166).val ≤ ((255 : F)).val ∧
-  (w.v167).val ≤ ((255 : F)).val ∧
-  (w.v181).val ≤ ((65535 : F)).val ∧
-  (w.v182).val ≤ ((255 : F)).val ∧
-  (w.v174).val ≤ ((255 : F)).val ∧
-  (w.v175).val ≤ ((255 : F)).val ∧
-  (w.v176).val ≤ ((255 : F)).val ∧
-  (w.v177).val ≤ ((255 : F)).val ∧
+  (w.v164).val ≤ 255 ∧
+  (w.v165).val ≤ 255 ∧
+  (w.v166).val ≤ 255 ∧
+  (w.v167).val ≤ 255 ∧
+  (w.v181).val ≤ 65535 ∧
+  (w.v182).val ≤ 255 ∧
+  (w.v174).val ≤ 255 ∧
+  (w.v175).val ≤ 255 ∧
+  (w.v176).val ≤ 255 ∧
+  (w.v177).val ≤ 255 ∧
   (w.v828 - (w.v3 + (60 : F))) = 0 ∧
-  (w.v174).val ≤ ((255 : F)).val ∧
-  (w.v175).val ≤ ((255 : F)).val ∧
-  (w.v176).val ≤ ((255 : F)).val ∧
-  (w.v177).val ≤ ((255 : F)).val ∧
-  (w.v191).val ≤ ((65535 : F)).val ∧
-  (w.v192).val ≤ ((255 : F)).val ∧
-  (w.v184).val ≤ ((255 : F)).val ∧
-  (w.v185).val ≤ ((255 : F)).val ∧
-  (w.v186).val ≤ ((255 : F)).val ∧
-  (w.v187).val ≤ ((255 : F)).val ∧
+  (w.v174).val ≤ 255 ∧
+  (w.v175).val ≤ 255 ∧
+  (w.v176).val ≤ 255 ∧
+  (w.v177).val ≤ 255 ∧
+  (w.v191).val ≤ 65535 ∧
+  (w.v192).val ≤ 255 ∧
+  (w.v184).val ≤ 255 ∧
+  (w.v185).val ≤ 255 ∧
+  (w.v186).val ≤ 255 ∧
+  (w.v187).val ≤ 255 ∧
   (w.v829 - (w.v3 + (64 : F))) = 0 ∧
-  (w.v184).val ≤ ((255 : F)).val ∧
-  (w.v185).val ≤ ((255 : F)).val ∧
-  (w.v186).val ≤ ((255 : F)).val ∧
-  (w.v187).val ≤ ((255 : F)).val ∧
+  (w.v184).val ≤ 255 ∧
+  (w.v185).val ≤ 255 ∧
+  (w.v186).val ≤ 255 ∧
+  (w.v187).val ≤ 255 ∧
   (w.v830 - (w.v3 + (4 : F))) = 0 ∧
   (w.v831 - (w.v3 + (8 : F))) = 0 ∧
   (w.v832 - (w.v3 + (12 : F))) = 0 ∧

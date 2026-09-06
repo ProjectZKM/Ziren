@@ -5,7 +5,7 @@
 import ZirenDet.Basic
 
 set_option maxRecDepth 4000000
-set_option maxHeartbeats 8000000
+set_option maxHeartbeats 40000000
 set_option linter.dupNamespace false
 
 namespace ZirenDet.Chips.ShiftLeftImm
@@ -152,35 +152,35 @@ def constraints_0 (w : W) : Prop :=
   (w.v28 * w.v34) = 0 ∧
   (w.v28 * w.v35) = 0 ∧
   (w.v28 * w.v36) = 0 ∧
-  (w.v8).val ≤ ((255 : F)).val ∧
-  (w.v9).val ≤ ((255 : F)).val ∧
-  (w.v10).val ≤ ((255 : F)).val ∧
-  (w.v11).val ≤ ((255 : F)).val ∧
-  (w.v12).val ≤ ((255 : F)).val ∧
-  (w.v13).val ≤ ((255 : F)).val ∧
-  (w.v14).val ≤ ((255 : F)).val
+  (w.v8).val ≤ 255 ∧
+  (w.v9).val ≤ 255 ∧
+  (w.v10).val ≤ 255 ∧
+  (w.v11).val ≤ 255 ∧
+  (w.v12).val ≤ 255 ∧
+  (w.v13).val ≤ 255 ∧
+  (w.v14).val ≤ 255
 
 def constraints_1 (w : W) : Prop :=
-  (w.v15).val ≤ ((255 : F)).val ∧
-  (w.v21).val ≤ ((65535 : F)).val ∧
-  (w.v22).val ≤ ((65535 : F)).val ∧
-  (w.v23).val ≤ ((511 : F)).val ∧
-  (w.v44).val ≤ ((65535 : F)).val ∧
-  ((((((((w.v23 * (65536 : F)) + w.v22) + (2 : F)) - w.v43) - (1 : F)) - w.v44) * (2130673921 : F))).val ≤ ((511 : F)).val ∧
-  (w.v39).val ≤ ((255 : F)).val ∧
-  (w.v40).val ≤ ((255 : F)).val ∧
-  (w.v41).val ≤ ((255 : F)).val ∧
-  (w.v42).val ≤ ((255 : F)).val ∧
-  (w.v38).val ≤ ((65535 : F)).val ∧
-  ((((((((w.v23 * (65536 : F)) + w.v22) + (3 : F)) - w.v37) - (1 : F)) - w.v38) * (2130673921 : F))).val ≤ ((511 : F)).val ∧
-  (w.v29).val ≤ ((255 : F)).val ∧
-  (w.v30).val ≤ ((255 : F)).val ∧
-  (w.v31).val ≤ ((255 : F)).val ∧
-  (w.v32).val ≤ ((255 : F)).val ∧
-  (w.v33).val ≤ ((255 : F)).val ∧
-  (w.v34).val ≤ ((255 : F)).val ∧
-  (w.v35).val ≤ ((255 : F)).val ∧
-  (w.v36).val ≤ ((255 : F)).val ∧
+  (w.v15).val ≤ 255 ∧
+  (w.v21).val ≤ 65535 ∧
+  (w.v22).val ≤ 65535 ∧
+  (w.v23).val ≤ 511 ∧
+  (w.v44).val ≤ 65535 ∧
+  ((((((((w.v23 * (65536 : F)) + w.v22) + (2 : F)) - w.v43) - (1 : F)) - w.v44) * ((65536 : F)⁻¹))).val ≤ 511 ∧
+  (w.v39).val ≤ 255 ∧
+  (w.v40).val ≤ 255 ∧
+  (w.v41).val ≤ 255 ∧
+  (w.v42).val ≤ 255 ∧
+  (w.v38).val ≤ 65535 ∧
+  ((((((((w.v23 * (65536 : F)) + w.v22) + (3 : F)) - w.v37) - (1 : F)) - w.v38) * ((65536 : F)⁻¹))).val ≤ 511 ∧
+  (w.v29).val ≤ 255 ∧
+  (w.v30).val ≤ 255 ∧
+  (w.v31).val ≤ 255 ∧
+  (w.v32).val ≤ 255 ∧
+  (w.v33).val ≤ 255 ∧
+  (w.v34).val ≤ 255 ∧
+  (w.v35).val ≤ 255 ∧
+  (w.v36).val ≤ 255 ∧
   (w.v324 - (((w.v23 * (65536 : F)) + w.v22) + (5 : F))) = 0 ∧
   (w.v325 - (w.v1 + (4 : F))) = 0 ∧
   (w.v326 - ((w.v23 * (65536 : F)) + w.v22)) = 0

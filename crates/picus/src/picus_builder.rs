@@ -509,9 +509,12 @@ impl<'a> Emitter<'a> {
             return;
         }
         assert_eq!(values.len(), 5, "syscall lookup must carry 5 values");
+        // `[shard, clk, syscall_id, arg1, arg2]`: all five identify the syscall.  The receiving
+        // chip gets shard/clk from the sender (they feed its global send), so they are ports
+        // like the rest.
         let port = if is_send { Port::Output } else { Port::Input };
         let dir = if is_send { "send" } else { "recv" };
-        self.bind_ports(port, &values[2..], &multiplicity, &format!("syscall_{dir}"));
+        self.bind_ports(port, values, &multiplicity, &format!("syscall_{dir}"));
     }
 
     /// `[shard, clk, result_lo, result_hi, arg1_lo, arg1_hi, arg2_lo, arg2_hi]`: the result
@@ -521,6 +524,7 @@ impl<'a> Emitter<'a> {
             return;
         }
         assert_eq!(values.len(), 8, "syscall result lookup must carry 8 values");
+        self.bind_ports(Port::Input, &values[0..2], &multiplicity, "syscall_result.at");
         self.bind_ports(Port::Output, &values[2..4], &multiplicity, "syscall_result.result");
         self.bind_ports(Port::Input, &values[4..8], &multiplicity, "syscall_result.arg");
         for half in &values[4..8] {

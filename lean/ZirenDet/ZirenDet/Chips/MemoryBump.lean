@@ -5,7 +5,7 @@
 import ZirenDet.Basic
 
 set_option maxRecDepth 4000000
-set_option maxHeartbeats 8000000
+set_option maxHeartbeats 40000000
 set_option linter.dupNamespace false
 
 namespace ZirenDet.Chips.MemoryBump
@@ -48,18 +48,18 @@ def constraints_0 (w : W) : Prop :=
   (w.v6 * (w.v10 - w.v4)) = 0 ∧
   (w.v9 * (w.v9 - (1 : F))) = 0 ∧
   ((((((1 : F) - w.v6) * w.v10) - ((w.v6 * w.v5) + (((1 : F) - w.v6) * w.v4))) - (1 : F)) - ((w.v7 + (w.v8 * (65536 : F))) + (w.v9 * (16777216 : F)))) = 0 ∧
-  (w.v10).val ≤ ((65535 : F)).val ∧
-  (w.v11).val < ((36 : F)).val ∧
-  (w.v7).val ≤ ((65535 : F)).val ∧
-  (w.v8).val ≤ ((255 : F)).val ∧
-  (w.v0).val ≤ ((255 : F)).val ∧
-  (w.v1).val ≤ ((255 : F)).val ∧
-  (w.v2).val ≤ ((255 : F)).val ∧
-  (w.v3).val ≤ ((255 : F)).val ∧
-  (w.v0).val ≤ ((255 : F)).val ∧
-  (w.v1).val ≤ ((255 : F)).val ∧
-  (w.v2).val ≤ ((255 : F)).val ∧
-  (w.v3).val ≤ ((255 : F)).val
+  (w.v10).val ≤ 65535 ∧
+  (w.v11).val < 36 ∧
+  (w.v7).val ≤ 65535 ∧
+  (w.v8).val ≤ 255 ∧
+  (w.v0).val ≤ 255 ∧
+  (w.v1).val ≤ 255 ∧
+  (w.v2).val ≤ 255 ∧
+  (w.v3).val ≤ 255 ∧
+  (w.v0).val ≤ 255 ∧
+  (w.v1).val ≤ 255 ∧
+  (w.v2).val ≤ 255 ∧
+  (w.v3).val ≤ 255
 
 def constraints (w : W) : Prop :=
   constraints_0 w
