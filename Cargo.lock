@@ -8069,6 +8069,7 @@ dependencies = [
  "clap",
  "dirs",
  "eyre",
+ "hex",
  "itertools 0.13.0",
  "lru",
  "num-bigint 0.4.6",
