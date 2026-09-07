@@ -16,7 +16,7 @@
 //!    | `Memory` (prev / current)   | prev record = inputs      | current record = outputs  |
 //!    | `State` (shard, clk, pc, …) | next state = outputs      | current state = inputs    |
 //!    | `Syscall`                   | outputs (the call)        | inputs (the callee)       |
-//!    | `SyscallResult`             | result = outputs, args = inputs (both directions)     |
+//!    | `SyscallResult`             | result = outputs, args = inputs | result = inputs, args = inputs |
 //!    | `Global`                    | outputs                   | inputs                    |
 //!    | chaining buses (`GlobalAccumulation`, `MemoryGlobal*Control`, `PrecompileChain`, …) | outputs | inputs |
 //!    | `Byte`                      | lowered to range / bit constraints or abstract calls  |
@@ -509,8 +509,8 @@ impl<'a> Emitter<'a> {
             return;
         }
         assert!(
-            values.len() == 5 || values.len() == 7,
-            "syscall lookup must carry 5 values (reduced args) or 7 (half-word args)"
+            values.len() == 5 || values.len() == 8,
+            "syscall lookup must carry 5 values (reduced args) or 8 (half-word args + is_linux)"
         );
         // `[shard, clk, syscall_id, arg1, arg2]` (or the args as half-words): all identify the
         // syscall.  The receiving
@@ -521,15 +521,24 @@ impl<'a> Emitter<'a> {
         self.bind_ports(port, values, &multiplicity, &format!("syscall_{dir}"));
     }
 
-    /// `[shard, clk, result_lo, result_hi, arg1_lo, arg1_hi, arg2_lo, arg2_hi]`: the result
-    /// halves are what the bridge determines, the argument halves are inputs on both sides.
-    fn handle_syscall_result(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+    /// `[shard, clk, result_lo, result_hi, arg1_lo, arg1_hi, arg2_lo, arg2_hi]`.  The result
+    /// originates at the instruction chip (the register value it writes back) and is relayed
+    /// through the core-shard syscall chip, the global bus and the precompile-shard syscall
+    /// chip to the Linux syscall chip, which checks it: a sender produces the result (output),
+    /// a receiver consumes it (input).  The argument halves are inputs on both sides.
+    fn handle_syscall_result(
+        &mut self,
+        multiplicity: PicusExpr,
+        values: &[PicusExpr],
+        is_send: bool,
+    ) {
         if matches!(multiplicity, PicusExpr::Const(0)) {
             return;
         }
         assert_eq!(values.len(), 8, "syscall result lookup must carry 8 values");
+        let result_port = if is_send { Port::Output } else { Port::Input };
         self.bind_ports(Port::Input, &values[0..2], &multiplicity, "syscall_result.at");
-        self.bind_ports(Port::Output, &values[2..4], &multiplicity, "syscall_result.result");
+        self.bind_ports(result_port, &values[2..4], &multiplicity, "syscall_result.result");
         self.bind_ports(Port::Input, &values[4..8], &multiplicity, "syscall_result.arg");
         for half in &values[4..8] {
             if !matches!(half, PicusExpr::Const(_)) {
@@ -560,7 +569,7 @@ impl<'a> Emitter<'a> {
                 }
             }
             LookupKind::Syscall => self.handle_syscall(m, v, is_send),
-            LookupKind::SyscallResult => self.handle_syscall_result(m, v),
+            LookupKind::SyscallResult => self.handle_syscall_result(m, v, is_send),
             LookupKind::Instruction => {
                 panic!(
                     "the Instruction bus no longer exists; chip {} still sends on it",

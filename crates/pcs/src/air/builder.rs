@@ -288,11 +288,12 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         );
     }
 
-    /// Sends a syscall with its two arguments as exact 16-bit half-words
-    /// `[shard, clk, syscall_id, arg1_lo, arg1_hi, arg2_lo, arg2_hi]` instead of the reduced
-    /// words.  The reduced word `lo + 65536 * hi` does not determine `(lo, hi)` because
-    /// `2^32 > p`; carrying the halves makes the receiving row's argument columns a function
-    /// of its inputs (the determinism theorem of the syscall chip closes on them).
+    /// Sends a syscall with its two arguments as exact 16-bit half-words and its Linux flag:
+    /// `[shard, clk, syscall_id, arg1_lo, arg1_hi, arg2_lo, arg2_hi, is_linux]` instead of the
+    /// reduced words.  The reduced word `lo + 65536 * hi` does not determine `(lo, hi)`
+    /// because `2^32 > p`, and the syscall chip's `is_linux` selector had no input pinning
+    /// it; carrying both makes the receiving row's columns a function of its inputs (the
+    /// determinism theorem of the syscall chip closes on them).
     #[allow(clippy::too_many_arguments)]
     fn send_syscall_halves(
         &mut self,
@@ -301,6 +302,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: [Self::Expr; 2],
         arg2: [Self::Expr; 2],
+        is_linux: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
         scope: LookupScope,
     ) {
@@ -308,7 +310,16 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         let [arg2_lo, arg2_hi] = arg2;
         self.send(
             AirLookup::new(
-                vec![shard.into(), clk.into(), syscall_id.into(), arg1_lo, arg1_hi, arg2_lo, arg2_hi],
+                vec![
+                    shard.into(),
+                    clk.into(),
+                    syscall_id.into(),
+                    arg1_lo,
+                    arg1_hi,
+                    arg2_lo,
+                    arg2_hi,
+                    is_linux.into(),
+                ],
                 multiplicity.into(),
                 LookupKind::Syscall,
             ),
@@ -325,6 +336,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: [Self::Expr; 2],
         arg2: [Self::Expr; 2],
+        is_linux: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
         scope: LookupScope,
     ) {
@@ -332,7 +344,16 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         let [arg2_lo, arg2_hi] = arg2;
         self.receive(
             AirLookup::new(
-                vec![shard.into(), clk.into(), syscall_id.into(), arg1_lo, arg1_hi, arg2_lo, arg2_hi],
+                vec![
+                    shard.into(),
+                    clk.into(),
+                    syscall_id.into(),
+                    arg1_lo,
+                    arg1_hi,
+                    arg2_lo,
+                    arg2_hi,
+                    is_linux.into(),
+                ],
                 multiplicity.into(),
                 LookupKind::Syscall,
             ),

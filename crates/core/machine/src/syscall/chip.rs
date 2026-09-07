@@ -380,6 +380,7 @@ where
                     local.syscall_id,
                     [local.arg1_lo.into(), local.arg1_hi.into()],
                     [local.arg2_lo.into(), local.arg2_hi.into()],
+                    local.is_linux,
                     local.is_real,
                     LookupScope::Local,
                 );

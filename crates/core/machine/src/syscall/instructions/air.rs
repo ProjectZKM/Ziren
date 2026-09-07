@@ -214,6 +214,7 @@ impl SyscallInstrsChip {
             syscall_id.clone(),
             AB::word_to_halves(local.frame.op_b_val()),
             AB::word_to_halves(local.frame.op_c_val()),
+            local.is_sys_linux,
             send_to_table,
             LookupScope::Local,
         );
