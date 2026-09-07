@@ -362,6 +362,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
+        // `is_complete` should be 1: the shrink stage consumes a fully reduced
+        // compress proof, and every completeness predicate of that proof is
+        // gated on this flag.  The circuit asserts it too (wrap_basefold.rs);
+        // this is the host mirror.
+        if public_values.is_complete != KoalaBear::ONE {
+            return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
+        }
+
         // Verify that the proof is for the Ziren vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if public_values.zkm_vk_digest != vkey_hash {
@@ -390,6 +398,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 "root public values are invalid",
             ));
         }
+        // `is_complete` should be 1: the wrap stage is terminal, so the proof
+        // it consumes must be the root of a fully reduced tree.  The circuit
+        // asserts it too (wrap_basefold.rs); this is the host mirror.
+        if *public_values.is_complete() != KoalaBear::ONE {
+            return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
+        }
+
         // Verify that the proof is for the Ziren vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if *public_values.zkm_vk_digest() != vkey_hash {

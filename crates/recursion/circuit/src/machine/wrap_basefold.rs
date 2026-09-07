@@ -611,6 +611,26 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // output digest can be set by kind (mirrors `verify_compress_basefold`'s
     // `PublicValuesOutputDigest` switch at compress_basefold.rs:879-889).
     let mut inner = public_values.inner;
+
+    // The proof being wrapped must be COMPLETE.
+    //
+    // `is_complete` is a witnessed field of the compose program and
+    // `assert_complete` there is multiplied by it (machine/complete.rs), so at
+    // `is_complete = 0` every completeness predicate is vacuous --- including
+    // `global_cumulative_sum == 0`, which is what closes cross-shard memory
+    // consistency for the whole execution.  The terminal stages are where the
+    // flag has to be pinned: shrink pins the compress proof it consumes, and
+    // the BN254 wrap pins the shrink proof it consumes.  Both reach this
+    // function, so one assertion covers both.
+    //
+    // Without it a prover can wrap a proof of an execution PREFIX, or of a
+    // shard range with arbitrary initial memory, and neither the host wrap
+    // verifier nor the on-chain Groth16 verifier can tell it from an honest
+    // proof.  (`verify_compressed` checks the flag on the host, but a host
+    // check is not on an adversary's path to a wrapped proof.)  SP1 asserts
+    // the same thing in its two terminal circuits, root.rs and wrap.rs.
+    builder.assert_felt_eq(inner.is_complete, C::F::ONE);
+
     match output_digest_kind {
         PublicValuesOutputDigest::Root => {
             // The BN254 wrap is the recursion-tree ROOT: its committed

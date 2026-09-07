@@ -94,6 +94,15 @@ impl<T> RootPublicValues<T> {
         &self.inner.committed_value_digest
     }
 
+    /// The completeness flag reflected from the proof this root wraps.
+    ///
+    /// Every predicate of `assert_complete` is gated on it, so a host verifier
+    /// that does not check it accepts a wrapped proof of an execution prefix.
+    #[inline]
+    pub const fn is_complete(&self) -> &T {
+        &self.inner.is_complete
+    }
+
     #[inline]
     pub const fn digest(&self) -> &[T; DIGEST_SIZE] {
         &self.inner.digest
