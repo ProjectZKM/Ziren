@@ -25,8 +25,22 @@ pub(crate) fn create_local_command(
     // 4. Remove the rustc configuration, otherwise in a build script it will attempt to compile the
     //    program with the toolchain of the normal build process, rather than the Ziren toolchain.
 
+    // The guest target `mipsel-zkm-zkvm-elf` exists only in the Ziren toolchain, so it has to be
+    // selected explicitly.  Inside a build script cargo exports `RUSTUP_TOOLCHAIN` and `RUSTC` for
+    // the toolchain compiling the HOST crate, and both take precedence over the default toolchain
+    // and over any `rust-toolchain` file here --- which is what step 4 above has always claimed to
+    // handle and never did.  The symptom is
+    //   error loading target specification: could not find specification for target
+    //   "mipsel-zkm-zkvm-elf"
+    // and it stayed hidden for as long as the build script never actually reran.
+    let toolchain = env::var("ZKM_GUEST_TOOLCHAIN").unwrap_or_else(|_| "zkm".to_string());
+
     command
         .current_dir(canonicalized_program_dir)
+        .env("RUSTUP_TOOLCHAIN", toolchain)
+        .env_remove("RUSTC")
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env("CARGO_ENCODED_RUSTFLAGS", get_rust_compiler_flags(args))
         .env("CARGO_TARGET_DIR", program_metadata.target_directory.join(HELPER_TARGET_SUBDIR))
         .args(get_program_build_args(args));

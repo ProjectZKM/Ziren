@@ -56,8 +56,11 @@ fn main() {
     let hello_elf = std::fs::read(HELLO_WORLD_ELF_PATH).unwrap_or_else(|e| {
         panic!("read {}: {}\n  build with: cd crates/test-artifacts/guests && cargo build --release --target mipsel-zkm-zkvm-elf -p hello-world", HELLO_WORLD_ELF_PATH, e)
     });
+    // The fibonacci guest reads its `n` from stdin, so it has to be supplied.
+    let mut fib_stdin = ZKMStdin::new();
+    fib_stdin.write(&10u32);
     let workloads: Vec<(&str, Vec<u8>, ZKMStdin)> = vec![
-        ("fibonacci", fib_elf, ZKMStdin::default()),
+        ("fibonacci", fib_elf, fib_stdin),
         ("hello-world", hello_elf, ZKMStdin::default()),
     ];
 

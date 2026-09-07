@@ -17,6 +17,7 @@ with them. Nothing below is optional before the change can be deployed.
 | `crates/verifier/bn254-vk/vk_root.bin` | the allowlist root is a function of that map, and is now a public input of the wrap circuit |
 | `crates/prover/scripts/artifacts/*.bin` | collected keys from earlier runs |
 | `crates/prover/proof-with-pis.bin` | fixture proof under the old hash |
+| `crates/prover/scripts/write_basefold_vk_map.rs` | hardcoded key hashes, including one for the fibonacci test ELF, which itself changed |
 | `crates/verifier/bn254-vk/*.bin` | the wrap circuit's constraint system changed: the recursion Poseidon2 chip is 14 columns wider |
 | the gnark Groth16 and PLONK circuit artifacts | same reason; they are built over the frozen shrink shape |
 | the GPU build | kernels carry the round count and the baked constants |

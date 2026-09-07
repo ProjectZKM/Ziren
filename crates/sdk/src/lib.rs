@@ -196,7 +196,7 @@ impl ProverClient {
     ///
     /// // Setup the inputs.
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write(&10usize);
+    /// stdin.write(&10u32);
     ///
     /// // Execute the program on the inputs.
     /// let (public_values, report) = client.execute(elf, &stdin).run().unwrap();
@@ -229,7 +229,7 @@ impl ProverClient {
     ///
     /// // Setup the inputs.
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write(&10usize);
+    /// stdin.write(&10u32);
     ///
     /// // Generate the proof.
     /// let proof = client.prove(&pk, stdin).run().unwrap();
@@ -249,7 +249,7 @@ impl ProverClient {
     /// let client = ProverClient::new();
     /// let (pk, vk) = client.setup(elf);
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write(&10usize);
+    /// stdin.write(&10u32);
     /// let proof = client.prove(&pk, stdin).run().unwrap();
     /// client.verify(&proof, &vk).unwrap();
     /// ```
@@ -281,7 +281,7 @@ impl ProverClient {
     /// let elf = test_artifacts::FIBONACCI_ELF;
     /// let client = ProverClient::new();
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write(&10usize);
+    /// stdin.write(&10u32);
     /// let (pk, vk) = client.setup(elf);
     /// ```
     pub fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
@@ -396,7 +396,7 @@ mod tests {
         let client = ProverClient::cpu();
         let elf = test_artifacts::FIBONACCI_ELF;
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
         let (_, _report) = client.execute(elf, &stdin).run().unwrap();
         // tracing::info!("gas = {}", report.estimate_gas());
     }
@@ -430,7 +430,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).run().unwrap();
@@ -450,7 +450,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).compressed().run().unwrap();
@@ -470,7 +470,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).plonk().run().unwrap();
@@ -503,7 +503,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, _vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         // Generate proof.
         let proof = client.prove(&pk, stdin).dvsnark().run().unwrap();
@@ -517,7 +517,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
         let proof = client.prove(&pk, stdin).plonk().run().unwrap();
         client.verify(&proof, &vk).unwrap();
     }

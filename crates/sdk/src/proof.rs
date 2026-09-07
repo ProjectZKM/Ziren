@@ -120,7 +120,7 @@ mod tests {
             proof: ZKMProof::Plonk(PlonkBn254Proof {
                 encoded_proof: "ab".to_string(),
                 plonk_vkey_hash: [0; 32],
-                public_inputs: ["".to_string(), "".to_string()],
+                public_inputs: ["".to_string(), "".to_string(), "".to_string()],
                 raw_proof: "".to_string(),
             }),
             public_values: ZKMPublicValues::new(),
@@ -136,7 +136,7 @@ mod tests {
             proof: ZKMProof::Groth16(Groth16Bn254Proof {
                 encoded_proof: "ab".to_string(),
                 groth16_vkey_hash: [0; 32],
-                public_inputs: ["".to_string(), "".to_string()],
+                public_inputs: ["".to_string(), "".to_string(), "".to_string()],
                 raw_proof: "".to_string(),
             }),
             public_values: ZKMPublicValues::new(),
@@ -152,7 +152,7 @@ mod tests {
             proof: ZKMProof::Plonk(PlonkBn254Proof {
                 encoded_proof: "".to_string(),
                 plonk_vkey_hash: [0; 32],
-                public_inputs: ["".to_string(), "".to_string()],
+                public_inputs: ["".to_string(), "".to_string(), "".to_string()],
                 raw_proof: "".to_string(),
             }),
             public_values: ZKMPublicValues::new(),
@@ -167,7 +167,7 @@ mod tests {
             proof: ZKMProof::Groth16(Groth16Bn254Proof {
                 encoded_proof: "".to_string(),
                 groth16_vkey_hash: [0; 32],
-                public_inputs: ["".to_string(), "".to_string()],
+                public_inputs: ["".to_string(), "".to_string(), "".to_string()],
                 raw_proof: "".to_string(),
             }),
             public_values: ZKMPublicValues::new(),

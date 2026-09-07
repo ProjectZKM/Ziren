@@ -3181,6 +3181,15 @@ pub mod tests {
 
         Ok(())
     }
+    /// The fibonacci test guest reads its `n` from standard input (as
+    /// `examples/fibonacci` does), so every caller has to supply one. Ten keeps
+    /// the cycle count the tests were tuned against.
+    fn fib_stdin(n: u32) -> ZKMStdin {
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&n);
+        stdin
+    }
+
 
     /// Tests an end-to-end workflow of proving a program across the entire proof generation
     /// pipeline.
@@ -3202,7 +3211,7 @@ pub mod tests {
         test_e2e_prover::<DefaultProverComponents>(
             &prover,
             elf,
-            ZKMStdin::default(),
+            fib_stdin(10),
             opts,
             Test::All,
         )
@@ -3247,7 +3256,7 @@ pub mod tests {
         test_e2e_prover::<DefaultProverComponents>(
             &prover,
             elf,
-            ZKMStdin::default(),
+            fib_stdin(10),
             opts,
             Test::Compress,
         )
@@ -3299,7 +3308,7 @@ pub mod tests {
         let result = test_e2e_prover::<DefaultProverComponents>(
             &prover,
             elf,
-            ZKMStdin::default(),
+            fib_stdin(10),
             opts,
             Test::Compress,
         );
@@ -3318,7 +3327,7 @@ pub mod tests {
         test_e2e_prover::<DefaultProverComponents>(
             &prover,
             elf,
-            ZKMStdin::default(),
+            fib_stdin(10),
             opts,
             Test::Wrap,
         )
@@ -3339,7 +3348,7 @@ pub mod tests {
         test_e2e_prover::<DefaultProverComponents>(
             &prover,
             elf,
-            ZKMStdin::default(),
+            fib_stdin(10),
             opts,
             Test::CircuitTest,
         )
@@ -3366,7 +3375,7 @@ pub mod tests {
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let (_, pk_d, program, vk) = prover.setup(elf);
 
-        let stdin = ZKMStdin::new();
+        let stdin = fib_stdin(10);
         let core = prover.prove_core(&pk_d, program, &stdin, opts, ZKMContext::default())?;
         let compressed = prover.compress(&vk, core, vec![], opts)?;
         let shrunk = prover.shrink(compressed, opts)?;
@@ -3520,7 +3529,7 @@ pub mod tests {
         test_e2e_prover::<DefaultProverComponents>(
             &prover,
             elf,
-            ZKMStdin::default(),
+            fib_stdin(10),
             opts,
             Test::Core,
         )
@@ -3547,7 +3556,7 @@ pub mod tests {
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let context = ZKMContext::default();
         let (_, pk_d, program, vk) = prover.setup(elf);
-        let core_proof = prover.prove_core(&pk_d, program, &ZKMStdin::default(), opts, context)?;
+        let core_proof = prover.prove_core(&pk_d, program, &fib_stdin(10), opts, context)?;
         let machine = prover.core_prover.machine();
         // FIX-off-safe: under FIX_CORE_SHAPES=false /
         // FIX_RECURSION_SHAPES=false the prover's `*_shape_config` are `None`,

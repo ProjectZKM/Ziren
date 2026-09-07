@@ -31,6 +31,22 @@ pub(crate) fn cargo_rerun_if_changed(metadata: &Metadata, program_dir: &Path) {
         }
     }
 
+    // When `program_dir` is a workspace ROOT rather than a single guest crate --- which is how
+    // `crates/test-artifacts/guests` is built --- the loop above finds no `src` there, and the
+    // members' sources go unwatched.  Editing a guest then leaves the old ELF in place and every
+    // test keeps running the previous program, silently.  Watch each member's sources too.
+    for package in &metadata.packages {
+        let manifest = Path::new(package.manifest_path.as_str());
+        if let Some(dir) = manifest.parent() {
+            for sub in ["src", "bin"] {
+                let path = dir.join(sub);
+                if path.exists() {
+                    println!("cargo::rerun-if-changed={}", path.display());
+                }
+            }
+        }
+    }
+
     // Re-run the build script if the workspace root's Cargo.lock changes. If the program is its own
     // workspace, this will be the program's Cargo.lock.
     println!("cargo::rerun-if-changed={}", metadata.workspace_root.join("Cargo.lock").as_str());

@@ -217,7 +217,7 @@ mod test {
         let client = ProverClient::cuda();
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         let proof = client.prove(&pk, stdin).run().unwrap();
         client.verify(&proof, &vk).unwrap();

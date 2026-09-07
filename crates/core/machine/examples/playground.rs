@@ -280,6 +280,12 @@ fn main() {
                 for (proof, vk) in stdin.proofs.iter() {
                     rt.write_proof(proof.clone(), vk.clone());
                 }
+            } else if name == "fibonacci" {
+                // The fibonacci guest reads its `n` from stdin, so it cannot run
+                // on an empty one.  Ten matches what the prover tests use.
+                let mut stdin = ZKMStdin::new();
+                stdin.write(&10u32);
+                rt.write_vecs(&stdin.buffer);
             }
             // Per-chip accumulators over every shard: real cells (height ×
             // raw interactions) versus paid cells (height × padded
