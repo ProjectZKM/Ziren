@@ -3,6 +3,7 @@
   Do not edit: regenerate after any change to the chip's AIR.
 -/
 import ZirenDet.Basic
+import ZirenDet.Safe
 
 set_option maxRecDepth 4000000
 set_option maxHeartbeats 40000000
@@ -242,7 +243,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end Branch_is_beq
 
@@ -485,7 +486,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end Branch_is_bgez
 
@@ -728,7 +729,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end Branch_is_bgtz
 
@@ -971,7 +972,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end Branch_is_blez
 
@@ -1214,7 +1215,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end Branch_is_bltz
 
@@ -1448,7 +1449,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end Branch_is_bne
 
@@ -1639,7 +1640,7 @@ theorem postconditions (w : W) (hw : constraints w) :
     (w.v46 * (w.v46 - (1 : F))) = 0 ∧
     (w.v47 * (w.v47 - (1 : F))) = 0 ∧
     ((((((w.v42 + w.v43) + w.v44) + w.v45) + w.v46) + w.v47)).val < 2 := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end top
 

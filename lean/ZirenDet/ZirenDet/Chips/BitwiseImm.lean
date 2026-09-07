@@ -3,6 +3,7 @@
   Do not edit: regenerate after any change to the chip's AIR.
 -/
 import ZirenDet.Basic
+import ZirenDet.Safe
 
 set_option maxRecDepth 4000000
 set_option maxHeartbeats 40000000
@@ -182,7 +183,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0]
+  picus_safe (picus_det [constraints_0])
 
 end BitwiseImm_is_and
 
@@ -329,7 +330,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0]
+  picus_safe (picus_det [constraints_0])
 
 end BitwiseImm_is_or
 
@@ -476,7 +477,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0]
+  picus_safe (picus_det [constraints_0])
 
 end BitwiseImm_is_xor
 
@@ -545,7 +546,7 @@ theorem postconditions (w : W) (hw : constraints w) :
     (w.v4 * (w.v4 - (1 : F))) = 0 ∧
     (w.v5 * (w.v5 - (1 : F))) = 0 ∧
     (((w.v3 + w.v4) + w.v5)).val < 2 := by
-  picus_det [constraints_0]
+  picus_safe (picus_det [constraints_0])
 
 end top
 

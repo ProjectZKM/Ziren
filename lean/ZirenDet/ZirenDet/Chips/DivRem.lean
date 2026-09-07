@@ -3,6 +3,7 @@
   Do not edit: regenerate after any change to the chip's AIR.
 -/
 import ZirenDet.Basic
+import ZirenDet.Safe
 
 set_option maxRecDepth 4000000
 set_option maxHeartbeats 40000000
@@ -3245,7 +3246,7 @@ theorem postconditions (w : W) (hw : constraints w) :
     (w.v88 * (w.v88 - (1 : F))) = 0 ∧
     (w.v89 * (w.v89 - (1 : F))) = 0 ∧
     ((((w.v86 + w.v87) + w.v88) + w.v89)).val < 2 := by
-  picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4])
 
 end top
 

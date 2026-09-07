@@ -3,6 +3,7 @@
   Do not edit: regenerate after any change to the chip's AIR.
 -/
 import ZirenDet.Basic
+import ZirenDet.Safe
 
 set_option maxRecDepth 4000000
 set_option maxHeartbeats 40000000

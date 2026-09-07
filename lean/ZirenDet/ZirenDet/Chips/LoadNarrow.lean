@@ -3,6 +3,7 @@
   Do not edit: regenerate after any change to the chip's AIR.
 -/
 import ZirenDet.Basic
+import ZirenDet.Safe
 
 set_option maxRecDepth 4000000
 set_option maxHeartbeats 40000000
@@ -270,7 +271,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end LoadNarrow_is_lb
 
@@ -517,7 +518,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end LoadNarrow_is_lbu
 
@@ -771,7 +772,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end LoadNarrow_is_lh
 
@@ -1019,7 +1020,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end LoadNarrow_is_lhu
 
@@ -1206,7 +1207,7 @@ theorem postconditions (w : W) (hw : constraints w) :
     (w.v49 * (w.v49 - (1 : F))) = 0 ∧
     (w.v50 * (w.v50 - (1 : F))) = 0 ∧
     ((((w.v47 + w.v48) + w.v49) + w.v50)).val < 2 := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end top
 

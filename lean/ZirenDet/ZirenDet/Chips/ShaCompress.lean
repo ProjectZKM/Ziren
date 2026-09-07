@@ -3,6 +3,7 @@
   Do not edit: regenerate after any change to the chip's AIR.
 -/
 import ZirenDet.Basic
+import ZirenDet.Safe
 
 set_option maxRecDepth 4000000
 set_option maxHeartbeats 40000000
@@ -1100,7 +1101,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8, constraints_9, constraints_10]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8, constraints_9, constraints_10])
 
 end ShaCompress_is_compression
 
@@ -1821,7 +1822,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7])
 
 end ShaCompress_is_finalize
 
@@ -2569,7 +2570,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8])
 
 end ShaCompress_is_initialize
 
@@ -3515,7 +3516,7 @@ theorem postconditions (w : W) (hw : constraints w) :
     (w.v247 * (w.v247 - (1 : F))) = 0 ∧
     (w.v248 * (w.v248 - (1 : F))) = 0 ∧
     (((w.v246 + w.v247) + w.v248)).val < 2 := by
-  picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8, constraints_9]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8, constraints_9])
 
 end top
 

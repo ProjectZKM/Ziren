@@ -3,6 +3,7 @@
   Do not edit: regenerate after any change to the chip's AIR.
 -/
 import ZirenDet.Basic
+import ZirenDet.Safe
 
 set_option maxRecDepth 4000000
 set_option maxHeartbeats 40000000
@@ -1410,7 +1411,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8, constraints_9, constraints_10, constraints_11]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8, constraints_9, constraints_10, constraints_11])
 
 end Bn254FpOpAssign_is_add
 
@@ -2812,7 +2813,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8, constraints_9, constraints_10, constraints_11]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4, constraints_5, constraints_6, constraints_7, constraints_8, constraints_9, constraints_10, constraints_11])
 
 end Bn254FpOpAssign_is_mul
 
@@ -3771,7 +3772,7 @@ theorem postconditions (w : W) (hw : constraints w) :
     (w.v3 * (w.v3 - (1 : F))) = 0 ∧
     (w.v5 * (w.v5 - (1 : F))) = 0 ∧
     ((w.v3 + w.v5)).val < 2 := by
-  picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2, constraints_3, constraints_4])
 
 end top
 

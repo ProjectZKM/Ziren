@@ -3,6 +3,7 @@
   Do not edit: regenerate after any change to the chip's AIR.
 -/
 import ZirenDet.Basic
+import ZirenDet.Safe
 
 set_option maxRecDepth 4000000
 set_option maxHeartbeats 40000000
@@ -337,7 +338,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1, constraints_2]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2])
 
 end Mul_is_mul
 
@@ -666,7 +667,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1, constraints_2]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2])
 
 end Mul_is_mult
 
@@ -995,7 +996,7 @@ theorem deterministic
     (w w' : W) (hw : constraints w) (hw' : constraints w')
     (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
     outputs w = outputs w' := by
-  picus_det [constraints_0, constraints_1, constraints_2]
+  picus_safe (picus_det [constraints_0, constraints_1, constraints_2])
 
 end Mul_is_multu
 
@@ -1201,7 +1202,7 @@ theorem postconditions (w : W) (hw : constraints w) :
     (w.v27 * (w.v27 - (1 : F))) = 0 ∧
     (w.v28 * (w.v28 - (1 : F))) = 0 ∧
     (((w.v26 + w.v27) + w.v28)).val < 2 := by
-  picus_det [constraints_0, constraints_1]
+  picus_safe (picus_det [constraints_0, constraints_1])
 
 end top
 
