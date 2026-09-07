@@ -567,7 +567,17 @@ pub fn verify_deferred_basefold<C, SC, A>(
     deferred_public_values.deferred_proofs_digest = deferred_proofs_digest;
     deferred_public_values.exit_code = builder.eval(C::F::ZERO);
     deferred_public_values.end_reconstruct_deferred_digest = reconstruct_deferred_digest;
-    deferred_public_values.is_complete = is_complete;
+    // A deferred node is NEVER a complete execution proof: it absorbs
+    // externally supplied proofs into the deferred-digest chain and asserts
+    // nothing about the execution's own boundary, so `assert_complete` is not
+    // run on its output.  If it could emit `is_complete = 1`, the flag the
+    // terminal stages now pin (wrap_basefold.rs) would be satisfiable by a
+    // proof whose completeness predicates were never enforced.  Pin it to zero
+    // and require the witness to agree; the honest prover already passes false
+    // (`ZKMProver::get_recursion_deferred_inputs_basefold`), so this is a no-op
+    // on real proofs.  SP1 does the same in its deferred program.
+    builder.assert_felt_eq(is_complete, C::F::ZERO);
+    deferred_public_values.is_complete = builder.eval(C::F::ZERO);
     deferred_public_values.contains_execution_shard = builder.eval(C::F::ZERO);
     deferred_public_values.global_cumulative_sum =
         SepticDigest(SepticCurve::convert(SepticDigest::<C::F>::zero().0, |value| {
