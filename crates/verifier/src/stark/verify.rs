@@ -29,6 +29,11 @@ use super::{HashableKey, InnerSC, ZKMVerifyingKey};
 const COMPRESS_DEGREE: usize = 3;
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 
+/// Height of the recursion vk merkle tree.  Must equal `zkm_prover::VK_MERKLE_TREE_HEIGHT`
+/// (the verifier does not depend on the prover crate); the enumerated recursion programs
+/// bake this height in, so it only changes together with a vk_map regeneration.
+pub const VK_MERKLE_TREE_HEIGHT: usize = 12;
+
 pub static VK_MAP: Lazy<&'static [u8]> = Lazy::new(|| {
     #[cfg(feature = "dummy-vk-map")]
     {
@@ -47,8 +52,15 @@ pub(crate) fn verify_stark_compressed_proof(
 ) -> Result<(), MachineVerificationError<InnerSC>> {
     let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
         bincode::deserialize(&VK_MAP).unwrap();
-    let (recursion_vk_root, _merkle_tree) =
-        MerkleTree::<KoalaBear, InnerSC>::commit(allowed_vk_map.keys().copied().collect());
+    // The prover commits the key set padded with the all-zero digest to the FIXED capacity
+    // `2^VK_MERKLE_TREE_HEIGHT` (the height baked into the recursion programs), so the root in
+    // the proof's public values is the root of the padded tree.  Committing the bare key list
+    // here made every proof fail with `vk_root mismatch` whenever the map was not exactly a
+    // power of two.
+    let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> = allowed_vk_map.keys().copied().collect();
+    assert!(leaves.len() <= (1 << VK_MERKLE_TREE_HEIGHT), "vk_map exceeds the fixed merkle capacity");
+    leaves.resize(1 << VK_MERKLE_TREE_HEIGHT, [KoalaBear::ZERO; DIGEST_SIZE]);
+    let (recursion_vk_root, _merkle_tree) = MerkleTree::<KoalaBear, InnerSC>::commit(leaves);
 
     let compress_machine = CompressAir::compress_machine(InnerSC::default());
 
