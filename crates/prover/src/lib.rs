@@ -3345,6 +3345,39 @@ pub mod tests {
         )
     }
 
+    /// GROTH16-ONLY CIRCUIT GATE.
+    ///
+    /// [`test_e2e_circuit_fibonacci`] runs the PLONK test engine first, and that
+    /// needs a KZG SRS sized to the outer circuit (2^26 for this workload); on a
+    /// host without the headroom the process is killed there, before either
+    /// circuit is actually checked.  Groth16's test engine needs no SRS, so this
+    /// gate reaches the satisfiability check on machines the PLONK one cannot.
+    ///
+    /// It is the gate for anything that changes the outer circuit's shape --- a
+    /// new public input, a new constraint opcode --- because it is the only cheap
+    /// test that both emits the constraint stream and solves it.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_circuit_groth16_only() -> Result<()> {
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+
+        let stdin = ZKMStdin::new();
+        let core = prover.prove_core(&pk_d, program, &stdin, opts, ZKMContext::default())?;
+        let compressed = prover.compress(&vk, core, vec![], opts)?;
+        let shrunk = prover.shrink(compressed, opts)?;
+        let wrapped = prover.wrap_bn254(shrunk, opts)?;
+
+        let (constraints, witness) = build_constraints_and_witness(&wrapped.vk, &wrapped.proof);
+        Groth16Bn254Prover::test(constraints, witness);
+        tracing::info!("Circuit GROTH16 test succeeded");
+        Ok(())
+    }
+
     /// VALUE-INDEPENDENCE GATE: build the gnark outer circuit (R1CS
     /// constraints) from wrap proof A, then SOLVE it with the witness built
     /// from a DIFFERENT fresh wrap proof B.  If the outer lift BAKED proof-A's
