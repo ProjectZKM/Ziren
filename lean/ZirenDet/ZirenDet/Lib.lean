@@ -955,6 +955,15 @@ def bitSplitOnce (exclude : Array Name) : TacticM (Option Name) := do
 /-- Global cap on bit splits per `picus_solve` call. -/
 initialize splitCounter : IO.Ref Nat ← IO.mkRef 0
 
+/-- Start time of the current `picus_solve` call (ms) and its wall-clock budget. -/
+initialize solveStart : IO.Ref Nat ← IO.mkRef 0
+
+def solveBudgetMs : Nat := 600000
+
+def overBudget : IO Bool := do
+  let t0 ← solveStart.get
+  return (← IO.monoMsNow) - t0 > solveBudgetMs
+
 /-- The solve loop on one goal: propagate pairs and constants (re-running the slack
 elimination), and when stuck split one shared bit; `budget` bounds the split depth. -/
 partial def solveLoop (budget : Nat) (exclude : Array Name) : TacticM Unit := do
@@ -962,6 +971,7 @@ partial def solveLoop (budget : Nat) (exclude : Array Name) : TacticM Unit := do
   let on := (← IO.getEnv "PICUS_TIMING").isSome
   while fuel > 0 do
     fuel := fuel - 1
+    if ← overBudget then break
     let t0 ← IO.monoMsNow
     let p0 ← try slackStep catch _ => pure false
     let p1 ← try propStep catch _ => pure false
@@ -972,6 +982,7 @@ partial def solveLoop (budget : Nat) (exclude : Array Name) : TacticM Unit := do
     else break
   if budget = 0 then return
   if (← splitCounter.get) ≥ 300 then return
+  if ← overBudget then return
   let did ← try bitSplitOnce exclude catch _ => pure none
   match did with
   | none => return
@@ -990,6 +1001,7 @@ partial def solveLoop (budget : Nat) (exclude : Array Name) : TacticM Unit := do
 elab "picus_solve" : tactic => do
   dbgLog "picus solve: start"
   splitCounter.set 0
+  solveStart.set (← IO.monoMsNow)
   let gs ← getGoals
   let mut out := #[]
   for g in gs do
