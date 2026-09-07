@@ -255,13 +255,16 @@ where SP1 claims nothing.
 **Tier 0 — fix before writing any proof.** A proof of a system carrying these would be a proof
 of a different system.
 
-1. Assert completeness at the terminal stages, in the shrink and wrap circuits and in the host
-   shrink and wrap verifiers. Until then every completeness predicate, including the one that
-   closes cross-shard memory, is vacuous on the adversary's path.
+1. ~~Assert completeness at the terminal stages.~~ **Done.** The assertion lives in
+   `verify_wrap_basefold_core`, the one function both shrink and wrap reach, with host mirrors
+   in `verify_shrink` and `verify_wrap_bn254`.
 2. Expose the recursion key root as a public input of the wrap circuit and check it in the
    Solidity and Rust verifiers. Consider adding the exit code at the same time, as SP1 does.
-3. Settle the Poseidon2 round count. Thirteen partial rounds at S-box degree 3 wants a
-   justification or a change; every hash assumption in the accounting rests on it.
+   **Still open.**
+3. ~~Settle the Poseidon2 round count.~~ **Done.** Changed from 13 partial rounds to 20 in all
+   four sites in this repo and in the GPU prover's Rust constant, kernel macro and baked
+   constant arrays. This changes every verifying key, so the key map, the gnark circuit
+   artifacts and the GPU build all have to be regenerated before it can be deployed.
 
 **Tier 1 — the cross-shard digest**, the weakest link and the biggest departure from SP1.
 

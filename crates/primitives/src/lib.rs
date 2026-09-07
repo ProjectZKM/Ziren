@@ -1106,7 +1106,18 @@ lazy_static! {
 
 pub fn poseidon2_init() -> Poseidon2KoalaBear<16> {
     const ROUNDS_F: usize = 8;
-    const ROUNDS_P: usize = 13;
+    // KoalaBear's S-box degree is 3, where BabyBear's is 7, and a lower degree
+    // needs MORE partial rounds for the same margin.  Plonky3's own
+    // `poseidon2_round_numbers_128` gives, for a 31-bit prime at width 16,
+    // (8, 20) at d = 3 and (8, 13) at d = 7 --- so 13 was the BabyBear number
+    // applied to a KoalaBear permutation, and 20 is the right one.  The
+    // `RC_16_30` table has 30 rows, so 8 external + 20 internal = 28 still fits.
+    //
+    // This value must stay equal to `kb31_poseidon2::my_perm`'s, to the two
+    // `NUM_INTERNAL_ROUNDS` constants (core machine and recursion chip), and to
+    // the GPU prover's `ROUNDS_P` / `P2_INT_ROUNDS`, or the AIRs prove a
+    // different permutation than the transcript and the Merkle trees use.
+    const ROUNDS_P: usize = 20;
     let mut round_constants = RC_16_30.to_vec();
     let internal_start = ROUNDS_F / 2;
     let internal_end = (ROUNDS_F / 2) + ROUNDS_P;

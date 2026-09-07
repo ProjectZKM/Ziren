@@ -17,7 +17,12 @@ pub const WIDTH: usize = 16;
 pub const RATE: usize = WIDTH / 2;
 
 pub const NUM_EXTERNAL_ROUNDS: usize = 8;
-pub const NUM_INTERNAL_ROUNDS: usize = 13;
+/// See `zkm_primitives::poseidon2_init`: the KoalaBear width-16 partial-round
+/// count is 20, not BabyBear's 13.  Must stay equal to the host permutation's
+/// `ROUNDS_P`, to the core machine's `NUM_INTERNAL_ROUNDS`, and to the GPU
+/// kernel's, or the recursion chip proves a different hash than the one the
+/// transcript and the Merkle commitments use.
+pub const NUM_INTERNAL_ROUNDS: usize = 20;
 pub const NUM_ROUNDS: usize = NUM_EXTERNAL_ROUNDS + NUM_INTERNAL_ROUNDS;
 
 /// A chip that implements addition for the opcode Poseidon2Wide.

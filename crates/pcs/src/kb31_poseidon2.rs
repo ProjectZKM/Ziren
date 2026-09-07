@@ -66,7 +66,9 @@ pub mod koala_bear_poseidon2 {
     #[must_use]
     pub fn my_perm() -> Perm {
         const ROUNDS_F: usize = 8;
-        const ROUNDS_P: usize = 13;
+        // See `zkm_primitives::poseidon2_init`: 20 is the KoalaBear width-16
+        // partial-round count; 13 was the BabyBear parameter.
+        const ROUNDS_P: usize = 20;
         let mut round_constants = RC_16_30.to_vec();
         let internal_start = ROUNDS_F / 2;
         let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
