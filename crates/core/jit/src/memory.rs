@@ -6,12 +6,24 @@
 //! (see [`crate::shm`]).
 
 use std::ops::{Deref, DerefMut};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, RawFd};
 
 /// JIT-side memory backing.  Implementations expose a contiguous byte
 /// region accessible by the JIT'd code via `memory_ptr` (in
 /// [`crate::JitContext`]).
+///
+/// On unix the backing also exposes its file descriptor (`AsRawFd`) so the
+/// fork-based isolation can share it; other targets (wasm32 verifiers pull
+/// this crate in through the executor) have no descriptors and no JIT.
+#[cfg(unix)]
 pub trait JitMemory: Sized + Deref<Target = [u8]> + DerefMut + AsRawFd {
+    /// Allocate a new memory region of the given size.
+    fn new(memory_size: usize) -> Self;
+}
+
+#[cfg(not(unix))]
+pub trait JitMemory: Sized + Deref<Target = [u8]> + DerefMut {
     /// Allocate a new memory region of the given size.
     fn new(memory_size: usize) -> Self;
 }

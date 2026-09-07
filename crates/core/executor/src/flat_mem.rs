@@ -58,8 +58,13 @@ impl FlatEntry {
 /// Entries the array holds: every word address the paged table can address.
 /// `PagedMemory` indexes `MAX_MEMORY / 4 / PAGE_LEN + 1` pages of `PAGE_LEN`
 /// words; anything beyond panics there and panics here.
+#[cfg(target_os = "linux")]
 const PAGE_LEN: usize = 1 << 14;
+#[cfg(target_os = "linux")]
 const NUM_ENTRIES: usize = (MAX_MEMORY / 4 / PAGE_LEN + 1) * PAGE_LEN;
+// Only meaningful with the mmap-backed implementation below; on a 32-bit target (wasm32
+// verifiers) the product does not even fit a `usize`.
+#[cfg(target_os = "linux")]
 const BYTE_LEN: usize = NUM_ENTRIES * std::mem::size_of::<FlatEntry>();
 
 /// The flat memory. See the module docs.
