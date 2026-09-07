@@ -93,29 +93,17 @@ Options: `--assume-selectors-deterministic`, `--shrcarry-summary abstract|precis
 
 ## Lean
 
-`crates/fv/lean4` is a Lake project pinned to Mathlib `v4.33.1`.  For every module `M` the
-generated file contains a witness structure `M.W`, `M.constraints`, `M.inputs`, `M.outputs`,
-`M.assumed`, the relation `M.rel`, and
+`--format lean` writes into [`crates/fv/lean4`](../lean4), a Lake project pinned to Mathlib
+`v4.33.1`. For every module `M` the generated file contains a witness structure `M.W`,
+`M.constraints`, `M.inputs`, `M.outputs`, `M.assumed`, the relation `M.rel`, and a theorem
+`M.deterministic` saying that two satisfying rows agreeing on their inputs agree on their
+outputs. Determinism of the abstract byte-table helpers enters as a hypothesis, never an
+axiom, and the closing tactic leaves a `sorry` when it cannot finish, so files always
+elaborate and open obligations are the `declaration uses 'sorry'` warnings.
 
-```lean
-theorem M.deterministic (h_Aux : ∀ i o o', Aux.rel i o → Aux.rel i o' → o = o') …
-    (w w' : W) (hw : constraints w) (hw' : constraints w')
-    (hin : inputs w = inputs w') (hassume : assumed w = assumed w') :
-    outputs w = outputs w'
-```
-
-Abstract helper modules (byte-table operations) have an `opaque rel`; their determinism is a
-hypothesis of the callers, never an axiom.  The closing tactic `picus_det` tries the cheap
-closers and otherwise leaves `sorry`, so files always elaborate and the open obligations are
-the `declaration uses 'sorry'` warnings.
-
-Build on the GPU box (never on the dev host):
-
-```bash
-rsync -a --exclude .lake lean/ZirenDet/ ant-5090-2:/mnt_zkm/stephen/lean/ZirenDet/
-ssh ant-5090-2 'export ELAN_HOME=/mnt_zkm/stephen/.elan PATH=/mnt_zkm/stephen/.elan/bin:$PATH \
-  XDG_CACHE_HOME=/mnt_zkm/stephen/.cache; cd /mnt_zkm/stephen/lean/ZirenDet && lake build'
-```
+That project's [README](../lean4/README.md) covers the theorem shape, the proof automation,
+how to build it on the GPU box, and how to read the open obligations. Builds never run on the
+dev host.
 
 ## Adding a chip
 
