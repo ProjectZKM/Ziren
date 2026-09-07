@@ -178,45 +178,53 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
 /// Env-gated (`ZIREN_WHIR_OPEN_TIMING=1`) section timers for the stacked
 /// open — process-global sums, dumped every 32 opens.  Diagnostic only.
 mod open_timing {
-    use core::sync::atomic::{AtomicU64, Ordering};
-    pub static ENGINE: AtomicU64 = AtomicU64::new(0);
-    pub static FOLDS: AtomicU64 = AtomicU64::new(0);
-    pub static COMMITS: AtomicU64 = AtomicU64::new(0);
-    pub static OOD: AtomicU64 = AtomicU64::new(0);
-    pub static QUERIES: AtomicU64 = AtomicU64::new(0);
-    pub static CONSTRAINTS: AtomicU64 = AtomicU64::new(0);
-    pub static FINAL: AtomicU64 = AtomicU64::new(0);
+    // Backing storage uses `AtomicUsize`, not `AtomicU64`, so this file
+    // compiles for the guest target (mipsel-zkm-zkvm-elf is 32-bit and has
+    // no `target_has_atomic = "64"`).  A guest that verifies a proof of this
+    // system inside the machine links this crate, so the module has to
+    // type-check there even though the timers never run: they are gated on
+    // an environment variable the guest has no way to set.  Nanosecond sums
+    // still fit: `usize::MAX` nanoseconds is 584 years on a 64-bit host, and
+    // on a 32-bit target the counters are inert.
+    use core::sync::atomic::{AtomicUsize, Ordering};
+    pub static ENGINE: AtomicUsize = AtomicUsize::new(0);
+    pub static FOLDS: AtomicUsize = AtomicUsize::new(0);
+    pub static COMMITS: AtomicUsize = AtomicUsize::new(0);
+    pub static OOD: AtomicUsize = AtomicUsize::new(0);
+    pub static QUERIES: AtomicUsize = AtomicUsize::new(0);
+    pub static CONSTRAINTS: AtomicUsize = AtomicUsize::new(0);
+    pub static FINAL: AtomicUsize = AtomicUsize::new(0);
     // Sub-sections (NESTED inside QUERIES / FINAL — they double-count
     // against their umbrella; umbrella minus subs = residual assembly).
-    pub static GRINDQ: AtomicU64 = AtomicU64::new(0);
-    pub static QR0: AtomicU64 = AtomicU64::new(0);
-    pub static QLATER: AtomicU64 = AtomicU64::new(0);
-    pub static FGRIND: AtomicU64 = AtomicU64::new(0);
-    pub static FOPEN: AtomicU64 = AtomicU64::new(0);
-    pub static CENGINE: AtomicU64 = AtomicU64::new(0);
-    pub static CHOST: AtomicU64 = AtomicU64::new(0);
+    pub static GRINDQ: AtomicUsize = AtomicUsize::new(0);
+    pub static QR0: AtomicUsize = AtomicUsize::new(0);
+    pub static QLATER: AtomicUsize = AtomicUsize::new(0);
+    pub static FGRIND: AtomicUsize = AtomicUsize::new(0);
+    pub static FOPEN: AtomicUsize = AtomicUsize::new(0);
+    pub static CENGINE: AtomicUsize = AtomicUsize::new(0);
+    pub static CHOST: AtomicUsize = AtomicUsize::new(0);
     // The PROLOGUE — everything before the round loop, previously untimed.
     // The seven umbrellas above summed to 18.0 s against a census-measured
     // 28.4 s of host time in `basefold_open`, so the largest single slice of
     // the open was the part no timer covered.
-    pub static PEVALS: AtomicU64 = AtomicU64::new(0);
-    pub static PINIT: AtomicU64 = AtomicU64::new(0);
-    pub static OPENS: AtomicU64 = AtomicU64::new(0);
+    pub static PEVALS: AtomicUsize = AtomicUsize::new(0);
+    pub static PINIT: AtomicUsize = AtomicUsize::new(0);
+    pub static OPENS: AtomicUsize = AtomicUsize::new(0);
 
     pub fn enabled() -> bool {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *ON.get_or_init(|| std::env::var("ZIREN_WHIR_OPEN_TIMING").is_ok())
     }
 
-    pub struct Timer(std::time::Instant, &'static AtomicU64);
+    pub struct Timer(std::time::Instant, &'static AtomicUsize);
     impl Timer {
-        pub fn new(slot: &'static AtomicU64) -> Option<Self> {
+        pub fn new(slot: &'static AtomicUsize) -> Option<Self> {
             enabled().then(|| Timer(std::time::Instant::now(), slot))
         }
     }
     impl Drop for Timer {
         fn drop(&mut self) {
-            self.1.fetch_add(self.0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            self.1.fetch_add(self.0.elapsed().as_nanos() as usize, Ordering::Relaxed);
         }
     }
 
@@ -226,7 +234,7 @@ mod open_timing {
         }
         let n = OPENS.fetch_add(1, Ordering::Relaxed) + 1;
         if n % 32 == 0 {
-            let g = |a: &AtomicU64| a.load(Ordering::Relaxed) as f64 / 1e9;
+            let g = |a: &AtomicUsize| a.load(Ordering::Relaxed) as f64 / 1e9;
             eprintln!(
                 "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s | qgrind={:.2}s qr0={:.2}s qlater={:.2}s fgrind={:.2}s fopen={:.2}s cengine={:.2}s chost={:.2}s",
                 g(&ENGINE), g(&FOLDS), g(&COMMITS), g(&OOD), g(&QUERIES), g(&CONSTRAINTS), g(&FINAL),
