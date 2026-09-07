@@ -14,11 +14,23 @@ namespace ZirenDet.Picus
 
 /-- Run `t`; on any exception (including runtime ones such as a heartbeat timeout), restore the
 state, warn, and admit the goals that were open when `t` started. -/
+/- Heartbeat budget (in thousands, like `maxHeartbeats`) for one `picus_safe` block.  The
+generated files set `maxHeartbeats 0`; the budget lives here so that the overrun is raised
+inside the block, where it is caught, and not in the elaborator's post-processing of the proof
+term, where it is not. -/
+register_option picus.safeHeartbeats : Nat := {
+  defValue := 30000
+  descr := "heartbeat budget (in thousands) of one picus_safe block"
+}
+
 elab "picus_safe " t:tactic : tactic => do
   let s ← saveState
   let gs ← getGoals
+  let kilo := picus.safeHeartbeats.get (← getOptions)
   let ok ← tryCatchRuntimeEx
-    (do evalTactic t; pure true)
+    (Core.withCurrHeartbeats <|
+      withTheReader Core.Context (fun ctx => { ctx with maxHeartbeats := kilo * 1000 }) do
+        evalTactic t; pure true)
     (fun e => do
       Core.withCurrHeartbeats do
         logWarning m!"picus_safe: automation aborted ({e.toMessageData}); goal admitted"
