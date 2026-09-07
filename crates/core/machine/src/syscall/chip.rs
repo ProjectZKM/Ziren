@@ -371,12 +371,15 @@ where
 
         match self.shard_kind {
             SyscallShardKind::Core => {
-                builder.receive_syscall(
+                // Received as half-words from the instruction chip, so the four argument
+                // columns are inputs of this row rather than a prover-chosen decomposition of
+                // the reduced word.
+                builder.receive_syscall_halves(
                     local.shard,
                     local.clk,
                     local.syscall_id,
-                    arg1.clone(),
-                    arg2.clone(),
+                    [local.arg1_lo.into(), local.arg1_hi.into()],
+                    [local.arg2_lo.into(), local.arg2_hi.into()],
                     local.is_real,
                     LookupScope::Local,
                 );

@@ -288,6 +288,58 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         );
     }
 
+    /// Sends a syscall with its two arguments as exact 16-bit half-words
+    /// `[shard, clk, syscall_id, arg1_lo, arg1_hi, arg2_lo, arg2_hi]` instead of the reduced
+    /// words.  The reduced word `lo + 65536 * hi` does not determine `(lo, hi)` because
+    /// `2^32 > p`; carrying the halves makes the receiving row's argument columns a function
+    /// of its inputs (the determinism theorem of the syscall chip closes on them).
+    #[allow(clippy::too_many_arguments)]
+    fn send_syscall_halves(
+        &mut self,
+        shard: impl Into<Self::Expr> + Clone,
+        clk: impl Into<Self::Expr> + Clone,
+        syscall_id: impl Into<Self::Expr> + Clone,
+        arg1: [Self::Expr; 2],
+        arg2: [Self::Expr; 2],
+        multiplicity: impl Into<Self::Expr>,
+        scope: LookupScope,
+    ) {
+        let [arg1_lo, arg1_hi] = arg1;
+        let [arg2_lo, arg2_hi] = arg2;
+        self.send(
+            AirLookup::new(
+                vec![shard.into(), clk.into(), syscall_id.into(), arg1_lo, arg1_hi, arg2_lo, arg2_hi],
+                multiplicity.into(),
+                LookupKind::Syscall,
+            ),
+            scope,
+        );
+    }
+
+    /// Receives a syscall sent with `send_syscall_halves`.
+    #[allow(clippy::too_many_arguments)]
+    fn receive_syscall_halves(
+        &mut self,
+        shard: impl Into<Self::Expr> + Clone,
+        clk: impl Into<Self::Expr> + Clone,
+        syscall_id: impl Into<Self::Expr> + Clone,
+        arg1: [Self::Expr; 2],
+        arg2: [Self::Expr; 2],
+        multiplicity: impl Into<Self::Expr>,
+        scope: LookupScope,
+    ) {
+        let [arg1_lo, arg1_hi] = arg1;
+        let [arg2_lo, arg2_hi] = arg2;
+        self.receive(
+            AirLookup::new(
+                vec![shard.into(), clk.into(), syscall_id.into(), arg1_lo, arg1_hi, arg2_lo, arg2_hi],
+                multiplicity.into(),
+                LookupKind::Syscall,
+            ),
+            scope,
+        );
+    }
+
     /// Packs a Word's 4 bytes into 2 half-words: lo = b0 + b1*256, hi = b2 + b3*256.
     /// Each half-word is in [0, 65535] < P, so the encoding is injective (collision-free).
     fn word_to_halves(word: Word<impl Into<Self::Expr> + Copy>) -> [Self::Expr; 2] {

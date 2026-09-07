@@ -206,12 +206,14 @@ impl SyscallInstrsChip {
             local.op_c_check.into(),
         );
 
-        builder.send_syscall(
+        // The arguments travel as exact 16-bit half-words: the reduced word would not
+        // determine the syscall chip's half-word columns (`2^32 > p`).
+        builder.send_syscall_halves(
             local.frame.shard,
             clk_from_r_type_frame::<AB>(&local.frame),
             syscall_id.clone(),
-            local.frame.op_b_val().reduce::<AB>(),
-            local.frame.op_c_val().reduce::<AB>(),
+            AB::word_to_halves(local.frame.op_b_val()),
+            AB::word_to_halves(local.frame.op_c_val()),
             send_to_table,
             LookupScope::Local,
         );

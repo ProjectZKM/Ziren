@@ -508,8 +508,12 @@ impl<'a> Emitter<'a> {
         if matches!(multiplicity, PicusExpr::Const(0)) {
             return;
         }
-        assert_eq!(values.len(), 5, "syscall lookup must carry 5 values");
-        // `[shard, clk, syscall_id, arg1, arg2]`: all five identify the syscall.  The receiving
+        assert!(
+            values.len() == 5 || values.len() == 7,
+            "syscall lookup must carry 5 values (reduced args) or 7 (half-word args)"
+        );
+        // `[shard, clk, syscall_id, arg1, arg2]` (or the args as half-words): all identify the
+        // syscall.  The receiving
         // chip gets shard/clk from the sender (they feed its global send), so they are ports
         // like the rest.
         let port = if is_send { Port::Output } else { Port::Input };

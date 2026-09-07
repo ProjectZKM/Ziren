@@ -1221,6 +1221,10 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
         let allowed_preprocessed_log2_heights = HashMap::from([
             (MipsAirId::Program, vec![Some(19), Some(20), Some(21), Some(22)]),
             (MipsAirId::Byte, vec![Some(16)]),
+            // The range table has `NUM_RANGE_ROWS = 2^(MAX_RANGE_BITS + 1)` rows; without an
+            // entry here `find_shape` has no height to offer it and every preprocessed shape
+            // lookup fails with `PreprocessedShapeError`.
+            (MipsAirId::Range, vec![Some(crate::range::NUM_RANGE_ROWS.ilog2() as usize)]),
         ]);
 
         // Generate the clusters from the maximal shapes and register them indexed by log2 shard
