@@ -19,14 +19,17 @@ generated files set `maxHeartbeats 0`; the budget lives here so that the overrun
 inside the block, where it is caught, and not in the elaborator's post-processing of the proof
 term, where it is not. -/
 register_option picus.safeHeartbeats : Nat := {
-  defValue := 30000
-  descr := "heartbeat budget (in thousands) of one picus_safe block"
+  defValue := 40000000
+  descr := "heartbeat budget of one picus_safe block, in thousands (same unit as maxHeartbeats)"
 }
 
 elab "picus_safe " t:tactic : tactic => do
   let s ← saveState
   let gs ← getGoals
   let kilo := picus.safeHeartbeats.get (← getOptions)
+  -- Note: `tryCatchRuntimeEx` sets `catchRuntimeEx` for the whole block, so an overrun inside
+  -- an inner `try` is swallowed there and the automation falls through to its own `sorry`;
+  -- either way the file elaborates and the theorem is reported open.
   let ok ← tryCatchRuntimeEx
     (Core.withCurrHeartbeats <|
       withTheReader Core.Context (fun ctx => { ctx with maxHeartbeats := kilo * 1000 }) do

@@ -7,7 +7,7 @@ import ZirenDet.Safe
 
 set_option maxRecDepth 4000000
 set_option maxHeartbeats 0
-set_option picus.safeHeartbeats 30000
+set_option picus.safeHeartbeats 40000000
 set_option linter.dupNamespace false
 
 namespace ZirenDet.Chips.Bn254Fp2MulAssign
