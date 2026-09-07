@@ -42,8 +42,14 @@ use crate::{ExecutionError, Executor};
 
 /// Batches the producer has taken, for tests and for the one-line
 /// `PRODUCER` census a caller can log. Not load-bearing.
+///
+/// `AtomicUsize`, not `AtomicU64`: a guest that verifies a proof of this
+/// system inside the machine links this crate, and the guest target is
+/// 32-bit with no `target_has_atomic = "64"`.  The counter is a batch
+/// count, so pointer width is ample.
 #[doc(hidden)]
-pub static PRODUCER_BATCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static PRODUCER_BATCHES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 mod platform {
