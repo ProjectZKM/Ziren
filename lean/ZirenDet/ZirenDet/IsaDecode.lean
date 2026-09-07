@@ -283,6 +283,10 @@ example : decodeInternal 0x003857c2#32 = some ⟨12, 10, 24, 31, false, true⟩ 
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x00400011#32 = some ⟨0, 33, 2, 0, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x00400013#32 = some ⟨0, 32, 2, 0, false, true⟩ := by
   native_decide
 
@@ -787,6 +791,10 @@ example : decodeInternal 0x01a00008#32 = some ⟨27, 0, 13, 0, false, true⟩ :=
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x01a00011#32 = some ⟨0, 33, 13, 0, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x01a00013#32 = some ⟨0, 32, 13, 0, false, true⟩ := by
   native_decide
 
@@ -948,6 +956,10 @@ example : decodeInternal 0x01f3001a#32 = some ⟨5, 32, 15, 19, false, false⟩ 
 
 /-- ADD -/
 example : decodeInternal 0x02000011#32 = some ⟨0, 33, 16, 0, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x02000013#32 = some ⟨0, 32, 16, 0, false, true⟩ := by
   native_decide
 
 /-- MEQ -/
@@ -1139,6 +1151,10 @@ example : decodeInternal 0x0299300b#32 = some ⟨51, 6, 20, 25, false, false⟩ 
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x02a00011#32 = some ⟨0, 33, 21, 0, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x02a00013#32 = some ⟨0, 32, 21, 0, false, true⟩ := by
   native_decide
 
@@ -1180,6 +1196,10 @@ example : decodeInternal 0x02b8001b#32 = some ⟨6, 32, 21, 24, false, false⟩ 
 
 /-- Jump -/
 example : decodeInternal 0x02c00008#32 = some ⟨27, 0, 22, 0, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x02c00011#32 = some ⟨0, 33, 22, 0, false, true⟩ := by
   native_decide
 
 /-- Jump -/
@@ -1663,6 +1683,10 @@ example : decodeInternal 0x24020017#32 = some ⟨0, 2, 0, 23, false, true⟩ := 
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x2402004e#32 = some ⟨0, 2, 0, 78, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x24020080#32 = some ⟨0, 2, 0, 128, false, true⟩ := by
   native_decide
 
@@ -1692,6 +1716,10 @@ example : decodeInternal 0x24021010#32 = some ⟨0, 2, 0, 4112, false, true⟩ :
 
 /-- ADD -/
 example : decodeInternal 0x24023000#32 = some ⟨0, 2, 0, 12288, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x2402fffe#32 = some ⟨0, 2, 0, 4294967294, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -1807,6 +1835,10 @@ example : decodeInternal 0x24050080#32 = some ⟨0, 5, 0, 128, false, true⟩ :=
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x240500a8#32 = some ⟨0, 5, 0, 168, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x24051010#32 = some ⟨0, 5, 0, 4112, false, true⟩ := by
   native_decide
 
@@ -1919,6 +1951,10 @@ example : decodeInternal 0x2407009c#32 = some ⟨0, 7, 0, 156, false, true⟩ :=
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x240700b5#32 = some ⟨0, 7, 0, 181, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x240700e0#32 = some ⟨0, 7, 0, 224, false, true⟩ := by
   native_decide
 
@@ -2011,6 +2047,10 @@ example : decodeInternal 0x24090013#32 = some ⟨0, 9, 0, 19, false, true⟩ := 
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x24090015#32 = some ⟨0, 9, 0, 21, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x2409002c#32 = some ⟨0, 9, 0, 44, false, true⟩ := by
   native_decide
 
@@ -2032,6 +2072,10 @@ example : decodeInternal 0x240900ad#32 = some ⟨0, 9, 0, 173, false, true⟩ :=
 
 /-- ADD -/
 example : decodeInternal 0x240900b2#32 = some ⟨0, 9, 0, 178, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x240900c5#32 = some ⟨0, 9, 0, 197, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -2075,11 +2119,19 @@ example : decodeInternal 0x240a0028#32 = some ⟨0, 10, 0, 40, false, true⟩ :=
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x240a0079#32 = some ⟨0, 10, 0, 121, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x240a007f#32 = some ⟨0, 10, 0, 127, false, true⟩ := by
   native_decide
 
 /-- ADD -/
 example : decodeInternal 0x240a0080#32 = some ⟨0, 10, 0, 128, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x240a008c#32 = some ⟨0, 10, 0, 140, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -2128,6 +2180,10 @@ example : decodeInternal 0x240b0063#32 = some ⟨0, 11, 0, 99, false, true⟩ :=
 
 /-- ADD -/
 example : decodeInternal 0x240b00d7#32 = some ⟨0, 11, 0, 215, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x240b00ff#32 = some ⟨0, 11, 0, 255, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -2287,7 +2343,15 @@ example : decodeInternal 0x240e0077#32 = some ⟨0, 14, 0, 119, false, true⟩ :
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x240e0080#32 = some ⟨0, 14, 0, 128, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x240e00b4#32 = some ⟨0, 14, 0, 180, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x240e00b6#32 = some ⟨0, 14, 0, 182, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -2375,6 +2439,10 @@ example : decodeInternal 0x2410004d#32 = some ⟨0, 16, 0, 77, false, true⟩ :=
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x24100066#32 = some ⟨0, 16, 0, 102, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x24100097#32 = some ⟨0, 16, 0, 151, false, true⟩ := by
   native_decide
 
@@ -2416,6 +2484,10 @@ example : decodeInternal 0x24110003#32 = some ⟨0, 17, 0, 3, false, true⟩ := 
 
 /-- ADD -/
 example : decodeInternal 0x24110047#32 = some ⟨0, 17, 0, 71, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x2411004a#32 = some ⟨0, 17, 0, 74, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -2624,6 +2696,10 @@ example : decodeInternal 0x24150076#32 = some ⟨0, 21, 0, 118, false, true⟩ :
 
 /-- ADD -/
 example : decodeInternal 0x24150080#32 = some ⟨0, 21, 0, 128, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x24150087#32 = some ⟨0, 21, 0, 135, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -2836,6 +2912,10 @@ example : decodeInternal 0x2419007f#32 = some ⟨0, 25, 0, 127, false, true⟩ :
 
 /-- ADD -/
 example : decodeInternal 0x24190080#32 = some ⟨0, 25, 0, 128, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x241900c4#32 = some ⟨0, 25, 0, 196, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -3107,6 +3187,10 @@ example : decodeInternal 0x3417ffff#32 = some ⟨16, 23, 0, 65535, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x3418ffff#32 = some ⟨16, 24, 0, 65535, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x3419ffff#32 = some ⟨16, 25, 0, 65535, false, true⟩ := by
   native_decide
 
@@ -3207,6 +3291,10 @@ example : decodeInternal 0x3442ff38#32 = some ⟨16, 2, 2, 65336, false, true⟩
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x3442ffff#32 = some ⟨16, 2, 2, 65535, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x344c8000#32 = some ⟨16, 12, 2, 32768, false, true⟩ := by
   native_decide
 
@@ -3263,7 +3351,19 @@ example : decodeInternal 0x34638573#32 = some ⟨16, 3, 3, 34163, false, true⟩
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x346386d7#32 = some ⟨16, 3, 3, 34519, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x346391cf#32 = some ⟨16, 3, 3, 37327, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x3463a79f#32 = some ⟨16, 3, 3, 42911, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x3463afa1#32 = some ⟨16, 3, 3, 44961, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -3288,6 +3388,10 @@ example : decodeInternal 0x3463f4ff#32 = some ⟨16, 3, 3, 62719, false, true⟩
 
 /-- OR -/
 example : decodeInternal 0x3463fb52#32 = some ⟨16, 3, 3, 64338, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x34840176#32 = some ⟨16, 4, 4, 374, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -3443,6 +3547,10 @@ example : decodeInternal 0x34a56c2a#32 = some ⟨16, 5, 5, 27690, false, true⟩
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x34a573f5#32 = some ⟨16, 5, 5, 29685, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x34a57fff#32 = some ⟨16, 5, 5, 32767, false, true⟩ := by
   native_decide
 
@@ -3587,6 +3695,10 @@ example : decodeInternal 0x34c6cb6c#32 = some ⟨16, 6, 6, 52076, false, true⟩
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x34c6d30c#32 = some ⟨16, 6, 6, 54028, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x34c6d4d8#32 = some ⟨16, 6, 6, 54488, false, true⟩ := by
   native_decide
 
@@ -3604,6 +3716,14 @@ example : decodeInternal 0x34e70001#32 = some ⟨16, 7, 7, 1, false, true⟩ := 
 
 /-- OR -/
 example : decodeInternal 0x34e707c8#32 = some ⟨16, 7, 7, 1992, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x34e70b23#32 = some ⟨16, 7, 7, 2851, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x34e7166b#32 = some ⟨16, 7, 7, 5739, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -3691,6 +3811,10 @@ example : decodeInternal 0x34e7e67c#32 = some ⟨16, 7, 7, 59004, false, true⟩
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x34e7e70e#32 = some ⟨16, 7, 7, 59150, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x34e90000#32 = some ⟨16, 9, 7, 0, false, true⟩ := by
   native_decide
 
@@ -3743,6 +3867,10 @@ example : decodeInternal 0x35089929#32 = some ⟨16, 8, 8, 39209, false, true⟩
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x3508a728#32 = some ⟨16, 8, 8, 42792, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x3508ab7a#32 = some ⟨16, 8, 8, 43898, false, true⟩ := by
   native_decide
 
@@ -3756,6 +3884,10 @@ example : decodeInternal 0x3508beef#32 = some ⟨16, 8, 8, 48879, false, true⟩
 
 /-- OR -/
 example : decodeInternal 0x3508cbff#32 = some ⟨16, 8, 8, 52223, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x3508cd5b#32 = some ⟨16, 8, 8, 52571, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -3835,6 +3967,10 @@ example : decodeInternal 0x35297fff#32 = some ⟨16, 9, 9, 32767, false, true⟩
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x352984f8#32 = some ⟨16, 9, 9, 34040, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x3529918c#32 = some ⟨16, 9, 9, 37260, false, true⟩ := by
   native_decide
 
@@ -3847,6 +3983,10 @@ example : decodeInternal 0x3529a4da#32 = some ⟨16, 9, 9, 42202, false, true⟩
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x3529b403#32 = some ⟨16, 9, 9, 46083, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x3529beef#32 = some ⟨16, 9, 9, 48879, false, true⟩ := by
   native_decide
 
@@ -3856,6 +3996,10 @@ example : decodeInternal 0x3529dc84#32 = some ⟨16, 9, 9, 56452, false, true⟩
 
 /-- OR -/
 example : decodeInternal 0x3529e3b9#32 = some ⟨16, 9, 9, 58297, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x3529e56e#32 = some ⟨16, 9, 9, 58734, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -3923,6 +4067,10 @@ example : decodeInternal 0x354a60e6#32 = some ⟨16, 10, 10, 24806, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x354a745e#32 = some ⟨16, 10, 10, 29790, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x354a7fff#32 = some ⟨16, 10, 10, 32767, false, true⟩ := by
   native_decide
 
@@ -3968,6 +4116,10 @@ example : decodeInternal 0x354ac289#32 = some ⟨16, 10, 10, 49801, false, true�
 
 /-- OR -/
 example : decodeInternal 0x354ac3e1#32 = some ⟨16, 10, 10, 50145, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x354ac763#32 = some ⟨16, 10, 10, 51043, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4019,7 +4171,15 @@ example : decodeInternal 0x356b59dc#32 = some ⟨16, 11, 11, 23004, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x356b781b#32 = some ⟨16, 11, 11, 30747, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x356b8c4e#32 = some ⟨16, 11, 11, 35918, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x356b9ba2#32 = some ⟨16, 11, 11, 39842, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4051,6 +4211,10 @@ example : decodeInternal 0x356bdec9#32 = some ⟨16, 11, 11, 57033, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x356be242#32 = some ⟨16, 11, 11, 57922, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x356bedf1#32 = some ⟨16, 11, 11, 60913, false, true⟩ := by
   native_decide
 
@@ -4079,6 +4243,10 @@ example : decodeInternal 0x358c4686#32 = some ⟨16, 12, 12, 18054, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x358c4691#32 = some ⟨16, 12, 12, 18065, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x358c5678#32 = some ⟨16, 12, 12, 22136, false, true⟩ := by
   native_decide
 
@@ -4104,6 +4272,14 @@ example : decodeInternal 0x358c7fff#32 = some ⟨16, 12, 12, 32767, false, true�
 
 /-- OR -/
 example : decodeInternal 0x358c8cb0#32 = some ⟨16, 12, 12, 36016, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x358ca1f5#32 = some ⟨16, 12, 12, 41461, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x358ca28a#32 = some ⟨16, 12, 12, 41610, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4167,6 +4343,10 @@ example : decodeInternal 0x35ad2a6a#32 = some ⟨16, 13, 13, 10858, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x35ad3533#32 = some ⟨16, 13, 13, 13619, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x35ad38aa#32 = some ⟨16, 13, 13, 14506, false, true⟩ := by
   native_decide
 
@@ -4204,6 +4384,10 @@ example : decodeInternal 0x35adaea9#32 = some ⟨16, 13, 13, 44713, false, true�
 
 /-- OR -/
 example : decodeInternal 0x35adafb2#32 = some ⟨16, 13, 13, 44978, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x35adbdb4#32 = some ⟨16, 13, 13, 48564, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4291,6 +4475,10 @@ example : decodeInternal 0x35ce973d#32 = some ⟨16, 14, 14, 38717, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x35ce9fc7#32 = some ⟨16, 14, 14, 40903, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x35cea0b0#32 = some ⟨16, 14, 14, 41136, false, true⟩ := by
   native_decide
 
@@ -4312,6 +4500,10 @@ example : decodeInternal 0x35cec5e4#32 = some ⟨16, 14, 14, 50660, false, true�
 
 /-- OR -/
 example : decodeInternal 0x35cec63b#32 = some ⟨16, 14, 14, 50747, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x35cecce9#32 = some ⟨16, 14, 14, 52457, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4367,6 +4559,10 @@ example : decodeInternal 0x35ef6ba2#32 = some ⟨16, 15, 15, 27554, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x35ef6efd#32 = some ⟨16, 15, 15, 28413, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x35ef7d66#32 = some ⟨16, 15, 15, 32102, false, true⟩ := by
   native_decide
 
@@ -4412,6 +4608,10 @@ example : decodeInternal 0x35efedfb#32 = some ⟨16, 15, 15, 60923, false, true�
 
 /-- OR -/
 example : decodeInternal 0x35eff0e9#32 = some ⟨16, 15, 15, 61673, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x35eff907#32 = some ⟨16, 15, 15, 63751, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4467,6 +4667,14 @@ example : decodeInternal 0x36106a23#32 = some ⟨16, 16, 16, 27171, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x36106b56#32 = some ⟨16, 16, 16, 27478, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x361075ee#32 = some ⟨16, 16, 16, 30190, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x36107b26#32 = some ⟨16, 16, 16, 31526, false, true⟩ := by
   native_decide
 
@@ -4495,6 +4703,10 @@ example : decodeInternal 0x3610aa41#32 = some ⟨16, 16, 16, 43585, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x3610b3d2#32 = some ⟨16, 16, 16, 46034, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x3610bcf0#32 = some ⟨16, 16, 16, 48368, false, true⟩ := by
   native_decide
 
@@ -4520,6 +4732,10 @@ example : decodeInternal 0x3610fff2#32 = some ⟨16, 16, 16, 65522, false, true�
 
 /-- OR -/
 example : decodeInternal 0x3610ffff#32 = some ⟨16, 16, 16, 65535, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x36310001#32 = some ⟨16, 17, 17, 1, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4560,6 +4776,10 @@ example : decodeInternal 0x36315d60#32 = some ⟨16, 17, 17, 23904, false, true�
 
 /-- OR -/
 example : decodeInternal 0x3631673d#32 = some ⟨16, 17, 17, 26429, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x3631784a#32 = some ⟨16, 17, 17, 30794, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4795,6 +5015,10 @@ example : decodeInternal 0x3694243b#32 = some ⟨16, 20, 20, 9275, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x3694360b#32 = some ⟨16, 20, 20, 13835, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x369443c7#32 = some ⟨16, 20, 20, 17351, false, true⟩ := by
   native_decide
 
@@ -4859,11 +5083,19 @@ example : decodeInternal 0x3694c9c8#32 = some ⟨16, 20, 20, 51656, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x3694ce69#32 = some ⟨16, 20, 20, 52841, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x3694d2db#32 = some ⟨16, 20, 20, 53979, false, true⟩ := by
   native_decide
 
 /-- OR -/
 example : decodeInternal 0x3694d2e2#32 = some ⟨16, 20, 20, 53986, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x3694e0a5#32 = some ⟨16, 20, 20, 57509, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4927,7 +5159,15 @@ example : decodeInternal 0x36b55c6c#32 = some ⟨16, 21, 21, 23660, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x36b56ae5#32 = some ⟨16, 21, 21, 27365, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x36b57062#32 = some ⟨16, 21, 21, 28770, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x36b573fc#32 = some ⟨16, 21, 21, 29692, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -4979,6 +5219,10 @@ example : decodeInternal 0x36d65678#32 = some ⟨16, 22, 22, 22136, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x36d66006#32 = some ⟨16, 22, 22, 24582, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x36d68427#32 = some ⟨16, 22, 22, 33831, false, true⟩ := by
   native_decide
 
@@ -4999,6 +5243,10 @@ example : decodeInternal 0x36d6beef#32 = some ⟨16, 22, 22, 48879, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x36d6c0ad#32 = some ⟨16, 22, 22, 49325, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x36d6c845#32 = some ⟨16, 22, 22, 51269, false, true⟩ := by
   native_decide
 
@@ -5016,6 +5264,10 @@ example : decodeInternal 0x36d6d797#32 = some ⟨16, 22, 22, 55191, false, true�
 
 /-- OR -/
 example : decodeInternal 0x36d6ee6b#32 = some ⟨16, 22, 22, 61035, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x36d6f1e3#32 = some ⟨16, 22, 22, 61923, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -5052,6 +5304,10 @@ example : decodeInternal 0x36f77057#32 = some ⟨16, 23, 23, 28759, false, true�
 
 /-- OR -/
 example : decodeInternal 0x36f772e7#32 = some ⟨16, 23, 23, 29415, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x36f77411#32 = some ⟨16, 23, 23, 29713, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -5100,6 +5356,10 @@ example : decodeInternal 0x37180aea#32 = some ⟨16, 24, 24, 2794, false, true�
 
 /-- OR -/
 example : decodeInternal 0x37181b25#32 = some ⟨16, 24, 24, 6949, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x3718415d#32 = some ⟨16, 24, 24, 16733, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -5195,6 +5455,10 @@ example : decodeInternal 0x37395678#32 = some ⟨16, 25, 25, 22136, false, true�
   native_decide
 
 /-- OR -/
+example : decodeInternal 0x37395709#32 = some ⟨16, 25, 25, 22281, false, true⟩ := by
+  native_decide
+
+/-- OR -/
 example : decodeInternal 0x37396394#32 = some ⟨16, 25, 25, 25492, false, true⟩ := by
   native_decide
 
@@ -5228,6 +5492,10 @@ example : decodeInternal 0x3739d2ea#32 = some ⟨16, 25, 25, 53994, false, true�
 
 /-- OR -/
 example : decodeInternal 0x3739e6f0#32 = some ⟨16, 25, 25, 59120, false, true⟩ := by
+  native_decide
+
+/-- OR -/
+example : decodeInternal 0x3739f576#32 = some ⟨16, 25, 25, 62838, false, true⟩ := by
   native_decide
 
 /-- OR -/
@@ -5387,6 +5655,10 @@ example : decodeInternal 0x3c030001#32 = some ⟨0, 3, 0, 65536, false, true⟩ 
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c03025c#32 = some ⟨0, 3, 0, 39583744, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c0311e3#32 = some ⟨0, 3, 0, 300089344, false, true⟩ := by
   native_decide
 
@@ -5408,6 +5680,10 @@ example : decodeInternal 0x3c032df2#32 = some ⟨0, 3, 0, 770834432, false, true
 
 /-- ADD -/
 example : decodeInternal 0x3c0335d2#32 = some ⟨0, 3, 0, 902955008, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0339ec#32 = some ⟨0, 3, 0, 971767808, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -5448,6 +5724,10 @@ example : decodeInternal 0x3c0380a2#32 = some ⟨0, 3, 0, 2158100480, false, tru
 
 /-- ADD -/
 example : decodeInternal 0x3c0382ca#32 = some ⟨0, 3, 0, 2194276352, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c038a4a#32 = some ⟨0, 3, 0, 2320105472, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -5555,6 +5835,10 @@ example : decodeInternal 0x3c04b8b0#32 = some ⟨0, 4, 0, 3098542080, false, tru
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c04beeb#32 = some ⟨0, 4, 0, 3203072000, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c04cbe1#32 = some ⟨0, 4, 0, 3420520448, false, true⟩ := by
   native_decide
 
@@ -5659,6 +5943,10 @@ example : decodeInternal 0x3c05e8f0#32 = some ⟨0, 5, 0, 3908042752, false, tru
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c05f901#32 = some ⟨0, 5, 0, 4177592320, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c05ffff#32 = some ⟨0, 5, 0, 4294901760, false, true⟩ := by
   native_decide
 
@@ -5700,6 +5988,10 @@ example : decodeInternal 0x3c063b1f#32 = some ⟨0, 6, 0, 991887360, false, true
 
 /-- ADD -/
 example : decodeInternal 0x3c0642e9#32 = some ⟨0, 6, 0, 1122566144, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0650f6#32 = some ⟨0, 6, 0, 1358299136, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -5780,6 +6072,14 @@ example : decodeInternal 0x3c06ff27#32 = some ⟨0, 6, 0, 4280745984, false, tru
 
 /-- ADD -/
 example : decodeInternal 0x3c070001#32 = some ⟨0, 7, 0, 65536, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0701f1#32 = some ⟨0, 7, 0, 32571392, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c070d30#32 = some ⟨0, 7, 0, 221249536, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -5871,6 +6171,10 @@ example : decodeInternal 0x3c07e8b1#32 = some ⟨0, 7, 0, 3903913984, false, tru
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c07ebe4#32 = some ⟨0, 7, 0, 3957587968, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c07f3a2#32 = some ⟨0, 7, 0, 4087480320, false, true⟩ := by
   native_decide
 
@@ -5892,6 +6196,10 @@ example : decodeInternal 0x3c084833#32 = some ⟨0, 8, 0, 1211301888, false, tru
 
 /-- ADD -/
 example : decodeInternal 0x3c085450#32 = some ⟨0, 8, 0, 1414529024, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c087b3e#32 = some ⟨0, 8, 0, 2067660800, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -5927,6 +6235,10 @@ example : decodeInternal 0x3c08a65a#32 = some ⟨0, 8, 0, 2790916096, false, tru
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c08aa98#32 = some ⟨0, 8, 0, 2862088192, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c08c662#32 = some ⟨0, 8, 0, 3328311296, false, true⟩ := by
   native_decide
 
@@ -5948,6 +6260,10 @@ example : decodeInternal 0x3c090e72#32 = some ⟨0, 9, 0, 242352128, false, true
 
 /-- ADD -/
 example : decodeInternal 0x3c091234#32 = some ⟨0, 9, 0, 305397760, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c09171a#32 = some ⟨0, 9, 0, 387579904, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -5975,7 +6291,15 @@ example : decodeInternal 0x3c094e8d#32 = some ⟨0, 9, 0, 1317863424, false, tru
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c095aea#32 = some ⟨0, 9, 0, 1525284864, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c095c05#32 = some ⟨0, 9, 0, 1543831552, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0962f5#32 = some ⟨0, 9, 0, 1660223488, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6036,6 +6360,10 @@ example : decodeInternal 0x3c09dead#32 = some ⟨0, 9, 0, 3735879680, false, tru
 
 /-- ADD -/
 example : decodeInternal 0x3c09ffff#32 = some ⟨0, 9, 0, 4294901760, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0a03b9#32 = some ⟨0, 10, 0, 62455808, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6151,6 +6479,10 @@ example : decodeInternal 0x3c0ae7f1#32 = some ⟨0, 10, 0, 3891331072, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c0aea76#32 = some ⟨0, 10, 0, 3933601792, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c0af168#32 = some ⟨0, 10, 0, 4050124800, false, true⟩ := by
   native_decide
 
@@ -6171,11 +6503,19 @@ example : decodeInternal 0x3c0b2d6d#32 = some ⟨0, 11, 0, 762118144, false, tru
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c0b3260#32 = some ⟨0, 11, 0, 845152256, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c0b515d#32 = some ⟨0, 11, 0, 1365049344, false, true⟩ := by
   native_decide
 
 /-- ADD -/
 example : decodeInternal 0x3c0b5dcf#32 = some ⟨0, 11, 0, 1573847040, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0b6539#32 = some ⟨0, 11, 0, 1698234368, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6212,6 +6552,10 @@ example : decodeInternal 0x3c0bdead#32 = some ⟨0, 11, 0, 3735879680, false, tr
 
 /-- ADD -/
 example : decodeInternal 0x3c0bdf06#32 = some ⟨0, 11, 0, 3741712384, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0bf104#32 = some ⟨0, 11, 0, 4043571200, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6263,6 +6607,10 @@ example : decodeInternal 0x3c0c644c#32 = some ⟨0, 12, 0, 1682702336, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c0c6df4#32 = some ⟨0, 12, 0, 1844707328, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c0c79d5#32 = some ⟨0, 12, 0, 2044002304, false, true⟩ := by
   native_decide
 
@@ -6272,6 +6620,10 @@ example : decodeInternal 0x3c0c7b63#32 = some ⟨0, 12, 0, 2070085632, false, tr
 
 /-- ADD -/
 example : decodeInternal 0x3c0c7fff#32 = some ⟨0, 12, 0, 2147418112, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0c84cd#32 = some ⟨0, 12, 0, 2228027392, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6312,6 +6664,10 @@ example : decodeInternal 0x3c0cdead#32 = some ⟨0, 12, 0, 3735879680, false, tr
 
 /-- ADD -/
 example : decodeInternal 0x3c0ce196#32 = some ⟨0, 12, 0, 3784704000, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0cef9c#32 = some ⟨0, 12, 0, 4019978240, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6363,6 +6719,10 @@ example : decodeInternal 0x3c0d7453#32 = some ⟨0, 13, 0, 1951596544, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c0d7562#32 = some ⟨0, 13, 0, 1969356800, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c0d7fff#32 = some ⟨0, 13, 0, 2147418112, false, true⟩ := by
   native_decide
 
@@ -6399,6 +6759,10 @@ example : decodeInternal 0x3c0dcd1b#32 = some ⟨0, 13, 0, 3441098752, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c0de67a#32 = some ⟨0, 13, 0, 3866755072, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c0decf6#32 = some ⟨0, 13, 0, 3975544832, false, true⟩ := by
   native_decide
 
@@ -6420,6 +6784,10 @@ example : decodeInternal 0x3c0e0660#32 = some ⟨0, 14, 0, 106954752, false, tru
 
 /-- ADD -/
 example : decodeInternal 0x3c0e1234#32 = some ⟨0, 14, 0, 305397760, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0e1a7b#32 = some ⟨0, 14, 0, 444268544, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6491,6 +6859,10 @@ example : decodeInternal 0x3c0edead#32 = some ⟨0, 14, 0, 3735879680, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c0edf5d#32 = some ⟨0, 14, 0, 3747414016, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c0eee8a#32 = some ⟨0, 14, 0, 4002021376, false, true⟩ := by
   native_decide
 
@@ -6527,7 +6899,15 @@ example : decodeInternal 0x3c0f3349#32 = some ⟨0, 15, 0, 860422144, false, tru
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c0f39a9#32 = some ⟨0, 15, 0, 967376896, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c0f49a5#32 = some ⟨0, 15, 0, 1235550208, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c0f4c11#32 = some ⟨0, 15, 0, 1276182528, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6643,6 +7023,10 @@ example : decodeInternal 0x3c101e3f#32 = some ⟨0, 16, 0, 507445248, false, tru
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c1042f0#32 = some ⟨0, 16, 0, 1123024896, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c104aad#32 = some ⟨0, 16, 0, 1252851712, false, true⟩ := by
   native_decide
 
@@ -6683,11 +7067,19 @@ example : decodeInternal 0x3c108236#32 = some ⟨0, 16, 0, 2184577024, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c109136#32 = some ⟨0, 16, 0, 2436235264, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c109f95#32 = some ⟨0, 16, 0, 2677342208, false, true⟩ := by
   native_decide
 
 /-- ADD -/
 example : decodeInternal 0x3c109fc7#32 = some ⟨0, 16, 0, 2680619008, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c10b2af#32 = some ⟨0, 16, 0, 2997813248, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6748,6 +7140,10 @@ example : decodeInternal 0x3c112b87#32 = some ⟨0, 17, 0, 730267648, false, tru
 
 /-- ADD -/
 example : decodeInternal 0x3c11373e#32 = some ⟨0, 17, 0, 926810112, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c115ef1#32 = some ⟨0, 17, 0, 1592852480, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -6820,6 +7216,10 @@ example : decodeInternal 0x3c11eaf2#32 = some ⟨0, 17, 0, 3941728256, false, tr
 
 /-- ADD -/
 example : decodeInternal 0x3c11fcc2#32 = some ⟨0, 17, 0, 4240572416, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c11ffff#32 = some ⟨0, 17, 0, 4294901760, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -7095,6 +7495,18 @@ example : decodeInternal 0x3c14c038#32 = some ⟨0, 20, 0, 3224895488, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c14ccbb#32 = some ⟨0, 20, 0, 3434807296, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c14d4bc#32 = some ⟨0, 20, 0, 3569090560, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c14e033#32 = some ⟨0, 20, 0, 3761438720, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c14e05a#32 = some ⟨0, 20, 0, 3763994624, false, true⟩ := by
   native_decide
 
@@ -7147,6 +7559,10 @@ example : decodeInternal 0x3c155e9f#32 = some ⟨0, 21, 0, 1587478528, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c156263#32 = some ⟨0, 21, 0, 1650655232, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c156a36#32 = some ⟨0, 21, 0, 1781923840, false, true⟩ := by
   native_decide
 
@@ -7172,6 +7588,10 @@ example : decodeInternal 0x3c158446#32 = some ⟨0, 21, 0, 2219180032, false, tr
 
 /-- ADD -/
 example : decodeInternal 0x3c159981#32 = some ⟨0, 21, 0, 2575368192, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c15a69b#32 = some ⟨0, 21, 0, 2795175936, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -7203,6 +7623,10 @@ example : decodeInternal 0x3c160879#32 = some ⟨0, 22, 0, 142147584, false, tru
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c1610d4#32 = some ⟨0, 22, 0, 282329088, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c161234#32 = some ⟨0, 22, 0, 305397760, false, true⟩ := by
   native_decide
 
@@ -7220,6 +7644,10 @@ example : decodeInternal 0x3c1622c6#32 = some ⟨0, 22, 0, 583401472, false, tru
 
 /-- ADD -/
 example : decodeInternal 0x3c162ff1#32 = some ⟨0, 22, 0, 804323328, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c165b00#32 = some ⟨0, 22, 0, 1526726656, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -7244,6 +7672,10 @@ example : decodeInternal 0x3c168000#32 = some ⟨0, 22, 0, 2147483648, false, tr
 
 /-- ADD -/
 example : decodeInternal 0x3c16aa20#32 = some ⟨0, 22, 0, 2854223872, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c16c5bf#32 = some ⟨0, 22, 0, 3317628928, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -7307,6 +7739,10 @@ example : decodeInternal 0x3c1754b8#32 = some ⟨0, 23, 0, 1421344768, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c176c8b#32 = some ⟨0, 23, 0, 1821048832, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c17787e#32 = some ⟨0, 23, 0, 2021523456, false, true⟩ := by
   native_decide
 
@@ -7340,6 +7776,10 @@ example : decodeInternal 0x3c17fa9e#32 = some ⟨0, 23, 0, 4204658688, false, tr
 
 /-- ADD -/
 example : decodeInternal 0x3c17faae#32 = some ⟨0, 23, 0, 4205707264, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
+example : decodeInternal 0x3c1802a8#32 = some ⟨0, 24, 0, 44564480, false, true⟩ := by
   native_decide
 
 /-- ADD -/
@@ -7479,6 +7919,10 @@ example : decodeInternal 0x3c19966e#32 = some ⟨0, 25, 0, 2523791360, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c1999bf#32 = some ⟨0, 25, 0, 2579431424, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c199c73#32 = some ⟨0, 25, 0, 2624782336, false, true⟩ := by
   native_decide
 
@@ -7499,6 +7943,10 @@ example : decodeInternal 0x3c19dead#32 = some ⟨0, 25, 0, 3735879680, false, tr
   native_decide
 
 /-- ADD -/
+example : decodeInternal 0x3c19ef7b#32 = some ⟨0, 25, 0, 4017815552, false, true⟩ := by
+  native_decide
+
+/-- ADD -/
 example : decodeInternal 0x3c19f546#32 = some ⟨0, 25, 0, 4115005440, false, true⟩ := by
   native_decide
 
@@ -7510,24 +7958,36 @@ example : decodeInternal 0x3c19fc14#32 = some ⟨0, 25, 0, 4229169152, false, tr
 example : decodeInternal 0x3c19ffff#32 = some ⟨0, 25, 0, 4294901760, false, true⟩ := by
   native_decide
 
-/-- MSUBU -/
-example : decodeInternal 0x70460005#32 = some ⟨47, 32, 6, 2, false, false⟩ := by
+/-- MADD -/
+example : decodeInternal 0x70460000#32 = some ⟨48, 32, 6, 2, false, false⟩ := by
   native_decide
 
 /-- CLO -/
 example : decodeInternal 0x70484021#32 = some ⟨20, 8, 2, 0, false, true⟩ := by
   native_decide
 
+/-- MSUB -/
+example : decodeInternal 0x704a0004#32 = some ⟨49, 32, 10, 2, false, false⟩ := by
+  native_decide
+
+/-- MSUBU -/
+example : decodeInternal 0x704f0005#32 = some ⟨47, 32, 15, 2, false, false⟩ := by
+  native_decide
+
 /-- CLZ -/
 example : decodeInternal 0x70642020#32 = some ⟨19, 4, 3, 0, false, true⟩ := by
   native_decide
 
-/-- MSUBU -/
-example : decodeInternal 0x70650005#32 = some ⟨47, 32, 5, 3, false, false⟩ := by
+/-- MADD -/
+example : decodeInternal 0x70650000#32 = some ⟨48, 32, 5, 3, false, false⟩ := by
   native_decide
 
-/-- MSUBU -/
-example : decodeInternal 0x706a0005#32 = some ⟨47, 32, 10, 3, false, false⟩ := by
+/-- MSUB -/
+example : decodeInternal 0x70690004#32 = some ⟨49, 32, 9, 3, false, false⟩ := by
+  native_decide
+
+/-- MADD -/
+example : decodeInternal 0x706a0000#32 = some ⟨48, 32, 10, 3, false, false⟩ := by
   native_decide
 
 /-- CLO -/
@@ -7538,8 +7998,8 @@ example : decodeInternal 0x7075a821#32 = some ⟨20, 21, 3, 0, false, true⟩ :=
 example : decodeInternal 0x70860001#32 = some ⟨46, 32, 6, 4, false, false⟩ := by
   native_decide
 
-/-- MSUBU -/
-example : decodeInternal 0x708d0005#32 = some ⟨47, 32, 13, 4, false, false⟩ := by
+/-- MADD -/
+example : decodeInternal 0x708d0000#32 = some ⟨48, 32, 13, 4, false, false⟩ := by
   native_decide
 
 /-- MADDU -/
@@ -7548,6 +8008,10 @@ example : decodeInternal 0x70920001#32 = some ⟨46, 32, 18, 4, false, false⟩ 
 
 /-- MADDU -/
 example : decodeInternal 0x70ad0001#32 = some ⟨46, 32, 13, 5, false, false⟩ := by
+  native_decide
+
+/-- MSUB -/
+example : decodeInternal 0x70b00004#32 = some ⟨49, 32, 16, 5, false, false⟩ := by
   native_decide
 
 /-- CLO -/
@@ -7562,16 +8026,24 @@ example : decodeInternal 0x70b40001#32 = some ⟨46, 32, 20, 5, false, false⟩ 
 example : decodeInternal 0x70c73821#32 = some ⟨20, 7, 6, 0, false, true⟩ := by
   native_decide
 
+/-- MSUB -/
+example : decodeInternal 0x70d00004#32 = some ⟨49, 32, 16, 6, false, false⟩ := by
+  native_decide
+
+/-- MSUBU -/
+example : decodeInternal 0x70ed0005#32 = some ⟨47, 32, 13, 7, false, false⟩ := by
+  native_decide
+
 /-- MADDU -/
 example : decodeInternal 0x70f30001#32 = some ⟨46, 32, 19, 7, false, false⟩ := by
   native_decide
 
-/-- MSUBU -/
-example : decodeInternal 0x70f60005#32 = some ⟨47, 32, 22, 7, false, false⟩ := by
+/-- MADD -/
+example : decodeInternal 0x70f60000#32 = some ⟨48, 32, 22, 7, false, false⟩ := by
   native_decide
 
-/-- MSUBU -/
-example : decodeInternal 0x71060005#32 = some ⟨47, 32, 6, 8, false, false⟩ := by
+/-- MADD -/
+example : decodeInternal 0x71060000#32 = some ⟨48, 32, 6, 8, false, false⟩ := by
   native_decide
 
 /-- CLO -/
@@ -7592,6 +8064,10 @@ example : decodeInternal 0x71231821#32 = some ⟨20, 3, 9, 0, false, true⟩ := 
 
 /-- MUL -/
 example : decodeInternal 0x712f2802#32 = some ⟨2, 5, 15, 9, false, false⟩ := by
+  native_decide
+
+/-- MSUBU -/
+example : decodeInternal 0x71360005#32 = some ⟨47, 32, 22, 9, false, false⟩ := by
   native_decide
 
 /-- CLZ -/
@@ -7626,20 +8102,44 @@ example : decodeInternal 0x71a42020#32 = some ⟨19, 4, 13, 0, false, true⟩ :=
 example : decodeInternal 0x71a50001#32 = some ⟨46, 32, 5, 13, false, false⟩ := by
   native_decide
 
+/-- MSUBU -/
+example : decodeInternal 0x71aa0005#32 = some ⟨47, 32, 10, 13, false, false⟩ := by
+  native_decide
+
 /-- MADDU -/
 example : decodeInternal 0x71c30001#32 = some ⟨46, 32, 3, 14, false, false⟩ := by
   native_decide
 
-/-- MSUBU -/
-example : decodeInternal 0x71c90005#32 = some ⟨47, 32, 9, 14, false, false⟩ := by
+/-- MADD -/
+example : decodeInternal 0x71c90000#32 = some ⟨48, 32, 9, 14, false, false⟩ := by
   native_decide
 
 /-- MSUBU -/
-example : decodeInternal 0x71e90005#32 = some ⟨47, 32, 9, 15, false, false⟩ := by
+example : decodeInternal 0x71d80005#32 = some ⟨47, 32, 24, 14, false, false⟩ := by
+  native_decide
+
+/-- MADD -/
+example : decodeInternal 0x71e90000#32 = some ⟨48, 32, 9, 15, false, false⟩ := by
   native_decide
 
 /-- MUL -/
 example : decodeInternal 0x72055002#32 = some ⟨2, 10, 5, 16, false, false⟩ := by
+  native_decide
+
+/-- MSUB -/
+example : decodeInternal 0x72060004#32 = some ⟨49, 32, 6, 16, false, false⟩ := by
+  native_decide
+
+/-- MSUB -/
+example : decodeInternal 0x720a0004#32 = some ⟨49, 32, 10, 16, false, false⟩ := by
+  native_decide
+
+/-- MSUBU -/
+example : decodeInternal 0x72170005#32 = some ⟨47, 32, 23, 16, false, false⟩ := by
+  native_decide
+
+/-- MSUB -/
+example : decodeInternal 0x722b0004#32 = some ⟨49, 32, 11, 17, false, false⟩ := by
   native_decide
 
 /-- MADDU -/
@@ -7650,6 +8150,10 @@ example : decodeInternal 0x72430001#32 = some ⟨46, 32, 3, 18, false, false⟩ 
 example : decodeInternal 0x724a6002#32 = some ⟨2, 12, 10, 18, false, false⟩ := by
   native_decide
 
+/-- MSUBU -/
+example : decodeInternal 0x724e0005#32 = some ⟨47, 32, 14, 18, false, false⟩ := by
+  native_decide
+
 /-- CLZ -/
 example : decodeInternal 0x72621020#32 = some ⟨19, 2, 19, 0, false, true⟩ := by
   native_decide
@@ -7658,8 +8162,16 @@ example : decodeInternal 0x72621020#32 = some ⟨19, 2, 19, 0, false, true⟩ :=
 example : decodeInternal 0x72663021#32 = some ⟨20, 6, 19, 0, false, true⟩ := by
   native_decide
 
+/-- MSUBU -/
+example : decodeInternal 0x72690005#32 = some ⟨47, 32, 9, 19, false, false⟩ := by
+  native_decide
+
 /-- MUL -/
 example : decodeInternal 0x726ac002#32 = some ⟨2, 24, 10, 19, false, false⟩ := by
+  native_decide
+
+/-- MSUBU -/
+example : decodeInternal 0x726c0005#32 = some ⟨47, 32, 12, 19, false, false⟩ := by
   native_decide
 
 /-- MUL -/
@@ -7674,6 +8186,10 @@ example : decodeInternal 0x7278c020#32 = some ⟨19, 24, 19, 0, false, true⟩ :
 example : decodeInternal 0x72863020#32 = some ⟨19, 6, 20, 0, false, true⟩ := by
   native_decide
 
+/-- MSUB -/
+example : decodeInternal 0x72870004#32 = some ⟨49, 32, 7, 20, false, false⟩ := by
+  native_decide
+
 /-- CLZ -/
 example : decodeInternal 0x72a42020#32 = some ⟨19, 4, 21, 0, false, true⟩ := by
   native_decide
@@ -7686,12 +8202,20 @@ example : decodeInternal 0x72aa7802#32 = some ⟨2, 15, 10, 21, false, false⟩ 
 example : decodeInternal 0x72ac6021#32 = some ⟨20, 12, 21, 0, false, true⟩ := by
   native_decide
 
-/-- MSUBU -/
-example : decodeInternal 0x72b70005#32 = some ⟨47, 32, 23, 21, false, false⟩ := by
+/-- MSUB -/
+example : decodeInternal 0x72b40004#32 = some ⟨49, 32, 20, 21, false, false⟩ := by
+  native_decide
+
+/-- MADD -/
+example : decodeInternal 0x72b70000#32 = some ⟨48, 32, 23, 21, false, false⟩ := by
   native_decide
 
 /-- MSUBU -/
-example : decodeInternal 0x72f30005#32 = some ⟨47, 32, 19, 23, false, false⟩ := by
+example : decodeInternal 0x72cb0005#32 = some ⟨47, 32, 11, 22, false, false⟩ := by
+  native_decide
+
+/-- MADD -/
+example : decodeInternal 0x72f30000#32 = some ⟨48, 32, 19, 23, false, false⟩ := by
   native_decide
 
 /-- MADDU -/
@@ -7700,6 +8224,10 @@ example : decodeInternal 0x73040001#32 = some ⟨46, 32, 4, 24, false, false⟩ 
 
 /-- MUL -/
 example : decodeInternal 0x73271002#32 = some ⟨2, 2, 7, 25, false, false⟩ := by
+  native_decide
+
+/-- MSUB -/
+example : decodeInternal 0x73300004#32 = some ⟨49, 32, 16, 25, false, false⟩ := by
   native_decide
 
 /-- CLO -/
