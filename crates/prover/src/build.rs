@@ -211,6 +211,7 @@ pub fn build_constraints_and_witness(
     template_input.write(&mut witness);
     witness.write_committed_values_digest(committed_values_digest);
     witness.write_vkey_hash(vkey_hash);
+    witness.write_vk_root(koalabears_to_bn254(&pv.vk_root));
 
     (constraints, witness)
 }

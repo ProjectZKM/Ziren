@@ -57,11 +57,18 @@ pub struct Witness<C: Config> {
     pub exts: Vec<C::EF>,
     pub vkey_hash: C::N,
     pub committed_values_digest: C::N,
+    /// Root of the Merkle tree of allowed recursion verifying keys.
+    ///
+    /// A public input of the wrap circuit: without it the recursion key
+    /// allowlist is bound only by an in-circuit witness the prover chooses, so
+    /// an outer verifier cannot tell an honest tree from one built around a
+    /// substituted compose or leaf program.
+    pub vk_root: C::N,
 }
 
 impl<C: Config> Witness<C> {
     pub fn size(&self) -> usize {
-        self.vars.len() + self.felts.len() + self.exts.len() + 2
+        self.vars.len() + self.felts.len() + self.exts.len() + 3
     }
 
     pub fn write_vkey_hash(&mut self, vkey_hash: C::N) {
@@ -72,6 +79,11 @@ impl<C: Config> Witness<C> {
     pub fn write_committed_values_digest(&mut self, committed_values_digest: C::N) {
         self.vars.push(committed_values_digest);
         self.committed_values_digest = committed_values_digest
+    }
+
+    pub fn write_vk_root(&mut self, vk_root: C::N) {
+        self.vars.push(vk_root);
+        self.vk_root = vk_root;
     }
 }
 

@@ -14,6 +14,7 @@ with them. Nothing below is optional before the change can be deployed.
 | Artifact | Why |
 |---|---|
 | `crates/prover/vk_map.bin` | every recursion verifying key changed |
+| `crates/verifier/bn254-vk/vk_root.bin` | the allowlist root is a function of that map, and is now a public input of the wrap circuit |
 | `crates/prover/scripts/artifacts/*.bin` | collected keys from earlier runs |
 | `crates/prover/proof-with-pis.bin` | fixture proof under the old hash |
 | `crates/verifier/bn254-vk/*.bin` | the wrap circuit's constraint system changed: the recursion Poseidon2 chip is 14 columns wider |
@@ -39,9 +40,15 @@ leaf-index lookup differs.
    hours and still misses shapes real workloads reach. Set `ZIREN_VK_COLLECT=<path>` and prove
    the workloads that matter; every recursion key the prover actually touches is written in the
    map's wire format. Merge with the `merge_vk_maps` binary.
-4. **Rebuild the gnark artifacts** over the new shrink shape, and publish them under a new
-   circuit version so no client mixes old and new.
-5. **Only then** consider the block-proving service. Do not deploy a prover whose key map, GPU
+4. **Regenerate the pinned allowlist root** once the map is final:
+   `cargo run -p zkm-prover --bin write_vk_root --release`. It is a public input of the wrap
+   circuit and is baked into the generated Solidity verifier, so it has to be right *before*
+   the artifacts are built, not after.
+5. **Rebuild the gnark artifacts** over the new shrink shape, and publish them under a new
+   circuit version so no client mixes old and new. The wrap circuit now has three public
+   inputs rather than two, so the verifier contract's ABI changes and existing deployments
+   cannot verify new proofs.
+6. **Only then** consider the block-proving service. Do not deploy a prover whose key map, GPU
    build and circuit artifacts are not all from the same revision.
 
 ## Keeping the seven sites in step

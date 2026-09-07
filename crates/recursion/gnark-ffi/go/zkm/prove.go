@@ -249,7 +249,7 @@ func ProveDvSnark(dataDir string, witnessPath string, storedDir string) Proof {
 	fmt.Println("finished SaveWitnessToFile")
 
 	return Proof{
-		PublicInputs: [2]string{"", ""},
+		PublicInputs: [3]string{"", "", ""},
 		EncodedProof: "",
 		RawProof:     "",
 	}

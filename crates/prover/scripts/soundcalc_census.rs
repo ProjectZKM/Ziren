@@ -30,6 +30,49 @@ where
     let mut widest_chip = String::new();
     for chip in machine.chips() {
         chips += 1;
+        // `SOUNDCALC_CENSUS_CHIPS=1`: one line per chip, for area-by-chip
+        // arithmetic against the executor's `ZIREN_SHARD_CLOSE_CENSUS` rows.
+        if std::env::var_os("SOUNDCALC_CENSUS_CHIPS").is_some() {
+            let fields: usize = chip
+                .sends()
+                .iter()
+                .chain(chip.receives().iter())
+                .map(|l| l.values.len())
+                .sum();
+            if let Some(want) = std::env::var_os("SOUNDCALC_CENSUS_LOOKUPS") {
+                if want.to_string_lossy() == chip.name() {
+                    for (dir, l) in chip
+                        .sends()
+                        .iter()
+                        .map(|l| ("send", l))
+                        .chain(chip.receives().iter().map(|l| ("recv", l)))
+                    {
+                        let vals: Vec<String> = l
+                            .values
+                            .iter()
+                            .map(|v| format!("{v:?}"))
+                            .collect();
+                        println!(
+                            "lookup {name} {} {dir} kind={:?} arity={} mult={:?} vals={}",
+                            chip.name(),
+                            l.kind,
+                            l.values.len(),
+                            l.multiplicity,
+                            vals.join(" ")
+                        );
+                    }
+                }
+            }
+            println!(
+                "chip {name} {} main_width={} preprocessed_width={} sends={} receives={} lookup_fields={}",
+                chip.name(),
+                BaseAir::width(&chip.air),
+                chip.preprocessed_width(),
+                chip.sends().len(),
+                chip.receives().len(),
+                fields
+            );
+        }
         main_width += BaseAir::width(&chip.air);
         pre_width += chip.preprocessed_width();
         let n = get_symbolic_constraints(

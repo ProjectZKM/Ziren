@@ -1,3 +1,9 @@
+/// The recursion verifying-key-allowlist root baked into the generated Solidity
+/// verifier. Kept next to `crates/verifier/bn254-vk/vk_root.bin`, which
+/// `cargo run -p zkm-prover --bin write_vk_root --release` regenerates.
+static VK_ROOT_BYTES: &[u8; 32] =
+    include_bytes!("../../../verifier/bn254-vk/vk_root.bin");
+
 use std::{
     fs::File,
     io::{Read, Write},
@@ -79,6 +85,7 @@ impl PlonkBn254Prover {
         let zkm_verifier_str = include_str!("../assets/ZKMVerifierPlonk.txt")
             .replace("{ZKM_CIRCUIT_VERSION}", ZKM_CIRCUIT_VERSION)
             .replace("{VERIFIER_HASH}", format!("0x{}", hex::encode(vkey_hash)).as_str())
+            .replace("{VK_ROOT}", format!("0x{}", hex::encode(*VK_ROOT_BYTES)).as_str())
             .replace("{PROOF_SYSTEM}", "Plonk");
         let mut zkm_verifier_file = File::create(zkm_verifier_path).unwrap();
         zkm_verifier_file.write_all(zkm_verifier_str.as_bytes()).unwrap();
@@ -108,6 +115,7 @@ impl PlonkBn254Prover {
         proof: &PlonkBn254Proof,
         vkey_hash: &BigUint,
         committed_values_digest: &BigUint,
+        vk_root: &BigUint,
         build_dir: &Path,
     ) -> Result<()> {
         if proof.plonk_vkey_hash != Self::get_vkey_hash(build_dir) {
@@ -122,6 +130,7 @@ impl PlonkBn254Prover {
             &proof.raw_proof,
             &vkey_hash.to_string(),
             &committed_values_digest.to_string(),
+            &vk_root.to_string(),
         )
         .map_err(|e| anyhow::anyhow!("failed to verify proof: {e}"))
     }

@@ -277,6 +277,8 @@ pub enum DslIr<C: Config> {
     /// Asserts that the inputted var is equal the circuit's committed values digest public input.
     /// Should only be used when target is a gnark circuit.
     CircuitCommitCommittedValuesDigest(Var<C::N>),
+    /// Commit the recursion verifying-key-allowlist root as a public input.
+    CircuitCommitVkRoot(Var<C::N>),
 
     /// Adds two elliptic curve points. (sum, point_1, point_2).
     CircuitV2HintAddCurve(

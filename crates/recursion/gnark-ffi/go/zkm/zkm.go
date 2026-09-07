@@ -32,6 +32,14 @@ var LocLastOpcode string = ""
 type Circuit struct {
 	VkeyHash              frontend.Variable `gnark:",public"`
 	CommittedValuesDigest frontend.Variable `gnark:",public"`
+	// Root of the Merkle tree of allowed recursion verifying keys.
+	//
+	// Inside the recursion tree this root is a free witness, so the in-circuit
+	// checks only say that every child's key lies in a tree with THIS root --- a
+	// tree the prover supplies.  Exposing it lets the on-chain verifier require
+	// the published root, and so rules out a proof built around a substituted
+	// compose, leaf or shrink program.
+	VkRoot                frontend.Variable `gnark:",public"`
 	Vars                  []frontend.Variable
 	Felts                 []koalabear.Variable
 	Exts                  []koalabear.ExtensionVariable
@@ -48,10 +56,11 @@ type WitnessInput struct {
 	Exts                  [][]string `json:"exts"`
 	VkeyHash              string     `json:"vkey_hash"`
 	CommittedValuesDigest string     `json:"committed_values_digest"`
+	VkRoot                string     `json:"vk_root"`
 }
 
 type Proof struct {
-	PublicInputs [2]string `json:"public_inputs"`
+	PublicInputs [3]string `json:"public_inputs"`
 	EncodedProof string    `json:"encoded_proof"`
 	RawProof     string    `json:"raw_proof"`
 }
@@ -235,6 +244,9 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		case "CommitCommittedValuesDigest":
 			element := vars[cs.Args[0][0]]
 			api.AssertIsEqual(circuit.CommittedValuesDigest, element)
+		case "CommitVkRoot":
+			element := vars[cs.Args[0][0]]
+			api.AssertIsEqual(circuit.VkRoot, element)
 		case "CircuitFelts2Ext":
 			exts[cs.Args[0][0]] = koalabear.Felts2Ext(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]])
 		case "CircuitFelts2Ext5":

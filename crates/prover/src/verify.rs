@@ -7,6 +7,8 @@ use p3_koala_bear::KoalaBear;
 use zkm_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
 use zkm_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
 
+use crate::utils::koalabears_to_bn254;
+
 use thiserror::Error;
 use zkm_pcs::{
     air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
@@ -426,9 +428,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let vkey_hash = BigUint::from_str(&proof.public_inputs[0])?;
         let committed_values_digest = BigUint::from_str(&proof.public_inputs[1])?;
+        let vk_root = BigUint::from_str(&proof.public_inputs[2])?;
+
+        // The recursion key allowlist root is a public input of the wrap circuit
+        // precisely so it can be pinned here.  Inside the tree it is a witness,
+        // so without this check a proof built around a substituted compose or
+        // leaf program is indistinguishable from an honest one.
+        let expected_vk_root =
+            koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
+        if vk_root != expected_vk_root {
+            return Err(PlonkVerificationError::InvalidVerificationKey.into());
+        }
 
         // Verify the proof with the corresponding public inputs.
-        prover.verify(proof, &vkey_hash, &committed_values_digest, build_dir)?;
+        prover.verify(proof, &vkey_hash, &committed_values_digest, &vk_root, build_dir)?;
 
         verify_plonk_bn254_public_inputs(vk, public_values, &proof.public_inputs)?;
 
@@ -447,9 +460,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let vkey_hash = BigUint::from_str(&proof.public_inputs[0])?;
         let committed_values_digest = BigUint::from_str(&proof.public_inputs[1])?;
+        let vk_root = BigUint::from_str(&proof.public_inputs[2])?;
+
+        // The recursion key allowlist root is a public input of the wrap circuit
+        // precisely so it can be pinned here.  Inside the tree it is a witness,
+        // so without this check a proof built around a substituted compose or
+        // leaf program is indistinguishable from an honest one.
+        let expected_vk_root =
+            koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
+        if vk_root != expected_vk_root {
+            return Err(Groth16VerificationError::InvalidVerificationKey.into());
+        }
 
         // Verify the proof with the corresponding public inputs.
-        prover.verify(proof, &vkey_hash, &committed_values_digest, build_dir)?;
+        prover.verify(proof, &vkey_hash, &committed_values_digest, &vk_root, build_dir)?;
 
         verify_groth16_bn254_public_inputs(vk, public_values, &proof.public_inputs)?;
 

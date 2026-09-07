@@ -26,6 +26,16 @@ contract ZKMVerifier is Groth16Verifier, IZKMVerifierWithHash {
         return {VERIFIER_HASH};
     }
 
+    /// @notice The root of the Merkle tree of recursion verifying keys this verifier accepts.
+    /// @dev Inside the proof tree this root is a witness the prover supplies, so the in-circuit
+    /// checks only establish that every child key lies in a tree with *that* root. Supplying this
+    /// value as a public input here, rather than taking it from the caller, is what binds a proof
+    /// to the published recursion programs and rules out one built around a substituted compose,
+    /// leaf or shrink program.
+    function VK_ROOT() public pure returns (bytes32) {
+        return {VK_ROOT};
+    }
+
     /// @notice Hashes the public values to a field elements inside Bn254.
     /// @param publicValues The public values.
     function hashPublicValues(
@@ -50,9 +60,10 @@ contract ZKMVerifier is Groth16Verifier, IZKMVerifierWithHash {
         }
 
         bytes32 publicValuesDigest = hashPublicValues(publicValues);
-        uint256[2] memory inputs;
+        uint256[3] memory inputs;
         inputs[0] = uint256(programVKey);
         inputs[1] = uint256(publicValuesDigest);
+        inputs[2] = uint256(VK_ROOT());
         uint256[8] memory proof = abi.decode(proofBytes[4:], (uint256[8]));
         this.Verify(proof, inputs);
     }

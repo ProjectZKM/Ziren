@@ -381,6 +381,10 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                     opcode: ConstraintOpcode::CommitCommittedValuesDigest,
                     args: vec![vec![a.id()]],
                 }),
+                DslIr::CircuitCommitVkRoot(a) => constraints.push(Constraint {
+                    opcode: ConstraintOpcode::CommitVkRoot,
+                    args: vec![vec![a.id()]],
+                }),
                 DslIr::CircuitFelts2Ext(a, b) => constraints.push(Constraint {
                     opcode: ConstraintOpcode::CircuitFelts2Ext,
                     args: vec![

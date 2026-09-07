@@ -82,7 +82,9 @@ use zkm_recursion_gnark_ffi::{
 };
 
 pub use types::*;
-use utils::{words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254};
+use utils::{
+    words_to_bytes, zkm_committed_values_digest_bn254, zkm_vk_root_bn254, zkm_vkey_digest_bn254,
+};
 
 use components::{DefaultProverComponents, ZKMProverComponents};
 
@@ -2228,6 +2230,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input.write(&mut witness);
         witness.write_committed_values_digest(committed_values_digest);
         witness.write_vkey_hash(vkey_hash);
+        let vk_root = zkm_vk_root_bn254(&proof);
+        witness.write_vk_root(vk_root);
 
         let prover = PlonkBn254Prover::new();
         let proof = prover.prove(witness, build_dir.to_path_buf());
@@ -2238,6 +2242,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 &proof,
                 &vkey_hash.as_canonical_biguint(),
                 &committed_values_digest.as_canonical_biguint(),
+                &vk_root.as_canonical_biguint(),
                 build_dir,
             )
             .unwrap();
@@ -2277,6 +2282,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input.write(&mut witness);
         witness.write_committed_values_digest(committed_values_digest);
         witness.write_vkey_hash(vkey_hash);
+        let vk_root = zkm_vk_root_bn254(&proof);
+        witness.write_vk_root(vk_root);
 
         let prover = Groth16Bn254Prover::new();
         let proof = prover.prove(witness, build_dir.to_path_buf());
@@ -2287,6 +2294,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 &proof,
                 &vkey_hash.as_canonical_biguint(),
                 &committed_values_digest.as_canonical_biguint(),
+                &vk_root.as_canonical_biguint(),
                 build_dir,
             )
             .unwrap();
@@ -2321,6 +2329,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input.write(&mut witness);
         witness.write_committed_values_digest(committed_values_digest);
         witness.write_vkey_hash(vkey_hash);
+        let vk_root = zkm_vk_root_bn254(&proof);
+        witness.write_vk_root(vk_root);
 
         let prover = DvSnarkBn254Prover::new();
         prover.prove(witness, build_dir.to_path_buf(), store_dir.to_path_buf())

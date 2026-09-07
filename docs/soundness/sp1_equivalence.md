@@ -258,9 +258,12 @@ of a different system.
 1. ~~Assert completeness at the terminal stages.~~ **Done.** The assertion lives in
    `verify_wrap_basefold_core`, the one function both shrink and wrap reach, with host mirrors
    in `verify_shrink` and `verify_wrap_bn254`.
-2. Expose the recursion key root as a public input of the wrap circuit and check it in the
-   Solidity and Rust verifiers. Consider adding the exit code at the same time, as SP1 does.
-   **Still open.**
+2. ~~Expose the recursion key root as a public input of the wrap circuit and check it in the
+   Solidity and Rust verifiers.~~ **Done.** The wrap circuit commits it, the gnark circuit
+   carries it as a third public input, and both the standalone Rust verifier and the generated
+   Solidity contract supply the published root rather than accepting one from the caller. The
+   exit code was left alone: unlike SP1 we assert it is zero unconditionally in the recursion
+   leaf, so exposing it would be a feature rather than a fix.
 3. ~~Settle the Poseidon2 round count.~~ **Done.** Changed from 13 partial rounds to 20 in all
    four sites in this repo and in the GPU prover's Rust constant, kernel macro and baked
    constant arrays. This changes every verifying key, so the key map, the gnark circuit

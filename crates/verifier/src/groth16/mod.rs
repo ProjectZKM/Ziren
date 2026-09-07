@@ -102,7 +102,7 @@ impl Groth16Verifier {
 
         Self::verify_gnark_proof(
             &proof[4..],
-            &[zkm_vkey_hash, hash_public_inputs(zkm_public_inputs)],
+            &[zkm_vkey_hash, hash_public_inputs(zkm_public_inputs), *crate::VK_ROOT_BYTES],
             groth16_vk,
         )
     }
@@ -153,7 +153,7 @@ impl Groth16Verifier {
 
         Self::verify_gnark_proof(
             &proof[4..],
-            &[zkm_vkey_hash, hash_public_inputs(zkm_public_inputs)],
+            &[zkm_vkey_hash, hash_public_inputs(zkm_public_inputs), *crate::VK_ROOT_BYTES],
             imm_groth16_vk,
         )
     }

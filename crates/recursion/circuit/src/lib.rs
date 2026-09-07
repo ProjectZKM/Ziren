@@ -799,6 +799,17 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriP
 
         let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
         builder.commit_vkey_hash_circuit(vkey_hash);
+
+        // The recursion verifying-key-allowlist root, as a public input.
+        //
+        // Inside the tree this root is a free witness (compress_basefold.rs
+        // sources it from the merkle witness), so the in-circuit checks only say
+        // "every child's key is in a tree with THIS root" --- a tree the prover
+        // supplies.  Exposing it here is what lets a verifier outside the proof
+        // system require the root to be the published one, and so rules out a
+        // tree built around a substituted compose, leaf or shrink program.
+        let vk_root = felts_to_bn254_var(builder, &public_values.vk_root);
+        builder.commit_vk_root_circuit(vk_root);
     }
 
     fn commit_recursion_public_values_imm_wrap_vk(
@@ -820,6 +831,12 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriP
         builder.push_op(DslIr::CircuitPoseidon2Permute(state));
         let vkey_hash = state[0];
         builder.commit_vkey_hash_circuit(vkey_hash);
+
+        // Same public input as the plain path above: folding the wrap vk into
+        // the vkey hash pins the WRAP program, not the recursion programs
+        // beneath it, so the allowlist root still has to be exposed.
+        let vk_root = felts_to_bn254_var(builder, &public_values.vk_root);
+        builder.commit_vk_root_circuit(vk_root);
     }
 
     fn vk_preprocessed_commit_felts(

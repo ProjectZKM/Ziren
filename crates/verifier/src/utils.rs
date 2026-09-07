@@ -15,11 +15,13 @@ pub fn hash_public_inputs(public_inputs: &[u8]) -> [u8; 32] {
 }
 
 /// Formats the Ziren vkey hash and public inputs for use in either the Plonk or Groth16 verifier.
-pub fn bn254_public_values(zkm_vkey_hash: &[u8; 32], zkm_public_inputs: &[u8]) -> [Fr; 2] {
+pub fn bn254_public_values(zkm_vkey_hash: &[u8; 32], zkm_public_inputs: &[u8]) -> [Fr; 3] {
     let committed_values_digest = hash_public_inputs(zkm_public_inputs);
     let vkey_hash = Fr::from_slice(&zkm_vkey_hash[1..]).unwrap();
     let committed_values_digest = Fr::from_slice(&committed_values_digest).unwrap();
-    [vkey_hash, committed_values_digest]
+    // The recursion verifying-key-allowlist root, pinned: see `VK_ROOT_BYTES`.
+    let vk_root = Fr::from_slice(crate::VK_ROOT_BYTES.as_slice()).unwrap();
+    [vkey_hash, committed_values_digest, vk_root]
 }
 
 /// Decodes the Ziren vkey hash from the string from a call to `vk.bytes32`.

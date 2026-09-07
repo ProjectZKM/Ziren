@@ -35,6 +35,20 @@ pub fn zkm_vkey_digest_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) ->
     koalabears_to_bn254(&zkm_vkey_digest_koalabear(proof))
 }
 
+/// Get the recursion verifying-key-allowlist root this reduce proof carries.
+pub fn zkm_vk_root_koalabear(
+    proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
+) -> [KoalaBear; 8] {
+    let proof = &proof.proof;
+    let pv: &RecursionPublicValues<KoalaBear> = proof.public_values.as_slice().borrow();
+    pv.vk_root
+}
+
+/// The same root as a BN254 element, the form the wrap circuit commits.
+pub fn zkm_vk_root_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> Bn254 {
+    koalabears_to_bn254(&zkm_vk_root_koalabear(proof))
+}
+
 /// Compute the digest of the public values.
 pub fn recursion_public_values_digest(
     config: &InnerSC,

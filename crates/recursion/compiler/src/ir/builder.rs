@@ -510,6 +510,13 @@ impl<C: Config> Builder<C> {
         self.push_op(DslIr::CircuitCommitCommittedValuesDigest(var));
     }
 
+    /// Commit the recursion verifying-key-allowlist root as a public input of
+    /// the outer circuit, so that a verifier outside the proof system can pin
+    /// which recursion programs the tree was allowed to use.
+    pub fn commit_vk_root_circuit(&mut self, var: Var<C::N>) {
+        self.push_op(DslIr::CircuitCommitVkRoot(var));
+    }
+
     pub fn reduce_e(&mut self, ext: Ext<C::F, C::EF>) {
         self.push_op(DslIr::ReduceE(ext));
     }
