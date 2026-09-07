@@ -1,0 +1,80 @@
+\section{Performance evaluation}
+\label{sec:performance}
+
+\subsection{Methodology}
+
+All multi-GPU measurements are taken on a single host equipped with eight NVIDIA RTX 5090 GPUs (one with $32$~GB of visible memory each), $124$ logical CPU cores, and $925$~GB of system RAM. CPU-only measurements use a $16$-core, $123$~GB RAM x86\_64 host running a Linux 5.x kernel. We use the JIT-by-default executor end-to-end through prove and verify, the GPU prover under the production residency profile (compose-PK cache on; program cache on; per-syscall trace sync on), and trace-generation worker pool sized at $16$.
+
+For each configuration we run at least three end-to-end measurements and report the median. Run-to-run variance on a shared GPU box is non-trivial: on contention-free runs we see $\pm 3\%$ wall-time variance; under contention we observe outliers as much as $3\times$ slower, which we discard from the reported medians per our experimental discipline. Verification runs end-to-end on every reported configuration; we do not measure prove-only timings.
+
+We note explicitly that this paper does not report a head-to-head comparison against SP1 on identical workloads. The two systems target different guest ISAs (MIPS32r2 versus RV32IM), use different chip decompositions, and use different test-fixture programs; a fair comparison would require a non-trivial fixture-equivalence harness that is beyond our current scope.
+
+\subsection{End-to-end results on Ethereum execution-layer blocks}
+
+Our primary production workload is the proving of an Ethereum execution-layer block via \texttt{reth}, a Rust implementation of the Ethereum consensus client. The test fixture is a single Ethereum block plus its associated state proofs; the resulting MIPS execution trace is approximately $420$ million cycles spread across $189$ shards. Table~\ref{tab:reth-multigpu} reports end-to-end timings at one, two, four, and eight GPUs.
+
+\begin{table}[t]
+\centering
+\caption{End-to-end (prove and verify) wall time on \texttt{reth} (Ethereum execution-layer block, $\sim$420 M cycles, 189 shards) at varying GPU count. Median of three runs.}
+\label{tab:reth-multigpu}
+\begin{tabular}{rrrrrr}
+\toprule
+GPUs & Core (s) & Compress (s) & Shrink (s) & Wrap (s) & Total (s) \\
+\midrule
+1 & 109.3 & 48.4 & 0.41 & 1.14 & 159.2 \\
+2 & 73.3 & 35.3 & 0.45 & 1.09 & 110.1 \\
+4 & 62.3 & 29.3 & 0.47 & 1.11 & 93.1 \\
+8 & 62.7 & 29.8 & 0.47 & 1.07 & 94.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The system scales from one GPU ($159.2$~s) to four GPUs ($93.1$~s) with a $1.71\times$ speedup. From four to eight GPUs the scaling plateaus: the core stage's per-shard CPU trace-generation cost saturates at four workers, and the compress stage's pipelined-arity choice scales $1{:}1$ with GPU count up to the pool size. The shrink and wrap stages are single-GPU by design and contribute approximately $1.5$~s irrespective of pool size.
+
+\subsection{Per-workload throughput sweep}
+
+\begin{table}[t]
+\centering
+\caption{Per-workload core-prove throughput on a CPU-only host (legacy FRI versus $\BaseFold{}+\Jagged{}$ at rate $1/2$ and rate $1/16$). Wall time in seconds; speedup expressed as ratio of FRI to $\BaseFold{}$ wall.}
+\label{tab:workload-sweep}
+\begin{tabular}{lrrrrr}
+\toprule
+Workload & Cycles & FRI (s) & $\BaseFold{}_{1/2}$ (s) & $\BaseFold{}_{1/16}$ (s) & Best speedup \\
+\midrule
+fibonacci-1k & 8\,K & 13.6 & 32.0 & 9.5 & $1.44\times$ \\
+json & 9\,K & 56.4 & 18.4 & 29.8 & $3.07\times$ \\
+chess & 12\,K & 61.4 & 23.5 & 34.8 & $2.62\times$ \\
+fibonacci-100k & 700\,K & 384.6 & 366.6 & 461.3 & $1.05\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:workload-sweep} reports the wall time of core proof generation across four representative workloads under three configurations: the legacy FRI baseline (now removed in the current revision), the $\BaseFold{}$ rate-$1/2$ development configuration, and the production rate-$1/16$ configuration with $16$ bits of $\Poseidon{2}$-based grinding.
+
+The $\BaseFold{}$ stack delivers a $3.07\times$ improvement on commit-bound mid-size workloads (JSON parsing) and a $2.62\times$ improvement on the chess-engine workload. On the tiny Fibonacci workload, the per-MLE encoding fixed costs dominate, and the rate-$1/2$ configuration loses; the production rate-$1/16$ configuration recovers to $1.44\times$ over FRI. On the largest CPU-feasible workload (Fibonacci with $700\,000$ cycles), $\BaseFold{}$ at rate-$1/2$ is on par with FRI, while rate-$1/16$ pays a $\sim$20\% penalty for the $8\times$ larger codeword.
+
+\subsection{Out-of-memory cure}
+
+The legacy FRI prover on the multi-million-cycle workloads (Tendermint light-block verification at $\sim$10 M cycles, an extended-fibonacci of 21 M cycles, and real Ethereum-block proving via \texttt{reth} and \texttt{geth}) exhausted memory on a $123$-GB-RAM host, with peak resident set sizes of $107$--$112$~GB during the FRI commit phase. The migration to $\BaseFold{}+\Stacked{}+\Jagged{}$ structurally cures this: per-MLE codeword encoding streams stripes of bounded size through the device DFT, so peak memory stays bounded by stripe size $\times$ blowup factor rather than whole-vector $\times$ blowup. Tendermint completes at a $\sim$52~GB peak resident set; the extended Fibonacci completes at $\sim$52~GB. Both were previously unprovable on the same hardware.
+
+\subsection{Compress stage decomposition}
+
+The compress stage is the next most expensive stage after core proving on the multi-GPU \texttt{reth} measurements. Its $\sim$30~s wall time at four GPUs decomposes into the per-shard recursion-program build, the dummy-witness construction in the dummy-VK-and-shard-proof generator, the per-shard $\Jagged{}$-fingerprint computation, and the Merkle-path open. The dummy-proof port (\S\ref{sec:recursion}) reduced startup pre-warm from $64.8$~s to $2.0$~s. The verifying-key cache (\S\ref{sec:gpu-prover}) absorbed a further $\sim$3.3~s on a $4$-GPU \texttt{reth} run via a $\sim$60\% hit rate across shape-equivalent shards.
+
+\subsection{JIT executor speedup}
+
+The JIT executor, measured in isolation on a 100\,000-instruction pure-ALU register-arithmetic chain, completes in $1.83$~ms with $18.3$~ns per instruction. The interpreter under \emph{simple} mode (no event recording) completes the same chain in $1.77$~ms; the interpreter under \emph{trace} mode (with event recording for prover consumption) requires $10.74$~ms, $107.4$~ns per instruction. The JIT thus delivers a $5.9\times$ speedup over the interpreter in the prover-relevant trace mode.
+
+End-to-end on small workloads, the JIT loses to the interpreter due to per-call setup overhead (transpilation of the program and one-time mmap of the $4$~GB guest memory bridge). On large workloads such as \texttt{reth} where the GPU prover dominates wall time, the JIT and interpreter timings are within run-to-run noise; both produce byte-identical execution traces.
+
+\subsection{Scaling analysis}
+
+The scaling characteristics observed across our workload sweep can be summarised as follows.
+
+\paragraph{One-to-two GPU.} A $1.45\times$ total speedup ($1.49\times$ core), reflecting near-linear core-stage scaling with two trace-generation workers per GPU.
+
+\paragraph{Two-to-four GPU.} A $1.14\times$ total speedup, with compress scaling from $35.3$~s to $29.3$~s ($-17\%$) while core scales from $73.3$~s to $62.3$~s ($-15\%$). The shrink and wrap stages are unchanged.
+
+\paragraph{Four-to-eight GPU.} A $1.02\times$ total speedup, effectively flat. The core stage's CPU-side trace-generation pool saturates at four workers under the current per-shard state-mutex contention; further scaling requires profiling and refactoring of the trace-gen worker loop. The compress stage scales $1{:}1$ with the GPU pool but its absolute floor is small enough that the gain is absorbed by the core stage's plateau.
+
+We anticipate that a follow-on revision profiling the per-shard state-mutex contention will unlock the four-to-eight scaling regime, restoring the linear curve out to eight GPUs.

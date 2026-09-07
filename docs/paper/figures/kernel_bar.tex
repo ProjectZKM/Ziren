@@ -1,0 +1,15 @@
+% GPU kernel time of the core lane by group (nsys, ten-shard sample).
+\begin{tikzpicture}
+\begin{axis}[
+  xbar, xmin=0, xmax=50, width=0.9\textwidth, height=7.2cm,
+  bar width=7pt, xlabel={share of core-proving kernel time (\%)},
+  symbolic y coords={Other,Zerocheck fold,Zerocheck interpreted,Jagged reduction,Zerocheck compiled,WHIR commit+open,LogUp-GKR layers},
+  ytick=data, nodes near coords, nodes near coords align={horizontal},
+  every node near coord/.append style={font=\scriptsize},
+  tick label style={font=\scriptsize}, label style={font=\small},
+  enlarge y limits=0.1,
+]
+\addplot[fill=gray!40, draw=black] coordinates {
+  (42,LogUp-GKR layers) (19,WHIR commit+open) (16.5,Zerocheck compiled) (8,Jagged reduction) (7.1,Zerocheck interpreted) (2.3,Zerocheck fold) (5,Other)};
+\end{axis}
+\end{tikzpicture}

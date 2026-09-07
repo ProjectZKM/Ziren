@@ -1,0 +1,50 @@
+This is BibTeX, Version 0.99d (TeX Live 2023/Debian)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: main.aux
+The style file: alpha.bst
+Database file #1: references.bib
+Warning--can't use both volume and number fields in barrington1989bounded
+Warning--empty booktitle in plookup
+Warning--can't use both volume and number fields in lund1992algebraic
+You've used 58 entries,
+            2543 wiz_defined-function locations,
+            821 strings with 12902 characters,
+and the built_in function-call counts, 20670 in all, are:
+= -- 1985
+> -- 1053
+< -- 37
++ -- 362
+- -- 357
+* -- 1215
+:= -- 3354
+add.period$ -- 184
+call.type$ -- 58
+change.case$ -- 366
+chr.to.int$ -- 54
+cite$ -- 61
+duplicate$ -- 772
+empty$ -- 1614
+format.name$ -- 437
+if$ -- 4301
+int.to.chr$ -- 5
+int.to.str$ -- 0
+missing$ -- 17
+newline$ -- 304
+num.names$ -- 174
+pop$ -- 539
+preamble$ -- 1
+purify$ -- 424
+quote$ -- 0
+skip$ -- 742
+stack$ -- 0
+substring$ -- 634
+swap$ -- 132
+text.length$ -- 37
+text.prefix$ -- 28
+top$ -- 0
+type$ -- 464
+warning$ -- 3
+while$ -- 166
+width$ -- 61
+write$ -- 729
+(There were 3 warnings)

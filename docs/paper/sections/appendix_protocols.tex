@@ -1,0 +1,29 @@
+\section{Protocol details}
+\label{sec:app-protocols}
+
+\subsection{The \WHIR{} iteration as implemented}
+\label{sec:app-whir}
+
+Section~\ref{sec:iopp} states what one iteration does; this appendix gives it step by step. An \emph{iteration} with folding factor $k$ reduces membership in $\CRS[\F, L, m, \widehat w, \sigma]$ to membership of a new function $f'$ in $\CRS[\F, L^{(2)}, m - k, \widehat w', \sigma']$: the number of variables drops by $k$ while the domain only halves, so the code's rate falls from $\rho$ to $2^{1-k}\rho$ (its redundancy $1/\rho$ grows) in the paper's convention; \Zirenver{} instead re-encodes the folded polynomial at an explicit per-round rate (below). An iteration proceeds as follows~\citep[\S2.1.3]{whir}.
+\begin{enumerate}
+  \item \textbf{Sumcheck rounds.} $k$ rounds of sumcheck on $\sum_{\bm b} \widehat w(\widehat f(\bm b), \bm b) = \sigma$, producing challenges $\bm\alpha = (\alpha_1, \dots, \alpha_k)$ and reducing the claim to one about $\widehat f(\bm\alpha, \cdot)$.
+  \item \textbf{Folded oracle.} The prover sends $g : L^{(2)} \to \F$, honestly the evaluation of $\widehat g = \widehat f(\bm\alpha, \cdot)$, re-encoded at the round's rate.
+  \item \textbf{Out-of-domain samples.} The verifier draws $z_0 \in \EF$ (two such points in \Zirenver{}); the prover answers $y_0 = \widehat g(\bm z_0)$ with $\bm z_0 = (z_0, z_0^2, \dots)$.
+  \item \textbf{Shift queries.} The verifier draws $t$ indices $z_i \in L^{(2^k)}$, obtains $y_i = \Fold(f, \bm\alpha)(z_i)$ by reading the $2^k$ symbols of $f$ that fold to $z_i$ (one Merkle leaf each), and draws a combination scalar $\gamma$.
+  \item \textbf{Recursive claim.} The new weight is $\widehat w'(Z, \bm X) = \widehat w(Z, \bm\alpha, \bm X) + Z \sum_i \gamma^{i+1} \eqf(\bm z_i, \bm X)$ and the new target $\sigma' = \widehat h_k(\alpha_k) + \sum_i \gamma^{i+1} y_i$; the protocol recurses on $(g, \widehat w', \sigma')$.
+\end{enumerate}
+After the last iteration the prover sends the coefficients of the final polynomial in the clear and the verifier checks the residual constraint directly.
+
+\subsection{The jagged branching program and the assist sumcheck}
+\label{sec:app-jagged}
+
+\paragraph{Evaluating $\widetilde f_t$: the branching program.} Proposition~3.2 of~\citep{jagged-pcs} writes
+\[
+  \widetilde f_t(\bm z_r, \bm z_c, i) = \sum_{y \in \{0,1\}^k} \eqf(\bm z_c, y)\, \widehat g(\bm z_r, i, t_{y-1}, t_y),
+\]
+where $g(a, b, c, d) = 1$ iff $b < d$ and $b = a + c$ as integers. The function $g$ is computed by a width-four read-once branching program reading one bit of each of $a, b, c, d$ per step (two bits of state: the carry of $a + c$ and whether the prefix of $b$ is below the prefix of $d$), so by Holmgren--Rothblum~\citep{hr18} its multilinear extension is evaluated in $O(m)$ field operations by a dynamic program over the layers. \Zirenver{} implements exactly this program: four memory states, four bits read per layer (sixteen bit-states), evaluated in reverse over $m + 1$ layers. The sum over the $2^k$ columns is not done by the verifier directly---$K \approx 3.6 \cdot 10^4$---but delegated to the prover through the ``jagged assist'' of Section~5 of the paper: the prover proves
+\[
+  \mathsf{jagged\_eval} = \sum_{x, y \in \{0,1\}^{m+1}} \sum_{k} \mathsf{L}_k(\bm z_c)\; \eqf\big((x, y), (\mathrm{bits}(t_k), \mathrm{bits}(t_{k+1}))\big)\; \mathsf{BP}(\bm z_r, \bm z^{*}, x, y)
+\]
+by a $2(m+1)$-variable sumcheck, where $\mathsf L_k$ is the $k$-th Lagrange weight of $\bm z_c$ and $\mathsf{BP}$ the branching-program polynomial; the verifier finishes with one evaluation of $\mathsf{BP}$ at the sumcheck point and an in-the-clear check of the closing identity against the public prefix sums.
+

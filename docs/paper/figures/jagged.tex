@@ -1,0 +1,43 @@
+% From unit tables of different heights to one committed polynomial: dense packing, stacking, jagged reduction.
+\begin{tikzpicture}[
+  font=\scriptsize,
+  tbl/.style={draw=black!75, line width=0.5pt, fill=gray!15},
+  cell/.style={draw=black!75, line width=0.4pt, fill=gray!15, minimum height=0.42cm, inner sep=0pt},
+  a/.style={-{Latex[length=1.8mm]}, line width=0.6pt, black!80},
+  lab/.style={font=\scriptsize, black!70},
+  bandlab/.style={font=\scriptsize\scshape, black!55, anchor=north west, inner sep=3pt},
+  claim/.style={rectangle, draw=black!75, rounded corners=2pt, fill=white, align=center, font=\scriptsize, inner sep=3pt},
+]
+% ---------- (a) unit tables
+\foreach \i/\h/\n in {0/2.2/{\texttt{LoadWord}},1/2.2/{},2/1.2/{\texttt{Branch}},3/1.2/{},4/0.45/{\texttt{Byte}},5/0.45/{}} {
+  \draw[tbl] (\i*0.62,0) rectangle ++(0.5,\h);
+}
+\node[lab, anchor=south] at (0.56,2.25) {$h_0$};
+\node[lab, anchor=south] at (1.8,1.25) {$h_2$};
+\node[lab, anchor=south] at (3.04,0.5) {$h_4$};
+\node[lab, anchor=north, align=center] at (1.7,-0.1) {unit tables: $K \approx 3.6\cdot 10^4$ columns,\\heights $h_y$ from 32 rows to millions};
+% ---------- (b) dense vector
+\draw[a] (3.9,1.3) -- node[lab, above] {concatenate} (5.3,1.3);
+\draw[tbl] (5.5,1.1) rectangle ++(6.4,0.42);
+\foreach \x/\t in {5.5/{$t_0{=}0$},7.7/{$t_2$},9.9/{$t_4$},11.9/{$t_K{=}A$}} { \draw[black!75] (\x,1.05) -- (\x,1.57); \node[lab, anchor=south] at (\x,1.6) {\t}; }
+\node[lab, anchor=north, align=center] at (8.7,1.0) {dense vector $\mathbf q = \mathbf c_0 \Vert \cdots \Vert \mathbf c_{K-1}$, length $A$ (trace area), padded to $2^m$;\\$\mathrm{col}(i)$ and $\mathrm{row}(i) = i - t_{\mathrm{col}(i)}$ locate position $i$};
+% ---------- (c) stripes / Merkle
+\draw[a] (8.7,0.15) -- node[lab, right] {cut into $2^{m-\ell}$ stripes of $2^{\ell}$ entries} (8.7,-0.7);
+\foreach \j in {0,...,7} { \node[cell, minimum width=0.62cm] at (6.3+\j*0.68,-1.05) {}; }
+\draw[decorate, decoration={brace, amplitude=3pt, mirror}, black!70] (5.98,-1.32) -- (8.66,-1.32) node[lab, midway, below=3pt] {32 stripes $=$ one Merkle leaf per coset row};
+\node[lab, anchor=west] at (11.7,-1.05) {$\cdots$ committed once};
+% ---------- (d) claim flow
+\node[claim] (c1) at (1.7,-2.75) {column claim\\$\widetilde p(\bm z_r, y) = v$};
+\node[claim] (c2) at (5.3,-2.75) {jagged sumcheck\\degree 2, $m$ rounds; verifier evaluates $\widetilde f_t$\\by a width-4 branching program};
+\node[claim] (c3) at (9.3,-2.75) {dense claim\\$\widetilde{\mathbf q}(\bm z^*) = v_{\mathbf q}$};
+\node[claim] (c4) at (12.2,-2.75) {\WHIR{} opening};
+\draw[a] (c1) -- (c2); \draw[a] (c2) -- (c3); \draw[a] (c3) -- (c4);
+\begin{scope}[on background layer]
+  \fill[blue!5, rounded corners=4pt] (-0.4,-0.9) rectangle (4.0,3.1);
+  \fill[orange!7, rounded corners=4pt] (4.2,-1.8) rectangle (13.6,3.1);
+  \fill[green!6, rounded corners=4pt] (-0.4,-3.5) rectangle (13.6,-1.95);
+  \node[bandlab] at (-0.4,3.1) {a\enspace per-unit tables};
+  \node[bandlab] at (4.2,3.1) {b\enspace dense packing and stacking};
+  \node[bandlab] at (-0.4,-1.95) {c\enspace reduction of a column claim};
+\end{scope}
+\end{tikzpicture}

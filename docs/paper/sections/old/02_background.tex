@@ -1,0 +1,55 @@
+\section{Background}
+\label{sec:background}
+
+This section reviews the cryptographic and architectural ingredients underlying \Zirenver{}. We assume familiarity with finite-field arithmetic and Merkle-tree commitments and refer the reader to standard treatments for foundational material.
+
+\subsection{Zero-knowledge virtual machines}
+
+A \zkVM{} is a system in which a \emph{guest program} expressed in a target instruction-set architecture is executed on \emph{guest inputs}, producing a \emph{guest trace} together with a succinct, soundly verifiable proof that the trace was produced honestly by that program on those inputs. The proof is succinct in the sense that its size and verification time are independent of (or only mildly dependent on) the trace length.
+
+Concretely, the prover takes an executable in the target ISA, runs it under a recording interpreter or compiler-instrumented executor, and emits a sequence of structured trace tables (one per chip). Each chip table is a width-$w$ matrix over the prime field $\F = \KB{}$, where $\KB{}$ is the Koala Bear prime field used by the Plonky3 ecosystem~\citep{plonky3}. The constraints on those tables are encoded as an algebraic intermediate representation (AIR) that the prover demonstrates to be satisfied via a polynomial commitment scheme (PCS).
+
+\subsection{MIPS32r2 versus RISC-V}
+
+The choice of guest ISA influences the chip set, the precompile boundary, and the interaction with existing developer tooling. \Ziren{} targets MIPS32r2 rather than the RV32IM target used by SP1. The structural similarities (32 general-purpose registers, fixed-width instructions, similar opcode counts) mean that significant portions of the prover architecture transfer directly. Notable differences relevant to \zkVM{} engineering are:
+\begin{itemize}
+  \item MIPS has explicit \texttt{HI}/\texttt{LO} registers receiving the upper and lower halves of multiplication and division outputs.
+  \item MIPS uses a branch-delay-slot semantics, in which the instruction immediately following a branch executes before the branch takes effect; the executor must track \texttt{next\_pc} and \texttt{next\_next\_pc} separately.
+  \item MIPS provides bit-manipulation primitives (\texttt{WSBH}, \texttt{EXT}, \texttt{INS}) that simplify the encoding of common hashing and byte-shuffling sequences.
+\end{itemize}
+
+\subsection{STARKs and polynomial commitment schemes}
+
+The \zkVM{} prover converts each chip table into a multilinear polynomial (\Mle{}) over the boolean hypercube $\{0,1\}^n$ where $n = \lceil \log_2 \text{height}\rceil$, commits to a low-degree extension of each \Mle{} via a polynomial commitment scheme, and proves AIR satisfaction by combining the commitments with sumcheck-style protocols~\citep{lund1992algebraic}. Two PCS families dominate practical small-field \zkVM{} construction:
+
+\paragraph{Fast Reed--Solomon IOPP (FRI).} FRI~\citep{ben2018fast} commits to the Reed--Solomon encoding of a polynomial over a multiplicative subgroup and uses repeated random folding to reduce a low-degree claim to a constant-size statement. FRI is the workhorse of the original Plonky3 and SP1 stacks.
+
+\paragraph{BaseFold.} $\BaseFold{}$~\citep{basefold} is a multilinear polynomial commitment scheme that interleaves random linear combinations from the sumcheck protocol with FRI-style codeword folding. Where vanilla FRI commits to a univariate polynomial and supports low-degree testing, $\BaseFold{}$ commits to the Reed--Solomon encoding of an MLE's hypercube evaluations and runs the sumcheck and codeword folds in lockstep under a single random challenge per round, so that the final folded codeword equals the final folded MLE. The construction avoids the wasted univariate-to-multilinear conversion of a naive FRI-on-MLE composition, exposes a per-stripe encoding pattern that admits streaming materialisation, and supports verifier costs whose constant factors compare favourably with WHIR at the parameters \Zirenver{} uses (cf. the per-round comparison in \S\ref{sec:basefold}).
+
+We use $\BaseFold{}$ throughout \Zirenver{}; the FRI baseline is retained only in the legacy outer-shrink path that does not yet emit a CPU chip.
+
+\subsection{Sumcheck-based lookup arguments}
+
+Modern small-field \zkVM s rely heavily on lookup arguments for cross-chip constraints (e.g., the CPU chip asserts the validity of an instruction by looking up its decomposed form in a program-image chip). \Zirenver{} uses the $\LogUp{}$ construction of Habök, Eagen, and Pawelczak~\citep{logup-gkr}, in which each lookup is reduced to a product-argument over rational functions and discharged via a GKR-style layered sumcheck~\citep{gkr-cmt}.
+
+A $\LogUp{}$ proof for a chip produces a vector of layer proofs descending from the GKR circuit root to its leaves; the protocol is shard-local in our integration, so a multi-shard workload produces one $\LogUp{}$ proof per chip per shard.
+
+\subsection{Zerocheck}
+
+The \emph{zerocheck} protocol reduces ``polynomial $f$ vanishes on a domain $D$'' to ``$f$ evaluated at a random point $r$ equals the expected sumcheck value.'' \Zirenver{}'s prover discharges all AIR constraints via a single zerocheck per chip, batched into a per-shard sumcheck after a transcript-mixed random linear combination over chips.
+
+\subsection{Jagged polynomial commitment}
+
+Real \zkVM{} chip tables have non-uniform heights: the CPU chip might be at $2^{20}$ rows while a precompile chip is at $2^{12}$. The $\Jagged{}$ construction (originating in SP1's \texttt{slop} crate family) reduces a heterogeneous batch of MLEs of differing heights to a single sumcheck claim that can then be discharged against a stacked $\BaseFold{}$ commitment.
+
+Formally, given chip MLEs $f_1, \ldots, f_k$ of heights $2^{n_1}, \ldots, 2^{n_k}$, the verifier samples random combination weights $\alpha_i$ and evaluation points $z_i$. The prover demonstrates $\sum_i \alpha_i f_i(z_i)$ equals the claimed value via a structured sumcheck whose variable ordering encodes the per-chip prefix-sum heights. The \emph{jagged-eval} sub-protocol checks the consistency of the claimed per-chip evaluations against the public chip-height vector; in \Zirenver{} this is discharged via a small DSL fragment running a $4\times 16$ branching-program evaluation~\citep{barrington1989bounded} together with a Horner-form prefix-sum check.
+
+\subsection{Recursion and outer wrap}
+
+\zkVM{} proofs are produced in two recursion layers and then wrapped into an outer SNARK. The prover first emits per-shard proofs (the \emph{core} layer). A \emph{compose tree} then aggregates pairs of shard proofs into combined proofs, halving the active proof count at each level until one proof remains (\emph{compress}). A final \emph{shrink} layer adapts the compressed proof to a smaller proof system, and a \emph{wrap} stage produces a Groth16 proof on the BN254 curve via \texttt{gnark}~\citep{gnark}.
+
+The recursion layers are themselves \zkVM s in miniature: each verifies a smaller fixed-shape program (a ``recursion program'') compiled to a DSL of register-allocated arithmetic operations, executed on a tiny recursion runtime, and proved with a STARK over the same Koala Bear prime field. The recursion verifier consumes a previous proof together with a verifying key, dispatching among a small set of program shapes via a \emph{verifying key map} (VK map) that records the hash of each admissible verifying key.
+
+\subsection{Inherited architecture from SP1}
+
+\Ziren{} originated as an SP1 fork retargeted to MIPS, and the second-generation migration was steered against periodic comparison with the SP1 reference. We acknowledge throughout that the protocol templates (chip decomposition, recursion structure, jagged sumcheck, basefold late binding, in-circuit verifier organisation) follow SP1's design. The contributions of \Zirenver{} that this paper foregrounds are concentrated in: the MIPS-specific executor and JIT, the GPU prover's residency and pipelining choices, the post-cross-binding sumcheck rewrite, and the integration discipline that brings the protocol stack to the production performance levels reported.

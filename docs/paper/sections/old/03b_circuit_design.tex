@@ -1,0 +1,104 @@
+\section{Circuit design}
+\label{sec:circuit-design}
+
+The shard-level prover in \S\ref{sec:architecture} operates on a fixed set of arithmetic intermediate representation (AIR) tables produced by the executor. Each table is a chip: a self-contained AIR with a width-$w$ column layout, an evaluator that constrains every row of the table to encode a valid step of one MIPS sub-behaviour, and a set of cross-chip lookup interactions used to chain its operation to the rest of the machine. This section describes the chip taxonomy, the AIR conventions used across chips, the preprocessed-trace and lookup-table commitments, the cross-chip $\LogUp{}$ interaction model, the MIPS precompiles, and the memory-consistency and shard-continuation arguments that tie the per-chip proofs into one execution.
+
+\subsection{Chip taxonomy}
+
+\Zirenver{}'s machine is the union of the chips registered in the \texttt{MipsAir} enum (cf. \texttt{crates/core/machine/src/mips/mod.rs}). The chip families are grouped as follows.
+
+\paragraph{CPU.} A single CPU chip (\texttt{CpuChip}) records one row per executed MIPS cycle. Each row carries the current shard index, a two-limb clock decomposition (a $16$-bit low limb and an $8$-bit high limb), the program counter and its two pseudo-successor values (\texttt{next\_pc} and \texttt{next\_next\_pc}, the latter required by the MIPS branch-delay-slot semantics), the decoded instruction fields, the three operand values, and a packed flag set distinguishing sequential instructions from halts, register-writing instructions from non-register-writing ones, and memory-accessing instructions from non-memory-accessing ones. The full layout is dense at $\sim 80$ columns. The CPU chip does not constrain operand semantics directly; instead it emits a \texttt{send\_instruction} interaction that an opcode-specific chip (the ALU chip, the branch chip, the memory chip, etc.) receives and constrains.
+
+\paragraph{ALU.} Eight ALU chips cover the arithmetic and logical opcodes:
+\texttt{AddSubChip} for \texttt{ADD}, \texttt{ADDU}, \texttt{ADDI}, \texttt{ADDIU}, \texttt{SUB}, and \texttt{SUBU};
+\texttt{BitwiseChip} for \texttt{AND}, \texttt{OR}, \texttt{XOR}, \texttt{NOR};
+\texttt{MulChip} for the multiplication opcodes producing \texttt{HI}/\texttt{LO} pair outputs;
+\texttt{DivRemChip} for division and remainder;
+\texttt{LtChip} for signed and unsigned less-than;
+\texttt{CloClzChip} for count-leading-ones and count-leading-zeros;
+and the shift family split into \texttt{ShiftLeft} and \texttt{ShiftRightChip}. A representative add/subtract chip (\texttt{AddSubChip}) carries the program counter, the operand pair, a $\mathtt{Word}$-typed \texttt{add\_operation} sub-AIR encoding the four-byte carry-propagation chain, and per-opcode selectors \texttt{is\_add} and \texttt{is\_sub}. The same chip handles subtraction by rearranging operands; the AIR receives one instruction for \texttt{ADD} ($a = b + c$) and one for \texttt{SUB} ($b = a + c$), gated by the respective selectors.
+
+\paragraph{Memory.} Three memory-related chips:
+\texttt{MemoryInstructionsChip} encodes the per-cycle load/store opcodes;
+\texttt{MemoryLocalChip} encodes the shard-local memory access tape, with up to $4$ access entries per row carrying \texttt{(addr, initial\_shard, final\_shard, initial\_clk, final\_clk, initial\_value, final\_value, is\_real)} for each access;
+and \texttt{MemoryGlobalChip}, instantiated twice as \texttt{MemoryGlobalInit} and \texttt{MemoryGlobalFinal}, encodes the cross-shard memory boundary state. The memory-consistency argument that ties these chips together is described in \S\ref{sec:memory-consistency}.
+
+\paragraph{Control flow.} \texttt{BranchChip} and \texttt{JumpChip} encode the conditional and unconditional control-flow opcodes. The branch-delay-slot semantics is implemented at the CPU level via the \texttt{next\_pc}/\texttt{next\_next\_pc} pair; the control-flow chips constrain the relationship between the active program counter and the next-cycle program counter under the relevant condition predicates.
+
+\paragraph{Miscellaneous instructions.} \texttt{MovCondChip} encodes the conditional-move opcodes; \texttt{MiscInstrsChip} covers the remaining bit-manipulation and structural opcodes such as \texttt{WSBH}, \texttt{EXT}, \texttt{INS}, and \texttt{SYNC}.
+
+\paragraph{Syscall dispatch.} \texttt{SyscallInstrsChip} encodes the per-cycle syscall opcode and routes it to the appropriate precompile via cross-chip interaction. \texttt{SyscallChip} is instantiated twice (\texttt{SyscallCore} and \texttt{SyscallPrecompile}) as a per-shard ledger of issued syscalls; a separate \texttt{SysLinuxChip} covers the Linux-syscall sub-shape used by the JIT runtime.
+
+\paragraph{Auxiliary tables.} The \texttt{ProgramChip} carries the preprocessed program image (one row per instruction in the program ELF). The \texttt{ByteChip} carries a preprocessed lookup table for byte-level range and decomposition queries (used pervasively by the ALU chips for carry, borrow, and limb-decomposition arguments). The \texttt{GlobalChip} carries the cross-chip global-lookup ledger used by the memory-consistency argument.
+
+\paragraph{Precompiles.} A precompile is a chip that constrains one invocation of a complex primitive operation per row, with the operation's structured input and output carried as memory accesses bound to the calling cycle. The current precompile set (cf. \texttt{crates/core/machine/src/syscall/precompiles/}) is:
+\begin{itemize}
+  \item \emph{Hashing}. \texttt{Sha256Extend}, \texttt{Sha256Compress} (split per phase of the SHA-256 round), \texttt{KeccakSponge} (full Keccak-f[1600] permutation), and \texttt{Poseidon2Permute} (the same $\Poseidon{2}$ permutation used by the prover for Merkle digests).
+  \item \emph{Edwards curves}. \texttt{Ed25519Add} and \texttt{Ed25519Decompress} cover the Ed25519 group operations relevant to signature verification.
+  \item \emph{Weierstrass curves}. Add, double, and decompress chips parameterised over the secp256k1, secp256r1, BN254, and BLS12-381 curves.
+  \item \emph{Field tower}. \texttt{FpOpChip}, \texttt{Fp2MulAssignChip}, and \texttt{Fp2AddSubAssignChip} cover prime-field and degree-$2$ extension-field operations for BN254 and BLS12-381 base fields.
+  \item \emph{Big-integer multiplication}. \texttt{Uint256MulChip} and \texttt{U256x2048MulChip} cover the wide-integer multiplications used by precompiles such as the modular exponentiation that underlies RSA-style assertions.
+  \item \emph{Other}. \texttt{BooleanCircuitGarbleChip} covers a garbled-Boolean primitive used by application-layer protocols.
+\end{itemize}
+
+The chip set is fixed at machine-construction time and registered in deterministic order; the order matters for trace generation but not for soundness, which is invariant under chip reordering as long as the cross-chip interaction map is preserved.
+
+\subsection{AIR structure conventions}
+
+Every chip implements the \texttt{MachineAir} trait, which exposes:
+a \texttt{name()} string used as the key for opening identification;
+a \texttt{num\_rows(record)} method that returns the next-power-of-two padded row count from the record's event list;
+a \texttt{generate\_trace} method that materialises the row-major matrix of base-field values; and
+an \texttt{Air::eval} method that emits the per-row AIR constraints into the builder.
+
+The chip's main trace is a column-major matrix of $\mathtt{NUM\_<CHIP>\_COLS}$ columns over $\KB{}$, layout-aligned (via the \texttt{AlignedBorrow} derive) so that the column-by-column borrowed-row view matches the in-memory struct layout. Padding rows below the last real event are zeroed; the chip's \texttt{is\_real} selector column distinguishes padded rows from real ones, and every per-row constraint multiplies through by \texttt{is\_real} so that padded rows are vacuously satisfied. Cross-chip interactions are gated by \texttt{is\_real} on both sides.
+
+\paragraph{Preprocessed columns.} Chips whose data is independent of the runtime witness — the program image (\texttt{ProgramChip}) and the byte lookup table (\texttt{ByteChip}) — commit their trace as a \emph{preprocessed} matrix at setup time, before the prover ever sees the program inputs. The preprocessed commitment is included as one of the rounds of the $\Stacked{}$ $\BaseFold{}$ commit (cf. \S\ref{sec:basefold-stacking}) and is opened at the same points as the main-trace commit. Because preprocessed traces are committed once, their verifying-key contribution is shared across every shard.
+
+\paragraph{Multiplicity conventions.} A chip's lookup interactions carry one of two multiplicity shapes: \emph{singleton interactions}, in which the chip emits or receives exactly one tuple per (real) row, and \emph{multi-entry interactions}, in which several tuples per row are bundled into one row of the chip (cf. the four-entry-per-row layout of \texttt{MemoryLocalChip}). The aggregate $\LogUp{}$ argument treats multi-entry rows by emitting $k$ logically independent fractions per row, each gated on its own column-level \texttt{is\_real} flag.
+
+\paragraph{Row count and log-height.} Each chip's row count is rounded up to a power of two (the AIR requires the trace length to be a power of two for the MLE structure) and recorded as its \emph{log-height}. The log-height vector across the chip set determines the per-chip $\bm z_c$ length entering the $\Jagged{}$ sumcheck and is hashed into the transcript via the chip-info digest described in \S\ref{sec:jagged}.
+
+\subsection{Preprocessed lookup tables}
+
+Two preprocessed tables anchor the bulk of \Zirenver{}'s lookup traffic:
+
+\paragraph{Byte lookups.} The \texttt{ByteChip} preprocessed table enumerates byte-pair operations: pairs $(a, b) \in \{0, \ldots, 255\}^2$ together with the precomputed values of common byte-level functions on them (carry bits for addition, borrow bits for subtraction, the bitwise AND/OR/XOR output, the range-check bit). Every ALU chip emits byte-lookup interactions for its carry, borrow, and decomposition arguments; \texttt{ByteChip} receives them and the $\LogUp{}$ argument enforces multiplicity consistency.
+
+\paragraph{Program image.} The \texttt{ProgramChip} preprocessed table holds one row per ELF instruction word, exposing the opcode, the source and destination register indices, and the immediate field. The CPU chip emits an instruction-lookup at each cycle, and \texttt{ProgramChip} receives it; this is how the proof attests that the executed instruction stream is exactly the program-image stream.
+
+Preprocessed tables are committed to a fixed verifying key alongside the AIR constants and are unchanged across runs of the same program; their digest is part of the program's verifying key and is checked against the verifying-key map at recursion time as described in \S\ref{sec:recursion}.
+
+\subsection{Cross-chip interactions via $\LogUp{}$}
+\label{sec:circuit-logup}
+
+\Zirenver{}'s chips do not constrain each other's outputs directly; instead, every cross-chip relationship is encoded as a $\LogUp{}$ interaction. Each interaction carries a sender chip, a receiver chip, an interaction kind (instruction, memory access, syscall, byte lookup, range check, etc.), and a tuple of base-field values. The sender emits the tuple with multiplicity $+1$; the receiver emits it with multiplicity $-1$ (more precisely, each chip emits its multiplicity into the per-chip fingerprinted sum, and the global sum is zero if and only if every emission is matched by a reception). The aggregate sum is discharged by the GKR-style $\LogUp{}$ argument of Habök--Papini~\citep{logup-gkr,haboeck}.
+
+A representative chain: the CPU chip at cycle $t$ holds the decoded \texttt{ADD} instruction. It emits a \texttt{send\_instruction} interaction carrying the program counter, the operand values, and the opcode tag. The \texttt{AddSubChip} receives the same tuple on the row whose \texttt{is\_add} selector is one; its AIR constrains the bit-decomposition that proves $a = b + c$ modulo $2^{32}$ with carry propagation. The shard-level $\LogUp{}$ argument verifies that every CPU instruction-send is matched by exactly one ALU instruction-receive; the per-chip AIR constraints verify that the matched ALU row computes the correct semantics.
+
+The shard-level $\LogUp{}$ prover (cf. \texttt{crates/stark/src/shard\_level/logup\_gkr\_prover.rs}) concatenates all per-chip lookup leaves into one shard-wide fraction vector, pads to the next power of two, builds the GKR product-argument tree, and produces a single layered sumcheck-stack proof per shard. The proof's leaves are then opened at a sumcheck-reduced point, and the resulting per-chip MLE evaluations feed the $\Jagged{}$ reduction described in \S\ref{sec:jagged}.
+
+\subsection{Memory consistency}
+\label{sec:memory-consistency}
+
+\Zirenver{} proves memory-read consistency via an offline-memory-checking argument inspired by the multi-set protocols common to \zkVM{} designs. Every memory access — read or write — is tagged with a shard index and a within-shard clock at the issuing CPU cycle. The access is recorded in two ledgers:
+
+\begin{enumerate}
+  \item The shard-local memory chip (\texttt{MemoryLocalChip}) records each access as a $4$-tuple row entry with its \texttt{initial\_clk}/\texttt{final\_clk} pair and the value witnessed at access time. The access is gated by an \texttt{is\_real} selector.
+  \item The global memory chips (\texttt{MemoryGlobalInit} for shard $0$'s entry state and \texttt{MemoryGlobalFinal} for the final shard's exit state) record the boundary state at the shard boundary points.
+\end{enumerate}
+
+The argument that the per-cycle witnessed value equals the most-recent write to the same address proceeds in two stages. First, within a shard, the memory chip's AIR constrains that for every address with a recorded access in the shard, the witnessed value matches the address's running multi-set state — a per-address $\LogUp{}$-style multi-set check whose accumulator is reset at the shard boundary. Second, across shards, the global chips constrain the shard-level boundary state: shard $k$'s exit state equals shard $k+1$'s entry state, with the equality discharged by a cumulative-sum reconciliation handled by the \texttt{GlobalChip} ledger.
+
+The result is that the verifier checks one cross-shard accumulator (the cumulative sum of all global-memory deltas, which must vanish) plus per-shard local consistency, and the conjunction implies that every memory read in the trace observed the most-recently-written value for its address. The cumulative sums are emitted by each chip and recorded as the \texttt{chip\_cumulative\_sums} map on each shard proof.
+
+\subsection{Shard continuation}
+\label{sec:shard-continuation}
+
+A long \zkVM{} execution is split into shards at fixed cycle boundaries (or earlier, if a chip's row count would exceed the shape limit). Each shard proof carries an \emph{entry-state} and \emph{exit-state} public values block; shard $k$'s exit state must equal shard $k+1$'s entry state, which the compose-stage recursion verifier checks directly. The state vector carries the program counter pair (\texttt{pc} and \texttt{next\_pc}), the register file, the high-water marks on each chip's clock, and the cumulative-sum accumulators for the cross-chip lookups discussed in \S\ref{sec:circuit-logup} and the memory-consistency argument in \S\ref{sec:memory-consistency}.
+
+The cumulative-sum reconciliation at the shard boundary is the load-bearing part of the continuation argument: any cross-chip lookup that crosses a shard boundary (the most common case is a register access whose write is in shard $k$ and whose read is in shard $k+1$) appears with a $+1$ multiplicity in one shard's local sum and a $-1$ multiplicity in the other's. The shard-pair cumulative-sum identity propagates the bookkeeping across the recursion compose tree until the root proof witnesses a single global sum of zero — the conjunction of all per-shard $\LogUp{}$ proofs and all shard-pair continuation checks is the proof that every cross-chip interaction in the whole execution is matched.
+
+\subsection{Verifying keys and chip-set dispatch}
+
+The chip set used by a particular program is encoded in its verifying key, which records the AIR hash, the preprocessed-trace digest, the chip log-heights, and the per-chip interaction count. The verifying-key map (\S\ref{sec:recursion}) records the admissible verifying keys for each shape of program (core shards of various widths, compress nodes at various tree positions, the shrink layer, the wrap layer); under strict verifying-key enforcement, the recursion verifier asserts that the loaded key is present in the map. The chip-set discipline is what makes the verifier's work shape-independent of the program's content: for every shape in the map, the verifier knows the chip count, the log-heights, and the interaction layout up front, and the recursion-circuit AST is fully resolved at compile time.

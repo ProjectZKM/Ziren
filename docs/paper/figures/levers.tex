@@ -1,0 +1,15 @@
+% Single-card wall time of block 25907955 through the sequence of changes (ABBA medians).
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, ymin=0, ymax=85, width=0.9\textwidth, height=6cm, bar width=16pt,
+  ylabel={wall time (s), one RTX 5090},
+  symbolic x coords={deployed,Global 100$\to$58,no mem.\ byte checks,ShiftLeftImm 56$\to$45,larger shards,LSB pairing $+$ bigger shards},
+  xtick=data, x tick label style={font=\scriptsize, rotate=20, anchor=east},
+  nodes near coords, every node near coord/.append style={font=\scriptsize},
+  tick label style={font=\scriptsize}, label style={font=\small},
+  enlarge x limits=0.12,
+]
+\addplot[fill=gray!40, draw=black] coordinates {
+  (deployed,74.1) (Global 100$\to$58,71.2) (no mem.\ byte checks,70.2) (ShiftLeftImm 56$\to$45,70.4) (larger shards,67.1) (LSB pairing $+$ bigger shards,48.7)};
+\end{axis}
+\end{tikzpicture}

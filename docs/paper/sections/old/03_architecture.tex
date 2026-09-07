@@ -1,0 +1,196 @@
+\section{Architecture}
+\label{sec:architecture}
+
+\Zirenver{} is organised as a four-stage pipeline: \emph{execute and shard}, \emph{core prove}, \emph{compress}, \emph{shrink}, and \emph{wrap}. The execute stage produces shard-sized chunks of trace records and chip event lists. The core prove stage commits per-shard MLEs and emits per-shard $\BaseFold{}$ proofs. The compress stage recursively aggregates these into a single proof. The shrink and wrap stages convert the aggregate proof into a Groth16-on-BN254 outer proof. Figure~\ref{fig:pipeline} summarises the flow.
+
+\begin{figure}[t]
+\centering
+\input{figures/pipeline}
+\caption{The \Zirenver{} proving pipeline. The executor produces shard records and chip event lists; the core stage emits one $\BaseFold{}$ shard proof per shard; the compress stage recursively aggregates pairs of shard proofs; the shrink stage adapts the final aggregate to the wrap circuit; the wrap stage produces a Groth16 proof on BN254.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{The shard-level $\BaseFold{}$ shard proof}
+
+A shard proof in \Zirenver{} is a single structured object containing the per-shard public values, a single main-trace commitment, the per-chip $\LogUp{}$ proofs, the per-chip zerocheck proofs, the per-chip opened values (main and preprocessed), and a serialised $\Jagged{}$-$\BaseFold{}$ opening proof. Crucially, in the post-migration architecture the auxiliary commitment vector (which in earlier prover incarnations carried separate permutation and quotient commitments) is empty: the soundness role previously played by those commitments is now discharged by the sumcheck bindings emitted by the $\LogUp{}$ and zerocheck protocols, with the quotient terms folded into the FRI commit inside $\BaseFold{}$.
+
+\subsubsection{Transcript binding}
+
+The shard transcript is initialised by observing the public values, the main commitment, and per-chip metadata (chip name, chip log-height). The verifier then samples $\LogUp{}$ challenges and discharges all per-chip lookup proofs in a uniform order, observing each layer's claim before sampling the next descent challenge. Zerocheck follows, again per-chip in a uniform order. The $\Jagged{}$ opening point is sampled from the post-zerocheck transcript state; the $\Jagged{}$ verifier reduces the per-chip evaluation claims to a single $\Stacked{}$ opening claim, which is then discharged via $\BaseFold{}$.
+
+\subsubsection{The per-chip-padded log-degree convention}
+
+A subtle invariant runs through the dummy-proof generators that allocate witness slices for the recursion verifier at compile time. Concretely, the recursion circuit requires an upper bound on the total length of witness data it will consume, and a naive bound based on per-chip lookup counts under-allocates whenever a chip has a non-power-of-two interaction count. We resolve this by padding each chip's lookup count to the next power of two before summation, and rounding the total up to the next power of two:
+\begin{equation}
+  W_{\max} = 2^{\lceil \log_2 \sum_c \mathrm{nextpow2}(\ell_c) \rceil + 1},
+\end{equation}
+where $\ell_c$ denotes the number of cross-table lookups on chip $c$. This per-chip-padded summation matches the structure of the prover's actual witness emission, where each chip's lookup proof is independently padded; without it, the recursion circuit silently allocates a buffer of the wrong size and the verifier panics at the first round of $\LogUp{}$.
+
+\subsection{$\BaseFold{}$ polynomial commitment over $\KB{}$}
+\label{sec:basefold}
+
+$\BaseFold{}$~\citep{basefold} is a multilinear polynomial commitment scheme that obtains its commit-, prover-, and verifier-time profile from two algorithmic ingredients folded into one round descent: a sumcheck reducing the claim that $\widetilde f(\bm z) = v$ to a claim about a folded multilinear of one fewer variable, and a FRI-style codeword fold that halves the committed Reed--Solomon codeword in lockstep with the sumcheck. The two folds share a single random challenge per round, which is the source of the construction's advantage over the naive composition of a separate sumcheck with a flattened FRI commitment to the MLE's coefficients.
+
+\subsubsection{Encoding and commit}
+
+For a multilinear polynomial $f \in \F[X_1, \ldots, X_n]$ given as the vector of its $2^n$ evaluations on the boolean hypercube, the $\BaseFold{}$ commit is a Reed--Solomon encoding of that vector at a coset of the multiplicative subgroup of $\F$ of order $2^{n + \log \rho^{-1}}$, where $\rho$ is the chosen rate. The encoded vector is hashed leaf-by-leaf into a binary Merkle tree under the $\Poseidon{2}$ permutation; its root is the commitment.
+
+Concretely, the prover commits in the production configuration with rate $\rho = 1/2$ (\textit{log\_blowup} $=1$, \textit{num\_queries} $= 94$, and \textit{proof\_of\_work\_bits} $= 16$); the parameter set is encoded in the $\BaseFold{}$ FRI configuration (cf. \texttt{crates/stark/src/basefold/config.rs}). The same configuration is used by both host and GPU provers.
+
+\subsubsection{Round descent}
+
+Given a commitment $C_0$ to a degree-$2^n$ MLE $f$, an evaluation point $\bm z = (z_1, \ldots, z_n) \in \EF^n$, and a claimed value $v = f(\bm z)$, the opening proof runs for $n$ rounds. At round $r$ the prover holds the running MLE $f_r$ on $n - r$ variables and the running RS codeword $C_r$ on $2^{n - r + \log \rho^{-1}}$ positions. The verifier already knows the running sumcheck claim $c_r$ and a chain of accepted commitments $C_0, \ldots, C_{r}$.
+
+\begin{enumerate}
+  \item The prover sends the univariate sumcheck message $g_r(X) = a_r + b_r X$ describing the partial evaluation of $f_r$ at the first variable. The verifier checks the sumcheck-consistency identity $a_r + b_r = c_r$ once $z_{r+1}$ is consumed.
+  \item The verifier observes the sumcheck message and samples a single round challenge $\beta_r \in \EF$.
+  \item The prover folds the MLE in place via the round equation
+  \[
+    f_{r+1}(X_2, \ldots, X_{n-r}) \;=\; (1 - \beta_r)\, f_r(0, X_2, \ldots) \;+\; \beta_r\, f_r(1, X_2, \ldots),
+  \]
+  and folds the codeword by pairing even and odd indices under the matched $\beta_r$ to obtain the next codeword $C_{r+1}$.
+  \item The prover commits $C_{r+1}$ via $\Poseidon{2}$ over a leaf-pair reshape (height $\to$ height/2, width $\to$ $2 \cdot$ width). The verifier observes the commitment root before the next round.
+  \item The verifier updates the running claim to $c_{r+1} = a_r + \beta_r \cdot b_r$.
+\end{enumerate}
+
+After $n$ rounds the codeword is a single $\EF$ element, the \emph{final polynomial}, and the running claim is the same element. The verifier observes the final polynomial, grinds for query indices, and runs the FRI query phase: sample $q$ random codeword positions, open the original commitments and each round commitment at those positions via Merkle inclusion paths, and walk the commit chain checking the standard FRI fold relation $(\mathrm{lo} + \mathrm{hi})/2 + (\mathrm{lo} - \mathrm{hi}) \cdot \beta_r \cdot g^{-i}/2$ at each round position. The final folded value at the query position must match the round-$n$ commitment evaluation, and that evaluation must match the final polynomial.
+
+The \emph{key invariant} of $\BaseFold{}$ — that the $r$-fold of the codeword agrees with the $r$-fold of the underlying MLE on the codeword's domain — is what permits the sumcheck and FRI fold challenges to be the same $\beta_r$. Without this alignment, the protocol decomposes into two unrelated proofs (a sumcheck reducing $v$ to a final scalar plus an independent FRI low-degree test); with it, both proofs share their challenge tape and the codeword shrinks to a constant in the same number of rounds as the sumcheck.
+
+\subsubsection{Stacking over heterogeneous rounds}
+\label{sec:basefold-stacking}
+
+A shard proof in \Zirenver{} contains at minimum a preprocessed-trace round (committed once at setup) and a main-trace round (committed per shard). In some configurations additional auxiliary rounds appear. The committed objects in different rounds typically have different widths and heights, but $\BaseFold{}$ requires a fixed leaf shape per Merkle commitment.
+
+The $\Stacked{}$ wrapper batches commitments of mixed widths into one $\BaseFold{}$ commitment by laying out the constituent MLEs as horizontal stripes of fixed stacking height $h = 2^{\log h}$ and committing the resulting interleaved matrix. The stacking height is chosen as $\log h = \min(8, \lfloor (\log N)/2 \rfloor)$, where $N$ is the total committed area; stripes are independently encoded and folded under one root.
+
+Opening at a point $\bm z$ splits the point as $\bm z = (\bm z_{\text{batch}}, \bm z_{\text{stack}})$, with $\bm z_{\text{stack}}$ of length $\log h$ used to evaluate within a stripe and $\bm z_{\text{batch}}$ selecting among stripes. The interleaving step is implemented as a streaming sequence of stripe writes (cf. \texttt{crates/stark/src/basefold/stacked.rs}), so the prover never materialises one dense $2^{n + \log \rho^{-1}}$ vector — a structural cure for the OOM behaviour the prior PCS exhibited on wide workloads. The verifier reduces the heterogeneous-MLE evaluation claim to the interleaved evaluation via a partial-Lagrange interpolation of the per-round batch evaluations supplied with the proof, then discharges the interleaved claim through the $\BaseFold{}$ verifier.
+
+A critical correctness invariant of $\Stacked{}$ is that the committed length be a power of two with $|\bm z| = \log_2(\text{committed length})$. Violating this invariant produces the proof-shape mismatches discussed in \S\ref{sec:lift-normalization}.
+
+\subsubsection{Soundness parameters}
+
+\Zirenver{} ships two soundness configurations. A development configuration uses code rate $\rho = 1/2$ with no grinding for fast iteration; this yields approximately $58$ proven bits of soundness under the Johnson bound. The production configuration uses the same rate with $94$ FRI queries and $16$ bits of $\Poseidon{2}$-based proof-of-work grinding on each round's transcript binding plus a separate $16$-bit grind on the per-round batching coefficient. The combined floor with sumcheck soundness over the degree-$4$ binomial extension of $\KB{}$ exceeds the $100$-bit aggregate target. We adopt the query count from the Gruen--Diamond analysis as carried through SP1's \texttt{slop\_primitives::FriConfig}; an environment-controlled override permits raising the rate to $\rho = 1/16$ for memory-constrained experiments, at the cost of an offline re-analysis of the per-query soundness contribution.
+
+\subsubsection{Status in \Zirenver{}}
+
+$\BaseFold{}$ is the production polynomial commitment scheme for every chip-trace commit. It is invoked by the shard-level prover (cf. \texttt{crates/stark/src/basefold/prover.rs}) over a $\Stacked{}$ assembly of per-chip MLEs as described in \S\ref{sec:basefold-stacking}; the resulting opening proof is bundled with the rest of the shard payload into a single $\Jagged{}$+$\BaseFold{}$ bundle. The in-circuit verifier (cf. \texttt{crates/recursion/circuit/src/basefold\_verifier.rs}) mirrors the host's transcript structure exactly, emitting one univariate sumcheck check, one Merkle commit observation, and one $\beta_r$ sample per round, with the query phase performed as a single batch at the end.
+
+Two limitations remain. First, in-circuit verification under strict verifying-key enforcement (the \texttt{VERIFY\_VK=true} configuration) currently diverges from the host-prover proof shape on the first round of $\LogUp{}$ (see \S\ref{sec:two-paths}), so end-to-end recursion under strict VK enforcement is not yet exercised on every workload; the bypass configuration verifies through every recursion layer. Second, the fold orientation tag described in \S\ref{sec:fold-orientation} resolves the immediate cross-path verifier ambiguity but does not yet make the host and device verifier transcripts byte-identical, an alignment that is open work.
+
+\subsection{$\Stacked{}$ batching}
+\label{sec:stacked}
+
+The shard proof presents multiple commitment rounds: at minimum, a preprocessed-trace round (committed once, before the prover ever sees the witness) and a main-trace round (committed per shard). In some configurations, additional auxiliary rounds appear. The $\Stacked{}$ wrapper batches commitments of differing widths and per-round MLE counts into a single $\BaseFold{}$ commitment by interleaving MLEs at a chosen stacking height and committing the resulting wider matrix.
+
+Given a stacking height $h$ chosen via the heuristic $h^* = \min(8, \lfloor \log_2 N/2 \rfloor)$ for total commit volume $N$, the prover lays out the input MLEs as horizontal stripes of height $h^*$, padding each MLE to the nearest multiple of $h^*$ rows. The committed object is a single matrix of height $h^*$ rows by ``stacked'' columns wide. Opening at a point $\bm{z}$ splits $\bm{z} = (\bm{z}_{\text{batch}}, \bm{z}_{\text{stack}})$, with $\bm{z}_{\text{stack}}$ of length $h^*$ used to evaluate within a stripe and $\bm{z}_{\text{batch}}$ used to select among the stacked stripes.
+
+A critical correctness invariant of $\Stacked{}$ is that the committed data length be a power of two and that $|\bm{z}| = \log_2(\text{committed length})$. Violating this invariant produces the proof-shape mismatches discussed in \S\ref{sec:lift-normalization}.
+
+\subsection{$\Jagged{}$ sumcheck reduction}
+\label{sec:jagged}
+
+A \zkVM{} shard contains many chip tables of wildly different heights — a CPU table at $2^{20}$ rows, an ALU table at $2^{15}$, a precompile table at $2^{12}$, an instance-rare precompile at $2^{6}$. Committing each table at its own height under independent Merkle trees produces a verifier proof that grows linearly with the number of chips. Padding every table up to a single common height before commit avoids that growth but inflates prover work proportionally to the height-of-the-tallest-chip times the chip count. The $\Jagged{}$ polynomial commitment, introduced for SP1 and adopted in \Zirenver{}, threads between the two regimes: the prover commits to a single concatenated dense vector at its native total length, and a sumcheck reduces the verifier's multi-table opening claim to a single point-evaluation claim that $\BaseFold{}$ discharges in one go.
+
+\subsubsection{Jagged packing}
+
+Let $\mathbf{T}_0, \ldots, \mathbf{T}_{N-1}$ denote the per-chip trace matrices in a shard, with chip $c$ contributing a height-$h_c$, width-$w_c$ block. The jagged packing concatenates all chip columns end-to-end into one dense vector
+\[
+  \mathbf{q} \;=\; \mathbf{T}_0[:,0] \,\Vert\, \mathbf{T}_0[:,1] \,\Vert\, \ldots \,\Vert\, \mathbf{T}_{N-1}[:, w_{N-1} - 1],
+\]
+with cumulative offsets $t_0 = 0$, $t_k = t_{k-1} + h_{c(k)}$ identifying the start of the $k$-th global column. The packed vector is padded with zeros up to the next power of two $2^n$ and absorbed into a single MLE $\widetilde{\mathbf q}$. Per-chip metadata (chip name, row count, column count, cumulative offset) is hashed into the transcript before the commit so that chip dimensions are cryptographically bound to the proof and a malicious prover cannot retroactively claim a different shape; the binding is performed by the \texttt{hash\_chip\_infos} helper alongside the packing routine in \texttt{crates/stark/src/jagged.rs}.
+
+The sparse $(\mathrm{row}, \mathrm{col})$-indexed virtual polynomial $p(\bm z_r, \bm z_c)$ that the protocol exposes to the verifier relates to $\widetilde{\mathbf q}$ via
+\[
+  p(\bm z_r, \bm z_c) \;=\; \sum_{j=0}^{|\mathbf q|-1} \widetilde{\mathbf q}(j) \cdot \mathsf{eq}(\mathrm{row}(j), \bm z_r) \cdot \mathsf{eq}(\mathrm{col}(j), \bm z_c),
+\]
+where $\mathrm{col}(j) = \min_k \{ t_k > j \}$ and $\mathrm{row}(j) = j - t_{\mathrm{col}(j)}$. The verifier never materialises $p$ directly; it asks for per-chip evaluations and the jagged sumcheck demonstrates that those evaluations are consistent with $\widetilde{\mathbf q}$.
+
+\subsubsection{Reduction sumcheck}
+
+The reduction takes a batch of per-chip MLE evaluation claims $\{ (f_c, n_c, \bm z_c, v_c) \}_{c=0}^{N-1}$, where $f_c$ is the chip-$c$ MLE on $n_c = \lceil \log_2 h_c \rceil$ variables and $v_c$ is the claimed value. The verifier samples a fresh random linear combination $\gamma$ with weights $\gamma^c$ across chips (per the prover construction in \texttt{crates/stark/src/jagged\_sumcheck.rs}); the combined polynomial
+\[
+  G(\bm X) \;=\; \sum_c \gamma^c\, f_c(\bm X|_{n_c}) \cdot \mathrm{geq}_c(\bm X)
+\]
+is sumchecked over $\log_2 |\mathbf q|$ variables. The factor $\mathrm{geq}_c$ is a polynomial that evaluates to one on the support of chip $c$ in the global packing and zero elsewhere; it corrects for the height differential and the offset layout.
+
+After the sumcheck, the prover sends the round messages (each carrying three $\EF$ coefficients corresponding to the per-round trivariate polynomial structure produced by the $\mathrm{geq}_c$ factor and the chip MLE), and the verifier reduces the claim to a single value $G(\bm z^*)$ at the sumcheck random point $\bm z^*$. The single residual claim is discharged in two steps: a $\Stacked{}$ opening of $\widetilde{\mathbf q}$ at $\bm z^*$ via $\BaseFold{}$, and an auxiliary \emph{jagged-eval} sub-proof that the $\mathrm{geq}_c$ factors used in the prover's combination match the public chip-height vector.
+
+\subsubsection{Jagged-eval sub-proof}
+
+The jagged-eval sub-proof reduces the verifier's task of checking the $\mathrm{geq}_c$ values to a sumcheck over a bivariate polynomial $P(x, y)$ that captures the structure of the cumulative offsets and per-column Lagrange weights (cf. the algorithmic description in \texttt{crates/stark/src/jagged\_eval\_sumcheck.rs}). The implementation factors $P$ as a product of a per-column Lagrange weight, an equality polynomial pinning the merged prefix-sum bits, and a branching-program evaluation that walks a compile-time-constant $4\times 16$ transition table. The branching-program evaluator follows Barrington's bounded-width construction~\citep{barrington1989bounded} and is a fixed in-circuit primitive: the recursion verifier emits the same fixed table at every shape.
+
+The resulting sumcheck is a $2 \cdot (\log_2|\mathbf q| + 1)$-variable reduction with three coefficients per round, terminated by a small in-the-clear check against the closing identity that ties the branching-program evaluation, the per-column equality factor, and the jagged-eval claim together.
+
+\subsubsection{Composition with $\BaseFold{}$}
+
+The $\Jagged{}$ layer sits on top of $\BaseFold{}$: it reduces the multi-table claim to a single MLE evaluation on the packed vector $\mathbf q$, and that single evaluation is proved by a $\Stacked{}$-$\BaseFold{}$ opening as described in \S\ref{sec:basefold-stacking}. The composition means that the prover commits to chip traces \emph{once} per shard (one $\BaseFold{}$ commit over the stacked packing), and the verifier expense is the jagged sumcheck plus one $\BaseFold{}$ opening — a single Merkle root, $\log_2|\mathbf q|$ univariate sumcheck messages, and $q$ query Merkle paths — regardless of the chip count. Prover work for the commit phase scales with the sum of per-table heights $\sum_c h_c$ rather than with $\max_c h_c \cdot N$.
+
+The composition is wired in the late-binding adapter at \texttt{crates/stark/src/basefold\_late\_binding.rs}; a parallel WHIR-era adapter remains in the tree for reference but is no longer exercised in production.
+
+\subsubsection{Status and limitations}
+
+The $\Jagged{}$+$\BaseFold{}$ bundle path is the production shape for shard proofs. The bundle struct (\texttt{JaggedBasefoldBundle}) replaces an earlier byte-string serialisation that flowed proof material through variable-length integer encoding; the structured-bundle layout permits deterministic per-element hashing on the recursion-circuit side and was introduced specifically to eliminate a class of hash-determinism failures across multi-GPU runs.
+
+The jagged-eval sub-proof is currently emitted as a structurally valid placeholder for one configuration of the recursion verifier — the placeholder satisfies the proof-shape contract but does not yet carry the inner sumcheck body required for full transcript replay under strict verifying-key enforcement; the in-circuit jagged-eval verifier consumes the placeholder shape today. The full sumcheck body for the placeholder is open work and will close the strict-VK gap discussed in \S\ref{sec:two-paths}. The per-round zero-column padding emitted by the prover must additionally be reflected in the verifier's column-prefix-sums vector; this is an easily-overlooked invariant whose violation produces dimension-mismatch panics during proof verification, as discussed in \S\ref{sec:lift-normalization}.
+
+Compared with SP1's analogous \texttt{slop} crate family, \Zirenver{}'s $\Jagged{}$ implementation tracks the same multi-table reduction shape, drops a per-chip side variant that was an internal experiment, and adopts the same default soundness parameters; the jagged-eval branching-program transition table is a direct port.
+
+\subsection{$\LogUp{}$ lookup arguments}
+
+Each chip in \Zirenver{} emits a $\LogUp{}$ proof per shard. The protocol uses a Habök-style log-derivative formulation: each lookup $(\text{requesting chip}, \text{providing chip}, \text{tuple})$ contributes a rational term, and the verifier checks the rational identity using a GKR circuit. The GKR circuit descends layer by layer, with each layer's claim discharged by a sumcheck whose round challenges feed the next layer.
+
+In the shard-level shape used by \Zirenver{}, the prover emits one $\LogUp{}$ proof per chip per shard, in a layer-based descent serialisation. The recursion-circuit verifier was previously organised around a per-shard sumcheck-stack serialisation, and the proof-shape divergence between the two has been the long pole of the recursion verifier port. We discuss the divergence and the migration plan in \S\ref{sec:logup-divergence}.
+
+\subsection{GPU prover}
+\label{sec:gpu-prover}
+
+\Zirenver{}'s GPU prover is implemented as a separate Rust crate (\texttt{ziren-gpu}) that depends on a CUDA toolkit and a small set of hand-written CUDA kernels. The host \texttt{ziren-stark} crate dispatches polynomial-commitment work to the GPU when its \texttt{gpu} feature is enabled.
+
+\subsubsection{Device residency}
+
+The defining architectural choice of the GPU prover is \emph{device residency}: trace tables, MLEs, codewords, and Merkle digests live on GPU memory for the duration of the per-shard proof. Host memory is used only to receive the final serialised proof bytes and to drive the high-level orchestration. This avoids the PCIe-bandwidth bottleneck of constantly shuttling intermediate state across the host/device boundary; it also concentrates memory pressure where the workload is most parallelisable.
+
+A device-resident dense jagged trace MLE structure plays the role of SP1's \texttt{TraceDenseData}: a single contiguous device buffer of base-field elements, indexed by per-chip offsets and column counts. The buffer is materialised once per shard from the trace tables and then reused across the commit, sumcheck, and opening phases.
+
+\subsubsection{Per-slot streams and the work-stealing pool}
+
+Multi-GPU dispatch is organised around a \emph{worker context} per GPU, each holding a CUDA stream pool and a per-slot scratch arena. A bounded-capacity channel passes (record, trace) tuples to the worker pool; each worker pulls a tuple, runs setup, commit, and open on a free GPU, and blocks on the result before pulling the next tuple. The number of concurrent in-flight workers per GPU is configurable but, for the production workloads measured in \S\ref{sec:performance}, a single in-flight task per GPU was found to be optimal: oversubscription doubles the per-shard memory footprint and triggers GPU-side allocator pressure that erases the latency-hiding win.
+
+The number of \emph{prover-side} concurrent workers (the \texttt{shard\_batch\_size}) is sized as $\max(4, \min(8, 2 \cdot G))$ where $G$ is the number of GPUs visible to the process. This scaling matches the CPU-side trace-generation throughput to the GPU-side prove throughput on our reference hardware; further oversubscription saturates the host-side state-mutex contention.
+
+\subsubsection{Verifying-key cache (V3)}
+
+Adjacent shards in the compress pipeline often share program shapes, in which case they share a verifying key. The verifying-key cache keeps the recursion-program verifying key resident on the GPU keyed by the program's Arc pointer identity, sharing across structurally-equivalent shards. On a representative Ethereum block this yields a $\sim$60\% hit rate and saves an estimated three to six seconds of compress wall time per workload.
+
+\subsubsection{Pipelined compress}
+
+The compress stage benefits from a per-height pending list and an arity-4 binary tree-reduce strategy: groups of four compressed proofs are combined at each level rather than the binary arity-2 fold used in earlier revisions. This change closes a $4\times$-to-$8\times$ GPU scaling cliff that we observed during initial multi-GPU bring-up, in which compress at $8$ GPUs was no faster than at $4$ GPUs because the level-by-level binary fold starved the available pool.
+
+\subsection{Recursion circuit and the in-circuit verifier}
+\label{sec:recursion}
+
+The recursion circuit is the in-DSL implementation of the verifier. It consumes a previous-layer proof and a verifying key and emits a structured assertion log that the recursion-program AIR enforces. The circuit is compiled to the recursion DSL, which is then assembled into a recursion program that the recursion runtime executes; the resulting trace is itself proven via a STARK over $\KB{}$, producing the next-layer proof.
+
+The recursion verifier is organised in four phases: the transcript prologue, $\LogUp{}$ replay, zerocheck replay, and $\Jagged{}$ opening. Each phase consumes the witness fields it requires and emits assertions whose satisfaction implies, by the soundness of the underlying protocols, that the input proof was honestly produced.
+
+\subsubsection{Lift programs, compose programs, and dummy proof allocators}
+
+\Zirenver{} uses several compile-time-constructed recursion programs: a \emph{lift program} per shape that converts a shard proof into the in-circuit format expected by the recursion verifier; a \emph{compose program} per tree-arity that combines compressed proofs at a given level; and \emph{dummy proof allocators} that build structurally-valid but content-empty proofs to drive the compile-time AST construction of the verifier.
+
+The dummy proof allocators are particularly performance-sensitive because the recursion-program build runs synthesis once per dummy at pre-warm time, and the original synthesis path internally called the real per-shard prove function on a synthetic input, costing tens of seconds per arity. We replaced this with a structural stub modelled on SP1's pattern, in which the dummy proof is a struct populated with shape-correct but content-meaningless data. The per-arity dummy synthesis dropped from approximately fifteen seconds to under two hundred microseconds, reducing total prover pre-warm from $64.8$~s to $2.0$~s.
+
+\subsection{Just-in-time MIPS executor}
+\label{sec:jit}
+
+The MIPS executor is a single-threaded $\mathtt{while\ not\ done\ \{\ execute\_cycle()\ \}}$ interpreter in the reference build, with per-instruction overhead dominated by register-file lookup, page-table walks for memory operations, and event-list appends for trace generation.
+
+For Linux x86\_64 hosts, \Zirenver{} ships a just-in-time compiler that emits native x86\_64 code from the MIPS instruction stream. The JIT uses \texttt{dynasm-rt} for assembly emission, pins MIPS GPRs to XMM register halves, and lowers each MIPS opcode to between one and ten x86 instructions. Loads and stores are inlined with a $\mathrm{addr} \mapsto (\mathrm{addr}\, \&\, \sim 7)\!\ll\!1 + (\mathrm{addr}\, \&\, 7)$ shift trick that places the per-word ``last-write clock'' adjacent to the word value in a contiguous host buffer, avoiding the BTreeMap-walking page-table lookups of the interpreter.
+
+A bit-exactness CI guard drives the JIT and the interpreter on a random program corpus and asserts byte-identical trace event streams; this discipline catches any soundness-relevant divergence at PR submission time.
+
+The JIT is build-time gated to Linux x86\_64 release builds; other platforms compile out the JIT entirely and use the interpreter, with no runtime overhead deciding which to use.
+
+\subsection{Verifying-key map}
+
+For proofs that the same recursion program shape can be loaded from a deterministic table, \Zirenver{} maintains a \emph{verifying-key map} (VK map): a file mapping the hash of each admissible verifying key to its preprocessed-trace digest. When \texttt{VERIFY\_VK=true}, the verifier asserts that the loaded VK is in the map. The map is regenerated workload-driven (only program shapes actually encountered are emitted), with per-shape parallel compilation and an off-by-one fix in the first-layer enumerator to ensure shapes whose terminal layer matches the first layer are not silently skipped.

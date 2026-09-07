@@ -1,0 +1,80 @@
+% Instruction frame: three consecutive cycles as three unit rows, drawn as a circuit
+% (units with pins, state registers between them, program and memory buses, sub-cycle ruler).
+\begin{tikzpicture}[
+  font=\scriptsize,
+  unit/.style={rectangle, draw=black!80, line width=0.6pt, minimum width=4.4cm, minimum height=2.3cm, fill=white},
+  reg/.style={rectangle, draw=black!80, line width=0.6pt, minimum width=1.25cm, minimum height=1.05cm, fill=gray!8, align=center, font=\tiny},
+  pub/.style={rectangle, draw=black!80, dashed, minimum width=1.3cm, minimum height=1.05cm, fill=gray!4, align=center, font=\tiny},
+  bus/.style={line width=1.4pt, black!85},
+  wire/.style={line width=0.5pt, black!80},
+  sig/.style={-{Latex[length=1.8mm]}, line width=0.6pt, black!80},
+  pin/.style={circle, fill=black!80, inner sep=0pt, minimum size=2.6pt},
+  npin/.style={circle, draw=black!45, fill=white, inner sep=0pt, minimum size=2.6pt},
+  lbl/.style={font=\tiny, black!70},
+  hdr/.style={font=\scriptsize\bfseries},
+]
+% ---------- buses
+\draw[bus] (-2.6,3.1) -- (17.4,3.1) node[right, font=\scriptsize] {program bus};
+\node[lbl, anchor=south west] at (-2.6,3.15) {$(\mathsf{pc},\mathsf{opcode},\mathsf{op\_a},\mathsf{op\_b},\mathsf{op\_c},\mathsf{imm},\ldots)$ received by the preprocessed \texttt{Program} ROM};
+\draw[bus] (-2.6,-2.2) -- (17.4,-2.2) node[right, font=\scriptsize] {memory bus};
+\node[lbl, anchor=north west] at (-2.6,-2.25) {$(\mathsf{shard},\ 4\,\mathsf{clk}{+}\mathsf{pos},\ \mathsf{addr},\ \mathsf{value})$: one receive of the previous tuple and one send of the new tuple per access};
+
+% ---------- unit macro: name, x, title, opcode, four pin labels (empty = unused pin)
+\newcommand{\unitrow}[8]{%
+  \node[unit] (#1) at (#2,0) {};
+  \node[hdr, anchor=north west] at ($(#1.north west)+(0.12,-0.1)$) {#3};
+  \node[lbl, anchor=north east] at ($(#1.north east)+(-0.12,-0.12)$) {\texttt{#4}};
+  % fetch pin (top)
+  \node[pin] (#1f) at ($(#1.north)+(0,0)$) {};
+  \draw[sig] (#1f) -- ($(#1f)+(0,0.8)$);
+  \node[lbl, anchor=south east] at ($(#1f)+(-0.08,0.42)$) {fetch $(\mathsf{pc},\mathsf{op})$};
+  % state pins (left/right)
+  \node[pin] (#1l) at (#1.west) {}; \node[pin] (#1r) at (#1.east) {};
+  % sub-cycle pins along the bottom
+  \foreach \k/\t in {1/{#5},2/{#6},3/{#7},4/{#8}} {
+    \pgfmathsetmacro{\px}{#2-1.65+1.1*(\k-1)}
+    \ifx\t\empty
+      \node[npin] (#1p\k) at (\px,-1.15) {};
+      \node[lbl, anchor=south, black!40] at (\px,-1.05) {@\k};
+    \else
+      \node[pin] (#1p\k) at (\px,-1.15) {};
+      \node[lbl, anchor=south, align=center] at (\px,-1.05) {@\k\\ \t};
+      \draw[sig] (#1p\k) -- (\px,-2.2);
+    \fi
+  }
+}
+\unitrow{u1}{0}{\texttt{AddSubImm} row}{addiu \$t0,\$t1,4}{rd $\mathsf{op\_b}$}{}{}{wr $\mathsf{op\_a}$}
+\unitrow{u2}{6.8}{\texttt{Branch} row}{bne \$t0,\$t2,L}{rd $\mathsf{op\_b}$}{rd $\mathsf{op\_c}$}{}{}
+\unitrow{u3}{13.6}{\texttt{LoadWord} row}{lw \$t3,0(\$t4)}{rd $\mathsf{op\_b}$}{}{mem rd}{wr $\mathsf{op\_a}$}
+
+\node[lbl, anchor=north east, black!60] at ($(u3.north east)+(-0.12,-0.42)$) {\emph{in the branch's delay slot}};
+% ---------- inner datapath sketch (what the row computes)
+\node[lbl, align=left, anchor=west] at ($(u1.west)+(0.15,-0.1)$) {$\mathsf{op\_a} \leftarrow \mathsf{op\_b} + \mathsf{imm}$\\ byte-checked result,\\ carry bits witnessed};
+\node[lbl, align=left, anchor=west] at ($(u2.west)+(0.15,-0.1)$) {$\mathsf{taken} \leftarrow [\mathsf{op\_b} \neq \mathsf{op\_c}]$\\ $\mathsf{next\_next\_pc} \leftarrow$\\ $\mathsf{taken}\,?\,\mathsf{target} : \mathsf{next\_pc}{+}4$};
+\node[lbl, align=left, anchor=west] at ($(u3.west)+(0.15,0.0)$) {$\mathsf{addr} \leftarrow \mathsf{op\_b} + \mathsf{imm}$\\ $\mathsf{op\_a} \leftarrow \mathsf{mem}[\mathsf{addr}]$\\ aligned, 4 byte lanes};
+
+% ---------- state registers between rows (the state bus)
+\node[pub] (s0) at (-3.7,0) {entry state\\(public values)\\$(s,\mathsf{clk},\mathsf{pc},\mathsf{pc}{+}4)$};
+\node[reg] (s1) at (3.4,0) {state\\$(s,\ \mathsf{clk}{+}1,$\\$\mathsf{pc}{+}4,\ \mathsf{pc}{+}8)$};
+\node[reg] (s2) at (10.2,0) {state\\$(s,\ \mathsf{clk}{+}2,$\\$\mathsf{pc}{+}8,\ \mathsf{target})$};
+\node[reg] (s3) at (17.0,0) {state\\$(s,\ \mathsf{clk}{+}3,$\\$\mathsf{target},\ \mathsf{target}{+}4)$};
+\draw[sig] (s0) -- node[lbl, above=1pt] {recv} (u1l);
+\draw[sig] (u1r) -- node[lbl, above=1pt] {send} (s1);
+\draw[sig] (s1) -- node[lbl, above=1pt] {recv} (u2l);
+\draw[sig] (u2r) -- node[lbl, above=1pt] {send} (s2);
+\draw[sig] (s2) -- node[lbl, above=1pt] {recv} (u3l);
+\draw[sig] (u3r) -- node[lbl, above=1pt] {send} (s3);
+\node[lbl, anchor=west, align=left] at ($(s3.east)+(0.1,0)$) {to the row at\\$\mathsf{target}$};
+
+% ---------- sub-cycle ruler
+\foreach \c/\x/\n/\m in {0/0/{\mathsf{clk}}/{\mathsf{clk}},1/6.8/{\mathsf{clk}{+}1}/{(\mathsf{clk}{+}1)},2/13.6/{\mathsf{clk}{+}2}/{(\mathsf{clk}{+}2)}} {
+  \draw[wire] (\x-2.2,-3.05) -- (\x+2.2,-3.05);
+  \foreach \k in {1,...,4} {
+    \pgfmathsetmacro{\px}{\x-1.65+1.1*(\k-1)}
+    \draw[wire] (\px,-2.95) -- (\px,-3.15);
+    \node[lbl, anchor=north] at (\px,-3.18) {${+}\k$};
+  }
+  \node[lbl, anchor=south] at (\x,-2.95) {cycle $\n$: positions $4\m{+}\mathsf{pos}$};
+}
+\node[lbl, anchor=east, align=right] at (-2.7,-3.1) {access\\positions};
+\end{tikzpicture}

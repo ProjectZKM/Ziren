@@ -1,0 +1,39 @@
+\section{The polynomial commitment: stacking and the jagged reduction}
+\label{sec:pcs}
+
+After the lookup argument and the zerocheck, the verifier holds evaluation claims on individual unit columns. A shard of the \texttt{reth} workload has about $3.6 \cdot 10^4$ columns whose heights range from 32 rows to millions; committing each column, or each unit, separately would cost the verifier a Merkle root and a query phase per commitment, and the recursion circuit would depend on which units a shard contains. \Zirenver{} commits the whole shard as \emph{one} multilinear polynomial and reduces the column claims to a claim on it. The reduction has two steps: a \emph{stacking} that turns the concatenation of all columns into a matrix of fixed height, and the \emph{jagged} sumcheck of~\citep{jagged-pcs} that maps a claim about a column's own coordinates to a claim about its position in the concatenation.
+
+The property this buys is modularity in the sense of Section~\ref{sec:ipcore}: because the verifier of the reduction depends only on the logarithm of the trace area, a unit can be widened, narrowed, added or removed without changing the shape of the program that verifies the shard. The block's internals can be revised, as they were four times in Section~\ref{sec:perf-changes}, without redesigning the layer above them.
+
+\subsection{Dense packing and stacking}
+\label{sec:pcs-stacking}
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/jagged}}
+\caption{From unit tables of different heights to one committed polynomial: columns are concatenated into the dense vector, which is cut into stripes of the stacking height and committed once; a column claim is turned into a claim on the dense vector by the jagged sumcheck.}
+\label{fig:jagged}
+\end{figure}
+
+
+Let the columns of a shard be $\mathbf{c}_0, \dots, \mathbf{c}_{K-1}$ with heights $h_0, \dots, h_{K-1}$ (unit order, then column order within a unit), and let $t_k = \sum_{j<k} h_j$ be the prefix sums. The \emph{dense vector} is $\mathbf{q} = \mathbf{c}_0 \Vert \mathbf{c}_1 \Vert \dots \Vert \mathbf{c}_{K-1}$, of length $A = t_K$, the \emph{trace area}. The prover pads $\mathbf q$ with zeros to length $2^{m}$, $m = \lceil \log_2 A \rceil$, and views it as the multilinear $\widetilde{\mathbf q}$ on $m$ variables.
+
+The commitment layer does not see $\widetilde{\mathbf q}$ as one vector of $2^m$ entries but as a matrix: a \emph{stacking height} $2^{\ell}$ is fixed by the configuration, the vector is cut into $2^{m-\ell}$ stripes of $2^{\ell}$ consecutive entries, and the stripes are grouped into the leaves of the Merkle commitment, 32 to a leaf in the deployed configuration (Section~\ref{sec:iopp-commit}). A point $\bm z \in \EF^{m}$ splits as $(\bm z_{\text{stripe}}, \bm z_{\text{row}})$ with $|\bm z_{\text{row}}| = \ell$; the evaluation $\widetilde{\mathbf q}(\bm z)$ equals the interpolation, by the Lagrange weights of $\bm z_{\text{stripe}}$, of the per-stripe evaluations at $\bm z_{\text{row}}$, which is how the \WHIR{} opening of the stripes is bound to the claim on $\widetilde{\mathbf q}$. Before anything is committed, the per-unit dimensions (name, row count, column count, prefix sum) are absorbed into the transcript, so a prover cannot re-interpret the packing after seeing challenges.
+
+\subsection{The jagged reduction}
+\label{sec:pcs-jagged}
+
+Following~\citep{jagged-pcs}, view the shard's trace as a \emph{jagged function} $p : \{0,1\}^{n} \times \{0,1\}^{k} \to \F$ on rows $x$ and columns $y$, zero for $x \ge h_y$, with $n = \max_y \lceil\log_2 h_y\rceil$ and $2^k \ge K$. Its dense representation is exactly $\mathbf q$: writing $\mathrm{col}(i)$ for the column containing position $i$ and $\mathrm{row}(i) = i - t_{\mathrm{col}(i)}$,
+\[
+  \widetilde p(\bm z_r, \bm z_c) \;=\; \sum_{i \in \{0,1\}^m} \mathbf q(i)\, \eqf(\mathrm{row}(i), \bm z_r)\, \eqf(\mathrm{col}(i), \bm z_c)
+  \;=\; \sum_{i} \widetilde{\mathbf q}(i)\, \widetilde f_{t}(\bm z_r, \bm z_c, i),
+\]
+where $f_t(\bm z_r, \bm z_c, i) = 1$ iff $\mathrm{row}(i) = \bm z_r$ and $\mathrm{col}(i) = \bm z_c$, and $\widetilde f_t$ is its multilinear extension. A column claim ``column $y$ evaluated at $\bm z_r$ equals $v$'' is the claim $\widetilde p(\bm z_r, y) = v$, so all column claims of the shard are claims on $\widetilde p$; the verifier batches them with a random $\gamma$ into one claim $\sum_c \gamma^c\, \widetilde p(\bm z_r^{(c)}, y_c) = \sum_c \gamma^c v_c$ (the batching of Section~5 of~\citep{jagged-pcs}), and the prover and verifier run the sumcheck of the product $\widetilde{\mathbf q}(i) \cdot \sum_c \gamma^c \widetilde f_t(\bm z_r^{(c)}, y_c, i)$ over $i \in \{0,1\}^m$. This is a degree-two sumcheck of $m$ rounds; at its end the verifier holds one claim $\widetilde{\mathbf q}(\bm z^{*}) = v_{\mathbf q}$, which goes to \WHIR{}, and one claim on $\widetilde f_t$ at $(\bm z_r, \bm z_c, \bm z^{*})$, which it must evaluate itself. The prover's work is a small constant number of field multiplications per entry of $\mathbf q$: the paper's bound is $5 \cdot 2^m + 2^n + 2^k$ multiplications for the reduction, on top of the commitment.
+
+\paragraph{Evaluating $\widetilde f_t$.} The verifier must evaluate $\widetilde f_t$ itself. Proposition~3.2 of~\citep{jagged-pcs} writes it as a sum over columns of a function computed by a width-four read-once branching program~\citep{barrington1989bounded}, whose multilinear extension is evaluable in $O(m)$ field operations by the dynamic program of Holmgren--Rothblum~\citep{hr18}; the sum over the $K \approx 3.6 \cdot 10^4$ columns is delegated to the prover by the ``jagged assist'' sumcheck of the same paper. Appendix~\ref{sec:app-jagged} gives the formulas as implemented. The verifier's cost is $O(m)$ field operations plus the sumcheck rounds, and it is an arithmetic circuit that depends only on $m$: the recursion program for a shard is a function of the shard's log-area class, not of its unit set.
+
+\paragraph{Soundness.} The reduction adds $m/|\EF|$ for the product sumcheck and $2(m+1)/|\EF|$ for the assist, both negligible at $|\EF| \approx 2^{124}$; it appears as the ``reduce to dense PCS'' component of the accounting in Section~\ref{sec:iopp-soundness}.
+
+\subsection{Instantiation on the inner and outer rings}
+
+The same jagged layer is instantiated twice: on the inner ring, where core and compress shards are committed with \WHIR{} over $\KB{}$ (Section~\ref{sec:iopp}), and on the outer \emph{wrap} ring, where the final recursion shard is committed with the FRI-based BaseFold-style instantiation Section~\ref{sec:recursion} describes. The stacking, the dense packing and the jagged sumcheck are shared; only the opening of $\widetilde{\mathbf q}(\bm z^*)$ differs.

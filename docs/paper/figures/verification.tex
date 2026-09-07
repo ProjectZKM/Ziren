@@ -1,0 +1,17 @@
+% Status of the extracted determinism theorems, per unit family.
+\begin{tikzpicture}
+\begin{axis}[
+  xbar stacked, xmin=0, xmax=34, width=0.9\textwidth, height=6.4cm, bar width=9pt,
+  symbolic y coords={Accelerators,Memory argument,Misc./syscall,Memory instructions,Control flow,Shifts,Integer ALU},
+  ytick=data, y dir=normal,
+  xlabel={extracted determinism theorems}, legend style={font=\scriptsize, at={(0.5,-0.32)}, anchor=north, legend columns=4},
+  tick label style={font=\scriptsize}, label style={font=\small},
+  nodes near coords, every node near coord/.append style={font=\tiny},
+  point meta=explicit, nodes near coords style={/pgf/number format/fixed},
+]
+\addplot[fill=gray!65] coordinates {(9,Integer ALU) [9] (1,Shifts) [1] (0,Control flow) [] (4,Memory instructions) [4] (1,Misc./syscall) [1] (1,Memory argument) [1] (1,Accelerators) [1]}; \addlegendentry{closed}
+\addplot[fill=gray!35] coordinates {(6,Integer ALU) [6] (4,Shifts) [4] (0,Control flow) [] (2,Memory instructions) [2] (5,Misc./syscall) [5] (4,Memory argument) [4] (1,Accelerators) [1]}; \addlegendentry{attempted, open}
+\addplot[fill=white] coordinates {(8,Integer ALU) [8] (0,Shifts) [] (0,Control flow) [] (0,Memory instructions) [] (9,Misc./syscall) [9] (0,Memory argument) [] (24,Accelerators) [24]}; \addlegendentry{not attempted}
+\addplot[fill=white, postaction={pattern=north east lines, pattern color=gray!60}] coordinates {(0,Integer ALU) [] (3,Shifts) [3] (9,Control flow) [9] (8,Memory instructions) [8] (0,Misc./syscall) [] (0,Memory argument) [] (6,Accelerators) [6]}; \addlegendentry{attempt not finished}
+\end{axis}
+\end{tikzpicture}

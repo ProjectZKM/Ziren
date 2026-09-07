@@ -1,0 +1,49 @@
+\section{Related work}
+\label{sec:related}
+
+We compare along the axes of Section~\ref{sec:intro}: guest ISA and execution model, arithmetisation (how instructions and memory become tables), lookup argument, commitment and proximity test, recursion, and the claimed security level and its regime. Table~\ref{tab:related} summarises the systems we are measured against; the text gives the positioning for each.
+
+\begin{table}[t]
+\centering
+\scriptsize\setlength{\tabcolsep}{3pt}
+\caption{Design axes of the block-proving \zkVM{}s discussed in the text, from their public descriptions. The last column names the regime under which each project states its level; regimes and conjectures differ and levels are not comparable without the accounting of Section~\ref{sec:iopp-soundness}.}
+\label{tab:related}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lllllll}
+\toprule
+System & ISA & Field & Instruction tables & Lookup & Commitment / IOPP & Regime of stated level \\
+\midrule
+\Zirenver{} & MIPS32r2 & KoalaBear ($2^{31}$) & chip per opcode, frames & \LogUp{} & jagged over \WHIR{} & unique decoding, union bound \\
+SP1 Hypercube~\citep{sp1-hypercube} & RV32IM & KoalaBear & chip per opcode & \LogUp{} & jagged over BaseFold & project target \\
+RISC Zero~\citep{risc0} & RV32IM & BabyBear & CPU circuit, continuations & permutation / lookup & DEEP-ALI + FRI & project calculator \\
+ZisK~\citep{zisk} & RV64IMA & Goldilocks & micro-ops, PIL2 & LogUp & FRI (STARK) & per release \\
+Airbender~\citep{airbender} & RV32IM & Mersenne-31 & degree-2 AIR & LogUp & DEEP-FRI & project target \\
+Ceno~\citep{ceno} & RV32IM & Goldilocks & basic-block circuits & GKR-based & multilinear PCS & --- \\
+OpenVM~\citep{openvm} & RV32IM + ext. & BabyBear & modular executor chips & LogUp & FRI (Plonky3) & project target \\
+Jolt~\citep{jolt} & RV32IM & 256-bit / small & Lasso opcode tables & Lasso & multilinear PCS & --- \\
+Cairo~\citep{cairo} & Cairo (own) & 251-bit & CPU AIR, builtins & permutation & FRI & --- \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\paragraph{Chip-decomposed \zkVM{}s.} SP1~\citep{sp1} established the chip-per-opcode, \LogUp{}-based, recursively aggregated template that \Ziren{} follows, and SP1 Hypercube~\citep{sp1-hypercube} introduced the jagged commitment and the shard-level lookup and zerocheck shape. \Zirenver{} inherits the template and the septic cross-shard digest and differs in the guest ISA (MIPS32r2 with delay slots, whose $\mathsf{pc}$-pair frames Section~\ref{sec:air-frame} describes), in the register argument (clock-zero shadow reads instead of a shard field on register accesses), in the proximity test (\WHIR{} instead of BaseFold, Section~\ref{sec:iopp}), and in the security accounting, which we report in the unique-decoding regime with the union bound rather than as a target. SP1's \texttt{sp1-jit}~\citep{sp1-jit} is the model for the executor. OpenVM~\citep{openvm} also has no CPU chip and organises its machine as modular instruction executors; \Ziren{}'s instruction frame is the same idea specialised to MIPS. Valida~\citep{valida} shares the modular-chip ancestry but co-designed a proof-oriented ISA.
+
+\paragraph{CPU-circuit and continuation designs.} RISC Zero~\citep{risc0} proves RISC-V with a single CPU circuit, continuations across segments and a DEEP-ALI/FRI stack over BabyBear; its per-cycle cost is paid by every instruction alike, where a chip-decomposed design pays each opcode's own width. Cairo~\citep{cairo} co-designed its instruction set and memory model with the arithmetisation (a permutation-based read-only memory and builtins), which is a design point \Ziren{} does not take: MIPS is a hardware ISA with an existing compiler toolchain and an existing fault-proof ecosystem.
+
+\paragraph{Lookup-centric and GKR-centric designs.} Jolt~\citep{jolt} evaluates instructions by indexed lookups into structured tables with Lasso~\citep{lasso}, so that the prover's dominant cost is the lookup argument and the commitment of its multiplicities; \Ziren{} uses lookups only for byte-granular facts (the $2^{16}$-row byte table) and for buses, and evaluates instructions by polynomial constraints. Ceno~\citep{ceno} builds non-uniform circuits per basic block and proves them with GKR, reconstructing memory and control flow across segments; its segment parallelism is the counterpart of \Ziren{}'s shards, and its GKR use is at the instruction level where \Ziren{}'s is only in the lookup argument. Both are the closest architectural alternatives to the chip-per-opcode design and are the natural baselines for the \emph{(row, interaction)} cost model of Section~\ref{sec:performance}.
+
+\paragraph{Public block-proving provers.} ZisK~\citep{zisk} (RISC-V 64, Goldilocks, PIL2) and Airbender~\citep{airbender} (RISC-V 32, Mersenne-31, DEEP-FRI) are the single-GPU provers \Ziren{} appears next to on the public dashboard~\citep{ethproofs}; they differ in field, security regime and proof size as much as in time, which is why Section~\ref{sec:perf-field} reports the comparison as context only. Nexus~\citep{nexus} follows a folding route that we do not measure against.
+
+\paragraph{Fields and frameworks.} The field, the $\Poseidon{}$ permutation~\citep{poseidon2}, the AIR interfaces and the DFT kernels come from Plonky3~\citep{plonky3}. Circle STARKs~\citep{circle-starks} obtain smooth domains over Mersenne-31 through the circle group, whereas \KB{} has two-adicity 24 and uses ordinary Reed--Solomon domains at the price of the $2^{32} > p$ word-splitting of Section~\ref{sec:prelim}; Binius~\citep{binius,fri-binius} removes the word-splitting by committing over binary towers, at the cost of tower arithmetic.
+
+\paragraph{Proximity tests and commitments.} FRI~\citep{ben2018fast} is the classical Reed--Solomon IOPP, DEEP-FRI~\citep{deep-fri} added out-of-domain sampling, BaseFold~\citep{basefold} interleaves FRI with sumcheck to obtain a multilinear commitment, STIR~\citep{stir} improves the rate round by round, and \WHIR{}~\citep{whir} combines these and is the IOPP used here; Brakedown~\citep{brakedown} and Ligero~\citep{ligero} trade proof size for a linear-time prover. The jagged commitment~\citep{jagged-pcs} is the sparse-to-dense reduction for variable-height tables, with the branching-program evaluation of Holmgren and Rothblum~\citep{hr18}. The contribution of this paper at this layer is the composition of the two and its measured schedule.
+
+\paragraph{Lookups.} The logarithmic-derivative lookup of Hab\"ock~\citep{haboeck} and its GKR realisation~\citep{logup-gkr} are used as published; Plookup~\citep{plookup} and cq~\citep{cq} are univariate alternatives that do not transfer to a multilinear, many-bus workload. The multiset memory argument descends from Blum et al.~\citep{blum1994}.
+
+\paragraph{MIPS execution systems.} Optimism's Cannon~\citep{cannon} is a single-step MIPS interpreter for interactive fault proofs, and its test suite is one of \Ziren{}'s conformance inputs; Kona~\citep{kona} is the fault-proof program of the same ecosystem, a workload rather than a proof system. zkMIPS~\citep{zkmips} is the first-generation \Ziren{} prover (a CPU-table design over Goldilocks); the current generation replaces its proof stack entirely.
+
+\paragraph{Verifiable computation for embedded and IoT systems.} Zero-knowledge proofs reach constrained devices today as authentication and attestation protocols: a survey of zero-knowledge authentication for the IoT~\citep{zk-iot-survey}; ZPiE~\citep{zpie}, a C library that runs zk-SNARK provers and verifiers on embedded boards; ZEKRA~\citep{zekra}, control-flow attestation in which a prover shows that a device's execution path is admissible without revealing it; and zRA~\citep{zra}, non-interactive remote attestation with zk-SNARKs anchored in read-only memory and a memory protection unit. In all of these the statement is small and about the device; a \zkVM{} for the device's instruction set inverts the arrangement, making the execution of the device's own program the statement and the constrained party the verifier. \Ziren{} is, to our knowledge, the only \zkVM{} whose guest is the instruction set of the MIPS embedded fleet.
+
+\paragraph{Circuit verification.} Picus~\citep{picus} introduced the determinism (uniqueness) formulation of under-constrained circuits and an SMT-based solver for it; Section~\ref{sec:verification-det} states the same property for \Ziren{}'s units and discharges it in \Lean{} with an integer-lifting tactic that replays Picus's propagation, because the public solver does not scale to units of the size in Table~\ref{tab:chips}.
+
+\paragraph{Security accounting.} The parameter analysis follows the round-by-round methodology of~\citep{whir} and is computed with the Ethereum Foundation's \texttt{soundcalc}~\citep{soundcalc}; the distinction between the unique-decoding, Johnson and capacity regimes and their conjectures is theirs, with the underlying bounds from proximity gaps~\citep{proximity-gaps} and DEEP-FRI~\citep{deep-fri}. RISC Zero's soundness calculator~\citep{risc0-soundness} and the ethSTARK documentation~\citep{ethstark} are the comparable published accountings.

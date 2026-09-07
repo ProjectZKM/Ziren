@@ -1,0 +1,21 @@
+% Proved-execution throughput (MHz) against number of cards, three block sizes, after the lookup-layer change;
+% the dashed line is the 288 M-cycle block on the deployed stack.
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.62\textwidth, height=6cm, xlabel={RTX 5090 GPUs (one host)}, ylabel={proved guest cycles / wall time (MHz)},
+  xtick={1,2,4}, xmin=0.7, xmax=4.4, ymin=0, ymax=25, grid=major,
+  legend style={font=\scriptsize, at={(0.5,-0.2)}, anchor=north, legend columns=2, cells={anchor=west}},
+  tick label style={font=\scriptsize}, label style={font=\small},
+]
+\addplot[mark=*, thick] coordinates {(1,6.4) (2,12.2) (4,20.0)};
+\addlegendentry{420 M-cycle block, after}
+\addplot[mark=square*, thick] coordinates {(1,6.3) (2,11.9) (4,20.0)};
+\addlegendentry{530 M-cycle block, after}
+\addplot[mark=triangle*, thick] coordinates {(1,7.3) (2,14.0) (4,24.0)};
+\addlegendentry{912 M-cycle block, after}
+\addplot[mark=o, dashed] coordinates {(1,3.9) (2,7.5) (4,13.8)};
+\addlegendentry{420 M-cycle block, deployed stack}
+\addplot[no marks, dotted, gray] coordinates {(1,6.4) (4,25.6)};
+\addlegendentry{linear from one GPU}
+\end{axis}
+\end{tikzpicture}

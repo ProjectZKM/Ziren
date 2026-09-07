@@ -1,0 +1,330 @@
+\newcommand{\etalchar}[1]{$^{#1}$}
+\begin{thebibliography}{BSBHR18}
+
+\bibitem[ACFY24a]{stir}
+Gal Arnon, Alessandro Chiesa, Giacomo Fenzi, and Eylon Yogev.
+\newblock {STIR: Reed--Solomon Proximity Testing with Fewer Queries}.
+\newblock Cryptology ePrint Archive, Paper 2024/390, 2024.
+
+\bibitem[ACFY24b]{whir}
+Gal Arnon, Alessandro Chiesa, Giacomo Fenzi, and Eylon Yogev.
+\newblock {WHIR: Reed--Solomon Proximity Testing with Super-Fast Verification}.
+\newblock Cryptology ePrint Archive, Paper 2024/1586, 2024.
+
+\bibitem[AHIV17]{ligero}
+Scott Ames, Carmit Hazay, Yuval Ishai, and Muthuramakrishnan
+  Venkitasubramaniam.
+\newblock Ligero: Lightweight sublinear arguments without a trusted setup.
+\newblock In {\em ACM CCS}, 2017.
+
+\bibitem[AST24]{jolt}
+Arasu Arun, Srinath Setty, and Justin Thaler.
+\newblock Jolt: {SNARKs} for virtual machines via lookups.
+\newblock EUROCRYPT 2024; Cryptology ePrint Archive, Paper 2023/1217, 2024.
+
+\bibitem[{Axi}24]{openvm}
+{Axiom}.
+\newblock {OpenVM}: A performant and modular {zkVM} framework.
+\newblock \url{https://openvm.dev/whitepaper.pdf}, 2024.
+
+\bibitem[Bar89]{barrington1989bounded}
+David~A. Barrington.
+\newblock {Bounded-Width Polynomial-Size Branching Programs Recognize Exactly
+  Those Languages in $\mathrm{NC}^1$}.
+\newblock In {\em Journal of Computer and System Sciences}, volume~38, pages
+  150--164, 1989.
+
+\bibitem[BEG{\etalchar{+}}94]{blum1994}
+Manuel Blum, Will Evans, Peter Gemmell, Sampath Kannan, and Moni Naor.
+\newblock {Checking the Correctness of Memories}.
+\newblock In {\em Algorithmica}, volume~12, pages 225--244, 1994.
+
+\bibitem[BSBHR18]{ben2018fast}
+Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev.
+\newblock {Fast Reed--Solomon Interactive Oracle Proofs of Proximity}.
+\newblock In {\em Proceedings of the 45th International Colloquium on Automata,
+  Languages, and Programming (ICALP)}, pages 14:1--14:17, 2018.
+
+\bibitem[BSCI{\etalchar{+}}20]{proximity-gaps}
+Eli Ben-Sasson, Dan Carmon, Yuval Ishai, Swastik Kopparty, and Shubhangi Saraf.
+\newblock Proximity gaps for {Reed--Solomon} codes.
+\newblock In {\em FOCS}, 2020.
+
+\bibitem[BSGKS20]{deep-fri}
+Eli Ben-Sasson, Lior Goldberg, Swastik Kopparty, and Shubhangi Saraf.
+\newblock {DEEP-FRI}: Sampling outside the box improves soundness.
+\newblock In {\em ITCS}, 2020.
+
+\bibitem[CJSC23]{zk-iot-survey}
+Zhigang Chen, Yuting Jiang, Xinxia Song, and Liqun Chen.
+\newblock A survey on zero-knowledge authentication for {Internet of Things}.
+\newblock {\em Electronics}, 12(5):1145, 2023.
+
+\bibitem[{Con}24]{gnark}
+{Consensys}.
+\newblock {gnark: A fast zk-SNARK library in Go}.
+\newblock \url{https://github.com/Consensys/gnark}, 2024.
+
+\bibitem[DDGM23]{zekra}
+Heini~Bergsson Debes, Edlira Dushku, Thanassis Giannetsos, and Ali Marandi.
+\newblock {ZEKRA}: Zero-knowledge control-flow attestation.
+\newblock In {\em ACM ASIA Conference on Computer and Communications Security
+  (ASIA CCS)}, 2023.
+
+\bibitem[DP23]{binius}
+Benjamin~E. Diamond and Jim Posen.
+\newblock Succinct arguments over towers of binary fields.
+\newblock Cryptology ePrint Archive, Paper 2023/1784, 2023.
+
+\bibitem[DP24]{fri-binius}
+Benjamin~E. Diamond and Jim Posen.
+\newblock Polylogarithmic proofs for multilinears over binary towers.
+\newblock Cryptology ePrint Archive, Paper 2024/504, 2024.
+
+\bibitem[EFG22]{cq}
+Liam Eagen, Dario Fiore, and Ariel Gabizon.
+\newblock {cq: Cached quotients for fast lookups}.
+\newblock Cryptology ePrint Archive, Paper 2022/1763, 2022.
+
+\bibitem[EH24]{zra}
+Shahriar Ebrahimi and Parisa Hassanizadeh.
+\newblock From interaction to independence: {zkSNARKs} for transparent and
+  non-interactive remote attestation.
+\newblock In {\em Network and Distributed System Security Symposium (NDSS)},
+  2024.
+\newblock IACR ePrint 2024/1068.
+
+\bibitem[{Eth}26a]{soundcalc}
+{Ethereum Foundation}.
+\newblock {soundcalc: security calculator for hash-based proof systems}.
+\newblock \url{https://github.com/ethereum/soundcalc}, 2026.
+
+\bibitem[{Eth}26b]{ethproofs}
+{Ethproofs}.
+\newblock {Ethproofs: real-time proving of Ethereum blocks}.
+\newblock \url{https://ethproofs.org}, 2026.
+
+\bibitem[FS87]{fiat-shamir}
+Amos Fiat and Adi Shamir.
+\newblock {How to Prove Yourself: Practical Solutions to Identification and
+  Signature Problems}.
+\newblock In {\em Advances in Cryptology --- CRYPTO '86}, pages 186--194, 1987.
+
+\bibitem[GKR08]{gkr-cmt}
+Shafi Goldwasser, Yael~Tauman Kalai, and Guy~N. Rothblum.
+\newblock {Delegating Computation: Interactive Proofs for Muggles}.
+\newblock In {\em Proceedings of the 40th ACM Symposium on Theory of Computing
+  (STOC)}, pages 113--122, 2008.
+
+\bibitem[GKS23]{poseidon2}
+Lorenzo Grassi, Dmitry Khovratovich, and Markus Schofnegger.
+\newblock {Poseidon2}: A faster version of the {Poseidon} hash function.
+\newblock In {\em AFRICACRYPT}, 2023.
+
+\bibitem[GLS{\etalchar{+}}21]{brakedown}
+Alexander Golovnev, Jonathan Lee, Srinath Setty, Justin Thaler, and Riad Wahby.
+\newblock {Brakedown: Linear-time and field-agnostic SNARKs for
+  $\mathsf{R1CS}$}.
+\newblock Cryptology ePrint Archive, Paper 2021/1043, 2021.
+
+\bibitem[GW20]{plookup}
+Ariel Gabizon and Zachary~J. Williamson.
+\newblock {plookup: A simplified polynomial protocol for lookup tables}.
+\newblock 2020.
+
+\bibitem[Hab22]{haboeck}
+Ulrich Habök.
+\newblock {Multivariate lookups based on logarithmic derivatives}.
+\newblock Cryptology ePrint Archive, Paper 2022/1530, 2022.
+
+\bibitem[Har25]{mips-at-40}
+David Harold.
+\newblock {MIPS} at 40.
+\newblock Jon Peddie Research,
+  \url{https://www.jonpeddie.com/news/mips-at-40/}, January 2025.
+
+\bibitem[HJR{\etalchar{+}}25]{jagged-pcs}
+Tamir Hemo, Kevin Jue, Eugene Rabinovich, Gyumin Roh, and Ron~D. Rothblum.
+\newblock {Jagged Polynomial Commitments (or: How to Stack Multilinears)}.
+\newblock Cryptology ePrint Archive, Paper 2025/917, 2025.
+
+\bibitem[HLP24]{circle-starks}
+Ulrich Hab{\"o}ck, David Levit, and Shahar Papini.
+\newblock Circle {STARKs}.
+\newblock Cryptology ePrint Archive, Paper 2024/278, 2024.
+
+\bibitem[HR18]{hr18}
+Justin Holmgren and Ron Rothblum.
+\newblock {Delegating Computations with (almost) Minimal Time and Space
+  Overhead}.
+\newblock Electronic Colloquium on Computational Complexity, Report TR18-161,
+  2018.
+
+\bibitem[LFKN92]{lund1992algebraic}
+Carsten Lund, Lance Fortnow, Howard Karloff, and Noam Nisan.
+\newblock {Algebraic Methods for Interactive Proof Systems}.
+\newblock In {\em Journal of the ACM}, volume~39, pages 859--868, 1992.
+
+\bibitem[{Lit}24]{valida}
+{Lita Foundation}.
+\newblock Valida {ISA} specification, version 1.0: A {zk}-optimized instruction
+  set architecture.
+\newblock \url{https://github.com/lita-xyz/valida-releases}, 2024.
+
+\bibitem[LZZ{\etalchar{+}}24]{ceno}
+Tianyi Liu, Zhenfei Zhang, Yuncong Zhang, Wenqing Hu, and Ye~Zhang.
+\newblock Ceno: Non-uniform, segment and parallel zero-knowledge virtual
+  machine.
+\newblock Cryptology ePrint Archive, Paper 2024/387, 2024.
+
+\bibitem[{Mat}25]{airbender}
+{Matter Labs}.
+\newblock {ZKsync Airbender}: A {RISC-V} {zkVM} over {Mersenne-31}.
+\newblock \url{https://github.com/matter-labs/zksync-airbender}, 2025.
+
+\bibitem[{Med}26]{mediatek-mt7621}
+{MediaTek Inc.}
+\newblock {MT7621A/N} dual-core network processor.
+\newblock \url{https://www.mediatek.com/products/home-networking/mt7621}, 2026.
+\newblock 880\,MHz MIPS 1004KEc dual-core Wi-Fi/router SoC. Accessed September
+  2026.
+
+\bibitem[{Mic}26]{microchip-pic32}
+{Microchip Technology Inc.}
+\newblock {MIPS32}-core-based microcontrollers ({PIC32M}).
+\newblock
+  \url{https://www.microchip.com/en-us/products/microcontrollers/32-bit-mcus/pic32m},
+  2026.
+\newblock Accessed September 2026.
+
+\bibitem[{MIP}26]{mips-shipped}
+{MIPS Tech LLC}.
+\newblock {IP} processors.
+\newblock \url{https://mips.com/products/hardware/}, 2026.
+\newblock States ``over 8.5B MIPS-based devices shipped''. Accessed September
+  2026.
+
+\bibitem[{Nex}24]{nexus}
+{Nexus Labs}.
+\newblock Nexus 1.0: Enabling verifiable computation.
+\newblock \url{https://whitepaper.nexus.xyz/}, 2024.
+
+\bibitem[{OP }24]{kona}
+{OP Labs}.
+\newblock Kona: A rust implementation of the {OP Stack} fault-proof program.
+\newblock \url{https://github.com/op-rs/kona}, 2024.
+
+\bibitem[{Ope}26]{openwrt-targets}
+{OpenWrt Project}.
+\newblock Targets and subtargets ({\tt ath79}, {\tt ramips}).
+\newblock \url{https://openwrt.org/docs/techref/targets/start}, 2026.
+\newblock Accessed September 2026.
+
+\bibitem[{Opt}23]{cannon}
+{Optimism Foundation}.
+\newblock {Cannon: A MIPS interpreter for Optimism fault proofs}.
+\newblock \url{https://github.com/ethereum-optimism/optimism}, 2023.
+
+\bibitem[PCW{\etalchar{+}}23]{picus}
+Shankara Pailoor, Yanju Chen, Franklyn Wang, Clara Rodr{\'\i}guez, Jacob~Van
+  Geffen, Jason Morton, Michael Chu, Brian Gu, Yu~Feng, and I{\c{s}}il Dillig.
+\newblock Automated detection of under-constrained circuits in zero-knowledge
+  proofs.
+\newblock In {\em PLDI}, 2023.
+
+\bibitem[PH23]{logup-gkr}
+Shahar Papini and Ulrich Habök.
+\newblock {Improving logarithmic derivative lookups using GKR}.
+\newblock Cryptology ePrint Archive, Paper 2023/1284, 2023.
+
+\bibitem[{Pol}24]{plonky3}
+{Polygon Zero and contributors}.
+\newblock {Plonky3: A toolkit for STARKs over small fields}.
+\newblock \url{https://github.com/Plonky3/Plonky3}, 2024.
+
+\bibitem[{Pol}25]{zisk}
+{Polygon Labs}.
+\newblock {ZisK}: A high-performance {zkVM}.
+\newblock \url{https://github.com/0xPolygonHermez/zisk}, 2025.
+
+\bibitem[QV15]{unicorn}
+Nguyen~Anh Quynh and Dang~Hoang Vu.
+\newblock Unicorn: The ultimate {CPU} emulator.
+\newblock Black Hat USA; \url{https://www.unicorn-engine.org/}, 2015.
+
+\bibitem[{RIS}24a]{risc0-soundness}
+{RISC Zero}.
+\newblock {STARK} soundness calculator.
+\newblock
+  \url{https://github.com/risc0/risc0/tree/main/risc0/zkp/src/prove/soundness.rs},
+  2024.
+
+\bibitem[{RIS}24b]{risc0}
+{RISC Zero, Inc.}
+\newblock {RISC0: A general-purpose zero-knowledge virtual machine}.
+\newblock \url{https://www.risczero.com}, 2024.
+
+\bibitem[SD21]{zpie}
+Xavier Salleras and Vanesa Daza.
+\newblock {ZPiE}: Zero-knowledge proofs in embedded systems.
+\newblock {\em Mathematics}, 9(20):2569, 2021.
+\newblock IACR ePrint 2021/1382.
+
+\bibitem[{Sta}21]{cairo}
+{StarkWare Industries}.
+\newblock {Cairo: A Turing-complete STARK-friendly CPU architecture}.
+\newblock \url{https://www.cairo-lang.org}, 2021.
+
+\bibitem[{Sta}23]{ethstark}
+{StarkWare}.
+\newblock {ethSTARK} documentation---version 1.2.
+\newblock Cryptology ePrint Archive, Paper 2021/582, 2023.
+
+\bibitem[STW24]{lasso}
+Srinath Setty, Justin Thaler, and Riad Wahby.
+\newblock Unlocking the lookup singularity with {Lasso}.
+\newblock EUROCRYPT 2024; Cryptology ePrint Archive, Paper 2023/1216, 2024.
+
+\bibitem[{Suc}24]{sp1}
+{Succinct Labs}.
+\newblock {SP1: A performant, open-source, contributor-friendly zkVM}.
+\newblock \url{https://github.com/succinctlabs/sp1}, 2024.
+\newblock Accessed 2026.
+
+\bibitem[{Suc}25a]{sp1-hypercube}
+{Succinct Labs}.
+\newblock {SP1 Hypercube}: Real-time proving of {Ethereum} blocks.
+\newblock \url{https://blog.succinct.xyz/sp1-hypercube/}, 2025.
+\newblock Technical report and open-source implementation.
+
+\bibitem[{Suc}25b]{sp1-jit}
+{Succinct Labs}.
+\newblock {sp1-jit: Just-in-time RISC-V executor for SP1}.
+\newblock \url{https://github.com/succinctlabs/sp1}, 2025.
+\newblock Component of the SP1 repository.
+
+\bibitem[{The}25]{ziren}
+{The ZKM Project}.
+\newblock {Ziren: A zero-knowledge MIPS virtual machine}.
+\newblock \url{https://docs.zkm.io}, 2025.
+
+\bibitem[Tur21]{mips-riscv-2021}
+Jim Turley.
+\newblock Wait, what? {MIPS} becomes {RISC-V}.
+\newblock {\em EE Journal}, March 2021.
+\newblock
+  \url{https://www.eejournal.com/article/wait-what-mips-becomes-risc-v/}.
+
+\bibitem[ZCF23]{basefold}
+Hadas Zeilberger, Binyi Chen, and Ben Fisch.
+\newblock {BaseFold: Efficient Field-Agnostic Polynomial Commitment Schemes
+  from Foldable Codes}.
+\newblock Cryptology ePrint Archive, Paper 2023/1705, 2023.
+
+\bibitem[{ZKM}24]{zkmips}
+{ZKM}.
+\newblock {zkMIPS}: A high-performance zero-knowledge proof system for the
+  {MIPS} architecture.
+\newblock \url{https://github.com/zkMIPS/zkMIPS}, 2024.
+
+\end{thebibliography}

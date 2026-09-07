@@ -1,0 +1,155 @@
+\section{Arithmetisation}
+\label{sec:air}
+
+Figure~\ref{fig:processor} shows the machine as a block diagram: instruction units connected by buses to a program ROM, a memory subsystem and lookup tables. A unit in the sense of Definition~\ref{def:chip} has a datapath width, its column count, and an activity, its row count; a \emph{bus} is an interconnect on which units exchange tuples, and the lookup argument of Section~\ref{sec:air-logup} plays the role of the wiring: it proves that every tuple driven on a bus is consumed exactly once. The area of the design is the sum over units of rows $\times$ columns (\emph{trace cells}); Section~\ref{sec:performance} reports it per unit, as a gate-count report would.
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/processor}}
+\caption{\Zirenver{} as a processor. Each executed instruction is one row of one unit; units talk only over buses (program fetch, state chaining, register/memory accesses, byte-table lookups, cross-shard interactions). Preprocessed tables are committed in the verifying key; the public values close the state chain and carry the digests.}
+\label{fig:processor}
+\end{figure}
+
+This section is the block's internal design, in the sense of Section~\ref{sec:ipcore}: the unit widths of Table~\ref{tab:chips} are its per-unit area figures, the buses are its interconnect, and the decisions taken here---one row per instruction, one shared memory argument, one lookup and one zerocheck---are what fix the area that Section~\ref{sec:performance} measures. One part of it is configuration rather than design: the accelerator set determines which precompile units a shard can contain, and adding one adds a unit and changes the verifying keys (\S\ref{sec:ipcore-config}).
+
+A shard is proved as a set of units. A unit is a table over $\F$ with a fixed width, a set of polynomial constraints of degree at most three on each row (the constraints are local to a row---the proof system evaluates them at a random point of the multilinear domain, Section~\ref{sec:air-zerocheck}---so relations between consecutive rows are expressed as bus interactions), and a set of interactions on named buses. Every relation \emph{between} units, and every relation between one row of a unit and another, is an interaction. This section describes the unit set, the instruction frame shared by all instruction units, the register and memory argument, the lookup argument and the zerocheck.
+
+\subsection{Unit set}
+\label{sec:air-chips}
+
+Table~\ref{tab:chips} lists the units of the core machine with their widths. Three families dominate the trace area of an Ethereum block: the memory-instruction units (\texttt{LoadWord}, \texttt{StoreWord}, \texttt{MemoryUnaligned}, \texttt{LoadNarrow}, \texttt{StoreNarrow}), the ALU units, and the \texttt{Global} unit that carries the cross-shard memory argument. The immediate forms of the ALU instructions (\texttt{ADDIU}, \texttt{ANDI}, \texttt{SLTI}, shifts by a constant, \ldots) have units separate from the register forms: an immediate row has one register read fewer and a narrower frame, and the split saves roughly a tenth of the width of those rows.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Core-machine units and main-trace widths (columns over $\F$). Preprocessed widths in parentheses. The immediate (\texttt{Imm}) variants take the second operand from the instruction word.}
+\label{tab:chips}
+\begin{tabular}{p{0.2\textwidth} p{0.74\textwidth}}
+\toprule
+Family & Units (width) \\
+\midrule
+Integer ALU & \texttt{AddSub} (36), \texttt{AddSubImm} (33), \texttt{Bitwise} (37), \texttt{BitwiseImm} (33), \texttt{Mul} (75), \texttt{DivRem} (164), \texttt{Lt} (50), \texttt{LtImm} (47), \texttt{CloClz} (93) \\
+Shifts & \texttt{ShiftLeft} (62), \texttt{ShiftLeftImm} (45), \texttt{ShiftRight} (89), \texttt{ShiftRightImm} (83) \\
+Control flow & \texttt{Branch} (56), \texttt{Jump} (57) \\
+Memory instructions & \texttt{LoadWord} (49), \texttt{LoadNarrow} (60), \texttt{StoreWord} (53), \texttt{StoreNarrow} (56), \texttt{MemoryUnaligned} (60) \\
+Misc.\ / syscall & \texttt{MiscInstrs} (433), \texttt{SyscallInstrs} (68), \texttt{SyscallCore}, \texttt{SyscallPrecompile} (11) \\
+Memory argument & \texttt{MemoryLocal} (56), \texttt{MemoryBump} (13), \texttt{MemoryGlobalInit}, \texttt{MemoryGlobalFinalize} (152), \texttt{Global} (58) \\
+Tables & \texttt{Program} (1, +14), \texttt{Byte} (10, +12), \texttt{Range} (1, +2) \\
+Precompiles & SHA-256 extend/compress and controls, \texttt{KeccakSponge} (2637) and control, \texttt{Poseidon2Permute} (573), Weierstrass add/double/decompress $\times$ 4 curves, Ed25519 add/decompress, $\mathbb F_p$/$\mathbb F_{p^2}$ ops, \texttt{Uint256MulMod} (441), \texttt{U256XU2048Mul} (2773), garbled gate \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Row counts are rounded up to a multiple of 32 rather than to a power of two; the jagged commitment of Section~\ref{sec:pcs} makes the padding cost proportional to the padding, not to the next power of two. Padding rows have $\mathsf{is\_real} = 0$; every constraint and every interaction multiplicity is gated so that padding rows are vacuous.
+
+\subsection{The instruction frame}
+\label{sec:air-frame}
+
+Earlier designs (SP1 before its hypercube release, and the first generation of \Ziren{}) had a \emph{CPU table} with one row per executed cycle that fetched the instruction, performed the register accesses, chained the program counter, and forwarded a decoded instruction to an opcode unit over a bus; the opcode unit then had a second row per instruction. The current design removes the central table: each instruction unit embeds an \emph{instruction frame} and performs those duties itself, so one executed instruction is exactly one row of one unit. The frame consists of:
+
+\begin{itemize}
+  \item \textbf{Program fetch.} The row sends $(\mathsf{pc}, \mathsf{opcode}, \mathsf{op\_a}, \mathsf{op\_b}, \mathsf{op\_c}, \mathsf{imm\_b}, \mathsf{imm\_c})$ on the \emph{program} bus; the preprocessed \texttt{Program} table receives it with the multiplicity recorded at trace generation. The instruction word therefore comes from the program image committed in the verifying key, and the unit's opcode selector is checked against it.
+  \item \textbf{Register accesses.} Reads of $\mathsf{op\_b}$ and $\mathsf{op\_c}$ (unless immediate) and the read-modify-write of $\mathsf{op\_a}$ at the sub-cycle positions $1..4$ of the instruction's tick, through the register variant of the memory argument (Section~\ref{sec:air-memory}). A write to register 0 is committed as zero: the frame carries an $\mathsf{op\_a\_0}$ flag and pins the written word to zero when it is set, so units bind their result through a $(1-\mathsf{op\_a\_0})$ factor rather than a gate.
+  \item \textbf{State bus.} The row receives the tuple $(\mathsf{shard}, \mathsf{clk}, \mathsf{pc}, \mathsf{next\_pc})$ and sends the tuple $(\mathsf{shard}, \mathsf{clk}+\Delta, \mathsf{next\_pc}, \mathsf{next\_next\_pc})$, where the increment $\Delta$ is one for an ordinary instruction and a larger bounded value for a syscall, so that the accelerator's memory accesses fit between the calling instruction and its successor (Section~\ref{sec:isa}); the public-values AIR sends the shard's entry state and receives its exit state. Lemma~\ref{lem:chain} is what this buys: the multiset balances only if the rows form a single chain, which is the shard's execution.
+  \item \textbf{Clock.} $\mathsf{clk}$ is witnessed as a 16-bit and a 9-bit limb, both range checked, so that clock differences in the memory argument can be decomposed cheaply.
+\end{itemize}
+
+\begin{lemma}[State-bus chain]
+\label{lem:chain}
+In a valid shard (Definition~\ref{def:shard}) with entry state $s_0$ and exit state $s_N$, the real instruction rows can be ordered $r_1, \dots, r_N$ so that $r_i$ receives $s_{i-1}$ and sends $s_i$, with $\mathsf{clk}(s_i) > \mathsf{clk}(s_{i-1})$; every real instruction row is in the chain, and $N$ is the number of real instruction rows.
+\end{lemma}
+\begin{proof}
+Each real instruction row receives exactly one state tuple and sends exactly one, with a strictly larger clock, and the public-values table sends $s_0$ and receives $s_N$. Balance of the state bus means the multiset of sent tuples equals the multiset of received tuples. Consider the directed graph whose vertices are the distinct state tuples and whose edges are the rows (from received tuple to sent tuple). Every vertex other than $s_0$ and $s_N$ has in-degree equal to out-degree, $s_0$ has out-degree one more than in-degree and $s_N$ the reverse, so the edge multiset decomposes into one $s_0 \to s_N$ path and cycles. A cycle is impossible because the clock strictly increases along every edge. Hence the rows form a single path from $s_0$ to $s_N$.
+\end{proof}
+
+Figure~\ref{fig:frame} shows three consecutive rows and the buses that bind them. Three frame variants exist: the I-type frame (an immediate as a 4-byte word, used by memory and branch units), the R-type frame (two register reads), and a \emph{shamt} frame for shifts by a constant, whose immediate is a single scalar. The frame byte-checks the word written to $\mathsf{op\_a}$; this is the single place where a register value is range checked, and it is what lets memory-instruction rows omit byte checks on the words they move (Section~\ref{sec:air-memory}).
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/frame}}
+\caption{Three consecutive cycles as rows of three units, drawn as a circuit. Each row is a unit with a fetch pin on the program bus, a receive and a send pin on the state bus (the shaded state registers carry $(\mathsf{shard},\mathsf{clk},\mathsf{pc},\mathsf{next\_pc})$ from the entry state onward), and four access pins at the sub-cycle positions $4\,\mathsf{clk}{+}1..4$ on the memory bus; filled pins are the accesses the opcode makes (register reads at 1--2, memory at 3, the register write at 4), hollow pins are unused. The text inside each unit is what its constraints compute. The \texttt{LoadWord} row sits in the branch's delay slot: its successor is the branch target, which arrives as data in the state register rather than as $\mathsf{pc}{+}4$.}
+\label{fig:frame}
+\end{figure}
+
+\subsection{Registers and memory}
+\label{sec:air-memory}
+
+Registers and memory share one offline memory-checking argument~\citep{blum1994} in the multiset style used by SP1~\citep{sp1}: the state of address $a$ is the tuple $(\mathsf{shard}, \mathsf{clk}, a, \mathsf{value})$ of its last access. An access at time $(s, c)$ \emph{sends} the previous tuple $(s', c', a, v')$ and \emph{receives} the new tuple $(s, c, a, v)$ on the \emph{memory} bus, with $v = v'$ for a read. The multiset balances if and only if every access consumes exactly the tuple produced by the previous access to the same address, provided timestamps strictly increase along each address's chain; the AIR of every access enforces $(s', c') < (s, c)$ by witnessing $c - c' - 1$, or $s - s' - 1$ when the shards differ, in range-checked limbs that cover the clock's 25 bits (a one-bit \texttt{compare\_clk} selector chooses the branch). Words are four byte columns; the argument carries them as such.
+
+\begin{lemma}[Memory argument]
+\label{lem:memory}
+In a valid shard, for every address $a$ the accesses to $a$ form a chain ordered by $(\mathsf{shard}, \mathsf{clk})$ in which each access consumes exactly the tuple produced by the previous access to $a$, starting from the tuple supplied by the initial-state row of $a$ and ending at the tuple consumed by its final-state row; in particular every read returns the value of the last write.
+\end{lemma}
+\begin{proof}
+Each access sends its previous tuple and receives its new tuple on the memory bus, and its constraints enforce that the new timestamp strictly exceeds the previous one. Balance of the memory bus, restricted to the tuples with address $a$, gives a graph as in Lemma~\ref{lem:chain} with the initial-state row as source and the final-state row as sink; strictly increasing timestamps exclude cycles, so the accesses form one path, and along the path a read carries its previous value forward unchanged.
+\end{proof}
+
+\paragraph{Registers.} The \texttt{MemoryBump} unit inserts, for every register at its first touch in a shard, a shadow read at $(\mathsf{shard}, 0)$. Since $\mathsf{clk}$ restarts at zero in every shard and real accesses sit at positions $1..4$ of a tick, the previous access of a register is always in the current shard. The register variant of the access columns therefore drops $\mathsf{prev\_shard}$, the compare selector and one limb, which is re-derived linearly from the others: 10 columns become 7 on every register access of every instruction.
+
+\paragraph{Shard-local memory.} Within a shard, the first access to a word must consume a tuple that no access in the shard produced, and the last access produces a tuple that nothing in the shard consumes. The \texttt{MemoryLocal} unit records, for every word touched in the shard, its initial and final $(\mathsf{shard}, \mathsf{clk}, \mathsf{value})$; it sends the initial tuple on the memory bus (so the first access can consume it) and receives the final one, and it forwards both as \emph{global} interactions (Section~\ref{sec:air-global}) so that they are matched across shards. On a \texttt{reth} block (the Ethereum execution-client workload of Section~\ref{sec:performance}) a few hundred thousand words are touched per shard, most of them the hot working set touched again in the next shard; the two global rows per touched word are the largest single contribution to trace area, which is why the shard size matters (Section~\ref{sec:performance}).
+
+\paragraph{Whole-execution memory.} \texttt{MemoryGlobalInit} carries the memory's initial contents (the program image and the hint data written into untouched words) and \texttt{MemoryGlobalFinalize} its final contents. Both witness the word as 32 boolean columns, which is what makes every value that enters memory byte-shaped by construction; addresses are 32-bit decomposed and proved strictly increasing along the table through a running comparison against the previous address, with the address cursors published as public values so the recursion can check that consecutive tables tile the address space without overlap. The program image itself is bound by the verifying key: its digest (Section~\ref{sec:air-global}) is a public parameter, and the init table must consume it.
+
+\paragraph{What is byte-checked.} Every value that enters a register is byte-checked by the frame at the write, and every value a precompile writes to memory is byte-checked or bit-decomposed by the precompile unit; memory-instruction rows therefore omit the two additional byte lookups per word that accesses otherwise carry.
+
+\subsection{Cross-shard interactions: the global digest}
+\label{sec:air-global}
+
+Interactions whose two sides live in different shards---the initial and final tuples of every shard-touched word, the memory init and finalize tables, and syscall pairings---cannot be balanced by a per-shard fraction sum. \Zirenver{} carries them in an elliptic-curve digest of the kind SP1 introduced~\citep{sp1}, with one deliberate departure. An interaction tuple $\bm m \in \F^7$ together with a one-byte kind is mapped to a point on a curve over the degree-seven extension $\F_{p^7}$ (a \emph{septic} point), sends contribute the point and receives its negation, and the sum of all points over the whole execution must be the identity (offset by a fixed public point so that no running sum is ever the identity). The verifier of a shard proof learns the shard's running sum from its public values, and the verifier of the whole proof adds the shards' sums and the program-image digest from the verifying key.
+
+The departure is in the map. SP1 hashes the message to the curve with a permutation constrained inside the unit, so its points are modelled as random-oracle outputs. \Zirenver{} applies no hash: the message \emph{is} the $x$-coordinate, up to a prover-chosen byte in the top limb, which is what reduces the unit from a few hundred columns to a few dozen. The security argument therefore changes shape, and \S\ref{sec:air-digest-security} states it in the form the map actually requires.
+
+The \texttt{Global} unit has one row per such interaction. It receives the tuple on the global bus, witnesses the curve point $(x, y) \in \F_{p^7}^2$ with $x_6 = 256\, m_6 + \mathsf{offset}$ for a byte $\mathsf{offset}$ chosen by the prover so that the cubic has a root (the \emph{lift}), checks $y^2 = x^3 + 3\zeta x - 3$ in $\F_{p^7} = \F[\zeta]/(\zeta^7 + 2\zeta - 8)$, and fixes the sign of $y$ from its top limb: receives have $y_6 \in [1, 63 \cdot 2^{24}]$ and sends $y_6 \in [2^{30}+1, p-1]$, two disjoint bands, proved by three byte-table lookups on the limbs of $y_6 - 1$ (respectively $y_6 - 2^{30} - 1$). The running sum is carried by an \emph{accumulation bus}: row $i$ receives $(i, S_i)$ and sends $(i+1, S_{i+1})$ with $S_{i+1} = S_i + P_i$ enforced by the chord identities of the curve addition, and the public-values AIR closes the chain at the shard's $\mathsf{global\_cumulative\_sum}$. The unit is 58 columns wide: a 7-limb message, the kind, the point (14), the offset and three range limbs, two running-sum points (28) and the index and flags.
+
+\subsection{Security of the digest}
+\label{sec:air-digest-security}
+Let $E$ be the curve $y^2 = x^3 + 3\zeta x - 3$ over $\F_{p^7}$ and $\mathsf{enc}: \F^7 \times \{0,\dots,255\} \to E$ the lift above. Write $\mathcal M$ for the set of \emph{reachable} messages: those an interaction of a satisfying trace can carry, given the range facts every sending unit enforces on its tuple. $\mathcal M$ is what the security of the digest rests on, and it is much smaller than $\F^7$: each limb of a memory or syscall tuple is a byte, a bounded clock limb or a bounded address.
+
+\begin{lemma}[injectivity of the lift]
+\label{lem:digest}
+Assume the message limbs satisfy the range facts the sending units enforce, so that $256\,m_6 + \mathsf{offset} < p$. Then $\mathsf{enc}$ is injective: the $x$-coordinate carries $\bm m$ in its low limbs and the offset in the top byte of $x_6$, which the bound makes recoverable, and the two sign bands for $y_6$ are disjoint, so $(\bm m, \mathsf{kind})$ is recoverable from the point.
+\end{lemma}
+
+Injectivity is what makes the digest a faithful encoding of the multiset; it is not by itself what makes the argument sound. If the sends and receives of a claimed execution are the multisets $S \neq R$ and their digests agree, then $\sum_i c_i\, \mathsf{enc}(\bm m_i) = O$ for the non-zero integer vector $c = \mathrm{mult}_S - \mathrm{mult}_R$ over the distinct tuples. Soundness of the cross-shard argument is therefore exactly the following assumption.
+
+\begin{assumption}[no reachable vanishing combination]
+\label{ass:digest}
+For the parameters of a block proof---at most $N_{\mathrm{int}}$ interactions in a proved execution, coefficients bounded by the multiplicity bound---it is infeasible to find a non-zero integer vector $c$ supported on at most $N_{\mathrm{int}}$ reachable messages with $\sum_i c_i\, \mathsf{enc}(\bm m_i) = O$ in $E(\F_{p^7})$.
+\end{assumption}
+
+Two things should be said plainly about this assumption, because it is the weakest link in the accounting and the one place where our design departs from the construction it descends from. First, SP1 hashes the message to the curve before lifting it, which lets the points be modelled as random-oracle outputs; the corresponding assumption is then a clean discrete-logarithm statement about points no adversary can steer. We removed the hash, so our points are chosen by the prover, and Assumption~\ref{ass:digest} must be read over a structured set rather than a random one. The protection is the \emph{sparsity} of $\mathcal M$: a prover who could realise an arbitrary point could pick a generator $G$ and scalars $k_i$ summing to zero, read the $x$-coordinates off as messages, and forge at will. That attack is blocked exactly to the extent that every sending unit bounds every limb it contributes, and collecting those bounds into one statement is an obligation of the arithmetisation rather than of the protocol.
+
+Second, sparsity is not the end of the analysis. The relevant attack on a subset-sum in a group is the generalised birthday method, whose cost falls as the adversary is allowed more lists; the bound must therefore be taken against the number of interactions a prover can actually place in a trace, not against the group order alone. The generic-group cost of a single discrete logarithm in the large prime-order subgroup of $E(\F_{p^7})$ is the square root of that subgroup's order, and $|E(\F_{p^7})| \approx p^7 \approx 2^{217}$; we do not state a bit figure here because the honest figure is the one that comes out of the $k$-list analysis at our interaction count, and that analysis is not yet done. This is a computational assumption, not the information-theoretic bound the rest of the accounting enjoys, and Section~\ref{sec:iopp-soundness} lists it as a separate component.
+
+Exceptional cases of the chord addition (doubling and the identity) cannot occur on honest traces because the running sum starts at a fixed public offset point and the dummy point $D$ is chosen with $\pm D$ outside the image of $\mathsf{enc}$, and a dishonest trace that hits one fails the addition identities.
+
+\subsection{Trace uniqueness}
+\label{sec:air-unique}
+
+\begin{theorem}[From unit determinism to trace uniqueness]
+\label{thm:unique}
+Fix a program image, public values and a valid shard. If every unit of the shard is deterministic in the sense of Definition~\ref{def:det}, then the rows reachable from the entry state along the state and memory buses are determined by the program image and the public values: any two valid shards with the same program image and public values agree on those rows up to permutation.
+\end{theorem}
+\begin{proof}
+By Lemma~\ref{lem:chain} the instruction rows of either shard form one chain from the entry state; write $r_1, \dots, r_N$ for the first shard's chain. We show by induction on $i$ that $r_i$ has the same inputs and outputs in both shards. The inputs of $r_i$ are its received state tuple $s_{i-1}$, its fetched instruction, and the previous values of the addresses it accesses. $s_0$ is public and $s_{i-1}$ is the output of $r_{i-1}$ by induction. The fetched instruction is a function of $\mathsf{pc}(s_{i-1})$ because the program bus is received only by the preprocessed program table, which is committed. The previous value of an address is, by Lemma~\ref{lem:memory}, the value written by the last earlier access to that address, or the initial value from the memory-initialisation table, which is bound to the program image and the public address cursors; earlier accesses belong to rows $r_j$, $j < i$, whose outputs agree by induction. So the inputs of $r_i$ agree, and determinism of its unit gives that its outputs agree. Rows of non-instruction units (the memory-initialisation and finalisation tables, the shadow reads, the digest rows, the tables) are determined in the same way from the bus tuples they receive, which are outputs of instruction rows or public. Rows that participate in no bus reachable from the entry state are not covered by this argument; the arithmetisation admits none, because every real row carries a frame or a memory access, but that is a property of the unit set rather than of the buses, and we do not prove it here.
+\end{proof}
+
+The theorem is stated, not machine-checked; the unit-level determinism statements are its machine-checked premises (Section~\ref{sec:verification-det}), and the two bus lemmas are the standard arguments of the multiset construction.
+
+\subsection{Preprocessed tables}
+
+The \texttt{Byte} table has $2^{16}$ rows indexed by a byte pair and one multiplicity column per operation (bitwise operations, shifts, comparisons and 8/16-bit range checks); every carry, borrow, comparison and range check in the machine is an interaction with it. The \texttt{Range} table serves the clock limbs, and the \texttt{Program} table holds the decoded program image. Preprocessed tables are committed at setup as part of the verifying key and opened at the same points as the main trace.
+
+\subsection{The shard-level lookup argument}
+\label{sec:air-logup}
+
+All interactions of a shard---on the program, state, memory, byte, range, syscall, global and accumulation buses---are proved by \emph{one} \LogUp{} instance. After the trace is committed, the verifier samples $\alpha, \beta \in \EF$; every interaction $(\mathsf{bus}, \bm f, m)$ of every unit contributes the fraction $m / (\alpha - \mathsf{bus} - \sum_{j \ge 1} \beta^{j} f_j)$, and the prover shows that the sum over all sends equals the sum over all receives. The fractions form the leaves of a GKR circuit of $\log_2(\text{leaves})$ layers, each layer adding pairs of fractions; layer transitions are proved by sumcheck from the root down, and the final layer's claims are evaluation claims on the columns that enter the fractions---multilinear evaluations of unit columns at a random point, which are handed to the polynomial commitment. On a reth block a shard has of the order of $10^8$ leaves, and Section~\ref{sec:performance} shows that this circuit is the single largest consumer of GPU time; the number of leaves is the number of (row, interaction) pairs, so interaction count per row is a cost in its own right, distinct from column count.
+
+Soundness of the fraction identity is $\deg/|\EF|$ per sumcheck round plus the collision probability of the fingerprint, which grows with the number of leaves; Section~\ref{sec:iopp-soundness} lists it as one component of the accounting. No grinding is applied to the lookup challenges in the current schedule.
+
+\subsection{The shard-level zerocheck}
+\label{sec:air-zerocheck}
+
+The polynomial constraints of all units are proved by \emph{one} zerocheck. The verifier samples $\lambda$ for a random linear combination across units and $\alpha$ across the constraints of a unit; for each unit the polynomial $C_c(\bm X) = \sum_k \alpha^k\, c_{c,k}(\text{row}(\bm X))$ must vanish on the unit's real rows. The prover proves $\sum_{\bm b} \eqf(\bm b, \bm r)\, \sum_c \lambda^c C_c(\bm b) = 0$ for a random $\bm r$ by sumcheck over the tallest unit's variables, with shorter units handled by an analytic ``virtual $\ge$'' factor rather than padding, and the final evaluation claims on the units' columns are again handed to the commitment. The constraint degree is three, which fixes the degree of the round polynomials at four; the constraint-evaluation kernel on the GPU is compiled per unit from the same constraint description that the verifier uses, except for the widest accelerator units, which are interpreted (Table~\ref{tab:census}), and a mismatch between the two is caught by host verification (Section~\ref{sec:performance}).
+
+The zerocheck's claims are seeded from the \LogUp{} openings so that the two protocols share one opening of each column: after the two sumchecks, what remains is a set of (unit, column, point, value) claims, of the order of $3.6 \cdot 10^4$ per shard, and turning those into a single claim on a single committed polynomial is the job of the commitment layer.

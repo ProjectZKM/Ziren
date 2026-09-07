@@ -2459,10 +2459,21 @@ mod test {
             "verifier must reject y_per_chip tampering"
         );
 
-        // Tamper #3: corrupt the BaseFold final_poly in the proof.
+        // Tamper #3: corrupt the PCS opening's final polynomial.
+        //
+        // The inner ring commits under jagged-WHIR (`WHIR_INNER_PCS = true`,
+        // kb31_poseidon2.rs), so the LIVE opening is `bundle.whir_proof` and
+        // `bundle.basefold_proof` is the empty placeholder the WHIR open
+        // returns (the `whir_mode` arm above, `final_poly = 0`, no messages,
+        // no commitments) — a field the verifier never reads.  Tamper
+        // whichever opening this bundle actually carries.
         let mut tampered = bundle.clone();
-        tampered.basefold_proof.basefold_proof.final_poly =
-            tampered.basefold_proof.basefold_proof.final_poly + JaggedChallenge::ONE;
+        if let Some(wp) = tampered.whir_proof.as_mut() {
+            wp.whir_proof.final_poly[0] += JaggedChallenge::ONE;
+        } else {
+            tampered.basefold_proof.basefold_proof.final_poly =
+                tampered.basefold_proof.basefold_proof.final_poly + JaggedChallenge::ONE;
+        }
         assert!(
             !verify_main_round(&tampered, &widths, &z_row, None),
             "verifier must reject final_poly tampering"

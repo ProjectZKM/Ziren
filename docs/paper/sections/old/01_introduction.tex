@@ -1,0 +1,31 @@
+\section{Introduction}
+\label{sec:intro}
+
+Zero-knowledge virtual machines (\zkVM s) compile execution traces of general-purpose programs into succinct cryptographic proofs that the trace was produced by a particular program on particular inputs and consumed at most a stated number of cycles. The recent generation of practical \zkVM s descends from the architectural template established by SP1~\citep{sp1}: a STARK-based prover over a small prime field, with chip-decomposed AIR constraints, recursive aggregation, and a Groth16 outer wrap on the BN254 curve to produce verifier-cheap proofs for on-chain consumption.
+
+\Ziren{}~\citep{ziren} is a \zkVM{} in this lineage whose guest instruction set is MIPS32r2 rather than RISC-V32IM. The choice of MIPS is motivated by the maturity of its instruction encoding, the directly available bit-manipulation and sign-extension primitives (notably \texttt{SEB}, \texttt{SEH}, \texttt{WSBH}, \texttt{EXT}, \texttt{INS}), and the existing deployment of MIPS in production fraud-proof systems such as Optimism's MIPS interpreter for fault proofs.
+
+This paper describes \Zirenver{}, a substantial redesign of the prover and recursion stack carried out across approximately fourteen months of incremental development. The first generation of \Ziren{} shared SP1's earlier proof-system organisation: a four-batch commitment structure (preprocessed, main, permutation, quotient) under FRI~\citep{ben2018fast}, with cross-shard binding implemented via duplicate commitments. The second generation moves to a hierarchical commitment construction~--- $\BaseFold{}$~\citep{basefold} for per-stripe encoding, $\Stacked{}$ batching over rounds, and $\Jagged{}$ sumcheck reduction across variable-height chip traces~--- and folds the soundness role of the legacy auxiliary commitments into per-chip sumcheck bindings: $\LogUp{}$ lookup proofs~\citep{logup-gkr} for cross-table arguments and zerocheck for per-chip AIR constraint satisfaction.
+
+\subsection{Problem statement and contributions}
+
+The previous \Ziren{} proof system suffered from three structural issues that this work resolves.
+
+\paragraph{Memory pressure.} The legacy FRI-based prover materialised the dense polynomial low-degree extension (LDE) for the entire shard in host memory before committing. For multi-million-cycle workloads such as Tendermint light-block verification and Ethereum execution-layer blocks, the working set exceeded $100$~GB on standard hardware, producing out-of-memory failures on otherwise feasible inputs. The hierarchical $\BaseFold{} + \Stacked{} + \Jagged{}$ stack encodes stripes incrementally so that peak memory is bounded by stripe size, not by whole-vector LDE size.
+
+\paragraph{Verifier complexity.} The cross-shard duplicate-commitment idiom required reconciling two parallel views of the same data; downstream removal of the duplicate commitment, while preserving Fiat--Shamir~\citep{fiat-shamir} soundness, required a careful sumcheck-binding rewrite. We complete this rewrite end-to-end and describe how the binding is recovered through a transcript-observation discipline and per-chip cumulative-sum carriage.
+
+\paragraph{Hardware throughput.} A reference CPU implementation of even a modest proving stack on tens-of-millions-of-cycles workloads is a thirty-minute proposition. Production deployment of a \zkVM{} requires hardware acceleration. We present a GPU prover stack with device-resident proof state, asynchronous per-shard streams, a polynomial-encoding cache, and pipelined compression that delivers a near-linear speedup curve up to four GPUs and a saturated four-eight GPU range on representative workloads.
+
+The principal contributions of this paper are:
+\begin{enumerate}
+  \item A protocol-level description of the post-migration \Ziren{} prover, including the precise role of $\BaseFold{}$ as a fold-based polynomial commitment scheme over $\KB{}$, the $\Stacked{}$ wrapper for heterogeneous-round batching, and the $\Jagged{}$ sumcheck for variable-height chip traces (\S\ref{sec:architecture}).
+  \item A description of two structurally distinct prover code paths --- an SP1-aligned path and a \Ziren{}-native path --- and the conditions under which they produce verifier-compatible proofs (\S\ref{sec:implementation}).
+  \item A discussion of subtle soundness corrections required during the migration, including a per-chip-padded log-degree convention for dummy proofs in the recursion verifier and a fold-orientation tag on the proof to support path-aware verification while the inner sumcheck algebra is being aligned across implementations (\S\ref{sec:implementation}).
+  \item A multi-workload performance evaluation over a Fibonacci sweep, JSON parsing, a chess engine, Tendermint light-block verification, and Ethereum block proving via \texttt{reth} and \texttt{geth}, on hardware spanning a single GPU through to eight (\S\ref{sec:performance}).
+  \item A description of the just-in-time (JIT) MIPS executor and its differential validation against the reference interpreter (\S\ref{sec:implementation}).
+\end{enumerate}
+
+\subsection{Roadmap}
+
+Section~\ref{sec:background} reviews the cryptographic background: STARKs, polynomial commitment schemes, sumcheck-based interactive arguments, lookup arguments, and the recursion structure inherited from SP1.  Section~\ref{sec:architecture} describes the \Zirenver{} architecture proper. Section~\ref{sec:implementation} covers the implementation choices that shaped the system. Section~\ref{sec:performance} presents the performance evaluation. Section~\ref{sec:discussion} discusses design rationale, limitations, and avenues for future work. Section~\ref{sec:related} situates the work in the broader \zkVM{} landscape, and Section~\ref{sec:conclusion} concludes.

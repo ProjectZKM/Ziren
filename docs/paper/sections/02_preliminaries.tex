@@ -1,0 +1,45 @@
+\section{Preliminaries}
+\label{sec:prelim}
+
+\subsection{Field, polynomials and codes}
+
+\paragraph{Field.} All traces live over the prime field $\F = \KB{}$, $p = 2^{31} - 2^{24} + 1$. Its multiplicative group has two-adicity 24, which bounds the Reed--Solomon domains available to the proximity test: the rate schedule of Section~\ref{sec:iopp} is chosen so that the largest domain stops one bit short of that limit. Random challenges and all sumcheck arithmetic use the degree-four binomial extension $\EF = \F[X]/(X^4 - 3)$; a sumcheck round polynomial of degree $d$ therefore has soundness error $d/|\EF| \approx d \cdot 2^{-124}$ per round. Note that $2^{32} > p$: a 32-bit machine word cannot be represented by a single field element, and every word in the arithmetisation is a vector of four field elements holding its little-endian bytes.
+
+\paragraph{Multilinear extensions and sumcheck.} For $f: \{0,1\}^n \to \F$ the multilinear extension $\widetilde f \in \F[X_1,\dots,X_n]$ is the unique multilinear polynomial agreeing with $f$ on the hypercube, $\widetilde f(\bm z) = \sum_{\bm b} f(\bm b)\,\eqf(\bm b, \bm z)$ with $\eqf(\bm b, \bm z) = \prod_i (b_i z_i + (1-b_i)(1-z_i))$. The sumcheck protocol~\citep{lund1992algebraic} reduces a claim $\sum_{\bm b \in \{0,1\}^n} g(\bm b) = \sigma$ about a low-degree $g$ to a claim $g(\bm r) = \sigma'$ at a random $\bm r \in \EF^n$ in $n$ rounds, each sending a univariate polynomial of degree $\deg g$. We write a claim about a multilinear $\widetilde f$ as the pair $(\bm z, v)$ meaning $\widetilde f(\bm z) = v$.
+
+\paragraph{Reed--Solomon and constrained Reed--Solomon codes.} For a smooth domain $L \subset \F^{*}$ (a coset of a subgroup of order $2^{\ell}$) the code $\RS[\F, L, m]$ is the set of functions $L \to \F$ that agree with a polynomial of degree $< 2^m$; its rate is $\rho = 2^m/|L|$. Identifying the coefficient vector of such a polynomial with a function on $\{0,1\}^m$, a codeword is also the evaluation of an $m$-variate multilinear $\widehat f$ at the points $(x, x^2, x^4, \dots, x^{2^{m-1}})$, $x \in L$. Following~\citep{whir}, the \emph{constrained} code $\CRS[\F, L, m, \widehat w, \sigma]$ is the subset of $\RS[\F, L, m]$ whose multilinear satisfies $\sum_{\bm b \in \{0,1\}^m} \widehat w(\widehat f(\bm b), \bm b) = \sigma$ for a weight polynomial $\widehat w$; the weight $\widehat w(Z, \bm X) = Z \cdot \eqf(\bm X, \bm z)$ expresses the evaluation claim $\widehat f(\bm z) = \sigma$. A \emph{fold} of a codeword by a challenge $\alpha$ maps $f: L \to \F$ to $\Fold(f, \alpha)(x^2) = \tfrac{f(x) + f(-x)}{2} + \alpha \tfrac{f(x) - f(-x)}{2x}$, which is a codeword of $\RS[\F, L^{(2)}, m-1]$ whenever $f$ is a codeword, and equals the partial evaluation of $\widehat f$ at $X_1 = \alpha$.
+
+\paragraph{Hashing and transcripts.} Merkle commitments and the Fiat--Shamir transcript~\citep{fiat-shamir} use the $\Poseidon{}$ permutation over $\F$ with a 248-bit digest (eight field elements). Proof-of-work grinding of $b$ bits means the prover searches for a nonce whose absorption yields $b$ leading zero bits in the squeezed challenge; it multiplies the cost of the corresponding cheating strategy by $2^{b}$ and appears additively in the security accounting.
+
+\subsection{Units, buses and determinism}
+\label{sec:prelim-chips}
+
+\begin{definition}[Unit]
+\label{def:chip}
+A \emph{unit} (a \emph{chip} in the implementation and in the literature this design descends from) is a table over $\F$ of a fixed width $w$ together with a set of polynomial constraints of degree at most three in the $w$ columns of one row, a distinguished boolean column $\mathsf{is\_real}$ gating every constraint, and a set of \emph{interactions}. A row is \emph{satisfying} if it satisfies every constraint.
+\end{definition}
+
+\begin{definition}[Interaction and bus]
+\label{def:bus}
+An interaction of a unit is a triple $(\mathsf{bus}, \bm f, m)$ where $\mathsf{bus}$ is a name, $\bm f$ is a tuple of linear expressions in the row's columns and $m$ is a linear expression in the columns (the multiplicity), marked as a \emph{send} or a \emph{receive}. Multiplicities are constrained to small non-negative integers---in the arithmetisation of Section~\ref{sec:air} they are zero, one, or a value range-checked against the byte table---so that a sum of them over the rows of a shard is far below $p$ and is read as an integer. For a set of tables, the \emph{multiset of a bus} is $\{(\bm f(r))\}$ with multiplicity $\sum m(r)$ over the sends of all rows $r$ of all units, and likewise for the receives. A bus \emph{balances} if its send and receive multisets are equal; because the multiplicities stay small, the fraction identity of Section~\ref{sec:air-logup} over $\EF$ is equivalent to this multiset equality.
+\end{definition}
+
+\paragraph{Lookups as fractions.} A lookup argument proves that two multisets of field-element tuples agree. In the logarithmic-derivative form of Hab\"ock and its GKR realisation~\citep{haboeck,logup-gkr}---written \LogUp{} throughout---each tuple $\bm f$ on bus $\mathsf{bus}$ with multiplicity $m$ contributes a fraction $m/(\alpha - \mathsf{bus} - \sum_{j \ge 1} \beta^{j} f_j)$ for random $\alpha, \beta \in \EF$, senders and receivers must sum to the same value, and the sum is computed by a layered GKR circuit~\citep{gkr-cmt} whose layers are proved by sumcheck. Section~\ref{sec:air-logup} proves all buses of a shard by one such argument.
+
+\paragraph{Zerocheck.} A \emph{zerocheck} proves that a polynomial vanishes on a set of points: to show $g(\bm b) = 0$ for every $\bm b$ in a subcube, the verifier samples $\bm r$ and the prover runs a sumcheck on $\sum_{\bm b} \eqf(\bm b, \bm r)\, g(\bm b)$, which is zero for every $\bm r$ if and only if $g$ vanishes on the subcube, up to the sumcheck's error. Section~\ref{sec:air-zerocheck} proves all polynomial constraints of a shard by one such check.
+
+\begin{definition}[Shard relation]
+\label{def:shard}
+A \emph{shard} is a set of tables, one per unit, together with public values $\mathsf{pv}$ (the entry and exit state, the address cursors of the global memory tables and the septic digest, Section~\ref{sec:isa}). It is \emph{valid} if every real row is satisfying and every bus balances, where the public-values table contributes the entry state as a send and the exit state as a receive on the state bus, and the program bus is received by the preprocessed program table with the recorded multiplicities.
+\end{definition}
+
+\begin{definition}[Inputs, outputs and determinism of a unit]
+\label{def:det}
+For a unit $U$, the \emph{inputs} $I_U(r)$ of a row $r$ are the values the row consumes from elsewhere: the tuples of its receives, the program tuple it fetches, and the previous-value part of its memory accesses. The \emph{outputs} $O_U(r)$ are the values it produces for elsewhere: the tuples of its sends other than the fetch, and the new-value part of its memory accesses. Fetch and previous value are sends in the sense of Definition~\ref{def:bus}---the preprocessed table and the earlier access are their sources---but they are inputs of the row, and the direction of a bus interaction is therefore not by itself the direction of the data. $U$ is \emph{deterministic} if for all satisfying real rows $r, r'$,
+\[
+  I_U(r) = I_U(r') \;\Rightarrow\; O_U(r) = O_U(r').
+\]
+This is the notion of Picus~\citep{picus} adapted to the interaction language: whatever a row consumes from another table is an input, whatever it produces for another table is an output.
+\end{definition}
+
+\paragraph{Cost metrics.} Throughout, the \emph{trace area} of a shard or a block is the sum over units of rows $\times$ columns of the committed main trace, in cells; the \emph{(row, interaction) count} is the number of bus interactions summed over all rows, which is the number of leaves of the lookup circuit; and \emph{throughput} is the number of proved guest cycles per second of wall-clock time. Section~\ref{sec:performance} relates the three to measured prover time.

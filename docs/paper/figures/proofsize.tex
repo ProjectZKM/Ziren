@@ -1,0 +1,17 @@
+% Anatomy of a measured compressed proof (617,618 bytes = 603 KiB).
+\begin{tikzpicture}
+\begin{axis}[
+  xbar stacked, xmin=0, xmax=603, width=0.78\textwidth, height=2.9cm, bar width=16pt,
+  symbolic y coords={proof}, ytick=data, yticklabels={compressed proof},
+  xlabel={KiB}, xtick={0,100,200,300,400,500,603},
+  legend style={font=\scriptsize, at={(0.5,-0.75)}, anchor=north, legend columns=2, cells={anchor=west}, draw=none},
+  tick label style={font=\scriptsize}, label style={font=\scriptsize},
+  nodes near coords, every node near coord/.append style={font=\scriptsize, /pgf/number format/fixed, /pgf/number format/precision=0},
+  point meta=explicit symbolic,
+]
+\addplot[fill=gray!65] coordinates {(476,proof) [476 (79\%)]}; \addlegendentry{first-round query openings, 79\% (one coset row of every stripe per query, plus paths)}
+\addplot[fill=gray!40] coordinates {(57,proof) [57]}; \addlegendentry{later-round openings (9.5\%)}
+\addplot[fill=gray!20] coordinates {(36,proof) [36]}; \addlegendentry{\LogUp{} layer proofs (6\%)}
+\addplot[fill=white] coordinates {(34,proof) [34]}; \addlegendentry{sumchecks, public values, final polynomial (5.5\%)}
+\end{axis}
+\end{tikzpicture}

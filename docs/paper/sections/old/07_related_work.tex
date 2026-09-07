@@ -1,0 +1,40 @@
+\section{Related work}
+\label{sec:related}
+
+\subsection{Zero-knowledge virtual machines}
+
+The contemporary \zkVM{} landscape is dominated by RISC-V-targeted systems descended from the architectural template of SP1~\citep{sp1}. SP1 introduced the chip-decomposed AIR construction, the recursion-tree compression, and the $\BaseFold{}$-plus-$\Jagged{}$ commitment stack that \Zirenver{} adopts. \Ziren{}'s history of incremental SP1 alignment, including the present work, reflects our commitment to leveraging the SP1 design where it is well-engineered and diverging only where the MIPS target or implementation constraints warrant.
+
+RISC0~\citep{risc0} is an alternative RISC-V \zkVM{} that uses a different cryptographic stack (over a 32-bit Mersenne prime field, with a different sumcheck-based commitment). Cairo~\citep{cairo} is a STARK-based virtual machine with a custom instruction set designed jointly with the prover's algebraic constraints; its development informed the chip-decomposition style now common across the ecosystem.
+
+Plonky3~\citep{plonky3} is not itself a \zkVM{} but provides the polynomial commitment, lookup, and sumcheck building blocks that underlie much of the contemporary \zkVM{} ecosystem, including \Zirenver{}. Our $\BaseFold{}$, $\Stacked{}$, and $\Jagged{}$ implementations build on Plonky3's lower-level primitives.
+
+The use of MIPS as a guest ISA in \Zirenver{} differs from the RISC-V-dominant ecosystem. The closest precedent is the Optimism MIPS interpreter used for fault proofs in the Optimism bedrock and Cannon designs~\citep{cannon}, though Cannon is a single-step interpreter rather than a \zkVM{}. The choice of MIPS in our setting is driven by ISA-maturity considerations rather than fault-proof compatibility.
+
+\subsection{Polynomial commitment schemes}
+
+The base $\BaseFold{}$ construction~\citep{basefold} interleaves sumcheck rounds with Reed--Solomon codeword folds, achieving multilinear-PCS structure with the round complexity of FRI. The $\Stacked{}$ and $\Jagged{}$ wrappers used in this work were introduced in SP1's \texttt{slop} crate family and have not, to our knowledge, been previously published in stand-alone form.
+
+The legacy FRI baseline~\citep{ben2018fast} remains in the literature as the workhorse of small-field STARK systems. Brakedown~\citep{brakedown} represents an alternative line of work using tensor-product codes for the underlying linear commitment; it has not seen widespread \zkVM{} adoption due to the overhead of the linear-code commit.
+
+The WHIR family of multilinear-PCS constructions~\citep{whir} was explored as a possible default in an earlier iteration of \Ziren{}. The performance characteristics on real Ethereum-block proving favoured $\BaseFold{}$ on commit-bound workloads, and the WHIR path has been removed from the production tree; we cite WHIR here as the closest contemporary alternative.
+
+\subsection{Lookup arguments and sumcheck}
+
+The $\LogUp{}$ lookup argument~\citep{logup-gkr} used by \Zirenver{} is a GKR-style sumcheck-based realisation of the Habök log-derivative lookup~\citep{haboeck}. The choice of sumcheck-based GKR over alternatives (Plookup~\citep{plookup}, cq~\citep{cq}, Halo2 lookups) reflects the practical tractability of GKR descent in recursion circuits over small fields.
+
+The classical sumcheck protocol~\citep{lund1992algebraic} underlies essentially every primitive in our stack: $\BaseFold{}$'s round descent, $\Jagged{}$'s reduction, $\LogUp{}$'s GKR layers, and zerocheck's per-chip constraint discharge are all sumcheck-based.
+
+\subsection{Recursion and outer wrap}
+
+The recursion architecture (compose tree, shrink, wrap) is essentially that of SP1 and its prior incarnations in the Plonky2~\citep{plonky2} ecosystem. The outer Groth16 wrap via \texttt{gnark}~\citep{gnark} on the BN254 curve is the standard choice for on-chain Ethereum verification.
+
+The in-circuit verifier port is the longest-running engineering effort in the system; we follow SP1's organisation of the recursion verifier into transcript, $\LogUp{}$, zerocheck, and $\Jagged{}$ phases, with module-by-module porting accounted for in our development logs.
+
+\subsection{GPU acceleration of STARK proving}
+
+The use of GPUs for STARK proving has become standard practice in the production \zkVM{} space~\citep{sp1-gpu}. Our GPU prover design is closest in shape to SP1's \texttt{sp1-gpu} architecture: device-resident dense trace MLE, per-stream worker pool, $\Poseidon{2}$-based Merkle commit on the device, and a query phase that opens via device-side Merkle paths. Where we diverge is in the work-stealing pool implementation, the verifying-key cache strategy, and the per-syscall trace synchronisation cadence; these choices were informed by measurements on the RTX 5090 family of GPUs and may not generalise to other hardware.
+
+\subsection{Just-in-time interpreters for \zkVM s}
+
+The use of JIT compilation to accelerate the guest-execution path of a \zkVM{} was pioneered (to our knowledge) by SP1's \texttt{sp1-jit}~\citep{sp1-jit}, which targets RISC-V. Our MIPS JIT borrows the architectural template (\texttt{dynasm-rt} assembly emission, GPR pinning into x86 XMM register halves, build-time \texttt{cfg} gate on Linux x86\_64) and adapts the register layout to MIPS's \texttt{HI}/\texttt{LO} pair and branch-delay-slot semantics.

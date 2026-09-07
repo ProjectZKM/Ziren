@@ -1,0 +1,45 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Why two prover paths persist}
+
+The continued maintenance of two structurally distinct prover paths (the SP1-aligned and the \Ziren{}-native dispatches; \S\ref{sec:two-paths}) reflects a deliberate design choice rather than an accident of incremental migration. Aligning the inner sumcheck algebra across paths is non-trivial work that involves both the prover-side polynomial-fold direction and the verifier-side challenge-evaluation reordering. Until that alignment is complete, attempting to run all production traffic through the SP1-aligned path would silently fail the recursion verifier at $\LogUp{}$ round one and beyond. The \Ziren{}-native dispatch, by contrast, has been validated end-to-end through every recursion layer up to BN254 wrap. We chose to accept the maintenance cost of two paths in exchange for a continuously-shippable production proof system.
+
+The path-aware verifier dispatch (\S\ref{sec:fold-orientation}) is the intermediate accommodation: a single proof carries a fold-orientation tag, and verifiers can route to the appropriate algebra. This allows the system to ship correct proofs from either path immediately and to converge the algebras incrementally.
+
+\subsection{The cost of soundness invariants}
+
+A consistent thread through the implementation history is that the soundness-critical invariants (the per-chip-padded sum convention for witness sizing, the per-round zero-column padding for $\Jagged{}$ prefix sums, the canonical-shape fix for compose-tree caching) have been discovered through verifier failures rather than through up-front formal specification. Each invariant, once identified, is a small mechanical fix; identifying it requires either reading the SP1 reference carefully or tracing a verifier panic backward through several layers of abstraction.
+
+This is, in our experience, a common pattern in \zkVM{} engineering: the soundness invariants of a multi-protocol stack are not all written down in any single place, and they are not visible at the type system level (a witness of the wrong size still type-checks). A more rigorous discipline would emerge from a formal verification effort, but in the interim we lean on differential testing against SP1 and aggressive end-to-end verification on every change.
+
+\subsection{The verifying-key map and proof-shape stability}
+
+The verifying-key map mechanism (\S\ref{sec:architecture}) is a pragmatic response to the difficulty of constructing a single recursion verifier that handles every possible program shape. By restricting the set of admissible shapes to those enumerated in the map, the prover can specialise the recursion program at compile time to the specific shape it expects.
+
+This has consequences for the wire format of proofs: a proof carries an implicit reference to its verifying-key map entry, and a recipient must have the matching map to verify the proof. We treat the map as part of the protocol parameters, alongside the field choice and the security level; map regeneration is a process step that occurs at protocol version bumps and is documented as such.
+
+\subsection{Known limitations}
+
+\paragraph{In-circuit verifier gap under strict verifying-key enforcement.} Under the \texttt{VERIFY\_VK=true} mode, certain workloads still hit an inner-sumcheck-algebra divergence between the path the GPU prover takes and the path the in-circuit recursion verifier expects. We treat this as a soft deficiency rather than a soundness issue: the host verifier accepts the proofs, and the inner-sumcheck algebra port is an active work item. The proper resolution is the full alignment of the two paths discussed in \S\ref{sec:two-paths}.
+
+\paragraph{Backend abstraction deferred.} The CPU and GPU paths do not share a trait-level abstraction layer. We have not factored the difference into a runtime backend interface because the GPU-specific lifetime and stream-binding constraints do not map cleanly onto a single Rust trait without losing the ability to express the device-residency lifecycle. This decision should be revisited if a third backend becomes desirable (e.g., AMD HIP or distributed CPU clusters).
+
+\paragraph{$\LogUp{}$ proof-shape divergence.} The proof-shape divergence between the prover's per-chip layer-based serialisation and the recursion verifier's per-shard round-based serialisation (\S\ref{sec:logup-divergence}) is a documented architectural gap. The current production system bridges it via an in-tree adapter, but the cleanest long-term outcome is prover migration to the recursion shape. This is gated on a wire-format break that we plan to schedule alongside other protocol-version changes.
+
+\paragraph{Multi-host distribution.} The current system runs on a single host with up to eight GPUs. Distribution across multiple hosts is not yet implemented; the natural shape is to distribute shards across hosts in the core stage and aggregate the compress tree on a single host, but the engineering and bandwidth analysis is open.
+
+\paragraph{Inner-sumcheck algebra port.} The full port of SP1's inner sumcheck folding to \Ziren{}'s tower implementation is the open work that gates a single unified prover path. The MLE-full-Lagrange-eval primitive is in-tree but not yet wired into the inner sumcheck round computation; this is the long pole of the convergence effort.
+
+\subsection{Future work}
+
+We identify several directions for future work, ranked by anticipated impact.
+
+\begin{enumerate}
+  \item \textbf{Inner-sumcheck algebra alignment.} Closes the gap between the two prover paths and unblocks a single unified production verifier.
+  \item \textbf{Per-chip $\BaseFold{}$ commit.} The current commit materialises the dense polynomial one-shot during $\Jagged{}$ reduction; restructuring to per-chip commit (mirroring SP1's per-chip jagged-basefold structure) eliminates the brief peak-memory window during sumcheck and unlocks even larger workloads.
+  \item \textbf{Profile-guided release of the four-to-eight scaling regime.} The per-shard state-mutex contention that bounds core-stage scaling beyond four GPUs is a known target; profiling and refactoring should restore the linear curve out to eight.
+  \item \textbf{Streaming $\BaseFold{}$ commit upstream.} The current commit holds the dense vector across the sumcheck reduction; a streaming variant would reduce the peak working set further, at the cost of some round-trip latency.
+  \item \textbf{Multi-host distribution.} Bandwidth analysis, work scheduling, and the failure-handling model for distributed shard proving.
+  \item \textbf{Formal verification of soundness invariants.} The per-chip padded-sum convention, the $\Stacked{}$ dimension invariant, and the fold-orientation tag are all candidates for formal specification and machine-checked proof.
+\end{enumerate}

@@ -1,0 +1,65 @@
+\section{Design verification}
+\label{sec:verification}
+
+The soundness argument of Sections~\ref{sec:air}--\ref{sec:iopp} establishes that an accepting proof implies the existence of a trace satisfying every constraint. Two further questions decide whether that trace is an execution of the advertised machine, and they are the questions asked of a processor before tape-out: does the emulator implement the ISA (functional correctness), and does the constraint system of each unit admit exactly one behaviour for each input (the circuit is deterministic, so a satisfying trace can only be the execution)? We treat both with the tools of hardware verification: a specification-derived conformance suite against an independent reference, an executable formal model, and per-unit uniqueness theorems. What this section produces is the verification collateral of \S\ref{sec:ipcore-collateral}: the suites and their reference results, the formal model and its two checks, the extracted theorems with the tactic that discharges them and the list of those still open, and the defects register of Table~\ref{tab:defects}. An integrator reads it to decide what has been established once, for every integration, and what has not.
+
+\subsection{ISA conformance}
+\label{sec:verification-isa}
+
+\paragraph{Vectors from the specification.} The MIPS32r2 architecture manual's encoding tables were transcribed into a machine-readable table of 77 instructions (all integer, shift, branch, jump, load/store, bit-manipulation and conditional-move forms the guest supports). For each instruction a generator emits ten programs with pseudo-random operands, boundary values and the delay-slot placements the instruction admits, assembled with \texttt{llvm-mc}; the reference is the Unicorn/QEMU MIPS32r2 emulator~\citep{unicorn}, which shares no code with \Ziren{}'s own, and each vector compares the general registers, \texttt{HI}/\texttt{LO} and the touched memory after execution. All 770 vectors agree, on both the interpreter and the JIT.
+
+\paragraph{Shared instruction suites.} The generated vectors cover the encoding space broadly but shallowly. A third suite covers the opposite way: fifteen hand-written suites, 144 cases in all, for the instructions whose MIPS32r2 semantics have the most corners---signed and unsigned division, the multiply-accumulate pairs that read and write \texttt{HI}/\texttt{LO}, the bit-field and byte-order instructions \texttt{SEB}, \texttt{SEH}, \texttt{WSBH}, \texttt{INS} and \texttt{EXT}, the rotates, and the count-leading-one and count-leading-zero instructions. Their case data lives in one crate that both the emulator tests and the prover tests consume, so every case is executed and proved against the same expected results. The generated vectors are shared the same way, one file read by both harnesses; between them, a regression that appeared in the emulator but not the prover, or the reverse, would show up as a disagreement rather than as two tests drifting apart.
+
+\paragraph{The Cannon suite.} The third source is independent of us. Optimism's Cannon ships a suite of hand-written MIPS test programs~\citep{cannon}, written by the fault-proof project whose ISA semantics a hybrid deployment must match (\S\ref{sec:ipcore-integration}); they exercise the machine against another team's reading of the architecture manual rather than against our own generator or our own regressions. A harness byte-swaps them to little-endian and adapts the halt convention; the 49 programs applicable to a little-endian guest all pass.
+
+\paragraph{From vectors to proofs.} 224 of the generated programs and 48 of the Cannon programs were also proved end to end and verified---one fewer than pass on the emulator, because a program that halts with a non-zero exit code is not a valid execution to prove--- so the arithmetisation accepts every behaviour the reference exhibits on them; the next subsection is the converse direction.
+
+\paragraph{Executable formal model.} A \Lean{} model of the ISA was written independently of \Ziren{}'s emulator: a decoder transcribed from the encoding tables, an interpreter with the delay-slot program-counter pair and little-endian byte memory, and an ALU. Two checks connect it to the implementation, both discharged by \texttt{native\_decide}: the decoder agrees with the emulator's decoder on all 2\,275 distinct instruction words appearing in the vectors, and the model reproduces the reference emulator's results on all 770 vectors. \Ziren{}'s two emulator implementations are additionally run twice on every vector with a digest of the emitted event records, which agree between runs and between the interpreter and the JIT; this is evidence of reproducibility rather than a proof of determinism.
+
+\subsection{Determinism of the units}
+\label{sec:verification-det}
+
+\paragraph{What is proved.} For a unit $U$ with constraint system $C_U$ over a row $w$ of columns, and with \emph{inputs} $I_U(w)$ (the values the row receives on its buses: the fetched instruction, the register and memory values read, the incoming state) and \emph{outputs} $O_U(w)$ (the values it sends: the register and memory values written, the outgoing state), determinism is the statement
+\[
+  \forall w, w'.\; C_U(w) \wedge C_U(w') \wedge I_U(w) = I_U(w') \;\Rightarrow\; O_U(w) = O_U(w').
+\]
+The statement is Definition~\ref{def:det}, with byte-table lookups lowered to range constraints or to calls of an abstract deterministic table.
+
+Theorem~\ref{thm:unique} is what makes a satisfying trace unique given the determinism of every unit. The theorems below are its premises, machine-checked for the units the automation closes and stated with an explicit gap for the rest.
+
+\paragraph{Extraction.} The theorems are not written by hand. The same Rust constraint description that the prover evaluates and the verifier checks is evaluated once with symbolic columns, the resulting polynomial constraints, range facts and bus interactions are lowered to a first-order statement, and a generator emits one \Lean{} file per unit: a record type for the row, the constraints as a conjunction, the input and output projections with their provenance, and the theorem above. Selector-specialised units (one theorem per opcode selector) and an \emph{is\_real}~$=1$ specialisation keep each statement about real rows of one opcode. The extraction covers all 64 units of the core machine: \ndettotal{} determinism theorems.
+
+\paragraph{Proof automation.} A theorem is closed by a tactic that lifts the statement from $\F$ to the integers: every column is replaced by an integer with the bound its range fact gives (a byte, a 16-bit limb, a bit, or $[0, p)$ when unconstrained), every field equation becomes an exact integer equation once its slack is shown to vanish under those bounds, and the remaining goal is linear arithmetic over bounded integers, decided by \Lean{}'s \texttt{omega}. Between the lifting and the decision the tactic runs the propagation loop of Picus inside the proof assistant: it proves corresponding columns of $w$ and $w'$ equal one pair at a time, substitutes, resolves selector bits to constants, and case-splits only on selector bits already known to agree. The automation runs with a fixed wall-clock budget per theorem. At the time of writing \ndetproved{} of the \ndettotal{} theorems are closed (Figure~\ref{fig:verification}, by unit family). \ndetopen{} were attempted and remain open: integer units whose constraints multiply by $2^{24}$ or $2^{32}$ and are only meaningful modulo $p$ (multiply, the conditional moves, the memory-argument units), which the integer lifting does not model, or whose selector case structure exceeds the split budget. \ndetskipped{} are not attempted by the generator: \ndetskipacc{} are accelerator units above the size threshold (the same theorem at 1\,000--5\,600 conjuncts), and \ndetskipcase{} are units whose constraints contain comparison case-splits from the byte-table summaries, which the current tactic does not handle. \ndetpending{} had not finished their attempt when the numbers were taken. The syscall unit, which was under-determined as first extracted (next paragraph), closes after the bus change; the count above is therefore for the constraint system with that change applied, which is one unit's constraints away from the system measured in Section~\ref{sec:performance}. All theorem statements compile; open ones carry an explicit \texttt{sorry} and are listed in the artifact.
+
+\begin{figure}[t]
+\centering
+\input{figures/verification}
+\caption{Status of the \ndettotal{} extracted determinism theorems (one per unit and opcode selector), by unit family. ``Not attempted'' theorems are skipped by the generator: accelerator units above the size threshold and units with comparison case-splits. ``Attempt not finished'' theorems were still under the automation's budget when the numbers were taken.}
+\label{fig:verification}
+\end{figure}
+
+\subsection{Findings}
+\label{sec:verification-findings}
+
+Table~\ref{tab:defects} lists the defects the flow surfaced; the first is described in detail.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs.}
+\label{tab:defects}
+\begin{tabular}{p{0.19\textwidth} p{0.37\textwidth} p{0.1\textwidth} p{0.25\textwidth}}
+\toprule
+Component & Defect & Found by & Resolution \\
+\midrule
+Syscall unit & argument half-words not determined by the reduced argument ($2^{32} > p$) & theorem & half-words carried on the syscall bus; theorem closes \\
+Syscall unit & result columns gated by a selector that no input pins & theorem & selector carried on the syscall bus; theorem closes \\
+Extractor & shard and clock fields of syscall interactions dropped, leaving outputs without inputs & theorem & extractor fixed \\
+Shape configuration & range table absent from the preprocessed heights; every shape-fixed proving test failed & proving & height registered \\
+Standalone verifier & recursion-key Merkle root computed from the bare key list while the prover pads to the tree height & proving & verifier pads the leaves \\
+Proving service & configured to skip the in-circuit key check, producing proofs the standalone verifier rejects & proving & service configuration \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Syscall argument half-words.} The syscall unit receives a reduced 32-bit argument $a \in \F$ from the instruction that raised the syscall and witnesses it as two 16-bit half-words $a_{\mathrm{lo}}, a_{\mathrm{hi}}$ constrained by $a_{\mathrm{lo}} + 2^{16} a_{\mathrm{hi}} = a$ in $\F$ and two 16-bit range checks. Because $2^{32} > p$, this does not determine the half-words: for every $a < 2^{32} - p$ both the decomposition of $a$ and that of $a + p$ satisfy the constraints. The extracted theorem for the unit is false and the automation reports exactly these four outputs as open. Whether the ambiguity is exploitable depends on the consumer: an accelerator that re-reduces the half-words modulo $p$ sees the same field element either way, while one that uses them as an exact 32-bit pointer does not. The finding is a specification gap between the two sides of the syscall bus. The remedy, applied after the finding, is to carry the half-words rather than the reduced sum on the bus, together with the unit's Linux selector; with that change the unit's determinism theorem closes in under a minute. The change alters the constraints of two units and therefore the verifying keys, so it is staged with the next key-changing release rather than deployed alone.

@@ -1,0 +1,12 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+\Zirenver{} consolidates fourteen months of incremental migration into a coherent second-generation \zkVM{} stack for the MIPS32r2 instruction set. Its principal architectural changes from the previous generation are: a hierarchical $\BaseFold{}+\Stacked{}+\Jagged{}$ polynomial commitment construction that structurally cures the memory-pressure failures of the legacy FRI prover on multi-million-cycle workloads; a sumcheck-binding rewrite of the soundness role previously discharged by auxiliary commitments; a GPU prover with device residency, per-slot streams, a verifying-key cache, and pipelined compress that delivers a near-linear speedup curve up to four GPUs; and a JIT-compiled MIPS executor that is bit-exact against the reference interpreter.
+
+We report end-to-end production-relevant timings on an Ethereum execution-layer block of $420$ million MIPS cycles ($94.1$ seconds at eight GPUs, prove and verify, through Groth16 BN254 wrap), and we discuss the subtle soundness invariants and integration discipline that were essential to bringing the system to this performance level. We are honest about the remaining gaps in the in-circuit verifier's algebraic alignment between the two prover paths, the proof-shape divergence in $\LogUp{}$ between prover and recursion verifier, and the four-to-eight GPU scaling plateau.
+
+\Zirenver{} is in production deployment and we anticipate continued incremental development along the directions sketched in \S\ref{sec:discussion}. Source code is released under permissive licences in the \Ziren{} and \texttt{ziren-gpu} repositories.
+
+\section*{Acknowledgements}
+
+We thank the SP1 team at Succinct Labs for the publicly-available reference implementation and the architectural template on which much of \Zirenver{} is based. We thank the Plonky3 team for the polynomial-commitment, lookup, and sumcheck primitives. Specific implementation work in \Zirenver{} draws inspiration and code patterns from these projects; the system's deficiencies are our own.

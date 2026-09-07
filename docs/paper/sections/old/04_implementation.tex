@@ -1,0 +1,94 @@
+\section{Implementation highlights}
+\label{sec:implementation}
+
+This section discusses the implementation-level choices that shaped the system's performance and soundness profile. Several of these were not anticipated at the start of the migration and emerged through measurement and bug-driven analysis; we record them here both as documentation of the system's current behaviour and as guidance for similar projects.
+
+\subsection{Two structurally distinct prover paths}
+\label{sec:two-paths}
+
+\Zirenver{} carries two prover code paths that produce structurally distinct proofs: an \emph{SP1-aligned} path that mirrors the reference SP1 prover's packed-pool integration for $\LogUp{}$ and zerocheck, and a \emph{\Ziren{}-native} path that descends from the prior \Ziren{} architecture's per-chip dispatch.
+
+Both paths are kept compiled and reachable; an internal dispatch decides at proof-generation time which path executes. The choice of default is significant: we observed that the SP1-aligned packed-pool path produces proofs that, at the first round of $\LogUp{}$, diverge from the \Ziren{}-native path's proofs in their inner sumcheck algebra. The divergence is not visible at the integration level (both paths produce a proof; both proofs verify under their own verifier) but is visible across the verifier boundary: a proof from the SP1-aligned path does not verify under the \Ziren{}-native verifier, and vice versa.
+
+Pending the alignment of the inner sumcheck algebra, the production default routes through the \Ziren{}-native dispatch, which maintains end-to-end soundness in the recursion layers we currently exercise. The SP1-aligned path remains available behind a debug environment variable for kernel-set parity testing.
+
+\subsection{Witness padding and dummy proof allocators}
+\label{sec:witness-padding}
+
+The recursion-circuit verifier consumes its previous-layer proof through a witness stream: a sequence of $\KB{}$ field elements deserialised in order matching the verifier's request pattern. The recursion program is compiled against a \emph{dummy proof} that has the correct structural shape but content-empty data; the witness slice sizes baked into the recursion program at compile time are derived from the dummy proof's serialised size.
+
+A naive bound on the witness slice size for the per-chip $\LogUp{}$ portion underestimates the prover's actual emission whenever a chip's lookup count is not a power of two: the prover pads each chip's lookup count up to the next power of two independently, and the total witness size therefore reflects per-chip-padded summation, not a single rounding of the gross total. We resolved this by adopting the per-chip-padded summation convention described in \S\ref{sec:architecture}, both in the dummy proof allocator and in the recursion-program compile-time slice-size derivation.
+
+The cost of getting this wrong is severe: the recursion circuit silently allocates a witness slice of the wrong size, and the verifier panics at the first round of $\LogUp{}$. The cost of getting it right is a single additional $\mathrm{nextpow2}$ in the size computation.
+
+\subsection{Per-chip-padded sum in $\BaseFold{}$ commit hashing}
+
+A related correction lies in the $\BaseFold{}$ commit hash sponge: the number of $\LogUp{}$ interactions absorbed in the transcript must match between prover and verifier. The shard's interaction count was, in earlier revisions, computed as a sum over chips of the per-chip raw count, but the prover-side hashing was padding per-chip first and then summing. The correction is to compute the verifier's count as $\sum_c \mathrm{nextpow2}(\ell_c)$ rather than $\mathrm{nextpow2}(\sum_c \ell_c)$.
+
+\subsection{Lift normalisation and compose-cache safety}
+\label{sec:lift-normalization}
+
+The compress pipeline aggregates shard proofs into compose-tree input via a \emph{lift} step that converts the shard's $\BaseFold{}$ proof into a normalised input for the compose recursion program. Because compose-tree caching keys on the recursion-program AST hash, lifts whose chip-set or chip-shape varies across shards produce divergent AST hashes and defeat the cache.
+
+We force a single canonical shape on the lift output by fixing the per-chip widths at canonical values (memory-constraint chip at $\log_2 = 19$, base-ALU and extension-ALU chips at $\log_2 = 20$). With this shape fix, the compose-tree cache is safe to enable across mixed shard workloads: every lift produces the same AST hash, and the cache delivers a real wall-time reduction without invalidating downstream verification.
+
+This fix is itself bounded by the \emph{stacked-PCS dimension invariant}. A second class of bug in the same area arises when the per-round zero-column padding in the prover's $\Jagged{}$ parameter assembly is not reflected in the verifier's expected column-prefix-sums vector. The verifier then samples a sumcheck point of one length while the flattened batch-evaluation vector reflects another length, and the column-claims assertion fires with a $2\times$ mismatch. The correction is on the prover side, in the construction of the $\Jagged{}$ little-polynomial prover parameters: the per-round zero-column row counts must be included in the flat \texttt{row\_counts} vector before the prefix sums are taken.
+
+\subsection{Verifying-key map enumeration and workload-driven injection}
+
+The verifying-key map's contents must cover every program shape encountered by every workload, and a naive enumeration of all shapes in a wide range produces many thousands of entries the vast majority of which are never used. We use an SP1-style consecutive-integer enumeration of shape parameters from $1$ through $12$, which covers all production workloads observed in our test suite, deduplicating to approximately 41 real shapes after structural canonicalisation.
+
+For one-off injection (e.g., capturing a new precompile cluster's verifying key without a full map regeneration), a workload-driven capture tool runs the prover up to the recursion-program compile point on a target ELF, extracts the resulting verifying keys, and emits them in the map format. Subsequent merging with the existing map is by hash injection.
+
+The full map regeneration runs in approximately thirteen minutes on a moderately-provisioned host, parallelised over CPU cores with a per-worker recursion-program compile budget controlled to avoid OOM under contention.
+
+\subsection{Fold-orientation tag and path-aware verification}
+\label{sec:fold-orientation}
+
+The two prover paths discussed in \S\ref{sec:two-paths} differ in the orientation of their $\BaseFold{}$ fold step: one path's first round folds against the most-significant bit of the evaluation point, while the other folds against the least-significant bit. The orientations are not interconvertible at the verifier level without a corresponding algebraic adjustment.
+
+We introduce a one-bit \emph{fold-orientation tag} on the proof, allowing path-aware verifier dispatch. The tag isolates the protocol-level invariant that distinguishes the two paths, and a resolver in the verifier reorders the evaluation point accordingly before initiating the round-by-round fold replay. This is sufficient for proof-shape compatibility (a path-A proof verifies under the path-A verifier; a path-B proof verifies under the path-B verifier), but does not yet provide full transcript compatibility across CPU and GPU verifier implementations of the same path. Full compatibility awaits the inner-sumcheck algebra alignment that is open work.
+
+\subsection{Pipelined compress and shard-batch sizing}
+
+The pipelined compress stage's wall time on multi-GPU is sensitive to a single parameter, the \texttt{shard\_batch\_size}, which controls the number of concurrent prover-submit threads in the compress dispatcher. Through a parameter sweep at one through eight GPUs we identified the rule
+\begin{equation}
+  \mathrm{SBS}^* = \max(4, \min(8, 2G)),
+\end{equation}
+where $G$ is the visible GPU count. At one and two GPUs, the conservative value of $4$ avoids out-of-memory failures from oversubscription on real \texttt{reth} shards. At four GPUs, $\mathrm{SBS} = 8$ provides $2\times$ oversubscription per GPU, hiding the per-shard CPU preparation latency. At eight GPUs, $\mathrm{SBS} = 8$ is exactly $1:1$ with the pool. Going further to $\mathrm{SBS} = 12$ at eight GPUs plateaus and then regresses, as worker threads contend on host-side state mutexes that the core stage uses for shared shard records.
+
+\subsection{Turn-based synchronisation: dropped}
+
+An earlier revision of \Zirenver{}'s compress pipeline used a \texttt{TurnBasedSync} barrier primitive to enforce strict commit-ordering across worker threads. We measured this barrier and found it cost about seven percent on \texttt{reth} multi-GPU wall time and six percent on \texttt{geth}, with no soundness benefit (the ordering it enforced was already implied by data dependencies elsewhere). The SP1 reference retains the data structure but never invokes it; we removed our active usage entirely.
+
+\subsection{Just-in-time MIPS executor: parity and bring-up}
+\label{sec:jit-bringup}
+
+The JIT MIPS executor described in \S\ref{sec:jit} is the third generation of execute-path acceleration in \Ziren{}. It supersedes both the legacy interpreter (still retained as a fallback) and an earlier Cranelift-targeted experiment that was retargeted to native code emission for the inner loop.
+
+Bringing the JIT to bit-exact parity with the interpreter on real Ziren guests required resolving thirteen distinct semantic divergences in the lowering of MIPS opcodes (rotation right, the LOCATION pseudo-instruction, $\mathtt{HI}/\mathtt{LO}$ ordering, the heap-break syscall, $\mathtt{EXT}/\mathtt{INS}$, the 32-bit forms of $\mathtt{MULT}/\mathtt{MUL}$, the per-syscall register refresh order, the per-syscall trace synchronisation cadence, sign-extension of immediate offsets, the $\mathtt{BLTZ}/\mathtt{BGEZ}$ branch family, and the trap-equal $\mathtt{TEQ}$ form). Each was identified by a differential test that ran the JIT-produced trace and the interpreter-produced trace through a byte-identity check on register state, memory state, and event ordering. Once resolved, all eleven parity tests and fifteen MIPS instruction-suite tests pass under JIT-by-default.
+
+The JIT's overhead on programs without precompile syscalls is small (a fraction of a millisecond per call); on tendermint, which has approximately one syscall per several hundred microseconds of CPU work, the JIT delivers a $\sim$$6\times$ speedup on the inner trace-mode execute loop. End-to-end on \texttt{reth}, where the GPU prover dominates wall time, the JIT speedup is within run-to-run noise: the executor speedup is invisible at the e2e level once the GPU prover is engaged.
+
+\subsection{Verifying key cache and program cache}
+
+Two host-side caches reduce repeated work across shards of the same workload.  The \emph{compose-pk} cache keeps the proving key for each compose-program shape resident on the GPU, keyed by program identity; on a shared-shape shard sequence this saves the per-shard preprocessed-trace generation and the device upload. The \emph{program} cache keeps the compiled compose-program itself, keyed by arity. Together these eliminate the synthesis cost of repeated compose calls within a single \texttt{prove\_core} run.
+
+The caches are opt-in by default in development and on-by-default in production, controlled by a single \texttt{ZIREN\_GPU\_RESIDENCY} environment variable that selects among \texttt{host} (caches off), \texttt{hybrid} (default, conservative), and \texttt{full} (all caches on). Legacy per-cache variables are deprecation-warned but still honoured for backwards compatibility.
+
+\subsection{$\LogUp{}$ shape divergence between prover and recursion verifier}
+\label{sec:logup-divergence}
+
+The largest piece of open architectural work in \Zirenver{} is the alignment of two $\LogUp{}$ proof types. The prover (in the \texttt{stark} crate) emits per-chip layer-based proofs whose serialisation walks the GKR circuit layer by layer; the recursion verifier (in the \texttt{recursion-circuit} crate) consumes per-shard round-based proofs whose serialisation walks the sumcheck stack round by round. The two were designed independently --- the prover predates the migration, the recursion was written ahead of the eventual prover migration --- and they encode the same protocol at different granularities.
+
+Three unification approaches are open: migrate the prover to emit the recursion's per-shard shape; add a per-shard adapter at proof-construction time; or add a per-chip verifier on the recursion side. The first is the cleanest architectural outcome but breaks wire compatibility with all previously-serialised proofs. The second is wire-compatible with the new shape but adds an extra reformat step per shard. The third is the most invasive on the recursion side but the least invasive on the prover. We are tracking this as a design decision to be made at the next major revision.
+
+\subsection{What \Zirenver{} chose not to do}
+
+For clarity, we record several design directions that \Zirenver{} explicitly does \emph{not} pursue.
+
+\begin{itemize}
+  \item No use of the WHIR PCS family. An earlier exploration of WHIR as a default was abandoned in favour of $\BaseFold{}$ due to commit-bound workload performance on real Ethereum-block proving.
+  \item No general-purpose runtime backend abstraction layer. The CPU and GPU paths share a high-level orchestration interface but diverge in implementation; we have deliberately not factored the difference into a trait abstraction, partly because the GPU-specific lifetime and stream-binding constraints do not map cleanly onto a single Rust trait.
+  \item No retirement of the interpreter MIPS executor. The interpreter remains the fallback for unsupported opcodes (a small set: $\mathtt{LWL}/\mathtt{LWR}$, $\mathtt{SWL}/\mathtt{SWR}$, $\mathtt{DIV}/\mathtt{DIVU}$, $\mathtt{MADD}/\mathtt{MSUB}$ and their unsigned variants, $\mathtt{SEXT}$, $\mathtt{INS}$, $\mathtt{EXT}$, $\mathtt{ROR}$, $\mathtt{WSBH}$, all of $\mathtt{SYSCALL}$) and for non-Linux-x86\_64 hosts. Bit-exactness regression in the JIT is a soundness bug; the interpreter is a permanent defence.
+\end{itemize}

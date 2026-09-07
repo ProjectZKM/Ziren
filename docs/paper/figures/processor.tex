@@ -1,0 +1,49 @@
+% Ziren as a processor block diagram: units (chips) and buses (interactions).
+\begin{tikzpicture}[
+  every node/.style={font=\scriptsize},
+  unit/.style={rectangle, draw=black!75, rounded corners=2pt, text width=2.0cm, minimum height=0.7cm, align=center, fill=gray!10, inner sep=2pt},
+  mem/.style={rectangle, draw=black!75, text width=2.7cm, minimum height=0.7cm, align=center, fill=blue!6, inner sep=2pt},
+  rom/.style={rectangle, draw=black!75, text width=2.7cm, minimum height=0.7cm, align=center, fill=yellow!12, inner sep=2pt},
+  bus/.style={line width=1.2pt, black!85},
+  buslab/.style={font=\scriptsize, black!70, right},
+  tap/.style={-{Latex[length=1.6mm]}, thin, black!80},
+]
+  % instruction units (functional units), pitch 2.3 cm
+  \node[unit] (alu)   at (0,0)    {ALU\\\texttt{AddSub}, \texttt{Bitwise}};
+  \node[unit] (shift) at (2.3,0)  {Shift\\\texttt{ShiftLeft(Imm)}};
+  \node[unit] (mul)   at (4.6,0)  {Mul/Div\\\texttt{Mul}, \texttt{DivRem}};
+  \node[unit] (ctl)   at (6.9,0)  {Control\\\texttt{Branch}, \texttt{Jump}};
+  \node[unit] (ld)    at (9.2,0)  {Load/Store\\\texttt{LoadWord}, \ldots};
+  \node[unit] (sys)   at (11.5,0) {Syscall\\\texttt{SyscallInstrs}};
+  \node[unit, fill=green!8, text width=2.5cm] (pre) at (14.9,0) {Accelerators\\Keccak, SHA, EC, \ldots};
+
+  % buses
+  \draw[bus] (-1.2,1.35) -- (16.4,1.35) node[buslab] {program bus};
+  \draw[bus] (-1.2,1.0)  -- (16.4,1.0)  node[buslab] {state bus};
+  \draw[bus] (-1.2,-1.0) -- (16.4,-1.0) node[buslab] {memory bus};
+  \draw[bus] (-1.2,-1.35) -- (16.4,-1.35) node[buslab] {byte / range bus};
+  \draw[bus] (-1.2,-1.7) -- (16.4,-1.7) node[buslab] {global bus};
+  \foreach \u in {alu,shift,mul,ctl,ld,sys,pre} {
+    \draw[tap] (\u.north) -- ++(0,0.5);
+    \draw[tap] (\u.south) -- ++(0,-0.5);
+  }
+  \draw[tap] (sys.east) -- node[above=1pt, font=\tiny, black!70, align=center] {syscall\\bus} (pre.west);
+
+  % tables and memory units
+  \node[rom] (prog) at (1.2,2.5)  {\texttt{Program} ROM\\(preprocessed, in vk)};
+  \node[rom, text width=3.4cm] (pv)   at (5.6,2.5)  {Public values\\entry/exit state, digests};
+  \node[mem] (bump) at (0.6,-2.9)  {\texttt{MemoryBump}\\register anchors};
+  \node[rom] (byte) at (4.0,-2.9)  {\texttt{Byte} / \texttt{Range} tables\\(preprocessed)};
+  \node[mem] (loc)  at (7.6,-2.9)  {\texttt{MemoryLocal}\\shard first/last touch};
+  \node[mem] (glob) at (11.0,-2.9) {\texttt{Global}\\septic digest};
+  \node[mem] (init) at (14.6,-2.9) {\texttt{MemoryGlobal}\\\texttt{Init}/\texttt{Finalize}};
+
+  \draw[tap] (prog.south) -- (1.2,1.35);
+  \draw[tap] (pv.south) -- (5.6,1.0);
+  \draw[tap] (bump.north) -- (0.6,-1.0);
+  \draw[tap] (byte.north) -- (4.0,-1.35);
+  \draw[tap] (loc.north) -- (7.6,-1.0);
+  \draw[tap] (loc.east) -- (glob.west);
+  \draw[tap] (glob.north) -- (11.0,-1.7);
+  \draw[tap] (init.north) -- (14.6,-1.7);
+\end{tikzpicture}
