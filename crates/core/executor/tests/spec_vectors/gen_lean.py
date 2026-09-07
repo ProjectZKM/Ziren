@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit `crates/fv/lean/ZirenDet/IsaVectors.lean` from `vectors.json`.
+"""Emit `crates/fv/lean4/ZirenDet/IsaVectors.lean` from `vectors.json`.
 
 Each vector becomes an `example` that runs the Lean ISA model (`ZirenDet/Isa.lean`) on the same
 program words and initial memory the oracle and the Rust executor saw, and checks the register
@@ -50,6 +50,6 @@ for v in d["vectors"]:
     out.append("")
     n += 1
 out.append("end ZirenDet.IsaVectors")
-path = os.path.join(repo, "crates", "fv", "lean", "ZirenDet", "IsaVectors.lean")
+path = os.path.join(repo, "crates", "fv", "lean4", "ZirenDet", "IsaVectors.lean")
 open(path, "w").write("\n".join(out) + "\n")
 print(f"wrote {n} examples to {path}")

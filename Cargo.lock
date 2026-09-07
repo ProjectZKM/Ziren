@@ -7957,20 +7957,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm-fv"
-version = "2.0.0"
-dependencies = [
- "clap",
- "p3-air",
- "p3-field",
- "p3-koala-bear",
- "p3-matrix",
- "zkm-core-executor",
- "zkm-core-machine",
- "zkm-pcs",
-]
-
-[[package]]
 name = "zkm-instruction-test-defs"
 version = "2.0.0"
 dependencies = [
@@ -8033,6 +8019,20 @@ dependencies = [
  "zkm-poly",
  "zkm-primitives",
  "zkm-zkvm",
+]
+
+[[package]]
+name = "zkm-picus"
+version = "2.0.0"
+dependencies = [
+ "clap",
+ "p3-air",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-matrix",
+ "zkm-core-executor",
+ "zkm-core-machine",
+ "zkm-pcs",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit `crates/fv/lean/ZirenDet/IsaDecode.lean` from `decoded.json` (the executor's own decoding of
+"""Emit `crates/fv/lean4/ZirenDet/IsaDecode.lean` from `decoded.json` (the executor's own decoding of
 every vector word, produced by `SPEC_DUMP_DECODED=... cargo test --test spec_vectors`): one
 `example` per distinct word checking that the Lean decoder, lowered to the executor's internal
 form, agrees with `Instruction::decode_from`."""
@@ -23,6 +23,6 @@ for word, f in sorted(d.items()):
     out.append("")
     n += 1
 out.append("end ZirenDet.IsaDecode")
-path = os.path.join(repo, "crates", "fv", "lean", "ZirenDet", "IsaDecode.lean")
+path = os.path.join(repo, "crates", "fv", "lean4", "ZirenDet", "IsaDecode.lean")
 open(path, "w").write("\n".join(out) + "\n")
 print(f"wrote {n} decode checks to {path}")
