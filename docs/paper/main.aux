@@ -133,7 +133,6 @@
 \citation{poseidon2}
 \citation{haboeck,logup-gkr}
 \citation{gkr-cmt}
-\citation{picus}
 \@writefile{toc}{\contentsline {paragraph}{Hashing and transcripts.}{9}{section*.28}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Units, buses and determinism}{9}{subsection.2.2}\protected@file@percent }
 \newlabel{sec:prelim-chips}{{2.2}{9}{Units, buses and determinism}{subsection.2.2}{}}
@@ -143,6 +142,7 @@
 \@writefile{toc}{\contentsline {paragraph}{Zerocheck.}{9}{section*.30}\protected@file@percent }
 \newlabel{def:shard}{{2.3}{9}{Shard relation}{theorem.2.3}{}}
 \newlabel{def:det}{{2.4}{9}{Inputs, outputs and determinism of a unit}{theorem.2.4}{}}
+\citation{picus}
 \@writefile{toc}{\contentsline {paragraph}{Cost metrics.}{10}{section*.31}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {3}The instruction set and execution model}{10}{section.3}\protected@file@percent }
 \newlabel{sec:isa}{{3}{10}{The instruction set and execution model}{section.3}{}}
@@ -159,14 +159,14 @@
 \newlabel{sec:ipcore}{{4}{11}{The core as an intellectual-property block}{section.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Ports}{11}{subsection.4.1}\protected@file@percent }
 \newlabel{sec:ipcore-ports}{{4.1}{11}{Ports}{subsection.4.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Realisation platform}{11}{subsection.4.2}\protected@file@percent }
-\newlabel{sec:ipcore-platform}{{4.2}{11}{Realisation platform}{subsection.4.2}{}}
-\citation{ethproofs}
-\citation{cannon,kona}
 \@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Ports of the core. ``Setup'' interfaces are used once per program; ``run'' interfaces once per execution.}}{12}{table.caption.36}\protected@file@percent }
 \newlabel{tab:ports}{{3}{12}{Ports of the core. ``Setup'' interfaces are used once per program; ``run'' interfaces once per execution}{table.caption.36}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Realisation platform}{12}{subsection.4.2}\protected@file@percent }
+\newlabel{sec:ipcore-platform}{{4.2}{12}{Realisation platform}{subsection.4.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Configuration space}{12}{subsection.4.3}\protected@file@percent }
 \newlabel{sec:ipcore-config}{{4.3}{12}{Configuration space}{subsection.4.3}{}}
+\citation{ethproofs}
+\citation{cannon,kona}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Integration paths}{13}{subsection.4.4}\protected@file@percent }
 \newlabel{sec:ipcore-integration}{{4.4}{13}{Integration paths}{subsection.4.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Verification collateral}{13}{subsection.4.5}\protected@file@percent }
@@ -179,21 +179,21 @@
 \newlabel{tab:chips}{{4}{14}{Core-machine units and main-trace widths (columns over $\F $). Preprocessed widths in parentheses. The immediate (\texttt {Imm}) variants take the second operand from the instruction word}{table.caption.38}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Unit set}{14}{subsection.5.1}\protected@file@percent }
 \newlabel{sec:air-chips}{{5.1}{14}{Unit set}{subsection.5.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}The instruction frame}{14}{subsection.5.2}\protected@file@percent }
-\newlabel{sec:air-frame}{{5.2}{14}{The instruction frame}{subsection.5.2}{}}
 \citation{blum1994}
 \citation{sp1}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}The instruction frame}{15}{subsection.5.2}\protected@file@percent }
+\newlabel{sec:air-frame}{{5.2}{15}{The instruction frame}{subsection.5.2}{}}
 \newlabel{lem:chain}{{5.1}{15}{State-bus chain}{theorem.5.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Registers and memory}{15}{subsection.5.3}\protected@file@percent }
 \newlabel{sec:air-memory}{{5.3}{15}{Registers and memory}{subsection.5.3}{}}
-\newlabel{lem:memory}{{5.2}{15}{Memory argument}{theorem.5.2}{}}
-\citation{sp1}
 \@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Three consecutive cycles as rows of three units, drawn as a circuit. Each row is a unit with a fetch pin on the program bus, a receive and a send pin on the state bus (the shaded state registers carry $(\mathsf  {shard},\mathsf  {clk},\mathsf  {pc},\mathsf  {next\_pc})$ from the entry state onward), and four access pins at the sub-cycle positions $4\,\mathsf  {clk}{+}1..4$ on the memory bus; filled pins are the accesses the opcode makes (register reads at 1--2, memory at 3, the register write at 4), hollow pins are unused. The text inside each unit is what its constraints compute. The \texttt  {LoadWord} row sits in the branch's delay slot: its successor is the branch target, which arrives as data in the state register rather than as $\mathsf  {pc}{+}4$.}}{16}{figure.caption.39}\protected@file@percent }
 \newlabel{fig:frame}{{4}{16}{Three consecutive cycles as rows of three units, drawn as a circuit. Each row is a unit with a fetch pin on the program bus, a receive and a send pin on the state bus (the shaded state registers carry $(\mathsf {shard},\mathsf {clk},\mathsf {pc},\mathsf {next\_pc})$ from the entry state onward), and four access pins at the sub-cycle positions $4\,\mathsf {clk}{+}1..4$ on the memory bus; filled pins are the accesses the opcode makes (register reads at 1--2, memory at 3, the register write at 4), hollow pins are unused. The text inside each unit is what its constraints compute. The \texttt {LoadWord} row sits in the branch's delay slot: its successor is the branch target, which arrives as data in the state register rather than as $\mathsf {pc}{+}4$}{figure.caption.39}{}}
+\newlabel{lem:memory}{{5.2}{16}{Memory argument}{theorem.5.2}{}}
 \@writefile{toc}{\contentsline {paragraph}{Registers.}{16}{section*.40}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Shard-local memory.}{16}{section*.41}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Whole-execution memory.}{16}{section*.42}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{What is byte-checked.}{16}{section*.43}\protected@file@percent }
+\citation{sp1}
+\@writefile{toc}{\contentsline {paragraph}{What is byte-checked.}{17}{section*.43}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Cross-shard interactions: the global digest}{17}{subsection.5.4}\protected@file@percent }
 \newlabel{sec:air-global}{{5.4}{17}{Cross-shard interactions: the global digest}{subsection.5.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Security of the digest}{17}{subsection.5.5}\protected@file@percent }
@@ -207,13 +207,13 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.8}The shard-level lookup argument}{18}{subsection.5.8}\protected@file@percent }
 \newlabel{sec:air-logup}{{5.8}{18}{The shard-level lookup argument}{subsection.5.8}{}}
 \citation{jagged-pcs}
-\citation{jagged-pcs}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.9}The shard-level zerocheck}{19}{subsection.5.9}\protected@file@percent }
 \newlabel{sec:air-zerocheck}{{5.9}{19}{The shard-level zerocheck}{subsection.5.9}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {6}The polynomial commitment: stacking and the jagged reduction}{19}{section.6}\protected@file@percent }
 \newlabel{sec:pcs}{{6}{19}{The polynomial commitment: stacking and the jagged reduction}{section.6}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Dense packing and stacking}{19}{subsection.6.1}\protected@file@percent }
 \newlabel{sec:pcs-stacking}{{6.1}{19}{Dense packing and stacking}{subsection.6.1}{}}
+\citation{jagged-pcs}
 \citation{jagged-pcs}
 \citation{jagged-pcs}
 \citation{barrington1989bounded}
@@ -275,43 +275,42 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.1}Experimental setup}{26}{subsection.10.1}\protected@file@percent }
 \newlabel{sec:perf-setup}{{10.1}{26}{Experimental setup}{subsection.10.1}{}}
 \@writefile{toc}{\contentsline {paragraph}{Workload.}{26}{section*.66}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Hardware.}{26}{section*.67}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs.}}{27}{table.caption.64}\protected@file@percent }
-\newlabel{tab:defects}{{5}{27}{Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs}{table.caption.64}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs; ``review'' means a line-by-line comparison of this design against the RISC-V system it descends from, reading both implementations side by side.}}{27}{table.caption.64}\protected@file@percent }
+\newlabel{tab:defects}{{5}{27}{Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs; ``review'' means a line-by-line comparison of this design against the RISC-V system it descends from, reading both implementations side by side}{table.caption.64}{}}
+\@writefile{toc}{\contentsline {paragraph}{Hardware.}{27}{section*.67}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Metrics.}{27}{section*.68}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Protocol.}{27}{section*.69}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {10.2}Emulator efficiency}{27}{subsection.10.2}\protected@file@percent }
-\newlabel{sec:perf-emu}{{10.2}{27}{Emulator efficiency}{subsection.10.2}{}}
-\newlabel{sec:perf-host}{{10.2}{27}{Emulator efficiency}{subsection.10.2}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Emulator and record pipeline under a host memory and processor budget. Sizes are per event or per shard of the block of \S  \ref {sec:perf-setup}; times are host-side, single process, three repetitions.}}{28}{table.caption.70}\protected@file@percent }
 \newlabel{tab:host}{{6}{28}{Emulator and record pipeline under a host memory and processor budget. Sizes are per event or per shard of the block of \S \ref {sec:perf-setup}; times are host-side, single process, three repetitions}{table.caption.70}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces GPU kernel time of the core-proving stage by group (nsys, ten-shard sample) and trace area by unit (19.6\,G cells over the whole block), deployed configuration before the changes of \S  \ref {sec:perf-changes}. Area is rows $\times $ columns at this row's shard count; the \texttt  {Global} rows scale with the number of shards (\S  \ref {sec:air-global}).}}{28}{table.caption.71}\protected@file@percent }
-\newlabel{tab:census}{{7}{28}{GPU kernel time of the core-proving stage by group (nsys, ten-shard sample) and trace area by unit (19.6\,G cells over the whole block), deployed configuration before the changes of \S \ref {sec:perf-changes}. Area is rows $\times $ columns at this row's shard count; the \texttt {Global} rows scale with the number of shards (\S \ref {sec:air-global})}{table.caption.71}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.2}Emulator efficiency}{28}{subsection.10.2}\protected@file@percent }
+\newlabel{sec:perf-emu}{{10.2}{28}{Emulator efficiency}{subsection.10.2}{}}
+\newlabel{sec:perf-host}{{10.2}{28}{Emulator efficiency}{subsection.10.2}{}}
 \newlabel{rem:opt}{{10.1}{28}{Optimisations not reflected in the tables}{theorem.10.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.3}Prover efficiency: where time and area go}{28}{subsection.10.3}\protected@file@percent }
 \newlabel{sec:perf-prover}{{10.3}{28}{Prover efficiency: where time and area go}{subsection.10.3}{}}
 \newlabel{sec:perf-profile}{{10.3}{28}{Prover efficiency: where time and area go}{subsection.10.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {10.4}Prover efficiency: effect of arithmetisation changes}{28}{subsection.10.4}\protected@file@percent }
-\newlabel{sec:perf-changes}{{10.4}{28}{Prover efficiency: effect of arithmetisation changes}{subsection.10.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces GPU kernel time of the core-proving stage by group (nsys, ten-shard sample) and trace area by unit (19.6\,G cells over the whole block), deployed configuration before the changes of \S  \ref {sec:perf-changes}. Area is rows $\times $ columns at this row's shard count; the \texttt  {Global} rows scale with the number of shards (\S  \ref {sec:air-global}).}}{29}{table.caption.71}\protected@file@percent }
+\newlabel{tab:census}{{7}{29}{GPU kernel time of the core-proving stage by group (nsys, ten-shard sample) and trace area by unit (19.6\,G cells over the whole block), deployed configuration before the changes of \S \ref {sec:perf-changes}. Area is rows $\times $ columns at this row's shard count; the \texttt {Global} rows scale with the number of shards (\S \ref {sec:air-global})}{table.caption.71}{}}
 \newlabel{fig:area}{{8a}{29}{Trace area by unit (19.6\,G cells); \texttt {Global} and the three largest memory-instruction units hold 59\%}{figure.caption.72}{}}
 \newlabel{sub@fig:area}{{a}{29}{Trace area by unit (19.6\,G cells); \texttt {Global} and the three largest memory-instruction units hold 59\%}{figure.caption.72}{}}
 \newlabel{fig:kernel}{{8b}{29}{GPU kernel time of the core-proving stage by group (nsys, ten-shard sample)}{figure.caption.72}{}}
 \newlabel{sub@fig:kernel}{{b}{29}{GPU kernel time of the core-proving stage by group (nsys, ten-shard sample)}{figure.caption.72}{}}
 \@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Where area and prover time go on the block, deployed configuration before the changes of \S  \ref {sec:perf-changes}.}}{29}{figure.caption.72}\protected@file@percent }
 \newlabel{fig:profile}{{8}{29}{Where area and prover time go on the block, deployed configuration before the changes of \S \ref {sec:perf-changes}}{figure.caption.72}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Single-GPU wall-clock time (block 25\,907\,955, core and compress stages, host-verified), medians of interleaved runs. Each row adds one change to the previous row.}}{29}{table.caption.73}\protected@file@percent }
-\newlabel{tab:levers}{{8}{29}{Single-GPU wall-clock time (block 25\,907\,955, core and compress stages, host-verified), medians of interleaved runs. Each row adds one change to the previous row}{table.caption.73}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.4}Prover efficiency: effect of arithmetisation changes}{29}{subsection.10.4}\protected@file@percent }
+\newlabel{sec:perf-changes}{{10.4}{29}{Prover efficiency: effect of arithmetisation changes}{subsection.10.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.5}Prover efficiency: layer order and multi-GPU scaling}{29}{subsection.10.5}\protected@file@percent }
 \newlabel{sec:perf-after}{{10.5}{29}{Prover efficiency: layer order and multi-GPU scaling}{subsection.10.5}{}}
 \citation{ethproofs}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Single-GPU wall-clock time (block 25\,907\,955, core and compress stages, host-verified), medians of interleaved runs. Each row adds one change to the previous row.}}{30}{table.caption.73}\protected@file@percent }
+\newlabel{tab:levers}{{8}{30}{Single-GPU wall-clock time (block 25\,907\,955, core and compress stages, host-verified), medians of interleaved runs. Each row adds one change to the previous row}{table.caption.73}{}}
 \@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Proved-execution throughput against number of GPUs for three block sizes after the lookup-layer change, and the deployed configuration for comparison. The dotted line is linear scaling from one GPU.}}{30}{figure.caption.74}\protected@file@percent }
 \newlabel{fig:scaling}{{9}{30}{Proved-execution throughput against number of GPUs for three block sizes after the lookup-layer change, and the deployed configuration for comparison. The dotted line is linear scaling from one GPU}{figure.caption.74}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces Wall-clock time per block (s, warm, three consecutive proofs of a 420\,M-cycle block) and proved-execution throughput, one to four RTX~5090 GPUs in one host, before and after the lookup-layer change. Proof size 617\,618 bytes in every case.}}{30}{table.caption.75}\protected@file@percent }
-\newlabel{tab:cards}{{9}{30}{Wall-clock time per block (s, warm, three consecutive proofs of a 420\,M-cycle block) and proved-execution throughput, one to four RTX~5090 GPUs in one host, before and after the lookup-layer change. Proof size 617\,618 bytes in every case}{table.caption.75}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.6}Context: public block-proving provers}{30}{subsection.10.6}\protected@file@percent }
 \newlabel{sec:perf-field}{{10.6}{30}{Context: public block-proving provers}{subsection.10.6}{}}
 \citation{whir}
-\citation{jagged-pcs}
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces Wall-clock time per block (s, warm, three consecutive proofs of a 420\,M-cycle block) and proved-execution throughput, one to four RTX~5090 GPUs in one host, before and after the lookup-layer change. Proof size 617\,618 bytes in every case.}}{31}{table.caption.75}\protected@file@percent }
+\newlabel{tab:cards}{{9}{31}{Wall-clock time per block (s, warm, three consecutive proofs of a 420\,M-cycle block) and proved-execution throughput, one to four RTX~5090 GPUs in one host, before and after the lookup-layer change. Proof size 617\,618 bytes in every case}{table.caption.75}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.7}Answering the question of Section~\ref {sec:intro}}{31}{subsection.10.7}\protected@file@percent }
 \newlabel{sec:perf-answer}{{10.7}{31}{Answering the question of Section~\ref {sec:intro}}{subsection.10.7}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.8}Threats to validity}{31}{subsection.10.8}\protected@file@percent }
@@ -320,6 +319,7 @@
 \newlabel{sec:app-protocols}{{A}{31}{Protocol details}{appendix.A}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {A.1}The \ensuremath  {\mathsf  {WHIR}}{} iteration as implemented}{31}{subsection.A.1}\protected@file@percent }
 \newlabel{sec:app-whir}{{A.1}{31}{The \WHIR {} iteration as implemented}{subsection.A.1}{}}
+\citation{jagged-pcs}
 \citation{hr18}
 \bibstyle{alpha}
 \bibdata{references}
@@ -329,15 +329,15 @@
 \bibcite{jolt}{{AST24}{}{{}}{{}}}
 \bibcite{openvm}{{{Axi}24}{}{{}}{{}}}
 \bibcite{barrington1989bounded}{{Bar89}{}{{}}{{}}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}The jagged branching program and the assist sumcheck}{32}{subsection.A.2}\protected@file@percent }
+\newlabel{sec:app-jagged}{{A.2}{32}{The jagged branching program and the assist sumcheck}{subsection.A.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Evaluating $\setbox \z@ \hbox {\mathsurround \z@ $\textstyle f$}\mathaccent "0365{f}_t$: the branching program.}{32}{section*.76}\protected@file@percent }
 \bibcite{blum1994}{{BEG{$^{+}$}94}{}{{}}{{}}}
 \bibcite{ben2018fast}{{BSBHR18}{}{{}}{{}}}
 \bibcite{proximity-gaps}{{BSCI{$^{+}$}20}{}{{}}{{}}}
 \bibcite{deep-fri}{{BSGKS20}{}{{}}{{}}}
 \bibcite{zk-iot-survey}{{CJSC23}{}{{}}{{}}}
 \bibcite{gnark}{{{Con}24}{}{{}}{{}}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}The jagged branching program and the assist sumcheck}{32}{subsection.A.2}\protected@file@percent }
-\newlabel{sec:app-jagged}{{A.2}{32}{The jagged branching program and the assist sumcheck}{subsection.A.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{Evaluating $\setbox \z@ \hbox {\mathsurround \z@ $\textstyle f$}\mathaccent "0365{f}_t$: the branching program.}{32}{section*.76}\protected@file@percent }
 \bibcite{zekra}{{DDGM23}{}{{}}{{}}}
 \bibcite{binius}{{DP23}{}{{}}{{}}}
 \bibcite{fri-binius}{{DP24}{}{{}}{{}}}
