@@ -1,0 +1,24 @@
+[package]
+name = "zkm-recursion-jit"
+version = "2.0.0"
+edition = "2021"
+description = "JIT compiler for the Ziren recursion (compress) executor (Linux x86_64)."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+p3-koala-bear = { workspace = true }
+p3-field = { workspace = true }
+zkm-recursion-core = { workspace = true }
+
+tracing = { workspace = true }
+thiserror = "1.0"
+
+# Same backend stack as `zkm-core-jit`, which mirrors SP1's sp1-jit.
+[target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
+dynasmrt = "2.0"
+
+[features]
+default = []
+
+[lib]
+path = "src/lib.rs"

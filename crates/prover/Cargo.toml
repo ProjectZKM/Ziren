@@ -15,6 +15,7 @@ p3-uni-stark = { workspace = true }
 p3-matrix = { workspace = true }
 zkm-recursion-compiler = { workspace = true }
 zkm-recursion-core = { workspace = true }
+zkm-recursion-jit = { workspace = true }
 zkm-recursion-circuit = { workspace = true }
 zkm-recursion-gnark-ffi = { workspace = true }
 zkm-core-machine = { workspace = true }
@@ -107,6 +108,10 @@ path = "scripts/check_vk_coverage.rs"
 [[bin]]
 name = "enum_build_coverage"
 path = "scripts/enum_build_coverage.rs"
+
+[[bin]]
+name = "jit_coverage"
+path = "scripts/jit_coverage.rs"
 
 [[bin]]
 name = "find_maximal_shapes"

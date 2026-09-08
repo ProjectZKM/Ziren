@@ -1,6 +1,10 @@
 mod analyzed;
 pub mod instruction;
-mod memory;
+// Public because the recursion JIT (`zkm-recursion-jit`) emits code that
+// addresses this memory directly — `base + addr * size_of::<MemoryEntry>()`
+// — and asserts that layout at compile time.  Keeping the module private
+// would leave the emitter's addressing unverifiable from outside.
+pub mod memory;
 mod opcode;
 mod program;
 mod record;
@@ -352,8 +356,16 @@ where
         // dispatches via par_iter, UnsafeRecord's Sync impl
         // and the disjoint-offset invariant from analyze make the
         // swap a one-liner.
+        // ZIREN_REC_EXEC_TIMING=1 splits a recursion program's execution into
+        // its two host phases.  The walk is the interpreter SP1 JITs away for
+        // the guest (sp1-jit / crates/core/jit here); this is the measurement
+        // that says what a recursion JIT would be worth.
+        let timing = std::env::var("ZIREN_REC_EXEC_TIMING").is_ok_and(|v| v != "0");
+        let t_analyze = std::time::Instant::now();
         let program_arc = self.program.clone();
         let (analyzed_program, event_counts) = program_arc.seq_blocks.clone().analyze();
+        let analyze_secs = t_analyze.elapsed().as_secs_f64();
+        let t_walk = std::time::Instant::now();
         let unsafe_record = UnsafeRecord::<F>::new(event_counts);
         // Pre-init public_values cell with default via the raw_get
         // pattern — works through `&UnsafeRecord` so it's compatible
@@ -399,6 +411,52 @@ where
             Some(&mut *debug_stdout),
             &unsafe_record,
         );
+        if timing {
+            let walk_secs = t_walk.elapsed().as_secs_f64();
+            // Counted off the PROGRAM, not off `state`: a `SeqBlock::Parallel`
+            // sub-walk runs on a fresh `WalkerState` whose counters are
+            // dropped when it returns, so the `nb_*` totals miss every
+            // instruction executed in parallel.
+            let instrs = analyzed_program.iter().count();
+            // Opcode mix, because a JIT is built one arm at a time: this says
+            // what fraction of the walk a first cut covering only the
+            // straight-line arithmetic/memory arms would actually replace.
+            let mut mix = [0usize; 12];
+            for ai in analyzed_program.iter() {
+                let k = match ai.inner() {
+                    Instruction::BaseAlu(_) => 0,
+                    Instruction::ExtAlu(_) => 1,
+                    Instruction::Mem(_) => 2,
+                    Instruction::Poseidon2(_) => 3,
+                    Instruction::Select(_) => 4,
+                    Instruction::HintBits(_) => 5,
+                    Instruction::HintAddCurve(_) => 6,
+                    Instruction::Print(_) => 7,
+                    Instruction::HintExt2Felts(_) => 8,
+                    Instruction::Ext2Felts(_) => 9,
+                    Instruction::CommitPublicValues(_) => 10,
+                    Instruction::Hint(_) => 11,
+                };
+                mix[k] += 1;
+            }
+            let names = [
+                "BaseAlu", "ExtAlu", "Mem", "Poseidon2", "Select", "HintBits",
+                "HintAddCurve", "Print", "HintExt2Felts", "Ext2Felts",
+                "CommitPublicValues", "Hint",
+            ];
+            let mix_str: String = names
+                .iter()
+                .zip(mix.iter())
+                .filter(|(_, &n)| n > 0)
+                .map(|(nm, n)| format!("{nm}={n} "))
+                .collect();
+            eprintln!("REC_MIX {mix_str}");
+            eprintln!(
+                "REC_EXEC analyze={analyze_secs:.4}s walk={walk_secs:.4}s instrs={instrs} \
+                 rate={:.2}M/s",
+                (instrs as f64) / walk_secs / 1e6
+            );
+        }
 
         // Restore taken-out fields and sync state regardless of result
         // (so error reporting downstream sees the updated pc/clk).

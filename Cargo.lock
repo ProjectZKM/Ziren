@@ -8099,6 +8099,7 @@ dependencies = [
  "zkm-recursion-compiler",
  "zkm-recursion-core",
  "zkm-recursion-gnark-ffi",
+ "zkm-recursion-jit",
 ]
 
 [[package]]
@@ -8238,6 +8239,18 @@ dependencies = [
  "zkm-core-machine",
  "zkm-pcs",
  "zkm-recursion-compiler",
+]
+
+[[package]]
+name = "zkm-recursion-jit"
+version = "2.0.0"
+dependencies = [
+ "dynasmrt",
+ "p3-field",
+ "p3-koala-bear",
+ "thiserror 1.0.69",
+ "tracing",
+ "zkm-recursion-core",
 ]
 
 [[package]]

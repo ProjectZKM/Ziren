@@ -27,6 +27,7 @@ members = [
     "crates/recursion/core",
     "crates/recursion/derive",
     "crates/recursion/gnark-ffi",
+    "crates/recursion/jit",
     "crates/sdk",
     "crates/pcs",
     "crates/test-artifacts",
@@ -112,6 +113,7 @@ zkm-recursion-circuit = { path = "crates/recursion/circuit", default-features = 
 zkm-recursion-gnark-ffi = { path = "crates/recursion/gnark-ffi", default-features = false }
 zkm-recursion-compiler = { path = "crates/recursion/compiler" }
 zkm-recursion-core = { path = "crates/recursion/core" }
+zkm-recursion-jit = { path = "crates/recursion/jit", version = "2.0.0" }
 zkm-core-executor = { path = "crates/core/executor", default-features = false }
 zkm-instruction-test-defs = { path = "crates/core/instruction-test-defs" }
 zkm-core-machine = { path = "crates/core/machine", default-features = false }
