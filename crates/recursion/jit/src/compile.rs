@@ -46,7 +46,7 @@ const _: () = {
 
 /// A compiled program, kept alive with its executable buffer.
 pub struct Compiled {
-    _buf: dynasmrt::ExecutableBuffer,
+    pub(crate) _buf: dynasmrt::ExecutableBuffer,
     entry: RawEntry,
     /// How many instructions were emitted, for the caller's logging.
     pub emitted: usize,
@@ -322,3 +322,56 @@ extern "C" fn div_f(in1: u32, in2: u32, flags: u32) -> u64 {
 /// The prime, re-exported so tests can build reduced values without
 /// depending on the emitter module directly.
 pub const P: u32 = PRIME;
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    /// Emitted bytes per instruction.
+    ///
+    /// This matters more here than in a guest JIT.  SP1 JITs a MIPS program:
+    /// its code is the static program text, and a loop executed a million
+    /// times is compiled once.  A recursion program has NO control flow — it
+    /// is already fully unrolled, so its instruction count IS its execution
+    /// length, and a 1:1 emission produces code proportional to the trace.
+    /// A leaf program is 4.3 M instructions, so bytes-per-instruction decides
+    /// whether this approach is usable at all.
+    #[test]
+    fn report_emitted_bytes_per_instruction() {
+        use p3_field::PrimeCharacteristicRing;
+        use zkm_recursion_core::runtime::{BasicBlock, RawProgram, SeqBlock};
+        use zkm_recursion_core::Address;
+        use zkm_recursion_core::{BaseAluInstr, BaseAluIo};
+
+        for (name, opcode) in [
+            ("Add", BaseAluOpcode::AddF),
+            ("Mul", BaseAluOpcode::MulF),
+            ("Div", BaseAluOpcode::DivF),
+        ] {
+            const N: usize = 1000;
+            let instrs: Vec<Instruction<KoalaBear>> = (0..N)
+                .map(|i| {
+                    Instruction::BaseAlu(BaseAluInstr {
+                        opcode,
+                        mult: KoalaBear::ONE,
+                        addrs: BaseAluIo {
+                            out: Address(KoalaBear::from_u32(i as u32 + 2)),
+                            in1: Address(KoalaBear::ZERO),
+                            in2: Address(KoalaBear::ONE),
+                        },
+                    })
+                })
+                .collect();
+            let prog = RawProgram { seq_blocks: vec![SeqBlock::Basic(BasicBlock { instrs })] };
+            let (analyzed, _) = prog.analyze();
+            let c = compile(&analyzed).expect("compile");
+            let bytes = c._buf.len();
+            eprintln!(
+                "JIT_SIZE {name}: {bytes} bytes / {N} instrs = {:.1} B/instr \
+                 -> {:.0} MB for a 4.3 M-instruction leaf program",
+                bytes as f64 / N as f64,
+                bytes as f64 / N as f64 * 4_314_157.0 / 1e6
+            );
+        }
+    }
+}
