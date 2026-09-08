@@ -13,7 +13,7 @@ Table~\ref{tab:ports} lists the interfaces of the core. Three of them are fixed 
 \small
 \caption{Ports of the core. ``Setup'' interfaces are used once per program; ``run'' interfaces once per execution.}
 \label{tab:ports}
-\begin{tabular}{p{0.19\textwidth} p{0.08\textwidth} p{0.63\textwidth}}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.10\textwidth} >{\raggedright\arraybackslash}p{0.58\textwidth}}
 \toprule
 Port & When & Contents \\
 \midrule
@@ -53,7 +53,7 @@ The block is delivered with the collateral of Section~\ref{sec:verification}: th
 \small
 \caption{Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs; ``review'' means a line-by-line comparison of this design against the RISC-V system it descends from, reading both implementations side by side.}
 \label{tab:defects}
-\begin{tabular}{p{0.19\textwidth} p{0.37\textwidth} p{0.1\textwidth} p{0.25\textwidth}}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.34\textwidth} >{\raggedright\arraybackslash}p{0.09\textwidth} >{\raggedright\arraybackslash}p{0.24\textwidth}}
 \toprule
 Component & Defect & Found by & Resolution \\
 \midrule
