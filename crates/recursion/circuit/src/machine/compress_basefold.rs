@@ -1127,8 +1127,10 @@ where
         //     the BP as `prefix_sum`, second half as `next_prefix_sum`.
         //     The host BranchingProgram reads its streams BIG-endian
         //     (get_ith_lsb_ef = p[dim-1-i]) while this emitter reads
-        //     LITTLE-endian, so the BP inputs (z_row + the two reduced-point
-        //     halves) are fed REVERSED to bridge the conventions.
+        //     LITTLE-endian (`v.get(i)`, no internal reversal -- see the
+        //     ORIENTATION note at step (6)), so the halves are fed REVERSED
+        //     to bridge the conventions.  `z_row` is likewise reversed;
+        //     `z_eval` is NOT, because the host already reverses `z_star`.
         //     The lagrange/prefix_sum_check below keeps proof_point un-reversed.
         let proof_point: &[Ext<C::F, C::EF>] = &partial_sumcheck_proof.point_and_eval.0;
         let half = proof_point.len() / 2;
@@ -1312,9 +1314,36 @@ where
         // (6) Multiply by the branching-program evaluation.
         //     BP parameterized by (z_row, z_eval);
         //     evaluated with first/second halves of the sub-sumcheck point.
-        // z_row reversed (BIG-endian host BP vs LITTLE-endian emitter); z_eval
-        // stays un-reversed (the host structural prover already uses rev(z_star)
-        // as its z_index, and the emitter's internal reversal lands it correctly).
+        // ORIENTATION.  `z_row` is fed REVERSED and `z_eval` is NOT, and the
+        // asymmetry is real -- it mirrors an asymmetry the HOST introduces.
+        //
+        // ⚠ `emit_branching_program_eval` has NO internal index reversal.  It
+        // indexes plainly, `lsb(v, i) = v.get(i)` (LITTLE-endian).  Its only
+        // `.rev()` is on the LAYER LOOP (`for layer in (0..=num_vars).rev()`),
+        // and the host DP loops its layers in reverse too, so loop order
+        // cancels and ONLY the indexing differs:
+        //     host   `get_ith_lsb_ef(p, i) = p[dim-1-i]`   (BIG-endian)
+        //     circuit `lsb(v, i) = v[i]`                   (LITTLE-endian)
+        //
+        // Now trace what the host actually passes.  `verify_jagged_reduction`
+        // (jagged_sumcheck.rs:326) calls
+        //     full_jagged_evaluation(offsets, z_row, z_col, z_star_rev)
+        // -- it reverses `z_star` but NOT `z_row`.  So the host's effective
+        // i-th LSB is `z_row[dim-1-i]` for the row point and
+        // `rev(z_star)[dim-1-i] = z_star[i]` for the trace point.  To match
+        // those under LITTLE-endian indexing this circuit must feed
+        // `rev(z_row)` and `z_eval` UN-reversed -- which is what the two
+        // bindings below do.
+        //
+        // Verified empirically: recomputing the host `BranchingProgram` from
+        // the exact arguments this call site passes reproduces the circuit's
+        // `bp_eval` at all four jagged-eval nodes (Asm x2, Wrap, Outer), with
+        // a negative control that flags 4/4 on a single perturbed limb.
+        //
+        // ⚠ DO NOT "fix" this into a symmetric form.  The previous comment
+        // here claimed the emitter performed an internal reversal; it does
+        // not, and making both sides reversed (or both un-reversed) breaks
+        // the bridge.
         let z_row_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
             z_row.iter().rev().map(|e| (*e).into()).collect();
         let z_eval_symbolic: Vec<SymbolicExt<C::F, C::EF>> =

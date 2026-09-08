@@ -191,10 +191,19 @@ where
     //   column_claims.len() = Σ_r (sum(cc[r]))  // flattened claims
     // then resize-to-next_power_of_two.
     //
-    // Host parity: no artificial-zero column insertions — the host
-    // packing has no pad columns (`offsets.len()-1 == Σ widths`); see
-    // recursive_jagged_pcs.rs / shard_level_witness.rs for the full
-    // rationale (the old `cc[len-2]+1` heuristic desynced z_col counts).
+    // ⚠ THE HOST PACKING DOES CARRY PAD COLUMNS.  A previous comment here
+    // claimed `offsets.len()-1 == Σ widths`; that is FALSE at every node.
+    // Measured on a fibonacci wrap run, `offsets.len()-1` minus `Σ widths`:
+    //     570-column node -> gap 5      557-column node -> gap 6
+    //     414-column node -> gap 4   (the gnark wrap)
+    // The gap is always `Σ packing.padding_heights[r].len()`, so every
+    // consumer MUST add the pads from `packing.padding_heights`.  The inner
+    // paths were never correct *because* the old premise held -- they were
+    // correct *despite* it, because they add the pads back separately.  The
+    // outer path was the only one that trusted the premise, and it was short
+    // by exactly the pad count (see JPADFIX in wrap_basefold.rs).
+    // CHECK the identity, never derive the pads from it -- deriving encodes
+    // the relationship instead of verifying it, which is what hid this.
     //
     // The lift's `col_prefix_sums_len = padded_cols + 1` controls
     // `num_col_variables = log2(padded_cols)`; the MLE assertion in

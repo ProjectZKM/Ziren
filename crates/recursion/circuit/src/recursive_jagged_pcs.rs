@@ -213,11 +213,19 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // `col_prefix_sums` — otherwise a round total that lands exactly on a
         // power of two samples one challenge too few.
         //
-        // The host's pad loop is bounded by the row cube (`2^z_row.len()`), but
-        // an area is a whole number of stacking stripes, so the gap is always
-        // below one stripe (`2^log_stacking_height` < the cube) and the loop
-        // emits exactly one column per round — the same one the lift lays out in
-        // `col_prefix_sums`.
+        // ⚠ A previous comment here claimed the host's pad loop "emits exactly
+        // one column per round".  That is FALSE.  Measured on a fibonacci wrap
+        // run, `padding_row_heights` per round was `[2, 3]`, `[1, 1]` and
+        // `[2, 4]` at the three jagged-eval nodes — two to four columns per
+        // round, never uniformly one.  The loop below is already written for
+        // the general case (`pad_cols` per round), so the code is correct; only
+        // the stated invariant was wrong.  Do not "simplify" this to a single
+        // insertion per round on the strength of that claim.
+        //
+        // The count that DOES hold is `packing.offsets.len() - 1 ==
+        // Σ widths + Σ packing.padding_heights[r].len()` — see JPADINV in
+        // machine/wrap_basefold.rs, where reading pads from the wrong source
+        // shipped a four-column undercount into the gnark wrap.
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         for (round_idx, insertion_point) in insertion_points.iter().enumerate().rev() {
             let pad_cols = padding_row_heights.get(round_idx).map(|p| p.len()).unwrap_or(0);
