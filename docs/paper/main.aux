@@ -157,6 +157,7 @@
 \newlabel{sec:isa-emulator}{{3.4}{11}{Emulator}{subsection.3.4}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4}The core as an intellectual-property block}{11}{section.4}\protected@file@percent }
 \newlabel{sec:ipcore}{{4}{11}{The core as an intellectual-property block}{section.4}{}}
+\newlabel{sec:ipcore-platform}{{4}{11}{Area belongs to the design}{section*.36}{}}
 \@writefile{toc}{\contentsline {paragraph}{Area belongs to the design.}{11}{section*.36}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces \textsc  {Ziren}{} as a processor. Each executed instruction is one row of one unit; units talk only over buses (program fetch, state chaining, register/memory accesses, byte-table lookups, cross-shard interactions). Preprocessed tables are committed in the verifying key; the public values close the state chain and carry the digests.}}{12}{figure.caption.39}\protected@file@percent }
 \newlabel{fig:processor}{{3}{12}{\Zirenver {} as a processor. Each executed instruction is one row of one unit; units talk only over buses (program fetch, state chaining, register/memory accesses, byte-table lookups, cross-shard interactions). Preprocessed tables are committed in the verifying key; the public values close the state chain and carry the digests}{figure.caption.39}{}}
@@ -175,9 +176,9 @@
 \@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Three consecutive cycles as rows of three units, drawn as a circuit. Each row is a unit with a fetch pin on the program bus, a receive and a send pin on the state bus (the shaded state registers carry $(\mathsf  {shard},\mathsf  {clk},\mathsf  {pc},\mathsf  {next\_pc})$ from the entry state onward), and four access pins at the sub-cycle positions $4\,\mathsf  {clk}{+}1..4$ on the memory bus; filled pins are the accesses the opcode makes (register reads at 1--2, memory at 3, the register write at 4), hollow pins are unused. The text inside each unit is what its constraints compute. The \texttt  {LoadWord} row sits in the branch's delay slot: its successor is the branch target, which arrives as data in the state register rather than as $\mathsf  {pc}{+}4$.}}{14}{figure.caption.41}\protected@file@percent }
 \newlabel{fig:frame}{{4}{14}{Three consecutive cycles as rows of three units, drawn as a circuit. Each row is a unit with a fetch pin on the program bus, a receive and a send pin on the state bus (the shaded state registers carry $(\mathsf {shard},\mathsf {clk},\mathsf {pc},\mathsf {next\_pc})$ from the entry state onward), and four access pins at the sub-cycle positions $4\,\mathsf {clk}{+}1..4$ on the memory bus; filled pins are the accesses the opcode makes (register reads at 1--2, memory at 3, the register write at 4), hollow pins are unused. The text inside each unit is what its constraints compute. The \texttt {LoadWord} row sits in the branch's delay slot: its successor is the branch target, which arrives as data in the state register rather than as $\mathsf {pc}{+}4$}{figure.caption.41}{}}
 \newlabel{lem:chain}{{5.1}{14}{State-bus chain}{theorem.5.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Registers and memory}{14}{subsection.5.3}\protected@file@percent }
-\newlabel{sec:air-memory}{{5.3}{14}{Registers and memory}{subsection.5.3}{}}
 \citation{sp1}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Registers and memory}{15}{subsection.5.3}\protected@file@percent }
+\newlabel{sec:air-memory}{{5.3}{15}{Registers and memory}{subsection.5.3}{}}
 \newlabel{lem:memory}{{5.2}{15}{Memory argument}{theorem.5.2}{}}
 \@writefile{toc}{\contentsline {paragraph}{Registers.}{15}{section*.42}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Shard-local memory.}{15}{section*.43}\protected@file@percent }
@@ -197,7 +198,6 @@
 \newlabel{sec:air-logup}{{5.8}{17}{The shard-level lookup argument}{subsection.5.8}{}}
 \citation{jagged-pcs}
 \citation{jagged-pcs}
-\citation{jagged-pcs}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.9}The shard-level zerocheck}{18}{subsection.5.9}\protected@file@percent }
 \newlabel{sec:air-zerocheck}{{5.9}{18}{The shard-level zerocheck}{subsection.5.9}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {6}The polynomial commitment: stacking and the jagged reduction}{18}{section.6}\protected@file@percent }
@@ -206,6 +206,7 @@
 \newlabel{sec:pcs-stacking}{{6.1}{18}{Dense packing and stacking}{subsection.6.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.2}The jagged reduction}{18}{subsection.6.2}\protected@file@percent }
 \newlabel{sec:pcs-jagged}{{6.2}{18}{The jagged reduction}{subsection.6.2}{}}
+\citation{jagged-pcs}
 \citation{jagged-pcs}
 \citation{barrington1989bounded}
 \citation{hr18}
@@ -275,11 +276,11 @@
 \newlabel{tab:host}{{4}{27}{Emulator and record pipeline under a host memory and processor budget. Sizes are per event or per shard of the block of \S \ref {sec:perf-setup}; times are host-side, single process, three repetitions}{table.caption.71}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces GPU kernel time of the core-proving stage by group (nsys, ten-shard sample) and trace area by unit (19.6\,G cells over the whole block), deployed configuration before the changes of \S  \ref {sec:perf-changes}. Area is rows $\times $ columns at this row's shard count; the \texttt  {Global} rows scale with the number of shards (\S  \ref {sec:air-global}).}}{27}{table.caption.72}\protected@file@percent }
 \newlabel{tab:census}{{5}{27}{GPU kernel time of the core-proving stage by group (nsys, ten-shard sample) and trace area by unit (19.6\,G cells over the whole block), deployed configuration before the changes of \S \ref {sec:perf-changes}. Area is rows $\times $ columns at this row's shard count; the \texttt {Global} rows scale with the number of shards (\S \ref {sec:air-global})}{table.caption.72}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {10.3}Prover efficiency: where time and area go}{27}{subsection.10.3}\protected@file@percent }
-\newlabel{sec:perf-prover}{{10.3}{27}{Prover efficiency: where time and area go}{subsection.10.3}{}}
-\newlabel{sec:perf-profile}{{10.3}{27}{Prover efficiency: where time and area go}{subsection.10.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {10.4}Prover efficiency: effect of arithmetisation changes}{27}{subsection.10.4}\protected@file@percent }
-\newlabel{sec:perf-changes}{{10.4}{27}{Prover efficiency: effect of arithmetisation changes}{subsection.10.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.3}Prover efficiency: where the cost is}{27}{subsection.10.3}\protected@file@percent }
+\newlabel{sec:perf-prover}{{10.3}{27}{Prover efficiency: where the cost is}{subsection.10.3}{}}
+\newlabel{sec:perf-profile}{{10.3}{27}{Prover efficiency: where the cost is}{subsection.10.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.4}Prover efficiency: what reducing area buys}{27}{subsection.10.4}\protected@file@percent }
+\newlabel{sec:perf-changes}{{10.4}{27}{Prover efficiency: what reducing area buys}{subsection.10.4}{}}
 \newlabel{fig:area}{{8a}{28}{Trace area by unit (19.6\,G cells); \texttt {Global} and the three largest memory-instruction units hold 59\%}{figure.caption.73}{}}
 \newlabel{sub@fig:area}{{a}{28}{Trace area by unit (19.6\,G cells); \texttt {Global} and the three largest memory-instruction units hold 59\%}{figure.caption.73}{}}
 \newlabel{fig:kernel}{{8b}{28}{GPU kernel time of the core-proving stage by group (nsys, ten-shard sample)}{figure.caption.73}{}}
@@ -288,8 +289,8 @@
 \newlabel{fig:profile}{{8}{28}{Where area and prover time go on the block, deployed configuration before the changes of \S \ref {sec:perf-changes}}{figure.caption.73}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Single-GPU wall-clock time (block 25\,907\,955, core and compress stages, host-verified), medians of interleaved runs. Each row adds one change to the previous row.}}{28}{table.caption.74}\protected@file@percent }
 \newlabel{tab:levers}{{6}{28}{Single-GPU wall-clock time (block 25\,907\,955, core and compress stages, host-verified), medians of interleaved runs. Each row adds one change to the previous row}{table.caption.74}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {10.5}Prover efficiency: layer order and multi-GPU scaling}{28}{subsection.10.5}\protected@file@percent }
-\newlabel{sec:perf-after}{{10.5}{28}{Prover efficiency: layer order and multi-GPU scaling}{subsection.10.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.5}Prover efficiency: memory traffic, and scaling across devices}{28}{subsection.10.5}\protected@file@percent }
+\newlabel{sec:perf-after}{{10.5}{28}{Prover efficiency: memory traffic, and scaling across devices}{subsection.10.5}{}}
 \citation{ethproofs}
 \@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Proved-execution throughput against number of GPUs for three block sizes after the lookup-layer change, and the deployed configuration for comparison. The dotted line is linear scaling from one GPU.}}{29}{figure.caption.75}\protected@file@percent }
 \newlabel{fig:scaling}{{9}{29}{Proved-execution throughput against number of GPUs for three block sizes after the lookup-layer change, and the deployed configuration for comparison. The dotted line is linear scaling from one GPU}{figure.caption.75}{}}

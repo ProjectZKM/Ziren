@@ -6,9 +6,9 @@ This section reports two metrics and one environment. The two metrics are the on
 \subsection{Experimental setup}
 \label{sec:perf-setup}
 
-\paragraph{Workload.} The workload is Ethereum mainnet block 25\,907\,955 executed by a MIPS32r2 build of the \texttt{reth} execution client with a witness trie represented as an arena. We use it because it is the workload on which this class of system is publicly compared, and because its instruction mix is representative of the hash-intensive computations these machines are asked to prove: the guest spends its cycles hashing trie nodes, recomputing a Merkle root over state it does not hold, and verifying signatures. It is not, however, a general-purpose benchmark, and \S\ref{sec:perf-threats} records what that costs the conclusions. Guest-side changes made during the study (a word-wise \texttt{memcmp}, a zero-copy Keccak wrapper, the arena trie) reduced its cycle count from 379 to 288 million; all prover measurements below use the 288\,M-cycle record, and the input witness is cached so that every run executes the identical instruction stream. The multi-GPU measurements of \S\ref{sec:perf-after} use three further blocks of 420, 530 and 912\,M cycles.
+\paragraph{Workload.} The workload is Ethereum mainnet block 25\,907\,955 executed by a MIPS32r2 build of the \texttt{reth} execution client with a witness trie represented as an arena. We use it because it is the workload on which this class of system is publicly compared, and because its instruction mix is representative of the hash-intensive computations these machines are asked to prove: the guest spends its cycles hashing trie nodes, recomputing a Merkle root over state it does not hold, and verifying signatures. It is not, however, a general-purpose benchmark, and \S\ref{sec:perf-threats} records what that costs the conclusions. The guest is compiled with a word-wise \texttt{memcmp}, a zero-copy Keccak wrapper and an arena representation of the witness trie, which together bring the block to 288 million cycles from the 379 million a naive build costs; every prover measurement below uses that record, from a cached witness, so that all runs execute the identical instruction stream. The multi-GPU measurements of \S\ref{sec:perf-after} use three further blocks of 420, 530 and 912\,M cycles.
 
-\paragraph{Hardware.} One NVIDIA RTX~5090 (32\,GB) in a host with one AMD EPYC 9355 processor and 925\,GB of memory; the multi-GPU measurements use four such GPUs in the same host (driver 570.153.02, CUDA 12.8, Ubuntu 22.04). The prover is pinned to one GPU; the source revisions behind every row are recorded in the artifact.
+\paragraph{Hardware.} One NVIDIA RTX~5090 (32\,GB) in a host with one AMD EPYC 9355 processor and 925\,GB of memory; the multi-GPU measurements use four such GPUs in the same host (driver 570.153.02, CUDA 12.8, Ubuntu 22.04). The prover is pinned to one GPU.
 
 \paragraph{Metrics.} \emph{Wall-clock time} is the end-to-end time of the proving process from reading the cached input to writing the compressed proof, including host verification of every shard proof and of the compressed proof (2--3\,s of the total, which a production service would omit). Two rates are reported, both in megahertz of guest execution. \emph{Emulation rate} is guest cycles per second of the emulator's own wall-clock time; \emph{proving throughput} is guest cycles per second of the whole proving process's wall-clock time. They are not comparable to each other---the second includes the first---and neither is a clock frequency. \emph{Trace area} is the sum over units of rows $\times$ columns, in cells, from the emulator's shard-close census multiplied by the unit widths; Table~\ref{tab:chips} gives the widths after the changes of \S\ref{sec:perf-changes}, while Table~\ref{tab:census} reports the census at the widths that preceded them. \emph{Proof size} is the byte length of the serialised compressed proof. GPU kernel time is attributed to kernel groups with \texttt{nsys} over a ten-shard sample.
 
@@ -18,7 +18,7 @@ This section reports two metrics and one environment. The two metrics are the on
 \label{sec:perf-emu}
 \label{sec:perf-host}
 
-The emulator is the block's front end: everything the prover consumes passes through it, and on a host driving several GPUs its cost, not the accelerator's, is what binds (below). Its two implementations differ by an order of magnitude in rate. On the block of \S\ref{sec:perf-setup} the just-in-time compiler emulates the guest at roughly 130\,MHz, while the interpreter runs at 5--20\,MHz depending on whether it is recording events; the two produce the same record (Section~\ref{sec:isa}), so the compiler is a pure speed-up. Emulation is therefore between two and twenty times faster than proving, and it is not the binding cost of a single-GPU proof.
+The emulator is the block's front end: everything the prover consumes passes through it, and on a host driving several GPUs its cost, not the accelerator's, is what binds (below). Its two implementations differ by an order of magnitude in rate. On the block of \S\ref{sec:perf-setup} the just-in-time compiler emulates the guest at roughly 130\,MHz, while the interpreter runs at 5--20\,MHz depending on whether it is recording events; the two produce the same record (Section~\ref{sec:isa}), so the compiler is a pure speed-up. The compiled emulator is therefore some twenty times faster than proving and the interpreter roughly comparable to it, so on a single GPU emulation is not the binding cost.
 
 It becomes binding when one host feeds several GPUs, because each shard is re-emulated by the worker that proves it. A worker's replay and trace generation took approximately one second of host processor time per shard against half a second of GPU time, and the event stream written by one shard replay was approximately 1\,GB. Table~\ref{tab:host} lists the changes made under an explicit host budget; each is a byte-identical transformation of the record, so the proofs do not change, and each removes data that no constraint reads.
 
@@ -49,7 +49,7 @@ Two rules follow. An event should carry exactly what a column witnesses: three o
 Two changes measured after the tables were taken are not reflected in them: wider clock fences, which reduce the shard count by 7\%, and heavier query grinding with device-side early exit, which reduces the proof by 7\%. Both were measured at a fixed revision and shard size, and neither moves wall-clock time.
 \end{remark}
 
-\subsection{Prover efficiency: where time and area go}
+\subsection{Prover efficiency: where the cost is}
 \label{sec:perf-prover}
 \label{sec:perf-profile}
 
@@ -84,7 +84,7 @@ Table~\ref{tab:census} pairs the kernel-time profile with the area census; Figur
 \end{figure}
 
 
-\subsection{Prover efficiency: effect of arithmetisation changes}
+\subsection{Prover efficiency: what reducing area buys}
 \label{sec:perf-changes}
 
 \begin{table}[t]
@@ -96,8 +96,8 @@ Table~\ref{tab:census} pairs the kernel-time profile with the area census; Figur
 Configuration & shards & wall-clock (s) & vs.\ previous \\
 \midrule
 Deployed configuration, no lookup grinding & 130 & 74.1 & \\
-+ \texttt{Global} 100 $\to$ 58 columns (\S\ref{sec:air-global}) & 130 & 71.2 & $-3.8\%$ \\
-+ memory-instruction accesses without byte checks (\S\ref{sec:air-memory}) & 130 & 70.2 & $-1.1\%$ \\
++ \texttt{Global} 100 $\to$ 58 columns (\S\ref{sec:air-global}) & 130 & 71.2 & $-3.9\%$ \\
++ memory-instruction accesses without byte checks (\S\ref{sec:air-memory}) & 130 & 70.2 & $-1.4\%$ \\
 + \texttt{ShiftLeftImm} 56 $\to$ 45 columns & 130 & 70.4 & neutral \\
 + shard size raised by a quarter & 114 & 67.1 & $-4.7\%$ \\
 \midrule
@@ -108,7 +108,7 @@ All four changes vs.\ deployed & 114 & 67.1 & $-9.4\%$ \\
 
 The cost model of \S\ref{sec:perf-profile} suggested the changes in Table~\ref{tab:levers}. Replacing the 30-bit boolean sign decomposition, the eight offset bits and the seven chord-witness columns of the \texttt{Global} unit by three byte lookups removed 42 columns from 48\,M rows and 3.8\% of the wall-clock time; the compressed proof size is unchanged (617\,618 bytes), while the core proofs shrink from 116 to 112\,MB per block, which also shortens the leaf stage. Removing the redundant byte checks on memory-instruction accesses removed 5.7\% of the \LogUp{} pairs for 1.1\% of the wall-clock time---less than the two-cells-per-pair rule predicts, because the lookup circuit's fold layers scale with padded heights rather than with pair count. An 11-column reduction of a 20\,M-row unit is below the measurement noise; the byte-check row, at 1.0\,s, sits at the edge of it. The largest single effect is the shard size: raising it by a quarter removes 16 of the block's shards---fewer than the cycle fence alone would suggest, because some shards close early on a unit's height budget---and saves 3.3\,s, approximately 0.2\,s per shard, which is the cost of one recursion leaf plus the per-shard setup. Larger shards were limited by GPU memory at this revision: at half again the baseline size the first-layer buffer of the \LogUp{} circuit, 4.5\,GiB, exceeds what the memory pool can place without repeated trim-and-retry and the prover runs 30\% slower, and at twice the baseline the shard does not fit in 32\,GB at all.
 
-\subsection{Prover efficiency: layer order and multi-GPU scaling}
+\subsection{Prover efficiency: memory traffic, and scaling across devices}
 \label{sec:perf-after}
 
 The profile identified the \LogUp{} circuit as the largest kernel consumer (42\%). A byte-level profile of its layers showed that the first layer paired adjacent fractions across the most-significant index bit, so that short units were carried through every layer of the tallest unit and the traffic summed over layers was 5.2$\times$ that of the first layer. Pairing on the least-significant bit instead lets each unit fold out after $\log_2$ of its own height. The change also frees enough memory for shards of twice the baseline size, which did not fit before it (\S\ref{sec:perf-changes}). With both, the same block proves in 48.7\,s on one GPU, against 67.8\,s for the revision without either at the largest shard size it could run ($-28\%$ for the pair; the 67.1\,s of Table~\ref{tab:levers} is a different revision), with the proof unchanged at 617\,618 bytes.
@@ -147,7 +147,7 @@ For context, the public block-proving dashboard~\citep{ethproofs} on 5 September
 \subsection{Answering the question of Section~\ref{sec:intro}}
 \label{sec:perf-answer}
 
-The question this paper opened with had three parts, and the evidence for each is now in. \emph{Is the prover competitive with the RISC-V systems?} Partly: on the public dashboard \Ziren{} was the slowest of the five single-GPU provers listed, and the changes reported here roughly halve its time on our own block, but the comparison is across different hardware, blocks and security regimes, and no same-hardware comparison against those systems exists. What can be said without qualification is that the machine proves a 288 million-cycle execution in under a minute on one consumer GPU, and scales to 20\,MHz of proved execution on four. \emph{Is the soundness stated under the weakest standard assumptions?} Within the proximity test, yes: the query counts are set in the unique-decoding regime, with no list-decoding conjecture, and the components are composed by a union bound rather than reported individually. Outside it, two assumptions remain, the random oracle and the discrete-logarithm hardness behind the cross-shard digest. \emph{Is the constraint system itself verified?} In part, and Section~\ref{sec:verification} is precise about which part: the emulator against an independent reference and a formal model, the units by extracted theorems of which a minority are closed, and the recursion machine not at all.
+The question this paper opened with had three parts, and the evidence for each is now in. \emph{Is the prover competitive with the RISC-V systems?} Partly: on the public dashboard \Ziren{} was the slowest of the five single-GPU provers listed, and the changes reported here reduce its time on our own block by a third, but the comparison is across different hardware, blocks and security regimes, and no same-hardware comparison against those systems exists. What can be said without qualification is that the machine proves a 288 million-cycle execution in under a minute on one consumer GPU, and scales to 20\,MHz of proved execution on four. \emph{Is the soundness stated under the weakest standard assumptions?} Within the proximity test, yes: the query counts are set in the unique-decoding regime, with no list-decoding conjecture, and the components are composed by a union bound rather than reported individually. Outside it, two assumptions remain, the random oracle and the discrete-logarithm hardness behind the cross-shard digest. \emph{Is the constraint system itself verified?} In part, and Section~\ref{sec:verification} is precise about which part: the emulator against an independent reference and a formal model, the units by extracted theorems of which a minority are closed, and the recursion machine not at all.
 
 \subsection{Threats to validity}
 \label{sec:perf-threats}
