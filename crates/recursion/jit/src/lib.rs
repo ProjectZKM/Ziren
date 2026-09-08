@@ -42,6 +42,8 @@
 #![cfg_attr(not(all(target_arch = "x86_64", target_os = "linux")), allow(unused))]
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+pub mod compile;
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub mod x86;
 
 use p3_koala_bear::KoalaBear;

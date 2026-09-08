@@ -17,6 +17,9 @@ thiserror = "1.0"
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
 dynasmrt = "2.0"
 
+[dev-dependencies]
+zkm-pcs = { workspace = true }
+
 [features]
 default = []
 
