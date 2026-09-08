@@ -215,6 +215,7 @@
 \@writefile{toc}{\contentsline {paragraph}{Regimes.}{19}{section*.38}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Components and their composition.}{19}{section*.39}\protected@file@percent }
 \newlabel{thm:composition}{{7.1}{19}{Composition}{theorem.7.1}{}}
+\citation{gnark}
 \@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Anatomy of a measured compressed proof (617\,618 bytes). Round-0 query openings dominate because each opens one coset row of every stripe.}}{20}{figure.caption.41}\protected@file@percent }
 \newlabel{fig:proofsize}{{6}{20}{Anatomy of a measured compressed proof (617\,618 bytes). Round-0 query openings dominate because each opens one coset row of every stripe}{figure.caption.41}{}}
 \@writefile{toc}{\contentsline {paragraph}{Proof size.}{20}{section*.40}\protected@file@percent }
@@ -222,7 +223,6 @@
 \newlabel{sec:recursion}{{8}{20}{Recursion and the outer ring}{section.8}{}}
 \@writefile{toc}{\contentsline {paragraph}{Leaves.}{20}{section*.42}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Compose tree.}{20}{section*.43}\protected@file@percent }
-\citation{gnark}
 \citation{unicorn}
 \@writefile{toc}{\contentsline {paragraph}{Shrink and wrap.}{21}{section*.44}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Verifying-key binding.}{21}{section*.45}\protected@file@percent }
@@ -260,6 +260,9 @@
 \newlabel{sec:perf-emu}{{10.2}{25}{Emulator efficiency}{subsection.10.2}{}}
 \newlabel{sec:perf-host}{{10.2}{25}{Emulator efficiency}{subsection.10.2}{}}
 \newlabel{rem:opt}{{10.1}{25}{Optimisations not reflected in the tables}{theorem.10.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.3}Prover efficiency: where the cost is}{25}{subsection.10.3}\protected@file@percent }
+\newlabel{sec:perf-prover}{{10.3}{25}{Prover efficiency: where the cost is}{subsection.10.3}{}}
+\newlabel{sec:perf-profile}{{10.3}{25}{Prover efficiency: where the cost is}{subsection.10.3}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces GPU kernel time of the core-proving stage by group (nsys, ten-shard sample) and trace area by unit (19.6\,G cells over the whole block), deployed configuration before the changes of \S  \ref {sec:perf-changes}. Area is rows $\times $ columns at this row's shard count; the \texttt  {Global} rows scale with the number of shards (\S  \ref {sec:air-global}).}}{26}{table.caption.61}\protected@file@percent }
 \newlabel{tab:census}{{5}{26}{GPU kernel time of the core-proving stage by group (nsys, ten-shard sample) and trace area by unit (19.6\,G cells over the whole block), deployed configuration before the changes of \S \ref {sec:perf-changes}. Area is rows $\times $ columns at this row's shard count; the \texttt {Global} rows scale with the number of shards (\S \ref {sec:air-global})}{table.caption.61}{}}
 \newlabel{fig:area}{{8a}{26}{Trace area by unit (19.6\,G cells); \texttt {Global} and the three largest memory-instruction units hold 59\%}{figure.caption.62}{}}
@@ -268,9 +271,6 @@
 \newlabel{sub@fig:kernel}{{b}{26}{GPU kernel time of the core-proving stage by group (nsys, ten-shard sample)}{figure.caption.62}{}}
 \@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Where area and prover time go on the block, deployed configuration before the changes of \S  \ref {sec:perf-changes}.}}{26}{figure.caption.62}\protected@file@percent }
 \newlabel{fig:profile}{{8}{26}{Where area and prover time go on the block, deployed configuration before the changes of \S \ref {sec:perf-changes}}{figure.caption.62}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {10.3}Prover efficiency: where the cost is}{26}{subsection.10.3}\protected@file@percent }
-\newlabel{sec:perf-prover}{{10.3}{26}{Prover efficiency: where the cost is}{subsection.10.3}{}}
-\newlabel{sec:perf-profile}{{10.3}{26}{Prover efficiency: where the cost is}{subsection.10.3}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.4}Prover efficiency: what reducing area buys}{26}{subsection.10.4}\protected@file@percent }
 \newlabel{sec:perf-changes}{{10.4}{26}{Prover efficiency: what reducing area buys}{subsection.10.4}{}}
 \citation{ethproofs}
@@ -280,32 +280,22 @@
 \newlabel{tab:cards}{{7}{27}{Wall-clock time per block (s, warm, three consecutive proofs of a 420\,M-cycle block) and proved-execution throughput, one to four RTX~5090 GPUs in one host, before and after the lookup-layer change. Proof size 617\,618 bytes in every case}{table.caption.65}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.5}Prover efficiency: memory traffic, and scaling across devices}{27}{subsection.10.5}\protected@file@percent }
 \newlabel{sec:perf-after}{{10.5}{27}{Prover efficiency: memory traffic, and scaling across devices}{subsection.10.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.6}Context: public block-proving provers}{27}{subsection.10.6}\protected@file@percent }
+\newlabel{sec:perf-field}{{10.6}{27}{Context: public block-proving provers}{subsection.10.6}{}}
 \@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Proved-execution throughput against number of GPUs for three block sizes after the lookup-layer change, and the deployed configuration for comparison. The dotted line is linear scaling from one GPU.}}{28}{figure.caption.64}\protected@file@percent }
 \newlabel{fig:scaling}{{9}{28}{Proved-execution throughput against number of GPUs for three block sizes after the lookup-layer change, and the deployed configuration for comparison. The dotted line is linear scaling from one GPU}{figure.caption.64}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {10.6}Context: public block-proving provers}{28}{subsection.10.6}\protected@file@percent }
-\newlabel{sec:perf-field}{{10.6}{28}{Context: public block-proving provers}{subsection.10.6}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.7}Answering the question of Section~\ref {sec:intro}}{28}{subsection.10.7}\protected@file@percent }
 \newlabel{sec:perf-answer}{{10.7}{28}{Answering the question of Section~\ref {sec:intro}}{subsection.10.7}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.8}Threats to validity}{28}{subsection.10.8}\protected@file@percent }
 \newlabel{sec:perf-threats}{{10.8}{28}{Threats to validity}{subsection.10.8}{}}
-\citation{whir}
-\citation{jagged-pcs}
-\citation{hr18}
-\@writefile{toc}{\contentsline {section}{\numberline {A}Protocol details}{29}{appendix.A}\protected@file@percent }
-\newlabel{sec:app-protocols}{{A}{29}{Protocol details}{appendix.A}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}The \ensuremath  {\mathsf  {WHIR}}{} iteration as implemented}{29}{subsection.A.1}\protected@file@percent }
-\newlabel{sec:app-whir}{{A.1}{29}{The \WHIR {} iteration as implemented}{subsection.A.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}The jagged branching program and the assist sumcheck}{29}{subsection.A.2}\protected@file@percent }
-\newlabel{sec:app-jagged}{{A.2}{29}{The jagged branching program and the assist sumcheck}{subsection.A.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{Evaluating $\setbox \z@ \hbox {\mathsurround \z@ $\textstyle f$}\mathaccent "0365{f}_t$: the branching program.}{29}{section*.66}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Ports of the core. ``Setup'' interfaces are used once per program; ``run'' interfaces once per execution.}}{30}{table.caption.67}\protected@file@percent }
-\newlabel{tab:ports}{{8}{30}{Ports of the core. ``Setup'' interfaces are used once per program; ``run'' interfaces once per execution}{table.caption.67}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {B}The core as delivered}{30}{appendix.B}\protected@file@percent }
-\newlabel{sec:app-ipcore}{{B}{30}{The core as delivered}{appendix.B}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.1}Ports}{30}{subsection.B.1}\protected@file@percent }
-\newlabel{sec:ipcore-ports}{{B.1}{30}{Ports}{subsection.B.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.2}Configuration space}{30}{subsection.B.2}\protected@file@percent }
-\newlabel{sec:ipcore-config}{{B.2}{30}{Configuration space}{subsection.B.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Ports of the core. ``Setup'' interfaces are used once per program; ``run'' interfaces once per execution.}}{29}{table.caption.66}\protected@file@percent }
+\newlabel{tab:ports}{{8}{29}{Ports of the core. ``Setup'' interfaces are used once per program; ``run'' interfaces once per execution}{table.caption.66}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {A}The core as delivered}{29}{appendix.A}\protected@file@percent }
+\newlabel{sec:app-ipcore}{{A}{29}{The core as delivered}{appendix.A}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}Ports}{29}{subsection.A.1}\protected@file@percent }
+\newlabel{sec:ipcore-ports}{{A.1}{29}{Ports}{subsection.A.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Configuration space}{29}{subsection.A.2}\protected@file@percent }
+\newlabel{sec:ipcore-config}{{A.2}{29}{Configuration space}{subsection.A.2}{}}
 \citation{cannon,kona}
 \bibstyle{alpha}
 \bibdata{references}
@@ -314,22 +304,22 @@
 \bibcite{ligero}{{AHIV17}{}{{}}{{}}}
 \bibcite{jolt}{{AST24}{}{{}}{{}}}
 \bibcite{openvm}{{{Axi}24}{}{{}}{{}}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.3}Integration paths}{31}{subsection.B.3}\protected@file@percent }
-\newlabel{sec:ipcore-integration}{{B.3}{31}{Integration paths}{subsection.B.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.4}Verification collateral}{31}{subsection.B.4}\protected@file@percent }
-\newlabel{sec:ipcore-collateral}{{B.4}{31}{Verification collateral}{subsection.B.4}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {C}Defects surfaced by the verification flow}{31}{appendix.C}\protected@file@percent }
-\newlabel{sec:app-defects}{{C}{31}{Defects surfaced by the verification flow}{appendix.C}{}}
 \bibcite{barrington1989bounded}{{Bar89}{}{{}}{{}}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.3}Integration paths}{30}{subsection.A.3}\protected@file@percent }
+\newlabel{sec:ipcore-integration}{{A.3}{30}{Integration paths}{subsection.A.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.4}Verification collateral}{30}{subsection.A.4}\protected@file@percent }
+\newlabel{sec:ipcore-collateral}{{A.4}{30}{Verification collateral}{subsection.A.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {B}Defects surfaced by the verification flow}{30}{appendix.B}\protected@file@percent }
+\newlabel{sec:app-defects}{{B}{30}{Defects surfaced by the verification flow}{appendix.B}{}}
 \bibcite{blum1994}{{BEG{$^{+}$}94}{}{{}}{{}}}
 \bibcite{ben2018fast}{{BSBHR18}{}{{}}{{}}}
 \bibcite{proximity-gaps}{{BSCI{$^{+}$}20}{}{{}}{{}}}
 \bibcite{bcs16}{{BSCS16}{}{{}}{{}}}
 \bibcite{deep-fri}{{BSGKS20}{}{{}}{{}}}
 \bibcite{zk-iot-survey}{{CJSC23}{}{{}}{{}}}
-\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs; ``review'' means a line-by-line comparison of this design against the RISC-V system it descends from, reading both implementations side by side.}}{32}{table.caption.68}\protected@file@percent }
-\newlabel{tab:defects}{{9}{32}{Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs; ``review'' means a line-by-line comparison of this design against the RISC-V system it descends from, reading both implementations side by side}{table.caption.68}{}}
 \bibcite{gnark}{{{Con}24}{}{{}}{{}}}
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs; ``review'' means a line-by-line comparison of this design against the RISC-V system it descends from, reading both implementations side by side.}}{31}{table.caption.67}\protected@file@percent }
+\newlabel{tab:defects}{{9}{31}{Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs; ``review'' means a line-by-line comparison of this design against the RISC-V system it descends from, reading both implementations side by side}{table.caption.67}{}}
 \bibcite{chiesa-yogev}{{CY24}{}{{}}{{}}}
 \bibcite{cysic}{{{Cys}25}{}{{}}{{}}}
 \citation{ethproofs}
@@ -380,4 +370,4 @@
 \bibcite{basefold}{{ZCF23}{}{{}}{{}}}
 \bibcite{zkmips}{{{ZKM}24}{}{{}}{{}}}
 \providecommand\NAT@force@numbers{}\NAT@force@numbers
-\gdef \@abspage@last{35}
+\gdef \@abspage@last{34}
