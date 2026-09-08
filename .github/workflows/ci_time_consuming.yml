@@ -2,7 +2,11 @@ name: Time-consuming test
 
 on:
   push:
-    branches: ["main"]
+    # Development happens on the feature branch; gating only `main` means an
+    # `#[ignore]`d end-to-end test can rot for weeks without anyone noticing.
+    # It did: `test_e2e_circuit_fibonacci` was broken from before 22efae5a
+    # until ff3488dc, behind three stacked breakages, and nothing ran it.
+    branches: ["main", "feat/upgrade-plonky3"]
   workflow_dispatch:
 
 env:
@@ -22,3 +26,15 @@ jobs:
             RUSTFLAGS="-C target-cpu=native" cargo test -r -p $pkg
           done
           RUSTFLAGS="-C target-cpu=native" cargo test -r --features imm-wrap-vk --features ark -- --ignored test_verify_groth16_imm_wrap_vk
+          # The end-to-end recursion gates.  All three are `#[ignore]`d because
+          # they are slow (~110s, ~335s, ~640s), which is exactly why nothing
+          # ran them -- and all three turned out to be load-bearing.  The
+          # compress and wrap gates cover core->compress->shrink->wrap; the
+          # circuit gate additionally drives the gnark outer circuit, which is
+          # the only thing that exercises the jagged-eval closing identity, and
+          # is where the column-accounting defect fixed in ff3488dc lived.
+          # NOTE: the circuit gate needs the Go toolchain on the runner.
+          VERIFY_VK=false RUSTFLAGS="-C target-cpu=native" cargo test -r -p zkm-prover -- --ignored --test-threads=1 \
+            tests::test_e2e_compress_fibonacci \
+            tests::test_e2e_wrap_fibonacci \
+            tests::test_e2e_circuit_fibonacci
