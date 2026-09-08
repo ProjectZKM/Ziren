@@ -356,8 +356,15 @@ pub fn verify_core_basefold<C, SC, A>(
             // evaluation-proof variable (same jagged metadata, different
             // inner PCS proof) and takes the WHIR verify branch below.
             let mut whir_evaluation_proof_var = None;
+            // (packing.offsets.len()-1, pad_cols) from the host packing — the
+            // authoritative column count, cross-checked in `jagged_column_count`.
+            let mut pack_info: Option<(usize, usize)> = None;
             let evaluation_proof_var = match &evaluation_proof {
                 LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+                    pack_info = Some((
+                        host.packing.offsets.len().saturating_sub(1),
+                        host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
+                    ));
                     whir_evaluation_proof_var =
                         Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
                             builder,
@@ -379,6 +386,10 @@ pub fn verify_core_basefold<C, SC, A>(
                     None
                 }
                 LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+                    pack_info = Some((
+                        host.packing.offsets.len().saturating_sub(1),
+                        host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
+                    ));
                     Some(crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                         builder,
                         host,
@@ -543,8 +554,20 @@ pub fn verify_core_basefold<C, SC, A>(
                     // evaluation over `packing.offsets.len() - 1` columns, pads
                     // included, so leaving them out here both drops their terms and
                     // shifts every column after the preprocessed round's pad by one.
-                    column_counts_by_round.iter().flatten().sum::<usize>()
-                        + preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
+                    {
+                        let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
+                        let witness_pads: usize =
+                            preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
+                        match pack_info {
+                            // Both sources are populated on the inner ring, so the
+                            // cross-check is a real invariant here -- this is where it
+                            // earns its keep (see jagged_column_count).
+                            Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
+                                total_cols, widths, packing_pads, Some(witness_pads), "core",
+                            ),
+                            None => widths + witness_pads,
+                        }
+                    },
                 );
             let mut challenger = machine.config().challenger_variable(builder);
 
@@ -670,6 +693,10 @@ pub fn verify_core_basefold<C, SC, A>(
                 // per-proof verifier; the proof's own fields are read
                 // where the verification actually happens.
                 LiftedEvalProof::Bundle { host, .. } => {
+                    pack_info = Some((
+                        host.packing.offsets.len().saturating_sub(1),
+                        host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
+                    ));
                     let bundle_num_vars =
                         host.basefold_proof.basefold_proof.fri_commitments.len();
                     // Fixed-height guard: enumerability rests on every
