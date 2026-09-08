@@ -41,28 +41,12 @@ Theorem~\ref{thm:unique} is what makes a satisfying trace unique given the deter
 \subsection{Findings}
 \label{sec:verification-findings}
 
-Table~\ref{tab:defects} lists the defects the flow surfaced; the first is described in detail.
+The flow surfaced nine defects, and how they were found is more informative than what they were. Three came from the determinism theorems, and all three are under-constraint: a value that the constraints permit to take more than one form. Three came from end-to-end proving, and all three are integration mistakes: two components that each behave correctly and disagree about a convention. The last three came from reading this implementation line by line against the RISC-V system it descends from, and they share a property the other two techniques cannot reach. Each is an \emph{omission}---a check that is absent rather than wrong.
 
-\begin{table}[t]
-\centering
-\small
-\caption{Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs; ``review'' means a line-by-line comparison of this design against the RISC-V system it descends from, reading both implementations side by side.}
-\label{tab:defects}
-\begin{tabular}{p{0.19\textwidth} p{0.37\textwidth} p{0.1\textwidth} p{0.25\textwidth}}
-\toprule
-Component & Defect & Found by & Resolution \\
-\midrule
-Syscall unit & argument half-words not determined by the reduced argument ($2^{32} > p$) & theorem & half-words carried on the syscall bus; theorem closes \\
-Syscall unit & result columns gated by a selector that no input pins & theorem & selector carried on the syscall bus; theorem closes \\
-Extractor & shard and clock fields of syscall interactions dropped, leaving outputs without inputs & theorem & extractor fixed \\
-Shape configuration & range table absent from the preprocessed heights; every shape-fixed proving test failed & proving & height registered \\
-Standalone verifier & recursion-key Merkle root computed from the bare key list while the prover pads to the tree height & proving & verifier pads the leaves \\
-Proving service & configured to skip the in-circuit key check, producing proofs the standalone verifier rejects & proving & service configuration \\
-Recursion, terminal stages & the completeness flag gates every completeness predicate---including the one forcing the cross-shard sum to zero---and neither the shrink nor the wrap circuit pinned it, so a proof of an execution prefix could be wrapped & review & both terminal circuits assert it; the deferred program can no longer emit it set \\
-Wrap circuit & the recursion-key allowlist root was not a public input, so no external verifier could require the published one & review & exposed as a public input and checked by the standalone and on-chain verifiers \\
-Hash parameters & partial-round count taken from the tabulation for S-box degree seven rather than three, giving less algebraic-attack margin than intended & review & schedule corrected; the measurements of Section~\ref{sec:performance} predate the change \\
-\bottomrule
-\end{tabular}
-\end{table}
+That distinction is worth stating plainly, because it bounds what the first two techniques can establish. A determinism theorem asks whether the constraints present admit two behaviours; it is silent about a constraint that was never written, since its absence makes no theorem false. Testing is silent for the same reason: an omitted check breaks nothing that an honest execution does, so no test fails. The completeness flag left unpinned at the terminal stages is the sharpest example. Every honest proof sets it, so every test passes and every extracted theorem holds; only a reader asking what enforces it finds that nothing does. Differential reading against an independent implementation of the same protocol is the cheapest way we know to find that class, and it is the reason we report it as a third technique rather than as incidental review.
+
+Appendix~\ref{sec:app-defects} tabulates all nine. One is described in detail here, because it is the one the extracted theorems found unaided and it shows what such a theorem does and does not say.
+
+
 
 \paragraph{Syscall argument half-words.} The syscall unit receives a reduced 32-bit argument $a \in \F$ from the instruction that raised the syscall and witnesses it as two 16-bit half-words $a_{\mathrm{lo}}, a_{\mathrm{hi}}$ constrained by $a_{\mathrm{lo}} + 2^{16} a_{\mathrm{hi}} = a$ in $\F$ and two 16-bit range checks. Because $2^{32} > p$, this does not determine the half-words: for every $a < 2^{32} - p$ both the decomposition of $a$ and that of $a + p$ satisfy the constraints. The extracted theorem for the unit is false and the automation reports exactly these four outputs as open. Whether the ambiguity is exploitable depends on the consumer: an accelerator that re-reduces the half-words modulo $p$ sees the same field element either way, while one that uses them as an exact 32-bit pointer does not. The finding is a specification gap between the two sides of the syscall bus. The remedy, applied after the finding, is to carry the half-words rather than the reduced sum on the bus, together with the unit's Linux selector; with that change the unit's determinism theorem closes in under a minute. The change alters the constraints of two units and therefore the verifying keys, so it is staged with the next key-changing release rather than deployed alone.
