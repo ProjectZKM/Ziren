@@ -288,7 +288,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // instantiation of this generic never receives a WhirBundle — its
     // input is the wrap machine's own OUTER BaseFold proof.
     let mut whir_evaluation_proof_var = None;
-    // JPADINV: (offsets.len()-1, pad_cols) from the host packing, outer path only.
+    // (offsets.len()-1, pad_cols) from the host packing — the authoritative
+    // column count, fed to `jagged_column_count` below.  Outer path only.
     let mut outer_pack_info: Option<(usize, usize)> = None;
     let evaluation_proof_var = match &evaluation_proof {
         crate::shard_level_witness::LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
@@ -323,8 +324,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             expected_eval,
             commit_root,
         } => {
-            // JPADINV: the host packing's own column accounting, from the SAME
-            // source the outer lift uses (`bundle.packing.padding_heights`,
+            // The host packing's own column accounting, from the SAME source
+            // the outer lift uses (`bundle.packing.padding_heights`,
             // shard_level_witness.rs:1383/1548) rather than the witness field.
             outer_pack_info = Some((
                 host.packing.offsets.len().saturating_sub(1),
@@ -455,56 +456,29 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
     // Chip columns + each round's stacking-padding columns (see
     // core_basefold.rs for why the pads have to be counted).
-    // JPADFIX: the stacking-pad columns must come from the SAME source the
-    // lift uses -- `bundle.packing.padding_heights` (shard_level_witness.rs:
-    // 1383 bakes the outer column space from it, :1548 bakes its constants).
-    // `preprocessed_round.padding_heights` is the WITNESS field: populated on
-    // the inner ring, EMPTY on the outer one.  Reading it here made
-    // `wrap_real_num_cols` short by exactly the pad count (410 vs 414), which
-    // truncated the jagged-eval column walk in `real_jagged_evaluator_fn` and
-    // broke its closing identity in the gnark wrap ONLY.  The host never
-    // notices: it derives its column count from the packing itself.
-    let wrap_real_num_cols: usize = column_counts_by_round.iter().flatten().sum::<usize>()
-        + outer_pack_info.map(|(_, pads)| pads).unwrap_or_else(|| {
-            preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>()
-        });
-    // ── JPADINV ────────────────────────────────────────────────────────
-    // The host packing DOES carry stacking-pad columns (measured gaps of
-    // 5, 6 and 4 at the three jagged-eval nodes), so every consumer must
-    // add them.  CHECK the identity; never derive the pads from it.
-    if let Some((host_cols, host_pads)) = outer_pack_info {
+    // The column count comes from ONE source: the host packing.  SP1 derives
+    // its jagged layout from a single place (a scan over `column_counts_by_round`,
+    // with no pads at all); Ziren's WHIR stacking adds pad columns, and the
+    // second source that grew for them — the witness field
+    // `preprocessed_round.padding_heights`, empty on the outer ring — is what
+    // shipped a four-column undercount into the gnark wrap.  See ff3488dc.
+    let wrap_real_num_cols: usize = {
         let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
-        let wit_pads: usize =
+        let witness_pads: usize =
             preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
-        assert_eq!(
-            host_cols,
-            widths + host_pads,
-            "jagged column accounting: host packing has {host_cols} columns but \
-sum(widths)={widths} + packing.padding_heights={host_pads}"
-        );
-        assert_eq!(
-            wrap_real_num_cols, host_cols,
-            "wrap_real_num_cols={wrap_real_num_cols} disagrees with the host packing's \
-{host_cols} columns (widths={widths}, witness pads={wit_pads}, packing pads={host_pads})"
-        );
-    }
-    if std::env::var_os("ZIREN_JEVAL_ARGS").is_some() {
-        eprintln!(
-            ">>> JCOLS wrap real_num_cols={} prep_n={} prep_sum={} main_n={} main_sum={} \
-pad_groups={:?} pad_sum={}",
-            wrap_real_num_cols,
-            column_counts_by_round.first().map(|v| v.len()).unwrap_or(0),
-            column_counts_by_round.first().map(|v| v.iter().sum::<usize>()).unwrap_or(0),
-            column_counts_by_round.last().map(|v| v.len()).unwrap_or(0),
-            column_counts_by_round.last().map(|v| v.iter().sum::<usize>()).unwrap_or(0),
-            preprocessed_round.padding_heights.iter().map(|p| p.len()).collect::<Vec<_>>(),
-            preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
-        );
-        for (i, n) in chip_names.iter().enumerate() {
-            eprintln!(">>> JCOLSCHIP wrap {} {} {}", i, n,
-                column_counts_by_round.last().and_then(|v| v.get(i)).copied().unwrap_or(0));
+        match outer_pack_info {
+            Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
+                total_cols,
+                widths,
+                packing_pads,
+                Some(witness_pads),
+                "wrap",
+            ),
+            // No outer bundle in scope: the witness field is the only source
+            // here, and on these paths it is the populated one.
+            None => widths + witness_pads,
         }
-    }
+    };
     let jagged_evaluator_fn = super::compress_basefold::real_jagged_evaluator_fn::<
         C,
         SC::FriChallengerVariable,

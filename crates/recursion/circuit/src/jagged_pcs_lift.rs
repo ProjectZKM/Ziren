@@ -201,7 +201,7 @@ where
     // paths were never correct *because* the old premise held -- they were
     // correct *despite* it, because they add the pads back separately.  The
     // outer path was the only one that trusted the premise, and it was short
-    // by exactly the pad count (see JPADFIX in wrap_basefold.rs).
+    // by exactly the pad count (checked by `zkm_pcs::jagged_pcs::jagged_column_count`; see ff3488dc).
     // CHECK the identity, never derive the pads from it -- deriving encodes
     // the relationship instead of verifying it, which is what hid this.
     //

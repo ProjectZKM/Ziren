@@ -223,9 +223,10 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // insertion per round on the strength of that claim.
         //
         // The count that DOES hold is `packing.offsets.len() - 1 ==
-        // Σ widths + Σ packing.padding_heights[r].len()` — see JPADINV in
-        // machine/wrap_basefold.rs, where reading pads from the wrong source
-        // shipped a four-column undercount into the gnark wrap.
+        // Σ widths + Σ packing.padding_heights[r].len()` — checked by
+        // `zkm_pcs::jagged_pcs::jagged_column_count`, which is the single
+        // source of truth for this count.  Reading pads from the wrong source
+        // shipped a four-column undercount into the gnark wrap (ff3488dc).
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         for (round_idx, insertion_point) in insertion_points.iter().enumerate().rev() {
             let pad_cols = padding_row_heights.get(round_idx).map(|p| p.len()).unwrap_or(0);

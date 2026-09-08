@@ -2701,3 +2701,61 @@ mod test {
         }
     }
 }
+
+/// The jagged column-accounting invariant, with the packing as the SINGLE
+/// SOURCE OF TRUTH for how many columns a shard's proof covers.
+///
+/// SP1 has no stacking-padding columns at all: its recursion verifier derives
+/// the column layout from one place, a plain scan over `column_counts_by_round`
+/// (`crates/recursion/circuit/src/jagged/verifier.rs`).  Ziren's jagged-over-WHIR
+/// stacking DOES pad each opening round out to its committed area, so the count
+/// is `Σ widths + Σ pads` — and Ziren consequently grew a second source for the
+/// pad half, the witness field `preprocessed_round.padding_heights`.
+///
+/// Those two sources disagreed: the witness field is populated on the inner ring
+/// and EMPTY on the outer one, so the gnark wrap computed 410 columns against the
+/// packing's 414, truncated its jagged-eval column walk, and failed the closing
+/// identity — while the host, which derives its count from the packing, accepted
+/// the same proof.  See `ff3488dc`.
+///
+/// This restores SP1's property: **one authoritative count**, returned from here,
+/// with the reconstruction merely CHECKED against it.  Never derive the pads as
+/// `total_cols - widths` — that encodes the relationship instead of verifying it,
+/// which is exactly what hid the defect.
+///
+/// # Panics
+///
+/// If the packing is internally inconsistent, or if either reconstruction
+/// disagrees with it.  These are `assert!`s rather than `debug_assert!`s on
+/// purpose: the release build is the one that ships proofs.
+/// Arguments, in order:
+/// - `total_cols`: `packing.offsets.len() - 1`, the authoritative total.
+/// - `widths`: `Σ_r Σ column_counts_by_round[r]`.
+/// - `packing_pads`: `Σ_r packing.padding_heights[r].len()`.
+/// - `witness_pads`: `Σ_r preprocessed_round.padding_heights[r].len()`, the
+///   witness field — or `None` where the caller has nothing to cross-check.
+/// - `site`: for the panic message: "wrap", "compress", "core", "deferred".
+pub fn jagged_column_count(
+    total_cols: usize,
+    widths: usize,
+    packing_pads: usize,
+    witness_pads: Option<usize>,
+    site: &str,
+) -> usize {
+    assert_eq!(
+        total_cols,
+        widths + packing_pads,
+        "{site}: the jagged packing is internally inconsistent — offsets describe \
+{total_cols} columns but sum(widths)={widths} + sum(packing.padding_heights)={packing_pads}"
+    );
+    if let Some(wit) = witness_pads {
+        assert_eq!(
+            wit, packing_pads,
+            "{site}: stacking-pad count disagrees between its two sources — the witness \
+field carries {wit}, the packing carries {packing_pads}.  The packing is authoritative; \
+a consumer reading the witness field here would verify over the wrong number of columns \
+(this is the ff3488dc defect, which was invisible to the host verifier)."
+        );
+    }
+    total_cols
+}
