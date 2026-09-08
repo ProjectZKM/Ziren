@@ -12,7 +12,7 @@
 ]
 % ---------------- row 1: execution and core proving (left to right)
 \node[io, minimum width=2.3cm] (elf) at (0,0) {MIPS32r2 ELF\\{\scriptsize input, hints}};
-\node[box, minimum width=2.4cm] (exec) at (3.2,0) {Executor\\{\scriptsize JIT or interpreter}};
+\node[box, minimum width=2.4cm] (exec) at (3.2,0) {Emulator\\{\scriptsize compiled or interpreted}};
 \node[card] at (6.7,0.16) {}; \node[card] at (6.6,0.08) {};
 \node[card] (rec) at (6.5,0) {shard\\record $i$};
 \node[box, text width=3.9cm, minimum height=1.2cm] (core) at (9.9,0) {Core prover (one shard)\\{\scriptsize \LogUp{}, zerocheck,\\jagged sumcheck, \WHIR{}}};

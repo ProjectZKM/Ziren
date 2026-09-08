@@ -42,7 +42,7 @@ Flat guest memory: one 16-byte entry per word in a sparse mapping; untouched pag
 \end{tabular}
 \end{table}
 
-Two rules follow. An event should carry exactly what a column witnesses: three of the seven rows remove fields that only a debug assertion or an unused code path had kept alive, 44 bytes per instruction event in total. And the process that coordinates several GPUs should never hold the whole execution: the coordinator's resident state is one shard's oracle and the guest image, so the block size is not bounded by host memory; only the shard size is bounded, by the accelerator's memory (\S\ref{sec:perf-changes}). Both rules apply to any \zkVM{} whose prover is fed by a re-executing host.
+Two rules follow. An event should carry exactly what a column witnesses: three of the seven rows remove fields that only a debug assertion or an unused code path had kept alive; on the shared register records alone this is 44 bytes for every instruction event, one write record and two read records. And the process that coordinates several GPUs should never hold the whole execution: the coordinator's resident state is one shard's oracle and the guest image, so the block size is not bounded by host memory; only the shard size is bounded, by the accelerator's memory (\S\ref{sec:perf-changes}). Both rules apply to any \zkVM{} whose prover is fed by a re-executing host.
 
 \begin{remark}[Optimisations not reflected in the tables]
 \label{rem:opt}
@@ -101,7 +101,7 @@ Deployed configuration, no lookup grinding & 130 & 74.1 & \\
 + \texttt{ShiftLeftImm} 56 $\to$ 45 columns & 130 & 70.4 & neutral \\
 + shard size raised by a quarter & 114 & 67.1 & $-4.7\%$ \\
 \midrule
-All four changes vs.\ deployed & 114 & 67.1 & $-9.4\%$ \\
+All four vs.\ deployed & 114 & 67.1 & $-9.4\%$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -113,7 +113,7 @@ The cost model of \S\ref{sec:perf-profile} suggested the changes in Table~\ref{t
 
 The profile identified the \LogUp{} circuit as the largest kernel consumer (42\%). A byte-level profile of its layers showed that the first layer paired adjacent fractions across the most-significant index bit, so that short units were carried through every layer of the tallest unit and the traffic summed over layers was 5.2$\times$ that of the first layer. Pairing on the least-significant bit instead lets each unit fold out after $\log_2$ of its own height. The change also frees enough memory for shards of twice the baseline size, which did not fit before it (\S\ref{sec:perf-changes}). With both, the same block proves in 48.7\,s on one GPU, against 67.8\,s for the revision without either at the largest shard size it could run ($-28\%$ for the pair; the 67.1\,s of Table~\ref{tab:levers} is a different revision), with the proof unchanged at 617\,618 bytes.
 
-Table~\ref{tab:cards} reports the scaling of that configuration from one to four GPUs on a 420\,M-cycle block, against the deployed configuration of the first row of Table~\ref{tab:levers}; the throughput columns give proved guest cycles per second of wall-clock time. Figure~\ref{fig:scaling} plots throughput against GPU count for three block sizes (420, 530 and 912\,M cycles; the larger blocks take 84.3/44.7/26.5\,s and 124.3/65.0/38.0\,s on one, two and four GPUs). Throughput is nearly independent of block size, within 20\% across the three, and scales by $1.9\times$ from one GPU to two and by $3.1\times$ to four. The last row of Table~\ref{tab:cards} shows the change helping least at four GPUs: it shortens core proving, whose share of the wall-clock time falls as the recursion tail and the start-up ramp grow. The gap to linear scaling has two components: the serial tail of the recursion tree after the last core shard, and the ramp at the start of a block, during which the emulator has not yet produced enough shards to keep every GPU busy---the same host-side cost as \S\ref{sec:perf-emu}, seen from the accelerator's side.
+Table~\ref{tab:cards} reports the scaling of that configuration from one to four GPUs on a 420\,M-cycle block, against the deployed configuration of the first row of Table~\ref{tab:levers}; the throughput columns give proved guest cycles per second of wall-clock time. Figure~\ref{fig:scaling} plots throughput against GPU count for three block sizes (420, 530 and 912\,M cycles; the larger blocks take 84.3/44.7/26.5\,s and 124.3/65.0/38.0\,s on one, two and four GPUs). Throughput is nearly independent of block size, within 20\% across the three, and on the 420\,M-cycle block scales by $1.9\times$ from one GPU to two and by $3.1\times$ to four; the two larger blocks reach $3.2\times$ and $3.3\times$ at four. The last row of Table~\ref{tab:cards} shows the change helping least at four GPUs: it shortens core proving, whose share of the wall-clock time falls as the recursion tail and the start-up ramp grow. The gap to linear scaling has two components: the serial tail of the recursion tree after the last core shard, and the ramp at the start of a block, during which the emulator has not yet produced enough shards to keep every GPU busy---the same host-side cost as \S\ref{sec:perf-emu}, seen from the accelerator's side.
 
 \begin{figure}[t]
 \centering

@@ -121,7 +121,7 @@ Two things should be said plainly about this assumption, because it is the weake
 
 Second, sparsity is not the end of the analysis. The relevant attack on a subset-sum in a group is the generalised birthday method, whose cost falls as the adversary is allowed more lists; the bound must therefore be taken against the number of interactions a prover can actually place in a trace, not against the group order alone. The generic-group cost of a single discrete logarithm in the large prime-order subgroup of $E(\F_{p^7})$ is the square root of that subgroup's order, and $|E(\F_{p^7})| \approx p^7 \approx 2^{217}$; we do not state a bit figure here because the honest figure is the one that comes out of the $k$-list analysis at our interaction count, and that analysis is not yet done. This is a computational assumption, not the information-theoretic bound the rest of the accounting enjoys, and Section~\ref{sec:iopp-soundness} lists it as a separate component.
 
-Exceptional cases of the chord addition (doubling and the identity) cannot occur on honest traces because the running sum starts at a fixed public offset point and the dummy point $D$ is chosen with $\pm D$ outside the image of $\mathsf{enc}$, and a dishonest trace that hits one fails the addition identities.
+Exceptional cases of the chord addition (doubling and the identity) cannot occur on honest traces because the running sum starts at a fixed public offset point and the fixed offset point, written $D$, is chosen with $\pm D$ outside the image of $\mathsf{enc}$, and a dishonest trace that hits one fails the addition identities.
 
 \subsection{Trace uniqueness}
 \label{sec:air-unique}
