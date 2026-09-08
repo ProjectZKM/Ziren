@@ -12,7 +12,7 @@
 
 use std::{collections::BTreeMap, path::PathBuf};
 
-use p3_field::PrimeField;
+use p3_field::{PrimeCharacteristicRing, PrimeField};
 use p3_koala_bear::KoalaBear;
 use zkm_prover::{utils::koalabears_to_bn254, InnerSC};
 use zkm_recursion_circuit::merkle_tree::MerkleTree;
@@ -26,8 +26,23 @@ fn main() {
         bincode::deserialize(&bytes).expect("deserialize vk_map.bin");
     println!("vk_map.bin: {} keys", allowed.len());
 
-    let (root, _tree) =
-        MerkleTree::<KoalaBear, InnerSC>::commit(allowed.keys().copied().collect());
+    // Pad to the FIXED capacity before committing.  The prover commits the key
+    // set padded with the all-zero digest to `2^VK_MERKLE_TREE_HEIGHT` -- the
+    // height the enumerated recursion programs bake in -- so the root carried in
+    // a proof's public values is the root of the PADDED tree.  Committing the
+    // bare key list here yields a different root whenever the map is not exactly
+    // a power of two (210 is not), and every proof then fails `vk_root mismatch`.
+    // Same fix as 48629f0e made on the verifier side; `VK_MERKLE_TREE_HEIGHT`
+    // only ever changes together with a vk_map regeneration.
+    let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> = allowed.keys().copied().collect();
+    assert!(
+        leaves.len() <= (1 << zkm_prover::VK_MERKLE_TREE_HEIGHT),
+        "vk_map has {} keys, exceeding the fixed merkle capacity 2^{}",
+        leaves.len(),
+        zkm_prover::VK_MERKLE_TREE_HEIGHT
+    );
+    leaves.resize(1 << zkm_prover::VK_MERKLE_TREE_HEIGHT, [KoalaBear::ZERO; DIGEST_SIZE]);
+    let (root, _tree) = MerkleTree::<KoalaBear, InnerSC>::commit(leaves);
 
     let bigint = koalabears_to_bn254(&root).as_canonical_biguint();
     let be = bigint.to_bytes_be();
