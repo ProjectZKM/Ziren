@@ -49,7 +49,9 @@ pub mod x86;
 use p3_koala_bear::KoalaBear;
 use zkm_recursion_core::air::Block;
 use zkm_recursion_core::runtime::memory::MemoryEntry;
-use zkm_recursion_core::runtime::{AnalyzedInstruction, Instruction, RawProgram, SeqBlock};
+use zkm_recursion_core::runtime::{
+    AnalyzedInstruction, BaseAluOpcode, ExtAluOpcode, Instruction, RawProgram, SeqBlock,
+};
 
 /// Why a program could not be compiled.
 #[derive(Debug, thiserror::Error)]
@@ -113,6 +115,14 @@ pub struct Plan {
     pub fallback: usize,
     /// Per-variant counts, in [`Plan::VARIANTS`] order.
     pub mix: [usize; 12],
+    /// `BaseAlu` by opcode: Add, Sub, Mul, Div (Div folds in DivFAssert).
+    pub base_ops: [usize; 4],
+    /// `ExtAlu` by opcode: Add, Sub, Mul, Div (Div folds in DivEAssert).
+    ///
+    /// This is what decides how much of the extension arithmetic is worth
+    /// inlining: a lane-wise add is four instructions, a quartic multiply
+    /// mod `X^4 - 3` is sixteen Montgomery multiplies and their reduction.
+    pub ext_ops: [usize; 4],
 }
 
 impl Plan {
@@ -181,6 +191,25 @@ pub fn plan<F>(program: &RawProgram<AnalyzedInstruction<F>>) -> Plan {
                     for ai in &basic.instrs {
                         let (idx, cov) = coverage_of(ai.inner());
                         p.mix[idx] += 1;
+                        match ai.inner() {
+                            Instruction::BaseAlu(i) => {
+                                p.base_ops[match i.opcode {
+                                    BaseAluOpcode::AddF => 0,
+                                    BaseAluOpcode::SubF => 1,
+                                    BaseAluOpcode::MulF => 2,
+                                    BaseAluOpcode::DivF | BaseAluOpcode::DivFAssert => 3,
+                                }] += 1;
+                            }
+                            Instruction::ExtAlu(i) => {
+                                p.ext_ops[match i.opcode {
+                                    ExtAluOpcode::AddE => 0,
+                                    ExtAluOpcode::SubE => 1,
+                                    ExtAluOpcode::MulE => 2,
+                                    ExtAluOpcode::DivE | ExtAluOpcode::DivEAssert => 3,
+                                }] += 1;
+                            }
+                            _ => {}
+                        }
                         match cov {
                             Coverage::Native => p.native += 1,
                             Coverage::CallOut => p.call_out += 1,

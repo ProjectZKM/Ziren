@@ -64,10 +64,26 @@ fn main() {
             .collect();
         rows.sort_unstable_by(|a, b| b.0.cmp(&a.0));
         for (n, name) in rows {
-            println!(
-                "  {name:<20} {n:>10}  {:>6.2}%",
-                100.0 * n as f64 / plan.total() as f64
-            );
+            println!("  {name:<20} {n:>10}  {:>6.2}%", 100.0 * n as f64 / plan.total() as f64);
+        }
+        let opnames = ["Add", "Sub", "Mul", "Div"];
+        let b: usize = plan.base_ops.iter().sum();
+        let e: usize = plan.ext_ops.iter().sum();
+        if b > 0 {
+            let cols: Vec<String> = (0..4)
+                .map(|i| {
+                    format!("{}={:.1}%", opnames[i], 100.0 * plan.base_ops[i] as f64 / b as f64)
+                })
+                .collect();
+            println!("  BaseAlu opcodes: {}", cols.join("  "));
+        }
+        if e > 0 {
+            let cols: Vec<String> = (0..4)
+                .map(|i| {
+                    format!("{}={:.1}%", opnames[i], 100.0 * plan.ext_ops[i] as f64 / e as f64)
+                })
+                .collect();
+            println!("  ExtAlu opcodes:  {}", cols.join("  "));
         }
         println!(
             "  -> native {:.2}%, call-out {:.2}%, fallback {:.2}%",

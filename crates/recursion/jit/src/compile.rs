@@ -26,11 +26,13 @@
 //! No dispatch, no decode, no bounds check — which is where the
 //! interpreter's ~100 cycles per instruction go.
 
-use dynasmrt::{dynasm, DynasmApi};
-use p3_field::PrimeField64;
+use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
+use p3_field::{PrimeCharacteristicRing, PrimeField64};
 use zkm_recursion_core::runtime::{
     AnalyzedInstruction, BaseAluOpcode, Instruction, RawProgram, SeqBlock,
 };
+
+use p3_koala_bear::KoalaBear;
 
 use crate::x86::{emit_add, emit_mul, emit_sub, PRIME};
 use crate::JitError;
@@ -50,8 +52,8 @@ pub struct Compiled {
     pub emitted: usize,
 }
 
-/// `(memory base, base_alu event base)`, both SysV register arguments.
-type RawEntry = unsafe extern "C" fn(*mut u8, *mut u8);
+/// `(memory base, base_alu event base) -> status`, SysV register arguments.
+type RawEntry = unsafe extern "C" fn(*mut u8, *mut u8) -> u32;
 
 impl Compiled {
     /// Run the compiled program.
@@ -62,8 +64,8 @@ impl Compiled {
     /// `base_alu_events` at least `emitted` events of 12 bytes.  Both are
     /// guaranteed by construction when the caller passes the arrays that
     /// `analyze()` sized, which is why compilation records the maxima it saw.
-    pub unsafe fn run(&self, mem: *mut u8, base_alu_events: *mut u8) {
-        (self.entry)(mem, base_alu_events);
+    pub unsafe fn run(&self, mem: *mut u8, base_alu_events: *mut u8) -> u32 {
+        (self.entry)(mem, base_alu_events)
     }
 }
 
@@ -87,10 +89,18 @@ pub fn compile<F: PrimeField64>(
 
     // Callee-saved, because the emitted body uses them across the whole
     // program and the SysV caller expects them preserved.
+    // rbx and r12 hold the two bases for the whole program, r13/r14 carry
+    // operands across a call-out.  All four are callee-saved, so a call-out
+    // preserves them for free.  SysV wants rsp 16-byte aligned AT the call:
+    // entry leaves rsp = 8 (mod 16), four pushes bring it back to 8, so one
+    // more 8 makes it 0.
     dynasm!(ops
         ; .arch x64
         ; push rbx
         ; push r12
+        ; push r13
+        ; push r14
+        ; sub rsp, 8
         ; mov r12, rsi          // r12 = base_alu event array
         ; mov rbx, rdi          // rbx = memory
     );
@@ -100,6 +110,14 @@ pub fn compile<F: PrimeField64>(
 
     dynasm!(ops
         ; .arch x64
+        ; mov eax, DWORD STATUS_OK as i32
+        ; jmp ->epilogue
+        // A trapped instruction lands here with its status already in eax.
+        ; ->fail:
+        ; ->epilogue:
+        ; add rsp, 8
+        ; pop r14
+        ; pop r13
         ; pop r12
         ; pop rbx
         ; ret
@@ -159,11 +177,14 @@ fn emit_one<F: PrimeField64>(
                 BaseAluOpcode::AddF => Op::Add,
                 BaseAluOpcode::SubF => Op::Sub,
                 BaseAluOpcode::MulF => Op::Mul,
-                // Division needs an inverse, and its out-of-domain case is a
-                // soundness assertion that must trip — a call-out, phase 4.
-                BaseAluOpcode::DivF | BaseAluOpcode::DivFAssert => {
-                    return Err(JitError::Unsupported("BaseAlu DivF"))
-                }
+                // Division is a call-out, not an emitted fragment: it needs a
+                // field inverse and its zero-divisor case has three outcomes,
+                // one of which must trap.  It is NOT rare -- 16.8% of BaseAlu
+                // on a leaf program -- so without this the JIT compiles
+                // nothing at all, because one unsupported instruction rejects
+                // the whole program.
+                BaseAluOpcode::DivF => Op::Div { is_assert: false },
+                BaseAluOpcode::DivFAssert => Op::Div { is_assert: true },
             };
             let in1 = disp(instr.addrs.in1.as_usize(), crate::MEMORY_ENTRY_SIZE)?;
             let in2 = disp(instr.addrs.in2.as_usize(), crate::MEMORY_ENTRY_SIZE)?;
@@ -181,6 +202,38 @@ fn emit_one<F: PrimeField64>(
                 Op::Add => emit_add(ops),
                 Op::Sub => emit_sub(ops),
                 Op::Mul => emit_mul(ops),
+                Op::Div { is_assert } => {
+                    // `mult` is a compile-time constant, so the two flags the
+                    // helper needs are folded into one immediate here rather
+                    // than being read at run time.
+                    let mut flags = 0u32;
+                    if instr.mult.is_zero() {
+                        flags |= FLAG_MULT_IS_ZERO;
+                    }
+                    if is_assert {
+                        flags |= FLAG_IS_ASSERT;
+                    }
+                    dynasm!(ops
+                        ; .arch x64
+                        ; mov r13d, r8d          // keep the operands across
+                        ; mov r14d, r9d          // the call (callee-saved)
+                        ; mov edi, r8d
+                        ; mov esi, r9d
+                        ; mov edx, DWORD flags as i32
+                        ; mov rax, QWORD div_f as usize as i64
+                        ; call rax
+                        ; mov rcx, rax
+                        ; shr rcx, 32            // status in the high word;
+                                                 // shr sets ZF, so ZF=1 means
+                                                 // status 0, i.e. SUCCESS
+                        ; jz >ok
+                        ; mov eax, ecx
+                        ; jmp ->fail
+                        ; ok:
+                        ; mov r8d, r13d
+                        ; mov r9d, r14d
+                    );
+                }
             }
             dynasm!(ops
                 ; .arch x64
@@ -216,6 +269,54 @@ enum Op {
     Add,
     Sub,
     Mul,
+    Div { is_assert: bool },
+}
+
+/// Status returned by a compiled program: 0 on success, non-zero when an
+/// instruction trapped and the caller must fall back to the interpreter to
+/// reproduce the exact error.
+pub const STATUS_OK: u32 = 0;
+/// A `DivF` hit the out-of-domain case that the interpreter reports as
+/// `RuntimeError::DivFOutOfDomain`.
+pub const STATUS_DIV_OUT_OF_DOMAIN: u32 = 1;
+
+/// Flag bits packed into the call-out's third argument.
+const FLAG_MULT_IS_ZERO: u32 = 1;
+const FLAG_IS_ASSERT: u32 = 2;
+
+/// `BaseAlu` division, as a call-out.
+///
+/// Division needs a field inverse, which is far too much to inline, and its
+/// zero-divisor case is not arithmetic at all — it is a soundness assertion
+/// with three outcomes.  This reproduces `execute_one`'s arm exactly:
+///
+/// * `in2 != 0` — the quotient.
+/// * `in2 == 0, in1 == 0` — one.
+/// * `in2 == 0, in1 != 0, mult == 0, not an assert` — zero, because a dead
+///   `DivF`'s result is never read.
+/// * otherwise — out of domain, which must trip.
+///
+/// Returns the value in the low word and the status in the high word, so the
+/// emitted code needs no stack slot for the error channel.
+extern "C" fn div_f(in1: u32, in2: u32, flags: u32) -> u64 {
+    use p3_field::{Field, PrimeCharacteristicRing};
+    // SAFETY: `MontyField31` is `#[repr(transparent)]` over `u32`, asserted
+    // by the layout contract in `lib.rs`.
+    let a: KoalaBear = unsafe { core::mem::transmute::<u32, KoalaBear>(in1) };
+    let b: KoalaBear = unsafe { core::mem::transmute::<u32, KoalaBear>(in2) };
+    let out = match b.try_inverse().map(|x| x * a) {
+        Some(x) => x,
+        None => {
+            if a.is_zero() {
+                KoalaBear::ONE
+            } else if flags & FLAG_MULT_IS_ZERO != 0 && flags & FLAG_IS_ASSERT == 0 {
+                KoalaBear::ZERO
+            } else {
+                return u64::from(STATUS_DIV_OUT_OF_DOMAIN) << 32;
+            }
+        }
+    };
+    u64::from(unsafe { core::mem::transmute::<KoalaBear, u32>(out) })
 }
 
 /// The prime, re-exported so tests can build reduced values without
