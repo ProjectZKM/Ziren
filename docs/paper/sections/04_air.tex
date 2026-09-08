@@ -32,8 +32,8 @@ Integer ALU & \texttt{AddSub} (36), \texttt{AddSubImm} (33), \texttt{Bitwise} (3
 Shifts & \texttt{ShiftLeft} (62), \texttt{ShiftLeftImm} (45), \texttt{ShiftRight} (89), \texttt{ShiftRightImm} (83) \\
 Control flow & \texttt{Branch} (56), \texttt{Jump} (57) \\
 Memory instructions & \texttt{LoadWord} (49), \texttt{LoadNarrow} (60), \texttt{StoreWord} (53), \texttt{StoreNarrow} (56), \texttt{MemoryUnaligned} (60) \\
-Misc.\ / syscall & \texttt{MiscInstrs} (433), \texttt{SyscallInstrs} (68), \texttt{SyscallCore}, \texttt{SyscallPrecompile} (11) \\
-Memory argument & \texttt{MemoryLocal} (56), \texttt{MemoryBump} (13), \texttt{MemoryGlobalInit}, \texttt{MemoryGlobalFinalize} (152), \texttt{Global} (58) \\
+Misc.\ / syscall & \texttt{MiscInstrs} (433), \texttt{SyscallInstrs} (68), \texttt{SyscallCore} (11), \texttt{SyscallPrecompile} (11) \\
+Memory argument & \texttt{MemoryLocal} (56), \texttt{MemoryBump} (13), \texttt{MemoryGlobalInit} (152), \texttt{MemoryGlobalFinalize} (152), \texttt{Global} (58) \\
 Tables & \texttt{Program} (1, +14), \texttt{Byte} (10, +12), \texttt{Range} (1, +2) \\
 Precompiles & SHA-256 extend/compress and controls, \texttt{KeccakSponge} (2637) and control, \texttt{Poseidon2Permute} (573), Weierstrass add/double/decompress $\times$ 4 curves, Ed25519 add/decompress, $\mathbb F_p$/$\mathbb F_{p^2}$ ops, \texttt{Uint256MulMod} (441), \texttt{U256XU2048Mul} (2773), garbled gate \\
 \bottomrule
@@ -110,7 +110,7 @@ Let $E$ be the curve $y^2 = x^3 + 3\zeta x - 3$ over $\F_{p^7}$ and $\mathsf{enc
 Assume the message limbs satisfy the range facts the sending units enforce, so that $256\,m_6 + \mathsf{offset} < p$. Then $\mathsf{enc}$ is injective on messages: limbs $x_0, \dots, x_5$ are $m_0, \dots, m_5$, and $x_6$ is $m_6$ shifted above a low byte holding the offset, which the bound makes separable; the two sign bands for $y_6$ are disjoint, so $\bm m$ and the offset are both recoverable from the point.
 \end{lemma}
 
-Injectivity is what makes the digest a faithful encoding of the multiset; it is not by itself what makes the argument sound. If the sends and receives of a claimed execution are the multisets $S \neq R$ and their digests agree, then $\sum_i c_i\, \mathsf{enc}(\bm m_i) = O$ for the non-zero integer vector $c = \mathrm{mult}_S - \mathrm{mult}_R$ over the distinct tuples. Soundness of the cross-shard argument is therefore exactly the following assumption.
+Lemma~\ref{lem:digest} is what makes the digest a faithful encoding of the multiset; it is not by itself what makes the argument sound. If the sends and receives of a claimed execution are the multisets $S \neq R$ and their digests agree, then $\sum_i c_i\, \mathsf{enc}(\bm m_i) = O$ for the non-zero integer vector $c = \mathrm{mult}_S - \mathrm{mult}_R$ over the distinct tuples. Soundness of the cross-shard argument is therefore exactly the following assumption.
 
 \begin{assumption}[no reachable vanishing combination]
 \label{ass:digest}
