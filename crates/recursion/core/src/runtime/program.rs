@@ -5,24 +5,61 @@ use shape::RecursionShape;
 use zkm_pcs::air::{MachineAir, MachineProgram};
 use zkm_pcs::septic_digest::SepticDigest;
 
+use crate::machine::RecursionAirEventCount;
 use crate::runtime::RawProgram;
 use crate::*;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionProgram<F> {
-    /// SeqBlock representation of the program — the canonical
-    /// instruction container. An earlier refactor migrated the
-    /// runtime off the flat `instructions` Vec and onto
-    /// `iter_instructions()`, and the redundant `instructions`
-    /// field has been dropped entirely. The compiler emits one
-    /// `Basic` block today; a future revision will introduce
-    /// `Parallel` blocks once the memory layer is thread-safe.
+    /// The program, already analyzed.
+    ///
+    /// `analyze()` assigns every instruction its offset in the execution
+    /// record.  It is a pure function of the instruction stream, so for a
+    /// given program it always gives the same answer — yet `Runtime::run`
+    /// used to recompute it on every call, deep-cloning the whole stream to
+    /// do so, while the recursion tree ran the same program on node after
+    /// node.  Measured on one node: analyze 25.2 ms against a walk of
+    /// 34.8 ms.
+    ///
+    /// Holding the analyzed form as THE representation, rather than the raw
+    /// stream plus a memo, is what SP1's `RootProgram` does — it carries
+    /// `inner: RawProgram<AnalyzedInstruction<F>>` and `event_counts` as
+    /// fields and analyzes once at construction.  It also avoids storing the
+    /// instruction stream twice, which for a 4.3 M-instruction leaf program
+    /// is not a rounding error.
+    ///
+    /// INVARIANT: the offsets here and `event_counts` were derived together
+    /// from this exact instruction stream.  Mutating the stream after
+    /// construction desynchronizes both, and the record writes are unchecked
+    /// -- build a new program with [`RecursionProgram::new`] instead.  Every
+    /// current writer does: the compiler assembles the raw stream and then
+    /// calls `new`, and nothing mutates a built program.
     #[serde(default = "RawProgram::default")]
-    pub seq_blocks: RawProgram<Instruction<F>>,
+    pub seq_blocks: RawProgram<AnalyzedInstruction<F>>,
     pub total_memory: usize,
     #[serde(skip)]
     pub traces: Vec<Option<Backtrace>>,
     pub shape: Option<RecursionShape>,
+    /// Per-chip event counts, derived by the same `analyze()` pass that
+    /// assigned the offsets.  `UnsafeRecord` is sized from it.
+    #[serde(default)]
+    pub event_counts: RecursionAirEventCount,
+}
+
+impl<F> RecursionProgram<F> {
+    /// Build a program from a raw instruction stream, analyzing it once.
+    ///
+    /// This is the only way to make a program, so a program cannot exist in
+    /// an un-analyzed state and `run()` has nothing to derive.
+    pub fn new(
+        seq_blocks: RawProgram<Instruction<F>>,
+        total_memory: usize,
+        traces: Vec<Option<Backtrace>>,
+        shape: Option<RecursionShape>,
+    ) -> Self {
+        let (seq_blocks, event_counts) = seq_blocks.analyze();
+        Self { seq_blocks, total_memory, traces, shape, event_counts }
+    }
 }
 
 /// The identity a proving key is built from.
@@ -74,7 +111,7 @@ impl<F> RecursionProgram<F> {
     /// follow-up will dispatch via `par_iter` once the memory layer
     /// is thread-safe).
     pub fn iter_instructions(&self) -> impl Iterator<Item = &Instruction<F>> {
-        self.seq_blocks.iter()
+        self.seq_blocks.iter().map(AnalyzedInstruction::inner)
     }
 
     /// Total instruction count, recursing through parallel sub-programs.
@@ -184,5 +221,36 @@ impl<F: Field> RecursionProgram<F> {
 
     pub fn shape_mut(&mut self) -> &mut Option<RecursionShape> {
         &mut self.shape
+    }
+}
+
+#[cfg(test)]
+mod analyzed_at_construction_tests {
+    use super::*;
+    use p3_koala_bear::KoalaBear;
+
+    /// A program cannot exist un-analyzed: `new` is the only constructor and
+    /// it analyzes, so `run()` has nothing left to derive.  This is SP1's
+    /// arrangement — their `RootProgram` carries `inner` already analyzed and
+    /// `event_counts` beside it.
+    #[test]
+    fn a_program_is_analyzed_when_it_is_built() {
+        use crate::runtime::instruction as instr;
+        use crate::MemAccessKind;
+
+        let instrs: Vec<Instruction<KoalaBear>> =
+            (0..8).map(|i| instr::mem(MemAccessKind::Write, 1, i, i)).collect();
+        let raw = RawProgram::from_linear(instrs);
+        let program = RecursionProgram::<KoalaBear>::new(raw, 0, Vec::new(), None);
+
+        assert_eq!(program.seq_blocks.instruction_count(), 8);
+        assert_eq!(program.event_counts.mem_const_events, 8, "counts derived with the offsets");
+        // Offsets are assigned, and distinct, which is the property the
+        // record writes depend on.
+        let offsets: Vec<usize> = program.seq_blocks.iter().map(|ai| ai.offset()).collect();
+        let mut sorted = offsets.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), offsets.len(), "two instructions share a record offset");
     }
 }

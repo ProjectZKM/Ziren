@@ -323,10 +323,7 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::{
-        extension::BinomialExtensionField, BasedVectorSpace,
-        PrimeCharacteristicRing,
-    };
+    use p3_field::{extension::BinomialExtensionField, BasedVectorSpace, PrimeCharacteristicRing};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -391,10 +388,12 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(instructions),
-            ..Default::default()
-        };
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(instructions),
+            0,
+            Vec::new(),
+            None,
+        );
 
         run_recursion_test_machines(program);
     }

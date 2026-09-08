@@ -73,12 +73,12 @@ fn build_program(n: usize) -> (RecursionProgram<F>, u32) {
         next += 1;
     }
 
-    let mut program = RecursionProgram::<F>::default();
-    program.seq_blocks = zkm_recursion_core::runtime::RawProgram {
+    let raw = zkm_recursion_core::runtime::RawProgram {
         seq_blocks: vec![zkm_recursion_core::runtime::SeqBlock::Basic(
             zkm_recursion_core::runtime::BasicBlock { instrs },
         )],
     };
+    let mut program = RecursionProgram::<F>::new(raw, 0, Vec::new(), None);
     program.total_memory = program.computed_total_memory();
     (program, next)
 }
@@ -100,7 +100,7 @@ fn the_jit_reproduces_the_interpreter_word_for_word() {
     // Compile only the ALU tail: the seeding `Mem` writes are not emitted
     // by this phase, so the test performs them directly into the same flat
     // memory the emitted code addresses.
-    let (analyzed, _counts) = program.seq_blocks.clone().analyze();
+    let analyzed = &program.seq_blocks;
     let alu_only = zkm_recursion_core::runtime::RawProgram {
         seq_blocks: vec![zkm_recursion_core::runtime::SeqBlock::Basic(
             zkm_recursion_core::runtime::BasicBlock {
@@ -189,12 +189,12 @@ fn the_zero_divisor_outcomes_match() {
             addrs: BaseAluIo { out: addr(2), in1: addr(0), in2: addr(1) },
         }));
 
-        let mut program = RecursionProgram::<F>::default();
-        program.seq_blocks = zkm_recursion_core::runtime::RawProgram {
+        let raw = zkm_recursion_core::runtime::RawProgram {
             seq_blocks: vec![zkm_recursion_core::runtime::SeqBlock::Basic(
                 zkm_recursion_core::runtime::BasicBlock { instrs },
             )],
         };
+        let mut program = RecursionProgram::<F>::new(raw, 0, Vec::new(), None);
         program.total_memory = program.computed_total_memory();
         let program = Arc::new(program);
 
@@ -211,7 +211,7 @@ fn the_zero_divisor_outcomes_match() {
         );
 
         // What the JIT does with it.
-        let (analyzed, _counts) = program.seq_blocks.clone().analyze();
+        let analyzed = &program.seq_blocks;
         let alu_only = zkm_recursion_core::runtime::RawProgram {
             seq_blocks: vec![zkm_recursion_core::runtime::SeqBlock::Basic(
                 zkm_recursion_core::runtime::BasicBlock {

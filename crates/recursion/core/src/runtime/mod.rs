@@ -296,7 +296,6 @@ where
         }
     }
 
-
     /// `&self` memory-read helper that wraps the
     /// `unsafe { mr_unchecked }` discipline. Soundness comes from
     /// the IR-level `SeqBlock::Parallel` disjoint-address invariant
@@ -363,7 +362,11 @@ where
         let timing = std::env::var("ZIREN_REC_EXEC_TIMING").is_ok_and(|v| v != "0");
         let t_analyze = std::time::Instant::now();
         let program_arc = self.program.clone();
-        let (analyzed_program, event_counts) = program_arc.seq_blocks.clone().analyze();
+        // Nothing to derive: the program was analyzed once when it was built,
+        // as SP1's `RootProgram` is.  `analyze_secs` stays in the instrument
+        // so the timing line keeps its shape and shows the phase at ~0.
+        let analyzed_program = &program_arc.seq_blocks;
+        let event_counts = program_arc.event_counts;
         let analyze_secs = t_analyze.elapsed().as_secs_f64();
         let t_walk = std::time::Instant::now();
         let unsafe_record = UnsafeRecord::<F>::new(event_counts);
@@ -440,9 +443,18 @@ where
                 mix[k] += 1;
             }
             let names = [
-                "BaseAlu", "ExtAlu", "Mem", "Poseidon2", "Select", "HintBits",
-                "HintAddCurve", "Print", "HintExt2Felts", "Ext2Felts",
-                "CommitPublicValues", "Hint",
+                "BaseAlu",
+                "ExtAlu",
+                "Mem",
+                "Poseidon2",
+                "Select",
+                "HintBits",
+                "HintAddCurve",
+                "Print",
+                "HintExt2Felts",
+                "Ext2Felts",
+                "CommitPublicValues",
+                "Hint",
             ];
             let mix_str: String = names
                 .iter()

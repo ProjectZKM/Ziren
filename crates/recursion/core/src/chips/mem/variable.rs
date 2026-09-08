@@ -198,13 +198,15 @@ mod tests {
 
     #[test]
     pub fn prove_basic_mem() {
-        let program = RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(vec![
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 2),
             ]),
-            ..Default::default()
-        };
+            0,
+            Vec::new(),
+            None,
+        );
 
         run_recursion_test_machines(program);
     }
@@ -212,13 +214,15 @@ mod tests {
     #[test]
     #[should_panic]
     pub fn basic_mem_bad_mult() {
-        let program = RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(vec![
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 999, 1, 2),
             ]),
-            ..Default::default()
-        };
+            0,
+            Vec::new(),
+            None,
+        );
 
         run_recursion_test_machines(program);
     }
@@ -226,13 +230,15 @@ mod tests {
     #[test]
     #[should_panic]
     pub fn basic_mem_bad_address() {
-        let program = RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(vec![
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 999, 2),
             ]),
-            ..Default::default()
-        };
+            0,
+            Vec::new(),
+            None,
+        );
 
         run_recursion_test_machines(program);
     }
@@ -240,13 +246,15 @@ mod tests {
     #[test]
     #[should_panic]
     pub fn basic_mem_bad_value() {
-        let program = RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(vec![
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 999),
             ]),
-            ..Default::default()
-        };
+            0,
+            Vec::new(),
+            None,
+        );
 
         run_recursion_test_machines(program);
     }

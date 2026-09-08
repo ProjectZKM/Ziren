@@ -689,9 +689,7 @@ where
                     Instruction::HintExt2Felts(HintExt2FeltsInstr {
                         output_addrs_mults, ..
                     })
-                    | Instruction::Ext2Felts(HintExt2FeltsInstr {
-                        output_addrs_mults, ..
-                    }) => {
+                    | Instruction::Ext2Felts(HintExt2FeltsInstr { output_addrs_mults, .. }) => {
                         output_addrs_mults
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
@@ -753,7 +751,7 @@ where
         }
         final_seq_blocks.extend(top_seq_blocks);
         let seq_blocks = zkm_recursion_core::runtime::RawProgram { seq_blocks: final_seq_blocks };
-        RecursionProgram { seq_blocks, total_memory, traces: final_traces, shape: None }
+        RecursionProgram::new(seq_blocks, total_memory, final_traces, None)
     }
 
     /// Compile a TracedVec of DSL ops into a `Vec<SeqBlock<Instruction<F>>>`.

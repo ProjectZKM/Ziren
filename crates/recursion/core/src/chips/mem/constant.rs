@@ -211,48 +211,56 @@ mod tests {
 
     #[test]
     pub fn prove_basic_mem() {
-        run_recursion_test_machines(RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(vec![
+        run_recursion_test_machines(RecursionProgram::new(
+            crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 2),
             ]),
-            ..Default::default()
-        });
+            0,
+            Vec::new(),
+            None,
+        ));
     }
 
     #[test]
     #[should_panic]
     pub fn basic_mem_bad_mult() {
-        prove_program(RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(vec![
+        prove_program(RecursionProgram::new(
+            crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 999, 1, 2),
             ]),
-            ..Default::default()
-        });
+            0,
+            Vec::new(),
+            None,
+        ));
     }
 
     #[test]
     #[should_panic]
     pub fn basic_mem_bad_address() {
-        prove_program(RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(vec![
+        prove_program(RecursionProgram::new(
+            crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 999, 2),
             ]),
-            ..Default::default()
-        });
+            0,
+            Vec::new(),
+            None,
+        ));
     }
 
     #[test]
     #[should_panic]
     pub fn basic_mem_bad_value() {
-        prove_program(RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(vec![
+        prove_program(RecursionProgram::new(
+            crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 999),
             ]),
-            ..Default::default()
-        });
+            0,
+            Vec::new(),
+            None,
+        ));
     }
 }

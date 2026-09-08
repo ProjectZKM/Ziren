@@ -51,9 +51,36 @@ fn main() {
         };
         seen.insert(cat, ());
 
-        // Same preparation the runtime does before its walk.
-        let (analyzed, _counts) = program.seq_blocks.clone().analyze();
-        let plan = zkm_recursion_jit::plan(&analyzed);
+        // No preparation needed: a program is analyzed when it is built.
+        let analyzed = &program.seq_blocks;
+        let plan = zkm_recursion_jit::plan(analyzed);
+
+        // What `run()` used to pay on EVERY call, now paid once at program
+        // construction.  Timed on the real program, because the 25.2 ms
+        // measured earlier came from a 7,040-instruction node and small
+        // programs are dominated by fixed costs rather than by the pass.
+        {
+            let raw = zkm_recursion_core::runtime::RawProgram {
+                seq_blocks: vec![zkm_recursion_core::runtime::SeqBlock::Basic(
+                    zkm_recursion_core::runtime::BasicBlock {
+                        instrs: program.iter_instructions().cloned().collect(),
+                    },
+                )],
+            };
+            let t = std::time::Instant::now();
+            let (_a, _c) = raw.clone().analyze();
+            let with_clone = t.elapsed();
+            let t2 = std::time::Instant::now();
+            let (_a2, _c2) = raw.analyze();
+            let without_clone = t2.elapsed();
+            println!(
+                "  analyze: {:.1} ms with the clone run() used to make, {:.1} ms without \
+                 ({:.0} ns/instr) -- was paid once per NODE, now once per program",
+                with_clone.as_secs_f64() * 1e3,
+                without_clone.as_secs_f64() * 1e3,
+                without_clone.as_nanos() as f64 / plan.total().max(1) as f64,
+            );
+        }
 
         println!("\n== {cat}: {} instructions ==", plan.total());
         let mut rows: Vec<(usize, &'static str)> = Plan::VARIANTS
@@ -97,9 +124,7 @@ fn main() {
             let mut n_par = 0usize;
             fn walk(
                 blocks: &[zkm_recursion_core::runtime::SeqBlock<
-                    zkm_recursion_core::runtime::AnalyzedInstruction<
-                        p3_koala_bear::KoalaBear,
-                    >,
+                    zkm_recursion_core::runtime::AnalyzedInstruction<p3_koala_bear::KoalaBear>,
                 >],
                 shapes: &mut HashMap<Vec<u8>, (usize, usize)>,
                 n_basic: &mut usize,

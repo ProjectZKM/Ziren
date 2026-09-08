@@ -387,10 +387,12 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(instructions),
-            ..Default::default()
-        };
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(instructions),
+            0,
+            Vec::new(),
+            None,
+        );
 
         run_recursion_test_machines(program);
     }

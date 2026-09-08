@@ -360,10 +360,12 @@ mod tests {
         let public_values_a: &RecursionPublicValues<u32> = public_values_a.as_slice().borrow();
         instructions.push(instr::commit_public_values(public_values_a));
 
-        let program = RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(instructions),
-            ..Default::default()
-        };
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(instructions),
+            0,
+            Vec::new(),
+            None,
+        );
 
         run_recursion_test_machines(program);
     }

@@ -21,7 +21,8 @@ use crate::{
         select::SelectChip,
     },
     instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr},
-    shape::RecursionShape, Instruction, RecursionProgram, D,
+    shape::RecursionShape,
+    Instruction, RecursionProgram, D,
 };
 
 #[derive(zkm_derive::MachineAir)]
@@ -42,7 +43,9 @@ pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: u
     PublicValues(PublicValuesChip),
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+// Serialized as part of `RecursionProgram`, which now carries the analyzed
+// program and the counts derived with it rather than re-deriving both.
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub struct RecursionAirEventCount {
     pub mem_const_events: usize,
     pub mem_var_events: usize,
@@ -399,10 +402,12 @@ pub mod tests {
     }
 
     fn test_instructions(instructions: Vec<Instruction<F>>) {
-        let program = RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(instructions),
-            ..Default::default()
-        };
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(instructions),
+            0,
+            Vec::new(),
+            None,
+        );
         run_recursion_test_machines(program);
     }
 

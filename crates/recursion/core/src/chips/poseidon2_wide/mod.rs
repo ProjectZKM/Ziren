@@ -136,7 +136,6 @@ pub(crate) mod tests {
     use p3_symmetric::Permutation;
     use rand::Rng;
 
-    
     use zkm_core_machine::utils::setup_logger;
     use zkm_pcs::{inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
     use zkm_test_fixtures::run_test_machine;
@@ -192,10 +191,12 @@ pub(crate) mod tests {
         // `run_recursion_test_machines`, so it has to size memory itself: the
         // compiler is what normally sets `total_memory`, and `ParMemVec` never
         // grows.
-        let mut program = RecursionProgram {
-            seq_blocks: crate::RawProgram::from_linear(instructions),
-            ..Default::default()
-        };
+        let mut program = RecursionProgram::new(
+            crate::RawProgram::from_linear(instructions),
+            0,
+            Vec::new(),
+            None,
+        );
         program.total_memory = program.computed_total_memory();
         let program = Arc::new(program);
         let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
