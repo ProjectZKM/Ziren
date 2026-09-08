@@ -2733,7 +2733,14 @@ mod test {
 /// - `widths`: `Σ_r Σ column_counts_by_round[r]`.
 /// - `packing_pads`: `Σ_r packing.padding_heights[r].len()`.
 /// - `witness_pads`: `Σ_r preprocessed_round.padding_heights[r].len()`, the
-///   witness field — or `None` where the caller has nothing to cross-check.
+///   witness field — or `None` where that field is ABSENT rather than merely
+///   a second opinion.  Pass `None` on the outer/wrap path: the outer lift
+///   never populates it (shard_level_witness.rs:1548 bakes the outer column
+///   space from `bundle.packing.padding_heights` instead), so it reads 0
+///   against the packing's real pad count and asserting equality there would
+///   panic on every honest wrap.  Pass `Some(..)` from the inner consumers,
+///   where both sources are genuinely populated and a disagreement is a bug —
+///   which is where this check earns its keep.
 /// - `site`: for the panic message: "wrap", "compress", "core", "deferred".
 pub fn jagged_column_count(
     total_cols: usize,

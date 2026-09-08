@@ -467,11 +467,21 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         let witness_pads: usize =
             preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
         match outer_pack_info {
+            // `None` for the witness cross-check, deliberately: on the OUTER
+            // path `preprocessed_round.padding_heights` is not merely a second
+            // opinion, it is ABSENT — the outer lift never populates it (see
+            // shard_level_witness.rs:1548, which bakes the outer column space
+            // from `bundle.packing.padding_heights` instead).  Measured at the
+            // gnark wrap node: packing pads 4, witness pads 0.  Asserting them
+            // equal here would turn the defect's fingerprint into an invariant
+            // and panic on every honest wrap.  The cross-check belongs to the
+            // INNER consumers, where both sources really are populated and a
+            // disagreement really is a bug.
             Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
                 total_cols,
                 widths,
                 packing_pads,
-                Some(witness_pads),
+                None,
                 "wrap",
             ),
             // No outer bundle in scope: the witness field is the only source
