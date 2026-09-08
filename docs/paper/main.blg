@@ -6,45 +6,45 @@ Database file #1: references.bib
 Warning--can't use both volume and number fields in barrington1989bounded
 Warning--empty booktitle in plookup
 Warning--can't use both volume and number fields in lund1992algebraic
-You've used 58 entries,
+You've used 61 entries,
             2543 wiz_defined-function locations,
-            821 strings with 12902 characters,
-and the built_in function-call counts, 20670 in all, are:
-= -- 1985
-> -- 1053
-< -- 37
-+ -- 362
-- -- 357
-* -- 1215
-:= -- 3354
-add.period$ -- 184
-call.type$ -- 58
-change.case$ -- 366
-chr.to.int$ -- 54
-cite$ -- 61
-duplicate$ -- 772
-empty$ -- 1614
-format.name$ -- 437
-if$ -- 4301
+            837 strings with 13417 characters,
+and the built_in function-call counts, 21814 in all, are:
+= -- 2101
+> -- 1105
+< -- 39
++ -- 379
+- -- 374
+* -- 1278
+:= -- 3533
+add.period$ -- 195
+call.type$ -- 61
+change.case$ -- 384
+chr.to.int$ -- 57
+cite$ -- 64
+duplicate$ -- 817
+empty$ -- 1705
+format.name$ -- 458
+if$ -- 4547
 int.to.chr$ -- 5
 int.to.str$ -- 0
-missing$ -- 17
-newline$ -- 304
-num.names$ -- 174
-pop$ -- 539
+missing$ -- 18
+newline$ -- 321
+num.names$ -- 183
+pop$ -- 566
 preamble$ -- 1
-purify$ -- 424
+purify$ -- 445
 quote$ -- 0
-skip$ -- 742
+skip$ -- 786
 stack$ -- 0
-substring$ -- 634
-swap$ -- 132
-text.length$ -- 37
-text.prefix$ -- 28
+substring$ -- 679
+swap$ -- 143
+text.length$ -- 39
+text.prefix$ -- 29
 top$ -- 0
-type$ -- 464
+type$ -- 488
 warning$ -- 3
-while$ -- 166
-width$ -- 61
-write$ -- 729
+while$ -- 177
+width$ -- 64
+write$ -- 770
 (There were 3 warnings)

@@ -74,7 +74,7 @@ Figure~\ref{fig:frame} shows three consecutive rows and the buses that bind them
 \subsection{Registers and memory}
 \label{sec:air-memory}
 
-Registers and memory share one offline memory-checking argument~\citep{blum1994} in the multiset style used by SP1~\citep{sp1}: the state of address $a$ is the tuple $(\mathsf{shard}, \mathsf{clk}, a, \mathsf{value})$ of its last access. An access at time $(s, c)$ \emph{sends} the previous tuple $(s', c', a, v')$ and \emph{receives} the new tuple $(s, c, a, v)$ on the \emph{memory} bus, with $v = v'$ for a read. The multiset balances if and only if every access consumes exactly the tuple produced by the previous access to the same address, provided timestamps strictly increase along each address's chain; the AIR of every access enforces $(s', c') < (s, c)$ by witnessing $c - c' - 1$, or $s - s' - 1$ when the shards differ, in range-checked limbs that cover the clock's 25 bits (a one-bit \texttt{compare\_clk} selector chooses the branch). Words are four byte columns; the argument carries them as such.
+Registers and memory share one offline memory-checking argument~\citep{blum1994} in the multiset style used by SP1~\citep{sp1}: the state of address $a$ is the tuple $(\mathsf{shard}, \mathsf{clk}, a, \mathsf{value})$ of its last access. An access at time $(s, c)$ \emph{sends} the previous tuple $(s', c', a, v')$ and \emph{receives} the new tuple $(s, c, a, v)$ on the \emph{memory} bus, with $v = v'$ for a read. The multiset balances if and only if every access consumes exactly the tuple produced by the previous access to the same address, provided timestamps strictly increase along each address's chain; the AIR of every access enforces $(s', c') < (s, c)$ by witnessing $c - c' - 1$, or $s - s' - 1$ when the shards differ, in range-checked limbs that cover the 27 bits of a $4\,\mathsf{clk} + \mathsf{pos}$ timestamp at a 25-bit clock (a one-bit \texttt{compare\_clk} selector chooses the branch). Words are four byte columns; the argument carries them as such.
 
 \begin{lemma}[Memory argument]
 \label{lem:memory}
@@ -107,7 +107,7 @@ Let $E$ be the curve $y^2 = x^3 + 3\zeta x - 3$ over $\F_{p^7}$ and $\mathsf{enc
 
 \begin{lemma}[injectivity of the lift]
 \label{lem:digest}
-Assume the message limbs satisfy the range facts the sending units enforce, so that $256\,m_6 + \mathsf{offset} < p$. Then $\mathsf{enc}$ is injective: the $x$-coordinate carries $\bm m$ in its low limbs and the offset in the top byte of $x_6$, which the bound makes recoverable, and the two sign bands for $y_6$ are disjoint, so $(\bm m, \mathsf{kind})$ is recoverable from the point.
+Assume the message limbs satisfy the range facts the sending units enforce, so that $256\,m_6 + \mathsf{offset} < p$. Then $\mathsf{enc}$ is injective on messages: limbs $x_0, \dots, x_5$ are $m_0, \dots, m_5$, and $x_6$ is $m_6$ shifted above a low byte holding the offset, which the bound makes separable; the two sign bands for $y_6$ are disjoint, so $\bm m$ and the offset are both recoverable from the point.
 \end{lemma}
 
 Injectivity is what makes the digest a faithful encoding of the multiset; it is not by itself what makes the argument sound. If the sends and receives of a claimed execution are the multisets $S \neq R$ and their digests agree, then $\sum_i c_i\, \mathsf{enc}(\bm m_i) = O$ for the non-zero integer vector $c = \mathrm{mult}_S - \mathrm{mult}_R$ over the distinct tuples. Soundness of the cross-shard argument is therefore exactly the following assumption.

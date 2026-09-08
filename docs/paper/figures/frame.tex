@@ -17,7 +17,7 @@
 \draw[bus] (-2.6,3.1) -- (17.4,3.1) node[right, font=\scriptsize] {program bus};
 \node[lbl, anchor=south west] at (-2.6,3.15) {$(\mathsf{pc},\mathsf{opcode},\mathsf{op\_a},\mathsf{op\_b},\mathsf{op\_c},\mathsf{imm},\ldots)$ received by the preprocessed \texttt{Program} ROM};
 \draw[bus] (-2.6,-2.2) -- (17.4,-2.2) node[right, font=\scriptsize] {memory bus};
-\node[lbl, anchor=north west] at (-2.6,-2.25) {$(\mathsf{shard},\ 4\,\mathsf{clk}{+}\mathsf{pos},\ \mathsf{addr},\ \mathsf{value})$: one receive of the previous tuple and one send of the new tuple per access};
+\node[lbl, anchor=north west] at (-2.6,-2.25) {$(\mathsf{shard},\ 4\,\mathsf{clk}{+}\mathsf{pos},\ \mathsf{addr},\ \mathsf{value})$: one send of the previous tuple and one receive of the new tuple per access};
 
 % ---------- unit macro: name, x, title, opcode, four pin labels (empty = unused pin)
 \newcommand{\unitrow}[8]{%

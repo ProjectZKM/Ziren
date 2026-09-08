@@ -23,7 +23,7 @@ Input stream & run & the bytes the guest reads as its standard input; a witness 
 Hint stream & run & host-supplied data the guest reads through the hint syscall (for example the block witness); a witness, written into untouched memory and thereby bound by the memory argument \\
 Public values & out & the digest of the committed output, the exit code, the entry and exit machine state, the address cursors of the global memory tables and the septic digest (Section~\ref{sec:isa}) \\
 Compressed proof & out & the root of the recursion tree, 603\,KiB for the block of Section~\ref{sec:performance}; optionally wrapped to a Groth16 proof over BN254 for on-chain verification (Section~\ref{sec:recursion}) \\
-Verifier & deliverable & a verifier that checks a compressed proof in well under a second on an ordinary host, small enough to embed in the consuming application; it carries the recursion-key allowlist \\
+Verifier & deliverable & a verifier that checks a compressed proof on an ordinary host, small enough to embed in the consuming application; it carries the recursion-key allowlist \\
 Accelerator interface & extension & a syscall number, an emulator hook that reads and writes guest memory at the invoking cycle, and a unit that receives the syscall tuple (arguments as 16-bit half-words plus the Linux flag) on the syscall bus and performs its memory accesses on the memory bus (Section~\ref{sec:isa}) \\
 \bottomrule
 \end{tabular}

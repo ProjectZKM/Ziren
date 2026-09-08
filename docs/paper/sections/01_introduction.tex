@@ -23,21 +23,21 @@ The construction is simple to describe. Every executed instruction is one row of
 \begin{table}[t]
 \centering
 \small
-\caption{Single-GPU block-proving provers on the public dashboard~\citep{ethproofs}, 23-hour medians on 5 September 2026, with the field, the regime in which each project states its security level, and the proof size. The last two rows are \Ziren{}'s deployed configuration and the configuration after the change of \S\ref{sec:perf-after}, both measured on the block of \S\ref{sec:perf-setup}. They are not comparable with the row above them: the dashboard median is over other blocks, and guest-side changes reduced this paper's block from 379 to 288 million cycles (\S\ref{sec:perf-setup}).}
+\caption{Single-GPU block-proving provers on the public dashboard~\citep{ethproofs}, 23-hour medians on 5 September 2026, with the field and the proof size. The last two rows are \Ziren{}'s deployed configuration and the configuration after the change of \S\ref{sec:perf-after}, both measured on the block of \S\ref{sec:perf-setup}. They are not comparable with the row above them: the dashboard median is over other blocks, this paper's block is 288 rather than 379 million cycles (\S\ref{sec:perf-setup}), and the proof-size difference is the commitment schedule of \S\ref{sec:iopp-soundness} rather than any property of the block.}
 \label{tab:headline}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{llllrr}
+\begin{tabular}{lllrr}
 \toprule
-System & ISA & Field & Regime of stated level & time (s) & proof \\
+System & ISA & Field & time (s) & proof \\
 \midrule
-Airbender~\citep{airbender} & RV32IM & Mersenne-31 & project target & 42 & --- \\
-ZisK~\citep{zisk} & RV64IMA & Goldilocks & per release & 73 & --- \\
-Ceno~\citep{ceno} (RTX~4090) & RV32IM & Goldilocks & --- & 74 & --- \\
-cysic (RTX~4090) & RV32IM & --- & --- & 92 & --- \\
-\Ziren{}, dashboard median at the time & MIPS32r2 & \KB{} & unique decoding, union bound & 107 & 1.0\,MB \\
+Airbender~\citep{airbender} & RV32IM & Mersenne-31 & 42 & --- \\
+ZisK~\citep{zisk} & RV64IMA & Goldilocks & 73 & --- \\
+Ceno~\citep{ceno} (RTX~4090) & RV32IM & Goldilocks & 74 & --- \\
+cysic~\citep{cysic} (RTX~4090) & RV32IM & --- & 92 & --- \\
+\Ziren{}, dashboard median at the time & MIPS32r2 & \KB{} & 107 & 1.0\,MB \\
 \midrule
-\Ziren{}, deployed configuration, this paper's block & MIPS32r2 & \KB{} & unique decoding, union bound & 74 & 603\,KiB \\
-\Ziren{}, after the lookup-layer change (\S\ref{sec:perf-after}) & MIPS32r2 & \KB{} & unique decoding, union bound & 49 & 603\,KiB \\
+\Ziren{}, deployed configuration, this paper's block & MIPS32r2 & \KB{} & 74 & 603\,KiB \\
+\Ziren{}, after the lookup-layer change (\S\ref{sec:perf-after}) & MIPS32r2 & \KB{} & 49 & 603\,KiB \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -46,7 +46,7 @@ cysic (RTX~4090) & RV32IM & --- & --- & 92 & --- \\
 
 \begin{theorem}[Unit determinism, informal]
 \label{thm:det-informal}
-For every unit $U$ of the core machine there is a mechanically extracted \Lean{} theorem stating that two rows of $U$ that satisfy its constraints and agree on their bus inputs agree on their bus outputs. Of the \ndettotal{} such theorems, \ndetproved{} are closed by a tactic that lifts the statement to bounded integer arithmetic and replays the propagation loop of Picus~\citep{picus} inside the proof assistant; the remainder are open and classified in Figure~\ref{fig:verification}. Together with the bus arguments, unit determinism implies that an accepting shard proof determines its trace up to permutation (Theorem~\ref{thm:unique}).
+For every unit $U$ of the core machine there is a mechanically extracted \Lean{} theorem stating that two rows of $U$ that satisfy its constraints and agree on their bus inputs agree on their bus outputs. Of the \ndettotal{} such theorems, \ndetproved{} are closed by a tactic that lifts the statement to bounded integer arithmetic and replays the propagation loop of Picus~\citep{picus} inside the proof assistant; the remainder are open and classified in Figure~\ref{fig:verification}. Together with the bus arguments, unit determinism implies that an accepting shard proof determines, up to permutation, every row reachable from the entry state along the state and memory buses (Theorem~\ref{thm:unique}); that this exhausts the real rows is a property of the unit set, which we argue but do not prove.
 \end{theorem}
 
 The flow found real defects: the syscall unit's argument half-words were not determined by the reduced argument it received (because $2^{32}$ exceeds the field modulus), and its Linux selector had no input pinning it. Both were fixed by carrying the exact half-words and the selector on the syscall bus, after which the unit's theorem closes (Section~\ref{sec:verification-findings}).

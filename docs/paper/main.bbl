@@ -50,6 +50,11 @@ Eli Ben-Sasson, Dan Carmon, Yuval Ishai, Swastik Kopparty, and Shubhangi Saraf.
 \newblock Proximity gaps for {Reed--Solomon} codes.
 \newblock In {\em FOCS}, 2020.
 
+\bibitem[BSCS16]{bcs16}
+Eli Ben-Sasson, Alessandro Chiesa, and Nicholas Spooner.
+\newblock {Interactive Oracle Proofs}.
+\newblock In {\em Theory of Cryptography --- TCC 2016-B}, pages 31--60, 2016.
+
 \bibitem[BSGKS20]{deep-fri}
 Eli Ben-Sasson, Lior Goldberg, Swastik Kopparty, and Shubhangi Saraf.
 \newblock {DEEP-FRI}: Sampling outside the box improves soundness.
@@ -64,6 +69,19 @@ Zhigang Chen, Yuting Jiang, Xinxia Song, and Liqun Chen.
 {Consensys}.
 \newblock {gnark: A fast zk-SNARK library in Go}.
 \newblock \url{https://github.com/Consensys/gnark}, 2024.
+
+\bibitem[CY24]{chiesa-yogev}
+Alessandro Chiesa and Eylon Yogev.
+\newblock {Building Cryptographic Proofs from Hash Functions}.
+\newblock \url{https://github.com/hash-based-snargs-book}, 2024.
+\newblock Textbook treatment of the {BCS} transformation, round-by-round
+  soundness and state restoration.
+
+\bibitem[{Cys}25]{cysic}
+{Cysic}.
+\newblock {Cysic}: hardware-accelerated proof generation.
+\newblock \url{https://cysic.xyz}, 2025.
+\newblock Listed on the public block-proving dashboard~\cite{ethproofs}.
 
 \bibitem[DDGM23]{zekra}
 Heini~Bergsson Debes, Edlira Dushku, Thanassis Giannetsos, and Ali Marandi.
