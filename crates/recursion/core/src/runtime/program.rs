@@ -52,7 +52,10 @@ pub struct RecursionProgram<F> {
     /// what the instruction stream already says, so a program's `(pk, vk)`
     /// does not move when it appears.  `default` is the empty plan, which
     /// the walker reads as "invert per instruction", so an old serialized
-    /// program stays correct and merely slower.
+    /// program stays correct and merely slower — and it cannot stay slower
+    /// for long either, because the on-disk program cache lives under a
+    /// directory named by a fingerprint of the running executable, so the
+    /// build that introduced the plan reads a cold cache.
     #[serde(default = "Vec::new")]
     pub div_plan: Vec<DivPlan<F>>,
 }
