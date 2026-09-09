@@ -205,3 +205,43 @@ pub fn commit_public_values<F: PrimeCharacteristicRing>(
         pv_addrs: pv_address.clone(),
     }))
 }
+
+impl<F: Copy> Instruction<F> {
+    /// Every address this instruction WRITES, in no particular order.
+    ///
+    /// Exhaustive by construction — a new variant makes the match fail to
+    /// compile rather than silently under-report.  Callers use it to decide
+    /// whether a value is already live at some point in a basic block, so
+    /// an under-report is unsound (it would let a reader hoist a read above
+    /// the write that produces it) while an over-report only costs
+    /// opportunity.  Mirror `Runtime::execute_one`'s `mw_us` calls exactly.
+    pub fn for_each_written_addr(&self, mut f: impl FnMut(Address<F>)) {
+        match self {
+            Instruction::BaseAlu(i) => f(i.addrs.out),
+            Instruction::ExtAlu(i) => f(i.addrs.out),
+            Instruction::Mem(i) => {
+                // A `Read` asserts the cell already holds `val`; only a
+                // `Write` produces one.  Treated as a write either way:
+                // over-reporting is the safe direction.
+                f(i.addrs.inner)
+            }
+            Instruction::Poseidon2(i) => i.addrs.output.iter().copied().for_each(f),
+            Instruction::Select(i) => {
+                f(i.addrs.out1);
+                f(i.addrs.out2);
+            }
+            Instruction::HintBits(i) => i.output_addrs_mults.iter().for_each(|(a, _)| f(*a)),
+            Instruction::HintAddCurve(i) => i
+                .output_x_addrs_mults
+                .iter()
+                .chain(i.output_y_addrs_mults.iter())
+                .for_each(|(a, _)| f(*a)),
+            Instruction::Print(_) => {}
+            Instruction::HintExt2Felts(i) | Instruction::Ext2Felts(i) => {
+                i.output_addrs_mults.iter().for_each(|(a, _)| f(*a))
+            }
+            Instruction::CommitPublicValues(_) => {}
+            Instruction::Hint(i) => i.output_addrs_mults.iter().for_each(|(a, _)| f(*a)),
+        }
+    }
+}

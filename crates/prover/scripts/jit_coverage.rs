@@ -68,10 +68,10 @@ fn main() {
                 )],
             };
             let t = std::time::Instant::now();
-            let (_a, _c) = raw.clone().analyze();
+            let (_a, _c, _d) = raw.clone().analyze();
             let with_clone = t.elapsed();
             let t2 = std::time::Instant::now();
-            let (_a2, _c2) = raw.analyze();
+            let (_a2, _c2, _d2) = raw.analyze();
             let without_clone = t2.elapsed();
             println!(
                 "  analyze: {:.1} ms with the clone run() used to make, {:.1} ms without \
@@ -80,6 +80,22 @@ fn main() {
                 without_clone.as_secs_f64() * 1e3,
                 without_clone.as_nanos() as f64 / plan.total().max(1) as f64,
             );
+            // The batch-inversion plan now rides `analyze`'s traversal, so
+            // what is reported is how many divisors it reaches, not a second
+            // pass's cost.
+            let hoisted: usize = {
+                use zkm_recursion_core::runtime::DivPlan;
+                fn count<F>(p: &[DivPlan<F>]) -> usize {
+                    p.iter()
+                        .map(|d| match d {
+                            DivPlan::Basic(a) => a.len(),
+                            DivPlan::Parallel(subs) => subs.iter().map(|s| count(s)).sum(),
+                        })
+                        .sum()
+                }
+                count(&program.div_plan)
+            };
+            println!("  div_plan: {hoisted} divisors hoisted");
         }
 
         println!("\n== {cat}: {} instructions ==", plan.total());
@@ -189,6 +205,101 @@ fn main() {
                     "; most repeated sequence x{c} of {n} instrs"
                 ))
             );
+        }
+        // Is batch inversion (Montgomery's trick: n inverses -> 1 + 3n muls)
+        // reachable?  It needs the divisors of a block gathered BEFORE the
+        // block runs.  A divisor produced inside the same block cannot be
+        // gathered without executing, so the question is what share of
+        // divisors are already live at block entry.
+        //
+        // The written-set must be EXHAUSTIVE or the answer is a fiction:
+        // `Hint` alone writes ~173 k addresses per program, and a divisor
+        // that a hint produces is not live at block entry no matter how the
+        // ALU instructions are arranged.  `for_each_written_addr` is the
+        // single definition, matched against `execute_one`'s `mw_us` calls.
+        {
+            use std::collections::HashSet;
+            use zkm_recursion_core::runtime::{Instruction, SeqBlock};
+            #[derive(Default)]
+            struct Census {
+                base_hoistable: usize,
+                base_in_block: usize,
+                ext_hoistable: usize,
+                ext_in_block: usize,
+            }
+            fn scan(
+                blocks: &[SeqBlock<
+                    zkm_recursion_core::runtime::AnalyzedInstruction<p3_koala_bear::KoalaBear>,
+                >],
+                c: &mut Census,
+            ) {
+                for b in blocks {
+                    match b {
+                        SeqBlock::Basic(bb) => {
+                            let mut written: HashSet<usize> = HashSet::new();
+                            for ai in &bb.instrs {
+                                match ai.inner() {
+                                    Instruction::BaseAlu(i)
+                                        if matches!(
+                                            i.opcode,
+                                            zkm_recursion_core::BaseAluOpcode::DivF
+                                                | zkm_recursion_core::BaseAluOpcode::DivFAssert
+                                        ) =>
+                                    {
+                                        if written.contains(&i.addrs.in2.as_usize()) {
+                                            c.base_in_block += 1;
+                                        } else {
+                                            c.base_hoistable += 1;
+                                        }
+                                    }
+                                    Instruction::ExtAlu(i)
+                                        if matches!(
+                                            i.opcode,
+                                            zkm_recursion_core::ExtAluOpcode::DivE
+                                                | zkm_recursion_core::ExtAluOpcode::DivEAssert
+                                        ) =>
+                                    {
+                                        if written.contains(&i.addrs.in2.as_usize()) {
+                                            c.ext_in_block += 1;
+                                        } else {
+                                            c.ext_hoistable += 1;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                ai.inner().for_each_written_addr(|a| {
+                                    written.insert(a.as_usize());
+                                });
+                            }
+                        }
+                        SeqBlock::Parallel(subs) => {
+                            for sub in subs {
+                                scan(&sub.seq_blocks, c);
+                            }
+                        }
+                    }
+                }
+            }
+            let mut c = Census::default();
+            scan(&analyzed.seq_blocks, &mut c);
+            let base_tot = c.base_hoistable + c.base_in_block;
+            let ext_tot = c.ext_hoistable + c.ext_in_block;
+            if base_tot > 0 {
+                println!(
+                    "  DivF {base_tot}: {} live at block entry ({:.1}%), {} produced in-block",
+                    c.base_hoistable,
+                    100.0 * c.base_hoistable as f64 / base_tot as f64,
+                    c.base_in_block,
+                );
+            }
+            if ext_tot > 0 {
+                println!(
+                    "  DivE {ext_tot}: {} live at block entry ({:.1}%), {} produced in-block",
+                    c.ext_hoistable,
+                    100.0 * c.ext_hoistable as f64 / ext_tot as f64,
+                    c.ext_in_block,
+                );
+            }
         }
         println!(
             "  -> native {:.2}%, call-out {:.2}%, fallback {:.2}%",

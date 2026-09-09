@@ -363,7 +363,7 @@ mod size_tests {
                 })
                 .collect();
             let prog = RawProgram { seq_blocks: vec![SeqBlock::Basic(BasicBlock { instrs })] };
-            let (analyzed, _) = prog.analyze();
+            let (analyzed, _, _) = prog.analyze();
             let c = compile(&analyzed).expect("compile");
             let bytes = c._buf.len();
             eprintln!(

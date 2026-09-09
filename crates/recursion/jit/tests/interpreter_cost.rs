@@ -37,6 +37,22 @@ const SEEDS: [u32; 8] = [1, 2, 3, 5, 7, 11, 13, 17];
 /// written — the same shape a real program has, since a recursion program
 /// writes every address exactly once and reads only what precedes it.
 fn homogeneous(n: usize, kind: &str) -> RecursionProgram<F> {
+    homogeneous_inner(n, kind, false)
+}
+
+/// Same program, but with the seed writes in their own basic block ahead of
+/// the ops.  That makes every divisor live at block entry, which is what
+/// `RecursionProgram::new`'s batch-inversion plan needs — so the pair
+/// `homogeneous` / `homogeneous_split` is a direct A/B on the plan.
+///
+/// It flatters the gather: these divisors are eight addresses reused N
+/// times, where a real program's are all distinct.  Read the ratio as an
+/// upper bound and the box's end-to-end `REC_EXEC walk=` as the truth.
+fn homogeneous_split(n: usize, kind: &str) -> RecursionProgram<F> {
+    homogeneous_inner(n, kind, true)
+}
+
+fn homogeneous_inner(n: usize, kind: &str, split: bool) -> RecursionProgram<F> {
     let mut instrs: Vec<Instruction<F>> = SEEDS
         .iter()
         .enumerate()
@@ -78,10 +94,17 @@ fn homogeneous(n: usize, kind: &str) -> RecursionProgram<F> {
         next += 1;
     }
 
-    let raw = zkm_recursion_core::runtime::RawProgram {
-        seq_blocks: vec![zkm_recursion_core::runtime::SeqBlock::Basic(
-            zkm_recursion_core::runtime::BasicBlock { instrs },
-        )],
+    use zkm_recursion_core::runtime::{BasicBlock, RawProgram, SeqBlock};
+    let raw = if split {
+        let ops = instrs.split_off(SEEDS.len());
+        RawProgram {
+            seq_blocks: vec![
+                SeqBlock::Basic(BasicBlock { instrs }),
+                SeqBlock::Basic(BasicBlock { instrs: ops }),
+            ],
+        }
+    } else {
+        RawProgram { seq_blocks: vec![SeqBlock::Basic(BasicBlock { instrs })] }
     };
     let mut program = RecursionProgram::<F>::new(raw, 0, Vec::new(), None);
     program.total_memory = program.computed_total_memory();
@@ -127,6 +150,41 @@ fn per_opcode_interpreter_cost() {
             best = best.min(t.elapsed().as_secs_f64());
         }
         println!("  {kind:<14}  {:>8.1}", best * 1e9 / N as f64);
+    }
+}
+
+/// What the batch-inversion plan is worth, on the same program laid out two
+/// ways: seeds in the ops' block (nothing hoisted, `try_inverse` per
+/// division) against seeds in a preceding block (every divisor gathered at
+/// block entry and inverted with Montgomery's trick).
+#[test]
+#[ignore = "a measurement, not a gate"]
+fn what_batch_inversion_is_worth() {
+    const N: usize = 400_000;
+    let perm = SC::new().perm;
+    {
+        let p = Arc::new(homogeneous(N, "BaseAlu/Add"));
+        let mut r = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(p, perm.clone());
+        r.run().expect("warm-up");
+    }
+    println!("\n  layout                    ns/instr   (N={N})");
+    for (label, program) in [
+        ("BaseAlu/Div  per-instruction", homogeneous(N, "BaseAlu/Div")),
+        ("BaseAlu/Div  batched", homogeneous_split(N, "BaseAlu/Div")),
+        ("BaseAlu/Mul  (reference)", homogeneous(N, "BaseAlu/Mul")),
+    ] {
+        let program = Arc::new(program);
+        let mut best = f64::MAX;
+        for _ in 0..3 {
+            let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
+                program.clone(),
+                perm.clone(),
+            );
+            let t = std::time::Instant::now();
+            runtime.run().expect("interpreter");
+            best = best.min(t.elapsed().as_secs_f64());
+        }
+        println!("  {label:<26}  {:>6.1}", best * 1e9 / N as f64);
     }
 }
 

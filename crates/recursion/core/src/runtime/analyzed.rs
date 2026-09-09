@@ -24,6 +24,7 @@ use crate::runtime::instruction::{
     HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
 };
 use crate::runtime::seq_block::{BasicBlock, RawProgram, SeqBlock};
+use crate::Address;
 
 /// An instruction tagged with its event-write offset.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,7 +70,79 @@ impl<F> AnalyzedInstruction<F> {
     }
 }
 
-impl<F> RawProgram<Instruction<F>> {
+/// Where a basic block's `DivF` divisors live, so the walk can invert them
+/// all at once instead of one at a time.
+///
+/// A field inversion is ~51 ns against a multiply's ~13 (measured, KoalaBear
+/// on this host: `BaseAlu/Div` 64.5 ns vs `BaseAlu/Mul` 13.3).  Montgomery's
+/// trick turns `n` inversions into `3n` multiplies and ONE inversion, so it
+/// pays as soon as a block has more than a couple of divisions — and the
+/// recursion programs are 16.8-18.6% `DivF` by base-ALU instruction
+/// (298,341 of them in the leaf).
+///
+/// It needs every divisor of the block in hand BEFORE the block runs, which
+/// is exactly what the census says is available: 298,338 of 298,341 leaf
+/// divisors are already live at block entry (99.98%), because a recursion
+/// program writes each address once and the divisors come from earlier
+/// blocks.  So the plan is the divisors' ADDRESSES, in execution order —
+/// addresses are compile-time constants even though the values are not.
+///
+/// Holding addresses rather than instruction indices is deliberate: the
+/// gather pass then touches only the memory cells the block is about to read
+/// anyway, instead of a second sparse pass over a 78 MB instruction stream.
+///
+/// A block is all-or-nothing.  If ANY of its `DivF` divisors is produced
+/// inside the block, the whole block keeps the per-instruction path; mixing
+/// the two would need a per-instruction marker, and the marker would cost
+/// every instruction in the program the width to carry it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DivPlan<F> {
+    /// This basic block's `DivF` divisor addresses, in execution order.
+    /// Empty means "invert per instruction" — either the block has no
+    /// division, or one of its divisors is not live at block entry.
+    Basic(Box<[Address<F>]>),
+    /// Mirrors `SeqBlock::Parallel`: one `Vec<DivPlan>` per sub-program,
+    /// matching that sub-program's `seq_blocks` element for element.
+    Parallel(Vec<Vec<DivPlan<F>>>),
+}
+
+/// `stamps[addr] == generation` iff the block currently being analyzed has
+/// already written `addr`.
+///
+/// A `HashSet` would be the obvious spelling and is the wrong one: a program
+/// is built often enough for this to matter (roughly 15 per worker per block
+/// under `FIX_CORE_SHAPES=off`), and hashing every one of a leaf's 4.3 M
+/// written addresses cost 122 ms — comparable to `analyze` itself.  Recursion
+/// addresses are dense and assigned in increasing order, so a stamp array is
+/// a near-sequential write, and the generation counter means no clearing
+/// between blocks.
+struct Written {
+    stamps: Vec<u32>,
+    generation: u32,
+}
+
+impl Written {
+    fn next_block(&mut self) {
+        self.generation += 1;
+    }
+
+    #[inline]
+    fn insert(&mut self, addr: usize) {
+        if addr >= self.stamps.len() {
+            // 0 is never a live generation (the counter starts at 1), so a
+            // freshly grown slot reads as "not written".
+            self.stamps.resize((addr + 1).next_power_of_two(), 0);
+        }
+        self.stamps[addr] = self.generation;
+    }
+
+    #[inline]
+    fn contains(&self, addr: usize) -> bool {
+        self.stamps.get(addr).is_some_and(|&g| g == self.generation)
+    }
+}
+
+impl<F: p3_field::PrimeField64> RawProgram<Instruction<F>> {
     /// Walk seq_blocks (recursing into `SeqBlock::Parallel` sub-programs)
     /// and accumulate per-chip event counts without rewriting the program.
     ///
@@ -109,7 +182,14 @@ impl<F> RawProgram<Instruction<F>> {
     /// compiler emits each `SeqBlock::Parallel` sub-program with
     /// monotonic, non-overlapping address ranges and no cross-block
     /// data dependencies. The runtime relies on this without verifying.
-    pub fn analyze(self) -> (RawProgram<AnalyzedInstruction<F>>, RecursionAirEventCount) {
+    /// Also returns the batch-inversion plan ([`DivPlan`]), built in the same
+    /// traversal.  Built separately it cost 122 ms on a 4.3 M-instruction
+    /// leaf — as much as `analyze` itself — because the expensive part is
+    /// walking every instruction, not the bookkeeping.  Sharing the walk
+    /// makes it marginal.
+    pub fn analyze(
+        self,
+    ) -> (RawProgram<AnalyzedInstruction<F>>, RecursionAirEventCount, Vec<DivPlan<F>>) {
         fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) -> usize {
             fn incr(num: &mut usize, amt: usize) -> usize {
                 let start = *num;
@@ -149,42 +229,78 @@ impl<F> RawProgram<Instruction<F>> {
             }
         }
 
-        fn analyze_block<T>(
+        fn analyze_block<T: p3_field::PrimeField64>(
             block: SeqBlock<Instruction<T>>,
             counts: &mut RecursionAirEventCount,
-        ) -> SeqBlock<AnalyzedInstruction<T>> {
+            written: &mut Written,
+        ) -> (SeqBlock<AnalyzedInstruction<T>>, DivPlan<T>) {
             match block {
                 SeqBlock::Basic(basic) => {
+                    written.next_block();
+                    let mut divisors: Vec<Address<T>> = Vec::new();
+                    // Set once a divisor turns out to be produced inside this
+                    // block: the value is not there to gather, and the plan
+                    // is all-or-nothing per block (see [`DivPlan`]).
+                    let mut given_up = false;
                     let analyzed = basic
                         .instrs
                         .into_iter()
                         .map(|instr| {
+                            if !given_up {
+                                if let Instruction::BaseAlu(i) = &instr {
+                                    if matches!(
+                                        i.opcode,
+                                        crate::BaseAluOpcode::DivF
+                                            | crate::BaseAluOpcode::DivFAssert
+                                    ) {
+                                        if written.contains(i.addrs.in2.as_usize()) {
+                                            given_up = true;
+                                            divisors.clear();
+                                        } else {
+                                            divisors.push(i.addrs.in2);
+                                        }
+                                    }
+                                }
+                            }
+                            // EXHAUSTIVE, and it must stay that way: a missed
+                            // write would let a divisor be gathered above the
+                            // instruction that produces it, and the walk
+                            // would divide by a stale cell.
+                            instr.for_each_written_addr(|a| written.insert(a.as_usize()));
                             let offset = instr_offset(&instr, counts);
                             AnalyzedInstruction::new(instr, offset)
                         })
                         .collect();
-                    SeqBlock::Basic(BasicBlock { instrs: analyzed })
+                    (
+                        SeqBlock::Basic(BasicBlock { instrs: analyzed }),
+                        DivPlan::Basic(divisors.into_boxed_slice()),
+                    )
                 }
                 SeqBlock::Parallel(par_blocks) => {
-                    let analyzed = par_blocks
+                    let (analyzed, plans): (Vec<_>, Vec<_>) = par_blocks
                         .into_iter()
-                        .map(|sub| RawProgram {
-                            seq_blocks: sub
+                        .map(|sub| {
+                            let (blocks, plans): (Vec<_>, Vec<_>) = sub
                                 .seq_blocks
                                 .into_iter()
-                                .map(|b| analyze_block(b, counts))
-                                .collect(),
+                                .map(|b| analyze_block(b, counts, written))
+                                .unzip();
+                            (RawProgram { seq_blocks: blocks }, plans)
                         })
-                        .collect();
-                    SeqBlock::Parallel(analyzed)
+                        .unzip();
+                    (SeqBlock::Parallel(analyzed), DivPlan::Parallel(plans))
                 }
             }
         }
 
         let mut counts = RecursionAirEventCount::default();
-        let analyzed_blocks =
-            self.seq_blocks.into_iter().map(|b| analyze_block(b, &mut counts)).collect();
-        (RawProgram { seq_blocks: analyzed_blocks }, counts)
+        let mut written = Written { stamps: Vec::new(), generation: 0 };
+        let (analyzed_blocks, div_plan): (Vec<_>, Vec<_>) = self
+            .seq_blocks
+            .into_iter()
+            .map(|b| analyze_block(b, &mut counts, &mut written))
+            .unzip();
+        (RawProgram { seq_blocks: analyzed_blocks }, counts, div_plan)
     }
 }
 
@@ -224,7 +340,7 @@ mod tests {
                 instrs: vec![dummy_base_alu(), dummy_base_alu(), dummy_mem(), dummy_base_alu()],
             })],
         };
-        let (analyzed, counts) = prog.analyze();
+        let (analyzed, counts, _) = prog.analyze();
         assert_eq!(counts.base_alu_events, 3);
         assert_eq!(counts.mem_const_events, 1);
         let mut base_alu_offsets = Vec::new();
@@ -258,7 +374,7 @@ mod tests {
         let prog: RawProgram<Instruction<KoalaBear>> = RawProgram {
             seq_blocks: vec![make_basic(), SeqBlock::Parallel(par_subs), make_basic()],
         };
-        let (_, counts) = prog.analyze();
+        let (_, counts, _) = prog.analyze();
         // 4 outer (2+2) + 2 sub × 2 instrs each = 4 + 4 = 8 base_alu events.
         assert_eq!(counts.base_alu_events, 8);
     }
@@ -282,7 +398,7 @@ mod tests {
             seq_blocks: vec![make_basic(), SeqBlock::Parallel(par_subs), make_basic()],
         };
         let counts_via_event_counts = prog.event_counts();
-        let (_, counts_via_analyze) = prog.analyze();
+        let (_, counts_via_analyze, _) = prog.analyze();
         assert_eq!(counts_via_event_counts.base_alu_events, counts_via_analyze.base_alu_events);
         assert_eq!(counts_via_event_counts.mem_const_events, counts_via_analyze.mem_const_events);
         assert_eq!(counts_via_event_counts.ext_alu_events, counts_via_analyze.ext_alu_events);
