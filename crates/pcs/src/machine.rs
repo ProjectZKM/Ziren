@@ -244,6 +244,55 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
         })
     }
 
+    /// GPU-worker slimming: move every preprocessed trace INTO its MLE form
+    /// (`Mle::from_row_major` takes ownership, so this is a move, not the
+    /// deep copy `preprocessed_mles` otherwise makes) and leave `traces`
+    /// empty.  A worker's cached key then holds the cells once instead of
+    /// twice; measured on a normalize key, `traces` was 294 MiB of a ~1.3 GB
+    /// key, times 48 keys, times one process per card.
+    ///
+    /// Only for a key whose remaining readers of `traces` can read the MLE
+    /// instead -- the device upload does (`preprocessed_trace_view`); the
+    /// host prover and serialization do not, so never slim a key that will
+    /// be proved with on the host or written out.  The precomputed commit is
+    /// materialised first since it is built from `traces`.
+    pub fn slim_traces_into_mles(&mut self) {
+        if self.traces.is_empty() {
+            return;
+        }
+        let _ = self.preprocessed_data();
+        if self.preprocessed_mles.get().is_none() {
+            use p3_maybe_rayon::prelude::*;
+            let traces = std::mem::take(&mut self.traces);
+            let mles: Vec<std::sync::Arc<crate::basefold::Mle<Val<SC>>>> = traces
+                .into_par_iter()
+                .map(|t| std::sync::Arc::new(crate::basefold::Mle::from_row_major(t)))
+                .collect();
+            let _ = self.preprocessed_mles.set(mles);
+        } else {
+            // The MLEs already hold their own copy; drop the original.
+            self.traces = Vec::new();
+        }
+    }
+
+    /// Whether [`Self::slim_traces_into_mles`] has run: the cells live only
+    /// in the MLE form.
+    pub fn traces_slimmed(&self) -> bool {
+        self.traces.is_empty() && self.preprocessed_mles.get().is_some_and(|m| !m.is_empty())
+    }
+
+    /// Row-major view of preprocessed trace `i`: from `traces`, or from the
+    /// MLE form on a slimmed key (`Mle::as_trace_ref` is the same cells,
+    /// byte for byte).
+    pub fn preprocessed_trace_view(&self, i: usize) -> crate::basefold::TraceRef<'_, Val<SC>> {
+        if !self.traces.is_empty() {
+            let t = &self.traces[i];
+            crate::basefold::TraceRef::new(&t.values, t.width)
+        } else {
+            self.preprocessed_mles()[i].as_trace_ref()
+        }
+    }
+
     /// The precomputed preprocessed commit, built on first use from `traces`
     /// in the SAME name/height order `setup` committed them in (the order
     /// `chip_ordering` records) and under the orientation recorded on the key
