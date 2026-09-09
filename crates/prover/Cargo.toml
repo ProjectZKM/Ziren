@@ -110,6 +110,10 @@ name = "enum_build_coverage"
 path = "scripts/enum_build_coverage.rs"
 
 [[bin]]
+name = "pk_size_census"
+path = "scripts/pk_size_census.rs"
+
+[[bin]]
 name = "jit_coverage"
 path = "scripts/jit_coverage.rs"
 

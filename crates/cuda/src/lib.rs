@@ -91,6 +91,13 @@ pub struct StatelessProveCoreRequestPayload {
     pub stdin: ZKMStdin,
     /// The proving key.
     pub pk: ZKMProvingKey,
+    /// The caller will send the core proof straight back in a `compress`
+    /// request.  The server keeps the shard proofs (and the stdin) for that
+    /// request and answers this one with an EMPTY proof body -- public values
+    /// and the cycle count only -- instead of shipping ~140 MB down and then
+    /// back up.  Ignored by servers that predate the field (serde default).
+    #[serde(default)]
+    pub retain_for_compress: bool,
 }
 
 /// The payload for the [zkm_prover::ZKMProver::compress] method.
@@ -323,7 +330,25 @@ impl ZKMCudaProver {
         pk: &ZKMProvingKey,
         stdin: &ZKMStdin,
     ) -> Result<ZKMCoreProof, ZKMCoreProverError> {
-        let payload = StatelessProveCoreRequestPayload { pk: pk.clone(), stdin: stdin.clone() };
+        self.prove_core_stateless_retaining(pk, stdin, false)
+    }
+
+    /// [`Self::prove_core_stateless`] for a caller that will [`Self::compress`]
+    /// the result next: with `retain_for_compress` the server keeps the shard
+    /// proofs and the returned [`ZKMCoreProof`] carries an empty proof body
+    /// (public values and cycles are real).  Hand that value to `compress`
+    /// unchanged; the server substitutes what it kept.
+    pub fn prove_core_stateless_retaining(
+        &self,
+        pk: &ZKMProvingKey,
+        stdin: &ZKMStdin,
+        retain_for_compress: bool,
+    ) -> Result<ZKMCoreProof, ZKMCoreProverError> {
+        let payload = StatelessProveCoreRequestPayload {
+            pk: pk.clone(),
+            stdin: stdin.clone(),
+            retain_for_compress,
+        };
         let request = crate::api::ProveCoreRequest { data: bincode::serialize(&payload).unwrap() };
         let response = block_on(async { self.client.prove_core_stateless(request).await }).unwrap();
         let proof: ZKMCoreProof = bincode::deserialize(&response.result).unwrap();

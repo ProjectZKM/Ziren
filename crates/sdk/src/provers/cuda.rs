@@ -46,7 +46,13 @@ impl CudaProver {
         }
 
         // Generate the core proof.
-        let proof = self.cuda_prover.prove_core_stateless(pk, stdin)?;
+        // Anything past Core sends the core proof straight back for
+        // compress, so let the server keep it rather than round-trip it.
+        let proof = self.cuda_prover.prove_core_stateless_retaining(
+            pk,
+            stdin,
+            kind != ZKMProofKind::Core,
+        )?;
         let cycles = proof.cycles;
         if kind == ZKMProofKind::Core {
             let proof_with_pv = ZKMProofWithPublicValues {
