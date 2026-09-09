@@ -44,23 +44,9 @@ pub struct RecursionProgram<F> {
     /// assigned the offsets.  `UnsafeRecord` is sized from it.
     #[serde(default)]
     pub event_counts: RecursionAirEventCount,
-    /// Batch-inversion plan, one entry per element of `seq_blocks`.  See
-    /// [`DivPlan`].  Derived from the analyzed stream, so it shares the
-    /// invariant above: it is only valid for THIS stream.
-    ///
-    /// Deliberately NOT part of [`setup_digest`] — it is a restatement of
-    /// what the instruction stream already says, so a program's `(pk, vk)`
-    /// does not move when it appears.  `default` is the empty plan, which
-    /// the walker reads as "invert per instruction", so an old serialized
-    /// program stays correct and merely slower — and it cannot stay slower
-    /// for long either, because the on-disk program cache lives under a
-    /// directory named by a fingerprint of the running executable, so the
-    /// build that introduced the plan reads a cold cache.
-    #[serde(default = "Vec::new")]
-    pub div_plan: Vec<DivPlan<F>>,
 }
 
-impl<F: p3_field::PrimeField64> RecursionProgram<F> {
+impl<F> RecursionProgram<F> {
     /// Build a program from a raw instruction stream, analyzing it once.
     ///
     /// This is the only way to make a program, so a program cannot exist in
@@ -71,8 +57,8 @@ impl<F: p3_field::PrimeField64> RecursionProgram<F> {
         traces: Vec<Option<Backtrace>>,
         shape: Option<RecursionShape>,
     ) -> Self {
-        let (seq_blocks, event_counts, div_plan) = seq_blocks.analyze();
-        Self { seq_blocks, total_memory, traces, shape, event_counts, div_plan }
+        let (seq_blocks, event_counts) = seq_blocks.analyze();
+        Self { seq_blocks, total_memory, traces, shape, event_counts }
     }
 }
 

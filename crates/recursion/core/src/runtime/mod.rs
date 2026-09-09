@@ -10,7 +10,7 @@ mod program;
 mod record;
 mod seq_block;
 
-pub use analyzed::{AnalyzedInstruction, DivPlan};
+pub use analyzed::AnalyzedInstruction;
 pub use seq_block::{BasicBlock, RawProgram, SeqBlock};
 
 // Avoid triggering annoying branch of thiserror derive macro.
@@ -72,42 +72,6 @@ pub const NUM_BITS: usize = 31;
 
 pub const D: usize = 4;
 
-/// Montgomery's trick: `vals[i]` becomes `1/vals[i]`, at a cost of `3n`
-/// multiplies and ONE inversion instead of `n` inversions.
-///
-/// A zero is carried through as a zero and skipped in the product chain, so
-/// one out-of-domain divisor neither poisons its neighbours nor makes the
-/// single inversion fail; the caller reads the zero back as "no inverse".
-///
-/// `scratch` holds the prefix products.  It is passed in rather than
-/// allocated so a walk that enters thousands of basic blocks reuses one
-/// buffer.
-fn batch_invert<F: p3_field::Field>(vals: &mut [F], scratch: &mut Vec<F>) {
-    scratch.clear();
-    scratch.reserve(vals.len());
-    // P_i = product of the non-zero values before i.
-    let mut acc = F::ONE;
-    for &v in vals.iter() {
-        scratch.push(acc);
-        if !v.is_zero() {
-            acc *= v;
-        }
-    }
-    // A product of non-zero field elements is non-zero, so this cannot fail.
-    let mut inv_acc =
-        acc.try_inverse().expect("a product of non-zero field elements is non-zero");
-    // Walking back down: `inv_acc` is 1/P_{i+1}, so P_i / P_{i+1} = 1/v_i.
-    for i in (0..vals.len()).rev() {
-        let v = vals[i];
-        if v.is_zero() {
-            vals[i] = F::ZERO;
-        } else {
-            vals[i] = scratch[i] * inv_acc;
-            inv_acc *= v;
-        }
-    }
-}
-
 /// Per-walker mutable state for the parallel SeqBlock executor. Each parallel
 /// sub-walker allocates its own `WalkerState` on the stack so the walker
 /// can take `&self` and dispatch `SeqBlock::Parallel` sub-walks via
@@ -135,19 +99,6 @@ pub struct WalkerState<F: Default + Copy> {
     pub nb_batch_fri: usize,
     pub nb_print_f: usize,
     pub nb_print_e: usize,
-    /// Batch-inverted `DivF` divisors for the basic block being walked, in
-    /// the order the block's divisions execute; `div_cursor` is how many
-    /// have been consumed.  Empty when the block has no plan, which puts
-    /// the `DivF` arm back on `try_inverse` per instruction.
-    ///
-    /// A zero entry means the divisor WAS zero — an inverse is never zero,
-    /// so the sentinel is unambiguous and the arm falls through to the
-    /// original out-of-domain handling.
-    pub div_inv: Vec<F>,
-    pub div_cursor: usize,
-    /// Prefix-product scratch for the batch inversion; kept on the state so
-    /// a block entry reuses the allocation instead of making one.
-    pub div_scratch: Vec<F>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -449,9 +400,6 @@ where
             nb_batch_fri: self.nb_batch_fri,
             nb_print_f: self.nb_print_f,
             nb_print_e: self.nb_print_e,
-            div_inv: Vec::new(),
-            div_cursor: 0,
-            div_scratch: Vec::new(),
         };
         // Take witness/debug_stdout out so we can pass them as `&mut`
         // through the recursive `&self` walker without aliasing self.
@@ -461,7 +409,6 @@ where
 
         let walker_result = self.execute_blocks(
             &analyzed_program.seq_blocks,
-            Some(program_arc.div_plan.as_slice()),
             &mut state,
             Some(&mut witness),
             Some(&mut *debug_stdout),
@@ -563,37 +510,14 @@ where
     fn execute_blocks(
         &self,
         blocks: &[SeqBlock<AnalyzedInstruction<F>>],
-        // Mirrors `blocks` element for element.  `None` — or any length
-        // mismatch, which is checked at every level — means "no plan here",
-        // and the walk inverts per instruction exactly as it always did.
-        plan: Option<&[DivPlan<F>]>,
         state: &mut WalkerState<F>,
         mut witness: Option<&mut VecDeque<Block<F>>>,
         mut debug_stdout: Option<&mut (dyn Write + 'a)>,
         rec: &UnsafeRecord<F>,
     ) -> Result<(), RuntimeError<F, EF>> {
-        let plan = plan.filter(|p| p.len() == blocks.len());
-        for (i, block) in blocks.iter().enumerate() {
-            let block_plan = plan.map(|p| &p[i]);
+        for block in blocks {
             match block {
                 SeqBlock::Basic(basic) => {
-                    // Gather the block's divisors and invert them all at
-                    // once.  The reads are pure (`mr_us` only borrows), and
-                    // every address here is one no instruction in this block
-                    // writes, so the values cannot change under the walk.
-                    state.div_cursor = 0;
-                    state.div_inv.clear();
-                    if let Some(DivPlan::Basic(addrs)) = block_plan {
-                        if !addrs.is_empty() {
-                            state.div_inv.reserve(addrs.len());
-                            for &a in addrs.iter() {
-                                state.div_inv.push(self.mr_us(a).val[0]);
-                            }
-                            let (inv, scratch) =
-                                (&mut state.div_inv, &mut state.div_scratch);
-                            batch_invert(inv, scratch);
-                        }
-                    }
                     for ai in &basic.instrs {
                         self.execute_one(
                             ai,
@@ -603,19 +527,11 @@ where
                             rec,
                         )?;
                     }
-                    state.div_inv.clear();
-                    state.div_cursor = 0;
                 }
                 SeqBlock::Parallel(par_blocks) => {
                     use p3_maybe_rayon::prelude::*;
-                    let sub_plans = match block_plan {
-                        Some(DivPlan::Parallel(subs)) if subs.len() == par_blocks.len() => {
-                            Some(subs.as_slice())
-                        }
-                        _ => None,
-                    };
-                    par_blocks.par_iter().enumerate().try_for_each(
-                        |(j, sub): (usize, &RawProgram<AnalyzedInstruction<F>>)| -> Result<(), RuntimeError<F, EF>> {
+                    par_blocks.par_iter().try_for_each(
+                        |sub: &RawProgram<AnalyzedInstruction<F>>| -> Result<(), RuntimeError<F, EF>> {
                             let mut substate = WalkerState::<F>::default();
                             substate.pc = state.pc;
                             substate.clk = state.clk;
@@ -623,7 +539,6 @@ where
                             // pure-compute (hint_in_par=0).
                             self.execute_blocks(
                                 &sub.seq_blocks,
-                                sub_plans.map(|p| p[j].as_slice()),
                                 &mut substate,
                                 None,
                                 None,
@@ -674,21 +589,7 @@ where
                     BaseAluOpcode::SubF => in1 - in2,
                     BaseAluOpcode::MulF => in1 * in2,
                     BaseAluOpcode::DivF | BaseAluOpcode::DivFAssert => {
-                        // Hoisted: this block's divisors were inverted in one
-                        // batch at block entry, and the block's divisions
-                        // consume them in execution order.  A zero entry is
-                        // the "divisor was zero" sentinel (an inverse never
-                        // is), which drops through to the same out-of-domain
-                        // handling as the un-hoisted path.
-                        let hoisted = state.div_inv.get(state.div_cursor).copied();
-                        if hoisted.is_some() {
-                            state.div_cursor += 1;
-                        }
-                        match hoisted
-                            .filter(|inv| !inv.is_zero())
-                            .or_else(|| in2.try_inverse())
-                            .map(|x| x * in1)
-                        {
+                        match in2.try_inverse().map(|x| x * in1) {
                             Some(x) => x,
                             None => {
                                 if in1.is_zero() {
@@ -980,62 +881,5 @@ where
         state.clk = next_clk;
         state.timestamp += 1;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod batch_invert_tests {
-    use super::batch_invert;
-    use p3_field::{Field, PrimeCharacteristicRing};
-    use p3_koala_bear::KoalaBear;
-
-    type F = KoalaBear;
-
-    fn check(vals: &[F]) {
-        let mut got = vals.to_vec();
-        let mut scratch = Vec::new();
-        batch_invert(&mut got, &mut scratch);
-        for (i, (&v, &inv)) in vals.iter().zip(got.iter()).enumerate() {
-            match v.try_inverse() {
-                Some(want) => assert_eq!(inv, want, "vals[{i}] = {v:?}"),
-                // A zero comes back as a zero — the sentinel the DivF arm
-                // reads as "no inverse".
-                None => assert_eq!(inv, F::ZERO, "vals[{i}] = {v:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn inverts_every_element() {
-        check(&(1u32..64).map(F::from_u32).collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn carries_zeros_through_without_poisoning_neighbours() {
-        check(&[F::ZERO]);
-        check(&[F::ZERO, F::from_u32(7)]);
-        check(&[F::from_u32(7), F::ZERO]);
-        check(&[F::from_u32(3), F::ZERO, F::ZERO, F::from_u32(11), F::ZERO]);
-        check(&[F::ZERO; 5]);
-    }
-
-    #[test]
-    fn handles_the_degenerate_lengths() {
-        check(&[]);
-        check(&[F::ONE]);
-        check(&[F::from_u32(2)]);
-    }
-
-    #[test]
-    fn reuses_the_scratch_across_calls() {
-        // The walker keeps one scratch for a whole program; a stale prefix
-        // from a longer previous block must not leak into a shorter one.
-        let mut scratch = Vec::new();
-        let mut long: Vec<F> = (1u32..40).map(F::from_u32).collect();
-        batch_invert(&mut long, &mut scratch);
-        let mut short = vec![F::from_u32(5), F::from_u32(9)];
-        batch_invert(&mut short, &mut scratch);
-        assert_eq!(short[0], F::from_u32(5).inverse());
-        assert_eq!(short[1], F::from_u32(9).inverse());
     }
 }

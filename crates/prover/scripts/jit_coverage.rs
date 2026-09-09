@@ -68,10 +68,10 @@ fn main() {
                 )],
             };
             let t = std::time::Instant::now();
-            let (_a, _c, _d) = raw.clone().analyze();
+            let (_a, _c) = raw.clone().analyze();
             let with_clone = t.elapsed();
             let t2 = std::time::Instant::now();
-            let (_a2, _c2, _d2) = raw.analyze();
+            let (_a2, _c2) = raw.analyze();
             let without_clone = t2.elapsed();
             println!(
                 "  analyze: {:.1} ms with the clone run() used to make, {:.1} ms without \
@@ -80,22 +80,6 @@ fn main() {
                 without_clone.as_secs_f64() * 1e3,
                 without_clone.as_nanos() as f64 / plan.total().max(1) as f64,
             );
-            // The batch-inversion plan now rides `analyze`'s traversal, so
-            // what is reported is how many divisors it reaches, not a second
-            // pass's cost.
-            let hoisted: usize = {
-                use zkm_recursion_core::runtime::DivPlan;
-                fn count<F>(p: &[DivPlan<F>]) -> usize {
-                    p.iter()
-                        .map(|d| match d {
-                            DivPlan::Basic(a) => a.len(),
-                            DivPlan::Parallel(subs) => subs.iter().map(|s| count(s)).sum(),
-                        })
-                        .sum()
-                }
-                count(&program.div_plan)
-            };
-            println!("  div_plan: {hoisted} divisors hoisted");
         }
 
         println!("\n== {cat}: {} instructions ==", plan.total());
