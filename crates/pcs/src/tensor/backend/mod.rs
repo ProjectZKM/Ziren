@@ -14,7 +14,7 @@
 //! whereas `Tensor` here is ROW-major, so the two stacks are still not interchangeable.
 //! Do not infer from the generics that a device backend is wired into any proving path.
 
-mod cpu;
+pub mod cpu;
 mod io;
 
 use std::{borrow::Cow, fmt::Debug, rc::Rc, sync::Arc};

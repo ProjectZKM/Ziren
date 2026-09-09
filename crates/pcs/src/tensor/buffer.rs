@@ -956,6 +956,39 @@ impl<T> Buffer<T, CpuBackend> {
         self.into()
     }
 
+    /// A buffer over memory this process does not own — `len` elements at
+    /// `ptr` inside a region kept alive by `keepalive` (a shared read-only
+    /// mapping).  The buffer is full (`capacity == len`) and immutable in
+    /// practice; conversions to `Vec` copy, and dropping it releases the
+    /// region reference instead of freeing.  `T: Copy` because the region is
+    /// shared: no element is ever dropped through this buffer.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be valid, aligned for `T`, and point at `len` initialised
+    /// elements that stay valid and unmodified for as long as `keepalive` is
+    /// alive.
+    pub unsafe fn from_foreign(
+        ptr: *mut T,
+        len: usize,
+        keepalive: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+    ) -> Self
+    where
+        T: Copy,
+    {
+        crate::tensor::backend::cpu::foreign_region_attach(
+            ptr as usize,
+            len * std::mem::size_of::<T>(),
+            keepalive,
+        );
+        Self::from_raw_parts(ptr, len, len, CpuBackend)
+    }
+
+    /// Whether this buffer's storage is foreign (see [`Self::from_foreign`]).
+    pub fn is_foreign(&self) -> bool {
+        crate::tensor::backend::cpu::is_foreign(self.as_ptr() as usize)
+    }
+
     /// Returns a slice containing the entire buffer.
     ///
     /// Equivalent to `&buffer[..]`.
@@ -1095,6 +1128,17 @@ impl<T> From<Buffer<T, CpuBackend>> for Vec<T> {
     /// assert_eq!(vec, vec![1, 2, 3]);
     /// ```
     fn from(value: Buffer<T, CpuBackend>) -> Self {
+        if value.is_foreign() {
+            // Foreign storage never reaches the global allocator: copy out,
+            // and let the buffer's drop release its region reference.  The
+            // region holds `Copy` data by construction (`from_foreign`).
+            let mut vec = Vec::with_capacity(value.len());
+            unsafe {
+                std::ptr::copy_nonoverlapping(value.as_ptr(), vec.as_mut_ptr(), value.len());
+                vec.set_len(value.len());
+            }
+            return vec;
+        }
         let mut self_undropped = ManuallyDrop::new(value);
         unsafe {
             Vec::from_raw_parts(
@@ -1350,5 +1394,36 @@ mod tests {
         assert_eq!(buffer.len(), 11);
         assert_eq!(*buffer[4], 4);
         assert_eq!(*buffer[5], 4);
+    }
+}
+
+#[cfg(test)]
+mod foreign_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// A buffer over a shared region reads the region's bytes, converts to a
+    /// `Vec` by copying, and its drop releases the region rather than freeing
+    /// it -- the region's keepalive goes with the last buffer.
+    #[test]
+    fn foreign_buffer_reads_copies_and_releases() {
+        let backing: Arc<Vec<u32>> = Arc::new((0..1024u32).collect());
+        let keepalive: Arc<dyn std::any::Any + Send + Sync> = backing.clone();
+        let ptr = backing.as_ptr() as *mut u32;
+        let a = unsafe { Buffer::<u32, CpuBackend>::from_foreign(ptr, 1024, keepalive.clone()) };
+        let b = unsafe { Buffer::<u32, CpuBackend>::from_foreign(ptr.add(512), 512, keepalive) };
+        assert!(a.is_foreign() && b.is_foreign());
+        assert_eq!(a.as_slice()[5], 5);
+        assert_eq!(b.as_slice()[0], 512);
+        assert_eq!(Arc::strong_count(&backing), 2, "one keepalive per region, not per buffer");
+        let v: Vec<u32> = b.into();
+        assert_eq!(v[1], 513);
+        assert_eq!(Arc::strong_count(&backing), 2, "region still held by `a`");
+        drop(a);
+        assert_eq!(Arc::strong_count(&backing), 1, "last buffer released the region");
+        assert!(!crate::tensor::backend::cpu::is_foreign(ptr as usize));
+        let owned: Buffer<u32, CpuBackend> = vec![1, 2, 3].into();
+        assert!(!owned.is_foreign());
+        let _v2: Vec<u32> = owned.into();
     }
 }
