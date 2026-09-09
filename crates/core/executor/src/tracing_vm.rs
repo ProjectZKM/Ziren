@@ -1382,6 +1382,9 @@ mod tests {
         let chunk = TraceChunk {
             input_stream_slice: None,
             shard_index: 0,
+            shape_fingerprint: 0,
+            shape_classes: Vec::new(),
+            shape_area: 0,
             start_registers: vec![0u32; 36],
             start_register_records: Vec::new(),
             pc_start: pc_base,

@@ -131,6 +131,28 @@ fn de_mem_reads<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Arc<Vec<MemVal
 pub struct TraceChunk {
     /// Shard index — preserved so a parallel collector can resort outputs.
     pub shard_index: u32,
+    /// The closed shard's per-chip height classes, hashed: `ilog2(next_pow2(
+    /// rows))` per air with rows > 0, the cycle count included as the `Cpu`
+    /// axis.  Under FIX_CORE_SHAPES=off that is what fixes the shard's padded
+    /// shape and hence which recursion program — which (pk, vk) — proves its
+    /// leaf, so two chunks with equal fingerprints almost always want the
+    /// same proving key.  A PLACEMENT HINT for the multi-GPU parent, nothing
+    /// more: the worker derives the real shape from the replayed record and
+    /// never reads this, and a wrong guess costs one cache miss, exactly what
+    /// every node paid before it existed.
+    #[serde(default)]
+    pub shape_fingerprint: u64,
+    /// The classes the fingerprint hashes, one byte per accumulator slot
+    /// (`ShardSplitAccumulator::slot` order): `ilog2(next_pow2(rows)) + 1`,
+    /// 0 for an air with no rows.  Diagnostic — lets a hint that splits or
+    /// merges the worker's real key be diffed axis by axis.
+    #[serde(default)]
+    pub shape_classes: Vec<u8>,
+    /// The closed shard's main-trace area in cells (rows x width summed over
+    /// airs, the executor's exact incremental count), which is what the
+    /// fingerprint is actually made of -- see `Executor::inc_shard_if_need`.
+    #[serde(default)]
+    pub shape_area: u64,
     /// Register file (36 slots, matching `JitContext::registers`) at the
     /// start of this shard's slice of execution: 0..32 are MIPS GPRs,
     /// 32/33 are HI/LO, 34 is BRK, 35 is HEAP. `Vec` (not `[u32; 36]`)
@@ -236,6 +258,9 @@ impl TraceChunk {
     pub fn empty(shard_index: u32, pc_start: u32, clk_start: u64) -> Self {
         Self {
             shard_index,
+            shape_fingerprint: 0,
+            shape_classes: Vec::new(),
+            shape_area: 0,
             start_registers: vec![0; 36],
             start_register_records: Vec::new(),
             pc_start,

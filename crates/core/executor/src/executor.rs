@@ -239,6 +239,16 @@ pub struct Executor<'a> {
     /// executed. Read by [`Self::inc_shard_if_need`] as an O(1) pair of comparisons.
     pub split_acct: ShardSplitAccumulator,
 
+    /// The fingerprint of the shard that just closed, waiting for
+    /// [`Self::bump_record`] to stamp it on that shard's [`TraceChunk`].  Set
+    /// in the close path while `split_acct` still holds the shard's heights;
+    /// `bump_record` runs after the per-shard reset, so it cannot compute it.
+    pub pending_shape_fingerprint: u64,
+    /// The per-slot classes behind it; see `TraceChunk::shape_classes`.
+    pub pending_shape_classes: Vec<u8>,
+    /// The area behind it; see `TraceChunk::shape_area`.
+    pub pending_shape_area: u64,
+
     /// Verifier used to sanity check `verify_zkm_proof` during runtime.
     pub subproof_verifier: Option<&'a dyn SubproofVerifier>,
 
@@ -585,6 +595,9 @@ impl<'a> Executor<'a> {
             max_syscall_cycles,
             report: ExecutionReport::default(),
             split_acct,
+            pending_shape_fingerprint: 0,
+            pending_shape_classes: Vec::new(),
+            pending_shape_area: 0,
             print_report: false,
             subproof_verifier: context.subproof_verifier,
             hook_registry,
@@ -2964,6 +2977,11 @@ impl<'a> Executor<'a> {
         // pc_start/clk_start come from the PREVIOUS bump (or program
         // init for the first shard); clk_end is the current clock.
         // Cheap O(1) snapshot — only enabled when collector is Some.
+        // Taken before the collector is borrowed: it belongs to the chunk
+        // being SEALED (the shard that just closed), not the one being opened.
+        let closed_shape_fingerprint = std::mem::take(&mut self.pending_shape_fingerprint);
+        let closed_shape_classes = std::mem::take(&mut self.pending_shape_classes);
+        let closed_shape_area = std::mem::take(&mut self.pending_shape_area);
         if let Some(trace) = self.minimal_trace_collector.as_mut() {
             use crate::minimal_trace::TraceChunk;
             let next_chunk_pc = self.state.pc;
@@ -2992,6 +3010,9 @@ impl<'a> Executor<'a> {
             // Patch the previous chunk's clk_end (if any) to seal it.
             if let Some(prev) = trace.chunks.last_mut() {
                 prev.clk_end = next_chunk_clk;
+                prev.shape_fingerprint = closed_shape_fingerprint;
+                prev.shape_classes = closed_shape_classes;
+                prev.shape_area = closed_shape_area;
                 // Option B: stamp the recorded mem_reads
                 // oracle entries onto the chunk that just closed. Drain
                 // the recording buffer so the next chunk starts fresh.
@@ -3022,6 +3043,9 @@ impl<'a> Executor<'a> {
             // (or at the end of execution via finalize_minimal_trace).
             trace.chunks.push(TraceChunk {
                 shard_index: trace.next_shard_index(),
+                shape_fingerprint: 0,
+                shape_classes: Vec::new(),
+                shape_area: 0,
                 start_registers: next_registers,
                 start_register_records: next_register_records,
                 pc_start: next_chunk_pc,
@@ -3363,6 +3387,9 @@ impl<'a> Executor<'a> {
                 }
                 trace.chunks.push(TraceChunk {
                     shard_index: 0,
+                    shape_fingerprint: 0,
+                    shape_classes: Vec::new(),
+                    shape_area: 0,
                     start_registers: start_regs,
                     start_register_records: start_reg_records,
                     pc_start: self.state.pc,
@@ -3462,6 +3489,9 @@ impl<'a> Executor<'a> {
             crate::minimal_trace::TraceChunk {
                 input_stream_slice: None,
                 shard_index: 0,
+                shape_fingerprint: 0,
+                shape_classes: Vec::new(),
+                shape_area: 0,
                 start_registers,
                 start_register_records: Vec::new(),
                 pc_start,
@@ -4039,6 +4069,46 @@ impl<'a> Executor<'a> {
                     census.join(","),
                 );
             }
+            // What this shard's leaf will be proved with, for the multi-GPU
+            // parent's placement (see `TraceChunk::shape_fingerprint`).  The
+            // heights are exact on both paths: the interpreter charges them
+            // per instruction and the native producer imports them back at
+            // every fence, before this runs.
+            self.pending_shape_fingerprint = {
+                use std::hash::{Hash, Hasher};
+                // What the leaf's proving key actually turns on is not each
+                // chip's own height but the shard's committed AREA: the jagged
+                // packing's `log_dense_size` (L) sets the reduction and
+                // jagged-eval round counts, and the basefold query round's
+                // leaf count is `2^(L - LOG_STACKING_HEIGHT)` -- the area in
+                // stacking stripes of 2^21 cells, which at L=28 ranges 80..120
+                // and is "the dimension that actually splits the diversity"
+                // (zkm-prover's NORMALIZE_KEY diagnostic).  MEASURED on the
+                // per-chip classes first: they split a true key 52 times in
+                // 106 (small arithmetic chips straddling powers of two) while
+                // (max height, cycles) merged ~9 keys per class.  `trace_area`
+                // is the executor's exact incremental cell count, so the two
+                // numbers below are what the worker will see up to the rows
+                // dependency generation adds.
+                let area = self.split_acct.trace_area(cpu_cycles);
+                let log_dense = (area.max(1)).next_power_of_two().trailing_zeros();
+                let stripes = area.div_ceil(1 << 21);
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                log_dense.hash(&mut h);
+                stripes.hash(&mut h);
+                let counts = self.split_acct.event_counts(cpu_cycles);
+                let mut classes = vec![0u8; counts.len()];
+                for (air, &rows) in &counts {
+                    if rows > 0 {
+                        classes[ShardSplitAccumulator::slot(air)] =
+                            rows.next_power_of_two().trailing_zeros() as u8 + 1;
+                    }
+                }
+                self.pending_shape_classes = classes;
+                self.pending_shape_area = area;
+                // Never 0: the parent reads 0 as "no hint".
+                h.finish() | 1
+            };
             if self.executor_mode == ExecutorMode::Checkpoint {
                 self.state.records_clk.push(self.state.clk);
             }

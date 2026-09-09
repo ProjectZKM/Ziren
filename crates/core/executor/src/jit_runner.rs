@@ -1309,6 +1309,9 @@ mod platform {
         crate::minimal_trace::TraceChunk {
             input_stream_slice: None,
             shard_index,
+            shape_fingerprint: 0,
+            shape_classes: Vec::new(),
+            shape_area: 0,
             start_registers,
             // JIT path carries value-only registers (no shard/timestamp).
             start_register_records: Vec::new(),
