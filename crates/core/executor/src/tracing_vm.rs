@@ -301,9 +301,29 @@ impl<'a> TracingVM<'a> {
         // point. Merge everything from `sub.records` into `self.record`
         // so the caller gets a single combined ExecutionRecord per
         // chunk. a future revision will skip the intermediate Vec entirely.
+        //
+        // A chunk is exactly one shard, so `sub.records` holds one record and
+        // it moves into `self.record` whole.  Appending it copied every event
+        // Vec into the caller's pre-reserved record (~0.5 GB of writes and
+        // first-touch page faults per shard, a third of the replay) and then
+        // freed the source.  The fields `append` does not carry stay as the
+        // caller's fresh record had them.  Anything else -- several records,
+        // or a caller record that already holds events -- still merges.
         use zkm_pcs::MachineRecord;
-        for mut other in sub.records.drain(..) {
-            self.record.append(&mut other);
+        if sub.records.len() == 1 && self.record.cpu_events.is_empty() {
+            let mut only = sub.records.pop().expect("one record");
+            only.public_values = self.record.public_values;
+            only.shape = None;
+            only.counts = None;
+            only.global_cumulative_sum.clear();
+            only.global_digests.clear();
+            only.global_byte_lookups.clear();
+            std::mem::swap(self.record, &mut only);
+            drop(only);
+        } else {
+            for mut other in sub.records.drain(..) {
+                self.record.append(&mut other);
+            }
         }
 
         // Replicate `Executor::execute`'s per-shard public-values stamp
@@ -402,8 +422,8 @@ impl<'a> TracingVM<'a> {
 /// one process that hands work out. SP1 draws the same line -- its shard task
 /// carries a chunk and the worker calls its own `trace_chunk`.
 ///
-/// The record is pre-allocated at `chunk.num_cycles() / 8`, the same
-/// reservation the parallel driver uses.
+/// The record is the replay's own, moved out whole; nothing is reserved up
+/// front.
 ///
 /// # Errors
 ///
@@ -416,8 +436,10 @@ pub fn trace_chunk(
     chunk: &TraceChunk,
     maximal_shapes: Option<MaximalShapes>,
 ) -> Result<ExecutionRecord, ExecutionError> {
-    let reservation = (chunk.num_cycles() as usize / 8).max(1);
-    let mut record = ExecutionRecord::new_preallocated(program.clone(), reservation);
+    // No reservation: the replay's own record moves in whole (see
+    // `execute_from_chunk_with_streams`), so a pre-reserved shell here would
+    // only be mapped and unmapped.
+    let mut record = ExecutionRecord::new_preallocated(program.clone(), 0);
     let mut vm = TracingVM::new_with_shapes(program, opts, &mut record, maximal_shapes);
     vm.execute_from_chunk(chunk)?;
     Ok(record)
