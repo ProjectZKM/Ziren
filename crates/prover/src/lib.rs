@@ -740,14 +740,41 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // to insert, never across a build.  `is_complete` is part of the
         // shape key, so the root -- the one node that sets it, at whichever
         // arity the shard count leaves it -- is its own program: warm both.
-        let pairs: Vec<(usize, usize, bool)> = (0..bands.len())
+        // Every pre-warmed key stays pinned in host memory, in every process
+        // (the parent and each core worker): with five bands that is forty
+        // keys apiece and a six-card box ran out of memory before its first
+        // block.  ZIREN_PREWARM_BANDS=<i,j,..> restricts the pre-warm to the
+        // bands that compose children usually sit in; the others build on
+        // demand.
+        let prewarm_bands: Vec<usize> = match env::var("ZIREN_PREWARM_BANDS") {
+            Ok(v) => v
+                .split(',')
+                .filter_map(|t| t.trim().parse::<usize>().ok())
+                .filter(|b| *b < bands.len())
+                .collect(),
+            Err(_) => (0..bands.len()).collect(),
+        };
+        let pairs: Vec<(usize, usize, bool)> = prewarm_bands
+            .into_iter()
             .flat_map(|b| {
                 (1..=REDUCE_BATCH_SIZE)
                     .flat_map(move |a| [(b, a, false), (b, a, true)])
             })
             .collect();
         let n_pairs = pairs.len();
-        pairs.into_par_iter().for_each(|(band_index, arity, is_complete)| {
+        // Bounded: a program build and its setup take gigabytes of host
+        // memory each, every process (the parent and each core worker) warms
+        // its own, and forty at once brought a six-card box down.
+        let prewarm_threads = env::var("ZIREN_PREWARM_THREADS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(4);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(prewarm_threads)
+            .build()
+            .expect("compose pre-warm pool");
+        pool.install(|| pairs.into_par_iter().for_each(|(band_index, arity, is_complete)| {
             let proof_shape =
                 RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_log2_ordered_shape(
                     &bands[band_index],
@@ -788,7 +815,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                  snapped onto {band:?} in {:?}",
                 per_pair_start.elapsed()
             );
-        });
+        }));
         tracing::debug!("compose pre-warm: {n_pairs} (band, arity) pairs");
         tracing::debug!(
             "compose pre-warm: arity 1..={} done in {:?}",
