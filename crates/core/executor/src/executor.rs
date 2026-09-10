@@ -207,7 +207,7 @@ pub struct Executor<'a> {
     /// since the HashMap probe sequence handles collision distribution.
     /// Cuts per-cycle HashMap overhead in half for user-memory accesses
     /// (addresses >= 36) that bypass the register-slot fast path.
-    pub local_memory_access: nohash_hasher::IntMap<u32, MemoryLocalEvent>,
+    pub local_memory_access: rustc_hash::FxHashMap<u32, MemoryLocalEvent>,
 
     /// fast-path register-slot mirror
     /// of `local_memory_access`. MIPS register addresses are 0..36
@@ -369,7 +369,7 @@ pub struct Executor<'a> {
 fn upsert_local_mem(
     override_map: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     reg_slots: &mut [Option<MemoryLocalEvent>; 36],
-    fallback_map: &mut nohash_hasher::IntMap<u32, MemoryLocalEvent>,
+    fallback_map: &mut rustc_hash::FxHashMap<u32, MemoryLocalEvent>,
     addr: u32,
     prev_record: MemoryRecord,
     record: MemoryRecord,
@@ -610,7 +610,7 @@ impl<'a> Executor<'a> {
             },
             memory_checkpoint: Memory::default(),
             uninitialized_memory_checkpoint: Memory::default(),
-            local_memory_access: nohash_hasher::IntMap::default(),
+            local_memory_access: rustc_hash::FxHashMap::default(),
             local_reg_access: std::array::from_fn(|_| None),
             maximal_shapes: None,
             costs,
