@@ -961,33 +961,67 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // the matrix away -- this says which of them that actually costs.
         let census = std::env::var("ZIREN_DEPS_CENSUS").is_ok_and(|v| v != "0");
         let mut census_rows: Vec<(String, u128)> = Vec::new();
+        // Two phases per record.  Every chip's `generate_dependencies` reads
+        // the RECORD and writes its own output; the only chip that reads what
+        // an earlier chip in this loop appended is `Global` (it consumes the
+        // `global_lookup_events` that the syscall and memory chips emit).  So
+        // the chips ahead of the first `Global` are independent of each other
+        // and run in parallel, each into its own output record; the outputs
+        // are appended in chip order (deterministic, byte-identical proofs);
+        // then `Global` and everything after it run sequentially, appending
+        // as they go, exactly as before.
+        //
+        // Opt-in (`ZIREN_DEPS_PARALLEL=1`): on an 8-card reth run the split
+        // was 1.7% SLOWER end to end -- the host is core-saturated by the
+        // workers' replays, so the pass finishes sooner only by taking cores
+        // from the shards being replayed next to it.  The sequential loop is
+        // the default.
+        let serial = !std::env::var("ZIREN_DEPS_PARALLEL").is_ok_and(|v| v != "0");
+        let first_consumer = chips.iter().position(|c| c.name() == "Global").unwrap_or(chips.len());
         for record in records.iter_mut() {
-            for chip in chips.iter() {
-                // A chip the shard does not INCLUDE gets no trace and no
-                // lookups in the proof -- `shard_chips` filters on exactly this
-                // predicate -- so running its dependencies can only produce
-                // events nothing will match.  In practice it produced none and
-                // simply allocated: the default `generate_dependencies` is
-                // `generate_trace`, which builds a PADDED trace matrix and
-                // throws it away.  MEASURED on a reth shard at 8 GPU, where the
-                // real tracegen runs on the DEVICE and this pass does not:
-                // `Bls12381FpOpAssign` 50.8 ms, `MemoryGlobalFinalize` 15.9 ms,
-                // `MemoryGlobalInit` 10.8 ms -- 79 ms of an 82 ms pass, for
-                // chips with no events at all, against 125-227 us for the chips
-                // actually doing work (`LoadWord`, `AddSub`, `StoreWord`).
-                //
-                // Checking it HERE rather than hoisting the filter is
-                // load-bearing: `included` is evaluated against the record as
-                // it stands, and `GlobalChip` (58th) is only included once the
-                // syscall and memory chips ahead of it have appended their
-                // `global_lookup_events` in this very loop.
+            let (par_chips, seq_chips) =
+                if serial { (&chips[..0], &chips[..]) } else { (&chips[..first_consumer], &chips[first_consumer..]) };
+            if !par_chips.is_empty() {
+                use rayon::prelude::*;
+                let t_par = std::time::Instant::now();
+                let included: Vec<&_> = par_chips.iter().filter(|c| c.included(record)).collect();
+                let outputs: Vec<Result<(String, A::Record, u128), A::Error>> = included
+                    .par_iter()
+                    .map(|chip| {
+                        let t_chip = std::time::Instant::now();
+                        let mut output = A::Record::default();
+                        chip.generate_dependencies(record, &mut output)?;
+                        Ok((chip.name(), output, t_chip.elapsed().as_micros()))
+                    })
+                    .collect();
+                for out in outputs {
+                    match out {
+                        Ok((name, mut output, us)) => {
+                            record.append(&mut output);
+                            if census {
+                                census_rows.push((name, us));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Error generating dependencies (parallel phase): {:?}", e);
+                            return Err(e);
+                        }
+                    }
+                }
+                if census {
+                    census_rows.push(("<parallel-phase-wall>".to_string(), t_par.elapsed().as_micros()));
+                }
+            }
+            for chip in seq_chips.iter() {
+                // `included` is evaluated against the record as it stands:
+                // `Global` is only included once the syscall and memory chips
+                // ahead of it have appended their `global_lookup_events`.
                 if !chip.included(record) {
                     continue;
                 }
                 let span = tracing::debug_span!("chip dependencies", chip = chip.name());
                 let _enter = span.enter();
                 let t_chip = std::time::Instant::now();
-
                 let mut output = A::Record::default();
                 if let Err(e) = chip.generate_dependencies(record, &mut output) {
                     tracing::error!(
