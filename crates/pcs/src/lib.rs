@@ -6,6 +6,7 @@ extern crate alloc;
 
 pub mod air;
 pub mod basefold;
+pub mod device_byte_lookups;
 mod chip;
 mod config;
 mod debug;

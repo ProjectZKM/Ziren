@@ -15,4 +15,14 @@ pub trait MachineRecord: Default + Sized + Send + Sync + Clone {
 
     /// Returns the public values of the record.
     fn public_values<F: PrimeCharacteristicRing>(&self) -> Vec<F>;
+
+    /// The byte-table multiplicities this record's byte lookups scatter to,
+    /// laid out as the Byte and Range chips' traces are: `NUM_BYTE_OPS`
+    /// planes of 2^16 rows (plane = opcode, row = `b << 8 | c`, or `a1` for
+    /// `U16Range`) and one plane of 2^17 rows (`(1 << b) + a1`) for the range
+    /// checks.  A prover that counts these on the device compares against
+    /// them; records without byte lookups return `None`.
+    fn byte_multiplicity_planes(&self) -> Option<(Vec<u32>, Vec<u32>)> {
+        None
+    }
 }

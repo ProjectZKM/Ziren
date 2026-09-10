@@ -688,6 +688,27 @@ impl MachineRecord for ExecutionRecord {
         // dependency pass appends an event-less output record after publishing).
     }
 
+    fn byte_multiplicity_planes(&self) -> Option<(Vec<u32>, Vec<u32>)> {
+        use crate::events::NUM_BYTE_OPS;
+        use crate::ByteOpcode;
+        let mut bytes = vec![0u32; NUM_BYTE_OPS << 16];
+        let mut range = vec![0u32; 1 << 17];
+        for (lookup, mult) in self.byte_lookups.iter() {
+            let mult = *mult as u32;
+            if lookup.opcode == ByteOpcode::Range {
+                range[(1usize << lookup.b) + lookup.a1 as usize] += mult;
+                continue;
+            }
+            let row = if lookup.opcode == ByteOpcode::U16Range {
+                lookup.a1 as usize
+            } else {
+                ((lookup.b as usize) << 8) | lookup.c as usize
+            };
+            bytes[((lookup.opcode as usize) << 16) + row] += mult;
+        }
+        Some((bytes, range))
+    }
+
     /// Retrieves the public values.  This method is needed for the `MachineRecord` trait, since
     fn public_values<F: PrimeCharacteristicRing>(&self) -> Vec<F> {
         let mut pv = self.public_values;

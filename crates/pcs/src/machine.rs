@@ -984,7 +984,13 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             if !par_chips.is_empty() {
                 use rayon::prelude::*;
                 let t_par = std::time::Instant::now();
-                let included: Vec<&_> = par_chips.iter().filter(|c| c.included(record)).collect();
+                let included: Vec<&_> = par_chips
+                    .iter()
+                    .filter(|c| {
+                        !crate::device_byte_lookups::chip_byte_lookups_on_device(&c.name())
+                            && c.included(record)
+                    })
+                    .collect();
                 let outputs: Vec<Result<(String, A::Record, u128), A::Error>> = included
                     .par_iter()
                     .map(|chip| {
@@ -1013,6 +1019,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 }
             }
             for chip in seq_chips.iter() {
+                // A chip whose byte lookups the device prover counts off its
+                // own trace has no dependencies left to generate here.
+                if crate::device_byte_lookups::chip_byte_lookups_on_device(&chip.name()) {
+                    continue;
+                }
                 // `included` is evaluated against the record as it stands:
                 // `Global` is only included once the syscall and memory chips
                 // ahead of it have appended their `global_lookup_events`.
