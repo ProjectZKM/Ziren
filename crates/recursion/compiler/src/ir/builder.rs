@@ -25,6 +25,16 @@ impl<T> Default for TracedVec<T> {
     }
 }
 
+/// Operations reserved up front by a TOP-LEVEL program builder.  Only the
+/// program's own vector gets this: at 680 bytes per `DslIr` it is a 6.8 GB
+/// address-space reservation, and a compile creates thousands of
+/// sub-builders (`if`/`else`/loop bodies) whose vectors used to reserve the
+/// same, i.e. tens of TB of address space churned per compile.  jemalloc
+/// retained that (its retained extents grow geometrically) until the 128 TiB
+/// address space ran out and an allocation failed with hundreds of GB of RAM
+/// free.
+pub const TOP_LEVEL_OPS_RESERVE: usize = 10_000_000;
+
 impl<T> From<Vec<T>> for TracedVec<T> {
     fn from(vec: Vec<T>) -> Self {
         let len = vec.len();
@@ -33,8 +43,14 @@ impl<T> From<Vec<T>> for TracedVec<T> {
 }
 
 impl<T> TracedVec<T> {
+    /// Empty, nothing reserved: sub-builders and blocks.
     pub fn new() -> Self {
-        Self { vec: Vec::with_capacity(10_000_000), traces: Vec::new() }
+        Self { vec: Vec::new(), traces: Vec::new() }
+    }
+
+    /// Reserve `capacity` operations (the top-level builder).
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { vec: Vec::with_capacity(capacity), traces: Vec::new() }
     }
 
     #[inline(always)]
@@ -122,13 +138,18 @@ impl<C: Config> Default for Builder<C> {
 
 impl<C: Config> Builder<C> {
     pub fn new(program_type: RecursionProgramType) -> Self {
+        Self::with_operations(program_type, TracedVec::with_capacity(TOP_LEVEL_OPS_RESERVE))
+    }
+
+    /// A builder over the given (normally empty) operation vector.
+    fn with_operations(
+        program_type: RecursionProgramType,
+        operations: TracedVec<DslIr<C>>,
+    ) -> Self {
         // We need to create a temporary placeholder for the p2_hash_num variable.
         let placeholder_p2_hash_num = Var::new(0, ptr::null_mut());
 
-        let mut inner = Box::new(UnsafeCell::new(InnerBuilder {
-            variable_count: 0,
-            operations: Default::default(),
-        }));
+        let mut inner = Box::new(UnsafeCell::new(InnerBuilder { variable_count: 0, operations }));
 
         let var_handle = Box::new(VarOperations::var_handle(&mut inner));
         let mut ext_handle = Box::new(ExtOperations::ext_handle(&mut inner));
@@ -164,7 +185,7 @@ impl<C: Config> Builder<C> {
         debug: bool,
         program_type: RecursionProgramType,
     ) -> Self {
-        let mut builder = Self::new(program_type);
+        let mut builder = Self::with_operations(program_type, TracedVec::new());
         builder.inner.get_mut().variable_count = variable_count;
         builder.nb_public_values = nb_public_values;
         builder.p2_hash_num = p2_hash_num;
