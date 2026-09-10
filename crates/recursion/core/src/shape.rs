@@ -422,27 +422,50 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // e2e this was gated on. If it overflows, RAISE THE CAPS here — do not
         // restore the band list. A second shape is a second compose program per
         // arity, and the layer barrier comes back with it.
-        let allowed_shapes = [[
-            (mem_var.clone(), 1 << 19),
-            (select.clone(), 1 << 19),
-            (mem_const.clone(), 1 << 12),
-            (base_alu.clone(), 1 << 19),
-            // ⚠ MEASURED on reth compress, which is what the fibonacci gate
-            // could not reach: a normalize program verifying a reth core shard
-            // needs ExtAlu 529_408 — 5_120 rows OVER 2^19, a 1% miss that
-            // aborted the run at `fix_shape`'s "no shape found for heights".
-            // Its whole profile was MemoryConst 132 · MemoryVar 179_632 ·
-            // BaseAlu 406_700 · ExtAlu 529_408 · Poseidon2WideDeg3 34_849 ·
-            // Select 27_504 · Ext2Felt 58_994.
-            (ext_alu.clone(), 1 << 20),
-            (poseidon2_wide.clone(), 1 << 17),
-            // Ext2Felt was at 58_994 of 65_536 on that same program — 90% of
-            // the cap. Raised with it rather than waiting for the next abort.
-            (ext2felt.clone(), 1 << 17),
-            (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-        ]]
-        .map(HashMap::from)
-        .to_vec();
+        // Bands, smallest first; `fix_shape_kind` snaps a program onto the
+        // cheapest one it fits and `dominating_band_index` lifts siblings to a
+        // common one.  The single band this used to be (the last entry, kept
+        // as the safety net) was sized for the largest compose node, and a
+        // leaf filled a fifth of it: over 1,138 production leaves a leaf held
+        // 180 K-2.3 M ext-ALU events (median 680 K, four per row) against
+        // the 4.2 M the band allowed, 35 K selects against 524 K, ~26 K
+        // Poseidon2 permutations against 131 K -- ~80% of its cells were
+        // padding, and the padding is proved.  Compose nodes are one fixed
+        // program (arity 4: 1.20 M ext-ALU, 675 K base-ALU, 498 K memory,
+        // 141 K selects, 66 K permutations, 41 K ext2felts).  Heights stay
+        // powers of two: shape keys and the pre-warm go through log2 heights,
+        // and every band must have its own signature there.
+        //
+        //   band  ext_alu  base_alu  mem_var  select  poseidon2  ext2felt   cells
+        //   L1    2^18     2^18      2^18     2^16    2^15       2^16      ~54 M   (~80% of leaves)
+        //   L2    2^19     2^19      2^18     2^16    2^16       2^16     ~103 M   (~98% of leaves)
+        //   M     2^19     2^18      2^18     2^18    2^17       2^16     ~116 M   (the compose program)
+        //   Z     2^19     2^19      2^18     2^18    2^17       2^16     ~130 M   (L2 and M siblings)
+        //   X     2^20     2^19      2^19     2^19    2^17       2^17     ~184 M   (the old band)
+        let band = |mem_var_log2: usize,
+                    select_log2: usize,
+                    base_alu_log2: usize,
+                    ext_alu_log2: usize,
+                    poseidon2_log2: usize,
+                    ext2felt_log2: usize| {
+            HashMap::from([
+                (mem_var.clone(), 1 << mem_var_log2),
+                (select.clone(), 1 << select_log2),
+                (mem_const.clone(), 1 << 12),
+                (base_alu.clone(), 1 << base_alu_log2),
+                (ext_alu.clone(), 1 << ext_alu_log2),
+                (poseidon2_wide.clone(), 1 << poseidon2_log2),
+                (ext2felt.clone(), 1 << ext2felt_log2),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
+            ])
+        };
+        let allowed_shapes = vec![
+            band(18, 16, 18, 18, 15, 16),
+            band(18, 16, 19, 19, 16, 16),
+            band(18, 18, 18, 19, 17, 16),
+            band(18, 18, 19, 19, 17, 16),
+            band(19, 19, 19, 20, 17, 17),
+        ];
         // No band may exceed the row cube every recursion stage proves at:
         // `PaddedMle::padded` asserts the padded rows fit `2^cube`, so a taller
         // band is a shape nothing can be snapped onto.
