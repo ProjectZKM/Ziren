@@ -164,7 +164,7 @@ where
 ///
 /// * `chips` — per-chip references resolved from the input shape
 ///   (caller does the shape → machine.chips() join).
-/// * `chip_log_heights_pairs` — per-chip (name, log_height) pairs
+/// * `chip_heights_pairs` — per-chip (name, rows) pairs, exact row counts
 ///   matching the shape order (shapes stay LOG-keyed).  Used to
 ///   populate both `chip_heights` (raw `2^log` heights) and
 ///   `chip_cumulative_sums` maps with one entry per chip (the
@@ -187,7 +187,9 @@ where
 /// | `evaluation_proof`     | `EvaluationProof::Empty` — lift adapter handles the Empty arm |
 pub fn dummy_basefold_shard_proof<F, EF, A>(
     chips: &[&Chip<F, A>],
-    chip_log_heights_pairs: &[(String, u8)],
+    // Per-chip ROW counts (exact, as the real prover pads them —
+    // `next_multiple_of_32_rows` to the shape's rows), not log2 heights.
+    chip_heights_pairs: &[(String, usize)],
     max_log_row_count: usize,
     // The recursion-layer AREA PIN this dummy must mirror.
     // `Some(_)` for a RECURSION (compress) child (pinned `jagged_n` / stripes);
@@ -220,7 +222,7 @@ where
     // vk_map regeneration.  The values are zero (shape-only fixture).
     let opened_values = {
         let bit_len = max_log_row_count + 1;
-        let heights_map: BTreeMap<String, u8> = chip_log_heights_pairs.iter().cloned().collect();
+        let heights_map: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
         let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
         name_sorted.sort_by(|a, b| MachineAir::<F>::name(**a).cmp(&MachineAir::<F>::name(**b)));
         let chips_ov: Vec<ChipOpenedValues<F, EF>> = name_sorted
@@ -229,14 +231,17 @@ where
                 let prep_w = MachineAir::<F>::preprocessed_width(**chip);
                 let main_w = <_ as BaseAir<F>>::width(&chip.air);
                 let name = MachineAir::<F>::name(**chip);
-                let log_h = heights_map.get(&name).copied().unwrap_or(0) as usize;
+                let rows = heights_map.get(&name).copied().unwrap_or(0);
+                // `log_degree` is derived geometry, ceil-log2 of the raw row
+                // count, exactly as `build_opened_values` derives it.
+                let log_h = zkm_pcs::shard_level::ceil_log2(rows);
                 // quotient[0] carries the big-endian bits
-                // of the chip HEIGHT (2^log_h, the VirtualGeq threshold), MSB at
-                // index 0 — the SAME encoding the real prover emits
-                // (shard_level/prover.rs:486-507).  Zeroing it would make the
-                // recursion program's full_geq emit fewer ops than the
-                // real-input program.
-                let height: u64 = 1u64 << log_h;
+                // of the chip HEIGHT (the raw row count, the VirtualGeq
+                // threshold), MSB at index 0 — the SAME encoding the real
+                // prover emits (shard_level/prover.rs:486-507).  Zeroing it
+                // would make the recursion program's full_geq emit fewer ops
+                // than the real-input program.
+                let height: u64 = rows as u64;
                 let degree_bits: Vec<EF> = (0..bit_len)
                     .map(|i| {
                         let shift = bit_len - 1 - i;
@@ -267,12 +272,10 @@ where
     };
 
     // The proof carries RAW heights (the felt the prologue
-    // observes); the dummy's chips sit at exactly `2^log_h`, matching the
-    // `quotient[0]` degree bits above.
-    let chip_heights: BTreeMap<String, usize> = chip_log_heights_pairs
-        .iter()
-        .map(|(name, log_h)| (name.clone(), 1usize << *log_h))
-        .collect();
+    // observes); the dummy's chips sit at exactly the shape's rows, matching
+    // the `quotient[0]` degree bits above.
+    let chip_heights: BTreeMap<String, usize> =
+        chip_heights_pairs.iter().map(|(name, rows)| (name.clone(), *rows)).collect();
 
     // Per-chip cumulative-sums map: one entry per chip with
     // both `local` and `global` zeroed.  Real prover at
@@ -301,44 +304,44 @@ where
     // Build a shape-faithful jagged-basefold Bundle (zero values) so the
     // dummy's witness stream matches the real prover's byte-for-byte.  Chip
     // dims in NAME-SORTED order (matches the lift's name-sorted
-    // `column_counts_by_round`); width = main trace width, height = 2^log_h.
-    let evaluation_proof = {
-        let heights: BTreeMap<String, u8> = chip_log_heights_pairs.iter().cloned().collect();
-        let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
-        name_sorted.sort_by(|a, b| MachineAir::<F>::name(**a).cmp(&MachineAir::<F>::name(**b)));
-        let chip_dims: Vec<(usize, u32)> = name_sorted
-            .iter()
-            .map(|chip| {
-                let name = MachineAir::<F>::name(**chip);
-                let w = <_ as BaseAir<F>>::width(&chip.air);
-                let log_h = heights.get(&name).copied().unwrap_or(0) as u32;
-                (w, log_h)
-            })
-            .collect();
-        // The PREPROCESSED round.  Its chip set is a property of the MACHINE —
-        // `setup` asserts a chip generates a preprocessed trace iff
-        // `preprocessed_width() > 0` — and it commits them in chip-NAME order,
-        // so the same walk reproduces the committed round.  Heights are the
-        // shape's: a preprocessed trace is padded to `fixed_log2_rows`, which is
-        // the shape written onto the program.
-        let prep_dims: Vec<(usize, u32)> = name_sorted
-            .iter()
-            .filter_map(|chip| {
-                let w = MachineAir::<F>::preprocessed_width(**chip);
-                if w == 0 {
-                    return None;
-                }
-                let name = MachineAir::<F>::name(**chip);
-                let log_h = heights.get(&name).copied().unwrap_or(0) as u32;
-                Some((w, log_h))
-            })
-            .collect();
-        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(dummy_jagged_basefold_bundle(
-            &prep_dims,
-            &chip_dims,
-            max_log_row_count,
-        ))
-    };
+    // `column_counts_by_round`); width = main trace width, height = the
+    // shape's rows.
+    let evaluation_proof =
+        {
+            let heights: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
+            let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
+            name_sorted.sort_by(|a, b| MachineAir::<F>::name(**a).cmp(&MachineAir::<F>::name(**b)));
+            let chip_dims: Vec<(usize, usize)> = name_sorted
+                .iter()
+                .map(|chip| {
+                    let name = MachineAir::<F>::name(**chip);
+                    let w = <_ as BaseAir<F>>::width(&chip.air);
+                    let rows = heights.get(&name).copied().unwrap_or(0);
+                    (w, rows)
+                })
+                .collect();
+            // The PREPROCESSED round.  Its chip set is a property of the MACHINE —
+            // `setup` asserts a chip generates a preprocessed trace iff
+            // `preprocessed_width() > 0` — and it commits them in chip-NAME order,
+            // so the same walk reproduces the committed round.  Heights are the
+            // shape's: a preprocessed trace is padded to `fixed_rows`, which is
+            // the shape written onto the program.
+            let prep_dims: Vec<(usize, usize)> = name_sorted
+                .iter()
+                .filter_map(|chip| {
+                    let w = MachineAir::<F>::preprocessed_width(**chip);
+                    if w == 0 {
+                        return None;
+                    }
+                    let name = MachineAir::<F>::name(**chip);
+                    let rows = heights.get(&name).copied().unwrap_or(0);
+                    Some((w, rows))
+                })
+                .collect();
+            zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(
+                dummy_jagged_basefold_bundle(&prep_dims, &chip_dims, max_log_row_count),
+            )
+        };
 
     // ── Dummy emits the SAME numeric row_counts / padding_column_counts
     // the real prover does for this shape, derived from the SAME jagged
@@ -385,7 +388,7 @@ where
         let area = zkm_pcs::jagged::committed_dense_len(real, log_stack);
         area.saturating_sub(real).div_ceil(cube).max(1)
     };
-    let heights_by_name: BTreeMap<String, u8> = chip_log_heights_pairs.iter().cloned().collect();
+    let heights_by_name: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
     let round_real = |preprocessed: bool| -> usize {
         chips
             .iter()
@@ -395,9 +398,8 @@ where
                 } else {
                     <_ as BaseAir<F>>::width(&c.air)
                 };
-                let log_h =
-                    heights_by_name.get(&MachineAir::<F>::name(*c)).copied().unwrap_or(0) as usize;
-                w * (1usize << log_h)
+                let rows = heights_by_name.get(&MachineAir::<F>::name(*c)).copied().unwrap_or(0);
+                w * rows
             })
             .sum()
     };
@@ -439,7 +441,7 @@ where
 /// `EvaluationProof::Empty`, which produced a tiny zero placeholder lift and
 /// made the dummy program diverge from the real one at byte 24.
 ///
-/// `chip_dims` = per-chip `(main_width, log_height)` in the SAME order the
+/// `chip_dims` = per-chip `(main_width, rows)` in the SAME order the
 /// jagged packing uses (name-sorted — matches the lift's `column_counts_by_round`
 /// AND the lift's `bundle.commit.chip_dims` row-count derivation).
 /// `max_log_row_count` = M (the BaseFold stacking height / verifier num_variables).
@@ -456,7 +458,7 @@ where
 ///   trailing_zeros(np2(total_values-1))`), each poly 3 coeffs (degree-2).
 pub fn dummy_jagged_basefold_bundle(
     // The PREPROCESSED opening round's per-chip `(preprocessed_width,
-    // log_height)`, name-sorted — the order `setup` commits them in.  Empty for
+    // rows)`, name-sorted — the order `setup` commits them in.  Empty for
     // a machine with no preprocessed chips, which is the single-round shape.
     //
     // A real proof opens preprocessed as its own round ahead of main,
@@ -464,8 +466,8 @@ pub fn dummy_jagged_basefold_bundle(
     // one round disagrees with it on the round count, the per-round stripe
     // multiples, the concatenated column space and the reduction dimension —
     // every one of them a witness-stream LENGTH, and so a different program.
-    prep_dims: &[(usize, u32)],
-    chip_dims: &[(usize, u32)],
+    prep_dims: &[(usize, usize)],
+    chip_dims: &[(usize, usize)],
     max_log_row_count: usize,
     // The recursion-layer AREA PIN.  `Some(target_log)` when
     // this dummy mirrors a RECURSION (compress) child (pin `log_dense_size` +
@@ -509,18 +511,18 @@ pub fn dummy_jagged_basefold_bundle(
     // running total, then the stacking-padding columns that close it out to its
     // committed area, and the next round starts at that area.  Mirror it
     // exactly — every length below falls out of this layout.
-    let round_dims: Vec<&[(usize, u32)]> =
+    let round_dims: Vec<&[(usize, usize)]> =
         if prep_dims.is_empty() { vec![chip_dims] } else { vec![prep_dims, chip_dims] };
 
     // pack_traces_jagged uses only height/width, so zero data gives the exact
     // offsets / total_values / column_counts for a round.
-    let pack_round = |dims: &[(usize, u32)]| {
+    let pack_round = |dims: &[(usize, usize)]| {
         let traces: Vec<(String, RowMajorMatrix<F>)> = dims
             .iter()
             .enumerate()
-            .map(|(i, (width, log_h))| {
+            .map(|(i, (width, rows))| {
                 let w = (*width).max(1);
-                let h = 1usize << *log_h;
+                let h = *rows;
                 (format!("chip{i}"), RowMajorMatrix::new(vec![F::ZERO; w * h], w))
             })
             .collect();
@@ -1040,18 +1042,24 @@ mod tests {
     /// the numeric counts must match exactly.
     #[test]
     fn dummy_row_padding_counts_equal_real_prover() {
+        // A representative mixed-height, mixed-width chip set
+        // (name-sorted, as the packer / lift see it), at power-of-two rows …
+        check_row_padding_counts(&[(3, 16), (7, 4), (1, 64), (12, 32)]);
+        // … and at the multiple-of-32 rows a tight recursion shape pins
+        // (`next_multiple_of_32_rows`): nothing here may assume a power of two.
+        check_row_padding_counts(&[(3, 96), (7, 32), (1, 160), (12, 224)]);
+    }
+
+    fn check_row_padding_counts(chip_dims: &[(usize, usize)]) {
         use p3_field::PrimeCharacteristicRing;
         use p3_matrix::dense::RowMajorMatrix;
         use zkm_pcs::jagged::{derive_row_and_padding_counts, pack_traces_jagged};
         use zkm_pcs::InnerVal;
 
-        // A representative mixed-height, mixed-width chip set
-        // (name-sorted, as the packer / lift see it).
-        let chip_dims: Vec<(usize, u32)> = vec![(3, 4), (7, 2), (1, 6), (12, 5)];
-        let max_log_row_count = 6usize;
+        let max_log_row_count = 8usize;
 
         // ── DUMMY side: derive from the dummy bundle's packing. ──
-        let dummy_bundle = dummy_jagged_basefold_bundle(&[], &chip_dims, max_log_row_count);
+        let dummy_bundle = dummy_jagged_basefold_bundle(&[], chip_dims, max_log_row_count);
         let (dummy_rc, dummy_pcc) = derive_row_and_padding_counts(
             &dummy_bundle.packing.column_counts,
             &dummy_bundle.packing.offsets,
@@ -1063,8 +1071,8 @@ mod tests {
         let real_traces: Vec<(String, RowMajorMatrix<InnerVal>)> = chip_dims
             .iter()
             .enumerate()
-            .map(|(i, (w, log_h))| {
-                let h = 1usize << *log_h;
+            .map(|(i, (w, rows))| {
+                let h = *rows;
                 // Non-zero values: ((r*w+c) mod p) — proves value-independence.
                 let vals: Vec<InnerVal> =
                     (0..(*w * h)).map(|k| InnerVal::from_u32((k as u32) % 17 + 1)).collect();
@@ -1108,8 +1116,7 @@ mod tests {
         assert_eq!(dummy_pcc, real_pcc, "padding_column_count dummy != real");
         // Sanity: the real chips' row counts ARE the chip heights, in dim
         // order; the padding columns follow them.
-        let expected_heights: Vec<usize> =
-            chip_dims.iter().map(|(_w, log_h)| 1usize << *log_h).collect();
+        let expected_heights: Vec<usize> = chip_dims.iter().map(|(_w, rows)| *rows).collect();
         assert_eq!(dummy_rc[..chip_dims.len()], expected_heights[..], "row_counts != chip heights",);
     }
 }

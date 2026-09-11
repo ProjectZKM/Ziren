@@ -1402,9 +1402,12 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(
+                // A recursion child: `proof_shape` carries exact ROW counts
+                // (the one recursion shape pins multiples of 32, not powers
+                // of two), so the dummy is built at those rows.
+                crate::stark::dummy_basefold_vk_and_shard_proof_rows::<A>(
                     machine,
-                    proof_shape,
+                    &proof_shape.inner,
                 )
             })
             .collect();

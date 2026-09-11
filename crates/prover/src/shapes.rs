@@ -948,6 +948,136 @@ mod tests {
     /// answer is "only the class".  If the program moves with the heights, no
     /// synthetic representative can ever reproduce a real child's vk and the
     /// allowlist can never contain a produced key.
+    /// THE FIXED POINT of the single recursion shape (`RecursionShapeConfig::
+    /// default`): every compose and deferred program at arities
+    /// `1..=REDUCE_BATCH_SIZE`, built over children padded to the shape,
+    /// must itself fit the shape.  Prints the organic rows per chip against
+    /// the caps, plus committed cells, so the caps can be re-sized from
+    /// measurement (the leaf side is surveyed in production with
+    /// `ZIREN_FIXSHAPE_DIAG=1`; see the shape's comment).
+    ///
+    /// `cargo test -r -p zkm-prover single_shape_fixed_point -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn single_shape_fixed_point() {
+        use crate::components::DefaultProverComponents;
+        use crate::REDUCE_BATCH_SIZE;
+        use p3_air::BaseAir;
+        use zkm_pcs::air::MachineAir;
+        use zkm_recursion_circuit::machine::{
+            build_compose_basefold_recursion_program, build_deferred_basefold_recursion_program,
+            PublicValuesOutputDigest, ZKMCompressBasefoldWitnessValues, ZKMCompressShape,
+            ZKMCompressWithVkeyShape, ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape,
+        };
+        use zkm_recursion_core::shape::RecursionShapeConfig;
+
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let rec_cfg = prover.compress_shape_config.as_ref().expect("compress shape config");
+        let shapes = rec_cfg.all_shapes();
+        assert_eq!(shapes.len(), 1, "one recursion shape, got {}", shapes.len());
+        let os =
+            RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_ordered_shape(&shapes[0]);
+        let caps: std::collections::BTreeMap<String, usize> =
+            shapes[0].iter().map(|(n, r)| (n.clone(), *r)).collect();
+        let caps = &caps;
+        let widths = {
+            let mut w = std::collections::BTreeMap::new();
+            for c in prover.compress_prover.machine().chips() {
+                let name = <_ as MachineAir<KoalaBear>>::name(c);
+                let main = <_ as BaseAir<KoalaBear>>::width(&c.air);
+                w.insert(name, main + <_ as MachineAir<KoalaBear>>::preprocessed_width(c));
+            }
+            w
+        };
+        let cells = |shape: &[(String, usize)]| -> u128 {
+            shape.iter().map(|(n, r)| (*widths.get(n).unwrap_or(&1) as u128) * (*r as u128)).sum()
+        };
+        let mut caps_sorted: Vec<(String, usize)> =
+            caps.iter().map(|(n, r)| (n.clone(), *r)).collect();
+        caps_sorted.sort();
+        eprintln!("[FIXPOINT] shape = {caps_sorted:?} cells={}", cells(&caps_sorted));
+
+        let max_log_row_count = ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count();
+        let machine = prover.compress_prover.machine();
+        let mut worst: std::collections::BTreeMap<String, (usize, String)> =
+            std::collections::BTreeMap::new();
+        let mut overflow = Vec::new();
+        for arity in 1..=REDUCE_BATCH_SIZE {
+            let compress_shape = ZKMCompressShape::from(vec![os.clone(); arity]);
+            for is_complete in [false, true] {
+                let shape = ZKMCompressWithVkeyShape {
+                    compress_shape: compress_shape.clone(),
+                    merkle_tree_height: crate::VK_MERKLE_TREE_HEIGHT,
+                };
+                let mut witness = ZKMCompressBasefoldWitnessValues::<
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+                >::dummy(machine, &shape);
+                witness.is_complete = is_complete;
+                let program = build_compose_basefold_recursion_program(
+                    machine,
+                    &witness,
+                    max_log_row_count,
+                    prover.vk_verification,
+                    PublicValuesOutputDigest::Reduce,
+                );
+                let heights = CompressAir::<KoalaBear>::heights(&program);
+                let tag = format!("compose arity={arity} complete={is_complete}");
+                report(&tag, &heights, caps, &mut worst, &mut overflow, &cells);
+            }
+            let dshape =
+                ZKMDeferredShape::new(compress_shape.clone(), crate::VK_MERKLE_TREE_HEIGHT);
+            let witness = ZKMDeferredBasefoldWitnessValues::<
+                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+            >::dummy(machine, &dshape);
+            let program = build_deferred_basefold_recursion_program(
+                machine,
+                &witness,
+                max_log_row_count,
+                prover.vk_verification,
+            );
+            let heights = CompressAir::<KoalaBear>::heights(&program);
+            report(
+                &format!("deferred arity={arity}"),
+                &heights,
+                caps,
+                &mut worst,
+                &mut overflow,
+                &cells,
+            );
+        }
+        for (chip, (rows, tag)) in worst.iter() {
+            let cap = caps.get(chip).copied().unwrap_or(0);
+            eprintln!(
+                "[FIXPOINT] worst {chip:18} rows={rows:>9} cap={cap:>9} fill={:5.1}%  ({tag})",
+                100.0 * *rows as f64 / cap.max(1) as f64
+            );
+        }
+        assert!(overflow.is_empty(), "[FIXPOINT] programs overflow the shape: {overflow:?}");
+
+        fn report(
+            tag: &str,
+            heights: &[(String, usize)],
+            caps: &std::collections::BTreeMap<String, usize>,
+            worst: &mut std::collections::BTreeMap<String, (usize, String)>,
+            overflow: &mut Vec<String>,
+            cells: &dyn Fn(&[(String, usize)]) -> u128,
+        ) {
+            let mut hs: Vec<(String, usize)> = heights.to_vec();
+            hs.sort();
+            eprintln!("[FIXPOINT] {tag}: organic={hs:?} cells={}", cells(&hs));
+            for (chip, rows) in hs.iter() {
+                let cap = caps.get(chip).copied().unwrap_or(0);
+                if *rows > cap {
+                    overflow.push(format!("{tag}: {chip} {rows} > {cap}"));
+                }
+                let e = worst.entry(chip.clone()).or_insert((0, String::new()));
+                if *rows > e.0 {
+                    *e = (*rows, tag.to_string());
+                }
+            }
+        }
+    }
+
     #[test]
     #[ignore]
     fn compose_vk_height_dependence() {

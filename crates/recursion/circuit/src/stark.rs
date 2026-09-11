@@ -31,13 +31,12 @@ use crate::{fri::dummy_commit, hash::FieldHasherVariable, CircuitConfig};
 /// Unblocks `program_from_shape` basefold
 /// dispatch and downstream `dummy()` constructors for
 /// `ZKMCoreBasefoldWitnessValues` etc.
+/// A dummy (vk, shard proof) for a CORE child at `shape`, whose values are
+/// LOG2 heights (the core cluster shapes: every core trace in a cluster is
+/// padded to a power of two).
 pub fn dummy_basefold_vk_and_shard_proof<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     shape: &OrderedShape,
-    // The recursion-layer AREA PIN this dummy child must mirror.
-    // `Some(RECURSION_LOG_TRACE_AREA)` when the child being built is a
-    // RECURSION (compress) proof (pinned dense → constant `jagged_n` / stripes);
-    // `None` when it is a CORE/normalize child (NATURAL, byte-identical).
 ) -> (
     StarkVerifyingKey<KoalaBearPoseidon2>,
     zkm_pcs::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
@@ -46,6 +45,27 @@ where
     A: MachineAir<KoalaBear>
         + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
 {
+    let rows: Vec<(String, usize)> =
+        shape.inner.iter().map(|(name, log_h)| (name.clone(), 1usize << *log_h)).collect();
+    dummy_basefold_vk_and_shard_proof_rows(machine, &rows)
+}
+
+/// A dummy (vk, shard proof) for a child whose chips sit at exactly `rows`
+/// (name, row count) — the RECURSION children, whose one shape pins every
+/// chip to a multiple-of-32 row count (`next_multiple_of_32_rows`), not a
+/// power of two.  `ZKMCompressShape::proof_shapes` carries ROWS.
+pub fn dummy_basefold_vk_and_shard_proof_rows<A>(
+    machine: &StarkMachine<KoalaBearPoseidon2, A>,
+    rows: &[(String, usize)],
+) -> (
+    StarkVerifyingKey<KoalaBearPoseidon2>,
+    zkm_pcs::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
+)
+where
+    A: MachineAir<KoalaBear>
+        + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+{
+    use zkm_pcs::shard_level::ceil_log2;
     use zkm_pcs::shard_level::verifier::BasefoldShardVerifier;
 
     // Build the dummy shard proof by directly zero-filling every
@@ -72,20 +92,19 @@ where
     // built against misaligned dummy input shapes no real proof can
     // produce. Localized by `zkm_prover::tests::vkroot_shrink_vkeq`
     // (EQUAL=true, real shape == allowed shape, vk ∉ map).
-    let chips_and_heights: Vec<(&Chip<KoalaBear, A>, usize)> = shape
-        .inner
+    let chips_and_heights: Vec<(&Chip<KoalaBear, A>, usize)> = rows
         .iter()
-        .filter_map(|(name, log_height)| {
-            machine.chips().iter().find(|c| c.name() == name.as_str()).map(|c| (c, *log_height))
+        .filter_map(|(name, rows)| {
+            machine.chips().iter().find(|c| c.name() == name.as_str()).map(|c| (c, *rows))
         })
         .collect();
     let chips: Vec<&Chip<KoalaBear, A>> = chips_and_heights.iter().map(|(c, _)| *c).collect();
 
-    let chip_log_heights_pairs: Vec<(String, u8)> = chips_and_heights
+    let chip_heights_pairs: Vec<(String, usize)> = chips_and_heights
         .iter()
-        .map(|(chip, log_height)| {
+        .map(|(chip, rows)| {
             let name = MachineAir::<KoalaBear>::name(*chip);
-            (name, *log_height as u8)
+            (name, *rows)
         })
         .collect();
 
@@ -96,7 +115,7 @@ where
     // assert rather than grow the dummy's cube.
     let max_log_row_count = BasefoldShardVerifier::production_default().max_log_row_count;
     let shape_max_log =
-        chip_log_heights_pairs.iter().map(|(_n, lh)| *lh as usize).max().unwrap_or(0);
+        chip_heights_pairs.iter().map(|(_n, rows)| ceil_log2(*rows)).max().unwrap_or(0);
     assert!(
         shape_max_log <= max_log_row_count,
         "dummy[basefold_shard_proof]: shape max log-height {shape_max_log} exceeds the \
@@ -105,7 +124,7 @@ where
 
     let proof = crate::dummy::dummy_basefold_shard_proof::<KoalaBear, InnerChallenge, A>(
         &chips,
-        &chip_log_heights_pairs,
+        &chip_heights_pairs,
         max_log_row_count,
     );
 
@@ -119,7 +138,7 @@ where
     // contains chips the machine actually has, so the dummy must
     // not leak retired shape names (BatchFRI / ExpReverseBitsLen)
     // into it either.
-    let chip_ordering = chip_log_heights_pairs
+    let chip_ordering = chip_heights_pairs
         .iter()
         .enumerate()
         .map(|(i, (name, _))| (name.to_owned(), i))
@@ -135,27 +154,33 @@ where
     // (preprocessed_width > 0), the prep height equals the chip height for the
     // program-keyed chips on the shapes we enumerate (Program / Byte etc.).
     let chip_information: Vec<(String, zkm_pcs::SerializableDomain<KoalaBear>, (usize, usize))> = {
-        let mut prep: Vec<(String, usize, usize)> = chip_log_heights_pairs
+        let mut prep: Vec<(String, usize, usize)> = chip_heights_pairs
             .iter()
-            .filter_map(|(name, log_h)| {
+            .filter_map(|(name, rows)| {
                 let chip = chips.iter().find(|c| c.name() == name.as_str())?;
                 let pw = MachineAir::<KoalaBear>::preprocessed_width(*chip);
                 if pw > 0 {
-                    Some((name.clone(), pw, *log_h as usize))
+                    Some((name.clone(), pw, *rows))
                 } else {
                     None
                 }
             })
             .collect();
-        // Sort by (Reverse(height), name) to match the prover's preprocessed
-        // trace ordering (machine.rs:454).
-        prep.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        // `StarkMachine::setup` records the preprocessed chips in NAME order.
+        prep.sort_by(|a, b| a.0.cmp(&b.0));
         prep.into_iter()
-            .map(|(name, pw, log_h)| {
+            .map(|(name, pw, rows)| {
                 (
                     name,
-                    zkm_pcs::SerializableDomain { shift: KoalaBear::ONE, log_size: log_h },
-                    (pw, 1usize << log_h),
+                    // The record `setup` writes: the two-adic domain ENCLOSING
+                    // the trace (`ceil_log2(rows)`, natural shift).  The
+                    // basefold verifier never reads it — the vk hash absorbs
+                    // commitment / pc_start / digest only.
+                    zkm_pcs::SerializableDomain {
+                        shift: KoalaBear::ONE,
+                        log_size: ceil_log2(rows),
+                    },
+                    (pw, rows),
                 )
             })
             .collect()

@@ -807,7 +807,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let child_shapes: Vec<_> = tuple
                 .iter()
                 .map(|b| {
-                    RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_log2_ordered_shape(
+                    RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_ordered_shape(
                         &bands[*b],
                     )
                 })
@@ -2601,10 +2601,10 @@ pub mod tests {
         // L=27.  Equal key AND equal program bytes — the invariant holding.
         let shape_at_band = |log_h: usize| -> ZKMCompressWithVkeyShape {
             let proof_shape = || {
-                OrderedShape::from_log2_heights(
+                OrderedShape::from_rows(
                     &chip_names
                         .iter()
-                        .map(|n: &String| (n.clone(), log_h))
+                        .map(|n: &String| (n.clone(), 1usize << log_h))
                         .collect::<Vec<(String, usize)>>(),
                 )
             };
@@ -2647,10 +2647,10 @@ pub mod tests {
         // `ZKMCompressBasefoldWitnessValues::dummy` hardcodes the production
         // pin, so build the witness directly with an explicit area pin — which
         // is exactly what a real child with natural area > 2^27 produces.
-        let proof_shape = OrderedShape::from_log2_heights(
+        let proof_shape = OrderedShape::from_rows(
             &chip_names
                 .iter()
-                .map(|n: &String| (n.clone(), 8usize))
+                .map(|n: &String| (n.clone(), 1usize << 8))
                 .collect::<Vec<(String, usize)>>(),
         );
         // There is no longer an area pin; the sweep below now builds the same
@@ -2920,10 +2920,10 @@ pub mod tests {
             .map(|c| <_ as MachineAir<KoalaBear>>::name(c))
             .collect();
         let proof_shape = || {
-            OrderedShape::from_log2_heights(
+            OrderedShape::from_rows(
                 &chip_names
                     .iter()
-                    .map(|n: &String| (n.clone(), 3usize))
+                    .map(|n: &String| (n.clone(), 1usize << 3))
                     .collect::<Vec<(String, usize)>>(),
             )
         };
@@ -2983,12 +2983,13 @@ pub mod tests {
         // the shared witness stream).
         use zkm_recursion_core::runtime::{Instruction, SeqBlock};
         let mut hint_in_par: usize = 0;
-        fn walk<F>(block: &SeqBlock<Instruction<F>>, hint: &mut usize, inside: bool) {
+        use zkm_recursion_core::runtime::AnalyzedInstruction;
+        fn walk<F>(block: &SeqBlock<AnalyzedInstruction<F>>, hint: &mut usize, inside: bool) {
             match block {
                 SeqBlock::Basic(b) => {
                     if inside {
                         for instr in &b.instrs {
-                            if let Instruction::Hint(h) = instr {
+                            if let Instruction::Hint(h) = instr.inner() {
                                 *hint += h.output_addrs_mults.len();
                             }
                         }
@@ -4057,16 +4058,18 @@ pub mod tests {
         setup_logger();
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let compress_machine = prover.compress_prover.machine();
+        // Rows (a recursion shape's unit), spelled as the powers of two they
+        // were when this probe was written.
         let child: Vec<(String, usize)> = vec![
-            ("BaseAlu".into(), 18),
-            ("ExtAlu".into(), 18),
-            ("MemoryConst".into(), 17),
-            ("MemoryVar".into(), 18),
-            ("Poseidon2WideDeg3".into(), 18),
-            ("PublicValues".into(), 4),
-            ("Select".into(), 18),
+            ("BaseAlu".into(), 1 << 18),
+            ("ExtAlu".into(), 1 << 18),
+            ("MemoryConst".into(), 1 << 17),
+            ("MemoryVar".into(), 1 << 18),
+            ("Poseidon2WideDeg3".into(), 1 << 18),
+            ("PublicValues".into(), 1 << 4),
+            ("Select".into(), 1 << 18),
         ];
-        let os = OrderedShape::from_log2_heights(&child);
+        let os = OrderedShape::from_rows(&child);
         for arity in [1usize, REDUCE_BATCH_SIZE] {
             let with_vkey = ZKMCompressWithVkeyShape {
                 compress_shape: ZKMCompressShape::from(vec![os.clone(); arity]),
@@ -4445,8 +4448,9 @@ pub mod tests {
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let compress_machine = prover.compress_prover.machine();
         let vk_of = |child: &[(&str, usize)], arity: usize| -> [u32; 8] {
-            let os = OrderedShape::from_log2_heights(
-                &child.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
+            // `child` gives log2 heights; a recursion shape carries rows.
+            let os = OrderedShape::from_rows(
+                &child.iter().map(|(n, h)| (n.to_string(), 1usize << *h)).collect::<Vec<_>>(),
             );
             let cshape = ZKMCompressShape::from(vec![os; arity]);
             let with_vkey = ZKMCompressWithVkeyShape {

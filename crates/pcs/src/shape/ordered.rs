@@ -24,7 +24,17 @@ impl OrderedShape {
             .collect()
     }
 
-    /// Create an [`OrderedShape`] from a set of log2 heights.
+    /// Create an [`OrderedShape`] from a set of exact ROW counts — the unit a
+    /// RECURSION shape speaks (`RecursionShapeConfig::as_ordered_shape`,
+    /// `dummy_basefold_vk_and_shard_proof_rows`).  Same representation as
+    /// [`Self::from_log2_heights`]; the name records which unit the values are.
+    #[must_use]
+    pub fn from_rows(traces: &[(String, usize)]) -> Self {
+        Self::from_log2_heights(traces)
+    }
+
+    /// Create an [`OrderedShape`] from a set of log2 heights (the CORE cluster
+    /// shapes; a recursion shape carries rows, see [`Self::from_rows`]).
     #[must_use]
     pub fn from_log2_heights(traces: &[(String, usize)]) -> Self {
         traces

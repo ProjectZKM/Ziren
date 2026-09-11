@@ -2,7 +2,6 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
-use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
@@ -706,16 +705,23 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // `traces` by the same list either way.
         named_preprocessed_traces.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let pcs = self.config.pcs();
         // Only the serialisable domain description is kept -- it goes into the
         // verifying key's `chip_information`.
         let chip_information: Vec<_> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| {
-                let domain = pcs.natural_domain_for_degree(trace.height());
+                // The two-adic domain ENCLOSING the trace.  Recursion chips
+                // are padded to the shape's exact rows (a multiple of 32, not
+                // a power of two), so this cannot go through
+                // `natural_domain_for_degree` (`log2_strict_usize`); the record
+                // is `(natural shift, ceil_log2(height))`, which is the same
+                // domain for the power-of-two heights it used to be built from.
+                // The basefold verifier never reads it (the vk hash absorbs
+                // commitment / pc_start / digest only); the dummy vk in
+                // `recursion/circuit/src/stark.rs` mirrors this exactly.
                 let ser_domain = SerializableDomain::new(
-                    domain.first_point(),
-                    domain.size().trailing_zeros() as usize,
+                    Val::<SC>::ONE,
+                    crate::shard_level::ceil_log2(trace.height()),
                 );
                 (name.to_owned(), ser_domain, (trace.width(), trace.height()))
             })
@@ -855,16 +861,23 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // `traces` by the same list either way.
         named_preprocessed_traces.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let pcs = self.config.pcs();
         // Only the serialisable domain description is kept -- it goes into the
         // verifying key's `chip_information`.
         let chip_information: Vec<_> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| {
-                let domain = pcs.natural_domain_for_degree(trace.height());
+                // The two-adic domain ENCLOSING the trace.  Recursion chips
+                // are padded to the shape's exact rows (a multiple of 32, not
+                // a power of two), so this cannot go through
+                // `natural_domain_for_degree` (`log2_strict_usize`); the record
+                // is `(natural shift, ceil_log2(height))`, which is the same
+                // domain for the power-of-two heights it used to be built from.
+                // The basefold verifier never reads it (the vk hash absorbs
+                // commitment / pc_start / digest only); the dummy vk in
+                // `recursion/circuit/src/stark.rs` mirrors this exactly.
                 let ser_domain = SerializableDomain::new(
-                    domain.first_point(),
-                    domain.size().trailing_zeros() as usize,
+                    Val::<SC>::ONE,
+                    crate::shard_level::ceil_log2(trace.height()),
                 );
                 (name.to_owned(), ser_domain, (trace.width(), trace.height()))
             })

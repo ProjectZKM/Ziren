@@ -164,18 +164,13 @@ organic={organic:?} -> band={band:?}"
         }
     }
 
-    /// A shape's per-chip ROW counts as the log2 heights an [`OrderedShape`]
-    /// speaks.
-    ///
-    /// The enumeration and dummy-proof path (`OrderedShape`, and the
-    /// `(String, u8)` pairs `dummy/basefold_shard_proof.rs` takes) is still
-    /// written in log2 heights, so the row counts a shape now carries are
-    /// bridged here.  It is exact for the power-of-two shapes shipped today;
-    /// teaching that path exact rows is what a single tight shape needs, and is
-    /// the next step of the port.
-    pub fn as_log2_ordered_shape(shape: &HashMap<String, usize>) -> OrderedShape {
-        shape.iter().map(|(name, rows)| (name.clone(), rows.next_power_of_two().ilog2() as usize))
-            .collect()
+    /// A shape as the [`OrderedShape`] the enumeration and the dummy-proof
+    /// path consume.  For RECURSION shapes an `OrderedShape` carries exact
+    /// ROW counts (`dummy_basefold_vk_and_shard_proof_rows`), so this is the
+    /// identity on the values — the shape is not a power of two and must not
+    /// be rounded to one.
+    pub fn as_ordered_shape(shape: &HashMap<String, usize>) -> OrderedShape {
+        shape.iter().map(|(name, rows)| (name.clone(), *rows)).collect()
     }
 
     pub fn get_all_shape_combinations(
@@ -183,7 +178,7 @@ organic={organic:?} -> band={band:?}"
         batch_size: usize,
     ) -> impl Iterator<Item = Vec<OrderedShape>> + '_ {
         (0..batch_size)
-            .map(|_| self.allowed_shapes.iter().map(Self::as_log2_ordered_shape))
+            .map(|_| self.allowed_shapes.iter().map(Self::as_ordered_shape))
             .multi_cartesian_product()
     }
 
@@ -328,164 +323,63 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
         let ext2felt = RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()).name();
 
-        // Specify allowed shapes.
-        //
-        // ⚠ These are ROW COUNTS, not log2 heights — the `1 << n` spellings keep
-        // the retune history below readable, but a chip is now padded to exactly
-        // the number written here (`next_multiple_of_32_rows`).  Powers of two
-        // are what the bands happened to be; nothing requires it any more, which
-        // is the whole point: a single shape tight enough for every program is
-        // what makes a compose program a function of its ARITY alone (SP1's
-        // `Compose(arity)`), and that is what lets adjacent ranges merge at any
-        // depth instead of behind a per-layer barrier.
-        //
-        // ORDER IS COSMETIC.  `fix_shape` scores every band a program fits and
-        // keeps the cheapest by committed cells, so a band never has to be
-        // positioned to win or lose a match; the list is kept roughly
-        // ascending only to read well.
-        //
-        // A band costs the compress vk enumeration exactly SIX shapes —
-        // `ZKMProofShape::generate` builds compose children by replicating ONE
-        // band across the batch (`vec![band; arity]`), so it emits arity
-        // 1..=`REDUCE_BATCH_SIZE` plus one Deferred and one Shrink per band,
-        // and nothing cartesian.
-        //
-        // ⚠ BUT THE BUDGET IS NOT THE BANDS' TO SPEND.  The normalize shapes
-        // dominate the map and their count is driven by `MAX_BLOCKS` in
-        // `zkm_prover::shapes`, which is derived from `ELEMENT_THRESHOLD` — so
-        // raising the shard-area cap consumes vk-merkle capacity.  Measured
-        // (`zkm_prover::tests::enumeration_size_probe`): at the 260,000,000
-        // threshold the map was 2651 of 4096; at 500,000,000 it is **3922 of
-        // 4096**.  That leaves ~174 shapes = room for about **29 more bands**,
-        // not the ~240 the earlier figure implied.  Anything that raises
-        // `ELEMENT_THRESHOLD` or adds bands must re-run that test — it is the
-        // only guard, and the map is now at 96% of a capacity that cannot be
-        // tuned (the tree height is baked into every enumerated program).
-        // Aug26 RETUNE (reth diag, `ZIREN_FIXSHAPE_DIAG=1`, forced+chosen
-        // maxima over 101 distinct programs after the Ext2Felt chip landed):
-        //   - MemoryConst is 12 on every non-cube band: the constant cache
-        //     collapsed the pool to ~280 distinct writes (observed organic max
-        //     213), and the old 2^19 cap was 6.7M cells of pure padding per
-        //     program.  The 2^19s in the older comments below predate the
-        //     cache.
-        //   - Band 0's Poseidon2WideDeg3 drops to 17: leaf max 67,177 and
-        //     compose max 68,686 fit 2^17 at ~1.9x, and at 362 committed
-        //     cells/row the old 2^18 cap was 63% of the whole band.
-        //   - Ext2Felt is 16 on the bands reth was observed on (0/2/6, max
-        //     42,548) and stays 17 elsewhere (deferred programs on band 7
-        //     measured 68,288).
-        // A program that stops fitting a lowered cap falls to the next
-        // cheapest band that fits — the fits-check keeps this safe; only the
-        // padding economics change.  The SHRINK shape is unaffected: it is
-        // FROZEN in `zkm_prover::ZKMProver::shrink_shape`, decoupled from
-        // these tables.
-        // THE recursion shape — one, not a list of bands.
+        // THE recursion shape — one, not a list of bands.  ROW COUNTS: a
+        // chip is padded to exactly the number written here
+        // (`next_multiple_of_32_rows`), and nothing below is a power of two.
         //
         // SP1 pads every recursion proof to a single shape
-        // (`crates/prover/compress_shape.json`), and that is what makes a
-        // compose program a function of its ARITY alone:
-        // `get_all_shape_combinations` yields exactly one combination per batch
-        // size, so the enumeration emits `Compose(1..=REDUCE_BATCH_SIZE)` +
-        // Deferred + Shrink — the same set SP1 enumerates. A tree whose nodes
-        // share one program per arity can merge adjacent proof RANGES at any
-        // depth, instead of draining one layer before starting the next.
+        // (`crates/prover/compress_shape.json`, rows rounded to a multiple of
+        // 32), and that is what makes a compose program a function of its
+        // ARITY alone: `get_all_shape_combinations` yields one combination per
+        // batch size, so the enumeration emits `Compose(1..=REDUCE_BATCH_SIZE)`
+        // + Deferred + Shrink, every sibling group is homogeneous by
+        // construction, and the pre-warm builds a handful of programs instead
+        // of one per band tuple.  (Five bands, Sep 10-11: leaf card time -35%
+        // but the compose keys went 2-3 -> 21-45 per block because sibling
+        // groups mixed bands, and the wall did not move.)
         //
-        // WHICH shape is decided by a FIXED POINT, and it is measured, not
-        // argued: a compose program is traced over its children, so raising the
-        // shape raises the organic heights of the program that verifies it.
-        // The shape has to hold still under one round of that.
-        // `ZIREN_FIXSHAPE_DIAG=1` on the pre-warm (9 bands x arities 1..=4)
-        // gives both sides:
+        // SIZED FROM ORGANIC HEIGHTS, the way SP1 builds its shape: 1,020
+        // production recursion nodes (reth, 8 cards, `ZIREN_FIXSHAPE_DIAG=1`,
+        // Sep 11) give per-chip maxima — rows are events / entries-per-row —
         //
-        //   children at the old band 0 (MemoryVar 2^18) -> arity-4 compose
-        //     needs MemoryVar 321_545 and Select 488_448.  NOT a fixed point:
-        //     measured by trying it, `no shape found for heights` at
-        //     `fix_shape` on the first arity-4 pre-warm pair.
-        //   children at the shape below      -> arity-4 compose needs
-        //     MemoryVar 447_323 · Select 488_448 · ExtAlu 295_245 ·
-        //     BaseAlu 282_019 · Poseidon2WideDeg3 116_424 · Ext2Felt 42_548 ·
-        //     MemoryConst 213.  All fit.  FIXED POINT.
+        //   chip                max      p99      p50   who sets the max
+        //   MemoryVar       248,877  248,877  110,247   the arity-4 compose
+        //   Select          140,960  140,960   35,144   the arity-4 compose
+        //   Poseidon2       66,236    66,236   24,467   the arity-4 compose
+        //   BaseAlu         452,760  438,253  109,714   a leaf (core verify)
+        //   ExtAlu          578,441  566,378  170,828   a leaf (core verify)
+        //   Ext2Felt        61,166    61,149   16,947   a leaf (core verify)
+        //   MemoryConst        226      226      136   constants
         //
-        // It costs 134_926_512 committed cells against band 0's 95_080_624 —
-        // but it is the ONLY self-consistent single shape among the nine, and
-        // it replaces all of them, including the 2^22 row-cube band at ~4x.
+        // The compose programs are deterministic in the shape (p99 == max),
+        // so their rows carry ~5% and are re-checked by the fixed-point probe
+        // (`zkm_prover::tests::single_shape_fixed_point`: build the compose
+        // and deferred programs at arities 1..=4 against THIS shape and
+        // assert they fit).  Leaf heights vary with the core shard's committed
+        // structure, and the largest core shards are area-capped, so the
+        // observed maxima are near the ceiling; they carry ~12%.  Against the
+        // old power-of-two band (ExtAlu 2^20, BaseAlu/MemoryVar/Select 2^19,
+        // Poseidon2/Ext2Felt 2^17: 183,816,368 committed cells) this is the
+        // cells the survey's p50 program actually needs, roughly halved.
         //
-        // ⚠ Every cap here is a power of two only because the dummy-proof path
-        // (`OrderedShape`, and the `(String, u8)` pairs
-        // `dummy/basefold_shard_proof.rs` takes) still speaks log2 heights, so
-        // `as_log2_ordered_shape` has to be exact.  The organic maxima above
-        // are 15-45% below these caps; teaching that path exact row counts
-        // recovers that, and the chips already pad to whatever row count is
-        // written here (`next_multiple_of_32_rows`).
-        //
-        // ⚠ reth's normalize verifies far larger core shards than the fibonacci
-        // e2e this was gated on. If it overflows, RAISE THE CAPS here — do not
-        // restore the band list. A second shape is a second compose program per
-        // arity, and the layer barrier comes back with it.
-        // Bands, smallest first; `fix_shape_kind` snaps a program onto the
-        // cheapest one it fits and `dominating_band_index` lifts siblings to a
-        // common one.  The single band this used to be (the last entry, kept
-        // as the safety net) was sized for the largest compose node, and a
-        // leaf filled a fifth of it: over 1,138 production leaves a leaf held
-        // 180 K-2.3 M ext-ALU events (median 680 K, four per row) against
-        // the 4.2 M the band allowed, 35 K selects against 524 K, ~26 K
-        // Poseidon2 permutations against 131 K -- ~80% of its cells were
-        // padding, and the padding is proved.  Compose nodes are one fixed
-        // program (arity 4: 1.20 M ext-ALU, 675 K base-ALU, 498 K memory,
-        // 141 K selects, 66 K permutations, 41 K ext2felts).  Heights stay
-        // powers of two: shape keys and the pre-warm go through log2 heights,
-        // and every band must have its own signature there.
-        //
-        //   band  ext_alu  base_alu  mem_var  select  poseidon2  ext2felt   cells
-        //   L1    2^18     2^18      2^18     2^16    2^15       2^16      ~54 M   (~80% of leaves)
-        //   L2    2^19     2^19      2^18     2^16    2^16       2^16     ~103 M   (~98% of leaves)
-        //   M     2^19     2^18      2^18     2^18    2^17       2^16     ~116 M   (the compose program)
-        //   Z     2^19     2^19      2^18     2^18    2^17       2^16     ~130 M   (L2 and M siblings)
-        //   X     2^20     2^19      2^19     2^19    2^17       2^17     ~184 M   (the old band)
-        let band = |mem_var_log2: usize,
-                    select_log2: usize,
-                    base_alu_log2: usize,
-                    ext_alu_log2: usize,
-                    poseidon2_log2: usize,
-                    ext2felt_log2: usize| {
-            HashMap::from([
-                (mem_var.clone(), 1 << mem_var_log2),
-                (select.clone(), 1 << select_log2),
-                (mem_const.clone(), 1 << 12),
-                (base_alu.clone(), 1 << base_alu_log2),
-                (ext_alu.clone(), 1 << ext_alu_log2),
-                (poseidon2_wide.clone(), 1 << poseidon2_log2),
-                (ext2felt.clone(), 1 << ext2felt_log2),
-                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-            ])
+        // ⚠ If a program overflows a cap, `fix_shape` panics
+        // (`no shape found`).  RAISE THE CAP and regenerate the vk_map — do
+        // not restore a band list.  The SHRINK shape is unaffected: it is
+        // FROZEN in `zkm_prover::ZKMProver::shrink_shape`.
+        let rows = |n: usize| -> usize {
+            assert!(n % 32 == 0, "recursion shape rows must be a multiple of 32: {n}");
+            n
         };
-        // L1 (18,16,18,18,15,16) is OUT: the production leaf path proves each
-        // leaf the moment its shard lands and settles the band over that one
-        // leaf, so siblings never agree and a two-band leaf population makes
-        // every compose group a mixed one (measured: 44 distinct arity-4
-        // compose keys in six blocks against 2-3 with one band, each a
-        // program build on the card thread).  With L2 fitting ~98% of leaves
-        // the groups are homogeneous again at about half the old band's cells.
-        // TWO bands: Z for every leaf AND every compose (it covers both L2 and
-        // M), X as the overflow.  Measured Sep 11 with L2/M/Z/X in the list:
-        // leaves land on L2 and composes on M, both at L=27 but with different
-        // per-chip heights, and since the production path settles the band per
-        // single node a compose group mixes the two shapes in every position
-        // pattern (2^4 arity-4 compose keys, 32 per run, built lazily on the
-        // card thread).  One shared band makes every compose key a pure
-        // (arity, is_complete) class: eight programs, warmed once per process.
-        // Z for leaves and composes alike, X as the overflow.  Surveyed on
-        // 1,020 production leaves (ZIREN_FIXSHAPE_DIAG, Sep 11): 6.8% of leaves
-        // exceed Z's ExtAlu cap (max 578,441 rows against 2^19) and land on X;
-        // widening Z to ExtAlu 2^20 measured neutral against the single band
-        // (ExtAlu dominates the leaf), so the overflow is kept and its cost
-        // -- a compose program per mixed Z/X sibling tuple, built on the card
-        // thread mid-block -- is removed by pre-warming every child-band
-        // tuple at process start (ZIREN_PREWARM_MIXED=1).
-        let allowed_shapes = vec![
-            band(18, 18, 19, 19, 17, 16),
-            band(19, 19, 19, 20, 17, 17),
-        ];
+        let allowed_shapes = vec![HashMap::from([
+            (mem_var.clone(), rows(262_144)),
+            (select.clone(), rows(147_456)),
+            (mem_const.clone(), rows(4_096)),
+            (base_alu.clone(), rows(507_072)),
+            (ext_alu.clone(), rows(647_872)),
+            (poseidon2_wide.clone(), rows(69_632)),
+            (ext2felt.clone(), rows(68_512)),
+            (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
+        ])];
         // No band may exceed the row cube every recursion stage proves at:
         // `PaddedMle::padded` asserts the padded rows fit `2^cube`, so a taller
         // band is a shape nothing can be snapped onto.
