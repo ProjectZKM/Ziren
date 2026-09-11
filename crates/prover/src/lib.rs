@@ -787,9 +787,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             );
             witness.is_complete = is_complete;
             if std::env::var("ZIREN_SHAPE_KEY_DIAG").is_ok() {
+                let own = self.compose_band_for(&witness);
+                let snapped = own.and_then(|b| self.dominating_band(&[b]));
                 eprintln!(
-                    "SHAPEDIAG prewarm band={band_index} arity={arity} key={:016x} {}",
+                    "SHAPEDIAG prewarm band={band_index} arity={arity} own={own:?} snapped={snapped:?} shape_key={:016x} key={:016x} {}",
                     witness.shape_key(),
+                    Self::band_keyed(witness.shape_key(), snapped),
                     witness.shape_diag()
                 );
             }
@@ -1357,7 +1360,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         if std::env::var("ZIREN_SHAPE_KEY_DIAG").is_ok() {
             eprintln!(
-                "SHAPEDIAG runtime band={band:?} key={:016x} {}",
+                "SHAPEDIAG runtime band={band:?} shape_key={:016x} key={:016x} {}",
+                input.shape_key(),
                 Self::band_keyed(input.shape_key(), band),
                 input.shape_diag()
             );
