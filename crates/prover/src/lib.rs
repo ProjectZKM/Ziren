@@ -2214,6 +2214,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
             tracing::debug!("wrap verifier key set (basefold)");
         }
+        // `ZIREN_DUMP_PART_STARK_VK=<path>`: write `bincode(wrap_vk.part_vk())`,
+        // the bytes `crates/verifier/bn254-vk/part_stark_vk.bin` must carry
+        // whenever the wrap machine or the shrink shape it verifies moves.
+        if let Some(path) = std::env::var_os("ZIREN_DUMP_PART_STARK_VK") {
+            match bincode::serialize(&wrap_vk.part_vk()) {
+                Ok(bytes) => match std::fs::write(&path, &bytes) {
+                    Ok(()) => eprintln!(">>> PART_STARK_VK written {} bytes to {:?}", bytes.len(), path),
+                    Err(e) => eprintln!(">>> PART_STARK_VK write failed {:?}: {e}", path),
+                },
+                Err(e) => eprintln!(">>> PART_STARK_VK serialize failed: {e}"),
+            }
+        }
 
         let mut wrap_challenger = self.wrap_prover.machine().config().challenger();
         let time = std::time::Instant::now();
