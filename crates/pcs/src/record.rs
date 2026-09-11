@@ -10,6 +10,13 @@ pub trait MachineRecord: Default + Sized + Send + Sync + Clone {
     /// The statistics of the record.
     fn stats(&self) -> HashMap<String, usize>;
 
+    /// The area pins a proof of this record commits under, when the record
+    /// knows its program and the program names a pin class
+    /// (`MachineProgram::area_pins`); `None` leaves it to the machine.
+    fn area_pins(&self) -> Option<crate::jagged::RecursionPins> {
+        None
+    }
+
     /// Appends two records together.
     fn append(&mut self, other: &mut Self);
 

@@ -46,6 +46,10 @@ pub struct ExecutionRecord<F> {
 impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
     type Config = ZKMCoreOpts;
 
+    fn area_pins(&self) -> Option<zkm_pcs::jagged::RecursionPins> {
+        zkm_pcs::air::MachineProgram::<F>::area_pins(&*self.program)
+    }
+
     fn stats(&self) -> hashbrown::HashMap<String, usize> {
         let mut stats = HashMap::new();
         stats.insert("base_alu_events".to_string(), self.base_alu_events.len());

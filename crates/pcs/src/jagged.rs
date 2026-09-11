@@ -177,6 +177,46 @@ pub const RECURSION_PINS: RecursionPins = RecursionPins {
     main: AreaPin { area: 1 << 26, pad_columns: 16 },
 };
 
+/// The pin CLASSES a recursion node can commit under, smallest first.  A
+/// node takes the smallest class both of its rounds fit
+/// (`RecursionPins::class_for_committed`), so the common node — a leaf, or a
+/// compose over a few of them (main p50 19 M, p90 25 M cells; compose-3
+/// 27 M) — commits at 2^25 and only the rare large one (a leaf verifying a
+/// chip-dense core shard, ~44 M; the root, by construction) at 2^26.  The
+/// program verifying a node is a function of the class, so a compose program
+/// is keyed by its children's class tuple; every tuple is enumerable.
+pub const RECURSION_PIN_CLASSES: [RecursionPins; 2] = [
+    RecursionPins {
+        prep: AreaPin { area: 1 << 25, pad_columns: 8 },
+        main: AreaPin { area: 1 << 25, pad_columns: 8 },
+    },
+    RECURSION_PINS,
+];
+
+impl RecursionPins {
+    /// The index of the largest class.
+    pub const LAST_CLASS: usize = RECURSION_PIN_CLASSES.len() - 1;
+
+    /// The pins of class `index`.
+    pub fn class(index: usize) -> RecursionPins {
+        RECURSION_PIN_CLASSES[index]
+    }
+
+    /// The smallest class whose pins hold a node whose rounds commit `main`
+    /// and `prep` cells naturally (stacking-rounded, `committed_dense_len`);
+    /// `None` when even the largest does not.
+    pub fn class_for_committed(main: usize, prep: usize) -> Option<usize> {
+        RECURSION_PIN_CLASSES
+            .iter()
+            .position(|c| main <= c.main.area && prep <= c.prep.area)
+    }
+
+    /// Which class these pins are, if any.
+    pub fn class_index(&self) -> Option<usize> {
+        RECURSION_PIN_CLASSES.iter().position(|c| c == self)
+    }
+}
+
 pub fn committed_dense_len(total_values: usize, log_stacking_height: usize) -> usize {
     if total_values == 0 {
         return 0;

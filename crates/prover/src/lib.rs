@@ -192,7 +192,7 @@ const CORE_CACHE_SIZE: usize = 5;
 /// reaches the root cleanly. Larger arity → fewer compress invocations
 /// (`(N-1)/(k-1)` total) and amortizes per-shard fixed overhead
 /// (Merkle binding, witness assembly, program build).
-pub const REDUCE_BATCH_SIZE: usize = 4;
+pub const REDUCE_BATCH_SIZE: usize = 3;
 
 // TODO: FIX
 //
@@ -762,7 +762,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // after every worker respawn.  ZIREN_PREWARM_MIXED=1 warms the full
         // product over the pre-warm bands (two bands: 2+4+8+16 tuples, x2
         // for is_complete); the default keeps the homogeneous tuples only.
-        let mixed = matches!(env::var("ZIREN_PREWARM_MIXED").as_deref(), Ok("1") | Ok("true"));
+        // Pin classes: a sibling group mixes classes whenever one member is
+        // large, so the mixed tuples are the normal case — warmed by default
+        // (ZIREN_PREWARM_MIXED=0 keeps the homogeneous ones only).
+        let mixed = !matches!(env::var("ZIREN_PREWARM_MIXED").as_deref(), Ok("0") | Ok("false"));
         let mut pairs: Vec<(Vec<usize>, bool)> = Vec::new();
         for arity in 1..=REDUCE_BATCH_SIZE {
             let tuples: Vec<Vec<usize>> = if mixed {
@@ -837,8 +840,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // separates bands, so an entry warmed without one was never hit
             // -- every worker rebuilt the first node of each arity, 0.7-1.3 s
             // apiece, three of them on the tail's critical chain.
-            let band = self.compose_band_for(&witness).and_then(|b| self.dominating_band(&[b]));
-            let (_program, digest) = self.compose_program_basefold_at(&witness, band);
+            // The runtime keys a node's program by the band its sibling GROUP
+            // settles on (`dominating_band` over the members' own classes),
+            // which is at least the node's own class; the program itself is a
+            // function of the node's own rows.  Warm every band the group can
+            // settle on, so no tuple is built on the card thread mid-block.
+            let own = self.compose_band_for(&witness).and_then(|b| self.dominating_band(&[b]));
+            let last = self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
+            let mut digest = [0u8; 32];
+            for band in own.map_or(0, |b| b)..=last {
+                let (_program, d) = self.compose_program_basefold_at(&witness, Some(band));
+                digest = d;
+            }
             // And claim its KEY, which is the more expensive half: a setup walks
             // every chip's preprocessed trace and commits the round, ~1.4 GiB of
             // it coming back to host.  The key itself is built by whichever node
@@ -848,7 +861,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             self.pin_recursion_pk(digest);
             tracing::debug!(
                 "compose pre-warm: band={band_index} arity={arity} is_complete={is_complete} \
-                 snapped onto {band:?} in {:?}",
+                 snapped onto {own:?}..={last} in {:?}",
                 per_pair_start.elapsed()
             );
         }));
@@ -1235,10 +1248,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         kind: &str,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let mut owned = (**program).clone();
-        match (band, self.compress_shape_config.as_ref()) {
-            (Some(index), Some(config)) => config.fix_shape_at(&mut owned, index),
-            _ => self.fix_recursion_shape_kind(&mut owned, kind),
-        }
+        // A node's pin class is a function of its own rows (and the root's is
+        // fixed); the caller's band is the cache key's, not the shape's.
+        let _ = band;
+        self.fix_recursion_shape_kind(&mut owned, kind);
         Arc::new(owned)
     }
 
@@ -1405,7 +1418,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             "compose",
             || {
                 let program = self.compose_program_unsnapped(input);
-                self.snapped(&program, band, "compose")
+                self.snapped(
+                    &program,
+                    band,
+                    if input.is_complete { "compose-root" } else { "compose" },
+                )
             },
         )
     }
@@ -1427,7 +1444,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             self.vk_verification,
             PublicValuesOutputDigest::Reduce,
         );
-        self.fix_recursion_shape_kind(&mut program, "compose");
+        self.fix_recursion_shape_kind(
+            &mut program,
+            if input.is_complete { "compose-root" } else { "compose" },
+        );
         Arc::new(program)
     }
 
@@ -2670,7 +2690,10 @@ pub mod tests {
 
         let mut seen: std::collections::BTreeMap<u64, (usize, Vec<u8>)> =
             std::collections::BTreeMap::new();
-        for rows in [32usize, 4_096, 131_072] {
+        // All three land in pin class 0 (65,536 rows × 406 main / 173
+        // preprocessed cells per row stay under 2^25); the class-1 sweep below
+        // must produce a DIFFERENT program.
+        for rows in [32usize, 4_096, 65_536] {
             let w = at_rows(rows);
             let sk = w.shape_key();
             let bytes = prog_bytes(&w);
@@ -2689,10 +2712,23 @@ pub mod tests {
         assert_eq!(
             seen.len(),
             1,
-            "[STEP-2] expected ONE shape_key for children at 32 / 4,096 / 131,072 rows \
+            "[STEP-2] expected ONE shape_key for children at 32 / 4,096 / 65,536 rows \
              (the area pins make the compose program row-independent); got {} — a \
              field of the proof structure still follows the child's rows",
             seen.len(),
+        );
+        // A child in pin class 1 (131,072 rows: main 53 M cells > 2^25) is
+        // verified by a different program — the class is part of the key.
+        let w1 = at_rows(131_072);
+        let sk1 = w1.shape_key();
+        assert!(
+            !seen.contains_key(&sk1),
+            "[STEP-2] a class-1 child shares the class-0 compose program key {sk1:#018x}",
+        );
+        let bytes1 = prog_bytes(&w1);
+        assert!(
+            seen.values().all(|(_, b)| *b != bytes1),
+            "[STEP-2] a class-1 child builds the class-0 compose program bytes",
         );
     }
 

@@ -134,10 +134,11 @@ impl BasefoldShardVerifier {
         // for recursion / shrink / wrap (LEGACY). Drives the zerocheck host
         // orientation (collapsed/no-embed claim + rev(z_gkr) eq-bridge anchor).
         core_rev: bool,
-        // The machine's preprocessed-round AREA PIN (`StarkMachine::prep_area_pin`):
-        // that round's committed area and padding split are reconstructed from
-        // the verifying key, and a pinned machine lays them out differently.
-        prep_pin: Option<crate::jagged::AreaPin>,
+        // Whether the machine pins its rounds (`StarkMachine::recursion_pins`):
+        // on a pinned machine the preprocessed round's committed area and
+        // padding split are those of the proof's pin CLASS, read off the
+        // proof's padding layout and checked against the rows.
+        pinned: Option<crate::jagged::RecursionPins>,
     ) -> Result<(), BasefoldVerifyError>
     where
         SC: StarkGenericConfig + crate::BasefoldRing,
@@ -422,7 +423,7 @@ impl BasefoldShardVerifier {
             // jagged claimed sum; index-aligned with `chips`.
             &proof.opened_values,
             challenger,
-            prep_pin,
+            pinned.map(|_| proof.padding_row_heights.first().map_or(0, |h| h.len())),
         )?;
 
         Ok(())
@@ -457,7 +458,10 @@ fn verify_jagged_pcs_host<SC, A>(
     // `y_per_chip` diverges from the openings the zerocheck consumed.
     opened_values: &crate::ShardOpenedValues<Val<SC>, Challenge<SC>>,
     challenger: &mut SC::Challenger,
-    prep_pin: Option<crate::jagged::AreaPin>,
+    // `Some(n)` on a pinned machine: the proof claims `n` preprocessed-round
+    // padding columns, which names its pin class
+    // (`RECURSION_PIN_CLASSES`); `None` = natural rounds.
+    claimed_prep_pad_columns: Option<usize>,
 ) -> Result<(), BasefoldVerifyError>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -656,6 +660,11 @@ where
         }
     };
 
+    // The pin class the proof claims (pinned machines), checked below against
+    // the rows: a proof may commit a node under a class larger than the rows
+    // need (the root does), never smaller.
+    let mut pin_class: Option<usize> = None;
+    let mut prep_total_all = 0usize;
     if n_prep > 0 {
         // Round 0's geometry is CLAIMED by the proof and PINNED by the
         // hash-bind below: the key's commitment is
@@ -692,6 +701,7 @@ where
             });
             prep_total += width.saturating_mul(*height);
         }
+        prep_total_all = prep_total;
         // The area the preprocessed commitment actually covers: the real cells
         // rounded out to whole stacking blocks, exactly as the prover's commit
         // does (`zkm_pcs::jagged::committed_dense_len`).  Derived, not read from
@@ -702,9 +712,26 @@ where
         // machine — the pin's area split into exactly `pad_columns` columns
         // (`AreaPin::split_padding`), the layout the prover used.
         let prep_natural = crate::jagged::committed_dense_len(prep_total, log_stack);
-        match prep_pin {
-            Some(pin) => {
-                let prep_area = pin.apply(prep_natural);
+        match claimed_prep_pad_columns {
+            Some(claimed) => {
+                let Some(class) = crate::jagged::RECURSION_PIN_CLASSES
+                    .iter()
+                    .position(|c| c.prep.pad_columns == claimed)
+                else {
+                    return Err(BasefoldVerifyError::JaggedPcs(format!(
+                        "preprocessed round: {claimed} padding columns name no pin class",
+                    )));
+                };
+                let pin = crate::jagged::RecursionPins::class(class).prep;
+                if prep_natural > pin.area {
+                    return Err(BasefoldVerifyError::JaggedPcs(format!(
+                        "preprocessed round: {prep_natural} committed cells exceed the claimed \
+                         class's pin {}",
+                        pin.area,
+                    )));
+                }
+                pin_class = Some(class);
+                let prep_area = pin.area;
                 for h in crate::jagged::AreaPin::split_padding(
                     prep_area.saturating_sub(prep_total),
                     pin.pad_columns,
@@ -827,6 +854,37 @@ where
                 "packing column accounting mismatch: [preprocessed | main] covers \
                  {col_idx} columns but the packing carries {total_cols}",
             )));
+        }
+        if let Some(class) = pin_class {
+            // The main round's padding must be the class's fixed column count,
+            // and the class must hold the rows: the smallest class both rounds
+            // fit is a floor for the claimed one.
+            let pins = crate::jagged::RecursionPins::class(class);
+            let main_pads = chip_infos.len() - n_prep_infos - n_main_infos;
+            if main_pads != pins.main.pad_columns {
+                return Err(BasefoldVerifyError::JaggedPcs(format!(
+                    "main round: {main_pads} padding columns, the claimed pin class has {}",
+                    pins.main.pad_columns,
+                )));
+            }
+            let main_total: usize = chip_infos[n_prep_infos..n_prep_infos + n_main_infos]
+                .iter()
+                .map(|i| i.row_count.saturating_mul(i.column_count))
+                .sum();
+            let main_natural = crate::jagged::committed_dense_len(main_total, log_stack);
+            let prep_natural = crate::jagged::committed_dense_len(prep_total_all, log_stack);
+            let Some(floor) =
+                crate::jagged::RecursionPins::class_for_committed(main_natural, prep_natural)
+            else {
+                return Err(BasefoldVerifyError::JaggedPcs(
+                    "the rows fit no pin class".into(),
+                ));
+            };
+            if class < floor {
+                return Err(BasefoldVerifyError::JaggedPcs(format!(
+                    "pin class {class} claimed for rows that need class {floor}",
+                )));
+            }
         }
     }
 

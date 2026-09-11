@@ -200,6 +200,10 @@ impl<F: Field> MachineProgram<F> for RecursionProgram<F> {
     fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
         SepticDigest::<F>::zero()
     }
+
+    fn area_pins(&self) -> Option<zkm_pcs::jagged::RecursionPins> {
+        self.shape.as_ref().and_then(|s| s.pins)
+    }
 }
 
 impl<F: Field> RecursionProgram<F> {

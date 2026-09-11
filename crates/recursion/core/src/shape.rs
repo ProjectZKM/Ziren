@@ -33,6 +33,11 @@ pub struct RecursionShape {
     /// Symptom: `OodEvaluationMismatch on chip MemoryVar` /
     /// `Poseidon2WideDeg3` flakes ~50% of fresh `cargo test` runs.
     pub(crate) inner: BTreeMap<String, usize>,
+    /// The pin class the program commits under
+    /// (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`), settled with the rows by
+    /// `RecursionShapeConfig::fix_shape_kind`; `None` = the machine's default.
+    #[serde(default)]
+    pub pins: Option<zkm_pcs::jagged::RecursionPins>,
 }
 
 impl RecursionShape {
@@ -43,13 +48,13 @@ impl RecursionShape {
 
 impl From<HashMap<String, usize>> for RecursionShape {
     fn from(value: HashMap<String, usize>) -> Self {
-        Self { inner: value.into_iter().collect() }
+        Self { inner: value.into_iter().collect(), pins: None }
     }
 }
 
 impl From<BTreeMap<String, usize>> for RecursionShape {
     fn from(value: BTreeMap<String, usize>) -> Self {
-        Self { inner: value }
+        Self { inner: value, pins: None }
     }
 }
 
@@ -110,6 +115,17 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     pub fn fix_shape_kind(&self, program: &mut RecursionProgram<F>, kind: &str) {
         let heights = RecursionAir::<F, DEGREE>::heights(program);
         let shape = Self::organic_shape(&heights);
+        // The pin class: the smallest both rounds fit — except the ROOT
+        // (`compose-root`), which always takes the largest so the shrink
+        // program, and through it the wrap circuit, sees one root geometry.
+        let own = Self::class_for_rows(&shape).unwrap_or_else(|| {
+            panic!("recursion {kind} program: its rows fit no pin class: {shape:?}")
+        });
+        let class = if kind == "compose-root" {
+            zkm_pcs::jagged::RecursionPins::LAST_CLASS
+        } else {
+            own
+        };
         if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
             let widths = Self::committed_widths();
             let cells: u128 = shape
@@ -120,9 +136,44 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
                 heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
             organic.sort();
             let rows: Vec<(String, usize)> = shape.iter().map(|(n, r)| (n.clone(), *r)).collect();
-            eprintln!("FIXSHAPE kind={kind} band_index=0 cells={cells} organic={organic:?} -> band={rows:?}");
+            eprintln!("FIXSHAPE kind={kind} band_index={class} cells={cells} organic={organic:?} -> band={rows:?}");
         }
-        *program.shape_mut() = Some(RecursionShape { inner: shape });
+        *program.shape_mut() = Some(RecursionShape {
+            inner: shape,
+            pins: Some(zkm_pcs::jagged::RecursionPins::class(class)),
+        });
+    }
+
+    /// The per-chip MAIN and PREPROCESSED widths of the recursion machine.
+    fn round_widths() -> (BTreeMap<String, usize>, BTreeMap<String, usize>) {
+        let airs = [
+            RecursionAir::<F, DEGREE>::MemoryConst(MemoryConstChip::default()),
+            RecursionAir::<F, DEGREE>::MemoryVar(MemoryVarChip::default()),
+            RecursionAir::<F, DEGREE>::BaseAlu(BaseAluChip),
+            RecursionAir::<F, DEGREE>::ExtAlu(ExtAluChip),
+            RecursionAir::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
+            RecursionAir::<F, DEGREE>::Select(SelectChip),
+            RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()),
+            RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip),
+        ];
+        let main = airs.iter().map(|a| (a.name(), p3_air::BaseAir::<F>::width(a))).collect();
+        let prep = airs.iter().map(|a| (a.name(), MachineAir::<F>::preprocessed_width(a))).collect();
+        (main, prep)
+    }
+
+    /// The pin class a program with these ROW counts commits under: the
+    /// smallest whose pins hold both rounds' stacking-rounded areas
+    /// (`zkm_pcs::jagged::RecursionPins::class_for_committed`).  Mirrors
+    /// `StarkMachine::pins_for_rows`.
+    pub fn class_for_rows(rows: &BTreeMap<String, usize>) -> Option<usize> {
+        let (mw, pw) = Self::round_widths();
+        let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let main: usize = rows.iter().map(|(n, r)| r * mw.get(n).copied().unwrap_or(0)).sum();
+        let prep: usize = rows.iter().map(|(n, r)| r * pw.get(n).copied().unwrap_or(0)).sum();
+        zkm_pcs::jagged::RecursionPins::class_for_committed(
+            zkm_pcs::jagged::committed_dense_len(main, log_stack),
+            zkm_pcs::jagged::committed_dense_len(prep, log_stack),
+        )
     }
 
     /// THE shape of a recursion program: its own heights, each rounded up to
@@ -206,20 +257,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     /// [`Self::all_shapes`].  This is the choice [`Self::fix_shape_kind`] makes
     /// on its own; exposed so a caller can learn it WITHOUT committing to it.
     pub fn band_index_for(&self, heights: &[(String, usize)]) -> Option<usize> {
-        let widths = Self::committed_widths();
-        let mut best: Option<(usize, u128)> = None;
-        for (index, shape) in self.allowed_shapes.iter().enumerate() {
-            let fits =
-                heights.iter().all(|(name, height)| *height <= shape.get(name).copied().unwrap_or(0));
-            if !fits {
-                continue;
-            }
-            let cells = Self::band_cells(shape, &widths);
-            if best.map_or(true, |(_, c)| cells < c) {
-                best = Some((index, cells));
-            }
-        }
-        best.map(|(i, _)| i)
+        // A "band" is a pin class now: the one the program's own rows take.
+        Self::class_for_rows(&Self::organic_shape(heights))
     }
 
     /// The cheapest band that DOMINATES every band in `indices` — one whose
@@ -232,28 +271,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     /// chain, so this is a search, not a maximum: the answer need not be any of
     /// the inputs, and may not exist.
     pub fn dominating_band_index(&self, indices: &[usize]) -> Option<usize> {
-        let widths = Self::committed_widths();
-        let mut required: HashMap<String, usize> = HashMap::new();
-        for i in indices {
-            for (name, rows) in self.allowed_shapes.get(*i)?.iter() {
-                let slot = required.entry(name.clone()).or_insert(0);
-                *slot = (*slot).max(*rows);
-            }
-        }
-        let mut best: Option<(usize, u128)> = None;
-        for (index, shape) in self.allowed_shapes.iter().enumerate() {
-            let covers = required
-                .iter()
-                .all(|(name, need)| shape.get(name).copied().unwrap_or(0) >= *need);
-            if !covers {
-                continue;
-            }
-            let cells = Self::band_cells(shape, &widths);
-            if best.map_or(true, |(_, c)| cells < c) {
-                best = Some((index, cells));
-            }
-        }
-        best.map(|(i, _)| i)
+        // Pin classes form a chain: the largest dominates.
+        let best = indices.iter().copied().max()?;
+        (best < self.allowed_shapes.len()).then_some(best)
     }
 
     /// Snap `program` onto band `index` regardless of what it would have chosen
@@ -262,7 +282,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         // Bands are gone: a program is always proved at its own rows
         // (`organic_shape`); the index is the caller's settled band, kept for
         // API compatibility with the multi-GPU pipeline's group settling.
-        assert!(index < self.allowed_shapes.len(), "recursion band {index} does not exist");
+        assert!(index < self.allowed_shapes.len(), "recursion pin class {index} does not exist");
+        // A node's class is a function of its own rows (its siblings' classes
+        // are covered by the parent's class-tuple programs), so the caller's
+        // index is not applied.
         self.fix_shape_kind(program, "forced");
     }
 
@@ -337,16 +360,43 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             assert!(n % 32 == 0, "recursion shape rows must be a multiple of 32: {n}");
             n
         };
-        let allowed_shapes = vec![HashMap::from([
-            (mem_var.clone(), rows(262_144)),
-            (select.clone(), rows(147_456)),
-            (mem_const.clone(), rows(4_096)),
-            (base_alu.clone(), rows(507_072)),
-            (ext_alu.clone(), rows(647_872)),
-            (poseidon2_wide.clone(), rows(69_632)),
-            (ext2felt.clone(), rows(68_512)),
-            (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
-        ])];
+        // One entry per PIN CLASS (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`),
+        // smallest first: the rows a DUMMY child of that class is built at
+        // (the program verifying it reads the class's pinned geometry, not
+        // these rows).  Class 1 is the single shape above; class 0 is its
+        // half, which lands both rounds at 2^25.
+        let allowed_shapes = vec![
+            HashMap::from([
+                (mem_var.clone(), rows(131_072)),
+                (select.clone(), rows(73_728)),
+                (mem_const.clone(), rows(2_048)),
+                (base_alu.clone(), rows(253_536)),
+                (ext_alu.clone(), rows(323_936)),
+                (poseidon2_wide.clone(), rows(34_816)),
+                (ext2felt.clone(), rows(34_272)),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
+            ]),
+            HashMap::from([
+                (mem_var.clone(), rows(262_144)),
+                (select.clone(), rows(147_456)),
+                (mem_const.clone(), rows(4_096)),
+                (base_alu.clone(), rows(507_072)),
+                (ext_alu.clone(), rows(647_872)),
+                (poseidon2_wide.clone(), rows(69_632)),
+                (ext2felt.clone(), rows(68_512)),
+                (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
+            ]),
+        ];
+        assert_eq!(allowed_shapes.len(), zkm_pcs::jagged::RECURSION_PIN_CLASSES.len());
+        for (index, shape) in allowed_shapes.iter().enumerate() {
+            let rows: BTreeMap<String, usize> =
+                shape.iter().map(|(n, r)| (n.clone(), *r)).collect();
+            assert_eq!(
+                Self::class_for_rows(&rows),
+                Some(index),
+                "the class-{index} dummy shape must land in class {index}",
+            );
+        }
         // No band may exceed the row cube every recursion stage proves at:
         // `PaddedMle::padded` asserts the padded rows fit `2^cube`, so a taller
         // band is a shape nothing can be snapped onto.

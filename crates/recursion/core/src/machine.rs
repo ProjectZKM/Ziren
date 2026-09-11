@@ -178,7 +178,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         .into_iter()
         .map(|(chip, rows)| (chip.name(), rows))
         .collect();
-        RecursionShape { inner: shape }
+        RecursionShape { inner: shape, pins: None }
     }
 
     pub fn heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {

@@ -102,6 +102,9 @@ where
 {
     /// The shard's chips.
     pub chips: &'a [&'a MachineChip<SC, A>],
+    /// The main round's area pin: the program's pin class, from the proving
+    /// key's `main_pin` (`None` = natural, the core machine).
+    pub main_pin: Option<crate::jagged::AreaPin>,
     /// The proving key's preprocessed traces.
     pub preprocessed_traces: &'a [crate::multilinear::PaddedMle<Val<SC>>],
     /// The shard's main traces as name-keyed
@@ -529,7 +532,7 @@ where
                         &chips,
                         &views,
                         self.machine().core_rev(),
-                        self.machine().main_area_pin(),
+                        record.area_pins().map(|p| p.main).or(self.machine().main_area_pin()),
                     );
                 Some(RetainedJaggedCommit {
                     main_commitment,
@@ -593,6 +596,7 @@ where
             pk.preprocessed_mles(),
             <SC as crate::BasefoldRing>::prep_open_data(pk.preprocessed_data()),
             &pk.chip_ordering,
+            pk.main_pin,
             data.public_values.clone(),
             &basefold_challenger_snapshot,
             // The commit-time retained jagged commitment (`None` on the
@@ -730,6 +734,8 @@ fn prove_shard_with_data_boxed<SC, A>(
         SC::BfMmcs,
     >,
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
+    // The proving key's main-round pin (the program's class).
+    pk_main_pin: Option<crate::jagged::AreaPin>,
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
 // The commit-time retained jagged commitment, threaded into
@@ -832,6 +838,7 @@ where
         machine,
         ShardData {
             chips: &chips_reborrow,
+            main_pin: pk_main_pin,
             preprocessed_traces: &preprocessed_traces,
             preprocessed_commit_data: pk_preprocessed_jagged,
             // The ready-made name-keyed `PaddedMle` store built above.

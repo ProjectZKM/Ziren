@@ -108,4 +108,11 @@ pub trait MachineProgram<F>: Send + Sync {
 
     /// Gets the initial global cumulative sum.
     fn initial_global_cumulative_sum(&self) -> SepticDigest<F>;
+
+    /// The area pins this program's proofs commit under, when the program
+    /// carries them (a recursion program's shape names its pin class); `None`
+    /// leaves the choice to the machine.
+    fn area_pins(&self) -> Option<crate::jagged::RecursionPins> {
+        None
+    }
 }

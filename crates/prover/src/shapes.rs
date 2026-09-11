@@ -781,11 +781,25 @@ impl ZKMProofShape {
             classes
         };
 
+        // Every ORDERED tuple of child classes at every arity: a sibling group
+        // mixes classes whenever one member is large, and the compose program
+        // is a function of the tuple in order.
+        let tuples = |arity: usize| -> Vec<Vec<OrderedShape>> {
+            recursion_shape_config
+                .get_all_shape_combinations(arity)
+                .map(|mut t| {
+                    for os in t.iter_mut() {
+                        os.inner.sort();
+                    }
+                    t
+                })
+                .collect()
+        };
         let arity_compress_shapes: Vec<Self> = {
-            let mut out = Vec::with_capacity(compress_child_classes.len() * reduce_batch_size);
+            let mut out = Vec::new();
             for arity in 1..=reduce_batch_size {
-                for os in &compress_child_classes {
-                    out.push(Self::Compress(vec![os.clone(); arity]));
+                for t in tuples(arity) {
+                    out.push(Self::Compress(t));
                 }
             }
             out
@@ -793,16 +807,17 @@ impl ZKMProofShape {
         // Deferred batches up to `reduce_batch_size` proofs per node, so it
         // needs the same per-arity sweep Compress gets.
         let deferred_shapes: Vec<Self> = {
-            let mut out = Vec::with_capacity(compress_child_classes.len() * reduce_batch_size);
+            let mut out = Vec::new();
             for arity in 1..=reduce_batch_size {
-                for os in &compress_child_classes {
-                    out.push(Self::Deferred(vec![os.clone(); arity]));
+                for t in tuples(arity) {
+                    out.push(Self::Deferred(t));
                 }
             }
             out
         };
+        // Shrink folds the ROOT, which always commits under the largest class.
         let shrink_shapes: Vec<Self> =
-            compress_child_classes.iter().map(|os| Self::Shrink(os.clone())).collect();
+            compress_child_classes.last().map(|os| Self::Shrink(os.clone())).into_iter().collect();
 
         // `recursion_shape_config` is not consulted for the
         // Compress/Deferred/Shrink tail; retained in the signature for API
@@ -974,11 +989,18 @@ mod tests {
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let rec_cfg = prover.compress_shape_config.as_ref().expect("compress shape config");
         let shapes = rec_cfg.all_shapes();
-        assert_eq!(shapes.len(), 1, "one recursion shape, got {}", shapes.len());
-        let os =
-            RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_ordered_shape(&shapes[0]);
+        assert_eq!(
+            shapes.len(),
+            zkm_pcs::jagged::RECURSION_PIN_CLASSES.len(),
+            "one dummy shape per pin class, got {}",
+            shapes.len()
+        );
+        // The largest class's dummy shape is the one whose caps the compose
+        // and deferred programs must fit.
+        let top = shapes.last().expect("a shape per class");
+        let os = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_ordered_shape(top);
         let caps: std::collections::BTreeMap<String, usize> =
-            shapes[0].iter().map(|(n, r)| (n.clone(), *r)).collect();
+            top.iter().map(|(n, r)| (n.clone(), *r)).collect();
         let caps = &caps;
         let widths = {
             let mut w = std::collections::BTreeMap::new();

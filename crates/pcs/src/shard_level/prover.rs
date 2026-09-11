@@ -229,6 +229,7 @@ where
 {
     let ShardData {
         chips,
+        main_pin,
         preprocessed_traces,
         preprocessed_commit_data,
         main_traces,
@@ -324,7 +325,7 @@ where
             // that build would have produced (same seam, same inputs, one
             // shard-phase earlier).
             Some(retained) => (retained.main_commitment, retained.precomputed),
-            None => commit_traces::<SC, A>(chips, &trace_views, dense_rev, machine.main_area_pin()),
+            None => commit_traces::<SC, A>(chips, &trace_views, dense_rev, main_pin),
         }
     };
     // `trace_views` is kept OWNED (no reborrow): the dims sites below

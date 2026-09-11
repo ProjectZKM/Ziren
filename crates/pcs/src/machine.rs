@@ -115,6 +115,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     pub fn prep_area_pin(&self) -> Option<crate::jagged::AreaPin> {
         self.recursion_pins.map(|p| p.prep)
     }
+
 }
 
 /// A proving key for a STARK.
@@ -175,6 +176,10 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// decodes it.
     #[serde(skip)]
     pub prep_pin: Option<crate::jagged::AreaPin>,
+    /// The main round's pin — the program's class, settled at `setup`; not
+    /// serialized for the same reason as `prep_pin`.
+    #[serde(skip)]
+    pub main_pin: Option<crate::jagged::AreaPin>,
     /// The preprocessed chip ordering.
     pub chip_ordering: HashMap<String, usize>,
     /// The preprocessed chip local only information.
@@ -195,6 +200,7 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             preprocessed_data: std::sync::OnceLock::new(),
             prep_rev: self.prep_rev,
             prep_pin: self.prep_pin,
+            main_pin: self.main_pin,
             chip_ordering: self.chip_ordering.clone(),
             constraints_map: self.constraints_map.clone(),
         }
@@ -224,6 +230,7 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
             preprocessed_data: std::sync::OnceLock::new(),
             prep_rev,
             prep_pin: None,
+            main_pin: None,
             chip_ordering,
             constraints_map,
         }
@@ -233,6 +240,12 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     /// `StarkMachine::prep_area_pin`).  Consuming builder.
     pub fn with_prep_pin(mut self, pin: Option<crate::jagged::AreaPin>) -> Self {
         self.prep_pin = pin;
+        self
+    }
+
+    /// Set the main round's pin.  Consuming builder.
+    pub fn with_main_pin(mut self, pin: Option<crate::jagged::AreaPin>) -> Self {
+        self.main_pin = pin;
         self
     }
 
@@ -466,6 +479,33 @@ impl<SC: StarkGenericConfig> Debug for PartStarkVerifyingKey<SC> {
 }
 
 impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
+    /// The pins a proof of a program with these per-chip ROW counts commits
+    /// under on this machine: the smallest pin class both rounds fit
+    /// (`RecursionPins::class_for_committed`), or `None` on a machine without
+    /// pins.  Rows name chips of this machine; unknown names are ignored.
+    /// Panics when no class holds the rows — the largest pin must be raised.
+    pub fn pins_for_rows(&self, rows: &[(String, usize)]) -> Option<crate::jagged::RecursionPins> {
+        self.recursion_pins?;
+        let log_stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let (mut main, mut prep) = (0usize, 0usize);
+        for (name, r) in rows {
+            if let Some(chip) = self.chips().iter().find(|c| c.name() == *name) {
+                main += r * <A as BaseAir<Val<SC>>>::width(&chip.air);
+                prep += r * chip.preprocessed_width();
+            }
+        }
+        let main_c = crate::jagged::committed_dense_len(main, log_stack);
+        let prep_c = crate::jagged::committed_dense_len(prep, log_stack);
+        let class = crate::jagged::RecursionPins::class_for_committed(main_c, prep_c)
+            .unwrap_or_else(|| {
+                panic!(
+                    "area pin: rows commit {main_c} main / {prep_c} preprocessed cells, past \
+                     every pin class (zkm_pcs::jagged::RECURSION_PIN_CLASSES)"
+                )
+            });
+        Some(crate::jagged::RecursionPins::class(class))
+    }
+
     /// Get an array containing a `ChipRef` for all the chips of this MIPS STARK machine.
     pub fn chips(&self) -> &[MachineChip<SC, A>] {
         &self.chips
@@ -692,6 +732,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     #[instrument("setup machine", level = "debug", skip_all)]
     #[allow(clippy::map_unwrap_or)]
     #[allow(clippy::redundant_closure_for_method_calls)]
+
     pub fn setup(&self, program: &A::Program) -> (StarkProvingKey<SC>, StarkVerifyingKey<SC>) {
         let parent_span = tracing::debug_span!("generate preprocessed traces");
         let (named_preprocessed_traces, num_constraints): (Vec<_>, Vec<_>) =
@@ -793,8 +834,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // Keep both — the root goes
         // to the vk, the precompute is seeded into the proving key below, so the
         // opening round never has to re-derive the committed order.
+        // The pins this program's proofs commit under: its own class when the
+        // program names one, else the machine's default.
+        let pins = program.area_pins().or(self.recursion_pins);
         let prep_precomputed =
-            SC::prep_precompute(&named, self.core_rev(), self.prep_area_pin());
+            SC::prep_precompute(&named, self.core_rev(), pins.map(|p| p.prep));
         let commit = prep_precomputed.commit_root();
 
         // Get the chip ordering.
@@ -829,7 +873,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     cell
                 },
                 prep_rev: self.core_rev(),
-                prep_pin: self.prep_area_pin(),
+                prep_pin: pins.map(|p| p.prep),
+                main_pin: pins.map(|p| p.main),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
@@ -974,6 +1019,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 preprocessed_data: std::sync::OnceLock::new(),
                 prep_rev: self.core_rev(),
                 prep_pin: self.prep_area_pin(),
+                main_pin: self.main_area_pin(),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
@@ -1213,7 +1259,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         &mut shard_challenger,
                         shard_proof,
                         self.core_rev,
-                        self.prep_area_pin(),
+                        self.recursion_pins(),
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
                 })
