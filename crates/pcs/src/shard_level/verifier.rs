@@ -876,9 +876,7 @@ where
             let Some(floor) =
                 crate::jagged::RecursionPins::class_for_committed(main_natural, prep_natural)
             else {
-                return Err(BasefoldVerifyError::JaggedPcs(
-                    "the rows fit no pin class".into(),
-                ));
+                return Err(BasefoldVerifyError::JaggedPcs("the rows fit no pin class".into()));
             };
             if class < floor {
                 return Err(BasefoldVerifyError::JaggedPcs(format!(

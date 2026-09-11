@@ -718,58 +718,21 @@ impl ZKMProofShape {
             small_shapes.iter().map(|os| Self::Recursion(vec![os.clone()])).collect();
 
         // ───────────────────────────────────────────────────────────────
-        // Compress / Deferred / Shrink key on
-        // f(recursion-chip-set, arity, CHILD NATURAL log_dense L).
+        // Compress / Deferred / Shrink key on f(recursion chip set, arity,
+        // the children's PIN CLASSES in order).
         //
         // A compose/deferred/shrink program verifies a BATCH of CHILD proofs,
-        // each itself a RECURSION (normalize/compose) proof over the fixed
-        // 7-chip recursion machine (uniform chip-set).  The compose VK depends
-        // on each child's jagged-bundle geometry, which is fully determined by
-        // the child's NATURAL log_dense `n` (= log2(np2(Σ width·2^h))):
-        //
-        //   log_dense (L) = max(n, RECURSION_LOG_TRACE_AREA)   [the AREA PIN]
-        //   log_stacking  = pick_log_stacking_height() = DEFAULT_LOG_STACKING_
-        //                   HEIGHT — a CONSTANT, never area-dependent
-        //   num_stripes   = 2^(L - log_stacking)   -> batch_evaluations width
-        //   reduction     = L rounds over an L-long eval_point
-        //   jagged_n      = 2*(L + 1)              -> jagged-eval sub-sumcheck
-        //   BaseFold      = log_stacking rounds / query paths
-        //
-        // ⚠️ THE AREA PIN IS A **FLOOR, NOT A CLAMP** — `precompute_jagged_
-        // basefold_commit_generic` raises `packing.log_dense_size` to
-        // `max(natural, RECURSION_LOG_TRACE_AREA)`.  A child whose natural area
-        // ALREADY exceeds 2^27 keeps its own larger L.  The enumeration used to
-        // emit a SINGLE representative at natural L ≤ pin, on the (wrong)
-        // premise that the pin fixed every child at L = 27.  That covers only
-        // the compose layer whose children are NORMALIZE proofs (measured
-        // natural L = 26 for a real fib normalize, so the pin binds); the
-        // DEEPER layers, whose children are COMPOSE proofs, are several times
-        // larger and land at natural L > 27 — a VK class no shape in the map
-        // could ever match, so `VERIFY_VK=true` panicked "vk not allowed" the
-        // moment the reduce tree grew past one compose layer.
-        //
-        // We therefore emit ONE representative per reachable child natural L:
-        //   * L = pin covers every child at or below the floor (all of which
-        //     share L = 27 / log_stacking = 21 / num_stripes = 64).
-        //   * L in (pin, L_MAX] covers the over-floor children, where
-        //     L_MAX is the largest natural area the recursion machine can
-        //     reach with every chip at the `CORE_MAX_LOG_ROW_COUNT` cube.
-        // Per class we emit Compress AND Deferred at every arity, plus one
-        // Shrink (shrink always folds a single child).  Since the geometry is a function of L alone, ANY height
-        // profile landing at a given L yields the same program — so a single
-        // greedy representative per L is exact, not approximate.
-        // The children a compose/deferred/shrink program can be built over are
-        // EXACTLY the recursion bands, because every recursion program is
-        // snapped onto one of them before it is proven
-        // (`ZKMProver::fix_recursion_shape`).
-        //
-        // This used to be a synthetic sweep that emitted ONE representative per
-        // log-dense class, on the premise that a compose vk is a function of the
-        // chip set and arity alone.  MEASURED (`compose_vk_height_dependence`):
-        // it is not — seven bands give seven DISTINCT compose vks at arity 1 and
-        // again at arity 4.  So a representative whose per-chip heights differ
-        // from a real child's produces a different key, which is why a freshly
-        // regenerated allowlist still rejected every produced compress vk.
+        // each a recursion proof over the fixed 7-chip machine committing
+        // under a pin class (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`): the
+        // class fixes the committed area, the padding column count and with
+        // them the stripe count, the reduction and the jagged-eval sub-sumcheck
+        // sizes — the whole geometry the verifier program bakes.  Rows do not
+        // enter (measured: children at 32 / 4,096 / 65,536 rows build one
+        // program), classes do (a 2^26 child builds another).  So one dummy
+        // child per class (`RecursionShapeConfig::all_shapes`, in class order)
+        // is exact, and the enumeration is every ORDERED class tuple at every
+        // arity — a sibling group mixes classes whenever one member is large.
+        // Shrink folds the root, which always commits under the largest class.
         let compress_child_classes: Vec<OrderedShape> = {
             let mut classes: Vec<OrderedShape> = recursion_shape_config
                 .get_all_shape_combinations(1)
@@ -1437,7 +1400,6 @@ mod tests {
         );
         eprintln!("[ARITY] per_arity_recursion_counts = {per_arity:?}");
     }
-
 
     /// ARITY-ENUM GAP PROBE: does a HETEROGENEOUS batch (two shards of the
     /// SAME cluster at DIFFERENT log_dense bands — e.g. a full shard + a

@@ -90,10 +90,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
 
     /// Marks this machine's shard proofs as committing under `pins` (the
     /// COMPRESS machine).  Consuming builder.
-    pub const fn with_recursion_pins(
-        mut self,
-        pins: Option<crate::jagged::RecursionPins>,
-    ) -> Self {
+    pub const fn with_recursion_pins(mut self, pins: Option<crate::jagged::RecursionPins>) -> Self {
         self.recursion_pins = pins;
         self
     }
@@ -115,7 +112,6 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     pub fn prep_area_pin(&self) -> Option<crate::jagged::AreaPin> {
         self.recursion_pins.map(|p| p.prep)
     }
-
 }
 
 /// A proving key for a STARK.
@@ -837,8 +833,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // The pins this program's proofs commit under: its own class when the
         // program names one, else the machine's default.
         let pins = program.area_pins().or(self.recursion_pins);
-        let prep_precomputed =
-            SC::prep_precompute(&named, self.core_rev(), pins.map(|p| p.prep));
+        let prep_precomputed = SC::prep_precompute(&named, self.core_rev(), pins.map(|p| p.prep));
         let commit = prep_precomputed.commit_root();
 
         // Get the chip ordering.

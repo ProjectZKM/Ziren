@@ -33,9 +33,9 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use p3_field::Field;
-use serde::{Deserialize, Serialize};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
+use serde::{Deserialize, Serialize};
 
 use crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
 
@@ -165,8 +165,8 @@ impl AreaPin {
     }
 }
 
-/// The pins every COMPRESS-machine proof (leaf, compose, deferred) commits
-/// under.  32 stacking blocks (`2^26` cells) per round — the area the single
+/// The largest pin class — the compress machine's DEFAULT pins, what a
+/// program that names no class (and the root) commits under.  32 stacking blocks (`2^26` cells) per round — the area the single
 /// 115.6 M-cell shape already committed at, so the commit costs what it did —
 /// with the gap split into `2^26 / 2^22 = 16` columns of at most one row cube.
 /// Organic maxima observed in production (Sep 11): main 44 M, preprocessed
@@ -206,9 +206,7 @@ impl RecursionPins {
     /// and `prep` cells naturally (stacking-rounded, `committed_dense_len`);
     /// `None` when even the largest does not.
     pub fn class_for_committed(main: usize, prep: usize) -> Option<usize> {
-        RECURSION_PIN_CLASSES
-            .iter()
-            .position(|c| main <= c.main.area && prep <= c.prep.area)
+        RECURSION_PIN_CLASSES.iter().position(|c| main <= c.main.area && prep <= c.prep.area)
     }
 
     /// Which class these pins are, if any.
@@ -877,6 +875,32 @@ mod tests {
 
         let offsets = cumulative_offsets(&infos);
         assert_eq!(offsets, vec![0, 300, 400]);
+    }
+
+    #[test]
+    fn pin_classes_are_ordered_and_the_smallest_fitting_one_wins() {
+        for w in RECURSION_PIN_CLASSES.windows(2) {
+            assert!(w[0].main.area < w[1].main.area && w[0].prep.area <= w[1].prep.area);
+        }
+        let small = RECURSION_PIN_CLASSES[0];
+        let large = RECURSION_PIN_CLASSES[RecursionPins::LAST_CLASS];
+        assert_eq!(RecursionPins::class_for_committed(1, 1), Some(0));
+        assert_eq!(RecursionPins::class_for_committed(small.main.area, small.prep.area), Some(0));
+        assert_eq!(RecursionPins::class_for_committed(small.main.area + 1, 1), Some(1));
+        assert_eq!(RecursionPins::class_for_committed(1, small.prep.area + 1), Some(1));
+        assert_eq!(RecursionPins::class_for_committed(large.main.area + 1, 1), None);
+        assert_eq!(RecursionPins::class(1), RECURSION_PINS);
+        assert_eq!(large.class_index(), Some(RecursionPins::LAST_CLASS));
+        // Every class's padding fits the row cube in exactly `pad_columns` columns.
+        let cube = 1usize << 22;
+        for c in RECURSION_PIN_CLASSES {
+            for pin in [c.main, c.prep] {
+                assert!(pin.pad_columns * cube >= pin.area);
+                let split = AreaPin::split_padding(pin.area - 32, pin.pad_columns, cube);
+                assert_eq!(split.len(), pin.pad_columns);
+                assert_eq!(split.iter().sum::<usize>(), pin.area - 32);
+            }
+        }
     }
 
     #[test]

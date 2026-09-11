@@ -66,52 +66,13 @@ pub struct RecursionShapeConfig<F, A> {
 impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     RecursionShapeConfig<F, RecursionAir<F, DEGREE>>
 {
-    /// Per-chip COMMITTED width: the main trace width plus the preprocessed
-    /// one, because a recursion proof commits both rounds and a band pads
-    /// both to the same per-chip height.  The spread is wide —
-    /// `Poseidon2WideDeg3` is 362 cells/row against `MemoryConst`'s 13 — so a
-    /// band's cost is nothing like its row count, and picking a band by rows
-    /// (or by list position) systematically over-pays on the wide chips.
-    fn committed_widths() -> BTreeMap<String, usize> {
-        [
-            RecursionAir::<F, DEGREE>::MemoryConst(MemoryConstChip::default()),
-            RecursionAir::<F, DEGREE>::MemoryVar(MemoryVarChip::default()),
-            RecursionAir::<F, DEGREE>::BaseAlu(BaseAluChip),
-            RecursionAir::<F, DEGREE>::ExtAlu(ExtAluChip),
-            RecursionAir::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
-            RecursionAir::<F, DEGREE>::Select(SelectChip),
-            RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()),
-            RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip),
-        ]
-        .into_iter()
-        .map(|air| {
-            let width =
-                p3_air::BaseAir::<F>::width(&air) + MachineAir::<F>::preprocessed_width(&air);
-            (air.name(), width)
-        })
-        .collect()
-    }
-
-    /// The cells a program pays if it is snapped onto `shape`: Σ over chips of
-    /// committed width × padded height.  This is what every device buffer
-    /// downstream is sized from (the jagged commit's dense length, and through
-    /// it the sumcheck tables), so it is the right thing to minimize.
-    fn band_cells(shape: &HashMap<String, usize>, widths: &BTreeMap<String, usize>) -> u128 {
-        shape
-            .iter()
-            .map(|(name, rows)| (widths.get(name).copied().unwrap_or(1) as u128) * (*rows as u128))
-            .sum()
-    }
-
     pub fn fix_shape(&self, program: &mut RecursionProgram<F>) {
         self.fix_shape_kind(program, "unknown");
     }
 
-    /// [`Self::fix_shape`], told which recursion stage is asking.
-    ///
-    /// The kind is what makes the choice legible: a compose node's children all
-    /// come from one stage, so whether those children share a band is a
-    /// property of that stage's band selection, not of any one program.
+    /// [`Self::fix_shape`], told which recursion stage is asking: the ROOT
+    /// (`compose-root`) always takes the largest pin class; every other kind
+    /// only labels the diagnostic line.
     pub fn fix_shape_kind(&self, program: &mut RecursionProgram<F>, kind: &str) {
         let heights = RecursionAir::<F, DEGREE>::heights(program);
         let shape = Self::organic_shape(&heights);
@@ -121,16 +82,16 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         let own = Self::class_for_rows(&shape).unwrap_or_else(|| {
             panic!("recursion {kind} program: its rows fit no pin class: {shape:?}")
         });
-        let class = if kind == "compose-root" {
-            zkm_pcs::jagged::RecursionPins::LAST_CLASS
-        } else {
-            own
-        };
+        let class =
+            if kind == "compose-root" { zkm_pcs::jagged::RecursionPins::LAST_CLASS } else { own };
         if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
-            let widths = Self::committed_widths();
+            let (mw, pw) = Self::round_widths();
             let cells: u128 = shape
                 .iter()
-                .map(|(n, r)| (widths.get(n).copied().unwrap_or(1) as u128) * (*r as u128))
+                .map(|(n, r)| {
+                    ((mw.get(n).copied().unwrap_or(0) + pw.get(n).copied().unwrap_or(0)) as u128)
+                        * (*r as u128)
+                })
                 .sum();
             let mut organic: Vec<(String, usize)> =
                 heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
@@ -157,7 +118,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
             RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip),
         ];
         let main = airs.iter().map(|a| (a.name(), p3_air::BaseAir::<F>::width(a))).collect();
-        let prep = airs.iter().map(|a| (a.name(), MachineAir::<F>::preprocessed_width(a))).collect();
+        let prep =
+            airs.iter().map(|a| (a.name(), MachineAir::<F>::preprocessed_width(a))).collect();
         (main, prep)
     }
 
@@ -178,13 +140,14 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
 
     /// THE shape of a recursion program: its own heights, each rounded up to
     /// a multiple of 32 (`next_multiple_of_32_rows`), the public-values chip
-    /// at its fixed `2^PUB_VALUES_LOG_HEIGHT` rows.  Nothing is snapped to a
-    /// band: every leaf, compose and deferred proof commits under the
-    /// compress machine's area pins (`zkm_pcs::jagged::RECURSION_PINS`), so
-    /// the program verifying it does not read these rows, and the padding the
-    /// old bands proved (a median leaf filled 28% of the single shape) is
-    /// gone.  The row cube (`2^max_log_row_count`) is the only cap; a program
-    /// past it cannot be proved at all.
+    /// at its fixed `2^PUB_VALUES_LOG_HEIGHT` rows.  Nothing is padded to a
+    /// common shape: every leaf, compose and deferred proof commits under a
+    /// pin class (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`, the smallest its
+    /// rows fit), so the program verifying it reads the class's geometry, not
+    /// these rows, and the padding a common shape proved (a median leaf filled
+    /// 28% of the single shape) is gone.  The row cube
+    /// (`2^max_log_row_count`) is the only cap; a program past it cannot be
+    /// proved at all.
     pub fn organic_shape(heights: &[(String, usize)]) -> BTreeMap<String, usize> {
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
         let cube = 1usize
@@ -248,44 +211,40 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         self.allowed_shapes.first()
     }
 
-    /// Every band a program can be snapped onto.
+    /// One DUMMY shape per pin class, in class order: the rows a dummy child
+    /// of that class is built at (`ZKMProofShape::generate`, the compose
+    /// pre-warm).  The program verifying such a child reads the class's
+    /// pinned geometry, so these rows only have to LAND in the class.
     pub fn all_shapes(&self) -> &[HashMap<String, usize>] {
         &self.allowed_shapes
     }
 
-    /// The cheapest band a program with these heights fits, by index into
-    /// [`Self::all_shapes`].  This is the choice [`Self::fix_shape_kind`] makes
-    /// on its own; exposed so a caller can learn it WITHOUT committing to it.
+    /// The pin class a program with these heights takes (its index into
+    /// [`Self::all_shapes`]): the choice [`Self::fix_shape_kind`] makes for a
+    /// non-root program, exposed so a caller can learn it without committing
+    /// to it.  Kept under its historical name for the pipeline's band API.
     pub fn band_index_for(&self, heights: &[(String, usize)]) -> Option<usize> {
-        // A "band" is a pin class now: the one the program's own rows take.
         Self::class_for_rows(&Self::organic_shape(heights))
     }
 
-    /// The cheapest band that DOMINATES every band in `indices` — one whose
-    /// per-chip caps are at least as tall as all of theirs.
-    ///
-    /// A compose program is traced over its children's proof shapes, so its
-    /// verifying key is enumerable only when those shapes agree.  Snapping a
-    /// node's children onto a common band is what makes them agree, and this
-    /// picks the cheapest band that can hold all of them.  Bands do not form a
-    /// chain, so this is a search, not a maximum: the answer need not be any of
-    /// the inputs, and may not exist.
+    /// The class that holds every class in `indices`: classes form a chain,
+    /// so it is the largest.  The pipeline settles a sibling group on it and
+    /// keys the group's programs by it (`ZKMProver::band_keyed`).
     pub fn dominating_band_index(&self, indices: &[usize]) -> Option<usize> {
         // Pin classes form a chain: the largest dominates.
         let best = indices.iter().copied().max()?;
         (best < self.allowed_shapes.len()).then_some(best)
     }
 
-    /// Snap `program` onto band `index` regardless of what it would have chosen
-    /// for itself — the caller has a reason the program cannot see.
+    /// [`Self::fix_shape_kind`] for a caller that settled a sibling-group
+    /// class: a node's OWN class is a function of its rows (its siblings'
+    /// classes are covered by the parent's class-tuple programs), so `index`
+    /// is only validated, not applied.
     pub fn fix_shape_at(&self, program: &mut RecursionProgram<F>, index: usize) {
         // Bands are gone: a program is always proved at its own rows
         // (`organic_shape`); the index is the caller's settled band, kept for
         // API compatibility with the multi-GPU pipeline's group settling.
         assert!(index < self.allowed_shapes.len(), "recursion pin class {index} does not exist");
-        // A node's class is a function of its own rows (its siblings' classes
-        // are covered by the parent's class-tuple programs), so the caller's
-        // index is not applied.
         self.fix_shape_kind(program, "forced");
     }
 
@@ -313,49 +272,23 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
         let ext2felt = RecursionAir::<F, DEGREE>::Ext2Felt(Ext2FeltChip::default()).name();
 
-        // THE recursion shape — one, not a list of bands.  ROW COUNTS: a
-        // chip is padded to exactly the number written here
-        // (`next_multiple_of_32_rows`), and nothing below is a power of two.
+        // One DUMMY shape per pin class (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`),
+        // smallest class first.  ROW COUNTS, exact (a chip is padded to the
+        // number written here, `next_multiple_of_32_rows`), nothing a power of
+        // two.  A real node is proved at its OWN rows and commits under the
+        // smallest class both of its rounds fit; a dummy child stands in for
+        // such a node when a compose program is built ahead of it
+        // (`ZKMProofShape::generate`, the pre-warm), and the program reads
+        // the class's pinned geometry rather than these rows, so all a dummy
+        // shape has to do is land in its class — asserted below.
         //
-        // SP1 pads every recursion proof to a single shape
-        // (`crates/prover/compress_shape.json`, rows rounded to a multiple of
-        // 32), and that is what makes a compose program a function of its
-        // ARITY alone: `get_all_shape_combinations` yields one combination per
-        // batch size, so the enumeration emits `Compose(1..=REDUCE_BATCH_SIZE)`
-        // + Deferred + Shrink, every sibling group is homogeneous by
-        // construction, and the pre-warm builds a handful of programs instead
-        // of one per band tuple.  (Five bands, Sep 10-11: leaf card time -35%
-        // but the compose keys went 2-3 -> 21-45 per block because sibling
-        // groups mixed bands, and the wall did not move.)
-        //
-        // SIZED FROM ORGANIC HEIGHTS, the way SP1 builds its shape: 1,020
-        // production recursion nodes (reth, 8 cards, `ZIREN_FIXSHAPE_DIAG=1`,
-        // Sep 11) give per-chip maxima — rows are events / entries-per-row —
-        //
-        //   chip                max      p99      p50   who sets the max
-        //   MemoryVar       248,877  248,877  110,247   the arity-4 compose
-        //   Select          140,960  140,960   35,144   the arity-4 compose
-        //   Poseidon2       66,236    66,236   24,467   the arity-4 compose
-        //   BaseAlu         452,760  438,253  109,714   a leaf (core verify)
-        //   ExtAlu          578,441  566,378  170,828   a leaf (core verify)
-        //   Ext2Felt        61,166    61,149   16,947   a leaf (core verify)
-        //   MemoryConst        226      226      136   constants
-        //
-        // The compose programs are deterministic in the shape (p99 == max),
-        // so their rows carry ~5% and are re-checked by the fixed-point probe
-        // (`zkm_prover::tests::single_shape_fixed_point`: build the compose
-        // and deferred programs at arities 1..=4 against THIS shape and
-        // assert they fit).  Leaf heights vary with the core shard's committed
-        // structure, and the largest core shards are area-capped, so the
-        // observed maxima are near the ceiling; they carry ~12%.  Against the
-        // old power-of-two band (ExtAlu 2^20, BaseAlu/MemoryVar/Select 2^19,
-        // Poseidon2/Ext2Felt 2^17: 183,816,368 committed cells) this is the
-        // cells the survey's p50 program actually needs, roughly halved.
-        //
-        // ⚠ If a program overflows a cap, `fix_shape` panics
-        // (`no shape found`).  RAISE THE CAP and regenerate the vk_map — do
-        // not restore a band list.  The SHRINK shape is unaffected: it is
-        // FROZEN in `zkm_prover::ZKMProver::shrink_shape`.
+        // Class 1 is the single shape that replaced the bands (SP1 style,
+        // sized from 1,020 production nodes on Sep 11: per-chip maxima
+        // MemoryVar 248,877 / Select 140,960 / Poseidon2 66,236 set by the
+        // arity-4 compose, BaseAlu 452,760 / ExtAlu 578,441 / Ext2Felt 61,166
+        // by a leaf verifying the largest core shard); it commits both rounds
+        // at 2^26.  Class 0 is its half, landing both rounds at 2^25.  The
+        // SHRINK shape is separate: FROZEN in `zkm_prover::ZKMProver::shrink_shape`.
         let rows = |n: usize| -> usize {
             assert!(n % 32 == 0, "recursion shape rows must be a multiple of 32: {n}");
             n
@@ -397,19 +330,60 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 "the class-{index} dummy shape must land in class {index}",
             );
         }
-        // No band may exceed the row cube every recursion stage proves at:
-        // `PaddedMle::padded` asserts the padded rows fit `2^cube`, so a taller
-        // band is a shape nothing can be snapped onto.
+        // No dummy shape may exceed the row cube every recursion stage proves
+        // at: `PaddedMle::padded` asserts the padded rows fit `2^cube`.
         let cube = zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
             .max_log_row_count;
         for shape in allowed_shapes.iter() {
             for (name, rows) in shape.iter() {
                 assert!(
                     *rows <= (1 << cube),
-                    "recursion band {name} = {rows} rows exceeds the row cube 2^{cube}",
+                    "recursion dummy shape {name} = {rows} rows exceeds the row cube 2^{cube}",
                 );
             }
         }
         Self { allowed_shapes, _marker: PhantomData }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_koala_bear::KoalaBear;
+    use zkm_pcs::jagged::{RecursionPins, RECURSION_PIN_CLASSES};
+
+    type Cfg = RecursionShapeConfig<KoalaBear, RecursionAir<KoalaBear, 3>>;
+
+    #[test]
+    fn dummy_shapes_land_in_their_class_and_the_root_takes_the_last() {
+        let cfg = Cfg::default();
+        assert_eq!(cfg.all_shapes().len(), RECURSION_PIN_CLASSES.len());
+        for (index, shape) in cfg.all_shapes().iter().enumerate() {
+            let rows: BTreeMap<String, usize> =
+                shape.iter().map(|(n, r)| (n.clone(), *r)).collect();
+            assert_eq!(Cfg::class_for_rows(&rows), Some(index));
+            let heights: Vec<(String, usize)> = rows.iter().map(|(n, r)| (n.clone(), *r)).collect();
+            assert_eq!(cfg.band_index_for(&heights), Some(index));
+        }
+        assert_eq!(cfg.dominating_band_index(&[0, 1, 0]), Some(1));
+        assert_eq!(cfg.dominating_band_index(&[0]), Some(0));
+        assert_eq!(cfg.dominating_band_index(&[7]), None);
+        assert_eq!(RecursionPins::LAST_CLASS, RECURSION_PIN_CLASSES.len() - 1);
+    }
+
+    #[test]
+    fn organic_rows_are_multiples_of_32_with_fixed_public_values() {
+        let pv = RecursionAir::<KoalaBear, 3>::PublicValues(PublicValuesChip).name();
+        let heights = vec![
+            ("ExtAlu".to_string(), 33usize),
+            (pv.clone(), 1usize),
+            ("Select".to_string(), 0usize),
+        ];
+        let rows = Cfg::organic_shape(&heights);
+        assert_eq!(rows["ExtAlu"], 64);
+        assert_eq!(rows["Select"], 32);
+        assert_eq!(rows[&pv], 1 << PUB_VALUES_LOG_HEIGHT);
+        // A few rows of every chip is a class-0 program.
+        assert_eq!(Cfg::class_for_rows(&rows), Some(0));
     }
 }

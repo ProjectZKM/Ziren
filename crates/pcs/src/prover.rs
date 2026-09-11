@@ -734,7 +734,7 @@ fn prove_shard_with_data_boxed<SC, A>(
         SC::BfMmcs,
     >,
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
-    // The proving key's main-round pin (the program's class).
+// The proving key's main-round pin (the program's class).
     pk_main_pin: Option<crate::jagged::AreaPin>,
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,

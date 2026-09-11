@@ -685,31 +685,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Build EVERY compose program a run can reach, once, at construction —
-    /// and its proving key with it.
+    /// and pin its proving key with it.
     ///
-    /// A compose program is a function of (child band, arity): it is traced
-    /// over its children's proof shapes, `fix_shape` has snapped those onto one
-    /// band, and a node's children are made to share one.  Both dimensions are
-    /// small and known before any proving starts, so the whole set is
-    /// enumerable — which is what lets this be a construction cost paid once
-    /// per process instead of a per-node cost paid every block.
+    /// A compose program is a function of its children's PIN-CLASS tuple (in
+    /// order), the arity and `is_complete`: a child's proof geometry is its
+    /// class's, so a dummy child built at the class's shape describes every
+    /// real child of that class.  Two classes at arities `1..=REDUCE_BATCH_SIZE`
+    /// is a small, known set, so the whole of it is a construction cost paid
+    /// once per process instead of a per-node cost paid on the card thread
+    /// mid-block (measured Sep 11: ~7 s apiece, re-paid after every worker
+    /// respawn).  Each tuple is also warmed under every cache band a sibling
+    /// group can settle on (`compose_program_basefold_at`), since the
+    /// pipeline keys a node by its group's band.
     ///
-    /// Two things had to be true first, and each was measured false before it
-    /// was fixed:
-    ///   * children of one node must agree, or no `vec![band; arity]` dummy
-    ///     describes them — 27 of 63 nodes had children of two or three shapes;
-    ///   * the dummy child must be built at the area a REAL child has.  The
-    ///     recursion area pin is a FLOOR, not a clamp, and every band's
-    ///     committed area passes it, so a dummy pinned at
-    ///     `RECURSION_LOG_TRACE_AREA` described nothing: of 24 pre-warmed keys,
-    ///     NOT ONE matched a key a real node presented.
-    ///
-    /// Bails when:
-    ///   - `compress_shape_config` is None
-    ///     (`FIX_RECURSION_SHAPES=false` — no allowed shape to drive
-    ///     `fix_shape`, would panic or build a non-canonical program),
-    ///   - the recursion shape config has no allowed shapes
-    ///     (defensive — should not happen with the default config).
+    /// Bails when `compress_shape_config` is None (`FIX_RECURSION_SHAPES=false`
+    /// — no classes to enumerate) or it has no shapes (defensive).
     fn prewarm_compose_programs(&self) {
         let Some(recursion_shape_config) = self.compress_shape_config.as_ref() else {
             tracing::debug!(
@@ -719,9 +709,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return;
         };
 
-        // Every allowed band, replicated across `arity` slots — the same way
-        // `ZKMProofShape::generate` enumerates compose children, so the pairs
-        // built here are the pairs the vk map contains.
+        // One dummy shape per pin class — the children `ZKMProofShape::generate`
+        // enumerates, so the tuples built here are the tuples the vk map holds.
         let bands = recursion_shape_config.all_shapes();
         if bands.is_empty() {
             tracing::debug!(
@@ -754,17 +743,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .collect(),
             Err(_) => (0..bands.len()).collect(),
         };
-        // Child-band TUPLES.  The production leaf path settles the band per
-        // single node (a leaf is proved the moment its shard lands), so a
-        // compose group's children need not share a band, and a mixed tuple
-        // is its own compose program -- measured Sep 11: every such program
-        // was built on the card thread mid-block, ~7 s apiece, and re-paid
-        // after every worker respawn.  ZIREN_PREWARM_MIXED=1 warms the full
-        // product over the pre-warm bands (two bands: 2+4+8+16 tuples, x2
-        // for is_complete); the default keeps the homogeneous tuples only.
-        // Pin classes: a sibling group mixes classes whenever one member is
-        // large, so the mixed tuples are the normal case — warmed by default
-        // (ZIREN_PREWARM_MIXED=0 keeps the homogeneous ones only).
+        // Child-class TUPLES, in order.  A leaf's class is settled the moment
+        // its shard lands, so a sibling group mixes classes whenever one member
+        // is large, and every ordered tuple is its own compose program: the
+        // full product is warmed by default (two classes at arities 1..=3:
+        // 2+4+8 tuples, x2 for is_complete); ZIREN_PREWARM_MIXED=0 keeps the
+        // homogeneous tuples only.
         let mixed = !matches!(env::var("ZIREN_PREWARM_MIXED").as_deref(), Ok("0") | Ok("false"));
         let mut pairs: Vec<(Vec<usize>, bool)> = Vec::new();
         for arity in 1..=REDUCE_BATCH_SIZE {
@@ -824,11 +808,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             witness.is_complete = is_complete;
             if std::env::var("ZIREN_SHAPE_KEY_DIAG").is_ok() {
                 let own = self.compose_band_for(&witness);
-                let snapped = own.and_then(|b| self.dominating_band(&[b]));
+                let last = self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
+                let keys: Vec<String> = (own.map_or(0, |b| b)..=last)
+                    .map(|b| format!("{b}:{:016x}", Self::band_keyed(witness.shape_key(), Some(b))))
+                    .collect();
                 eprintln!(
-                    "SHAPEDIAG prewarm band={band_index} arity={arity} own={own:?} snapped={snapped:?} shape_key={:016x} key={:016x} {}",
+                    "SHAPEDIAG prewarm band={band_index} arity={arity} own={own:?} shape_key={:016x} keys=[{}] {}",
                     witness.shape_key(),
-                    Self::band_keyed(witness.shape_key(), snapped),
+                    keys.join(","),
                     witness.shape_diag()
                 );
             }
@@ -1013,27 +1000,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .max_log_row_count
     }
 
-    /// Snap a basefold recursion program onto one of the allowed recursion
-    /// shapes before proving a recursion shard.
-    ///
-    /// This is what makes the produced verifying keys ENUMERABLE.  A program
-    /// left at its organic heights produces a proof whose per-chip heights are
-    /// whatever execution happened to yield, so the parent compose program —
-    /// which is built from its children's shapes — is a function of those
-    /// organic heights and can never coincide with a program built from
-    /// `ZKMProofShape::generate`'s band-snapped shapes.  That is why
-    /// `VERIFY_VK=true` rejected at compress with the vk absent from a FRESHLY
-    /// regenerated map: the map was not stale, the produced key was simply
-    /// outside the enumerated space.
-    ///
-    /// `None` (`FIX_RECURSION_SHAPES=false`) leaves the program at its organic
-    /// heights and gives up vk enumerability with it.
-    fn fix_recursion_shape(&self, program: &mut RecursionProgram<KoalaBear>) {
-        self.fix_recursion_shape_kind(program, "unknown");
-    }
-
-    /// [`Self::fix_recursion_shape`], told which stage is asking — see
-    /// [`RecursionShapeConfig::fix_shape_kind`].
+    /// Settle a recursion program's rows and pin class — see
+    /// [`RecursionShapeConfig::fix_shape_kind`].  A no-op without a shape
+    /// config (`FIX_RECURSION_SHAPES=false`), which gives up vk enumerability.
     fn fix_recursion_shape_kind(&self, program: &mut RecursionProgram<KoalaBear>, kind: &str) {
         if let Some(config) = self.compress_shape_config.as_ref() {
             config.fix_shape_kind(program, kind);
@@ -1293,6 +1262,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Uncached body of [`Self::recursion_program_basefold`] — separate so the
     /// cache audit can rebuild and assert byte-equality.
+    #[cfg(test)]
     fn build_normalize_program_basefold_uncached(
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
@@ -1397,7 +1367,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         self.compose_program_basefold_at(input, None)
     }
 
-    /// [`Self::compose_program_basefold`], snapped onto a caller-chosen band —
+    /// [`Self::compose_program_basefold`], keyed by a caller-chosen band (the
+    /// sibling group's settled class; the program's own class comes from its rows) —
     /// see [`Self::recursion_program_basefold_at`].
     pub fn compose_program_basefold_at(
         &self,
@@ -1430,6 +1401,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Uncached body of [`Self::compose_program_basefold`] — exposed so the
     /// cache wrapper can rebuild under the cache audit to
     /// assert byte-equality.
+    #[cfg(test)]
     fn build_compose_program_basefold_uncached(
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
@@ -2616,9 +2588,10 @@ pub mod tests {
                 .expect("serialize compose program")
         };
 
-        // ── (a) SAFE COLLISION: different per-child height bands ───────────
-        // Both bands sit under the area-pin floor, so both children commit at
-        // L=27.  Equal key AND equal program bytes — the invariant holding.
+        // ── (a) SAFE COLLISION: different per-child heights, one class ──────
+        // 2^3 and 2^8 rows per chip both land in pin class 0, so both children
+        // commit at the same geometry.  Equal key AND equal program bytes —
+        // the invariant holding.
         let shape_at_band = |log_h: usize| -> ZKMCompressWithVkeyShape {
             let proof_shape = || {
                 OrderedShape::from_rows(
@@ -2644,8 +2617,7 @@ pub mod tests {
         let sk_high = witness_high.shape_key();
         assert_eq!(
             sk_low, sk_high,
-            "[STEP-2] expected shape_key to be band-INDEPENDENT (both bands sit \
-             under the RECURSION_LOG_TRACE_AREA floor, so both commit at L=27)",
+            "[STEP-2] expected shape_key to be height-INDEPENDENT within a pin class",
         );
         let bytes_low = prog_bytes(&witness_low);
         let bytes_high = prog_bytes(&witness_high);
