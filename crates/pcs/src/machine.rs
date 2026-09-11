@@ -168,7 +168,12 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// The AREA PIN `setup` committed the preprocessed round under (a
     /// recursion machine's `prep` pin), `None` = natural.  Rebuilding the
     /// precompute from `traces` has to use the same one.
-    #[serde(default)]
+    /// Not serialized: a proving key crosses the wire only for the CORE
+    /// program (setup response), whose rounds are natural, and the recursion
+    /// keys that carry a pin are built in-process by `setup`.  Skipping keeps
+    /// the key's bincode layout — a client built against an older tree still
+    /// decodes it.
+    #[serde(skip)]
     pub prep_pin: Option<crate::jagged::AreaPin>,
     /// The preprocessed chip ordering.
     pub chip_ordering: HashMap<String, usize>,
