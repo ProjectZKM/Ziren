@@ -179,6 +179,16 @@ pub fn describe_shard_proof_structure(
             let mut h = std::collections::hash_map::DefaultHasher::new();
             bundle.packing.column_counts.hash(&mut h);
             v.push(("column_counts_hash".into(), (h.finish() & 0xffff_ffff) as usize));
+            // Readable: the per-round column counts and the chip set with
+            // heights, so a split on either is attributable to a chip.
+            for (r, cc) in bundle.packing.column_counts.iter().enumerate() {
+                v.push((format!("cc{r}"), *cc as usize));
+            }
+            let mut chips: Vec<(&String, &usize)> = sp.chip_heights.iter().collect();
+            chips.sort();
+            for (name, hgt) in chips {
+                v.push((format!("h.{name}"), *hgt));
+            }
             let bf = &bundle.basefold_proof.basefold_proof;
             v.push(("bf_uni".into(), bf.univariate_messages.len()));
             v.push(("bf_fri".into(), bf.fri_commitments.len()));
