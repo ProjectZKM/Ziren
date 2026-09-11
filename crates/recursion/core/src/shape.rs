@@ -474,15 +474,16 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // pattern (2^4 arity-4 compose keys, 32 per run, built lazily on the
         // card thread).  One shared band makes every compose key a pure
         // (arity, is_complete) class: eight programs, warmed once per process.
-        // Z' = Z with ExtAlu 2^20 and Ext2Felt 2^17.  Surveyed on 1,020
-        // production leaves (ZIREN_FIXSHAPE_DIAG, Sep 11): ExtAlu reached
-        // 578,441 rows in 6.8% of leaves (Z capped it at 524,288, sending
-        // those leaves to X and every mixed Z/X sibling pattern cost a compose
-        // program build on the critical path); Ext2Felt peaked at 93% of 2^16.
-        // Everything else fits Z with margin (MemoryVar 95%, Select 54%,
-        // BaseAlu 86%, Poseidon2 51%).  Zero overflow in the survey.
+        // Z for leaves and composes alike, X as the overflow.  Surveyed on
+        // 1,020 production leaves (ZIREN_FIXSHAPE_DIAG, Sep 11): 6.8% of leaves
+        // exceed Z's ExtAlu cap (max 578,441 rows against 2^19) and land on X;
+        // widening Z to ExtAlu 2^20 measured neutral against the single band
+        // (ExtAlu dominates the leaf), so the overflow is kept and its cost
+        // -- a compose program per mixed Z/X sibling tuple, built on the card
+        // thread mid-block -- is removed by pre-warming every child-band
+        // tuple at process start (ZIREN_PREWARM_MIXED=1).
         let allowed_shapes = vec![
-            band(18, 18, 19, 20, 17, 17),
+            band(18, 18, 19, 19, 17, 16),
             band(19, 19, 19, 20, 17, 17),
         ];
         // No band may exceed the row cube every recursion stage proves at:

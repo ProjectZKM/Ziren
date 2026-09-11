@@ -754,13 +754,40 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .collect(),
             Err(_) => (0..bands.len()).collect(),
         };
-        let pairs: Vec<(usize, usize, bool)> = prewarm_bands
-            .into_iter()
-            .flat_map(|b| {
-                (1..=REDUCE_BATCH_SIZE)
-                    .flat_map(move |a| [(b, a, false), (b, a, true)])
-            })
-            .collect();
+        // Child-band TUPLES.  The production leaf path settles the band per
+        // single node (a leaf is proved the moment its shard lands), so a
+        // compose group's children need not share a band, and a mixed tuple
+        // is its own compose program -- measured Sep 11: every such program
+        // was built on the card thread mid-block, ~7 s apiece, and re-paid
+        // after every worker respawn.  ZIREN_PREWARM_MIXED=1 warms the full
+        // product over the pre-warm bands (two bands: 2+4+8+16 tuples, x2
+        // for is_complete); the default keeps the homogeneous tuples only.
+        let mixed = matches!(env::var("ZIREN_PREWARM_MIXED").as_deref(), Ok("1") | Ok("true"));
+        let mut pairs: Vec<(Vec<usize>, bool)> = Vec::new();
+        for arity in 1..=REDUCE_BATCH_SIZE {
+            let tuples: Vec<Vec<usize>> = if mixed {
+                let mut acc: Vec<Vec<usize>> = vec![Vec::new()];
+                for _ in 0..arity {
+                    acc = acc
+                        .iter()
+                        .flat_map(|t| {
+                            prewarm_bands.iter().map(move |b| {
+                                let mut u = t.clone();
+                                u.push(*b);
+                                u
+                            })
+                        })
+                        .collect();
+                }
+                acc
+            } else {
+                prewarm_bands.iter().map(|b| vec![*b; arity]).collect()
+            };
+            for t in tuples {
+                pairs.push((t.clone(), false));
+                pairs.push((t, true));
+            }
+        }
         let n_pairs = pairs.len();
         // Bounded: a program build and its setup take gigabytes of host
         // memory each, every process (the parent and each core worker) warms
@@ -774,12 +801,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .num_threads(prewarm_threads)
             .build()
             .expect("compose pre-warm pool");
-        pool.install(|| pairs.into_par_iter().for_each(|(band_index, arity, is_complete)| {
-            let proof_shape =
-                RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_log2_ordered_shape(
-                    &bands[band_index],
-                );
-            let compress_shape = ZKMCompressShape::from(vec![proof_shape; arity]);
+        pool.install(|| pairs.into_par_iter().for_each(|(tuple, is_complete)| {
+            let arity = tuple.len();
+            let band_index = format!("{tuple:?}");
+            let child_shapes: Vec<_> = tuple
+                .iter()
+                .map(|b| {
+                    RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_log2_ordered_shape(
+                        &bands[*b],
+                    )
+                })
+                .collect();
+            let compress_shape = ZKMCompressShape::from(child_shapes);
             let shape = ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height };
             let mut witness = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy(
                 self.compress_prover.machine(),
