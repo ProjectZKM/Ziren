@@ -32,6 +32,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         // `true` for the CORE machine (rev shard proofs), `false`
         // for recursion / shrink / wrap (LEGACY). Threaded to the host zerocheck.
         core_rev: bool,
+        // The machine's preprocessed-round AREA PIN (`StarkMachine::prep_area_pin`).
+        prep_pin: Option<crate::jagged::AreaPin>,
     ) -> Result<(), VerificationError<SC>>
     where
         A: for<'a> Air<VerifierConstraintFolder<'a, SC>>
@@ -76,6 +78,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 challenger,
                 num_pv_elts,
                 core_rev,
+                prep_pin,
             )
             .map_err(|e| VerificationError::BasefoldShardVerifier(format!("{e}")))?;
         return Ok(());

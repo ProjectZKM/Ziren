@@ -97,15 +97,16 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         .map(Chip::new)
         .into_iter()
         .collect::<Vec<_>>();
-        // NO AREA PIN.  Compress used to raise every reduce shard's committed
-        // dense to `2^RECURSION_LOG_TRACE_AREA`, on the premise that one fixed
-        // jagged geometry collapses the compose VK to f(chip-set, arity).  It
-        // does not: the pin is a FLOOR, and measured, every real child's natural
-        // area already passes it — children commit at 150994944 and 218103808
-        // and the floor never binds — so the geometry was never fixed and the
-        // padding only ever cost the SMALL children, which it rounded up to
-        // 2^27 for nothing.  SP1 has no such pin.
+        // Every COMPRESS-machine proof (leaf, compose, deferred) commits both of
+        // its rounds under `RECURSION_PINS`: a fixed committed area and a fixed
+        // padding-column count.  That makes the program verifying such a proof
+        // a function of arity alone — its geometry no longer reads the child's
+        // row counts — which is what lets every node be proved at its own
+        // multiple-of-32 rows (`RecursionShapeConfig::fix_shape`) instead of a
+        // shape sized for the largest.  (An earlier pin was a floor nobody
+        // reached; this one is sized above every organic area and asserted.)
         StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
+            .with_recursion_pins(Some(zkm_pcs::jagged::RECURSION_PINS))
     }
 
     pub fn shrink_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {

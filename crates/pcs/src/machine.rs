@@ -52,13 +52,22 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// to the host `verify_zerocheck_host` / `recompute_zerocheck_rlc_eval_host`
     /// so a core proof is host-verified rev and a recursion/wrap proof legacy.
     core_rev: bool,
+
+    /// The AREA PINS of this machine's two committed rounds, `Some` only on
+    /// the COMPRESS machine (`RecursionAir::compress_machine`): every leaf,
+    /// compose and deferred proof commits its preprocessed and main rounds at
+    /// `zkm_pcs::jagged::RECURSION_PINS` with a fixed padding-column count, so
+    /// the compose program that verifies such a proof does not depend on the
+    /// node's row counts, and every node is proved at its own multiple-of-32
+    /// rows.  `None` on core, shrink and wrap (natural own area).
+    recursion_pins: Option<crate::jagged::RecursionPins>,
 }
 
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     /// Creates a new [`StarkMachine`] whose shard proofs use the LEGACY zerocheck
     /// orientation (every recursion / shrink / wrap machine, and test machines).
     pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
-        Self { config, chips, num_pv_elts, core_rev: true }
+        Self { config, chips, num_pv_elts, core_rev: true, recursion_pins: None }
     }
 
     /// Creates a CORE [`StarkMachine`] whose shard proofs use the
@@ -69,7 +78,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
         chips: Vec<Chip<Val<SC>, A>>,
         num_pv_elts: usize,
     ) -> Self {
-        Self { config, chips, num_pv_elts, core_rev: true }
+        Self { config, chips, num_pv_elts, core_rev: true, recursion_pins: None }
     }
 
     /// Whether this machine's shard proofs use the rev(zeta) CORE
@@ -77,6 +86,34 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     #[inline]
     pub const fn core_rev(&self) -> bool {
         self.core_rev
+    }
+
+    /// Marks this machine's shard proofs as committing under `pins` (the
+    /// COMPRESS machine).  Consuming builder.
+    pub const fn with_recursion_pins(
+        mut self,
+        pins: Option<crate::jagged::RecursionPins>,
+    ) -> Self {
+        self.recursion_pins = pins;
+        self
+    }
+
+    /// The area pins this machine's proofs commit under (`None` = natural).
+    #[inline]
+    pub const fn recursion_pins(&self) -> Option<crate::jagged::RecursionPins> {
+        self.recursion_pins
+    }
+
+    /// The main round's pin, if any.
+    #[inline]
+    pub fn main_area_pin(&self) -> Option<crate::jagged::AreaPin> {
+        self.recursion_pins.map(|p| p.main)
+    }
+
+    /// The preprocessed round's pin, if any.
+    #[inline]
+    pub fn prep_area_pin(&self) -> Option<crate::jagged::AreaPin> {
+        self.recursion_pins.map(|p| p.prep)
     }
 }
 
@@ -128,6 +165,11 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// symptom is a Merkle `CapMismatch` on round 0, far from the cause.
     #[serde(default)]
     pub prep_rev: bool,
+    /// The AREA PIN `setup` committed the preprocessed round under (a
+    /// recursion machine's `prep` pin), `None` = natural.  Rebuilding the
+    /// precompute from `traces` has to use the same one.
+    #[serde(default)]
+    pub prep_pin: Option<crate::jagged::AreaPin>,
     /// The preprocessed chip ordering.
     pub chip_ordering: HashMap<String, usize>,
     /// The preprocessed chip local only information.
@@ -147,6 +189,7 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             preprocessed_mles: std::sync::OnceLock::new(),
             preprocessed_data: std::sync::OnceLock::new(),
             prep_rev: self.prep_rev,
+            prep_pin: self.prep_pin,
             chip_ordering: self.chip_ordering.clone(),
             constraints_map: self.constraints_map.clone(),
         }
@@ -175,9 +218,17 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
             preprocessed_mles: std::sync::OnceLock::new(),
             preprocessed_data: std::sync::OnceLock::new(),
             prep_rev,
+            prep_pin: None,
             chip_ordering,
             constraints_map,
         }
+    }
+
+    /// The preprocessed round's area pin this key was committed under (see
+    /// `StarkMachine::prep_area_pin`).  Consuming builder.
+    pub fn with_prep_pin(mut self, pin: Option<crate::jagged::AreaPin>) -> Self {
+        self.prep_pin = pin;
+        self
     }
 
     /// Build a proving key whose preprocessed commit has already been computed.
@@ -308,7 +359,7 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
                 .zip(self.traces.iter())
                 .map(|((_, name), trace)| (name.clone(), trace.clone()))
                 .collect();
-            std::sync::Arc::new(SC::prep_precompute(&named, use_rev))
+            std::sync::Arc::new(SC::prep_precompute(&named, use_rev, self.prep_pin))
         })
     }
 
@@ -737,7 +788,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // Keep both — the root goes
         // to the vk, the precompute is seeded into the proving key below, so the
         // opening round never has to re-derive the committed order.
-        let prep_precomputed = SC::prep_precompute(&named, self.core_rev());
+        let prep_precomputed =
+            SC::prep_precompute(&named, self.core_rev(), self.prep_area_pin());
         let commit = prep_precomputed.commit_root();
 
         // Get the chip ordering.
@@ -772,6 +824,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     cell
                 },
                 prep_rev: self.core_rev(),
+                prep_pin: self.prep_area_pin(),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
@@ -889,7 +942,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
             .collect();
-        let commit = SC::prep_commit(&named, self.core_rev());
+        let commit = SC::prep_commit(&named, self.core_rev(), self.prep_area_pin());
 
         // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces
@@ -915,6 +968,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 preprocessed_mles: std::sync::OnceLock::new(),
                 preprocessed_data: std::sync::OnceLock::new(),
                 prep_rev: self.core_rev(),
+                prep_pin: self.prep_area_pin(),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
@@ -1154,6 +1208,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         &mut shard_challenger,
                         shard_proof,
                         self.core_rev,
+                        self.prep_area_pin(),
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
                 })

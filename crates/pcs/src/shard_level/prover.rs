@@ -37,6 +37,9 @@ pub fn commit_traces<SC, A>(
     // `PrecomputedJaggedCommit.rev` so the reduction stays in lockstep — covers
     // BOTH the device-hook and host-fallback build branches.
     use_rev: bool,
+    // The main round's AREA PIN (`StarkMachine::main_area_pin`), `None` on
+    // every natural-area machine.
+    pin: Option<crate::jagged::AreaPin>,
 ) -> (
     [Val<SC>; 8],
     crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>,
@@ -120,6 +123,7 @@ where
             <crate::koala_bear_poseidon2::KoalaBearPoseidon2 as BasefoldRing>::commit_multilinears(
                 &named_inner,
                 use_rev,
+                pin,
             );
         // Record the per-shard orientation on the built commit.  The producer
         // builds its dense under this SAME `use_rev` but may not stamp the field,
@@ -170,7 +174,8 @@ where
         // Build the ring-native BaseFold precompute via the `BasefoldRing`
         // trait method, INLINE during the prove pass.  The returned commit
         // already stamps `rev`.
-        let precomputed_generic = <SC as BasefoldRing>::commit_multilinears(&named_inner, use_rev);
+        let precomputed_generic =
+            <SC as BasefoldRing>::commit_multilinears(&named_inner, use_rev, pin);
         // Ring-generic digest: NO jagged hash-bind on the outer ring (the
         // BN254 wrap re-binds in its registered hook).
         let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
@@ -319,7 +324,7 @@ where
             // that build would have produced (same seam, same inputs, one
             // shard-phase earlier).
             Some(retained) => (retained.main_commitment, retained.precomputed),
-            None => commit_traces::<SC, A>(chips, &trace_views, dense_rev),
+            None => commit_traces::<SC, A>(chips, &trace_views, dense_rev, machine.main_area_pin()),
         }
     };
     // `trace_views` is kept OWNED (no reborrow): the dims sites below

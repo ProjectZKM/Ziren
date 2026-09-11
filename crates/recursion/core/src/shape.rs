@@ -109,59 +109,51 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     /// property of that stage's band selection, not of any one program.
     pub fn fix_shape_kind(&self, program: &mut RecursionProgram<F>, kind: &str) {
         let heights = RecursionAir::<F, DEGREE>::heights(program);
-        let widths = Self::committed_widths();
-
-        // Snap onto the CHEAPEST band that fits, not the first one listed.
-        //
-        // Bands are per-chip caps and a program's organic heights are wildly
-        // uneven, so the bands do not form a chain: the list holds several
-        // incomparable profiles (ALU-heavy compose levels, Select-heavy
-        // bundle-lift levels) and there is no ordering under which "first that
-        // fits" is also "smallest that fits".  Taking the first match made the
-        // list position load-bearing — every band carried a comment pleading
-        // for it to be placed before or after some other one — and still lost:
-        // a reth compose level whose ExtAlu was 0.5% over 2^21 fell through to
-        // the row-cube band and padded its committed area 2.2×, which is the
-        // whole of that stage's device working set.  Scoring every fitting
-        // band and keeping the cheapest makes list order cosmetic, so a new
-        // tightly-fitting band can only ever help.
-        let mut closest_shape: Option<&HashMap<String, usize>> = None;
-        let mut closest_cells = u128::MAX;
-        let mut closest_index = usize::MAX;
-
-        for (index, shape) in self.allowed_shapes.iter().enumerate() {
-            // If any of the heights is greater than the shape, continue.
-            let fits = heights.iter().all(|(name, height)| *height <= *shape.get(name).unwrap());
-            if !fits {
-                continue;
-            }
-
-            let cells = Self::band_cells(shape, &widths);
-            if cells < closest_cells {
-                closest_cells = cells;
-                closest_shape = Some(shape);
-                closest_index = index;
-            }
+        let shape = Self::organic_shape(&heights);
+        if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
+            let widths = Self::committed_widths();
+            let cells: u128 = shape
+                .iter()
+                .map(|(n, r)| (widths.get(n).copied().unwrap_or(1) as u128) * (*r as u128))
+                .sum();
+            let mut organic: Vec<(String, usize)> =
+                heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
+            organic.sort();
+            let rows: Vec<(String, usize)> = shape.iter().map(|(n, r)| (n.clone(), *r)).collect();
+            eprintln!("FIXSHAPE kind={kind} band_index=0 cells={cells} organic={organic:?} -> band={rows:?}");
         }
+        *program.shape_mut() = Some(RecursionShape { inner: shape });
+    }
 
-        if let Some(shape) = closest_shape {
-            if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
-                let mut organic: Vec<(String, usize)> =
-                    heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
-                organic.sort();
-                let mut band: Vec<(String, usize)> =
-                    shape.iter().map(|(n, h)| (n.clone(), *h)).collect();
-                band.sort();
-                eprintln!(
-                    "FIXSHAPE kind={kind} band_index={closest_index} cells={closest_cells} \
-organic={organic:?} -> band={band:?}"
+    /// THE shape of a recursion program: its own heights, each rounded up to
+    /// a multiple of 32 (`next_multiple_of_32_rows`), the public-values chip
+    /// at its fixed `2^PUB_VALUES_LOG_HEIGHT` rows.  Nothing is snapped to a
+    /// band: every leaf, compose and deferred proof commits under the
+    /// compress machine's area pins (`zkm_pcs::jagged::RECURSION_PINS`), so
+    /// the program verifying it does not read these rows, and the padding the
+    /// old bands proved (a median leaf filled 28% of the single shape) is
+    /// gone.  The row cube (`2^max_log_row_count`) is the only cap; a program
+    /// past it cannot be proved at all.
+    pub fn organic_shape(heights: &[(String, usize)]) -> BTreeMap<String, usize> {
+        let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
+        let cube = 1usize
+            << zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+        heights
+            .iter()
+            .map(|(name, height)| {
+                let rows = if *name == public_values {
+                    1 << PUB_VALUES_LOG_HEIGHT
+                } else {
+                    height.max(&1).next_multiple_of(32)
+                };
+                assert!(
+                    rows <= cube,
+                    "recursion chip {name} needs {rows} rows, past the row cube {cube}",
                 );
-            }
-            let shape = RecursionShape { inner: shape.clone().into_iter().collect() };
-            *program.shape_mut() = Some(shape);
-        } else {
-            panic!("no shape found for heights: {heights:?}");
-        }
+                (name.clone(), rows)
+            })
+            .collect()
     }
 
     /// A shape as the [`OrderedShape`] the enumeration and the dummy-proof
@@ -267,36 +259,11 @@ organic={organic:?} -> band={band:?}"
     /// Snap `program` onto band `index` regardless of what it would have chosen
     /// for itself — the caller has a reason the program cannot see.
     pub fn fix_shape_at(&self, program: &mut RecursionProgram<F>, index: usize) {
-        let shape = self
-            .allowed_shapes
-            .get(index)
-            .unwrap_or_else(|| panic!("recursion band {index} does not exist"));
-        let heights = RecursionAir::<F, DEGREE>::heights(program);
-        for (name, height) in heights.iter() {
-            let cap = shape.get(name).copied().unwrap_or(0);
-            assert!(
-                *height <= cap,
-                "recursion band {index} caps {name} at {cap} rows but the program needs {height}",
-            );
-        }
-        // Same diagnostic as `fix_shape_kind` — a forced snap was previously
-        // invisible, which hid the organic heights of every leaf (leaves are
-        // always band-forced for sibling agreement).
-        if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
-            let widths = Self::committed_widths();
-            let cells = Self::band_cells(shape, &widths);
-            let mut organic: Vec<(String, usize)> =
-                heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
-            organic.sort();
-            let mut band: Vec<(String, usize)> =
-                shape.iter().map(|(n, h)| (n.clone(), *h)).collect();
-            band.sort();
-            eprintln!(
-                "FIXSHAPE kind=forced band_index={index} cells={cells} \
-organic={organic:?} -> band={band:?}"
-            );
-        }
-        *program.shape_mut() = Some(RecursionShape { inner: shape.clone().into_iter().collect() });
+        // Bands are gone: a program is always proved at its own rows
+        // (`organic_shape`); the index is the caller's settled band, kept for
+        // API compatibility with the multi-GPU pipeline's group settling.
+        assert!(index < self.allowed_shapes.len(), "recursion band {index} does not exist");
+        self.fix_shape_kind(program, "forced");
     }
 
     /// The organic heights of a built program, for [`Self::band_index_for`].

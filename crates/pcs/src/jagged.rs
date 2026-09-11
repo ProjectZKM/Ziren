@@ -33,6 +33,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use p3_field::Field;
+use serde::{Deserialize, Serialize};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
@@ -109,6 +110,73 @@ pub struct JaggedPacking<F> {
 /// constraint and cannot run out of memory at that size; anything larger has
 /// to stay on the streaming path, so its block count is rounded out to a
 /// multiple of 8.
+/// A PINNED committed area for one opening round: the dense length the round
+/// commits at, and the number of stacking-padding columns the gap
+/// `area - real` is split into.  Both are fixed so that the geometry a
+/// recursion program reads from the proof — `log_dense_size`, the stripe
+/// count, the column count — is a property of the machine, not of how many
+/// rows this particular node has.  That is what lets every recursion node be
+/// proved at its own (multiple-of-32) row count while the program that
+/// verifies it stays one per arity.  Every column is at most the row cube
+/// tall (`2^max_log_row_count`), so `pad_columns >= area / cube`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AreaPin {
+    pub area: usize,
+    pub pad_columns: usize,
+}
+
+/// The pins of a recursion (compress) machine's two committed rounds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecursionPins {
+    /// The preprocessed round (committed by `setup`).
+    pub prep: AreaPin,
+    /// The main round.
+    pub main: AreaPin,
+}
+
+impl AreaPin {
+    /// The dense length a round with `natural` committed cells lands on under
+    /// this pin: the pin itself.  A natural area past the pin is a bug — the
+    /// program built for the pin would not verify it — so it panics rather
+    /// than growing.
+    pub fn apply(&self, natural_dense_len: usize) -> usize {
+        assert!(
+            natural_dense_len <= self.area,
+            "area pin: a round's natural committed area {natural_dense_len} exceeds the pin \
+             {} — raise the pin (zkm_pcs::jagged::RECURSION_PINS) and regenerate the vk map",
+            self.area,
+        );
+        self.area
+    }
+
+    /// Split a padding gap of `pad` cells into exactly `k` columns of at most
+    /// `cube` rows each, as even as possible (the first `pad % k` columns get
+    /// one extra row).  Trailing columns may be empty when `pad < k`.
+    pub fn split_padding(pad: usize, k: usize, cube: usize) -> Vec<usize> {
+        assert!(k >= 1, "split_padding: at least one column");
+        let base = pad / k;
+        let rem = pad % k;
+        let heights: Vec<usize> = (0..k).map(|i| base + usize::from(i < rem)).collect();
+        assert!(
+            heights.iter().all(|h| *h <= cube),
+            "split_padding: {pad} cells over {k} columns exceeds the row cube {cube}",
+        );
+        heights
+    }
+}
+
+/// The pins every COMPRESS-machine proof (leaf, compose, deferred) commits
+/// under.  32 stacking blocks (`2^26` cells) per round — the area the single
+/// 115.6 M-cell shape already committed at, so the commit costs what it did —
+/// with the gap split into `2^26 / 2^22 = 16` columns of at most one row cube.
+/// Organic maxima observed in production (Sep 11): main 44 M, preprocessed
+/// 44 M cells (the leaf verifying the largest core shard); the arity-4 compose
+/// is 36 M / 21 M.  `AreaPin::apply` panics past the pin.
+pub const RECURSION_PINS: RecursionPins = RecursionPins {
+    prep: AreaPin { area: 1 << 26, pad_columns: 16 },
+    main: AreaPin { area: 1 << 26, pad_columns: 16 },
+};
+
 pub fn committed_dense_len(total_values: usize, log_stacking_height: usize) -> usize {
     if total_values == 0 {
         return 0;
@@ -143,6 +211,26 @@ impl<F> JaggedPacking<F> {
 /// Most downstream code (sumcheck reduction, verifier weight tables)
 /// only needs the metadata, not the dense values.
 pub fn compute_jagged_metadata<F: Field>(
+    traces: &[(String, crate::multilinear::PaddedMle<F>)],
+) -> JaggedPacking<F> {
+    compute_jagged_metadata_pinned::<F>(traces, None)
+}
+
+/// [`compute_jagged_metadata`] with the committed dense raised to an
+/// [`AreaPin`] (a recursion round); `None` is the natural stacking-block
+/// rounding.
+pub fn compute_jagged_metadata_pinned<F: Field>(
+    traces: &[(String, crate::multilinear::PaddedMle<F>)],
+    pin: Option<AreaPin>,
+) -> JaggedPacking<F> {
+    let mut packing = compute_jagged_metadata_natural::<F>(traces);
+    if let Some(pin) = pin {
+        packing.dense_len = pin.apply(packing.dense_len);
+    }
+    packing
+}
+
+fn compute_jagged_metadata_natural<F: Field>(
     traces: &[(String, crate::multilinear::PaddedMle<F>)],
 ) -> JaggedPacking<F> {
     // Delegate to the dims-based core so callers that have only the
@@ -749,5 +837,40 @@ mod tests {
 
         let offsets = cumulative_offsets(&infos);
         assert_eq!(offsets, vec![0, 300, 400]);
+    }
+
+    #[test]
+    fn split_padding_is_even_bounded_and_exact() {
+        let cube = 1usize << 22;
+        for pad in [0usize, 1, 15, 16, 17, 1000, (1 << 26) - 32, (1 << 26)] {
+            let v = AreaPin::split_padding(pad, 16, cube);
+            assert_eq!(v.len(), 16);
+            assert_eq!(v.iter().sum::<usize>(), pad);
+            assert!(v.iter().all(|h| *h <= cube));
+            assert!(v.iter().max().unwrap() - v.iter().min().unwrap() <= 1);
+        }
+    }
+
+    #[test]
+    fn pinned_metadata_raises_the_dense_len_to_the_pin() {
+        use crate::multilinear::PaddedMle;
+        use p3_field::PrimeCharacteristicRing;
+        let traces: Vec<(String, PaddedMle<crate::InnerVal>)> = vec![(
+            "a".into(),
+            PaddedMle::padded_with_zeros(
+                std::sync::Arc::new(crate::basefold::Mle::from_row_major(RowMajorMatrix::new(
+                    vec![crate::InnerVal::ONE; 96 * 3],
+                    3,
+                ))),
+                22,
+            ),
+        )];
+        let natural = compute_jagged_metadata::<crate::InnerVal>(&traces);
+        assert_eq!(natural.dense_len, 1 << DEFAULT_LOG_STACKING_HEIGHT);
+        let pin = AreaPin { area: 1 << 26, pad_columns: 16 };
+        let pinned = compute_jagged_metadata_pinned::<crate::InnerVal>(&traces, Some(pin));
+        assert_eq!(pinned.dense_len, 1 << 26);
+        assert_eq!(pinned.total_values, natural.total_values);
+        assert_eq!(pinned.log_dense_size(), 26);
     }
 }

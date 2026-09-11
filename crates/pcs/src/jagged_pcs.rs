@@ -1071,6 +1071,12 @@ pub mod jagged {
         /// commit, in lockstep.  `false` on every recursion / shrink / wrap
         /// commit (byte-identical).
         pub rev: bool,
+        /// `Some(k)` when this round was committed under an
+        /// [`crate::jagged::AreaPin`]: its stacking gap is laid out as exactly
+        /// `k` padding columns (`prove_jagged_basefold_rounds_generic`), so the
+        /// column count the recursion program reads is a property of the
+        /// machine, not of the node's row counts.  `None` = natural layout.
+        pub fixed_pad_columns: Option<usize>,
     }
     /// Concrete inner alias (MT = JaggedMmcs).
     pub type PrecomputedJaggedCommit =
@@ -1330,11 +1336,30 @@ pub mod jagged {
                 // the machine rather than of how full this particular shard is,
                 // which is what lets the recursion circuit carry a fixed layout.
                 let cube = 1usize << z_row.len();
-                let mut done = 0usize;
+                // Under an AREA PIN the gap is split into a FIXED number of
+                // columns (`AreaPin::split_padding`), so the column count —
+                // and with it the program that verifies this round — does
+                // not depend on the node's row counts; otherwise as many
+                // cube-tall columns as the gap needs.
+                let pad_heights: Vec<usize> = match r.precomputed.fixed_pad_columns {
+                    Some(k) => crate::jagged::AreaPin::split_padding(pad, k, cube),
+                    None => {
+                        let mut v = Vec::new();
+                        let mut done = 0usize;
+                        loop {
+                            let h = core::cmp::min(cube, pad - done);
+                            v.push(h);
+                            done += h;
+                            if done >= pad {
+                                break;
+                            }
+                        }
+                        v
+                    }
+                };
                 let mut pad_off = base + pk.total_values;
                 let mut this_round_pads: Vec<usize> = Vec::new();
-                loop {
-                    let h = core::cmp::min(cube, pad - done);
+                for h in pad_heights {
                     this_round_pads.push(h);
                     offsets.push(pad_off);
                     chip_infos.push(crate::jagged::JaggedChipInfo {
@@ -1345,11 +1370,7 @@ pub mod jagged {
                     y_per_chip.push(alloc::vec![InnerChallenge::ZERO]);
                     let log_h = h.max(1).next_power_of_two().trailing_zeros() as usize;
                     r_row_per_chip.push(z_row[z_row.len() - log_h..].to_vec());
-                    done += h;
                     pad_off += h;
-                    if done >= pad {
-                        break;
-                    }
                 }
                 round_padding_heights.push(this_round_pads);
             }
@@ -2393,7 +2414,7 @@ mod test {
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false);
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -2424,7 +2445,7 @@ mod test {
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false);
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -2500,7 +2521,7 @@ mod test {
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false);
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -2557,7 +2578,7 @@ mod test {
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false);
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {

@@ -2643,25 +2643,24 @@ pub mod tests {
              equal length but different compose program BYTES across bands",
         );
 
-        // ── (b) THE REGRESSION: children whose bundle L differs ────────────
-        // `ZKMCompressBasefoldWitnessValues::dummy` hardcodes the production
-        // pin, so build the witness directly with an explicit area pin — which
-        // is exactly what a real child with natural area > 2^27 produces.
-        let proof_shape = OrderedShape::from_rows(
-            &chip_names
-                .iter()
-                .map(|n: &String| (n.clone(), 1usize << 8))
-                .collect::<Vec<(String, usize)>>(),
-        );
-        // There is no longer an area pin; the sweep below now builds the same
-        // witness three times, and the assertion it makes (equal key => equal
-        // program bytes) still holds.
-        let at_pin = |_pin: usize| -> ZKMCompressBasefoldWitnessValues<InnerSC> {
+        // ── (b) ROW INDEPENDENCE: children at three different row counts ───
+        // Every recursion node is proved at its own multiple-of-32 rows and
+        // commits under the compress machine's area pins, so the compose
+        // program over children of ANY rows is one program: one shape_key,
+        // one byte sequence.  Rows are chosen well inside the pins (main
+        // 406·rows, preprocessed 173·rows cells against 2^26 each).
+        let at_rows = |rows: usize| -> ZKMCompressBasefoldWitnessValues<InnerSC> {
+            let proof_shape = OrderedShape::from_rows(
+                &chip_names
+                    .iter()
+                    .map(|n: &String| (n.clone(), rows))
+                    .collect::<Vec<(String, usize)>>(),
+            );
             let vks_and_proofs: Vec<_> = (0..arity)
                 .map(|_| {
-                    zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
+                    zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof_rows::<
                         CompressAir<KoalaBear>,
-                    >(compress_machine, &proof_shape)
+                    >(compress_machine, &proof_shape.inner)
                 })
                 .collect();
             let vk_merkle_data =
@@ -2671,32 +2670,28 @@ pub mod tests {
 
         let mut seen: std::collections::BTreeMap<u64, (usize, Vec<u8>)> =
             std::collections::BTreeMap::new();
-        // Was a sweep over recursion area pins, which no longer exist.
-        for pin in [0usize] {
-            let w = at_pin(pin);
+        for rows in [32usize, 4_096, 131_072] {
+            let w = at_rows(rows);
             let sk = w.shape_key();
             let bytes = prog_bytes(&w);
-            if let Some((prev_pin, prev_bytes)) = seen.get(&sk) {
+            if let Some((prev_rows, prev_bytes)) = seen.get(&sk) {
                 assert!(
                     *prev_bytes == bytes,
-                    "[STEP-2] CACHE-KEY UNSOUND: bundle L={prev_pin} and L={pin} \
-                     share shape_key {sk:#018x} but build DIFFERENT compose \
-                     programs ({} vs {} bytes).  `compose_program_basefold` \
-                     would return the wrong cached program for one of them. \
-                     shape_key must hash the evaluation_proof bundle's \
-                     log_dense_size and the lengths it drives.",
+                    "[STEP-2] CACHE-KEY UNSOUND: children at {prev_rows} and {rows} rows \
+                     share shape_key {sk:#018x} but build DIFFERENT compose programs \
+                     ({} vs {} bytes).",
                     prev_bytes.len(),
                     bytes.len(),
                 );
             }
-            seen.insert(sk, (pin, bytes));
+            seen.insert(sk, (rows, bytes));
         }
         assert_eq!(
             seen.len(),
-            3,
-            "[STEP-2] expected three DISTINCT shape_keys for bundle L=27/28/29 \
-             (each builds a differently sized compose program); got {} — the \
-             key no longer separates log_dense_size",
+            1,
+            "[STEP-2] expected ONE shape_key for children at 32 / 4,096 / 131,072 rows \
+             (the area pins make the compose program row-independent); got {} — a \
+             field of the proof structure still follows the child's rows",
             seen.len(),
         );
     }

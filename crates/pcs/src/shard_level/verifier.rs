@@ -134,6 +134,10 @@ impl BasefoldShardVerifier {
         // for recursion / shrink / wrap (LEGACY). Drives the zerocheck host
         // orientation (collapsed/no-embed claim + rev(z_gkr) eq-bridge anchor).
         core_rev: bool,
+        // The machine's preprocessed-round AREA PIN (`StarkMachine::prep_area_pin`):
+        // that round's committed area and padding split are reconstructed from
+        // the verifying key, and a pinned machine lays them out differently.
+        prep_pin: Option<crate::jagged::AreaPin>,
     ) -> Result<(), BasefoldVerifyError>
     where
         SC: StarkGenericConfig + crate::BasefoldRing,
@@ -418,6 +422,7 @@ impl BasefoldShardVerifier {
             // jagged claimed sum; index-aligned with `chips`.
             &proof.opened_values,
             challenger,
+            prep_pin,
         )?;
 
         Ok(())
@@ -452,6 +457,7 @@ fn verify_jagged_pcs_host<SC, A>(
     // `y_per_chip` diverges from the openings the zerocheck consumed.
     opened_values: &crate::ShardOpenedValues<Val<SC>, Challenge<SC>>,
     challenger: &mut SC::Challenger,
+    prep_pin: Option<crate::jagged::AreaPin>,
 ) -> Result<(), BasefoldVerifyError>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -691,8 +697,28 @@ where
         // does (`zkm_pcs::jagged::committed_dense_len`).  Derived, not read from
         // the proof: this is what pins round 0's padding, and with it the column
         // space the jagged evaluation runs over.
-        let prep_area = crate::jagged::committed_dense_len(prep_total, log_stack);
-        push_padding(&mut chip_infos, prep_area.saturating_sub(prep_total));
+        // The round's committed area and its padding split: the natural
+        // stacking-block rounding into cube-tall columns, or — on a pinned
+        // machine — the pin's area split into exactly `pad_columns` columns
+        // (`AreaPin::split_padding`), the layout the prover used.
+        let prep_natural = crate::jagged::committed_dense_len(prep_total, log_stack);
+        match prep_pin {
+            Some(pin) => {
+                let prep_area = pin.apply(prep_natural);
+                for h in crate::jagged::AreaPin::split_padding(
+                    prep_area.saturating_sub(prep_total),
+                    pin.pad_columns,
+                    cube,
+                ) {
+                    chip_infos.push(JaggedChipInfo {
+                        name: alloc::format!("<stacking-pad:{}>", chip_infos.len()),
+                        row_count: h,
+                        column_count: 1,
+                    });
+                }
+            }
+            None => push_padding(&mut chip_infos, prep_natural.saturating_sub(prep_total)),
+        }
         n_prep_infos = chip_infos.len();
     }
 

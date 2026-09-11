@@ -126,6 +126,9 @@ where
         &chips,
         &chip_heights_pairs,
         max_log_row_count,
+        // A COMPRESS-machine child commits under the machine's pins; a core
+        // child has none.
+        machine.recursion_pins(),
     );
 
     // Build a minimal-but-shape-correct VK matching the legacy

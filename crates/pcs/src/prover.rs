@@ -529,6 +529,7 @@ where
                         &chips,
                         &views,
                         self.machine().core_rev(),
+                        self.machine().main_area_pin(),
                     );
                 Some(RetainedJaggedCommit {
                     main_commitment,

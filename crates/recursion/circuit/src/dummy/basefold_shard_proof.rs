@@ -191,9 +191,11 @@ pub fn dummy_basefold_shard_proof<F, EF, A>(
     // `next_multiple_of_32_rows` to the shape's rows), not log2 heights.
     chip_heights_pairs: &[(String, usize)],
     max_log_row_count: usize,
-    // The recursion-layer AREA PIN this dummy must mirror.
-    // `Some(_)` for a RECURSION (compress) child (pinned `jagged_n` / stripes);
-    // `None` for CORE/normalize (NATURAL, byte-identical).
+    // The AREA PINS the child's machine commits under
+    // (`StarkMachine::recursion_pins`): `Some` for a COMPRESS-machine child
+    // (both rounds at a fixed area with a fixed padding-column count), `None`
+    // for a CORE child (natural, byte-identical).
+    pins: Option<zkm_pcs::jagged::RecursionPins>,
 ) -> BasefoldShardProof<F, EF>
 where
     F: Field + Copy + PrimeCharacteristicRing,
@@ -339,7 +341,7 @@ where
                 })
                 .collect();
             zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(
-                dummy_jagged_basefold_bundle(&prep_dims, &chip_dims, max_log_row_count),
+                dummy_jagged_basefold_bundle(&prep_dims, &chip_dims, max_log_row_count, pins),
             )
         };
 
@@ -381,7 +383,13 @@ where
     // space.
     let cube = 1usize << max_log_row_count;
     let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
-    let pad_columns = |real: usize| -> usize {
+    let pad_columns = |real: usize, pin: Option<zkm_pcs::jagged::AreaPin>| -> usize {
+        // A pinned round always carries exactly `pin.pad_columns` columns
+        // (`AreaPin::split_padding`); a natural round as many cube-tall
+        // columns as its stacking gap needs, at least one.
+        if let Some(pin) = pin {
+            return pin.pad_columns;
+        }
         if real == 0 {
             return 1;
         }
@@ -405,10 +413,12 @@ where
     };
     let mut padding_row_heights: Vec<Vec<F>> = Vec::new();
     if n_prep > 0 {
-        // The preprocessed round is committed by `setup`, never area-pinned.
-        padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(true))]);
+        // The preprocessed round is committed by `setup` under the machine's
+        // `prep` pin (none on core).
+        padding_row_heights
+            .push(vec![F::ZERO; pad_columns(round_real(true), pins.map(|p| p.prep))]);
     }
-    padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(false))]);
+    padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(false), pins.map(|p| p.main))]);
 
     #[allow(clippy::needless_update)]
     BasefoldShardProof {
@@ -469,10 +479,10 @@ pub fn dummy_jagged_basefold_bundle(
     prep_dims: &[(usize, usize)],
     chip_dims: &[(usize, usize)],
     max_log_row_count: usize,
-    // The recursion-layer AREA PIN.  `Some(target_log)` when
-    // this dummy mirrors a RECURSION (compress) child (pin `log_dense_size` +
-    // `jagged_n` to the pinned L); `None` for CORE/normalize (NATURAL derivation,
-    // byte-identical).
+    // The child's machine pins (`None` = natural areas, as many padding
+    // columns as the gap needs).  The preprocessed round (first, when
+    // present) takes `pins.prep`, the main round `pins.main`.
+    pins: Option<zkm_pcs::jagged::RecursionPins>,
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle {
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
@@ -537,33 +547,28 @@ pub fn dummy_jagged_basefold_bundle(
     // Each round's committed area.  The preprocessed round is committed by
     // `setup` and is never area-pinned; only the main round takes the
     // RECURSION-LAYER AREA PIN.
+    // Which pin a round commits under: the preprocessed round (the first,
+    // when present) takes `prep`, the main round (the last) `main`.
+    let round_pin = |r: usize, n_rounds: usize| -> Option<zkm_pcs::jagged::AreaPin> {
+        let pins = pins?;
+        if r + 1 == n_rounds {
+            Some(pins.main)
+        } else {
+            Some(pins.prep)
+        }
+    };
+    // Each round's committed area: the natural stacking-block rounding, raised
+    // to the round's pin on a pinned machine — exactly what the prover's
+    // `compute_jagged_metadata_pinned` lands on.
     let areas: Vec<usize> = packings
         .iter()
         .enumerate()
         .map(|(r, pk)| {
-            // ⚠ THE AREA HERE IS STILL NOT THE REAL PROVER'S.  Measured against a
-            // real compose child (`tv/offs/cols`): two of three bands reproduce
-            // exactly, and the third is one COLUMN and eight blocks short — the
-            // dummy lands on 120 stacking blocks (251658240) where the real
-            // child carries 122, re-rounded to 128 (268435456), with 21 columns
-            // against the dummy's 20.  Widening the area by a cell does NOT
-            // close it (measured: the dummy set is unchanged), so the gap is in
-            // the round's RAW cells, not in how they are rounded.
-            //
-            // The way out is to stop deriving it here at all.  SP1 hands its
-            // dummy the packing quantities EXPLICITLY, computed from the shape
-            // with the same formula the prover uses — per round, a `multiple` of
-            // the stacking height and a padding-column count:
-            //
-            //     let main_multiple = Σ(height·width).div_ceil(1 << log_stacking);
-            //     let main_padding_cols = ((main_multiple << log_stacking) - Σ(height·width))
-            //                                 .div_ceil(1 << max_log_row_count).max(1);
-            //
-            // and it has no area pin at all.  Passing those two numbers per
-            // round, rather than re-deriving an area from zero matrices, is what
-            // makes a dummy that matches by construction instead of by luck.
-            let _ = r;
-            zkm_pcs::jagged::committed_dense_len(pk.total_values, log_stacking)
+            let natural = zkm_pcs::jagged::committed_dense_len(pk.total_values, log_stacking);
+            match round_pin(r, packings.len()) {
+                Some(pin) => pin.apply(natural),
+                None => natural,
+            }
         })
         .collect();
 
@@ -574,7 +579,7 @@ pub fn dummy_jagged_basefold_bundle(
     let mut round_counts: Vec<Vec<(usize, usize)>> = Vec::with_capacity(packings.len());
     let mut padding_heights: Vec<Vec<usize>> = Vec::with_capacity(packings.len());
     let mut base = 0usize;
-    for (pk, area) in packings.iter().zip(areas.iter()) {
+    for (r, (pk, area)) in packings.iter().zip(areas.iter()).enumerate() {
         let n_cols = pk.offsets.len().saturating_sub(1);
         offsets.extend(pk.offsets.iter().take(n_cols).map(|o| o + base));
         column_counts.extend(pk.chip_infos.iter().map(|ci| ci.column_count));
@@ -584,19 +589,29 @@ pub fn dummy_jagged_basefold_bundle(
         // into columns no taller than the row cube — ALWAYS at least one, even
         // when the round lands on a stripe boundary (the `.max(1)`).
         let pad = area.saturating_sub(pk.total_values);
+        let pad_heights: Vec<usize> = match round_pin(r, packings.len()) {
+            Some(pin) => zkm_pcs::jagged::AreaPin::split_padding(pad, pin.pad_columns, cube),
+            None => {
+                let mut v = Vec::new();
+                let mut done = 0usize;
+                loop {
+                    let h = core::cmp::min(cube, pad - done);
+                    v.push(h);
+                    done += h;
+                    if done >= pad {
+                        break;
+                    }
+                }
+                v
+            }
+        };
         let mut this_round_pads: Vec<usize> = Vec::new();
-        let mut done = 0usize;
         let mut pad_off = base + pk.total_values;
-        loop {
-            let h = core::cmp::min(cube, pad - done);
+        for h in pad_heights {
             this_round_pads.push(h);
             offsets.push(pad_off);
             column_counts.push(1);
-            done += h;
             pad_off += h;
-            if done >= pad {
-                break;
-            }
         }
         padding_heights.push(this_round_pads);
         base += area;
@@ -1059,7 +1074,7 @@ mod tests {
         let max_log_row_count = 8usize;
 
         // ── DUMMY side: derive from the dummy bundle's packing. ──
-        let dummy_bundle = dummy_jagged_basefold_bundle(&[], chip_dims, max_log_row_count);
+        let dummy_bundle = dummy_jagged_basefold_bundle(&[], chip_dims, max_log_row_count, None);
         let (dummy_rc, dummy_pcc) = derive_row_and_padding_counts(
             &dummy_bundle.packing.column_counts,
             &dummy_bundle.packing.offsets,

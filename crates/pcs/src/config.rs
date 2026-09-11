@@ -94,6 +94,7 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     fn prep_commit(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
         use_rev: bool,
+        pin: Option<crate::jagged::AreaPin>,
     ) -> Com<Self>;
 
     /// The PRECOMPUTED preprocessed commit: the commitment together with the
@@ -120,6 +121,7 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     fn prep_precompute(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
         use_rev: bool,
+        pin: Option<crate::jagged::AreaPin>,
     ) -> Self::PrepPrecomputed;
 }
 
@@ -260,10 +262,12 @@ pub trait BasefoldRing: StarkGenericConfig {
     fn commit_multilinears(
         chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
         use_rev: bool,
+        pin: Option<crate::jagged::AreaPin>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
         use p3_matrix::dense::RowMajorMatrix;
 
-        let mut packing = crate::jagged::compute_jagged_metadata::<crate::InnerVal>(chip_traces);
+        let mut packing =
+            crate::jagged::compute_jagged_metadata_pinned::<crate::InnerVal>(chip_traces, pin);
         // A round with NO CELLS still has to produce a well-formed commitment.
         // `setup` drops every chip that generates no preprocessed trace, so a
         // machine whose chips all have `preprocessed_width() == 0` reaches here
@@ -342,6 +346,7 @@ pub trait BasefoldRing: StarkGenericConfig {
             prover_data,
             whir_data,
             rev: use_rev,
+            fixed_pad_columns: pin.map(|p| p.pad_columns),
         }
     }
 
