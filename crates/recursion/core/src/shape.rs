@@ -459,10 +459,22 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (public_values.clone(), 1 << PUB_VALUES_LOG_HEIGHT),
             ])
         };
+        // L1 (18,16,18,18,15,16) is OUT: the production leaf path proves each
+        // leaf the moment its shard lands and settles the band over that one
+        // leaf, so siblings never agree and a two-band leaf population makes
+        // every compose group a mixed one (measured: 44 distinct arity-4
+        // compose keys in six blocks against 2-3 with one band, each a
+        // program build on the card thread).  With L2 fitting ~98% of leaves
+        // the groups are homogeneous again at about half the old band's cells.
+        // TWO bands: Z for every leaf AND every compose (it covers both L2 and
+        // M), X as the overflow.  Measured Sep 11 with L2/M/Z/X in the list:
+        // leaves land on L2 and composes on M, both at L=27 but with different
+        // per-chip heights, and since the production path settles the band per
+        // single node a compose group mixes the two shapes in every position
+        // pattern (2^4 arity-4 compose keys, 32 per run, built lazily on the
+        // card thread).  One shared band makes every compose key a pure
+        // (arity, is_complete) class: eight programs, warmed once per process.
         let allowed_shapes = vec![
-            band(18, 16, 18, 18, 15, 16),
-            band(18, 16, 19, 19, 16, 16),
-            band(18, 18, 18, 19, 17, 16),
             band(18, 18, 19, 19, 17, 16),
             band(19, 19, 19, 20, 17, 17),
         ];
