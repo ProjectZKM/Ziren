@@ -71,19 +71,20 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     }
 
     /// [`Self::fix_shape`], told which recursion stage is asking: the ROOT
-    /// (`compose-root`) always takes the largest pin class; every other kind
+    /// (`compose-root`, or `normalize-root` when a single shard is the whole
+    /// proof) always takes the largest pin class, so the shrink program — and
+    /// the wrap circuit behind it — sees one root geometry; every other kind
     /// only labels the diagnostic line.
     pub fn fix_shape_kind(&self, program: &mut RecursionProgram<F>, kind: &str) {
         let heights = RecursionAir::<F, DEGREE>::heights(program);
         let shape = Self::organic_shape(&heights);
-        // The pin class: the smallest both rounds fit — except the ROOT
-        // (`compose-root`), which always takes the largest so the shrink
-        // program, and through it the wrap circuit, sees one root geometry.
+        // The pin class: the smallest both rounds fit — except the ROOT,
+        // which always takes the largest (see above).
         let own = Self::class_for_rows(&shape).unwrap_or_else(|| {
             panic!("recursion {kind} program: its rows fit no pin class: {shape:?}")
         });
         let class =
-            if kind == "compose-root" { zkm_pcs::jagged::RecursionPins::LAST_CLASS } else { own };
+            if kind.ends_with("-root") { zkm_pcs::jagged::RecursionPins::LAST_CLASS } else { own };
         if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
             let (mw, pw) = Self::round_widths();
             let cells: u128 = shape

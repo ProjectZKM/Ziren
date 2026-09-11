@@ -1163,7 +1163,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             "normalize",
             || {
                 let program = self.normalize_program_unsnapped(input);
-                self.snapped(&program, band, "normalize")
+                self.snapped(
+                    &program,
+                    band,
+                    if input.is_complete { "normalize-root" } else { "normalize" },
+                )
             },
         )
     }
@@ -1272,7 +1276,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count = Self::pcs_max_log_row_count();
         let mut program =
             build_normalize_basefold_program(self.core_prover.machine(), input, max_log_row_count);
-        self.fix_recursion_shape_kind(&mut program, "normalize");
+        self.fix_recursion_shape_kind(
+            &mut program,
+            if input.is_complete { "normalize-root" } else { "normalize" },
+        );
         Arc::new(program)
     }
 
