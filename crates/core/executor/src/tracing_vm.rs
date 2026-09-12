@@ -251,7 +251,34 @@ impl<'a> TracingVM<'a> {
                 Ok(true) => break "halt", // natural halt within the chunk
                 Ok(false) => {}
                 Err(ExecutionError::ExceededCycleLimit(_)) => break "clk_end", // shard boundary
-                Err(e) => return Err(e),
+                Err(e) => {
+                    // The recurring production failure is a replay that reads
+                    // one hint past the window its chunk carries, and the
+                    // executor's own log names only the cursor (`ptr == len`),
+                    // which is the same for every chunk and so identifies
+                    // nothing.  Name the chunk, where the window sat in the
+                    // whole stream, and where the guest was, so the next
+                    // occurrence is diagnosable from the log alone.
+                    if sub.state.input_stream_ptr >= sub.state.input_stream.len() {
+                        tracing::error!(
+                            target: "replay",
+                            "chunk replay ran out of hints: shard_index={} window=[{}..{}) \
+                             slice_len={} consumed={} pc={:#010x} clk={} clk_end={} \
+                             prerecorded={} err={:?}",
+                            chunk.shard_index,
+                            chunk.input_stream_ptr,
+                            chunk.input_stream_ptr as usize + sub.state.input_stream.len(),
+                            sub.state.input_stream.len(),
+                            sub.state.input_stream_ptr,
+                            sub.state.pc,
+                            sub.state.global_clk,
+                            chunk.clk_end,
+                            stream_prerecorded,
+                            e,
+                        );
+                    }
+                    return Err(e);
+                }
             }
         };
         // bump the worker's live record into its
