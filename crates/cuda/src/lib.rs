@@ -5,7 +5,7 @@ use std::{
     process::{Command, Stdio},
     sync::LazyLock,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -45,6 +45,14 @@ pub struct ZKMCudaProver {
     client: Client,
     /// The GPU server container, if managed by the prover.
     managed_container: Option<CudaProverContainer>,
+    /// What the server reported spending on the calls since the last
+    /// [`Self::take_server_prove_ms`], in milliseconds.
+    ///
+    /// A caller that times the RPC itself also times the request waiting for
+    /// the server's prover, which is not proving time: a pipelined caller can
+    /// have the next request in flight while the current one is still being
+    /// proved.  The server times only its own work and reports it here.
+    server_prove_ms: AtomicU64,
 }
 
 pub struct CudaProverContainer {
@@ -177,7 +185,11 @@ impl ZKMCudaProver {
                 )
                 .expect("failed to create client");
 
-                ZKMCudaProver { client, managed_container: None }
+                ZKMCudaProver {
+                    client,
+                    managed_container: None,
+                    server_prove_ms: AtomicU64::new(0),
+                }
             }
             ZKMGpuServer::Local { visible_device_index, port } => {
                 Self::start_gpu_server(reqwest_middlewares, visible_device_index, port)?
@@ -299,7 +311,25 @@ impl ZKMCudaProver {
         Ok(ZKMCudaProver {
             client,
             managed_container: Some(CudaProverContainer { name: container_name, cleaned_up }),
+            server_prove_ms: AtomicU64::new(0),
         })
+    }
+
+    /// Add what the server reported spending on one call.
+    fn record_server_prove_ms(&self, ms: u64) {
+        if ms > 0 {
+            self.server_prove_ms.fetch_add(ms, Ordering::Relaxed);
+        }
+    }
+
+    /// What the server reported spending since the last call to this, in
+    /// milliseconds; `None` when it reported nothing (a server that predates
+    /// the field).  Reading it clears the accumulator.
+    pub fn take_server_prove_ms(&self) -> Option<u64> {
+        match self.server_prove_ms.swap(0, Ordering::Relaxed) {
+            0 => None,
+            ms => Some(ms),
+        }
     }
 
     /// Executes the [zkm_prover::ZKMProver::setup] method inside the container.
@@ -318,6 +348,7 @@ impl ZKMCudaProver {
         let payload = ProveCoreRequestPayload { stdin: stdin.clone() };
         let request = crate::api::ProveCoreRequest { data: bincode::serialize(&payload).unwrap() };
         let response = block_on(async { self.client.prove_core(request).await }).unwrap();
+        self.record_server_prove_ms(response.prove_ms);
         let proof: ZKMCoreProof = bincode::deserialize(&response.result).unwrap();
         Ok(proof)
     }
@@ -351,6 +382,7 @@ impl ZKMCudaProver {
         };
         let request = crate::api::ProveCoreRequest { data: bincode::serialize(&payload).unwrap() };
         let response = block_on(async { self.client.prove_core_stateless(request).await }).unwrap();
+        self.record_server_prove_ms(response.prove_ms);
         let proof: ZKMCoreProof = bincode::deserialize(&response.result).unwrap();
         Ok(proof)
     }
@@ -368,6 +400,7 @@ impl ZKMCudaProver {
         let request = crate::api::CompressRequest { data: bincode::serialize(&payload).unwrap() };
 
         let response = block_on(async { self.client.compress(request).await }).unwrap();
+        self.record_server_prove_ms(response.prove_ms);
         let proof: ZKMReduceProof<InnerSC> = bincode::deserialize(&response.result).unwrap();
         Ok(proof)
     }

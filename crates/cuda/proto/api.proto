@@ -32,6 +32,10 @@ message ProveCoreRequest {
 
 message ProveCoreResponse {
     bytes result = 1;
+    // How long the server itself spent proving, in milliseconds, not
+    // counting the request waiting for the prover.  Absent (0) from servers
+    // that predate the field, in which case the caller times the call.
+    uint64 prove_ms = 2;
 }
 
 message CompressRequest {
@@ -40,6 +44,10 @@ message CompressRequest {
 
 message CompressResponse {
     bytes result = 1;
+    // How long the server itself spent proving, in milliseconds, not
+    // counting the request waiting for the prover.  Absent (0) from servers
+    // that predate the field, in which case the caller times the call.
+    uint64 prove_ms = 2;
 }
 
 message ShrinkRequest {

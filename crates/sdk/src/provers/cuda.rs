@@ -190,6 +190,10 @@ impl Prover<DefaultProverComponents> for CudaProver {
         &self.cpu_prover
     }
 
+    fn take_prove_ms(&self) -> Option<u64> {
+        self.cuda_prover.take_server_prove_ms()
+    }
+
     fn prove_impl<'a>(
         &'a self,
         pk: &ZKMProvingKey,

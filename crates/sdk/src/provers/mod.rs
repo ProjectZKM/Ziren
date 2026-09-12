@@ -96,6 +96,17 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
     /// elf_id:
     ///    The SHA-256 hash of the ELF, without the 0x prefix.
     ///    If this field is not none, the network prover will use it to index the cached ELF.
+    /// How long this prover spent on the last proof, in milliseconds, when it
+    /// knows better than the caller's stopwatch.
+    ///
+    /// A remote prover times only its own work: a caller that times the RPC
+    /// also times the request waiting in the server's queue, which is not
+    /// proving time.  `None` means the caller should use its own measurement.
+    /// Reading it clears the value.
+    fn take_prove_ms(&self) -> Option<u64> {
+        None
+    }
+
     fn prove_with_cycles(
         &self,
         pk: &ZKMProvingKey,
@@ -219,6 +230,10 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
 impl Prover<DefaultProverComponents> for ProverClient {
     fn id(&self) -> ProverType {
         todo!()
+    }
+
+    fn take_prove_ms(&self) -> Option<u64> {
+        self.prover.take_prove_ms()
     }
 
     fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {
