@@ -270,6 +270,56 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
     }
 
+    /// Add/sub only: `result = a + b mod M` under `is_add`, `a - b mod M` under `is_sub`.
+    ///
+    /// Semantically IDENTICAL to [`Self::eval_variable`] called with
+    /// `is_mul = is_div = 0` — substitute the zeros into its `p_result` and
+    /// `p_op` and this is what remains — but it does not BUILD the terms it
+    /// then multiplies away.
+    ///
+    /// That distinction is the whole point.  `eval_variable` constructs
+    /// `p_mul = p_a * p_b` and `p_div = p_res * p_b` unconditionally, and a
+    /// polynomial product over `NUM_LIMBS` limbs is a `NUM_LIMBS^2` expression
+    /// tree.  Multiplying an already-built tree by a compile-time zero does not
+    /// delete its nodes, so an add/sub-only caller still pays the convolution.
+    ///
+    /// MEASURED (Sep 2026): `Bn254Fp2AddSubAssign` — a chip that can only add or
+    /// subtract, and which already passes `AB::F::ZERO` for both `is_mul` and
+    /// `is_div` — has tape 18,353, i.e. 2 x 9,176, exactly two copies of the
+    /// FUSED `Bn254FpOpAssign` chip's 9,215.  It was paying in full for a 32x32
+    /// = 1,024-product convolution it can never reach.
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval_addsub<AB: ZKMAirBuilder<Var = V>>(
+        &self,
+        builder: &mut AB,
+        a: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        b: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        modulus: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        is_add: impl Into<AB::Expr> + Clone,
+        is_sub: impl Into<AB::Expr> + Clone,
+        is_real: impl Into<AB::Expr> + Clone,
+    ) where
+        V: Into<AB::Expr>,
+        Limbs<V, P::Limbs>: Copy,
+    {
+        let p_a_param: Polynomial<AB::Expr> = (a).clone().into();
+        let p_b: Polynomial<AB::Expr> = (b).clone().into();
+        let p_res_param: Polynomial<AB::Expr> = self.result.into();
+
+        let is_add: AB::Expr = is_add.into();
+        let is_sub: AB::Expr = is_sub.into();
+
+        // Mirrors `eval_variable` with the mul/div selectors set to zero:
+        //   add:  witness the result, constrain  a + b       == result (mod M)
+        //   sub:  witness `a`,        constrain  result + b  == a      (mod M)
+        let p_result = p_res_param.clone() * is_add.clone() + p_a_param.clone() * is_sub.clone();
+        let p_add = p_a_param + p_b.clone();
+        let p_sub = p_res_param + p_b;
+        let p_op = p_add * is_add + p_sub * is_sub;
+
+        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn eval_mul_and_carry<AB: ZKMAirBuilder<Var = V>>(
         &self,

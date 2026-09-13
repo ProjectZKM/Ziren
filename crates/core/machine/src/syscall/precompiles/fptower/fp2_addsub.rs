@@ -246,27 +246,27 @@ where
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
         {
-            local.c0.eval_variable(
+            // `eval_addsub`, not `eval_variable`: this chip can only add or
+            // subtract, and the zeros it used to pass for `is_mul`/`is_div` did
+            // NOT stop `eval_variable` from building the limb convolutions —
+            // measured tape 18,353 = 2 x the fused Fp chip's 9,215.
+            local.c0.eval_addsub(
                 builder,
                 &p_x,
                 &q_x,
                 &p_modulus,
                 local.is_add,
                 AB::Expr::ONE - local.is_add,
-                AB::F::ZERO,
-                AB::F::ZERO,
                 local.is_real,
             );
 
-            local.c1.eval_variable(
+            local.c1.eval_addsub(
                 builder,
                 &p_y,
                 &q_y,
                 &p_modulus,
                 local.is_add,
                 AB::Expr::ONE - local.is_add,
-                AB::F::ZERO,
-                AB::F::ZERO,
                 local.is_real,
             );
         }
