@@ -104,7 +104,7 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
     MipsAir<KoalaBear>,
 >>::DeviceProvingKey;
 
-/// Fixed height of the allowed-vk Merkle tree (capacity 2^12 = 4096 vks).
+/// Fixed height of the allowed-vk Merkle tree (capacity 2^14 = 16,384 vks).
 ///
 /// BOTH the shape enumeration (`ZKMCompressProgramShape::from_proof_shape`,
 /// which bakes `merkle_tree_height` into every compose/deferred/shrink
@@ -114,24 +114,44 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 /// derivations could diverge and the witnessed merkle paths would desync
 /// from the program shape.  A fixed ceiling kills that circularity.
 ///
-/// It has to CONTAIN the enumeration, which is not a tuning knob: a normalize
-/// key is a function of `(chip set, preprocessed block count, main block
-/// count)`, and the reachable main block counts run up to the prover's own
-/// per-shard area cap (`ELEMENT_THRESHOLD` = 120 stacking blocks).  That is
-/// 2707 keys today.  A height that cannot hold them is not "a smaller map" —
-/// it is a map that rejects real proofs, which is what 2^11 (2048) did.
+/// It has to CONTAIN the enumeration, which is not a tuning knob.  A normalize
+/// key is a function of `(chip set, preprocessed blocks, main blocks,
+/// preprocessed pad columns, main pad columns)` — SP1's `CoreProofShape`, field
+/// for field — and the reachable main block counts run up to the prover's own
+/// per-shard area cap (`ELEMENT_THRESHOLD` = 120 stacking blocks).  MEASURED at
+/// 7,960 shapes (7,931 normalize + 14 compose + 14 deferred + 1 shrink).
+///
+/// A height that cannot hold them is not "a smaller map" — it is a map that
+/// rejects real proofs, which is what 2^11 (2048) did.  2^13 would fit today's
+/// 7,960 with 232 slots to spare; 2^14 is chosen instead because the height is
+/// baked into every compose program, so raising it is itself a vk-changing
+/// event, and `ELEMENT_THRESHOLD` (env-overridable) and the cluster list can
+/// both grow.  Pay for the headroom once.
 /// `tests::enumeration_size_probe` asserts the fit.
-pub const VK_MERKLE_TREE_HEIGHT: usize = 12;
+pub const VK_MERKLE_TREE_HEIGHT: usize = 14;
 
 /// Digest sink for `ZIREN_VK_COLLECT=<path>`.
 ///
-/// `ZKMProofShape::generate` does not reach every compose/normalize shape a
-/// real workload produces — reth trips `vk not allowed` on a key that is in
-/// neither this branch's 3500-key map nor canonical's 1.25M-key one — and a
-/// full regen is ~15 h.  With this set, every recursion VK the prover actually
-/// touches is recorded and the path is rewritten in `vk_map.bin` wire format,
-/// so ONE workload run yields exactly the keys the map is missing.  Merge the
-/// result into `crates/prover/vk_map.bin` with the `merge_vk_maps` bin.
+/// The backfill for an enumeration that did not cover its own key space.  With
+/// this set, every recursion VK the prover actually touches is recorded and the
+/// path is rewritten in `vk_map.bin` wire format, so ONE workload run yields
+/// the keys the map is missing.  Merge the result into
+/// `crates/prover/vk_map.bin` with the `merge_vk_maps` bin.
+///
+/// WHY the map was ever short (Sep 2026): the normalize key is a function of
+/// `(chip set, prep blocks, main blocks, prep pad columns, main pad columns)`,
+/// but `generate` keyed only on the first three and emitted ONE representative
+/// per class.  `shape_at_class` packs its fillers up to the class ceiling, so
+/// that representative always landed on the FEWEST pad columns; a real shard
+/// that only just crossed into the class commits more of them, which is a
+/// different program and so a different vk.  MEASURED by
+/// `tests::normalize_vk_padding_column_probe`: one chip set, `main_blocks=8`,
+/// 1 pad column vs 2 -> the vks differ.  The pad counts are in the key now.
+///
+/// Collection should therefore be a DIAGNOSTIC, not a dependency: a key that
+/// shows up here and is not in an enumerated map is a coverage bug in
+/// `generate`, and the fix belongs there.  Keep it until a full enumerated
+/// regen has run against production traffic with nothing new collected.
 ///
 /// Collection is independent of `vk_verification`: the digests are identical
 /// either way (only the leaf-index lookup differs), so the capture run is a
@@ -4216,6 +4236,13 @@ pub mod tests {
             ("MovCond", 10),
             ("Mul", 10),
             ("Program", 19),
+            // The two lookup TABLES are preprocessed AND `included()` on every
+            // shard, so a real core proof commits both in the preprocessed
+            // round: Byte at 2^16 above, Range at its fixed `NUM_RANGE_ROWS`
+            // (2^10).  Omitting Range leaves the dummy preprocessed round two
+            // columns short of the machine's, and `jagged_column_count` fails
+            // the "core" consistency assert before any vk is produced.
+            ("Range", 10),
             ("ShiftLeft", 9),
             ("ShiftRight", 9),
             ("SyscallCore", 10),
@@ -4265,6 +4292,162 @@ pub mod tests {
             "[AGGKEY] CONCLUSION: the vk keys on the committed BLOCK COUNT, not log_dense: {}",
             (vk_base == vk_sb && st_base.2 == st_sb.2)
                 && !(vk_base == vk_sl && st_base.2 != st_sl.2),
+        );
+    }
+
+    /// PROBE: is the STACKING-PAD COLUMN COUNT part of the normalize vk key?
+    ///
+    /// `normalize_vk_aggregate_key_probe` establishes that the key is a
+    /// function of the committed BLOCK COUNTS and not of the per-chip heights.
+    /// `ZKMProofShape::generate` takes that one step further and emits ONE
+    /// representative per `(chip set, prep blocks, main blocks)` — which is
+    /// only sound if nothing ELSE about the commitment reaches the program.
+    ///
+    /// It does.  A round's committed area is its real cells rounded out to
+    /// whole stacking blocks, and `committed_dense_len` rounds past four
+    /// blocks on to a multiple of EIGHT — so the gap between the real cells
+    /// and the committed area runs up to `8 << log_stacking`, and the dummy
+    /// (and the prover) close it with `ceil(gap / 2^max_log_row_count)`
+    /// explicit padding COLUMNS.  Those columns are in the concatenated
+    /// column space the verifier walks, so their COUNT is a program length.
+    ///
+    /// Two shapes can therefore share a class and still commit a different
+    /// number of padding columns.  The enumeration's representative packs its
+    /// fillers greedily up to the class ceiling, so it always lands on the
+    /// FEWEST pads; a real shard that only just crossed into the class lands
+    /// on more.  If the vks differ, the enumerated map is missing those
+    /// shapes by construction — which is what `ZIREN_VK_COLLECT` has been
+    /// papering over.
+    ///
+    /// `cargo test -r -p zkm-prover normalize_vk_padding_column_probe -- --ignored --nocapture`
+    #[test]
+    #[serial]
+    #[ignore]
+    fn normalize_vk_padding_column_probe() {
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shape::OrderedShape;
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+        let widths: std::collections::BTreeMap<String, usize> = machine
+            .chips()
+            .iter()
+            .map(|c| {
+                (
+                    <_ as MachineAir<KoalaBear>>::name(c),
+                    p3_air::BaseAir::<KoalaBear>::width(c).max(1),
+                )
+            })
+            .collect();
+        let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        // The same cube the dummy bundle splits a round's gap over.
+        let cube = 1usize << ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count();
+
+        // The main round's committed blocks and the number of padding columns
+        // that close it out — the same two derivations the dummy bundle makes.
+        let geometry = |hs: &[(&str, usize)]| -> (usize, usize, usize) {
+            let tv: usize =
+                hs.iter().map(|(n, h)| widths.get(*n).copied().unwrap_or(1) * (1usize << h)).sum();
+            let area = zkm_pcs::jagged::committed_dense_len(tv, log_stack);
+            let gap = area - tv;
+            let pad_cols = gap.div_ceil(cube).max(1);
+            (tv, area >> log_stack, pad_cols)
+        };
+        let vk_of = |hs: &[(&str, usize)]| -> [u32; 8] {
+            let os = OrderedShape::from_log2_heights(
+                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
+            );
+            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
+            let d = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+            let p = prover.recursion_program_basefold(&d).0;
+            use p3_field::PrimeField32;
+            prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
+        };
+
+        // A core cluster with one byte-lookup-free FILLER ("MemoryLocal") whose
+        // height moves the main round's cell count without touching the
+        // preprocessed round or the VK-setup byte-lookup budget.
+        let with_filler = |filler_h: usize| -> Vec<(&'static str, usize)> {
+            vec![
+                ("AddSub", 13),
+                ("Bitwise", 12),
+                ("Branch", 11),
+                ("Byte", 16),
+                ("Cpu", 14),
+                ("Global", 9),
+                ("Lt", 12),
+                ("MemoryLocal", filler_h),
+                ("Program", 19),
+                ("Range", 10),
+                ("SyscallCore", 10),
+            ]
+        };
+
+        // Sweep the filler and group by main block count; within a class,
+        // report every distinct pad-column count.
+        let mut by_class: BTreeMap<usize, Vec<(usize, usize, usize)>> = BTreeMap::new();
+        for h in 1..=21 {
+            let hs = with_filler(h);
+            let (tv, blocks, pads) = geometry(&hs);
+            by_class.entry(blocks).or_default().push((h, tv, pads));
+        }
+        for (blocks, rows) in &by_class {
+            let pads: BTreeSet<usize> = rows.iter().map(|(_, _, p)| *p).collect();
+            eprintln!("[PADCOL] main_blocks={blocks}: filler heights {:?} -> pad-col counts {:?}",
+                rows.iter().map(|(h, _, _)| *h).collect::<Vec<_>>(), pads);
+        }
+
+        // Pick the first class that spans two different pad-column counts.
+        let Some((blocks, a, b)) = by_class.iter().find_map(|(blocks, rows)| {
+            let lo = rows.iter().min_by_key(|(_, _, p)| *p)?;
+            let hi = rows.iter().max_by_key(|(_, _, p)| *p)?;
+            (lo.2 != hi.2).then_some((*blocks, *lo, *hi))
+        }) else {
+            eprintln!("[PADCOL] INCONCLUSIVE: no class in the sweep spans two pad-column counts");
+            return;
+        };
+
+        eprintln!(
+            "[PADCOL] class main_blocks={blocks}: A filler=2^{} cells={} pads={} | B filler=2^{} cells={} pads={}",
+            a.0, a.1, a.2, b.0, b.1, b.2,
+        );
+        let vk_a = vk_of(&with_filler(a.0));
+        let vk_b = vk_of(&with_filler(b.0));
+        eprintln!("[PADCOL] vk_A={vk_a:?}");
+        eprintln!("[PADCOL] vk_B={vk_b:?}");
+        eprintln!(
+            "[PADCOL] NECESSARY: same (chip set, blocks), pad cols {} vs {} -> vk_eq={}.  \
+             vk_eq=false means the pad-column count belongs in the enumeration key.",
+            a.2,
+            b.2,
+            vk_a == vk_b,
+        );
+
+        // The other direction, and the one the enumeration's soundness rests
+        // on: two shapes agreeing on ALL FIVE key fields must produce the same
+        // vk, or no synthetic representative could ever stand in for a real
+        // proof.  Find a class holding two different filler heights at the same
+        // pad count and check they collapse.
+        let Some((blocks, c, d)) = by_class.iter().find_map(|(blocks, rows)| {
+            let first = rows.first()?;
+            let other = rows.iter().find(|r| r.0 != first.0 && r.2 == first.2)?;
+            Some((*blocks, *first, *other))
+        }) else {
+            eprintln!("[PADCOL] SUFFICIENCY INCONCLUSIVE: no class holds two heights at one pad count");
+            return;
+        };
+        eprintln!(
+            "[PADCOL] class main_blocks={blocks} pads={}: C filler=2^{} cells={} | D filler=2^{} cells={}",
+            c.2, c.0, c.1, d.0, d.1,
+        );
+        let vk_c = vk_of(&with_filler(c.0));
+        let vk_d = vk_of(&with_filler(d.0));
+        eprintln!(
+            "[PADCOL] SUFFICIENT: same (chip set, blocks, pad cols), cells {} vs {} -> vk_eq={}.  \
+             vk_eq=true means one representative per class is faithful.",
+            c.1,
+            d.1,
+            vk_c == vk_d,
         );
     }
 
@@ -4546,6 +4729,9 @@ pub mod tests {
             ("MovCond", 10),
             ("Mul", 10),
             ("Program", 19),
+            // Range at NUM_RANGE_ROWS — see the note in
+            // `normalize_vk_aggregate_key_probe`.
+            ("Range", 10),
             ("ShiftLeft", 9),
             ("ShiftRight", 9),
             ("SyscallCore", 10),
@@ -4733,6 +4919,9 @@ pub mod tests {
             ("MovCond", 12),
             ("Mul", 13),
             ("Program", 19),
+            // Range at NUM_RANGE_ROWS — see the note in
+            // `normalize_vk_aggregate_key_probe`.
+            ("Range", 10),
             ("ShiftLeft", 13),
             ("ShiftRight", 11),
             ("SyscallCore", 11),

@@ -484,87 +484,101 @@ impl ZKMProofShape {
             (blocks(cells(true)), blocks(cells(false)))
         };
 
-        // Per-shard normalize shapes — FAITHFUL representatives.
+        // The other half of the class key: how many stacking-PADDING COLUMNS
+        // each round commits.
         //
-        // The normalize program's VK depends on the child core proof's exact
-        // PER-CHIP heights (the jagged bundle's per-chip `(width, log_height)`
-        // + the Program/Byte preprocessed-domain `log_size` that feed
-        // `vk.hash`), NOT merely the total `log_dense`.  Under FIX_CORE_SHAPES
-        // =false a real core shard's jagged commit is padded to EXACTLY
-        // `CoreShapeConfig::find_canonical_cluster_shape(record)` — one
-        // cluster's per-chip band-cap shape (present chips at the cluster cap,
-        // canonicalize's missing chips at log-1, the fitting Program band).
+        // A round's committed area is its real cells rounded out to whole
+        // stacking blocks, and `committed_dense_len` rounds past four blocks on
+        // to a multiple of EIGHT — so the gap can be as wide as `8 <<
+        // log_stacking`, and the prover (and the dummy that mirrors it) closes
+        // it with `ceil(gap / 2^CORE_MAX_LOG_ROW_COUNT)` explicit padding
+        // columns, never fewer than one.  Those columns sit in the concatenated
+        // column space the recursion verifier walks, so their COUNT is a
+        // program LENGTH — as much a part of the key as the block count is.
         //
-        // A plain uniform-height-by-`log_dense` sweep is NOT faithful: at
-        // a matched `(chip_set, log_dense)` its per-chip heights differ from
-        // the canonical-cluster shape, so its dummy VK differs from the real
-        // VK (pinned by `tests::test_vk_equality_normalize_fib` EQUAL=false on
-        // a uniform/raw dummy, and `tests::multishard_normalize_arity_faithful`
-        // dummy_faithful=true ONLY at the canonical lift, enum_repr_eq=false at
-        // the uniform representative).
+        // Two shapes sharing `(chip set, prep blocks, main blocks)` can still
+        // commit different pad counts: a shape that only just crossed into the
+        // class pads over most of eight blocks, one that nearly fills it pads
+        // over a sliver.  Keying on the blocks alone therefore emits ONE
+        // representative for what are up to four distinct programs, and the
+        // other three are the keys production has been topping the map up with
+        // via `ZIREN_VK_COLLECT`.
+        let pad_col_cells: usize = 1usize << consts::CORE_MAX_LOG_ROW_COUNT;
+        let pads_of = |os: &OrderedShape| -> (usize, usize) {
+            use zkm_pcs::air::MachineAir;
+            let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+            let cells = |prep: bool| -> usize {
+                os.inner
+                    .iter()
+                    .map(|(name, log_h)| {
+                        let w = chips_by_name
+                            .get(name)
+                            .map(|c| {
+                                if prep {
+                                    MachineAir::<KoalaBear>::preprocessed_width(*c)
+                                } else {
+                                    p3_air::BaseAir::<KoalaBear>::width(*c).max(1)
+                                }
+                            })
+                            .unwrap_or(0);
+                        w * (1usize << *log_h)
+                    })
+                    .sum()
+            };
+            let pads = |total: usize| -> usize {
+                let area = zkm_pcs::jagged::committed_dense_len(total, log_stack);
+                area.saturating_sub(total).div_ceil(pad_col_cells).max(1)
+            };
+            (pads(cells(true)), pads(cells(false)))
+        };
+
+        // Per-shard normalize shapes — ONE representative per CLASS.
         //
-        // FAITHFUL construction (coverage is partial — see
-        // CAVEAT): generate candidate RAW height profiles via the cheap
-        // per-cluster uniform-height SWEEP, then LIFT each through
-        // `find_canonical_cluster_shape_from_ordered` — the min-area
-        // canonical-cluster shape a real FIX-off core commit pads to (the SAME
-        // construction `multishard_normalize_arity_faithful`'s `lift_to_band_cap`
-        // proved `dummy_faithful=true` — i.e. the dummy built at the canonical
-        // lift reproduces the real normalize VK).  Dedup the lifted shapes →
-        // a SMALL canonical set (13 here), cheap: ONE min-area search per swept
-        // profile (a few hundred), not the O(clusters²) `enumerate_canonical_
-        // cluster_shapes` (~28.5K searches, > 3 min, over-emits ~70K).
+        // The class is `(chip set, preprocessed blocks, main blocks,
+        // preprocessed pad columns, main pad columns)` — SP1's `CoreProofShape`
+        // (sp1 crates/hypercube/src/prover/shard.rs), field for field.  Nothing
+        // finer reaches the program: the per-chip heights enter the proof only
+        // as WITNESSED values (`row_counts`, the `quotient[0]` degree bits,
+        // `log_degree`), never as a length, and the only lengths the commitment
+        // contributes are the column count (chip widths, fixed by the chip set,
+        // plus the pad columns) and the per-round stripe count (the block
+        // count).  `pick_log_stacking_height` is a constant, so the stacking
+        // height is not a sixth field.
         //
-        // ⚠️ CAVEAT: the UNIFORM-height sweep only spans
-        // raw profiles where every filler chip shares one height, so the lifted
-        // canonical shapes have uniform-ish caps.  A real shard's per-chip event
-        // counts are NON-uniform (e.g. fib shard1 real canonical = Bitwise:12
-        // DivRem:10 MiscInstrs:1 Mul:10 …, vs this sweep's nearest = Bitwise:11
-        // DivRem:9 MiscInstrs:10 Mul:9 …), which lift to a DIFFERENT canonical
-        // shape — so the swept set MISSES some real canonical shapes and the
-        // captured real fib-1k normalize VKs are NOT yet members.  The lift is
-        // faithful; the raw-profile SOURCE is too coarse.  The fix is a fast,
-        // correctly-COLLAPSED canonical enumeration (reproduce the min-area
-        // collapse over the real reachable per-chip profiles) — neither this
-        // sweep (misses) nor `enumerate_canonical_cluster_shapes_fast`
-        // (over-emits, no collapse) is the final answer.
-        // Enumerate the per-shard normalize shape at EVERY integer log_dense
-        // L in [L_min, L_max] per cluster, DIRECTLY.
+        // MEASURED, both directions, by `zkm_prover::tests`:
+        //   * `normalize_vk_aggregate_key_probe` — moving cells around with the
+        //     block counts HELD leaves the key byte-identical; moving the
+        //     preprocessed round (Program 2^19 -> 2^17) changes it.
+        //   * `normalize_vk_padding_column_probe` — one chip set at
+        //     `main_blocks=8`, 1 pad column vs 2: the keys DIFFER.  This is why
+        //     the pad counts are in the key.  They were not until Sep 2026, and
+        //     that omission is what `ZIREN_VK_COLLECT` was backfilling: the
+        //     representative below packs its fillers up to the class ceiling, so
+        //     it always lands on the FEWEST pads, while a real shard that only
+        //     just crossed into the class commits more of them.
         //
-        // Because the recursion VK = f(cluster, arity, log_dense) is
-        // height-INDEPENDENT given log_dense, the right key is L itself, not a
-        // particular height profile.  A uniform-height SWEEP + LIFT
-        // (find_canonical_cluster_shape_from_ordered) only dedups a SPARSE set
-        // of band-quantized L values, so real NON-uniform FIX-off proofs whose
-        // NATURAL log_dense falls between the swept L's are MISSING.  Emitting
-        // ONE canonical shape per integer L means any real proof landing at
-        // log_dense L hits the map regardless of how its heights are
-        // distributed.
-        //
-        // Per-L construction (value-independent; the VK is height-independent
-        // given L so the exact distribution is free): Byte at its 2^16
-        // lookup-table height; Program canonical-minimal; every other
-        // byte-lookup-EMITTING chip pinned minimal (so the VK-setup
-        // `Σ byte_lookups·2^h ≤ |F|` always holds); the remaining area is
-        // GREEDILY packed into the byte-lookup-FREE filler chips (each ≤ 2^cube)
-        // until total_values reaches ~2^L.  `log_dense_of` (= jagged
-        // `packing.log_dense_size`) then confirms the produced shape lands at L;
-        // we dedup by the produced OrderedShape so identical chip-NAME-sets
-        // (cluster duplicates) collapse, and cap L < 30 (the AreaOutOfBounds
-        // guard) — `build_compress_vks` catch_unwinds any overflow.
+        // Because any shape landing in a class reproduces that class's key, the
+        // representative can be built however is convenient — which is what the
+        // construction below exploits.  Earlier revisions of this code keyed on
+        // `log_dense` (the power of two ENCLOSING the committed length) and,
+        // before that, tried to reproduce a real shard's exact per-chip profile
+        // by lifting swept heights through
+        // `CoreShapeConfig::find_canonical_cluster_shape_from_ordered`.  Both
+        // are superseded: `log_dense` is too coarse (shapes sharing one can
+        // commit different block counts), and the canonical lift is the
+        // fix-shape path SP1 itself abandoned — `ShapeCluster` survives in their
+        // tree referenced by nothing.  Production passes `None` for the shape
+        // config, so no real proof is snapped to a cluster shape anyway.
         let cube = consts::CORE_MAX_LOG_ROW_COUNT;
-        // Build the canonical shape for `cluster` at a target log_dense `target`.
-        // Returns None when `target` is below the fixed-overhead floor or above
-        // the all-chips-at-cube ceiling for this cluster.
         // Build the representative shape for one class: a chip set, a Program
-        // band (which sets the PREPROCESSED round), and a target MAIN block
-        // count.  Byte sits at its 2^16 lookup-table height, every other
-        // byte-lookup-EMITTING chip is pinned minimal so the VK-setup
-        // `Σ byte_lookups·2^h ≤ |F|` always holds, and the byte-lookup-FREE
-        // fillers greedily absorb the rest of the main area.  Since the key is
-        // a function of the two block counts and nothing finer, ANY shape
-        // landing in the class reproduces the real proof's key — the
-        // distribution across fillers is free.
+        // band (which sets the PREPROCESSED round), a target MAIN block count
+        // and a target MAIN pad-column count.  Byte sits at its 2^16
+        // lookup-table height, every other byte-lookup-EMITTING chip is pinned
+        // minimal so the VK-setup `Σ byte_lookups·2^h ≤ |F|` always holds, and
+        // the byte-lookup-FREE fillers greedily absorb the rest of the main
+        // area.  Returns `None` when the class is unreachable for this cluster
+        // — below its fixed-overhead floor, above its all-chips-at-cube
+        // ceiling, or a pad count the block count cannot produce.
         // The two lookup TABLES sit at their fixed heights on every shard:
         // Byte at 2^16 and Range at 2^10 (`NUM_RANGE_ROWS`).  Both are
         // preprocessed AND `included()` unconditionally, so a real shard
@@ -574,7 +588,8 @@ impl ZKMProofShape {
         let shape_at_class = |names: &[String],
                               fillers: &std::collections::HashSet<&String>,
                               prog_h: usize,
-                              target_main_blocks: usize|
+                              target_main_blocks: usize,
+                              target_main_pads: usize|
          -> Option<OrderedShape> {
             let mut heights: Vec<(String, usize)> = names
                 .iter()
@@ -594,8 +609,17 @@ impl ZKMProofShape {
             let area_of = |hs: &[(String, usize)]| -> u128 {
                 hs.iter().map(|(n, h)| (chip_width(n) as u128) * (1u128 << *h)).sum()
             };
-            let cap_area: u128 =
+            // The greedy fill below packs up to `cap_area`, so `cap_area` is
+            // what decides the pad-column count: filling right up to the class
+            // ceiling leaves the smallest gap and so the FEWEST pad columns.
+            // To reach a representative at `target_main_pads` columns instead,
+            // lower the ceiling by the `target_main_pads - 1` whole pad columns
+            // that have to sit below it.  The exact landing point is still
+            // checked against both halves of the key at the end.
+            let class_ceiling: u128 =
                 (target_main_blocks as u128) << (zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT);
+            let cap_area: u128 =
+                class_ceiling.saturating_sub(((target_main_pads - 1) * pad_col_cells) as u128);
             if area_of(&heights) > cap_area {
                 return None;
             }
@@ -624,7 +648,8 @@ impl ZKMProofShape {
                 heights[i].1 = best;
             }
             let os = OrderedShape::from_log2_heights(&heights);
-            (blocks_of(&os).1 == target_main_blocks).then_some(os)
+            (blocks_of(&os).1 == target_main_blocks && pads_of(&os).1 == target_main_pads)
+                .then_some(os)
         };
 
         // The reachable MAIN block counts.  `committed_dense_len` rounds a
@@ -660,9 +685,25 @@ impl ZKMProofShape {
         let main_block_targets: Vec<usize> =
             (1..=4).chain((1..).map(|k| k * 8).take_while(|b| *b < MAX_BLOCKS)).collect();
 
+        // The reachable pad-column counts.  A round's gap is at most the width
+        // of one rounding step — eight stacking blocks — so no round can need
+        // more than `ceil(8 << log_stacking / 2^CORE_MAX_LOG_ROW_COUNT)`
+        // columns, and never fewer than one.  Below four blocks the step is a
+        // single block, which fits in one column, so those classes only ever
+        // land on 1; `shape_at_class` returns `None` for the unreachable
+        // combinations rather than this bound having to know about them.
+        let max_pad_cols: usize =
+            (8usize << (zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize))
+                .div_ceil(pad_col_cells)
+                .max(1);
+
         let small_shapes: Vec<OrderedShape> = {
-            // ONE representative per (chip set, prep blocks, main blocks).
-            let mut by_class: BTreeMap<(Vec<String>, usize, usize), OrderedShape> = BTreeMap::new();
+            // ONE representative per
+            // (chip set, prep blocks, main blocks, prep pad cols, main pad cols)
+            // — the full set of commitment geometry the normalize program is a
+            // function of.  See `pads_of` for why the pad counts belong here.
+            let mut by_class: BTreeMap<(Vec<String>, usize, usize, usize, usize), OrderedShape> =
+                BTreeMap::new();
             for cluster in &machine_shape.chip_clusters {
                 let names: Vec<String> =
                     cluster.iter().filter(|n| chips_by_name.contains_key(*n)).cloned().collect();
@@ -683,20 +724,32 @@ impl ZKMProofShape {
                 // the same prep block count are deduped by the class key.
                 for prog_h in 1..=cube {
                     for &target in &main_block_targets {
-                        let Some(os) = shape_at_class(&names, &fillers, prog_h, target) else {
-                            continue;
-                        };
-                        let (prep_blocks, main_blocks) = blocks_of(&os);
-                        // AreaOutOfBounds: the CONCATENATED instance is what the
-                        // proof commits, so both rounds count toward the guard.
-                        if prep_blocks + main_blocks >= MAX_BLOCKS {
-                            continue;
+                        for target_pads in 1..=max_pad_cols {
+                            let Some(os) =
+                                shape_at_class(&names, &fillers, prog_h, target, target_pads)
+                            else {
+                                continue;
+                            };
+                            let (prep_blocks, main_blocks) = blocks_of(&os);
+                            let (prep_pads, main_pads) = pads_of(&os);
+                            // AreaOutOfBounds: the CONCATENATED instance is what
+                            // the proof commits, so both rounds count toward the
+                            // guard.
+                            if prep_blocks + main_blocks >= MAX_BLOCKS {
+                                continue;
+                            }
+                            let mut inner = os.inner.clone();
+                            inner.sort();
+                            by_class
+                                .entry((
+                                    names.clone(),
+                                    prep_blocks,
+                                    main_blocks,
+                                    prep_pads,
+                                    main_pads,
+                                ))
+                                .or_insert(OrderedShape { inner });
                         }
-                        let mut inner = os.inner.clone();
-                        inner.sort();
-                        by_class
-                            .entry((names.clone(), prep_blocks, main_blocks))
-                            .or_insert(OrderedShape { inner });
                     }
                 }
             }
