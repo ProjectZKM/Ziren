@@ -229,7 +229,10 @@ where
         let modulus_coeffs = P::MODULUS.iter().map(|&limbs| AB::Expr::from_u8(limbs)).collect_vec();
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
-        local.output.eval_variable(
+        // `eval_addsubmul`, not `eval_variable`: this chip never divides, and the
+        // `AB::F::ZERO` it used to pass for `is_div` did not stop `eval_variable`
+        // building `p_div = p_res * p_b` on every one of its rows.
+        local.output.eval_addsubmul(
             builder,
             &p,
             &q,
@@ -237,7 +240,6 @@ where
             local.is_add,
             local.is_sub,
             local.is_mul,
-            AB::F::ZERO,
             local.is_real,
         );
 

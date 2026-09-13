@@ -270,6 +270,53 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
     }
 
+    /// Add/sub/mul, no division — for the fused `Fp` precompile chip.
+    ///
+    /// Semantically IDENTICAL to [`Self::eval_variable`] with `is_div = 0`, and
+    /// identical for the same reason [`Self::eval_addsub`] is: the selector
+    /// being a compile-time zero does not stop `eval_variable` building
+    /// `p_div = p_res * p_b`, an entire `NUM_LIMBS^2` expression tree, before
+    /// multiplying it away.
+    ///
+    /// `fptower::fp` passes `AB::F::ZERO` for `is_div` on every row, so the
+    /// whole chip has been paying for a second convolution it can never reach.
+    /// `Bn254FpOpAssign` is 1,182,662 rows on a BN254-heavy block, the single
+    /// largest precompile term there, so this is the cheapest large reduction
+    /// available: it needs no new chip and no executor change.
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval_addsubmul<AB: ZKMAirBuilder<Var = V>>(
+        &self,
+        builder: &mut AB,
+        a: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        b: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        modulus: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        is_add: impl Into<AB::Expr> + Clone,
+        is_sub: impl Into<AB::Expr> + Clone,
+        is_mul: impl Into<AB::Expr> + Clone,
+        is_real: impl Into<AB::Expr> + Clone,
+    ) where
+        V: Into<AB::Expr>,
+        Limbs<V, P::Limbs>: Copy,
+    {
+        let p_a_param: Polynomial<AB::Expr> = (a).clone().into();
+        let p_b: Polynomial<AB::Expr> = (b).clone().into();
+        let p_res_param: Polynomial<AB::Expr> = self.result.into();
+
+        let is_add: AB::Expr = is_add.into();
+        let is_sub: AB::Expr = is_sub.into();
+        let is_mul: AB::Expr = is_mul.into();
+
+        // `eval_variable` with is_div = 0, term for term.
+        let p_result =
+            p_res_param.clone() * (is_add.clone() + is_mul.clone()) + p_a_param.clone() * is_sub.clone();
+        let p_add = p_a_param.clone() + p_b.clone();
+        let p_sub = p_res_param + p_b.clone();
+        let p_mul = p_a_param * p_b;
+        let p_op = p_add * is_add + p_sub * is_sub + p_mul * is_mul;
+
+        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
+    }
+
     /// Add/sub only: `result = a + b mod M` under `is_add`, `a - b mod M` under `is_sub`.
     ///
     /// Semantically IDENTICAL to [`Self::eval_variable`] called with
