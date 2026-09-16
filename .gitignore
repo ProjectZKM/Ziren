@@ -6,6 +6,10 @@ crates/test-artifacts/guests/Cargo.lock
 *.log
 bins
 *.s
+# ...but the Go runtime overlay IS source: it replaces stock runtime
+# assembly in the guest build, and `*.s` above silently kept it out of
+# every clone (the zkvm RuntimeExit commit-then-halt path lives here).
+!crates/go-runtime/zkvm_overlay/**/*.s
 *.txt
 *.codex
 

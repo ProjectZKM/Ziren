@@ -51,7 +51,8 @@ fn main() {
         .current_dir(&keeper_dir)
         .env("GOOS", "linux")
         .env("GOARCH", "mipsle")
-        .env("GOMIPS", "softfloat");
+        .env("GOMIPS", "softfloat")
+        .env("GOTOOLCHAIN", "go1.25.4");
     let status = cmd.status().expect("failed to run go build");
 
     if !status.success() {

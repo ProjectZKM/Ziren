@@ -9070,6 +9070,7 @@ dependencies = [
  "clap",
  "dirs",
  "eyre",
+ "hex",
  "itertools 0.13.0",
  "lru",
  "num-bigint 0.4.6",
@@ -9097,6 +9098,7 @@ dependencies = [
  "zkm-recursion-compiler",
  "zkm-recursion-core",
  "zkm-recursion-gnark-ffi",
+ "zkm-recursion-jit",
 ]
 
 [[package]]
@@ -9218,6 +9220,18 @@ dependencies = [
  "zkm-core-machine",
  "zkm-pcs",
  "zkm-recursion-compiler",
+]
+
+[[package]]
+name = "zkm-recursion-jit"
+version = "2.0.0"
+dependencies = [
+ "dynasmrt",
+ "p3-field 0.5.1",
+ "p3-koala-bear 0.5.1",
+ "thiserror 1.0.69",
+ "tracing",
+ "zkm-recursion-core",
 ]
 
 [[package]]
