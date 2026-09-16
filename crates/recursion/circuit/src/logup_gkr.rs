@@ -252,10 +252,11 @@ where
 }
 
 /// Number of grinding bits for the LogUp-GKR challenge — must stay in
-/// lockstep with the host prover's `zkm_pcs::logup_gkr::GKR_GRINDING_BITS`
-/// (= 12); the in-circuit verifier re-checks the same witness the host
-/// ground, so a mismatch would reject honest proofs.
-pub const GKR_GRINDING_BITS: usize = 0;
+/// lockstep with the host prover's `zkm_pcs::logup_gkr::GKR_GRINDING_BITS`;
+/// the in-circuit verifier re-checks the same witness the host ground, so a
+/// mismatch would reject honest proofs.  16 is what the 100-bit provable
+/// schedule needs (docs/soundness/): at 0 the LogUp-GKR term scores 84.
+pub const GKR_GRINDING_BITS: usize = 16;
 
 /// Per-shard chip introspection input to [`verify_logup_gkr`].
 ///
@@ -833,7 +834,7 @@ mod tests {
     // degree-masked num/den arithmetic — the genuine height anchor.
 
     use p3_air::VirtualPairCol;
-    
+
     use zkm_pcs::air::LookupScope;
     use zkm_pcs::{Lookup, LookupKind};
 

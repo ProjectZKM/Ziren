@@ -1,4 +1,4 @@
-# 📊 Ziren (v2.0 (feat/upgrade-plonky3 1114ad77, UDR-64 schedule))
+# 📊 Ziren (v2.0 (feat/upgrade-plonky3, UDR-100 schedule))
 
 How to read this report:
 - Table rows correspond to security regimes
@@ -10,7 +10,7 @@ How to read this report:
 
 | Metric | Value | Relevant circuit | Notes |
 | --- | --- | --- | --- |
-| Final bits of security | **64 bits** | [core](#core) | Regime: UDR |
+| Final bits of security | **100 bits** | [core](#core) | Regime: UDR |
 | Final proof size (worst case) | **975 KiB** | [wrap](#wrap) | |
 
 ## Circuits
@@ -31,17 +31,18 @@ How to read this report:
 - Constraint degree: 3
 - Batch size: 32
 - Batching: Affine
-- Queries per iteration: [71, 51, 49]
+- Queries per iteration: [124, 88, 85]
 - OOD samples per iteration: [2, 2]
 - Total grinding overhead log2: 17.59
-- Trace length: 4194304
-- Trace width: 36489
+- Jagged trace length: 4194304
+- Jagged trace width: 36489
+- Lookup (logup): logup-gkr
 
-**Proof Size:** 228 KiB (expected) / 262 KiB (worst case)
+**Proof Size:** 383 KiB (expected) / 450 KiB (worst case)
 
 | regime | total | logup-gkr | OOD(i=1) | OOD(i=2) | Shift(i=1) | Shift(i=2) | batching | fin | fold(i=0,s=1) | fold(i=0,s=2) | fold(i=0,s=3) | fold(i=1,s=1) | fold(i=1,s=2) | fold(i=1,s=3) | fold(i=1,s=4) | fold(i=1,s=5) | fold(i=1,s=6) | fold(i=2,s=1) | fold(i=2,s=2) | fold(i=2,s=3) | fold(i=2,s=4) | fold(i=2,s=5) | fold(i=2,s=6) | reduce to dense PCS | zerocheck |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UDR | 64 | 84 | 213 | 225 | 64 | 64 | 102 | 64 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 109 |
+| UDR | 100 | 100 | 213 | 225 | 100 | 100 | 102 | 100 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 109 |
 
 
 ## compress
@@ -56,17 +57,18 @@ How to read this report:
 - Constraint degree: 3
 - Batch size: 32
 - Batching: Affine
-- Queries per iteration: [71, 51, 49]
+- Queries per iteration: [124, 88, 85]
 - OOD samples per iteration: [2, 2]
 - Total grinding overhead log2: 17.59
-- Trace length: 1048576
-- Trace width: 392
+- Jagged trace length: 1048576
+- Jagged trace width: 392
+- Lookup (logup): logup-gkr
 
-**Proof Size:** 228 KiB (expected) / 262 KiB (worst case)
+**Proof Size:** 383 KiB (expected) / 450 KiB (worst case)
 
 | regime | total | logup-gkr | OOD(i=1) | OOD(i=2) | Shift(i=1) | Shift(i=2) | batching | fin | fold(i=0,s=1) | fold(i=0,s=2) | fold(i=0,s=3) | fold(i=1,s=1) | fold(i=1,s=2) | fold(i=1,s=3) | fold(i=1,s=4) | fold(i=1,s=5) | fold(i=1,s=6) | fold(i=2,s=1) | fold(i=2,s=2) | fold(i=2,s=3) | fold(i=2,s=4) | fold(i=2,s=5) | fold(i=2,s=6) | reduce to dense PCS | zerocheck |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UDR | 64 | 96 | 213 | 225 | 64 | 64 | 102 | 64 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 115 |
+| UDR | 100 | 112 | 213 | 225 | 100 | 100 | 102 | 100 | 103 | 104 | 105 | 103 | 104 | 105 | 106 | 107 | 108 | 105 | 106 | 107 | 108 | 109 | 110 | 116 | 115 |
 
 
 ## wrap
@@ -77,21 +79,22 @@ How to read this report:
 - Hash size (bits): 254
 - Number of queries: 94
 - Grinding query phase (bits): 22
+- Grinding batching phase (bits): 16
 - Field: KoalaBear⁴
 - Rate (ρ): 0.125
-- Dense trace length: $2^{21}$
-- Trace length: 1048576
-- Trace width: 247
+- Trace length (H): $2^{21}$
 - FRI rounds: 21
 - FRI folding factors: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
 - FRI early stop degree: 8
-- Dense batch size: 32
+- Batch size: 32
 - Batching: Affine
+- Jagged trace length: 1048576
+- Jagged trace width: 247
 - Lookup (logup): logup-gkr
 
 **Proof Size:** 545 KiB (expected) / 975 KiB (worst case)
 
 | regime | total | logup-gkr | batching | commit round 1 | commit round 10 | commit round 11 | commit round 12 | commit round 13 | commit round 14 | commit round 15 | commit round 16 | commit round 17 | commit round 18 | commit round 19 | commit round 2 | commit round 20 | commit round 21 | commit round 3 | commit round 4 | commit round 5 | commit round 6 | commit round 7 | commit round 8 | commit round 9 | query phase | reduce to dense PCS | zerocheck |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UDR | 96 | 96 | 114 | 102 | 111 | 112 | 113 | 114 | 115 | 116 | 117 | 118 | 119 | 120 | 103 | 120 | 121 | 104 | 105 | 106 | 107 | 108 | 109 | 110 | 100 | 116 | 115 |
+| UDR | 100 | 112 | 114 | 102 | 111 | 112 | 113 | 114 | 115 | 116 | 117 | 118 | 119 | 120 | 103 | 120 | 121 | 104 | 105 | 106 | 107 | 108 | 109 | 110 | 100 | 116 | 115 |
 

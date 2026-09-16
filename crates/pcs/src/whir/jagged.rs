@@ -121,19 +121,20 @@ pub fn core_whir_config(lsh: usize) -> WhirConfig {
     // Round-0 folds FEWER variables than the later rounds.  A round-0 query
     // authenticates one coset row from EVERY stripe of every round — `chunks
     // x 2^ff0` felts — and re-hashing those rows is the recursion leaf's
-    // dominant cost (measured: at reth areas the uniform ff=7 schedule gives
+    // dominant cost (measured: at reth areas a uniform ff=7 schedule gives
     // ~28K felts/query x 84 queries ≈ 2.4M felts ⇒ a ~640M-cell leaf that
-    // cannot fit a 32GB card).  ff0=4 cuts that term 8x; later rounds query
-    // a single folded poly (leaf = 2^7 felts, chunk-independent) so their
-    // factor stays 7.  Query counts, rates, and PoW are round-indexed and
-    // unchanged.  lsh=21: folds [4,7,7], final poly 2^3 coefficients.
-    // Provable (unique-decoding) 64-bit schedule — see docs/soundness/.
-    // Per round: queries x (-log2((1+rho)/2)) + PoW = 71x0.678+16, 51x0.956+16,
-    // 49x0.994+16 ~ 64.  (The Johnson regime is capped at 65 bits by the
-    // field's fold terms whatever the query count, so 64 is what both
-    // accountings agree on.)  Round-0 queries drive the compress proof size
-    // (79% of its bytes) and the recursion verifier's work; 124 -> 71 was the
-    // 100 -> 64 bit decision of Sep 5.
+    // cannot fit a 32GB card).  ff0=3 cuts that term 16x; later rounds query
+    // a single folded poly (leaf = 2^6 felts, chunk-independent) so their
+    // factor stays 6.  Query counts, rates, and PoW are round-indexed and
+    // independent of the folds.  lsh=21: folds [3,6,6], final poly 2^6.
+    // Provable (unique-decoding) 100-bit schedule — see docs/soundness/.
+    // Per round: queries x (-log2((1+rho)/2)) + PoW = 124x0.678+16,
+    // 88x0.956+16, 85x0.994+16 ~ 100.  The Johnson regime is capped at 65
+    // bits by the field's fold terms whatever the query count, so 100 is a
+    // UNIQUE-DECODING claim and the list-decoding accounting does not reach
+    // it; `udr_only = true` in the soundcalc config says so.  Round-0
+    // queries drive the compress proof size (79% of its bytes) and the
+    // recursion verifier's work, which is what 100 bits costs.
     const ROUND0_FF: usize = 3;
     const START_LOG_INV_RATE: usize = 2;
     let mut rem =
@@ -151,7 +152,7 @@ pub fn core_whir_config(lsh: usize) -> WhirConfig {
         rp.log_inv_rate = START_LOG_INV_RATE + 3 * (r + 1);
     }
     let num_rounds = config.round_parameters.len();
-    let queries = [71usize, 51, 49, 49, 49, 49, 49];
+    let queries = [124usize, 88, 85, 85, 85, 85, 85];
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.num_queries = queries[r.min(queries.len() - 1)];
         rp.queries_pow_bits = 16;

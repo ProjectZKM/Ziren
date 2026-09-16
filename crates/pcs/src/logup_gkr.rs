@@ -20,8 +20,11 @@ use p3_field::Field;
 /// LogUp-GKR argument. The prover grinds
 /// for a witness that, once absorbed, makes the challenger emit
 /// `GKR_GRINDING_BITS` leading zero bits; the verifier re-checks the witness
-/// before sampling any GKR challenge.
-pub const GKR_GRINDING_BITS: usize = 0;
+/// before sampling any GKR challenge.  16 is what the 100-bit provable
+/// schedule needs (docs/soundness/): at 0 the LogUp-GKR term scores 84, and
+/// the total is the minimum over terms.  It costs ~43 ms/shard in the
+/// deterministic search.
+pub const GKR_GRINDING_BITS: usize = 16;
 
 /// Config-aware GKR proof-of-work grinding.
 ///
