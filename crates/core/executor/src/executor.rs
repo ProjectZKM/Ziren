@@ -102,7 +102,7 @@ const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SH
 /// Measured Sep 6 at 25 bits (8 M shards, reth): the clk fence closed 29 of 48 execution shards
 /// at 6.71 M cycles with only ~363 M of the 460 M-cell area budget used, so the width was the
 /// binding fence; at 26 bits `ELEMENT_THRESHOLD` (trace area) binds again.
-pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 26;
+pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 25;
 
 /// Whether to log one `SHARD_CLOSE` line per closed core shard, naming the
 /// fence that closed it.  Read once; off unless `ZIREN_SHARD_CLOSE_CENSUS` is
