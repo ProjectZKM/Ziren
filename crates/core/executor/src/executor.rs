@@ -3028,8 +3028,18 @@ impl<'a> Executor<'a> {
                 // The hint window this chunk consumed. Final as of now: the
                 // cursor has passed it, and neither `FD_HINT` (pushes at the
                 // end) nor a hook (splices at the cursor) rewrites behind it.
+                //
+                // Carry ONE ENTRY PAST the cursor. HINT_LEN (`syscalls/hint.rs`)
+                // PEEKS `input_stream[ptr]` to report its length and does NOT
+                // advance `ptr`; only the matching HINT_READ does. A chunk that
+                // closes between the two has therefore already read the entry at
+                // `ptr`, and a window ending at `ptr` would leave it out: the
+                // replay re-runs that HINT_LEN, finds its cursor at the end of a
+                // slice one entry short, and dies with InvalidSyscallArgs. The
+                // next chunk opens at `ptr` and keeps its own copy, so the entry
+                // is duplicated across the seam on purpose.
                 let from = prev.input_stream_ptr as usize;
-                let to = self.state.input_stream_ptr.min(self.state.input_stream.len());
+                let to = self.state.input_stream_ptr.saturating_add(1).min(self.state.input_stream.len());
                 prev.input_stream_slice = Some(if from < to {
                     self.state.input_stream[from..to].to_vec()
                 } else {
