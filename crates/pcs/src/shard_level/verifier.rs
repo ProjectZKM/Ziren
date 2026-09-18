@@ -422,6 +422,7 @@ impl BasefoldShardVerifier {
             // The trace openings the recursion circuit cross-binds to the
             // jagged claimed sum; index-aligned with `chips`.
             &proof.opened_values,
+            &proof.main_commitment,
             challenger,
             pinned.map(|_| proof.padding_row_heights.first().map_or(0, |h| h.len())),
         )?;
@@ -457,6 +458,11 @@ fn verify_jagged_pcs_host<SC, A>(
     // assert (recursive_jagged_pcs.rs:247) and reject a bundle whose
     // `y_per_chip` diverges from the openings the zerocheck consumed.
     opened_values: &crate::ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    // The eight felts the Fiat-Shamir prologue observed as this shard's main
+    // commitment.  The OUTER ring needs them here: that is the only place its
+    // bundle is decoded, and projecting the bundle's own commitment to compare
+    // against them is the re-bind the wrap path never had.
+    observed_main_commitment: &[Val<SC>; 8],
     challenger: &mut SC::Challenger,
     // `Some(n)` on a pinned machine: the proof claims `n` preprocessed-round
     // padding columns, which names its pin class
@@ -551,6 +557,39 @@ where
                     )));
                 }
             };
+        // OUTER-RING COMMITMENT RE-BIND.
+        //
+        // The wrap prover sets `main_commitment` to
+        // `digest_felts(commit.original_commitment)` and leaves the binding to
+        // "its registered hook" (`shard_level/prover.rs`).  That hook was never
+        // written, so the eight felts that seeded Fiat-Shamir and the
+        // commitment this bundle's Merkle/FRI proof actually opens were two
+        // unrelated objects: a prover could build the AIR/zerocheck half around
+        // chosen openings and a perfectly valid BaseFold bundle for a DIFFERENT
+        // polynomial, and nothing here required the halves to describe one
+        // trace.  Project the bundle's own commitment and require it to be the
+        // observed one.  Done HERE, on the already-decoded bundle -- decoding a
+        // second copy of a ~1.2 MB bundle earlier in the call chain overflowed
+        // the stack.
+        {
+            let projected =
+                <SC as crate::BasefoldRing>::digest_felts(&bundle.commit.original_commitment);
+            // SAFETY: [JaggedVal; 8] == [Val<SC>; 8] (JaggedVal == KoalaBear ==
+            // Val<SC>), the identity the prover uses to write `main_commitment`.
+            let projected_val: [Val<SC>; 8] = unsafe {
+                core::mem::transmute_copy::<[crate::jagged_pcs::JaggedVal; 8], [Val<SC>; 8]>(
+                    &projected,
+                )
+            };
+            if projected_val != *observed_main_commitment {
+                return Err(BasefoldVerifyError::JaggedPcs(
+                    "outer ring: digest_felts(bundle.commit.original_commitment) != the \
+                     observed main_commitment -- the commitment that seeded Fiat-Shamir is \
+                     not the one this opening authenticates"
+                        .into(),
+                ));
+            }
+        }
         let chip_widths: Vec<usize> =
             chips.iter().map(|c| <_ as BaseAir<Val<SC>>>::width(*c)).collect();
         // SAFETY: Challenge<SC> == InnerChallenge under the field gate above.
