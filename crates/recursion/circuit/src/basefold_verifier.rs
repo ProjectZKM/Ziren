@@ -1025,9 +1025,39 @@ where
         // observed by the JAGGED layer BEFORE z_col is sampled (mirror of
         // host verify_jagged_basefold_inner_generic's leading
         // `challenger.observe(commit)`), so they are NOT re-observed here,
-        // and the untrusted batch_evaluations are never observed into the
-        // transcript.  `commitments` + `batch_evaluations` are consumed by
-        // the per-query component binding below.
+        // `commitments` + `batch_evaluations` are consumed by the per-query
+        // component binding below, and `batch_evaluations` is now also
+        // ABSORBED first — see step (0), which closes the adaptivity that
+        // made the batching point predictable before the claims were fixed.
+
+        // (0) Bind the claims: the claimed evaluations are absorbed BEFORE any randomness that
+        // weighs them.
+        //
+        // These values are prover-supplied and were trusted for transcript
+        // purposes: grinding and the batching point were derived without them.
+        // That makes the batching vector `lambda` predictable to a prover who
+        // has not yet chosen `y`.  The stacked layer checks `sum_i a_i y_i = q`
+        // for the outer claim `q`, and BaseFold proves only
+        // `sum_i lambda_i y_i = sum_i lambda_i v_i` -- two linear equations in
+        // `y`.  With two or more stripe claims and independent `a`, `lambda`,
+        // they can be solved for ANY target `q`: the prover opens the honest
+        // random combination while the stacked equation reports a value that is
+        // not the committed polynomial's.  A correct sumcheck, FRI chain and
+        // Merkle path do not help, because the choice happens before them.
+        //
+        // Absorbing first removes the adaptivity.  The order below -- claims,
+        // then batch grinding, then the batching point -- is the contract, and
+        // the host prover, the native verifier, the recursive verifier and the
+        // CUDA prover all have to keep it or the transcript forks.
+        //
+        // This is the observation the comment above used to say did NOT happen
+        // ("the untrusted batch_evaluations are never observed into the
+        // transcript").  It does now, in the host's order.
+        for round in batch_evaluations.iter() {
+            for &claim in round.iter() {
+                observe_ext_element::<C, FC>(builder, challenger, claim);
+            }
+        }
 
         // (1) Verify batch grinding (host step 1):
         //   check_witness(BATCH_GRINDING_BITS, batch_grinding_witness).
