@@ -50,6 +50,27 @@ use crate::{
 /// equals the provider value for every chip.  A host (`CpuProver`) caller with
 /// no device traces passes `|_| None`, so every width-0 chip stays a plain
 /// `dummy`.
+/// Wrap one raw chip trace at `cube`, moving its cells rather than copying.
+///
+/// A width-0 chip (device-resident or unexercised) has no host cells and maps
+/// to a fully-virtual `dummy`; an empty `inner` is THE "no host trace data"
+/// discriminator.
+pub fn into_padded<F: p3_field::Field>(
+    mat: RowMajorMatrix<F>,
+    cube: u32,
+) -> crate::multilinear::PaddedMle<F> {
+    if mat.width == 0 {
+        crate::multilinear::PaddedMle::dummy(
+            cube,
+            crate::multilinear::Padding::Constant(F::ZERO, 0),
+        )
+    } else {
+        // MOVE the trace's backing buffer into the Mle (zero-copy).
+        let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(mat));
+        crate::multilinear::PaddedMle::padded_with_zeros(mle, cube)
+    }
+}
+
 pub fn named_padded_traces<F, N, T, H>(
     names: N,
     traces: T,
@@ -267,10 +288,20 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 })
                 .collect::<Result<Vec<_>, A::Error>>()
         })?;
+        // Wrap once, here, at the FIXED cube every stage proves at: the trace
+        // then carries its own shape and no consumer re-wraps it. The wrap is
+        // zero-copy -- `Mle::from_row_major` moves the matrix's `Vec`.
+        //
         // One chip generates one trace, so the collect into a name-keyed map is
-        // lossless (`shard_chips` yields each chip once), and each matrix MOVES
-        // in -- the cells are not touched.
-        Ok(crate::Traces { named_traces: traces.into_iter().collect() })
+        // lossless: `shard_chips` yields each chip once.
+        let cube = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+            .max_log_row_count as u32;
+        Ok(crate::Traces {
+            named_traces: traces
+                .into_iter()
+                .map(|(name, mat)| (name, into_padded(mat, cube)))
+                .collect(),
+        })
     }
 
     /// Commit to the main traces.
@@ -454,14 +485,17 @@ where
         // degree-masked reconstruction excludes it (degree=0 => full_geq=1 =>
         // identity fraction (0,1)).  `None` (recursion / shrink / wrap) =>
         // own-chip-set commit.
+        let cube = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+            .max_log_row_count as u32;
         if let Some(cluster_widths) = cluster_widths {
             for (name, width) in cluster_widths.iter() {
                 // 0 rows at full canonical width: `values` empty, `width == w`
-                // => `RowMajorMatrix::height() == 0`.
+                // => height 0, so the chip is PRESENT in the committed set but
+                // commits nothing.
                 let w = (*width).max(1);
-                named_traces
-                    .entry(name.clone())
-                    .or_insert_with(|| RowMajorMatrix::new(Vec::<Val<SC>>::new(), w));
+                named_traces.entry(name.clone()).or_insert_with(|| {
+                    into_padded(RowMajorMatrix::new(Vec::<Val<SC>>::new(), w), cube)
+                });
             }
         }
 
@@ -492,17 +526,9 @@ where
                 // `<= cube` at shape construction; `PaddedMle::padded`
                 // hard-asserts it again per chip below, so an over-tall
                 // trace fails loudly here rather than growing the cube.
-                let max_log_row_count =
-                    crate::shard_level::verifier::BasefoldShardVerifier::production_default()
-                        .max_log_row_count;
-                let names: Vec<String> = named_traces.keys().cloned().collect();
-                let main_store = named_padded_traces(
-                    names,
-                    named_traces.into_iter().map(|(_, mat)| mat),
-                    max_log_row_count as u32,
-                    // Host prover: no device traces, no baked heights.
-                    |_| None,
-                );
+                // The traces arrived already wrapped at this cube, so the
+                // store IS the map -- no second pass, no name vector.
+                let main_store = named_traces.named_traces;
                 let chips: Vec<&MachineChip<SC, A>> =
                     self.machine().shard_chips_ordered(&chip_ordering).collect();
                 // `views` and `chips` are zipped positionally by `commit_traces`,

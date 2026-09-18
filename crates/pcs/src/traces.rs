@@ -1,7 +1,6 @@
 //! A shard's main traces, keyed by chip name.
 
-use p3_matrix::dense::RowMajorMatrix;
-use serde::{Deserialize, Serialize};
+use crate::multilinear::PaddedMle;
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
@@ -23,21 +22,25 @@ use std::ops::{Deref, DerefMut};
 ///    positionally, so a repeated name shifts every later pair and commits
 ///    traces against the wrong AIRs.
 ///
-/// One difference from SP1 that is deliberate: SP1 stores an already-padded
-/// `PaddedMle`, because its trace generator pads (and copies to the backend) at
-/// generation time. Ziren pads later, in `commit`, where the device path also
-/// supplies baked heights for width-0 chips, so the element here is the raw
-/// `RowMajorMatrix` and `named_padded_traces` does the wrap.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(bound(serialize = "F: Serialize", deserialize = "F: Deserialize<'de>"))]
+/// The element is a [`PaddedMle`], as in SP1: the trace is wrapped once, at
+/// generation, and carries its own cube from then on. The wrap is zero-copy —
+/// `Mle::from_row_major` MOVES the matrix's `Vec` — and the cube is the fixed
+/// `CORE_MAX_LOG_ROW_COUNT` every stage proves at, so it is known at generation
+/// and never floated per proof. Holding the raw `RowMajorMatrix` instead would
+/// mean re-wrapping at each consumer and carrying the cube separately.
+/// (SP1 additionally derives `Serialize`/`Deserialize`, because its `Traces`
+/// crosses a process boundary. Ziren's `PaddedMle` is not serializable and
+/// nothing here serializes a `Traces`, so those derives are omitted rather than
+/// forced onto the MLE.)
+#[derive(Debug, Clone, Default)]
 pub struct Traces<F> {
     /// The traces for each chip.
-    pub named_traces: BTreeMap<String, RowMajorMatrix<F>>,
+    pub named_traces: BTreeMap<String, PaddedMle<F>>,
 }
 
 impl<F> IntoIterator for Traces<F> {
-    type Item = (String, RowMajorMatrix<F>);
-    type IntoIter = <BTreeMap<String, RowMajorMatrix<F>> as IntoIterator>::IntoIter;
+    type Item = (String, PaddedMle<F>);
+    type IntoIter = <BTreeMap<String, PaddedMle<F>> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.named_traces.into_iter()
@@ -45,7 +48,7 @@ impl<F> IntoIterator for Traces<F> {
 }
 
 impl<F> Deref for Traces<F> {
-    type Target = BTreeMap<String, RowMajorMatrix<F>>;
+    type Target = BTreeMap<String, PaddedMle<F>>;
 
     fn deref(&self) -> &Self::Target {
         &self.named_traces
@@ -61,29 +64,39 @@ impl<F> DerefMut for Traces<F> {
 #[cfg(test)]
 mod tests {
     use super::Traces;
+    use crate::basefold::Mle;
+    use crate::multilinear::PaddedMle;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
+    use std::sync::Arc;
+
+    const CUBE: u32 = 5;
+
+    fn wrap(values: Vec<KoalaBear>, width: usize) -> (PaddedMle<KoalaBear>, *const KoalaBear) {
+        let m = RowMajorMatrix::new(values, width);
+        let ptr = m.values.as_ptr();
+        (PaddedMle::padded_with_zeros(Arc::new(Mle::from_row_major(m)), CUBE), ptr)
+    }
 
     /// Traces are the largest thing the prover moves — a shard's main traces
     /// run to hundreds of millions of cells — so building a `Traces` must MOVE
-    /// each matrix, never copy its cells.
+    /// each trace, never copy its cells.
     ///
-    /// `RowMajorMatrix` owns a `Vec`, so a move relocates the 3-word handle and
-    /// leaves the allocation alone. This pins that: the backing pointer a
-    /// matrix had before it went into the map is the pointer it still has
-    /// coming out. If anyone turns one of these steps into a `clone`, the
-    /// allocation changes and this fails.
+    /// `Mle::from_row_major` takes the matrix's `Vec` by value and `PaddedMle`
+    /// holds it behind an `Arc`, so nothing is copied. This pins it by pointer
+    /// identity: if any step in the path becomes a `clone`, the allocation
+    /// changes and this fails.
     #[test]
     fn building_traces_moves_cells_rather_than_copying_them() {
-        let cells: Vec<u32> = (0..4096).collect();
-        let before = cells.as_ptr();
-        let m = RowMajorMatrix::new(cells, 16);
-
-        let traces =
-            Traces { named_traces: [("Cpu".to_string(), m)].into_iter().collect() };
+        use p3_field::PrimeCharacteristicRing;
+        let (pm, before) = wrap(vec![KoalaBear::ONE; 32], 8);
+        let traces = Traces { named_traces: [("Cpu".to_string(), pm)].into_iter().collect() };
         assert_eq!(traces.len(), 1);
 
-        let out: Vec<RowMajorMatrix<u32>> = traces.into_iter().map(|(_, mat)| mat).collect();
-        assert_eq!(out[0].values.as_ptr(), before, "the trace was copied, not moved");
+        let out: Vec<PaddedMle<KoalaBear>> =
+            traces.into_iter().map(|(_, mle)| mle).collect();
+        let after = out[0].real_trace_ref().expect("a real trace").values.as_ptr();
+        assert_eq!(after, before, "the trace was copied, not moved");
     }
 
     #[test]
@@ -91,13 +104,13 @@ mod tests {
         // The property the `Vec` form could not express: `commit_traces` zips
         // chips and traces positionally, so two entries under one name would
         // shift every later pair.
+        use p3_field::PrimeCharacteristicRing;
+        let (a, _) = wrap(vec![KoalaBear::ONE; 8], 4);
+        let (b, _) = wrap(vec![KoalaBear::TWO; 8], 4);
         let t = Traces {
-            named_traces: [
-                ("Cpu".to_string(), RowMajorMatrix::new(vec![1u32; 8], 4)),
-                ("Cpu".to_string(), RowMajorMatrix::new(vec![2u32; 8], 4)),
-            ]
-            .into_iter()
-            .collect(),
+            named_traces: [("Cpu".to_string(), a), ("Cpu".to_string(), b)]
+                .into_iter()
+                .collect(),
         };
         assert_eq!(t.len(), 1);
     }
@@ -106,16 +119,15 @@ mod tests {
     fn iteration_is_name_ordered() {
         // The commit order the recursion verifier's compile-time `column_counts`
         // assume, with no sort at the call site.
+        use p3_field::PrimeCharacteristicRing;
+        let names = ["ShiftLeft", "AddSub", "Memory"];
         let t = Traces {
-            named_traces: [
-                ("ShiftLeft".to_string(), RowMajorMatrix::new(vec![0u32; 4], 4)),
-                ("AddSub".to_string(), RowMajorMatrix::new(vec![0u32; 4], 4)),
-                ("Memory".to_string(), RowMajorMatrix::new(vec![0u32; 4], 4)),
-            ]
-            .into_iter()
-            .collect(),
+            named_traces: names
+                .iter()
+                .map(|n| ((*n).to_string(), wrap(vec![KoalaBear::ZERO; 4], 4).0))
+                .collect(),
         };
-        let names: Vec<&str> = t.keys().map(String::as_str).collect();
-        assert_eq!(names, ["AddSub", "Memory", "ShiftLeft"]);
+        let got: Vec<&str> = t.keys().map(String::as_str).collect();
+        assert_eq!(got, ["AddSub", "Memory", "ShiftLeft"]);
     }
 }
