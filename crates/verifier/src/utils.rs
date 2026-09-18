@@ -26,6 +26,10 @@ pub fn bn254_public_values(zkm_vkey_hash: &[u8; 32], zkm_public_inputs: &[u8]) -
 
 /// Decodes the Ziren vkey hash from the string from a call to `vk.bytes32`.
 pub fn decode_zkm_vkey_hash(zkm_vkey_hash: &str) -> Result<[u8; 32], Error> {
-    let bytes = hex::decode(&zkm_vkey_hash[2..]).map_err(|_| Error::InvalidProgramVkeyHash)?;
+    // `[2..]` assumed a "0x" prefix: on a shorter string, or one whose byte 2
+    // is not a char boundary, this panicked instead of returning the error this
+    // function already has for the purpose.
+    let hex_part = zkm_vkey_hash.strip_prefix("0x").ok_or(Error::InvalidProgramVkeyHash)?;
+    let bytes = hex::decode(hex_part).map_err(|_| Error::InvalidProgramVkeyHash)?;
     bytes.try_into().map_err(|_| Error::InvalidProgramVkeyHash)
 }

@@ -30,7 +30,7 @@ pub(crate) fn deserialize_with_flags(buf: &[u8]) -> Result<(Fq, CompressedPointF
 
         let x = Fq::from_be_bytes_mod_order(&x_bytes).expect("Failed to convert x bytes to Fq");
 
-        Ok((x, m_data.into()))
+        Ok((x, CompressedPointFlag::try_from(m_data)?))
     }
 }
 

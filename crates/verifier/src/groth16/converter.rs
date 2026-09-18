@@ -15,9 +15,16 @@ use super::error::Groth16Error;
 /// The byte slice is represented as 2 uncompressed g1 points, and one uncompressed g2 point,
 /// as outputted from Gnark.
 pub(crate) fn load_groth16_proof_from_bytes(buffer: &[u8]) -> Result<Groth16Proof, Groth16Error> {
-    let ar = uncompressed_bytes_to_g1_point(&buffer[..64])?;
-    let bs = uncompressed_bytes_to_g2_point(&buffer[64..192])?;
-    let krs = uncompressed_bytes_to_g1_point(&buffer[192..256])?;
+    // `buffer` is the caller's proof with the 4-byte prefix stripped, so every
+    // one of these fixed offsets is an unchecked index into untrusted bytes: a
+    // short proof panicked here rather than returning `InvalidData`.  Reach
+    // them with `get`.
+    let at = |r: core::ops::Range<usize>| {
+        buffer.get(r).ok_or(Groth16Error::GeneralError(crate::error::Error::InvalidData))
+    };
+    let ar = uncompressed_bytes_to_g1_point(at(0..64)?)?;
+    let bs = uncompressed_bytes_to_g2_point(at(64..192)?)?;
+    let krs = uncompressed_bytes_to_g1_point(at(192..256)?)?;
 
     Ok(Groth16Proof { ar, bs, krs })
 }

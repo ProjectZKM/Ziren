@@ -118,12 +118,17 @@ pub(crate) fn load_plonk_proof_from_bytes(
     buffer: &[u8],
     num_bsb22_commitments: usize,
 ) -> Result<PlonkProof, PlonkError> {
-    let lro0 = uncompressed_bytes_to_g1_point(&buffer[..64])?;
-    let lro1 = uncompressed_bytes_to_g1_point(&buffer[64..128])?;
-    let lro2 = uncompressed_bytes_to_g1_point(&buffer[128..192])?;
-    let h0 = uncompressed_bytes_to_g1_point(&buffer[192..256])?;
-    let h1 = uncompressed_bytes_to_g1_point(&buffer[256..320])?;
-    let h2 = uncompressed_bytes_to_g1_point(&buffer[320..384])?;
+    // Same as the groth16 loader: fixed offsets into untrusted bytes, reached
+    // with `get` so a short proof is `InvalidData` and not a panic.
+    let at = |r: core::ops::Range<usize>| {
+        buffer.get(r).ok_or(PlonkError::GeneralError(Error::InvalidData))
+    };
+    let lro0 = uncompressed_bytes_to_g1_point(at(0..64)?)?;
+    let lro1 = uncompressed_bytes_to_g1_point(at(64..128)?)?;
+    let lro2 = uncompressed_bytes_to_g1_point(at(128..192)?)?;
+    let h0 = uncompressed_bytes_to_g1_point(at(192..256)?)?;
+    let h1 = uncompressed_bytes_to_g1_point(at(256..320)?)?;
+    let h2 = uncompressed_bytes_to_g1_point(at(320..384)?)?;
 
     // Stores l_at_zeta, r_at_zeta, o_at_zeta, s1_at_zeta, s2_at_zeta, bsb22_commitments
     let mut claimed_values = Vec::with_capacity(5 + num_bsb22_commitments);
