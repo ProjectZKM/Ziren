@@ -49,12 +49,31 @@ pub struct NetworkProver {
 }
 
 impl NetworkProver {
+    /// Build from the environment alone.
     pub fn from_env() -> anyhow::Result<NetworkProver> {
-        let proof_network_privkey = Some(
-            env::var("ZKM_PRIVATE_KEY").expect("ZKM_PRIVATE_KEY must be set for remote proving"),
-        );
-        let endpoint =
-            Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
+        Self::with_overrides(None, None)
+    }
+
+    /// Build from explicit credentials/endpoint, falling back to the
+    /// environment for whatever is not supplied.
+    ///
+    /// `ProverClientBuilder::private_key` / `rpc_url` used to be accepted and
+    /// then dropped, because network mode always called `from_env()`: a caller
+    /// could believe it had selected one key and endpoint while the SDK
+    /// connected with unrelated environment credentials.
+    pub fn with_overrides(
+        private_key: Option<String>,
+        rpc_url: Option<String>,
+    ) -> anyhow::Result<NetworkProver> {
+        let proof_network_privkey = Some(match private_key {
+            Some(k) => k,
+            None => env::var("ZKM_PRIVATE_KEY")
+                .map_err(|_| anyhow::anyhow!("ZKM_PRIVATE_KEY must be set for remote proving"))?,
+        });
+        let endpoint = Some(match rpc_url {
+            Some(u) => u,
+            None => env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()),
+        });
         let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
         // Default ca cert directory
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -92,9 +111,9 @@ impl NetworkProver {
             None => Endpoint::new(endpoint_para.to_owned())?,
         };
 
-        let private_key = proof_network_privkey.to_owned().expect("ZKM_PRIVATE_KEY must be set");
+        let private_key = proof_network_privkey.to_owned().expect("set just above");
         if private_key.is_empty() {
-            panic!("Please set the ZKM_PRIVATE_KEY");
+            anyhow::bail!("the proving-network private key is empty");
         }
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
@@ -314,12 +333,14 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         &'a self,
         pk: &ZKMProvingKey,
         stdin: ZKMStdin,
-        _opts: ProofOpts,
+        opts: ProofOpts,
         _context: ZKMContext<'a>,
         kind: ZKMProofKind,
         elf_id: Option<String>,
     ) -> Result<(ZKMProofWithPublicValues, u64)> {
-        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, elf_id, None))
+        // `Prove::timeout` reaches `ProofOpts`; passing `None` here meant a
+        // stalled remote request polled forever despite an explicit timeout.
+        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, elf_id, opts.timeout))
     }
 }
 

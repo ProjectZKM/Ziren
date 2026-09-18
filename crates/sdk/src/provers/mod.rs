@@ -60,6 +60,14 @@ pub enum ZKMVerificationError {
     Plonk(anyhow::Error),
     #[error("Groth16 verification error: {0}")]
     Groth16(anyhow::Error),
+    /// `ZKMProof` is public and deserializable, so a structurally impossible
+    /// value (an empty `Core` shard vector) is reachable input, not a bug.
+    #[error("Malformed proof")]
+    MalformedProof,
+    /// A representable variant this verifier does not handle, e.g. `DvSnark` or
+    /// `CompressToGroth16`. Previously `unreachable!()`.
+    #[error("Unsupported proof kind")]
+    UnsupportedProofKind,
 }
 
 /// An implementation of [crate::ProverClient].
@@ -148,8 +156,14 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         }
         match &bundle.proof {
             ZKMProof::Core(proof) => {
+                // An empty `Core` vector deserializes fine, so `last()` is a
+                // real `None` and used to panic a caller.
+                let last = proof.last().ok_or(ZKMVerificationError::MalformedProof)?;
+                if last.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
+                    return Err(ZKMVerificationError::MalformedProof);
+                }
                 let public_values: &PublicValues<Word<_>, _> =
-                    proof.last().unwrap().public_values.as_slice().borrow();
+                    last.public_values.as_slice().borrow();
 
                 // Get the committed value digest bytes.
                 let committed_value_digest_bytes = public_values
@@ -173,6 +187,9 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     .map_err(ZKMVerificationError::Core)
             }
             ZKMProof::Compressed(proof) => {
+                if proof.proof.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
+                    return Err(ZKMVerificationError::MalformedProof);
+                }
                 let public_values: &PublicValues<Word<_>, _> =
                     proof.proof.public_values.as_slice().borrow();
 
@@ -222,7 +239,8 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     },
                 )
                 .map_err(ZKMVerificationError::Groth16),
-            _ => unreachable!(),
+            // Reachable: these variants deserialize like any other.
+            _ => Err(ZKMVerificationError::UnsupportedProofKind),
         }
     }
 }
