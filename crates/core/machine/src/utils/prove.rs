@@ -120,16 +120,13 @@ where
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
                 tracing::debug_span!("checkpoint generator").in_scope(|| {
-                    // One JIT pass over the whole program: it fills
-                    // `public_values_stream` and the final cycle count, and
-                    // captures a whole-program MinimalTrace chunk.  The
-                    // consumer then re-derives the shard boundaries and records
-                    // from a single from-start `ExecutionState`, so it sees
-                    // exactly what a per-shard checkpoint loop would produce.
-                    // `initial_state` is pristine: the full `input_stream` /
-                    // `proof_stream` from `write_vecs` / `write_proof`,
-                    // `global_clk == 0`, empty `records_clk`.  The consumer's
-                    // `initialize()` loads the memory image from it.
+                    // One JIT pass over the whole program fills
+                    // `public_values_stream` and the cycle count and captures a
+                    // whole-program MinimalTrace chunk. The consumer re-derives
+                    // the shard boundaries from `initial_state` alone, so it
+                    // sees what a per-shard checkpoint loop would have produced.
+                    // That state must stay pristine: full input/proof streams,
+                    // `global_clk == 0`, empty `records_clk`.
                     let initial_state = runtime.state.clone();
                     let chunk = runtime
                         .run_fast_capture_whole_program_chunk()
@@ -190,8 +187,6 @@ where
                             // Receive the latest checkpoint.
                             let received = { checkpoints_rx.lock().unwrap().recv() };
                             if let Ok((index, execution_state, done, num_cycles)) = received {
-                                // In-memory checkpoint — no
-                                // tempfile read, no bincode::deserialize.
                                 tracing::trace!(
                                     target = "checkpoint_pin",
                                     event = "consume",
@@ -199,13 +194,12 @@ where
                                     done = done,
                                     num_cycles = num_cycles,
                                 );
-                                // The checkpoint is a single from-start state
-                                // covering the whole program, and one
-                                // `trace_checkpoint` cannot cover that:
-                                // `Executor::execute` stops after
-                                // `shard_batch_size` shards.  Drive it to
-                                // completion and feed each batch to the same
-                                // body below, so peak memory stays at one batch.
+                                // One `trace_checkpoint` cannot cover a
+                                // whole-program state -- `Executor::execute`
+                                // stops after `shard_batch_size` shards -- so
+                                // drive it to completion and feed each batch
+                                // through the body below, keeping peak memory
+                                // at one batch.
                                 let mut batch_index = index;
                                 let mut process_batch = |mut records: Vec<ExecutionRecord>,
                                                      report: ExecutionReport,
@@ -228,11 +222,10 @@ where
                                 state.execution_shard = record.public_values.execution_shard;
                                 state.start_pc = record.public_values.start_pc;
                                 state.next_pc = record.public_values.next_pc;
-                                // Option 2 State bus: the per-shard 2-pc endpoints and
-                                // timestamps are populated by the executor's finalization,
-                                // not the running `state`, so carry them here — otherwise the
-                                // `record.public_values = *state` write below zeroes them and
-                                // the `State`-bus multiset no longer balances.
+                                // The executor's finalization, not the running `state`,
+                                // populates the 2-pc endpoints and timestamps, so carry them
+                                // across: the `record.public_values = *state` write below
+                                // would otherwise zero them and unbalance the State bus.
                                 state.start_next_pc = record.public_values.start_next_pc;
                                 state.next_next_pc = record.public_values.next_next_pc;
                                 state.initial_timestamp = record.public_values.initial_timestamp;
@@ -283,9 +276,9 @@ where
                                     state.last_finalize_addr_bits =
                                         record.public_values.last_finalize_addr_bits;
                                     state.start_pc = state.next_pc;
-                                    // Option 2 State bus: a no-CPU shard has no Cpu row chain,
-                                    // so its PV-AIR send_state/receive_state must self-cancel —
-                                    // force both endpoints equal (start==next 2-pc, equal ts).
+                                    // A no-CPU shard has no Cpu row chain, so its PV-AIR
+                                    // send_state/receive_state must self-cancel: force both
+                                    // endpoints equal.
                                     state.start_next_pc = state.next_next_pc;
                                     state.last_timestamp = state.initial_timestamp;
                                     record.public_values = *state;
@@ -354,9 +347,9 @@ where
                                     state.last_finalize_addr_bits =
                                         record.public_values.last_finalize_addr_bits;
                                     state.start_pc = state.next_pc;
-                                    // Option 2 State bus: a no-CPU shard has no Cpu row chain,
-                                    // so its PV-AIR send_state/receive_state must self-cancel —
-                                    // force both endpoints equal (start==next 2-pc, equal ts).
+                                    // A no-CPU shard has no Cpu row chain, so its PV-AIR
+                                    // send_state/receive_state must self-cancel: force both
+                                    // endpoints equal.
                                     state.start_next_pc = state.next_next_pc;
                                     state.last_timestamp = state.initial_timestamp;
                                     record.public_values = *state;
@@ -485,12 +478,12 @@ where
         #[cfg(feature = "debug")]
         drop(all_records_tx);
 
-        // THE INVARIANT, relied on at the `commit` call below.  Whatever
-        // `FIX_CORE_SHAPES` says, the jagged commit pads to the canonical
-        // CLUSTER shape, so the recursion normalize VK is a function of the chip
-        // SET alone and matches the production vk_map.  With FIX off the records
-        // keep their RAW heights and the STARK proves at those heights; only the
-        // commit is padded.  Built once per prove call.
+        // The invariant the `commit` call below relies on: whatever
+        // `FIX_CORE_SHAPES` says, the jagged commit pads to the canonical CLUSTER
+        // shape, so the recursion normalize VK depends on the chip SET alone and
+        // matches the production vk_map. With FIX off the records keep their raw
+        // heights and the STARK proves at those heights; only the commit is
+        // padded.
         let cluster_shape_config = CoreShapeConfig::<SC::Val>::default();
 
         // Chip NAME -> trace WIDTH, so `commit` can size the height-0 trace it
@@ -516,15 +509,13 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
-                                    // Derive this shard's canonical cluster and
-                                    // hand it to `commit`, which injects a
-                                    // height-0 full-width trace for every chip in
-                                    // the cluster the shard lacks — see the
-                                    // invariant where `cluster_shape_config` is
-                                    // built.  Keyed by chip NAME, because the PCS
-                                    // layer cannot depend on `MipsAirId`.  A shard
-                                    // that overflows every cluster yields `None`
-                                    // and commits its own chip set.
+                                    // Hand `commit` this shard's canonical cluster;
+                                    // it injects a height-0 full-width trace for
+                                    // every chip in the cluster the shard lacks.
+                                    // Keyed by chip NAME because the PCS layer
+                                    // cannot depend on `MipsAirId`. A shard that
+                                    // overflows every cluster yields `None` and
+                                    // commits its own chip set.
                                     let cluster_widths: Option<
                                         std::collections::BTreeMap<String, usize>,
                                     > = cluster_shape_config
@@ -533,14 +524,11 @@ where
                                             shape
                                                 .iter()
                                                 .filter_map(|(air, _log_h)| {
-                                                    // The shape still carries a `Cpu`
-                                                    // AXIS (the shard's cycle band),
-                                                    // but there is no Cpu CHIP —
-                                                    // injecting a non-machine name
-                                                    // would shift the alphabetical
-                                                    // chips⇄traces zip downstream.
-                                                    // Only real machine chips are
-                                                    // injectable.
+                                                    // The shape carries a `Cpu` AXIS
+                                                    // (the cycle band) but no Cpu
+                                                    // CHIP; injecting a non-machine
+                                                    // name would shift the
+                                                    // alphabetical chips/traces zip.
                                                     let name = air.to_string();
                                                     let width =
                                                         cluster_chip_widths.get(&name).copied()?;
@@ -549,18 +537,12 @@ where
                                                 .collect()
                                         });
 
-                                    // LOCKSTEP ORIENTATION: `commit()` reads the
-                                    // per-shard rev(zeta) decision directly off the
-                                    // per-stage source of truth
-                                    // (`StarkMachine::core_rev()` — `true` for the CORE
-                                    // MIPS machine) and records it on
-                                    // `MainTraceData.rev` / `PrecomputedJaggedCommit.rev`;
-                                    // `open()` reads it back off the shard data and
-                                    // threads it into the zerocheck + jagged reduction,
-                                    // so the whole CORE proof is uniformly rev and the
-                                    // commit / zerocheck / reduction can never drift.
-                                    // The recursion / shrink / wrap machines carry
-                                    // `core_rev() == false` (byte-identical).
+                                    // Orientation is decided once per stage by
+                                    // `StarkMachine::core_rev()` (true for the core MIPS
+                                    // machine, false for recursion/shrink/wrap). `commit()`
+                                    // records it on the shard data and `open()` reads it
+                                    // back, so commit, zerocheck and reduction cannot drift
+                                    // apart.
                                     let t_commit = std::time::Instant::now();
                                     // CORE never pins the recursion AREA (that is a
                                     // compress-only geometry) → `None` (NATURAL own-area
