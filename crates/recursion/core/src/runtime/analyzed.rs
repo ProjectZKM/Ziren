@@ -20,9 +20,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::machine::RecursionAirEventCount;
-use crate::runtime::instruction::{
-    HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
-};
+use crate::runtime::instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction};
 use crate::runtime::seq_block::{BasicBlock, RawProgram, SeqBlock};
 
 /// An instruction tagged with its event-write offset.
@@ -69,6 +67,118 @@ impl<F> AnalyzedInstruction<F> {
     }
 }
 
+/// The event-vector offset `analyze()` assigns to one instruction, and the
+/// amount by which it advances the running per-chip counts.
+///
+/// Shared by `analyze` and [`RawProgram::validate_offsets`] so the two can
+/// never drift apart -- a validator that disagreed with the assigner would
+/// be worse than none.
+fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) -> usize {
+    fn incr(num: &mut usize, amt: usize) -> usize {
+        let start = *num;
+        *num += amt;
+        start
+    }
+    match instr {
+        Instruction::BaseAlu(_) => incr(&mut counts.base_alu_events, 1),
+        Instruction::ExtAlu(_) => incr(&mut counts.ext_alu_events, 1),
+        Instruction::Mem(_) => incr(&mut counts.mem_const_events, 1),
+        Instruction::Poseidon2(_) => incr(&mut counts.poseidon2_wide_events, 1),
+        Instruction::Select(_) => incr(&mut counts.select_events, 1),
+        // ExpReverseBitsLen: 1 event per instruction (event carries
+        // `exp: Vec<F>` of all bits inline). Match runtime push.
+        // FriFold: runtime emits ps_at_z.len() events per instruction
+        // (one per polynomial in the batch). Was off-by-default-1.
+        Instruction::Hint(HintInstr { output_addrs_mults })
+        | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
+            incr(&mut counts.mem_var_events, output_addrs_mults.len())
+        }
+        Instruction::HintExt2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr: _ }) => {
+            incr(&mut counts.mem_var_events, output_addrs_mults.len())
+        }
+        // One event per instruction: the event carries the input
+        // block; the addresses ride the preprocessed trace.
+        Instruction::Ext2Felts(_) => incr(&mut counts.ext2felt_events, 1),
+        Instruction::HintAddCurve(instr) => incr(
+            &mut counts.mem_var_events,
+            instr.output_x_addrs_mults.len() + instr.output_y_addrs_mults.len(),
+        ),
+        // Assign event-vec offsets for the two newly-tracked
+        // event types.
+        Instruction::CommitPublicValues(_) => incr(&mut counts.commit_pv_hash_events, 1),
+        // No event-vector slot consumed; offset is meaningless.
+        Instruction::Print(_) => 0,
+    }
+}
+
+impl<F> RawProgram<AnalyzedInstruction<F>> {
+    /// Re-derive every offset this program claims, and check it.
+    ///
+    /// `analyze()` assigns the offsets and the counts together, and the runtime
+    /// then trusts both completely: `UnsafeRecord` is SIZED from the counts and
+    /// each event is an unchecked store at its instruction's offset
+    /// (`raw_write_ev`, `mw_unchecked`).  Counts that are too small leave record
+    /// slots uninitialized for `into_record` to read as values; offsets that
+    /// collide give one slot two writers.  Nothing catches either at runtime.
+    ///
+    /// The invariant holds for any program built by `RecursionProgram::new`.
+    /// It does NOT hold for one that arrived another way: `Deserialize` is
+    /// derived, the fields are `pub`, and `event_counts` carries
+    /// `#[serde(default)]`, so a truncated file deserializes to all-zero
+    /// counts.  The program disk cache loads exactly such a file, from a
+    /// directory any co-tenant can write.
+    ///
+    /// So walk the analyzed stream in `analyze()`'s own order, recompute what
+    /// each offset should be, and compare.  One pass, no allocation -- cheap
+    /// beside the compile the cache exists to skip.
+    pub fn validate_offsets(&self, claimed: &RecursionAirEventCount) -> Result<(), String> {
+        fn walk_block<T>(
+            block: &SeqBlock<AnalyzedInstruction<T>>,
+            counts: &mut RecursionAirEventCount,
+            seen: &mut usize,
+        ) -> Result<(), String> {
+            match block {
+                SeqBlock::Basic(basic) => {
+                    for instr in &basic.instrs {
+                        let expected = instr_offset(&instr.inner, counts);
+                        *seen += 1;
+                        if instr.offset != expected {
+                            return Err(format!(
+                                "instruction {}: claimed offset {} != re-derived {}",
+                                *seen - 1,
+                                instr.offset,
+                                expected
+                            ));
+                        }
+                    }
+                    Ok(())
+                }
+                SeqBlock::Parallel(par_blocks) => {
+                    for sub in par_blocks {
+                        for b in &sub.seq_blocks {
+                            walk_block(b, counts, seen)?;
+                        }
+                    }
+                    Ok(())
+                }
+            }
+        }
+
+        let mut counts = RecursionAirEventCount::default();
+        let mut seen = 0usize;
+        for b in &self.seq_blocks {
+            walk_block(b, &mut counts, &mut seen)?;
+        }
+        if counts != *claimed {
+            return Err(format!(
+                "event counts disagree with the {seen}-instruction stream: \
+                 claimed {claimed:?}, re-derived {counts:?}"
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl<F> RawProgram<Instruction<F>> {
     /// Walk seq_blocks (recursing into `SeqBlock::Parallel` sub-programs)
     /// and accumulate per-chip event counts without rewriting the program.
@@ -110,45 +220,6 @@ impl<F> RawProgram<Instruction<F>> {
     /// monotonic, non-overlapping address ranges and no cross-block
     /// data dependencies. The runtime relies on this without verifying.
     pub fn analyze(self) -> (RawProgram<AnalyzedInstruction<F>>, RecursionAirEventCount) {
-        fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) -> usize {
-            fn incr(num: &mut usize, amt: usize) -> usize {
-                let start = *num;
-                *num += amt;
-                start
-            }
-            match instr {
-                Instruction::BaseAlu(_) => incr(&mut counts.base_alu_events, 1),
-                Instruction::ExtAlu(_) => incr(&mut counts.ext_alu_events, 1),
-                Instruction::Mem(_) => incr(&mut counts.mem_const_events, 1),
-                Instruction::Poseidon2(_) => incr(&mut counts.poseidon2_wide_events, 1),
-                Instruction::Select(_) => incr(&mut counts.select_events, 1),
-                // ExpReverseBitsLen: 1 event per instruction (event carries
-                // `exp: Vec<F>` of all bits inline). Match runtime push.
-                // FriFold: runtime emits ps_at_z.len() events per instruction
-                // (one per polynomial in the batch). Was off-by-default-1.
-                Instruction::Hint(HintInstr { output_addrs_mults })
-                | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
-                    incr(&mut counts.mem_var_events, output_addrs_mults.len())
-                }
-                Instruction::HintExt2Felts(HintExt2FeltsInstr {
-                    output_addrs_mults,
-                    input_addr: _,
-                }) => incr(&mut counts.mem_var_events, output_addrs_mults.len()),
-                // One event per instruction: the event carries the input
-                // block; the addresses ride the preprocessed trace.
-                Instruction::Ext2Felts(_) => incr(&mut counts.ext2felt_events, 1),
-                Instruction::HintAddCurve(instr) => incr(
-                    &mut counts.mem_var_events,
-                    instr.output_x_addrs_mults.len() + instr.output_y_addrs_mults.len(),
-                ),
-                // Assign event-vec offsets for the two newly-tracked
-                // event types.
-                Instruction::CommitPublicValues(_) => incr(&mut counts.commit_pv_hash_events, 1),
-                // No event-vector slot consumed; offset is meaningless.
-                Instruction::Print(_) => 0,
-            }
-        }
-
         fn analyze_block<T>(
             block: SeqBlock<Instruction<T>>,
             counts: &mut RecursionAirEventCount,
@@ -246,6 +317,52 @@ mod tests {
 
     // (removed) sumcheck_verify_carries_secondary_offset test:
     // SumcheckVerify pipeline deleted, no multi-chip emitters remain.
+
+    /// `validate_offsets` must accept what `analyze` produces, and reject a
+    /// program whose counts no longer describe its instruction stream -- the
+    /// shape a truncated or hand-built disk-cache entry takes (`event_counts`
+    /// is `#[serde(default)]`, so it deserializes to zeros).
+    #[test]
+    fn validate_offsets_accepts_analyzed_and_rejects_tampered() {
+        let prog: RawProgram<Instruction<KoalaBear>> = RawProgram {
+            seq_blocks: vec![
+                SeqBlock::Basic(BasicBlock {
+                    instrs: vec![dummy_base_alu(), dummy_mem(), dummy_base_alu()],
+                }),
+                SeqBlock::Parallel(vec![
+                    RawProgram {
+                        seq_blocks: vec![SeqBlock::Basic(BasicBlock {
+                            instrs: vec![dummy_base_alu()],
+                        })],
+                    },
+                    RawProgram {
+                        seq_blocks: vec![SeqBlock::Basic(BasicBlock { instrs: vec![dummy_mem()] })],
+                    },
+                ]),
+            ],
+        };
+        let (analyzed, counts) = prog.analyze();
+        assert!(analyzed.validate_offsets(&counts).is_ok());
+
+        // All-zero counts: what a file missing the field deserializes to.
+        let zeroed = RecursionAirEventCount::default();
+        let err = analyzed.validate_offsets(&zeroed).unwrap_err();
+        assert!(err.contains("event counts disagree"), "{err}");
+
+        // One count too small by one: `UnsafeRecord` would be sized short and
+        // the last BaseAlu write would land in an uninitialized slot.
+        let mut short = counts;
+        short.base_alu_events -= 1;
+        assert!(analyzed.validate_offsets(&short).is_err());
+
+        // A tampered offset, counts left intact.
+        let mut bad = analyzed;
+        if let SeqBlock::Basic(basic) = &mut bad.seq_blocks[0] {
+            basic.instrs[2].offset = 0;
+        }
+        let err = bad.validate_offsets(&counts).unwrap_err();
+        assert!(err.contains("claimed offset"), "{err}");
+    }
 
     #[test]
     fn analyze_handles_parallel_blocks() {
