@@ -268,8 +268,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 .collect::<Result<Vec<_>, A::Error>>()
         })?;
         // One chip generates one trace, so the collect into a name-keyed map is
-        // lossless; `shard_chips` yields each chip once.
-        Ok(traces.into())
+        // lossless (`shard_chips` yields each chip once), and each matrix MOVES
+        // in -- the cells are not touched.
+        Ok(crate::Traces { named_traces: traces.into_iter().collect() })
     }
 
     /// Commit to the main traces.
