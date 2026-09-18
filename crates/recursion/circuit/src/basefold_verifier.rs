@@ -1412,6 +1412,66 @@ where
                 let mut beta_at = 0usize;
                 for (round, block) in blocks.iter().enumerate() {
                     let arity = round_arities.get(round).copied().unwrap_or(1);
+                    // QUERY-CHAIN BINDING.  Each round's block carries the
+                    // codeword values around this query, and exactly one of
+                    // them IS the query's own value: `emit_basefold_block_fold`
+                    // divides the index bits out of `x` to get `x_base`, so the
+                    // query sits at `xs[p] = x_base * zeta^bitrev_k(p)` with
+                    // `bitrev_k(p) = Sigma b_j 2^(k-1-j)`, i.e. `p = Sigma b_j 2^j`
+                    // -- the plain little-endian value of this round's bits.
+                    //
+                    // Without this assert the chain was open at BOTH ends of
+                    // the first round: `folded` was seeded with `initial_eval`
+                    // and then immediately overwritten by the fold of `block`,
+                    // so `initial_eval` -- the ONLY quantity tied to the
+                    // component commitments, via its Merkle-verified leaves --
+                    // fed nothing at all.  The chain then proved that SOME
+                    // codeword folds to `final_poly`, never that it was the
+                    // committed one, and a prover could commit an unrelated
+                    // round-0 codeword and still pass every Merkle path.  For
+                    // rounds >= 1 the same equality is the ordinary FRI
+                    // round-to-round consistency check.  SP1 asserts it every
+                    // round too (`basefold/mod.rs` `assert_ext_eq(eval_ordered[0],
+                    // folded_eval)`).
+                    //
+                    // Skipped when the proof carries no component openings,
+                    // where `initial_eval` falls back to `block[0]` itself and
+                    // there is nothing to bind to.
+                    //
+                    // MEASURED, and the honest state of things: that skip is
+                    // taken on the ONE path this verifier is known to run,
+                    // the wrap/outer ring.  `read_basefold_proof_outer_from_
+                    // stream` (`basefold_witness.rs`) sets `component_openings:
+                    // Vec::new()` on purpose -- "verifier discards
+                    // component_openings on this path", worth ~25MB of consts --
+                    // which was true only BECAUSE `initial_eval` fed nothing.
+                    // So this assert is correct but currently INERT: perturbing
+                    // it leaves `test_circuit_groth16_only` and both compress
+                    // tests green, whereas perturbing the sumcheck chain above
+                    // fails the gnark solve.  ZR-24 is therefore NOT closed by
+                    // this block alone -- the outer witness has to start
+                    // carrying and Merkle-verifying its component openings, and
+                    // that costs constraints on the ring with the least ptau
+                    // headroom.  Landed anyway so the check is in place the
+                    // moment the data is.
+                    if !proof.component_openings.is_empty() {
+                        let mut cur: Vec<Ext<C::F, C::EF>> = block.to_vec();
+                        // Halve on the most significant bit of `p` first.
+                        for j in (0..arity).rev() {
+                            let half = cur.len() / 2;
+                            if half == 0 {
+                                break;
+                            }
+                            let bit = query_indices[query_idx][bit_at + j].clone();
+                            let lo = cur[..half].to_vec();
+                            let hi = cur[half..].to_vec();
+                            // `select_chain_ef` swaps on a set bit, so the
+                            // leading `half` is `lo` at 0 and `hi` at 1.
+                            let sel = C::select_chain_ef(builder, bit, lo, hi);
+                            cur = sel[..half].to_vec();
+                        }
+                        builder.assert_ext_eq(cur[0], folded);
+                    }
                     let round_betas = &betas[beta_at..beta_at + arity];
                     beta_at += arity;
                     let (f, nx) = emit_basefold_block_fold::<C>(
