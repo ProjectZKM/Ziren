@@ -214,8 +214,11 @@ impl<'a> TracingVM<'a> {
         // uninitialized image) read as zero.  Consuming positionally removes
         // both failure modes: the Nth access gets the Nth recorded record.
         if !chunk.mem_reads.is_empty() {
-            sub.replay_mem =
-                Some(crate::minimal_trace::ReplayMem { entries: chunk.mem_reads.clone(), pos: 0 });
+            sub.replay_mem = Some(crate::minimal_trace::ReplayMem {
+                entries: chunk.mem_reads.clone(),
+                pos: 0,
+                exhausted: false,
+            });
         }
 
         // bound this worker to chunk.clk_end. Without
@@ -254,6 +257,52 @@ impl<'a> TracingVM<'a> {
                 Err(e) => return Err(e),
             }
         };
+        // LOCKSTEP CHECK.  The oracle is positional: the Nth access of the
+        // replay must be the Nth access the producer captured.  When that
+        // stops being true the replay does not fail -- reads fall through to
+        // the unseeded paged image and yield zeros, and a full record is
+        // produced for an execution that never happened.  Catch it here, where
+        // the chunk is finished and `pos` is final.
+        if let Some(m) = sub.replay_mem.as_ref() {
+            let consumed = m.pos;
+            let total = m.entries.len();
+            // Running dry is unambiguous: every read after it was invented.
+            if m.exhausted {
+                return Err(ExecutionError::ReplayOracleDesync {
+                    consumed,
+                    total,
+                    exhausted: true,
+                });
+            }
+            // Leftover entries mean the replay took a different path through
+            // the same cycles.  That is equally a desync in principle, but it
+            // has never been asserted in production, so it warns by default
+            // and only fails under `ZKM_REPLAY_STRICT=1`.  Run a campaign with
+            // the flag on, confirm it stays quiet, then make it the default and
+            // delete the knob -- shipping it as a hard error untested would
+            // fail healthy blocks.
+            if consumed != total {
+                let strict = std::env::var("ZKM_REPLAY_STRICT")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                if strict {
+                    return Err(ExecutionError::ReplayOracleDesync {
+                        consumed,
+                        total,
+                        exhausted: false,
+                    });
+                }
+                tracing::warn!(
+                    target: "tracing_vm",
+                    shard_index = chunk.shard_index,
+                    consumed,
+                    total,
+                    "replay finished with memory-oracle entries unconsumed — the replay and \
+                     the producer disagree about this chunk's accesses",
+                );
+            }
+        }
+
         // bump the worker's live record into its
         // records vec. When `ExceededCycleLimit` triggers, the normal
         // trailing bump_record path in execute() is bypassed, leaving

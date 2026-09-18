@@ -250,6 +250,13 @@ pub struct ReplayMem {
     pub entries: Arc<Vec<MemValue>>,
     /// How many accesses have been served.
     pub pos: usize,
+    /// Set when an access found the oracle already spent.
+    ///
+    /// The read then falls through to the paged image and the replay carries
+    /// on against unseeded memory, so this flag is the only evidence that the
+    /// records being produced describe a different execution than the
+    /// producer's.  `tracing_vm` turns it into a hard error at chunk exit.
+    pub exhausted: bool,
 }
 
 impl TraceChunk {

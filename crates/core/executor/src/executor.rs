@@ -448,6 +448,25 @@ pub enum ExecutionError {
     #[error("invalid memory access for opcode {0} and address {1}")]
     InvalidMemoryAccess(Opcode, u32),
 
+    /// A replay worker fell out of lockstep with the producer's capture.
+    ///
+    /// Either the memory oracle ran dry mid-chunk (`exhausted`, always a bug:
+    /// the reads after it came from the unseeded paged image) or the chunk
+    /// ended with entries left over, which means the replay took a different
+    /// path through the same cycles.
+    #[error(
+        "replay oracle out of lockstep: consumed {consumed} of {total} memory records \
+         (exhausted: {exhausted})"
+    )]
+    ReplayOracleDesync {
+        /// Accesses served before the chunk ended.
+        consumed: usize,
+        /// Accesses the producer captured.
+        total: usize,
+        /// Whether an access found the oracle already spent.
+        exhausted: bool,
+    },
+
     /// The execution failed with an unimplemented syscall.
     #[error("unimplemented syscall {0}")]
     UnsupportedSyscall(u32),
@@ -2990,15 +3009,20 @@ impl<'a> Executor<'a> {
         }
         let cursor = self.replay_mem.as_mut()?;
         let Some(mv) = cursor.entries.get(cursor.pos).copied() else {
-            static ONCE: std::sync::Once = std::sync::Once::new();
+            // Record it and let the caller fall through to the paged image, as
+            // before -- but the flag now SURVIVES, and `tracing_vm` fails the
+            // chunk on it.  The previous `std::sync::Once` reported this at
+            // most once per PROCESS: the first desync in a long-lived worker
+            // printed one line and every later one was silent, which is how a
+            // corrupted capture became a divergent trace with no signal.  That
+            // is the shape the HINT_LEN window bug took.
+            cursor.exhausted = true;
             let pos = cursor.pos;
             let len = cursor.entries.len();
-            ONCE.call_once(|| {
-                tracing::error!(
-                    "replay memory oracle exhausted at access {pos} of {len} (addr {addr:#x}) \
-                     — the replay is not in lockstep with the producer",
-                );
-            });
+            tracing::error!(
+                "replay memory oracle exhausted at access {pos} of {len} (addr {addr:#x}) \
+                 — the replay is not in lockstep with the producer",
+            );
             return None;
         };
         cursor.pos += 1;
