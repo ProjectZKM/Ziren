@@ -1182,6 +1182,60 @@ where
             })
             .collect();
 
+        // (4b) SUMCHECK CHAIN — the constraints that tie the commitment to the
+        // claimed evaluations.
+        //
+        // The query phase below binds the committed codeword to `final_poly`,
+        // and the stacked layer binds `batch_evaluations` to the jagged claim
+        // (`recursive_stacked_pcs.rs` `assert_ext_eq(claim_adj, ...)`), but
+        // until this block NOTHING connected the two ends: the univariate
+        // messages were observed into the transcript and never constrained, so
+        // a prover could pair a genuine commitment and a genuine query chain
+        // with evaluations it had never opened.  On the inner rings the WHIR
+        // circuit enforces its own sumcheck, but the WRAP layer is BaseFold
+        // (`KoalaBearPoseidon2Outer::WHIR_INNER_PCS = false`) and reaches this
+        // verifier, so the gap sat under the published Groth16 proof.
+        //
+        // Exact mirror of the host verifier's steps (5) and (11)
+        // (crates/pcs/src/basefold/verifier.rs:169-184, 290-294):
+        //
+        //   eval_claim  == (1 - x_0) * p_0[0] + x_0 * p_0[1]
+        //   expected_i  == (1 - x_i) * p_i[0] + x_i * p_i[1]       (i >= 1)
+        //   expected_i+1 = p_i[0] + beta_i * p_i[1]
+        //   final_poly  == p_last[0] + beta_last * p_last[1]
+        //
+        // `eval_claim` is the batched claim: the same Lagrange recombination of
+        // `batch_evaluations` the host performs in its step (3), over the same
+        // coefficients the per-query `initial_eval` below already uses.
+        {
+            use zkm_recursion_compiler::ir::SymbolicExt;
+            use zkm_recursion_compiler::prelude::Ext;
+
+            let mut claim_acc: SymbolicExt<C::F, C::EF> = SymbolicExt::<C::F, C::EF>::ZERO;
+            let mut idx = 0usize;
+            for round in batch_evaluations.iter() {
+                for &v in round.iter() {
+                    claim_acc = claim_acc + batching_coefficients[idx] * v;
+                    idx += 1;
+                }
+            }
+            let eval_claim: Ext<C::F, C::EF> = builder.eval(claim_acc);
+
+            let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
+            let mut expected: Ext<C::F, C::EF> = eval_claim;
+            for (i, round) in proof.rounds.iter().enumerate() {
+                let p0 = round.uni_poly[0];
+                let p1 = round.uni_poly[1];
+                let x = stack_point[i];
+                let got: Ext<C::F, C::EF> = builder.eval((one - x) * p0 + x * p1);
+                builder.assert_ext_eq(got, expected);
+                expected = builder.eval(p0 + betas[i] * p1);
+            }
+            // (11) Terminal identity: the value the sumcheck folds down to is
+            // the same constant the query chain folds to.
+            builder.assert_ext_eq(expected, proof.final_poly);
+        }
+
         // (5) Observe the final poly constant + PoW witnesses.
         {
             let final_poly_ext = proof.final_poly;
@@ -1207,10 +1261,25 @@ where
         {
             use zkm_recursion_compiler::prelude::Ext;
             let final_poly_ext: Ext<C::F, C::EF> = proof.final_poly;
-            let num_queries = self
-                .params
-                .num_queries
-                .min(proof.query_phase_openings.first().map(|v| v.len()).unwrap_or(0));
+            // The number of queries is the verifier's PARAMETER, never
+            // anything the proof carries: taking `.min(openings.len())` here
+            // let a proof with an empty (or short) `query_phase_openings`
+            // decide how many queries were checked -- zero of them, in the
+            // limit.  Assert the shape instead, exactly as the WHIR circuit
+            // does (`whir_circuit.rs` "whir query openings"). The lift builds
+            // these vectors at program-build time, so a short vector is a
+            // different PROGRAM, and this assert stops such a program from
+            // being built at all.
+            let num_queries = self.params.num_queries;
+            for (round_idx, round_openings) in proof.query_phase_openings.iter().enumerate() {
+                assert_eq!(
+                    round_openings.len(),
+                    num_queries,
+                    "basefold: query_phase_openings[{round_idx}].len() ({}) != num_queries ({})",
+                    round_openings.len(),
+                    num_queries,
+                );
+            }
             for query_idx in 0..num_queries {
                 // One opened BLOCK per commit-phase round: `2^arity` values,
                 // the contiguous bit-reversed rows this query descends from.
