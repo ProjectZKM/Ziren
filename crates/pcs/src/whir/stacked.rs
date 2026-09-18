@@ -949,11 +949,15 @@ where
         let mut all_fr: Vec<EF> = Vec::with_capacity(n - final_log);
         let mut pow_flat = 0usize;
         let mut folded_vars = 0usize;
+        // Every vector below is PROOF-SUPPLIED.  Reach them with `get`, never
+        // `[..]`: this is a `Result`-returning verifier and a truncated proof
+        // must be a rejection, not a panic.
+        let shape = |what: &'static str| WhirVerifierError::IncorrectShape(what.into());
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
             let msgs: &[SumcheckPoly<EF>] = if r + 1 == num_rounds {
                 &whir.final_sumcheck_polys
             } else {
-                &whir.round_sumcheck_polys[r]
+                whir.round_sumcheck_polys.get(r).ok_or_else(|| shape("round messages"))?
             };
             if msgs.len() != round_cfg.folding_factor {
                 return Err(WhirVerifierError::IncorrectShape("round messages".into()));
@@ -971,7 +975,7 @@ where
                 challenger.observe_algebra_element(c0);
                 challenger.observe_algebra_element(c1);
                 challenger.observe_algebra_element(c2);
-                let pow = &whir.folding_pow[pow_flat];
+                let pow = whir.folding_pow.get(pow_flat).ok_or_else(|| shape("folding pow"))?;
                 pow_flat += 1;
                 if !challenger
                     .check_witness(round_cfg.pow_bits.get(var).copied().unwrap_or(0), pow.0)
@@ -989,9 +993,23 @@ where
                 break;
             }
 
-            challenger.observe(whir.round_commitments[r].clone());
+            challenger.observe(
+                whir.round_commitments.get(r).ok_or_else(|| shape("round commitment"))?.clone(),
+            );
             let rem = n - folded_vars;
-            let ood_answers = &whir.round_ood_answers[r];
+            let ood_answers = whir.round_ood_answers.get(r).ok_or_else(|| shape("round ood"))?;
+            // The OOD sample count is a CONFIG parameter.  Reading it off the
+            // proof's own vector let a proof choose how many out-of-domain
+            // constraints it had to satisfy -- zero of them, in the limit --
+            // and the transcript stayed self-consistent either way, so the
+            // verifier accepted at a soundness level below the advertised
+            // schedule.  The recursive verifier has always pinned this
+            // (`whir_circuit.rs`, `assert_eq!(ood_answers.len(),
+            // round_cfg.ood_samples)`); the native one now agrees, so both
+            // accept the same language.
+            if ood_answers.len() != round_cfg.ood_samples {
+                return Err(shape("round ood count"));
+            }
             let mut ood_points: Vec<Vec<EF>> = Vec::with_capacity(ood_answers.len());
             for ans in ood_answers.iter() {
                 let pt: Vec<EF> = (0..rem).map(|_| challenger.sample_algebra_element()).collect();
@@ -999,7 +1017,7 @@ where
                 ood_points.push(pt);
             }
 
-            let query_pow = &whir.folding_pow[pow_flat];
+            let query_pow = whir.folding_pow.get(pow_flat).ok_or_else(|| shape("query pow"))?;
             pow_flat += 1;
             if !challenger.check_witness(round_cfg.queries_pow_bits, query_pow.0) {
                 return Err(WhirVerifierError::PowMismatch { round: r, var: usize::MAX });
@@ -1009,7 +1027,8 @@ where
                 .map(|_| challenger.sample_bits(prev_domain_log) & mask)
                 .collect();
 
-            let openings = &whir.round_query_openings[r];
+            let openings =
+                whir.round_query_openings.get(r).ok_or_else(|| shape("round query openings"))?;
             let leaves_per_query = if prev_round0 { commitments.len() } else { 1 };
             if openings.leaves.len() != indices.len() * leaves_per_query {
                 return Err(WhirVerifierError::IncorrectShape("query openings".into()));
@@ -1057,7 +1076,14 @@ where
                         opening_proof: &leaf.proof,
                     };
                     self.mmcs
-                        .verify_batch(&whir.round_commitments[r - 1], &dims, idx, opened)
+                        .verify_batch(
+                            whir.round_commitments
+                                .get(r - 1)
+                                .ok_or_else(|| shape("prev round commitment"))?,
+                            &dims,
+                            idx,
+                            opened,
+                        )
                         .map_err(|_| WhirVerifierError::IncorrectShape("merkle".into()))?;
                     leaf.values[0]
                         .chunks_exact(EF::DIMENSION)
@@ -1093,7 +1119,8 @@ where
             return Err(WhirVerifierError::PowMismatch { round: num_rounds, var: usize::MAX });
         }
         let final_mask = (1usize << prev_domain_log) - 1;
-        let final_openings = whir.round_query_openings.last().unwrap();
+        let final_openings =
+            whir.round_query_openings.last().ok_or_else(|| shape("final query openings"))?;
         let leaves_per_query = if prev_round0 { commitments.len() } else { 1 };
         if final_openings.leaves.len() != self.config.final_queries * leaves_per_query {
             return Err(WhirVerifierError::IncorrectShape("final query count".into()));
@@ -1139,7 +1166,12 @@ where
                     opening_proof: &leaf.proof,
                 };
                 self.mmcs
-                    .verify_batch(whir.round_commitments.last().unwrap(), &dims, idx, opened)
+                    .verify_batch(
+                        whir.round_commitments.last().ok_or_else(|| shape("final commitment"))?,
+                        &dims,
+                        idx,
+                        opened,
+                    )
                     .map_err(|_| WhirVerifierError::IncorrectShape("final merkle".into()))?;
                 leaf.values[0]
                     .chunks_exact(EF::DIMENSION)
