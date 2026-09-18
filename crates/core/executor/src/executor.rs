@@ -3974,10 +3974,8 @@ impl<'a> Executor<'a> {
             if records_clk_index < self.state.records_clk.len()
                 && self.state.clk >= self.state.records_clk[self.state.records_clk_index as usize]
             {
-                // Option 2 State bus: stamp the just-finished shard's final
-                // timestamp (post-last-instruction clk, before the per-shard
-                // reset) — the 2nd element of the State-bus final endpoint
-                // `(shard, last_timestamp, next_pc, next_next_pc)`.
+                // Stamp the shard's final timestamp before the per-shard clk
+                // reset: `last_timestamp` in the State-bus final endpoint.
                 self.record.public_values.last_timestamp = self.state.clk;
                 self.state.current_shard += 1;
                 self.state.clk = 0;
@@ -4002,45 +4000,27 @@ impl<'a> Executor<'a> {
         // itself — see `ShardSplitAccumulator`.
         let cpu_cycles = (self.state.clk / 5) as u64;
 
-        // Shard-limit test: two comparisons against state that every
-        // instruction already maintained, evaluated on EVERY cycle.
+        // Both figures are exact on every cycle, so this is two comparisons
+        // against state the instructions already maintained -- no check
+        // frequency and no worst-case padding.
         //
-        //  * `area_split` closes the shard once the accumulated UN-PADDED main-trace cell count
-        //    reaches `ELEMENT_THRESHOLD`, keeping dense shards at log_dense <= 29 — the
-        //    per-shard dense-area budget the jagged commit is sized for. This is the limit that
-        //    closes 100% of real core splits on reth / tendermint / goat.
-        //  * `ramp_split` closes the block's first shards early, so eight cards can start
-        //    on real work while the parent is still cutting — see `RAMP_SHARDS`.
-        //  * `height_split` closes it once the tallest chip reaches the per-chip cube cap, so
-        //    no chip exceeds `2^CORE_MAX_LOG_ROW_COUNT` rows however large `SHARD_SIZE` is,
-        //    keeping every shard inside the base-cube recursion's fixed per-chip height.
-        //    LIVE but not tripping on today's workloads: measured peaks are goat 2,216,960 and
-        //    tendermint 2,491,392 against a `CORE_SHARD_HEIGHT_THRESHOLD` of 4,128,768, i.e.
-        //    only ~1.7x of headroom. Raising `ELEMENT_THRESHOLD` walks straight at this fence,
-        //    so do not treat it as slack.
-        //
-        // There is no check frequency and no worst-case padding. Both existed only because the
-        // area / height figures used to be rebuilt from scratch every `SHAPE_CHECK_FREQUENCY`
-        // cycles by `estimate_mips_event_counts`, which left a blind window that
-        // `pad_mips_event_counts` had to cover by inflating every chip by its worst-case growth
-        // over that window. With the figures exact on every cycle, both are dead weight.
+        //  * `area_split` closes the shard once the un-padded main-trace cell count reaches
+        //    `ELEMENT_THRESHOLD`, the per-shard dense-area budget the jagged commit is sized
+        //    for (log_dense <= 29). It closes 100% of real core splits.
+        //  * `height_split` closes it once the tallest chip reaches `2^CORE_MAX_LOG_ROW_COUNT`
+        //    rows, keeping every shard inside the base-cube recursion's per-chip height. Live
+        //    but not tripping today, with only ~1.7x of headroom, so raising
+        //    `ELEMENT_THRESHOLD` walks straight at this fence -- it is not slack.
         let (area_split, height_split) = self.split_acct.check_shard_limit(cpu_cycles);
 
         // Block-start ramp: the first shards close at a fraction of the area
         // budget so eight cards can start while the parent is still cutting.
         let ramp_split = self.ramp_split_due();
 
-        // Offline shape-search tooling only; INERT ON THE PRODUCTION PROVE PATH.
-        // `shape_match_found` can only go false inside this block, and BOTH of its inputs are
-        // off by default: `lde_size_check` is `false` (set true only by the offline
-        // `find_maximal_shapes` script) and `maximal_shapes` is `None` (it is
-        // `prover.core_shape_config`, which only the offline shape tooling populates).
-        // Kept because that tooling is still selectable.
-        //
-        // Unlike the two production limits above this one is genuinely O(shapes x chips), so it
-        // keeps a sampling frequency of its own rather than paying that cost every cycle. The
-        // frequency is a private constant of the tooling, NOT the retired `SHAPE_CHECK_FREQUENCY`
-        // knob: it no longer has any influence on where production shards split.
+        // Offline shape-search tooling; inert on the production prove path,
+        // where `lde_size_check` is false and `maximal_shapes` is None. Unlike
+        // the limits above it is O(shapes x chips), so it samples at its own
+        // frequency instead of paying that per cycle.
         let mut shape_match_found = true;
         if (self.lde_size_check || self.maximal_shapes.is_some())
             && self.state.global_clk.is_multiple_of(SHAPE_SEARCH_CHECK_FREQUENCY)
@@ -4121,13 +4101,12 @@ impl<'a> Executor<'a> {
         }
 
         if cpu_exit || clk_exit || !shape_match_found || height_split || area_split || ramp_split {
-            // Which of the three fences actually closed this shard.  The fences
-            // are not independent -- raising `ELEMENT_THRESHOLD` just hands the
-            // close to the next one up -- so "is the area budget still binding?"
-            // is only answerable by counting closes, never by reading the
-            // constant.  Env-gated (`ZIREN_SHARD_CLOSE_CENSUS=1`) and off by
-            // default: one line per shard is diagnostic volume, not prove-path
-            // volume.
+            // Which fence actually closed this shard. They are not independent
+            // -- raising `ELEMENT_THRESHOLD` hands the close to the next one up
+            // -- so "is the area budget still binding?" is answerable only by
+            // counting closes, never by reading the constant. Env-gated
+            // (`ZIREN_SHARD_CLOSE_CENSUS=1`): one line per shard is diagnostic
+            // volume, not prove-path volume.
             if shard_close_census_enabled() {
                 let reason = if clk_exit {
                     "clk"
@@ -4165,20 +4144,14 @@ impl<'a> Executor<'a> {
             // every fence, before this runs.
             self.pending_shape_fingerprint = {
                 use std::hash::{Hash, Hasher};
-                // What the leaf's proving key actually turns on is not each
-                // chip's own height but the shard's committed AREA: the jagged
-                // packing's `log_dense_size` (L) sets the reduction and
-                // jagged-eval round counts, and the basefold query round's
-                // leaf count is `2^(L - LOG_STACKING_HEIGHT)` -- the area in
-                // stacking stripes of 2^21 cells, which at L=28 ranges 80..120
-                // and is "the dimension that actually splits the diversity"
-                // (zkm-prover's NORMALIZE_KEY diagnostic).  MEASURED on the
-                // per-chip classes first: they split a true key 52 times in
-                // 106 (small arithmetic chips straddling powers of two) while
-                // (max height, cycles) merged ~9 keys per class.  `trace_area`
-                // is the executor's exact incremental cell count, so the two
-                // numbers below are what the worker will see up to the rows
-                // dependency generation adds.
+                // The leaf's proving key keys off the shard's committed AREA,
+                // not each chip's own height: the jagged packing's
+                // `log_dense_size` (L) sets the reduction and jagged-eval round
+                // counts, and the basefold query round's leaf count is
+                // `2^(L - LOG_STACKING_HEIGHT)` -- the area in stacking stripes
+                // of 2^21 cells. `trace_area` is the executor's exact
+                // incremental cell count, so both numbers below are what the
+                // worker sees, up to the rows dependency generation adds.
                 let area = self.split_acct.trace_area(cpu_cycles);
                 let log_dense = (area.max(1)).next_power_of_two().trailing_zeros();
                 let stripes = area.div_ceil(1 << 21);
@@ -4201,9 +4174,8 @@ impl<'a> Executor<'a> {
             if self.executor_mode == ExecutorMode::Checkpoint {
                 self.state.records_clk.push(self.state.clk);
             }
-            // Option 2 State bus: stamp the just-finished shard's final
-            // timestamp before the per-shard clk reset (cf. the records_clk
-            // path above).
+            // As in the records_clk path above: stamp the final timestamp
+            // before the per-shard clk reset.
             self.record.public_values.last_timestamp = self.state.clk;
             self.state.current_shard += 1;
             self.state.clk = 0;

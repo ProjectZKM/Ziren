@@ -109,104 +109,42 @@ where
     std::thread::scope(move |s| {
         let _span = span.enter();
 
-        // Spawn the checkpoint generator thread.
-        //
-        // In-memory shard checkpoints: pin each per-shard
-        // `ExecutionState` in RAM and send it directly through the channel.
-        // The previous implementation wrote each checkpoint to a `tempfile`,
-        // sent the `File` handle downstream, and the trace-gen worker
-        // `bincode::deserialize_from`'d it back.  That roundtrip cost ~5 s of
-        // wall time on the production reth wrap (per `docs/perf_reth_gpu.md`)
-        // and burned inode + page-cache pressure under `TMPDIR=/dev/shm`.
-        // Mirrors `core_multi_gpu.rs`'s multi-GPU checkpoint channel in
-        // ziren-gpu (search `checkpoints_tx`); this brings the 1-GPU-fallback
-        // / CPU-prover baseline into line.
-        //
-        // RAM cost: an `ExecutionState` is dominated by the memory image
-        // diff since the last checkpoint (typically a few MB per shard),
-        // bounded by `checkpoints_channel_capacity` in flight.  We log
-        // every cache hit/miss-equivalent (here: every send/recv) at
-        // `trace` level so behaviour can be verified at runtime.
+        // Checkpoints travel in memory rather than through tempfiles.  An
+        // `ExecutionState` is dominated by the memory-image diff since the last
+        // checkpoint (a few MB per shard), and `checkpoints_channel_capacity`
+        // bounds how many are in flight.
         let checkpoint_generator_span = tracing::Span::current().clone();
         let (checkpoints_tx, checkpoints_rx) =
             sync_channel::<(usize, ExecutionState, bool, u64)>(opts.checkpoints_channel_capacity);
-        // The checkpoint pass runs on the JIT: one fast whole-program run
-        // that populates `public_values_stream` + the final cycle count and
-        // captures a whole-program MinimalTrace chunk, replacing the slow
-        // interpreter `execute_state` loop.  The consumer reconstructs records
-        // byte-identically via the from-start `trace_checkpoint`, so the core
-        // proof is unchanged (b26f9b47).
         let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
                 tracing::debug_span!("checkpoint generator").in_scope(|| {
-                    // Producer: run the whole program ONCE on the JIT
-                    // (fast) to (a) populate `public_values_stream` + the
-                    // final cycle count and (b) capture a whole-program
-                    // MinimalTrace chunk, then hand the consumer a single
-                    // from-start `ExecutionState` (`done = true`, no chunk
-                    // sidecar) so `trace_checkpoint` re-derives the shard
-                    // boundaries + records byte-identically. This replaces
-                    // the interpreter `execute_state` loop (the slow first
-                    // pass) with a single JIT pass.
-                    {
-                        // Pristine initial state: carries the full
-                        // `input_stream` / `proof_stream` (from write_vecs /
-                        // write_proof), `global_clk == 0`, empty
-                        // `records_clk`; the consumer's `initialize()` loads
-                        // the memory image. This is what the trace worker
-                        // replays from the start.
-                        let initial_state = runtime.state.clone();
-                        let chunk = runtime
-                            .run_fast_capture_whole_program_chunk()
-                            .map_err(ZKMCoreProverError::ExecutionError)?;
-                        let global_clk = runtime.state.global_clk;
-                        tracing::debug!(
-                            target = "checkpoint_pin",
-                            "D.4 JIT producer: whole-program chunk clk=[{}..{}] \
-                             mem_reads_oracle={} global_clk={}",
-                            chunk.clk_start,
-                            chunk.clk_end,
-                            chunk.mem_reads.len(),
-                            global_clk,
-                        );
-                        checkpoints_tx.send((0, initial_state, true, global_clk)).unwrap();
-                        return Ok(runtime.state.public_values_stream);
-                    }
-                    let mut index = 0;
-                    // track how many chunks we've already
-                    // sent so each batch's sidecar only carries the NEW
-                    // chunks added since the last `execute_state`.
-                    loop {
-                        // Enter the span.
-                        let span = tracing::debug_span!("batch");
-                        let _span = span.enter();
-
-                        // Execute the runtime until we reach a checkpoint.
-                        let (checkpoint, done) = runtime
-                            .execute_state(false)
-                            .map_err(ZKMCoreProverError::ExecutionError)?;
-
-                        // Send the checkpoint in-memory (no tempfile + bincode roundtrip).
-                        let global_clk = runtime.state.global_clk;
-
-                        tracing::trace!(
-                            target = "checkpoint_pin",
-                            event = "produce",
-                            index = index,
-                            done = done,
-                            global_clk = global_clk,
-                        );
-                        checkpoints_tx.send((index, checkpoint, done, global_clk)).unwrap();
-
-                        // If we've reached the final checkpoint, break out of the loop.
-                        if done {
-                            break Ok(runtime.state.public_values_stream);
-                        }
-
-                        // Update the index.
-                        index += 1;
-                    }
+                    // One JIT pass over the whole program: it fills
+                    // `public_values_stream` and the final cycle count, and
+                    // captures a whole-program MinimalTrace chunk.  The
+                    // consumer then re-derives the shard boundaries and records
+                    // from a single from-start `ExecutionState`, so it sees
+                    // exactly what a per-shard checkpoint loop would produce.
+                    // `initial_state` is pristine: the full `input_stream` /
+                    // `proof_stream` from `write_vecs` / `write_proof`,
+                    // `global_clk == 0`, empty `records_clk`.  The consumer's
+                    // `initialize()` loads the memory image from it.
+                    let initial_state = runtime.state.clone();
+                    let chunk = runtime
+                        .run_fast_capture_whole_program_chunk()
+                        .map_err(ZKMCoreProverError::ExecutionError)?;
+                    let global_clk = runtime.state.global_clk;
+                    tracing::debug!(
+                        target = "checkpoint_pin",
+                        "whole-program chunk clk=[{}..{}] mem_reads_oracle={} global_clk={}",
+                        chunk.clk_start,
+                        chunk.clk_end,
+                        chunk.mem_reads.len(),
+                        global_clk,
+                    );
+                    checkpoints_tx.send((0, initial_state, true, global_clk)).unwrap();
+                    Ok(runtime.state.public_values_stream)
                 })
             });
 
@@ -261,16 +199,13 @@ where
                                     done = done,
                                     num_cycles = num_cycles,
                                 );
-                                // JIT producer: the checkpoint below is a
-                                // single FROM-START, whole-program state, so ONE
-                                // `trace_checkpoint` cannot cover the program —
+                                // The checkpoint is a single from-start state
+                                // covering the whole program, and one
+                                // `trace_checkpoint` cannot cover that:
                                 // `Executor::execute` stops after
-                                // `shard_batch_size` shards.  Drive the trace
-                                // executor to completion instead and hand each
-                                // batch to the SAME downstream body, so peak
-                                // memory stays at one batch (the multi-checkpoint
-                                // path's profile) and the per-batch public-value
-                                // semantics are unchanged.
+                                // `shard_batch_size` shards.  Drive it to
+                                // completion and feed each batch to the same
+                                // body below, so peak memory stays at one batch.
                                 let mut batch_index = index;
                                 let mut process_batch = |mut records: Vec<ExecutionRecord>,
                                                      report: ExecutionReport,
@@ -550,21 +485,16 @@ where
         #[cfg(feature = "debug")]
         drop(all_records_tx);
 
-        // A CoreShapeConfig used ONLY to
-        // compute the per-shard FULL canonical CLUSTER shape for the jagged
-        // commit (`find_canonical_cluster_shape`), INDEPENDENT of
-        // `FIX_CORE_SHAPES` (`shape_config`).  With `FIX_CORE_SHAPES=false` the
-        // records stay at RAW heights and the core STARK proves at those
-        // heights, but the jagged commit must still pad/extend to the SAME
-        // canonical cluster shape `fix_shape` + `canonicalize_shape_to_cluster`
-        // produce under FIX-on, so the recursion normalize VK = f(chip-SET) and
-        // matches the production vk_map.  Built once per prove call (the same
-        // default config the prover constructs at `ZKMProver::new`).
+        // THE INVARIANT, relied on at the `commit` call below.  Whatever
+        // `FIX_CORE_SHAPES` says, the jagged commit pads to the canonical
+        // CLUSTER shape, so the recursion normalize VK is a function of the chip
+        // SET alone and matches the production vk_map.  With FIX off the records
+        // keep their RAW heights and the STARK proves at those heights; only the
+        // commit is padded.  Built once per prove call.
         let cluster_shape_config = CoreShapeConfig::<SC::Val>::default();
 
-        // Chip NAME -> trace WIDTH, so the commit path can ADD a missing
-        // canonical-cluster chip's HEIGHT-0 zero COMMIT trace (width is required
-        // to size it).  Machine-static, built once.
+        // Chip NAME -> trace WIDTH, so `commit` can size the height-0 trace it
+        // injects for a missing chip.  Machine-static, built once.
         let cluster_chip_widths: std::collections::BTreeMap<String, usize> = prover
             .machine()
             .chips()
@@ -586,23 +516,15 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
-                                    // Derive the FULL canonical CLUSTER this raw
-                                    // FIX-off shard lifts to (the SAME shape `fix_shape` +
-                                    // `canonicalize_shape_to_cluster` produce under
-                                    // FIX_CORE_SHAPES=true) and its chip NAME -> width
-                                    // map, then pass it EXPLICITLY to `commit`.  The prover's
-                                    // `commit` (see `zkm_pcs::prover`) derives the missing set
-                                    // (canonical cluster minus present), and injects a
-                                    // genuine HEIGHT-0 (0-row, full-width, zero) trace
-                                    // for each missing chip — so the FIX-off normalize
-                                    // VK = the FIX-on canonical-cluster VK (production
-                                    // vk_map) while the STARK proves at RAW heights.
-                                    // Keyed by chip NAME (the PCS layer cannot depend on
-                                    // `MipsAirId`).  A shard whose heights overflow
-                                    // every cluster yields `None` (no inject, legacy
-                                    // own-chip-set commit).  The band `log_height` is
-                                    // retired — the injection keys off the chip-SET
-                                    // and a 0-row commit, not any band value.
+                                    // Derive this shard's canonical cluster and
+                                    // hand it to `commit`, which injects a
+                                    // height-0 full-width trace for every chip in
+                                    // the cluster the shard lacks — see the
+                                    // invariant where `cluster_shape_config` is
+                                    // built.  Keyed by chip NAME, because the PCS
+                                    // layer cannot depend on `MipsAirId`.  A shard
+                                    // that overflows every cluster yields `None`
+                                    // and commits its own chip set.
                                     let cluster_widths: Option<
                                         std::collections::BTreeMap<String, usize>,
                                     > = cluster_shape_config
