@@ -104,6 +104,29 @@ const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SH
 /// binding fence; at 26 bits `ELEMENT_THRESHOLD` (trace area) binds again.
 pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 25;
 
+/// BLOCK-START RAMP.  A block's first shards decide how quickly every card can
+/// start: a card cannot prove what the parent has not cut yet.  MEASURED on 76
+/// production blocks at 8 cards: the first shard ships 84 ms in and all eight
+/// cards are busy by 336 ms, but the cards then run dry -- 70% of ALL card idle
+/// (7.0 s per block summed over 8 cards, ~0.9 s per card) falls in the first two
+/// seconds, and in that window the parent's wait for a free card slot is ZERO at
+/// 19 ships/s.  The parent is flat out and still cannot fill 8 x 4 queue slots;
+/// from the third second on it waits 44-56 ms per ship, i.e. the steady state is
+/// card-bound, which is why "host starvation" was refuted when measured there.
+///
+/// So the first shards are cut at a fraction of the area budget: smaller shards
+/// close sooner, so shards-per-second rises exactly while the cards are starving.
+/// The cost is the per-shard fixed overhead (~0.111 s of card time) on the few
+/// extra shards, against the idle it removes -- and that trade is TIGHT.
+/// MEASURED on 4 cards, ABBA on a cached block: 16 shards at a quarter of the
+/// budget cut early idle 3,290 -> 950 ms/block (-71%) but added 12 shards (82 ->
+/// 94) and 6 compose nodes, and the wall went 12.94 -> 13.22 s. Half the ramp
+/// at half the cut keeps most of the idle win for a third of the extra shards.
+const RAMP_SHARDS: u32 = 8;
+/// The first [`RAMP_SHARDS`] shards close at `1 / 2^RAMP_AREA_SHIFT` of the area
+/// budget.
+const RAMP_AREA_SHIFT: u32 = 1;
+
 /// Whether to log one `SHARD_CLOSE` line per closed core shard, naming the
 /// fence that closed it.  Read once; off unless `ZIREN_SHARD_CLOSE_CENSUS` is
 /// `1`/`true`.
@@ -3897,7 +3920,19 @@ impl<'a> Executor<'a> {
             >= CORE_SHARD_CLK_LIMIT;
         let (area_split, height_split) =
             self.split_acct.check_shard_limit((self.state.clk / 5) as u64);
-        cpu_exit || clk_exit || area_split || height_split
+        cpu_exit || clk_exit || area_split || height_split || self.ramp_split_due()
+    }
+
+    /// Whether the block-start ramp would close this shard: see [`RAMP_SHARDS`].
+    /// Only the cutting pass consults it -- a replay follows the boundaries the
+    /// cutting pass already recorded.
+    #[inline]
+    fn ramp_split_due(&self) -> bool {
+        if self.state.current_shard > RAMP_SHARDS {
+            return false;
+        }
+        let area = self.split_acct.trace_area((self.state.clk / 5) as u64);
+        area >= (self.split_acct.element_threshold() >> RAMP_AREA_SHIFT)
     }
 
     pub(crate) fn inc_shard_if_need(&mut self) -> bool {
@@ -3941,6 +3976,8 @@ impl<'a> Executor<'a> {
         //    reaches `ELEMENT_THRESHOLD`, keeping dense shards at log_dense <= 29 — the
         //    per-shard dense-area budget the jagged commit is sized for. This is the limit that
         //    closes 100% of real core splits on reth / tendermint / goat.
+        //  * `ramp_split` closes the block's first shards early, so eight cards can start
+        //    on real work while the parent is still cutting — see `RAMP_SHARDS`.
         //  * `height_split` closes it once the tallest chip reaches the per-chip cube cap, so
         //    no chip exceeds `2^CORE_MAX_LOG_ROW_COUNT` rows however large `SHARD_SIZE` is,
         //    keeping every shard inside the base-cube recursion's fixed per-chip height.
@@ -3955,6 +3992,10 @@ impl<'a> Executor<'a> {
         // `pad_mips_event_counts` had to cover by inflating every chip by its worst-case growth
         // over that window. With the figures exact on every cycle, both are dead weight.
         let (area_split, height_split) = self.split_acct.check_shard_limit(cpu_cycles);
+
+        // Block-start ramp: the first shards close at a fraction of the area
+        // budget so eight cards can start while the parent is still cutting.
+        let ramp_split = self.ramp_split_due();
 
         // Offline shape-search tooling only; INERT ON THE PRODUCTION PROVE PATH.
         // `shape_match_found` can only go false inside this block, and BOTH of its inputs are
@@ -4046,7 +4087,7 @@ impl<'a> Executor<'a> {
             }
         }
 
-        if cpu_exit || clk_exit || !shape_match_found || height_split || area_split {
+        if cpu_exit || clk_exit || !shape_match_found || height_split || area_split || ramp_split {
             // Which of the three fences actually closed this shard.  The fences
             // are not independent -- raising `ELEMENT_THRESHOLD` just hands the
             // close to the next one up -- so "is the area budget still binding?"
@@ -4063,6 +4104,8 @@ impl<'a> Executor<'a> {
                     "area"
                 } else if cpu_exit {
                     "cpu"
+                } else if ramp_split {
+                    "ramp"
                 } else {
                     "shape"
                 };

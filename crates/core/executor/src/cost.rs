@@ -427,6 +427,13 @@ impl ShardSplitAccumulator {
         (area >= self.element_threshold, self.max_height >= self.height_threshold)
     }
 
+    /// The per-shard area budget this accumulator closes on.
+    #[inline]
+    #[must_use]
+    pub fn element_threshold(&self) -> u64 {
+        self.element_threshold
+    }
+
     /// The live trace area, including the `Cpu` contribution. For diagnostics only.
     #[must_use]
     pub fn trace_area(&self, cpu_cycles: u64) -> u64 {
