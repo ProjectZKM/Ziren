@@ -1,7 +1,7 @@
 use crate::septic_digest::SepticDigest;
 use core::fmt::Display;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{cmp::Reverse, error::Error, time::Instant};
+use std::{error::Error, time::Instant};
 
 use p3_air::Air;
 use p3_challenger::CanObserve;
@@ -436,9 +436,6 @@ where
         mut named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs> {
-        // Order the chips and traces by trace size (biggest first), and get the ordering map.
-        named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
-
         // MISSING-CHIP INJECTION (exact mirror of the GPU `commit`).
         //
         // Terminology: "FIX-off" in this codebase means the NATURAL-HEIGHTS
@@ -519,10 +516,16 @@ where
                 );
                 let chips: Vec<&MachineChip<SC, A>> =
                     self.machine().shard_chips_ordered(&chip_ordering).collect();
-                debug_assert_eq!(
+                // NOT a debug_assert: `views` and `chips` are zipped positionally
+                // by `commit_traces`, so a name in the store that the machine
+                // does not have as a chip (a mis-injected cluster name, a
+                // duplicate) shifts every later pair and commits traces against
+                // the wrong AIRs -- silently, and only in release. One length
+                // comparison per shard commit is not worth saving.
+                assert_eq!(
                     chips.len(),
                     main_store.len(),
-                    "chip names must be unique for the store to stay parallel to `chips`",
+                    "every committed trace name must be a machine chip, exactly once",
                 );
                 // Store order (name-sorted BTreeMap) == chips order.
                 let views: Vec<crate::multilinear::PaddedMle<Val<SC>>> =
@@ -828,10 +831,13 @@ where
             ),
         })
         .collect();
-    debug_assert_eq!(
+    // Same reasoning as the length check in `commit`: this map and `chips` are
+    // consumed in parallel, so a mismatch misaligns traces against AIRs rather
+    // than failing, and a `debug_assert` would only catch it outside release.
+    assert_eq!(
         main_traces_named.len(),
         chips.len(),
-        "chip names must be unique for the name-keyed trace map to stay parallel to `chips`",
+        "every trace name must be a machine chip, exactly once",
     );
 
     let proof = crate::shard_level::prover::prove_shard_with_data::<SC, A>(

@@ -440,31 +440,18 @@ where
                             Ok(())
                             };
 
-                                if true {
-                                    // Whole-program from-start checkpoint: loop
-                                    // `execute_record` on ONE carried executor
-                                    // until it reports `done`, mirroring the
-                                    // interpreter producer's `execute_state` loop
-                                    // (and the GPU driver's).
-                                    trace_checkpoint_to_completion::<SC, _>(
-                                        program.clone(),
-                                        execution_state,
-                                        opts,
-                                        shape_config,
-                                        &mut process_batch,
-                                    )?;
-                                } else {
-                                    let (records, report) =
-                                        tracing::debug_span!("trace checkpoint").in_scope(|| {
-                                            trace_checkpoint::<SC>(
-                                                program.clone(),
-                                                execution_state,
-                                                opts,
-                                                shape_config,
-                                            )
-                                        });
-                                    process_batch(records, report, done, num_cycles)?;
-                                }
+                                // Whole-program from-start checkpoint: loop
+                                // `execute_record` on ONE carried executor until
+                                // it reports `done`, mirroring the interpreter
+                                // producer's `execute_state` loop and the GPU
+                                // driver's.
+                                trace_checkpoint_to_completion::<SC, _>(
+                                    program.clone(),
+                                    execution_state,
+                                    opts,
+                                    shape_config,
+                                    &mut process_batch,
+                                )?;
                             } else {
                                 break;
                             }
