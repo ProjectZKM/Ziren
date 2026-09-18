@@ -12,7 +12,7 @@ use {
     futures::StreamExt,
     indicatif::{ProgressBar, ProgressStyle},
     reqwest::Client,
-    std::{cmp::min, process::Command},
+    std::cmp::min,
 };
 
 use crate::ZKM_CIRCUIT_VERSION;
@@ -81,9 +81,10 @@ pub fn install_circuit_artifacts(
     artifacts_type: &str,
     zkm_circuit_version: &str,
 ) {
-    // Create the build directory.
-    std::fs::create_dir_all(&build_dir).expect("failed to create build directory");
-
+    // `build_dir` is deliberately NOT created here: its existence is the
+    // "already installed" marker, so it comes into being only at the rename
+    // below, once there is something complete to name.
+    //
     // Download the artifacts.
     let download_url = if zkm_prover::build::zkm_imm_wrap_vk_mode() {
         format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{artifacts_type}-imm-wrap-vk.tar.gz")
@@ -96,19 +97,99 @@ pub fn install_circuit_artifacts(
     block_on(download_file(&client, &download_url, &mut artifacts_tar_gz_file))
         .expect("failed to download file");
 
-    // Extract the tarball to the build directory.
-    let mut res = Command::new("tar")
-        .args([
-            "-Pxzf",
-            artifacts_tar_gz_file.path().to_str().unwrap(),
-            "-C",
-            build_dir.to_str().unwrap(),
-        ])
-        .spawn()
-        .expect("failed to extract tarball");
-    res.wait().unwrap();
+    // Stage into a sibling directory and rename only once extraction succeeded.
+    // `build_dir`'s existence is the installation marker every later call keys
+    // on, so it must never name a partial extraction.
+    let staging = build_dir.with_extension(format!("staging-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging).expect("failed to create staging directory");
+
+    if let Err(e) = extract_contained(artifacts_tar_gz_file.path(), &staging) {
+        let _ = std::fs::remove_dir_all(&staging);
+        panic!("failed to extract circuit artifacts from {download_url}: {e}");
+    }
+
+    let _ = std::fs::remove_dir_all(&build_dir);
+    if let Some(parent) = build_dir.parent() {
+        std::fs::create_dir_all(parent).expect("failed to create build directory parent");
+    }
+    std::fs::rename(&staging, &build_dir).expect("failed to install circuit artifacts");
 
     println!("[zkm] downloaded {} to {:?}", download_url, build_dir.to_str().unwrap(),);
+}
+
+/// Extract a `.tar.gz` into `dest`, refusing any entry that would write outside
+/// it.
+///
+/// The archive is fetched over the network and is not pinned by digest or
+/// signature, so it is treated as untrusted input: an absolute path, a `..`
+/// component, or a link escaping `dest` aborts the extraction rather than
+/// landing anywhere on the host. This replaces `tar -Pxzf`, whose `-P` kept
+/// absolute paths and made a compromised archive an arbitrary file overwrite.
+#[cfg(feature = "network")]
+fn extract_contained(archive: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    use std::path::{Component, Path};
+
+    // `dest` is freshly created, so it canonicalizes without following anything
+    // an archive could have planted.
+    let dest_root = dest.canonicalize()?;
+    let bad = |msg: String| Error::new(ErrorKind::InvalidData, msg);
+
+    // Reject the path shapes that escape by construction, before any I/O.
+    let contained = |p: &Path| -> std::io::Result<()> {
+        for c in p.components() {
+            match c {
+                Component::Normal(_) | Component::CurDir => {}
+                Component::ParentDir => {
+                    return Err(bad(format!("entry escapes the install directory: {}", p.display())))
+                }
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err(bad(format!("entry has an absolute path: {}", p.display())))
+                }
+            }
+        }
+        Ok(())
+    };
+
+    let file = std::fs::File::open(archive)?;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    // Ownership from the archive is never honoured; these artifacts belong to
+    // whoever is installing them.
+    tar.set_preserve_permissions(false);
+    tar.set_unpack_xattrs(false);
+
+    for entry in tar.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.into_owned();
+        contained(&path)?;
+
+        // A link is the second way out: the path is innocent but the target is
+        // not, and a later entry can then be written through it.
+        if let Some(link) = entry.link_name()? {
+            contained(&link)?;
+            // Hard links resolve against `dest`, symlinks against the entry's
+            // own directory; requiring both to stay inside covers each case.
+            let base = if entry.header().entry_type().is_hard_link() {
+                dest_root.clone()
+            } else {
+                dest_root.join(&path).parent().unwrap_or(&dest_root).to_path_buf()
+            };
+            if !base.join(&link).starts_with(&dest_root) {
+                return Err(bad(format!("link target escapes the install directory: {}", link.display())));
+            }
+        }
+
+        // Only ordinary files, directories and links belong in an artifact
+        // bundle; device nodes and fifos never do.
+        let kind = entry.header().entry_type();
+        if !(kind.is_file() || kind.is_dir() || kind.is_symlink() || kind.is_hard_link()) {
+            return Err(bad(format!("unsupported archive entry type for {}", path.display())));
+        }
+
+        entry.unpack_in(&dest_root)?;
+    }
+    Ok(())
 }
 
 /// Download the file with a progress bar that indicates the progress.
@@ -119,6 +200,10 @@ pub async fn download_file(
     file: &mut impl std::io::Write,
 ) -> std::result::Result<(), String> {
     let res = client.get(url).send().await.or(Err(format!("Failed to GET from '{}'", &url)))?;
+    // Without this a 404 body is happily written out as if it were the archive.
+    let res = res
+        .error_for_status()
+        .map_err(|e| format!("Request for '{}' failed: {}", &url, e))?;
 
     let total_size =
         res.content_length().ok_or(format!("Failed to get content length from '{}'", &url))?;
@@ -140,4 +225,108 @@ pub async fn download_file(
     pb.finish();
 
     Ok(())
+}
+
+#[cfg(all(test, feature = "network"))]
+mod tests {
+    use super::extract_contained;
+    use std::io::Write;
+    use std::path::Path;
+
+    /// Build a `.tar.gz` with one entry, writing the name straight into the
+    /// header bytes.
+    ///
+    /// `Builder::append_data` validates the path itself and refuses `..` and
+    /// absolute names, so it cannot produce the archives this module has to
+    /// test against. `append` writes a caller-built header verbatim, which is
+    /// exactly what a hostile packer would do.
+    fn archive_with(header: tar::Header, path: &str, body: &[u8]) -> tempfile::NamedTempFile {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let enc = flate2::write::GzEncoder::new(f.reopen().unwrap(), flate2::Compression::none());
+        let mut b = tar::Builder::new(enc);
+        let mut header = header;
+        header.set_size(body.len() as u64);
+        {
+            let raw = header.as_mut_bytes();
+            let name = path.as_bytes();
+            assert!(name.len() < 100, "test names stay in the short-name field");
+            raw[..100].fill(0);
+            raw[..name.len()].copy_from_slice(name);
+        }
+        header.set_cksum();
+        b.append(&header, body).unwrap();
+        b.into_inner().unwrap().finish().unwrap();
+        f
+    }
+
+    fn file_header() -> tar::Header {
+        let mut h = tar::Header::new_gnu();
+        h.set_mode(0o644);
+        h.set_cksum();
+        h
+    }
+
+    fn extract_to_fresh_dir(a: &tempfile::NamedTempFile) -> std::io::Result<tempfile::TempDir> {
+        let dest = tempfile::tempdir().unwrap();
+        extract_contained(a.path(), dest.path())?;
+        Ok(dest)
+    }
+
+    #[test]
+    fn plain_entry_extracts() {
+        let a = archive_with(file_header(), "vk.bin", b"ok");
+        let dest = extract_to_fresh_dir(&a).expect("honest archive must extract");
+        assert_eq!(std::fs::read(dest.path().join("vk.bin")).unwrap(), b"ok");
+    }
+
+    #[test]
+    fn parent_traversal_is_rejected() {
+        let a = archive_with(file_header(), "../escaped.bin", b"pwn");
+        let err = extract_to_fresh_dir(&a).unwrap_err();
+        assert!(err.to_string().contains("escapes"), "got: {err}");
+    }
+
+    #[test]
+    fn absolute_path_is_rejected() {
+        // The shape `tar -P` used to honour, and the reported arbitrary-write.
+        let a = archive_with(file_header(), "/tmp/zkm-absolute-escape.bin", b"pwn");
+        let err = extract_to_fresh_dir(&a).unwrap_err();
+        assert!(err.to_string().contains("absolute") || err.to_string().contains("escapes"),
+            "got: {err}");
+        assert!(!Path::new("/tmp/zkm-absolute-escape.bin").exists(), "wrote outside dest");
+    }
+
+    #[test]
+    fn symlink_escaping_dest_is_rejected() {
+        let mut h = tar::Header::new_gnu();
+        h.set_mode(0o777);
+        h.set_entry_type(tar::EntryType::Symlink);
+        h.set_link_name("/etc").unwrap();
+        h.set_cksum();
+        let a = archive_with(h, "link", b"");
+        let err = extract_to_fresh_dir(&a).unwrap_err();
+        assert!(err.to_string().contains("escapes") || err.to_string().contains("absolute"),
+            "got: {err}");
+    }
+
+    #[test]
+    fn device_nodes_are_rejected() {
+        let mut h = tar::Header::new_gnu();
+        h.set_mode(0o644);
+        h.set_entry_type(tar::EntryType::Char);
+        h.set_cksum();
+        let a = archive_with(h, "dev/null", b"");
+        let err = extract_to_fresh_dir(&a).unwrap_err();
+        assert!(err.to_string().contains("unsupported"), "got: {err}");
+    }
+
+    #[test]
+    fn truncated_archive_is_an_error_not_a_partial_install() {
+        let good = archive_with(file_header(), "vk.bin", b"0123456789");
+        let bytes = std::fs::read(good.path()).unwrap();
+        let mut t = tempfile::NamedTempFile::new().unwrap();
+        t.write_all(&bytes[..bytes.len() / 2]).unwrap();
+        t.flush().unwrap();
+        assert!(extract_to_fresh_dir(&t).is_err(), "truncated archive must not report success");
+    }
 }

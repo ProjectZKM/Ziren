@@ -37,6 +37,8 @@ hex = "0.4.3"
 log = "0.4.22"
 dirs = "5.0.1"
 tempfile = "3.10.1"
+tar = { version = "0.4", optional = true }
+flate2 = { version = "1.0", optional = true }
 cfg-if = "1.0"
 strum = "0.26.3"
 strum_macros = "0.26.4"
@@ -67,6 +69,8 @@ network = [
   "dep:reqwest",
   "dep:twirp",
   "dep:ethers",
+  "dep:tar",
+  "dep:flate2",
 ]
 # The Groth16 verification key (vk) is not affected by the Ziren upgrade.
 imm-wrap-vk = ["zkm-prover/imm-wrap-vk"]
