@@ -45,7 +45,7 @@ pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: u
 
 // Serialized as part of `RecursionProgram`, which now carries the analyzed
 // program and the counts derived with it rather than re-deriving both.
-#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RecursionAirEventCount {
     pub mem_const_events: usize,
     pub mem_var_events: usize,

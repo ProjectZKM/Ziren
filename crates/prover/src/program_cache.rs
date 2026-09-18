@@ -42,8 +42,8 @@ pub fn program_cache_audit_enabled() -> bool {
 // PROGRAM_CACHE=1` still byte-checks every in-memory hit, disk-loaded included.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 /// Disk-cache reuse counters, for the stage report.
 pub static DISK_HITS: AtomicU64 = AtomicU64::new(0);
@@ -96,8 +96,26 @@ pub fn disk_load<F: serde::de::DeserializeOwned>(
     let dir = disk_cache_dir()?;
     let path = entry_path(dir, stage, key);
     let bytes = std::fs::read(&path).ok()?;
-    match bincode::deserialize(&bytes) {
+    match bincode::deserialize::<zkm_recursion_core::RecursionProgram<F>>(&bytes) {
         Ok(p) => {
+            // A cache entry is NOT a program this process built: it is bytes
+            // from a directory, and `RecursionProgram`'s `Deserialize` is
+            // derived, so nothing has re-run `analyze()` on it.  The runtime
+            // sizes `UnsafeRecord` from `event_counts` and writes every event
+            // unchecked at its instruction's offset, so an entry whose counts
+            // are too small (they are `#[serde(default)]` -- a truncated file
+            // deserializes them to all zeros) would leave record slots
+            // uninitialized for `into_record` to read as field elements.
+            // Re-derive the offsets and compare before handing the program
+            // over; a mismatch is treated exactly like a corrupt file, which
+            // this loader already promises to survive by rebuilding.
+            if let Err(e) = p.seq_blocks.validate_offsets(&p.event_counts) {
+                tracing::warn!(
+                    "program disk cache: {} fails its offset invariant ({e}); rebuilding",
+                    path.display()
+                );
+                return None;
+            }
             DISK_HITS.fetch_add(1, Ordering::Relaxed);
             Some(p)
         }
