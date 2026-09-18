@@ -42,6 +42,7 @@ lazy_static! {
 }
 
 mod constants;
+mod cursor;
 mod converter;
 mod error;
 

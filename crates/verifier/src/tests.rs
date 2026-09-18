@@ -184,3 +184,124 @@ fn test_vkeys() {
     let s3_vkey_bytes = std::fs::read(s3_vkey_path).unwrap();
     assert_eq!(s3_vkey_bytes, *crate::PLONK_VK_BYTES);
 }
+
+/// ZR-03: every public entry point must be total over arbitrary bytes.
+///
+/// These assert the *absence of panics*, not verification success: a
+/// verification service handed a short, empty or wrong-variant input must get
+/// an `Err` back rather than die.
+///
+/// They drive `verify_gnark_proof`, NOT `verify`. `verify` compares a hash of
+/// the verifying key against a 4-byte prefix in the proof and returns
+/// `VkeyHashMismatch` long before either parser runs, so truncation tests
+/// written against it pass without ever reaching the code under test.
+/// `verify_gnark_proof` is public and calls the VK and proof loaders directly.
+///
+/// The loops walk every truncation boundary because a guard on the first fixed
+/// section does not protect the reads after it -- that is exactly how the first
+/// attempt at this fix left an exactly-384-byte PLONK proof panicking.
+#[cfg(test)]
+mod malformed_input {
+    use crate::{decode_zkm_vkey_hash, Groth16Verifier, PlonkVerifier, StarkVerifier};
+
+    const HASH: &str = "0x00b005e00203e88bce0273c208edbee966d980737aba868d71e9088c01f634d5";
+    const PUB: [[u8; 32]; 3] = [[0u8; 32]; 3];
+
+    /// A VK whose parsed counts are zero, so the loader succeeds on a
+    /// well-formed prefix and the PROOF loader is actually reached.
+    fn plonk_vk_zero_counts() -> Vec<u8> {
+        // 372 bytes of fixed fields (num_qcp = 0 at 368..372), then g1 + two g2
+        // (32 + 64 + 64), then the 33788-byte reserved block, then a zero u64
+        // commitment-index count.
+        vec![0u8; 372 + 160 + 33788 + 8]
+    }
+
+    #[test]
+    fn plonk_proof_loader_survives_every_truncation() {
+        let vk = plonk_vk_zero_counts();
+        // Past 384: the boundary the first fix stopped at, where `buffer[384..416]`
+        // used to panic.
+        for n in 0..900usize {
+            let proof = vec![0u8; n];
+            let _ = PlonkVerifier::verify_gnark_proof(&proof, &PUB, &vk);
+        }
+    }
+
+    #[test]
+    fn plonk_vk_loader_survives_every_truncation() {
+        let proof = vec![0u8; 1024];
+        for n in 0..500usize {
+            let vk = vec![0u8; n];
+            let _ = PlonkVerifier::verify_gnark_proof(&proof, &PUB, &vk);
+        }
+    }
+
+    #[test]
+    fn plonk_vk_loader_survives_a_hostile_index_count() {
+        // `num_commitment_constraint_indexes` is a u64 read out of the VK; a
+        // huge value must not drive an allocation or run off the end.
+        let mut vk = plonk_vk_zero_counts();
+        let at = 372 + 160 + 33788;
+        vk[at..at + 8].copy_from_slice(&u64::MAX.to_be_bytes());
+        let proof = vec![0u8; 1024];
+        assert!(PlonkVerifier::verify_gnark_proof(&proof, &PUB, &vk).is_err());
+    }
+
+    #[test]
+    fn plonk_vk_loader_survives_a_hostile_qcp_count() {
+        let mut vk = plonk_vk_zero_counts();
+        vk[368..372].copy_from_slice(&u32::MAX.to_be_bytes());
+        let proof = vec![0u8; 1024];
+        assert!(PlonkVerifier::verify_gnark_proof(&proof, &PUB, &vk).is_err());
+    }
+
+    #[test]
+    fn groth16_loaders_survive_every_truncation() {
+        // Both directions: a short VK against a long proof, and the reverse.
+        for n in 0..400usize {
+            let vk = vec![0u8; n];
+            let _ = Groth16Verifier::verify_gnark_proof(&vec![0u8; 300], &PUB, &vk);
+        }
+        let vk = vec![0u8; 512];
+        for n in 0..300usize {
+            let proof = vec![0u8; n];
+            let _ = Groth16Verifier::verify_gnark_proof(&proof, &PUB, &vk);
+        }
+    }
+
+    #[test]
+    fn groth16_vk_loader_survives_a_hostile_k_count() {
+        let mut vk = vec![0u8; 512];
+        vk[288..292].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(Groth16Verifier::verify_gnark_proof(&vec![0u8; 300], &PUB, &vk).is_err());
+    }
+
+    #[test]
+    fn stark_rejects_arbitrary_bytes() {
+        // Bincode over arbitrary bytes used to `expect`, and a valid but
+        // non-Compressed variant used to `panic!`.
+        for n in [0usize, 1, 7, 64, 1024] {
+            let bytes = vec![0xABu8; n];
+            assert!(StarkVerifier::verify(&bytes, b"public", &bytes).is_err());
+            assert!(StarkVerifier::verify_proof(&bytes, &bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn vkey_hash_decoding_is_total() {
+        for s in ["", "0", "0x", "0xzz", "00b005e0", "0x00b005e0", "not hex at all", "0x\u{20ac}\u{20ac}"] {
+            let _ = decode_zkm_vkey_hash(s);
+        }
+        assert!(decode_zkm_vkey_hash(HASH).is_ok());
+    }
+
+    #[test]
+    fn bn254_public_values_is_total_over_hashes() {
+        // An arbitrary 32-byte hash can exceed the BN254 scalar modulus.
+        for b in [0x00u8, 0x7f, 0xff] {
+            let _ = crate::bn254_public_values(&[b; 32], b"public");
+        }
+        let vkey = decode_zkm_vkey_hash(HASH).unwrap();
+        assert!(crate::bn254_public_values(&vkey, b"public").is_ok());
+    }
+}

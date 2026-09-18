@@ -108,12 +108,23 @@ impl StarkVerifier {
     /// Compared to `verify_proof()`, it performs a consistency check between
     /// user-supplied public values and those committed in the proof.
     pub fn verify(proof: &[u8], zkm_public_inputs: &[u8], zkm_vk: &[u8]) -> Result<(), StarkError> {
-        let proof: ZKMProof = bincode::deserialize(proof).expect("failed to deserialize the proof");
-        let ZKMProof::Compressed(proof) = proof else { panic!("expected a compressed proof") };
+        // Both inputs are caller-supplied bytes and this function returns a
+        // Result, so a bad decode or a non-compressed variant is an error, not
+        // a panic that takes a verification service down with it.
+        let proof: ZKMProof =
+            bincode::deserialize(proof).map_err(|_| StarkError::MalformedProof)?;
+        let ZKMProof::Compressed(proof) = proof else {
+            return Err(StarkError::UnexpectedProofVariant);
+        };
         let public_inputs = ZKMPublicValues::from(zkm_public_inputs);
         let vk: ZKMVerifyingKey =
-            bincode::deserialize(zkm_vk).expect("failed to deserialize the vk");
+            bincode::deserialize(zkm_vk).map_err(|_| StarkError::MalformedVerifyingKey)?;
 
+        // `Borrow` here is an infallible reinterpret of a fixed layout over a
+        // proof-controlled vector; check the length first.
+        if proof.proof.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
+            return Err(StarkError::MalformedProof);
+        }
         let proof_public_values: &PublicValues<Word<_>, _> =
             proof.proof.public_values.as_slice().borrow();
 
@@ -144,10 +155,13 @@ impl StarkVerifier {
     /// Compared to `verify()`, it does not perform a consistency check between
     /// user-supplied public values and those committed in the proof.
     pub fn verify_proof(proof: &[u8], zkm_vk: &[u8]) -> Result<(), StarkError> {
-        let proof: ZKMProof = bincode::deserialize(proof).expect("failed to deserialize the proof");
-        let ZKMProof::Compressed(proof) = proof else { panic!("expected a compressed proof") };
+        let proof: ZKMProof =
+            bincode::deserialize(proof).map_err(|_| StarkError::MalformedProof)?;
+        let ZKMProof::Compressed(proof) = proof else {
+            return Err(StarkError::UnexpectedProofVariant);
+        };
         let vk: ZKMVerifyingKey =
-            bincode::deserialize(zkm_vk).expect("failed to deserialize the vk");
+            bincode::deserialize(zkm_vk).map_err(|_| StarkError::MalformedVerifyingKey)?;
 
         verify_stark_compressed_proof(&vk, &proof).map_err(StarkError::Recursion)
     }

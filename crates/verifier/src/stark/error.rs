@@ -8,6 +8,12 @@ use super::{CoreSC, InnerSC};
 pub enum StarkError {
     #[error("Invalid public values")]
     InvalidPublicValues,
+    #[error("Malformed proof bytes")]
+    MalformedProof,
+    #[error("Malformed verifying key bytes")]
+    MalformedVerifyingKey,
+    #[error("Expected a compressed proof")]
+    UnexpectedProofVariant,
     #[error("Version mismatch")]
     VersionMismatch(String),
     #[error("Core machine verification error: {0}")]

@@ -15,13 +15,21 @@ pub fn hash_public_inputs(public_inputs: &[u8]) -> [u8; 32] {
 }
 
 /// Formats the Ziren vkey hash and public inputs for use in either the Plonk or Groth16 verifier.
-pub fn bn254_public_values(zkm_vkey_hash: &[u8; 32], zkm_public_inputs: &[u8]) -> [Fr; 3] {
+///
+/// Fallible because `zkm_vkey_hash` is caller-supplied: the length is fixed,
+/// but `Fr::from_slice` also rejects a value at or above the BN254 scalar
+/// modulus, so an arbitrary 32-byte hash reached an `unwrap` here.
+pub fn bn254_public_values(
+    zkm_vkey_hash: &[u8; 32],
+    zkm_public_inputs: &[u8],
+) -> Result<[Fr; 3], Error> {
     let committed_values_digest = hash_public_inputs(zkm_public_inputs);
-    let vkey_hash = Fr::from_slice(&zkm_vkey_hash[1..]).unwrap();
-    let committed_values_digest = Fr::from_slice(&committed_values_digest).unwrap();
+    let vkey_hash = Fr::from_slice(&zkm_vkey_hash[1..]).map_err(Error::Field)?;
+    let committed_values_digest = Fr::from_slice(&committed_values_digest).map_err(Error::Field)?;
     // The recursion verifying-key-allowlist root, pinned: see `VK_ROOT_BYTES`.
-    let vk_root = Fr::from_slice(crate::VK_ROOT_BYTES.as_slice()).unwrap();
-    [vkey_hash, committed_values_digest, vk_root]
+    // This one is a build-time constant, so a failure is a build bug, not input.
+    let vk_root = Fr::from_slice(crate::VK_ROOT_BYTES.as_slice()).map_err(Error::Field)?;
+    Ok([vkey_hash, committed_values_digest, vk_root])
 }
 
 /// Decodes the Ziren vkey hash from the string from a call to `vk.bytes32`.
