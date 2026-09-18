@@ -688,6 +688,38 @@ where
                 .collect()
         })
         .collect();
+    // The component openings are what tie the query chain back to the
+    // polynomials that were actually committed: their leaf values rebuild the
+    // batched `initial_eval`, and each leaf is Merkle-verified against the
+    // round's ORIGINAL commitment.  This path used to drop them
+    // (`component_openings: Vec::new()`, "verifier discards component_openings
+    // on this path"), which was true only because the verifier's `initial_eval`
+    // fed nothing -- it was overwritten by the first fold before it was ever
+    // compared.  With that equality now asserted, dropping them here is what
+    // made the assert inert on the one ring that reaches this reader.
+    let component_openings = host
+        .component_openings
+        .iter()
+        .map(|round| {
+            round
+                .iter()
+                .map(|c| crate::basefold_verifier::RecursiveBasefoldComponentOpening {
+                    leaf_values: c
+                        .leaf_values
+                        .iter()
+                        .map(|row| row.iter().map(|v| v.read(builder)).collect())
+                        .collect(),
+                    merkle_path_bytes: c.merkle_path_bytes.clone(),
+                    merkle_path_digests: c
+                        .merkle_path_digests
+                        .iter()
+                        .map(|d| rd_digest(d, builder))
+                        .collect(),
+                    _phantom: core::marker::PhantomData,
+                })
+                .collect()
+        })
+        .collect();
     let batch_evaluations = host
         .batch_evaluations
         .iter()
@@ -698,8 +730,7 @@ where
         final_poly,
         pow_witness,
         batch_grinding_witness,
-        // verifier discards component_openings on this path.
-        component_openings: Vec::new(),
+        component_openings,
         query_phase_openings,
         batch_evaluations,
     }
@@ -727,6 +758,23 @@ pub fn write_basefold_proof_outer_to_stream<C>(
                 v.write(witness);
             }
             for d in op.merkle_path_digests.iter() {
+                for f in d.iter() {
+                    f.write(witness);
+                }
+            }
+        }
+    }
+    // Mirror the reader exactly: component openings between the query-phase
+    // openings and the batch evaluations.  A stream that disagrees with the
+    // reader by one element desynchronizes everything after it.
+    for round in host.component_openings.iter() {
+        for c in round.iter() {
+            for row in c.leaf_values.iter() {
+                for v in row.iter() {
+                    v.write(witness);
+                }
+            }
+            for d in c.merkle_path_digests.iter() {
                 for f in d.iter() {
                     f.write(witness);
                 }
