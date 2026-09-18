@@ -1437,6 +1437,80 @@ mod tests {
     /// `sub.state.global_clk <= clk_end + epsilon` indirectly via the
     /// fact that `execute_from_chunk` returns Ok without
     /// `ExceededCycleLimit` propagating.
+    /// Build a chunk that loads from the same non-register address `n` times,
+    /// with an oracle of `oracle_len` answers.
+    fn chunk_with_short_oracle(loads: u32, oracle_len: usize) -> (Arc<Program>, TraceChunk) {
+        use crate::instruction::Instruction;
+        use crate::opcode::Opcode;
+        let pc_base = 0x1000_0000u32;
+        // LW rd, rs, imm — read 0x2000_0000, which is well past NUM_REGISTERS
+        // so it goes through the replay oracle rather than the register
+        // short-circuit.
+        let insns: Vec<Instruction> = (0..loads)
+            .map(|_| Instruction::new(Opcode::LW, 2, 0, 0x2000_0000, false, true))
+            .collect();
+        let program = Arc::new(Program::new(insns, pc_base, pc_base));
+        let mem_reads: Vec<crate::minimal_trace::MemValue> = (0..oracle_len)
+            .map(|_| crate::minimal_trace::MemValue { value: 0, timestamp: 0, shard: 0 })
+            .collect();
+        let chunk = TraceChunk {
+            input_stream_slice: None,
+            shard_index: 0,
+            shape_fingerprint: 0,
+            shape_classes: Vec::new(),
+            shape_area: 0,
+            start_registers: vec![0u32; 36],
+            start_register_records: Vec::new(),
+            pc_start: pc_base,
+            clk_start: 0,
+            clk_end: 10_000,
+            current_shard: 0,
+            input_stream_ptr: 0,
+            proof_stream_ptr: 0,
+            public_values_stream_ptr: 0,
+            final_memory: Vec::new(),
+            final_uninit_memory: Vec::new(),
+            mem_reads: Arc::new(mem_reads),
+        };
+        (program, chunk)
+    }
+
+    /// A truncated oracle used to degrade silently: the read fell through to
+    /// the unseeded paged image, returned zero, and the worker produced a full
+    /// record for an execution that never happened — reported at most once per
+    /// PROCESS through a `std::sync::Once`.  It must now fail the chunk.
+    #[test]
+    fn a_truncated_replay_oracle_fails_the_chunk() {
+        let (program, chunk) = chunk_with_short_oracle(8, 2);
+        let opts = ZKMCoreOpts::default();
+        let mut record = ExecutionRecord::new(program.clone());
+        let mut vm = TracingVM::new(program.clone(), opts, &mut record);
+        match vm.execute_from_chunk(&chunk) {
+            Err(ExecutionError::ReplayOracleDesync { exhausted, .. }) => {
+                assert!(exhausted, "a short oracle is the exhausted case");
+            }
+            other => panic!("a truncated oracle must fail the chunk, got {other:?}"),
+        }
+    }
+
+    /// The other direction — entries left unconsumed — is equally a desync, but
+    /// it has never been asserted in production, so it warns by default and
+    /// only fails under `ZKM_REPLAY_STRICT=1`.  Pin the default here so the
+    /// staging is deliberate rather than accidental; flip this test when the
+    /// strict check becomes the default.
+    #[test]
+    fn a_surplus_replay_oracle_is_tolerated_by_default() {
+        let (program, chunk) = chunk_with_short_oracle(2, 64);
+        let opts = ZKMCoreOpts::default();
+        let mut record = ExecutionRecord::new(program.clone());
+        let mut vm = TracingVM::new(program.clone(), opts, &mut record);
+        assert!(
+            std::env::var("ZKM_REPLAY_STRICT").is_err(),
+            "this test pins the DEFAULT behaviour; unset ZKM_REPLAY_STRICT to run it"
+        );
+        vm.execute_from_chunk(&chunk).expect("surplus entries only warn by default");
+    }
+
     #[test]
     fn execute_from_chunk_respects_clk_end_bound() {
         use crate::instruction::Instruction;
