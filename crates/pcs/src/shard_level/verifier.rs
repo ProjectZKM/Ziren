@@ -515,7 +515,23 @@ where
         };
         use p3_air::BaseAir;
         let bytes = match evaluation_proof {
-            EvaluationProof::Empty => return Ok(()),
+            // NOT a compatibility case here.  `Empty` means "this
+            // configuration has no jagged PCS", and the TypeId gate above has
+            // already established that this one does -- it is a
+            // KoalaBear/BaseFold shard on the outer ring.  `evaluation_proof`
+            // is a public, deserializable field whose default is `Empty`, so
+            // returning `Ok(())` for it let anyone strip the PCS opening off
+            // an otherwise valid shard proof and keep every algebraic check:
+            // the transcript prologue has already absorbed `main_commitment`,
+            // zerocheck and LogUp go on consuming the supplied opened values,
+            // and nothing is left to bind those values to that commitment.
+            EvaluationProof::Empty => {
+                return Err(BasefoldVerifyError::JaggedPcs(
+                    "outer KoalaBear shard carries EvaluationProof::Empty: the PCS opening is \
+                     missing, so no commitment binds the opened values"
+                        .into(),
+                ))
+            }
             EvaluationProof::Bytes(b) => b,
             EvaluationProof::Bundle(_) => {
                 return Err(BasefoldVerifyError::JaggedPcs(
@@ -588,11 +604,20 @@ where
         };
     }
 
-    // Resolve to a bundle. Empty means no jagged-PCS proof to verify;
-    // Bundle is the host-emitted structured form; Bytes is a device
-    // hook's pre-serialized form that we deserialize here.
+    // Resolve to a bundle.  `Bundle` is the host-emitted structured form and
+    // `Bytes` a device hook's pre-serialized form we deserialize here; `Empty`
+    // is rejected (see below).
     let bundle = match evaluation_proof {
-        EvaluationProof::Empty => return Ok(()),
+        // Same reasoning as the outer branch above: past the type gate this is
+        // an active KoalaBear PCS, so a missing opening is a malformed proof,
+        // never a configuration that has none.
+        EvaluationProof::Empty => {
+            return Err(BasefoldVerifyError::JaggedPcs(
+                "inner KoalaBear shard carries EvaluationProof::Empty: the PCS opening is \
+                 missing, so no commitment binds the opened values"
+                    .into(),
+            ))
+        }
         EvaluationProof::Bundle(b) => b.clone(),
         EvaluationProof::Bytes(bytes) => {
             JaggedBasefoldBundle::from_bytes(bytes).ok_or_else(|| {
