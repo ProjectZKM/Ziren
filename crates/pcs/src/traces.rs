@@ -1,6 +1,7 @@
 //! A shard's main traces, keyed by chip name.
 
 use crate::multilinear::PaddedMle;
+use crate::tensor::{Backend, CpuBackend};
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
@@ -28,34 +29,39 @@ use std::ops::{Deref, DerefMut};
 /// `CORE_MAX_LOG_ROW_COUNT` every stage proves at, so it is known at generation
 /// and never floated per proof. Holding the raw `RowMajorMatrix` instead would
 /// mean re-wrapping at each consumer and carrying the cube separately.
+/// Backend-parameterised like SP1's `Traces<F, B>`: `PaddedMle` already carries
+/// a backend (`CudaBackend` implements `Backend` in ziren-gpu), so a
+/// device-resident trace map is representable. `CpuBackend` is the default, so
+/// `Traces<F>` reads as before.
+///
 /// (SP1 additionally derives `Serialize`/`Deserialize`, because its `Traces`
 /// crosses a process boundary. Ziren's `PaddedMle` is not serializable and
 /// nothing here serializes a `Traces`, so those derives are omitted rather than
 /// forced onto the MLE.)
 #[derive(Debug, Clone, Default)]
-pub struct Traces<F> {
+pub struct Traces<F, A: Backend = CpuBackend> {
     /// The traces for each chip.
-    pub named_traces: BTreeMap<String, PaddedMle<F>>,
+    pub named_traces: BTreeMap<String, PaddedMle<F, A>>,
 }
 
-impl<F> IntoIterator for Traces<F> {
-    type Item = (String, PaddedMle<F>);
-    type IntoIter = <BTreeMap<String, PaddedMle<F>> as IntoIterator>::IntoIter;
+impl<F, A: Backend> IntoIterator for Traces<F, A> {
+    type Item = (String, PaddedMle<F, A>);
+    type IntoIter = <BTreeMap<String, PaddedMle<F, A>> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.named_traces.into_iter()
     }
 }
 
-impl<F> Deref for Traces<F> {
-    type Target = BTreeMap<String, PaddedMle<F>>;
+impl<F, A: Backend> Deref for Traces<F, A> {
+    type Target = BTreeMap<String, PaddedMle<F, A>>;
 
     fn deref(&self) -> &Self::Target {
         &self.named_traces
     }
 }
 
-impl<F> DerefMut for Traces<F> {
+impl<F, A: Backend> DerefMut for Traces<F, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.named_traces
     }
@@ -66,6 +72,7 @@ mod tests {
     use super::Traces;
     use crate::basefold::Mle;
     use crate::multilinear::PaddedMle;
+use crate::tensor::{Backend, CpuBackend};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;
