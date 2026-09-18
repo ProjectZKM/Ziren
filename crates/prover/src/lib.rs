@@ -1834,7 +1834,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     crate::compress_tree::ShardRange,
                     Arc<RecursionProgram<KoalaBear>>,
                     ExecutionRecord<KoalaBear>,
-                    Vec<(String, RowMajorMatrix<KoalaBear>)>,
+                    zkm_pcs::Traces<KoalaBear>,
                 )>(opts.recursion_opts.records_and_traces_channel_capacity);
             let record_and_trace_tx = Arc::new(Mutex::new(record_and_trace_tx));
             let record_and_trace_rx = Arc::new(Mutex::new(record_and_trace_rx));

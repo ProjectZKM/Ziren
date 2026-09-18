@@ -154,7 +154,7 @@ where
         let p2_trace_gen_sync = Arc::new(TurnBasedSync::new());
         let checkpoints_rx = Arc::new(Mutex::new(checkpoints_rx));
         let (p2_records_and_traces_tx, p2_records_and_traces_rx) =
-            sync_channel::<(Vec<ExecutionRecord>, Vec<Vec<(String, RowMajorMatrix<Val<SC>>)>>)>(
+            sync_channel::<(Vec<ExecutionRecord>, Vec<zkm_pcs::Traces<Val<SC>>>)>(
                 opts.records_and_traces_channel_capacity,
             );
         let p2_records_and_traces_tx = Arc::new(Mutex::new(p2_records_and_traces_tx));

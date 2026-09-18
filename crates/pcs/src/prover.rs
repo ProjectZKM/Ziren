@@ -233,10 +233,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
 
     /// Generate the main traces.
     #[allow(clippy::type_complexity)]
-    fn generate_traces(
-        &self,
-        record: &A::Record,
-    ) -> Result<Vec<(String, RowMajorMatrix<Val<SC>>)>, A::Error> {
+    fn generate_traces(&self, record: &A::Record) -> Result<crate::Traces<Val<SC>>, A::Error> {
         let shard_chips = self.machine().shard_chips(record).collect::<Vec<_>>();
 
         // For each chip, generate the trace.
@@ -270,7 +267,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 })
                 .collect::<Result<Vec<_>, A::Error>>()
         })?;
-        Ok(traces)
+        // One chip generates one trace, so the collect into a name-keyed map is
+        // lossless; `shard_chips` yields each chip once.
+        Ok(traces.into())
     }
 
     /// Commit to the main traces.
@@ -286,7 +285,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn commit(
         &self,
         record: &A::Record,
-        traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
+        traces: crate::Traces<Val<SC>>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs>;
 
@@ -433,7 +432,7 @@ where
     fn commit(
         &self,
         record: &A::Record,
-        mut named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
+        mut named_traces: crate::Traces<Val<SC>>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs> {
         // MISSING-CHIP INJECTION (exact mirror of the GPU `commit`).
@@ -455,33 +454,23 @@ where
         // identity fraction (0,1)).  `None` (recursion / shrink / wrap) =>
         // own-chip-set commit.
         if let Some(cluster_widths) = cluster_widths {
-            use std::collections::BTreeSet;
-            let present: BTreeSet<String> =
-                named_traces.iter().map(|(n, _)| n.clone()).collect();
             for (name, width) in cluster_widths.iter() {
-                if !present.contains(name) {
-                    // 0 rows at full canonical width: `values` empty, `width == w`
-                    // => `RowMajorMatrix::height() == 0`.
-                    let w = (*width).max(1);
-                    named_traces.push((
-                        name.clone(),
-                        RowMajorMatrix::new(Vec::<Val<SC>>::new(), w),
-                    ));
-                }
+                // 0 rows at full canonical width: `values` empty, `width == w`
+                // => `RowMajorMatrix::height() == 0`.
+                let w = (*width).max(1);
+                named_traces
+                    .entry(name.clone())
+                    .or_insert_with(|| RowMajorMatrix::new(Vec::<Val<SC>>::new(), w));
             }
         }
 
-        // Name-order the commit so the recursion verifier's compile-time
-        // name-order column_counts / opened_values match the committed column
-        // order.
-        named_traces.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        // Get the chip ordering (name-order, matching the commit + the recursion
-        // `opened_values.chips` BTreeMap order).
+        // `Traces` is name-keyed, so the commit order the recursion verifier's
+        // compile-time `column_counts` / `opened_values` expect is the map's own
+        // order -- there is nothing to sort and no duplicate to guard against.
         let chip_ordering: hashbrown::HashMap<String, usize> = named_traces
-            .iter()
+            .keys()
             .enumerate()
-            .map(|(i, (name, _))| (name.to_owned(), i))
+            .map(|(i, name)| (name.to_owned(), i))
             .collect();
 
         // Build the shard's name-keyed trace-MLE store ONCE — the matrices
@@ -505,8 +494,7 @@ where
                 let max_log_row_count =
                     crate::shard_level::verifier::BasefoldShardVerifier::production_default()
                         .max_log_row_count;
-                let names: Vec<String> =
-                    named_traces.iter().map(|(name, _)| name.clone()).collect();
+                let names: Vec<String> = named_traces.keys().cloned().collect();
                 let main_store = named_padded_traces(
                     names,
                     named_traces.into_iter().map(|(_, mat)| mat),
@@ -516,16 +504,16 @@ where
                 );
                 let chips: Vec<&MachineChip<SC, A>> =
                     self.machine().shard_chips_ordered(&chip_ordering).collect();
-                // NOT a debug_assert: `views` and `chips` are zipped positionally
-                // by `commit_traces`, so a name in the store that the machine
-                // does not have as a chip (a mis-injected cluster name, a
-                // duplicate) shifts every later pair and commits traces against
-                // the wrong AIRs -- silently, and only in release. One length
-                // comparison per shard commit is not worth saving.
+                // `views` and `chips` are zipped positionally by `commit_traces`,
+                // and `Traces` only rules out duplicates -- a committed name the
+                // machine has no chip for (a mis-injected cluster name) would
+                // still shift every later pair and commit traces against the
+                // wrong AIRs. A real assert, not a `debug_assert`: it must hold
+                // in release too.
                 assert_eq!(
                     chips.len(),
                     main_store.len(),
-                    "every committed trace name must be a machine chip, exactly once",
+                    "every committed trace name must be a machine chip",
                 );
                 // Store order (name-sorted BTreeMap) == chips order.
                 let views: Vec<crate::multilinear::PaddedMle<Val<SC>>> =
