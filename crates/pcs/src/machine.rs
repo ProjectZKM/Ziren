@@ -1221,6 +1221,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             return Err(MachineVerificationError::EmptyProof);
         }
 
+        // Every read of `public_values` below -- the `observe_slice` here, and
+        // the typed `Borrow` in the shard loop -- SLICES it to `num_pv_elts`.
+        // The typed length check lives in `verify_shard`
+        // (`shard_level/verifier.rs`, `PublicValuesLengthMismatch`), which runs
+        // AFTER both, and the `Borrow` impl guards itself with a
+        // `debug_assert!` that is compiled out.  So a deserialized proof whose
+        // first shard carries a short `public_values` panicked with a slice
+        // range error before the typed error could be produced -- a panic
+        // inside a `Result`-returning verifier, on untrusted input.  Check the
+        // shape up front instead.
+        if proof.shard_proofs.iter().any(|p| p.public_values.len() < self.num_pv_elts()) {
+            return Err(MachineVerificationError::InvalidPublicValues(
+                "a shard's public_values is shorter than the machine's num_pv_elts",
+            ));
+        }
+
         // Snapshot the (now observed) base challenger as an immutable, shareable value.
         // Each shard clones this snapshot independently, exactly as the serial loop did,
         // so the per-shard challenger state is bit-identical to the serial version.

@@ -81,6 +81,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         //
         // Transition:
         // - Shard should increment by one for each shard.
+        // Same guard as `StarkMachine::verify`: the `Borrow` below slices to
+        // the typed size behind a `debug_assert!`, so on a deserialized proof
+        // with a short `public_values` this panicked instead of returning the
+        // typed error.  `ZKMCoreProofData` arrives from the wire, so it is
+        // untrusted input to a `Result`-returning function.
+        let num_pv_elts = self.core_prover.machine().num_pv_elts();
+        if proof.0.iter().any(|p| p.public_values.len() < num_pv_elts) {
+            return Err(MachineVerificationError::InvalidPublicValues(
+                "a shard's public_values is shorter than the machine's num_pv_elts",
+            ));
+        }
+
         let mut current_shard = KoalaBear::ZERO;
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
