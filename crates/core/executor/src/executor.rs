@@ -2650,12 +2650,21 @@ impl<'a> Executor<'a> {
                 let out = b as u64 * c as u64;
                 (out as u32, (out >> 32) as u32) //lo,hi
             }
+            // `wrapping_*`, not `/` and `%`: signed division has ONE overflow
+            // case, `-2^31 / -1`, on which Rust's operators panic ("attempt to
+            // divide with overflow") and take the whole prover down with them.
+            // MIPS defines it, the JIT returns `0x8000_0000` for it, and the
+            // AIR is built to prove it -- `is_overflow` (`alu/divrem/mod.rs`)
+            // is exactly this case, and its constraint wants quotient `-2^31`
+            // with remainder `0`, which is what `wrapping_div`/`wrapping_rem`
+            // give.  (`c == 0` never reaches here: `execute_alu` traps on it
+            // above, and the AIR rejects any row with `is_c_0`.)
             Opcode::DIV => (
-                ((b as i32) / (c as i32)) as u32, // lo
-                ((b as i32) % (c as i32)) as u32, // hi
+                (b as i32).wrapping_div(c as i32) as u32, // lo
+                (b as i32).wrapping_rem(c as i32) as u32, // hi
             ),
             Opcode::DIVU => (b / c, b % c), //lo,hi
-            Opcode::MOD => (((b as i32) % (c as i32)) as u32, 0),
+            Opcode::MOD => ((b as i32).wrapping_rem(c as i32) as u32, 0),
             Opcode::MODU => (b % c, 0), //lo,hi
             Opcode::AND => (b & c, 0),
             Opcode::OR => (b | c, 0),
@@ -4832,6 +4841,31 @@ mod tests {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(12.into()), expected);
+    }
+
+    /// `-2^31 / -1` is the one overflow case of signed division.  Rust's `/`
+    /// and `%` PANIC on it, so before the `wrapping_*` fix a guest containing
+    /// this division took the prover down with "attempt to divide with
+    /// overflow" -- on an operation the AIR is built to prove (`is_overflow`
+    /// in `alu/divrem`, quotient `-2^31`, remainder `0`) and the JIT already
+    /// returned `0x8000_0000` for.  `c == 0` is the separate, trapped case.
+    #[test]
+    #[allow(clippy::unreadable_literal)]
+    fn signed_division_overflow_does_not_panic() {
+        // MOD writes its result to rd, so the generic helper covers it.
+        simple_op_code_test(Opcode::MOD, 0x00000000, 0x80000000, 0xffffffff);
+
+        // DIV writes lo/hi; read LO directly.
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 10, 0, 0x80000000, false, true),
+            Instruction::new(Opcode::ADD, 11, 0, 0xffffffff, false, true),
+            Instruction::new(Opcode::DIV, 0, 10, 11, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.register(Register::LO), 0x80000000);
+        assert_eq!(runtime.register(Register::HI), 0x00000000);
     }
 
     #[test]
