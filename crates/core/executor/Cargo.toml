@@ -66,6 +66,14 @@ serde_json = { workspace = true }
 [features]
 bigint-rug = ["zkm-curves/bigint-rug"]
 pre-alloc = []
+# Compile OUT the native JIT executor, leaving the interpreter.
+#
+# `build.rs` has always gated `zkm_use_native_executor` on
+# `not(feature = "profiling")`, but the feature was never declared here, so it
+# could not be enabled: the documented way to get an interpreted executor did
+# nothing and cargo warned `unexpected cfg value: profiling` on every build.
+# Profiling wants this because the JIT does not emit per-instruction events.
+profiling = []
 
 [[bench]]
 name = "jit_vs_interp"

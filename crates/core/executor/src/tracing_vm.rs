@@ -275,31 +275,22 @@ impl<'a> TracingVM<'a> {
                 });
             }
             // Leftover entries mean the replay took a different path through
-            // the same cycles.  That is equally a desync in principle, but it
-            // has never been asserted in production, so it warns by default
-            // and only fails under `ZKM_REPLAY_STRICT=1`.  Run a campaign with
-            // the flag on, confirm it stays quiet, then make it the default and
-            // delete the knob -- shipping it as a hard error untested would
-            // fail healthy blocks.
+            // the same cycles: equally a desync, and equally a record produced
+            // for an execution that did not happen.
+            //
+            // This warned by default until a campaign could show it stays
+            // quiet, because shipping it as a hard error untested would fail
+            // healthy blocks. That campaign has now run: 2,331 production
+            // blocks (26005269..26007605, 8h18m) emitted the warning ZERO
+            // times, and no chunk desynced either way. So it fails closed, and
+            // the `ZKM_REPLAY_STRICT` knob is gone -- a soundness check should
+            // not have a fail-open override.
             if consumed != total {
-                let strict = std::env::var("ZKM_REPLAY_STRICT")
-                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                    .unwrap_or(false);
-                if strict {
-                    return Err(ExecutionError::ReplayOracleDesync {
-                        consumed,
-                        total,
-                        exhausted: false,
-                    });
-                }
-                tracing::warn!(
-                    target: "tracing_vm",
-                    shard_index = chunk.shard_index,
+                return Err(ExecutionError::ReplayOracleDesync {
                     consumed,
                     total,
-                    "replay finished with memory-oracle entries unconsumed — the replay and \
-                     the producer disagree about this chunk's accesses",
-                );
+                    exhausted: false,
+                });
             }
         }
 
@@ -1439,6 +1430,16 @@ mod tests {
     /// `ExceededCycleLimit` propagating.
     /// Build a chunk that loads from the same non-register address `n` times,
     /// with an oracle of `oracle_len` answers.
+    /// A chunk whose oracle has MORE entries than the replay will consume.
+    ///
+    /// Same builder as the short case -- the two differ only in whether
+    /// `oracle_len` is under or over what `loads` accesses consume -- but the
+    /// name matters at the call site, because the two desyncs are reported with
+    /// different `exhausted` flags.
+    fn chunk_with_surplus_oracle(loads: u32, oracle_len: usize) -> (Arc<Program>, TraceChunk) {
+        chunk_with_short_oracle(loads, oracle_len)
+    }
+
     fn chunk_with_short_oracle(loads: u32, oracle_len: usize) -> (Arc<Program>, TraceChunk) {
         use crate::instruction::Instruction;
         use crate::opcode::Opcode;
@@ -1493,22 +1494,22 @@ mod tests {
         }
     }
 
-    /// The other direction — entries left unconsumed — is equally a desync, but
-    /// it has never been asserted in production, so it warns by default and
-    /// only fails under `ZKM_REPLAY_STRICT=1`.  Pin the default here so the
-    /// staging is deliberate rather than accidental; flip this test when the
-    /// strict check becomes the default.
+    /// The other direction — entries left unconsumed — is the branch that used
+    /// to only warn. It now fails like exhaustion does, and `exhausted` is the
+    /// flag that tells the two apart.
     #[test]
-    fn a_surplus_replay_oracle_is_tolerated_by_default() {
-        let (program, chunk) = chunk_with_short_oracle(2, 64);
+    fn a_surplus_replay_oracle_fails_the_chunk() {
+        let (program, chunk) = chunk_with_surplus_oracle(2, 64);
         let opts = ZKMCoreOpts::default();
         let mut record = ExecutionRecord::new(program.clone());
         let mut vm = TracingVM::new(program.clone(), opts, &mut record);
-        assert!(
-            std::env::var("ZKM_REPLAY_STRICT").is_err(),
-            "this test pins the DEFAULT behaviour; unset ZKM_REPLAY_STRICT to run it"
-        );
-        vm.execute_from_chunk(&chunk).expect("surplus entries only warn by default");
+        match vm.execute_from_chunk(&chunk) {
+            Err(ExecutionError::ReplayOracleDesync { exhausted, consumed, total }) => {
+                assert!(!exhausted, "a surplus oracle is not the exhausted case");
+                assert!(consumed < total, "surplus means unconsumed entries remain");
+            }
+            other => panic!("a surplus oracle must fail the chunk, got {other:?}"),
+        }
     }
 
     #[test]

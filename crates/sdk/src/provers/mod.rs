@@ -229,7 +229,9 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
 
 impl Prover<DefaultProverComponents> for ProverClient {
     fn id(&self) -> ProverType {
-        todo!()
+        // Every wrapped prover (CPU, CUDA, mock, network) implements this; the
+        // `todo!()` that used to be here panicked on a public trait method.
+        self.prover.id()
     }
 
     fn take_prove_ms(&self) -> Option<u64> {
