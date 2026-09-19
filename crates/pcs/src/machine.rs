@@ -122,16 +122,6 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// `preprocessed_mles`.
     #[serde(skip)]
     preprocessed_data: std::sync::OnceLock<std::sync::Arc<SC::PrepPrecomputed>>,
-    /// VESTIGIAL. The two dense row layouts were collapsed to one (natural), so
-    /// nothing reads this any more.
-    ///
-    /// It is kept only because it is serialized (`#[serde(default)]`) on a key
-    /// that crosses the wire for the CORE setup response, and the cuda client
-    /// ships its proving key in every core request -- so REMOVING it is a wire
-    /// format change that needs client and server rebuilt together. Do that as its
-    /// own change; until then this is written `true` and never read.
-    #[serde(default)]
-    pub prep_rev: bool,
     /// The AREA PIN `setup` committed the preprocessed round under (a
     /// recursion machine's `prep` pin), `None` = natural.  Rebuilding the
     /// precompute from `traces` has to use the same one.
@@ -164,7 +154,6 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             // deep-copying the MLEs.
             preprocessed_mles: std::sync::OnceLock::new(),
             preprocessed_data: std::sync::OnceLock::new(),
-            prep_rev: self.prep_rev,
             prep_pin: self.prep_pin,
             main_pin: self.main_pin,
             chip_ordering: self.chip_ordering.clone(),
@@ -184,8 +173,6 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
         traces: Vec<RowMajorMatrix<Val<SC>>>,
         chip_ordering: HashMap<String, usize>,
         constraints_map: HashMap<String, usize>,
-        // The orientation `setup` committed the preprocessed traces under.
-        prep_rev: bool,
     ) -> Self {
         Self {
             commit,
@@ -194,7 +181,6 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
             traces,
             preprocessed_mles: std::sync::OnceLock::new(),
             preprocessed_data: std::sync::OnceLock::new(),
-            prep_rev,
             prep_pin: None,
             main_pin: None,
             chip_ordering,
@@ -220,8 +206,8 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     /// The commit is the expensive half of `setup`, and a caller that just
     /// built it has no reason to make [`Self::preprocessed_data`] build it a
     /// second time.  The supplied data MUST be the precompute of exactly these
-    /// `traces` under exactly this `prep_rev` — it is what the preprocessed
-    /// round of every shard proof opens against `commit`.
+    /// `traces` — it is what the preprocessed round of every shard proof opens
+    /// against `commit`.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_with_preprocessed_data(
         commit: Com<SC>,
@@ -230,7 +216,6 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
         traces: Vec<RowMajorMatrix<Val<SC>>>,
         chip_ordering: HashMap<String, usize>,
         constraints_map: HashMap<String, usize>,
-        prep_rev: bool,
         preprocessed_data: std::sync::Arc<SC::PrepPrecomputed>,
     ) -> Self {
         let key = Self::from_parts(
@@ -240,7 +225,6 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
             traces,
             chip_ordering,
             constraints_map,
-            prep_rev,
         );
         let _ = key.preprocessed_data.set(preprocessed_data);
         key
@@ -329,9 +313,8 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
 
     /// The precomputed preprocessed commit, built on first use from `traces`
     /// in the SAME name/height order `setup` committed them in (the order
-    /// `chip_ordering` records) and under the orientation recorded on the key
-    /// (`prep_rev`), so the rebuilt commitment reproduces `self.commit`
-    /// exactly.
+    /// `chip_ordering` records), so the rebuilt commitment reproduces
+    /// `self.commit` exactly.
     pub fn preprocessed_data(&self) -> &std::sync::Arc<SC::PrepPrecomputed> {
         self.preprocessed_data.get_or_init(|| {
             let mut names: Vec<(usize, &String)> =
@@ -836,7 +819,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     let _ = cell.set(std::sync::Arc::new(prep_precomputed));
                     cell
                 },
-                prep_rev: true,
                 prep_pin: pins.map(|p| p.prep),
                 main_pin: pins.map(|p| p.main),
                 chip_ordering: chip_ordering.clone(),
@@ -981,7 +963,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 traces,
                 preprocessed_mles: std::sync::OnceLock::new(),
                 preprocessed_data: std::sync::OnceLock::new(),
-                prep_rev: true,
                 prep_pin: self.prep_area_pin(),
                 main_pin: self.main_area_pin(),
                 chip_ordering: chip_ordering.clone(),
