@@ -1221,20 +1221,34 @@ mod tests {
             (0..5000).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
         let program = Program::new(insns, pc_base, pc_base);
 
-        // Baseline: full bookkeeping
-        let t0 = Instant::now();
-        let mut exec_a = Executor::new(program.clone(), ZKMCoreOpts::default());
-        exec_a.run().expect("baseline run");
-        let t_baseline = t0.elapsed();
-        let cpu_a: usize = exec_a.records.iter().map(|r| r.cpu_events.len()).sum();
+        // BEST of several runs per arm, not a single sample.
+        //
+        // The gate below is a wall-clock RATIO of two ~10ms runs, and this test
+        // runs under `cargo test`'s default parallelism alongside a hundred
+        // others: one descheduled run is enough to fail it. That made it flake,
+        // and it flakes more the more tests share the binary. Taking the minimum
+        // measures the work rather than the scheduler -- the fastest observed run
+        // is the one least interfered with -- while keeping the regression gate.
+        const SAMPLES: usize = 3;
+        let mut t_baseline = core::time::Duration::MAX;
+        let mut t_lifter = core::time::Duration::MAX;
+        let mut cpu_a = 0usize;
+        let mut cpu_b = 0usize;
 
-        // Lifter: skip replay bookkeeping
-        let t0 = Instant::now();
-        let mut exec_b = Executor::new(program.clone(), ZKMCoreOpts::default());
-        exec_b.skip_replay_bookkeeping = true;
-        exec_b.run().expect("lifter run");
-        let t_lifter = t0.elapsed();
-        let cpu_b: usize = exec_b.records.iter().map(|r| r.cpu_events.len()).sum();
+        for _ in 0..SAMPLES {
+            let t0 = Instant::now();
+            let mut exec_a = Executor::new(program.clone(), ZKMCoreOpts::default());
+            exec_a.run().expect("baseline run");
+            t_baseline = t_baseline.min(t0.elapsed());
+            cpu_a = exec_a.records.iter().map(|r| r.cpu_events.len()).sum();
+
+            let t0 = Instant::now();
+            let mut exec_b = Executor::new(program.clone(), ZKMCoreOpts::default());
+            exec_b.skip_replay_bookkeeping = true;
+            exec_b.run().expect("lifter run");
+            t_lifter = t_lifter.min(t0.elapsed());
+            cpu_b = exec_b.records.iter().map(|r| r.cpu_events.len()).sum();
+        }
 
         // Byte-equiv: event counts must match (skip_replay_bookkeeping
         // only drops counters, not events).
@@ -1247,7 +1261,7 @@ mod tests {
         // Regression gate: lifter must not be > 1.5× slower than baseline.
         let ratio = t_lifter.as_nanos() as f64 / t_baseline.as_nanos().max(1) as f64;
         eprintln!(
-            "[D.4 ] baseline={:.3}ms lifter={:.3}ms ratio={:.2}",
+            "[D.4 ] best-of-{SAMPLES}: baseline={:.3}ms lifter={:.3}ms ratio={:.2}",
             t_baseline.as_secs_f64() * 1000.0,
             t_lifter.as_secs_f64() * 1000.0,
             ratio,
