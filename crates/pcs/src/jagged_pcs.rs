@@ -808,20 +808,25 @@ pub mod jagged {
 
     use super::FriConfig;
 
-    /// Wire-format jagged metadata: only the per-bundle quantities
-    /// the verifier needs to reconstruct the same `JaggedPacking`
-    /// from chip_infos it receives separately.  We don't serialize
-    /// `dense_values` (that's the multi-GB vector we just committed
-    /// to BaseFold).
+    /// Wire-format jagged metadata: the per-bundle quantities the verifier needs
+    /// to reconstruct the same `JaggedPacking` from chip_infos it receives
+    /// separately.
     ///
-    /// `column_counts`: per-chip *actual*
-    /// column count as exercised by this shard's trace, written by
-    /// the prover from `compute_jagged_metadata`.  The verifier reads
-    /// this instead of `BaseAir::width(chip)` so the prover can send
-    /// `trace.width` (the truly-populated columns) without any
-    /// chip.width() pad.
-    /// Empty vec on the wire = legacy bundle → caller falls back to
-    /// `BaseAir::width(chip)` for backward compat.
+    /// It carries no dense cells. (The old doc said "we don't serialize
+    /// `dense_values` -- that's the multi-GB vector we just committed to
+    /// BaseFold". `JaggedPacking::dense_values` is `Vec::new()` on this path;
+    /// the dense is materialized transiently as `dense_q` inside the reduction
+    /// and dropped. The omission is right, the reason given for it was not.)
+    ///
+    /// `column_counts`: the column count of every entry in the CONCATENATED
+    /// column space, in that order -- the shard's real chips AND the synthetic
+    /// `<stacking-pad:N>` entries the round flattening inserts, each of width 1.
+    /// It is read off the flattened `chip_infos`, not from
+    /// `compute_jagged_metadata`. The verifier reads it instead of
+    /// `BaseAir::width(chip)` so the prover can send `trace.width` (the
+    /// truly-populated columns) with no `chip.width()` pad.
+    /// Empty vec on the wire = legacy bundle → the caller falls back to the chip
+    /// widths (`jagged_pcs.rs:1980`).
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
     pub struct PackingMeta {
         pub offsets: Vec<usize>,
@@ -843,17 +848,34 @@ pub mod jagged {
         /// legacy wire format byte-identical.
         #[serde(default)]
         pub round_counts: Vec<Vec<(usize, usize)>>,
-        /// Each round's stacking-padding column heights, in round order — the
-        /// gap between the round's real cells and the area the stacked
-        /// commitment actually covers, split into columns no taller than the
-        /// row cube (a taller column has no eq table to be weighed against).
+        /// Each round's stacking-padding column heights, in round order — the gap
+        /// between the round's real cells and the area the stacked commitment
+        /// covers, split into columns no taller than the row cube (a taller column
+        /// has no eq table to be weighed against).
         ///
-        /// It is NOT derivable from `round_counts`: a round whose cells already
-        /// fill a whole number of stripes still gets a full extra stripe, so
-        /// `next_multiple_of` under-counts it by `1 << log_stacking_height` and
-        /// the reconstructed final offset lands a stripe short.  The recursion
-        /// lift closes its column space with this height, so it has to be the
-        /// prover's own value.
+        /// How the split is made depends on the round's AREA PIN:
+        ///
+        /// * pinned (the compress machine) → `AreaPin::split_padding(gap, k, cube)`
+        ///   gives exactly `k` columns whatever the gap is, which is what keeps the
+        ///   column COUNT — and so the program verifying the round — independent of
+        ///   the node's row counts;
+        /// * unpinned → as many cube-tall columns as the gap needs, and at least
+        ///   one even when the gap is zero.
+        ///
+        /// What is NOT derivable from `round_counts` is therefore the column COUNT,
+        /// for those two reasons. (The old doc gave a different reason: that a round
+        /// already filling whole stripes "still gets a full extra stripe, so
+        /// `next_multiple_of` under-counts it". It does not — `pad =
+        /// area.saturating_sub(total_values)` is then 0 and the round gets a single
+        /// ZERO-height column, so the area IS exactly `next_multiple_of`; it is the
+        /// count that cannot be recovered.)
+        ///
+        /// The recursion lift closes its column space from this, so it has to be the
+        /// prover's own value. Note the circuit calls the same data
+        /// `padding_row_heights` and consumes only its LENGTH, as a column count
+        /// (`recursive_jagged_pcs.rs:232`) — the "row_heights" half of that name is
+        /// misleading, and a wrong invariant about this field has already shipped a
+        /// four-column undercount into the gnark wrap once.
         ///
         /// `serde(default)` empty on a bundle with no padding columns, which
         /// keeps the legacy wire format byte-identical.
