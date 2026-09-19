@@ -671,16 +671,21 @@ mod basefold_over_bn254_roundtrip_test {
         let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
         let precompute = <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(
             &trace_views,
-            // use_rev: false on the wrap/BN254 path.
-            false,
             None,
         );
         let commitment = precompute.commit.original_commitment.clone();
 
-        // Honest step-3 column claims — the values the production prover reads
-        // off the zerocheck residual: the full row_eq over z_row indexed by the
-        // BIT-REVERSED trace row (legacy orientation, in lockstep with the
-        // `use_rev = false` commit above).
+        // Honest step-3 column claims — the values the production prover reads off
+        // the zerocheck residual: the full row_eq over the REVERSED z_row,
+        // indexed by the LITERAL row, exactly as `jagged_sumcheck.rs` builds it.
+        // Reversing the variable order and indexing naturally is the same table
+        // as the natural order indexed bit-reversed; production does the former.
+        //
+        // The trace itself is read at the literal row. It used to be read at
+        // `row.reverse_bits() >> (32 - log_h)`, in lockstep with a `use_rev =
+        // false` commit -- the legacy bit-reversed dense layout. That layout no
+        // longer exists: the commit lays rows down naturally, so a bit-reversed
+        // read here would claim values for the wrong rows.
         let claims: Vec<Vec<JaggedChallenge>> = {
             let z_row_rev: Vec<JaggedChallenge> = z_row.iter().rev().copied().collect();
             let eq_c = zkm_pcs::zerocheck_prover::eq_mle_table::<JaggedChallenge>(&z_row_rev);
@@ -689,12 +694,10 @@ mod basefold_over_bn254_roundtrip_test {
                 .map(|(_, t)| {
                     let w = t.width;
                     let h = t.values.len() / w;
-                    let log_h = (h as u32).trailing_zeros();
                     (0..w)
                         .map(|col| {
                             (0..h).fold(JaggedChallenge::ZERO, |acc, row| {
-                                let src = ((row as u32).reverse_bits() >> (32 - log_h)) as usize;
-                                acc + eq_c[row] * JaggedChallenge::from(t.values[src * w + col])
+                                acc + eq_c[row] * JaggedChallenge::from(t.values[row * w + col])
                             })
                         })
                         .collect()
