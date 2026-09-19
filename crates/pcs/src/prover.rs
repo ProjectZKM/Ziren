@@ -535,9 +535,6 @@ where
             main_data: retained,
             chip_ordering,
             public_values: record.public_values(),
-            // Record the rev(zeta) orientation on the shard data; `open()` reads
-            // it back so commit and reduction cannot drift apart.
-            rev: crate::machine::CORE_REV,
         }
     }
 
@@ -782,7 +779,12 @@ where
         .expect("CpuProver::commit retains the main-trace store");
     let max_log_row_count =
         crate::shard_level::verifier::BasefoldShardVerifier::production_default().max_log_row_count;
-    debug_assert!(
+    // SP1 checks this at the same boundary and with a hard assert
+    // (`jagged/src/prover.rs`: `assert_eq!(padded_mle.num_variables(),
+    // self.max_log_row_count)`), because the cube is what every consumer reads
+    // back off an arbitrary entry. A `debug_assert` compiles out in release,
+    // which is where a non-uniform store would be committed.
+    assert!(
         main_traces_named.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
         "retained main store padded to a cube != the fixed max_log_row_count \
          {max_log_row_count}",

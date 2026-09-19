@@ -46,7 +46,6 @@ fn main() {
 
     println!("proof   : {proof_path}");
     println!("chips   : {}", chips.len());
-    println!("core_rev: {}", zkm_pcs::CORE_REV);
 
     // The verdict is only as good as the verifying key: the challenger is
     // SEEDED from it, so a key belonging to another program resamples

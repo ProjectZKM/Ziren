@@ -1448,12 +1448,9 @@ where
     // poly on `rev(z_gkr)` (natural cells, dropped bitrev), so the batched
     // reduced value carries `eq(rev(z_gkr), z*)`.  Mirror that here by feeding
     // the eq-bridge the reversed GKR point.  The decision is SHARD-UNIFORM:
-    // the anchor orientation is `CORE_REV` for every machine (=> rev). The
-    // `else` keeps the legacy `eq(z_gkr, z*)` layout documented, and is what a
-    // future change to that constant would select.
-    let conv_use_rev = crate::CORE_REV;
-    let z_gkr_anchor: Vec<Challenge<SC>> =
-        if conv_use_rev { z_gkr.iter().rev().copied().collect() } else { z_gkr.clone() };
+    // the anchor is rev(z_gkr) for every machine. (A legacy arm kept
+    // `eq(z_gkr, z*)`; that layout no longer exists.)
+    let z_gkr_anchor: Vec<Challenge<SC>> = z_gkr.iter().rev().copied().collect();
 
     // (2) eq(anchor, z*) — circuit zerocheck.rs:480-489.
     let zerocheck_eq_val = eq_eval_host::<Challenge<SC>>(&z_gkr_anchor, z_star);

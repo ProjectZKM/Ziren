@@ -132,9 +132,8 @@ where
     let mut name_order: Vec<usize> = (0..chips.len()).collect();
     name_order.sort_by(|&i, &j| chips[i].name().cmp(&chips[j].name()));
 
-    // SHARD-UNIFORM rev(zeta) convention: every shard is [`zkm_pcs::CORE_REV`]
-    // (this stage took it as an argument it never read, which is why the
-    // parameter is gone).  The GKR opening ALWAYS emits
+    // SHARD-UNIFORM rev(zeta) convention: rows are committed in one layout.
+    // The GKR opening ALWAYS emits
     // `main_trace_evaluations_full` for every chip (device-only/height-0 →
     // zeros, width-0 → empty).
 

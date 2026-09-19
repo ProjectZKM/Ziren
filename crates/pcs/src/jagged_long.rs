@@ -498,10 +498,10 @@ mod tests {
     /// base: `full_jagged_evaluation` derives `w(z*)` in closed form from the
     /// jagged packing geometry.  Under natural order the interleaved base
     /// addresses exactly the cells that closed form assumes, so
-    /// `HadamardProduct` can be wired into the reduction on the CORE path
-    /// (`core_rev() == true`) with no layout work at all.  The recursion /
-    /// shrink / wrap stages still commit under the legacy bitrev and are what
-    /// the authorised VK regen has to move.
+    /// `HadamardProduct` can be wired into the reduction with no layout work at
+    /// all.  (This used to hold only on the CORE path, the recursion / shrink /
+    /// wrap stages committing under a legacy bitrev layout; that second layout is
+    /// gone and every stage commits natural.)
     #[test]
     fn interleaved_layout_equals_natural_order_dense_layout() {
         use crate::multilinear::PaddedMle;
@@ -522,16 +522,8 @@ mod tests {
                 })
                 .collect();
             let packing = crate::jagged::compute_jagged_metadata(&named);
-            let natural = crate::jagged::materialize_dense_jagged::<InnerVal>(
-                &named,
-                packing.dense_len,
-                true,
-            );
-            let legacy = crate::jagged::materialize_dense_jagged::<InnerVal>(
-                &named,
-                packing.dense_len,
-                false,
-            );
+            let natural =
+                crate::jagged::materialize_dense_jagged::<InnerVal>(&named, packing.dense_len);
 
             let msg: Vec<std::sync::Arc<Mle<InnerVal, CpuBackend>>> =
                 comps.into_iter().map(std::sync::Arc::new).collect();
@@ -552,12 +544,6 @@ mod tests {
                 natural[inter.len()..].iter().all(|v| *v == InnerVal::ZERO),
                 "widths={widths:?}: the dense past the real cells is stacking padding \
                  and must be zero",
-            );
-            assert_ne!(
-                &legacy[..inter.len()],
-                inter,
-                "widths={widths:?}: legacy bitrev is the one real difference — if this stops \
-                 holding the orientation flag has changed meaning",
             );
         }
     }

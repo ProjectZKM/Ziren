@@ -346,10 +346,6 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, crate::multilinear::PaddedMle<F>)],
     dense_len: usize,
-    // The rev(zeta) orientation, threaded EXPLICITLY.  `true` => NATURAL row
-    // order; `false` => bit-reversed (the LEGACY layout).  Production is always
-    // `crate::CORE_REV`; the `jagged_pcs` tests are what pass `false`.
-    use_rev: bool,
 ) -> Vec<F> {
     // `real_cells` is the only thing the packing reads off a view, so it runs
     // over explicit per-chip `(cells, width)` borrows.
@@ -395,16 +391,11 @@ pub fn materialize_dense_jagged<F: Field>(
             remaining = tail;
         }
 
-        // The rev(zeta) orientation (`use_rev`; production is always
-        // `crate::CORE_REV`).  `true` => commit the dense column in
-        // NATURAL row order (matching the rev(zeta) zerocheck residual + the
-        // natural-indexed `build_weight_table`), so the jagged round-0
-        // identity `Σ z_col·y == Σ_b q·w` holds.  `false` (every non-core
-        // path) => keep the bit-reversed layout exactly (byte-identical).
-        // Only the host (width>0) chips are materialized here; device chips
-        // are skipped (their cells come from the GPU dense hook), which
-        // reproduces the same `use_rev` layout on device.
-        let use_rev_commit = use_rev;
+        // Rows are committed in NATURAL order, matching the zerocheck residual
+        // and the natural-indexed `build_weight_table`, so the jagged round-0
+        // identity `Σ z_col·y == Σ_b q·w` holds.  Only the host (width>0) chips
+        // are materialized here; device chips are skipped (their cells come from
+        // the GPU dense hook), which reproduces the same layout on device.
         chip_slots.into_par_iter().zip(chip_chunks.into_par_iter()).for_each(
             |(slot, ((trace_values, width), _))| {
                 let (trace_values, width) = (*trace_values, *width);
@@ -413,26 +404,12 @@ pub fn materialize_dense_jagged<F: Field>(
                     return;
                 }
                 // Per-column parallel: each column writes into its own
-                // [col*height..(col+1)*height] slice.
-                // Bit-reverse the row index so the dense
-                // matches the zerocheck's bitrev_rows orientation (opened_values
-                // = MLE of bitrev(trace)); keeps the jagged reduction/BaseFold
-                // consistent with the in-circuit step-4 evaluation_claims.
-                let is_pow2 = height.is_power_of_two();
-                let log_h = if is_pow2 { (height as u32).trailing_zeros() } else { 0 };
+                // [col*height..(col+1)*height] slice.  Own-height packing, rows
+                // in natural order -- the chip's row-major data transposed to
+                // column-major.
                 slot.par_chunks_exact_mut(height).enumerate().for_each(|(col, dst)| {
-                    // Own-height packing.  Under rev(zeta) NATURAL row
-                    // order (`dst[row] = trace[row]`); else bit-reversed
-                    // (byte-identical).
                     for row in 0..height {
-                        let src = if use_rev_commit {
-                            row
-                        } else if is_pow2 {
-                            ((row as u32).reverse_bits() >> (32 - log_h)) as usize
-                        } else {
-                            row
-                        };
-                        dst[row] = trace_values[src * width + col];
+                        dst[row] = trace_values[row * width + col];
                     }
                 });
             },

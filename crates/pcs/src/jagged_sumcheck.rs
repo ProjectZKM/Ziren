@@ -416,11 +416,9 @@ mod phase1_acceptance_gate {
         let packing = crate::jagged::compute_jagged_metadata(&trace_views);
 
         // Dense q (column-by-column, natural row order) padded to 2^n.
-        // This unit test uses the LEGACY bitrev convention (`use_rev = false`),
-        // matching the `use_rev_y = false` companion below — byte-identical.
         let dense_q = {
             let mut d =
-                crate::jagged::materialize_dense_jagged(&trace_views, packing.dense_len, false);
+                crate::jagged::materialize_dense_jagged(&trace_views, packing.dense_len);
             d.resize(1usize << packing.log_dense_size(), InnerVal::ZERO);
             d
         };
@@ -444,20 +442,13 @@ mod phase1_acceptance_gate {
 
         // y_per_chip = host column claims.  MUST mirror the PRODUCTION
         // column-claim formula (the step-3 claims fed to
-        // `prove_jagged_basefold_rounds`): the full row_eq over z_row indexed by the
-        // BIT-REVERSED trace row, because `materialize_dense_jagged` writes the
-        // dense column in bit-reversed row order (`y_per_chip == opened_values
-        // == MLE of bitrev(trace)`), and `build_weight_table` weights that same
-        // bit-reversed dense layout with `eq_c[row]`.  Using the NATURAL row
-        // index here makes the verifier's claimed
-        // sum `t = Σ z_col_lagrange·y` diverge from the true sumcheck sum
-        // `Σ_b q·w`, so `verify_jagged_reduction`'s round-0 identity fails even
-        // for equal heights.
-        // Mirror the production y orientation off the SAME orientation flag as
-        // the companion `materialize_dense_jagged` above (`use_rev = false`), so
-        // this test's commit and y stay consistent — LEGACY bitrev (the test's
-        // existing convention), byte-identical.
-        let use_rev_y = false;
+        // `prove_jagged_basefold_rounds`): the full row_eq over z_row indexed by
+        // the trace row in the SAME order `materialize_dense_jagged` writes the
+        // dense column in, which `build_weight_table` then weights with
+        // `eq_c[row]`.  Reading rows in a different order here makes the
+        // verifier's claimed sum `t = Σ z_col_lagrange·y` diverge from the true
+        // sumcheck sum `Σ_b q·w`, so `verify_jagged_reduction`'s round-0 identity
+        // fails even for equal heights.
         let y_per_chip: Vec<Vec<InnerChallenge>> = traces
             .iter()
             .zip(r_row_per_chip.iter())
@@ -466,20 +457,11 @@ mod phase1_acceptance_gate {
                 let h = trace.values.len() / w.max(1);
                 let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                 let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-                let is_pow2 = h.is_power_of_two();
-                let log_h2 = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
                 (0..w)
                     .map(|col| {
                         let mut acc = InnerChallenge::ZERO;
                         for row in 0..h {
-                            let src = if use_rev_y {
-                                row
-                            } else if is_pow2 {
-                                ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
-                            } else {
-                                row
-                            };
-                            acc += eq_c[row] * InnerChallenge::from(trace.values[src * w + col]);
+                            acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
                         }
                         acc
                     })

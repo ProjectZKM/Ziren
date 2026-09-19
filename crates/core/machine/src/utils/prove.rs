@@ -524,10 +524,9 @@ where
                                                 .collect()
                                         });
 
-                                    // Orientation is `zkm_pcs::CORE_REV` for every
-                                    // machine. `commit()` records it on the shard data and
-                                    // `open()` reads it back, so commit, zerocheck and
-                                    // reduction cannot drift apart.
+                                    // Rows are committed in one layout (natural), so
+                                    // commit, zerocheck and reduction cannot disagree
+                                    // about it.
                                     let t_commit = std::time::Instant::now();
                                     // CORE never pins the recursion AREA (that is a
                                     // compress-only geometry) → `None` (NATURAL own-area

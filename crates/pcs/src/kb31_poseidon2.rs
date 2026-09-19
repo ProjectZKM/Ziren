@@ -257,10 +257,9 @@ pub mod koala_bear_poseidon2 {
                 String,
                 p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
             )],
-            use_rev: bool,
-            pin: Option<crate::jagged::AreaPin>,
+                pin: Option<crate::jagged::AreaPin>,
         ) -> Com<Self> {
-            inner_prep_commit(named_preprocessed_traces, use_rev, pin)
+            inner_prep_commit(named_preprocessed_traces, pin)
         }
 
         type PrepPrecomputed = crate::jagged_pcs::jagged::PrecomputedJaggedCommit;
@@ -270,10 +269,9 @@ pub mod koala_bear_poseidon2 {
                 String,
                 p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
             )],
-            use_rev: bool,
-            pin: Option<crate::jagged::AreaPin>,
+                pin: Option<crate::jagged::AreaPin>,
         ) -> Self::PrepPrecomputed {
-            inner_prep_precompute(named_preprocessed_traces, use_rev, pin)
+            inner_prep_precompute(named_preprocessed_traces, pin)
         }
     }
 
@@ -308,11 +306,10 @@ pub mod koala_bear_poseidon2 {
 
     pub fn inner_prep_commit(
         chip_traces: &[(String, p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
-        use_rev: bool,
         pin: Option<crate::jagged::AreaPin>,
     ) -> Com<KoalaBearPoseidon2> {
         use crate::config::PrepCommitRoot;
-        inner_prep_precompute(chip_traces, use_rev, pin).commit_root()
+        inner_prep_precompute(chip_traces, pin).commit_root()
     }
 
     /// Same commit as [`inner_prep_commit`], keeping the BaseFold prover data
@@ -320,7 +317,6 @@ pub mod koala_bear_poseidon2 {
     /// observed.  See `StarkGenericConfig::PrepPrecomputed`.
     pub fn inner_prep_precompute(
         chip_traces: &[(String, p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
-        use_rev: bool,
         // The preprocessed round's AREA PIN on a recursion machine
         // (`StarkMachine::recursion_pins`), `None` on core.
         pin: Option<crate::jagged::AreaPin>,
@@ -333,7 +329,6 @@ pub mod koala_bear_poseidon2 {
             // The MACHINE's orientation: the preprocessed round is opened at
             // the same shard point as main, so both rounds must agree on row
             // order.
-            use_rev,
             pin,
         )
     }

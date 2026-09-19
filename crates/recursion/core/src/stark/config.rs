@@ -141,13 +141,12 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
             String,
             p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>,
         )],
-        use_rev: bool,
         pin: Option<zkm_pcs::jagged::AreaPin>,
     ) -> zkm_pcs::Com<Self> {
         // The OuterSC wrap-machine PREPROCESSED commit goes through the jagged
         // BaseFold path over the Poseidon2-BN254 `OuterValMmcs` (no two-adic
         // coset LDE).
-        outer_jagged_hooks::outer_prep_commit(named_preprocessed_traces, use_rev, pin)
+        outer_jagged_hooks::outer_prep_commit(named_preprocessed_traces, pin)
     }
 
     type PrepPrecomputed =
@@ -158,10 +157,9 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
             String,
             p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>,
         )],
-        use_rev: bool,
         pin: Option<zkm_pcs::jagged::AreaPin>,
     ) -> Self::PrepPrecomputed {
-        outer_jagged_hooks::outer_prep_precompute(named_preprocessed_traces, use_rev, pin)
+        outer_jagged_hooks::outer_prep_precompute(named_preprocessed_traces, pin)
     }
 
     type Val = OuterVal;
@@ -430,10 +428,9 @@ pub mod outer_jagged_hooks {
 
     pub(crate) fn outer_prep_commit(
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
-        use_rev: bool,
         pin: Option<zkm_pcs::jagged::AreaPin>,
     ) -> zkm_pcs::Com<KoalaBearPoseidon2Outer> {
-        outer_prep_precompute(chip_traces, use_rev, pin).commit.original_commitment
+        outer_prep_precompute(chip_traces, pin).commit.original_commitment
     }
 
     /// Same commit as [`outer_prep_commit`], keeping the BaseFold prover data
@@ -441,7 +438,6 @@ pub mod outer_jagged_hooks {
     /// `StarkGenericConfig::PrepPrecomputed`.
     pub(crate) fn outer_prep_precompute(
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
-        use_rev: bool,
         pin: Option<zkm_pcs::jagged::AreaPin>,
     ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs> {
         // The commit consumes BORROWED views over the
@@ -449,11 +445,6 @@ pub mod outer_jagged_hooks {
         let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_owned(chip_traces);
         <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::commit_multilinears(
             &chip_trace_views,
-            // The orientation `setup` is committing under. The comment here used to
-            // say "the wrap machine is LEGACY bitrev", but this is reached via
-            // `prep_precompute(&named, CORE_REV, ..)`, so it receives `true` like
-            // every other machine.
-            use_rev,
             pin,
         )
     }
@@ -529,7 +520,6 @@ mod basefold_over_bn254_roundtrip_test {
         let dense = zkm_pcs::jagged::materialize_dense_jagged::<JaggedVal>(
             &trace_views,
             packing.dense_len,
-            false,
         );
         let dense_traces = vec![("<jagged-dense>".to_string(), RowMajorMatrix::new(dense, 1))];
 

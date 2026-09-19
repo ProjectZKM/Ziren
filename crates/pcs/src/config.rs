@@ -93,7 +93,6 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     /// setup path never takes the `None` branch.
     fn prep_commit(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
-        use_rev: bool,
         pin: Option<crate::jagged::AreaPin>,
     ) -> Com<Self>;
 
@@ -113,14 +112,12 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
 
     /// Build the precomputed preprocessed commit.  Deterministic in its input,
     /// so a key that was deserialized without it can rebuild it on demand.
-    /// `use_rev` is the row orientation ([`crate::CORE_REV`] in production).
     /// The preprocessed round is opened at the same shard point as main, so it
     /// must be committed under the SAME orientation — a preprocessed commit
     /// built LEGACY-bitrev while the shard reduces natural-row makes the two
     /// rounds disagree on row order, and the preprocessed reduction fails.
     fn prep_precompute(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
-        use_rev: bool,
         pin: Option<crate::jagged::AreaPin>,
     ) -> Self::PrepPrecomputed;
 }
@@ -262,15 +259,12 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// is the WHIR root while `prover_data` remains the BaseFold one (whose Merkle
     /// tree is then dead, kept only for the interleaved MLEs the step-4 reduction
     /// reads), and `whir_data` is `Some`. Those three move together here, but
-    /// `PrecomputedJaggedCommitGeneric` can represent them disagreeing.  `use_rev` is the per-shard rev(zeta)
-    /// orientation, threaded to `materialize_dense_jagged` and recorded on
-    /// the returned commit; the
+    /// `PrecomputedJaggedCommitGeneric` can represent them disagreeing.  The
     /// AREA PIN (`Some(target_log)` on a compress commit pins
     /// `log_dense_size` to `max(natural, target_log)`; `None` = NATURAL
     /// own-area packing).
     fn commit_multilinears(
         chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
-        use_rev: bool,
         pin: Option<crate::jagged::AreaPin>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
         use p3_matrix::dense::RowMajorMatrix;
@@ -295,7 +289,6 @@ pub trait BasefoldRing: StarkGenericConfig {
                 let dense_q = crate::jagged::materialize_dense_jagged::<crate::InnerVal>(
                     chip_traces,
                     packing.dense_len,
-                    use_rev,
                 );
                 // A real assert, not `debug_assert`: this is the shape of the
                 // data being COMMITTED, the compare is O(1), and release is
@@ -372,7 +365,6 @@ pub trait BasefoldRing: StarkGenericConfig {
             commit,
             prover_data,
             whir_data,
-            rev: use_rev,
             fixed_pad_columns: pin.map(|p| p.pad_columns),
         }
     }

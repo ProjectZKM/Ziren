@@ -31,11 +31,6 @@ pub struct MainTraceData<SC: StarkGenericConfig, M, P> {
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
-    /// The rev(zeta) orientation, recorded on the committed data at `commit()`
-    /// from [`crate::CORE_REV`].  `open()` reads it off the shard data and
-    /// threads it into the zerocheck + jagged reduction so the whole prove stays
-    /// in lockstep.
-    pub rev: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

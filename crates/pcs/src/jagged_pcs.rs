@@ -1057,31 +1057,6 @@ pub mod jagged {
         /// width-1 polynomials as `interleaved_mles` (the reduction reads
         /// them) over a placeholder Merkle tree.
         pub whir_data: Option<crate::whir::jagged::JaggedWhirProverDataGeneric<MT>>,
-        /// The rev(zeta) orientation the dense commit was materialized under.
-        /// Recorded on the committed data so the step-4 jagged reduction (host
-        /// re-materialize + `y_per_chip`) reads the SAME orientation the commit
-        /// used, in lockstep.
-        ///
-        /// Every production commit is [`crate::CORE_REV`]; the `jagged_pcs` tests
-        /// are what commit under `false`. (The old doc here described it as
-        /// "`StarkMachine::core_rev()` — `true` only on the CORE MIPS path,
-        /// `false` on every recursion / shrink / wrap commit". That accessor no
-        /// longer exists, and it never varied.)
-        ///
-        /// CAUTION, two producers set this field from DIFFERENT sources:
-        ///   * the host `BasefoldRing::commit_multilinears` sets it from its own
-        ///     `use_rev` argument, and
-        ///   * ziren-gpu's device commit hook sets it from `provider.rev()`,
-        ///     which `DeviceShardTraces` defaults to **false** and only
-        ///     `with_rev` raises.
-        /// The host prover then overwrites the field unconditionally after the
-        /// build. On the host path that is a no-op (nothing overrides
-        /// `commit_multilinears`); on the device path it silently CORRECTS a
-        /// provider that was never given `with_rev`, which is the difference
-        /// between a detectable mismatch and a wrong proof. Do not turn that
-        /// overwrite into an assert without first establishing that every
-        /// provider is given `with_rev`.
-        pub rev: bool,
         /// `Some(k)` when this round was committed under an
         /// [`crate::jagged::AreaPin`]: its stacking gap is laid out as exactly
         /// `k` padding columns (`prove_jagged_basefold_rounds_generic`), so the
@@ -2189,7 +2164,7 @@ mod test {
         let views = as_chip_views(&traces);
         let packing = crate::jagged::compute_jagged_metadata::<JaggedVal>(&views);
         let dense =
-            crate::jagged::materialize_dense_jagged::<JaggedVal>(&views, packing.dense_len, false);
+            crate::jagged::materialize_dense_jagged::<JaggedVal>(&views, packing.dense_len);
         let dense_traces = vec![("<jagged-dense>".to_string(), RowMajorMatrix::new(dense, 1))];
 
         let mut p_chal = build_challenger();
@@ -2334,16 +2309,10 @@ mod test {
     /// row-MLE evaluations the production prover reads off the zerocheck
     /// residual, recomputed here from the traces.
     ///
-    /// `use_rev` MUST match the orientation the round was committed under
-    /// (`commit_multilinears(.., use_rev, ..)`), which is the pairing the shard
-    /// prover carries on `PrecomputedJaggedCommit.rev`: under `false` the commit
-    /// lays rows out bit-reversed and the claims read them the same way; under
-    /// `true` (production's [`crate::CORE_REV`]) both are natural order. Passing
-    /// the wrong one makes an honest bundle fail verification.
+    /// Rows are read in NATURAL order, the one layout the commit lays down.
     fn column_claims(
         views: &[ChipTraceView],
         z_row: &[JaggedChallenge],
-        use_rev: bool,
     ) -> Vec<Vec<JaggedChallenge>> {
         // eq_c[r] = eq(z_row, r): built over reversed z_row to undo
         // eq_mle_table's LSB-first bitrev.  The FULL row_eq subsumes the
@@ -2362,22 +2331,10 @@ mod test {
                 if h == 0 {
                     return vec![JaggedChallenge::ZERO; w];
                 }
-                let is_pow2 = h.is_power_of_two();
-                let log_h = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
                 (0..w)
                     .map(|col| {
                         (0..h).fold(JaggedChallenge::ZERO, |acc, row| {
-                            // Read rows the way the commit laid them out: natural
-                            // under `use_rev`, bit-reversed under the legacy
-                            // convention.
-                            let src = if use_rev {
-                                row
-                            } else if is_pow2 {
-                                ((row as u32).reverse_bits() >> (32 - log_h)) as usize
-                            } else {
-                                row
-                            };
-                            acc + eq_c[row] * JaggedChallenge::from(tvals[src * w + col])
+                            acc + eq_c[row] * JaggedChallenge::from(tvals[row * w + col])
                         })
                     })
                     .collect()
@@ -2424,17 +2381,17 @@ mod test {
         let views = as_chip_views(&traces);
         let mut p_chal = build_challenger();
         // Production rounds pipeline: precompute the main round's commit
-        // (inner ring, legacy `use_rev = false`, no area pin), observe it
+        // (inner ring, no area pin), observe it
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false, None);
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
             chip_traces: &views,
             r_row_per_chip: &r_row,
-            claims: column_claims(&views, &z_row, false),
+            claims: column_claims(&views, &z_row),
             precomputed: &precomputed,
         }];
         let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
@@ -2442,77 +2399,6 @@ mod test {
         assert!(
             verify_main_round(&bundle, &widths, &z_row, None),
             "jagged-basefold pipeline should accept honest proof"
-        );
-    }
-
-    /// The same honest roundtrip under the orientation PRODUCTION actually uses.
-    ///
-    /// Every other jagged-BaseFold test here commits with `use_rev = false`, the
-    /// LEGACY bitrev layout — and they FAIL if flipped to `true` (verified: 4 of
-    /// them), because `column_claims` used to hardcode the bitrev row mapping. So
-    /// the committed dense layout production runs, `CORE_REV = true`, had no
-    /// coverage at this level at all; it was only ever exercised end-to-end by a
-    /// full prove. That is also why flipping the `CORE_REV` constant passes the
-    /// whole suite: the tests are pinned to the other layout.
-    ///
-    /// This closes that gap. Nothing about the PCS was legacy-shaped; only the
-    /// test helper was.
-    #[test]
-    fn jagged_basefold_roundtrip_under_core_rev() {
-        let (traces, z_row) = mk_shard(&[(4, 16), (2, 8)], 0xC0DE_BA5E);
-        let views = as_chip_views(&traces);
-        let mut p_chal = build_challenger();
-        let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
-            &views,
-            crate::CORE_REV,
-            None,
-        );
-        assert!(crate::CORE_REV, "this test is the CORE_REV arm; the legacy arm is above");
-        assert!(precomputed.rev, "the commit must record the orientation it was built under");
-        p_chal.observe(precomputed.commit.original_commitment.clone());
-        let r_row = r_row_suffixes(&views, &z_row);
-        let rounds = [JaggedOpenRound {
-            chip_traces: &views,
-            r_row_per_chip: &r_row,
-            // Claims read NATURAL rows, matching the commit above.
-            claims: column_claims(&views, &z_row, crate::CORE_REV),
-            precomputed: &precomputed,
-        }];
-        let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
-        let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
-        assert!(
-            verify_main_round(&bundle, &widths, &z_row, None),
-            "an honest bundle committed under CORE_REV must verify",
-        );
-    }
-
-    /// A claim/commit orientation MISMATCH must be rejected, so the test above is
-    /// pinning the pairing rather than passing for an unrelated reason.
-    #[test]
-    fn jagged_basefold_rejects_claims_of_the_wrong_orientation() {
-        let (traces, z_row) = mk_shard(&[(4, 16), (2, 8)], 0xC0DE_BA5E);
-        let views = as_chip_views(&traces);
-        let mut p_chal = build_challenger();
-        let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
-            &views,
-            crate::CORE_REV,
-            None,
-        );
-        p_chal.observe(precomputed.commit.original_commitment.clone());
-        let r_row = r_row_suffixes(&views, &z_row);
-        let rounds = [JaggedOpenRound {
-            chip_traces: &views,
-            r_row_per_chip: &r_row,
-            // Committed natural, claimed bit-reversed: the exact disagreement the
-            // `rev` field on the commit exists to prevent.
-            claims: column_claims(&views, &z_row, !crate::CORE_REV),
-            precomputed: &precomputed,
-        }];
-        let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
-        let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
-        assert!(
-            !verify_main_round(&bundle, &widths, &z_row, None),
-            "claims of the wrong orientation must NOT verify",
         );
     }
 
@@ -2526,17 +2412,17 @@ mod test {
         let views = as_chip_views(&traces);
         let mut p_chal = build_challenger();
         // Production rounds pipeline: precompute the main round's commit
-        // (inner ring, legacy `use_rev = false`, no area pin), observe it
+        // (inner ring, no area pin), observe it
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false, None);
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
             chip_traces: &views,
             r_row_per_chip: &r_row,
-            claims: column_claims(&views, &z_row, false),
+            claims: column_claims(&views, &z_row),
             precomputed: &precomputed,
         }];
         let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
@@ -2602,17 +2488,17 @@ mod test {
         let views = as_chip_views(&traces);
         let mut p_chal = build_challenger();
         // Production rounds pipeline: precompute the main round's commit
-        // (inner ring, legacy `use_rev = false`, no area pin), observe it
+        // (inner ring, no area pin), observe it
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false, None);
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
             chip_traces: &views,
             r_row_per_chip: &r_row,
-            claims: column_claims(&views, &z_row, false),
+            claims: column_claims(&views, &z_row),
             precomputed: &precomputed,
         }];
         let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
@@ -2659,17 +2545,17 @@ mod test {
         let views = as_chip_views(&traces);
         let mut p_chal = build_challenger();
         // Production rounds pipeline: precompute the main round's commit
-        // (inner ring, legacy `use_rev = false`, no area pin), observe it
+        // (inner ring, no area pin), observe it
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
         let precomputed =
-            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, false, None);
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
             chip_traces: &views,
             r_row_per_chip: &r_row,
-            claims: column_claims(&views, &z_row, false),
+            claims: column_claims(&views, &z_row),
             precomputed: &precomputed,
         }];
         let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);

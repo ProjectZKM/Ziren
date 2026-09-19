@@ -130,38 +130,8 @@ where
         let precomputed =
             <crate::koala_bear_poseidon2::KoalaBearPoseidon2 as BasefoldRing>::commit_multilinears(
                 &named_inner,
-                crate::CORE_REV,
                 pin,
             );
-        // CHECK the orientation rather than overwrite it.
-        //
-        // This was `precomputed.rev = CORE_REV`, an unconditional overwrite, whose
-        // own comment named the cost: a producer that built its dense under a
-        // DIFFERENT orientation would have the expected value stamped over the
-        // actual one, turning a detectable mismatch into a wrong proof. It also
-        // named the fix -- have the producer stamp it and assert here -- and the
-        // producers now do:
-        //
-        //   * the host `commit_multilinears` sets `rev` from its `use_rev`
-        //     argument at construction, and nothing overrides that method;
-        //   * ziren-gpu's device hook sets it from `provider.rev()`, and every
-        //     production `DeviceShardTraces` is given `.with_rev(CORE_REV)` (five
-        //     call sites; the only providers left at the `false` default are three
-        //     `#[test]` fns that exercise laziness and draining, not orientation).
-        //
-        // So this holds today, and if it ever stops holding the mismatch is real:
-        // the dense the commit was built over disagrees with the orientation the
-        // step-4 reduction will re-materialize under, which is a wrong proof. Fail
-        // loudly instead.
-        assert_eq!(
-            precomputed.rev,
-            crate::CORE_REV,
-            "commit_traces: the producer built its dense under rev={} but the shard \
-             reduces under CORE_REV={}; the commit and the step-4 re-materialize \
-             would disagree (check that this provider got `with_rev`)",
-            precomputed.rev,
-            crate::CORE_REV,
-        );
         // (The AREA PIN needs no equivalent stamp: `commit_multilinears` sets
         // `fixed_pad_columns` from its `pin` argument at construction and nothing
         // reassigns it. A comment here claimed this code FORCED the pin onto the
@@ -203,7 +173,7 @@ where
         // trait method, INLINE during the prove pass.  The returned commit
         // already stamps `rev`.
         let precomputed_generic =
-            <SC as BasefoldRing>::commit_multilinears(&named_inner, crate::CORE_REV, pin);
+            <SC as BasefoldRing>::commit_multilinears(&named_inner, pin);
         // Ring-generic digest: NO jagged hash-bind on the outer ring (the
         // BN254 wrap re-binds in its registered hook).
         let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
@@ -970,17 +940,10 @@ where
             out.push(vec![Challenge::<SC>::ZERO; w]);
             continue;
         }
-        // Under [`crate::CORE_REV`] both the zerocheck residual and the jagged
-        // `y_per_chip` read NATURAL rows, so the reuse is valid at ANY height and
-        // this holds trivially. Only the LEGACY bitrev convention needs a
-        // power-of-two height, so the check stays as what flipping that constant
-        // would re-activate.
-        assert!(
-            crate::CORE_REV || h.is_power_of_two(),
-            "compute_residual_y_openings: chip {name} has height {h}, which is not a \
-             power of two, under the LEGACY (use_rev = false) bitrev convention — the \
-             zerocheck residual's row order would not match the jagged one",
-        );
+        // Both the zerocheck residual and the jagged `y_per_chip` read NATURAL
+        // rows, so the reuse is valid at ANY height. (This guarded the LEGACY
+        // bitrev convention, which needed a power-of-two height; that layout is
+        // gone.)
         // Strict shape check: prep-then-main, main slice is the last `w` values
         // (zerocheck num_main_cols == trace width).
         let prep_cols = ptrace.num_polynomials();
