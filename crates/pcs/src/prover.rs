@@ -304,16 +304,17 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         })
     }
 
-    /// Commit to the main traces.
+    /// Commit to a shard's main traces.
     ///
-    /// `cluster_widths` is the per-shard FULL
-    /// canonical-CLUSTER chip NAME -> trace WIDTH map, threaded EXPLICITLY.
-    /// `Some(map)` (the CORE FIX-off path) => the commit injects a genuine
-    /// HEIGHT-0 (0-row, full-width, zero) trace for each cluster chip this raw
-    /// shard is MISSING (canonical cluster minus present), keeping the chip-SET
-    /// (recursion normalize VK) stable while committing nothing for those chips.
-    /// `None` (recursion / shrink / wrap / FIX-on) => own-chip-set commit,
-    /// byte-identical to legacy.
+    /// `cluster_widths` is the canonical CLUSTER's chip name -> width map, and
+    /// it decides which chip set gets committed:
+    ///
+    /// * `Some(map)` (core): every cluster chip this shard LACKS is committed as
+    ///   a height-0 trace at its full width. The chip set -- and so the
+    ///   recursion normalize vk -- is then the same for every shard, while those
+    ///   chips commit no cells (row_count 0, which the degree-masked
+    ///   reconstruction excludes).
+    /// * `None` (recursion / shrink / wrap): commit the shard's own chip set.
     fn commit(
         &self,
         record: &A::Record,
@@ -467,31 +468,18 @@ where
         mut named_traces: crate::Traces<Val<SC>>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs> {
-        // MISSING-CHIP INJECTION (exact mirror of the GPU `commit`).
+        // MISSING-CHIP INJECTION, mirroring the GPU `commit`.
         //
-        // Terminology: "FIX-off" in this codebase means the NATURAL-HEIGHTS
-        // discipline — chips commit at their event-driven heights, no shape
-        // fitting ("FIX" was the retired `FIX_CORE_SHAPES` mode, which padded
-        // every chip up to a fitted canonical shape; only offline shape/vk
-        // tooling ever fits now).  The core prove path is always FIX-off.
-        //
-        // When `Some(cluster_widths)` is passed (CORE only), inject a genuine
-        // HEIGHT-0 (0-row, FULL-WIDTH, zero) `RowMajorMatrix` at each
-        // canonical-CLUSTER chip's width for every cluster chip this raw
-        // (event-driven) shard is MISSING.  The chip is then PRESENT in the
-        // committed set — the chip SET (and thus the vk structure) stays
-        // uniform, flowing through `chip_ordering` and the BaseFold commit
-        // packing — but commits NOTHING (`row_count: 0`), so the
-        // degree-masked reconstruction excludes it (degree=0 => full_geq=1 =>
-        // identity fraction (0,1)).  `None` (recursion / shrink / wrap) =>
-        // own-chip-set commit.
+        // Chips commit at their event-driven heights, so which chips a shard has
+        // varies with what it executed. Injecting the cluster's absent chips at
+        // height 0 makes the committed chip SET uniform -- which is what keeps
+        // one normalize vk valid across shards -- without committing any cells
+        // for them.
         let cube = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
             .max_log_row_count as u32;
         if let Some(cluster_widths) = cluster_widths {
             for (name, width) in cluster_widths.iter() {
-                // 0 rows at full canonical width: `values` empty, `width == w`
-                // => height 0, so the chip is PRESENT in the committed set but
-                // commits nothing.
+                // Full width, no rows: present in the set, committing nothing.
                 let w = (*width).max(1);
                 named_traces.entry(name.clone()).or_insert_with(|| {
                     into_padded(RowMajorMatrix::new(Vec::<Val<SC>>::new(), w), cube)
@@ -508,26 +496,16 @@ where
             .map(|(i, name)| (name.to_owned(), i))
             .collect();
 
-        // Build the shard's name-keyed trace-MLE store ONCE — the matrices
-        // MOVE into their `Arc<Mle>`s via the zero-copy
-        // `Mle::from_row_major` — then commit through the ring-dispatched
-        // builder (`commit_traces`: the inner ring routes
-        // through `self.commit_multilinears`, the wrap ring through
-        // `BasefoldRing::commit_multilinears`) and RETAIN
-        // {digest, precompute, store} for `open()`.  One build, one store:
-        // the commit and the prove read the same cells.
+        // Commit through the ring-dispatched builder and RETAIN
+        // {digest, precompute, store} for `open()`, so the commit and the prove
+        // read the same cells rather than each building their own view.
         let retained: Option<RetainedJaggedCommit<SC>> = {
             use core::any::TypeId;
             if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
-                // The FIXED zerocheck cube — never floated up to a tall
-                // chip.  Coverage is enforced UPSTREAM: the core executor's
-                // `height_split` closes a shard before any chip reaches
-                // `2^cube` rows, and every recursion band is asserted
-                // `<= cube` at shape construction; `PaddedMle::padded`
-                // hard-asserts it again per chip below, so an over-tall
-                // trace fails loudly here rather than growing the cube.
-                // The traces arrived already wrapped at this cube, so the
-                // store IS the map -- no second pass, no name vector.
+                // The traces were padded to the cube in `generate_traces`, so
+                // the store IS the map -- no second pass and no name vector
+                // here. `PaddedMle::padded` asserted the height fits at that
+                // point, which is where an over-tall trace fails.
                 let main_store = named_traces.named_traces;
                 let chips: Vec<&MachineChip<SC, A>> =
                     self.machine().shard_chips_ordered(&chip_ordering).collect();
