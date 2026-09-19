@@ -75,21 +75,46 @@ impl NetworkProver {
             None => env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()),
         });
         let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
-        // Default ca cert directory
+        // The CA used to verify the proving network's certificate.
+        //
+        // This used to fall back SILENTLY to the repository's bundled
+        // `tool/ca.pem`, whose private key (`tool/ca.key`) is committed and
+        // therefore public: anyone can mint a certificate under it, so trusting
+        // it means any endpoint can impersonate the proving network -- and
+        // network proving sends the guest ELF and the private input stream
+        // there. The fixture is fine for tests; making it the default was not.
+        //
+        // `CA_CERT_PATH` is now required, with the bundled fixture reachable
+        // only by opting in explicitly.
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let ca_cert_path = Some(
-            env::var("CA_CERT_PATH")
-                .unwrap_or(manifest_dir.join("tool/ca.pem").to_string_lossy().to_string()),
-        );
+        let allow_test_ca = env::var("ZKM_ALLOW_INSECURE_TEST_CA")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let ca_cert_path = match env::var("CA_CERT_PATH") {
+            Ok(p) => Some(p),
+            Err(_) if allow_test_ca => {
+                tracing::warn!(
+                    "using the bundled INSECURE test CA: its private key is public, so this \
+                     connection can be impersonated. Never send sensitive witness data over it."
+                );
+                Some(manifest_dir.join("tool/ca.pem").to_string_lossy().to_string())
+            }
+            Err(_) => None,
+        };
         let ssl_cert_path = env::var("SSL_CERT_PATH").ok();
         let ssl_key_path = env::var("SSL_KEY_PATH").ok();
         let ssl_config = match (ssl_cert_path.as_ref(), ssl_key_path.as_ref()) {
             (Some(ssl_cert_path), Some(ssl_key_path)) => {
-                let (ca_cert, identity) = get_cert_and_identity(
-                    ca_cert_path.as_ref().expect("CA_CERT_PATH not set"),
-                    ssl_cert_path.as_ref(),
-                    ssl_key_path.as_ref(),
-                )?;
+                let ca = ca_cert_path.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "SSL_CERT_PATH/SSL_KEY_PATH are set but CA_CERT_PATH is not. Set it to \
+                         the CA that signs the proving network's certificate. To use the \
+                         repository's bundled test CA -- whose private key is PUBLIC, so the \
+                         connection can be impersonated -- set ZKM_ALLOW_INSECURE_TEST_CA=1."
+                    )
+                })?;
+                let (ca_cert, identity) =
+                    get_cert_and_identity(ca, ssl_cert_path.as_ref(), ssl_key_path.as_ref())?;
                 Some(Config { ca_cert, identity })
             }
             _ => None,
@@ -145,14 +170,24 @@ impl NetworkProver {
 
     pub async fn download_file(url: &str) -> Result<Vec<u8>> {
         let response = reqwest::get(url).await?;
+        // Without this an error page is returned as if it were proof bytes, and
+        // the failure surfaces later as an unintelligible decode error.
+        let response = response
+            .error_for_status()
+            .map_err(|e| anyhow::anyhow!("downloading {url} failed: {e}"))?;
         let content = response.bytes().await?;
         Ok(content.to_vec())
     }
 
-    pub async fn connect(&self) -> StageServiceClient<Channel> {
+    /// Connect to the proving network.
+    ///
+    /// Fallible on purpose: an unreachable or misconfigured endpoint is an
+    /// ordinary remote failure, and this used to `expect` and take the caller's
+    /// process down with it.
+    pub async fn connect(&self) -> Result<StageServiceClient<Channel>> {
         StageServiceClient::connect(self.endpoint.clone())
             .await
-            .expect("connect: {self.endpoint:?}")
+            .map_err(|e| anyhow::anyhow!("could not connect to the proving network: {e}"))
     }
 
     async fn request_proof(&self, input: ProverInput, kind: ZKMProofKind) -> Result<String> {
@@ -195,7 +230,7 @@ impl NetworkProver {
         };
 
         self.sign_ecdsa(&mut request).await?;
-        let mut client = self.connect().await;
+        let mut client = self.connect().await?;
 
         let start = tokio::time::Instant::now();
         let response = client.generate_proof(request).await?.into_inner();
@@ -211,7 +246,7 @@ impl NetworkProver {
         timeout: Option<Duration>,
     ) -> Result<(ZKMProof, ZKMPublicValues, u64)> {
         let start_time = Instant::now();
-        let mut client = self.connect().await;
+        let mut client = self.connect().await?;
         loop {
             if let Some(timeout) = timeout {
                 if start_time.elapsed() > timeout {
@@ -224,9 +259,15 @@ impl NetworkProver {
 
             match Status::from_i32(get_status_response.status) {
                 Some(Status::Computing) => {
+                    // An unrecognised step means the server is newer than this
+                    // client, which is normal skew -- it is not grounds for
+                    // aborting a proof that is still progressing.
                     match Step::from_i32(get_status_response.step) {
                         Some(step) => log::info!("proof_id: {proof_id}, step: {step}"),
-                        None => todo!(),
+                        None => log::info!(
+                            "proof_id: {proof_id}, step: {} (unknown to this client)",
+                            get_status_response.step
+                        ),
                     }
                     sleep(Duration::from_millis(self.poll_interval)).await;
                 }
