@@ -512,7 +512,7 @@ where
                 let (main_commitment, precomputed) =
                     crate::shard_level::prover::commit_traces::<SC>(
                         &named_traces,
-                        self.machine().core_rev(),
+                        crate::machine::CORE_REV,
                         record.area_pins().map(|p| p.main).or(self.machine().main_area_pin()),
                     );
                 Some(RetainedJaggedCommit {
@@ -539,7 +539,7 @@ where
             // Record the per-shard rev(zeta)
             // orientation from the per-stage source of truth
             // (`StarkMachine::core_rev()` — `true` only for the CORE MIPS machine).
-            rev: self.machine().core_rev(),
+            rev: crate::machine::CORE_REV,
         }
     }
 

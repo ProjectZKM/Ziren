@@ -29,9 +29,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         prep_chip_dims: &[(String, usize)],
         challenger: &mut SC::Challenger,
         proof: &ShardProof<SC>,
-        // `true` for the CORE machine (rev shard proofs), `false`
-        // for recursion / shrink / wrap (LEGACY). Threaded to the host zerocheck.
-        core_rev: bool,
         // The machine's pins (`StarkMachine::recursion_pins`), `Some` = pinned rounds.
         pinned: Option<crate::jagged::RecursionPins>,
     ) -> Result<(), VerificationError<SC>>
@@ -77,7 +74,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 basefold_proof.as_ref(),
                 challenger,
                 num_pv_elts,
-                core_rev,
                 pinned,
             )
             .map_err(|e| VerificationError::BasefoldShardVerifier(format!("{e}")))?;

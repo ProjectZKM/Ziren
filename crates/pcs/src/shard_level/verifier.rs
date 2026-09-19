@@ -133,10 +133,6 @@ impl BasefoldShardVerifier {
         proof: &BasefoldShardProof<Val<SC>, Challenge<SC>>,
         challenger: &mut SC::Challenger,
         num_pv_elts: usize,
-        // `true` for the CORE machine (rev shard proofs); `false`
-        // for recursion / shrink / wrap (LEGACY). Drives the zerocheck host
-        // orientation (collapsed/no-embed claim + rev(z_gkr) eq-bridge anchor).
-        core_rev: bool,
         // Whether the machine pins its rounds (`StarkMachine::recursion_pins`):
         // on a pinned machine the preprocessed round's committed area and
         // padding split are those of the proof's pin CLASS, read off the
@@ -344,7 +340,6 @@ impl BasefoldShardVerifier {
             &proof.logup_gkr_proof.logup_evaluations,
             &proof.public_values,
             max_log_row_count,
-            core_rev,
             challenger,
             // Discriminator: opened_values carries the trace@z*
             // openings the circuit's rlc_eval (zerocheck.rs:613) is built
@@ -1234,9 +1229,6 @@ fn verify_zerocheck_host<SC, A>(
     gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     public_values: &[Val<SC>],
     max_log_row_count: usize,
-    // `true` for the CORE machine (rev shard proofs); `false` for
-    // recursion / shrink / wrap (LEGACY).
-    core_rev: bool,
     challenger: &mut SC::Challenger,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
 ) -> Result<(), BasefoldVerifyError>
@@ -1275,7 +1267,6 @@ where
         gkr_batch_open,
         lambda,
         opened_values,
-        core_rev,
     );
     if rlc_eval != zerocheck_proof.point_and_eval.1 {
         return Err(BasefoldVerifyError::Zerocheck(
@@ -1439,9 +1430,6 @@ fn recompute_zerocheck_rlc_eval_host<SC, A>(
     gkr_batch_open: Challenge<SC>,
     lambda: Challenge<SC>,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
-    // `true` for the CORE machine (rev eq-bridge anchor rev(z_gkr)),
-    // `false` for recursion / shrink / wrap (LEGACY).
-    core_rev: bool,
 ) -> Challenge<SC>
 where
     SC: StarkGenericConfig,
@@ -1460,9 +1448,10 @@ where
     // poly on `rev(z_gkr)` (natural cells, dropped bitrev), so the batched
     // reduced value carries `eq(rev(z_gkr), z*)`.  Mirror that here by feeding
     // the eq-bridge the reversed GKR point.  The decision is SHARD-UNIFORM:
-    // the anchor orientation follows the per-machine `core_rev` flag
-    // (core => rev); legacy (recursion / wrap) shards keep `eq(z_gkr, z*)`.
-    let conv_use_rev = core_rev;
+    // the anchor orientation is `CORE_REV` for every machine (=> rev). The
+    // `else` keeps the legacy `eq(z_gkr, z*)` layout documented, and is what a
+    // future change to that constant would select.
+    let conv_use_rev = crate::CORE_REV;
     let z_gkr_anchor: Vec<Challenge<SC>> =
         if conv_use_rev { z_gkr.iter().rev().copied().collect() } else { z_gkr.clone() };
 

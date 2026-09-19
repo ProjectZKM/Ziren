@@ -252,7 +252,7 @@ where
     //     construction site padded every entry to it, so
     //     `num_variables()` on any entry must agree — asserted below.
     let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
-    let dense_rev = machine.core_rev();
+    let dense_rev = crate::machine::CORE_REV;
     // The FIXED config cube.  Every `PaddedMle` in the map was built AT
     // this constant (both the `padded_with_zeros` host chips and the
     // `dummy` width-0 chips), so each entry must report it — asserted in

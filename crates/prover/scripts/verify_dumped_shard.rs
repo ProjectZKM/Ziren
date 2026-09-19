@@ -46,7 +46,7 @@ fn main() {
 
     println!("proof   : {proof_path}");
     println!("chips   : {}", chips.len());
-    println!("core_rev: {}", machine.core_rev());
+    println!("core_rev: {}", zkm_pcs::CORE_REV);
 
     // The verdict is only as good as the verifying key: the challenger is
     // SEEDED from it, so a key belonging to another program resamples
@@ -67,7 +67,6 @@ fn main() {
             &prep_chip_dims,
             &mut challenger,
             &proof,
-            machine.core_rev(),
             machine.recursion_pins(),
         );
         println!("vk[{label}] hash: {:?}", key.hash_koalabear());

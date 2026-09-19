@@ -216,9 +216,7 @@ pub enum MipsAir<F: PrimeField32> {
 impl<F: PrimeField32> MipsAir<F> {
     pub fn machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = Self::chips();
-        // The CORE machine's shard proofs use the rev(zeta) CORE
-        // orientation, so host verify picks the collapsed/no-embed claim.
-        StarkMachine::new_core_rev(config, chips, ZKM_PROOF_NUM_PV_ELTS)
+        StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS)
     }
 
     /// Get all the different MIPS AIRs.

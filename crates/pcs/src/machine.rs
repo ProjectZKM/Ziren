@@ -43,16 +43,6 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// The number of public values elements that the machine uses
     num_pv_elts: usize,
 
-    /// Whether this machine's shard proofs use the rev(zeta) CORE
-    /// orientation (the collapsed-claim convention).  `true` ONLY
-    /// for the CORE (MIPS) machine — its FIX-off/FIX-on prove path installs the
-    /// `Some(true)` orientation carrier, so its shard proofs are rev.  `false`
-    /// (the default) for every recursion / shrink / wrap machine — those proofs
-    /// are LEGACY (the recursion prover never installs the carrier).  Threaded
-    /// to the host `verify_zerocheck_host` / `recompute_zerocheck_rlc_eval_host`
-    /// so a core proof is host-verified rev and a recursion/wrap proof legacy.
-    core_rev: bool,
-
     /// The AREA PINS of this machine's two committed rounds, `Some` only on
     /// the COMPRESS machine (`RecursionAir::compress_machine`): every leaf,
     /// compose and deferred proof commits its preprocessed and main rounds at
@@ -63,29 +53,27 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     recursion_pins: Option<crate::jagged::RecursionPins>,
 }
 
+/// The row orientation every machine's shard proofs are committed and verified
+/// under: rev(zeta), the collapsed-claim convention.
+///
+/// This was a per-machine field with two constructors, documented as `true` for
+/// the CORE (MIPS) machine and `false` for every recursion / shrink / wrap
+/// machine. It had not been that for some time: both constructors assigned
+/// `true`, the field was private with no setter, and so `new` and
+/// `new_core_rev` were the same function. The orientation is a property of the
+/// protocol, not of a machine, and naming it once says so.
+///
+/// The jagged layer below still takes `rev` as a real parameter
+/// (`BasefoldRing::commit_multilinears`, `PrecomputedJaggedCommit.rev`), because
+/// its own tests commit and open under `false` to pin the legacy layout. That is
+/// the only place the flag varies.
+pub const CORE_REV: bool = true;
+
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
-    /// Creates a new [`StarkMachine`] whose shard proofs use the LEGACY zerocheck
-    /// orientation (every recursion / shrink / wrap machine, and test machines).
+    /// Creates a new [`StarkMachine`]. Its shard proofs are committed under
+    /// [`CORE_REV`], as every machine's are.
     pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
-        Self { config, chips, num_pv_elts, core_rev: true, recursion_pins: None }
-    }
-
-    /// Creates a CORE [`StarkMachine`] whose shard proofs use the
-    /// rev(zeta) orientation (host verify picks the collapsed / no-embed claim).
-    /// Used ONLY by the MIPS core machine.
-    pub const fn new_core_rev(
-        config: SC,
-        chips: Vec<Chip<Val<SC>, A>>,
-        num_pv_elts: usize,
-    ) -> Self {
-        Self { config, chips, num_pv_elts, core_rev: true, recursion_pins: None }
-    }
-
-    /// Whether this machine's shard proofs use the rev(zeta) CORE
-    /// orientation.
-    #[inline]
-    pub const fn core_rev(&self) -> bool {
-        self.core_rev
+        Self { config, chips, num_pv_elts, recursion_pins: None }
     }
 
     /// Marks this machine's shard proofs as committing under `pins` (the
@@ -152,14 +140,17 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     #[serde(skip)]
     preprocessed_data: std::sync::OnceLock<std::sync::Arc<SC::PrepPrecomputed>>,
     /// The row orientation the PREPROCESSED commit was built under at `setup`
-    /// (`StarkMachine::core_rev`).
+    /// (today always [`CORE_REV`]).
     ///
-    /// It has to travel WITH the key.  The preprocessed round is opened against
+    /// Kept as a stored field, rather than read from the constant, because it has
+    /// to travel WITH the key: the preprocessed round is opened against
     /// `vk.commit`, so the prover must rebuild the commit under the exact
-    /// orientation `setup` used — and a caller-supplied flag is the wrong
-    /// source: a key that has been round-tripped through `pk_to_host` reaches a
-    /// prover whose machine may report a different `core_rev`, and the only
-    /// symptom is a Merkle `CapMismatch` on round 0, far from the cause.
+    /// orientation `setup` used. A caller-supplied flag is the wrong source — a
+    /// key round-tripped through `pk_to_host` reaches a prover that may disagree,
+    /// and the only symptom is a Merkle `CapMismatch` on round 0, far from the
+    /// cause. It is also serialized (`#[serde(default)]`) on a key that crosses
+    /// the wire for the CORE setup response, so dropping it would be a wire
+    /// format change for no gain.
     #[serde(default)]
     pub prep_rev: bool,
     /// The AREA PIN `setup` committed the preprocessed round under (a
@@ -833,7 +824,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // The pins this program's proofs commit under: its own class when the
         // program names one, else the machine's default.
         let pins = program.area_pins().or(self.recursion_pins);
-        let prep_precomputed = SC::prep_precompute(&named, self.core_rev(), pins.map(|p| p.prep));
+        let prep_precomputed = SC::prep_precompute(&named, crate::machine::CORE_REV, pins.map(|p| p.prep));
         let commit = prep_precomputed.commit_root();
 
         // Get the chip ordering.
@@ -867,7 +858,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     let _ = cell.set(std::sync::Arc::new(prep_precomputed));
                     cell
                 },
-                prep_rev: self.core_rev(),
+                prep_rev: crate::machine::CORE_REV,
                 prep_pin: pins.map(|p| p.prep),
                 main_pin: pins.map(|p| p.main),
                 chip_ordering: chip_ordering.clone(),
@@ -987,7 +978,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
             .collect();
-        let commit = SC::prep_commit(&named, self.core_rev(), self.prep_area_pin());
+        let commit = SC::prep_commit(&named, crate::machine::CORE_REV, self.prep_area_pin());
 
         // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces
@@ -1012,7 +1003,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 traces,
                 preprocessed_mles: std::sync::OnceLock::new(),
                 preprocessed_data: std::sync::OnceLock::new(),
-                prep_rev: self.core_rev(),
+                prep_rev: crate::machine::CORE_REV,
                 prep_pin: self.prep_area_pin(),
                 main_pin: self.main_area_pin(),
                 chip_ordering: chip_ordering.clone(),
@@ -1269,7 +1260,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         prep_chip_dims,
                         &mut shard_challenger,
                         shard_proof,
-                        self.core_rev,
                         self.recursion_pins(),
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
