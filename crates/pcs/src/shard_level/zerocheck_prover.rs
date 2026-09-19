@@ -80,12 +80,6 @@ pub fn prove_shard_zerocheck<SC, A>(
     // unexercised chip is a `dummy` (inner `None`, width 0): its cells come
     // from the device fold / provider-materialize fallback below.
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    // The per-shard rev(zeta) orientation
-    // (from `StarkMachine::core_rev()` — `true` only on the CORE MIPS path).
-    // On the CORE path the
-    // whole proof is uniformly rev; every recursion / shrink / wrap prove is
-    // `false` (byte-identical).
-    dense_rev: bool,
 ) -> (PartialSumcheckProof<Challenge<SC>>, std::collections::BTreeMap<String, Vec<Challenge<SC>>>)
 where
     SC: StarkGenericConfig,
@@ -138,10 +132,9 @@ where
     let mut name_order: Vec<usize> = (0..chips.len()).collect();
     name_order.sort_by(|&i, &j| chips[i].name().cmp(&chips[j].name()));
 
-    // SHARD-UNIFORM rev(zeta) convention: driven solely by the per-stage
-    // `dense_rev` flag (from `StarkMachine::core_rev()` — `true` only on the
-    // CORE prove path; `false` on every recursion / shrink / wrap prove, the
-    // legacy arm).  The GKR opening ALWAYS emits
+    // SHARD-UNIFORM rev(zeta) convention: every shard is [`zkm_pcs::CORE_REV`]
+    // (this stage took it as an argument it never read, which is why the
+    // parameter is gone).  The GKR opening ALWAYS emits
     // `main_trace_evaluations_full` for every chip (device-only/height-0 →
     // zeros, width-0 → empty).
 

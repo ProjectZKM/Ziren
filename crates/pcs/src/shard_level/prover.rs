@@ -39,12 +39,6 @@ pub fn commit_traces<SC>(
     // are zero-copy relabeled to InnerVal views for the commit hook / host
     // fallback.
     main_traces: &crate::traces::Traces<Val<SC>>,
-    // The per-shard rev(zeta) orientation
-    // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
-    // precompute (dense materialize) and FORCED onto the built
-    // `PrecomputedJaggedCommit.rev` so the reduction stays in lockstep — covers
-    // BOTH the device-hook and host-fallback build branches.
-    use_rev: bool,
     // The main round's AREA PIN (`StarkMachine::main_area_pin`), `None` on
     // every natural-area machine.
     pin: Option<crate::jagged::AreaPin>,
@@ -127,18 +121,18 @@ where
         let mut precomputed =
             <crate::koala_bear_poseidon2::KoalaBearPoseidon2 as BasefoldRing>::commit_multilinears(
                 &named_inner,
-                use_rev,
+                crate::CORE_REV,
                 pin,
             );
-        // Record the per-shard orientation on the built commit.  The producer
-        // builds its dense under this SAME `use_rev` but may not stamp the field,
-        // and an unstamped `false` is indistinguishable from a deliberate
-        // `false`, so this is an unconditional overwrite rather than a check.
-        // NOTE the cost of that: if a producer ever built under a DIFFERENT
-        // orientation, this would stamp the expected value over the actual one
-        // and turn a detectable mismatch into a wrong proof.  Making the producer
-        // stamp it (and asserting here) is the fix if that ever becomes possible.
-        precomputed.rev = use_rev;
+        // Stamp the orientation on the built commit: the producer builds its dense
+        // under the same [`crate::CORE_REV`] but may not set the field, and an
+        // unstamped `false` is indistinguishable from a deliberate one, so this is
+        // an unconditional overwrite rather than a check. The cost of that: a
+        // producer that ever built under a DIFFERENT orientation would have the
+        // expected value stamped over the actual one, turning a detectable
+        // mismatch into a wrong proof. Making the producer stamp it (and asserting
+        // here) is the fix if that becomes possible.
+        precomputed.rev = crate::CORE_REV;
         // FORCE the recursion AREA PIN onto the
         // built commit (the device hook pins `log_dense_size` device-side under
         // the SAME value, but may not stamp the field) so the OPEN-path
@@ -180,7 +174,7 @@ where
         // trait method, INLINE during the prove pass.  The returned commit
         // already stamps `rev`.
         let precomputed_generic =
-            <SC as BasefoldRing>::commit_multilinears(&named_inner, use_rev, pin);
+            <SC as BasefoldRing>::commit_multilinears(&named_inner, crate::CORE_REV, pin);
         // Ring-generic digest: NO jagged hash-bind on the outer ring (the
         // BN254 wrap re-binds in its registered hook).
         let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
@@ -246,13 +240,10 @@ where
     //     sets the proof envelope's `fold_orientation` field; no transcript
     //     effect).  A `StarkGpuProver` overrides this whole method and
     //     supplies its own orientation.
-    //   * `dense_rev` — the per-shard rev(zeta) orientation, from the
-    //     per-stage source of truth `StarkMachine::core_rev()`.
     //   * `max_log_row_count` — the FIXED config cube.  The
     //     construction site padded every entry to it, so
     //     `num_variables()` on any entry must agree — asserted below.
     let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
-    let dense_rev = crate::machine::CORE_REV;
     // The FIXED config cube.  Every `PaddedMle` in the map was built AT
     // this constant (both the `padded_with_zeros` host chips and the
     // `dummy` width-0 chips), so each entry must report it — asserted in
@@ -331,7 +322,7 @@ where
             // shard-phase earlier).
             Some(retained) => (retained.main_commitment, retained.precomputed),
             // The name-keyed map, as SP1 passes it -- not `(chips, &trace_views)`.
-            None => commit_traces::<SC>(&main_traces, dense_rev, main_pin),
+            None => commit_traces::<SC>(&main_traces, main_pin),
         }
     };
     // `trace_views` is kept OWNED (no reborrow): the dims sites below
@@ -413,8 +404,6 @@ where
             // The shared per-chip trace-MLE built once above (covers ALL
             // chips) — the SOLE host main-trace source for this stage.
             shared_trace_mles,
-            // The per-shard rev(zeta) orientation.
-            dense_rev,
         );
 
         // Observe slot 2 — the zerocheck openings (trace@z*), observed after
@@ -508,7 +497,6 @@ where
         &trace_at_z,
         &logup_gkr_proof.logup_evaluations,
         &open_heights,
-        dense_rev,
     );
 
     // Jagged-PCS opening (prove evaluation claims). Per-chip `r_row` is the trailing
@@ -883,11 +871,6 @@ pub fn compute_residual_y_openings<SC, A>(
     // source.  An empty / short slice (host callers that don't precompute it)
     // tolerates `.get` → falls back to 0 (unexercised).
     heights: &[Option<usize>],
-    // The shard's rev(zeta) orientation (`dense_rev`).  Under `use_rev` BOTH
-    // the zerocheck residual and the jagged `y_per_chip` read NATURAL rows, so
-    // the reuse is valid for ANY height; only the LEGACY (`!use_rev`) bitrev
-    // convention needs a power-of-two height.
-    use_rev: bool,
 ) -> Vec<Vec<Challenge<SC>>>
 where
     SC: StarkGenericConfig,
@@ -958,8 +941,13 @@ where
             out.push(vec![Challenge::<SC>::ZERO; w]);
             continue;
         }
+        // Under [`crate::CORE_REV`] both the zerocheck residual and the jagged
+        // `y_per_chip` read NATURAL rows, so the reuse is valid at ANY height and
+        // this holds trivially. Only the LEGACY bitrev convention needs a
+        // power-of-two height, so the check stays as what flipping that constant
+        // would re-activate.
         assert!(
-            use_rev || h.is_power_of_two(),
+            crate::CORE_REV || h.is_power_of_two(),
             "compute_residual_y_openings: chip {name} has height {h}, which is not a \
              power of two, under the LEGACY (use_rev = false) bitrev convention — the \
              zerocheck residual's row order would not match the jagged one",

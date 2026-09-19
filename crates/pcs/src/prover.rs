@@ -512,7 +512,6 @@ where
                 let (main_commitment, precomputed) =
                     crate::shard_level::prover::commit_traces::<SC>(
                         &named_traces,
-                        crate::machine::CORE_REV,
                         record.area_pins().map(|p| p.main).or(self.machine().main_area_pin()),
                     );
                 Some(RetainedJaggedCommit {

@@ -449,7 +449,10 @@ pub mod outer_jagged_hooks {
         let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_owned(chip_traces);
         <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::commit_multilinears(
             &chip_trace_views,
-            // The machine's orientation (the wrap machine is LEGACY bitrev).
+            // The orientation `setup` is committing under. The comment here used to
+            // say "the wrap machine is LEGACY bitrev", but this is reached via
+            // `prep_precompute(&named, CORE_REV, ..)`, so it receives `true` like
+            // every other machine.
             use_rev,
             pin,
         )
