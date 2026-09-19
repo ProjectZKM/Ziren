@@ -88,6 +88,11 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
         // `dummy.x - initial.x`, and it is nonzero for the same reason the row
         // is a valid addition at all.
         let denom = dummy.x - initial.x;
+        assert!(
+            denom != SepticExtension::<F>::ZERO,
+            "padding row: the dummy layout's chord denominator is zero, so the row is not a \
+             valid addition",
+        );
         let inv = denom.inverse();
         for i in 0..N {
             self.denominator_inv[i] = SepticBlock::from(inv.0);
@@ -117,6 +122,13 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
         // failure: a trace that reaches the exceptional case is not provable
         // rather than silently unconstrained.
         let denom = point_to_add_x - sums[0].x;
+        // A named failure rather than `inverse()`'s bare division-by-zero: this
+        // is the exceptional case, and it should say so.
+        assert!(
+            denom != SepticExtension::<F>::ZERO,
+            "the running sum equals the event point, so the chord addition is exceptional \
+             (x2 == x1): this trace is not provable",
+        );
         let inv = denom.inverse();
         for i in 0..N {
             self.denominator_inv[i] = SepticBlock::from(inv.0);

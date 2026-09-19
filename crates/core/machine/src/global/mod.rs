@@ -287,9 +287,19 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
         );
         // Padding rows carry the shard digest in their trailing columns (see
         // `GlobalAccumulationOperation::populate_dummy`).
+        //
+        // With NO events the shard's cumulative sum is the offset point `D`
+        // itself — the scan never runs, so there is nothing to read from it.
+        // This used to fall back to `dummy()`, which made `populate_dummy`
+        // compute `dummy + (-dummy)`: an exceptional addition whose denominator
+        // `x2 - x1` is zero, so `add_incomplete` inverted zero and panicked. Any
+        // shard with no global interactions could therefore not generate this
+        // trace at all (it is reachable from a unit test that skips the
+        // dependency pass, and it panicked there).  `D` is also the right value
+        // on its own terms: it is what a zero cumulative sum is represented by.
         let final_digest = match cumulative_sum.last() {
             Some(digest) => digest.point(),
-            None => SepticCurve::<F>::dummy(),
+            None => SepticDigest::<F>::zero().0,
         };
 
         let chunk_size = std::cmp::max(padded_nb_rows / num_cpus::get(), 0) + 1;
