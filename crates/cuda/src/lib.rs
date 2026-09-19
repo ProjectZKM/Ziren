@@ -280,12 +280,24 @@ impl ZKMCudaProver {
         // it, so the default stays a tag and says so.
         let image_name = std::env::var("ZKM_GPU_IMAGE")
             .unwrap_or_else(|_| "projectzkm/ziren-gpu:latest".to_string());
+        // Enforced, not merely warned: an unpinned tag is resolved fresh from the
+        // registry each run, and this container receives the private witness.
+        // Same shape as the test-CA gate (`ZKM_ALLOW_INSECURE_TEST_CA`): the
+        // insecure choice stays available, but it has to be made explicitly.
         if !image_name.contains("@sha256:") {
+            if std::env::var("ZKM_ALLOW_MUTABLE_GPU_IMAGE").ok().as_deref() != Some("1") {
+                return Err(format!(
+                    "the CUDA prover image {image_name:?} is not pinned by digest, and it \
+                     receives the private witness input. Set ZKM_GPU_IMAGE to a reviewed \
+                     repo@sha256:... digest, or ZKM_ALLOW_MUTABLE_GPU_IMAGE=1 to accept a \
+                     mutable tag (local development only)."
+                )
+                .into());
+            }
             tracing::warn!(
-                "the CUDA prover image {image_name:?} is not pinned by digest; it is resolved \
-                 fresh from the registry and receives the private witness input. Set \
-                 ZKM_GPU_IMAGE to a reviewed repo@sha256:... digest for anything but local \
-                 development."
+                "the CUDA prover image {image_name:?} is not pinned by digest and \
+                 ZKM_ALLOW_MUTABLE_GPU_IMAGE=1 was set; it is resolved fresh from the registry \
+                 and receives the private witness input."
             );
         }
 
@@ -624,6 +636,38 @@ mod tests {
         };
         assert!(matches!(err, ZKMCoreProverError::IoError(_)), "got: {err}");
         assert!(format!("{err}").contains("prove_core"), "the operation is named: {err}");
+    }
+
+    /// ZR-10: an unpinned image is refused unless the insecure choice is made
+    /// explicitly.  The container receives the private witness input, and a tag
+    /// is resolved fresh from the registry on every run.
+    #[test]
+    fn an_unpinned_gpu_image_requires_an_explicit_opt_in() {
+        // Serialised against other env users by construction: this test owns both
+        // variables and restores them.
+        let img = std::env::var("ZKM_GPU_IMAGE").ok();
+        let allow = std::env::var("ZKM_ALLOW_MUTABLE_GPU_IMAGE").ok();
+        std::env::set_var("ZKM_GPU_IMAGE", "projectzkm/ziren-gpu:latest");
+        std::env::remove_var("ZKM_ALLOW_MUTABLE_GPU_IMAGE");
+        let refused = ZKMCudaProver::start_gpu_server(Vec::new(), None, Some(65500));
+        let Err(e) = refused else { panic!("an unpinned tag must be refused") };
+        assert!(format!("{e}").contains("not pinned by digest"), "got: {e}");
+
+        // A digest is accepted at this gate (it fails later, on docker, which is
+        // not what this test is about).
+        std::env::set_var("ZKM_GPU_IMAGE", "projectzkm/ziren-gpu@sha256:0000");
+        let past_gate = ZKMCudaProver::start_gpu_server(Vec::new(), None, Some(65501));
+        if let Err(e) = &past_gate {
+            assert!(!format!("{e}").contains("not pinned by digest"), "digest must pass: {e}");
+        }
+
+        match img {
+            Some(v) => std::env::set_var("ZKM_GPU_IMAGE", v),
+            None => std::env::remove_var("ZKM_GPU_IMAGE"),
+        }
+        if let Some(v) = allow {
+            std::env::set_var("ZKM_ALLOW_MUTABLE_GPU_IMAGE", v);
+        }
     }
 
     #[test]

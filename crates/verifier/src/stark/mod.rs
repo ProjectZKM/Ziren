@@ -121,7 +121,12 @@ impl StarkVerifier {
 
         // `Borrow` here is an infallible reinterpret of a fixed layout over a
         // proof-controlled vector; check the length first.
-        if proof.proof.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
+        //
+        // EXACT, not `<`: a longer vector also passes `align_to`, so the cast
+        // would silently reinterpret its first `size_of::<PublicValues<..>>()`
+        // elements and ignore the rest.  Honest proofs are PADDED to exactly
+        // `PROOF_MAX_NUM_PVS`, so this rejects nothing valid.
+        if proof.proof.public_values.len() != zkm_pcs::PROOF_MAX_NUM_PVS {
             return Err(StarkError::MalformedProof);
         }
         let proof_public_values: &PublicValues<Word<_>, _> =

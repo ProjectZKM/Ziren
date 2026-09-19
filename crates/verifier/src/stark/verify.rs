@@ -71,7 +71,21 @@ pub(crate) fn verify_stark_compressed_proof(
         return Err(MachineVerificationError::InvalidVerificationKey);
     }
 
-    // Validate public values
+    // Validate public values.
+    //
+    // `Borrow` is the `AlignedBorrow` reinterpret: its length and alignment checks
+    // are `debug_assert`, so in release a SHORT slice panics indexing `shorts[0]`
+    // and a LONG one silently reinterprets the first struct-worth.
+    //
+    // Exact length, which is unambiguous here:
+    //   RECURSIVE_PROOF_NUM_PV_ELTS = size_of::<RecursionPublicValues<u8>>()
+    //   const_assert_eq!(RECURSIVE_PROOF_NUM_PV_ELTS, PROOF_MAX_NUM_PVS)   // = 231
+    // so the struct exactly fills the padded vec and `!=` rejects nothing honest.
+    if proof.public_values.len() != zkm_recursion_core::air::RECURSIVE_PROOF_NUM_PV_ELTS {
+        return Err(MachineVerificationError::InvalidPublicValues(
+            "recursion public values have the wrong length",
+        ));
+    }
     let public_values: &RecursionPublicValues<_> = proof.public_values.as_slice().borrow();
     if !is_recursion_public_values_valid(compress_machine.config(), public_values) {
         return Err(MachineVerificationError::InvalidPublicValues(
