@@ -23,9 +23,10 @@ use crate::{
 /// Wrap raw per-chip main traces into the name-keyed `PaddedMle` store
 /// ([`ShardData::main_traces`]).
 ///
-/// THE single definition of the trace wrap, shared by every
-/// `ShardData` construction site (host `open` + the ziren-gpu core /
-/// pipeline drivers), so the wrap can never drift between them.
+/// The map-shaped form of [`into_padded`], which is THE single definition of
+/// the wrap -- every `ShardData` construction site (host `open`, the ziren-gpu
+/// core and pipeline drivers) reaches one or the other, so the two cannot
+/// drift.
 ///
 /// `names` and `traces` are parallel, in chip-index order. Each owned trace is
 /// MOVED into its `Arc<Mle>` via the zero-copy `Mle::from_row_major` (the Mle's
@@ -58,12 +59,24 @@ use crate::{
 pub fn into_padded<F: p3_field::Field>(
     mat: RowMajorMatrix<F>,
     cube: u32,
+    baked_height: Option<usize>,
 ) -> crate::multilinear::PaddedMle<F> {
     if mat.width == 0 {
-        crate::multilinear::PaddedMle::dummy(
-            cube,
-            crate::multilinear::Padding::Constant(F::ZERO, 0),
-        )
+        // Device-resident or unexercised chip: no host cells. Bake the device
+        // height when the caller knows it, so `metadata_height()` is the only
+        // source; otherwise a plain dummy and the height falls back to the
+        // provider.
+        match baked_height {
+            Some(h) => crate::multilinear::PaddedMle::dummy_with_height(
+                cube,
+                crate::multilinear::Padding::Constant(F::ZERO, 0),
+                h,
+            ),
+            None => crate::multilinear::PaddedMle::dummy(
+                cube,
+                crate::multilinear::Padding::Constant(F::ZERO, 0),
+            ),
+        }
     } else {
         // MOVE the trace's backing buffer into the Mle (zero-copy).
         let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(mat));
@@ -87,28 +100,8 @@ where
         .into_iter()
         .zip(traces)
         .map(|(name, t)| {
-            let pm = if t.width == 0 {
-                // Device-resident / unexercised chip: no host cells.  Bake the
-                // per-chip device height when the caller supplies one (so
-                // `metadata_height()` is the sole source), else a plain dummy
-                // (the height falls back to the provider).
-                match heights(&name) {
-                    Some(h) => crate::multilinear::PaddedMle::dummy_with_height(
-                        max_log_row_count,
-                        crate::multilinear::Padding::Constant(F::ZERO, 0),
-                        h,
-                    ),
-                    None => crate::multilinear::PaddedMle::dummy(
-                        max_log_row_count,
-                        crate::multilinear::Padding::Constant(F::ZERO, 0),
-                    ),
-                }
-            } else {
-                // MOVE the trace's backing buffer into the Mle (zero-copy).
-                let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(t));
-                crate::multilinear::PaddedMle::padded_with_zeros(mle, max_log_row_count)
-            };
-            (name, pm)
+            let baked = heights(&name);
+            (name, into_padded(t, max_log_row_count, baked))
         })
         .collect()
 }
@@ -299,7 +292,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         Ok(crate::Traces {
             named_traces: traces
                 .into_iter()
-                .map(|(name, mat)| (name, into_padded(mat, cube)))
+                .map(|(name, mat)| (name, into_padded(mat, cube, None)))
                 .collect(),
         })
     }
@@ -482,7 +475,7 @@ where
                 // Full width, no rows: present in the set, committing nothing.
                 let w = (*width).max(1);
                 named_traces.entry(name.clone()).or_insert_with(|| {
-                    into_padded(RowMajorMatrix::new(Vec::<Val<SC>>::new(), w), cube)
+                    into_padded(RowMajorMatrix::new(Vec::<Val<SC>>::new(), w), cube, None)
                 });
             }
         }
