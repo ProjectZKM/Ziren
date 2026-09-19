@@ -20,8 +20,14 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
         syscall_keccak_sponge(u32_array.as_ptr(), &mut general_result);
     }
 
-    let tmp: &mut [u8; 64] = unsafe { core::mem::transmute(&mut general_result) };
-    keccak256_result.copy_from_slice(&tmp[..32]);
+    // The digest is the first 8 words of the precompile's output. This used to
+    // `transmute` `&mut [u32; 17]` into `&mut [u8; 64]` and slice it; the byte
+    // order that produced is the target's, and every target this runs on -- the
+    // mipsel guest and the host the tests use -- is little-endian, so
+    // `to_le_bytes` is the same bytes without the unsafe.
+    for (out, word) in keccak256_result.chunks_exact_mut(4).zip(&general_result[..8]) {
+        out.copy_from_slice(&word.to_le_bytes());
+    }
     keccak256_result
 }
 
@@ -40,23 +46,24 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
 
     let blocks = data.len() / RATE + 1;
     let total = blocks * STRIDE;
-    // Every word is written below (data words, the two stride words per
-    // block, the tail and padding of the last block), so the buffer is not
-    // zero-filled first: on a reth block that memset was ~5.5 M cycles.
-    let mut words: Vec<u32> = Vec::with_capacity(total);
-    // SAFETY: capacity is `total`, and each of the `total` u32 slots is
-    // written exactly once before `words` is read.
-    unsafe { words.set_len(total) };
+    // Not zero-filled first: on a reth block that memset was ~5.5 M cycles. The
+    // buffer is therefore `MaybeUninit<u32>` and stays that way until every slot
+    // is written -- `set_len` on a `Vec<u32>` whose elements are uninitialized is
+    // instant UB, because uninitialized is not a valid `u32`, and it is what
+    // `clippy::uninit_vec` (deny-level, correctness) fires on. The same pattern is
+    // already used in `zkm-pcs`'s row-GKR round buffers.
+    let mut out_vec: Vec<u32> = Vec::with_capacity(total);
+    let words = &mut out_vec.spare_capacity_mut()[..total];
 
     let mut full = data.chunks_exact(RATE);
     let mut base = 0;
     for block in &mut full {
         let out = &mut words[base..base + STRIDE];
         for (w, chunk) in block.chunks_exact(4).enumerate() {
-            out[w] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            out[w].write(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
         }
-        out[RATE_WORDS] = 0;
-        out[RATE_WORDS + 1] = 0;
+        out[RATE_WORDS].write(0);
+        out[RATE_WORDS + 1].write(0);
         base += STRIDE;
     }
 
@@ -68,19 +75,33 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
     let mut tail = rem.chunks_exact(4);
     let mut w = 0;
     for chunk in &mut tail {
-        out[w] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        out[w].write(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
         w += 1;
     }
     let mut last = 0u32;
     for (k, &byte) in tail.remainder().iter().enumerate() {
         last |= (byte as u32) << (8 * k);
     }
-    out[w] = last | (1u32 << (8 * (rem.len() % 4)));
-    for slot in out[w + 1..].iter_mut() {
-        *slot = 0;
+    last |= 1u32 << (8 * (rem.len() % 4));
+    // `w <= RATE_WORDS - 1` always, since `rem.len() < RATE`. When the two
+    // coincide the 0x80 lands in the same word as the 0x01, which is the
+    // 135-byte case the reference layout also folds together.
+    if w == RATE_WORDS - 1 {
+        last |= 0x80u32 << 24;
     }
-    out[RATE_WORDS - 1] |= 0x80u32 << 24;
-    words
+    out[w].write(last);
+    for slot in out[w + 1..].iter_mut() {
+        slot.write(0);
+    }
+    if w < RATE_WORDS - 1 {
+        out[RATE_WORDS - 1].write(0x80u32 << 24);
+    }
+
+    // SAFETY: every one of the `total` slots is written above -- the data words,
+    // the two stride words of each block, and the tail, padding and zero fill of
+    // the last one -- so the buffer is fully initialized.
+    unsafe { out_vec.set_len(total) };
+    out_vec
 }
 
 #[cfg(test)]
