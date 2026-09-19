@@ -26,6 +26,12 @@ pub enum BasefoldVerifyError {
     PublicValuesLengthMismatch { expected: usize, got: usize },
     /// The proof's chip list is not the machine's chip set.
     ChipCountMismatch { expected: usize, got: usize },
+    /// A chip's opened row is not as wide as its AIR.
+    ///
+    /// Checked before any AIR sees the row: `AlignedBorrow`'s only length guard
+    /// is a `debug_assert`, so in release a short row reaches `&shorts[0]` on an
+    /// empty slice and panics inside a `Result`-returning verifier.
+    OpeningWidthMismatch { chip: String, round: &'static str, expected: usize, got: usize },
     /// LogUp-GKR verification failed (sumcheck identity, chip opening
     /// consistency, or GKR-circuit-output MLE shape).
     LogupGkr(String),
@@ -47,6 +53,12 @@ impl core::fmt::Display for BasefoldVerifyError {
             }
             Self::ChipCountMismatch { expected, got } => {
                 write!(f, "chip count mismatch: expected {expected}, got {got}")
+            }
+            Self::OpeningWidthMismatch { chip, round, expected, got } => {
+                write!(
+                    f,
+                    "chip {chip}: {round} opening is {got} columns, the AIR declares {expected}"
+                )
             }
             Self::LogupGkr(msg) => write!(f, "LogUp-GKR: {msg}"),
             Self::Zerocheck(msg) => write!(f, "zerocheck: {msg}"),
@@ -163,6 +175,48 @@ impl BasefoldShardVerifier {
                 expected: chips.len(),
                 got: opening_count,
             });
+        }
+
+        // Shape check: every opened row is as wide as its AIR.
+        //
+        // These rows go to the constraint folder, which hands them to the AIR,
+        // which `Borrow`s them into its column struct -- and `AlignedBorrow`
+        // only length-checks under `debug_assert`. In release a short row
+        // reaches `&shorts[0]` on an empty slice and PANICS, so a malformed
+        // proof could abort this `Result`-returning verifier. The jagged
+        // geometry takes its widths from the machine, so nothing downstream
+        // catches a proof-supplied row of the wrong length either.
+        //
+        // The RECURSIVE verifier already had this check -- unconditionally, per
+        // chip, on both rounds: `verify_opening_shape_basefold`
+        // (recursion/circuit/src/zerocheck.rs:125, called at :510). So the
+        // invariant is not new and honest proofs already satisfy it; every shard
+        // proof production recursion consumes is checked there. The HOST path
+        // was simply the gap. SP1 checks it host-side too
+        // (`ShardVerifier::verify_opening_shape`).
+        //
+        // Note the recursive twin `.expect()`s, so it panics rather than
+        // returning its `OpeningShapeError` -- same defect class as this one,
+        // one layer up.
+        for (chip, opening) in chips.iter().zip(proof.opened_values.chips.iter()) {
+            let expected_main = <A as p3_air::BaseAir<Val<SC>>>::width(&chip.air);
+            if opening.main.local.len() != expected_main {
+                return Err(BasefoldVerifyError::OpeningWidthMismatch {
+                    chip: chip.name(),
+                    round: "main",
+                    expected: expected_main,
+                    got: opening.main.local.len(),
+                });
+            }
+            let expected_prep = chip.preprocessed_width();
+            if opening.preprocessed.local.len() != expected_prep {
+                return Err(BasefoldVerifyError::OpeningWidthMismatch {
+                    chip: chip.name(),
+                    round: "preprocessed",
+                    expected: expected_prep,
+                    got: opening.preprocessed.local.len(),
+                });
+            }
         }
 
         // Transcript prologue

@@ -440,3 +440,44 @@ mod tests {
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ADD_SUB_COLS)
     }
 }
+
+#[cfg(test)]
+mod opened_width_tests {
+    use super::AddSubCols;
+    use core::borrow::Borrow;
+    use p3_koala_bear::KoalaBear;
+
+    /// What happens when a verifier hands an AIR a row of the WRONG width.
+    ///
+    /// `AlignedBorrow`'s only length check is a `debug_assert`, so in release it
+    /// is gone and `align_to` yields an EMPTY `shorts` for a short slice, making
+    /// `&shorts[0]` an out-of-bounds index. Either way the result is a PANIC, not
+    /// an error -- and the shard verifier reaches this with `opened_values.chips
+    /// [i].main.local` taken straight from the proof, whose length nothing checks
+    /// against `chip.width()` (SP1 has `verify_opening_shape` for exactly this).
+    ///
+    /// So a malformed proof can abort a `Result`-returning verifier. This test
+    /// pins the mechanism; the fix belongs in the verifier, which should reject
+    /// the shape before any AIR sees it.
+    #[test]
+    fn a_short_row_panics_instead_of_erroring() {
+        let width = core::mem::size_of::<AddSubCols<u8>>();
+        let short = vec![KoalaBear::default(); width - 1];
+        let r = std::panic::catch_unwind(|| {
+            let cols: &AddSubCols<KoalaBear> = short.as_slice().borrow();
+            // Touch a field so nothing is optimised away.
+            let _ = core::hint::black_box(cols.pc);
+        });
+        assert!(r.is_err(), "a short row must not be silently accepted as a valid AIR row");
+    }
+
+    /// An exactly-sized row is fine, so the test above is about the length and
+    /// not about `Borrow` being broken.
+    #[test]
+    fn an_exact_row_borrows() {
+        let width = core::mem::size_of::<AddSubCols<u8>>();
+        let row = vec![KoalaBear::default(); width];
+        let cols: &AddSubCols<KoalaBear> = row.as_slice().borrow();
+        let _ = core::hint::black_box(cols.pc);
+    }
+}
