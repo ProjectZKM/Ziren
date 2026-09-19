@@ -349,8 +349,21 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
         jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
         expected_eval: Ext<C::F, C::EF>,
-        // original_commitments[0] = the witnessed BN254 commit cap root.
+        // The MAIN round's witnessed BN254 commit cap root — LAST in opening
+        // order, so `original_commitments = preceding_roots ++ [commit_root]`.
         commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1],
+        // The raw roots of every round committed BEFORE the main one, in
+        // opening order.
+        //
+        // Read HERE rather than in the lift, and that is the whole point: the
+        // witness stream is positional, so a value must be read at the point in
+        // circuit construction that matches where the prover wrote it.  The lift
+        // runs long after this reader — the rest of the shard proof is read in
+        // between — so reading them there consumed whatever the prover had
+        // written at that later position and left these roots to be consumed by
+        // some other read.  The symptom was an honest proof failing
+        // `assert_digest_eq` against a witnessed 0.
+        preceding_roots: Vec<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
     },
 }
 
@@ -1193,6 +1206,17 @@ where
     let first_root: OuterDigestRaw = outer_cap_root(&bundle.commit.original_commitment);
     let commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1] =
         core::array::from_fn(|i| first_root[i].read(builder));
+    // Then the preceding rounds' raw roots, in the same order
+    // `write_outer_eval_bundle_impl` appends them — immediately after the main
+    // root, and here, not in the lift (see `preceding_roots`).
+    let preceding_roots: Vec<[zkm_recursion_compiler::ir::Var<C::N>; 1]> = bundle
+        .preceding_commits
+        .iter()
+        .map(|c| {
+            let root: OuterDigestRaw = outer_cap_root(c);
+            core::array::from_fn(|i| root[i].read(builder))
+        })
+        .collect();
 
     Some(LiftedEvalProof::OuterBundle {
         host: bundle,
@@ -1201,6 +1225,7 @@ where
         jagged_eval,
         expected_eval,
         commit_root,
+        preceding_roots,
     })
 }
 
@@ -1301,6 +1326,10 @@ pub fn lift_jagged_basefold_bundle_outer<C>(
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_expected_eval: Ext<C::F, C::EF>,
     preread_commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1],
+    // The preceding rounds' raw roots, PRE-READ alongside `preread_commit_root`.
+    // Pre-read for the same reason every other value here is: the witness stream
+    // is positional and this function runs long after the reader.
+    preread_preceding_roots: &[[zkm_recursion_compiler::ir::Var<C::N>; 1]],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
@@ -1455,20 +1484,22 @@ where
     // query-chain equality changed nothing: the mismatch is upstream of it.
     //
     // The preceding roots are WITNESSED, not `const_digest`: they vary per
-    // proof, so baking them would make the R1CS proof-specific. Reading them
-    // here is positionally safe because this function performs no other stream
-    // reads and the writer appends them after the main root.
+    // proof, so baking them would make the R1CS proof-specific.  They are read
+    // in `read_outer_eval_bundle_impl`, not here — the stream is positional and
+    // this function runs after the rest of the shard proof has been read.
     //
     // The preceding roots arrive from the PROOF, so on their own they are
     // proof-controlled; the `vk_preprocessed_cap` bind below is what pins them.
+    assert_eq!(
+        preread_preceding_roots.len(),
+        bundle.preceding_commits.len(),
+        "outer lift: {} pre-read preceding roots for {} preceding rounds",
+        preread_preceding_roots.len(),
+        bundle.preceding_commits.len(),
+    );
     let mut original_commitments: Vec<<HV as crate::hash::FieldHasherVariable<C>>::DigestVariable> =
         Vec::with_capacity(num_rounds);
-    for c in bundle.preceding_commits.iter() {
-        let root: OuterDigestRaw = outer_cap_root(c);
-        let witnessed: [zkm_recursion_compiler::ir::Var<C::N>; 1] =
-            core::array::from_fn(|i| root[i].read(builder));
-        original_commitments.push(witnessed);
-    }
+    original_commitments.extend_from_slice(preread_preceding_roots);
     // `HV::DigestVariable == [Var<Bn254>; 1] == [Var<C::N>; 1]` for the outer ring.
     original_commitments.push(preread_commit_root);
     assert_eq!(

@@ -323,6 +323,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             jagged_eval,
             expected_eval,
             commit_root,
+            preceding_roots,
         } => {
             // The host packing's own column accounting, from the SAME source
             // the outer lift uses (`bundle.packing.padding_heights`,
@@ -339,6 +340,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             jagged_eval.clone(),
             *expected_eval,
             *commit_root,
+            preceding_roots,
             max_log_row_count,
             &column_counts_by_round,
             None,
