@@ -510,13 +510,16 @@ pub struct JitBridgeState<'a> {
 ///
 /// Returns 0 on success.  A non-zero return is currently unused;
 /// the JIT codegen ignores the call's return value.
-pub extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
-    // SAFETY: the JIT only ever calls this handler from a SYSCALL
-    // emit point, where `ctx` is a live `*mut JitContext` set up by
-    // the caller and `ctx.user_data` was populated with a
-    // `*mut JitBridgeState` that outlives this call.  No other
-    // thread touches the executor while the JIT'd code is
-    // executing.
+///
+/// # Safety
+///
+/// `ctx` must be a live, aligned `*mut JitContext` for the whole call, and
+/// `ctx.user_data` must be either null or a `*mut JitBridgeState` that outlives
+/// it.  No other thread may touch the executor while the JIT'd code runs.  The
+/// JIT only calls this from a SYSCALL emit point, where all three hold; nothing
+/// in the handler can verify any of them, which is why the signature says so.
+pub unsafe extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
+    // SAFETY: guaranteed by this function's contract, above.
     let ctx = unsafe { &mut *ctx };
     let bridge_ptr = ctx.user_data as *mut JitBridgeState<'_>;
     if bridge_ptr.is_null() {
