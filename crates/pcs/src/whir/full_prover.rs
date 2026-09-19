@@ -80,8 +80,11 @@ where
 
         // ---- Starting commitment: encode, pack 2^ff rows/leaf, commit, OOD. ----
         let start_cw = self.encoder.encode_batch(alloc::vec![Arc::clone(&mle)]);
-        let start_rows = start_cw[0].data.values.len(); // width-1 base storage
-        let start_leaves = RowMajorMatrix::new(start_cw[0].data.values.clone(), 1usize << ff);
+        // MOVE the encoded cells into the leaf matrix instead of cloning the whole
+        // codeword (see `take_codeword_values`); `start_cw` is not read again.
+        let start_values = crate::basefold::fri::take_codeword_values(start_cw);
+        let start_rows = start_values.len(); // width-1 base storage
+        let start_leaves = RowMajorMatrix::new(start_values, 1usize << ff);
         let (start_commit, start_data) = self.mmcs.commit(alloc::vec![start_leaves]);
         challenger.observe(start_commit.clone());
         let mut start_ood_points = Vec::with_capacity(self.config.starting_ood_samples);
@@ -146,7 +149,9 @@ where
                 Arc::clone(&ef_dft),
             );
             let ef_cw = ef_encoder.encode_batch(alloc::vec![folded_mle]);
-            let base_cw = codeword_from_ef::<F, EF>(ef_cw[0].data.values.clone());
+            // Moved, not cloned: `ef_cw` is dropped here.
+            let base_cw =
+                codeword_from_ef::<F, EF>(crate::basefold::fri::take_codeword_values(ef_cw));
             let leaf_w = (1usize << ff) * EF::DIMENSION;
             let leaves = RowMajorMatrix::new(base_cw.data.values, leaf_w);
             let (commitment, prover_data) = self.mmcs.commit(alloc::vec![leaves]);

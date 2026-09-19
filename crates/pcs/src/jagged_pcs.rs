@@ -1127,11 +1127,22 @@ pub mod jagged {
         pub precomputed: &'a PrecomputedJaggedCommitGeneric<MT>,
     }
 
-    /// Build borrowed `ChipTraceView`s over an OWNED re-materialized trace
-    /// set (`rematerialize_chip_traces_via_provider`), so the downstream
-    /// view-taking commit/reduction consumers can read its cells with no
-    /// further copy.  The returned views borrow `owned`, which must outlive
-    /// them (the caller keeps it in scope).
+    /// Build `ChipTraceView`s from an OWNED re-materialized trace set
+    /// (`rematerialize_chip_traces_via_provider`) for the downstream
+    /// view-taking commit/reduction consumers.
+    ///
+    /// NOTE: despite the name, the returned views do NOT borrow `owned` -- each
+    /// one COPIES its chip's cells into a fresh `Arc<Mle>`, so `owned` need not
+    /// outlive them and may be dropped immediately. The previous version of this
+    /// comment claimed the opposite ("the returned views borrow `owned`, which
+    /// must outlive them") and that the cells are read "with no further copy";
+    /// both were wrong, and reasoning about lifetimes from them would mislead.
+    ///
+    /// The copy is avoidable: every caller passes a local that is used exactly
+    /// once, so a consuming variant could move the cells instead. Doing that
+    /// means changing this signature, and the only callers are in `ziren-gpu`
+    /// (`device_jagged_trusted_eval.rs`) on a path its own comments mark as cold,
+    /// so it is left as a deliberate TODO rather than a cross-repo change.
     pub fn views_over_owned(
         owned: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
     ) -> alloc::vec::Vec<ChipTraceView> {

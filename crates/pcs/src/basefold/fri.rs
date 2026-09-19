@@ -26,7 +26,7 @@ use p3_maybe_rayon::prelude::*;
 use p3_util::{log2_strict_usize, reverse_slice_index_bits};
 
 use super::code::RsCodeWord;
-use super::mle::Mle;
+use super::mle::{Message, Mle};
 
 /// Output of one BaseFold commit-phase round.
 ///
@@ -171,6 +171,26 @@ where
 }
 
 /// Repack an EF codeword into base-field [`RsCodeWord`] storage.
+/// Take the cells out of a freshly-encoded codeword WITHOUT copying them.
+///
+/// `Encoder::encode_batch` returns `Message<RsCodeWord<_>>` = `Vec<Arc<..>>`, and
+/// the cells therefore sit behind an `Arc`, which is why every caller used to
+/// write `cw[0].data.values.clone()` -- a full copy of the codeword, megabytes
+/// per round at core sizes. The `Arc` is created inside `encode_batch` and handed
+/// straight back, so the caller is its sole owner and `try_unwrap` succeeds,
+/// moving the cells instead.
+///
+/// The `Err` arm keeps the old clone if a reference is ever retained elsewhere,
+/// so this is a pure win or a no-op, never a regression.
+pub fn take_codeword_values<F: Field>(codewords: Message<RsCodeWord<F>>) -> Vec<F> {
+    let mut codewords = codewords;
+    let first = codewords.swap_remove(0);
+    match alloc::sync::Arc::try_unwrap(first) {
+        Ok(owned) => owned.data.values,
+        Err(shared) => shared.data.values.clone(),
+    }
+}
+
 pub fn codeword_from_ef<F, EF>(codeword_ef: Vec<EF>) -> RsCodeWord<F>
 where
     F: TwoAdicField,
