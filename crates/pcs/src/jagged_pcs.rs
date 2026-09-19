@@ -74,7 +74,9 @@ pub struct JaggedProverDataGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
 pub type JaggedProverData = JaggedProverDataGeneric<JaggedMmcs>;
 
 /// Stacking height of the stacked PCS: `2^21` rows per stripe.  Never
-/// clamped down for small commits (see [`pick_log_stacking_height`]).
+/// NEVER clamped down for small commits -- see [`pick_log_stacking_height`],
+/// which explains why making the height area-dependent would make a VK
+/// clamp-dependent. (This line used to claim the opposite of that function.)
 pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 
 /// Interleave batch size for the stacked PCS: number of MLE-column
@@ -1371,7 +1373,6 @@ pub mod jagged {
             total_values,
             dense_len: total_values,
         };
-        let n_chips = chip_infos.len();
 
         // The reduction, over the CONCATENATED dense
         let reduce = |z_col: &[InnerChallenge],
@@ -1421,16 +1422,19 @@ pub mod jagged {
         // reduction core's return type stays fixed.
         let whir_any = rounds.iter().any(|r| r.precomputed.whir_data.is_some());
         let whir_mode = whir_any && rounds.iter().all(|r| r.precomputed.whir_data.is_some());
-        if whir_any && !whir_mode {
-            // A round lacks WHIR data while another carries it: the open
-            // falls back to BaseFold while the caller may have observed a
-            // WHIR root — an inconsistent proof.  Surface which is missing.
-            let flags: alloc::vec::Vec<bool> =
-                rounds.iter().map(|r| r.precomputed.whir_data.is_some()).collect();
-            eprintln!(
-                "[whir open] MIXED rounds, falling back to BaseFold: per-round whir_data presence = {flags:?}                  (round order: preceding/preprocessed first, main last)"
-            );
-        }
+        // A round lacking WHIR data while another carries it makes the open fall
+        // back to BaseFold while the caller may already have observed a WHIR
+        // root. The comment here used to say that is "an inconsistent proof" and
+        // then `eprintln!`ed and produced it anyway. It is a PROVER-side
+        // invariant violation with no honest outcome, so fail instead of emitting
+        // a proof whose transcript the verifier cannot reproduce.
+        assert!(
+            !whir_any || whir_mode,
+            "prove_jagged_basefold_rounds: mixed WHIR rounds -- per-round whir_data \
+             presence = {:?} (round order: preceding/preprocessed first, main last); \
+             the open would fall back to BaseFold against a WHIR root",
+            rounds.iter().map(|r| r.precomputed.whir_data.is_some()).collect::<alloc::vec::Vec<_>>(),
+        );
         let whir_slot: core::cell::RefCell<
             Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
         > = core::cell::RefCell::new(None);
@@ -1442,6 +1446,10 @@ pub mod jagged {
                     .map(|r| r.precomputed.whir_data.as_ref().expect("whir_mode"))
                     .collect();
                 let lsh = wdatas[0].log_stacking_height as usize;
+                assert!(
+                    wdatas.iter().all(|w| w.log_stacking_height as usize == lsh),
+                    "open_jagged_whir_rounds: rounds disagree on log_stacking_height",
+                );
                 let cfg = crate::whir::jagged::core_whir_config(lsh);
                 let ef_dft =
                     alloc::sync::Arc::new(p3_dft::Radix2DitParallel::<InnerChallenge>::default());
@@ -1484,7 +1492,25 @@ pub mod jagged {
         // coords to index EVERY round's stripes end to end; the stripe total
         // need not be a power of two (the verifier zero-pads it), so the
         // dimension is the ceiling.
+        // Every round's stripe count is computed with ROUND 0's stacking height, so
+        // the rounds have to agree. They do -- `pick_log_stacking_height` ignores
+        // its argument and returns the fixed 21, deliberately, so that the height
+        // cannot depend on trace area and make a VK clamp-dependent -- but nothing
+        // enforced it, and the failure mode if it ever changed is a silently wrong
+        // stripe total in the batched open, not a build error.
         let log_stacking_height = rounds[0].precomputed.prover_data.log_stacking_height as usize;
+        assert!(
+            rounds
+                .iter()
+                .all(|r| r.precomputed.prover_data.log_stacking_height as usize
+                    == log_stacking_height),
+            "prove_jagged_basefold_rounds: rounds disagree on log_stacking_height {:?}; the \
+             batched open indexes every round's stripes with round 0's height",
+            rounds
+                .iter()
+                .map(|r| r.precomputed.prover_data.log_stacking_height)
+                .collect::<alloc::vec::Vec<_>>(),
+        );
         let total_stripes: usize =
             rounds.iter().map(|r| r.precomputed.prover_data.area >> log_stacking_height).sum();
         let batch_dim = total_stripes.max(1).next_power_of_two().trailing_zeros() as usize;
@@ -1498,7 +1524,6 @@ pub mod jagged {
             reduce,
             open,
         );
-        let _ = n_chips;
 
         // The bundle carries the LAST round's commit — the main one, which the
         // hash-bind ties to `main_commitment`.  An earlier round's commitment as
