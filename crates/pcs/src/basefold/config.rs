@@ -154,15 +154,18 @@ impl<F: Field> FriConfig<F> {
     /// is `2^k · N` EF bytes per stripe, at the cost of the fixed 100
     /// queries no longer matching the rate's 100-bit target.
     ///
-    /// **⚠ SOUNDNESS WARNING.** This knob pins `num_queries = 100` and
-    /// `pow = 16` REGARDLESS of `log_blowup`, so it does NOT track the
-    /// rate-dependent query count needed for 100-bit soundness.  At the
-    /// sound inner default (`blowup=2`, 124 queries — see
-    /// `default_fri_config`) this override would DROP to 100 queries
-    /// (`100 · 0.6781 + 16 ≈ 84` bits) and at `blowup=1` to ~71 bits.
-    /// It is a MEMORY-MEASUREMENT hammer ONLY — using it in production
-    /// silently weakens the proof below 100-bit.  Leave it UNSET for the
-    /// sound `(2, 124, 16)` default.
+    /// The query count follows the rate, so the 100-bit target holds at every
+    /// accepted `k`:
+    ///
+    /// ```text
+    ///   bits(q, k) = q · ( -log2(0.5 + 2^-k / 2) ) + pow
+    ///   q(k)       = ⌈ (100 - pow) / ( -log2(0.5 + 2^-k / 2) ) ⌉
+    ///              = 203, 124, 102, 93      for k = 1..4 at pow = 16
+    /// ```
+    ///
+    /// `q(2) = 124` is [`Self::default_fri_config`].  The folding arity stays
+    /// `INNER_LOG_FOLDING_ARITY`, which fixes the round count `num_vars / arity`
+    /// and the leaf width `2^arity` the recursion circuit is compiled for.
     ///
     /// Accepts integer values in [1, 4].  Any other value (or unset)
     /// falls back to the sound production default.
@@ -193,10 +196,24 @@ impl<F: Field> FriConfig<F> {
         if !(1..=4).contains(&log_blowup) {
             return Self::default_fri_config();
         }
-        // Keep num_queries + pow unchanged — rate-adjusted soundness
-        // analysis is caller's responsibility.  This is purely a
-        // memory-measurement knob.
-        Self::new(log_blowup, 100, 16)
+        // Sound at every accepted k, so nothing here is gated.  k != 2 is a
+        // core-commit measurement only: it does not survive a recursion proof.
+        if log_blowup != Self::default_fri_config().log_blowup {
+            tracing::warn!(
+                "ZIREN_BASEFOLD_LOG_BLOWUP={log_blowup}: 100-bit soundness is held by the query \
+                 count, but only the default blowup survives a recursion proof."
+            );
+        }
+        // q(k) = ⌈(100 - 16) / (-log2(0.5 + 2^-k / 2))⌉   -- see the doc above
+        let num_queries = match log_blowup {
+            1 => 203,
+            2 => 124,
+            3 => 102,
+            _ => 93,
+        };
+        // `new` alone gives arity 1: rounds `num_vars/1`, leaves of 2 values,
+        // against a circuit compiled for `INNER_LOG_FOLDING_ARITY`.
+        Self::new(log_blowup, num_queries, 16).with_log_folding_arity(INNER_LOG_FOLDING_ARITY)
     }
 
     /// **WRAP / SHRINK-grade parameters:
@@ -228,5 +245,66 @@ impl<F: Field> FriConfig<F> {
     /// unit tests where soundness isn't load-bearing.
     pub const fn test_fri_config() -> Self {
         Self::new(1, 4, 0)
+    }
+}
+
+#[cfg(test)]
+mod env_override {
+    use super::*;
+
+    type F = p3_koala_bear::KoalaBear;
+
+    /// bits(q, k) = q · ( -log2(0.5 + 2^-k / 2) ) + pow
+    fn soundness_bits(c: &FriConfig<F>) -> f64 {
+        let rate = 1.0f64 / (1u64 << c.log_blowup) as f64;
+        c.num_queries as f64 * -(0.5 + rate / 2.0).log2() + c.proof_of_work_bits as f64
+    }
+
+    #[test]
+    fn the_default_is_the_hundred_bit_config() {
+        let d = FriConfig::<F>::default_fri_config();
+        assert_eq!((d.log_blowup, d.num_queries, d.proof_of_work_bits), (2, 124, 16));
+        assert_eq!(d.log_folding_arity, INNER_LOG_FOLDING_ARITY);
+        assert!(soundness_bits(&d) >= 100.0, "default is {} bits", soundness_bits(&d));
+    }
+
+    /// An unset or out-of-range value must give exactly the default.
+    #[test]
+    fn a_rejected_value_falls_back_to_the_default() {
+        let prev = std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP").ok();
+        for bad in ["0", "5", "not-a-number", ""] {
+            std::env::set_var("ZIREN_BASEFOLD_LOG_BLOWUP", bad);
+            let c = FriConfig::<F>::from_env_or_default();
+            let d = FriConfig::<F>::default_fri_config();
+            assert_eq!(
+                (c.log_blowup, c.num_queries, c.proof_of_work_bits, c.log_folding_arity),
+                (d.log_blowup, d.num_queries, d.proof_of_work_bits, d.log_folding_arity),
+                "{bad:?} must fall back to the default"
+            );
+        }
+        match prev {
+            Some(v) => std::env::set_var("ZIREN_BASEFOLD_LOG_BLOWUP", v),
+            None => std::env::remove_var("ZIREN_BASEFOLD_LOG_BLOWUP"),
+        }
+    }
+
+    /// When applied it must hold 100 bits and keep the arity: `new` hard-codes
+    /// arity 1, and dropping to it changes the proof SHAPE, not just the margin.
+    #[test]
+    fn every_accepted_blowup_holds_the_target_and_the_arity() {
+        let prevb = std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP").ok();
+        for k in 1..=4 {
+            std::env::set_var("ZIREN_BASEFOLD_LOG_BLOWUP", k.to_string());
+            let c = FriConfig::<F>::from_env_or_default();
+            assert_eq!(c.log_blowup, k);
+            assert_eq!(c.log_folding_arity, INNER_LOG_FOLDING_ARITY, "arity dropped at blowup {k}");
+            let bits = soundness_bits(&c);
+            assert!(bits >= 100.0, "blowup {k}: {} queries = {bits:.1} bits", c.num_queries);
+            assert!(bits < 101.5, "blowup {k}: {} queries overshoots at {bits:.1} bits", c.num_queries);
+        }
+        match prevb {
+            Some(v) => std::env::set_var("ZIREN_BASEFOLD_LOG_BLOWUP", v),
+            None => std::env::remove_var("ZIREN_BASEFOLD_LOG_BLOWUP"),
+        }
     }
 }
