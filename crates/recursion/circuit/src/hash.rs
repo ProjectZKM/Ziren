@@ -74,6 +74,26 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         true
     }
 
+    /// The BN254 form of a verifying key's preprocessed commitment, for the ring
+    /// that has one.
+    ///
+    /// ZR-23 bind #2 needs the KEY's preprocessed root inside
+    /// `lift_jagged_basefold_bundle_outer`, to pin the proof-supplied
+    /// `preceding_commits[0]` against. `Self::DigestVariable` already IS that
+    /// 1-cap on the outer ring, but `verify_wrap_basefold_core` is SC-generic,
+    /// so the concrete `[Var<C::N>; 1]` cannot be named at the call site — hence
+    /// a dispatched accessor rather than passing `vk.commitment` directly.
+    ///
+    /// The inner ring returns `None`: it never produces an `OuterBundle`, and it
+    /// pins its preceding rounds through the felt-shaped
+    /// `(raw, modified)` pair and the `jagged_hash_bind_in_circuit` rebind
+    /// instead.
+    fn vk_outer_cap(
+        _commitment: Self::DigestVariable,
+    ) -> Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]> {
+        None
+    }
+
     fn hash(builder: &mut Builder<C>, input: &[Felt<C::F>]) -> Self::DigestVariable;
 
     fn compress(builder: &mut Builder<C>, input: [Self::DigestVariable; 2])
@@ -286,6 +306,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
+        vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
         crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
@@ -580,6 +601,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         _row_counts_by_round: Option<&[Vec<usize>]>,
+        _vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
         crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
@@ -644,6 +666,16 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     /// `compress([original, hash]) == original`, the gnark AssertEqV failure).
     fn jagged_hash_bind_in_circuit() -> bool {
         false
+    }
+
+    /// OUTER ring: the verifying key's commitment IS the raw BN254 preprocessed
+    /// root (`recursion/core/src/stark/config.rs:426` returns
+    /// `commit.original_commitment` unmixed), so it is exactly the value the
+    /// preceding round's proof-supplied root must equal. No geometry mix to undo.
+    fn vk_outer_cap(
+        commitment: Self::DigestVariable,
+    ) -> Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]> {
+        Some(commitment)
     }
 
     fn hash(builder: &mut Builder<C>, input: &[Felt<<C as Config>::F>]) -> Self::DigestVariable {
@@ -866,6 +898,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
+        vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
         crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
@@ -891,6 +924,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
             max_log_row_count,
             column_counts_by_round,
             row_counts_by_round,
+            vk_preprocessed_cap,
         )
     }
 

@@ -1304,6 +1304,10 @@ pub fn lift_jagged_basefold_bundle_outer<C>(
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
+    // The verifying key's preprocessed commitment (ZR-23 bind #2). See the
+    // `vk_preprocessed_cap` block below for what it is asserted against and why
+    // a plain equality is the right comparison on this ring.
+    vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
 ) -> JaggedPcsProofVariable<
     RecursiveBasefoldProof<
         Felt<C::F>,
@@ -1442,10 +1446,8 @@ where
     // here is positionally safe because this function performs no other stream
     // reads and the writer appends them after the main root.
     //
-    // NOTE, and this is a soundness limit rather than an oversight: accepting
-    // proof-supplied preceding roots repairs COMPLETENESS only. Each one still
-    // has to be re-bound to `vk.commit` with its geometry, which is ZR-23's
-    // second bind; until that lands, this vector is proof-controlled.
+    // The preceding roots arrive from the PROOF, so on their own they are
+    // proof-controlled; the `vk_preprocessed_cap` bind below is what pins them.
     let mut original_commitments: Vec<<HV as crate::hash::FieldHasherVariable<C>>::DigestVariable> =
         Vec::with_capacity(num_rounds);
     for c in bundle.preceding_commits.iter() {
@@ -1462,12 +1464,67 @@ where
         "one raw commitment per opened round: {} preceding + main != {num_rounds} rounds",
         bundle.preceding_commits.len(),
     );
-    // OUTER ring (gnark wrap): the BN254 hash-bind / re-bind is performed
-    // inside the registered outer jagged-verify hook, NOT in this lift.  Carry
-    // modified == original here so the in-circuit assert in
-    // `verify_trusted_evaluations` is a no-op (compress([orig,hash])==orig is
-    // NOT what runs — the outer path uses its own digest-mix; see hash.rs).
-    // The inner ring (where the validation gates run) carries the real modified.
+    // ZR-23 bind #2: pin the preceding (preprocessed) round to the KEY.
+    //
+    // Everything above takes the preceding roots from the proof. Nothing then
+    // required them to be the roots the verifying key committed, so a prover
+    // could open a preprocessed round of its own choosing. This is the bind.
+    //
+    // A plain equality is the RIGHT comparison on this ring, and that is not an
+    // approximation of the inner bind: the outer key stores the RAW root
+    // (`PrepCommitRoot::commit_root` for `PrecomputedJaggedCommitGeneric<
+    // OuterValMmcs>` returns `commit.original_commitment` unmixed --
+    // recursion/core/src/stark/config.rs:426), whereas the inner key stores
+    // `compress([root, hash(counts)])` (pcs/src/kb31_poseidon2.rs:301). So the
+    // inner ring must re-derive the mix to compare, and here there is no mix to
+    // undo.
+    //
+    // The consequence, stated plainly: this binds the preceding round's ROOT to
+    // the key, and it does NOT bind that round's GEOMETRY. The inner ring gets
+    // geometry for free because the key's digest has the counts hashed into it;
+    // the outer key has no counts in it, so pinning the outer geometry the same
+    // way means mixing counts into `commit_root` for this ring -- a verifying-key
+    // format change, hence new Groth16 artifacts. Left out deliberately: the
+    // root bind costs one BN254 equality and needs no ceremony, and shipping it
+    // separately is worth more than bundling it with a key migration.
+    //
+    // Why the skip was there: `jagged_hash_bind_in_circuit()` returns false for
+    // this ring (hash.rs) and `commit_root` returns the raw root, both justified
+    // by the same premise -- "the wrap machine also opens a single round, so
+    // there is no preceding round whose geometry would need pinning here", with
+    // the note "if the wrap ever grows a preprocessed opening round, it needs
+    // its own BN254 bind". That premise is false, and the same module contradicts
+    // it: `outer_prep_precompute` exists (config.rs:438) precisely "so the
+    // preprocessed round can be OPENED", every recursion chip has a nonzero
+    // `preprocessed_width`, and `wrap_basefold.rs` therefore builds
+    // `column_counts_by_round = [prep_widths, main_widths]`. The wrap machine
+    // opens TWO rounds. The deferred conditional is already live.
+    if let Some(key_cap) = vk_preprocessed_cap {
+        // One preceding round, one key commitment: the key's single preprocessed
+        // commitment covers the whole round (all preprocessed chips together).
+        // If a future shape opens more than one preceding round, this must fail
+        // here rather than silently pin only the first.
+        assert!(
+            bundle.preceding_commits.len() <= 1,
+            "outer lift: {} preceding rounds but the key carries one preprocessed \
+             commitment -- ZR-23's bind would cover only the first",
+            bundle.preceding_commits.len(),
+        );
+        if !bundle.preceding_commits.is_empty() {
+            <HV as crate::hash::FieldHasherVariable<C>>::assert_digest_eq(
+                builder,
+                original_commitments[0],
+                key_cap,
+            );
+        }
+    }
+
+    // The in-circuit geometry rebind in
+    // `BasefoldShardVerifier::verify_shard` is skipped on this ring
+    // (`HV::jagged_hash_bind_in_circuit() == false`), because the outer key holds
+    // no mixed digest to compare against -- see the block above. `modified` is
+    // carried equal to `original` so that assert stays a no-op rather than
+    // asserting `compress([orig, hash]) == orig`, which can never hold.
     let modified_commitments = original_commitments.clone();
 
     // jagged_eval_proof = the WITNESSED sub-sumcheck

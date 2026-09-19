@@ -342,6 +342,14 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             max_log_row_count,
             &column_counts_by_round,
             None,
+            // ZR-23 bind #2: the KEY's preprocessed commitment, so the outer lift
+            // can pin the proof-supplied `preceding_commits[0]` to it. The other
+            // two arms get the same thing as the felt-shaped
+            // `preceding_commitments` pair above; this arm was the one that got
+            // nothing, which is the root of both ZR-23 and ZR-24.
+            // `vk_outer_cap` is `Some` only on the outer ring, which is the only
+            // ring that produces an `OuterBundle`.
+            <SC as FieldHasherVariable<C>>::vk_outer_cap(vk_legacy.commitment),
         ))
         }
         LiftedEvalProof::Bundle {
