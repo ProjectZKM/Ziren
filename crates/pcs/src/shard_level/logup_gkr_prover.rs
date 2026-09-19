@@ -9,56 +9,22 @@ use p3_field::{ExtensionField, PrimeField};
 
 use crate::zerocheck_prover::eq_mle_table;
 
-/// Per-chip MLE `eval_at` dispatch helper.
+/// Per-column MLE evaluations of a row-major trace at a multilinear point.
 ///
-/// Currently this function ALWAYS delegates to the host
-/// implementation [`evaluate_trace_columns_at_point`].  The GPU
-/// path lives in `zkm-gpu-core::basefold::per_chip_eval_at`
-/// (crate `ziren-gpu/core`) and operates on a
-/// `ColMajorMatrixDevice<KoalaBear>` rather than a host slice — so
-/// integrating the dispatch through this generic helper would
-/// require plumbing a `dyn DeviceTrace` accessor through the
-/// generic Ziren prover, which is intentionally out of scope.
+/// ```text
+///   trace[row·width + col],  len = height·width          (row-major)
+///   f_col(r) = Σ_{row < height} eq(r, row) · trace[row·width + col]
+///   eq(r, row) = Π_i ( r_i·b_i + (1-r_i)·(1-b_i) ),  b_i = bit i of row
+/// ```
 ///
-/// Instead the GPU prover (which already owns the device matrices)
-/// should call
-/// `zkm_gpu_core::basefold::per_chip_eval_at::eval_chip_columns_at_point_device`
-/// directly when the device hook is registered, and fall back to this host
-/// helper otherwise.
+/// Returns `f_col(eval_point)` for each of the `width` columns.
 ///
-/// This stub exists so the host-side dispatch site
-/// (`prove_shard_logup_gkr_rows` step 6 in
-/// `crates/pcs/src/shard_level/row_gkr/top_level.rs:239-289`)
-/// can be migrated to a single named entry point in a future
-/// follow-up without touching call sites again.
+/// `height` need NOT be a power of two, and need not fill the cube: rows
+/// `[height, 2^|eval_point|)` are implicit zeros, which is what height-agnostic
+/// jagged recursion opens over.  Requires `height ≤ 2^|eval_point|`; a taller
+/// trace would drop rows.
 ///
-/// See the ziren-gpu basefold crate's `per_chip_eval_at.rs` for the
-/// GPU implementation.
-pub fn evaluate_trace_columns_at_point_or_device<F, EF>(
-    trace: &[F],
-    width: usize,
-    eval_point: &[EF],
-) -> Vec<EF>
-where
-    F: PrimeField + Sync,
-    EF: ExtensionField<F> + Send + Sync,
-{
-    evaluate_trace_columns_at_point::<F, EF>(trace, width, eval_point)
-}
-
-/// Compute per-column MLE evaluations of a row-major trace at a
-/// multilinear point.
-///
-/// `trace[row * width + col]` is the row-major flattening; the
-/// MLE of column `col` is the multilinear extension of the
-/// `(row → trace[row, col])` map over `{0,1}^log2(height)`.
-///
-/// `eval_point` must have length `log2(height)`; `height` must be
-/// a power of two.  Returns one extension-field eval per column.
-///
-/// Uses the equality polynomial table to compute each column in
-/// `O(height)` after a one-time `O(height)` table build.  Total
-/// work: `O(height * width)`.
+/// `O(height·width)` time, `O(2^⌈log2 height⌉)` extra space.
 pub fn evaluate_trace_columns_at_point<F, EF>(
     trace: &[F],
     width: usize,
@@ -71,45 +37,30 @@ where
     if width == 0 {
         return Vec::new();
     }
+    // Row-major contract: `trace.len() = height · width`.  Checked, not assumed --
+    // integer division would otherwise drop a partial row silently.
+    assert_eq!(
+        trace.len() % width,
+        0,
+        "trace length {} is not a multiple of width {width}",
+        trace.len()
+    );
     let height = trace.len() / width;
-    // Height-agnostic: evaluate the trace MLE over the
-    // 2^|eval_point| cube treating rows `[height, domain)` as implicit
-    // zero padding — a real trace's
-    // height may be < the cube the verifier opens it over, which is
-    // what height-agnostic jagged recursion needs (1 program / cluster,
-    // any heights).  Correctness guard: the trace cannot be TALLER than the
-    // cube (that would silently drop rows), so require `height <= domain`.
-    // For `height == domain` this is byte-identical:
-    // every eq-table entry is consumed, no rows are padded.
     let domain = 1usize << eval_point.len();
-    debug_assert!(height <= domain, "trace height ({height}) must be <= 2^|eval_point| ({domain})");
-    // GPU-IDLE lever: TRUNCATED eq-table build
-    // Only rows `[0, height)` are ever summed below, so only the FIRST
-    // `height` eq-table entries are ever read — yet the table is built over
-    // the whole `2^|eval_point|` cube.  That is ruinous for the full-point
-    // openings (`*_evals_full` in the LogUp-GKR output-extract), where
-    // `eval_point` is the full `max_log_row_count` trace point while the
-    // trace being opened (notably every PREPROCESSED trace) is far shorter:
-    // a 2^22-row cube table gets built to read its first few thousand
-    // entries, per chip, per shard, on the host with the GPU idle.
+    // `assert`, not `debug_assert`: at height > domain the `else` branch below
+    // sizes the eq table at `domain` and the row loop indexes past it, so release
+    // would panic out of bounds inside a rayon closure rather than say this.
+    assert!(height <= domain, "trace height ({height}) must be <= 2^|eval_point| ({domain})");
+    // Truncated eq table.  Only rows < height are summed, and for row < 2^k every
+    // bit i ≥ k of `row` is zero, hence with k = ⌈log2 height⌉
     //
-    // MEASURED (sub-instrumented `logup_gkr_output_extract`, goat core): the
-    // full-point PREPROCESSED evaluation costs 78-96 ms of worker time per
-    // shard and — the decisive signature — does NOT scale with chip count
-    // (25 chips -> 96 ms, 4 chips -> 88 ms) while the main-trace evaluations
-    // do (25 chips -> 114/131 ms, 4 chips -> 0.0/4.2 ms).  On a 4-chip shard
-    // it is essentially the entire span wall.  That is the fixed
-    // `O(2^|eval_point|)` table build, not trace work.
+    //     eq(r, row) = ( Π_{i≥k} (1 - r_i) ) · eq(r[..k], row)
     //
-    // `eq_mle_table` maps index bit `i` to `eval_point[i]`, so every
-    // `row < 2^k` has all bits `>= k` zero and therefore
-    //     eq[row] == (prod_{i>=k} (1 - r_i)) * eq_k[row],
-    // with `eq_k = eq_mle_table(&eval_point[..k])`.  Building the size-`2^k`
-    // table and folding the constant tail into the per-column accumulator is
-    // EXACT — field multiplication is associative and distributes over the
-    // sum, so `tail * sum(eq_k[row] * x_row) == sum(eq[row] * x_row)` with no
-    // rounding — and turns the build from `O(2^|eval_point|)` into
-    // `O(height)`.
+    // so build the 2^k table and fold the constant tail into each column
+    // accumulator: exact by associativity and distributivity, and O(height)
+    // instead of O(2^|eval_point|).  The gap is large -- `eval_point` is the full
+    // max_log_row_count point while the preprocessed traces opened at it are
+    // thousands of rows, ~90 ms/shard of otherwise-pointless table build.
     let k = if height <= 1 { 0 } else { (height - 1).ilog2() as usize + 1 };
     let (eq, tail) = if k < eval_point.len() {
         let tail = eval_point[k..].iter().fold(EF::ONE, |acc, &r| acc * (EF::ONE - r));
@@ -117,51 +68,30 @@ where
     } else {
         (eq_mle_table::<EF>(eval_point), EF::ONE)
     };
-    debug_assert!(eq.len() >= height);
+    assert!(eq.len() >= height, "eq table ({}) shorter than height ({height})", eq.len());
 
-    // Rows `[height, domain)` contribute zero (implicit zero padding), so we
-    // sum only over the real `height` rows — the eq-table is indexed at
-    // `row < height <= domain` so the indices are in bounds.
+    // Rows [height, domain) contribute zero, so sum over row < height only.
     //
-    // HOST LEVER: base-field multiply + row-major pass
-    // This function IS the LogUp-GKR output-extract's preprocessed opening,
-    // and it is the largest single block of host compute on the shard
-    // critical path: sub-instrumented on reth core (281 shards, 25 chips),
-    // `prep` costs 131 ms/shard and the full-point `prepfull` a further
-    // 108 ms/shard, together driving a 161 ms/shard `par_iter` inside a span
-    // whose thread-CPU reads ~2% (the work is on rayon workers, so the
-    // span-CPU census classifies it "blocked" and it hid there).
+    // Inner sum, two exact forms:
     //
-    // The old form was `acc += eq[row] * EF::from(trace[row * width + col])`,
-    // column-parallel.  Two costs, both removable with no change to the
-    // emitted values:
+    //     EF::from(c) * e    full D×D extension product        (D = 4)
+    //     e * c              Mul<Base> = D base multiplies
     //
-    //  1. `EF::from(b)` embeds the base felt as `[b, 0, 0, 0]` and then runs
-    //     the FULL quartic extension product — the generic `Mul<Self>` arm of
-    //     `BinomialExtensionField<_, 4>` is a `D x D` double loop, ~16 base
-    //     multiplies plus the `W` foldings, and the compiler cannot elide the
-    //     three zero limbs because they are runtime values.  `Mul<Base>` is
-    //     `value.map(|x| x * b)` = 4 base multiplies.  The two agree
-    //     EXACTLY: with `b = [b0,0,0,0]` every `j > 0` term of the double
-    //     loop is a field zero and `i + 0 < D` always, so the generic arm
-    //     already computes `[a0*b0, a1*b0, a2*b0, a3*b0]`.  Dropping the
-    //     embedding is bit-identical, not merely equivalent.
+    // identical termwise: embedding gives c = [c,0,0,0], so every j>0 term of the
+    // double loop is zero and i+0 < D always.
     //
-    //  2. Column-parallel over a ROW-major trace strides by `width` felts, so
-    //     every column pass pulls one cache line per row and the matrix is
-    //     re-streamed `width` times.  Blocking over rows reads it once, keeps
-    //     `width` accumulators hot, and parallelises over `height / CHUNK`
-    //     instead of `width` (better on the narrow preprocessed traces).
-    //     Field addition is exact and associative, so summing per-chunk
-    //     partials and adding them in chunk order is bit-identical to the
-    //     single sequential per-column sum.
+    // Row-blocked rather than column-parallel: a column pass strides by `width`
+    // and re-streams the matrix `width` times; blocking reads it once with `width`
+    // live accumulators, parallel over height/ROW_BLOCK.  Bit-identical because
+    // field addition is exact, associative AND commutative -- any summation order
+    // gives the same element (`reduce` folds an arbitrary work-stealing tree, not
+    // chunk order).
     use p3_maybe_rayon::prelude::*;
     if height == 0 {
         return vec![EF::ZERO; width];
     }
-    // Rows per parallel block.  Large enough that the per-block accumulator
-    // allocation and the reduce are noise, small enough to keep every worker
-    // fed on the short preprocessed traces.
+    // Rows per block: parallelism is height/ROW_BLOCK, so a trace shorter than
+    // this runs on one worker.
     const ROW_BLOCK: usize = 512;
     let mut evals = trace[..height * width]
         .par_chunks(ROW_BLOCK * width)
