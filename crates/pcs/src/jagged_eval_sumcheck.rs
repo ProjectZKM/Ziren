@@ -181,16 +181,17 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 }
 
 // A NAIVE reference implementation of the jagged-eval sumcheck, plus the two
-// materializers it needs. Nothing calls any of it.
+// materializers it needs.
 //
-// It is kept because it is the other half of a differential test that does not
-// exist yet: materialize `f` and `bp` for a small instance, run the naive
-// O(n·2^n) sumcheck, and require the structural `prove_jagged_evaluation` above
-// to agree. That is worth having -- the jagged tests were pinned to one layout
-// until recently and this path has no independent check -- but writing it means
-// aligning two challenger transcripts, so it is a piece of work rather than a
-// tidy-up. `allow(dead_code)` instead of deletion so the option survives; if it
-// is still unused in a few months, delete it and recover this from git.
+// They are the naive side of
+// `tests::structural_and_naive_jagged_eval_sumchecks_agree`, which is the
+// differential check of the structural prover against this definition. Only the
+// test uses them, so a non-test build sees them as dead; hence `allow(dead_code)`
+// rather than deletion.
+//
+// (I first described these as uncalled. That was wrong: a
+// `#[cfg(debug_assertions)]` block in `prove_jagged_evaluation` did call them --
+// it just compared `claimed_sum` to itself, and never ran under `cargo test -r`.)
 
 /// Prove the jagged-evaluation sub-protocol.
 ///
@@ -926,32 +927,15 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal> + 'st
         ),
     };
 
-    // For small workloads (n ≤ NAIVE_SUMCHECK_MAX_N) the naive path
-    // remains as a debug cross-check.  Skip in release for speed.
-    #[cfg(debug_assertions)]
-    if n <= NAIVE_SUMCHECK_MAX_N {
-        let bp = BranchingProgram::new(z_row.to_vec(), z_trace.to_vec());
-        let f_evals = materialize_f_evals(&z_col_lagrange, prefix_sums, half);
-        let bp_evals = materialize_bp_evals(&bp, half);
-        let mut shadow_challenger = {
-            // Naive path needs a fresh challenger to compare against;
-            // structural already advanced the real challenger.  Skip
-            // shadow check in production since it doubles work.
-            let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-            crate::kb31_poseidon2::InnerChallenger::new(perm)
-        };
-        // Re-observe up to claimed_sum for fair comparison.
-        shadow_challenger.observe_algebra_element(claimed_sum);
-        let naive =
-            naive_jagged_eval_sumcheck(f_evals, bp_evals, claimed_sum, &mut shadow_challenger);
-        debug_assert_eq!(
-            partial_sumcheck_proof.claimed_sum, naive.claimed_sum,
-            "structural vs naive claimed_sum disagree"
-        );
-        // NOTE: full point_and_eval comparison would require shared
-        // challenger state and is not done here; round identity tests
-        // cover correctness independently.
-    }
+    // (A `#[cfg(debug_assertions)]` block here used to run the naive prover as a
+    // "cross-check" and `debug_assert_eq!` its `claimed_sum` against the
+    // structural one. That could not fail: both provers are HANDED the same
+    // `claimed_sum` and return it unchanged, so it compared a value to itself.
+    // Its own note conceded that the comparison that would mean something --
+    // the round polynomials and the folded point -- "is not done here", and being
+    // debug-only it never ran under `cargo test -r` either. Replaced by
+    // `tests::structural_and_naive_jagged_eval_sumchecks_agree`, which compares
+    // both and runs in every profile.)
 
     JaggedSumcheckEvalProof { partial_sumcheck_proof }
 }
@@ -1123,6 +1107,123 @@ mod tests {
         }
         // Final identity: last claim == point_and_eval.1.
         assert_eq!(claim, psp.point_and_eval.1);
+    }
+
+    /// DIFFERENTIAL: the structural jagged-eval sumcheck must agree with the
+    /// naive O(n·2^n) definition, round polynomial for round polynomial.
+    ///
+    /// This is the check the five naive helpers were written for and never got.
+    /// What existed instead was an inline `debug_assert_eq!` inside
+    /// `prove_jagged_evaluation` comparing `claimed_sum` to `naive.claimed_sum` --
+    /// vacuous, because both provers are HANDED the same `claimed_sum` and echo it
+    /// back, so it could not fail. It was also `#[cfg(debug_assertions)]`, and the
+    /// suite is run with `cargo test -r`, so it never executed there either.
+    ///
+    /// Both provers interpolate each round from the same three evaluations
+    /// (`univariate_from_three_evals`), observe the resulting coefficients, and
+    /// sample one challenge, so seeding two fresh challengers identically makes
+    /// their transcripts line up: the sampled challenges agree round-by-round IFF
+    /// the coefficients do. Comparing the proofs is therefore a genuine
+    /// round-by-round check of the structural prover against the definition.
+    ///
+    /// The two disagree on one convention: the structural proof's point is
+    /// `prover.rhos`, in prepend order, while the naive one pushes in round order.
+    /// Reversed here rather than "fixed" -- the orders are load-bearing for their
+    /// own consumers.
+    #[test]
+    fn structural_and_naive_jagged_eval_sumchecks_agree() {
+        let prefix_sums = vec![0usize, 3, 5];
+        let z_row = vec![
+            InnerChallenge::from_u8(7),
+            InnerChallenge::from_u8(11),
+            InnerChallenge::from_u8(13),
+        ];
+        let z_col = vec![InnerChallenge::from_u8(17)];
+        let z_trace = vec![
+            InnerChallenge::from_u8(19),
+            InnerChallenge::from_u8(23),
+            InnerChallenge::from_u8(29),
+        ];
+
+        // Derive the shared inputs exactly as `prove_jagged_evaluation` does, so
+        // the test cannot drift from the production derivation.
+        let last = prefix_sums.last().copied().unwrap();
+        let log_m =
+            if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
+        let half = log_m + 1;
+        let n = 2 * half;
+        assert!(n <= NAIVE_SUMCHECK_MAX_N, "fixture must stay inside the naive path");
+
+        let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(&z_col);
+        let num_chips = prefix_sums.len() - 1;
+        let z_col_eq_vals: Vec<InnerChallenge> = z_col_lagrange[..num_chips].to_vec();
+        let claimed_sum = full_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace);
+        let merged_prefix_sums: Vec<Vec<InnerChallenge>> = (0..num_chips)
+            .map(|k| {
+                let mut m =
+                    crate::jagged_branching_program::bits_big_endian(prefix_sums[k], half);
+                m.extend_from_slice(&crate::jagged_branching_program::bits_big_endian::<
+                    InnerChallenge,
+                >(prefix_sums[k + 1], half));
+                m
+            })
+            .collect();
+
+        // Structural, on a challenger seeded with the claimed sum (what
+        // `prove_jagged_evaluation` observes before the sumcheck).
+        let mut ch_structural = InnerChallenger::new(poseidon2_init());
+        ch_structural.observe_algebra_element(claimed_sum);
+        let structural = structural_jagged_eval_sumcheck(
+            &z_row,
+            &z_trace,
+            &merged_prefix_sums,
+            &z_col_eq_vals,
+            claimed_sum,
+            &mut ch_structural,
+        );
+
+        // Naive, on an identically seeded challenger.
+        let bp = BranchingProgram::new(z_row.clone(), z_trace.clone());
+        let f_evals = materialize_f_evals(&z_col_lagrange, &prefix_sums, half);
+        let bp_evals = materialize_bp_evals(&bp, half);
+        // The two fold from opposite ends: the naive prover folds the LOWEST index
+        // bit first (`f[2*i]`/`f[2*i+1]` pairs adjacent entries), while the
+        // structural one folds its highest variable first -- which is exactly why
+        // its point comes back in prepend order. Reverse the n-bit index of both
+        // materialized tables so round r folds the same variable on both sides.
+        // (Without this the round-0 polynomials mirror each other: one has
+        // `g(0)=0, g(1)=claimed`, the other the reverse, both summing to the same
+        // claimed value because they are the same polynomial read backwards.)
+        let rev_index = |v: &[InnerChallenge]| -> Vec<InnerChallenge> {
+            (0..v.len()).map(|i| v[bit_reverse(i, n)]).collect()
+        };
+        let f_evals = rev_index(&f_evals);
+        let bp_evals = rev_index(&bp_evals);
+        let mut ch_naive = InnerChallenger::new(poseidon2_init());
+        ch_naive.observe_algebra_element(claimed_sum);
+        let naive = naive_jagged_eval_sumcheck(f_evals, bp_evals, claimed_sum, &mut ch_naive);
+
+        assert_eq!(structural.univariate_polys.len(), n, "structural round count");
+        assert_eq!(naive.univariate_polys.len(), n, "naive round count");
+        for (round, (s, nv)) in
+            structural.univariate_polys.iter().zip(naive.univariate_polys.iter()).enumerate()
+        {
+            assert_eq!(
+                s.coefficients, nv.coefficients,
+                "round {round}: structural and naive round polynomials differ",
+            );
+        }
+
+        let structural_point: Vec<InnerChallenge> =
+            structural.point_and_eval.0.iter().rev().copied().collect();
+        assert_eq!(
+            structural_point, naive.point_and_eval.0,
+            "sumcheck challenge points differ (structural reversed to round order)",
+        );
+        assert_eq!(
+            structural.point_and_eval.1, naive.point_and_eval.1,
+            "final folded evaluations differ",
+        );
     }
 
     /// claimed_sum equals the closed-form expected sum.
