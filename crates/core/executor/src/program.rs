@@ -144,12 +144,8 @@ impl Program {
             loads.push(LoadSegment { vaddr, offset, file_size, mem_size, executable });
         }
 
-        // Place by virtual address, not by header order. `fetch` and the
-        // preprocessed Program AIR both index the instruction image as
-        // `(pc - pc_base) / 4`, so header order is not the layout; appending in
-        // header order decoded a reordered ELF at the wrong PCs. Overlaps are
-        // rejected rather than resolved, because "the last header wins" is not
-        // defined ELF semantics yet silently decided which of two words a pc runs.
+        // Both readers index the image as `i = (pc - pc_base) / 4`, so placement is
+        // by vaddr, not header order. Overlaps are rejected: `i` must be injective.
         loads.sort_by_key(|s| s.vaddr);
         for pair in loads.windows(2) {
             let (prev, next) = (&pair[0], &pair[1]);
@@ -163,12 +159,8 @@ impl Program {
             }
         }
 
-        // Exactly one contiguous executable interval. A sparse image would need
-        // every hole filled with a word that faults when executed, and
-        // `pc_base + idx * 4` in the preprocessed Program trace would stop
-        // describing the mapping. Every guest we build links a single executable
-        // PT_LOAD, so requiring this costs nothing and turns "decodes the wrong
-        // words" into a load error.
+        // Executable segments must tile one interval [pc_base, exec_end) exactly:
+        // the AIR stamps pc = pc_base + i·4 for every row, so a hole has no encoding.
         let exec: Vec<&LoadSegment> = loads.iter().filter(|s| s.executable).collect();
         let (Some(first_exec), Some(last_exec)) = (exec.first(), exec.last()) else {
             bail!("No executable PT_LOAD segment: there is nothing to run");
@@ -188,9 +180,8 @@ impl Program {
         let base_address = first_exec.vaddr;
         let exec_end = last_exec.vaddr + last_exec.mem_size;
         let n_words = ((exec_end - base_address) / WORD_SIZE as u32) as usize;
-        // Not a soundness bound -- a program this size cannot be proven -- but the
-        // zero tail of an executable segment is declared by `p_memsz`, so without
-        // a cap a 100-byte ELF could ask for a gigabyte-sized instruction image.
+        // p_memsz is attacker-declared and need not be file-backed, so bound the
+        // image independently of the ELF size.
         if n_words > MAX_INSTRUCTIONS {
             bail!("executable image is {n_words} words, over the {MAX_INSTRUCTIONS}-word limit");
         }
@@ -226,10 +217,8 @@ impl Program {
                 };
                 image.insert(addr, word);
                 if executable {
-                    // The zero tail of a `p_memsz > p_filesz` executable segment gets
-                    // a slot too: it is mapped, `image` holds it, and a pc can reach
-                    // it. Pushing only the file-backed words left the vector short
-                    // and shifted every later segment's instructions off their PCs.
+                    // Every mapped word gets a slot, including the zero tail where
+                    // p_memsz > p_filesz, so `i` stays aligned with the address.
                     words[((addr - base_address) / WORD_SIZE as u32) as usize] = word;
                 }
                 if addr > hiaddr {
@@ -278,14 +267,12 @@ impl Program {
     #[must_use]
     #[inline]
     /// Fetch the instruction at the given program counter.
-    /// `pc` must lie in the program's executable range. That holds for the
-    /// entrypoint by construction -- `Program::from` rejects an entry outside it --
-    /// and for every later pc because each executed pc is looked up in the
-    /// preprocessed Program table, which contains exactly
-    /// `pc_base .. pc_base + 4 * instructions.len()`.
+    /// Requires `pc ∈ [pc_base, pc_base + 4·instructions.len())`.  The entrypoint
+    /// is checked by `Program::from`; every later pc is constrained by the Program
+    /// table lookup, whose domain is exactly that interval.
     pub fn fetch(&self, pc: u32) -> Instruction {
-        // `wrapping_sub` then `get`: one bounds check, the same as indexing, but a
-        // pc below `pc_base` now names itself instead of underflowing first.
+        // `wrapping_sub` + `get`: one bounds check, and pc < pc_base wraps out of
+        // range rather than underflowing.
         let idx = (pc.wrapping_sub(self.pc_base) / 4) as usize;
         match self.instructions.get(idx) {
             Some(instruction) => *instruction,
@@ -300,11 +287,8 @@ impl Program {
 
 /// Collect the optional runtime patches a Go guest needs, keyed by address.
 ///
-/// The patches are an OPTIMISATION -- they stub out runtime entry points the
-/// zkVM does not need -- so a program without a symbol table simply has none.
-/// This used to `expect` twice: a valid STRIPPED ELF has no symbol table, and
-/// `Program::from` is a fallible API that panicked on it instead of loading.
-/// A genuine parse failure is still an error, and now propagates as one.
+/// The patches stub out runtime entry points the zkVM does not need, so a
+/// stripped ELF (no symbol table) simply has none.  A parse failure is an error.
 pub fn patch_elf(
     f: &elf::ElfBytes<LittleEndian>,
     patch_list: &mut BTreeMap<u32, u32>,
@@ -491,10 +475,8 @@ mod tests {
     /// A minimal 32-bit little-endian MIPS `ET_EXEC` with one executable
     /// `PT_LOAD` and NO symbol table.
     ///
-    /// Hand-assembled rather than taken from the test artifacts, because the
-    /// point is the absence of a section/symbol table: a stripped binary is a
-    /// valid ELF, and `Program::from` used to panic on it inside `patch_elf`
-    /// (`symbol_table().expect(..).expect(..)`) despite being a fallible API.
+    /// Hand-assembled: the point is `e_shoff = 0`, i.e. no section or symbol
+    /// table, which is valid for an `ET_EXEC` image.
     fn stripped_mips_elf() -> Vec<u8> {
         mips_elf(
             0x0040_0000,
@@ -673,8 +655,7 @@ mod tests {
                     mem_words: 4,
                     flags: PF_RX,
                 },
-                // Starts inside the first segment: whichever header is applied last
-                // used to win, deciding which word a pc runs.
+                // Starts inside the first segment: `i` would not be injective.
                 Seg { vaddr: 0x0040_0008, words: vec![0xdead_beef], mem_words: 1, flags: PF_RW },
             ],
         );
@@ -684,8 +665,7 @@ mod tests {
 
     #[test]
     fn an_entrypoint_outside_the_executable_range_is_an_error() {
-        // Below `pc_base` and one word past the end. The first used to reach
-        // `fetch`'s unchecked `pc - pc_base` subtraction.
+        // pc_base - 4 and pc_base + 4·n: both outside the image interval.
         for entry in [0x003f_fffc, 0x0040_0010] {
             let elf = mips_elf(
                 entry,

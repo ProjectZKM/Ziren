@@ -513,11 +513,9 @@ pub struct JitBridgeState<'a> {
 ///
 /// # Safety
 ///
-/// `ctx` must be a live, aligned `*mut JitContext` for the whole call, and
-/// `ctx.user_data` must be either null or a `*mut JitBridgeState` that outlives
-/// it.  No other thread may touch the executor while the JIT'd code runs.  The
-/// JIT only calls this from a SYSCALL emit point, where all three hold; nothing
-/// in the handler can verify any of them, which is why the signature says so.
+/// `ctx` must be a live, aligned `*mut JitContext` for the whole call;
+/// `ctx.user_data` null or a `*mut JitBridgeState` that outlives it; and no other
+/// thread may touch the executor while the JIT'd code runs.
 pub unsafe extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
     // SAFETY: guaranteed by this function's contract, above.
     let ctx = unsafe { &mut *ctx };

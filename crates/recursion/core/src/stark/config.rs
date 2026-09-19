@@ -675,17 +675,10 @@ mod basefold_over_bn254_roundtrip_test {
         );
         let commitment = precompute.commit.original_commitment.clone();
 
-        // Honest step-3 column claims — the values the production prover reads off
-        // the zerocheck residual: the full row_eq over the REVERSED z_row,
-        // indexed by the LITERAL row, exactly as `jagged_sumcheck.rs` builds it.
-        // Reversing the variable order and indexing naturally is the same table
-        // as the natural order indexed bit-reversed; production does the former.
+        // claim[c][col] = Σ_{row < h_c} eq(rev(z_row), row) · t[row·w + col]
         //
-        // The trace itself is read at the literal row. It used to be read at
-        // `row.reverse_bits() >> (32 - log_h)`, in lockstep with a `use_rev =
-        // false` commit -- the legacy bit-reversed dense layout. That layout no
-        // longer exists: the commit lays rows down naturally, so a bit-reversed
-        // read here would claim values for the wrong rows.
+        // the row_eq over the reversed point indexed by the LITERAL row, as
+        // `jagged_sumcheck::build_weight_table` computes it.
         let claims: Vec<Vec<JaggedChallenge>> = {
             let z_row_rev: Vec<JaggedChallenge> = z_row.iter().rev().copied().collect();
             let eq_c = zkm_pcs::zerocheck_prover::eq_mle_table::<JaggedChallenge>(&z_row_rev);

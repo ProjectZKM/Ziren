@@ -92,11 +92,8 @@ pub type ExternFn = extern "C" fn(*mut JitContext);
 /// `extern "C"` function signature for a syscall handler invoked from
 /// JIT'd code.  Returns a status word that the JIT can branch on.
 ///
-/// `unsafe` because the handler is handed a raw `*mut JitContext` and must
-/// dereference it: validity of that pointer, and of whatever `user_data`
-/// carries, is the emitter's contract, not something the handler can check.
-/// A safe `fn` type here let an implementation dereference a caller-supplied
-/// raw pointer without saying so (`clippy::not_unsafe_ptr_arg_deref`).
+/// `unsafe`: the handler must dereference the raw `*mut JitContext`, and the
+/// validity of that pointer and of `user_data` is the emitter's contract.
 pub type SyscallHandler = unsafe extern "C" fn(*mut JitContext) -> u64;
 
 /// `extern "C"` function signature for a debug printer invoked from

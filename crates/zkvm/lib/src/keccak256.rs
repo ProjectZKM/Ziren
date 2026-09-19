@@ -20,25 +20,23 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
         syscall_keccak_sponge(u32_array.as_ptr(), &mut general_result);
     }
 
-    // The digest is the first 8 words of the precompile's output. This used to
-    // `transmute` `&mut [u32; 17]` into `&mut [u8; 64]` and slice it; the byte
-    // order that produced is the target's, and every target this runs on -- the
-    // mipsel guest and the host the tests use -- is little-endian, so
-    // `to_le_bytes` is the same bytes without the unsafe.
+    // digest = words[0..8] little-endian (mipsel guest and test host are both LE).
     for (out, word) in keccak256_result.chunks_exact_mut(4).zip(&general_result[..8]) {
         out.copy_from_slice(&word.to_le_bytes());
     }
     keccak256_result
 }
 
-/// The sponge precompile's input for `data`: per 136-byte block, 34
-/// little-endian words followed by two zero words (the precompile's state
-/// stride), with keccak's `10*1` padding applied in the last block.
+/// Precompile input for absorbing `data` into keccak-f[1600].
 ///
-/// Built straight from the input slice: the previous version copied the data
-/// into a padded `Vec<u8>`, zero-filled it, then pushed the words one at a
-/// time — ~30 M cycles of copies and pushes on a reth block that hashes
-/// ~5 MB.  Kept as a pure function so the layout is testable natively.
+/// ```text
+///   R = 136 bytes = 34 words   (rate)        S = 36 words   (state stride)
+///   blocks = ⌊len/R⌋ + 1                     total  = blocks · S
+///   block b  ->  words [b·S, b·S + 34)  then two zero words
+/// ```
+///
+/// Padding is keccak's `10*1` over the last block: bit 0 of byte `len mod R`,
+/// bit 7 of byte `R-1`.  Both land in word 33 when `len mod R ∈ [132, 136)`.
 pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
     const RATE: usize = 136;
     const RATE_WORDS: usize = RATE / 4;
@@ -46,12 +44,8 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
 
     let blocks = data.len() / RATE + 1;
     let total = blocks * STRIDE;
-    // Not zero-filled first: on a reth block that memset was ~5.5 M cycles. The
-    // buffer is therefore `MaybeUninit<u32>` and stays that way until every slot
-    // is written -- `set_len` on a `Vec<u32>` whose elements are uninitialized is
-    // instant UB, because uninitialized is not a valid `u32`, and it is what
-    // `clippy::uninit_vec` (deny-level, correctness) fires on. The same pattern is
-    // already used in `zkm-pcs`'s row-GKR round buffers.
+    // `MaybeUninit<u32>`, not a zero-filled `Vec<u32>`: all `total` slots are
+    // written below, and uninitialised is not a valid `u32`.
     let mut out_vec: Vec<u32> = Vec::with_capacity(total);
     let words = &mut out_vec.spare_capacity_mut()[..total];
 
@@ -67,9 +61,7 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
         base += STRIDE;
     }
 
-    // The last block: the leftover bytes, then 0x01 right after them, zeros,
-    // and 0x80 in the block's final byte (the same byte when 135 bytes are
-    // left).
+    // Last block: rem = len mod R bytes of data, then the `10*1` padding.
     let rem = full.remainder();
     let out = &mut words[base..base + STRIDE];
     let mut tail = rem.chunks_exact(4);
@@ -83,9 +75,7 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
         last |= (byte as u32) << (8 * k);
     }
     last |= 1u32 << (8 * (rem.len() % 4));
-    // `w <= RATE_WORDS - 1` always, since `rem.len() < RATE`. When the two
-    // coincide the 0x80 lands in the same word as the 0x01, which is the
-    // 135-byte case the reference layout also folds together.
+    // w = ⌊rem/4⌋ ≤ 33; at w = 33 the 0x80 shares the word with the 0x01.
     if w == RATE_WORDS - 1 {
         last |= 0x80u32 << 24;
     }
@@ -97,9 +87,8 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
         out[RATE_WORDS - 1].write(0x80u32 << 24);
     }
 
-    // SAFETY: every one of the `total` slots is written above -- the data words,
-    // the two stride words of each block, and the tail, padding and zero fill of
-    // the last one -- so the buffer is fully initialized.
+    // SAFETY: all `total` slots written above (data words, two stride words per
+    // block, and the last block's tail + padding + zero fill).
     unsafe { out_vec.set_len(total) };
     out_vec
 }
@@ -108,7 +97,8 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
 mod tests {
     use super::keccak_sponge_words;
 
-    /// The layout the precompile has always been fed (the previous builder).
+    /// Independent construction of the same layout: pad into a byte buffer, then
+    /// emit 34 words + 2 zero words per block.
     fn reference(data: &[u8]) -> Vec<u32> {
         let len = data.len();
         let final_block_len = len % 136;

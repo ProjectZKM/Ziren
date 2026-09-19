@@ -107,16 +107,12 @@ use zkm_pcs::UniConfig;
 
 /// `p3_uni_stark::prove` over a single hand-built AIR fixture.
 ///
-/// ONE definition, not one per `debug_assertions` setting. These were two
-/// identical bodies behind two identical signatures differing only in whether
-/// the `DebugConstraintBuilder` bound was present -- `p3_uni_stark` needs it
-/// only on its debug-assertions constraint-checking path. A `where` clause
-/// cannot be `cfg_attr`-gated, so the bound is simply always required; the
-/// debug profile already demanded it, and release is verified to satisfy it
-/// (every chip AIR is generic over its builder, so it implements this too).
+/// The `DebugConstraintBuilder` bound is unconditional: `p3_uni_stark` requires
+/// it only under `debug_assertions`, a `where` clause cannot be `cfg_attr`-gated,
+/// and every chip AIR is generic over its builder.
 ///
-/// `challenger` is untouched: `p3_uni_stark` builds its own transcript. It stays
-/// in the signature because ~45 fixtures pass one.
+/// `_challenger` is unread -- `p3_uni_stark` builds its own transcript -- and kept
+/// only because the fixtures pass one.
 #[cfg(test)]
 pub fn uni_stark_prove<SC, A>(
     config: &SC,
@@ -135,7 +131,7 @@ where
 
 /// `p3_uni_stark::verify` over a single hand-built AIR fixture.
 ///
-/// One definition, for the reasons on [`uni_stark_prove`].
+/// See [`uni_stark_prove`].
 #[cfg(test)]
 pub fn uni_stark_verify<SC, A>(
     config: &SC,

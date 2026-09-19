@@ -174,15 +174,10 @@ impl Default for ZKMGpuServer {
     }
 }
 
-/// Every RPC error names the operation it came from. Six methods share one
-/// transport, so "the CUDA prover failed" does not say which call died, and a
-/// version-skew decode failure is indistinguishable from a dead socket without
-/// it. These four map the two remote-boundary failures -- transport and codec --
-/// into the error type each method already declares.
-///
-/// Both are ordinary remote failures, not invariant violations: a restarted
-/// container, a truncated reply, or a server built from a different commit must
-/// surface as the declared `Err`, not terminate the caller's process.
+/// Map the two remote-boundary failures -- transport and codec -- into the error
+/// type each RPC method declares, tagged with the operation name: six methods
+/// share one transport, and a codec failure is otherwise indistinguishable from a
+/// dead socket.
 fn core_transport(op: &'static str, e: impl std::fmt::Display) -> ZKMCoreProverError {
     ZKMCoreProverError::IoError(std::io::Error::other(format!("CUDA RPC `{op}` failed: {e}")))
 }
@@ -213,8 +208,7 @@ impl ZKMCudaProver {
 
         let prover = match gpu_server {
             ZKMGpuServer::External { endpoint } => {
-                // `CUDA_ENDPOINT` is configuration: a typo in it must be a
-                // returned error, not a panic out of a `Result`-returning fn.
+                // `CUDA_ENDPOINT` is configuration, so a bad value is an `Err`.
                 let url = Url::parse(&endpoint)
                     .map_err(|e| format!("CUDA_ENDPOINT `{endpoint}` is not a URL: {e}"))?;
                 let client = Client::new(url, reqwest::Client::new(), reqwest_middlewares)
@@ -306,11 +300,10 @@ impl ZKMCudaProver {
 
         // Pull the image, and require that the pull actually SUCCEEDED.
         //
-        // `output()` is `Ok` whenever docker could be spawned, whatever docker
-        // then reported, so this used to check only that the binary exists: a
-        // failed pull -- no network, no credentials, tag withdrawn -- fell
-        // through to `docker run` on whatever stale local image happened to be
-        // lying around, silently proving with code nobody selected.
+        // `output()` is `Ok` whenever docker could be SPAWNED, whatever docker then
+        // reported, so the exit status must be checked too: otherwise a failed pull
+        // (no network, no credentials, tag withdrawn) runs whatever stale local
+        // image is present.
         let pull = Command::new("docker")
             .args(["pull", &image_name])
             .output()
@@ -355,9 +348,8 @@ impl ZKMCudaProver {
         let _ = ctrlc::set_handler(move || {
             tracing::info!("received Ctrl+C, cleaning up...");
 
-            // `unwrap_or_else(into_inner)`, not `unwrap`: the lock is poisoned
-            // exactly when another thread panicked, which is when this handler
-            // most needs to run. Panicking here instead leaks the container.
+            // Poisoned <=> another thread panicked, i.e. exactly when cleanup
+            // matters; recover the guard rather than leak the container.
             let containers =
                 GPU_CONTAINERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             for (container_name, cleanup_flag) in containers.iter() {
@@ -623,10 +615,7 @@ mod tests {
         let prover =
             ZKMCudaProver::connect_without_waiting(&dead_endpoint()).expect("the client builds");
 
-        // `setup` returns Box<dyn StdError>, `prove_core` returns
-        // ZKMCoreProverError: both used to unwrap the transport result.
-        // `let ... else` rather than `expect_err`, because the Ok types here do
-        // not implement Debug.
+        // `let ... else` rather than `expect_err`: the Ok types are not Debug.
         let Err(err) = prover.setup(&[]) else { panic!("a refused connection must be an error") };
         assert!(format!("{err}").contains("setup"), "the operation is named: {err}");
 

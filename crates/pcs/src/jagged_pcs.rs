@@ -73,10 +73,9 @@ pub struct JaggedProverDataGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
 /// Concrete inner prover-data alias (`MT = JaggedMmcs`).
 pub type JaggedProverData = JaggedProverDataGeneric<JaggedMmcs>;
 
-/// Stacking height of the stacked PCS: `2^21` rows per stripe.  Never
-/// NEVER clamped down for small commits -- see [`pick_log_stacking_height`],
-/// which explains why making the height area-dependent would make a VK
-/// clamp-dependent. (This line used to claim the opposite of that function.)
+/// Stacking height of the stacked PCS: `2^21` rows per stripe, never clamped for
+/// small commits -- an area-dependent height would make the VK area-dependent.
+/// See [`pick_log_stacking_height`].
 pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 
 /// Interleave batch size for the stacked PCS: number of MLE-column
@@ -1446,12 +1445,9 @@ pub mod jagged {
         // reduction core's return type stays fixed.
         let whir_any = rounds.iter().any(|r| r.precomputed.whir_data.is_some());
         let whir_mode = whir_any && rounds.iter().all(|r| r.precomputed.whir_data.is_some());
-        // A round lacking WHIR data while another carries it makes the open fall
-        // back to BaseFold while the caller may already have observed a WHIR
-        // root. The comment here used to say that is "an inconsistent proof" and
-        // then `eprintln!`ed and produced it anyway. It is a PROVER-side
-        // invariant violation with no honest outcome, so fail instead of emitting
-        // a proof whose transcript the verifier cannot reproduce.
+        // Mixed rounds would open with BaseFold against an already-observed WHIR
+        // root: a prover-side invariant violation with no honest outcome, so fail
+        // rather than emit a transcript the verifier cannot reproduce.
         assert!(
             !whir_any || whir_mode,
             "prove_jagged_basefold_rounds: mixed WHIR rounds -- per-round whir_data \
