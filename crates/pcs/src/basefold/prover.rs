@@ -484,8 +484,28 @@ where
                     p.extend_from_slice(&eval_point[var + j + 1..]);
                     current_mle.eval_at(&p)[0]
                 };
-                let one_val =
-                    if r == EF::ZERO { EF::ZERO } else { (current_eval - zero_val) / r + zero_val };
+                let one_val = if r == EF::ZERO {
+                    // At `r == 0` the claim fixes only `g(0)`: the rearrangement
+                    // above divides by `r`, so there is nothing to solve for.
+                    // `g(1)` is UNCONSTRAINED by the claim but not unknown --
+                    // it is a property of the current MLE, and the verifier goes
+                    // on to sample a generally nonzero beta and continue with
+                    // `g(beta) = g(0) + beta * g(1)`. Substituting zero here
+                    // therefore made any honest opening at a zero-containing
+                    // point fail a later round, unless `g(1)` happened to be
+                    // zero. Evaluate the endpoint instead of inventing it.
+                    //
+                    // Random extension points miss this with overwhelming
+                    // probability, which is why randomized roundtrips never
+                    // caught it; Boolean points and points handed down by
+                    // higher-level reductions hit it deterministically.
+                    let mut p: Vec<EF> = Vec::with_capacity(num_variables - var - j);
+                    p.push(EF::ONE);
+                    p.extend_from_slice(&eval_point[var + j + 1..]);
+                    current_mle.eval_at(&p)[0]
+                } else {
+                    (current_eval - zero_val) / r + zero_val
+                };
                 let uni_poly = [zero_val, one_val];
                 univariate_messages.push(uni_poly);
                 for &elem in &uni_poly {

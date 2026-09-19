@@ -233,3 +233,89 @@ fn test_basefold_roundtrip_folding_arity() {
             .unwrap_or_else(|e| panic!("arity {log_folding_arity} must verify: {e:?}"));
     }
 }
+
+/// ZR-22: openings at points containing ZERO must verify.
+///
+/// The prover derives `g(1)` from the claim by dividing by the coordinate `r`,
+/// which is impossible at `r == 0` -- there the claim fixes only `g(0)`. The old
+/// code substituted `g(1) = 0`, but the verifier goes on to sample a generally
+/// nonzero beta and continue with `g(beta) = g(0) + beta * g(1)`, so an honest
+/// opening at a zero-containing point failed a later round unless the real
+/// `g(1)` happened to be zero.
+///
+/// Random extension points miss this with overwhelming probability, which is why
+/// the randomized roundtrips above never caught it. These points are CHOSEN.
+fn roundtrip_at_point(
+    num_variables: usize,
+    log_folding_arity: usize,
+    eval_point: Vec<InnerChallenge>,
+    label: &str,
+) {
+    type F = InnerVal;
+    type EF = InnerChallenge;
+    assert_eq!(eval_point.len(), num_variables);
+
+    let num_polys = 2usize;
+    let mut rng = StdRng::seed_from_u64(0x2E20_C0DE);
+    let mut values = Vec::with_capacity((1 << num_variables) * num_polys);
+    for _ in 0..(1 << num_variables) * num_polys {
+        values.push(rand_kb(&mut rng));
+    }
+    let mle = Arc::new(Mle::from_row_major(RowMajorMatrix::new(values, num_polys)));
+
+    let fri_config =
+        FriConfig::<F>::test_fri_config().with_log_folding_arity(log_folding_arity);
+    let mmcs = build_mmcs();
+    let dft = Arc::new(Radix2DitParallel::<F>::default());
+    let prover = BasefoldProver::<F, EF, _, _>::new(fri_config.clone(), dft, mmcs.clone(), 1);
+    let verifier = BasefoldVerifier::<F, EF, _>::new(fri_config, mmcs, 1);
+
+    let mut p_chal = build_challenger();
+    let (commitment, prover_data) = prover.commit_mles(vec![mle.clone()]);
+    p_chal.observe(commitment.clone());
+
+    let claims: Vec<EF> = mle.eval_at::<EF>(&eval_point);
+    let proof = prover.prove_trusted_mle_evaluations(
+        eval_point.clone(),
+        vec![vec![mle.clone()]],
+        vec![claims.clone()],
+        &[&prover_data],
+        &mut p_chal,
+    );
+
+    let mut v_chal = build_challenger();
+    v_chal.observe(commitment.clone());
+    assert!(
+        verifier
+            .verify_mle_evaluations(&[commitment], eval_point, &[claims], &proof, &mut v_chal)
+            .is_ok(),
+        "{label}: an honest opening at a zero-containing point must verify"
+    );
+}
+
+#[test]
+fn basefold_accepts_openings_at_zero_coordinates() {
+    type EF = InnerChallenge;
+    let n = 4usize;
+    let mut rng = StdRng::seed_from_u64(0x5EED_0000);
+    let nz: Vec<EF> = (0..n).map(|_| rand_ef(&mut rng)).collect();
+
+    for arity in [1usize, 2] {
+        // Zero in the first, a middle, and the last coordinate.
+        for zero_at in 0..n {
+            let mut p = nz.clone();
+            p[zero_at] = EF::ZERO;
+            roundtrip_at_point(n, arity, p, &format!("arity={arity} zero_at={zero_at}"));
+        }
+        // Every coordinate zero, and a Boolean mix -- the cases a
+        // higher-level reduction can hand down.
+        roundtrip_at_point(n, arity, vec![EF::ZERO; n], &format!("arity={arity} all-zero"));
+        roundtrip_at_point(n, arity, vec![EF::ONE; n], &format!("arity={arity} all-one"));
+        roundtrip_at_point(
+            n,
+            arity,
+            vec![EF::ZERO, EF::ONE, EF::ZERO, EF::ONE],
+            &format!("arity={arity} boolean-mix"),
+        );
+    }
+}
