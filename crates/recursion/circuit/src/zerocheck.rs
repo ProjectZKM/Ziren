@@ -403,7 +403,6 @@ where
         zerocheck_proof: &PartialSumcheckProof<Ext<C::F, C::EF>>,
         pcs_max_log_row_count: usize,
         public_values: &'a [Felt<C::F>],
-        core_layer_rev: bool,
         challenger: &mut FC,
     ) where
         FC: FieldChallengerVariable<C, C::Bit>,
@@ -419,21 +418,17 @@ where
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         let one_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ONE);
 
-        // PER-PROGRAM rev/collapsed convention decision
-        // rev(zeta) is scoped to the CORE commit + the NORMALIZE
-        // recursion-verify.  `core_layer_rev` is a CIRCUIT-CONSTRUCTION-TIME
-        // flag passed by the caller: it is `true` ONLY for the NORMALIZE program
-        // (`core_basefold`, which verifies the rev core shard proof) and `false`
-        // for COMPRESS / SHRINK / WRAP (which verify LEGACY recursion proofs —
-        // the recursion prover never installs the rev carrier, so those proofs
-        // are legacy).  This keeps the recursion rings' in-circuit verify on the
-        // legacy embed-loop (section (6) below), so the WRAP R1CS is UNCHANGED
-        // and the gnark ceremony STANDS.  A global rev-zeta env-flip is avoided
-        // because it would leak rev into the wrap ring (recursion proofs also
-        // carry `*_full`).  The witnessed `*_full` presence is still required
-        // (the NORMALIZE program's core-proof openings always carry it).
-        let verifier_use_rev = core_layer_rev
-            && !gkr_evaluations.chip_openings.is_empty()
+        // Every program takes the collapsed rev(zeta) claim. This was gated on a
+        // `core_layer_rev` parameter documented as `true` ONLY for NORMALIZE and
+        // `false` for COMPRESS / SHRINK / WRAP -- but all eight call sites passed
+        // `true`, so the discriminator had not existed for some time (their own
+        // comments already said "one row orientation for every machine"). Dropping
+        // a parameter that was a compile-time `true` folded into this `&&` leaves
+        // the emitted circuit identical, so no VK moves.
+        //
+        // What remains is a genuine condition: the openings must actually carry
+        // `main_trace_evaluations_full`.
+        let verifier_use_rev = !gkr_evaluations.chip_openings.is_empty()
             && gkr_evaluations
                 .chip_openings
                 .values()

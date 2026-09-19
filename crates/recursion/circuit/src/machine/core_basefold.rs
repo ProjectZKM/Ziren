@@ -679,8 +679,6 @@ pub fn verify_core_basefold<C, SC, A>(
                     &insertion_points,
                     &mut challenger,
                     machine.num_pv_elts(),
-                    // NORMALIZE verifies the rev CORE proof -> rev.
-                    true,
                     eval_public_values_fn,
                     jagged_evaluator_fn,
                 );
@@ -739,8 +737,6 @@ pub fn verify_core_basefold<C, SC, A>(
                 &insertion_points,
                 &mut challenger,
                 machine.num_pv_elts(),
-                // NORMALIZE verifies the rev CORE proof -> rev.
-                true,
                 eval_public_values_fn,
                 jagged_evaluator_fn,
             );

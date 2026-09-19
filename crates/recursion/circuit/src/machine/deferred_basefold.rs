@@ -489,8 +489,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 &insertion_points,
                 &mut challenger,
                 machine.num_pv_elts(),
-                // One row orientation for every machine (see `wrap_basefold`).
-                true,
                 eval_public_values_fn,
                 jagged_evaluator_fn,
             );
@@ -541,8 +539,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
             &insertion_points,
             &mut challenger,
             machine.num_pv_elts(),
-            // One row orientation for every machine (see `wrap_basefold`).
-            true,
             eval_public_values_fn,
             jagged_evaluator_fn,
         );

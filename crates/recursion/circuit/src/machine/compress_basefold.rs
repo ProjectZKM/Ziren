@@ -631,8 +631,6 @@ pub fn verify_compress_basefold<C, SC, A>(
                 &_insertion_points,
                 &mut _challenger,
                 machine.num_pv_elts(),
-                // One row orientation for every machine (see `wrap_basefold`).
-                true,
                 _eval_public_values_fn,
                 _jagged_evaluator_fn,
             );
@@ -683,8 +681,6 @@ pub fn verify_compress_basefold<C, SC, A>(
                 &_insertion_points,
                 &mut _challenger,
                 machine.num_pv_elts(),
-                // One row orientation for every machine (see `wrap_basefold`).
-                true,
                 _eval_public_values_fn,
                 _jagged_evaluator_fn,
             );

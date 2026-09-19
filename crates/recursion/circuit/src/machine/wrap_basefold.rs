@@ -550,8 +550,6 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             &insertion_points,
             &mut challenger,
             machine.num_pv_elts(),
-            // One row orientation for every machine.
-            true,
             eval_public_values_fn,
             jagged_evaluator_fn,
         );
@@ -639,10 +637,6 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         &insertion_points,
         &mut challenger,
         machine.num_pv_elts(),
-        // One row orientation for every machine: the shard verifier always
-        // takes the collapsed rev(zeta) claim, so the wrap ring reads the same
-        // convention as the core and recursion rings.
-        true,
         eval_public_values_fn,
         jagged_evaluator_fn,
     );
