@@ -1340,6 +1340,22 @@ where
                     let mut acc: zkm_recursion_compiler::ir::SymbolicExt<C::F, C::EF> =
                         zkm_recursion_compiler::ir::SymbolicExt::<C::F, C::EF>::ZERO;
                     let mut batch_idx = 0usize;
+                    // One round of component openings per committed round, and
+                    // `commitments[round_idx]` is what each round's leaf is
+                    // authenticated against.  Openings SHORTER than the
+                    // commitment vector would leave the trailing rounds' start
+                    // values unauthenticated while every other check still
+                    // passed, so the two lengths are required equal rather than
+                    // zipped.  Program-build time, like the `num_queries` shape
+                    // assert above: a short vector is a different PROGRAM, and
+                    // this stops such a program from being built.
+                    assert_eq!(
+                        proof.component_openings.len(),
+                        commitments.len(),
+                        "basefold: {} rounds of component openings for {} committed rounds",
+                        proof.component_openings.len(),
+                        commitments.len(),
+                    );
                     for (round_idx, round_openings) in proof.component_openings.iter().enumerate() {
                         let round_polys =
                             batch_evaluations.get(round_idx).map(|r| r.len()).unwrap_or(0);
@@ -1365,7 +1381,23 @@ where
                         // MerkleTreeMmcs multi-matrix same-height leaf —
                         // path dir bit at level k = query index bit k
                         // (LSB-first, full-height tree).
-                        if !op.merkle_path_digests.is_empty() {
+                        // EXACT path shape, not `if !is_empty()`.  An empty
+                        // witnessed path skipped the `assert_digest_eq` below
+                        // outright, so the leaf that seeds the query chain was
+                        // read from the witness and bound to nothing — the leaf
+                        // values still fed `acc` above.  The component leaf sits
+                        // in a FULL-height tree over the codeword domain, so the
+                        // honest path is exactly `log_codeword_size` levels and
+                        // consumes every query-index bit; requiring that makes
+                        // the residual-bit loop below provably empty.
+                        assert_eq!(
+                            op.merkle_path_digests.len(),
+                            log_codeword_size,
+                            "basefold: round {round_idx} component path is {} levels, the \
+                             codeword domain is 2^{log_codeword_size}",
+                            op.merkle_path_digests.len(),
+                        );
+                        {
                             let leaf_felts: Vec<zkm_recursion_compiler::prelude::Felt<C::F>> =
                                 op.leaf_values.iter().flatten().copied().collect();
                             let mut leaf_digest: HV::DigestVariable =

@@ -753,5 +753,78 @@ mod basefold_over_bn254_roundtrip_test {
             ok,
             "jagged-basefold full bundle pipeline should accept the honest proof over BN254"
         );
+
+        // ZR-23 bind #3, on this ring: the cross-bind
+        //   Σ_k eq(z_col,k)·open_k = Σ_k eq(z_col,k)·y_k
+        // is the only thing tying the bundle's column claims to the openings the
+        // AIR phases consumed.  Two controls, because "accepts the honest proof"
+        // and "rejects a mismatch" are independent failures — a bind that is
+        // never reached passes the first and fails the second.
+        let honest: Vec<Vec<JaggedChallenge>> = bundle.y_per_chip.clone();
+        let mut v_chal = make_challenger();
+        v_chal.observe(commitment);
+        assert!(
+            verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
+                &chip_infos,
+                &r_row_v,
+                &z_row_v,
+                &bundle,
+                &mut v_chal,
+                <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs(),
+                true,
+                <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config(),
+                &[],
+                Some(&honest),
+            ),
+            "the cross-bind must accept openings that agree with the bundle's column claims"
+        );
+
+        // Perturb ONE column claim.  Both sides are weighted by the same
+        // eq(z_col,·), so a single changed entry moves one side of the equality
+        // and nothing else in the proof notices.
+        let mut tampered = honest.clone();
+        tampered[0][0] += JaggedChallenge::ONE;
+        let mut v_chal = make_challenger();
+        v_chal.observe(commitment);
+        assert!(
+            !verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
+                &chip_infos,
+                &r_row_v,
+                &z_row_v,
+                &bundle,
+                &mut v_chal,
+                <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs(),
+                true,
+                <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config(),
+                &[],
+                Some(&tampered),
+            ),
+            "the cross-bind must REJECT openings that disagree with the bundle's column \
+             claims — without it the zerocheck and the jagged phase can describe two \
+             different traces"
+        );
+    }
+
+    /// ZR-23 bind #2 is dispatched through a trait method whose DEFAULT is
+    /// `None` = "this ring cannot answer, re-derive instead".  A `None` here
+    /// would make the host bind a silent no-op — the same way ZR-24's
+    /// query-chain equality sat inert behind an always-empty vector — so the
+    /// answer being `Some`, and discriminating, is the thing to test.
+    #[test]
+    fn outer_vk_commit_bind_is_not_vacuous() {
+        use p3_symmetric::Hash;
+        let a: zkm_pcs::Com<KoalaBearPoseidon2Outer> = Hash::from([Bn254::ONE]);
+        let b: zkm_pcs::Com<KoalaBearPoseidon2Outer> = Hash::from([Bn254::ZERO]);
+        type R = KoalaBearPoseidon2Outer;
+        assert_eq!(
+            <R as BasefoldRing>::vk_commit_is_preceding_root(&a, &a),
+            Some(true),
+            "the outer ring stores the raw root, so a key equal to the proof's root is a match"
+        );
+        assert_eq!(
+            <R as BasefoldRing>::vk_commit_is_preceding_root(&a, &b),
+            Some(false),
+            "a different root must be reported as a mismatch, not as unanswerable"
+        );
     }
 }

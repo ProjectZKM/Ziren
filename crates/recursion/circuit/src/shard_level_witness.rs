@@ -1409,6 +1409,20 @@ where
     // witness stream in `read_outer_eval_bundle_impl` (not const-baked).
     let basefold_proof_var = preread_basefold_proof;
 
+    // The query chain's start value is recomputed from the component openings
+    // and Merkle-verified per round; with no openings the verifier falls back to
+    // reading `block[0]` straight from the witness, which binds it to nothing.
+    // That fallback exists for the `Empty`/placeholder shapes, which are BUILT
+    // rather than proved — this lift is the production outer shape, so it is
+    // required to carry one round of openings per opened round, making the
+    // authentication unconditional here.
+    assert_eq!(
+        basefold_proof_var.component_openings.len(),
+        num_rounds,
+        "outer lift: {} rounds of component openings for {num_rounds} opened rounds",
+        basefold_proof_var.component_openings.len(),
+    );
+
     // batch_evaluations = the WITNESSED values (reuse)
     let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = basefold_proof_var
         .batch_evaluations
