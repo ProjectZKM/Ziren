@@ -19,9 +19,14 @@ use std::ops::{Deref, DerefMut};
 ///    and the recursion verifier's compile-time `column_counts` /
 ///    `opened_values` are in that same order. A `BTreeMap` *is* that order.
 ///
-///  * **Uniqueness.** `commit_traces` zips the chip slice and the trace views
-///    positionally, so a repeated name shifts every later pair and commits
-///    traces against the wrong AIRs.
+///  * **Uniqueness.** One trace per chip name is what makes the name a usable
+///    key at all: `commit_traces` reads the name off the key and
+///    `prove_shard_with_data` looks each chip's trace up by it, so a duplicate
+///    would mean two traces claiming one AIR. (This is also why `commit_traces`
+///    takes a `Traces` rather than the `(&[&Chip], &[PaddedMle])` pair it used
+///    to: the pair was zipped positionally, and `zip` truncates, so a length
+///    mismatch committed traces against the wrong AIRs instead of failing. A map
+///    cannot express that state.)
 ///
 /// The element is a [`PaddedMle`], as in SP1: the trace is wrapped once, at
 /// generation, and carries its own cube from then on. The wrap is zero-copy —

@@ -89,21 +89,23 @@ pub fn named_padded_traces<F, N, T, H>(
     traces: T,
     max_log_row_count: u32,
     heights: H,
-) -> std::collections::BTreeMap<String, crate::multilinear::PaddedMle<F>>
+) -> crate::traces::Traces<F>
 where
     F: p3_field::Field,
     N: IntoIterator<Item = String>,
     T: IntoIterator<Item = RowMajorMatrix<F>>,
     H: Fn(&str) -> Option<usize>,
 {
-    names
-        .into_iter()
-        .zip(traces)
-        .map(|(name, t)| {
-            let baked = heights(&name);
-            (name, into_padded(t, max_log_row_count, baked))
-        })
-        .collect()
+    crate::traces::Traces {
+        named_traces: names
+            .into_iter()
+            .zip(traces)
+            .map(|(name, t)| {
+                let baked = heights(&name);
+                (name, into_padded(t, max_log_row_count, baked))
+            })
+            .collect(),
+    }
 }
 
 /// Data bundle for [`crate::shard_level::prover::prove_shard_with_data`]:
@@ -134,7 +136,7 @@ where
     /// is committed and observed in alphabetical order — `commit()`'s
     /// name-order re-sort builds `chip_ordering`, and `shard_chips_ordered`
     /// replays it.
-    pub main_traces: std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>,
+    pub main_traces: crate::traces::Traces<Val<SC>>,
     /// The shard's public values.
     pub public_values: Vec<Val<SC>>,
     /// The PRECOMPUTED preprocessed commit, built once by `setup` and held in
@@ -172,8 +174,7 @@ where
     /// `Mle::from_row_major`) and consumed by `open()` — the commit and
     /// the prove read the same cells.  `None` on device provers (their
     /// traces are device-resident).
-    pub main_store:
-        Option<std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>>,
+    pub main_store: Option<crate::traces::Traces<Val<SC>>>,
 }
 
 /// The polynomial-commitment component of a shard prover.
@@ -499,27 +500,18 @@ where
                 // the store IS the map -- no second pass and no name vector
                 // here. `PaddedMle::padded` asserted the height fits at that
                 // point, which is where an over-tall trace fails.
-                let main_store = named_traces.named_traces;
-                let chips: Vec<&MachineChip<SC, A>> =
-                    self.machine().shard_chips_ordered(&chip_ordering).collect();
-                // `views` and `chips` are zipped positionally by `commit_traces`,
-                // and `Traces` only rules out duplicates -- a committed name the
-                // machine has no chip for (a mis-injected cluster name) would
-                // still shift every later pair and commit traces against the
-                // wrong AIRs. A real assert, not a `debug_assert`: it must hold
-                // in release too.
-                assert_eq!(
-                    chips.len(),
-                    main_store.len(),
-                    "every committed trace name must be a machine chip",
-                );
-                // Store order (name-sorted BTreeMap) == chips order.
-                let views: Vec<crate::multilinear::PaddedMle<Val<SC>>> =
-                    main_store.values().cloned().collect();
+                // `commit_traces` takes the name-keyed map, as SP1's does, so the
+                // names travel WITH the traces. This used to build the machine's
+                // chip vector, assert it was the same length as the store, and
+                // then flatten the store to a nameless `Vec` for `commit_traces`
+                // to re-pair positionally -- a round trip that threw the keys away
+                // and recovered them by position, where a committed name the
+                // machine had no chip for would shift every later pair and commit
+                // traces against the wrong AIRs. Passing the map removes the
+                // hazard rather than asserting against it.
                 let (main_commitment, precomputed) =
-                    crate::shard_level::prover::commit_traces::<SC, A>(
-                        &chips,
-                        &views,
+                    crate::shard_level::prover::commit_traces::<SC>(
+                        &named_traces,
                         self.machine().core_rev(),
                         record.area_pins().map(|p| p.main).or(self.machine().main_area_pin()),
                     );
@@ -527,7 +519,7 @@ where
                     main_commitment,
                     precomputed,
                     device_dense_q: None,
-                    main_store: Some(main_store),
+                    main_store: Some(named_traces),
                 })
             } else {
                 // Non-KoalaBear config: nothing provable downstream (the
@@ -815,9 +807,13 @@ where
             ),
         })
         .collect();
-    // Same reasoning as the length check in `commit`: this map and `chips` are
-    // consumed in parallel, so a mismatch misaligns traces against AIRs rather
-    // than failing, and a `debug_assert` would only catch it outside release.
+    // The pairing downstream is now BY NAME (`prove_shard_with_data` looks each
+    // chip's trace up in this map and panics by name if it is absent), so this no
+    // longer guards a positional misalignment. It still guards the other
+    // direction: a COMMITTED trace name that no AIR covers would be silently
+    // ignored by a name-keyed lookup, and a committed polynomial nothing
+    // constrains is a soundness gap, not a lookup miss. `assert_eq!` because
+    // release is where it matters.
     assert_eq!(
         main_traces_named.len(),
         chips.len(),

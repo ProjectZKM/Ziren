@@ -24,13 +24,21 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// relabeled to `InnerVal` for the commit build (a zero-copy slice
 /// reinterpret) — no trace data is copied or moved, and no ownership
 /// round-trips through the return.
-pub fn commit_traces<SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    // BORROWED views over the shard prover's shared
-    // `Arc<Mle>` store (no owned deep copy).  On the device / in-dispatch
-    // commit path they are zero-copy relabeled to InnerVal views for the
-    // commit hook / host fallback.
-    main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
+pub fn commit_traces<SC>(
+    // The shard's traces KEYED BY CHIP NAME, as SP1's `commit_traces` takes
+    // them (`hypercube/src/prover/shard.rs:462` -- `traces: &Traces<F, B>`, then
+    // `traces.values()`).  The name comes from the key, so there is no chip
+    // slice to pair this against and no positional pairing to get wrong; the
+    // previous signature took `(&[&Chip], &[PaddedMle])` and had to assert the
+    // two were parallel because `zip` TRUNCATES, which meant a committed name
+    // the machine had no chip for silently shifted every later pair and
+    // committed traces against the wrong AIRs.  A map cannot express that state.
+    //
+    // The entries are BORROWED views over the shard prover's shared `Arc<Mle>`
+    // store (no owned deep copy).  On the device / in-dispatch commit path they
+    // are zero-copy relabeled to InnerVal views for the commit hook / host
+    // fallback.
+    main_traces: &crate::traces::Traces<Val<SC>>,
     // The per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
     // precompute (dense materialize) and FORCED onto the built
@@ -46,7 +54,6 @@ pub fn commit_traces<SC, A>(
 )
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
-    A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger: 'static,
@@ -86,17 +93,15 @@ where
     // Val<SC> view (Val<SC> == InnerVal under the TypeId gate; identical
     // layout, no copy).  These views borrow the same shared `Arc<Mle>` cells
     // as `main_traces`, so they live as long as the `'t` borrow.
-    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
-    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
-    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
-    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
-    assert_eq!(chips.len(), main_traces.len(), "commit_traces: chips/main_traces must be parallel",);
-    let named_inner: alloc::vec::Vec<crate::jagged_pcs::jagged::ChipTraceView> = chips
+    //
+    // The name is the map's KEY, so a chip and its trace cannot come apart here.
+    // Iteration is `BTreeMap` order = alphabetical, which is the order the chip
+    // set is committed and observed in, and the order the recursion verifier's
+    // compile-time `column_counts` / `opened_values` use.
+    let named_inner: alloc::vec::Vec<crate::jagged_pcs::jagged::ChipTraceView> = main_traces
         .iter()
-        .zip(main_traces.iter())
-        .map(|(chip, pm)| {
-            let name = chip.name().to_string();
-            // SAFETY: `Val<SC> == InnerVal` under the assert above, so
+        .map(|(name, pm)| {
+            // SAFETY: `Val<SC> == InnerVal` under the TypeId assert above, so
             // `PaddedMle<Val<SC>>` and `PaddedMle<InnerVal>` are the SAME type
             // and this is a no-op relabel.  The clone is an `Arc` refcount
             // bump, not a copy of the trace.
@@ -106,7 +111,7 @@ where
                     crate::multilinear::PaddedMle<InnerVal>,
                 >(&core::mem::ManuallyDrop::new(pm.clone()))
             };
-            (name, pm_inner)
+            (name.clone(), pm_inner)
         })
         .collect();
 
@@ -325,7 +330,8 @@ where
             // that build would have produced (same seam, same inputs, one
             // shard-phase earlier).
             Some(retained) => (retained.main_commitment, retained.precomputed),
-            None => commit_traces::<SC, A>(chips, &trace_views, dense_rev, main_pin),
+            // The name-keyed map, as SP1 passes it -- not `(chips, &trace_views)`.
+            None => commit_traces::<SC>(&main_traces, dense_rev, main_pin),
         }
     };
     // `trace_views` is kept OWNED (no reborrow): the dims sites below
