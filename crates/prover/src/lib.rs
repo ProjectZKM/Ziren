@@ -33,7 +33,6 @@ use std::{
 
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
 use zkm_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMContext};
 use zkm_core_machine::{

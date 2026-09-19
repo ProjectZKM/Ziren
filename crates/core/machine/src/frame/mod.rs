@@ -31,7 +31,7 @@ use zkm_pcs::Word;
 
 use crate::{
     air::{
-        MemoryAirBuilder, WordAirBuilder, ZKMCoreAirBuilder, TIMESTAMP_HIGH_LIMB_BITS,
+        WordAirBuilder, ZKMCoreAirBuilder, TIMESTAMP_HIGH_LIMB_BITS,
         TIMESTAMP_HIGH_LIMB_MASK,
     },
     instruction::InstructionCols,

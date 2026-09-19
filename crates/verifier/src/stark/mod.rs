@@ -3,7 +3,6 @@ extern crate alloc;
 use core::borrow::Borrow;
 use itertools::Itertools;
 
-use p3_commit::Pcs;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};

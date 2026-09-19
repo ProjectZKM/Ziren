@@ -27,7 +27,7 @@
 //! interpreter's ~100 cycles per instruction go.
 
 use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
-use p3_field::{PrimeCharacteristicRing, PrimeField64};
+use p3_field::PrimeField64;
 use zkm_recursion_core::runtime::{
     AnalyzedInstruction, BaseAluOpcode, Instruction, RawProgram, SeqBlock,
 };

@@ -50,7 +50,7 @@ use zkm_pcs::{air::MachineAir, PicusInfo};
 use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{
-    air::{WordAirBuilder, ZKMCoreAirBuilder},
+    air::ZKMCoreAirBuilder,
     frame::{eval_shamt_frame, ShamtFrameCols},
     utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,

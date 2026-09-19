@@ -1001,7 +1001,6 @@ where
         challenger: &mut FC,
         commitment: &Self::Commitment,
     ) {
-        use crate::challenger::CanObserveVariable;
         challenger.observe(builder, *commitment);
     }
 
@@ -1014,8 +1013,6 @@ where
         proof: &Self::Proof,
         challenger: &mut FC,
     ) {
-        use crate::challenger::CanObserveVariable;
-        use crate::hash::FieldHasherVariable;
         use crate::logup_gkr::observe_ext_element;
         use p3_field::PrimeCharacteristicRing;
 

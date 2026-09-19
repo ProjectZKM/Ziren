@@ -72,7 +72,7 @@ use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
 use crate::basefold_verifier::RecursiveBasefoldProof;
-use crate::challenger::{CanObserveVariable, FieldChallengerVariable};
+use crate::challenger::FieldChallengerVariable;
 use crate::jagged_circuit::{
     JaggedDimensionMetadata, JaggedPcsProofVariable, JaggedSumcheckEvalProof,
 };

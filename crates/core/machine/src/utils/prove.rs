@@ -10,7 +10,6 @@ use web_time::Instant;
 use zkm_pcs::MachineProvingKey;
 
 use p3_field::PrimeField32;
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::shape::CoreShapeConfig;
 use crate::{

@@ -2049,7 +2049,6 @@ pub mod jagged {
     /// the registered verify hook; the inner ring keeps the concrete
     /// `verify_jagged_basefold_inner`.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     pub fn verify_jagged_basefold_inner_generic<Challenger, MT>(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],

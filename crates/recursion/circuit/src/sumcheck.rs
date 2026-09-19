@@ -12,7 +12,7 @@
 use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::{Builder, Ext, SymbolicExt};
 
-use crate::challenger::{CanObserveVariable, FieldChallengerVariable};
+use crate::challenger::FieldChallengerVariable;
 use crate::partial_sumcheck::PartialSumcheckProof;
 use crate::univariate::UnivariatePolynomial;
 use crate::CircuitConfig;

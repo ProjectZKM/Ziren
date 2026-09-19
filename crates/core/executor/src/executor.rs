@@ -1800,7 +1800,6 @@ impl<'a> Executor<'a> {
     /// AluEvent, hi_record branching); inlining bloats execute_alu's
     /// icache budget. LLVM's default heuristic is correct here.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     fn emit_alu_event(
         &mut self,
         clk: u32,
@@ -2120,7 +2119,6 @@ impl<'a> Executor<'a> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
     fn emit_syscall_event(
         &mut self,

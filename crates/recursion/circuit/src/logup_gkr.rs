@@ -30,7 +30,7 @@ use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
 use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
-use crate::challenger::{CanObserveVariable, FieldChallengerVariable};
+use crate::challenger::FieldChallengerVariable;
 use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
 use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 

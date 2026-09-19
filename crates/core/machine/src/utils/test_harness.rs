@@ -128,7 +128,10 @@ where
 pub fn uni_stark_prove<SC, A>(
     config: &SC,
     air: &A,
-    challenger: &mut SC::Challenger,
+    // Underscored, not removed: `p3_uni_stark::prove` builds its own transcript,
+    // so this never gets touched -- but it is part of the signature the fixtures
+    // call, matching `uni_stark_verify` below.
+    _challenger: &mut SC::Challenger,
     trace: RowMajorMatrix<SC::Val>,
 ) -> Proof<UniConfig<SC>>
 where
@@ -162,7 +165,11 @@ where
 pub fn uni_stark_verify<SC, A>(
     config: &SC,
     air: &A,
-    challenger: &mut SC::Challenger,
+    // Underscored, not removed: `p3_uni_stark::verify` owns the transcript
+    // itself, so this copy never touches the challenger -- but the parameter is
+    // part of the signature the test fixtures call, and the
+    // `cfg(debug_assertions)` twin above takes it the same way.
+    _challenger: &mut SC::Challenger,
     proof: &Proof<UniConfig<SC>>,
 ) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
 where

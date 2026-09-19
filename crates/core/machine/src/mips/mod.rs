@@ -1482,7 +1482,6 @@ pub mod tests {
     //
     // Run serially (`--test-threads=1`):
     // set/cleared around each verify.
-    #[test]
     // FAST diagnostic harness: prove one honest FIX-on fibonacci shard and run
     // ONLY a recon-ON verify (no gate-B/C) — reads the walk-vs-reconstruction
     // numbers in ~one prove + one verify. `#[ignore]` so it never runs in CI.

@@ -1585,7 +1585,6 @@ impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for LogupRoundPolynomia
 /// this function — it is passed in explicitly so the caller can use
 /// the same challenger state for downstream layers.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 pub fn prove_gkr_round<F, EF, Challenger>(
     state: &LayerState<F, EF>,
     eval_point: &[EF],
