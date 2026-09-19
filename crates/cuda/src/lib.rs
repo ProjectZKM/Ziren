@@ -242,8 +242,23 @@ impl ZKMCudaProver {
         // If the gpu endpoint url hasn't been provided, we start the Docker container
         let container_name =
             port.map(|p| format!("ziren-gpu-{p}")).unwrap_or("ziren-gpu".to_string());
+        // This container receives the private witness input and runs on the
+        // proving host with GPU access, so which bytes it is remains a security
+        // decision. A tag is MUTABLE: whoever controls the registry or the tag
+        // controls the code that sees the witness. `ZKM_GPU_IMAGE` accepts a
+        // digest (`repo@sha256:...`), which is what production should set; a
+        // reviewed digest cannot be hard-coded here without someone reviewing
+        // it, so the default stays a tag and says so.
         let image_name = std::env::var("ZKM_GPU_IMAGE")
             .unwrap_or_else(|_| "projectzkm/ziren-gpu:latest".to_string());
+        if !image_name.contains("@sha256:") {
+            tracing::warn!(
+                "the CUDA prover image {image_name:?} is not pinned by digest; it is resolved \
+                 fresh from the registry and receives the private witness input. Set \
+                 ZKM_GPU_IMAGE to a reviewed repo@sha256:... digest for anything but local \
+                 development."
+            );
+        }
 
         let cleaned_up = Arc::new(AtomicBool::new(false));
         let port = port.unwrap_or(3000);
@@ -254,9 +269,25 @@ impl ZKMCudaProver {
             return Err("Docker is not available or you don't have the necessary permissions. Please ensure Docker is installed and you are part of the docker group.".into());
         }
 
-        // Pull the docker image if it's not present
-        if let Err(e) = Command::new("docker").args(["pull", &image_name]).output() {
-            return Err(format!("Failed to pull Docker image: {e}. Please check your internet connection and Docker permissions.").into());
+        // Pull the image, and require that the pull actually SUCCEEDED.
+        //
+        // `output()` is `Ok` whenever docker could be spawned, whatever docker
+        // then reported, so this used to check only that the binary exists: a
+        // failed pull -- no network, no credentials, tag withdrawn -- fell
+        // through to `docker run` on whatever stale local image happened to be
+        // lying around, silently proving with code nobody selected.
+        let pull = Command::new("docker")
+            .args(["pull", &image_name])
+            .output()
+            .map_err(|e| format!("Failed to run `docker pull`: {e}. Please check your Docker installation and permissions."))?;
+        if !pull.status.success() {
+            return Err(format!(
+                "`docker pull {image_name}` failed ({}): {}. Refusing to fall back to a local \
+                 image that may differ from the requested one.",
+                pull.status,
+                String::from_utf8_lossy(&pull.stderr).trim(),
+            )
+            .into());
         }
 
         // Start the docker container
