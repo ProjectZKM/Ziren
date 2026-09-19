@@ -152,12 +152,16 @@ impl Default for ZKMGpuServer {
         {
             let visible_device_index =
                 if let Ok(device) = std::env::var("CUDA_VISIBLE_DEVICE_INDEX") {
-                    Some(device.parse().expect("Invalid CUDA device index"))
+                    Some(device.parse().unwrap_or_else(|e| {
+                        panic!("CUDA_VISIBLE_DEVICE_INDEX=`{device}` is not an index: {e}")
+                    }))
                 } else {
                     None
                 };
             let port = if let Ok(port) = std::env::var("CUDA_PORT") {
-                Some(port.parse().expect("Invalid CUDA local server port"))
+                Some(port.parse().unwrap_or_else(|e| {
+                    panic!("CUDA_PORT=`{port}` is not a port number: {e}")
+                }))
             } else {
                 None
             };
@@ -170,6 +174,37 @@ impl Default for ZKMGpuServer {
     }
 }
 
+/// Every RPC error names the operation it came from. Six methods share one
+/// transport, so "the CUDA prover failed" does not say which call died, and a
+/// version-skew decode failure is indistinguishable from a dead socket without
+/// it. These four map the two remote-boundary failures -- transport and codec --
+/// into the error type each method already declares.
+///
+/// Both are ordinary remote failures, not invariant violations: a restarted
+/// container, a truncated reply, or a server built from a different commit must
+/// surface as the declared `Err`, not terminate the caller's process.
+fn core_transport(op: &'static str, e: impl std::fmt::Display) -> ZKMCoreProverError {
+    ZKMCoreProverError::IoError(std::io::Error::other(format!("CUDA RPC `{op}` failed: {e}")))
+}
+
+fn core_codec(op: &'static str, what: &'static str, e: impl std::fmt::Display) -> ZKMCoreProverError {
+    ZKMCoreProverError::SerializationError(Box::new(bincode::ErrorKind::Custom(format!(
+        "CUDA RPC `{op}`: could not {what}: {e} (a truncated reply or a server/client version \
+         mismatch reaches here)"
+    ))))
+}
+
+fn rec_transport(op: &'static str, e: impl std::fmt::Display) -> ZKMRecursionProverError {
+    ZKMRecursionProverError::RuntimeError(format!("CUDA RPC `{op}` failed: {e}"))
+}
+
+fn rec_codec(op: &'static str, what: &'static str, e: impl std::fmt::Display) -> ZKMRecursionProverError {
+    ZKMRecursionProverError::RuntimeError(format!(
+        "CUDA RPC `{op}`: could not {what}: {e} (a truncated reply or a server/client version \
+         mismatch reaches here)"
+    ))
+}
+
 impl ZKMCudaProver {
     /// Creates a new [ZKMCudaProver] that can be used to communicate with the GPU server at
     /// `gpu_endpoint`, or if not provided, create one that runs inside a Docker container.
@@ -178,12 +213,12 @@ impl ZKMCudaProver {
 
         let prover = match gpu_server {
             ZKMGpuServer::External { endpoint } => {
-                let client = Client::new(
-                    Url::parse(&endpoint).expect("failed to parse url"),
-                    reqwest::Client::new(),
-                    reqwest_middlewares,
-                )
-                .expect("failed to create client");
+                // `CUDA_ENDPOINT` is configuration: a typo in it must be a
+                // returned error, not a panic out of a `Result`-returning fn.
+                let url = Url::parse(&endpoint)
+                    .map_err(|e| format!("CUDA_ENDPOINT `{endpoint}` is not a URL: {e}"))?;
+                let client = Client::new(url, reqwest::Client::new(), reqwest_middlewares)
+                    .map_err(|e| format!("could not create the CUDA RPC client: {e}"))?;
 
                 ZKMCudaProver {
                     client,
@@ -320,7 +355,12 @@ impl ZKMCudaProver {
         let _ = ctrlc::set_handler(move || {
             tracing::info!("received Ctrl+C, cleaning up...");
 
-            for (container_name, cleanup_flag) in GPU_CONTAINERS.lock().unwrap().iter() {
+            // `unwrap_or_else(into_inner)`, not `unwrap`: the lock is poisoned
+            // exactly when another thread panicked, which is when this handler
+            // most needs to run. Panicking here instead leaks the container.
+            let containers =
+                GPU_CONTAINERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            for (container_name, cleanup_flag) in containers.iter() {
                 if !cleanup_flag.load(Ordering::SeqCst) {
                     cleanup_container(container_name);
                     cleanup_flag.store(true, Ordering::SeqCst);
@@ -332,12 +372,11 @@ impl ZKMCudaProver {
         // Wait a few seconds for the container to start
         std::thread::sleep(Duration::from_secs(2));
 
-        let client = Client::new(
-            Url::parse(&format!("http://localhost:{port}/twirp/")).expect("failed to parse url"),
-            reqwest::Client::new(),
-            reqwest_middlewares,
-        )
-        .expect("failed to create client");
+        let endpoint = format!("http://localhost:{port}/twirp/");
+        let url =
+            Url::parse(&endpoint).map_err(|e| format!("`{endpoint}` is not a URL: {e}"))?;
+        let client = Client::new(url, reqwest::Client::new(), reqwest_middlewares)
+            .map_err(|e| format!("could not create the CUDA RPC client: {e}"))?;
 
         Ok(ZKMCudaProver {
             client,
@@ -366,9 +405,18 @@ impl ZKMCudaProver {
     /// Executes the [zkm_prover::ZKMProver::setup] method inside the container.
     pub fn setup(&self, elf: &[u8]) -> Result<(ZKMProvingKey, ZKMVerifyingKey), Box<dyn StdError>> {
         let payload = SetupRequestPayload { elf: elf.to_vec() };
-        let request = crate::api::SetupRequest { data: bincode::serialize(&payload).unwrap() };
-        let response = block_on(async { self.client.setup(request).await }).unwrap();
-        let payload: SetupResponsePayload = bincode::deserialize(&response.result).unwrap();
+        let data = bincode::serialize(&payload)
+            .map_err(|e| format!("CUDA RPC `setup`: could not encode the request: {e}"))?;
+        let request = crate::api::SetupRequest { data };
+        let response = block_on(async { self.client.setup(request).await })
+            .map_err(|e| format!("CUDA RPC `setup` failed: {e}"))?;
+        let payload: SetupResponsePayload =
+            bincode::deserialize(&response.result).map_err(|e| {
+                format!(
+                    "CUDA RPC `setup`: could not decode the response: {e} (a truncated reply or a \
+                     server/client version mismatch reaches here)"
+                )
+            })?;
         Ok((payload.pk, payload.vk))
     }
 
@@ -377,10 +425,14 @@ impl ZKMCudaProver {
     /// You will need at least 24GB of VRAM to run this method.
     pub fn prove_core(&self, stdin: &ZKMStdin) -> Result<ZKMCoreProof, ZKMCoreProverError> {
         let payload = ProveCoreRequestPayload { stdin: stdin.clone() };
-        let request = crate::api::ProveCoreRequest { data: bincode::serialize(&payload).unwrap() };
-        let response = block_on(async { self.client.prove_core(request).await }).unwrap();
+        let data = bincode::serialize(&payload)
+            .map_err(|e| core_codec("prove_core", "encode the request", e))?;
+        let request = crate::api::ProveCoreRequest { data };
+        let response = block_on(async { self.client.prove_core(request).await })
+            .map_err(|e| core_transport("prove_core", e))?;
         self.record_server_prove_ms(response.prove_ms);
-        let proof: ZKMCoreProof = bincode::deserialize(&response.result).unwrap();
+        let proof: ZKMCoreProof = bincode::deserialize(&response.result)
+            .map_err(|e| core_codec("prove_core", "decode the response", e))?;
         Ok(proof)
     }
 
@@ -411,10 +463,14 @@ impl ZKMCudaProver {
             stdin: stdin.clone(),
             retain_for_compress,
         };
-        let request = crate::api::ProveCoreRequest { data: bincode::serialize(&payload).unwrap() };
-        let response = block_on(async { self.client.prove_core_stateless(request).await }).unwrap();
+        let data = bincode::serialize(&payload)
+            .map_err(|e| core_codec("prove_core_stateless", "encode the request", e))?;
+        let request = crate::api::ProveCoreRequest { data };
+        let response = block_on(async { self.client.prove_core_stateless(request).await })
+            .map_err(|e| core_transport("prove_core_stateless", e))?;
         self.record_server_prove_ms(response.prove_ms);
-        let proof: ZKMCoreProof = bincode::deserialize(&response.result).unwrap();
+        let proof: ZKMCoreProof = bincode::deserialize(&response.result)
+            .map_err(|e| core_codec("prove_core_stateless", "decode the response", e))?;
         Ok(proof)
     }
 
@@ -428,11 +484,14 @@ impl ZKMCudaProver {
         deferred_proofs: Vec<ZKMReduceProof<InnerSC>>,
     ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         let payload = CompressRequestPayload { vk: vk.clone(), proof, deferred_proofs };
-        let request = crate::api::CompressRequest { data: bincode::serialize(&payload).unwrap() };
-
-        let response = block_on(async { self.client.compress(request).await }).unwrap();
+        let data = bincode::serialize(&payload)
+            .map_err(|e| rec_codec("compress", "encode the request", e))?;
+        let request = crate::api::CompressRequest { data };
+        let response = block_on(async { self.client.compress(request).await })
+            .map_err(|e| rec_transport("compress", e))?;
         self.record_server_prove_ms(response.prove_ms);
-        let proof: ZKMReduceProof<InnerSC> = bincode::deserialize(&response.result).unwrap();
+        let proof: ZKMReduceProof<InnerSC> = bincode::deserialize(&response.result)
+            .map_err(|e| rec_codec("compress", "decode the response", e))?;
         Ok(proof)
     }
 
@@ -444,10 +503,13 @@ impl ZKMCudaProver {
         reduced_proof: ZKMReduceProof<InnerSC>,
     ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         let payload = ShrinkRequestPayload { reduced_proof: reduced_proof.clone() };
-        let request = crate::api::ShrinkRequest { data: bincode::serialize(&payload).unwrap() };
-
-        let response = block_on(async { self.client.shrink(request).await }).unwrap();
-        let proof: ZKMReduceProof<InnerSC> = bincode::deserialize(&response.result).unwrap();
+        let data = bincode::serialize(&payload)
+            .map_err(|e| rec_codec("shrink", "encode the request", e))?;
+        let request = crate::api::ShrinkRequest { data };
+        let response = block_on(async { self.client.shrink(request).await })
+            .map_err(|e| rec_transport("shrink", e))?;
+        let proof: ZKMReduceProof<InnerSC> = bincode::deserialize(&response.result)
+            .map_err(|e| rec_codec("shrink", "decode the response", e))?;
         Ok(proof)
     }
 
@@ -459,10 +521,13 @@ impl ZKMCudaProver {
         reduced_proof: ZKMReduceProof<InnerSC>,
     ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
         let payload = WrapRequestPayload { reduced_proof: reduced_proof.clone() };
-        let request = crate::api::WrapRequest { data: bincode::serialize(&payload).unwrap() };
-
-        let response = block_on(async { self.client.wrap(request).await }).unwrap();
-        let proof: ZKMReduceProof<OuterSC> = bincode::deserialize(&response.result).unwrap();
+        let data = bincode::serialize(&payload)
+            .map_err(|e| rec_codec("wrap_bn254", "encode the request", e))?;
+        let request = crate::api::WrapRequest { data };
+        let response = block_on(async { self.client.wrap(request).await })
+            .map_err(|e| rec_transport("wrap_bn254", e))?;
+        let proof: ZKMReduceProof<OuterSC> = bincode::deserialize(&response.result)
+            .map_err(|e| rec_codec("wrap_bn254", "decode the response", e))?;
         Ok(proof)
     }
 }
@@ -524,5 +589,84 @@ impl Middleware for LoggingMiddleware {
             }
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+impl ZKMCudaProver {
+    /// `new` blocks for up to 300 seconds waiting for the server to report
+    /// ready, so the tests build the client directly. Nothing else differs.
+    fn connect_without_waiting(endpoint: &str) -> std::result::Result<Self, Box<dyn StdError>> {
+        let client = Client::new(
+            Url::parse(endpoint)?,
+            reqwest::Client::new(),
+            vec![Box::new(LoggingMiddleware) as Box<dyn Middleware>],
+        )?;
+        Ok(ZKMCudaProver { client, managed_container: None, server_prove_ms: AtomicU64::new(0) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A port nothing is listening on: bound to reserve it, then dropped.
+    fn dead_endpoint() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        drop(listener);
+        format!("http://127.0.0.1:{port}/twirp/")
+    }
+
+    #[test]
+    fn an_unreachable_server_is_an_error_not_a_panic() {
+        let prover =
+            ZKMCudaProver::connect_without_waiting(&dead_endpoint()).expect("the client builds");
+
+        // `setup` returns Box<dyn StdError>, `prove_core` returns
+        // ZKMCoreProverError: both used to unwrap the transport result.
+        // `let ... else` rather than `expect_err`, because the Ok types here do
+        // not implement Debug.
+        let Err(err) = prover.setup(&[]) else { panic!("a refused connection must be an error") };
+        assert!(format!("{err}").contains("setup"), "the operation is named: {err}");
+
+        let Err(err) = prover.prove_core(&ZKMStdin::new()) else {
+            panic!("a refused connection must be an error")
+        };
+        assert!(matches!(err, ZKMCoreProverError::IoError(_)), "got: {err}");
+        assert!(format!("{err}").contains("prove_core"), "the operation is named: {err}");
+    }
+
+    #[test]
+    fn a_malformed_endpoint_is_an_error_not_a_panic() {
+        let Err(err) = ZKMCudaProver::new(ZKMGpuServer::External { endpoint: "not a url".into() })
+        else {
+            panic!("a bad endpoint must be an error")
+        };
+        assert!(format!("{err}").contains("CUDA_ENDPOINT"), "got: {err}");
+    }
+
+    /// A truncated reply, or one from a server built at a different commit,
+    /// arrives as bytes that do not decode. That is the shape of version skew.
+    #[test]
+    fn an_undecodable_response_is_a_typed_error_naming_the_call() {
+        let garbage = [0xffu8; 8];
+
+        let Err(e) = bincode::deserialize::<ZKMCoreProof>(&garbage)
+            .map_err(|e| core_codec("prove_core", "decode the response", e))
+        else {
+            panic!("garbage must not decode")
+        };
+        assert!(matches!(e, ZKMCoreProverError::SerializationError(_)), "got: {e}");
+        let msg = format!("{e}");
+        assert!(msg.contains("prove_core") && msg.contains("version mismatch"), "got: {msg}");
+
+        let Err(e) = bincode::deserialize::<ZKMReduceProof<InnerSC>>(&garbage)
+            .map_err(|e| rec_codec("compress", "decode the response", e))
+        else {
+            panic!("garbage must not decode")
+        };
+        assert!(matches!(e, ZKMRecursionProverError::RuntimeError(_)), "got: {e}");
+        assert!(format!("{e}").contains("compress"), "got: {e}");
     }
 }
