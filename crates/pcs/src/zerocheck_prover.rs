@@ -30,35 +30,43 @@ use crate::folder::{PairWindow, VerifierConstraintFolder};
 use crate::septic_digest::SepticDigest;
 use crate::{Challenge, StarkGenericConfig, Val};
 
-/// Evaluate the equality multilinear extension `eq(r, -)` at every point of
-/// the Boolean hypercube `{0,1}^m`, returning the dense evaluation table.
+/// Dense evaluation table of the equality MLE over `r ∈ EF^m`:
 ///
-/// The algorithm runs in `O(2^m)` time using the standard tensor product.
+/// ```text
+///   eq(r, x) = Π_{i<m} ( r_i·x_i + (1-r_i)·(1-x_i) ),   x ∈ {0,1}^m
+///   table[ Σ_i x_i·2^i ] = eq(r, x)
+/// ```
+///
+/// so bit `i` of the index pairs with `r_i`.  `O(2^m)` time, `O(2^m)` space.
 pub fn eq_mle_table<EF: Field + Send + Sync>(r: &[EF]) -> Vec<EF> {
     eq_mle_table_iter(r.iter().copied())
 }
 
-/// [`eq_mle_table`] over `r` REVERSED, without materialising the reversal.
+/// [`eq_mle_table`] over the reversed coordinate order, i.e.
 ///
-/// Callers that need the table over the reversed point used to write
-/// `eq_mle_table(&r.iter().rev().copied().collect::<Vec<_>>())`, allocating a
-/// copy of the point purely to hand it over backwards. The point is tiny next to
-/// the `2^m` table, so this is about not repeating the idiom -- and about not
-/// having two places where a reversal can be applied twice by accident.
+/// ```text
+///   eq_rev(r, x) = eq( (r_{m-1}, …, r_0), x )
+///   table_rev[j] = table[ bitrev_m(j) ]
+/// ```
+///
+/// Reversing the coordinates and bit-reversing the index are the same map; this
+/// applies it without materialising the reversed point.
 pub fn eq_mle_table_rev<EF: Field + Send + Sync>(r: &[EF]) -> Vec<EF> {
     eq_mle_table_iter(r.iter().rev().copied())
 }
 
-/// The tensor-product doubling itself, over any exact-size sequence of
-/// coordinates.
+/// Tensor-product doubling shared by [`eq_mle_table`] and [`eq_mle_table_rev`].
 ///
-/// ONE allocation, expanded in place. This used to allocate a fresh `Vec` per
-/// round -- `m` allocations totalling ~2x the final table -- justified by a
-/// comment about an "in-place reverse-iter ordering constraint". There is no such
-/// constraint in the `split_at_mut` form below: `lo` and `hi` are disjoint, and
-/// each `hi` slot is written from its `lo` partner BEFORE that partner is
-/// overwritten, so the doubling is still trivially parallel. Arithmetic order is
-/// unchanged, so every value is bit-identical to the previous implementation.
+/// Round `k` extends the table from `2^k` to `2^{k+1}` entries:
+///
+/// ```text
+///   hi_j ← lo_j · r_k        lo_j ← lo_j · (1 - r_k)        j < 2^k
+/// ```
+///
+/// One allocation of `2^m`, expanded in place: `lo = table[0..2^k]` and
+/// `hi = table[2^k..2^{k+1}]` are disjoint, and `hi_j` is written from `lo_j`
+/// before `lo_j` is overwritten, so the round is order-independent across `j`
+/// and parallelises.
 fn eq_mle_table_iter<EF: Field + Send + Sync, I: ExactSizeIterator<Item = EF>>(r: I) -> Vec<EF> {
     use p3_maybe_rayon::prelude::*;
     let m = r.len();
@@ -66,8 +74,6 @@ fn eq_mle_table_iter<EF: Field + Send + Sync, I: ExactSizeIterator<Item = EF>>(r
         return vec![EF::ONE];
     }
     let final_len = 1usize << m;
-    // Safe init, not uninit: KoalaBear's u32 serde rejects out-of-range values,
-    // and an uninitialised `Vec<EF>` is UB besides.
     let mut table: Vec<EF> = vec![EF::ZERO; final_len];
     table[0] = EF::ONE;
     let mut old_len = 1usize;

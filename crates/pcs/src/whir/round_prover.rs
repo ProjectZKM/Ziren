@@ -146,7 +146,6 @@ where
                 Arc::clone(&ef_dft),
             );
             let ef_codewords = ef_encoder.encode_batch(alloc::vec![folded_mle]);
-            // Moved, not cloned: `ef_codewords` is dropped here.
             let base_codeword = codeword_from_ef::<F, EF>(
                 crate::basefold::fri::take_codeword_values(ef_codewords),
             );

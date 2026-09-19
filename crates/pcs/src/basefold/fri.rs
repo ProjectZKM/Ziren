@@ -171,17 +171,12 @@ where
 }
 
 /// Repack an EF codeword into base-field [`RsCodeWord`] storage.
-/// Take the cells out of a freshly-encoded codeword WITHOUT copying them.
+/// Move the cells of a freshly-encoded codeword out of its `Arc`.
 ///
-/// `Encoder::encode_batch` returns `Message<RsCodeWord<_>>` = `Vec<Arc<..>>`, and
-/// the cells therefore sit behind an `Arc`, which is why every caller used to
-/// write `cw[0].data.values.clone()` -- a full copy of the codeword, megabytes
-/// per round at core sizes. The `Arc` is created inside `encode_batch` and handed
-/// straight back, so the caller is its sole owner and `try_unwrap` succeeds,
-/// moving the cells instead.
-///
-/// The `Err` arm keeps the old clone if a reference is ever retained elsewhere,
-/// so this is a pure win or a no-op, never a regression.
+/// `Message<T> = Vec<Arc<T>>`, so the cells are behind a shared pointer and
+/// cannot be moved in general.  On return from `Encoder::encode_batch` the
+/// refcount is 1, so `try_unwrap` succeeds; the `Err` arm clones, since the type
+/// does not encode uniqueness.
 pub fn take_codeword_values<F: Field>(codewords: Message<RsCodeWord<F>>) -> Vec<F> {
     let mut codewords = codewords;
     let first = codewords.swap_remove(0);

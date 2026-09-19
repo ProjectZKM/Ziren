@@ -50,15 +50,13 @@ fn build_weight_table(
     // slice, no stride, no explicit Pi_high embedding — the full row_eq
     // bakes the height factor in for any row < 2^log_h_c because the high
     // bits of such a row are 0.
-    let _ = r_row_per_chip; // unused: the full row_eq subsumes the per-chip row points
-    // `_rev` builds the table over the reversed point without materialising the
-    // reversal (was a `rev().copied().collect()` feeding the forward call).
+    // `r_row_per_chip` is subsumed: for row < 2^{log h_c} the high coordinates of
+    // `row` vanish, so eq(rev(z*), row) already carries the per-chip height factor.
+    let _ = r_row_per_chip;
+    // w[offsets[k] + row] = eq(z_col, k) · eq(rev(z*), row),  row < h_c
     let row_eq_full: Vec<InnerChallenge> =
         crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
-    // Every chip uses the SAME table: the full row_eq subsumes each chip's height,
-    // so there is nothing per-chip about it. This used to build a
-    // `Vec<&[InnerChallenge]>` with one identical entry per chip -- an allocation
-    // and an indirection per call for no information.
+    // One table for every chip: the factor above is chip-independent.
     let eq_c: &[InnerChallenge] = &row_eq_full;
 
     let mut k: usize = 0;

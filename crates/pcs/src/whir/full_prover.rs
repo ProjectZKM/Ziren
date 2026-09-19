@@ -80,8 +80,7 @@ where
 
         // ---- Starting commitment: encode, pack 2^ff rows/leaf, commit, OOD. ----
         let start_cw = self.encoder.encode_batch(alloc::vec![Arc::clone(&mle)]);
-        // MOVE the encoded cells into the leaf matrix instead of cloning the whole
-        // codeword (see `take_codeword_values`); `start_cw` is not read again.
+        // 2^ff rows per leaf over the width-1 base storage.
         let start_values = crate::basefold::fri::take_codeword_values(start_cw);
         let start_rows = start_values.len(); // width-1 base storage
         let start_leaves = RowMajorMatrix::new(start_values, 1usize << ff);
@@ -149,7 +148,6 @@ where
                 Arc::clone(&ef_dft),
             );
             let ef_cw = ef_encoder.encode_batch(alloc::vec![folded_mle]);
-            // Moved, not cloned: `ef_cw` is dropped here.
             let base_cw =
                 codeword_from_ef::<F, EF>(crate::basefold::fri::take_codeword_values(ef_cw));
             let leaf_w = (1usize << ff) * EF::DIMENSION;
