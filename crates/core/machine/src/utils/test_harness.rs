@@ -105,9 +105,19 @@ use p3_uni_stark::Proof;
 #[cfg(test)]
 use zkm_pcs::UniConfig;
 
+/// `p3_uni_stark::prove` over a single hand-built AIR fixture.
+///
+/// ONE definition, not one per `debug_assertions` setting. These were two
+/// identical bodies behind two identical signatures differing only in whether
+/// the `DebugConstraintBuilder` bound was present -- `p3_uni_stark` needs it
+/// only on its debug-assertions constraint-checking path. A `where` clause
+/// cannot be `cfg_attr`-gated, so the bound is simply always required; the
+/// debug profile already demanded it, and release is verified to satisfy it
+/// (every chip AIR is generic over its builder, so it implements this too).
+///
+/// `challenger` is untouched: `p3_uni_stark` builds its own transcript. It stays
+/// in the signature because ~45 fixtures pass one.
 #[cfg(test)]
-#[cfg(debug_assertions)]
-#[cfg(not(doctest))]
 pub fn uni_stark_prove<SC, A>(
     config: &SC,
     air: &A,
@@ -123,28 +133,10 @@ where
     p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &vec![])
 }
 
+/// `p3_uni_stark::verify` over a single hand-built AIR fixture.
+///
+/// One definition, for the reasons on [`uni_stark_prove`].
 #[cfg(test)]
-#[cfg(not(debug_assertions))]
-pub fn uni_stark_prove<SC, A>(
-    config: &SC,
-    air: &A,
-    // Underscored, not removed: `p3_uni_stark::prove` builds its own transcript,
-    // so this never gets touched -- but it is part of the signature the fixtures
-    // call, matching `uni_stark_verify` below.
-    _challenger: &mut SC::Challenger,
-    trace: RowMajorMatrix<SC::Val>,
-) -> Proof<UniConfig<SC>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>,
-{
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &vec![])
-}
-
-#[cfg(test)]
-#[cfg(debug_assertions)]
-#[cfg(not(doctest))]
 pub fn uni_stark_verify<SC, A>(
     config: &SC,
     air: &A,
@@ -156,26 +148,6 @@ where
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>
         + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
-{
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &vec![])
-}
-
-#[cfg(test)]
-#[cfg(not(debug_assertions))]
-pub fn uni_stark_verify<SC, A>(
-    config: &SC,
-    air: &A,
-    // Underscored, not removed: `p3_uni_stark::verify` owns the transcript
-    // itself, so this copy never touches the challenger -- but the parameter is
-    // part of the signature the test fixtures call, and the
-    // `cfg(debug_assertions)` twin above takes it the same way.
-    _challenger: &mut SC::Challenger,
-    proof: &Proof<UniConfig<SC>>,
-) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>,
 {
     p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &vec![])
 }
