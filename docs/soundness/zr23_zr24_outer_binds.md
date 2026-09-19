@@ -52,27 +52,75 @@ The minimal fix is therefore to thread the pair that already exists into
 `lift_outer_bundle_dispatch` (one parameter, one method, two impls) and use it
 exactly as the inner lift does.
 
-## The blocker: two digest representations
+## The representation question, RESOLVED
 
-This is why it is not a mechanical change, and it needs someone who knows the
-wrap commit scheme:
+The previous revision of this file recorded "whether the outer proof's
+PREPROCESSED round is BN254-committed" as a blocker needing someone who knows
+the wrap commit scheme. It does not: the code answers it, and the answer is
+**yes — the outer preprocessed round is BN254-committed, a 1-cap, exactly like
+the main round.** There is no per-round ring split to reconcile.
 
-| | type |
-|---|---|
-| `preceding_commitments` on the wrap path | `([Felt<C::F>; 8], [Felt<C::F>; 8])` |
-| `original_commitments` in the outer lift  | `[Var<C::N>; 1]` — a BN254 1-cap |
+Evidence:
 
-The outer BaseFold Merkle-verifies leaves against BN254 caps, while the
-verifying key carries 8-felt KoalaBear digests. The open question is whether the
-outer proof's PREPROCESSED round is BN254-committed at all:
+1. The outer ring has ONE Merkle scheme for every round.
+   `recursion/core/src/stark/config.rs:16` sets `DIGEST_SIZE = 1`, and `:30`
+   defines the only val-Mmcs the ring has:
+   ```rust
+   pub type OuterValMmcs = MerkleTreeMmcs<KoalaBear, Bn254, OuterHash, OuterCompress, 2, DIGEST_SIZE>;
+   ```
+   with `:288` naming its commitment type outright:
+   `OuterValMmcs::Commitment = Hash<KoalaBear, Bn254, 1>`.
 
-- if it is, the key needs to expose (or the circuit derive) its 1-cap form, and
-  the hash-bind has to be done in the BN254 hasher;
-- if it is not, then the preceding round on this ring is inner-shaped and the
-  representations have to be reconciled before either bind means anything.
+2. The outer lift's own parameter is `bundle: &JaggedBasefoldBundleGeneric<OuterValMmcs>`
+   (`shard_level_witness.rs:1283`). The bundle is generic over ONE Mmcs, so
+   `bundle.preceding_commits` — the raw roots of every round before the last —
+   are that same BN254 1-cap. The preceding round is not inner-shaped.
 
-Until that is settled, `original_commitments` on the outer ring is either
-proof-controlled (today, after the ordering fix) or wrong (before it).
+3. The two representations are ALREADY reconciled in the tree, in both
+   directions. `KoalaBearPoseidon2Outer::vk_preprocessed_commit_felts`
+   (`recursion/circuit/src/lib.rs:842`) is the in-circuit twin of host
+   `BasefoldRing::digest_felts`: it projects the BN254 1-cap to 8 KoalaBear
+   felts as `split_32(commitment[0], 4)` zero-padded to 8. The inner impl
+   (`lib.rs:772`) is the identity. So `[Felt;8]` and the 1-cap are already
+   interconvertible in-circuit, and the wrap path's uniform `[Felt;8]`
+   `preceding_commitments` type is a consequence of that projection, not
+   evidence that the outer round is felt-committed.
+
+4. The key-side 1-cap is already in scope at the call site that needs it.
+   `verify_wrap_basefold_core` takes `vk_legacy: VerifyingKeyVariable<C, SC>`,
+   whose `commitment` is `SC::DigestVariable` — the BN254 1-cap on the outer
+   instantiation. Nothing has to be added to the verifying key; the outer lift
+   simply is not handed it.
+
+5. The round count is genuinely 2, so none of this is vacuous. Every recursion
+   chip implements `preprocessed_width` (`recursion/core/src/chips/`:
+   `alu_base.rs:89`, `alu_ext.rs:81`, `select.rs:54`, `ext2felt.rs:83`,
+   `public_values.rs:77`, `mem/constant.rs:55`, `mem/variable.rs:56`,
+   `poseidon2_wide/trace.rs:174`), so `prep_widths` in `wrap_basefold.rs` is
+   non-empty, `column_counts_by_round.len() == 2`, and
+   `preceding_commits.len() == 1`. The `[main_root, zero]` vector really does
+   authenticate the preprocessed round's opening against the main root.
+
+What this changes: the fix is representable today as a pair of
+`SC::DigestVariable` values — `(bundle.preceding_commits[i]` for the raw side,
+`vk_legacy.commitment` for the key side) — threaded into
+`lift_outer_bundle_dispatch`. It does not need a ceremony decision, a key
+format change, or a new witness field for the ROOTS.
+
+## What is still genuinely open
+
+Not the representation, but the bind MECHANISM:
+
+- The inner path's comments describe the pin as re-deriving
+  `compress([raw, hash(counts)])` and asserting it equals the key-held
+  `modified_commitments` entry. Whether that assertion actually exists in the
+  circuit, what the host stores in the key (raw root vs geometry-mixed digest),
+  and whether the outer ring executes it at all, must be established before
+  writing the outer bind — the outer lift's comment claims the BN254 bind
+  happens "inside the registered outer jagged-verify hook", and that claim needs
+  checking rather than trusting. Getting this wrong either rejects honest proofs
+  or provides false assurance, and neither is visible without a gnark build.
+- The cost decision below is unchanged and remains the release blocker.
 
 ## Also unresolved, and independent
 
