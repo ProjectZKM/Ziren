@@ -1617,9 +1617,11 @@ pub mod jagged {
         // the coverage check measures the proof's group map against.
         n_prep: usize,
         bundle: &JaggedBasefoldBundle,
-        // Cross-bind: per-chip `opened_values.chips[].main.local` (index-
-        // aligned with `chip_infos` / `bundle.y_per_chip`); `None` disables the bind.
-        opened_main: Option<&[Vec<InnerChallenge>]>,
+        // Cross-bind: per-chip `opened_values.chips[].main.local`, index-aligned
+        // with `chip_infos` / `bundle.y_per_chip`.  REQUIRED: the bind is what
+        // ties the zerocheck's openings to the jagged phase's column claims, so
+        // an `Option` here would be a way to verify a shard without it.
+        opened_main: &[Vec<InnerChallenge>],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> bool {
         verify_jagged_basefold_inner(
@@ -1654,7 +1656,7 @@ pub mod jagged {
         // Cross-bind: per-chip `opened_values.chips[].main.local` trace
         // openings (index-aligned with `chip_infos` / `bundle.y_per_chip`), or
         // `None` for synthetic-bundle unit tests with no shard openings.
-        opened_main: Option<&[Vec<InnerChallenge>]>,
+        opened_main: &[Vec<InnerChallenge>],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
     ) -> bool {
@@ -1711,8 +1713,8 @@ pub mod jagged {
                 grp.iter().map(|&i| bundle.y_per_chip[i].clone()).collect();
             // Slice this group's opened main.local columns in the SAME
             // membership order as `y_per_chip_g` so the cross-bind k-walk lines up.
-            let opened_main_g: Option<Vec<Vec<InnerChallenge>>> =
-                opened_main.map(|om| grp.iter().map(|&i| om[i].clone()).collect());
+            let opened_main_g: Vec<Vec<InnerChallenge>> =
+                grp.iter().map(|&i| opened_main[i].clone()).collect();
             let pkg = bundle.packing_g(g);
             let packing = JaggedPacking {
                 dense_values: Vec::new(),
@@ -1728,7 +1730,7 @@ pub mod jagged {
                 &r_row_g,
                 z_row,
                 &y_per_chip_g,
-                opened_main_g.as_deref(),
+                &opened_main_g,
                 bundle.reduction_g(g),
                 bundle.jagged_eval_g(g),
                 bundle.commit_g(g),
@@ -1831,7 +1833,7 @@ pub mod jagged {
         // Cross-bind: this group's per-chip `opened_values.chips[].main.local`
         // trace openings (index-aligned with `y_per_chip`), or `None` for callers
         // (unit tests) that verify a synthetic bundle with no shard openings.
-        opened_main: Option<&[Vec<InnerChallenge>]>,
+        opened_main: &[Vec<InnerChallenge>],
         reduction: &crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge>,
         jagged_eval: &crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
         commit: &crate::jagged_pcs::JaggedCommit,
@@ -1909,11 +1911,9 @@ pub mod jagged {
         //
         // Close it exactly as the circuit does — `cross_bind_openings` below is
         // that identity, shared with the OUTER ring so both check the same one.
-        if let Some(opened_main_g) = opened_main {
-            if let Err(why) = cross_bind_openings(y_per_chip, opened_main_g, &z_col) {
-                eprintln!("[basefold verify] group {g}: CROSS-BIND FAILED — {why}");
-                return false;
-            }
+        if let Err(why) = cross_bind_openings(y_per_chip, opened_main, &z_col) {
+            eprintln!("[basefold verify] group {g}: CROSS-BIND FAILED — {why}");
+            return false;
         }
 
         // Replay the jagged-eval sub-protocol transcript so the
@@ -2102,10 +2102,9 @@ pub mod jagged {
         )],
         // ZR-23 bind #3: the trace openings the AIR phases consumed, index-
         // aligned with `chip_infos` / `bundle.y_per_chip`, for
-        // `cross_bind_openings`.  `None` leaves the two halves of the proof
-        // unbound and is only for callers that have no openings to offer (the
-        // PCS-level roundtrip tests).
-        opened_main: Option<&[Vec<InnerChallenge>]>,
+        // `cross_bind_openings`.  REQUIRED, like every other binding input:
+        // making it optional is what let the outer ring verify without it.
+        opened_main: &[Vec<InnerChallenge>],
     ) -> bool
     where
         MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
@@ -2139,11 +2138,9 @@ pub mod jagged {
         let z_col: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| challenger.sample_algebra_element()).collect();
         // ZR-23 bind #3, on the same `z_col` the reduction is about to use.
-        if let Some(opened_main) = opened_main {
-            if let Err(why) = cross_bind_openings(&bundle.y_per_chip, opened_main, &z_col) {
-                eprintln!("[basefold verify outer] CROSS-BIND FAILED — {why}");
-                return false;
-            }
+        if let Err(why) = cross_bind_openings(&bundle.y_per_chip, opened_main, &z_col) {
+            eprintln!("[basefold verify outer] CROSS-BIND FAILED — {why}");
+            return false;
         }
         let red_result = crate::jagged_sumcheck::verify_jagged_reduction(
             &bundle.reduction,
@@ -2446,13 +2443,12 @@ mod test {
     /// explicit stacking-padding columns, per-group r_row) with
     /// `build_jagged_verify_inputs`, observe the commit, then
     /// `verify_jagged_basefold_no_observe`.  `opened_main` threads the
-    /// cross-bind openings; `None` disables the bind (a caller with no
-    /// shard openings).
+    /// cross-bind openings, which the verifier requires.
     fn verify_main_round(
         bundle: &JaggedBasefoldBundle,
         chip_widths: &[usize],
         z_row: &[JaggedChallenge],
-        opened_main: Option<&[Vec<JaggedChallenge>]>,
+        opened_main: &[Vec<JaggedChallenge>],
     ) -> bool {
         let (chip_infos, r_row_per_chip, z_row_v) =
             build_jagged_verify_inputs(&bundle.packing, chip_widths, z_row);
@@ -2496,7 +2492,7 @@ mod test {
         let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
         let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
         assert!(
-            verify_main_round(&bundle, &widths, &z_row, None),
+            verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
             "jagged-basefold pipeline should accept honest proof"
         );
     }
@@ -2530,7 +2526,7 @@ mod test {
         // The honest bundle must verify — otherwise the rejections below
         // are vacuous (a verifier that rejects EVERYTHING passes them).
         assert!(
-            verify_main_round(&bundle, &widths, &z_row, None),
+            verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
             "the untampered bundle must verify"
         );
 
@@ -2538,7 +2534,7 @@ mod test {
         let mut tampered = bundle.clone();
         tampered.reduction.q_at_z = tampered.reduction.q_at_z + JaggedChallenge::ONE;
         assert!(
-            !verify_main_round(&tampered, &widths, &z_row, None),
+            !verify_main_round(&tampered, &widths, &z_row, &tampered.y_per_chip),
             "verifier must reject q_at_z tampering"
         );
 
@@ -2546,7 +2542,7 @@ mod test {
         let mut tampered = bundle.clone();
         tampered.y_per_chip[0][0] = tampered.y_per_chip[0][0] + JaggedChallenge::ONE;
         assert!(
-            !verify_main_round(&tampered, &widths, &z_row, None),
+            !verify_main_round(&tampered, &widths, &z_row, &tampered.y_per_chip),
             "verifier must reject y_per_chip tampering"
         );
 
@@ -2566,7 +2562,7 @@ mod test {
                 tampered.basefold_proof.basefold_proof.final_poly + JaggedChallenge::ONE;
         }
         assert!(
-            !verify_main_round(&tampered, &widths, &z_row, None),
+            !verify_main_round(&tampered, &widths, &z_row, &tampered.y_per_chip),
             "verifier must reject final_poly tampering"
         );
     }
@@ -2612,7 +2608,7 @@ mod test {
             crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT
         );
         assert!(
-            verify_main_round(&bundle, &widths, &z_row, Some(&opened)),
+            verify_main_round(&bundle, &widths, &z_row, &opened),
             "honest proof must verify"
         );
 
@@ -2622,7 +2618,7 @@ mod test {
             let mut tampered = bundle.clone();
             tampered.commit.log_stacking_height = h;
             assert!(
-                !verify_main_round(&tampered, &widths, &z_row, Some(&opened)),
+                !verify_main_round(&tampered, &widths, &z_row, &opened),
                 "log_stacking_height = {h} must be rejected (production is {prod})"
             );
         }
@@ -2658,7 +2654,7 @@ mod test {
 
         // (1) honest openings + cross-bind ON → ACCEPT.
         assert!(
-            verify_main_round(&bundle, &widths, &z_row, Some(&opened_ok)),
+            verify_main_round(&bundle, &widths, &z_row, &opened_ok),
             "honest openings must verify"
         );
 
@@ -2666,14 +2662,14 @@ mod test {
         let mut opened_bad = opened_ok.clone();
         opened_bad[0][0] += JaggedChallenge::ONE; // tamper ONE column claim
         assert!(
-            !verify_main_round(&bundle, &widths, &z_row, Some(&opened_bad)),
+            !verify_main_round(&bundle, &widths, &z_row, &opened_bad),
             "y_per_chip diverging from openings MUST be rejected by the cross-bind"
         );
 
         // (3) SAME divergent openings but bind OFF (None) → ACCEPT.
         //     Documents the pre-fix gap the cross-bind closes.
         assert!(
-            verify_main_round(&bundle, &widths, &z_row, None),
+            verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
             "pre-fix baseline: with no opened-values bind the divergent proof is \
              (wrongly) accepted"
         );
@@ -2724,11 +2720,11 @@ mod test {
         // Honest verify: the identity cover passes coverage and the whole
         // pipeline accepts.
         let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
-        assert!(verify_main_round(&bundle, &widths, &z_row, None), "G==1 bundle must verify");
+        assert!(verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip), "G==1 bundle must verify");
         // The deserialized copy behaves identically (legacy-shape
         // equivalence).
         assert!(
-            verify_main_round(&bundle2, &widths, &z_row, None),
+            verify_main_round(&bundle2, &widths, &z_row, &bundle2.y_per_chip),
             "deserialized G==1 bundle must verify identically"
         );
     }

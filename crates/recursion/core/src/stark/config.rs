@@ -733,7 +733,7 @@ mod basefold_over_bn254_roundtrip_test {
         let (chip_infos, r_row_v, z_row_v) =
             build_jagged_verify_inputs(&bundle.packing, &chip_widths, &z_row);
         let mut v_chal = make_challenger();
-        v_chal.observe(commitment);
+        v_chal.observe(commitment.clone());
         let ok = verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
             &chip_infos,
             &r_row_v,
@@ -745,9 +745,10 @@ mod basefold_over_bn254_roundtrip_test {
             fri,
             // Single-round fixture: no preceding rounds.
             &[],
-            // PCS-level fixture: there is no AIR above it, so no openings to
-            // cross-bind against.
-            None,
+            // PCS-level fixture: there is no AIR above it, so the bundle's own
+            // claims ARE the openings.  Passed explicitly because the parameter
+            // is required — the two controls below are what give the bind teeth.
+            &bundle.y_per_chip.clone(),
         );
         assert!(
             ok,
@@ -762,7 +763,7 @@ mod basefold_over_bn254_roundtrip_test {
         // never reached passes the first and fails the second.
         let honest: Vec<Vec<JaggedChallenge>> = bundle.y_per_chip.clone();
         let mut v_chal = make_challenger();
-        v_chal.observe(commitment);
+        v_chal.observe(commitment.clone());
         assert!(
             verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
                 &chip_infos,
@@ -774,7 +775,7 @@ mod basefold_over_bn254_roundtrip_test {
                 true,
                 <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config(),
                 &[],
-                Some(&honest),
+                &honest,
             ),
             "the cross-bind must accept openings that agree with the bundle's column claims"
         );
@@ -785,7 +786,7 @@ mod basefold_over_bn254_roundtrip_test {
         let mut tampered = honest.clone();
         tampered[0][0] += JaggedChallenge::ONE;
         let mut v_chal = make_challenger();
-        v_chal.observe(commitment);
+        v_chal.observe(commitment.clone());
         assert!(
             !verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
                 &chip_infos,
@@ -797,7 +798,7 @@ mod basefold_over_bn254_roundtrip_test {
                 true,
                 <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config(),
                 &[],
-                Some(&tampered),
+                &tampered,
             ),
             "the cross-bind must REJECT openings that disagree with the bundle's column \
              claims — without it the zerocheck and the jagged phase can describe two \
@@ -812,17 +813,22 @@ mod basefold_over_bn254_roundtrip_test {
     /// answer being `Some`, and discriminating, is the thing to test.
     #[test]
     fn outer_vk_commit_bind_is_not_vacuous() {
-        use p3_symmetric::Hash;
-        let a: zkm_pcs::Com<KoalaBearPoseidon2Outer> = Hash::from([Bn254::ONE]);
-        let b: zkm_pcs::Com<KoalaBearPoseidon2Outer> = Hash::from([Bn254::ZERO]);
         type R = KoalaBearPoseidon2Outer;
+        let traces = vec![("Cpu".to_string(), {
+            let v: Vec<JaggedVal> =
+                (0..64).map(|i| JaggedVal::from_u32((i * 2_654_435_761u64 % 1_000_003) as u32)).collect();
+            RowMajorMatrix::new(v, 4)
+        })];
+        let real = crate::stark::config::outer_jagged_hooks::outer_prep_commit(&traces, None);
+        let other = zkm_pcs::Com::<R>::default();
+        assert_ne!(real, other, "fixture precondition: a real commit differs from the default");
         assert_eq!(
-            <R as BasefoldRing>::vk_commit_is_preceding_root(&a, &a),
+            <R as BasefoldRing>::vk_commit_is_preceding_root(&real, &real),
             Some(true),
             "the outer ring stores the raw root, so a key equal to the proof's root is a match"
         );
         assert_eq!(
-            <R as BasefoldRing>::vk_commit_is_preceding_root(&a, &b),
+            <R as BasefoldRing>::vk_commit_is_preceding_root(&other, &real),
             Some(false),
             "a different root must be reported as a mismatch, not as unanswerable"
         );

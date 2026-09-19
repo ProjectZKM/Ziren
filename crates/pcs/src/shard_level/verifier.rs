@@ -801,7 +801,7 @@ where
                     (c.clone(), real + pad)
                 })
                 .collect::<Vec<_>>(),
-            Some(&opened_main),
+            &opened_main,
         );
         return if ok {
             Ok(())
@@ -1285,7 +1285,7 @@ where
         &prep_rounds,
         n_prep_infos,
         &bundle,
-        Some(&opened_main),
+        &opened_main,
         lb_challenger,
     ) {
         return Err(BasefoldVerifyError::JaggedPcs(
@@ -1896,14 +1896,17 @@ where
     let initial_num_variables = numerator.len().trailing_zeros() as usize;
 
     // (0) Re-observe + check the GKR proof-of-work grinding witness BEFORE
-    // sampling alpha/beta — EXACTLY matching the prover's grind
-    // (row_gkr/top_level.rs::gkr_grind), which observes the witness into the
-    // challenger. Without this the verifier's alpha/beta diverge from the
-    // prover's and the G1 PV-balance below fails. Config-aware: a real check
-    // for the Inner core proof, a no-op for the Outer/wrap (whose prover
-    // grind is itself a no-op). This provides both soundness AND
-    // consistency (the grinding witness is checked, not omitted).
-    if !crate::logup_gkr::GkrGrind::gkr_check_witness(
+    // sampling alpha/beta — exactly matching the prover's grind, which observes
+    // the witness into the challenger.  Without the observe the verifier's
+    // alpha/beta diverge from the prover's and the G1 PV-balance below fails;
+    // without the bit check the grind is transcript consistency only and earns
+    // no soundness.
+    //
+    // Checked on EVERY ring now: this was a config-aware no-op on the
+    // outer/wrap ring while `ziren.soundcalc.toml` credited wrap with
+    // `grinding_bits_lookup = 16`, so the report described a transcript the
+    // protocol did not execute.
+    if !crate::logup_gkr::gkr_check_witness(
         challenger,
         crate::logup_gkr::GKR_GRINDING_BITS,
         proof.witness,

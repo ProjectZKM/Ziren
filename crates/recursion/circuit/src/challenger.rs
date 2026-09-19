@@ -427,13 +427,13 @@ impl<C: Config> FieldChallengerVariable<C, Var<C::N>> for MultiField32Challenger
         MultiField32ChallengerVariable::check_witness(self, builder, bits, witness);
     }
 
-    fn gkr_check_witness(&mut self, builder: &mut Builder<C>, nb_bits: usize, witness: Felt<C::F>) {
-        // OUTER/wrap ring: LogUp-GKR grinding is a no-op (the wrap prover's
-        // GKR grind is itself a no-op; host `gkr_check_witness` is gated to
-        // the inner challenger).  Leave the challenger UNTOUCHED — distinct
-        // from `check_witness`, which advances for the BaseFold open.
-        let _ = (builder, nb_bits, witness);
-    }
+    // No `gkr_check_witness` override: this ring takes the trait default, which
+    // delegates to `check_witness` above — observe the witness, sample
+    // `nb_bits`, assert they are zero.  The override used to make it a no-op on
+    // the premise that the wrap prover's GKR grind was itself a no-op; the
+    // prover now grinds on every ring (`row_gkr/top_level.rs`), so a no-op here
+    // would leave the transcript un-advanced and desync every subsequent
+    // alpha/beta.
 
     fn duplexing(&mut self, builder: &mut Builder<C>) {
         MultiField32ChallengerVariable::duplexing(self, builder);

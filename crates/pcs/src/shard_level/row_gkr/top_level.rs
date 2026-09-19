@@ -15,7 +15,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 use super::build::build_gkr_circuit;
 use super::round::prove_gkr_round;
 use crate::air::MachineAir;
-use crate::logup_gkr::{GkrGrind, GKR_GRINDING_BITS};
+use crate::logup_gkr::GKR_GRINDING_BITS;
 use crate::multilinear::PaddedMle;
 use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
 use crate::shard_level::types::{ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof};
@@ -44,17 +44,32 @@ where
     F: PrimeField + 'static,
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     A: MachineAir<F>,
-    Challenger: FieldChallenger<F> + 'static,
+    Challenger: FieldChallenger<F>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + 'static,
 {
-    // Proof-of-work grinding. MUST run BEFORE sampling alpha/beta to
-    // match the in-circuit verifier's `check_witness`, which is the FIRST
-    // challenger op in `verify_logup_gkr` (recursion logup_gkr.rs:347). p3's
-    // `grind` finds the witness AND observes it into the challenger, so the
-    // post-grind state — alpha/beta and the whole GKR transcript — is
-    // identical between prover and verifier. Config-aware (see `GkrGrind`):
-    // real grind for the Inner challenger, `F::ZERO` no-op for the
-    // Outer/wrap challenger (never recursion-verified).
-    let witness: F = challenger.gkr_grind(GKR_GRINDING_BITS);
+    // Proof-of-work grinding, GKR_GRINDING_BITS of it, BEFORE alpha/beta are
+    // sampled — the order the verifier replays (`check_witness` is the first
+    // challenger op in `verify_logup_gkr`).  Observing the witness is part of
+    // the grind, so the post-grind state, alpha/beta and the whole GKR
+    // transcript are identical between prover and verifier.
+    //
+    // Performed on EVERY ring.  This used to route through a config-aware
+    // `GkrGrind` that ground for the inner challenger and returned `F::ZERO`
+    // for the outer/wrap one, on the premise that the outer challenger "is not
+    // a `GrindingChallenger`, so a hard bound would break the wrap path".  That
+    // premise is false: the wrap BaseFold open grinds `pow_bits = 22` through
+    // exactly this trait, and `verify_jagged_pcs_host` already requires
+    // `SC::Challenger: GrindingChallenger<Witness = JaggedVal>`.  So the bound
+    // is free, and the soundness budget's `grinding_bits_lookup = 16` for wrap
+    // (`docs/soundness/ziren.soundcalc.toml`) is now earned rather than
+    // credited to a no-op.
+    //
+    // DETERMINISTIC grind (smallest-index witness) rather than p3's `grind`
+    // (`find_any`): the witness is observed into the challenger, so a
+    // nondeterministic one makes every downstream alpha/beta — and the whole
+    // logup_gkr proof — vary run to run.
+    let witness: F = crate::logup_gkr::gkr_grind(challenger, GKR_GRINDING_BITS);
 
     // Sample the LogUp challenges [alpha, beta].  `beta_seed_dim` = log2(max_arity
     // rounded up).  `betas.len()` = 1 + max_arity (slot 0 is for
