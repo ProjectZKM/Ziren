@@ -66,7 +66,7 @@ impl Program {
         }
 
         let mut patch_list: BTreeMap<u32, u32> = BTreeMap::new();
-        patch_elf(&elf, &mut patch_list);
+        patch_elf(&elf, &mut patch_list)?;
         let entry: u32 = elf
             .ehdr
             .e_entry
@@ -186,11 +186,24 @@ impl Program {
     }
 }
 
-pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32, u32>) {
-    let symbols = f
-        .symbol_table()
-        .expect("failed to read symbols table, cannot patch program")
-        .expect("failed to parse symbols table, cannot patch program");
+/// Collect the optional runtime patches a Go guest needs, keyed by address.
+///
+/// The patches are an OPTIMISATION -- they stub out runtime entry points the
+/// zkVM does not need -- so a program without a symbol table simply has none.
+/// This used to `expect` twice: a valid STRIPPED ELF has no symbol table, and
+/// `Program::from` is a fallible API that panicked on it instead of loading.
+/// A genuine parse failure is still an error, and now propagates as one.
+pub fn patch_elf(
+    f: &elf::ElfBytes<LittleEndian>,
+    patch_list: &mut BTreeMap<u32, u32>,
+) -> Result<()> {
+    let symbols = match f.symbol_table().map_err(|e| {
+        anyhow::anyhow!("failed to parse the ELF symbol table, cannot patch program: {e}")
+    })? {
+        Some(symbols) => symbols,
+        // Stripped: nothing to patch, which is not an error.
+        None => return Ok(()),
+    };
 
     let mut exit_new = 0;
     let mut exit_old = 0;
@@ -266,6 +279,7 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
             0x0, // nop
         );
     }
+    Ok(())
 }
 
 pub fn patch_stack(image: &mut BTreeMap<u32, u32>) {
@@ -355,5 +369,82 @@ impl<F: PrimeField32> MachineProgram<F> for Program {
         SepticDigest(
             digests.into_par_iter().reduce(|| SepticCurveComplete::Infinity, |a, b| a + b).point(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Program;
+
+    /// A minimal 32-bit little-endian MIPS `ET_EXEC` with one executable
+    /// `PT_LOAD` and NO symbol table.
+    ///
+    /// Hand-assembled rather than taken from the test artifacts, because the
+    /// point is the absence of a section/symbol table: a stripped binary is a
+    /// valid ELF, and `Program::from` used to panic on it inside `patch_elf`
+    /// (`symbol_table().expect(..).expect(..)`) despite being a fallible API.
+    fn stripped_mips_elf() -> Vec<u8> {
+        const EHDR: usize = 52;
+        const PHDR: usize = 32;
+        let code: [u32; 4] = [0x2021_0001, 0x2021_0002, 0x2021_0003, 0x0000_0000];
+        let code_off = EHDR + PHDR;
+        let vaddr: u32 = 0x0040_0000;
+
+        let mut e = Vec::new();
+        e.extend_from_slice(&[0x7f, b'E', b'L', b'F']);
+        e.push(1); // ELFCLASS32
+        e.push(1); // ELFDATA2LSB
+        e.push(1); // EV_CURRENT
+        e.extend_from_slice(&[0u8; 9]); // padding
+        e.extend_from_slice(&2u16.to_le_bytes()); // ET_EXEC
+        e.extend_from_slice(&8u16.to_le_bytes()); // EM_MIPS
+        e.extend_from_slice(&1u32.to_le_bytes()); // e_version
+        e.extend_from_slice(&vaddr.to_le_bytes()); // e_entry
+        e.extend_from_slice(&(EHDR as u32).to_le_bytes()); // e_phoff
+        e.extend_from_slice(&0u32.to_le_bytes()); // e_shoff: none -> stripped
+        e.extend_from_slice(&0u32.to_le_bytes()); // e_flags
+        e.extend_from_slice(&(EHDR as u16).to_le_bytes()); // e_ehsize
+        e.extend_from_slice(&(PHDR as u16).to_le_bytes()); // e_phentsize
+        e.extend_from_slice(&1u16.to_le_bytes()); // e_phnum
+        e.extend_from_slice(&0u16.to_le_bytes()); // e_shentsize
+        e.extend_from_slice(&0u16.to_le_bytes()); // e_shnum
+        e.extend_from_slice(&0u16.to_le_bytes()); // e_shstrndx
+        assert_eq!(e.len(), EHDR);
+
+        let bytes = (code.len() * 4) as u32;
+        e.extend_from_slice(&1u32.to_le_bytes()); // PT_LOAD
+        e.extend_from_slice(&(code_off as u32).to_le_bytes()); // p_offset
+        e.extend_from_slice(&vaddr.to_le_bytes()); // p_vaddr
+        e.extend_from_slice(&vaddr.to_le_bytes()); // p_paddr
+        e.extend_from_slice(&bytes.to_le_bytes()); // p_filesz
+        e.extend_from_slice(&bytes.to_le_bytes()); // p_memsz
+        e.extend_from_slice(&5u32.to_le_bytes()); // PF_R | PF_X
+        e.extend_from_slice(&4u32.to_le_bytes()); // p_align
+        assert_eq!(e.len(), code_off);
+
+        for w in code {
+            e.extend_from_slice(&w.to_le_bytes());
+        }
+        e
+    }
+
+    #[test]
+    fn a_stripped_elf_loads_without_patches() {
+        let program = Program::from(&stripped_mips_elf())
+            .expect("a stripped ELF is valid and must load, not panic");
+        assert_eq!(program.pc_start, 0x0040_0000);
+        assert!(!program.instructions.is_empty(), "the executable segment was decoded");
+    }
+
+    #[test]
+    fn a_truncated_elf_is_an_error() {
+        let full = stripped_mips_elf();
+        // Every prefix: none may panic, and none may load.
+        for n in 0..full.len() {
+            assert!(
+                Program::from(&full[..n]).is_err(),
+                "a {n}-byte prefix of an ELF must be rejected, not accepted"
+            );
+        }
     }
 }
