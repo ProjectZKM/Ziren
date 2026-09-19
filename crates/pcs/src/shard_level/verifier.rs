@@ -1,6 +1,6 @@
-//! Host-side BasefoldShardVerifier: transcript prologue + LogUp-GKR
-//! + zerocheck + jagged-PCS verification, executing directly against
-//! host types rather than symbolic AIR.
+//! Host-side shard-proof verification: transcript prologue, LogUp-GKR,
+//! zerocheck, then the jagged-PCS opening -- against host types rather than
+//! symbolic AIR.
 
 use alloc::vec::Vec;
 
@@ -22,11 +22,9 @@ use crate::{Challenge, Chip, StarkGenericConfig, StarkVerifyingKey, Val};
 /// Errors emitted by the host-side shard-level BaseFold verifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BasefoldVerifyError {
-    /// Shape mismatch between the proof's public_values length and
-    /// the machine's expected PV count.
+    /// The proof's `public_values` length is not the machine's PV count.
     PublicValuesLengthMismatch { expected: usize, got: usize },
-    /// Shape mismatch between the proof's chip list and the machine's
-    /// chip set.
+    /// The proof's chip list is not the machine's chip set.
     ChipCountMismatch { expected: usize, got: usize },
     /// LogUp-GKR verification failed (sumcheck identity, chip opening
     /// consistency, or GKR-circuit-output MLE shape).
@@ -66,49 +64,42 @@ impl core::fmt::Display for BasefoldVerifyError {
 
 impl std::error::Error for BasefoldVerifyError {}
 
-/// Host-side shard-level BaseFold verifier.
+/// Host-side shard-level BaseFold verifier: the LogUp-GKR + zerocheck +
+/// jagged-PCS flow, run against host types rather than symbolic AIR.
 ///
-/// Parameterised on `SC: StarkGenericConfig` to match the
-/// [`BasefoldShardProof`] it consumes.  When the proof and config
-/// refer to `KoalaBearPoseidon2`, the verifier drives the LogUp-GKR
-/// + zerocheck + jagged-PCS flow that the recursion-circuit
-/// in-circuit version already implements.
-///
-/// Construct via [`Self::production_default`] for max_log_row_count = 22
-/// (Ziren's shard-padded default) or [`Self::with_params`] for custom.
+/// The config travels with the proof it verifies, not with this struct -- the
+/// only thing carried here is the shard cube. Build it with
+/// [`Self::production_default`]; [`Self::with_params`] is for tests on small
+/// shards.
 #[derive(Clone, Debug)]
 pub struct BasefoldShardVerifier {
-    /// Shard-padded max log row count — determines zerocheck dim and
-    /// jagged-PCS stack depth.
+    /// The shard cube: sets the zerocheck dimension and the jagged-PCS stack
+    /// depth. Every trace in a shard is padded to `2^max_log_row_count` rows.
     pub max_log_row_count: usize,
 }
 
 impl BasefoldShardVerifier {
-    /// Production default (max_log_row_count = 22).  The BaseFold codeword
-    /// two-adicity bound is over the STACKED poly's `log_stacking_height`
-    /// (≤ DEFAULT_LOG_STACKING_HEIGHT = 21), NOT max_log_row_count: the
-    /// LDE domain is `2^(log_stacking + log_blowup)`.  At the inner
-    /// default `log_blowup = 2` (`basefold/config.rs::default_fri_config`),
-    /// `log_stacking(≤21) + 2 ≤ 23 ≤ KoalaBear TWO_ADICITY = 24`, so the
-    /// recursion-circuit verifier's `two_adic_generator(log_codeword_size)`
-    /// does not panic (one bit of headroom; the wrap stage at blowup=3 sits
-    /// at exactly 24).
+    /// The production shard cube (22), fixed: every stage proves and verifies
+    /// at exactly this constant and it is never floated per proof.
+    ///
+    /// Two invariants keep it safe to fix.
+    ///
+    /// COVERAGE -- nothing can exceed it. The core executor's `height_split`
+    /// closes a shard before any chip reaches `2^CORE_MAX_LOG_ROW_COUNT` rows
+    /// (measured peaks ~2.5M against the 4.1M fence), and every recursion band
+    /// is asserted `<=` this cube at shape construction.
+    ///
+    /// TWO-ADICITY -- it is not the binding constraint. The codeword bound is
+    /// over the stacked poly's `log_stacking_height` (fixed 21), not this cube:
+    /// the LDE domain is `2^(log_stacking + log_blowup)`, so at the inner
+    /// `log_blowup = 2` that is `21 + 2 = 23`, one bit under KoalaBear's
+    /// `TWO_ADICITY = 24`. The wrap stage at blowup 3 sits at exactly 24.
     #[must_use]
     pub const fn production_default() -> Self {
-        // FIXED cube: every stage proves and verifies at exactly this
-        // constant — never floated per proof.  Coverage invariant: the core
-        // executor's `height_split` closes a shard before any chip reaches
-        // `2^CORE_MAX_LOG_ROW_COUNT` rows (`CORE_SHARD_HEIGHT_THRESHOLD`,
-        // measured peaks ~2.5M vs the 4.1M fence), and every recursion band
-        // is asserted `<=` this cube at shape construction
-        // (recursion/core shape.rs).
-        // Two-adic-safe: the BaseFold codeword bound is over
-        // log_stacking_height (fixed 21), NOT max_log_row_count.
         Self { max_log_row_count: crate::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT }
     }
 
-    /// Construct with explicit parameters.  Use when writing tests
-    /// against small shards.
+    /// A custom cube, for tests on small shards.
     #[must_use]
     pub const fn with_params(max_log_row_count: usize) -> Self {
         Self { max_log_row_count }
