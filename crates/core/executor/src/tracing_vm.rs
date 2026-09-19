@@ -1550,3 +1550,131 @@ mod tests {
         vm.execute_from_chunk(&chunk).expect("bounded worker exits cleanly");
     }
 }
+
+/// ZR-12: a regression that actually executes the hint seam.
+///
+/// `hint_slices_match_the_finished_stream` above builds 4,000 `ADD`s and an
+/// EMPTY input stream, so it never executes `HINT_LEN` or `HINT_READ` and cannot
+/// distinguish the old `[from, ptr)` capture window from the corrected
+/// `[from, ptr + 1)`.
+///
+/// `HINT_LEN` PEEKS `input_stream[ptr]` without advancing `ptr`, so a chunk
+/// sealed BETWEEN a `HINT_LEN` and its matching `HINT_READ` must carry the entry
+/// the peek saw -- one PAST the cursor -- or the replay finds its window one
+/// entry short and dies at `ptr == len`. That cost ~40 blocks a day.
+///
+/// The load-bearing part of these tests is the assertion that the seam WAS
+/// actually split. Without it the test passes under both implementations, which
+/// is precisely the defect being fixed here: a first version of this module did
+/// exactly that.
+#[cfg(test)]
+mod hint_seam_tests {
+    use super::*;
+    use crate::instruction::Instruction;
+    use crate::minimal_trace::MinimalTrace;
+    use crate::opcode::Opcode;
+    use crate::register::Register;
+    use crate::{Executor, Program};
+
+    const SYSHINTLEN: u32 = 0x0000_00F0;
+    const SYSHINTREAD: u32 = 0x0000_00F1;
+    const HINT_DST: u32 = 0x0010_0000;
+
+    fn li(reg: Register, value: u32) -> Instruction {
+        Instruction::new(Opcode::ADD, reg as u8, 0, value, false, true)
+    }
+    fn nop() -> Instruction {
+        Instruction::new(Opcode::ADD, 1, 0, 0, false, true)
+    }
+    fn syscall() -> Instruction {
+        Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false)
+    }
+
+    fn hint_seam_program(padding: usize, hint_len: u32) -> Vec<Instruction> {
+        let mut insns = vec![li(Register::V0, SYSHINTLEN), syscall()];
+        insns.extend((0..padding).map(|_| nop()));
+        insns.extend([
+            li(Register::V0, SYSHINTREAD),
+            li(Register::A0, HINT_DST),
+            li(Register::A1, hint_len),
+            syscall(),
+        ]);
+        insns
+    }
+
+    fn run(padding: usize, hint: &[u8]) -> (Vec<Vec<u8>>, Vec<TraceChunk>) {
+        let pc_base = 0x1000_0000u32;
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 1 << 10;
+        let program =
+            Program::new(hint_seam_program(padding, hint.len() as u32), pc_base, pc_base);
+        let mut exec = Executor::new(program, opts);
+        exec.write_vecs(&[hint.to_vec()]);
+        exec.minimal_trace_collector = Some(MinimalTrace::default());
+        loop {
+            match exec.execute_state(false) {
+                Ok((_, true)) => break,
+                Ok((_, false)) => {}
+                Err(e) => panic!("padding={padding}: execution failed: {e:?}"),
+            }
+        }
+        exec.seal_minimal_trace_final_memory();
+        let stream = exec.state.input_stream.clone();
+        (stream, exec.minimal_trace_collector.take().unwrap().chunks)
+    }
+
+    /// A chunk sealed inside the seam is one whose cursor is still 0 (the hint
+    /// is unread) and which is NOT the last chunk. There must be at least one,
+    /// or nothing about the seam is being tested -- and each must carry the
+    /// peeked entry, which is what `[from, ptr + 1)` provides and
+    /// `[from, ptr)` does not.
+    #[test]
+    fn a_chunk_sealed_inside_the_hint_seam_carries_the_peeked_entry() {
+        let hint: Vec<u8> = (0..16u8).collect();
+        // Enough padding that the seam spans several shard fences.
+        let (stream, chunks) = run(6000, &hint);
+        assert!(chunks.len() > 2, "only {} chunk(s): the fence never split the seam", chunks.len());
+
+        let sealed_in_seam: Vec<usize> = (0..chunks.len() - 1)
+            .filter(|&i| chunks[i].input_stream_ptr == 0)
+            .collect();
+        assert!(
+            !sealed_in_seam.is_empty(),
+            "no chunk was sealed between HINT_LEN and HINT_READ, so this test proves nothing; \
+             cursors={:?}",
+            chunks.iter().map(|c| c.input_stream_ptr).collect::<Vec<_>>()
+        );
+
+        for i in sealed_in_seam {
+            let slice = chunks[i].input_stream_slice.as_ref().unwrap_or_else(|| {
+                panic!("chunk {i} sealed inside the seam without any hint window")
+            });
+            assert!(
+                !slice.is_empty(),
+                "chunk {i} was sealed inside the seam with an EMPTY window: the replay would \
+                 not see the entry HINT_LEN peeked"
+            );
+            assert_eq!(slice[0], stream[0], "the carried entry is not the peeked one");
+        }
+    }
+
+    /// The window of every sealed chunk is a true slice of the stream at its own
+    /// cursor, across a sweep of fence positions.
+    #[test]
+    fn every_sealed_window_is_a_true_slice_of_the_stream() {
+        let hint: Vec<u8> = (0..16u8).collect();
+        for padding in [0usize, 1, 64, 1000, 6000] {
+            let (stream, chunks) = run(padding, &hint);
+            for (i, c) in chunks.iter().enumerate() {
+                let Some(slice) = c.input_stream_slice.as_ref() else { continue };
+                let from = c.input_stream_ptr as usize;
+                let to = (from + slice.len()).min(stream.len());
+                assert_eq!(
+                    slice.as_slice(),
+                    &stream[from..to],
+                    "padding={padding}, chunk {i}: captured window is not the stream's"
+                );
+            }
+        }
+    }
+}

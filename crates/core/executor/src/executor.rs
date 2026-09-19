@@ -247,7 +247,13 @@ pub struct Executor<'a> {
     pub local_reg_access: [Option<MemoryLocalEvent>; 36],
 
     /// A counter for the number of cycles that have been executed in certain functions.
-    pub cycle_tracker: HashMap<String, (u64, u32)>,
+    /// Open cycle-tracker scopes, innermost LAST.
+    ///
+    /// A STACK, not a name-keyed map: as a map, starting an already-open name
+    /// silently overwrote its start clock, ending an outer name while an inner
+    /// one was still open succeeded, and both produced plausible but wrong
+    /// attribution. Depth is the index, so it cannot disagree with nesting.
+    pub cycle_tracker: Vec<(String, u64)>,
 
     /// A buffer for stdout and stderr IO.
     pub io_buf: HashMap<u32, String>,
@@ -629,7 +635,7 @@ impl<'a> Executor<'a> {
             memory_accesses: MemoryAccessRecord::default(),
             shard_size: (opts.shard_size as u32) * 4,
             shard_batch_size: opts.shard_batch_size as u32,
-            cycle_tracker: HashMap::new(),
+            cycle_tracker: Vec::new(),
             io_buf: HashMap::new(),
             trace_buf,
             unconstrained: false,
@@ -4205,6 +4211,17 @@ impl<'a> Executor<'a> {
         // Flush trace buf
         if let Some(ref mut buf) = self.trace_buf {
             buf.flush().unwrap();
+        }
+
+        // A scope still open here was never closed, so its cycles were never
+        // reported and whatever it was meant to measure is missing from the
+        // report entirely.
+        if !self.cycle_tracker.is_empty() {
+            let open: Vec<&str> = self.cycle_tracker.iter().map(|(n, _)| n.as_str()).collect();
+            tracing::warn!(
+                "execution ended with unclosed cycle-tracker scopes: {open:?} -- their cycles \
+                 are absent from the report"
+            );
         }
 
         // Ensure that all proofs and input bytes were read, otherwise warn the user.

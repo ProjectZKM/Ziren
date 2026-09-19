@@ -133,24 +133,51 @@ fn handle_cycle_tracker_command(rt: &mut Executor, command: CycleTrackerCommand)
     }
 }
 
-/// Start tracking cycles for the given name at the specific depth and print out the log.
+/// Open a cycle-tracker scope.
+///
+/// Reopening a name that is already open is an instrumentation bug: as a
+/// name-keyed map this overwrote the original start clock and the outer span's
+/// cycles were lost. The scope is still pushed, so nesting stays consistent and
+/// the matching ends line up -- the mistake is reported rather than absorbed.
 fn start_cycle_tracker(rt: &mut Executor, name: &str) {
-    let depth = rt.cycle_tracker.len() as u32;
-    rt.cycle_tracker.insert(name.to_string(), (rt.state.global_clk, depth));
-    let padding = "│ ".repeat(depth as usize);
+    if rt.cycle_tracker.iter().any(|(n, _)| n == name) {
+        log::warn!(
+            "cycle-tracker-start: {name:?} is already open; nested scopes must have distinct \
+             names or their attribution is wrong"
+        );
+    }
+    let depth = rt.cycle_tracker.len();
+    rt.cycle_tracker.push((name.to_string(), rt.state.global_clk));
+    let padding = "│ ".repeat(depth);
     log::info!("{padding}┌╴{name}");
 }
 
-/// End tracking cycles for the given name, print out the log, and return the total number of cycles
-/// in the span. If the name is not found in the cycle tracker cache, returns None.
+/// Close a cycle-tracker scope, returning its cycle count.
+///
+/// Enforces LIFO. Closing an outer scope while an inner one is still open used
+/// to succeed and leave the inner scope open forever; closing an unknown name
+/// was ignored entirely. Both now say so: a non-LIFO close unwinds the scopes
+/// above it (reporting each as unclosed) so later ends still align, and an
+/// unknown close returns `None` with a warning.
 fn end_cycle_tracker(rt: &mut Executor, name: &str) -> Option<u64> {
-    if let Some((start, depth)) = rt.cycle_tracker.remove(name) {
-        let padding = "│ ".repeat(depth as usize);
-        let total_cycles = rt.state.global_clk - start;
-        log::info!("{}└╴{} cycles", padding, num_to_comma_separated(total_cycles));
-        return Some(total_cycles);
+    let Some(pos) = rt.cycle_tracker.iter().rposition(|(n, _)| n == name) else {
+        log::warn!("cycle-tracker-end: {name:?} was never opened");
+        return None;
+    };
+    if pos + 1 != rt.cycle_tracker.len() {
+        let inner: Vec<&str> =
+            rt.cycle_tracker[pos + 1..].iter().map(|(n, _)| n.as_str()).collect();
+        log::warn!(
+            "cycle-tracker-end: {name:?} closed while {inner:?} still open; those scopes are \
+             unclosed and their cycles are not reported"
+        );
+        rt.cycle_tracker.truncate(pos + 1);
     }
-    None
+    let (_, start) = rt.cycle_tracker.pop()?;
+    let padding = "│ ".repeat(rt.cycle_tracker.len());
+    let total_cycles = rt.state.global_clk.saturating_sub(start);
+    log::info!("{}└╴{} cycles", padding, num_to_comma_separated(total_cycles));
+    Some(total_cycles)
 }
 
 /// Update the io buffer for the given file descriptor with the given string.
@@ -168,5 +195,82 @@ fn update_io_buf(ctx: &mut SyscallContext, fd: u32, s: &str) -> Vec<String> {
         lines.into_iter().map(std::string::ToString::to_string).collect::<Vec<String>>()
     } else {
         vec![]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{end_cycle_tracker, start_cycle_tracker};
+    use crate::{Executor, Program};
+    use zkm_pcs::ZKMCoreOpts;
+
+    fn executor() -> Executor<'static> {
+        let pc = 0x1000_0000u32;
+        Executor::new(Program::new(Vec::new(), pc, pc), ZKMCoreOpts::default())
+    }
+
+    fn open(rt: &Executor<'_>) -> Vec<String> {
+        rt.cycle_tracker.iter().map(|(n, _)| n.clone()).collect()
+    }
+
+    #[test]
+    fn nested_scopes_close_innermost_first() {
+        let mut rt = executor();
+        start_cycle_tracker(&mut rt, "outer");
+        rt.state.global_clk = 10;
+        start_cycle_tracker(&mut rt, "inner");
+        rt.state.global_clk = 30;
+        assert_eq!(end_cycle_tracker(&mut rt, "inner"), Some(20));
+        assert_eq!(open(&rt), ["outer"], "the outer scope stays open");
+        rt.state.global_clk = 40;
+        assert_eq!(end_cycle_tracker(&mut rt, "outer"), Some(40));
+        assert!(rt.cycle_tracker.is_empty());
+    }
+
+    /// As a name-keyed map this OVERWROTE the first start clock, so the outer
+    /// span silently measured from the inner one's start.
+    #[test]
+    fn a_repeated_name_does_not_lose_the_first_start() {
+        let mut rt = executor();
+        start_cycle_tracker(&mut rt, "dup");
+        rt.state.global_clk = 100;
+        start_cycle_tracker(&mut rt, "dup");
+        assert_eq!(rt.cycle_tracker.len(), 2, "both opens are tracked");
+        rt.state.global_clk = 150;
+        // Innermost first: 150 - 100.
+        assert_eq!(end_cycle_tracker(&mut rt, "dup"), Some(50));
+        // ...and the FIRST open still has its own start clock.
+        assert_eq!(end_cycle_tracker(&mut rt, "dup"), Some(150));
+    }
+
+    /// Closing an outer scope while an inner one is open used to succeed and
+    /// leave the inner scope open forever.
+    #[test]
+    fn a_non_lifo_close_unwinds_rather_than_leaking() {
+        let mut rt = executor();
+        start_cycle_tracker(&mut rt, "outer");
+        start_cycle_tracker(&mut rt, "inner");
+        rt.state.global_clk = 60;
+        assert_eq!(end_cycle_tracker(&mut rt, "outer"), Some(60));
+        assert!(rt.cycle_tracker.is_empty(), "the abandoned inner scope is not left open");
+    }
+
+    #[test]
+    fn closing_an_unopened_scope_is_reported_not_ignored() {
+        let mut rt = executor();
+        assert_eq!(end_cycle_tracker(&mut rt, "never-opened"), None);
+        start_cycle_tracker(&mut rt, "real");
+        assert_eq!(end_cycle_tracker(&mut rt, "other"), None, "a different name does not close it");
+        assert_eq!(open(&rt), ["real"]);
+    }
+
+    #[test]
+    fn depth_follows_nesting() {
+        let mut rt = executor();
+        start_cycle_tracker(&mut rt, "a");
+        start_cycle_tracker(&mut rt, "b");
+        start_cycle_tracker(&mut rt, "c");
+        assert_eq!(rt.cycle_tracker.len(), 3, "depth is the stack index, so it cannot disagree");
+        assert_eq!(open(&rt), ["a", "b", "c"]);
     }
 }

@@ -51,6 +51,14 @@ impl AddAssign for ExecutionReport {
         counts_add_assign(&mut self.opcode_counts, *rhs.opcode_counts);
         counts_add_assign(&mut self.syscall_counts, *rhs.syscall_counts);
         self.touched_memory_addresses += rhs.touched_memory_addresses;
+        // The proving pipeline aggregates per-shard reports with this operator,
+        // so omitting `cycle_tracker` silently discarded every
+        // `cycle-tracker-report-*` measurement the guest emitted. A scope's
+        // cycles are additive across the shards it spans, which is the same rule
+        // the single-report accumulation in `handle_cycle_tracker_command` uses.
+        for (name, cycles) in rhs.cycle_tracker {
+            *self.cycle_tracker.entry(name).or_insert(0) += cycles;
+        }
     }
 }
 
@@ -75,5 +83,41 @@ impl Display for ExecutionReport {
             writeln!(f, "  {line}")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExecutionReport;
+
+    /// The proving pipeline aggregates per-shard reports with `+=`, and this
+    /// operator used to omit `cycle_tracker` entirely, so every
+    /// `cycle-tracker-report-*` measurement was silently discarded on the way
+    /// out. A scope's cycles are additive across the shards it spans.
+    #[test]
+    fn aggregation_keeps_scope_measurements() {
+        let mut a = ExecutionReport::default();
+        a.cycle_tracker.insert("keccak".into(), 100);
+        a.cycle_tracker.insert("only_in_a".into(), 7);
+
+        let mut b = ExecutionReport::default();
+        b.cycle_tracker.insert("keccak".into(), 250);
+        b.cycle_tracker.insert("only_in_b".into(), 9);
+
+        a += b;
+        assert_eq!(a.cycle_tracker.get("keccak"), Some(&350), "shared scopes add");
+        assert_eq!(a.cycle_tracker.get("only_in_a"), Some(&7), "lhs-only survives");
+        assert_eq!(a.cycle_tracker.get("only_in_b"), Some(&9), "rhs-only is carried over");
+    }
+
+    #[test]
+    fn aggregating_into_an_empty_report_carries_everything() {
+        let mut empty = ExecutionReport::default();
+        let mut rhs = ExecutionReport::default();
+        rhs.cycle_tracker.insert("prologue".into(), 42);
+        rhs.touched_memory_addresses = 5;
+        empty += rhs;
+        assert_eq!(empty.cycle_tracker.get("prologue"), Some(&42));
+        assert_eq!(empty.touched_memory_addresses, 5);
     }
 }
