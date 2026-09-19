@@ -35,36 +35,52 @@ use crate::{Challenge, StarkGenericConfig, Val};
 ///
 /// The algorithm runs in `O(2^m)` time using the standard tensor product.
 pub fn eq_mle_table<EF: Field + Send + Sync>(r: &[EF]) -> Vec<EF> {
+    eq_mle_table_iter(r.iter().copied())
+}
+
+/// [`eq_mle_table`] over `r` REVERSED, without materialising the reversal.
+///
+/// Callers that need the table over the reversed point used to write
+/// `eq_mle_table(&r.iter().rev().copied().collect::<Vec<_>>())`, allocating a
+/// copy of the point purely to hand it over backwards. The point is tiny next to
+/// the `2^m` table, so this is about not repeating the idiom -- and about not
+/// having two places where a reversal can be applied twice by accident.
+pub fn eq_mle_table_rev<EF: Field + Send + Sync>(r: &[EF]) -> Vec<EF> {
+    eq_mle_table_iter(r.iter().rev().copied())
+}
+
+/// The tensor-product doubling itself, over any exact-size sequence of
+/// coordinates.
+///
+/// ONE allocation, expanded in place. This used to allocate a fresh `Vec` per
+/// round -- `m` allocations totalling ~2x the final table -- justified by a
+/// comment about an "in-place reverse-iter ordering constraint". There is no such
+/// constraint in the `split_at_mut` form below: `lo` and `hi` are disjoint, and
+/// each `hi` slot is written from its `lo` partner BEFORE that partner is
+/// overwritten, so the doubling is still trivially parallel. Arithmetic order is
+/// unchanged, so every value is bit-identical to the previous implementation.
+fn eq_mle_table_iter<EF: Field + Send + Sync, I: ExactSizeIterator<Item = EF>>(r: I) -> Vec<EF> {
+    use p3_maybe_rayon::prelude::*;
     let m = r.len();
-    // Build via fresh Vec each iter (avoids in-place reverse-iter
-    // ordering constraint, lets us parallelize the doubling step).
-    // Skip zero/one init since every slot is overwritten.
-    let final_len = 1usize << m;
-    if final_len == 0 {
-        return Vec::new();
-    }
     if m == 0 {
         return vec![EF::ONE];
     }
-    use p3_maybe_rayon::prelude::*;
-    let mut table: Vec<EF> = vec![EF::ONE];
-    for &ri in r {
-        let old_len = table.len();
-        let new_len = old_len * 2;
-        // FLAKE FIX: KoalaBear u32 serde rejects out-of-range values
-        // from uninit memory; switch to safe vec! init.
-        let mut next: Vec<EF> = vec![EF::ZERO; new_len];
+    let final_len = 1usize << m;
+    // Safe init, not uninit: KoalaBear's u32 serde rejects out-of-range values,
+    // and an uninitialised `Vec<EF>` is UB besides.
+    let mut table: Vec<EF> = vec![EF::ZERO; final_len];
+    table[0] = EF::ONE;
+    let mut old_len = 1usize;
+    for ri in r {
         let one_minus_ri = EF::ONE - ri;
-        let (lo, hi) = next.split_at_mut(old_len);
-        lo.par_iter_mut().zip(hi.par_iter_mut()).zip(table.par_iter()).for_each(
-            |((lo_j, hi_j), &v)| {
-                *lo_j = v * one_minus_ri;
-                *hi_j = v * ri;
-            },
-        );
-        table = next;
+        let (lo, hi) = table[..old_len * 2].split_at_mut(old_len);
+        lo.par_iter_mut().zip(hi.par_iter_mut()).for_each(|(lo_j, hi_j)| {
+            *hi_j = *lo_j * ri;
+            *lo_j *= one_minus_ri;
+        });
+        old_len *= 2;
     }
-    debug_assert_eq!(table.len(), final_len);
+    debug_assert_eq!(old_len, final_len);
     table
 }
 

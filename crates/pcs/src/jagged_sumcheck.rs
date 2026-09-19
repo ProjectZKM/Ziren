@@ -51,16 +51,19 @@ fn build_weight_table(
     // bakes the height factor in for any row < 2^log_h_c because the high
     // bits of such a row are 0.
     let _ = r_row_per_chip; // unused: the full row_eq subsumes the per-chip row points
-    let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
+    // `_rev` builds the table over the reversed point without materialising the
+    // reversal (was a `rev().copied().collect()` feeding the forward call).
     let row_eq_full: Vec<InnerChallenge> =
-        crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-    let eq_per_chip: Vec<&[InnerChallenge]> =
-        packing.chip_infos.iter().map(|_info| row_eq_full.as_slice()).collect();
+        crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
+    // Every chip uses the SAME table: the full row_eq subsumes each chip's height,
+    // so there is nothing per-chip about it. This used to build a
+    // `Vec<&[InnerChallenge]>` with one identical entry per chip -- an allocation
+    // and an indirection per call for no information.
+    let eq_c: &[InnerChallenge] = &row_eq_full;
 
     let mut k: usize = 0;
     for (c_idx, info) in packing.chip_infos.iter().enumerate() {
         let h_c = info.row_count;
-        let eq_c = &eq_per_chip[c_idx];
         for _j in 0..info.column_count {
             let off = packing.offsets[k];
             // Bounds guard: catches the case
@@ -167,8 +170,7 @@ pub fn build_fused_weight_inputs(
     z_row: &[InnerChallenge],
 ) -> (Vec<InnerChallenge>, Vec<InnerChallenge>) {
     let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
-    let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
-    let row_eq = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+    let row_eq = crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
     (z_col_lagrange, row_eq)
 }
 
@@ -455,8 +457,7 @@ mod phase1_acceptance_gate {
             .map(|((_n, trace), _r_row_c)| {
                 let w = trace.width;
                 let h = trace.values.len() / w.max(1);
-                let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
-                let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+                let eq_c = crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(&z_row);
                 (0..w)
                     .map(|col| {
                         let mut acc = InnerChallenge::ZERO;
@@ -567,8 +568,7 @@ mod phase1_acceptance_gate {
         let w = trace_cols.len();
         let raw_h = trace_cols[0].len();
         let h_store = 1usize << log_h_store;
-        let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
-        let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+        let eq_c = crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
         let log_h2 = log_h_store as u32;
         (0..w)
             .map(|col| {
@@ -750,8 +750,7 @@ mod phase1_acceptance_gate {
         let w = trace_cols.len();
         let h_raw = 1usize << lr;
         let h_band = 1usize << lb;
-        let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
-        let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+        let eq_c = crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
         (0..w)
             .map(|col| {
                 // Materialize the band-length dense column: raw data bitrev'd over

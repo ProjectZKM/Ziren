@@ -2364,8 +2364,7 @@ mod test {
         // eq_mle_table's LSB-first bitrev.  The FULL row_eq subsumes the
         // height factor for any row < 2^log_h_c (the high bits of such a
         // row are 0).
-        let z_row_rev: Vec<JaggedChallenge> = z_row.iter().rev().copied().collect();
-        let eq_c = crate::zerocheck_prover::eq_mle_table::<JaggedChallenge>(&z_row_rev);
+        let eq_c = crate::zerocheck_prover::eq_mle_table_rev::<JaggedChallenge>(z_row);
         views
             .iter()
             .map(|(_, pm)| {
