@@ -65,16 +65,16 @@ impl NetworkProver {
         private_key: Option<String>,
         rpc_url: Option<String>,
     ) -> anyhow::Result<NetworkProver> {
-        let proof_network_privkey = Some(match private_key {
+        let proof_network_privkey = match private_key {
             Some(k) => k,
             None => env::var("ZKM_PRIVATE_KEY")
                 .map_err(|_| anyhow::anyhow!("ZKM_PRIVATE_KEY must be set for remote proving"))?,
-        });
-        let endpoint = Some(match rpc_url {
+        };
+        let endpoint = match rpc_url {
             Some(u) => u,
             None => env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()),
-        });
-        let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
+        };
+        let domain_name = env::var("DOMAIN_NAME").unwrap_or("stage".to_string());
         // The CA used to verify the proving network's certificate.
         //
         // This used to fall back SILENTLY to the repository's bundled
@@ -120,11 +120,14 @@ impl NetworkProver {
             _ => None,
         };
 
-        let endpoint_para = endpoint.to_owned().expect("ENDPOINT must be set");
+        // Each of these was wrapped in `Some(..)` at construction and then
+        // `expect`ed back out, so the "must be set" panics could not fire; the
+        // Option was plumbing, not a failure mode. Bound directly now.
+        let endpoint_para = endpoint;
         let endpoint = match ssl_config {
             Some(config) => {
                 let mut tls_config = ClientTlsConfig::new()
-                    .domain_name(domain_name.to_owned().expect("DOMAIN_NAME must be set"));
+                    .domain_name(domain_name);
                 if let Some(ca_cert) = config.ca_cert {
                     tls_config = tls_config.ca_certificate(ca_cert);
                 }
@@ -136,7 +139,7 @@ impl NetworkProver {
             None => Endpoint::new(endpoint_para.to_owned())?,
         };
 
-        let private_key = proof_network_privkey.to_owned().expect("set just above");
+        let private_key = proof_network_privkey;
         if private_key.is_empty() {
             anyhow::bail!("the proving-network private key is empty");
         }
@@ -282,9 +285,18 @@ impl NetworkProver {
                     };
 
                     // proof
+                    // `proof_with_public_inputs` is SERVER-controlled, so a
+                    // malformed or truncated response must be an error, not a
+                    // panic in the caller's process. This is the ZR-18 case.
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
-                            .expect("Failed to deserialize proof");
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "proving network returned a proof this client cannot \
+                                     deserialize ({} bytes): {e}",
+                                    get_status_response.proof_with_public_inputs.len(),
+                                )
+                            })?;
                     let cycles = get_status_response.total_steps;
                     let proving_time = get_status_response.proving_time;
                     tracing::info!(
@@ -340,8 +352,15 @@ impl NetworkProver {
         let (proof, mut public_values, cycles) = self.wait_proof(&proof_id, kind, timeout).await?;
 
         if kind == ZKMProofKind::CompressToGroth16 {
-            assert_eq!(private_input.len(), 1);
-            public_values = bincode::deserialize(private_input.last().unwrap())?;
+            // Caller-supplied shape: an `assert_eq!` + `.unwrap()` here panicked
+            // this `Result`-returning API on a bad input length.
+            let [only] = private_input.as_slice() else {
+                anyhow::bail!(
+                    "CompressToGroth16 takes exactly one private input, got {}",
+                    private_input.len(),
+                );
+            };
+            public_values = bincode::deserialize(only)?;
         }
 
         Ok((
