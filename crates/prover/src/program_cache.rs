@@ -23,7 +23,6 @@ pub fn program_cache_audit_enabled() -> bool {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────
 // Cross-block / cross-process disk cache.
 //
 // The in-memory program cache is a field on the `ZKMProver`, so it warms

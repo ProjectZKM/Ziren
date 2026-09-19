@@ -598,7 +598,7 @@ mod tests {
         assert_eq!(machine_jagged.column_counts_by_round.len(), 2);
     }
 
-    // ── HEIGHT-BINDING GUARD executed-circuit tests ──
+    // HEIGHT-BINDING GUARD executed-circuit tests
     //
     // These compile + RUN the DSL through the recursion runtime
     // (`run_test_recursion`), so the in-circuit `assert_felt_eq` in
@@ -652,7 +652,7 @@ mod tests {
         run_guard(32, 4);
     }
 
-    // ── MAIN-PADDING-COLUMN BIT-BOUND tests ──
+    // MAIN-PADDING-COLUMN BIT-BOUND tests
     //
     // Forgery-rejection at the recursion-circuit level.  The soundness role
     // of the main (padding) column height bound is carried by the

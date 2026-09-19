@@ -382,7 +382,7 @@ impl<P> BasefoldShardVerifier<P> {
             evaluation_proof,
         } = proof;
 
-        // ── Phase 1: Transcript prologue ────────────────────────
+        // Phase 1: Transcript prologue
 
         // Observe public values; non-machine-PV slots must be
         // zero-padded (caller's responsibility).
@@ -438,7 +438,7 @@ impl<P> BasefoldShardVerifier<P> {
 
         let _ = num_pv_elts; // reserved for public-value length check
 
-        // ── Phase 2: LogUp-GKR sumcheck verification ────────────
+        // Phase 2: LogUp-GKR sumcheck verification
         //
         // Reduces the per-chip LogUp cumulative-sum identity to a
         // single point/eval claim per chip.  The verifier samples
@@ -458,7 +458,7 @@ impl<P> BasefoldShardVerifier<P> {
             eval_public_values_fn,
         );
 
-        // ── Phase 3: Zerocheck sumcheck verification ────────────
+        // Phase 3: Zerocheck sumcheck verification
         //
         // Verifies the transition-constraint zerocheck IOP.
         // Consumes the LogUp-GKR-emitted per-chip evaluations and
@@ -479,7 +479,7 @@ impl<P> BasefoldShardVerifier<P> {
             challenger,
         );
 
-        // ── Phase 4: Jagged-PCS opening verification ────────────
+        // Phase 4: Jagged-PCS opening verification
         //
         // The prover's claimed main-trace evaluation at the
         // zerocheck-reduced point must be consistent with the
@@ -574,7 +574,7 @@ impl<P> BasefoldShardVerifier<P> {
         }
         evaluation_claims.extend(opened_values.chips.iter().map(|chip| chip.main.local.clone()));
 
-        // ── jagged HASH-BIND re-check (in-circuit) ──────────
+        // jagged HASH-BIND re-check (in-circuit)
         //
         // For each
         // round recompute

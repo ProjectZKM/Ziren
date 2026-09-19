@@ -48,7 +48,7 @@ use crate::witness::Witnessable;
 use crate::CircuitConfig;
 use zkm_pcs::{InnerChallenge, InnerVal};
 
-// ── Univariate + sumcheck types ──────────────────────────────────
+// Univariate + sumcheck types
 
 impl<C> Witnessable<C> for UnivariatePolynomial<InnerChallenge>
 where
@@ -86,7 +86,7 @@ where
     }
 }
 
-// ── LogUp-GKR proof types ────────────────────────────────────────
+// LogUp-GKR proof types
 
 impl<C> Witnessable<C> for LogUpGkrOutput<InnerChallenge>
 where
@@ -210,7 +210,7 @@ where
     }
 }
 
-// ── BaseFold opening types ───────────────────────────────────────
+// BaseFold opening types
 
 impl<C> Witnessable<C> for BasefoldAirOpenedValues<InnerChallenge>
 where
@@ -302,7 +302,7 @@ where
 // `basefold_zerocheck_proofs` fields, and there are no matching per-chip
 // recursion verifiers.
 
-// ── Jagged-PCS proof types ───────────────────────────────────────
+// Jagged-PCS proof types
 
 impl<C> Witnessable<C> for JaggedDimensionMetadata<InnerVal>
 where
@@ -343,7 +343,7 @@ where
 // structs whose fields use raw `EF` / `F` and map through to the
 // variable versions, which are not defined here.
 
-// ── Recursive BaseFold proof types ───────────────────────────────
+// Recursive BaseFold proof types
 
 impl<C, Dig: Clone> Witnessable<C> for RecursiveBasefoldRound<InnerVal, InnerChallenge, Dig>
 where
@@ -414,7 +414,7 @@ where
     fn write(&self, _witness: &mut impl WitnessWriter<C>) {}
 }
 
-// ── Top-level BaseFold shard proof ──────────────────────────────
+// Top-level BaseFold shard proof
 
 impl<C> Witnessable<C> for crate::shard_basefold::BasefoldShardProof<InnerVal, InnerChallenge>
 where
@@ -633,7 +633,7 @@ pub fn write_basefold_proof_to_stream<C>(
     }
 }
 
-// ── OUTER (BN254) value-independent (witness-stream) basefold proof ───
+// OUTER (BN254) value-independent (witness-stream) basefold proof
 //
 // The gnark wrap path witnesses the outer bundle's proof-specific values
 // from the gnark witness stream (rather than baking them as

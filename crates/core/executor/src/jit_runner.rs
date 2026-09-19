@@ -105,9 +105,7 @@ mod tests {
     }
 }
 
-// ──────────────────────────────────────────────────────────────────
 // JIT-side mem_reads oracle (scaffold)
-// ──────────────────────────────────────────────────────────────────
 //
 // Two-stage tracing relies on the producer side (which
 // today is the interp `Executor::execute_state` pass) emitting a

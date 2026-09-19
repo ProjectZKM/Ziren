@@ -240,7 +240,6 @@ pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
     roots[0]
 }
 
-// ─────────────────────────────────────────────────────────────────────
 // Jagged "hash-bind" (the count ↔ commitment tie).
 //
 // Observing only the RAW BaseFold root would leave the per-chip
@@ -268,7 +267,6 @@ pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
 //   * felts are `from_canonical_usize` (wraps mod the field order — the
 //     in-circuit verifier guards each count `< F::ORDER` so the wrap can
 //     never be exploited; see the recursion guards).
-// ─────────────────────────────────────────────────────────────────────
 
 /// Derive the per-chip `(row_counts, column_counts)` the hash-bind hashes,
 /// from the host jagged `PackingMeta`.  This is the SINGLE source of truth
@@ -418,7 +416,6 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
     FriConfig::<JaggedVal>::from_env_or_default()
 }
 
-// ─────────────────────────────────────────────────────────────────────
 // GPU jagged-reduction sumcheck dispatch hook.
 //
 // Mirrors the host `crate::jagged_sumcheck::prove_jagged_reduction_owned`
@@ -427,7 +424,6 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
 // (`JaggedReductionProof<InnerChallenge>`).  Wired from the jagged
 // step (4) reduction when the GPU jagged-reduction hook is registered
 // (GPU prover only).
-// ─────────────────────────────────────────────────────────────────────
 
 /// Borrowed-cells view of an EF row-GKR layer suitable for the GPU
 /// init hook.  The four sub-MLEs are passed by slice so the upload
@@ -600,7 +596,6 @@ where
     prover.prove_trusted_evaluation(eval_point, &[&prover_data.stacked_data], challenger)
 }
 
-// ─────────────────────────────────────────────────────────────────────
 // GPU BaseFold open dispatch.
 //
 // Mirror of the GPU commit override — provided statically by the prover
@@ -625,7 +620,6 @@ where
 // The hook returns `Result<.., (prover_data, eval_point)>` so the device
 // side can tunnel ownership of the host inputs back to the host fallback
 // on error (mirrors the `commit_jagged_pcs` hook contract).
-// ─────────────────────────────────────────────────────────────────────
 
 // The device open lives in the `JaggedOpener` impl `DeviceJaggedOpener`
 // (zkm-gpu-basefold), which calls `FriCudaProver::prove` and falls back to
@@ -779,7 +773,7 @@ where
     )
 }
 
-// ─── Jagged-sumcheck integration ──────────
+// Jagged-sumcheck integration
 //
 // The dense polynomial is still materialized for the sumcheck reduction (the
 // memory win is in the commit phase: BaseFold streams stripes through
@@ -924,7 +918,7 @@ pub mod jagged {
         pub preceding_commits:
             Vec<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
 
-        // ── Per-round split extra groups (G≥2 only) ───────────────────────
+        // Per-round split extra groups (G≥2 only)
         // All `serde(default)` empty so a G==1 bundle is byte-identical to the
         // pre-split wire format.  Indexed g-1 for group g≥1.
         /// Reductions for groups 1..G.
@@ -1082,7 +1076,6 @@ pub mod jagged {
     pub type PrecomputedJaggedCommit =
         PrecomputedJaggedCommitGeneric<crate::jagged_pcs::JaggedMmcs>;
 
-    // ─────────────────────────────────────────────────────────────────
     // Single shard-wide commit buffer — GPU precompute-commit hook.
     //
     // Device-side build of the precompute commit: resident chips are
@@ -1092,7 +1085,6 @@ pub mod jagged {
     // reduction.  Output MUST be byte-identical to the host precompute
     // (commit digest, prover_data shapes, interleaved MLE bytes) — the
     // commit is transcript-critical.
-    // ─────────────────────────────────────────────────────────────────
 
     // The device commit is built by the device prover's own `commit()`; its
     // recursion-AREA-PIN + provider-read rev(zeta) semantics match this host
@@ -1290,7 +1282,7 @@ pub mod jagged {
     {
         assert!(!rounds.is_empty(), "prove_jagged_basefold_rounds: no rounds");
 
-        // ── Concatenate the rounds into one column space ──────────────────
+        // Concatenate the rounds into one column space
         let mut chip_infos: Vec<crate::jagged::JaggedChipInfo> = Vec::new();
         let mut offsets: Vec<usize> = Vec::new();
         let mut round_padding_heights: Vec<Vec<usize>> = Vec::with_capacity(rounds.len());
@@ -1389,7 +1381,7 @@ pub mod jagged {
         };
         let n_chips = chip_infos.len();
 
-        // ── The reduction, over the CONCATENATED dense ────────────────────
+        // The reduction, over the CONCATENATED dense
         let reduce = |z_col: &[InnerChallenge],
                       challenger: &mut Challenger|
          -> crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge> {
@@ -1430,7 +1422,7 @@ pub mod jagged {
             crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, challenger)
         };
 
-        // ── ONE batched open across every round's committed data ──────────
+        // ONE batched open across every round's committed data
         // In WHIR mode (every round carries `whir_data`) the open runs the
         // jagged-WHIR sibling; the WHIR proof is captured into `whir_slot`
         // and the closure returns an EMPTY BaseFold placeholder so the shared
@@ -1629,7 +1621,7 @@ pub mod jagged {
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
     ) -> bool {
-        // ── COVERAGE CHECK (the #1 soundness guard — FIRST assertion) ─────
+        // COVERAGE CHECK (the #1 soundness guard — FIRST assertion)
         // Independently re-derive the round partition from the PUBLIC
         // name-sorted (name,row_count,column_count) the verifier already
         // holds, and require the proof's `groups` membership to equal it
@@ -1780,7 +1772,7 @@ pub mod jagged {
             return false;
         };
 
-        // ── CROSS-BIND (host analog of recursive_jagged_pcs.rs:247) ─────
+        // CROSS-BIND (host analog of recursive_jagged_pcs.rs:247)
         //
         // The recursion CIRCUIT ties the jagged sumcheck's claimed sum to the
         // TRACE OPENINGS: it forms `column_claims = opened_values.chips[].main.local`
@@ -2243,7 +2235,6 @@ mod test {
         .expect("basefold jagged-PCS roundtrip");
     }
 
-    // ════════════════════════════════════════════════════════════════
     // Jagged-BaseFold bundle tests — driven through the PRODUCTION
     // pipeline pair: `prove_jagged_basefold_rounds` (here with the
     // shard's single MAIN round) and `verify_jagged_basefold_no_observe`,
@@ -2252,7 +2243,6 @@ mod test {
     // (shard_level/verifier.rs) — chip_infos carrying the EXPLICIT
     // stacking-padding columns.  The commit observe is the caller's on
     // both sides (the shard-level Phase 1 prologue analog).
-    // ════════════════════════════════════════════════════════════════
 
     use crate::jagged_pcs::jagged::{
         build_jagged_verify_inputs, prove_jagged_basefold_rounds,
@@ -2616,13 +2606,11 @@ mod test {
         );
     }
 
-    // ───────────────────────────────────────────────────────────────────
     // G-host: LOCK THE HASH-BIND CONVENTION (jagged geometry
     // count ↔ commitment tie) with a host-only commit → verify round-trip,
     // BEFORE any circuit consumes it.  A wrong order / missing len-prefix
     // would silently desync Fiat-Shamir; this test prints the host hash and
     // asserts modified == recomputed host-side.
-    // ───────────────────────────────────────────────────────────────────
     #[test]
     fn g_host_hash_bind_roundtrip() {
         use crate::jagged_pcs::jagged::PackingMeta;

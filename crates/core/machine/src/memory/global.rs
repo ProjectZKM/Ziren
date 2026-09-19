@@ -358,8 +358,8 @@ where
             local.is_real.into(),
         );
 
-        // ── Option 2: local-only strictly-increasing address ordering via
-        // the MemoryGlobal{Init,Finalize}Control bus ──────────────────────
+        // Option 2: local-only strictly-increasing address ordering via
+        // the MemoryGlobal{Init,Finalize}Control bus
         // Each row receives its predecessor's address `prev_addr` (chained
         // by the bus to the prior row's `addr`; the genesis row receives the
         // prior shard's `previous_*_addr` from the public-values AIR) and

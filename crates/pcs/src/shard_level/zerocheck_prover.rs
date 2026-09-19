@@ -100,7 +100,7 @@ where
     // jagged-PCS round 0 checks desync.
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
-    // ── Per-chip ZeroCheckPoly path ──────────────────────
+    // Per-chip ZeroCheckPoly path
     //
     // Builds one lazy
     // `ZeroCheckPoly` per chip — summing only over the chip's real rows
@@ -115,7 +115,7 @@ where
     // columns main-then-preprocessed, chips folded in chip-NAME order
     // (matching the recursion verifier), eq anchored at the
     // GKR-emitted point.
-    // ── Per-chip ZeroCheckPoly setup (K-independent) ─────────
+    // Per-chip ZeroCheckPoly setup (K-independent)
     let zeta: Vec<Challenge<SC>> = logup_evaluations.point.clone();
     let num_variables = max_log_row_count as u32;
     debug_assert_eq!(
@@ -202,7 +202,7 @@ where
             }
         }
 
-        // ── SINGLE-FIELD CLAIM COLLAPSE ──────────────────
+        // SINGLE-FIELD CLAIM COLLAPSE
         // Seed the per-chip zerocheck claim from the FULL-POINT openings
         // (`main_trace_evaluations_full` ++ `preprocessed_trace_evaluations
         // _full`) with NO embed_factor.  Under the rev(zeta) convention
@@ -298,7 +298,7 @@ where
             None
         };
 
-        // ── rev(zeta) CONVENTION CONVERGENCE ─────────────
+        // rev(zeta) CONVENTION CONVERGENCE
         // use_rev: feed NATURAL trace rows and anchor the poly on
         // `rev(zeta)` (built at the poly construction below).  The poly's
         // big-endian fold over rev(zeta) then computes the LSB-first

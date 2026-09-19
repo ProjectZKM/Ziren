@@ -122,7 +122,7 @@ impl SysLinuxChip {
         cols.result = event.v0.into();
         cols.output.populate_write(event.write_records[0], blu);
 
-        // ── Canonical syscall decoder ──────────────────────────────────
+        // Canonical syscall decoder
         let sid = F::from_u32(event.syscall_code);
         cols.decode_mmap
             .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_MMAP as u32));
@@ -144,7 +144,7 @@ impl SysLinuxChip {
             || event.syscall_code == SyscallCode::SYS_MMAP2 as u32;
         cols.is_mmap = F::from_bool(is_mmap);
 
-        // ── Canonical a0 / a1 decoder ──────────────────────────────────
+        // Canonical a0 / a1 decoder
         let a0_val = F::from_u32(event.a0);
         cols.decode_a0_0.populate_from_field_element(a0_val);
         cols.decode_a0_1.populate_from_field_element(a0_val - F::ONE);
@@ -154,14 +154,14 @@ impl SysLinuxChip {
         cols.decode_a1_1.populate_from_field_element(a1_val - F::ONE);
         cols.decode_a1_3.populate_from_field_element(a1_val - F::from_u32(3));
 
-        // ── Composite flags ────────────────────────────────────────────
+        // Composite flags
         cols.is_mmap_a0_0 = F::from_bool(is_mmap && event.a0 == 0);
         cols.is_fnctl_a1_1 =
             F::from_bool(event.syscall_code == SyscallCode::SYS_FCNTL as u32 && event.a1 == 1);
         cols.is_fnctl_a1_3 =
             F::from_bool(event.syscall_code == SyscallCode::SYS_FCNTL as u32 && event.a1 == 3);
 
-        // ── Branch-specific trace ──────────────────────────────────────
+        // Branch-specific trace
         match event.syscall_code {
             4045 => {
                 // brk: read BRK register.

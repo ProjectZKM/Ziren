@@ -27,7 +27,7 @@ pub struct SyscallEvent {
     /// The second operand.
     pub arg2: u32,
 
-    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    /// instruction frame (see `AluEvent`)
     /// Every entry in `record.syscall_events` is a real SYSCALL instruction
     /// (single producer: `emit_syscall_event`), but the flag keeps the recipe
     /// uniform.  `a_record` above already carries the op_a write.

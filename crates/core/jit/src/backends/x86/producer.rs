@@ -356,7 +356,7 @@ pub fn build_producer(
         let control_flow = is_branch(op) || is_jump(op);
         let memory = is_load(op) || is_store(op);
 
-        // ── body ────────────────────────────────────────────
+        // body
         if memory {
             let full = t.assembler.new_dynamic_label();
             let touch = t.assembler.new_dynamic_label();
@@ -387,7 +387,7 @@ pub fn build_producer(
             cold.push(Cold::Trap { label: trap, pc });
         }
 
-        // ── stamps, clock ───────────────────────────────────
+        // stamps, clock
         for &(reg, pos) in &plan.stamps[..plan.n_stamps as usize] {
             assert!(reg < 36 && (POS_C..=POS_HI).contains(&pos), "stamp ({reg}, {pos})");
             let off = REG_STAMPS_OFFSET + i32::from(reg) * 8;
@@ -405,7 +405,7 @@ pub fn build_producer(
         }
         dynasm!(t.assembler ; .arch x64 ; add Rq(CLK_SHARD), 5);
 
-        // ── charges and fence checks ────────────────────────
+        // charges and fence checks
         let area = i32::try_from(plan.area).expect("area charge fits i32");
         let heights = &plan.heights[..plan.n_heights as usize];
         if control_flow {
@@ -489,7 +489,7 @@ pub fn build_producer(
             });
         }
 
-        // ── delay-slot dispatch ─────────────────────────────
+        // delay-slot dispatch
         if plan.delay_slot {
             let pc_base = cfg.pc_base;
             let bad = shared.bad_jump;

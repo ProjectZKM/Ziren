@@ -204,7 +204,7 @@ fn degree_bits_to_height(degree: &[Challenge]) -> Option<usize> {
     set.map(|s| 1usize << s)
 }
 
-// ───────────────────────────── CONTROL ────────────────────────────────
+// CONTROL
 
 /// CONTROL: an honest FIX-off proof VERIFIES.  Proves the harness's
 /// verify path is REAL (not trivially rejecting everything), so a later
@@ -243,7 +243,7 @@ fn stage0_control_fixon_honest_verifies() {
     assert!(res.is_ok(), "honest FIX-on proof must verify (control)");
 }
 
-// ───────────────────────────── FORGERY ────────────────────────────────
+// FORGERY
 
 /// Core forgery driver.  Proves a FIX-off proof, confirms it verifies
 /// honestly, then for the chosen target chip applies the supplied
@@ -439,7 +439,6 @@ fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
     eprintln!("[STAGE0][FORGE] TRANSCRIPT-only chip='{name}': height {cur} -> {lie}");
 }
 
-// ─────────────────────────────────────────────────────────────────────
 // fibonacci (height-varied MIPS)
 //
 // Two height-binding mechanisms exist on the host shard-verify path:
@@ -454,7 +453,6 @@ fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
 //       walk (verifier.rs:1861-1880).  This is the SUBSTRATE the
 //       VK-identity change relies on once heights leave both the hash and
 //       the transcript framing.  It always runs.
-// ─────────────────────────────────────────────────────────────────────
 
 // (A) TRANSCRIPT-COUPLED forgeries — reject via the transcript bind even
 //     with the reconstruction gate OFF (the production default).
@@ -595,9 +593,7 @@ fn stage1_degree_only_overclaim_fibonacci_rejected_on_default() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────
 // keccak / sha3 (precompile-uniform shards)
-// ─────────────────────────────────────────────────────────────────────
 
 #[test]
 #[ignore = "proves a real FIX-off keccak core proof (multi-second); run with --ignored"]
@@ -631,7 +627,6 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
     eprintln!("[STAGE0][VERDICT] keccak DEGREE-only OVER-claim => {tag}");
 }
 
-// ─────────────────────────────────────────────────────────────────────
 // Jagged HASH-BIND forgeries.
 //
 // The hash-bind ties the per-chip (row_count, column_count) geometry to the
@@ -645,7 +640,6 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
 // the recompute diverge and REJECT (`JaggedPcs(... IncorrectTableSizes)`).
 // This is the count↔commitment tie that the legacy raw-root-only digest
 // lacked entirely (a prover could witness any geometry).
-// ─────────────────────────────────────────────────────────────────────
 
 /// COLUMN-count tamper: bump a chip's `column_count` in the bundle's
 /// packing (leaving the committed raw root untouched).  The host re-check
@@ -727,7 +721,6 @@ fn stage0_forge_count_tamper_row_fibonacci() {
     eprintln!("[STAGE0][VERDICT] fibonacci ROW-count tamper (hash-bind) => {tag}");
 }
 
-// ═════════════════════════════════════════════════════════════════════
 // STAGE 1 — ZERO-DEGREE MODEL SOUNDNESS.
 //
 // The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
@@ -742,7 +735,6 @@ fn stage0_forge_count_tamper_row_fibonacci() {
 // rejection can only come from the degree-masked substrate (the
 // `LogupGkr`/`Zerocheck` reconstruction), NOT the Fiat-Shamir transcript
 // bind.  Run under the un-gated production default (reconstruction ON).
-// ═════════════════════════════════════════════════════════════════════
 
 /// Find the first shard+chip committed at genuine HEIGHT 0 — a missing
 /// canonical-cluster chip: its `degree` bits (`quotient[0]`) are a NON-EMPTY
@@ -871,7 +863,6 @@ fn stage1_forge_present_active_claims_missing_rejected() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────
 // PREPROCESSED BINDING PROBE.
 //
 // Ziren commits preprocessed traces INTO EACH SHARD alongside the main
@@ -888,7 +879,6 @@ fn stage1_forge_present_active_claims_missing_rejected() {
 // that is accepted, a prover can prove anything and claim it is some other
 // program.  If it is rejected, something already binds -- and the tag says
 // which check caught it.
-// ─────────────────────────────────────────────────────────────────────
 
 #[test]
 #[ignore = "proves two real FIX-off core proofs (multi-second); run with --ignored"]

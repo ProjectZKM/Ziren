@@ -89,14 +89,14 @@ fn the_jit_reproduces_the_interpreter_word_for_word() {
     let (program, total) = build_program(N);
     let program = Arc::new(program);
 
-    // ── the interpreter ──────────────────────────────────────────────
+    // the interpreter
     let mut runtime =
         Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(program.clone(), SC::new().perm);
     runtime.run().expect("interpreter");
     let want_events = runtime.record.base_alu_events.clone();
     assert_eq!(want_events.len(), N, "every ALU instruction should emit one event");
 
-    // ── the JIT ──────────────────────────────────────────────────────
+    // the JIT
     // Compile only the ALU tail: the seeding `Mem` writes are not emitted
     // by this phase, so the test performs them directly into the same flat
     // memory the emitted code addresses.
@@ -131,7 +131,7 @@ fn the_jit_reproduces_the_interpreter_word_for_word() {
         "the interpreter accepted this program, so the JIT must too"
     );
 
-    // ── compare ──────────────────────────────────────────────────────
+    // compare
     for (i, want) in want_events.iter().enumerate() {
         let got = &events[i * 3..i * 3 + 3];
         let w: [u32; 3] = unsafe {

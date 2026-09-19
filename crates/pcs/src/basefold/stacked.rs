@@ -685,7 +685,7 @@ mod test {
         let prover = StackedPcsProver::new(basefold_prover, log_stacking_height, batch_size);
         let verifier = StackedPcsVerifier::new(basefold_verifier, log_stacking_height);
 
-        // ── Commit each round separately; observe BOTH digests IN ORDER. ──
+        // Commit each round separately; observe BOTH digests IN ORDER.
         let mut p_chal = build_challenger();
         let (commit0, data0) = prover.commit_multilinears(vec![r0_a.clone(), r0_b.clone()]);
         p_chal.observe(commit0.clone());

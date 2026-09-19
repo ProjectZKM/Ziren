@@ -235,7 +235,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     }
     let z_star = proof.eval_point.clone();
 
-    // ── CLOSING WEIGHT `w_at_z` — CLOSED FORM ──────────────
+    // CLOSING WEIGHT `w_at_z` — CLOSED FORM
     //
     // `w_at_z` is the dense weight-MLE `w[off_k + row] = eq(z_col,k)·eq(z_row,row)`
     // evaluated at `z_star`.  It is a function of the VERIFIER's own trusted
@@ -562,7 +562,7 @@ mod phase1_acceptance_gate {
         );
     }
 
-    // ── Host-math proxy for the in-circuit step-4 assert ──
+    // Host-math proxy for the in-circuit step-4 assert
     //
     // The in-circuit recursion step-4 assert (recursive_jagged_pcs.rs:234) is
     //   assert_ext_eq( evaluate_mle_ext(column_claims, z_col), claimed_sum )

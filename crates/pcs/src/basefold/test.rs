@@ -72,12 +72,12 @@ fn test_basefold_roundtrip_single_round() {
     );
     let verifier = BasefoldVerifier::<F, EF, _>::new(fri_config, mmcs, 1);
 
-    // ── Commit (prover side, observed by both transcripts) ───────────
+    // Commit (prover side, observed by both transcripts)
     let mut p_chal = build_challenger();
     let (commitment, prover_data) = prover.commit_mles(vec![mle.clone()]);
     p_chal.observe(commitment.clone());
 
-    // ── Evaluation claims at a random extension-field point ──────────
+    // Evaluation claims at a random extension-field point
     let eval_point: Vec<EF> = (0..num_variables).map(|_| rand_ef(&mut rng)).collect();
     let eval_claims_one_round: Vec<EF> = mle.eval_at::<EF>(&eval_point);
     assert_eq!(eval_claims_one_round.len(), num_polys);
@@ -90,7 +90,7 @@ fn test_basefold_roundtrip_single_round() {
         &mut p_chal,
     );
 
-    // ── Verify with a fresh challenger that observes the same digest ─
+    // Verify with a fresh challenger that observes the same digest
     let mut v_chal = build_challenger();
     v_chal.observe(commitment.clone());
     verifier

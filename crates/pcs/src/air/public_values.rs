@@ -56,7 +56,7 @@ pub struct PublicValues<W, T> {
     /// The bits of the largest address that is witnessed for finalization in the current shard.
     pub last_finalize_addr_bits: [T; 32],
 
-    // ── Option 2 (local-only) boundary-anchor fields ──
+    // Option 2 (local-only) boundary-anchor fields
     // These are emitted by the public-values AIR (`eval_public_values`)
     // as the closing endpoints of the new control-bus interactions
     // (State / GlobalAccumulation / MemoryGlobalInit/Finalize) that

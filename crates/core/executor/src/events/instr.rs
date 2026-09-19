@@ -15,7 +15,7 @@ pub struct AluEvent {
     pub next_pc: u32,
     /// The opcode.
     pub opcode: Opcode,
-    /// ── instruction frame ─────────────────────────────────────────────
+    /// instruction frame
     /// Non-zero when this event is a REAL instruction, i.e. when the chip must
     /// carry its own program fetch / state chaining / register access rather
     /// than receiving a decoded instruction from `CpuChip` over the
@@ -119,7 +119,7 @@ pub struct CompAluEvent {
     pub hi_record: MemoryWriteRecord,
     pub hi_record_is_real: bool,
 
-    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    /// instruction frame (see `AluEvent`)
     /// Non-zero when this event is a REAL instruction.  The synthetic
     /// dependency events from `dependencies.rs` keep 0, and every field below
     /// is then meaningless.  FFI-safe: `u32` flag + the `Option*` mirrors, for
@@ -185,7 +185,7 @@ pub struct MemInstrEvent {
     /// The memory access record for memory operations.
     pub mem_access: MemoryRecordEnum,
 
-    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    /// instruction frame (see `AluEvent`)
     pub is_instruction: u32,
     /// Register memory records for the two operands a memory instruction has.
     ///
@@ -260,7 +260,7 @@ pub struct BranchEvent {
     /// The third operand value.
     pub c: u32,
 
-    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    /// instruction frame (see `AluEvent`)
     /// Branch events are always real instructions today, but the flag keeps
     /// the recipe uniform.  FFI-safe: `u32` + `Option*` mirrors.
     pub is_instruction: u32,
@@ -326,7 +326,7 @@ pub struct JumpEvent {
     /// The third operand value.
     pub c: u32,
 
-    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    /// instruction frame (see `AluEvent`)
     pub is_instruction: u32,
     /// The clock cycle.
     pub clk: u32,
@@ -395,7 +395,7 @@ pub struct MiscEvent {
     /// The hi operand memory record.
     pub hi_record: MemoryWriteRecord,
 
-    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    /// instruction frame (see `AluEvent`)
     pub is_instruction: u32,
     /// The `next_pc` RECEIVED on the `State` bus.
     pub recv_next_pc: u32,
@@ -461,7 +461,7 @@ pub struct MovCondEvent {
     /// The third operand value.
     pub prev_a: u32,
 
-    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    /// instruction frame (see `AluEvent`)
     pub is_instruction: u32,
     /// The clock cycle.
     pub clk: u32,

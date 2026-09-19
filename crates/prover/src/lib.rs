@@ -2207,7 +2207,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .unwrap();
         let mut proof = compress_proof.shard_proofs.pop().unwrap();
 
-        // ── BaseFold side-channel attach (GPU shrink) ──────────────────
+        // BaseFold side-channel attach (GPU shrink)
         //
         // Byte-exact no-op on the CPU prover (`CpuProver::open` already
         // populated `basefold_shard_proof` inline via
@@ -2615,7 +2615,7 @@ pub mod tests {
                 .expect("serialize compose program")
         };
 
-        // ── (a) SAFE COLLISION: different per-child heights, one class ──────
+        // (a) SAFE COLLISION: different per-child heights, one class
         // 2^3 and 2^8 rows per chip both land in pin class 0, so both children
         // commit at the same geometry.  Equal key AND equal program bytes —
         // the invariant holding.
@@ -2662,7 +2662,7 @@ pub mod tests {
              equal length but different compose program BYTES across bands",
         );
 
-        // ── (b) ROW INDEPENDENCE: children at three different row counts ───
+        // (b) ROW INDEPENDENCE: children at three different row counts
         // Every recursion node is proved at its own multiple-of-32 rows and
         // commits under the compress machine's area pins, so the compose
         // program over children of ANY rows is one program: one shape_key,
@@ -2783,7 +2783,7 @@ pub mod tests {
             ZKMCoreBasefoldWitnessValues::dummy(machine, &shape)
         };
 
-        // ── (a) The key must COLLIDE, and every collision must be safe ─────
+        // (a) The key must COLLIDE, and every collision must be safe
         // Core shards carry no area pin, so a wide height sweep does split the
         // key on `log_dense_size`.  What the cache needs is the other
         // direction: shapes differing only in a dimension the circuit cannot
@@ -2829,7 +2829,7 @@ pub mod tests {
             }
         }
 
-        // ── (b) THE SPLIT THAT MUST HAPPEN: a different chip SET ───────────
+        // (b) THE SPLIT THAT MUST HAPPEN: a different chip SET
         // Dropping a chip changes `column_counts_by_round`, which the verifier
         // BAKES, so the two programs differ and the keys must too.
         let mut fewer = base.clone();
@@ -4571,7 +4571,7 @@ pub mod tests {
             if infos.is_empty() { 1 } else { 2 },
         );
 
-        // ── The preprocessed round's COLUMN COUNT, real vs. enumerated ──
+        // The preprocessed round's COLUMN COUNT, real vs. enumerated
         //
         // The real round's padding is `area - real` split into columns no
         // taller than the row cube, at least one (`prove_jagged_basefold_rounds`).
@@ -5186,7 +5186,7 @@ pub mod tests {
         use crate::shapes::ZKMProofShape;
         setup_logger();
 
-        // ── vk_map sizes (the baked baseline). ──
+        // vk_map sizes (the baked baseline).
         let real_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
             bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap();
         let dummy_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
@@ -5198,7 +5198,7 @@ pub mod tests {
             dummy_vk_map.len()
         );
 
-        // ── Enumerated shape cardinality (height-keyed). ──
+        // Enumerated shape cardinality (height-keyed).
         let core_cfg = CoreShapeConfig::<KoalaBear>::default();
         let rec_cfg = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
         let all: Vec<ZKMProofShape> =

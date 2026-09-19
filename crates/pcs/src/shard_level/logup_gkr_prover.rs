@@ -83,7 +83,7 @@ where
     // every eq-table entry is consumed, no rows are padded.
     let domain = 1usize << eval_point.len();
     debug_assert!(height <= domain, "trace height ({height}) must be <= 2^|eval_point| ({domain})");
-    // ── GPU-IDLE lever: TRUNCATED eq-table build ───────────────────────
+    // GPU-IDLE lever: TRUNCATED eq-table build
     // Only rows `[0, height)` are ever summed below, so only the FIRST
     // `height` eq-table entries are ever read — yet the table is built over
     // the whole `2^|eval_point|` cube.  That is ruinous for the full-point
@@ -123,7 +123,7 @@ where
     // sum only over the real `height` rows — the eq-table is indexed at
     // `row < height <= domain` so the indices are in bounds.
     //
-    // ── HOST LEVER: base-field multiply + row-major pass ────────────────────
+    // HOST LEVER: base-field multiply + row-major pass
     // This function IS the LogUp-GKR output-extract's preprocessed opening,
     // and it is the largest single block of host compute on the shard
     // critical path: sub-instrumented on reth core (281 shards, 25 chips),

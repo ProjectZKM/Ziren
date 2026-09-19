@@ -116,7 +116,7 @@ where
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     ) = if is_inner {
-        // ── INNER ring ───────────────────────────────────────────────────
+        // INNER ring
         // Single shard-wide commit buffer, built by the host precompute over
         // the inner ring's `BfMmcs`.
         let mut precomputed =
@@ -141,7 +141,7 @@ where
         let raw_root_inner: [InnerVal; 8] =
             crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
-        // ── jagged HASH-BIND (inner ring only) ────────────
+        // jagged HASH-BIND (inner ring only)
         // Tie the per-chip (row_count, column_count) geometry to the commitment:
         //   modified = compress([raw_root, hash(once(len) ++ row_counts ++ col_counts)])
         // The Fiat-Shamir transcript observes `modified` (set as `main_commitment`
@@ -170,7 +170,7 @@ where
         };
         (main_commitment, precomputed_generic)
     } else {
-        // ── OUTER/wrap ring (BN254 OuterValMmcs) ───────────────────────
+        // OUTER/wrap ring (BN254 OuterValMmcs)
         // Build the ring-native BaseFold precompute via the `BasefoldRing`
         // trait method, INLINE during the prove pass.  The returned commit
         // already stamps `rev`.
@@ -281,7 +281,7 @@ where
         .collect();
     let shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>] =
         shared_trace_mles_vec.as_slice();
-    // ── The shard body, single-body form (the stage helpers live in
+    // The shard body, single-body form (the stage helpers live in
     // shard_level).
     debug_assert_eq!(
         chips.len(),
@@ -431,8 +431,8 @@ where
         "shard phase done"
     );
 
-    // ── Openings-for-free: reuse the zerocheck residual as the
-    // jagged step-3 y_per_chip ────────────────────────────────────────────
+    // Openings-for-free: reuse the zerocheck residual as the
+    // jagged step-3 y_per_chip
     // `trace_at_z[name]` is the zerocheck reduction's component_poly_evals
     // (prep-then-main per chip, = padded-MLE_BE(bitrev(trace)) @ z) — exactly
     // the per-column values jagged step (3) would recompute from the trace.
@@ -450,7 +450,7 @@ where
         .map(|pm| if pm.inner().is_none() { pm.metadata_height() } else { None })
         .collect();
 
-    // ── The PREPROCESSED round (the first opening round) ──────────────────
+    // The PREPROCESSED round (the first opening round)
     //
     // Its chip set, ORDER and dims come from the commit itself
     // (`packing.chip_infos`), which is authoritative: `setup` sorted the
@@ -582,12 +582,10 @@ where
     proof
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Shared NON-DEVICE shard-driver orchestration helpers, `pub` so the
 // ziren-gpu device-native drivers reuse them instead of duplicating.  Each
 // helper's operation order + observe/sample sequence must stay in lockstep
 // with the inline driver above (the drivers must emit byte-identical proofs).
-// ═══════════════════════════════════════════════════════════════════════════
 
 /// Per-chip RAW height for the transcript prologue + the proof's
 /// `chip_heights` map (the observed felt is the raw
@@ -1445,7 +1443,7 @@ where
     // The inner rings return `EvaluationProof::Bundle`; the wrap ring returns
     // `Bytes` (rmp-serialized `JaggedBasefoldBundleGeneric<OuterValMmcs>`) and
     // passes `pre_y_per_chip = None`.
-    // ── The PREPROCESSED round's views, mirroring the main round's ────────
+    // The PREPROCESSED round's views, mirroring the main round's
     //
     // Its heights come from the trace itself; every preprocessed trace is
     // host-resident (it was committed once at setup), so there is no

@@ -702,9 +702,7 @@ impl Display for CpuProverError {
 
 impl Error for CpuProverError {}
 
-// ───────────────────────────────────────────────────────────
 // Helper: drive prove_shard_with_data from inside `CpuProver::open()`.
-// ───────────────────────────────────────────────────────────
 
 /// Drive [`crate::shard_level::prover::prove_shard_with_data`]
 /// using a cloned challenger so the caller's transcript isn't perturbed.

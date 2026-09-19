@@ -521,7 +521,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         SC,
     >(max_log_row_count, max_log_row_count as u32);
 
-    // ── The jagged-WHIR verify branch (mirror of compress_basefold) ──
+    // The jagged-WHIR verify branch (mirror of compress_basefold)
     if let Some(whir_pv) = &whir_shard_proof_variable {
         let lsh = match &evaluation_proof {
             LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,

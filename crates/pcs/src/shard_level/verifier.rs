@@ -165,7 +165,7 @@ impl BasefoldShardVerifier {
             });
         }
 
-        // ── Transcript prologue ──────────────────────────────────
+        // Transcript prologue
         //
         // Observe public values, main commitment, and per-chip
         // metadata.  Order MUST match the prover's ordering at
@@ -211,7 +211,7 @@ impl BasefoldShardVerifier {
             }
         }
 
-        // ── LogUp-GKR sumcheck verification ──────────────────────
+        // LogUp-GKR sumcheck verification
         //
         // Ported from
         //   crates/recursion/circuit/src/logup_gkr.rs::verify_logup_gkr
@@ -235,15 +235,16 @@ impl BasefoldShardVerifier {
             .unwrap_or(1);
         let beta_seed_dim = max_arity.next_power_of_two().trailing_zeros() as usize;
 
-        // The core Option-2 public-values closure (`eval_public_values`:
-        // State / GlobalAccumulation / MemoryGlobalInit+Finalize boundary
-        // buses) only applies to machines that actually carry those buses —
-        // i.e. the MIPS core machine.  The recursion machine uses only
-        // self-cancelling `Local` buses (Memory / Program / Range / Syscall),
-        // so its local-only closure is `gkr_sum == 0` and the core State-bus
-        // PV-AIR (which reads a different PV schema and emits arity-16
-        // GlobalAccumulation messages) must not run for it.  Detect the
-        // machine kind structurally from its interaction set.
+        // Which closure the LogUp sum has to satisfy depends on the machine's
+        // buses, so detect them rather than being told:
+        //
+        // * CORE carries boundary buses (State, GlobalAccumulation, the
+        //   MemoryGlobal init/finalize controls), so its closure is the PV-AIR's
+        //   `eval_public_values`.
+        // * RECURSION carries only self-cancelling `Local` buses, so its closure
+        //   is simply `gkr_sum == 0`. Running the core PV-AIR for it would be
+        //   wrong twice over: it reads a different PV schema and emits arity-16
+        //   GlobalAccumulation messages that machine never sends.
         let machine_has_pv_buses = chips.iter().any(|chip| {
             chip.sends().iter().chain(chip.receives().iter()).any(|lk| {
                 matches!(
@@ -256,16 +257,11 @@ impl BasefoldShardVerifier {
             })
         });
 
-        // ── FIXED CUBE ──────────────────────────────────
-        //
-        // `self.max_log_row_count` is the fixed config cube — never floated
-        // up from the proof.  The GKR round-count check
-        // (`round_proofs.len() + 1 == max_log_row_count`) and the zerocheck
-        // point-dim check both bind the proof to this constant, so a proof
-        // produced at any other cube is rejected outright.  Every reachable
-        // proof IS at this cube: the core executor's `height_split` caps
-        // chip heights below `2^22` and the recursion bands are asserted
-        // `<=` the cube at shape construction.
+        // The cube comes from the config, never from the proof: the GKR
+        // round-count check (`round_proofs.len() + 1 == max_log_row_count`) and
+        // the zerocheck point dimension both bind the proof to it, so a proof
+        // built at another cube is rejected. Why every honest proof is at this
+        // one is on `production_default`.
         let max_log_row_count = self.max_log_row_count;
 
         verify_logup_gkr_host::<SC, A>(
@@ -280,7 +276,7 @@ impl BasefoldShardVerifier {
             challenger,
         )?;
 
-        // ── Zerocheck sumcheck verification ──────────────────────
+        // Zerocheck sumcheck verification
         //
         // Samples the same phase challenges as the in-circuit verifier,
         // checks the direct `Σ_b C(b) == 0` sumcheck, and observes the
@@ -302,7 +298,7 @@ impl BasefoldShardVerifier {
             &proof.opened_values,
         )?;
 
-        // ── Jagged HASH-BIND re-check ───────
+        // Jagged HASH-BIND re-check
         //
         // Recompute
         //   modified' = compress([raw_root, hash(once(len) ++ rc ++ cc)])
@@ -396,7 +392,7 @@ impl BasefoldShardVerifier {
             }
         }
 
-        // ── Jagged-PCS opening verification ──────────────────────
+        // Jagged-PCS opening verification
         //
         // Delegate to the existing host-side verifier at
         // crate::jagged_pcs::jagged::verify_jagged_basefold_no_observe
@@ -672,7 +668,7 @@ where
     // claimed by the proof and pinned by the hash-bind against the key's
     // commitment.  Nothing here reads chip metadata off the key — the key
     // carries none; the commitment already says what shape was committed.
-    // ── Rebuild the batched column layout, round by round ────────────────
+    // Rebuild the batched column layout, round by round
     //
     // The proof is ONE jagged instance whose columns run
     // `[round 0 real | round 0 stacking pad | round 1 real | round 1 pad | ..]`.
@@ -1204,7 +1200,7 @@ where
     let gkr_batch_open: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
-    // ── constraint-RLC BINDING (HARD CHECK) ───────
+    // constraint-RLC BINDING (HARD CHECK)
     // Recompute the in-circuit `rlc_eval` ON THE HOST from the SAME inputs
     // the circuit uses — the trace@z* openings carried in `opened_values`,
     // the transcript-sampled (alpha, gkr_batch_open, lambda), the GKR point
@@ -1278,12 +1274,12 @@ where
             acc_pow = acc_pow * gkr_batch_open;
             gkr_batch_open_powers.push(acc_pow);
         }
-        // ── SHARD-UNIFORM convention decision (mirror prover) ─
+        // SHARD-UNIFORM convention decision (mirror prover)
         let zerocheck_sum_mod: Challenge<SC> = gkr_evaluations
             .chip_openings
             .values()
             .map(|chip_evaluation| {
-                // ── SINGLE-FIELD CLAIM COLLAPSE ──────────────
+                // SINGLE-FIELD CLAIM COLLAPSE
                 // When the SHARD uses the collapsed convention, seed the
                 // per-chip claimed_sum term DIRECTLY from the FULL-POINT
                 // openings (`*_full`) with NO embed_factor — mirroring the
@@ -1405,7 +1401,7 @@ where
     let z_star = &zerocheck_proof.point_and_eval.0;
     let z_gkr = &gkr_evaluations.point;
 
-    // ── rev(zeta) eq-bridge anchor ──────────────────────────
+    // rev(zeta) eq-bridge anchor
     // Under the collapsed convention the prover anchors every chip's zerocheck
     // poly on `rev(z_gkr)` (natural cells, dropped bitrev), so the batched
     // reduced value carries `eq(rev(z_gkr), z*)`.  Mirror that here by feeding
@@ -1492,9 +1488,7 @@ where
     rlc_eval
 }
 
-// ─────────────────────────────────────────────────────────────
 // LogUp-GKR stage: host-side verification helpers
-// ─────────────────────────────────────────────────────────────
 
 /// Host-side `eq_eval`: the multilinear equality indicator
 ///
@@ -1921,7 +1915,7 @@ where
         denominator_eval = d0 + (d1 - d0) * line;
     }
 
-    // ── DEGREE-MASKED LAST-LAYER RECONSTRUCTION (height anchor) ──
+    // DEGREE-MASKED LAST-LAYER RECONSTRUCTION (height anchor)
     //
     // The round walk above reduces the GKR `circuit_output` num/den MLEs to
     // their evaluation `(numerator_eval, denominator_eval)` at the fully
@@ -2051,7 +2045,7 @@ where
                 name
             ))
         })?;
-        // ── FULL-POINT OPENING ──
+        // FULL-POINT OPENING
         //
         // Each chip's trace is opened at the FULL `max_log_row_count` point
         // (the trace is a padded MLE, real on the low rows and ZERO on the

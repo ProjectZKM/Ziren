@@ -1301,7 +1301,7 @@ mod tests {
             (0..50).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
         let program = Program::new(insns, pc_base, pc_base);
 
-        // ── Sequential pass A: capture records + MinimalTrace ──
+        // Sequential pass A: capture records + MinimalTrace
         let mut exec_a = Executor::new(program.clone(), ZKMCoreOpts::default());
         exec_a.minimal_trace_collector = Some(MinimalTrace::default());
         exec_a.run().expect("sequential run A");
@@ -1311,7 +1311,7 @@ mod tests {
         let total_cpu_a: usize = records_a.iter().map(|r| r.cpu_events.len()).sum();
         let total_addsub_a: usize = records_a.iter().map(|r| r.add_sub_events.len()).sum();
 
-        // ── Parallel pass B: replay via TracingVM workers ──
+        // Parallel pass B: replay via TracingVM workers
         let program_arc = Arc::new(program);
         let records_b = drive_tracing_vm_parallel(program_arc, ZKMCoreOpts::default(), &trace)
             .expect("parallel replay B");

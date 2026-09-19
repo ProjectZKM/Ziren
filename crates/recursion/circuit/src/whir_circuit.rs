@@ -409,7 +409,7 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
         let n = lsh;
         let final_log = n - folds.iter().sum::<usize>();
 
-        // ── Structural shape checks (compile-time). ──
+        // Structural shape checks (compile-time).
         assert_eq!(proof.final_poly.len(), 1usize << final_log, "whir final_poly len");
         assert_eq!(batch_evaluations.len(), round_stripe_counts.len(), "whir round count");
         assert_eq!(commitments.len(), round_stripe_counts.len(), "whir commitment count");
@@ -421,7 +421,7 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             "stacked WHIR carries its OOD in round constraints"
         );
 
-        // ── Replay claim batching: observe echoed evals, draw λ. ──
+        // Replay claim batching: observe echoed evals, draw λ.
         for round in batch_evaluations {
             for &e in round {
                 observe_ext_element::<C, FC>(builder, challenger, e);
@@ -605,7 +605,7 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             prev_round0 = false;
         }
 
-        // ── Final PoW + final queries. ──
+        // Final PoW + final queries.
         challenger.check_witness(builder, self.config.final_pow_bits, proof.final_pow);
         let final_openings = proof.round_query_openings.last().unwrap();
         let leaves_per_query = if prev_round0 { commitments.len() } else { 1 };
@@ -674,7 +674,7 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             },
         );
 
-        // ── Terminal identity. ──
+        // Terminal identity.
         let mut total = SymbolicExt::<C::F, C::EF>::ZERO;
         for c in &constraints {
             match c {
@@ -880,7 +880,7 @@ mod tests {
             })
             .collect();
 
-        // ── Build the circuit. ──
+        // Build the circuit.
         let mut builder = Builder::<InnerConfig>::default();
         let commit_vars: Vec<[zkm_recursion_compiler::ir::Felt<F>; 8]> = commitment_roots
             .iter()
@@ -907,7 +907,7 @@ mod tests {
             &mut challenger,
         );
 
-        // ── Witness stream, same order as the reads above. ──
+        // Witness stream, same order as the reads above.
         let mut witness_stream: Vec<WitnessBlock<InnerConfig>> = Vec::new();
         for d in &commitment_roots {
             for f in d {

@@ -504,7 +504,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         denominator_eval = d0_sym + (d1_sym - d0_sym) * last_coord_sym;
     }
 
-    // ── DEGREE-MASKED LAST-LAYER RECONSTRUCTION ──
+    // DEGREE-MASKED LAST-LAYER RECONSTRUCTION
     //
     // In-circuit mirror of the host `verify_logup_gkr_host` reconstruction
     // (crates/pcs/src/shard_level/verifier.rs:1628-1881).
@@ -692,7 +692,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         builder.assert_ext_eq(denominator_eval, expected_denominator);
     }
 
-    // ── Observe slot 1 — the GKR trace openings (trace@ζ) ──────────
+    // Observe slot 1 — the GKR trace openings (trace@ζ)
     //
     // In-circuit mirror of the host prover
     // (`row_gkr::top_level::prove_shard_logup_gkr_rows`) and of the host
@@ -812,7 +812,7 @@ mod tests {
         );
     }
 
-    // ── in-circuit LogUp degree-masked reconstruction tests ──
+    // in-circuit LogUp degree-masked reconstruction tests
     //
     // The full `verify_logup_gkr` transcript replay is exercised end-to-end by
     // the `test_e2e_compress_fibonacci` integration test (a real FIX-off proof

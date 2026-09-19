@@ -459,7 +459,7 @@ fn bne_loop_jit_matches_interpreter() {
     const N: u32 = 17;
     let program = build_bne_loop(N);
 
-    // ── Interpreter (forced via env) ────────────────────────
+    // Interpreter (forced via env)
     std::env::set_var("ZIREN_DISABLE_JIT", "1");
     let mut interp = Executor::new(program.clone(), ZKMCoreOpts::default());
     match interp.run_fast() {
@@ -469,7 +469,7 @@ fn bne_loop_jit_matches_interpreter() {
     let interp_regs = snapshot_interp_regs(&mut interp);
     std::env::remove_var("ZIREN_DISABLE_JIT");
 
-    // ── JIT ────────────────────────────────────────────────
+    // JIT
     // Note: this currently reaches the JIT path via Executor::run_fast
     // only if the program clears the `JIT_MIN_INSTR_COUNT` gate.  This
     // 6-instr fixture does not, so we exercise the JIT path directly to
@@ -777,7 +777,7 @@ fn alu_chain_jit_matches_interpreter_for_register_file() {
         "ALU-only program should not contain SYSCALL/LWL/LWR/SWL/SWR"
     );
 
-    // ── Interpreter ──────────────────────────────────────────
+    // Interpreter
     let mut rt = Executor::new(program.clone(), ZKMCoreOpts::default());
     match rt.run_fast() {
         Ok(()) | Err(ExecutionError::ExceptionOrTrap()) => {}
@@ -785,7 +785,7 @@ fn alu_chain_jit_matches_interpreter_for_register_file() {
     }
     let interp_regs = snapshot_interp_regs(&mut rt);
 
-    // ── JIT ───────────────────────────────────────────────────
+    // JIT
     let params = BuildParams {
         program_size: program.instructions.len(),
         memory_size: 4096,

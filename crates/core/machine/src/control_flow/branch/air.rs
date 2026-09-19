@@ -141,7 +141,7 @@ where
             builder.when(is_real.clone()).assert_bool(local.is_branching);
         }
 
-        // ── The comparison helpers ───────────────────────────────────────
+        // The comparison helpers
         //
         // A branch needs only EQUALITY (BEQ/BNE — and, since the zero-compare
         // opcodes read register 0 as `op_b`, `a_eq_b` doubles as `a == 0`
@@ -185,7 +185,7 @@ where
             (AB::Expr::ONE - local.msb_a) * (AB::Expr::ONE - local.a_eq_b),
         );
 
-        // ── The branching decision, per opcode ───────────────────────────
+        // The branching decision, per opcode
         // BEQ branches iff a == b.
         builder.when(local.is_beq * local.is_branching).assert_one(local.a_eq_b);
         builder.when(local.is_beq).when_not(local.is_branching).assert_zero(local.a_eq_b);

@@ -459,7 +459,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             }
         }
 
-        // ── The jagged-WHIR verify branch (mirror of compress_basefold) ──
+        // The jagged-WHIR verify branch (mirror of compress_basefold)
         if let Some(whir_pv) = &whir_shard_proof_variable {
             let lsh = match &evaluation_proof {
                 LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,

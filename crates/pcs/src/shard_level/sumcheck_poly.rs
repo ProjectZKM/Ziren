@@ -442,7 +442,7 @@ pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
     NV28_CHIP_META.with(|c| c.borrow_mut().take())
 }
 
-// ── BaseFold-over-BN254 wrap port: OUTER-ring jagged BaseFold open/verify ──
+// BaseFold-over-BN254 wrap port: OUTER-ring jagged BaseFold open/verify
 //
 // The OUTER (wrap) ring proves/verifies the jagged BaseFold open over
 // `OuterValMmcs` (Poseidon2-BN254) + `OuterChallenger` (MultiField32). Those

@@ -618,9 +618,7 @@ pub fn jagged_stats(packing: &JaggedPacking<impl Field>) -> JaggedStats {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════
 //  Hierarchical PCS: Table-Local Column Folding + Global BaseFold
-// ═══════════════════════════════════════════════════════════════════
 //
 // The naive approach (pack_traces_jagged above) treats all columns from
 // all tables as a single flat vector. This has O(total_columns) fan-in
@@ -742,7 +740,6 @@ pub fn hierarchical_jagged_pack<F: Field>(
     (folded, packing)
 }
 
-// ────────────────────────────────────────────────────────────────────────
 // <2^30 jagged round-split — shared integer-only partition.
 //
 // The jagged verifier asserts each round's `area < 1<<30`, `log_m < 30`, and
@@ -753,7 +750,6 @@ pub fn hierarchical_jagged_pack<F: Field>(
 // log_m+1`) hits the KoalaBear 31-bit num2bits wall.  Splitting the chips
 // into G groups, each with total area < 2^30, keeps every per-round
 // prefix-sum ≤ 31 bits.
-// ────────────────────────────────────────────────────────────────────────
 
 /// The `1 << 30` per-round area ceiling (the jagged verifier's
 /// `AreaOutOfBounds` / `log_m < 30` bound).  A round must hold a STRICTLY

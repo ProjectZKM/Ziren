@@ -419,7 +419,7 @@ where
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         let one_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ONE);
 
-        // ── PER-PROGRAM rev/collapsed convention decision ──────
+        // PER-PROGRAM rev/collapsed convention decision
         // rev(zeta) is scoped to the CORE commit + the NORMALIZE
         // recursion-verify.  `core_layer_rev` is a CIRCUIT-CONSTRUCTION-TIME
         // flag passed by the caller: it is `true` ONLY for the NORMALIZE program
@@ -447,7 +447,7 @@ where
 
         // (2) eq(zerocheck reduced point, GKR-emitted point).
         //
-        // ── rev(zeta) eq-bridge anchor ──────────────────────
+        // rev(zeta) eq-bridge anchor
         // Under the collapsed convention the prover anchors every chip's
         // zerocheck poly on `rev(z_gkr)` (natural cells, dropped bitrev), so the
         // batched reduced value carries `eq(rev(z_gkr), z*)`.  Mirror the host
@@ -615,7 +615,7 @@ where
             .values()
             .zip(opened_values.chips.iter())
             .map(|(chip_evaluation, opening)| {
-                // ── SINGLE-FIELD CLAIM COLLAPSE ──────────────
+                // SINGLE-FIELD CLAIM COLLAPSE
                 // When the SHARD uses the collapsed convention, seed the
                 // per-chip claimed_sum term DIRECTLY from the FULL-POINT
                 // openings (`*_full`) with NO embed_factor — mirroring the host
@@ -758,7 +758,7 @@ mod tests {
         let _result = eq_eval::<C>(&a, &b);
     }
 
-    // ── in-circuit *_full → claimed_sum CLAIM-BINDING tests ──
+    // in-circuit *_full → claimed_sum CLAIM-BINDING tests
     //
     // These EXECUTED-CIRCUIT tests (`run_test_recursion`) drive the EXACT
     // section-(6)/(7) claim-binding arithmetic that `verify_zerocheck` computes

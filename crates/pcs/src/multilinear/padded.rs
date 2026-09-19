@@ -352,7 +352,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
         };
         debug_assert!(eq.len() >= num_real);
 
-        // ── real-cells contribution ────────────────────────────────────────
+        // real-cells contribution
         // Per column: sequential dot product over the real rows (matching
         // `evaluate_trace_columns_at_point`'s accumulation order exactly),
         // parallelized across columns.
@@ -376,7 +376,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
             vec![EF::ZERO; np]
         };
 
-        // ── padding contribution ───────────────────────────────────────────
+        // padding contribution
         // Rows [num_real, 2^num_variables) carry the (per-column) padding
         // value; their MLE contribution is `pad · Σ_{row ≥ num_real} eq[row]`
         // where the geq-sum is computed analytically in O(num_variables) via

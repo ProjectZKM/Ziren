@@ -770,7 +770,6 @@ impl ZKMProofShape {
         let arity_recursion_shapes: Vec<Self> =
             small_shapes.iter().map(|os| Self::Recursion(vec![os.clone()])).collect();
 
-        // ───────────────────────────────────────────────────────────────
         // Compress / Deferred / Shrink key on f(recursion chip set, arity,
         // the children's PIN CLASSES in order).
         //

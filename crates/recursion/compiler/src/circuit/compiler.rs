@@ -598,7 +598,7 @@ where
         // In debug mode, we perform cycle tracking and keep track of backtraces.
         // Otherwise, we ignore cycle tracking instructions and pass around an empty Vec of traces.
         let debug_mode = zkm_debug_mode();
-        // ── REGION CENSUS ── env-gated compile-time tally of instructions per
+        // REGION CENSUS env-gated compile-time tally of instructions per
         // cycle-tracker region: the span builder runs WITHOUT debug_mode's
         // per-instruction println/backtraces, and the map prints greppably.
         let region_census = std::env::var_os("ZIREN_RECURSION_REGION_CENSUS").is_some();

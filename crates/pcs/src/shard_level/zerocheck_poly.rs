@@ -68,7 +68,7 @@ use crate::Chip;
 // device dispatches, below rayon's profitable granularity, and the
 // injected tasks displaced trace generation (−12 % reth).
 
-// ───────────────────────────── ported primitives ─────────────────────────
+// ported primitives
 
 /// `eq(point, -)` lagrange weights over the WHOLE `2^|point|` hypercube,
 /// big-endian (`point[0]` = MSB).
@@ -301,7 +301,7 @@ impl<F: Field> VirtualGeq<F> {
     }
 }
 
-// ───────────────────────────── ZeroCheckPoly ─────────────────────────────
+// ZeroCheckPoly
 
 /// One chip's zerocheck sumcheck polynomial.
 ///
@@ -909,7 +909,7 @@ pub(crate) fn bitrev_rows<EF: Field>(cells: &[EF], ncols: usize, height: usize) 
     out
 }
 
-// ───────────────────────────── trait impls ───────────────────────────────
+// trait impls
 
 impl<F, K, EF, A> SumcheckPolyBase for ZeroCheckPoly<'_, F, K, EF, A>
 where
@@ -1245,7 +1245,7 @@ mod tests {
         let _ = InnerVal::ONE; // keep InnerVal import used
     }
 
-    // ───── sumcheck-reduction end-to-end identity (host sum_as_poly) ─────
+    // sumcheck-reduction end-to-end identity (host sum_as_poly)
     use crate::air::{AirLookup, BaseAirBuilder, LookupScope};
     use crate::air::{MachineAir, MachineProgram};
     use crate::chip::Chip;
@@ -2433,7 +2433,7 @@ mod tests {
         }
     }
 
-    // ─────────────────── sum_as_poly spec-reference parity ───────────────────
+    // sum_as_poly spec-reference parity
     //
     // An INDEPENDENT re-implementation of one chip's one-round degree-4 round
     // poly, derived from the byte-exact spec of `sum_as_poly` (the exact thing

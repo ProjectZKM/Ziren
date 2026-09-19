@@ -643,7 +643,7 @@ pub fn verify_core_basefold<C, SC, A>(
             // separately.  The `assert_num_vars_le_max` binding below binds
             // the witnessed round count to `[0, MAX]`, so the soundness
             // primitive is in place regardless.
-            // ── The jagged-WHIR verify branch ──
+            // The jagged-WHIR verify branch
             // A WhirBundle proof runs verify_shard with the stacked-WHIR
             // inner PCS verifier; everything above (transcript prologue, GKR,
             // zerocheck, jagged metadata) is shared.  Branch taken at

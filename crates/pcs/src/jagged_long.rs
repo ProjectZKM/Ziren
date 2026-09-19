@@ -448,7 +448,7 @@ mod tests {
         let mut pch = InnerChallenger::new(perm.clone());
         let proof = prove_jagged_reduction_hadamard(msg, lsh, weights, &mut pch);
 
-        // ── verifier replay ──
+        // verifier replay
         let mut vch = InnerChallenger::new(perm);
         let mut current = claim;
         let mut sampled: Vec<InnerChallenge> = Vec::new();

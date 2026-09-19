@@ -300,7 +300,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
     let branch_target_pc = (current_pc.wrapping_add(4).wrapping_add(ins.op_c as u32)) as i32;
 
     match op {
-        // ── ALU ─────────────────────────────────────────────
+        // ALU
         JitOpcode::Add => t.add(rd, op_b, op_c),
         JitOpcode::Sub => t.sub(rd, op_b, op_c),
         JitOpcode::And => t.and(rd, op_b, op_c),
@@ -387,7 +387,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
 
-        // ── Multiply / divide ───────────────────────────────
+        // Multiply / divide
         // These all take two register source operands.  Ziren's
         // instruction format allows op_b/op_c to be immediates too,
         // but the JIT lowerings only accept registers — so when imm
@@ -470,7 +470,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             t.msubu(rs, rt);
         }
 
-        // ── ZKM extension ALU ───────────────────────────────
+        // ZKM extension ALU
         JitOpcode::Wsbh => {
             if ins.imm_b {
                 let v = ins.op_b;
@@ -532,7 +532,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
 
-        // ── Memory ──────────────────────────────────────────
+        // Memory
         JitOpcode::Lb => t.lb(rd, rs, imm32),
         JitOpcode::Lbu => t.lbu(rd, rs, imm32),
         JitOpcode::Lh => t.lh(rd, rs, imm32),
@@ -550,7 +550,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
         JitOpcode::Swr => t.swr(rd, rs, imm32),
         JitOpcode::Sc => t.sc(rd, rs, imm32),
 
-        // ── Control flow ────────────────────────────────────
+        // Control flow
         // Source register encoding (mirrors `execute_branch` in
         // executor.rs which reads `src1 = op_a` for ALL branches):
         // - Two-source (BEQ/BNE): src1=op_a, src2=op_b  → t.beq(rd, rs, ...)
@@ -631,7 +631,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
 
-        // ── System ──────────────────────────────────────────
+        // System
         JitOpcode::Syscall => t.syscall(current_pc),
         JitOpcode::Teq => {
             // Source register mapping (mirrors `execute_teq` in
@@ -652,7 +652,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
 
-        // ── Move-on-condition (Ziren extension) ─────────────
+        // Move-on-condition (Ziren extension)
         JitOpcode::Meq => {
             if ins.imm_b || ins.imm_c {
                 return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });

@@ -345,7 +345,7 @@ where
             )
         };
 
-    // ── Dummy emits the SAME numeric row_counts / padding_column_counts
+    // Dummy emits the SAME numeric row_counts / padding_column_counts
     // the real prover does for this shape, derived from the SAME jagged
     // packing (`dummy_jagged_basefold_bundle` builds it via
     // `pack_traces_jagged` on zero matrices -> exact
@@ -500,7 +500,7 @@ pub fn dummy_jagged_basefold_bundle(
     type EF = InnerChallenge;
     const D: usize = 4; // InnerChallenge = BinomialExtensionField<InnerVal, 4>
 
-    // ── Build the JAGGED shape at the PASSED per-chip heights.  In the VK
+    // Build the JAGGED shape at the PASSED per-chip heights.  In the VK
     // enumeration these are the cluster MAXIMAL-shape heights (normalize via
     // `maximal_core_shapes`, compress via `RecursionShapeConfig::allowed_shapes`),
     // so the dummy is already built at the per-chip-set cluster-max — the
@@ -514,7 +514,7 @@ pub fn dummy_jagged_basefold_bundle(
     //
     // pack_traces_jagged uses only height/width, so zero data gives the exact
     // offsets / total_values / log_dense_size / column_counts.
-    // ── The opening ROUNDS, as the prover lays them out ──────────────────
+    // The opening ROUNDS, as the prover lays them out
     //
     // `prove_jagged_basefold_rounds_generic` concatenates the rounds into ONE
     // column space: each round contributes its real columns rebased onto the
@@ -642,7 +642,7 @@ pub fn dummy_jagged_basefold_bundle(
         padding_heights,
     };
 
-    // ── Derived sub-lengths ──
+    // Derived sub-lengths
     let l = log_dense_size;
     // Per-round stripe counts.  They size the batched
     // open's per-round component openings and batch evaluations.
@@ -679,7 +679,7 @@ pub fn dummy_jagged_basefold_bundle(
 
     let zero_cap = || MerkleCap::<F, [F; 8]>::new(vec![[F::ZERO; 8]]);
 
-    // ── BaseFold proof (log_stacking rounds; query openings drive the stream) ──
+    // BaseFold proof (log_stacking rounds; query openings drive the stream)
     // One commit-phase round per `log_folding_arity` variables (trailing group
     // may be shorter), but still ONE univariate message per variable.
     let round_arities: Vec<usize> = {
@@ -768,7 +768,7 @@ pub fn dummy_jagged_basefold_bundle(
         batch_evaluations: round_stripes.iter().map(|stripes| vec![EF::ZERO; *stripes]).collect(),
     };
 
-    // ── The PCS the production config commits under ──
+    // The PCS the production config commits under
     // `KoalaBearPoseidon2::WHIR_INNER_PCS` routes every inner proof (core,
     // normalize, compose, shrink) through jagged-WHIR: the open captures a
     // `StackedWhirProof` and leaves the BaseFold proof EMPTY
@@ -799,14 +799,14 @@ pub fn dummy_jagged_basefold_bundle(
         (stacked, None)
     };
 
-    // ── Reduction sumcheck (L rounds, degree-2 → evals=[EF;3]) ──
+    // Reduction sumcheck (L rounds, degree-2 → evals=[EF;3])
     let reduction = JaggedReductionProof::<EF> {
         rounds: vec![JaggedReductionRound { evals: [EF::ZERO; 3] }; l.max(1)],
         eval_point: vec![EF::ZERO; l.max(1)],
         q_at_z: EF::ZERO,
     };
 
-    // ── Jagged-eval sub-sumcheck (n rounds, degree-2 → 3 coeffs) ──
+    // Jagged-eval sub-sumcheck (n rounds, degree-2 → 3 coeffs)
     let jagged_eval = JaggedSumcheckEvalProof::<EF> {
         partial_sumcheck_proof: PartialSumcheckProof {
             univariate_polys: vec![
@@ -1073,7 +1073,7 @@ mod tests {
 
         let max_log_row_count = 8usize;
 
-        // ── DUMMY side: derive from the dummy bundle's packing. ──
+        // DUMMY side: derive from the dummy bundle's packing.
         let dummy_bundle = dummy_jagged_basefold_bundle(&[], chip_dims, max_log_row_count, None);
         let (dummy_rc, dummy_pcc) = derive_row_and_padding_counts(
             &dummy_bundle.packing.column_counts,
@@ -1081,8 +1081,8 @@ mod tests {
             dummy_bundle.packing.total_values,
         );
 
-        // ── REAL side: pack full-VALUE matrices at the SAME dims (what
-        // the real prover's host commit does), then derive identically. ──
+        // REAL side: pack full-VALUE matrices at the SAME dims (what
+        // the real prover's host commit does), then derive identically.
         let real_traces: Vec<(String, RowMajorMatrix<InnerVal>)> = chip_dims
             .iter()
             .enumerate()
@@ -1126,7 +1126,7 @@ mod tests {
         let (real_rc, real_pcc) =
             derive_row_and_padding_counts(&real_column_counts, &real_offsets, area);
 
-        // ── dummy == real on the new fields. ──
+        // dummy == real on the new fields.
         assert_eq!(dummy_rc, real_rc, "row_counts dummy != real");
         assert_eq!(dummy_pcc, real_pcc, "padding_column_count dummy != real");
         // Sanity: the real chips' row counts ARE the chip heights, in dim

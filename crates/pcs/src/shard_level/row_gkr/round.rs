@@ -284,7 +284,7 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
         }
     };
 
-    // ── eq-root HALF trick ──────────────────────────────────────────
+    // eq-root HALF trick
     // `p(X) = eq(round_coord, X) · g(X)` factors through the eq factor of
     // the bound variable, so `p` vanishes at the eq-factor root and (by
     // the sumcheck identity) `p(0) + p(1) = current_claim`.  Evaluate the
@@ -760,7 +760,7 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
 
     let num_chips = state.n0.len();
 
-    // ── eq-root HALF trick ──────────────────────────────────────────
+    // eq-root HALF trick
     // `p(X) = eq(round_coord, X) · g(X)` (the row eq factor `eq(c, X)` is
     // common across every chip / row / pad term), so `p` vanishes at the
     // eq-factor root and `p(0) + p(1) = current_claim`.  Evaluate the FULL
@@ -2018,7 +2018,6 @@ mod tests {
         }
     }
 
-    // ───────────────────────────────────────────────────────────────
     // eq-root HALF-trick bit-identity tests.
     //
     // These assert the {0, 1/2}+claim+eq_root reconstruction produces
@@ -2028,7 +2027,6 @@ mod tests {
     // non-degenerate coordinate — the trick only trades the third sum for
     // an interpolation.  Passing `round_coord = 0` (a degenerate value)
     // forces the direct {1, 2, 3} fallback, giving the reference sweep.
-    // ───────────────────────────────────────────────────────────────
 
     /// Independent brute-force evaluation of the packed round polynomial
     /// `p(X)` at a single `X` under the factored-eq layout.  Mirrors the

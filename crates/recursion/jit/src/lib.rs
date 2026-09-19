@@ -64,7 +64,7 @@ pub enum JitError {
     Unsupported(&'static str),
 }
 
-// ── Layout contract ──────────────────────────────────────────────────────
+// Layout contract
 // The emitted code addresses memory as `base + addr * size_of::<MemoryEntry>`
 // with the value at offset 0.  These are the assumptions that makes, checked
 // at compile time so a layout change in `zkm-recursion-core` breaks the

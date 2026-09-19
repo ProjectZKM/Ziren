@@ -1681,7 +1681,6 @@ pub mod tests {
         );
     }
 
-    // ───────────────────────────────────────────────────────────────────────
     // Fast validation harness for the single-FIELD-collapse
     // height-soundness restructure.  TEST-ONLY: these add NO production logic;
     // they wrap the existing FIX-off prove + machine.verify path so the later
@@ -1695,7 +1694,6 @@ pub mod tests {
     // originally asserted the opposite -- that the forgery SURVIVED -- to pin
     // the hole the restructure had to close; that flip has happened and the
     // assertions now guard against it reopening.
-    // ───────────────────────────────────────────────────────────────────────
 
     // Shared helper: FIX-off prove a single-shard program at RAW heights, then
     // return (proof, machine, vk) so the caller can verify honest / forged

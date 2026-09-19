@@ -1731,7 +1731,7 @@ mod tests {
         assert_eq!(result, 28);
     }
 
-    // ── Round-count binding tests ──
+    // Round-count binding tests
     //
     // These compile + RUN the DSL through the recursion runtime
     // (`run_test_recursion`), so the in-circuit `assert_felt_eq` inside
@@ -1833,7 +1833,7 @@ mod tests {
         run_numvars_bind(32, 4);
     }
 
-    // ── Merkle-walk `index == 0` residual-assert tests ──
+    // Merkle-walk `index == 0` residual-assert tests
     //
     // The production residual binding lives inside
     // `verify_untrusted_evaluations` after each in-circuit Merkle walk:

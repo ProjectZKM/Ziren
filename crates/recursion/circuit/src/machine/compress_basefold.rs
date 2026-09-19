@@ -597,7 +597,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // compress with bundle lift hits `basefold_verifier.rs:779`
         // (`rounds.len() != num_variables`) when small shards trigger
         // `pick_log_stacking_height` clamping.
-        // ── The jagged-WHIR verify branch (mirror of core_basefold) ──
+        // The jagged-WHIR verify branch (mirror of core_basefold)
         // A WhirBundle child runs verify_shard with the stacked-WHIR inner
         // PCS verifier; everything else (transcript prologue, GKR,
         // zerocheck, jagged metadata) is shared.  Branch taken at
