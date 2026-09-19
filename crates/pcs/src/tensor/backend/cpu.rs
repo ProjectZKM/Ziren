@@ -67,6 +67,10 @@ unsafe impl Allocator for CpuBackend {
 struct ForeignRegion {
     end: usize,
     refs: usize,
+    /// Never read: holding it is the point. Dropping the last `ForeignRegion` for
+    /// a mapping drops this `Arc`, which is what releases the foreign allocation,
+    /// so the field is an RAII handle rather than data.
+    #[allow(dead_code)]
     keepalive: Arc<dyn Any + Send + Sync>,
 }
 

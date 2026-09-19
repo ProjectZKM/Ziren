@@ -180,6 +180,18 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
     }
 }
 
+// A NAIVE reference implementation of the jagged-eval sumcheck, plus the two
+// materializers it needs. Nothing calls any of it.
+//
+// It is kept because it is the other half of a differential test that does not
+// exist yet: materialize `f` and `bp` for a small instance, run the naive
+// O(n·2^n) sumcheck, and require the structural `prove_jagged_evaluation` above
+// to agree. That is worth having -- the jagged tests were pinned to one layout
+// until recently and this path has no independent check -- but writing it means
+// aligning two challenger transcripts, so it is a piece of work rather than a
+// tidy-up. `allow(dead_code)` instead of deletion so the option survives; if it
+// is still unused in a few months, delete it and recover this from git.
+
 /// Prove the jagged-evaluation sub-protocol.
 ///
 /// Returns a structurally-valid
@@ -218,6 +230,7 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 /// Reverse the lowest `n` bits of `v`.  Used to align the LSB-first
 /// hypercube indexing (used by partial_lagrange) with the MSB-first
 /// big-endian Point convention of `merged_prefix_sums`.
+#[allow(dead_code)]
 fn bit_reverse(v: usize, n: usize) -> usize {
     let mut r = 0;
     for j in 0..n {
@@ -239,6 +252,7 @@ fn bit_reverse(v: usize, n: usize) -> usize {
 /// Index mapping (per the MSB-first / LSB-first alignment between
 /// the big-endian Point and partial_lagrange's table indexing):
 ///   `i = (bit_reverse(upper_k, half) << half) | bit_reverse(lower_k, half)`
+#[allow(dead_code)]
 fn materialize_f_evals(
     z_col_lagrange: &[InnerChallenge],
     prefix_sums: &[usize],
@@ -271,6 +285,7 @@ fn materialize_f_evals(
 /// First `half` bits ↔ var_0..var_{half-1} (lower's MSB-first
 /// representation per partial_lagrange convention); last `half` bits ↔
 /// var_half..var_{n-1} (upper's MSB-first).
+#[allow(dead_code)]
 fn materialize_bp_evals(bp: &BranchingProgram<InnerChallenge>, half: usize) -> Vec<InnerChallenge> {
     let n = 2 * half;
     let total = 1usize << n;
@@ -326,6 +341,7 @@ fn univariate_from_three_evals(
 /// **Complexity**: O(2^n) memory + O(n × 2^n) time.  Only feasible
 /// for small `n` (test fixtures, log_m ≤ ~12).  Production needs
 /// the structural prover below.
+#[allow(dead_code)]
 fn naive_jagged_eval_sumcheck(
     mut f: Vec<InnerChallenge>,
     mut bp: Vec<InnerChallenge>,
@@ -397,6 +413,7 @@ fn naive_jagged_eval_sumcheck(
 /// to the dummy proof (production needs the structural prover).
 /// Set to `n=24` (log_m=11) → 16M-cell hypercube — fits in ~64MB EF
 /// per side.  log_m=12 (n=26) would need 256MB and gets slow.
+#[allow(dead_code)]
 const NAIVE_SUMCHECK_MAX_N: usize = 24;
 
 /// Structural sumcheck prover for the jagged-eval polynomial.

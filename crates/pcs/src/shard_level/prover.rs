@@ -206,7 +206,8 @@ where
 /// proof bytes for the same shard.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_with_data<SC, A>(
-    machine: &crate::StarkMachine<SC, A>,
+    // (The `machine` parameter is gone: its only use was `machine.core_rev()`,
+    // and there is one row orientation now.)
     data: crate::prover::ShardData<'_, SC, A>,
     challenger: &mut SC::Challenger,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>

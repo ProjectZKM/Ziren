@@ -77,7 +77,6 @@ mod tests {
     use super::Traces;
     use crate::basefold::Mle;
     use crate::multilinear::PaddedMle;
-use crate::tensor::{Backend, CpuBackend};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;

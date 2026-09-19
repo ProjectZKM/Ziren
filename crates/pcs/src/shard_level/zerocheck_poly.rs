@@ -362,8 +362,11 @@ where
     /// Construct a chip's zerocheck poly.  `main_cells` / `prep_cells`
     /// are the real (un-padded) trace rows, row-major, in the cell field
     /// `K` (base `F` for the first round, `EF` after a fold).
+    // `pub(crate)`, not `pub`: it takes a `pub(crate) VirtualGeq`, so a `pub`
+    // signature leaked a more-private type (the `private_interfaces` warning).
+    // Its only caller is `zerocheck_prover.rs`, in this crate.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         air: &'a Chip<F, A>,
         public_values: &'a [F],
         alpha: EF,

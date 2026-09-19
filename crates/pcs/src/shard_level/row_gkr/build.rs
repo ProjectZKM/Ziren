@@ -171,9 +171,7 @@ mod tests {
     use super::*;
     use crate::air::LookupScope;
     use crate::lookup::{Lookup, LookupKind};
-    use crate::Challenge;
 
-    type EF = Challenge<crate::koala_bear_poseidon2::KoalaBearPoseidon2>;
 
     /// Build a one-chip shard with a single send-interaction whose
     /// trace and lookup are deterministic.  Used to drive end-to-end

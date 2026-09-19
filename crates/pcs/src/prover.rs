@@ -567,7 +567,6 @@ where
         // and the jagged-PCS opening, driven from the challenger
         // snapshot above.
         let basefold_shard_proof = prove_shard_with_data_boxed::<SC, A>(
-            self.machine(),
             &chips,
             pk.preprocessed_mles(),
             <SC as crate::BasefoldRing>::prep_open_data(pk.preprocessed_data()),
@@ -696,9 +695,9 @@ impl Error for CpuProverError {}
 /// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A>(
-// Supplies the per-stage rev(zeta) orientation and the recursion area pin
-// the shard body reads; nothing else is taken from the prover.
-    machine: &StarkMachine<SC, A>,
+    // (The `machine` parameter is gone: it supplied the per-stage rev(zeta)
+    // orientation, and there is one row orientation now. The area pin comes from
+    // the proving key, not from here.)
     chips: &[&MachineChip<SC, A>],
     pk_preprocessed_mles: &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>],
 // The proving key's PRECOMPUTED preprocessed commit
@@ -821,7 +820,6 @@ where
     );
 
     let proof = crate::shard_level::prover::prove_shard_with_data::<SC, A>(
-        machine,
         ShardData {
             chips: &chips_reborrow,
             main_pin: pk_main_pin,
