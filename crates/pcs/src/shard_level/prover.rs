@@ -75,11 +75,20 @@ where
     );
     // Ring discriminator: the INNER ring (core/compress/shrink) uses the
     // Poseidon2-KoalaBear `JaggedChallenger`; the OUTER/wrap ring uses the BN254
-    // `OuterChallenger` (and `BfMmcs = OuterValMmcs`).  The inner ring routes the
-    // commit through the `commit_multilinears` device seam (so a `StarkGpuProver`
-    // override is picked up); the outer ring — always host (the wrap never runs
-    // on the GPU) — builds via the `BasefoldRing::commit_multilinears`
-    // trait method (which encapsulates the ring-generic `SC::BfMmcs` bounds).
+    // `OuterChallenger` (and `BfMmcs = OuterValMmcs`).
+    //
+    // What the branch is actually FOR is the jagged HASH-BIND below: the inner
+    // ring ties the per-chip geometry into the observed digest, the outer ring
+    // does not. Both arms call the same `commit_multilinears` default body (one
+    // through the concrete `KoalaBearPoseidon2`, one through the generic `SC`),
+    // which is why the commit itself is not what differs.
+    //
+    // A previous comment here said the inner arm went through a
+    // "`commit_multilinears` device seam (so a `StarkGpuProver` override is picked
+    // up)". There is no such override -- that method has exactly one body in
+    // either repo, and ziren-gpu does not implement `BasefoldRing` at all. The
+    // device path commits through its own hook
+    // (`gpu_jagged_precompute_commit_hook`), not through this method.
     let is_inner =
         TypeId::of::<SC::Challenger>() == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
 
@@ -118,25 +127,45 @@ where
         // INNER ring
         // Single shard-wide commit buffer, built by the host precompute over
         // the inner ring's `BfMmcs`.
-        let mut precomputed =
+        let precomputed =
             <crate::koala_bear_poseidon2::KoalaBearPoseidon2 as BasefoldRing>::commit_multilinears(
                 &named_inner,
                 crate::CORE_REV,
                 pin,
             );
-        // Stamp the orientation on the built commit: the producer builds its dense
-        // under the same [`crate::CORE_REV`] but may not set the field, and an
-        // unstamped `false` is indistinguishable from a deliberate one, so this is
-        // an unconditional overwrite rather than a check. The cost of that: a
-        // producer that ever built under a DIFFERENT orientation would have the
-        // expected value stamped over the actual one, turning a detectable
-        // mismatch into a wrong proof. Making the producer stamp it (and asserting
-        // here) is the fix if that becomes possible.
-        precomputed.rev = crate::CORE_REV;
-        // FORCE the recursion AREA PIN onto the
-        // built commit (the device hook pins `log_dense_size` device-side under
-        // the SAME value, but may not stamp the field) so the OPEN-path
-        // jagged-eval half reads it back in lockstep.
+        // CHECK the orientation rather than overwrite it.
+        //
+        // This was `precomputed.rev = CORE_REV`, an unconditional overwrite, whose
+        // own comment named the cost: a producer that built its dense under a
+        // DIFFERENT orientation would have the expected value stamped over the
+        // actual one, turning a detectable mismatch into a wrong proof. It also
+        // named the fix -- have the producer stamp it and assert here -- and the
+        // producers now do:
+        //
+        //   * the host `commit_multilinears` sets `rev` from its `use_rev`
+        //     argument at construction, and nothing overrides that method;
+        //   * ziren-gpu's device hook sets it from `provider.rev()`, and every
+        //     production `DeviceShardTraces` is given `.with_rev(CORE_REV)` (five
+        //     call sites; the only providers left at the `false` default are three
+        //     `#[test]` fns that exercise laziness and draining, not orientation).
+        //
+        // So this holds today, and if it ever stops holding the mismatch is real:
+        // the dense the commit was built over disagrees with the orientation the
+        // step-4 reduction will re-materialize under, which is a wrong proof. Fail
+        // loudly instead.
+        assert_eq!(
+            precomputed.rev,
+            crate::CORE_REV,
+            "commit_traces: the producer built its dense under rev={} but the shard \
+             reduces under CORE_REV={}; the commit and the step-4 re-materialize \
+             would disagree (check that this provider got `with_rev`)",
+            precomputed.rev,
+            crate::CORE_REV,
+        );
+        // (The AREA PIN needs no equivalent stamp: `commit_multilinears` sets
+        // `fixed_pad_columns` from its `pin` argument at construction and nothing
+        // reassigns it. A comment here claimed this code FORCED the pin onto the
+        // built commit; it never did.)
         let raw_root_inner: [InnerVal; 8] =
             crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 

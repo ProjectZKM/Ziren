@@ -54,7 +54,7 @@ fn main() {
     // REJECT therefore proves nothing on its own.  Try every candidate key and
     // report each verdict, so a rejection under the right key is
     // distinguishable from a rejection caused by the wrong one.
-    let mut verdict = |label: &str, key: &ZKMVerifyingKey| {
+    let verdict = |label: &str, key: &ZKMVerifyingKey| {
         // Exactly `StarkMachine::verify`'s per-shard setup: the verifying key
         // observed into a fresh challenger, then this shard's public values.
         let mut challenger = machine.config().challenger();

@@ -252,8 +252,17 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// BOTH rings (Val == KoalaBear everywhere).  No challenger observe
     /// (the caller surfaces the commitment).
     ///
-    /// DEFAULT body — every ring commits the same way with its own
-    /// `bf_mmcs()` / `fri_config()`.  `use_rev` is the per-shard rev(zeta)
+    /// DEFAULT body, and the ONLY body: no ring overrides this method (checked
+    /// across both repos), so the per-ring variation is entirely in the associated
+    /// `BfMmcs` / `bf_mmcs()` / `fri_config()` / `WHIR_INNER_PCS`. In particular
+    /// there is no `StarkGpuProver` override of it -- the device path commits
+    /// through its own separate hook.
+    ///
+    /// INVARIANT the caller inherits: when `WHIR_INNER_PCS`, the returned `commit`
+    /// is the WHIR root while `prover_data` remains the BaseFold one (whose Merkle
+    /// tree is then dead, kept only for the interleaved MLEs the step-4 reduction
+    /// reads), and `whir_data` is `Some`. Those three move together here, but
+    /// `PrecomputedJaggedCommitGeneric` can represent them disagreeing.  `use_rev` is the per-shard rev(zeta)
     /// orientation, threaded to `materialize_dense_jagged` and recorded on
     /// the returned commit; the
     /// AREA PIN (`Some(target_log)` on a compress commit pins
@@ -288,7 +297,17 @@ pub trait BasefoldRing: StarkGenericConfig {
                     packing.dense_len,
                     use_rev,
                 );
-                debug_assert_eq!(dense_q.len(), packing.dense_len);
+                // A real assert, not `debug_assert`: this is the shape of the
+                // data being COMMITTED, the compare is O(1), and release is
+                // exactly where a silent mismatch would be committed and then
+                // opened against a different length.
+                assert_eq!(
+                    dense_q.len(),
+                    packing.dense_len,
+                    "materialize_dense_jagged produced {} cells for a dense_len of {}",
+                    dense_q.len(),
+                    packing.dense_len,
+                );
                 let dense_traces = alloc::vec![(
                     alloc::string::String::from("<jagged-dense>"),
                     RowMajorMatrix::new(dense_q, 1),
@@ -331,7 +350,15 @@ pub trait BasefoldRing: StarkGenericConfig {
                 Self::BfMmcs,
                 crate::jagged_pcs::JaggedDft,
             >(dense_traces, Self::bf_mmcs(), dft, cfg);
-            debug_assert_eq!(wcommit.area, prover_data.area);
+            // Likewise real: in WHIR mode the returned `commit` is the WHIR root
+            // while `prover_data` stays the BaseFold one, so their areas
+            // disagreeing means the reduction reads interleaved MLEs that the
+            // observed commitment does not cover.
+            assert_eq!(
+                wcommit.area, prover_data.area,
+                "WHIR commit area {} != BaseFold prover_data area {}",
+                wcommit.area, prover_data.area,
+            );
             Some((wcommit, wdata))
         } else {
             None

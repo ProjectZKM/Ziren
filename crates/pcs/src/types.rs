@@ -38,25 +38,6 @@ pub struct MainTraceData<SC: StarkGenericConfig, M, P> {
     pub rev: bool,
 }
 
-impl<SC: StarkGenericConfig, M, P> MainTraceData<SC, M, P> {
-    pub fn new(
-        traces: Vec<Arc<M>>,
-        main_data: P,
-        chip_ordering: HashMap<String, usize>,
-        public_values: Vec<Val<SC>>,
-    ) -> Self {
-        Self {
-            traces,
-            main_data,
-            chip_ordering,
-            public_values,
-            // Default LEGACY orientation; the CORE commit path overwrites this
-            // to `machine.core_rev()`.
-            rev: false,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "T: Serialize"))]
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
