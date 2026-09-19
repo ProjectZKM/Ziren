@@ -1057,13 +1057,30 @@ pub mod jagged {
         /// width-1 polynomials as `interleaved_mles` (the reduction reads
         /// them) over a placeholder Merkle tree.
         pub whir_data: Option<crate::whir::jagged::JaggedWhirProverDataGeneric<MT>>,
-        /// The per-shard rev(zeta) orientation the dense commit was
-        /// materialized under (from the per-stage `StarkMachine::core_rev()`
-        /// source of truth — `true` only on the CORE MIPS path).  Recorded on
-        /// the committed data so the step-4 jagged reduction (host
-        /// re-materialize + `y_per_chip`) uses the SAME orientation as the
-        /// commit, in lockstep.  `false` on every recursion / shrink / wrap
-        /// commit (byte-identical).
+        /// The rev(zeta) orientation the dense commit was materialized under.
+        /// Recorded on the committed data so the step-4 jagged reduction (host
+        /// re-materialize + `y_per_chip`) reads the SAME orientation the commit
+        /// used, in lockstep.
+        ///
+        /// Every production commit is [`crate::CORE_REV`]; the `jagged_pcs` tests
+        /// are what commit under `false`. (The old doc here described it as
+        /// "`StarkMachine::core_rev()` — `true` only on the CORE MIPS path,
+        /// `false` on every recursion / shrink / wrap commit". That accessor no
+        /// longer exists, and it never varied.)
+        ///
+        /// CAUTION, two producers set this field from DIFFERENT sources:
+        ///   * the host `BasefoldRing::commit_multilinears` sets it from its own
+        ///     `use_rev` argument, and
+        ///   * ziren-gpu's device commit hook sets it from `provider.rev()`,
+        ///     which `DeviceShardTraces` defaults to **false** and only
+        ///     `with_rev` raises.
+        /// The host prover then overwrites the field unconditionally after the
+        /// build. On the host path that is a no-op (nothing overrides
+        /// `commit_multilinears`); on the device path it silently CORRECTS a
+        /// provider that was never given `with_rev`, which is the difference
+        /// between a detectable mismatch and a wrong proof. Do not turn that
+        /// overwrite into an assert without first establishing that every
+        /// provider is given `with_rev`.
         pub rev: bool,
         /// `Some(k)` when this round was committed under an
         /// [`crate::jagged::AreaPin`]: its stacking gap is laid out as exactly

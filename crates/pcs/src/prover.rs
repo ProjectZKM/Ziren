@@ -535,9 +535,8 @@ where
             main_data: retained,
             chip_ordering,
             public_values: record.public_values(),
-            // Record the per-shard rev(zeta)
-            // orientation from the per-stage source of truth
-            // (`StarkMachine::core_rev()` — `true` only for the CORE MIPS machine).
+            // Record the rev(zeta) orientation on the shard data; `open()` reads
+            // it back so commit and reduction cannot drift apart.
             rev: crate::machine::CORE_REV,
         }
     }

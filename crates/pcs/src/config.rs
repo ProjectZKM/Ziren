@@ -113,7 +113,7 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
 
     /// Build the precomputed preprocessed commit.  Deterministic in its input,
     /// so a key that was deserialized without it can rebuild it on demand.
-    /// `use_rev` is the MACHINE's row orientation (`StarkMachine::core_rev`).
+    /// `use_rev` is the row orientation ([`crate::CORE_REV`] in production).
     /// The preprocessed round is opened at the same shard point as main, so it
     /// must be committed under the SAME orientation — a preprocessed commit
     /// built LEGACY-bitrev while the shard reduces natural-row makes the two

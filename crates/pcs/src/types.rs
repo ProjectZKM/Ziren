@@ -31,12 +31,10 @@ pub struct MainTraceData<SC: StarkGenericConfig, M, P> {
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
-    /// The per-shard rev(zeta) orientation, recorded on the committed data at
-    /// `commit()` from the per-stage source of truth
-    /// (`StarkMachine::core_rev()` — `true` only on the CORE MIPS prove path).
-    /// `open()` reads it off the shard data and threads it into the zerocheck +
-    /// jagged reduction so the whole prove stays in lockstep.
-    /// `false` on every recursion / shrink / wrap commit (byte-identical).
+    /// The rev(zeta) orientation, recorded on the committed data at `commit()`
+    /// from [`crate::CORE_REV`].  `open()` reads it off the shard data and
+    /// threads it into the zerocheck + jagged reduction so the whole prove stays
+    /// in lockstep.
     pub rev: bool,
 }
 

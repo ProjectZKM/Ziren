@@ -524,12 +524,10 @@ where
                                                 .collect()
                                         });
 
-                                    // Orientation is decided once per stage by
-                                    // `StarkMachine::core_rev()` (true for the core MIPS
-                                    // machine, false for recursion/shrink/wrap). `commit()`
-                                    // records it on the shard data and `open()` reads it
-                                    // back, so commit, zerocheck and reduction cannot drift
-                                    // apart.
+                                    // Orientation is `zkm_pcs::CORE_REV` for every
+                                    // machine. `commit()` records it on the shard data and
+                                    // `open()` reads it back, so commit, zerocheck and
+                                    // reduction cannot drift apart.
                                     let t_commit = std::time::Instant::now();
                                     // CORE never pins the recursion AREA (that is a
                                     // compress-only geometry) → `None` (NATURAL own-area

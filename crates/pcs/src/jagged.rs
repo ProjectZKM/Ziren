@@ -346,10 +346,9 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, crate::multilinear::PaddedMle<F>)],
     dense_len: usize,
-    // The per-shard rev(zeta) orientation, threaded EXPLICITLY from the
-    // per-stage source of truth (`StarkMachine::core_rev()` — `true` only on
-    // the CORE MIPS prove path).  `true` => NATURAL row order; `false` =>
-    // bit-reversed (byte-identical to the recursion / shrink / wrap stages).
+    // The rev(zeta) orientation, threaded EXPLICITLY.  `true` => NATURAL row
+    // order; `false` => bit-reversed (the LEGACY layout).  Production is always
+    // `crate::CORE_REV`; the `jagged_pcs` tests are what pass `false`.
     use_rev: bool,
 ) -> Vec<F> {
     // `real_cells` is the only thing the packing reads off a view, so it runs
@@ -396,8 +395,8 @@ pub fn materialize_dense_jagged<F: Field>(
             remaining = tail;
         }
 
-        // The per-shard rev(zeta) orientation (`use_rev`, from
-        // `StarkMachine::core_rev()`).  `true` => commit the dense column in
+        // The rev(zeta) orientation (`use_rev`; production is always
+        // `crate::CORE_REV`).  `true` => commit the dense column in
         // NATURAL row order (matching the rev(zeta) zerocheck residual + the
         // natural-indexed `build_weight_table`), so the jagged round-0
         // identity `Σ z_col·y == Σ_b q·w` holds.  `false` (every non-core
