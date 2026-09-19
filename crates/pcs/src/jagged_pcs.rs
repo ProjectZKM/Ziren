@@ -2332,13 +2332,18 @@ mod test {
 
     /// Honest per-chip per-column claims for the MAIN round: the step-3
     /// row-MLE evaluations the production prover reads off the zerocheck
-    /// residual, recomputed here from the traces.  Legacy bitrev row
-    /// orientation (`use_rev = false`), in lockstep with each test's
-    /// `commit_multilinears(&views, false)` commit — the pairing
-    /// the shard prover carries via `PrecomputedJaggedCommit.rev`.
+    /// residual, recomputed here from the traces.
+    ///
+    /// `use_rev` MUST match the orientation the round was committed under
+    /// (`commit_multilinears(.., use_rev, ..)`), which is the pairing the shard
+    /// prover carries on `PrecomputedJaggedCommit.rev`: under `false` the commit
+    /// lays rows out bit-reversed and the claims read them the same way; under
+    /// `true` (production's [`crate::CORE_REV`]) both are natural order. Passing
+    /// the wrong one makes an honest bundle fail verification.
     fn column_claims(
         views: &[ChipTraceView],
         z_row: &[JaggedChallenge],
+        use_rev: bool,
     ) -> Vec<Vec<JaggedChallenge>> {
         // eq_c[r] = eq(z_row, r): built over reversed z_row to undo
         // eq_mle_table's LSB-first bitrev.  The FULL row_eq subsumes the
@@ -2362,10 +2367,12 @@ mod test {
                 (0..w)
                     .map(|col| {
                         (0..h).fold(JaggedChallenge::ZERO, |acc, row| {
-                            // Legacy orientation: the commit lays rows out
-                            // bit-reversed, so the claim reads them the same
-                            // way.
-                            let src = if is_pow2 {
+                            // Read rows the way the commit laid them out: natural
+                            // under `use_rev`, bit-reversed under the legacy
+                            // convention.
+                            let src = if use_rev {
+                                row
+                            } else if is_pow2 {
                                 ((row as u32).reverse_bits() >> (32 - log_h)) as usize
                             } else {
                                 row
@@ -2427,7 +2434,7 @@ mod test {
         let rounds = [JaggedOpenRound {
             chip_traces: &views,
             r_row_per_chip: &r_row,
-            claims: column_claims(&views, &z_row),
+            claims: column_claims(&views, &z_row, false),
             precomputed: &precomputed,
         }];
         let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
@@ -2435,6 +2442,77 @@ mod test {
         assert!(
             verify_main_round(&bundle, &widths, &z_row, None),
             "jagged-basefold pipeline should accept honest proof"
+        );
+    }
+
+    /// The same honest roundtrip under the orientation PRODUCTION actually uses.
+    ///
+    /// Every other jagged-BaseFold test here commits with `use_rev = false`, the
+    /// LEGACY bitrev layout — and they FAIL if flipped to `true` (verified: 4 of
+    /// them), because `column_claims` used to hardcode the bitrev row mapping. So
+    /// the committed dense layout production runs, `CORE_REV = true`, had no
+    /// coverage at this level at all; it was only ever exercised end-to-end by a
+    /// full prove. That is also why flipping the `CORE_REV` constant passes the
+    /// whole suite: the tests are pinned to the other layout.
+    ///
+    /// This closes that gap. Nothing about the PCS was legacy-shaped; only the
+    /// test helper was.
+    #[test]
+    fn jagged_basefold_roundtrip_under_core_rev() {
+        let (traces, z_row) = mk_shard(&[(4, 16), (2, 8)], 0xC0DE_BA5E);
+        let views = as_chip_views(&traces);
+        let mut p_chal = build_challenger();
+        let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+            &views,
+            crate::CORE_REV,
+            None,
+        );
+        assert!(crate::CORE_REV, "this test is the CORE_REV arm; the legacy arm is above");
+        assert!(precomputed.rev, "the commit must record the orientation it was built under");
+        p_chal.observe(precomputed.commit.original_commitment.clone());
+        let r_row = r_row_suffixes(&views, &z_row);
+        let rounds = [JaggedOpenRound {
+            chip_traces: &views,
+            r_row_per_chip: &r_row,
+            // Claims read NATURAL rows, matching the commit above.
+            claims: column_claims(&views, &z_row, crate::CORE_REV),
+            precomputed: &precomputed,
+        }];
+        let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
+        let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
+        assert!(
+            verify_main_round(&bundle, &widths, &z_row, None),
+            "an honest bundle committed under CORE_REV must verify",
+        );
+    }
+
+    /// A claim/commit orientation MISMATCH must be rejected, so the test above is
+    /// pinning the pairing rather than passing for an unrelated reason.
+    #[test]
+    fn jagged_basefold_rejects_claims_of_the_wrong_orientation() {
+        let (traces, z_row) = mk_shard(&[(4, 16), (2, 8)], 0xC0DE_BA5E);
+        let views = as_chip_views(&traces);
+        let mut p_chal = build_challenger();
+        let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+            &views,
+            crate::CORE_REV,
+            None,
+        );
+        p_chal.observe(precomputed.commit.original_commitment.clone());
+        let r_row = r_row_suffixes(&views, &z_row);
+        let rounds = [JaggedOpenRound {
+            chip_traces: &views,
+            r_row_per_chip: &r_row,
+            // Committed natural, claimed bit-reversed: the exact disagreement the
+            // `rev` field on the commit exists to prevent.
+            claims: column_claims(&views, &z_row, !crate::CORE_REV),
+            precomputed: &precomputed,
+        }];
+        let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
+        let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
+        assert!(
+            !verify_main_round(&bundle, &widths, &z_row, None),
+            "claims of the wrong orientation must NOT verify",
         );
     }
 
@@ -2458,7 +2536,7 @@ mod test {
         let rounds = [JaggedOpenRound {
             chip_traces: &views,
             r_row_per_chip: &r_row,
-            claims: column_claims(&views, &z_row),
+            claims: column_claims(&views, &z_row, false),
             precomputed: &precomputed,
         }];
         let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
@@ -2534,7 +2612,7 @@ mod test {
         let rounds = [JaggedOpenRound {
             chip_traces: &views,
             r_row_per_chip: &r_row,
-            claims: column_claims(&views, &z_row),
+            claims: column_claims(&views, &z_row, false),
             precomputed: &precomputed,
         }];
         let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
@@ -2591,7 +2669,7 @@ mod test {
         let rounds = [JaggedOpenRound {
             chip_traces: &views,
             r_row_per_chip: &r_row,
-            claims: column_claims(&views, &z_row),
+            claims: column_claims(&views, &z_row, false),
             precomputed: &precomputed,
         }];
         let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
