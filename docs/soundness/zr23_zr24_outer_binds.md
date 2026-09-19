@@ -1,138 +1,132 @@
-# ZR-23 / ZR-24: what the outer ring is still missing, and the exact blocker
+# ZR-23 / ZR-24: the outer ring's binds
 
-Status: ZR-24's ordering is fixed on `fix/zr24-commitment-order` but sources its
-roots from the PROOF, so it repairs completeness only. ZR-23's second and third
-binds are open. This file records where the sound pattern already exists in this
-repository, the one call site that does not use it, and the open question that
-stops it being a mechanical change.
+The outer (wrap/BN254) ring reached the audit with its preprocessed round
+unbound in three separate ways. This file states each bind, where it now lives,
+and what is deliberately left out.
 
-## The sound pattern already exists
+## The layout both rings share
 
-The INNER lift is the reference. `shard_level_witness.rs:2146`:
+A shard proof opens rounds in commit order, main LAST:
 
-```rust
-assert_eq!(preceding_commitments.len() + 1, num_rounds, ...);
-let mut original_commitments = Vec::with_capacity(num_rounds);
-original_commitments.extend(preceding_commitments.iter().map(|(raw, _)| *raw));
-original_commitments.push(preread_commit_root);          // main LAST
-// modified_commitments likewise: preceding's KEY digest, then the witnessed main
+```text
+    rounds        = [preceding.., main]
+    chip_infos    = [prep real | prep pad | main real | main pad]
+    y_per_chip[i] ↔ chip_infos[i] ↔ opened_values (prep.local / main.local)
 ```
 
-with the comment that says why it is sound: *"the preceding rounds' commitments
-come from the caller (the verifying key)"*, and the hash-bind then
-*"re-derives `compress([raw, hash(counts)])` and asserts it equals this, which is
-what pins that round's geometry to the key."*
+`preceding_commits` are the raw roots of the rounds before the last;
+`component_polynomials_query_openings_and_proofs` follows the same order. Both
+non-outer callers build the key-side pair from the verifying key
+(`compress_basefold.rs:344`, `wrap_basefold.rs:256`); the `OuterBundle` arm was
+the one that got nothing, which is the root of all three findings below.
 
-So the pair is `(raw root the BaseFold open binds against, digest the KEY
-holds)`, and the hash-bind ties one to the other. Sourcing the roots from the
-proof — which is what `fix/zr24-commitment-order` currently does — gets the
-ORDER right and leaves the vector proof-controlled.
+## ZR-24 — ordering
 
-Both non-outer callers build that pair from the key:
+`lift_jagged_basefold_bundle_outer` synthesised
 
-- `machine/compress_basefold.rs:344` —
-  `vec![(preprocessed_round.raw_commit, basefold_vk_pre.preprocessed_commit)]`
-- `machine/wrap_basefold.rs:256`     — the same expression
+```text
+    original_commitments = [main_root, 0, 0, ..]
+```
 
-## The one call site that drops it
+so `component_openings[0]`, which belongs to the first PRECEDING round, was
+Merkle-verified against `main_root`: activating component verification rejected
+honest proofs at the first `HV::assert_digest_eq`, and disabling the later
+query-chain equality changed nothing because the mismatch is upstream of it.
 
-`wrap_basefold.rs` passes `&preceding_commitments` to the `WhirBundle` arm
-(line 307) and the `Bundle` arm (line 368), and **not** to the `OuterBundle`
-arm (line ~333), which calls `lift_outer_bundle_dispatch` without it. The outer
-lift consequently had no key-side data at all and synthesised
-`[main_root, zero, zero, ..]`.
+FIXED: the lift now witnesses `[preceding.., main]` in opening order, and the
+outer witness reader/writer carry the component openings (they were dropped as
+`Vec::new()`, which is what made the query-chain binding in `basefold_verifier.rs`
+inert).
 
-That single omission is the root of both findings:
+## ZR-23 bind #2 — the preceding root is the KEY's
 
-- ZR-24: `component_openings[0]` (a preceding round) authenticated against
-  `main_root`, so activating component verification rejects honest proofs.
-- ZR-23 bind #2: no preceding root is ever re-bound to `vk.commit`.
+The roots above arrive from the PROOF. On their own they let a prover open a
+preprocessed round of its own choosing. Bound on both sides now:
 
-The minimal fix is therefore to thread the pair that already exists into
-`lift_outer_bundle_dispatch` (one parameter, one method, two impls) and use it
-exactly as the inner lift does.
+* IN-CIRCUIT — `vk_preprocessed_cap`, threaded from `verify_wrap_basefold_core`
+  through `FieldHasherVariable::vk_outer_cap` (`Some` only on the ring that
+  produces an `OuterBundle`) into the lift, which asserts
+  `original_commitments[0] == vk.commitment`.
+* HOST — `BasefoldRing::vk_commit_is_preceding_root`, in the outer branch of
+  `verify_jagged_pcs_host`, which used `vk` for nothing at all before.
 
-## The representation question, RESOLVED
+A plain equality is the right comparison here, and not an approximation of the
+inner bind:
 
-The previous revision of this file recorded "whether the outer proof's
-PREPROCESSED round is BN254-committed" as a blocker needing someone who knows
-the wrap commit scheme. It does not: the code answers it, and the answer is
-**yes — the outer preprocessed round is BN254-committed, a 1-cap, exactly like
-the main round.** There is no per-round ring split to reconcile.
+```text
+    outer  commit_root = commit.original_commitment                (raw)
+    inner  commit_root = compress([raw, hash(row/col counts)])     (geometry-mixed)
+```
 
-Evidence:
+so the inner ring must re-derive the mix to compare and the outer has no mix to
+undo. Answered per ring through a trait method rather than by relabelling
+`Com<SC>` at the call site, because `Com<SC>` and the BaseFold commitment type
+coincide only on the outer ring — a fact each implementor knows concretely and
+no caller can establish.
 
-1. The outer ring has ONE Merkle scheme for every round.
-   `recursion/core/src/stark/config.rs:16` sets `DIGEST_SIZE = 1`, and `:30`
-   defines the only val-Mmcs the ring has:
-   ```rust
-   pub type OuterValMmcs = MerkleTreeMmcs<KoalaBear, Bn254, OuterHash, OuterCompress, 2, DIGEST_SIZE>;
-   ```
-   with `:288` naming its commitment type outright:
-   `OuterValMmcs::Commitment = Hash<KoalaBear, Bn254, 1>`.
+LEFT OUT, deliberately: this pins the round's ROOT, not its ROW COUNTS. The
+inner ring gets geometry free because the counts are hashed into its key digest;
+the outer key has no counts in it, so pinning outer geometry the same way means
+mixing counts into `commit_root` for this ring — a verifying-key format change,
+hence new Groth16 artifacts. The root bind costs one BN254 equality and no
+ceremony. The chip COUNT and the per-chip WIDTHS are pinned from the machine
+(`prep_chip_dims`), so what stays proof-claimed is the row counts alone.
 
-2. The outer lift's own parameter is `bundle: &JaggedBasefoldBundleGeneric<OuterValMmcs>`
-   (`shard_level_witness.rs:1283`). The bundle is generic over ONE Mmcs, so
-   `bundle.preceding_commits` — the raw roots of every round before the last —
-   are that same BN254 1-cap. The preceding round is not inner-shaped.
+Why the bind was skipped: `jagged_hash_bind_in_circuit()` returns false for this
+ring and `commit_root` returns the raw root, both justified by "the wrap machine
+also opens a single round, so there is no preceding round whose geometry would
+need pinning here", with the note "if the wrap ever grows a preprocessed opening
+round, it needs its own BN254 bind". That premise is false and the same module
+contradicts it: `outer_prep_precompute` exists "so the preprocessed round can be
+OPENED", every recursion chip has a nonzero `preprocessed_width`, and
+`wrap_basefold.rs` therefore builds `column_counts_by_round = [prep, main]`. The
+wrap machine opens TWO rounds; the deferred conditional was already live.
 
-3. The two representations are ALREADY reconciled in the tree, in both
-   directions. `KoalaBearPoseidon2Outer::vk_preprocessed_commit_felts`
-   (`recursion/circuit/src/lib.rs:842`) is the in-circuit twin of host
-   `BasefoldRing::digest_felts`: it projects the BN254 1-cap to 8 KoalaBear
-   felts as `split_32(commitment[0], 4)` zero-padded to 8. The inner impl
-   (`lib.rs:772`) is the identity. So `[Felt;8]` and the 1-cap are already
-   interconvertible in-circuit, and the wrap path's uniform `[Felt;8]`
-   `preceding_commitments` type is a consequence of that projection, not
-   evidence that the outer round is felt-committed.
+## ZR-23 bind #3 — the column claims are the openings
 
-4. The key-side 1-cap is already in scope at the call site that needs it.
-   `verify_wrap_basefold_core` takes `vk_legacy: VerifyingKeyVariable<C, SC>`,
-   whose `commitment` is `SC::DigestVariable` — the BN254 1-cap on the outer
-   instantiation. Nothing has to be added to the verifying key; the outer lift
-   simply is not handed it.
+`verify_jagged_basefold_inner_generic` had no `opened_main` parameter, so on the
+outer ring the zerocheck (which consumes `opened_values`) and the jagged phase
+(which consumes `bundle.y_per_chip`) were two independent checks over two
+unrelated sets of column claims.
 
-5. The round count is genuinely 2, so none of this is vacuous. Every recursion
-   chip implements `preprocessed_width` (`recursion/core/src/chips/`:
-   `alu_base.rs:89`, `alu_ext.rs:81`, `select.rs:54`, `ext2felt.rs:83`,
-   `public_values.rs:77`, `mem/constant.rs:55`, `mem/variable.rs:56`,
-   `poseidon2_wide/trace.rs:174`), so `prep_widths` in `wrap_basefold.rs` is
-   non-empty, `column_counts_by_round.len() == 2`, and
-   `preceding_commits.len() == 1`. The `[main_root, zero]` vector really does
-   authenticate the preprocessed round's opening against the main root.
+FIXED: `cross_bind_openings`, extracted from the inner ring's
+`verify_one_jagged_group` so both rings check the SAME identity. With
+`w_k = eq(z_col, k)` over the flattened column index, `k` running as
+`verify_jagged_reduction` walks it,
 
-What this changes: the fix is representable today as a pair of
-`SC::DigestVariable` values — `(bundle.preceding_commits[i]` for the raw side,
-`vk_legacy.commitment` for the key side) — threaded into
-`lift_outer_bundle_dispatch`. It does not need a ceremony decision, a key
-format change, or a new witness field for the ROOTS.
+```text
+    Σ_k w_k·open_k  =  Σ_k w_k·y_k ,
+```
 
-## What is still genuinely open
+whose right-hand side is bit-for-bit the `t` the reduction takes as its round-0
+claim, so this is exactly "the openings generate the claimed sum". The MLE form
+is not a weakening of an element-wise compare: under the `rev(zeta)` orientation
+the two vectors need not agree element-wise while their `z_col`-MLEs do, and it
+is the MLE identity the circuit asserts (`recursive_jagged_pcs.rs:247`).
 
-Not the representation, but the bind MECHANISM:
+The outer branch's `chip_infos` are named `chip{i}` positionally, so the
+alignment is rebuilt from `round_counts[r].len()` real chips plus
+`padding_heights[r].len()` single-column padding groups per round, rounds in
+commit order. A rebuild that does not cover the groups the verifier weighs is a
+rejection, not a fallback to the unbound path.
 
-- The inner path's comments describe the pin as re-deriving
-  `compress([raw, hash(counts)])` and asserting it equals the key-held
-  `modified_commitments` entry. Whether that assertion actually exists in the
-  circuit, what the host stores in the key (raw root vs geometry-mixed digest),
-  and whether the outer ring executes it at all, must be established before
-  writing the outer bind — the outer lift's comment claims the BN254 bind
-  happens "inside the registered outer jagged-verify hook", and that claim needs
-  checking rather than trusting. Getting this wrong either rejects honest proofs
-  or provides false assurance, and neither is visible without a gnark build.
-- The cost decision below is unchanged and remains the release blocker.
+## Cost
 
-## Also unresolved, and independent
+Host-side binds (#2 host, #3) cost no constraints. In-circuit, activating
+component verification measured 31,874,392 constraints — 95.0% of the 2^25
+ceiling, against 84.5% with the openings dropped.
 
-ZR-23 bind #3: the outer branch of `verify_jagged_pcs_host` receives
-`opened_values` but never compares `bundle.y_per_chip` against
-`opened_values.chips[].main.local`, so the jagged reduction and zerocheck can be
-driven by two different sets of column claims. The inner cross-bind at
-`shard_level/verifier.rs:990-1059` is the reference.
+The ptau supports it. `powersOfTau28_hez_final_25.ptau` is truncated, but only
+past section 12: the monomial sections are COMPLETE —
 
-## Cost, unchanged
+```text
+    tauG1       67,108,863 / 67,108,863 points   → domain 2^25
+    tauG2       33,554,432 / 33,554,432
+    alphaTauG1  33,554,432 / 33,554,432
+    betaTauG1   33,554,432 / 33,554,432
+    section 13   5.4% present (a Lagrange table gnark does not read)
+```
 
-Activating component verification measured 31,874,392 constraints — 95.0% of the
-2^25 ceiling, against 84.5% with the openings dropped. Headroom 15.5% -> 5.0% on
-a truncated ptau. Closing ZR-24 still needs the headroom decision regardless of
-which representation question above is answered.
+so 31,874,392 < 2^25 = 33,554,432 fits, with 1.68M constraints of headroom.
+That headroom, not the truncation, is the thing to watch: the next change to the
+outer circuit's shape has 5% to spend, and there is no 2^26 ptau to move to.

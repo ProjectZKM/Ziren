@@ -637,6 +637,136 @@ where
         };
         let (chip_infos, r_row_per_chip, z_row) =
             build_jagged_verify_inputs(&bundle.packing, &chip_widths, eval_point_inner);
+
+        // ZR-23 bind #3: the openings the AIR phases consumed, index-aligned
+        // with `chip_infos`, so `cross_bind_openings` can require
+        //   Σ_k eq(z_col,k)·open_k = Σ_k eq(z_col,k)·y_k
+        // on this ring too.  Without it the outer zerocheck (which consumes
+        // `opened_values`) and the outer jagged phase (which consumes
+        // `bundle.y_per_chip`) are two independent checks over two unrelated
+        // sets of column claims — the inner ring has bound them since the
+        // cross-bind landed there; this branch never has.
+        //
+        // `build_jagged_verify_inputs` names its groups `chip{i}` positionally,
+        // so the alignment is reconstructed from the packing's round structure
+        // rather than by name.  Each round contributes
+        //   `round_counts[r].len()` real chips, then `padding_heights[r].len()`
+        //   single-column padding groups,
+        // rounds in commit order with MAIN last — the same
+        // `[prep real | prep pad | main real | main pad]` layout the inner
+        // branch builds by name below.  Padding is one column of committed
+        // zeros, so its claim is ZERO.
+        //
+        // The preprocessed round is ordered by the verifying key, so its i-th
+        // chip is `prep_chip_dims[i]` and its opening is that chip's
+        // `preprocessed.local`; the main round follows the shard's chip order.
+        // SAFETY (as elsewhere in this function): Challenge<SC> ==
+        // InnerChallenge under the TypeId gate above.
+        let relabel = |cloned: Vec<Challenge<SC>>| -> Vec<InnerChallenge> {
+            let (ptr, len, cap) = {
+                let mut v = core::mem::ManuallyDrop::new(cloned);
+                (v.as_mut_ptr(), v.len(), v.capacity())
+            };
+            unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
+        };
+        let opened_main: Vec<Vec<InnerChallenge>> = {
+            let rounds = &bundle.packing.round_counts;
+            if rounds.is_empty() {
+                return Err(BasefoldVerifyError::JaggedPcs(
+                    "outer bundle carries no per-round geometry, so its column claims cannot \
+                     be aligned with the shard's openings"
+                        .into(),
+                ));
+            }
+            let mut om: Vec<Vec<InnerChallenge>> = Vec::with_capacity(chip_infos.len());
+            for (r, round) in rounds.iter().enumerate() {
+                if r + 1 == rounds.len() {
+                    // MAIN: the shard's chips, in the shard's order.
+                    if round.len() != opened_values.chips.len() {
+                        return Err(BasefoldVerifyError::JaggedPcs(format!(
+                            "outer main round: the proof claims {} chips, the shard opened {}",
+                            round.len(),
+                            opened_values.chips.len(),
+                        )));
+                    }
+                    om.extend(opened_values.chips.iter().map(|c| relabel(c.main.local.clone())));
+                } else {
+                    // PREPROCESSED: the key's chips, in the key's order.
+                    if round.len() != prep_chip_dims.len() {
+                        return Err(BasefoldVerifyError::JaggedPcs(format!(
+                            "outer preprocessed round: the proof claims {} chips, the machine \
+                             has {}",
+                            round.len(),
+                            prep_chip_dims.len(),
+                        )));
+                    }
+                    for ((name, width), (_, claimed_width)) in
+                        prep_chip_dims.iter().zip(round.iter())
+                    {
+                        // Widths come from the MACHINE; a proof claiming other
+                        // ones is describing a different preprocessed trace.
+                        if claimed_width != width {
+                            return Err(BasefoldVerifyError::JaggedPcs(format!(
+                                "outer preprocessed round: chip {name} is {claimed_width} \
+                                 columns in the proof but {width} in the machine",
+                            )));
+                        }
+                        let idx =
+                            chips.iter().position(|c| c.name() == *name).ok_or_else(|| {
+                                BasefoldVerifyError::JaggedPcs(format!(
+                                    "outer preprocessed round covers chip {name}, which the \
+                                     shard does not have"
+                                ))
+                            })?;
+                        om.push(relabel(opened_values.chips[idx].preprocessed.local.clone()));
+                    }
+                }
+                let pads = bundle.packing.padding_heights.get(r).map_or(0, |p| p.len());
+                om.extend(core::iter::repeat_with(|| alloc::vec![InnerChallenge::ZERO]).take(pads));
+            }
+            // A reconstruction that does not cover the groups the verifier is
+            // about to weigh would silently bind the wrong columns, so it is a
+            // rejection rather than a fallback to the unbound path.
+            if om.len() != chip_infos.len() {
+                return Err(BasefoldVerifyError::JaggedPcs(format!(
+                    "outer cross-bind: rebuilt {} column groups from the packing's rounds, but \
+                     the proof opens {}",
+                    om.len(),
+                    chip_infos.len(),
+                )));
+            }
+            om
+        };
+
+        // ZR-23 bind #2, host side: the preceding (preprocessed) round's root
+        // comes off the PROOF, and nothing above required it to be the root the
+        // VERIFYING KEY committed — so a prover could open a preprocessed round
+        // of its own choosing and every check so far would still pass.
+        //
+        // This ring's key stores that root unmixed, so the bind is the equality
+        // (`vk_commit_is_preceding_root`).  It pins the round's ROOT, not its
+        // GEOMETRY: the inner ring gets geometry for free because its key digest
+        // has the counts hashed in, whereas this key has no counts in it.  The
+        // per-chip width pin above and the `round.len()` check cover the part of
+        // that geometry the machine already knows; the row counts stay
+        // proof-claimed until the outer key format carries them.
+        for raw in bundle.preceding_commits.iter() {
+            match <SC as crate::BasefoldRing>::vk_commit_is_preceding_root(&vk.commit, raw) {
+                Some(true) => {}
+                Some(false) => {
+                    return Err(BasefoldVerifyError::JaggedPcs(
+                        "outer preprocessed round: the proof's commitment is not the \
+                         verifying key's, so the round it opens is not the one the key \
+                         committed"
+                            .into(),
+                    ))
+                }
+                // A ring whose key stores a mixed digest re-derives it instead;
+                // that is the inner branch below, which never reaches here.
+                None => {}
+            }
+        }
+
         let mmcs = <SC as crate::BasefoldRing>::bf_mmcs();
         let fri = <SC as crate::BasefoldRing>::fri_config();
         let ok = verify_jagged_basefold_inner_generic::<
@@ -671,6 +801,7 @@ where
                     (c.clone(), real + pad)
                 })
                 .collect::<Vec<_>>(),
+            Some(&opened_main),
         );
         return if ok {
             Ok(())

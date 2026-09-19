@@ -1321,7 +1321,6 @@ pub fn lift_jagged_basefold_bundle_outer<C>(
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = Bn254, Bit = zkm_recursion_compiler::ir::Var<Bn254>>,
 {
-    use crate::hash::FieldHasherVariable;
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_core::stark::KoalaBearPoseidon2Outer as HV;
 

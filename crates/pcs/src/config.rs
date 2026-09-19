@@ -234,6 +234,31 @@ pub trait BasefoldRing: StarkGenericConfig {
         crate::basefold::config::FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default()
     }
 
+    /// Does the verifying key's commitment EQUAL the raw root the BaseFold open
+    /// authenticates a preceding round against?
+    ///
+    /// The two rings store different things under `vk.commit`, so the question
+    /// only has a direct answer on one of them:
+    ///
+    /// * OUTER — `commit_root` returns `commit.original_commitment` unmixed
+    ///   (`recursion/core/src/stark/config.rs`), so key and root are the same
+    ///   value of the same type and the comparison is a plain equality:
+    ///   `Some(vk_commit == raw)`.
+    /// * INNER — the key holds `compress([raw, hash(counts)])`
+    ///   (`kb31_poseidon2.rs`), so no equality against `raw` can hold; `None`,
+    ///   and the caller re-derives the bound form instead (which pins the
+    ///   round's geometry as well as its root).
+    ///
+    /// Answered per ring rather than by relabelling `Com<Self>` at the call
+    /// site: the two types coincide only on the outer ring, and that is a fact
+    /// each implementor knows concretely and no caller can establish.
+    fn vk_commit_is_preceding_root(
+        _vk_commit: &crate::Com<Self>,
+        _raw: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> Option<bool> {
+        None
+    }
+
     /// #H: per-ring projection of the BaseFold commitment to 8 KoalaBear felts
     /// for the `[F;8] main_commitment` FS observe (host path). Inner = MerkleCap
     /// root[0]; outer = deterministic projection of the BN254 commit.

@@ -228,6 +228,17 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
     }
 
+    /// `Com<KoalaBearPoseidon2Outer>` is `OuterPcs::Commitment` =
+    /// `OuterValMmcs::Commitment` = `Hash<KoalaBear, Bn254, 1>`, the SAME type
+    /// the BaseFold open Merkle-verifies against, and this ring's `commit_root`
+    /// stores it unmixed — so the bind is the equality itself.
+    fn vk_commit_is_preceding_root(
+        vk_commit: &zkm_pcs::Com<Self>,
+        raw: &<Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> Option<bool> {
+        Some(vk_commit == raw)
+    }
+
     fn digest_felts(
         commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [zkm_pcs::jagged_pcs::JaggedVal; 8] {
@@ -734,6 +745,9 @@ mod basefold_over_bn254_roundtrip_test {
             fri,
             // Single-round fixture: no preceding rounds.
             &[],
+            // PCS-level fixture: there is no AIR above it, so no openings to
+            // cross-bind against.
+            None,
         );
         assert!(
             ok,

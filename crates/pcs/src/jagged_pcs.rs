@@ -1750,6 +1750,78 @@ pub mod jagged {
     /// `z_row`: sample `z_col_g`, verify the reduction, replay the
     /// jagged-eval transcript, extend `z*_g`, and verify the BaseFold open
     /// of `C_g`.  Returns `false` on any rejection.
+    /// Bind the bundle's column claims to the trace openings the AIR phases
+    /// consumed — the host analog of `recursive_jagged_pcs.rs:247`.
+    ///
+    /// Let `k` index the flattened column space in the order
+    /// `verify_jagged_reduction` walks it (chip `i`'s first `y_per_chip[i].len()`
+    /// columns, chips in order), `w_k = eq(z_col, k)` the partial-Lagrange
+    /// weights over that index, `y_k` the bundle's claim and `o_k` the opening.
+    /// This asserts
+    ///
+    /// ```text
+    ///     Σ_k w_k·o_k  =  Σ_k w_k·y_k ,
+    /// ```
+    ///
+    /// i.e. the two column vectors are equal AS MLEs at `z_col`. The right-hand
+    /// side is bit-for-bit the `t` that `verify_jagged_reduction` takes as its
+    /// round-0 claim (`jagged_sumcheck.rs:735-742`), so this is exactly "the
+    /// openings generate the claimed sum".
+    ///
+    /// The MLE form is not a weakening of an element-wise compare: under the
+    /// `rev(zeta)` orientation the two vectors need not agree element-wise,
+    /// while their `z_col`-MLEs do, and it is the MLE identity the circuit
+    /// asserts.
+    ///
+    /// Without it the two halves of the proof are independent: the zerocheck
+    /// consumes `opened_values`, the jagged phase consumes `y_per_chip`, and
+    /// nothing requires them to describe one trace.
+    fn cross_bind_openings(
+        y_per_chip: &[Vec<InnerChallenge>],
+        opened_main: &[Vec<InnerChallenge>],
+        z_col: &[InnerChallenge],
+    ) -> Result<(), alloc::string::String> {
+        if opened_main.len() != y_per_chip.len() {
+            return Err(alloc::format!(
+                "opened-main chip count {} != y_per_chip {}",
+                opened_main.len(),
+                y_per_chip.len(),
+            ));
+        }
+        let w = crate::jagged_branching_program::partial_lagrange(z_col);
+        let mut sum_y = InnerChallenge::ZERO;
+        let mut sum_open = InnerChallenge::ZERO;
+        let mut k = 0usize;
+        for (i, (yc, oc)) in y_per_chip.iter().zip(opened_main.iter()).enumerate() {
+            // `column_count ≤ BaseAir::width`, so an opening exposing fewer
+            // columns than the sumcheck consumed is malformed.
+            if oc.len() < yc.len() {
+                return Err(alloc::format!(
+                    "chip {i}: opened {} columns, the reduction consumed {}",
+                    oc.len(),
+                    yc.len(),
+                ));
+            }
+            for j in 0..yc.len() {
+                let Some(&wk) = w.get(k) else {
+                    return Err(alloc::format!(
+                        "column index {k} past the {}-entry eq table over z_col",
+                        w.len(),
+                    ));
+                };
+                sum_y += wk * yc[j];
+                sum_open += wk * oc[j];
+                k += 1;
+            }
+        }
+        if sum_open != sum_y {
+            return Err("Σ w·open != Σ w·y at z_col: the bundle's column claims are not the \
+                        openings the zerocheck consumed"
+                .into());
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn verify_one_jagged_group(
         packing: &JaggedPacking<InnerVal>,
@@ -1835,56 +1907,11 @@ pub mod jagged {
         // zerocheck (which consumes `opened_values`) and this jagged phase (which
         // consumes `y_per_chip`) independently — the soundness-parity gap.
         //
-        // Close it exactly as the circuit does: recompute the OPENED-VALUES column
-        // MLE at the SAME `z_col` and require it to equal the y-derived claimed sum
-        // `t`.  We mirror the MLE form rather than a raw element-wise compare: under
-        // the rev(zeta) orientation the two column vectors are NOT guaranteed
-        // element-wise equal, but their `z_col`-MLEs ARE equal — that is precisely
-        // the identity the circuit asserts and that passes on every honest proof.
-        // We weight only the columns the sumcheck actually consumed (per-chip
-        // `y_per_chip[i].len()`, i.e. the packed column_count), matching the k-walk
-        // in `verify_jagged_reduction` so `sum_y` reproduces its `t` bit-for-bit.
+        // Close it exactly as the circuit does — `cross_bind_openings` below is
+        // that identity, shared with the OUTER ring so both check the same one.
         if let Some(opened_main_g) = opened_main {
-            if opened_main_g.len() != y_per_chip.len() {
-                eprintln!(
-                    "[basefold verify] group {g}: cross-bind FAILED — opened-main \
-                     chip count {} != y_per_chip {}",
-                    opened_main_g.len(),
-                    y_per_chip.len(),
-                );
-                return false;
-            }
-            let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(&z_col);
-            let mut sum_y = InnerChallenge::ZERO;
-            let mut sum_open = InnerChallenge::ZERO;
-            let mut k = 0usize;
-            let mut ok = true;
-            'chips: for (yc, mc) in y_per_chip.iter().zip(opened_main_g.iter()) {
-                // The opened trace must expose at least the columns the sumcheck
-                // consumed (column_count ≤ BaseAir::width); a proof opening fewer
-                // is malformed → reject.
-                if mc.len() < yc.len() {
-                    ok = false;
-                    break 'chips;
-                }
-                for j in 0..yc.len() {
-                    if k >= z_col_lagrange.len() {
-                        ok = false;
-                        break 'chips;
-                    }
-                    let w = z_col_lagrange[k];
-                    sum_y += w * yc[j];
-                    sum_open += w * mc[j];
-                    k += 1;
-                }
-            }
-            if !ok || sum_open != sum_y {
-                eprintln!(
-                    "[basefold verify] group {g}: CROSS-BIND FAILED — the bundle's \
-                     y_per_chip column claims are inconsistent with \
-                     opened_values.main.local at z_col \
-                     (evaluate_mle(opened_main, z_col) != jagged claimed_sum)"
-                );
+            if let Err(why) = cross_bind_openings(y_per_chip, opened_main_g, &z_col) {
+                eprintln!("[basefold verify] group {g}: CROSS-BIND FAILED — {why}");
                 return false;
             }
         }
@@ -2073,6 +2100,12 @@ pub mod jagged {
             <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
             usize,
         )],
+        // ZR-23 bind #3: the trace openings the AIR phases consumed, index-
+        // aligned with `chip_infos` / `bundle.y_per_chip`, for
+        // `cross_bind_openings`.  `None` leaves the two halves of the proof
+        // unbound and is only for callers that have no openings to offer (the
+        // PCS-level roundtrip tests).
+        opened_main: Option<&[Vec<InnerChallenge>]>,
     ) -> bool
     where
         MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
@@ -2105,6 +2138,13 @@ pub mod jagged {
         let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
         let z_col: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| challenger.sample_algebra_element()).collect();
+        // ZR-23 bind #3, on the same `z_col` the reduction is about to use.
+        if let Some(opened_main) = opened_main {
+            if let Err(why) = cross_bind_openings(&bundle.y_per_chip, opened_main, &z_col) {
+                eprintln!("[basefold verify outer] CROSS-BIND FAILED — {why}");
+                return false;
+            }
+        }
         let red_result = crate::jagged_sumcheck::verify_jagged_reduction(
             &bundle.reduction,
             &packing,
