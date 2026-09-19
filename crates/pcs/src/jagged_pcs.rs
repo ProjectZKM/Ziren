@@ -1788,6 +1788,16 @@ pub mod jagged {
         )],
         g: usize,
     ) -> bool {
+        // The stacking height is part of the PROTOCOL, not of the proof.
+        // `pick_log_stacking_height` returns `DEFAULT_LOG_STACKING_HEIGHT`
+        // unconditionally, so an honest commit always carries it.  Taking it from
+        // the proof instead would let the prover pick the verifier's geometry: it
+        // feeds `stack_dim`, the target dimension, and the WHIR configuration
+        // below.  The recursion circuit already pins the same constant
+        // (`basefold_verifier.rs`); this is the native half.
+        if commit.log_stacking_height != crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT {
+            return false;
+        }
         // Sample z_col at the matching transcript position
         // (after the commit observe, before the reduction), mirroring
         // the prover.
@@ -2070,6 +2080,12 @@ pub mod jagged {
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
+        // See `verify_one_jagged_group`: the stacking height is protocol, not
+        // proof.  Bound here too because this entry point derives its own
+        // `stack_dim` and WHIR config from it.
+        if bundle.commit.log_stacking_height != crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT {
+            return false;
+        }
         // One jagged GROUP (the round split is inside it, as `preceding_rounds`
         // + this bundle's own commit).  The coverage check (group-map vs
         // partition) is enforced on the INNER host verifier; the wrap bundle
@@ -2525,6 +2541,53 @@ mod test {
     ///       REJECTED once threaded in (`Some`);
     ///   (3) the SAME divergent case is (wrongly) ACCEPTED with the bind
     ///       disabled (`None`) — the pre-fix gap the bind closes.
+    /// ZR-27: the verifier must not take its geometry from the proof.
+    ///
+    /// `log_stacking_height` selects `stack_dim`, the target dimension and the
+    /// WHIR configuration.  An honest commit always carries
+    /// `DEFAULT_LOG_STACKING_HEIGHT`, so any other value is a prover-chosen
+    /// geometry and must be refused before it is used.
+    #[test]
+    fn rejects_nonproduction_stacking_height() {
+        let (traces, z_row) = mk_shard(&[(4, 16), (2, 8)], 0x0027_0027);
+        let views = as_chip_views(&traces);
+        let mut p_chal = build_challenger();
+        let precomputed =
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(&views, None);
+        p_chal.observe(precomputed.commit.original_commitment.clone());
+        let r_row = r_row_suffixes(&views, &z_row);
+        let rounds = [JaggedOpenRound {
+            chip_traces: &views,
+            r_row_per_chip: &r_row,
+            claims: column_claims(&views, &z_row),
+            precomputed: &precomputed,
+        }];
+        let bundle = prove_jagged_basefold_rounds(&rounds, &z_row, &mut p_chal);
+        let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
+        let opened = bundle.y_per_chip.clone();
+
+        // The honest proof carries the production height and verifies.
+        assert_eq!(
+            bundle.commit.log_stacking_height,
+            crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT
+        );
+        assert!(
+            verify_main_round(&bundle, &widths, &z_row, Some(&opened)),
+            "honest proof must verify"
+        );
+
+        // Any other height is refused, in both directions.
+        let prod = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
+        for h in [prod - 1, prod + 1, prod + 3] {
+            let mut tampered = bundle.clone();
+            tampered.commit.log_stacking_height = h;
+            assert!(
+                !verify_main_round(&tampered, &widths, &z_row, Some(&opened)),
+                "log_stacking_height = {h} must be rejected (production is {prod})"
+            );
+        }
+    }
+
     #[test]
     fn crossbind_rejects_divergent_openings() {
         let (traces, z_row) = mk_shard(&[(4, 16), (2, 8)], 0x0121_0BAD);
