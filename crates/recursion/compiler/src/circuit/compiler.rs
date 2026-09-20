@@ -23,6 +23,27 @@ use crate::prelude::*;
 /// The number of instructions to preallocate in a recursion program
 const PREALLOC_INSTRUCTIONS: usize = 10000000;
 
+/// Panic unless the parallel sub-blocks' written-address ranges are pairwise
+/// disjoint.
+///
+/// Sorting by start reduces the pairwise question to adjacent pairs: in sorted
+/// order some two ranges overlap iff some neighbouring two do. Empty ranges
+/// (`start == end`) satisfy `end <= next.start` and so never conflict.
+fn assert_disjoint_written_ranges(ranges: &[core::ops::Range<u32>]) {
+    let mut sorted: Vec<core::ops::Range<u32>> = ranges.to_vec();
+    sorted.sort_unstable_by_key(|r| r.start);
+    for pair in sorted.windows(2) {
+        assert!(
+            pair[0].end <= pair[1].start,
+            "parallel sub-blocks write overlapping addresses ({:?} and {:?}): \
+             the runtime writes these concurrently through shared references, \
+             which requires disjoint ranges",
+            pair[0],
+            pair[1],
+        );
+    }
+}
+
 /// The backend for the circuit compiler.
 #[derive(Debug, Clone, Default)]
 pub struct AsmCompiler<C: Config> {
@@ -754,7 +775,7 @@ where
         RecursionProgram::new(seq_blocks, total_memory, final_traces, None)
     }
 
-    /// Compile a TracedVec of DSL ops into a `Vec<SeqBlock<Instruction<F>>>`.
+/// Compile a TracedVec of DSL ops into a `Vec<SeqBlock<Instruction<F>>>`.
     ///
     /// Most ops accumulate into a "current Basic block" buffer.
     /// `DslIr::Parallel(par_blocks)` flushes the current buffer to a
@@ -787,6 +808,27 @@ where
             let mut outcomes: Vec<Outcome<Instruction<C::F>>> = Vec::new();
             match ir_instr {
                 DslIr::Parallel(par_blocks) => {
+                    // The runtime walks these children concurrently and writes
+                    // memory through SHARED references with `mw_unchecked`.
+                    // That is sound only while their written-address ranges are
+                    // pairwise disjoint: two children writing one address is an
+                    // actual Rust data race, not merely a wrong proof.
+                    //
+                    // `ir_par_map_collect` assigns each child
+                    // `next_addr..variable_count()` from a monotonically
+                    // increasing counter, so the ranges are disjoint by
+                    // construction — but that is a property of one emitter, and
+                    // lowering discarded `addrs_written` without ever looking
+                    // at it, so nothing tied the invariant to the code relying
+                    // on it. A second emitter, or a hand-built block, inherited
+                    // the unchecked writes with none of the discipline.
+                    //
+                    // Sorting by start and comparing neighbours decides pairwise
+                    // disjointness in one pass: sorted ranges overlap iff some
+                    // adjacent pair does. Empty ranges satisfy it trivially.
+                    assert_disjoint_written_ranges(
+                        &par_blocks.iter().map(|b| b.addrs_written.clone()).collect::<Vec<_>>(),
+                    );
                     // Flush the in-progress Basic block before opening the
                     // Parallel boundary.
                     if !current_basic.is_empty() {
@@ -1010,6 +1052,55 @@ impl<C: Config<F: PrimeField64>> Reg<C> for Address<C::F> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The runtime writes parallel children concurrently through shared
+    /// references, so overlapping written-address ranges are a data race. These
+    /// pin the predicate that decides it.
+    mod parallel_written_ranges {
+        use crate::circuit::compiler::assert_disjoint_written_ranges;
+
+        #[test]
+        fn disjoint_ranges_are_accepted() {
+            assert_disjoint_written_ranges(&[0..10, 10..20, 20..30]);
+        }
+
+        #[test]
+        fn touching_ranges_are_disjoint() {
+            // `end` is exclusive, so `0..10` and `10..11` share no address.
+            assert_disjoint_written_ranges(&[0..10, 10..11]);
+        }
+
+        #[test]
+        fn empty_ranges_never_conflict() {
+            assert_disjoint_written_ranges(&[5..5, 5..5, 0..5]);
+        }
+
+        #[test]
+        fn order_of_the_blocks_does_not_matter() {
+            // The emitter's order is not sorted order; the check sorts first.
+            assert_disjoint_written_ranges(&[20..30, 0..10, 10..20]);
+        }
+
+        #[test]
+        #[should_panic(expected = "write overlapping addresses")]
+        fn a_shared_address_is_rejected() {
+            // Address 9 is written by both children.
+            assert_disjoint_written_ranges(&[0..10, 9..20]);
+        }
+
+        #[test]
+        #[should_panic(expected = "write overlapping addresses")]
+        fn a_contained_range_is_rejected() {
+            assert_disjoint_written_ranges(&[0..100, 40..50]);
+        }
+
+        #[test]
+        #[should_panic(expected = "write overlapping addresses")]
+        fn an_overlap_between_non_adjacent_blocks_is_still_found() {
+            // Unsorted, and the overlapping pair is not adjacent as given.
+            assert_disjoint_written_ranges(&[0..10, 30..40, 5..8]);
+        }
+    }
     use std::{collections::VecDeque, io::BufRead, iter::zip, sync::Arc};
 
     use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};

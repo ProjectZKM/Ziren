@@ -4,16 +4,21 @@
 //! a `BasicBlock` (linearly ordered instructions) or a `Parallel` block
 //! (multiple `RawProgram`s that can execute concurrently).
 //!
-//! The IR-level discipline that makes parallel execution sound: each
-//! parallel sub-program is emitted with a monotonically-increasing
-//! address counter so per-block written-address ranges are disjoint by
-//! construction. The runtime relies on this discipline; it does not
-//! verify it.
+//! The discipline that makes parallel execution sound: each parallel
+//! sub-program is emitted with a monotonically-increasing address counter, so
+//! per-block written-address ranges are pairwise disjoint. The runtime writes
+//! through shared references with `mw_unchecked` and relies on exactly that;
+//! two children writing one address is a data race, not a wrong proof.
 //!
-//! These types are additive scaffolding — the compiler emits a single
-//! `Basic` block today; the runtime walks `seq_blocks` and `Parallel`
-//! emission lands once the memory/record layers support interior
-//! mutability.
+//! Disjointness is CHECKED where the block is formed, in the compiler's
+//! lowering of `DslIr::Parallel`, against the `addrs_written` range each
+//! sub-block carries. Being disjoint "by construction" is a property of one
+//! emitter, and the ranges used to be discarded at lowering without being
+//! looked at, which left the invariant and the code depending on it
+//! unconnected.
+//!
+//! `Parallel` is live, not scaffolding: a compose program with `n` inputs
+//! carries at least one `Parallel` block, one sub-program per input.
 
 use serde::{Deserialize, Serialize};
 use std::iter::Flatten;
