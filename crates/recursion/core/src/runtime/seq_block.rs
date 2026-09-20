@@ -41,8 +41,8 @@ pub enum SeqBlock<T> {
     /// One basic block, executed sequentially.
     Basic(BasicBlock<T>),
     /// Many sub-programs to be executed in parallel. Each sub-program's
-    /// written-address range is disjoint from the others' (IR-level
-    /// discipline; not verified at runtime).
+    /// written-address range is disjoint from the others', which the
+    /// compiler checks when it lowers `DslIr::Parallel`.
     Parallel(Vec<RawProgram<T>>),
 }
 
@@ -83,39 +83,48 @@ impl<T> RawProgram<T> {
     /// total_instructions_in_parallel_subs)`. A program with a non-zero
     /// second component is one where `par_iter` walker dispatch would
     /// help; the third component bounds the wall-time win.
+    ///
+    /// `n_par_instrs` counts each instruction AT MOST ONCE: it is the number
+    /// of instructions lying inside at least one `Parallel`, so it is bounded
+    /// by [`Self::instruction_count`] and a ratio against that total is a
+    /// proportion.
+    ///
+    /// It previously added `sub_instr_count(b)`, which already descends into
+    /// nested `Parallel` blocks, and then recursed into the same `b` and added
+    /// those same instructions again — one extra copy per nesting level. A
+    /// program whose parallel blocks nest reported more parallel instructions
+    /// than it contains; a compose program reported 137%. Nothing caught it
+    /// because the only fixture exercising this had a single flat block.
     pub fn parallelism_summary(&self) -> (usize, usize, usize) {
         fn walk<T>(
             block: &SeqBlock<T>,
+            inside_parallel: bool,
             n_par: &mut usize,
             n_subs: &mut usize,
             n_par_instrs: &mut usize,
         ) {
             match block {
-                SeqBlock::Basic(_) => {}
+                // Counted only where it actually sits inside a parallel
+                // region, and only by the one walk that reaches it.
+                SeqBlock::Basic(b) => {
+                    if inside_parallel {
+                        *n_par_instrs += b.instrs.len();
+                    }
+                }
                 SeqBlock::Parallel(subs) => {
                     *n_par += 1;
                     *n_subs += subs.len();
                     for sub in subs {
                         for b in &sub.seq_blocks {
-                            *n_par_instrs += sub_instr_count(b);
-                            walk(b, n_par, n_subs, n_par_instrs);
+                            walk(b, true, n_par, n_subs, n_par_instrs);
                         }
                     }
                 }
             }
         }
-        fn sub_instr_count<T>(block: &SeqBlock<T>) -> usize {
-            match block {
-                SeqBlock::Basic(b) => b.instrs.len(),
-                SeqBlock::Parallel(subs) => subs
-                    .iter()
-                    .map(|sub| sub.seq_blocks.iter().map(sub_instr_count).sum::<usize>())
-                    .sum(),
-            }
-        }
         let (mut n_par, mut n_subs, mut n_par_instrs) = (0, 0, 0);
         for b in &self.seq_blocks {
-            walk(b, &mut n_par, &mut n_subs, &mut n_par_instrs);
+            walk(b, false, &mut n_par, &mut n_subs, &mut n_par_instrs);
         }
         (n_par, n_subs, n_par_instrs)
     }
@@ -250,6 +259,66 @@ impl<T> IntoIterator for SeqBlock<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A parallel region's instruction count is a PROPORTION of the program,
+    /// so it can never exceed the program's own instruction count. Nested
+    /// blocks used to be re-counted once per nesting level, which put the
+    /// ratio above 100%.
+    #[test]
+    fn nested_parallel_instructions_are_counted_once() {
+        let basic = |n: usize| SeqBlock::Basic(BasicBlock { instrs: vec![0u8; n] });
+
+        // One outer Parallel with two children; the first child holds a
+        // Basic(2) and an inner Parallel whose two children hold Basic(3)
+        // each. Instructions inside a parallel region: 2 + 3 + 3 + 4 = 12.
+        let inner = SeqBlock::Parallel(vec![
+            RawProgram { seq_blocks: vec![basic(3)] },
+            RawProgram { seq_blocks: vec![basic(3)] },
+        ]);
+        let program = RawProgram {
+            seq_blocks: vec![SeqBlock::Parallel(vec![
+                RawProgram { seq_blocks: vec![basic(2), inner] },
+                RawProgram { seq_blocks: vec![basic(4)] },
+            ])],
+        };
+
+        let (n_par, n_subs, n_par_instrs) = program.parallelism_summary();
+        assert_eq!(n_par, 2, "the outer and the inner Parallel");
+        assert_eq!(n_subs, 4, "two children each");
+        assert_eq!(n_par_instrs, 12, "2 + 3 + 3 + 4, each instruction once");
+
+        // The invariant that makes the ratio meaningful.
+        let total: usize = program.seq_blocks.iter().map(count_all).sum();
+        assert_eq!(total, 12, "every instruction here is inside the outer Parallel");
+        assert!(
+            n_par_instrs <= total,
+            "parallel instructions ({n_par_instrs}) cannot exceed the total ({total})",
+        );
+    }
+
+    /// Instructions outside any `Parallel` are not parallel instructions.
+    #[test]
+    fn instructions_outside_a_parallel_are_not_counted() {
+        let basic = |n: usize| SeqBlock::Basic(BasicBlock { instrs: vec![0u8; n] });
+        let program = RawProgram {
+            seq_blocks: vec![
+                basic(7),
+                SeqBlock::Parallel(vec![RawProgram { seq_blocks: vec![basic(5)] }]),
+            ],
+        };
+        let (n_par, n_subs, n_par_instrs) = program.parallelism_summary();
+        assert_eq!((n_par, n_subs), (1, 1));
+        assert_eq!(n_par_instrs, 5, "the leading Basic(7) is sequential");
+    }
+
+    fn count_all(block: &SeqBlock<u8>) -> usize {
+        match block {
+            SeqBlock::Basic(b) => b.instrs.len(),
+            SeqBlock::Parallel(subs) => {
+                subs.iter().map(|s| s.seq_blocks.iter().map(count_all).sum::<usize>()).sum()
+            }
+        }
+    }
 
     #[test]
     fn iterates_basic_block_in_order() {

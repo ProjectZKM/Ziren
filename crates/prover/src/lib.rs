@@ -2961,16 +2961,19 @@ pub mod tests {
         // Build the production compress machine (RecursionAir, COMPRESS_DEGREE).
         let compress_machine = CompressAir::compress_machine(InnerSC::default());
 
-        // Construct a 4-input compress shape using minimal recursion-chip
-        // names. Real chip names from RecursionAir; the exact heights
-        // don't matter for the program emission check (the dummy
-        // generator silently skips unknown chips, so use only ones that
-        // exist in the recursion machine).
-        // Use the chip names from the recursion machine itself.
+        // EVERY chip of the machine, not a prefix of them.
+        //
+        // The jagged verifier derives its column layout from the MACHINE and
+        // splices the per-round stacking pads at `insertion_points`, which are
+        // the prefix sums of the machine's per-round column counts. A shape
+        // carrying only some chips therefore produces claims for those chips
+        // while the insertion points still describe the whole machine, and the
+        // splice indexes past the claim vector. A two-chip prefix used to be
+        // accepted because the layout was taken from the proof; it is taken
+        // from the machine now, so the fixture has to describe the machine.
         let chip_names: Vec<String> = compress_machine
             .chips()
             .iter()
-            .take(2)
             .map(<_ as MachineAir<KoalaBear>>::name)
             .collect();
         let proof_shape = || {
@@ -3018,9 +3021,32 @@ pub mod tests {
             n_par >= 1,
             "compose program with {n_inputs} inputs should have ≥1 SeqBlock::Parallel block, got {n_par}",
         );
-        assert_eq!(
-            n_subs, n_inputs,
-            "Parallel block should hold {n_inputs} sub-programs, got {n_subs}",
+        // `parallelism_summary` RECURSES, so `n_subs` sums the children of
+        // every nested `Parallel` as well. The property this test is about is
+        // the top-level fan-out: `ir_par_map_collect` over the inputs emits one
+        // sub-program per input. Nested blocks inside a child are the per-chip
+        // loops, and how many of those there are is a function of the shape,
+        // not of `n_inputs` -- so comparing the recursive total against
+        // `n_inputs` only held while the fixture was degenerate enough to have
+        // exactly one `Parallel` block.
+        let top_level_fanouts: Vec<usize> = program
+            .seq_blocks
+            .seq_blocks
+            .iter()
+            .filter_map(|b| match b {
+                zkm_recursion_core::runtime::SeqBlock::Parallel(subs) => Some(subs.len()),
+                zkm_recursion_core::runtime::SeqBlock::Basic(_) => None,
+            })
+            .collect();
+        assert!(
+            top_level_fanouts.contains(&n_inputs),
+            "a top-level Parallel block should hold one sub-program per input \
+             ({n_inputs}); top-level fan-outs were {top_level_fanouts:?}",
+        );
+        assert!(
+            n_subs >= n_inputs,
+            "the recursive sub-program total ({n_subs}) cannot be below the \
+             top-level fan-out ({n_inputs})",
         );
         assert!(n_par_instrs > 0, "Parallel sub-programs should hold non-zero instructions",);
 
