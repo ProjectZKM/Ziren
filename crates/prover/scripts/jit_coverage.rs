@@ -10,6 +10,7 @@
 //! Run:
 //!   cargo run --release --bin jit_coverage
 
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
 use zkm_prover::components::DefaultProverComponents;
@@ -89,7 +90,7 @@ fn main() {
             .map(|(i, n)| (plan.mix[i], *n))
             .filter(|(n, _)| *n > 0)
             .collect();
-        rows.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        rows.sort_unstable_by_key(|r| Reverse(r.0));
         for (n, name) in rows {
             println!("  {name:<20} {n:>10}  {:>6.2}%", 100.0 * n as f64 / plan.total() as f64);
         }
@@ -307,7 +308,7 @@ fn main() {
         .map(|(i, n)| (totals.mix[i], *n))
         .filter(|(n, _)| *n > 0)
         .collect();
-    rows.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    rows.sort_unstable_by_key(|r| Reverse(r.0));
     for (n, name) in rows {
         println!("  {name:<20} {n:>10}  {:>6.2}%", 100.0 * n as f64 / totals.total() as f64);
     }

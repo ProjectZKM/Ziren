@@ -105,14 +105,6 @@ pub struct ZKMCoreBasefoldWitnessVariable<
     pub vk_root: [Felt<C::F>; DIGEST_SIZE],
 }
 
-/// Query-helpers on a shard-level proof tuple.  Ziren's legacy
-/// [`crate::stark::ShardProofVariable`] exposes these as methods on
-/// the proof; the basefold tuple has no methods so we derive them
-/// from the chip-name list embedded in the LogUp-GKR proof.
-fn contains_chip(chip_names: &[String], name: &str) -> bool {
-    chip_names.iter().any(|n| n.as_str() == name)
-}
-
 /// Verify a list of basefold shard proofs, asserting the
 /// shard-to-shard consistency chain, and commit the aggregated
 /// [`RecursionPublicValues`] to the recursion-public-values stream.

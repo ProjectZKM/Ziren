@@ -59,8 +59,7 @@ use crate::{
 /// The number of main trace columns for `ShiftLeft`.
 pub const NUM_SHIFT_LEFT_COLS: usize = size_of::<ShiftLeftCols<u8>>();
 
-/// The number of bits in a byte.
-pub const BYTE_SIZE: usize = 8;
+use super::BYTE_SIZE;
 
 /// A chip that implements bitwise operations for the opcodes SLL and SLLI.
 #[derive(Default)]

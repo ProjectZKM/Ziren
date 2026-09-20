@@ -156,13 +156,14 @@ where
         let pid = AB::Expr::from_u32(SyscallCode::SHA_COMPRESS.syscall_id());
 
         // Send the initial state `(pid, shard, clk, w_ptr, h_ptr, 0, a..h)`.
-        let mut send_vals: Vec<AB::Expr> = Vec::new();
-        send_vals.push(pid.clone());
-        send_vals.push(local.shard.into());
-        send_vals.push(local.clk.into());
-        send_vals.push(local.w_ptr.into());
-        send_vals.push(local.h_ptr.into());
-        send_vals.push(AB::Expr::ZERO);
+        let mut send_vals: Vec<AB::Expr> = vec![
+            pid.clone(),
+            local.shard.into(),
+            local.clk.into(),
+            local.w_ptr.into(),
+            local.h_ptr.into(),
+            AB::Expr::ZERO,
+        ];
         for word in local.initial_state.iter() {
             for b in word.0.iter() {
                 send_vals.push((*b).into());
@@ -174,13 +175,14 @@ where
         );
 
         // Receive the final state `(pid, shard, clk, w_ptr, h_ptr, 80, a..h)`.
-        let mut recv_vals: Vec<AB::Expr> = Vec::new();
-        recv_vals.push(pid);
-        recv_vals.push(local.shard.into());
-        recv_vals.push(local.clk.into());
-        recv_vals.push(local.w_ptr.into());
-        recv_vals.push(local.h_ptr.into());
-        recv_vals.push(AB::Expr::from_u32(80));
+        let mut recv_vals: Vec<AB::Expr> = vec![
+            pid,
+            local.shard.into(),
+            local.clk.into(),
+            local.w_ptr.into(),
+            local.h_ptr.into(),
+            AB::Expr::from_u32(80),
+        ];
         for word in local.final_state.iter() {
             for b in word.0.iter() {
                 recv_vals.push((*b).into());

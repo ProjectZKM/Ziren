@@ -100,8 +100,8 @@ pub fn all_bit_states() -> [BitState; 16] {
         curr_col_prefix_sum_bit: false,
         next_col_prefix_sum_bit: false,
     });
-    for i in 0..16 {
-        out[i] = BitState {
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = BitState {
             row_bit: (i & 1) != 0,
             index_bit: (i & 2) != 0,
             curr_col_prefix_sum_bit: (i & 4) != 0,
@@ -413,8 +413,8 @@ mod tests {
     fn partial_lagrange_4_at_zero_point_is_basis() {
         let result = partial_lagrange_4::<InnerChallenge>([InnerChallenge::ZERO; 4]);
         assert_eq!(result[0], InnerChallenge::ONE);
-        for i in 1..16 {
-            assert_eq!(result[i], InnerChallenge::ZERO);
+        for v in &result[1..16] {
+            assert_eq!(*v, InnerChallenge::ZERO);
         }
     }
 

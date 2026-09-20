@@ -2,6 +2,7 @@
 //! lines, most frequent first, for `addr2line -i` attribution.
 //!
 //!   cargo run --release --example trace_hist -- trace.bin > pcs.txt
+use std::cmp::Reverse;
 use std::{
     collections::HashMap,
     env,
@@ -27,7 +28,7 @@ fn main() {
         }
     }
     let mut v: Vec<(u32, u64)> = counts.into_iter().collect();
-    v.sort_by(|a, b| b.1.cmp(&a.1));
+    v.sort_by_key(|r| Reverse(r.1));
     let out = std::io::stdout();
     let mut out = out.lock();
     writeln!(out, "# total_cycles {total} unique_pcs {}", v.len()).unwrap();

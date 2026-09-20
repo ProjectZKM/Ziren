@@ -25,6 +25,8 @@
 //! and the final endpoint at `+1`).  More than two means the chip chain failed
 //! to telescope, and the extra pair names the row where it broke.
 
+use std::cmp::Reverse;
+
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::{Executor, Program};
 use zkm_core_machine::{
@@ -177,7 +179,7 @@ fn main() {
                     )
                 })
                 .collect();
-            rows.sort_by(|a, b| b.1.cmp(&a.1));
+            rows.sort_by_key(|r| Reverse(r.1));
             let total: usize = rows.iter().map(|r| r.1).sum();
             eprintln!("{:<28} {:>7} {:>7}  {:>6}", "chip", "main_w", "prep_w", "%main");
             for (name, w, pw) in &rows {
@@ -450,7 +452,7 @@ fn main() {
                     )
                 })
                 .collect();
-            ranked.sort_by(|a, b| b.1.cmp(&a.1));
+            ranked.sort_by_key(|r| Reverse(r.1));
             let paid_total: u128 = ranked.iter().map(|r| r.1).sum();
             eprintln!(
                 "\n{:<28} {:>16} {:>16} {:>7} {:>14} {:>6}",

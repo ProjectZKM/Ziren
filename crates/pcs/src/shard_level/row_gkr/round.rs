@@ -228,6 +228,9 @@ where
 /// the original flat index — matching the LSB-first MLE convention
 /// downstream consumers rely on (`eq_eval`, trace evaluation at the
 /// "last log_h coords", etc.).
+// The factored eq tables and their bound coordinates are the round's state;
+// bundling them would only move the same arity behind a struct.
+#[allow(clippy::too_many_arguments)]
 fn round_poly_evaluations<EF: Field + Send + Sync>(
     eq_int: &[EF],
     eq_row: &[EF],
@@ -2035,6 +2038,9 @@ mod tests {
     /// `p(X)` at a single `X` under the factored-eq layout.  Mirrors the
     /// math of `round_poly_evaluations` WITHOUT the eq-root trick — the
     /// ground truth for the bit-identity tests.
+    // The independent reference: it takes the round's inputs one by one on
+    // purpose, so a shared struct cannot make it agree with the code it checks.
+    #[allow(clippy::too_many_arguments)]
     fn ref_p(
         eq_int: &[EF],
         eq_row: &[EF],

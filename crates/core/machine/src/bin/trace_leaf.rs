@@ -5,6 +5,7 @@
 //!
 //!   trace_leaf trace.bin leaves.txt   (lines: `start size name`, decimal)
 //! prints `callsite_pc cycles name`, most expensive first.
+use std::cmp::Reverse;
 use std::{
     collections::HashMap,
     env,
@@ -61,7 +62,7 @@ fn main() {
         writeln!(out, "# leaf {name} total_cycles {}", leaf_total[li]).unwrap();
     }
     let mut v: Vec<((usize, u32), u64)> = counts.into_iter().collect();
-    v.sort_by(|a, b| b.1.cmp(&a.1));
+    v.sort_by_key(|r| Reverse(r.1));
     for ((li, site), c) in v {
         writeln!(out, "{site:08x} {c} {}", leaves[li].2).unwrap();
     }

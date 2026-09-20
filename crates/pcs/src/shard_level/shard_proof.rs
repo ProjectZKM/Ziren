@@ -43,6 +43,10 @@ pub struct ChipCumulativeSums<F, EF> {
 ///   the bundle-lift recursion shape because it skips rmp varint
 ///   reparsing, keeping the lifted bytes deterministic.
 #[derive(Clone, Serialize, Deserialize, Default)]
+// `Bundle`/`OuterBundle` carry a whole jagged proof, so the variants are far
+// apart by construction.  Boxing them would put an indirection on every
+// opening read in the shard verifier.
+#[allow(clippy::large_enum_variant)]
 pub enum EvaluationProof {
     #[default]
     Empty,

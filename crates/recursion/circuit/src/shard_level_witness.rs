@@ -2129,6 +2129,10 @@ where
     (bp, sc, je, ee, cr)
 }
 
+// The lift reads every witness component the bundle carries; collapsing them
+// into a struct is what let ZR-24's root vector be assembled in the wrong
+// place to begin with, so they stay named and explicit here.
+#[allow(clippy::too_many_arguments)]
 pub fn lift_jagged_bundle_generic<C, HV, PP>(
     builder: &mut Builder<C>,
     bundle: &JaggedBasefoldBundle,

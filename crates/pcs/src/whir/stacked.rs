@@ -940,7 +940,6 @@ where
             Lagrange { point: Vec<EF>, coeff: EF, vars: usize },
             Monomial { point: Vec<EF>, coeff: EF, vars: usize },
         }
-        let mut claim = claim;
         let mut constraints: Vec<C<EF>> =
             alloc::vec![C::Lagrange { point: stack_point.to_vec(), coeff: EF::ONE, vars: n }];
 

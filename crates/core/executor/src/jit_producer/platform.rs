@@ -16,8 +16,7 @@ use zkm_core_jit::{
     backends::x86::{
         producer::{
             build_producer, producer_reject, runs_in_interpreter, HeightCharge, ProducerConfig,
-            ProducerInstr, ProducerReject, MAX_CHARGES, MAX_STAMPS, POS_A, POS_B, POS_C,
-            POS_HI,
+            ProducerInstr, ProducerReject, MAX_CHARGES, MAX_STAMPS, POS_A, POS_B, POS_C, POS_HI,
         },
         JIT_EXIT_BAD_JUMP, JIT_EXIT_FALL_OFF, JIT_EXIT_HOST, JIT_EXIT_ORACLE_FULL,
         JIT_EXIT_SHARD_FENCE,
@@ -73,16 +72,13 @@ struct Bridge<'a> {
 /// again without native progress in between changes nothing.
 fn sync_in(exec: &mut Executor<'_>, ctx: &JitContext, br: &mut Bridge<'_>) {
     let regs = &mut exec.state.memory.registers.registers;
-    for i in 0..NUM_REGISTERS {
+    for (i, reg) in regs.iter_mut().enumerate().take(NUM_REGISTERS) {
         let value = if i == 0 { 0 } else { ctx.registers[i] };
         let stamp = ctx.reg_stamps[i];
         if stamp != 0 {
-            regs[i] = Some(MemoryRecord {
-                shard: (stamp >> 32) as u32,
-                timestamp: stamp as u32,
-                value,
-            });
-        } else if let Some(r) = regs[i].as_mut() {
+            *reg =
+                Some(MemoryRecord { shard: (stamp >> 32) as u32, timestamp: stamp as u32, value });
+        } else if let Some(r) = reg.as_mut() {
             r.value = value;
         }
     }
@@ -120,8 +116,8 @@ fn clk_limit(exec: &Executor<'_>) -> u32 {
 fn sync_out(exec: &mut Executor<'_>, ctx: &mut JitContext, br: &mut Bridge<'_>) {
     ctx.pc = exec.state.pc;
     let regs = &exec.state.memory.registers.registers;
-    for i in 0..NUM_REGISTERS {
-        let (value, stamp) = match regs[i] {
+    for (i, reg) in regs.iter().enumerate().take(NUM_REGISTERS) {
+        let (value, stamp) = match reg {
             None => (0, 0),
             Some(r) if r.shard == 0 && r.timestamp == 0 => (r.value, 0),
             Some(r) => (r.value, (u64::from(r.shard) << 32) | u64::from(r.timestamp)),
@@ -142,11 +138,7 @@ fn sync_out(exec: &mut Executor<'_>, ctx: &mut JitContext, br: &mut Bridge<'_>) 
         ctx.height_left.fill(i64::MAX / 2);
     } else {
         ctx.clk_limit = clk_limit(exec);
-        exec.split_acct.export_budgets(
-            &mut ctx.area_left,
-            &mut ctx.height_left,
-            &mut ctx.touched,
-        );
+        exec.split_acct.export_budgets(&mut ctx.area_left, &mut ctx.height_left, &mut ctx.touched);
     }
     // The active view changes at ENTER/EXIT (copy-on-write inside a block).
     let flat = exec.flat_mem.as_deref().expect("producer runs on the flat memory");
@@ -180,8 +172,7 @@ fn is_delay_slot(program: &Program, pc: u32) -> bool {
 /// only ever set by a syscall, which runs in the interpreter).
 fn program_done(exec: &Executor<'_>) -> bool {
     let pc = exec.state.pc;
-    pc == 0
-        || pc.wrapping_sub(exec.program.pc_base) >= (exec.program.instructions.len() * 4) as u32
+    pc == 0 || pc.wrapping_sub(exec.program.pc_base) >= (exec.program.instructions.len() * 4) as u32
 }
 
 /// The native trap site: run one instruction in the interpreter.
@@ -195,11 +186,8 @@ extern "C" fn producer_handler(ctx: *mut JitContext) -> u64 {
     let pc = ctx.pc;
     let pending = std::mem::replace(&mut ctx.pending_jump_at_start, 0);
     exec.state.pc = pc;
-    exec.state.next_pc = if pending != 0 && is_delay_slot(&exec.program, pc) {
-        pending
-    } else {
-        pc.wrapping_add(4)
-    };
+    exec.state.next_pc =
+        if pending != 0 && is_delay_slot(&exec.program, pc) { pending } else { pc.wrapping_add(4) };
     let was_unconstrained = exec.unconstrained;
     match exec.execute_cycle() {
         Err(e) => {
@@ -293,7 +281,9 @@ fn cached_producer(exec: &Executor<'_>) -> Option<Arc<JitFunction>> {
 }
 
 fn build(exec: &Executor<'_>) -> Built {
-    assert!(
+    // Both sides are compile-time constants, so this is a build error, not a
+    // runtime one.
+    const _: () = assert!(
         <MipsAirId as enum_map::Enum>::LENGTH <= PRODUCER_HEIGHT_SLOTS,
         "JitContext::height_left has too few slots for MipsAirId"
     );

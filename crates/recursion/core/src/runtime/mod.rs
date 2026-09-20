@@ -320,7 +320,7 @@ where
     /// `SeqBlock::Parallel` disjoint-offset invariant.
     #[inline(always)]
     unsafe fn raw_write_ev<T>(slot: &MaybeUninit<UnsafeCell<T>>, ev: T) {
-        unsafe { UnsafeCell::raw_get(slot.as_ptr() as *const UnsafeCell<T>).write(ev) }
+        unsafe { UnsafeCell::raw_get(slot.as_ptr()).write(ev) }
     }
 
     /// Variant that takes `trap_pc` explicitly so it can
@@ -374,9 +374,8 @@ where
         // pattern — works through `&UnsafeRecord` so it's compatible
         // with the new `&self` walker. CommitPublicValues overwrites.
         unsafe {
-            UnsafeCell::raw_get(unsafe_record.public_values.as_ptr()
-                as *const UnsafeCell<crate::air::RecursionPublicValues<F>>)
-            .write(crate::air::RecursionPublicValues::default());
+            UnsafeCell::raw_get(unsafe_record.public_values.as_ptr())
+                .write(crate::air::RecursionPublicValues::default());
         }
 
         // Hoist mutable per-walker state into a
@@ -680,7 +679,6 @@ where
                     }
                     MemAccessKind::Write => {
                         self.mw_us(*addr, *val, *mult);
-                        drop(())
                     }
                 }
                 // mem_const_count is pre-sized by `UnsafeRecord::new`

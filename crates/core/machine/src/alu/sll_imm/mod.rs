@@ -62,8 +62,7 @@ pub const SHAMT_BITS: usize = 5;
 
 pub const NUM_SHIFT_LEFT_IMM_COLS: usize = size_of::<ShiftLeftImmCols<u8>>();
 
-/// The number of bits in a byte.
-pub const BYTE_SIZE: usize = 8;
+use super::BYTE_SIZE;
 
 /// A chip that implements the immediate-form (shamt) SLL; the
 /// variable-register form proves in [`super::ShiftLeft`].

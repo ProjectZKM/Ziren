@@ -69,6 +69,9 @@ pub struct EventSlice {
 
 /// One deferred shard, as the controller wants it built.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+// The variants differ in size because one carries its event slices inline.
+// Boxing it would add an allocation per deferred shard on the planning path.
+#[allow(clippy::large_enum_variant)]
 pub enum DeferredShardPlan {
     /// A precompile shard: one syscall code, its events in stream order.
     Precompile { code: SyscallCode, slices: Vec<EventSlice> },

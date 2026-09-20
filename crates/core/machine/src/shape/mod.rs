@@ -1410,6 +1410,54 @@ pub enum CoreShapeError {
     PrecompileNotIncluded(HashMap<String, usize>),
 }
 
+/// Canonicalize a fixed record shape UP to the smallest stacked-shapes
+/// cluster that contains its chip set (VERIFY_VK multi-shard coverage).
+///
+/// Chip sets are event-driven: a guest that never executes (say) a MISC
+/// instruction drops `MiscInstrs` from its execution shards, so the
+/// per-shard chip-set space is combinatorial and can never be fully
+/// pre-enumerated into the vk_map.  The fix is to make core
+/// shapes carry the FULL cluster chip set (zero-event chips emit
+/// shape-height padding traces — tracegen already honors this via
+/// `fixed_log2_rows`).  This post-pass extends `record.shape` with the
+/// missing cluster chips at log-height 1 so every shard of a given type
+/// presents the canonical chip set to the recursion layer.
+///
+/// No-op when the record has no shape or no cluster contains its set
+/// (the recursion vk lookup will then fail loudly with the digest).
+pub fn canonicalize_shape_to_cluster(record: &mut ExecutionRecord) {
+    let Some(shape) = record.shape.as_mut() else { return };
+    canonicalize_shape(shape);
+}
+
+/// `Shape`-level core of [`canonicalize_shape_to_cluster`]: extend `shape`
+/// with the missing chips of the smallest superset stacked-shapes cluster at
+/// log-height 1.  Shared by the record post-pass (FIX-on) and the read-only
+/// [`CoreShapeConfig::find_canonical_cluster_shape`] (FIX-off band-cap).
+pub fn canonicalize_shape(shape: &mut Shape<MipsAirId>) {
+    use std::collections::BTreeSet;
+    use std::str::FromStr;
+    let present: BTreeSet<MipsAirId> = shape.iter().map(|(k, _)| *k).collect();
+    let clusters = zkm_pcs::stacked_shapes::build_mips_machine_shape().chip_clusters;
+    // Parse each cluster's names into MipsAirIds (skip names without a
+    // live machine id) and pick the smallest superset cluster.
+    let mut best: Option<BTreeSet<MipsAirId>> = None;
+    for cluster in clusters.iter() {
+        let ids: BTreeSet<MipsAirId> =
+            cluster.iter().filter_map(|n| MipsAirId::from_str(n).ok()).collect();
+        if present.is_subset(&ids) && best.as_ref().map(|b| ids.len() < b.len()).unwrap_or(true) {
+            best = Some(ids);
+        }
+    }
+    if let Some(cluster) = best {
+        for id in cluster {
+            if !present.contains(&id) {
+                shape.insert(id, 1);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use std::sync::Arc;
@@ -2186,54 +2234,6 @@ pub mod tests {
                 enumerated,
                 "[{label}] canonicalized chip-SET must equal an enumerated cluster; got {present_ids:?}"
             );
-        }
-    }
-}
-
-/// Canonicalize a fixed record shape UP to the smallest stacked-shapes
-/// cluster that contains its chip set (VERIFY_VK multi-shard coverage).
-///
-/// Chip sets are event-driven: a guest that never executes (say) a MISC
-/// instruction drops `MiscInstrs` from its execution shards, so the
-/// per-shard chip-set space is combinatorial and can never be fully
-/// pre-enumerated into the vk_map.  The fix is to make core
-/// shapes carry the FULL cluster chip set (zero-event chips emit
-/// shape-height padding traces — tracegen already honors this via
-/// `fixed_log2_rows`).  This post-pass extends `record.shape` with the
-/// missing cluster chips at log-height 1 so every shard of a given type
-/// presents the canonical chip set to the recursion layer.
-///
-/// No-op when the record has no shape or no cluster contains its set
-/// (the recursion vk lookup will then fail loudly with the digest).
-pub fn canonicalize_shape_to_cluster(record: &mut ExecutionRecord) {
-    let Some(shape) = record.shape.as_mut() else { return };
-    canonicalize_shape(shape);
-}
-
-/// `Shape`-level core of [`canonicalize_shape_to_cluster`]: extend `shape`
-/// with the missing chips of the smallest superset stacked-shapes cluster at
-/// log-height 1.  Shared by the record post-pass (FIX-on) and the read-only
-/// [`CoreShapeConfig::find_canonical_cluster_shape`] (FIX-off band-cap).
-pub fn canonicalize_shape(shape: &mut Shape<MipsAirId>) {
-    use std::collections::BTreeSet;
-    use std::str::FromStr;
-    let present: BTreeSet<MipsAirId> = shape.iter().map(|(k, _)| *k).collect();
-    let clusters = zkm_pcs::stacked_shapes::build_mips_machine_shape().chip_clusters;
-    // Parse each cluster's names into MipsAirIds (skip names without a
-    // live machine id) and pick the smallest superset cluster.
-    let mut best: Option<BTreeSet<MipsAirId>> = None;
-    for cluster in clusters.iter() {
-        let ids: BTreeSet<MipsAirId> =
-            cluster.iter().filter_map(|n| MipsAirId::from_str(n).ok()).collect();
-        if present.is_subset(&ids) && best.as_ref().map(|b| ids.len() < b.len()).unwrap_or(true) {
-            best = Some(ids);
-        }
-    }
-    if let Some(cluster) = best {
-        for id in cluster {
-            if !present.contains(&id) {
-                shape.insert(id, 1);
-            }
         }
     }
 }

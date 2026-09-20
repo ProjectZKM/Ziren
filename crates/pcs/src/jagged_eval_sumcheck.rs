@@ -291,7 +291,7 @@ fn materialize_bp_evals(bp: &BranchingProgram<InnerChallenge>, half: usize) -> V
     let n = 2 * half;
     let total = 1usize << n;
     let mut evals = vec![InnerChallenge::ZERO; total];
-    for i in 0..total {
+    for (i, eval) in evals.iter_mut().enumerate() {
         // Lower's big-endian bits = [bit_0(i), bit_1(i), ..., bit_{half-1}(i)]
         let lower_bits: Vec<InnerChallenge> = (0..half)
             .map(|j| if (i >> j) & 1 == 1 { InnerChallenge::ONE } else { InnerChallenge::ZERO })
@@ -299,7 +299,7 @@ fn materialize_bp_evals(bp: &BranchingProgram<InnerChallenge>, half: usize) -> V
         let upper_bits: Vec<InnerChallenge> = (half..n)
             .map(|j| if (i >> j) & 1 == 1 { InnerChallenge::ONE } else { InnerChallenge::ZERO })
             .collect();
-        evals[i] = bp.eval(&lower_bits, &upper_bits);
+        *eval = bp.eval(&lower_bits, &upper_bits);
     }
     evals
 }
@@ -1160,8 +1160,7 @@ mod tests {
         let claimed_sum = full_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace);
         let merged_prefix_sums: Vec<Vec<InnerChallenge>> = (0..num_chips)
             .map(|k| {
-                let mut m =
-                    crate::jagged_branching_program::bits_big_endian(prefix_sums[k], half);
+                let mut m = crate::jagged_branching_program::bits_big_endian(prefix_sums[k], half);
                 m.extend_from_slice(&crate::jagged_branching_program::bits_big_endian::<
                     InnerChallenge,
                 >(prefix_sums[k + 1], half));

@@ -252,8 +252,8 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         assert!(!roots.is_empty(), "BN254 wrap commitment MerkleCap must have at least one root",);
         let felts = p3_field::split_32::<Bn254, KoalaBear>(roots[0][0], 8);
         let mut out = [KoalaBear::default(); 8];
-        for i in 0..8 {
-            out[i] = felts.get(i).copied().unwrap_or_default();
+        for (i, o) in out.iter_mut().enumerate() {
+            *o = felts.get(i).copied().unwrap_or_default();
         }
         out
     }

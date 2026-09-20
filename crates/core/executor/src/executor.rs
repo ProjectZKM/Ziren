@@ -3734,8 +3734,9 @@ impl<'a> Executor<'a> {
 
             // Clear user_data immediately so a stale pointer can't be
             // dereferenced if anything else inspects ctx later.
+            // `bridge_state` holds only raw aliases and implements no
+            // `Drop`, so clearing the pointer IS the severing step.
             ctx.user_data = std::ptr::null_mut();
-            drop(bridge_state);
             // Note: the syscall trampoline already syncs the bridge
             // → executor.state.memory at every syscall boundary, and
             // HALT-terminated programs always end via a syscall.  So

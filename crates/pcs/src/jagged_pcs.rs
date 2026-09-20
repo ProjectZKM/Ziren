@@ -224,7 +224,6 @@ where
 /// Plonky3 `MerkleTreeMmcs::Commitment` for `InnerValMmcs`).  This
 /// helper pulls out the first cap root — the same byte sequence
 /// `DuplexChallenger::observe(MerkleCap)` consumes.
-#[must_use]
 /// Extract the 8-felt MerkleCap root from a JaggedMmcs commitment (the
 /// inner BasefoldRing::digest_felts body).
 pub fn basefold_commit_digest_felts(
@@ -308,7 +307,6 @@ pub fn jagged_counts_from_packing(packing: &jagged::PackingMeta) -> (Vec<usize>,
 /// `hash_iter( once(len) ++ row_counts ++ column_counts )` where
 /// `len = column_counts.len()`.  Uses the inner Poseidon2-KoalaBear sponge
 /// (`InnerHash`) — the SAME hasher `SC::hash` resolves to in-circuit.
-#[must_use]
 pub fn jagged_geometry_hash(row_counts: &[usize], column_counts: &[usize]) -> [JaggedVal; 8] {
     use p3_field::PrimeCharacteristicRing;
     use p3_symmetric::CryptographicHasher;
@@ -325,7 +323,6 @@ pub fn jagged_geometry_hash(row_counts: &[usize], column_counts: &[usize]) -> [J
 /// Uses `InnerCompress` (the SAME compressor `SC::compress` resolves to
 /// in-circuit).  Returns the MODIFIED 8-felt digest that the Fiat-Shamir
 /// transcript observes as `main_commitment`.
-#[must_use]
 pub fn jagged_hash_bind_modified(
     raw_root: [JaggedVal; 8],
     row_counts: &[usize],
@@ -340,7 +337,6 @@ pub fn jagged_hash_bind_modified(
 
 /// Convenience: compute the MODIFIED digest directly from the raw commit +
 /// packing — the host emit-site one-liner.
-#[must_use]
 pub fn jagged_hash_bind_from_packing(
     raw_root: [JaggedVal; 8],
     packing: &jagged::PackingMeta,
@@ -386,7 +382,6 @@ pub fn jagged_counts_from_jagged_packing(
 /// Host emit-site one-liner: the MODIFIED digest from the raw root + the
 /// full `JaggedPacking` the commit prover holds.  This is the value the
 /// Fiat-Shamir transcript observes as `main_commitment`.
-#[must_use]
 pub fn jagged_hash_bind_from_jagged_packing(
     raw_root: [JaggedVal; 8],
     packing: &crate::jagged::JaggedPacking<JaggedVal>,
@@ -1784,8 +1779,7 @@ pub mod jagged {
 
         // STEP 3: verify each independent jagged instance against the SHARED
         // z_row.  All G must accept.
-        for g in 0..g_count {
-            let grp = &proof_groups[g];
+        for (g, grp) in proof_groups.iter().enumerate() {
             // Group-LOCAL chip_infos / r_row (membership-indexed); the
             // per-group bundle metadata (offsets/total/log_dense_size) is
             // group-local too (prefix-sums restart at 0).

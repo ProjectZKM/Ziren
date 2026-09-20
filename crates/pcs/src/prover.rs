@@ -411,7 +411,7 @@ where
                 Val<SC>,
                 SC::Challenge,
             >,
-        > + for<'a> Air<SymbolicAirBuilder<Val<SC>>>,
+        > + Air<SymbolicAirBuilder<Val<SC>>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC::Val: PrimeField32,
     Com<SC>: Send + Sync,
@@ -695,9 +695,9 @@ impl Error for CpuProverError {}
 /// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A>(
-    // (The `machine` parameter is gone: it supplied the per-stage rev(zeta)
-    // orientation, and there is one row orientation now. The area pin comes from
-    // the proving key, not from here.)
+// (The `machine` parameter is gone: it supplied the per-stage rev(zeta)
+// orientation, and there is one row orientation now. The area pin comes from
+// the proving key, not from here.)
     chips: &[&MachineChip<SC, A>],
     pk_preprocessed_mles: &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>],
 // The proving key's PRECOMPUTED preprocessed commit

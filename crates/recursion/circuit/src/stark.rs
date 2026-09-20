@@ -238,10 +238,6 @@ pub mod tests {
     use super::*;
     use crate::witness::*;
 
-    type F = InnerVal;
-    type A = MipsAir<F>;
-    type SC = KoalaBearPoseidon2;
-
     /// Verifies `dummy_basefold_vk_and_shard_proof` produces a
     /// proof whose `chip_cumulative_sums` map cardinality matches
     /// the input shape's chip count — the shape-stability invariant

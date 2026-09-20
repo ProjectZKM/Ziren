@@ -131,12 +131,12 @@ fn spec_vectors_match_the_oracle() {
                     .iter()
                     .map(|x| x.as_u64().unwrap() as u32)
                     .collect();
-                for i in 1..32 {
-                    if fin.regs[i] != regs[i] {
-                        problems.push(format!(
-                            "${i}: ziren {:#010x} oracle {:#010x}",
-                            fin.regs[i], regs[i]
-                        ));
+                // `zip` below would silently stop at the shorter side, where
+                // the indexed loop this replaced panicked; keep it loud.
+                assert_eq!(regs.len(), 32, "oracle vector must carry all 32 registers");
+                for (i, (got, want)) in fin.regs.iter().zip(&regs).enumerate().skip(1) {
+                    if got != want {
+                        problems.push(format!("${i}: ziren {got:#010x} oracle {want:#010x}"));
                     }
                 }
                 let (hi, lo) = (v["hi"].as_u64().unwrap() as u32, v["lo"].as_u64().unwrap() as u32);
@@ -159,6 +159,10 @@ fn spec_vectors_match_the_oracle() {
                     || again.lo != fin.lo
                     || again.mem != fin.mem
                     || again.clk != fin.clk
+                    // The trace fingerprint, which is the whole point of
+                    // computing it: determinism on the events the prover
+                    // sees, not only on the architectural state.
+                    || again.records_digest != fin.records_digest
                 {
                     problems.push("second run differs from the first".into());
                 }

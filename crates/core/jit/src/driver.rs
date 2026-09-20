@@ -743,6 +743,9 @@ where
 /// Returns `Err` on memfd failure, oversized code buffer, or an
 /// unsupported opcode.
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+// The emitter's inputs: program geometry, the instruction stream and the
+// per-opcode callbacks.
+#[allow(clippy::too_many_arguments)]
 pub fn build_jit_function<T, I, F>(
     program_size: usize,
     memory_size: usize,

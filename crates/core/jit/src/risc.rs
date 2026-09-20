@@ -103,7 +103,7 @@ impl MipsRegister {
         if idx > Self::Heap as u8 {
             Self::Zero
         } else {
-            unsafe { std::mem::transmute(idx) }
+            unsafe { std::mem::transmute::<u8, Self>(idx) }
         }
     }
 

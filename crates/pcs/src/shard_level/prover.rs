@@ -1256,6 +1256,9 @@ where
 ///
 /// `pub` so the host shard body reaches it directly.  A device driver has its
 /// own body reading its own provider; this stays the host one.
+// The host open takes the chips, traces, claims, points and challenger as the
+// protocol names them; a wrapper struct would hide which ring it is opening.
+#[allow(clippy::too_many_arguments)]
 pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     // The FIRST opening round — see the trait method.

@@ -1344,7 +1344,7 @@ mod tests {
         for i in 0..40u32 {
             // Cycle reg index 1..15 so we hit a range of register addrs.
             let dst = ((i % 14) + 1) as u8;
-            insns.push(Instruction::new(Opcode::ADD, dst, 0, (i + 1), false, true));
+            insns.push(Instruction::new(Opcode::ADD, dst, 0, i + 1, false, true));
         }
         // Then a chain of ADDs that read previously-written regs.
         for _ in 0..40 {

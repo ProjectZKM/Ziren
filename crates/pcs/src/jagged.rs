@@ -654,6 +654,8 @@ pub fn fold_tables_local<F: Field>(
             let mut folded = vec![F::ZERO; height];
             let mut alpha_pow = F::ONE;
             for col in 0..width {
+                // Column-strided read into the folded accumulator.
+                #[allow(clippy::needless_range_loop)]
                 for row in 0..height {
                     folded[row] += alpha_pow * trace.values[row * width + col];
                 }

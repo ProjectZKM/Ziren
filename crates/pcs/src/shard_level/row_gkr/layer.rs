@@ -29,8 +29,13 @@ pub struct RowMajorTable<F> {
 }
 
 impl<F: Clone> RowMajorTable<F> {
-    /// Caller MUST write every cell before any read. `F: Copy` is
-    /// sufficient because Copy has no Drop, so leaking on panic is
+    /// Allocate `(1 << num_row_variables) * num_interactions` cells
+    /// WITHOUT initializing them.
+    ///
+    /// # Safety
+    ///
+    /// The caller must write every cell before any read.  `F: Copy` is
+    /// sufficient because `Copy` implies no `Drop`, so leaking on panic is
     /// sound.
     #[must_use]
     pub unsafe fn filled_raw_uninit(num_row_variables: usize, num_interactions: usize) -> Self

@@ -42,20 +42,6 @@ where
     H::poseidon2_hash(builder, &pv_slice[..NUM_PV_ELMS_TO_HASH])
 }
 
-/// Assert that the digest of the root public values is correct.
-pub(crate) fn assert_root_public_values_valid<C, H>(
-    builder: &mut Builder<C>,
-    public_values: &RootPublicValues<Felt<C::F>>,
-) where
-    C: CircuitConfig,
-    H: Poseidon2KoalaBearHasherVariable<C>,
-{
-    let expected_digest = root_public_values_digest::<C, H>(builder, &public_values.inner);
-    for (value, expected) in public_values.inner.digest.iter().copied().zip_eq(expected_digest) {
-        builder.assert_felt_eq(value, expected);
-    }
-}
-
 /// Compute the digest of the root public values.
 pub(crate) fn root_public_values_digest<C, H>(
     builder: &mut Builder<C>,

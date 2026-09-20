@@ -1,3 +1,7 @@
+/// The number of bits in a byte.  Defined here rather than per chip so the
+/// `pub use <chip>::*` globs below cannot re-export the same name twice.
+pub const BYTE_SIZE: usize = 8;
+
 pub mod add_sub;
 pub mod add_sub_imm;
 pub mod bitwise;

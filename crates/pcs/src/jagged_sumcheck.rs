@@ -458,6 +458,9 @@ mod phase1_acceptance_gate {
                 (0..w)
                     .map(|col| {
                         let mut acc = InnerChallenge::ZERO;
+                        // `row * w + col` walks one COLUMN of a row-major
+                        // trace; the stride is the point.
+                        #[allow(clippy::needless_range_loop)]
                         for row in 0..h {
                             acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
                         }
@@ -570,6 +573,10 @@ mod phase1_acceptance_gate {
         (0..w)
             .map(|col| {
                 let mut acc = InnerChallenge::ZERO;
+                // `row` indexes `eq_c` in natural order; `src` is its
+                // bit-reversal into the stored column.  The two orders differ,
+                // so there is nothing to zip.
+                #[allow(clippy::needless_range_loop)]
                 for row in 0..h_store {
                     let src = if log_h2 == 0 {
                         0usize
@@ -661,19 +668,19 @@ mod phase1_acceptance_gate {
                 let mut f = InnerChallenge::ONE;
                 match cand {
                     "A" => {
-                        for j in (max_log_row - lb)..(max_log_row - lr) {
-                            f *= InnerChallenge::ONE - z_row[j];
+                        for z in &z_row[(max_log_row - lb)..(max_log_row - lr)] {
+                            f *= InnerChallenge::ONE - *z;
                         }
                     }
                     "B" => {
-                        for k in *lr..*lb {
-                            f *= InnerChallenge::ONE - z_row[k];
+                        for z in &z_row[*lr..*lb] {
+                            f *= InnerChallenge::ONE - *z;
                         }
                     }
                     "C" => {
                         let mut d = InnerChallenge::ONE;
-                        for j in (max_log_row - lb)..(max_log_row - lr) {
-                            d *= InnerChallenge::ONE - z_row[j];
+                        for z in &z_row[(max_log_row - lb)..(max_log_row - lr)] {
+                            d *= InnerChallenge::ONE - *z;
                         }
                         f = d.inverse();
                     }
@@ -753,6 +760,8 @@ mod phase1_acceptance_gate {
                 // Materialize the band-length dense column: raw data bitrev'd over
                 // the RAW width placed in the LOW rows, zeros in the high rows.
                 let mut dense = vec![InnerVal::ZERO; h_band];
+                // Scatter into `dense` at the BIT-REVERSED position of `r`.
+                #[allow(clippy::needless_range_loop)]
                 for r in 0..h_raw {
                     let pos = if lr == 0 {
                         0

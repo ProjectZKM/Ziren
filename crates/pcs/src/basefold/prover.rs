@@ -375,7 +375,7 @@ where
     /// variables of every committed MLE (all MLEs in a single proof
     /// must share the same `num_variables`).
     #[allow(clippy::type_complexity)]
-    pub fn prove_trusted_mle_evaluations<Challenger: 'static>(
+    pub fn prove_trusted_mle_evaluations<Challenger>(
         &self,
         eval_point: Vec<EF>,
         mle_rounds: Vec<Vec<Arc<Mle<F>>>>,
@@ -389,8 +389,10 @@ where
         challenger: &mut Challenger,
     ) -> BasefoldProof<F, EF, MT>
     where
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>
+            + 'static,
     {
         let num_variables = eval_point.len();
 

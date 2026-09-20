@@ -622,6 +622,9 @@ where
     /// undefined or colliding with a node) fall back to the direct
     /// `{0,1,2,3,4}` sweep, which additionally needs the `y_3` accumulator the
     /// caller computed (gated on the SAME `zerocheck_eq_root(last)` predicate).
+    // The five interpolation nodes plus the claim and the eq root; each one is
+    // a distinct scalar of the identity, not a field of some record.
+    #[allow(clippy::too_many_arguments)]
     fn finalize_round_poly(
         &self,
         claim: EF,
@@ -826,6 +829,9 @@ where
 /// points 0, 2, 4.  Out-of-range `row1` (odd tail) is the `ZERO`
 /// padding constant.  `vals_0 = r0`, `vals_2 = r0 + 2·slope`,
 /// `vals_4 = r0 + 4·slope`, `slope = r1 − r0`.
+// Strides and offsets of the pair being interpolated: passing them
+// individually keeps the indexing arithmetic visible at the call site.
+#[allow(clippy::too_many_arguments)]
 fn interp_pair<K: Field>(
     cells: &[K],
     ncols: usize,

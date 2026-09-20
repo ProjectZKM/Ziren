@@ -43,9 +43,10 @@ fn homogeneous(n: usize, kind: &str) -> RecursionProgram<F> {
         .map(|(i, s)| instr::mem(MemAccessKind::Write, 1, i as u32, *s))
         .collect();
 
-    let mut next = SEEDS.len() as u32;
+    // One fresh destination address per generated instruction.
+    let first_out = SEEDS.len() as u32;
     let mut s: u64 = 0x9e37_79b9_7f4a_7c15;
-    for _ in 0..n {
+    for next in first_out..first_out + n as u32 {
         s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         let a = ((s >> 33) as u32) % next;
         // Never divide by a live cell: a zero divisor makes the interpreter
@@ -75,7 +76,6 @@ fn homogeneous(n: usize, kind: &str) -> RecursionProgram<F> {
             "ExtAlu/Div" => ext(ExtAluOpcode::DivE),
             other => panic!("unknown kind {other}"),
         });
-        next += 1;
     }
 
     let raw = zkm_recursion_core::runtime::RawProgram {

@@ -898,6 +898,9 @@ mod tests {
     /// `(rw_num, rw_den)` constants — the exact height-soundness
     /// `assert_ext_eq` (logup_gkr.rs step (8)).  Runs the DSL so the assert
     /// fires at runtime.
+    // A test harness that pins one reconstruction; each argument is a case
+    // parameter it varies.
+    #[allow(clippy::too_many_arguments)]
     fn run_single_send_reconstruction(
         lookup: &Lookup<F>,
         main_full_vals: &[EF],

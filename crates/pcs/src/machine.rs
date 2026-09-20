@@ -1,3 +1,5 @@
+use core::cmp::Reverse;
+
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
@@ -1115,7 +1117,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 }
             }
             if census {
-                census_rows.sort_by(|a, b| b.1.cmp(&a.1));
+                census_rows.sort_by_key(|r| Reverse(r.1));
                 let total: u128 = census_rows.iter().map(|r| r.1).sum();
                 let top = census_rows
                     .iter()

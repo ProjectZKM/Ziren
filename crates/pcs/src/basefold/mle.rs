@@ -147,9 +147,9 @@ impl<F: Field> Mle<F, CpuBackend> {
     /// substitutes for var `i` (first-var-first convention).  Note
     /// this is the *Lagrange* combination `(1-r)·lo + r·hi`, not the
     /// monomial fold used by [`Self::fold`].
-    pub fn eval_at<EF: ExtensionField<F>>(&self, point: &[EF]) -> Vec<EF>
+    pub fn eval_at<EF>(&self, point: &[EF]) -> Vec<EF>
     where
-        EF: Send + Sync,
+        EF: ExtensionField<F> + Send + Sync,
         F: Sync,
     {
         debug_assert_eq!(point.len(), self.num_variables() as usize);

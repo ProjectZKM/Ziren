@@ -66,11 +66,8 @@ pub struct RecursionAirEventCount {
 }
 
 impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAir<F, DEGREE> {
-    /// Get a machine with all chips, except the dummy chip.
-
-    /// Get a machine with all chips, except the dummy chip.
-
-    /// A machine with dyunamic chip sizes that includes the wide variant of the Poseidon2 chip.
+    /// A machine with dynamic chip sizes that includes the wide variant of the
+    /// Poseidon2 chip.
     pub fn compress_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = [
             RecursionAir::MemoryConst(MemoryConstChip::default()),
@@ -374,7 +371,6 @@ pub mod tests {
     type F = <SC as StarkGenericConfig>::Val;
     type EF = <SC as StarkGenericConfig>::Challenge;
     type A = RecursionAir<F, 3>;
-    type B = RecursionAir<F, 9>;
 
     /// Runs the given program on machines that use the wide and skinny Poseidon2 chips.
     pub fn run_recursion_test_machines(mut program: RecursionProgram<F>) {

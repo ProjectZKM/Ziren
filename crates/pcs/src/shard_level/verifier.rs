@@ -474,6 +474,9 @@ impl BasefoldShardVerifier {
 ///
 /// The TypeId gate mirrors prove_trusted_evaluations — returns `Ok(())`
 /// for non-KoalaBear configs (nothing to verify in that path).
+// Mirrors the prover's argument list one-for-one, which is what makes the two
+// sides auditable against each other.
+#[allow(clippy::too_many_arguments)]
 fn verify_jagged_pcs_host<SC, A>(
     // The verifying key pins the PREPROCESSED round: which chips it covers,
     // in which order, and at what dimensions.  Read from here, never from the
@@ -1011,7 +1014,6 @@ where
     // height — the sentinel keeps the `col_idx + 1` lookup in-bounds
     // for the last column too.  The `else if` fallback remains for
     // legacy bundles serialized before the sentinel was added.
-    let mut chip_infos = chip_infos;
     {
         // Only the MAIN region's heights come from the packing; the
         // preprocessed region's are already pinned by the verifying key above,

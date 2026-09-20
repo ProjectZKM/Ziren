@@ -350,7 +350,7 @@ where
         &self.basefold_prover
     }
 
-    pub fn prove_trusted_evaluation<Challenger: 'static>(
+    pub fn prove_trusted_evaluation<Challenger>(
         &self,
         eval_point: Vec<EF>,
         // BORROWED for the same reason as
@@ -361,8 +361,10 @@ where
         challenger: &mut Challenger,
     ) -> StackedBasefoldProof<F, EF, MT>
     where
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>
+            + 'static,
     {
         // First `log_stacking_height` coords fold the per-stripe
         // hypercube (the lowest bits of the underlying dense index);
@@ -495,9 +497,9 @@ where
 /// bit) — same convention as [`Mle::eval_at`], so the values
 /// produced here line up with the per-stripe evals the prover sends
 /// in `batch_evaluations`.
-fn eval_multilinear_padded<F: Field, EF: ExtensionField<F>>(values: &[EF], point: &[EF]) -> EF
+fn eval_multilinear_padded<F: Field, EF>(values: &[EF], point: &[EF]) -> EF
 where
-    EF: PrimeCharacteristicRing,
+    EF: ExtensionField<F> + PrimeCharacteristicRing,
 {
     let target = 1usize << point.len();
     let mut current: Vec<EF> = values.to_vec();
@@ -750,7 +752,7 @@ mod test {
         let log_stacking_height = 4u32;
         let batch_size = 2usize;
         let stack_height = 1usize << log_stacking_height;
-        let mut rng = StdRng::seed_from_u64(0xBAD_0_DEAD);
+        let mut rng = StdRng::seed_from_u64(0x0BAD_DEAD);
 
         let make_mle = |width: usize, log_h: usize, rng: &mut StdRng| -> Arc<Mle<F>> {
             let n = (1usize << log_h) * width;
