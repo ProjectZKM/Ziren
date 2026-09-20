@@ -8,6 +8,14 @@ license = { workspace = true }
 repository = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
+# `tool/` holds the insecure test PKI, INCLUDING the CA private key
+# `tool/ca.key`. It is committed on purpose -- the fixture only has to work for
+# this repository's own tests -- but publishing it would put a usable signing
+# key in every downloaded copy of the crate, and `CARGO_MANIFEST_DIR` in a
+# published crate points at the registry cache, so a consumer who set
+# `ZKM_ALLOW_INSECURE_TEST_CA=1` would be trusting a CA whose key ships beside
+# it. Excluded from the package; it stays in the repository.
+exclude = ["tool/"]
 
 [dependencies]
 prost = { version = "0.11.0", optional = true }

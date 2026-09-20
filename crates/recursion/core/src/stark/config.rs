@@ -275,10 +275,14 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         //
         // The round's `claims` reach the generic body, which weighs them into
         // the reduction; the ring only names its own commitment family here.
+        // The wrap ring opens under jagged-over-BaseFold: its proof is what the
+        // gnark circuit verifies.  Named as the type, so no round set can be
+        // WHIR in part.
         let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_rounds_generic::<
             Self::Challenger,
             Self::BfMmcs,
             zkm_pcs::jagged_pcs::JaggedDft,
+            zkm_pcs::jagged_pcs::jagged::BasefoldDenseOpen,
         >(
             &rounds,
             z_row,
@@ -620,7 +624,7 @@ mod basefold_over_bn254_roundtrip_test {
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
             build_jagged_verify_inputs, prove_jagged_rounds_generic, verify_jagged_inner_generic,
-            JaggedOpenRound,
+            BasefoldDenseOpen, JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -713,14 +717,12 @@ mod basefold_over_bn254_roundtrip_test {
             claims,
             precomputed: &precompute,
         }];
-        let bundle = prove_jagged_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            &rounds,
-            &z_row,
-            &mut p_chal,
-            mmcs.clone(),
-            dft,
-            fri.clone(),
-        );
+        let bundle = prove_jagged_rounds_generic::<
+            OuterChallenger,
+            OuterValMmcs,
+            OuterDft,
+            BasefoldDenseOpen,
+        >(&rounds, &z_row, &mut p_chal, mmcs.clone(), dft, fri.clone());
 
         // Verifier inputs rebuilt from the bundle's packing — chip_infos
         // carrying the EXPLICIT stacking-padding columns, exactly as the outer
@@ -818,7 +820,7 @@ mod basefold_over_bn254_roundtrip_test {
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
             build_jagged_verify_inputs, prove_jagged_rounds_generic, verify_jagged_inner_generic,
-            JaggedOpenRound,
+            BasefoldDenseOpen, JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -928,14 +930,12 @@ mod basefold_over_bn254_roundtrip_test {
                 precomputed: &main,
             },
         ];
-        let bundle = prove_jagged_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            &rounds,
-            &z_row,
-            &mut p_chal,
-            mmcs.clone(),
-            dft,
-            fri.clone(),
-        );
+        let bundle = prove_jagged_rounds_generic::<
+            OuterChallenger,
+            OuterValMmcs,
+            OuterDft,
+            BasefoldDenseOpen,
+        >(&rounds, &z_row, &mut p_chal, mmcs.clone(), dft, fri.clone());
 
         // The bundle must carry the EARLIER round's raw root as preceding and
         // the LAST round's as its own.
@@ -1020,6 +1020,101 @@ mod basefold_over_bn254_roundtrip_test {
             <R as BasefoldRing>::vk_commit_is_preceding_root(&other, &real),
             Some(false),
             "a different root must be reported as a mismatch, not as unanswerable"
+        );
+    }
+}
+
+/// The wrap ring performs the LogUp-GKR grind its soundness report counts.
+///
+/// `docs/soundness/ziren.soundcalc.toml` credits `grinding_bits_lookup = 16` on
+/// every circuit, wrap included. That was once false here: `gkr_grind` returned
+/// zero without observing for a non-inner challenger, the host's
+/// `gkr_check_witness` accepted unconditionally, and the circuit's
+/// `MultiField32ChallengerVariable` override was an explicit no-op — so the wrap
+/// figure credited 16 bits nothing earned, and the stated 100 was closer to 96.
+///
+/// The premise for that split was that the outer challenger could not grind. It
+/// can: the wrap BaseFold open grinds `pow_bits = 22` through the very same
+/// `GrindingChallenger`. These tests pin all three halves of the property on
+/// THIS ring — the grind advances the transcript, an honest witness is accepted
+/// and leaves prover and verifier in the same state, and a tampered one is not —
+/// so the no-op cannot come back and still pass.
+///
+/// The inner ring's copies live in `zkm_pcs::logup_gkr`; zkm-pcs cannot import
+/// `OuterSC`, which is why this ring's are here.
+#[cfg(test)]
+mod wrap_gkr_grind {
+    use super::{outer_perm, OuterChallenger};
+    use p3_challenger::{CanObserve, CanSample};
+    use p3_field::PrimeCharacteristicRing;
+    use zkm_pcs::jagged_pcs::JaggedVal;
+    use zkm_pcs::logup_gkr::{gkr_check_witness, gkr_grind, GKR_GRINDING_BITS};
+
+    /// Seeded so the grind starts from a non-trivial state, and reproducible so
+    /// prover and verifier can be handed the SAME state.
+    fn seeded() -> OuterChallenger {
+        let mut ch = OuterChallenger::new(outer_perm()).unwrap();
+        ch.observe(JaggedVal::from_u32(0xA11CE));
+        ch.observe(JaggedVal::from_u32(0xB0B));
+        ch
+    }
+
+    /// The assertion a no-op cannot pass.
+    ///
+    /// Accept/reject alone does not distinguish a grind from a stub: a stub that
+    /// returns zero and observes nothing still "round-trips" against a stub
+    /// checker. What separates them is whether the challenger MOVED, because
+    /// every subsequent alpha and beta is drawn from that state.
+    #[test]
+    fn wrap_gkr_grind_advances_the_transcript() {
+        let mut ungrinded = seeded();
+        let before: JaggedVal = ungrinded.sample();
+
+        let mut prover = seeded();
+        let _witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+        let after: JaggedVal = prover.sample();
+
+        assert_ne!(
+            before, after,
+            "the wrap LogUp-GKR grind must advance the transcript; a grind that leaves the \
+             challenger untouched costs nothing to produce, while the soundness report \
+             counts 16 bits for it",
+        );
+    }
+
+    /// The honest witness is accepted, and the two sides end in the same state —
+    /// which is what "the verifier consumes the challenger exactly as the prover
+    /// did" means in practice.
+    #[test]
+    fn wrap_gkr_grinding_witness_roundtrips() {
+        let mut prover = seeded();
+        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+
+        let mut verifier = seeded();
+        assert!(
+            gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness),
+            "the honest wrap grinding witness must be accepted, or the negative case proves \
+             nothing",
+        );
+
+        let p: JaggedVal = prover.sample();
+        let v: JaggedVal = verifier.sample();
+        assert_eq!(p, v, "prover and verifier must leave the wrap transcript in the same state");
+    }
+
+    /// NEGATIVE: one off-by-one witness. The check observes the witness and
+    /// requires the squeezed challenge's low `GKR_GRINDING_BITS` to be zero, so a
+    /// different witness re-seeds the sponge and fails except with probability
+    /// `2^-16`.
+    #[test]
+    fn wrap_gkr_grinding_rejects_a_tampered_witness() {
+        let mut prover = seeded();
+        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+
+        let mut verifier = seeded();
+        assert!(
+            !gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness + JaggedVal::ONE),
+            "a tampered wrap grinding witness must be rejected",
         );
     }
 }

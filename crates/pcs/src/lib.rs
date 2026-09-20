@@ -25,6 +25,7 @@ mod machine;
 pub mod multilinear;
 mod opts;
 mod permutation;
+pub mod profile;
 mod proof;
 mod traces;
 mod prover;

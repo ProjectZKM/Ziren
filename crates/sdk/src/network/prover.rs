@@ -93,11 +93,26 @@ impl NetworkProver {
         let ca_cert_path = match env::var("CA_CERT_PATH") {
             Ok(p) => Some(p),
             Err(_) if allow_test_ca => {
+                // `tool/` is excluded from the published package (see the SDK
+                // manifest), so this path exists in a repository checkout and
+                // not in a crates.io copy. Say which of the two is missing
+                // rather than letting it surface as a file-not-found from
+                // inside the TLS setup.
+                let fixture = manifest_dir.join("tool/ca.pem");
+                if !fixture.exists() {
+                    return Err(anyhow::anyhow!(
+                        "ZKM_ALLOW_INSECURE_TEST_CA is set but {} does not exist. The test PKI \
+                         is not published with this crate -- its CA private key is committed -- \
+                         so it is reachable only from a repository checkout. Set CA_CERT_PATH to \
+                         the CA that signs the proving network's certificate.",
+                        fixture.display(),
+                    ));
+                }
                 tracing::warn!(
                     "using the bundled INSECURE test CA: its private key is public, so this \
                      connection can be impersonated. Never send sensitive witness data over it."
                 );
-                Some(manifest_dir.join("tool/ca.pem").to_string_lossy().to_string())
+                Some(fixture.to_string_lossy().to_string())
             }
             Err(_) => None,
         };
@@ -126,8 +141,7 @@ impl NetworkProver {
         let endpoint_para = endpoint;
         let endpoint = match ssl_config {
             Some(config) => {
-                let mut tls_config = ClientTlsConfig::new()
-                    .domain_name(domain_name);
+                let mut tls_config = ClientTlsConfig::new().domain_name(domain_name);
                 if let Some(ca_cert) = config.ca_cert {
                     tls_config = tls_config.ca_certificate(ca_cert);
                 }

@@ -158,15 +158,34 @@ impl Groth16Verifier {
         )
     }
 
-    /// Get the partial STARK verifying key for a given version.
-    /// version: The version of the circuit, e.g. "v1.0.0"
-    pub fn get_part_stark_vk(zkm_circuit_version: &str) -> &'static [u8] {
+    /// The partial STARK verifying key bundled for `zkm_circuit_version`, or
+    /// `None` when no such version is bundled.
+    ///
+    /// The version is chosen by the caller and may come from configuration or
+    /// from a peer, so an unknown one is an answer this function can give
+    /// rather than a reason to end the process.
+    #[must_use]
+    pub fn try_get_part_stark_vk(zkm_circuit_version: &str) -> Option<&'static [u8]> {
         BUNDLED_PART_STARK_VKS
             .iter()
             .find_map(|(version, bytes)| (*version == zkm_circuit_version).then_some(*bytes))
-            .unwrap_or_else(|| {
-                panic!("unsupported bundled part_stark_vk version: {zkm_circuit_version}")
-            })
+    }
+
+    /// Get the partial STARK verifying key for a given version.
+    /// version: The version of the circuit, e.g. "v1.0.0"
+    ///
+    /// # Panics
+    ///
+    /// If no key is bundled for that version. Use [`Self::try_get_part_stark_vk`]
+    /// where the version is not known to be one of `BUNDLED_PART_STARK_VKS`.
+    #[must_use]
+    pub fn get_part_stark_vk(zkm_circuit_version: &str) -> &'static [u8] {
+        Self::try_get_part_stark_vk(zkm_circuit_version).unwrap_or_else(|| {
+            panic!(
+                "no part_stark_vk is bundled for circuit version {zkm_circuit_version}; bundled: {:?}",
+                BUNDLED_PART_STARK_VKS.iter().map(|(v, _)| *v).collect::<Vec<_>>(),
+            )
+        })
     }
 
     #[cfg(feature = "ark")]

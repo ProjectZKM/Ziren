@@ -458,6 +458,9 @@ impl BasefoldShardVerifier {
             // jagged claimed sum; index-aligned with `chips`.
             &proof.opened_values,
             &proof.main_commitment,
+            // The per-chip raw heights the prologue above already absorbed, so
+            // the jagged geometry can be pinned to them instead of to itself.
+            &proof.chip_heights,
             challenger,
             pinned.map(|_| proof.padding_row_heights.first().map_or(0, |h| h.len())),
         )?;
@@ -501,6 +504,12 @@ fn verify_jagged_pcs_host<SC, A>(
     // bundle is decoded, and projecting the bundle's own commitment to compare
     // against them is the re-bind the wrap path never had.
     observed_main_commitment: &[Val<SC>; 8],
+    // The proof's per-chip RAW trace heights, keyed by chip name — the values
+    // the Fiat-Shamir prologue observed, one felt each, BEFORE any challenge of
+    // this phase exists.  They are therefore the canonical main-round row
+    // counts: the jagged geometry is checked against them rather than only
+    // against itself.
+    observed_chip_heights: &std::collections::BTreeMap<String, usize>,
     challenger: &mut SC::Challenger,
     // `Some(n)` on a pinned machine: the proof claims `n` preprocessed-round
     // padding columns, which names its pin class
@@ -695,38 +704,76 @@ where
                     // redefines the column layout this branch goes on to weigh.
                     // The preprocessed round is pinned the same way below; this
                     // is the main round's half of it.
-                    for (i, (_, claimed_width)) in round.iter().enumerate() {
-                        let width = chip_widths.get(i).copied().unwrap_or(0);
-                        if *claimed_width != width {
-                            return Err(BasefoldVerifyError::JaggedPcs(format!(
-                                "outer main round: chip {} is {claimed_width} columns in the \
-                                 proof but {width} in the machine",
-                                chips[i].name(),
-                            )));
-                        }
-                    }
+                    // Widths come from the MACHINE, row counts from the heights
+                    // the prologue OBSERVED.
+                    //
+                    // `build_jagged_verify_inputs` PREFERS the proof's
+                    // `column_counts` over `BaseAir::width`, so an unchecked
+                    // width silently redefines the column layout this branch
+                    // goes on to weigh; the row counts were claimed and tied to
+                    // nothing at all on this ring (the inner ring folds them
+                    // into `main_commitment` through the hash-bind, whereas this
+                    // ring observes the raw root). The heights need no new
+                    // binding of their own: the prologue absorbed one height
+                    // felt per chip before this phase began, so the canonical
+                    // row count is a value the transcript has already fixed;
+                    // what was missing is that nothing compared the two.
+                    let expected: Vec<(String, usize, usize)> = chips
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| {
+                            let name = c.name();
+                            let h = observed_chip_heights.get(name.as_str()).copied().unwrap_or(0);
+                            (name, chip_widths.get(i).copied().unwrap_or(0), h)
+                        })
+                        .collect();
+                    crate::jagged_pcs::check_round_geometry(round, &expected, "outer main round")
+                        .map_err(BasefoldVerifyError::JaggedPcs)?;
                     om.extend(opened_values.chips.iter().map(|c| relabel(c.main.local.clone())));
                 } else {
                     // PREPROCESSED: the key's chips, in the key's order.
-                    if round.len() != prep_chip_dims.len() {
-                        return Err(BasefoldVerifyError::JaggedPcs(format!(
-                            "outer preprocessed round: the proof claims {} chips, the machine \
-                             has {}",
-                            round.len(),
-                            prep_chip_dims.len(),
-                        )));
-                    }
-                    for ((name, width), (_, claimed_width)) in
-                        prep_chip_dims.iter().zip(round.iter())
-                    {
-                        // Widths come from the MACHINE; a proof claiming other
-                        // ones is describing a different preprocessed trace.
-                        if claimed_width != width {
+                    //
+                    // The preprocessed half: the round's geometry is pinned
+                    // BY THE VERIFYING KEY.
+                    //
+                    // The key's `chip_information` records `(width, height)` per
+                    // preprocessed chip, name-ordered — the same set and order
+                    // `setup` commits — so the dimensions of what the key
+                    // committed are known, not claimed. The inner ring reaches
+                    // the same conclusion through its hash-bound key digest;
+                    // this ring's key stores the raw root, so the dimensions the
+                    // key already carries are what the round is held to.
+                    //
+                    // A key with no `chip_information` (the mock prover writes
+                    // an empty one) has nothing to pin against, and the round
+                    // falls back to the machine's widths with its root pin
+                    // intact.
+                    let expected: Vec<(String, usize, usize)> =
+                        if vk.chip_information.len() == prep_chip_dims.len() {
+                            vk.chip_information
+                                .iter()
+                                .map(|(name, _, (w, h))| (name.clone(), *w, *h))
+                                .collect()
+                        } else {
+                            prep_chip_dims.iter().map(|(name, w)| (name.clone(), *w, 0)).collect()
+                        };
+                    // The machine and the key must agree on the round before
+                    // either can pin it: they are two records of one `setup`.
+                    for ((kn, kw, _), (mn, mw)) in expected.iter().zip(prep_chip_dims.iter()) {
+                        if kn != mn || kw != mw {
                             return Err(BasefoldVerifyError::JaggedPcs(format!(
-                                "outer preprocessed round: chip {name} is {claimed_width} \
-                                 columns in the proof but {width} in the machine",
+                                "outer preprocessed round: the machine has {mn} at {mw} columns \
+                                 where the verifying key has {kn} at {kw}",
                             )));
                         }
+                    }
+                    crate::jagged_pcs::check_round_geometry(
+                        round,
+                        &expected,
+                        "outer preprocessed round",
+                    )
+                    .map_err(BasefoldVerifyError::JaggedPcs)?;
+                    for (name, _) in prep_chip_dims.iter() {
                         let idx =
                             chips.iter().position(|c| c.name() == *name).ok_or_else(|| {
                                 BasefoldVerifyError::JaggedPcs(format!(
@@ -1024,6 +1071,37 @@ where
 
     // Round 1: the shard's main chips, widths from the packing.
     use p3_air::BaseAir;
+
+    // Hold the main round to the geometry the verifier knows
+    // without the proof — the machine's widths and the heights the prologue
+    // observed — the same rule the outer branch applies above.
+    //
+    // This ring already ties the round's geometry to `main_commitment` through
+    // the hash-bind, which is a statement about the COMMITMENT. The pin here is
+    // a statement about the MACHINE and the TRANSCRIPT, and the two are
+    // independent: a hash-bind that were ever vacuous (an empty round, a
+    // relabelled digest) leaves the widths below falling back to
+    // `BaseAir::width` and the row counts to whatever the offsets say.
+    // Applied only when the bundle's round structure is the one the machine
+    // commits — one round per preprocessed round plus the main one. A bundle
+    // that disagrees about how many rounds there are is rejected by the round
+    // accounting, not silently re-interpreted here.
+    let expected_rounds = usize::from(n_prep > 0) + 1;
+    if let Some(main_round) = combined_packing.round_counts.last() {
+        if combined_packing.round_counts.len() == expected_rounds {
+            let expected: Vec<(String, usize, usize)> = chips
+                .iter()
+                .map(|c| {
+                    let name = MachineAir::<Val<SC>>::name(*c);
+                    let h = observed_chip_heights.get(name.as_str()).copied().unwrap_or(0);
+                    (name, <_ as BaseAir<Val<SC>>>::width(*c), h)
+                })
+                .collect();
+            crate::jagged_pcs::check_round_geometry(main_round, &expected, "inner main round")
+                .map_err(BasefoldVerifyError::JaggedPcs)?;
+        }
+    }
+
     let main_column_counts: &[usize] =
         combined_packing.column_counts.get(n_prep_infos..).unwrap_or(&[]);
     chip_infos.extend(chips.iter().enumerate().map(|(i, chip)| {

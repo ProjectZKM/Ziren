@@ -50,14 +50,22 @@ pub trait FieldChallengerVariable<C: Config, Bit>:
 
     fn check_witness(&mut self, builder: &mut Builder<C>, nb_bits: usize, witness: Felt<C::F>);
 
-    /// LogUp-GKR grinding check.  Mirrors the HOST `gkr_check_witness`
-    /// (crates/pcs/src/logup_gkr.rs), which is hard-gated to the INNER
-    /// challenger: the inner ring performs the real grind check (= the
-    /// default, which delegates to [`Self::check_witness`]), while the
-    /// OUTER/wrap (MultiField32) ring treats GKR grinding as a no-op
-    /// (its prover grind is itself a no-op).  This is DISTINCT from the
-    /// BaseFold-open grind (`check_witness`), which the host advances on
-    /// BOTH rings — so the two must not share one blanket no-op.
+    /// LogUp-GKR grinding check, mirroring the host `gkr_check_witness`
+    /// (crates/pcs/src/logup_gkr.rs).
+    ///
+    /// EVERY production ring performs it. The default delegates to
+    /// [`Self::check_witness`] — observe the witness, sample `nb_bits`, assert
+    /// they are zero — and no ring overrides it.
+    ///
+    /// An override that returned without touching the challenger would not be a
+    /// cheaper equivalent. It would leave the transcript un-advanced while the
+    /// prover's grind advanced its own, desynchronising every subsequent
+    /// alpha/beta; and `docs/soundness/ziren.soundcalc.toml` credits
+    /// `grinding_bits_lookup = 16` on every circuit, so the accounting would
+    /// describe a transcript the protocol did not execute. Such an override
+    /// existed here on the wrap ring, on the premise that the outer challenger
+    /// could not grind — a premise the wrap BaseFold open disproves by grinding
+    /// `pow_bits = 22` through the same trait.
     fn gkr_check_witness(&mut self, builder: &mut Builder<C>, nb_bits: usize, witness: Felt<C::F>) {
         self.check_witness(builder, nb_bits, witness);
     }
@@ -339,9 +347,8 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
         // sample so every downstream challenge in the BaseFold open (the
         // per-round `beta`s and the query indices that derive `initial_x`)
         // stays in lockstep with the host.  The earlier "complete no-op" body
-        // conflated this with the GKR grind: GKR grinding IS a no-op on the
-        // outer ring, but that is now routed through the separate
-        // `gkr_check_witness` (which this challenger overrides to a no-op).
+        // conflated this grind with the LogUp-GKR one; they are separate events
+        // (`gkr_check_witness`), and both are performed on both rings.
         // The BaseFold grind must NOT be a no-op — leaving the challenger
         // un-advanced for the two 16-bit grind draws desync'd the betas /
         // query indices and produced a wrong final FRI fold (gnark step9).

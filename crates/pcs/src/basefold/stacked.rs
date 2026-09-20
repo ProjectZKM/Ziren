@@ -739,6 +739,253 @@ mod test {
             .expect("stacked verifier should accept honest TWO-ROUND proof (G=2)");
     }
 
+    /// The adaptive correction vector.
+    ///
+    /// The stacked layer checks `sum_i a_i y_i = q` at the batch point, and
+    /// BaseFold proves `sum_i lambda_i y_i = sum_i lambda_i v_i` at a point it
+    /// samples itself. Before the repair, `lambda` was sampled without `y` in
+    /// the transcript, so a prover could pick `y` knowing BOTH coefficient
+    /// vectors: choose `d != 0` with `sum_i lambda_i d_i = 0` and
+    /// `sum_i a_i d_i = delta != 0`, send `y + d`, and claim `q + delta` while
+    /// opening the honest random combination. Two linear equations, two or more
+    /// stripe claims, an affine space of solutions.
+    ///
+    /// The repair absorbs `y` before grinding and before `lambda`. This test
+    /// mounts the attack's free half — restate the claim vector and move the
+    /// outer claim with it, so the STACKED equation is satisfied by
+    /// construction — and requires the proof to be rejected anyway.
+    ///
+    /// The rejection is pinned to `Basefold(BatchPow)`, which is the mechanism
+    /// and not merely the outcome: the batch proof-of-work was ground against a
+    /// transcript containing the honest claims, so restating them invalidates
+    /// it BEFORE the batching point is drawn. A prover cannot see `lambda` for
+    /// its chosen `y` without first committing to that `y`.
+    #[test]
+    fn a_restated_claim_vector_is_rejected() {
+        type F = InnerVal;
+        type EF = InnerChallenge;
+
+        let log_stacking_height = 4u32;
+        let stack_height = 1usize << log_stacking_height;
+        let mut rng = StdRng::seed_from_u64(0x2C26_A77A);
+
+        let make_mle = |width: usize, log_h: usize, rng: &mut StdRng| -> Arc<Mle<F>> {
+            let n = (1usize << log_h) * width;
+            let v: Vec<F> = (0..n).map(|_| rand_kb(rng)).collect();
+            Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, width)))
+        };
+
+        // Two rounds, so the flattened claim vector has several entries: the
+        // attack needs at least two to have a correction space at all.
+        let r0 = make_mle(2, 3, &mut rng);
+        let r1 = make_mle(2, 4, &mut rng);
+
+        let fri_config = FriConfig::<F>::test_fri_config();
+        let mmcs = build_mmcs();
+        let dft = Arc::new(Radix2DitParallel::<F>::default());
+        let prover = StackedPcsProver::new(
+            BasefoldProver::<F, EF, _, _>::new(fri_config.clone(), dft, mmcs.clone(), 2),
+            log_stacking_height,
+            2,
+        );
+        let verifier = StackedPcsVerifier::new(
+            BasefoldVerifier::<F, EF, _>::new(fri_config, mmcs, 2),
+            log_stacking_height,
+        );
+
+        let mut p_chal = build_challenger();
+        let (commit0, data0) = prover.commit_multilinears(vec![r0.clone()]);
+        p_chal.observe(commit0.clone());
+        let (commit1, data1) = prover.commit_multilinears(vec![r1.clone()]);
+        p_chal.observe(commit1.clone());
+
+        let area0 = 16usize.next_multiple_of(stack_height);
+        let area1 = 32usize.next_multiple_of(stack_height);
+        let total_stripes = (area0 >> log_stacking_height) + (area1 >> log_stacking_height);
+        let num_batch_vars = total_stripes.next_power_of_two().trailing_zeros() as usize;
+        let total_point_vars = num_batch_vars + log_stacking_height as usize;
+
+        let eval_point: Vec<EF> = (0..total_point_vars).map(|_| rand_ef(&mut rng)).collect();
+        let stack_point: Vec<EF> = eval_point[..log_stacking_height as usize].to_vec();
+        let batch_point = &eval_point[log_stacking_height as usize..];
+
+        let mut honest_flat: Vec<EF> = Vec::new();
+        for m in data0.interleaved_mles.iter() {
+            honest_flat.extend(m.eval_at::<EF>(&stack_point));
+        }
+        for m in data1.interleaved_mles.iter() {
+            honest_flat.extend(m.eval_at::<EF>(&stack_point));
+        }
+        let honest_claim = eval_multilinear_padded::<F, EF>(&honest_flat, batch_point);
+
+        let proof =
+            prover.prove_trusted_evaluation(eval_point.clone(), &[&data0, &data1], &mut p_chal);
+
+        let verify = |proof: &StackedBasefoldProof<F, EF, _>, claim: EF| {
+            let mut v_chal = build_challenger();
+            v_chal.observe(commit0.clone());
+            v_chal.observe(commit1.clone());
+            verifier.verify_trusted_evaluation(
+                &[commit0.clone(), commit1.clone()],
+                &[area0, area1],
+                &eval_point,
+                proof,
+                claim,
+                &mut v_chal,
+            )
+        };
+
+        // Non-vacuity: the untampered proof verifies against its honest claim.
+        verify(&proof, honest_claim).expect("the honest two-round proof must verify");
+
+        // The attack's free half: restate one stripe claim and move the outer
+        // claim by exactly the amount the stacked equation demands. Nothing
+        // here touches the opening, the sumcheck or the Merkle paths.
+        let mut tampered = proof.clone();
+        assert!(
+            tampered.batch_evaluations.iter().map(|r| r.len()).sum::<usize>() >= 2,
+            "the correction space is empty with fewer than two stripe claims",
+        );
+        tampered.batch_evaluations[0][0] += EF::ONE;
+        let tampered_flat: Vec<EF> = tampered.batch_evaluations.iter().flatten().copied().collect();
+        let tampered_claim = eval_multilinear_padded::<F, EF>(&tampered_flat, batch_point);
+        assert_ne!(tampered_claim, honest_claim, "the restated vector must move the outer claim");
+
+        // The stacked equation is satisfied by construction, so a rejection
+        // here is the transcript refusing the restatement -- not the shape or
+        // the stacking identity.
+        match verify(&tampered, tampered_claim) {
+            Err(StackedVerifierError::Basefold(BasefoldVerifierError::BatchPow)) => {}
+            other => panic!(
+                "a restated claim vector with a matching outer claim must be rejected by the \
+                 batch proof-of-work, which was ground over the honest claims; got {other:?}"
+            ),
+        }
+    }
+
+    /// Build an honest two-round stacked proof, apply `tamper` to it, and
+    /// return what the verifier makes of the result.
+    ///
+    /// The outer claim stays the HONEST one: these controls are about the
+    /// proof's own shape, so the claim must not be what rejects them.
+    fn two_round_verify_with(
+        seed: u64,
+        tamper: impl FnOnce(&mut StackedBasefoldProof<InnerVal, InnerChallenge, InnerValMmcs>),
+    ) -> Result<(), StackedVerifierError> {
+        type F = InnerVal;
+        type EF = InnerChallenge;
+
+        let log_stacking_height = 4u32;
+        let stack_height = 1usize << log_stacking_height;
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let make_mle = |width: usize, log_h: usize, rng: &mut StdRng| -> Arc<Mle<F>> {
+            let n = (1usize << log_h) * width;
+            let v: Vec<F> = (0..n).map(|_| rand_kb(rng)).collect();
+            Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, width)))
+        };
+        // Round 1 spans TWO stripes, so a truncated claim vector is
+        // representable without removing the round itself.
+        let r0 = make_mle(2, 3, &mut rng);
+        let r1 = make_mle(2, 5, &mut rng);
+
+        let fri_config = FriConfig::<F>::test_fri_config();
+        let mmcs = build_mmcs();
+        let dft = Arc::new(Radix2DitParallel::<F>::default());
+        let prover = StackedPcsProver::new(
+            BasefoldProver::<F, EF, _, _>::new(fri_config.clone(), dft, mmcs.clone(), 2),
+            log_stacking_height,
+            2,
+        );
+        let verifier = StackedPcsVerifier::new(
+            BasefoldVerifier::<F, EF, _>::new(fri_config, mmcs, 2),
+            log_stacking_height,
+        );
+
+        let mut p_chal = build_challenger();
+        let (commit0, data0) = prover.commit_multilinears(vec![r0]);
+        p_chal.observe(commit0.clone());
+        let (commit1, data1) = prover.commit_multilinears(vec![r1]);
+        p_chal.observe(commit1.clone());
+
+        let area0 = 16usize.next_multiple_of(stack_height);
+        let area1 = 64usize.next_multiple_of(stack_height);
+        let total_stripes = (area0 >> log_stacking_height) + (area1 >> log_stacking_height);
+        let num_batch_vars = total_stripes.next_power_of_two().trailing_zeros() as usize;
+
+        let eval_point: Vec<EF> =
+            (0..num_batch_vars + log_stacking_height as usize).map(|_| rand_ef(&mut rng)).collect();
+        let stack_point: Vec<EF> = eval_point[..log_stacking_height as usize].to_vec();
+        let batch_point = &eval_point[log_stacking_height as usize..];
+
+        let mut flat: Vec<EF> = Vec::new();
+        for m in data0.interleaved_mles.iter() {
+            flat.extend(m.eval_at::<EF>(&stack_point));
+        }
+        for m in data1.interleaved_mles.iter() {
+            flat.extend(m.eval_at::<EF>(&stack_point));
+        }
+        let claim = eval_multilinear_padded::<F, EF>(&flat, batch_point);
+
+        let mut proof =
+            prover.prove_trusted_evaluation(eval_point.clone(), &[&data0, &data1], &mut p_chal);
+        tamper(&mut proof);
+
+        let mut v_chal = build_challenger();
+        v_chal.observe(commit0.clone());
+        v_chal.observe(commit1.clone());
+        verifier.verify_trusted_evaluation(
+            &[commit0, commit1],
+            &[area0, area1],
+            &eval_point,
+            &proof,
+            claim,
+            &mut v_chal,
+        )
+    }
+
+    /// An OMITTED round.
+    ///
+    /// The claim vector is a parallel array to the committed rounds. A proof
+    /// that drops one round's stripe claims still carries every commitment, so
+    /// nothing downstream re-derives the count; the flattened interpolation
+    /// would simply weigh a shorter vector.
+    #[test]
+    fn a_proof_missing_a_round_is_rejected() {
+        // Non-vacuity: untouched, the same fixture verifies.
+        two_round_verify_with(0x2C24_0417, |_| {}).expect("the honest two-round proof must verify");
+
+        match two_round_verify_with(0x2C24_0417, |p| {
+            p.batch_evaluations.pop().expect("two rounds");
+        }) {
+            Err(StackedVerifierError::IncorrectShape) => {}
+            other => panic!("a proof covering one of two rounds must be rejected: {other:?}"),
+        }
+    }
+
+    /// A TRUNCATED claim vector.
+    ///
+    /// Every round is present, but one of them claims fewer stripes than its
+    /// area covers. The dropped stripes would then contribute nothing to the
+    /// batched claim while the opening still authenticates the whole committed
+    /// area.
+    #[test]
+    fn a_truncated_claim_vector_is_rejected() {
+        match two_round_verify_with(0x2C24_7405, |p| {
+            let round = p
+                .batch_evaluations
+                .iter_mut()
+                .find(|r| r.len() > 1)
+                .expect("a round spanning more than one stripe");
+            round.pop();
+        }) {
+            Err(StackedVerifierError::IncorrectShape) => {}
+            other => {
+                panic!("a round claiming fewer stripes than its area must be rejected: {other:?}")
+            }
+        }
+    }
+
     /// Negative control for the FS observe-order risk: if the verifier
     /// observes the two round commitments in the WRONG order, the BaseFold
     /// transcript desyncs and verification must FAIL.  This proves the

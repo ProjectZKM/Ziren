@@ -109,11 +109,11 @@ mod tests {
     }
 
     /// The grinding witness is what makes the LogUp-GKR transcript cost work to
-    /// steer, and ZR-29 was this check being a NO-OP on the wrap ring: the
-    /// override asserted nothing, so any witness passed and the challenger was
-    /// left un-advanced.  These pin both halves of the property — an honest
-    /// witness is accepted, and a witness off by one is not — so a future
-    /// no-op cannot pass them.
+    /// steer.  This check has been a no-op on a ring before: the override
+    /// asserted nothing, so any witness passed and the challenger was left
+    /// un-advanced.  These pin both halves of the property — an honest witness
+    /// is accepted, and a witness off by one is not — so a no-op cannot pass
+    /// them.
     #[test]
     fn gkr_grinding_witness_roundtrips() {
         // The prover grinds from the seeded state.
@@ -128,6 +128,48 @@ mod tests {
             "the honest grinding witness must be accepted, or the negative case below \
              proves nothing"
         );
+    }
+
+    /// The assertion a no-op cannot pass.
+    ///
+    /// Accept/reject alone does not separate a grind from a stub: a stub that
+    /// returns zero and observes nothing still "round-trips" against a stub
+    /// checker, and it is still deterministic. What separates them is whether
+    /// the challenger MOVED, because every subsequent alpha and beta is drawn
+    /// from that state. The wrap ring's copy of this is
+    /// `zkm_recursion_core::stark::config::wrap_gkr_grind` (zkm-pcs cannot
+    /// import `OuterSC`).
+    #[test]
+    fn gkr_grind_advances_the_transcript() {
+        let mut ungrinded = seeded();
+        let before: JaggedVal = ungrinded.sample();
+
+        let mut prover = seeded();
+        let _witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+        let after: JaggedVal = prover.sample();
+
+        assert_ne!(
+            before, after,
+            "the LogUp-GKR grind must advance the transcript; one that leaves the challenger \
+             untouched costs nothing to produce, while the soundness report counts 16 bits \
+             for it",
+        );
+    }
+
+    /// The prover and the verifier must leave the transcript in the SAME state:
+    /// that is what "the verifier consumes the challenger exactly as the prover
+    /// did" means for every challenge drawn afterwards.
+    #[test]
+    fn gkr_grind_and_check_leave_the_same_state() {
+        let mut prover = seeded();
+        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+
+        let mut verifier = seeded();
+        assert!(gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness));
+
+        let p: JaggedVal = prover.sample();
+        let v: JaggedVal = verifier.sample();
+        assert_eq!(p, v, "prover and verifier must agree on the post-grind state");
     }
 
     /// NEGATIVE: one off-by-one witness.  `check_witness` observes the witness

@@ -115,8 +115,12 @@ pub fn convert_ark_imm_wrap_vk(
 fn convert_endianness<const CHUNK_SIZE: usize, const ARRAY_SIZE: usize>(
     bytes: &[u8; ARRAY_SIZE],
 ) -> [u8; ARRAY_SIZE] {
-    let reversed: [_; ARRAY_SIZE] = bytes
-        .chunks_exact(CHUNK_SIZE)
+    // `as_chunks` rather than `chunks_exact`: the chunk size is a constant, so
+    // the array form carries it in the type and leaves no remainder to ignore.
+    let (chunks, remainder) = bytes.as_chunks::<CHUNK_SIZE>();
+    debug_assert!(remainder.is_empty(), "ARRAY_SIZE must be a whole number of CHUNK_SIZE chunks");
+    let reversed: [_; ARRAY_SIZE] = chunks
+        .iter()
         .flat_map(|chunk| chunk.iter().rev().copied())
         .enumerate()
         .fold([0u8; ARRAY_SIZE], |mut acc, (i, v)| {

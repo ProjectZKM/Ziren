@@ -1,11 +1,11 @@
 use alloc::vec::Vec;
 
 use crate::{
-    cursor::Cursor,
     converter::{
         unchecked_compressed_x_to_g1_point, unchecked_compressed_x_to_g2_point,
         uncompressed_bytes_to_g1_point, uncompressed_bytes_to_g2_point,
     },
+    cursor::Cursor,
     groth16::{Groth16G1, Groth16G2, Groth16Proof, Groth16VerifyingKey},
 };
 
