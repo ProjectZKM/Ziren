@@ -94,7 +94,7 @@ fn eq_mle_table_iter<EF: Field + Send + Sync, I: ExactSizeIterator<Item = EF>>(r
 /// Boolean hypercube with real per-chip `local_cumulative_sum` +
 /// `global_cumulative_sum`.  The recursion verifier's
 /// `build_opened_values_from_chip_openings_with_cumsums` must pass
-/// MATCHING values (from `BasefoldShardProof.chip_cumulative_sums`) or
+/// MATCHING values (from `JaggedShardProof.chip_cumulative_sums`) or
 /// the zerocheck sumcheck balance will not close.
 #[allow(clippy::too_many_arguments)]
 pub fn eval_constraints_on_hypercube_with_cumsums<SC, A>(

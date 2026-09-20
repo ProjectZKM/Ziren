@@ -60,7 +60,7 @@ pub enum EvaluationProof {
 #[serde(
     bound = "F: p3_field::Field + Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>"
 )]
-pub struct BasefoldShardProof<F, EF> {
+pub struct JaggedShardProof<F, EF> {
     /// Public values for the shard.
     pub public_values: Vec<F>,
     /// Commitment digest to the main trace.
@@ -158,14 +158,14 @@ fn default_zero_digest<F: p3_field::Field>() -> [F; 8] {
     [F::ZERO; 8]
 }
 
-impl<F, EF> BasefoldShardProof<F, EF>
+impl<F, EF> JaggedShardProof<F, EF>
 where
     F: p3_field::Field,
     EF: p3_field::Field,
 {
     /// Placeholder proof with dummy() inner proofs; not valid.
     pub fn empty(main_commit: [F; 8], num_pv: usize) -> Self {
-        BasefoldShardProof {
+        JaggedShardProof {
             public_values: vec![F::ZERO; num_pv],
             main_commitment: main_commit,
             logup_gkr_proof: LogupGkrProof::dummy(),
@@ -198,10 +198,10 @@ mod tests {
 
     #[test]
     fn basefold_shard_proof_rmp_roundtrip() {
-        let proof: BasefoldShardProof<F, EF> =
-            BasefoldShardProof::empty(std::array::from_fn(|_| F::ZERO), 16);
+        let proof: JaggedShardProof<F, EF> =
+            JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 16);
         let bytes = rmp_serde::to_vec(&proof).expect("serializes via rmp");
-        let back: BasefoldShardProof<F, EF> =
+        let back: JaggedShardProof<F, EF> =
             rmp_serde::from_slice(&bytes).expect("deserializes via rmp");
         assert_eq!(back.public_values.len(), proof.public_values.len());
         assert_eq!(back.main_commitment.len(), proof.main_commitment.len());
@@ -249,7 +249,7 @@ mod tests {
         };
         let old_bytes = rmp_serde::to_vec(&old).expect("old serializes");
         // Decode old (shorter) bytes into the NEW struct.
-        let back: BasefoldShardProof<F, EF> = rmp_serde::from_slice(&old_bytes)
+        let back: JaggedShardProof<F, EF> = rmp_serde::from_slice(&old_bytes)
             .expect("old-format proof deserializes into new struct");
         assert_eq!(back.public_values.len(), 7);
         // The new fields default to empty (serde(default)).
@@ -259,27 +259,27 @@ mod tests {
 
     #[test]
     fn basefold_shard_proof_empty_pv_count() {
-        let proof: BasefoldShardProof<F, EF> =
-            BasefoldShardProof::empty(std::array::from_fn(|_| F::ZERO), 0);
+        let proof: JaggedShardProof<F, EF> =
+            JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 0);
         assert_eq!(proof.public_values.len(), 0);
         assert_eq!(proof.main_commitment.len(), 8);
     }
 
     #[test]
     fn basefold_shard_proof_large_pv_count() {
-        let proof: BasefoldShardProof<F, EF> =
-            BasefoldShardProof::empty(std::array::from_fn(|_| F::ZERO), 231);
+        let proof: JaggedShardProof<F, EF> =
+            JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 231);
         assert_eq!(proof.public_values.len(), 231);
     }
 
     #[test]
     fn basefold_shard_proof_fold_orientation_roundtrip() {
         for orientation in [FoldOrientation::Msb, FoldOrientation::Lsb] {
-            let mut proof: BasefoldShardProof<F, EF> =
-                BasefoldShardProof::empty(std::array::from_fn(|_| F::ZERO), 4);
+            let mut proof: JaggedShardProof<F, EF> =
+                JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 4);
             proof.fold_orientation = orientation;
             let bytes = rmp_serde::to_vec(&proof).expect("serializes via rmp");
-            let back: BasefoldShardProof<F, EF> =
+            let back: JaggedShardProof<F, EF> =
                 rmp_serde::from_slice(&bytes).expect("deserializes via rmp");
             assert_eq!(back.fold_orientation, orientation);
         }
@@ -287,8 +287,8 @@ mod tests {
 
     #[test]
     fn basefold_shard_proof_constructs() {
-        let proof: BasefoldShardProof<F, EF> =
-            BasefoldShardProof::empty(std::array::from_fn(|_| F::ZERO), 16);
+        let proof: JaggedShardProof<F, EF> =
+            JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 16);
         assert_eq!(proof.public_values.len(), 16);
         assert_eq!(proof.main_commitment.len(), 8);
         assert!(proof.logup_gkr_proof.round_proofs.is_empty());

@@ -26,10 +26,10 @@
 
 use std::hash::{Hash, Hasher};
 
-use zkm_pcs::shard_level::shard_proof::{BasefoldShardProof, EvaluationProof};
+use zkm_pcs::shard_level::shard_proof::{JaggedShardProof, EvaluationProof};
 use zkm_pcs::{InnerChallenge, InnerVal};
 
-/// Hash the structural dimensions of one `BasefoldShardProof`, in the order
+/// Hash the structural dimensions of one `JaggedShardProof`, in the order
 /// its `Witnessable::write` impl
 /// (`crates/recursion/circuit/src/shard_level_witness.rs`) walks them.
 ///
@@ -37,7 +37,7 @@ use zkm_pcs::{InnerChallenge, InnerVal};
 /// proof type, the Normalize stage over `shard_proofs` and the Compose stage
 /// over the second half of each `vks_and_proofs` pair.
 pub fn hash_shard_proof_structure<H: Hasher>(
-    sp: &BasefoldShardProof<InnerVal, InnerChallenge>,
+    sp: &JaggedShardProof<InnerVal, InnerChallenge>,
     h: &mut H,
 ) {
     // Write order:
@@ -130,7 +130,7 @@ pub fn hash_shard_proof_structure<H: Hasher>(
 /// is invisible in the hash, so this reports the components that feed it and
 /// lets the two be diffed field by field.
 pub fn describe_shard_proof_structure(
-    sp: &BasefoldShardProof<InnerVal, InnerChallenge>,
+    sp: &JaggedShardProof<InnerVal, InnerChallenge>,
 ) -> Vec<(String, usize)> {
     let lgkr = &sp.logup_gkr_proof;
     let mut v: Vec<(String, usize)> = vec![

@@ -416,11 +416,11 @@ where
 
 // Top-level BaseFold shard proof
 
-impl<C> Witnessable<C> for crate::shard_basefold::BasefoldShardProof<InnerVal, InnerChallenge>
+impl<C> Witnessable<C> for crate::shard_basefold::JaggedShardProof<InnerVal, InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = crate::shard_basefold::BasefoldShardProof<Felt<C::F>, Ext<C::F, C::EF>>;
+    type WitnessVariable = crate::shard_basefold::JaggedShardProof<Felt<C::F>, Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let main_commitment: [Felt<C::F>; 8] =
@@ -430,7 +430,7 @@ where
             .iter()
             .map(|(name, bits)| (name.clone(), bits.read(builder)))
             .collect();
-        crate::shard_basefold::BasefoldShardProof {
+        crate::shard_basefold::JaggedShardProof {
             main_commitment,
             chip_height_bits,
             public_values: self.public_values.read(builder),

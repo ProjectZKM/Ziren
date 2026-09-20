@@ -56,7 +56,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// Whether this ring carries the jagged geometry HASH-BIND
     /// (`modified_commitment = compress([raw_root, hash(counts)])`) and must
     /// re-bind it in-circuit inside
-    /// [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
+    /// [`crate::shard_basefold::JaggedShardVerifier::verify_shard`].
     ///
     /// The INNER KoalaBear rings (core/compress/shrink) carry a real MODIFIED
     /// (FS-observed) digest distinct from the RAW commit root — they MUST run
@@ -780,7 +780,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         // if deserialization fails (empty/placeholder paths).
         //
         // P2c-for-outer: the PRODUCTION outer wrap path no longer reaches this
-        // bytes lift — `BasefoldShardProof::read` now witnesses the outer bundle
+        // bytes lift — `JaggedShardProof::read` now witnesses the outer bundle
         // into a `LiftedEvalProof::OuterBundle` (value-independent), and
         // `verify_wrap_basefold_core` lifts it via `lift_outer_bundle_dispatch`.
         // This bytes arm survives only as the empty/deserialize-failure fallback

@@ -12,7 +12,7 @@ use super::basefold_constraint_folder::{
     compute_padded_row_adjustment_basefold_host, eval_constraints_basefold_host,
     BasefoldConstraintFolder,
 };
-use super::shard_proof::{BasefoldShardProof, FoldOrientation};
+use super::shard_proof::{JaggedShardProof, FoldOrientation};
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
 use crate::lookup::LookupKind;
@@ -21,7 +21,7 @@ use crate::{Challenge, Chip, StarkGenericConfig, StarkVerifyingKey, Val};
 
 /// Errors emitted by the host-side shard-level BaseFold verifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BasefoldVerifyError {
+pub enum JaggedShardVerifyError {
     /// The proof's `public_values` length is not the machine's PV count.
     PublicValuesLengthMismatch { expected: usize, got: usize },
     /// The proof's chip list is not the machine's chip set.
@@ -45,7 +45,7 @@ pub enum BasefoldVerifyError {
     Unimplemented(&'static str),
 }
 
-impl core::fmt::Display for BasefoldVerifyError {
+impl core::fmt::Display for JaggedShardVerifyError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::PublicValuesLengthMismatch { expected, got } => {
@@ -68,13 +68,13 @@ impl core::fmt::Display for BasefoldVerifyError {
                 // tracking hint (`unimplemented_error_displays_phase_hint`
                 // asserts on it) so users who hit an unimplemented sub-flow
                 // can find the umbrella tracking issue.
-                write!(f, "host-side BasefoldShardVerifier: {phase} not yet implemented")
+                write!(f, "host-side JaggedShardVerifier: {phase} not yet implemented")
             }
         }
     }
 }
 
-impl std::error::Error for BasefoldVerifyError {}
+impl std::error::Error for JaggedShardVerifyError {}
 
 /// Host-side shard-level BaseFold verifier: the LogUp-GKR + zerocheck +
 /// jagged-PCS flow, run against host types rather than symbolic AIR.
@@ -84,13 +84,13 @@ impl std::error::Error for BasefoldVerifyError {}
 /// [`Self::production_default`]; [`Self::with_params`] is for tests on small
 /// shards.
 #[derive(Clone, Debug)]
-pub struct BasefoldShardVerifier {
+pub struct JaggedShardVerifier {
     /// The shard cube: sets the zerocheck dimension and the jagged-PCS stack
     /// depth. Every trace in a shard is padded to `2^max_log_row_count` rows.
     pub max_log_row_count: usize,
 }
 
-impl BasefoldShardVerifier {
+impl JaggedShardVerifier {
     /// The production shard cube (22), fixed: every stage proves and verifies
     /// at exactly this constant and it is never floated per proof.
     ///
@@ -130,7 +130,7 @@ impl BasefoldShardVerifier {
         chips: &[&Chip<Val<SC>, A>],
         // The MACHINE's preprocessed chips (name, width), name ordered.
         prep_chip_dims: &[(String, usize)],
-        proof: &BasefoldShardProof<Val<SC>, Challenge<SC>>,
+        proof: &JaggedShardProof<Val<SC>, Challenge<SC>>,
         challenger: &mut SC::Challenger,
         num_pv_elts: usize,
         // Whether the machine pins its rounds (`StarkMachine::recursion_pins`):
@@ -138,7 +138,7 @@ impl BasefoldShardVerifier {
         // padding split are those of the proof's pin CLASS, read off the
         // proof's padding layout and checked against the rows.
         pinned: Option<crate::jagged::RecursionPins>,
-    ) -> Result<(), BasefoldVerifyError>
+    ) -> Result<(), JaggedShardVerifyError>
     where
         SC: StarkGenericConfig + crate::BasefoldRing,
         A: MachineAir<Val<SC>>
@@ -159,7 +159,7 @@ impl BasefoldShardVerifier {
     {
         // Shape check: public_values length.
         if proof.public_values.len() != num_pv_elts {
-            return Err(BasefoldVerifyError::PublicValuesLengthMismatch {
+            return Err(JaggedShardVerifyError::PublicValuesLengthMismatch {
                 expected: num_pv_elts,
                 got: proof.public_values.len(),
             });
@@ -167,7 +167,7 @@ impl BasefoldShardVerifier {
         // Shape check: chip count vs. LogUp-GKR openings.
         let opening_count = proof.logup_gkr_proof.logup_evaluations.chip_openings.len();
         if opening_count != chips.len() {
-            return Err(BasefoldVerifyError::ChipCountMismatch {
+            return Err(JaggedShardVerifyError::ChipCountMismatch {
                 expected: chips.len(),
                 got: opening_count,
             });
@@ -196,7 +196,7 @@ impl BasefoldShardVerifier {
         for (chip, opening) in chips.iter().zip(proof.opened_values.chips.iter()) {
             let expected_main = <A as p3_air::BaseAir<Val<SC>>>::width(&chip.air);
             if opening.main.local.len() != expected_main {
-                return Err(BasefoldVerifyError::OpeningWidthMismatch {
+                return Err(JaggedShardVerifyError::OpeningWidthMismatch {
                     chip: chip.name(),
                     round: "main",
                     expected: expected_main,
@@ -205,7 +205,7 @@ impl BasefoldShardVerifier {
             }
             let expected_prep = chip.preprocessed_width();
             if opening.preprocessed.local.len() != expected_prep {
-                return Err(BasefoldVerifyError::OpeningWidthMismatch {
+                return Err(JaggedShardVerifyError::OpeningWidthMismatch {
                     chip: chip.name(),
                     round: "preprocessed",
                     expected: expected_prep,
@@ -398,7 +398,7 @@ impl BasefoldShardVerifier {
                         };
                     let order = <InnerVal as p3_field::PrimeField32>::ORDER_U32 as usize;
                     if rc_g.iter().chain(cc_g.iter()).any(|&c| c >= order) {
-                        return Err(BasefoldVerifyError::JaggedPcs(
+                        return Err(JaggedShardVerifyError::JaggedPcs(
                             "jagged hash-bind: count >= F::ORDER (BaseFieldOverflow)".into(),
                         ));
                     }
@@ -408,7 +408,7 @@ impl BasefoldShardVerifier {
                         .map(|(r, c)| r.saturating_mul(*c))
                         .fold(0usize, |a, b| a.saturating_add(b));
                     if area == 0 || area >= (1usize << 30) {
-                        return Err(BasefoldVerifyError::JaggedPcs(
+                        return Err(JaggedShardVerifyError::JaggedPcs(
                             "jagged hash-bind: area out of bounds (0 < area < 2^30) \
                              (AreaOutOfBounds)"
                                 .into(),
@@ -429,7 +429,7 @@ impl BasefoldShardVerifier {
                         )
                     };
                     if recomputed != observed_inner {
-                        return Err(BasefoldVerifyError::JaggedPcs(
+                        return Err(JaggedShardVerifyError::JaggedPcs(
                             "jagged hash-bind mismatch: recomputed \
                              compress([raw_root, hash(counts)]) != observed \
                              main_commitment (IncorrectTableSizes)"
@@ -515,7 +515,7 @@ fn verify_jagged_pcs_host<SC, A>(
     // padding columns, which names its pin class
     // (`RECURSION_PIN_CLASSES`); `None` = natural rounds.
     claimed_prep_pad_columns: Option<usize>,
-) -> Result<(), BasefoldVerifyError>
+) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
     A: MachineAir<Val<SC>>,
@@ -578,7 +578,7 @@ where
             // zerocheck and LogUp go on consuming the supplied opened values,
             // and nothing is left to bind those values to that commitment.
             EvaluationProof::Empty => {
-                return Err(BasefoldVerifyError::JaggedPcs(
+                return Err(JaggedShardVerifyError::JaggedPcs(
                     "outer KoalaBear shard carries EvaluationProof::Empty: the PCS opening is \
                      missing, so no commitment binds the opened values"
                         .into(),
@@ -586,7 +586,7 @@ where
             }
             EvaluationProof::Bytes(b) => b,
             EvaluationProof::Bundle(_) => {
-                return Err(BasefoldVerifyError::JaggedPcs(
+                return Err(JaggedShardVerifyError::JaggedPcs(
                     "outer ring expects a serialized (Bytes) BaseFold bundle, got Bundle".into(),
                 ));
             }
@@ -595,7 +595,7 @@ where
             match JaggedPcsProofGeneric::<<SC as crate::BasefoldRing>::BfMmcs>::from_bytes_for_verification(bytes) {
                 Some(b) => b,
                 None => {
-                    return Err(BasefoldVerifyError::JaggedPcs(format!(
+                    return Err(JaggedShardVerifyError::JaggedPcs(format!(
                         "outer BaseFold bundle deserialize failed ({} bytes)",
                         bytes.len()
                     )));
@@ -626,7 +626,7 @@ where
                 )
             };
             if projected_val != *observed_main_commitment {
-                return Err(BasefoldVerifyError::JaggedPcs(
+                return Err(JaggedShardVerifyError::JaggedPcs(
                     "outer ring: digest_felts(bundle.commit.original_commitment) != the \
                      observed main_commitment -- the commitment that seeded Fiat-Shamir is \
                      not the one this opening authenticates"
@@ -680,7 +680,7 @@ where
         let opened_main: Vec<Vec<InnerChallenge>> = {
             let rounds = &bundle.packing.round_counts;
             if rounds.is_empty() {
-                return Err(BasefoldVerifyError::JaggedPcs(
+                return Err(JaggedShardVerifyError::JaggedPcs(
                     "outer bundle carries no per-round geometry, so its column claims cannot \
                      be aligned with the shard's openings"
                         .into(),
@@ -691,7 +691,7 @@ where
                 if r + 1 == rounds.len() {
                     // MAIN: the shard's chips, in the shard's order.
                     if round.len() != opened_values.chips.len() {
-                        return Err(BasefoldVerifyError::JaggedPcs(format!(
+                        return Err(JaggedShardVerifyError::JaggedPcs(format!(
                             "outer main round: the proof claims {} chips, the shard opened {}",
                             round.len(),
                             opened_values.chips.len(),
@@ -728,7 +728,7 @@ where
                         })
                         .collect();
                     crate::jagged_pcs::check_round_geometry(round, &expected, "outer main round")
-                        .map_err(BasefoldVerifyError::JaggedPcs)?;
+                        .map_err(JaggedShardVerifyError::JaggedPcs)?;
                     om.extend(opened_values.chips.iter().map(|c| relabel(c.main.local.clone())));
                 } else {
                     // PREPROCESSED: the key's chips, in the key's order.
@@ -761,7 +761,7 @@ where
                     // either can pin it: they are two records of one `setup`.
                     for ((kn, kw, _), (mn, mw)) in expected.iter().zip(prep_chip_dims.iter()) {
                         if kn != mn || kw != mw {
-                            return Err(BasefoldVerifyError::JaggedPcs(format!(
+                            return Err(JaggedShardVerifyError::JaggedPcs(format!(
                                 "outer preprocessed round: the machine has {mn} at {mw} columns \
                                  where the verifying key has {kn} at {kw}",
                             )));
@@ -772,11 +772,11 @@ where
                         &expected,
                         "outer preprocessed round",
                     )
-                    .map_err(BasefoldVerifyError::JaggedPcs)?;
+                    .map_err(JaggedShardVerifyError::JaggedPcs)?;
                     for (name, _) in prep_chip_dims.iter() {
                         let idx =
                             chips.iter().position(|c| c.name() == *name).ok_or_else(|| {
-                                BasefoldVerifyError::JaggedPcs(format!(
+                                JaggedShardVerifyError::JaggedPcs(format!(
                                     "outer preprocessed round covers chip {name}, which the \
                                      shard does not have"
                                 ))
@@ -791,7 +791,7 @@ where
             // about to weigh would silently bind the wrong columns, so it is a
             // rejection rather than a fallback to the unbound path.
             if om.len() != chip_infos.len() {
-                return Err(BasefoldVerifyError::JaggedPcs(format!(
+                return Err(JaggedShardVerifyError::JaggedPcs(format!(
                     "outer cross-bind: rebuilt {} column groups from the packing's rounds, but \
                      the proof opens {}",
                     om.len(),
@@ -823,21 +823,21 @@ where
         // are, so require exactly that many.
         let expected_preceding = usize::from(!prep_chip_dims.is_empty());
         if bundle.preceding_commits.len() != expected_preceding {
-            return Err(BasefoldVerifyError::JaggedPcs(format!(
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
                 "outer bundle carries {} preceding round(s); the machine has {} preprocessed                  chip(s), so it must carry exactly {expected_preceding}",
                 bundle.preceding_commits.len(),
                 prep_chip_dims.len(),
             )));
         }
         if bundle.packing.round_counts.len() != expected_preceding + 1 {
-            return Err(BasefoldVerifyError::JaggedPcs(format!(
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
                 "outer bundle describes {} round(s); the machine commits {}",
                 bundle.packing.round_counts.len(),
                 expected_preceding + 1,
             )));
         }
         if bundle.packing.padding_heights.len() != bundle.packing.round_counts.len() {
-            return Err(BasefoldVerifyError::JaggedPcs(format!(
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
                 "outer bundle has padding heights for {} round(s) but geometry for {}",
                 bundle.packing.padding_heights.len(),
                 bundle.packing.round_counts.len(),
@@ -848,7 +848,7 @@ where
             match <SC as crate::BasefoldRing>::vk_commit_is_preceding_root(&vk.commit, raw) {
                 Some(true) => {}
                 Some(false) => {
-                    return Err(BasefoldVerifyError::JaggedPcs(
+                    return Err(JaggedShardVerifyError::JaggedPcs(
                         "outer preprocessed round: the proof's commitment is not the \
                          verifying key's, so the round it opens is not the one the key \
                          committed"
@@ -897,7 +897,7 @@ where
         return if ok {
             Ok(())
         } else {
-            Err(BasefoldVerifyError::JaggedPcs("outer BaseFold bundle rejected".into()))
+            Err(JaggedShardVerifyError::JaggedPcs("outer BaseFold bundle rejected".into()))
         };
     }
 
@@ -909,7 +909,7 @@ where
         // an active KoalaBear PCS, so a missing opening is a malformed proof,
         // never a configuration that has none.
         EvaluationProof::Empty => {
-            return Err(BasefoldVerifyError::JaggedPcs(
+            return Err(JaggedShardVerifyError::JaggedPcs(
                 "inner KoalaBear shard carries EvaluationProof::Empty: the PCS opening is \
                  missing, so no commitment binds the opened values"
                     .into(),
@@ -918,7 +918,7 @@ where
         EvaluationProof::Bundle(b) => b.clone(),
         EvaluationProof::Bytes(bytes) => JaggedPcsProof::from_bytes_for_verification(bytes)
             .ok_or_else(|| {
-                BasefoldVerifyError::JaggedPcs(format!(
+                JaggedShardVerifyError::JaggedPcs(format!(
                     "rmp-serde deserialize failed ({} bytes)",
                     bytes.len()
                 ))
@@ -996,12 +996,12 @@ where
         // ordered -- the same set and order `setup` commits); HEIGHTS are
         // claimed by the proof and pinned by the hash-bind below.
         let Some(prep_round) = combined_packing.round_counts.first() else {
-            return Err(BasefoldVerifyError::JaggedPcs(
+            return Err(JaggedShardVerifyError::JaggedPcs(
                 "preprocessed round: the proof carries no geometry for it".into(),
             ));
         };
         if prep_round.len() != n_prep {
-            return Err(BasefoldVerifyError::JaggedPcs(format!(
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
                 "preprocessed round: the proof claims {} chips, the machine has {n_prep}",
                 prep_round.len(),
             )));
@@ -1010,7 +1010,7 @@ where
         for ((name, width), (height, claimed_width)) in prep_chip_dims.iter().zip(prep_round.iter())
         {
             if claimed_width != width {
-                return Err(BasefoldVerifyError::JaggedPcs(format!(
+                return Err(JaggedShardVerifyError::JaggedPcs(format!(
                     "preprocessed round: chip {name} is {claimed_width} columns in the proof \
                      but {width} in the machine",
                 )));
@@ -1039,13 +1039,13 @@ where
                     .iter()
                     .position(|c| c.prep.pad_columns == claimed)
                 else {
-                    return Err(BasefoldVerifyError::JaggedPcs(format!(
+                    return Err(JaggedShardVerifyError::JaggedPcs(format!(
                         "preprocessed round: {claimed} padding columns name no pin class",
                     )));
                 };
                 let pin = crate::jagged::RecursionPins::class(class).prep;
                 if prep_natural > pin.area {
-                    return Err(BasefoldVerifyError::JaggedPcs(format!(
+                    return Err(JaggedShardVerifyError::JaggedPcs(format!(
                         "preprocessed round: {prep_natural} committed cells exceed the claimed \
                          class's pin {}",
                         pin.area,
@@ -1093,7 +1093,7 @@ where
     // outer branch requires the same count unconditionally.
     let expected_rounds = usize::from(n_prep > 0) + 1;
     if combined_packing.round_counts.len() != expected_rounds {
-        return Err(BasefoldVerifyError::JaggedPcs(format!(
+        return Err(JaggedShardVerifyError::JaggedPcs(format!(
             "inner bundle describes {} round(s); the machine commits {expected_rounds} \
              ({} preprocessed chip(s) plus the main round)",
             combined_packing.round_counts.len(),
@@ -1113,7 +1113,7 @@ where
         })
         .collect();
     crate::jagged_pcs::check_round_geometry(main_round, &expected, "inner main round")
-        .map_err(BasefoldVerifyError::JaggedPcs)?;
+        .map_err(JaggedShardVerifyError::JaggedPcs)?;
 
     let main_column_counts: &[usize] =
         combined_packing.column_counts.get(n_prep_infos..).unwrap_or(&[]);
@@ -1168,7 +1168,7 @@ where
                 // This is the bind that makes the preprocessed round mean
                 // anything.
                 if info.row_count != h {
-                    return Err(BasefoldVerifyError::JaggedPcs(format!(
+                    return Err(JaggedShardVerifyError::JaggedPcs(format!(
                         "preprocessed round: {} is {} rows in the packing but {} as \
                          pinned by the verifying key",
                         info.name, h, info.row_count,
@@ -1213,7 +1213,7 @@ where
             col_idx = pad_idx;
         }
         if col_idx != total_cols {
-            return Err(BasefoldVerifyError::JaggedPcs(format!(
+            return Err(JaggedShardVerifyError::JaggedPcs(format!(
                 "packing column accounting mismatch: [preprocessed | main] covers \
                  {col_idx} columns but the packing carries {total_cols}",
             )));
@@ -1225,7 +1225,7 @@ where
             let pins = crate::jagged::RecursionPins::class(class);
             let main_pads = chip_infos.len() - n_prep_infos - n_main_infos;
             if main_pads != pins.main.pad_columns {
-                return Err(BasefoldVerifyError::JaggedPcs(format!(
+                return Err(JaggedShardVerifyError::JaggedPcs(format!(
                     "main round: {main_pads} padding columns, the claimed pin class has {}",
                     pins.main.pad_columns,
                 )));
@@ -1239,10 +1239,10 @@ where
             let Some(floor) =
                 crate::jagged::RecursionPins::class_for_committed(main_natural, prep_natural)
             else {
-                return Err(BasefoldVerifyError::JaggedPcs("the rows fit no pin class".into()));
+                return Err(JaggedShardVerifyError::JaggedPcs("the rows fit no pin class".into()));
             };
             if class < floor {
-                return Err(BasefoldVerifyError::JaggedPcs(format!(
+                return Err(JaggedShardVerifyError::JaggedPcs(format!(
                     "pin class {class} claimed for rows that need class {floor}",
                 )));
             }
@@ -1321,7 +1321,7 @@ where
             continue;
         }
         let idx = chips.iter().position(|c| c.name() == info.name).ok_or_else(|| {
-            BasefoldVerifyError::JaggedPcs(format!(
+            JaggedShardVerifyError::JaggedPcs(format!(
                 "preprocessed round covers chip {} which the shard does not have",
                 info.name,
             ))
@@ -1359,7 +1359,7 @@ where
         // against, and require it to equal the key's.  That single check is
         // what pins BOTH the root and the preprocessed row/column counts.
         let Some(raw) = bundle.preceding_commits.first() else {
-            return Err(BasefoldVerifyError::JaggedPcs(
+            return Err(JaggedShardVerifyError::JaggedPcs(
                 "preprocessed round: the proof carries no raw commitment for it".into(),
             ));
         };
@@ -1390,7 +1390,7 @@ where
             >(&core::mem::ManuallyDrop::new(vk.commit.clone()))
         };
         if crate::jagged_pcs::basefold_commit_digest_felts(&key_commitment) != rebound {
-            return Err(BasefoldVerifyError::JaggedPcs(
+            return Err(JaggedShardVerifyError::JaggedPcs(
                 "preprocessed round: the claimed commitment and geometry do not \
                  re-derive the verifying key's commitment"
                     .into(),
@@ -1420,7 +1420,7 @@ where
         &opened_main,
         lb_challenger,
     ) {
-        return Err(BasefoldVerifyError::JaggedPcs(
+        return Err(JaggedShardVerifyError::JaggedPcs(
             "verify_jagged_no_observe rejected the bundle".into(),
         ));
     }
@@ -1494,7 +1494,7 @@ fn verify_zerocheck_host<SC, A>(
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
-) -> Result<(), BasefoldVerifyError>
+) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
@@ -1532,7 +1532,7 @@ where
         opened_values,
     );
     if rlc_eval != zerocheck_proof.point_and_eval.1 {
-        return Err(BasefoldVerifyError::Zerocheck(
+        return Err(JaggedShardVerifyError::Zerocheck(
             "zerocheck rlc_eval != point_and_eval.1 (item-12 constraint-RLC binding)".to_string(),
         ));
     }
@@ -1540,14 +1540,14 @@ where
     // (2) Point dimension == max_log_row_count.
     let point_dim = zerocheck_proof.point_and_eval.0.len();
     if point_dim != max_log_row_count {
-        return Err(BasefoldVerifyError::Zerocheck(format!(
+        return Err(JaggedShardVerifyError::Zerocheck(format!(
             "zerocheck point dim {point_dim} != max_log_row_count {max_log_row_count}"
         )));
     }
 
     // (3) gkr_point dim must match zerocheck point dim.
     if gkr_evaluations.point.len() != point_dim {
-        return Err(BasefoldVerifyError::Zerocheck(format!(
+        return Err(JaggedShardVerifyError::Zerocheck(format!(
             "gkr_evaluations.point dim {} != zerocheck point dim {}",
             gkr_evaluations.point.len(),
             point_dim
@@ -1613,7 +1613,7 @@ where
             })
             .fold(Challenge::<SC>::ZERO, |acc, m| acc * lambda + m);
         if zerocheck_proof.claimed_sum != zerocheck_sum_mod {
-            return Err(BasefoldVerifyError::Zerocheck(
+            return Err(JaggedShardVerifyError::Zerocheck(
                 "GKR sum-modification identity failed (claimed_sum != lambda-RLC(GKR openings))"
                     .into(),
             ));
@@ -1634,7 +1634,7 @@ where
         4,
     )
     .map_err(|e| match e {
-        BasefoldVerifyError::LogupGkr(msg) => BasefoldVerifyError::Zerocheck(msg),
+        JaggedShardVerifyError::LogupGkr(msg) => JaggedShardVerifyError::Zerocheck(msg),
         other => other,
     })?;
 
@@ -1861,7 +1861,7 @@ fn verify_sumcheck_host<F, EF, Challenger>(
     challenger: &mut Challenger,
     expected_num_variables: usize,
     expected_degree: usize,
-) -> Result<(), BasefoldVerifyError>
+) -> Result<(), JaggedShardVerifyError>
 where
     F: Field,
     EF: ExtensionField<F> + BasedVectorSpace<F> + Copy,
@@ -1869,18 +1869,18 @@ where
 {
     let n = proof.univariate_polys.len();
     if n != expected_num_variables {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "sumcheck proof has {n} rounds, expected {expected_num_variables}"
         )));
     }
     if proof.point_and_eval.0.len() != expected_num_variables {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "sumcheck point_and_eval.0 has dim {}, expected {expected_num_variables}",
             proof.point_and_eval.0.len()
         )));
     }
     if n == 0 {
-        return Err(BasefoldVerifyError::LogupGkr(
+        return Err(JaggedShardVerifyError::LogupGkr(
             "sumcheck has zero rounds — invalid proof shape".into(),
         ));
     }
@@ -1888,7 +1888,7 @@ where
     // First round: p_0(0) + p_0(1) == claimed_sum.
     let p0 = &proof.univariate_polys[0];
     if p0.coefficients.len() != expected_degree + 1 {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "sumcheck round 0 poly has {} coefficients, expected {}",
             p0.coefficients.len(),
             expected_degree + 1
@@ -1897,7 +1897,7 @@ where
     let p0_at_0 = eval_coeffs_host(&p0.coefficients, EF::ZERO);
     let p0_at_1 = eval_coeffs_host(&p0.coefficients, EF::ONE);
     if p0_at_0 + p0_at_1 != proof.claimed_sum {
-        return Err(BasefoldVerifyError::LogupGkr(
+        return Err(JaggedShardVerifyError::LogupGkr(
             "sumcheck first-round inconsistency with claimed_sum".into(),
         ));
     }
@@ -1922,7 +1922,7 @@ where
         alphas.insert(0, alpha);
         let curr = &proof.univariate_polys[i];
         if curr.coefficients.len() != expected_degree + 1 {
-            return Err(BasefoldVerifyError::LogupGkr(format!(
+            return Err(JaggedShardVerifyError::LogupGkr(format!(
                 "sumcheck round {i} poly has {} coefficients, expected {}",
                 curr.coefficients.len(),
                 expected_degree + 1
@@ -1932,7 +1932,7 @@ where
         let curr_at_0 = eval_coeffs_host(&curr.coefficients, EF::ZERO);
         let curr_at_1 = eval_coeffs_host(&curr.coefficients, EF::ONE);
         if prev_at_alpha != curr_at_0 + curr_at_1 {
-            return Err(BasefoldVerifyError::LogupGkr(format!(
+            return Err(JaggedShardVerifyError::LogupGkr(format!(
                 "sumcheck round-{i} consistency failed"
             )));
         }
@@ -1950,7 +1950,7 @@ where
 
     // Point must match the sampled challenges.
     if alphas != proof.point_and_eval.0 {
-        return Err(BasefoldVerifyError::LogupGkr(
+        return Err(JaggedShardVerifyError::LogupGkr(
             "sumcheck reduced point doesn't match sampled challenges".into(),
         ));
     }
@@ -1958,7 +1958,7 @@ where
     // Final: p_{n-1}(alpha_last) == claimed final eval.
     let final_recomputed = eval_coeffs_host(&prev_poly.coefficients, alpha_last);
     if final_recomputed != proof.point_and_eval.1 {
-        return Err(BasefoldVerifyError::LogupGkr(
+        return Err(JaggedShardVerifyError::LogupGkr(
             "sumcheck final eval doesn't match recomputed value".into(),
         ));
     }
@@ -1997,7 +1997,7 @@ fn verify_logup_gkr_host<SC, A>(
     public_values: &[Val<SC>],
     machine_has_pv_buses: bool,
     challenger: &mut SC::Challenger,
-) -> Result<(), BasefoldVerifyError>
+) -> Result<(), JaggedShardVerifyError>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
@@ -2010,14 +2010,14 @@ where
     let numerator = &proof.circuit_output.numerator;
     let denominator = &proof.circuit_output.denominator;
     if numerator.len() != denominator.len() {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "circuit_output numerator/denominator length mismatch: {} vs {}",
             numerator.len(),
             denominator.len()
         )));
     }
     if !numerator.len().is_power_of_two() {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "circuit_output length {} is not a power of two",
             numerator.len()
         )));
@@ -2041,7 +2041,7 @@ where
         crate::logup_gkr::GKR_GRINDING_BITS,
         proof.witness,
     ) {
-        return Err(BasefoldVerifyError::LogupGkr("GKR grinding witness check failed".into()));
+        return Err(JaggedShardVerifyError::LogupGkr("GKR grinding witness check failed".into()));
     }
 
     // (1) Sample the LogUp permutation challenges (alpha + beta_seed),
@@ -2094,7 +2094,7 @@ where
             Challenge::<SC>::ZERO
         };
         if gkr_sum != -pv_digest {
-            return Err(BasefoldVerifyError::LogupGkr(
+            return Err(JaggedShardVerifyError::LogupGkr(
                 "public-values balance failed (sum circuit_output num/den != -PV_digest)".into(),
             ));
         }
@@ -2130,7 +2130,7 @@ where
     // unverified MLE halving) — the round count must be checked, not derived
     // from the proof.
     if proof.round_proofs.len() + 1 != max_log_row_count {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "GKR round count {} + 1 != max_log_row_count {} (proof must be \
              padded to the fixed round count)",
             proof.round_proofs.len(),
@@ -2151,7 +2151,7 @@ where
         // Expected claimed sum.
         let expected_claim = lambda * numerator_eval + denominator_eval;
         if round_proof.sumcheck_proof.claimed_sum != expected_claim {
-            return Err(BasefoldVerifyError::LogupGkr(format!(
+            return Err(JaggedShardVerifyError::LogupGkr(format!(
                 "round {i}: sumcheck claimed_sum mismatch"
             )));
         }
@@ -2193,7 +2193,7 @@ where
         let d1 = round_proof.denominator_1;
         let expected_final = eq_val * (lambda * (n0 * d1 + n1 * d0) + d0 * d1);
         if final_eval != expected_final {
-            return Err(BasefoldVerifyError::LogupGkr(format!(
+            return Err(JaggedShardVerifyError::LogupGkr(format!(
                 "round {i}: final_eval identity failed"
             )));
         }
@@ -2253,7 +2253,7 @@ where
     // (round.rs:179-184), so the first `log_num_interactions` coords are
     // the interaction axis and the remaining are the trace (row) axis.
     if eval_point.len() != log_num_interactions + max_log_row_count {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "reconstruction: reduced eval_point dim {} != log_num_interactions {} + \
              max_log_row_count {}",
             eval_point.len(),
@@ -2267,14 +2267,14 @@ where
     // dimension must equal the FIXED cube threaded in from `verify_shard`.
     let logup_evaluations = &proof.logup_evaluations;
     if trace_point.len() != max_log_row_count {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "reconstruction: trace_point dim {} != max_log_row_count {}",
             trace_point.len(),
             max_log_row_count
         )));
     }
     if logup_evaluations.point.as_slice() != trace_point {
-        return Err(BasefoldVerifyError::LogupGkr(
+        return Err(JaggedShardVerifyError::LogupGkr(
             "reconstruction: logup_evaluations.point != reduced trace_point".into(),
         ));
     }
@@ -2313,7 +2313,7 @@ where
     // builds the layer, so the global `col` axis here matches
     // `circuit_output`'s.
     if opened_values.chips.len() != chips.len() {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "reconstruction: opened_values chip count {} != chips {}",
             opened_values.chips.len(),
             chips.len()
@@ -2329,7 +2329,7 @@ where
         let degree: &[Challenge<SC>] =
             opening.quotient.first().map(|v| v.as_slice()).unwrap_or(&[]);
         if degree.len() != point_extended.len() {
-            return Err(BasefoldVerifyError::LogupGkr(format!(
+            return Err(JaggedShardVerifyError::LogupGkr(format!(
                 "reconstruction: chip '{}' degree dim {} != point_extended dim {}",
                 name,
                 degree.len(),
@@ -2344,7 +2344,7 @@ where
         // Trace openings at the GKR point, looked up by chip NAME (the
         // chip_openings BTreeMap is name-ordered, `chips` is def-ordered).
         let chip_eval = logup_evaluations.chip_openings.get(name.as_str()).ok_or_else(|| {
-            BasefoldVerifyError::LogupGkr(format!(
+            JaggedShardVerifyError::LogupGkr(format!(
                 "reconstruction: no chip_opening for chip '{}'",
                 name
             ))
@@ -2427,7 +2427,7 @@ where
     // prover could use that to drop lookups it does not want counted.
     let axis_width = 1usize << interaction_point.len();
     if numerator_values.len() > axis_width {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
+        return Err(JaggedShardVerifyError::LogupGkr(format!(
             "reconstruction: interaction axis {} is narrower than the chips' raw \
              interaction total {}",
             axis_width,
@@ -2447,14 +2447,14 @@ where
     // walk's `numerator_eval`/`denominator_eval` (which never sees the
     // degree) stays fixed.
     if numerator_eval != reconstructed_numerator {
-        return Err(BasefoldVerifyError::LogupGkr(
+        return Err(JaggedShardVerifyError::LogupGkr(
             "last-layer reconstruction: numerator mismatch (degree-masked \
              height-soundness assert)"
                 .into(),
         ));
     }
     if denominator_eval != reconstructed_denominator {
-        return Err(BasefoldVerifyError::LogupGkr(
+        return Err(JaggedShardVerifyError::LogupGkr(
             "last-layer reconstruction: denominator mismatch (degree-masked \
              height-soundness assert)"
                 .into(),
@@ -2484,13 +2484,13 @@ mod tests {
 
     #[test]
     fn verifier_constructs_with_defaults() {
-        let v = BasefoldShardVerifier::production_default();
+        let v = JaggedShardVerifier::production_default();
         assert_eq!(v.max_log_row_count, 22);
     }
 
     #[test]
     fn verifier_with_params_honors_custom_row_count() {
-        let v = BasefoldShardVerifier::with_params(3);
+        let v = JaggedShardVerifier::with_params(3);
         assert_eq!(v.max_log_row_count, 3);
     }
 
@@ -2502,7 +2502,7 @@ mod tests {
     /// proof.
     #[test]
     fn fixed_cube_sourced_from_the_core_constant() {
-        let base = BasefoldShardVerifier::production_default().max_log_row_count;
+        let base = JaggedShardVerifier::production_default().max_log_row_count;
         assert_eq!(base, crate::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT);
         assert_eq!(base, 22);
     }
@@ -2511,7 +2511,7 @@ mod tests {
     /// text so users can grep for it.
     #[test]
     fn unimplemented_error_displays_phase_hint() {
-        let e = BasefoldVerifyError::Unimplemented("Phase 2 (LogUp-GKR verification)");
+        let e = JaggedShardVerifyError::Unimplemented("Phase 2 (LogUp-GKR verification)");
         let s = format!("{e}");
         assert!(s.contains("Phase 2"));
         assert!(s.contains(""));
@@ -2519,12 +2519,12 @@ mod tests {
 
     #[test]
     fn shape_errors_display_expected_and_got() {
-        let e = BasefoldVerifyError::PublicValuesLengthMismatch { expected: 100, got: 50 };
+        let e = JaggedShardVerifyError::PublicValuesLengthMismatch { expected: 100, got: 50 };
         let s = format!("{e}");
         assert!(s.contains("100"));
         assert!(s.contains("50"));
 
-        let e = BasefoldVerifyError::ChipCountMismatch { expected: 10, got: 7 };
+        let e = JaggedShardVerifyError::ChipCountMismatch { expected: 10, got: 7 };
         let s = format!("{e}");
         assert!(s.contains("10"));
         assert!(s.contains("7"));

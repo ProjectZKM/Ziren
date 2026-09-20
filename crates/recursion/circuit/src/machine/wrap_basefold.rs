@@ -1,9 +1,9 @@
 //! Basefold call site for the final wrap recursion stage.
 //!
 //! Consumes
-//! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
+//! [`zkm_pcs::shard_level::shard_proof::JaggedShardProof`]
 //! and dispatches to
-//! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
+//! [`crate::shard_basefold::JaggedShardVerifier::verify_shard`].
 //!
 //! Wrap is the terminal stage: it verifies a single recursive proof
 //! (the root of the recursion tree), asserts its root public values
@@ -15,7 +15,7 @@ use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::{
-    shard_level::shard_proof::BasefoldShardProof, InnerChallenge, InnerVal, StarkVerifyingKey,
+    shard_level::shard_proof::JaggedShardProof, InnerChallenge, InnerVal, StarkVerifyingKey,
 };
 use zkm_recursion_compiler::ir::{Builder, Felt};
 use zkm_recursion_core::stark::zkm_imm_wrap_vk_mode;
@@ -40,7 +40,7 @@ pub struct ZKMWrapBasefoldWitnessValues<
     SC: zkm_pcs::StarkGenericConfig + FieldHasher<p3_koala_bear::KoalaBear>,
 > {
     /// Single `(vk, root-proof)` pair to wrap.
-    pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
+    pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, JaggedShardProof<InnerVal, InnerChallenge>)>,
     /// vk-merkle witness binding the input VK against the canonical
     /// vk_root.
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
@@ -428,10 +428,10 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         chip_heights_for_input,
         max_log_row_count,
     );
-    let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
+    let chip_metadata = crate::shard_basefold::JaggedShardVerifier::<
         crate::basefold_verifier::RecursiveBasefoldVerifier,
     >::chip_metadata_from_chips::<SC, A>(&shard_chips);
-    let insertion_points = crate::shard_basefold::BasefoldShardVerifier::<
+    let insertion_points = crate::shard_basefold::JaggedShardVerifier::<
         crate::basefold_verifier::RecursiveBasefoldVerifier,
     >::insertion_points_from_column_counts(&column_counts_by_round);
     let basefold_shard_proof_variable = evaluation_proof_var.map(|epv| {
@@ -545,7 +545,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
             _ => unreachable!("whir proof variable implies a WhirBundle"),
         };
-        let whir_verifier = crate::shard_basefold::BasefoldShardVerifier::<
+        let whir_verifier = crate::shard_basefold::JaggedShardVerifier::<
             crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
         > {
             stacked_pcs_verifier: crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(

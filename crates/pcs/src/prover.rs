@@ -288,7 +288,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         //
         // One chip generates one trace, so the collect into a name-keyed map is
         // lossless: `shard_chips` yields each chip once.
-        let cube = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+        let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
             .max_log_row_count as u32;
         Ok(crate::Traces {
             named_traces: traces
@@ -469,7 +469,7 @@ where
         // height 0 makes the committed chip SET uniform -- which is what keeps
         // one normalize vk valid across shards -- without committing any cells
         // for them.
-        let cube = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+        let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
             .max_log_row_count as u32;
         if let Some(cluster_widths) = cluster_widths {
             for (name, width) in cluster_widths.iter() {
@@ -554,10 +554,10 @@ where
         challenger.observe_slice(&data.public_values[0..self.machine().num_pv_elts()]);
 
         // Snapshot the challenger at the state the BaseFold verifier will
-        // see at entry to `BasefoldShardVerifier::verify_shard`:
+        // see at entry to `JaggedShardVerifier::verify_shard`:
         // `machine::verify_shard` observes `public_values[0..num_pv_elts]`
         // before calling `Verifier::verify_shard`, which dispatches to
-        // `BasefoldShardVerifier::verify_shard` WITHOUT doing any further
+        // `JaggedShardVerifier::verify_shard` WITHOUT doing any further
         // ops on the challenger.  Capture that state here so the
         // shard-level prover's prologue sees an aligned transcript
         // (otherwise round 0's claimed_sum check desyncs).
@@ -716,7 +716,7 @@ fn prove_shard_with_data_boxed<SC, A>(
     commit_data: Option<RetainedJaggedCommit<SC>>,
 ) -> Option<
     Box<
-        crate::shard_level::shard_proof::BasefoldShardProof<
+        crate::shard_level::shard_proof::JaggedShardProof<
             Val<SC>,
             <SC as StarkGenericConfig>::Challenge,
         >,
@@ -777,7 +777,7 @@ where
         .and_then(|retained| retained.main_store.take())
         .expect("CpuProver::commit retains the main-trace store");
     let max_log_row_count =
-        crate::shard_level::verifier::BasefoldShardVerifier::production_default().max_log_row_count;
+        crate::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
     // A hard assert at this boundary, because the cube is what every consumer
     // reads
     // back off an arbitrary entry. A `debug_assert` compiles out in release,

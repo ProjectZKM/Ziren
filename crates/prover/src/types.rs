@@ -236,7 +236,7 @@ pub enum ZKMRecursionProverError {
 
 #[allow(clippy::large_enum_variant)]
 pub enum ZKMCircuitWitness {
-    /// Basefold-shape normalize input — consumes `BasefoldShardProof`s from
+    /// Basefold-shape normalize input — consumes `JaggedShardProof`s from
     /// the core prover (carried on `ShardProof.basefold_shard_proof`).
     /// Dispatches to `build_normalize_basefold_program` during compress.
     CoreBasefold(ZKMCoreBasefoldWitnessValues<InnerSC>),

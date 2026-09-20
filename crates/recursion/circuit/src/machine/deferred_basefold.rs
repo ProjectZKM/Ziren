@@ -1,9 +1,9 @@
 //! Basefold call site for the deferred recursion stage.
 //!
 //! Consumes
-//! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
+//! [`zkm_pcs::shard_level::shard_proof::JaggedShardProof`]
 //! and dispatches to
-//! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
+//! [`crate::shard_basefold::JaggedShardVerifier::verify_shard`].
 //!
 //!
 //! Verifies a batch of deferred recursive proofs: each is a
@@ -27,7 +27,7 @@ use zkm_pcs::air::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS};
 use zkm_pcs::septic_curve::SepticCurve;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{
-    shard_level::shard_proof::BasefoldShardProof, InnerChallenge, InnerVal, StarkVerifyingKey, Word,
+    shard_level::shard_proof::JaggedShardProof, InnerChallenge, InnerVal, StarkVerifyingKey, Word,
 };
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_recursion_compiler::ir::{Builder, Felt};
@@ -54,7 +54,7 @@ use crate::{
 pub struct ZKMDeferredBasefoldWitnessValues<
     SC: zkm_pcs::StarkGenericConfig + FieldHasher<p3_koala_bear::KoalaBear>,
 > {
-    pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
+    pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, JaggedShardProof<InnerVal, InnerChallenge>)>,
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
     pub start_reconstruct_deferred_digest: [SC::Val; POSEIDON_NUM_WORDS],
     pub zkm_vk_digest: [SC::Val; DIGEST_SIZE],
@@ -128,7 +128,7 @@ pub struct ZKMDeferredBasefoldVerifier<C, SC, A> {
 ///
 ///   * Each VK in `vks_and_proofs` lies inside the merkle tree whose
 ///     root is `vk_merkle_data.root`.
-///   * Each inner proof verifies via `BasefoldShardVerifier::verify_shard`.
+///   * Each inner proof verifies via `JaggedShardVerifier::verify_shard`.
 ///   * Each inner proof's public values (interpreted as
 ///     `RecursionPublicValues`) satisfy `assert_recursion_public_values_valid`
 ///     and `is_complete == 1`.
@@ -387,11 +387,11 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 &proof_opened_values,
                 max_log_row_count,
             );
-        let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
+        let chip_metadata = crate::shard_basefold::JaggedShardVerifier::<
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::chip_metadata_from_chips::<SC, A>(&shard_chips);
         let insertion_points =
-            crate::shard_basefold::BasefoldShardVerifier::<
+            crate::shard_basefold::JaggedShardVerifier::<
                 crate::basefold_verifier::RecursiveBasefoldVerifier,
             >::insertion_points_from_column_counts(&column_counts_by_round);
         let basefold_shard_proof_variable = evaluation_proof_var.map(|epv| {
@@ -481,7 +481,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
                 _ => unreachable!("whir proof variable implies a WhirBundle"),
             };
-            let whir_verifier = crate::shard_basefold::BasefoldShardVerifier::<
+            let whir_verifier = crate::shard_basefold::JaggedShardVerifier::<
                 crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
             > {
                 stacked_pcs_verifier:

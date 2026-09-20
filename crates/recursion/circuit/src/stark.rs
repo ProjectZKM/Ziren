@@ -39,7 +39,7 @@ pub fn dummy_basefold_vk_and_shard_proof<A>(
     shape: &OrderedShape,
 ) -> (
     StarkVerifyingKey<KoalaBearPoseidon2>,
-    zkm_pcs::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
+    zkm_pcs::shard_level::shard_proof::JaggedShardProof<KoalaBear, InnerChallenge>,
 )
 where
     A: MachineAir<KoalaBear>
@@ -59,14 +59,14 @@ pub fn dummy_basefold_vk_and_shard_proof_rows<A>(
     rows: &[(String, usize)],
 ) -> (
     StarkVerifyingKey<KoalaBearPoseidon2>,
-    zkm_pcs::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
+    zkm_pcs::shard_level::shard_proof::JaggedShardProof<KoalaBear, InnerChallenge>,
 )
 where
     A: MachineAir<KoalaBear>
         + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
 {
     use zkm_pcs::shard_level::ceil_log2;
-    use zkm_pcs::shard_level::verifier::BasefoldShardVerifier;
+    use zkm_pcs::shard_level::verifier::JaggedShardVerifier;
 
     // Build the dummy shard proof by directly zero-filling every
     // field (chip log heights, cumulative sums, logup-GKR round
@@ -113,7 +113,7 @@ where
     // recursion bands are asserted `<= cube` at shape construction
     // (recursion/core shape.rs) — so an over-tall shape here is a bug;
     // assert rather than grow the dummy's cube.
-    let max_log_row_count = BasefoldShardVerifier::production_default().max_log_row_count;
+    let max_log_row_count = JaggedShardVerifier::production_default().max_log_row_count;
     let shape_max_log =
         chip_heights_pairs.iter().map(|(_n, rows)| ceil_log2(*rows)).max().unwrap_or(0);
     assert!(

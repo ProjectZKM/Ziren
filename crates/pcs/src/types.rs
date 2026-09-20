@@ -75,10 +75,10 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     /// malformed and the verifier rejects it.
     ///
     /// `Box` keeps the ShardProof size footprint flat — the
-    /// BasefoldShardProof is ~KB of nested structs.
+    /// JaggedShardProof is ~KB of nested structs.
     #[serde(default)]
     pub basefold_shard_proof:
-        Option<Box<crate::shard_level::shard_proof::BasefoldShardProof<Val<SC>, Challenge<SC>>>>,
+        Option<Box<crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, Challenge<SC>>>>,
 }
 
 impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {
@@ -122,7 +122,7 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
     /// same condition).
     pub fn basefold(
         &self,
-    ) -> &crate::shard_level::shard_proof::BasefoldShardProof<Val<SC>, Challenge<SC>> {
+    ) -> &crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, Challenge<SC>> {
         self.basefold_shard_proof.as_ref().expect("shard proof missing basefold payload")
     }
 

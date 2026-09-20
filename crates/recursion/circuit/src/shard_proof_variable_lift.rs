@@ -1,11 +1,11 @@
 //! Adapter: tuple from [`crate::shard_level_witness`]'s
-//! `BasefoldShardProof::read` → assembled
-//! [`crate::shard_basefold::BasefoldShardProofVariable`].
+//! `JaggedShardProof::read` → assembled
+//! [`crate::shard_basefold::JaggedShardProofVariable`].
 //!
 //! Bridges the stark-side proof types
 //! (`zkm_pcs::shard_level::types::*`) into the recursion-circuit's
 //! own copies (`crate::logup_proof::*`, `crate::partial_sumcheck::*`)
-//! that [`crate::shard_basefold::BasefoldShardProofVariable`] consumes.
+//! that [`crate::shard_basefold::JaggedShardProofVariable`] consumes.
 //!
 //! Both sets are structurally identical.  The "conversion" is
 //! field-by-field copy.
@@ -19,7 +19,7 @@ use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter};
 use crate::jagged_circuit::JaggedPcsProofVariable;
 use crate::logup_proof as rc;
 use crate::partial_sumcheck::PartialSumcheckProof as RcPartialSumcheckProof;
-use crate::shard_basefold::BasefoldShardProofVariable;
+use crate::shard_basefold::JaggedShardProofVariable;
 use crate::univariate::UnivariatePolynomial as RcUnivariatePolynomial;
 use crate::CircuitConfig;
 use zkm_pcs::{InnerChallenge, InnerVal};
@@ -104,9 +104,9 @@ pub fn lift_logup_gkr_proof<F: Clone, K: Clone>(
     }
 }
 
-/// Assemble a full [`BasefoldShardProofVariable`] from the pieces
+/// Assemble a full [`JaggedShardProofVariable`] from the pieces
 /// that flow out of [`crate::shard_level_witness`]'s
-/// `BasefoldShardProof::read`.
+/// `JaggedShardProof::read`.
 ///
 /// # Inputs
 ///
@@ -124,12 +124,12 @@ pub fn assemble_basefold_shard_proof_variable<C, HV, PP>(
     zerocheck_proof: &st::PartialSumcheckProof<Ext<C::F, C::EF>>,
     evaluation_proof: JaggedPcsProofVariable<PP, HV::DigestVariable, C::F, C::EF>,
     chip_height_bits: Vec<(String, Vec<Felt<C::F>>)>,
-) -> BasefoldShardProofVariable<C, HV, PP>
+) -> JaggedShardProofVariable<C, HV, PP>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     HV: crate::hash::FieldHasherVariable<C>,
 {
-    BasefoldShardProofVariable {
+    JaggedShardProofVariable {
         main_commitment,
         chip_height_bits,
         public_values,
@@ -171,7 +171,7 @@ where
     )
 }
 
-/// Construct a [`crate::shard_basefold::BasefoldShardVerifier`]
+/// Construct a [`crate::shard_basefold::JaggedShardVerifier`]
 /// configured with production defaults.
 ///
 /// Wraps a [`crate::basefold_verifier::RecursiveBasefoldVerifier`]
@@ -190,7 +190,7 @@ where
 pub fn build_basefold_shard_verifier<HV>(
     max_log_row_count: usize,
     log_stacking_height: u32,
-) -> crate::shard_basefold::BasefoldShardVerifier<
+) -> crate::shard_basefold::JaggedShardVerifier<
     crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
 > {
     build_basefold_shard_verifier_with_num_vars::<HV>(
@@ -211,7 +211,7 @@ pub fn build_basefold_shard_verifier_with_num_vars<HV>(
     max_log_row_count: usize,
     log_stacking_height: u32,
     num_variables: usize,
-) -> crate::shard_basefold::BasefoldShardVerifier<
+) -> crate::shard_basefold::JaggedShardVerifier<
     crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
 > {
     // Inner stages (core/compress/shrink): production default (log_blowup=1).
@@ -231,7 +231,7 @@ pub fn build_basefold_shard_verifier_wrap<HV>(
     max_log_row_count: usize,
     log_stacking_height: u32,
     num_variables: usize,
-) -> crate::shard_basefold::BasefoldShardVerifier<
+) -> crate::shard_basefold::JaggedShardVerifier<
     crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
 > {
     build_basefold_shard_verifier_with_params::<HV>(
@@ -248,7 +248,7 @@ pub fn build_basefold_shard_verifier_with_params<HV>(
     max_log_row_count: usize,
     log_stacking_height: u32,
     params: crate::basefold_verifier::BasefoldVerifierParams,
-) -> crate::shard_basefold::BasefoldShardVerifier<
+) -> crate::shard_basefold::JaggedShardVerifier<
     crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
 > {
     let basefold_verifier = crate::basefold_verifier::RecursiveBasefoldVerifier::<HV>::new(params);
@@ -256,7 +256,7 @@ pub fn build_basefold_shard_verifier_with_params<HV>(
         basefold_verifier,
         log_stacking_height,
     );
-    crate::shard_basefold::BasefoldShardVerifier::new(stacked_pcs_verifier, max_log_row_count)
+    crate::shard_basefold::JaggedShardVerifier::new(stacked_pcs_verifier, max_log_row_count)
 }
 
 /// Build a [`crate::basefold_chip_opened_values::BasefoldShardOpenedValues`]
@@ -326,7 +326,7 @@ where
 
 /// Variant of [`build_opened_values_from_chip_openings`]
 /// that consumes a per-chip `chip_cumulative_sums` map (witnessed from
-/// the host BasefoldShardProof) and uses real values for
+/// the host JaggedShardProof) and uses real values for
 /// `local_cumulative_sum` and `global_cumulative_sum` per chip.
 ///
 /// When the map is missing an entry for a given chip name, falls back to
@@ -398,7 +398,7 @@ where
 /// Finalize the per-chip opened values carried from
 /// the host proof.
 ///
-/// The host `BasefoldShardProof.opened_values` carries each chip's
+/// The host `JaggedShardProof.opened_values` carries each chip's
 /// trace evaluations at the *zerocheck-reduced* point `z` (prep + main
 /// `local`), in chip-NAME order — the values the in-circuit zerocheck
 /// verifier batches/constrains and asserts equal `point_and_eval.1`
@@ -870,7 +870,7 @@ mod tests {
 
     /// Integration test: assemble_basefold_shard_proof_variable
     /// composes all the lift adapters end-to-end and produces a
-    /// structurally-valid BasefoldShardProofVariable.  Verifies
+    /// structurally-valid JaggedShardProofVariable.  Verifies
     /// the complete tuple → variable assembly path used inside
     /// each machine_basefold module.
     #[test]
@@ -932,7 +932,7 @@ mod tests {
         assert_eq!(assembled.chip_height_bits.len(), 0);
     }
 
-    /// Smoke test: BasefoldShardVerifier construction with
+    /// Smoke test: JaggedShardVerifier construction with
     /// production defaults yields a correctly-shaped verifier.
     #[test]
     fn build_basefold_shard_verifier_production_default() {

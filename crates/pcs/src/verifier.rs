@@ -59,12 +59,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         // two-adic-quotient FRI/STARK verify fallback; a missing
         // `basefold_shard_proof` is a hard error.
         let basefold_proof = proof.basefold_shard_proof.as_ref().ok_or_else(|| {
-            VerificationError::BasefoldShardVerifier(
+            VerificationError::JaggedShardVerifier(
                 "shard proof missing basefold_shard_proof (FRI verify path retired)".to_string(),
             )
         })?;
         let shard_verifier =
-            crate::shard_level::verifier::BasefoldShardVerifier::production_default();
+            crate::shard_level::verifier::JaggedShardVerifier::production_default();
         let num_pv_elts = proof.public_values.len();
         shard_verifier
             .verify_shard::<SC, A>(
@@ -76,7 +76,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 num_pv_elts,
                 pinned,
             )
-            .map_err(|e| VerificationError::BasefoldShardVerifier(format!("{e}")))?;
+            .map_err(|e| VerificationError::JaggedShardVerifier(format!("{e}")))?;
         Ok(())
     }
 }
@@ -120,8 +120,8 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     /// Zerocheck proofs attached but number does not match number of chips.
     InvalidProofShape,
     /// Shard-level BaseFold verifier (the task path) rejected the proof.
-    /// The message carries the inner BasefoldVerifyError's display.
-    BasefoldShardVerifier(String),
+    /// The message carries the inner JaggedShardVerifyError's display.
+    JaggedShardVerifier(String),
 }
 
 impl Debug for OpeningShapeError {
@@ -180,8 +180,8 @@ impl<SC: StarkGenericConfig> Debug for VerificationError<SC> {
             VerificationError::InvalidProofShape => {
                 write!(f, "invalid proof shape (zerocheck proof count mismatch)")
             }
-            VerificationError::BasefoldShardVerifier(msg) => {
-                write!(f, "BasefoldShardVerifier: {}", msg)
+            VerificationError::JaggedShardVerifier(msg) => {
+                write!(f, "JaggedShardVerifier: {}", msg)
             }
         }
     }
@@ -214,8 +214,8 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
             VerificationError::InvalidProofShape => {
                 write!(f, "invalid proof shape (zerocheck proof count mismatch)")
             }
-            VerificationError::BasefoldShardVerifier(msg) => {
-                write!(f, "BasefoldShardVerifier: {}", msg)
+            VerificationError::JaggedShardVerifier(msg) => {
+                write!(f, "JaggedShardVerifier: {}", msg)
             }
         }
     }

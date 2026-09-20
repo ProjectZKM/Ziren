@@ -21,7 +21,7 @@
 //! observed `chip_heights` and consumes the `degree` bits directly).
 //!
 //! WHERE THE HEIGHT LIVES IN A FIX-off HOST SHARD PROOF
-//! (`BasefoldShardProof<F, EF>`):
+//! (`JaggedShardProof<F, EF>`):
 //!   * `chip_heights[name]`            — observed into the transcript
 //!     prologue (shard_level/verifier.rs:199-204).
 //!   * `opened_values.chips[c].quotient[0]`— the per-chip `degree` =
@@ -37,7 +37,7 @@
 //! padding mask → the reconstructed numerator/denominator diverge from
 //! the GKR round walk → `LogupGkr(...)` reject.
 //!
-//! WHICH CHECK CATCHES IT is reported via the `BasefoldVerifyError`
+//! WHICH CHECK CATCHES IT is reported via the `JaggedShardVerifyError`
 //! variant carried inside `MachineVerificationError::InvalidShardProof`:
 //!   * `LogupGkr(_)`  — reconstruction / full_geq mask (PRIMARY host
 //!     substrate height bind).
@@ -140,7 +140,7 @@ fn reject_tag(res: &Result<(), MachineVerificationError<SC>>) -> String {
     match res {
         Ok(()) => "ACCEPTED".to_string(),
         Err(MachineVerificationError::InvalidShardProof(inner)) => {
-            // The Display of BasefoldVerifyError carries the variant
+            // The Display of JaggedShardVerifyError carries the variant
             // prefix (LogupGkr/Zerocheck/JaggedPcs/...).
             format!("REJECTED::InvalidShardProof[{inner}]")
         }

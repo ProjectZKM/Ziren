@@ -1,6 +1,6 @@
 //! Lift adapter — bridges the host-side
 //! `evaluation_proof: Vec<u8>` bytes (carried by
-//! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`])
+//! [`zkm_pcs::shard_level::shard_proof::JaggedShardProof`])
 //! into a recursion-circuit
 //! [`crate::jagged_circuit::JaggedPcsProofVariable`].
 //!

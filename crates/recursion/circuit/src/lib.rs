@@ -242,7 +242,7 @@ pub trait CircuitConfig: Config {
     /// bundle never appears there.  Only [`OuterConfig`] overrides this to
     /// witness the BN254 bundle so the gnark R1CS is value-independent.
     ///
-    /// Called from `BasefoldShardProof::read` at the evaluation-proof stream
+    /// Called from `JaggedShardProof::read` at the evaluation-proof stream
     /// position so the witnessed values land in the same order
     /// [`Self::write_outer_eval_bundle`] produces them.
     fn read_outer_eval_bundle(
@@ -258,7 +258,7 @@ pub trait CircuitConfig: Config {
     /// Prover-side counterpart of [`Self::read_outer_eval_bundle`]: WRITE the
     /// outer bundle's proof-specific values to the witness stream in the SAME
     /// order `read` consumes them.  Returns `true` when it handled the proof
-    /// (outer config + outer bundle bytes), so `BasefoldShardProof::write` can
+    /// (outer config + outer bundle bytes), so `JaggedShardProof::write` can
     /// skip the default Bytes/Bundle write.  Default (inner) = `false`.
     fn write_outer_eval_bundle<W: crate::witness::WitnessWriter<Self>>(
         _host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,

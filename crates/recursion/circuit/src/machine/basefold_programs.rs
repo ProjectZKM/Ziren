@@ -51,7 +51,7 @@ where
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Core);
     let input_var = input.read(&mut builder);
     // Populate per-shard chip_heights from each shard's
-    // `BasefoldShardProof.chip_heights`.  Fed into
+    // `JaggedShardProof.chip_heights`.  Fed into
     // `verify_core_basefold` which drives
     // `chip_height_bits_from_heights` at the lift site (real
     // Horner-recomposed heights — same value the prover prologue
@@ -254,7 +254,7 @@ mod tests {
         assert_ne!(a, c);
     }
 
-    /// Produce a real (but empty-trace) BasefoldShardProof via the
+    /// Produce a real (but empty-trace) JaggedShardProof via the
     /// host-side prove_shard_with_data path.  Zero-filled traces
     /// won't satisfy AIR constraints, but prove_shard_with_data
     /// doesn't verify them — it just emits a wire-shape-correct
@@ -360,7 +360,7 @@ mod tests {
         // `zerocheck_proof.point.dim == pcs_max_log_row_count`, so
         // both sides must agree on this number.
         let max_log_row_count =
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
         let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
             &machine,
@@ -383,7 +383,7 @@ mod tests {
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
         let witness = dummy_core_basefold_witness(&machine);
         let max_log_row_count =
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
         let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
             &machine,
@@ -443,7 +443,7 @@ mod tests {
 
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(KoalaBearPoseidon2::default());
         let max_log_row_count =
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
 
         // Resolve AddSub's real trace width so we can size heights that

@@ -213,7 +213,7 @@ where
 // ---------------------------------------------------------------------------
 // Witnessable impls for the shard-level basefold recursion stages.
 // Each one follows the pattern of the legacy equivalent
-// above, with `ShardProof<SC>::read` replaced by `BasefoldShardProof::read`
+// above, with `ShardProof<SC>::read` replaced by `JaggedShardProof::read`
 // (which produces a 5-tuple variable, see shard_level_witness.rs:198-241).
 // ---------------------------------------------------------------------------
 

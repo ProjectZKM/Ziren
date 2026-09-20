@@ -152,7 +152,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     pub fn organic_shape(heights: &[(String, usize)]) -> BTreeMap<String, usize> {
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
         let cube = 1usize
-            << zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+            << zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
         heights
             .iter()
@@ -330,7 +330,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         }
         // No dummy shape may exceed the row cube every recursion stage proves
         // at: `PaddedMle::padded` asserts the padded rows fit `2^cube`.
-        let cube = zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+        let cube = zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
             .max_log_row_count;
         for shape in allowed_shapes.iter() {
             for (name, rows) in shape.iter() {

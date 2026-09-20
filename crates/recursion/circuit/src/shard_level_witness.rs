@@ -275,7 +275,7 @@ where
 }
 
 /// The lifted (partially witnessed) evaluation proof carried out
-/// of `BasefoldShardProof::read` in tuple slot 4.  For the `Bundle` variant
+/// of `JaggedShardProof::read` in tuple slot 4.  For the `Bundle` variant
 /// the basefold proof's felt/ext values are read INLINE from the witness
 /// stream here (so the read order matches the per-shard write order — the
 /// shard proofs are read in a single batched `shard_proofs.read()`), and the
@@ -298,7 +298,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         // hash-bind, `main_commitment` is the MODIFIED digest
         // `compress([raw_root, hash(counts)])` (observed in the FS prologue),
         // so the raw root is witnessed SEPARATELY here (from
-        // `BasefoldShardProof::jagged_original_commitment`).  On the
+        // `JaggedShardProof::jagged_original_commitment`).  On the
         // hash-bind-off path the host writes `main_commitment` into that field
         // too, so this still equals main_commitment.
         commit_root: [Felt<C::F>; 8],
@@ -367,9 +367,9 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     },
 }
 
-// Top-level: BasefoldShardProof
+// Top-level: JaggedShardProof
 //
-// Bridges `zkm_pcs::shard_level::shard_proof::BasefoldShardProof`
+// Bridges `zkm_pcs::shard_level::shard_proof::JaggedShardProof`
 // (host) to a tuple of recursion-variable pieces.  This impl
 // exposes the typed pieces (logup_gkr_proof, zerocheck_proof)
 // + raw felts (main_commitment, public_values) so call sites
@@ -406,7 +406,7 @@ pub struct PreprocessedRoundWitness<C: CircuitConfig> {
 }
 
 impl<C> Witnessable<C>
-    for zkm_pcs::shard_level::shard_proof::BasefoldShardProof<InnerVal, InnerChallenge>
+    for zkm_pcs::shard_level::shard_proof::JaggedShardProof<InnerVal, InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -1164,7 +1164,7 @@ fn host_stacked_basefold_to_recursive_outer(
 /// proof-specific values from the gnark witness stream (the value-independent
 /// replacement for the const-baking in `lift_jagged_basefold_bundle_outer`).
 ///
-/// Called from `BasefoldShardProof::read` via
+/// Called from `JaggedShardProof::read` via
 /// `CircuitConfig::read_outer_eval_bundle` (OuterConfig override).  Returns the
 /// witnessed `LiftedEvalProof::OuterBundle` when `host` is an
 /// `EvaluationProof::Bytes` that deserializes as an outer bundle; otherwise
@@ -1239,7 +1239,7 @@ where
 /// Prover-side counterpart of [`read_outer_eval_bundle_impl`]: WRITE the outer
 /// bundle's proof-specific values to the witness stream in the SAME order the
 /// read consumes them.  Returns `true` when handled (outer bundle bytes), so
-/// `BasefoldShardProof::write` skips its default Bytes/Bundle write.
+/// `JaggedShardProof::write` skips its default Bytes/Bundle write.
 pub fn write_outer_eval_bundle_impl<C, W>(
     host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
     witness: &mut W,
@@ -1314,7 +1314,7 @@ where
 /// (`preread_basefold_proof`, `preread_sumcheck`, `preread_jagged_eval`,
 /// `preread_expected_eval`, `preread_commit_root`) are PRE-READ from the gnark
 /// witness stream (`read_outer_eval_bundle_impl`, routed via
-/// `BasefoldShardProof::read`) — witnessed rather than baked as `builder.constant`,
+/// `JaggedShardProof::read`) — witnessed rather than baked as `builder.constant`,
 /// so the gnark R1CS verifies any fresh wrap proof.  Only the SHAPE metadata
 /// (`bundle.packing`, column/row counts) is read here as compile-time constants
 /// (shape-derived, identical across proofs of the same shape).
@@ -1569,7 +1569,7 @@ where
     }
 
     // The in-circuit geometry rebind in
-    // `BasefoldShardVerifier::verify_shard` is skipped on this ring
+    // `JaggedShardVerifier::verify_shard` is skipped on this ring
     // (`HV::jagged_hash_bind_in_circuit() == false`), because the outer key holds
     // no mixed digest to compare against -- see the block above. `modified` is
     // carried equal to `original` so that assert stays a no-op rather than
@@ -1713,7 +1713,7 @@ where
 /// swap from `lift_evaluation_proof_bytes(...)` →
 /// `lift_evaluation_proof_via_bundle(...)`.  A later cutover can
 /// finish the migration by changing the upstream
-/// `BasefoldShardProof.evaluation_proof` field type from `Vec<u8>` to
+/// `JaggedShardProof.evaluation_proof` field type from `Vec<u8>` to
 /// `JaggedPcsProof`, eliminating this adapter and the
 /// rmp-serde round trip — which is the actual fix for the
 /// serialization-induced determinism cascade.
@@ -1766,7 +1766,7 @@ where
     } else {
         // Empty / malformed bytes — fall back to the all-zero
         // placeholder (preserves shape compatibility with scaffolding
-        // tests and the BasefoldShardProof::empty() construction
+        // tests and the JaggedShardProof::empty() construction
         // path).
         crate::jagged_pcs_lift::lift_empty_placeholder::<C, HV>(
             builder,
@@ -1783,7 +1783,7 @@ where
 ///
 /// Reading it from the runtime witness stream would consume felts that
 /// were never written there (the bundle rides separately on
-/// `BasefoldShardProof.evaluation_proof_bundle`, outside the
+/// `JaggedShardProof.evaluation_proof_bundle`, outside the
 /// felt-stream).  Treating bundle values as IR constants matches their
 /// semantics.
 fn host_sumcheck_to_const_var<C>(
@@ -1898,7 +1898,7 @@ fn write_sumcheck_to_stream<C>(
 ///   carries it, or (b) wire the verifier-side
 ///   `placeholder_jagged_evaluator_fn` for the basefold path
 ///   (loosens soundness — temporary unblock only).
-/// * Genericity of `BasefoldShardProof<F, EF>` — the wire-format
+/// * Genericity of `JaggedShardProof<F, EF>` — the wire-format
 ///   field `evaluation_proof: Vec<u8>` is generic-friendly but
 ///   replacing it with `JaggedPcsProof` (concrete
 ///   InnerVal/InnerChallenge) requires either dropping the struct
@@ -2080,7 +2080,7 @@ where
 /// the legacy bytes-deserialize lift paths (`lift_evaluation_proof_bytes`,
 /// `lift_jagged_basefold_bundle_from_bytes`) which deserialize the bundle at
 /// lift time and so have no inline pre-read proof.  The production inner path
-/// pre-reads in `BasefoldShardProof::read` instead (value-independent).
+/// pre-reads in `JaggedShardProof::read` instead (value-independent).
 ///
 /// Digests are const-promoted to `HV::DigestVariable` (rekey raw
 /// KoalaBear roots → `HV::Digest`, read scalars, then const_digest each) so
@@ -2136,7 +2136,7 @@ pub fn lift_jagged_bundle_generic<C, HV, PP>(
     builder: &mut Builder<C>,
     bundle: &JaggedPcsProof,
     // the inner PCS proof's felt/ext values, PRE-READ from the
-    // witness stream in `BasefoldShardProof::read`.  This is what makes the
+    // witness stream in `JaggedShardProof::read`.  This is what makes the
     // recursion program value-independent: the proof values are witness
     // inputs, not baked constants.  Digests are witnessed too ([Felt;8] =
     // inner DigestVariable), so no rekey is needed below.  Generic over the
@@ -2223,12 +2223,12 @@ where
     // in-circuit `col_prefix_sums`, so the lifted program is height-agnostic.
 
     // sumcheck_proof = the PRE-READ (witnessed) reduction
-    // sumcheck (read in BasefoldShardProof::read), not a host const.
+    // sumcheck (read in JaggedShardProof::read), not a host const.
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
 
     // basefold proof = the PRE-READ (witnessed) proof
     // No host_stacked_basefold_to_recursive / `.read()` here — the felt/ext
-    // values already came off the witness stream in BasefoldShardProof::read.
+    // values already came off the witness stream in JaggedShardProof::read.
     // Digests are witnessed too ([Felt;8] = inner DigestVariable), so the
     // proof is already in HV::DigestVariable form — no rekey needed.
     let stacked_pcs_proof = RecursiveStackedPcsProof::<PP, C::F, C::EF> {
@@ -2240,7 +2240,7 @@ where
     // original_commitments[0] is the BaseFold commit cap
     // root.  For the single-main-commit flow it EQUALS `main_commitment`
     // (basefold_commit_digest(commit) = commit.original_commitment.roots()[0]), which
-    // is already witnessed in BasefoldShardProof::read.  Reuse that witnessed
+    // is already witnessed in JaggedShardProof::read.  Reuse that witnessed
     // value (`preread_commit_root`) instead of BAKING the proof-specific root
     // via const_digest — this is the final value-dependence in the lift, and
     // witnessing it is what lets a same-shape dummy match the real program.
@@ -2726,13 +2726,13 @@ mod tests {
 
     type C = InnerConfig;
 
-    /// Construction smoke test: BasefoldShardProof Witnessable
+    /// Construction smoke test: JaggedShardProof Witnessable
     /// can be invoked against an empty proof shape.  Verifies the
     /// trait composition compiles end-to-end.
     #[test]
     fn shard_proof_witness_compiles() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let proof = zkm_pcs::shard_level::shard_proof::BasefoldShardProof::<
+        let proof = zkm_pcs::shard_level::shard_proof::JaggedShardProof::<
             InnerVal,
             InnerChallenge,
         >::empty(std::array::from_fn(|_| InnerVal::ZERO), 8);
@@ -3068,7 +3068,7 @@ mod tests {
     }
 
     /// bytes adapter falls back to zero placeholder
-    /// for empty bytes (matches the BasefoldShardProof::empty path).
+    /// for empty bytes (matches the JaggedShardProof::empty path).
     #[test]
     fn lift_evaluation_proof_via_bundle_empty_bytes_falls_back() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();

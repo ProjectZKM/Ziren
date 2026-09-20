@@ -1,4 +1,4 @@
-//! Zero-fill allocator for [`BasefoldShardProof`].
+//! Zero-fill allocator for [`JaggedShardProof`].
 //!
 //! Every
 //! field is zero-filled — no real prove call, no AIR evaluation,
@@ -20,7 +20,7 @@ use zkm_pcs::{
     air::{LookupScope, MachineAir},
     septic_digest::SepticDigest,
     shard_level::{
-        shard_proof::{BasefoldShardProof, ChipCumulativeSums, FoldOrientation},
+        shard_proof::{JaggedShardProof, ChipCumulativeSums, FoldOrientation},
         types::{
             ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof, LogupGkrRoundProof,
             PartialSumcheckProof, UnivariatePolynomial,
@@ -129,7 +129,7 @@ where
                     ChipEvaluation {
                         // log_degree placeholder — per-chip
                         // height is carried separately by
-                        // `BasefoldShardProof.chip_heights`
+                        // `JaggedShardProof.chip_heights`
                         // (see [`dummy_basefold_shard_proof`]).
                         log_degree: 0,
                         // FULL-POINT openings.  The
@@ -155,7 +155,7 @@ where
     LogupGkrProof { circuit_output, round_proofs, logup_evaluations, witness: F::ZERO }
 }
 
-/// Allocator for [`BasefoldShardProof`] — zero-filled, no real
+/// Allocator for [`JaggedShardProof`] — zero-filled, no real
 /// prove call.  Top-level entry used by
 /// [`crate::stark::dummy_basefold_vk_and_shard_proof`] in place of
 /// the slow `prove_shard_with_data` path.
@@ -196,7 +196,7 @@ pub fn dummy_basefold_shard_proof<F, EF, A>(
     // (both rounds at a fixed area with a fixed padding-column count), `None`
     // for a CORE child (natural, byte-identical).
     pins: Option<zkm_pcs::jagged::RecursionPins>,
-) -> BasefoldShardProof<F, EF>
+) -> JaggedShardProof<F, EF>
 where
     F: Field + Copy + PrimeCharacteristicRing,
     EF: ExtensionField<F> + Copy + PrimeCharacteristicRing,
@@ -421,7 +421,7 @@ where
     padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(false), pins.map(|p| p.main))]);
 
     #[allow(clippy::needless_update)]
-    BasefoldShardProof {
+    JaggedShardProof {
         public_values,
         main_commitment,
         preprocessed_original_commitment,

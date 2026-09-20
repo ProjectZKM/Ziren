@@ -5,7 +5,7 @@ use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::shard_proof::{BasefoldShardProof, FoldOrientation};
+use super::shard_proof::{JaggedShardProof, FoldOrientation};
 use crate::air::MachineAir;
 use crate::prover::ShardData;
 use crate::shard_level::row_gkr::top_level::prove_shard_logup_gkr_rows;
@@ -143,7 +143,7 @@ where
         //   modified = compress([raw_root, hash(once(len) ++ row_counts ++ col_counts)])
         // The Fiat-Shamir transcript observes `modified` (set as `main_commitment`
         // below); the BaseFold opening still binds against `raw_root`, carried to
-        // the recursion lift via `BasefoldShardProof::jagged_original_commitment`.
+        // the recursion lift via `JaggedShardProof::jagged_original_commitment`.
         let digest_inner: [InnerVal; 8] = crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
             raw_root_inner,
             &precomputed.packing,
@@ -208,7 +208,7 @@ pub fn prove_shard_with_data<SC, A>(
     // and there is one row orientation now.)
     data: crate::prover::ShardData<'_, SC, A>,
     challenger: &mut SC::Challenger,
-) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
+) -> JaggedShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
     A: MachineAir<Val<SC>> + crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
@@ -247,7 +247,7 @@ where
     // `dummy` width-0 chips), so each entry must report it — asserted in
     // debug builds.
     let max_log_row_count =
-        crate::shard_level::verifier::BasefoldShardVerifier::production_default().max_log_row_count;
+        crate::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
     debug_assert!(
         main_traces.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
         "prove_shard_with_data: main_traces padded to a cube != the fixed \
@@ -557,7 +557,7 @@ where
     let chip_cumulative_sums =
         build_chip_cumulative_sums::<SC, A>(chips, shared_trace_mles, &chip_cum_tails);
 
-    // The final `BasefoldShardProof` construction — including the witnessed
+    // The final `JaggedShardProof` construction — including the witnessed
     // row/padding-column counts + the raw BaseFold root
     // (`jagged_original_commitment`), both derived from `evaluation_proof`.
 
@@ -1114,7 +1114,7 @@ where
         .collect()
 }
 
-/// The final `BasefoldShardProof` construction.  Derives
+/// The final `JaggedShardProof` construction.  Derives
 /// the witnessed per-round row/padding-column counts and the RAW
 /// BaseFold root (`jagged_original_commitment`) from `evaluation_proof`, then
 /// moves every piece into the proof.  PURE DATA — no transcript.
@@ -1132,7 +1132,7 @@ pub fn assemble_basefold_shard_proof<SC>(
     >,
     evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
     orientation: FoldOrientation,
-) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
+) -> JaggedShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
 {
@@ -1212,7 +1212,7 @@ where
         _ => Vec::new(),
     };
 
-    BasefoldShardProof {
+    JaggedShardProof {
         public_values,
         main_commitment,
         padding_row_heights,

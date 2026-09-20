@@ -18,7 +18,7 @@
 //! * Program builder — accepts a `StarkMachine<KoalaBearPoseidon2,
 //!   RecursionAir<KoalaBear, DEGREE>>` and a
 //!   [`ZKMDeferredBasefoldWitnessValues`] whose embedded
-//!   `BasefoldShardProof` was produced over recursion-AIR traces.
+//!   `JaggedShardProof` was produced over recursion-AIR traces.
 //! * Trait bound propagation — `RecursionAir<F, DEGREE>` satisfies
 //!   `Air<BasefoldConstraintFolder>` via the standard `MachineAir`
 //!   derive (see notes in

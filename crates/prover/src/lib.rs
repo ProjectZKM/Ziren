@@ -1011,7 +1011,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         })
     }
 
-    /// The FIXED zerocheck cube (= `BasefoldShardVerifier`
+    /// The FIXED zerocheck cube (= `JaggedShardVerifier`
     /// production default `max_log_row_count`, 22).  EVERY stage builds,
     /// proves, and verifies at this one constant; nothing floats it up
     /// from an input proof's zerocheck dim.  The in-circuit checks bind
@@ -1023,7 +1023,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// any chip reaches `2^cube` rows, and every recursion band is
     /// asserted `<= cube` at shape construction.
     fn pcs_max_log_row_count() -> usize {
-        zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
             .max_log_row_count
     }
 
@@ -1605,7 +1605,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
-    /// Extract `BasefoldShardProof`s from a batch of `ShardProof`s
+    /// Extract `JaggedShardProof`s from a batch of `ShardProof`s
     /// (the `basefold_shard_proof` payload populated by
     /// the prover's `open()`) and wrap each batch
     /// into a `ZKMCoreBasefoldWitnessValues`.
@@ -3002,7 +3002,7 @@ pub mod tests {
         // → ir_par_map_collect → DslIr::Parallel → compile_block →
         // SeqBlock::Parallel).
         let max_log_row_count =
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
         let program = build_compose_basefold_program::<CompressAir<KoalaBear>>(
             &compress_machine,
@@ -3796,7 +3796,7 @@ pub mod tests {
             // what makes the produced key unenumerable.
             use zkm_pcs::shard_level::shard_proof::EvaluationProof as EP;
             use zkm_pcs::InnerChallenge;
-            let describe = |bf: &zkm_pcs::shard_level::shard_proof::BasefoldShardProof<
+            let describe = |bf: &zkm_pcs::shard_level::shard_proof::JaggedShardProof<
                 KoalaBear,
                 InnerChallenge,
             >|

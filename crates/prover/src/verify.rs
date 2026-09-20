@@ -13,7 +13,7 @@ use thiserror::Error;
 use zkm_pcs::{
     air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
-    shard_level::verifier::BasefoldVerifyError,
+    shard_level::verifier::JaggedShardVerifyError,
     MachineProof, MachineProver, MachineVerificationError, PartStarkVerifyingKey,
     StarkGenericConfig, VerificationError, Word,
 };
@@ -95,8 +95,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let num_pv_elts = self.core_prover.machine().num_pv_elts();
         if let Some(p) = proof.0.iter().find(|p| p.public_values.len() < num_pv_elts) {
             return Err(MachineVerificationError::InvalidShardProof(
-                VerificationError::BasefoldShardVerifier(
-                    BasefoldVerifyError::PublicValuesLengthMismatch {
+                VerificationError::JaggedShardVerifier(
+                    JaggedShardVerifyError::PublicValuesLengthMismatch {
                         expected: num_pv_elts,
                         got: p.public_values.len(),
                     }

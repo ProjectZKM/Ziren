@@ -56,8 +56,8 @@
 //! recursion machines is the remaining cross-crate step.  Those
 //! machines currently call [`crate::stark::StarkVerifier::verify_shard`]
 //! on [`crate::stark::ShardProofVariable`] and need to switch to
-//! `BasefoldShardVerifier::verify_shard` on
-//! [`BasefoldShardProofVariable`], supplying the additional inputs
+//! `JaggedShardVerifier::verify_shard` on
+//! [`JaggedShardProofVariable`], supplying the additional inputs
 //! the new verifier takes: per-chip metadata, insertion points,
 //! public-values-constraint + jagged-eval closures.
 
@@ -88,7 +88,7 @@ use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 /// Host-side BaseFold shard proof — the concrete type the prover
 /// produces and the recursion harness feeds into the verifier.
 ///
-/// Field layout mirrors [`BasefoldShardProofVariable`] one-to-one
+/// Field layout mirrors [`JaggedShardProofVariable`] one-to-one
 /// (the host-side variant uses raw `F` / `EF` where the variable
 /// uses `Felt<F>` / `Ext<F, EF>`), with a `Witnessable` impl that
 /// reads the host proof through the builder and emits the
@@ -101,7 +101,7 @@ use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
 #[serde(bound(deserialize = "F: Deserialize<'de>, EF: Deserialize<'de>"))]
-pub struct BasefoldShardProof<F, EF> {
+pub struct JaggedShardProof<F, EF> {
     /// Commitment digest to the main trace.
     pub main_commitment: [F; 8],
     /// Per-chip (name, height-bits) list.  Height bits are big-
@@ -133,7 +133,7 @@ pub struct BasefoldShardProof<F, EF> {
 ///   - `evaluation_proof` — input to phase 4
 ///
 /// Mirrors `ShardProofVariable` (crates/recursion/circuit/src/shard.rs).
-pub struct BasefoldShardProofVariable<
+pub struct JaggedShardProofVariable<
     C: CircuitConfig,
     HV: crate::hash::FieldHasherVariable<C> = zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
     PP = RecursiveBasefoldProof<
@@ -205,7 +205,7 @@ impl<C: CircuitConfig> BasefoldVerifyingKeyVariable<C> {
 /// representations.
 ///
 /// Mirrors `RecursiveShardVerifier` (crates/recursion/circuit/src/shard.rs).
-pub struct BasefoldShardVerifier<P> {
+pub struct JaggedShardVerifier<P> {
     /// Stacked-PCS verifier wrapping the underlying multilinear
     /// PCS verifier.
     pub stacked_pcs_verifier: RecursiveStackedPcsVerifier<P>,
@@ -214,7 +214,7 @@ pub struct BasefoldShardVerifier<P> {
     pub max_log_row_count: usize,
 }
 
-impl<P> BasefoldShardVerifier<P> {
+impl<P> JaggedShardVerifier<P> {
     pub const fn new(
         stacked_pcs_verifier: RecursiveStackedPcsVerifier<P>,
         max_log_row_count: usize,
@@ -283,7 +283,7 @@ impl<P> BasefoldShardVerifier<P> {
     }
 }
 
-impl<P> BasefoldShardVerifier<P> {
+impl<P> JaggedShardVerifier<P> {
     /// Verify a BaseFold-pipeline shard proof, end-to-end.
     ///
     /// The four-phase verification flow:
@@ -330,7 +330,7 @@ impl<P> BasefoldShardVerifier<P> {
         &self,
         builder: &mut Builder<C>,
         vk: &BasefoldVerifyingKeyVariable<C>,
-        proof: &'a BasefoldShardProofVariable<C, HV, P::Proof>,
+        proof: &'a JaggedShardProofVariable<C, HV, P::Proof>,
         shard_chips: &[&MachineChip<SC, A>],
         chip_metadata: &LogupGkrShardChipMetadata,
         opened_values: &'a BasefoldShardOpenedValuesVariable<C>,
@@ -367,7 +367,7 @@ impl<P> BasefoldShardVerifier<P> {
         ) -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>),
     {
         let _ = vk; // used by the transcript prologue and phase 4
-        let BasefoldShardProofVariable {
+        let JaggedShardProofVariable {
             main_commitment,
             chip_height_bits,
             public_values,
@@ -690,9 +690,9 @@ impl<P> BasefoldShardVerifier<P> {
 /// fixtures, witness-stream sizing, and circuit compilation tests.
 ///
 /// The corresponding host-side BaseFold proof type would be the
-/// concrete-types analog of [`BasefoldShardProofVariable`]; this
+/// concrete-types analog of [`JaggedShardProofVariable`]; this
 /// helper produces an in-circuit dummy that the
-/// [`BasefoldShardVerifier::verify_shard`] flow can be exercised
+/// [`JaggedShardVerifier::verify_shard`] flow can be exercised
 /// against without a real prover run.
 ///
 /// Sized for the BaseFold pipeline's 5-field proof shape
@@ -721,7 +721,7 @@ pub struct BasefoldProofShape {
     pub basefold_num_variables: usize,
 }
 
-/// Build an in-circuit dummy [`BasefoldShardProofVariable`] sized
+/// Build an in-circuit dummy [`JaggedShardProofVariable`] sized
 /// to `shape`.  All Ext/Felt cells are populated with builder
 /// constants of zero — the shape (lengths of each Vec, dimensions
 /// of each MLE) matches a real proof so the recursion compiler's
@@ -752,7 +752,7 @@ pub struct BasefoldProofShape {
 pub fn dummy_basefold_shard_proof_variable<C>(
     builder: &mut Builder<C>,
     shape: &BasefoldProofShape,
-) -> BasefoldShardProofVariable<C>
+) -> JaggedShardProofVariable<C>
 where
     // The dummy uses the default inner digest hasher
     // (KoalaBearPoseidon2 / `[Felt;8]`); it's only constructed in
@@ -946,7 +946,7 @@ where
         }
     };
 
-    BasefoldShardProofVariable {
+    JaggedShardProofVariable {
         main_commitment,
         chip_height_bits,
         public_values,
@@ -990,7 +990,7 @@ mod tests {
     /// full sequence of setup the compress / deferred / wrap
     /// machines will use when they switch from the legacy
     /// `StarkVerifier::verify_shard` to
-    /// `BasefoldShardVerifier::verify_shard`.  Exists as a
+    /// `JaggedShardVerifier::verify_shard`.  Exists as a
     /// compile-time documentation fixture; the actual
     /// `verify_shard` call is elided here because the integration
     /// test would require constructing a full MachineChip set,
@@ -1003,9 +1003,9 @@ mod tests {
     ///   1. `shard_chips: &[&MachineChip<SC, A>]` — from the
     ///      machine's chip set.
     ///   2. `chip_metadata: &LogupGkrShardChipMetadata` — derived
-    ///      via [`BasefoldShardVerifier::chip_metadata_from_chips`].
+    ///      via [`JaggedShardVerifier::chip_metadata_from_chips`].
     ///   3. `insertion_points: &[usize]` — derived via
-    ///      [`BasefoldShardVerifier::insertion_points_from_column_counts`]
+    ///      [`JaggedShardVerifier::insertion_points_from_column_counts`]
     ///      from the machine's per-round column-count table.
     ///   4. `eval_public_values_fn: FnOnce(&mut RecursivePublicValuesConstraintFolder)`
     ///      — machine-specific public-values constraint closure.

@@ -1,9 +1,9 @@
 //! Basefold call site for the core recursion stage.
 //!
 //! Consumes
-//! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
+//! [`zkm_pcs::shard_level::shard_proof::JaggedShardProof`]
 //! and dispatches to
-//! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
+//! [`crate::shard_basefold::JaggedShardVerifier::verify_shard`].
 //!
 //! Verifies every shard via the basefold shard verifier, then asserts
 //! the shard-to-shard consistency chain (shard index,
@@ -25,7 +25,7 @@ use zkm_core_machine::mips::MAX_LOG_NUMBER_OF_SHARDS;
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::{
     air::{LookupScope, PublicValues, POSEIDON_NUM_WORDS},
-    shard_level::shard_proof::BasefoldShardProof,
+    shard_level::shard_proof::JaggedShardProof,
     InnerChallenge, InnerVal, StarkVerifyingKey, Word,
 };
 use zkm_recursion_compiler::{
@@ -44,7 +44,7 @@ use crate::{
 
 /// Witness values — host-side input the Normalize program consumes.
 ///
-/// Carries the core vk + per-shard [`BasefoldShardProof`]s and the
+/// Carries the core vk + per-shard [`JaggedShardProof`]s and the
 /// completeness/first-shard flags the Normalize program reads.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -53,7 +53,7 @@ use crate::{
 ))]
 pub struct ZKMCoreBasefoldWitnessValues<SC: zkm_pcs::StarkGenericConfig> {
     pub vk: StarkVerifyingKey<SC>,
-    pub shard_proofs: Vec<BasefoldShardProof<InnerVal, InnerChallenge>>,
+    pub shard_proofs: Vec<JaggedShardProof<InnerVal, InnerChallenge>>,
     pub is_complete: bool,
     pub is_first_shard: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
@@ -113,7 +113,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
 /// (lines 118-568 of `core.rs`) with the following substitutions:
 ///
 ///   * `ShardProofVariable` → per-shard tuple from [`crate::shard_level_witness`]
-///   * `StarkVerifier::verify_shard` → [`BasefoldShardVerifier::verify_shard`]
+///   * `StarkVerifier::verify_shard` → [`JaggedShardVerifier::verify_shard`]
 ///   * `shard_proof.chip_ordering`/`.contains_cpu()` etc. → chip-name
 ///     list from `logup_gkr_proof.logup_evaluations.chip_openings`
 ///   * `opened_values` reconstructed via
@@ -121,7 +121,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
 // Per-shard chip → log_height map, indexed by the same order as
 // `input.shard_proof_tuples`. Empty slice falls back to all-zero
 // degree bits (placeholder behavior). Real heights flow from the
-// host-side `BasefoldShardProof.chip_heights` populated by
+// host-side `JaggedShardProof.chip_heights` populated by
 // `prove_shard_with_data`.
 pub fn verify_core_basefold<C, SC, A>(
     builder: &mut Builder<C>,
@@ -423,7 +423,7 @@ pub fn verify_core_basefold<C, SC, A>(
             };
             // Real chip_height_bits derivation: pulls per-chip log
             // heights from `chip_heights_per_shard` (witnessed from
-            // each shard's `BasefoldShardProof.chip_heights`) and
+            // each shard's `JaggedShardProof.chip_heights`) and
             // sorts by (Reverse(log_h), name) to match the prover
             // prologue.  Falls back to a zero-filled map when the
             // input is missing (empty-slice callers).
@@ -473,10 +473,10 @@ pub fn verify_core_basefold<C, SC, A>(
             // disagree (the columns two-round, the claims one-round).
             let _ = main_widths;
             let column_counts_by_round: Vec<Vec<usize>> = column_counts_by_round_pre.clone();
-            let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
+            let chip_metadata = crate::shard_basefold::JaggedShardVerifier::<
                 crate::basefold_verifier::RecursiveBasefoldVerifier,
             >::chip_metadata_from_chips::<SC, A>(&shard_chips);
-            let insertion_points = crate::shard_basefold::BasefoldShardVerifier::<
+            let insertion_points = crate::shard_basefold::JaggedShardVerifier::<
                 crate::basefold_verifier::RecursiveBasefoldVerifier,
             >::insertion_points_from_column_counts(&column_counts_by_round);
             let basefold_shard_proof_variable = evaluation_proof_var.map(|epv| {
@@ -646,7 +646,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
                     _ => unreachable!("whir proof variable implies a WhirBundle"),
                 };
-                let whir_verifier = crate::shard_basefold::BasefoldShardVerifier::<
+                let whir_verifier = crate::shard_basefold::JaggedShardVerifier::<
                     crate::whir_circuit::RecursiveStackedWhirVerifier<SC>,
                 > {
                     stacked_pcs_verifier:
@@ -1176,7 +1176,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
     ///
     /// Walk order MUST mirror the core-level `Witnessable::<C>::write` impl in
     /// `crates/recursion/circuit/src/machine/witness.rs` and the per-shard
-    /// `BasefoldShardProof` one in
+    /// `JaggedShardProof` one in
     /// `crates/recursion/circuit/src/shard_level_witness.rs` (delegated to
     /// [`crate::machine::shape_signature::hash_shard_proof_structure`]).
     pub fn shape_key(&self) -> u64 {

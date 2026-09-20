@@ -31,7 +31,7 @@ use crate::{
 use super::{
     Chip, Com, MachineProof, PcsProverData, StarkGenericConfig, Val, VerificationError, Verifier,
 };
-use crate::shard_level::verifier::BasefoldVerifyError;
+use crate::shard_level::verifier::JaggedShardVerifyError;
 
 /// A chip in a machine.
 pub type MachineChip<SC, A> = Chip<Val<SC>, A>;
@@ -1198,8 +1198,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             proof.shard_proofs.iter().find(|p| p.public_values.len() < num_pv_elts)
         {
             return Err(MachineVerificationError::InvalidShardProof(
-                VerificationError::BasefoldShardVerifier(
-                    BasefoldVerifyError::PublicValuesLengthMismatch {
+                VerificationError::JaggedShardVerifier(
+                    JaggedShardVerifyError::PublicValuesLengthMismatch {
                         expected: num_pv_elts,
                         got: p.public_values.len(),
                     }
