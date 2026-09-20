@@ -1217,11 +1217,25 @@ pub mod jagged {
             "prove_jagged_basefold_linear_core: area {area} is not a power of two",
         );
 
-        // (5) Point-extend: the BaseFold commit covers `area` cells
-        // (num_stripes × batch_size × stack_height), which can exceed
-        // 2^log_dense_size, so extend z* to log2(area) with extra Fiat-Shamir
-        // coords (the verifier samples the matching coords in the same
-        // transcript order), then open at z*.
+        // (5) Point-extend the reduction point to `log2(area)`.
+        //
+        //   reduction.eval_point.len() = log_dense_size
+        //   target_dim                 = log2(area)
+        //
+        // `log_dense_size <= target_dim` always; any shortfall is filled with
+        // fresh Fiat-Shamir coords, which the verifier draws in the same order.
+        //
+        // The gap is EMPTY on every measured path: the multi-round prover pins
+        // `log_dense_size = s + b` and passes `area = 2^(s + b)` (`s` the
+        // stacking height, `b` the batch dimension), so the two are equal and
+        // the loop body never runs -- 21 of 21 calls idle across the pcs and
+        // recursion-core suites (21->21 x6, 22->22 x3, 27->27 x12, the last
+        // being the pinned recursion shape `2 x 2^26`).
+        //
+        // Kept rather than asserted: the device caller builds its own packing
+        // and has not been measured, and the verifier extends symmetrically, so
+        // a proof verifying does not establish `log_dense_size = log2(area)`
+        // there.
         let target_dim = area.trailing_zeros() as usize;
         let mut extended_eval_point = reduction.eval_point.clone();
         while extended_eval_point.len() < target_dim {
@@ -1328,7 +1342,21 @@ pub mod jagged {
                 r.r_row_per_chip.len(),
                 pk.chip_infos.len(),
             );
+            let row_cube = 1usize << z_row.len();
             for (ci, (claim, info)) in r.claims.iter().zip(pk.chip_infos.iter()).enumerate() {
+                // `r_row` is the trailing `ceil_log2(row_count)` coords of
+                // `z_row`, so a chip is weighable only while
+                // `row_count <= 2^|z_row|`.  Past that there is no eq table to
+                // weigh it against, and the violation surfaces as a slice
+                // underflow inside the CALLER; name it at the boundary.
+                assert!(
+                    info.row_count <= row_cube,
+                    "prove_jagged_basefold_rounds: round {ri} chip {ci} ({}) has {} rows, above \
+                     the row cube 2^{} the shared eval point spans",
+                    info.name,
+                    info.row_count,
+                    z_row.len(),
+                );
                 assert_eq!(
                     claim.len(),
                     info.column_count,
@@ -2294,9 +2322,9 @@ pub mod jagged {
 /// The jagged column-accounting invariant, with the packing as the SINGLE
 /// SOURCE OF TRUTH for how many columns a shard's proof covers.
 ///
-/// SP1 has no stacking-padding columns at all: its recursion verifier derives
-/// the column layout from one place, a plain scan over `column_counts_by_round`
-/// (`crates/recursion/circuit/src/jagged/verifier.rs`).  Ziren's jagged-over-WHIR
+/// A layout with no stacking-padding columns needs no such invariant: the
+/// column count is a plain scan over `column_counts_by_round`, derived in one
+/// place.  Ziren's jagged-over-WHIR
 /// stacking DOES pad each opening round out to its committed area, so the count
 /// is `Σ widths + Σ pads` — and Ziren consequently grew a second source for the
 /// pad half, the witness field `preprocessed_round.padding_heights`.
@@ -2307,7 +2335,7 @@ pub mod jagged {
 /// identity — while the host, which derives its count from the packing, accepted
 /// the same proof.  See `ff3488dc`.
 ///
-/// This restores SP1's property: **one authoritative count**, returned from here,
+/// Hence **one authoritative count**, returned from here,
 /// with the reconstruction merely CHECKED against it.  Never derive the pads as
 /// `total_cols - widths` — that encodes the relationship instead of verifying it,
 /// which is exactly what hid the defect.
