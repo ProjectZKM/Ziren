@@ -24,7 +24,7 @@
 //! Witnessable surface.  Until those are added, this adapter
 //! returns a structurally-correct dummy variable with all-zero
 //! cells (matches
-//! [`crate::shard_basefold::dummy_basefold_shard_proof_variable`]'s
+//! [`crate::shard_basefold::dummy_jagged_shard_proof_variable`]'s
 //! pattern).
 //!
 //! # Field mapping (target shape)
@@ -58,7 +58,7 @@ use zkm_pcs::{InnerChallenge, InnerVal};
 ///
 /// Returns a structurally-valid dummy proof with all-zero cells,
 /// matching the shape that
-/// [`crate::shard_basefold::dummy_basefold_shard_proof_variable`]
+/// [`crate::shard_basefold::dummy_jagged_shard_proof_variable`]
 /// produces.  Real bundle deserialization + per-piece
 /// Witnessable mapping lands in subsequent iterations as the
 /// stark-side Witnessable surface for `JaggedReductionProof` and

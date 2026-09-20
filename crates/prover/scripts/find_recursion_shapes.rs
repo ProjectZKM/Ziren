@@ -82,12 +82,11 @@ fn main() {
         // Build with NO compress_shape_config -> natural (pre-fix_shape) heights.
         prover.compress_shape_config = None;
 
-        let core_shape_config = &zkm_core_machine::shape::CoreShapeConfig::default();
 
         // Core-derived enumeration (like build_compress_vks), NOT the
         // band-shaped generate_maximal_shapes.
         let all_shapes =
-            ZKMProofShape::generate(core_shape_config, &enum_cfg, args.recursion_batch_size)
+            ZKMProofShape::generate(&enum_cfg, args.recursion_batch_size)
                 .collect::<Vec<_>>();
         let num_shapes = all_shapes.len();
         tracing::info!("measure: number of enumerated shapes: {}", num_shapes);

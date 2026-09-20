@@ -117,7 +117,7 @@ pub fn lift_logup_gkr_proof<F: Clone, K: Clone>(
 /// - `evaluation_proof`: lifted by [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
 /// - `chip_height_bits`: per-chip name + bit-decomposed height
 ///   coordinates, supplied by the caller.
-pub fn assemble_basefold_shard_proof_variable<C, HV, PP>(
+pub fn assemble_jagged_shard_proof_variable<C, HV, PP>(
     main_commitment: [Felt<C::F>; 8],
     public_values: Vec<Felt<C::F>>,
     logup_gkr_proof: &st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
@@ -868,13 +868,13 @@ mod tests {
         assert_eq!(opened.chips.len(), 0);
     }
 
-    /// Integration test: assemble_basefold_shard_proof_variable
+    /// Integration test: assemble_jagged_shard_proof_variable
     /// composes all the lift adapters end-to-end and produces a
     /// structurally-valid JaggedShardProofVariable.  Verifies
     /// the complete tuple → variable assembly path used inside
     /// each machine_basefold module.
     #[test]
-    fn assemble_basefold_shard_proof_variable_composes() {
+    fn assemble_jagged_shard_proof_variable_composes() {
         use p3_field::PrimeCharacteristicRing;
         use zkm_recursion_compiler::circuit::AsmBuilder;
         use zkm_recursion_compiler::config::InnerConfig;
@@ -913,7 +913,7 @@ mod tests {
         >(&mut builder, &[], 21, &empty_cols);
         let chip_height_bits = empty_chip_height_bits::<InnerConfig>(&mut builder, &[], 21);
 
-        let assembled = assemble_basefold_shard_proof_variable::<
+        let assembled = assemble_jagged_shard_proof_variable::<
             InnerConfig,
             zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             _,

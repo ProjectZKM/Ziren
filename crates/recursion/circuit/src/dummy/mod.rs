@@ -29,8 +29,8 @@
 //! - Ziren callee replaced: [`crate::stark::dummy_basefold_vk_and_shard_proof`]
 //! - Shape-parity guard: `crate::stark::tests::dummy_basefold_vk_and_shard_proof_shape_stable`
 
-pub mod basefold_shard_proof;
+pub mod jagged_shard_proof;
 
-pub use basefold_shard_proof::{
-    dummy_basefold_shard_proof, dummy_logup_gkr_proof, dummy_partial_sumcheck_proof,
+pub use jagged_shard_proof::{
+    dummy_jagged_shard_proof, dummy_logup_gkr_proof, dummy_partial_sumcheck_proof,
 };

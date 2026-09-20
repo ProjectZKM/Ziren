@@ -130,7 +130,7 @@ where
                         // log_degree placeholder — per-chip
                         // height is carried separately by
                         // `JaggedShardProof.chip_heights`
-                        // (see [`dummy_basefold_shard_proof`]).
+                        // (see [`dummy_jagged_shard_proof`]).
                         log_degree: 0,
                         // FULL-POINT openings.  The
                         // VK-enumeration dummy MUST carry these with the SAME
@@ -185,7 +185,7 @@ where
 /// | `chip_heights`         | one entry per chip from input shape (raw `2^log`) |
 /// | `chip_cumulative_sums` | one entry per chip (local=ZERO, global=ZERO) |
 /// | `evaluation_proof`     | `EvaluationProof::Empty` — lift adapter handles the Empty arm |
-pub fn dummy_basefold_shard_proof<F, EF, A>(
+pub fn dummy_jagged_shard_proof<F, EF, A>(
     chips: &[&Chip<F, A>],
     // Per-chip ROW counts (exact, as the real prover pads them —
     // `next_multiple_of_32_rows` to the shape's rows), not log2 heights.

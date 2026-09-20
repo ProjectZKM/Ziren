@@ -71,7 +71,7 @@ impl Prover<DefaultProverComponents> for MockProver {
             ZKMProofKind::Compressed => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
 
-                let shard_proof = ShardProof { public_values: vec![], basefold_shard_proof: None };
+                let shard_proof = ShardProof { public_values: vec![], jagged_shard_proof: None };
 
                 let reduce_vk = StarkVerifyingKey {
                     commit: vec![[KoalaBear::ZERO; 8]].into(),

@@ -197,7 +197,7 @@ mod tests {
     type EF = p3_field::extension::BinomialExtensionField<F, 4>;
 
     #[test]
-    fn basefold_shard_proof_rmp_roundtrip() {
+    fn jagged_shard_proof_rmp_roundtrip() {
         let proof: JaggedShardProof<F, EF> =
             JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 16);
         let bytes = rmp_serde::to_vec(&proof).expect("serializes via rmp");
@@ -235,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn basefold_shard_proof_old_format_deserializes() {
+    fn jagged_shard_proof_old_format_deserializes() {
         let old: OldBasefoldShardProof<F, EF> = OldBasefoldShardProof {
             public_values: vec![F::ZERO; 7],
             main_commitment: std::array::from_fn(|_| F::ZERO),
@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn basefold_shard_proof_empty_pv_count() {
+    fn jagged_shard_proof_empty_pv_count() {
         let proof: JaggedShardProof<F, EF> =
             JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 0);
         assert_eq!(proof.public_values.len(), 0);
@@ -266,14 +266,14 @@ mod tests {
     }
 
     #[test]
-    fn basefold_shard_proof_large_pv_count() {
+    fn jagged_shard_proof_large_pv_count() {
         let proof: JaggedShardProof<F, EF> =
             JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 231);
         assert_eq!(proof.public_values.len(), 231);
     }
 
     #[test]
-    fn basefold_shard_proof_fold_orientation_roundtrip() {
+    fn jagged_shard_proof_fold_orientation_roundtrip() {
         for orientation in [FoldOrientation::Msb, FoldOrientation::Lsb] {
             let mut proof: JaggedShardProof<F, EF> =
                 JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 4);
@@ -286,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn basefold_shard_proof_constructs() {
+    fn jagged_shard_proof_constructs() {
         let proof: JaggedShardProof<F, EF> =
             JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 16);
         assert_eq!(proof.public_values.len(), 16);

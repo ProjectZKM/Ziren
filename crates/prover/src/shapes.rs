@@ -81,9 +81,11 @@ pub fn check_shapes<C: ZKMProverComponents>(
     let (shape_tx, shape_rx) =
         std::sync::mpsc::sync_channel::<ZKMCompressProgramShape>(num_compiler_workers);
     let (panic_tx, panic_rx) = std::sync::mpsc::channel();
-    let core_shape_config = &CoreShapeConfig::default();
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
+    // `generate_maximal_shapes` DOES consult the core shapes -- unlike
+    // `generate`, which is why only the latter lost the parameter.
+    let core_shape_config = &CoreShapeConfig::default();
 
     let all_maximal_shapes = ZKMProofShape::generate_maximal_shapes(
         core_shape_config,
@@ -154,16 +156,13 @@ pub fn build_vk_map<C: ZKMProverComponents>(
 ) -> (BTreeSet<[KoalaBear; DIGEST_SIZE]>, Vec<usize>, usize) {
     let mut prover = ZKMProver::<C>::new();
     prover.vk_verification = !dummy;
-    let core_shape_config = &CoreShapeConfig::default();
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
 
     tracing::info!("building compress vk map");
     let (vk_set, panic_indices, height) = if dummy {
         tracing::warn!("Making a dummy vk map");
-        let dummy_set = ZKMProofShape::dummy_vk_map(
-            core_shape_config,
-            recursion_shape_config,
+        let dummy_set = ZKMProofShape::dummy_vk_map(recursion_shape_config,
             reduce_batch_size,
         )
         .into_keys()
@@ -186,7 +185,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
 
         let indices_set = indices.map(|indices| indices.into_iter().collect::<HashSet<_>>());
         let all_shapes =
-            ZKMProofShape::generate(core_shape_config, recursion_shape_config, reduce_batch_size)
+            ZKMProofShape::generate(recursion_shape_config, reduce_batch_size)
                 .collect::<BTreeSet<_>>();
         let num_shapes = all_shapes.len();
         tracing::info!("number of shapes: {}", num_shapes);
@@ -373,10 +372,15 @@ impl ZKMProofShape {
     /// (`CoreShapeConfig::all_shapes`); stacked_shapes is the sole
     /// Recursion-shape source.
     ///
-    /// The `core_shape_config` argument is retained for API
-    /// stability but is not consulted.
+        /// The enumerable shapes: compose, deferred and shrink.
+    ///
+    /// No core shape configuration is taken, because none is consulted. These
+    /// key on the children's PIN CLASSES, which the machine fixes; the
+    /// normalize shapes that WOULD have depended on core workload data are not
+    /// enumerated at all, being collected from real proofs instead. Keeping a
+    /// `CoreShapeConfig` parameter that nothing reads implied the enumeration
+    /// tracked the collected workload shapes when it never did.
     pub fn generate<'a>(
-        _core_shape_config: &'a CoreShapeConfig<KoalaBear>,
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
@@ -892,12 +896,11 @@ impl ZKMProofShape {
             )
     }
 
-    pub fn dummy_vk_map<'a>(
-        core_shape_config: &'a CoreShapeConfig<KoalaBear>,
-        recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
+    pub fn dummy_vk_map(
+        recursion_shape_config: &RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
     ) -> BTreeMap<[KoalaBear; DIGEST_SIZE], usize> {
-        Self::generate(core_shape_config, recursion_shape_config, reduce_batch_size)
+        Self::generate(recursion_shape_config, reduce_batch_size)
             .enumerate()
             .map(|(i, _)| ([KoalaBear::from_usize(i); DIGEST_SIZE], i))
             .collect()
@@ -1403,11 +1406,10 @@ mod tests {
         }
 
         // generate()'s arity-1 Recursion shapes -> their classes.
-        let core_shape_config = CoreShapeConfig::default();
         let recursion_shape_config = RecursionShapeConfig::default();
         let mut gen_classes: BTreeSet<(Vec<String>, usize)> = BTreeSet::new();
         let mut arity1_count = 0usize;
-        for s in ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, 4) {
+        for s in ZKMProofShape::generate(&recursion_shape_config, 4) {
             if let ZKMProofShape::Recursion(batch) = s {
                 if batch.len() == 1 {
                     arity1_count += 1;
@@ -1454,10 +1456,9 @@ mod tests {
     #[test]
     fn generate_emits_no_normalize_shapes() {
         use crate::REDUCE_BATCH_SIZE;
-        let core_shape_config = CoreShapeConfig::default();
         let recursion_shape_config = RecursionShapeConfig::default();
         let all: Vec<ZKMProofShape> =
-            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, REDUCE_BATCH_SIZE)
+            ZKMProofShape::generate(&recursion_shape_config, REDUCE_BATCH_SIZE)
                 .collect();
 
         let normalize = all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
@@ -1641,11 +1642,10 @@ mod tests {
     #[test]
     #[ignore]
     fn test_generate_all_shapes() {
-        let core_shape_config = CoreShapeConfig::default();
         let recursion_shape_config = RecursionShapeConfig::default();
         let reduce_batch_size = 2;
         let all_shapes =
-            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, reduce_batch_size)
+            ZKMProofShape::generate(&recursion_shape_config, reduce_batch_size)
                 .collect::<BTreeSet<_>>();
 
         println!("Number of compress shapes: {}", all_shapes.len());
@@ -1661,10 +1661,9 @@ mod tests {
     #[ignore]
     fn measure_vkroot_heights() {
         use crate::REDUCE_BATCH_SIZE;
-        let core_shape_config = CoreShapeConfig::default();
         let recursion_shape_config = RecursionShapeConfig::default();
         let all_shapes: BTreeSet<_> =
-            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, REDUCE_BATCH_SIZE)
+            ZKMProofShape::generate(&recursion_shape_config, REDUCE_BATCH_SIZE)
                 .collect();
         let num_shapes = all_shapes.len();
         let enum_height = num_shapes.next_power_of_two().ilog2() as usize;
@@ -1707,12 +1706,11 @@ mod tests {
     /// reduce_batch_size.
     #[test]
     fn generate_uses_stacked_shapes_for_recursion() {
-        let core_shape_config = CoreShapeConfig::default();
         let recursion_shape_config = RecursionShapeConfig::default();
         let reduce_batch_size = 2;
 
         let all: BTreeSet<_> =
-            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, reduce_batch_size)
+            ZKMProofShape::generate(&recursion_shape_config, reduce_batch_size)
                 .collect();
         let recursion_count =
             all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();

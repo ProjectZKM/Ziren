@@ -1637,7 +1637,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Extract `JaggedShardProof`s from a batch of `ShardProof`s
-    /// (the `basefold_shard_proof` payload populated by
+    /// (the `jagged_shard_proof` payload populated by
     /// the prover's `open()`) and wrap each batch
     /// into a `ZKMCoreBasefoldWitnessValues`.
     ///
@@ -1653,7 +1653,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Option<Vec<ZKMCoreBasefoldWitnessValues<InnerSC>>> {
         // Verify every shard carries a basefold side-channel before
         // producing any witnesses.
-        if shard_proofs.iter().any(|p| p.basefold_shard_proof.is_none()) {
+        if shard_proofs.iter().any(|p| p.jagged_shard_proof.is_none()) {
             return None;
         }
 
@@ -1681,7 +1681,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             );
             let bf_proofs = batch
                 .iter()
-                .map(|sp| *sp.basefold_shard_proof.as_ref().unwrap().clone())
+                .map(|sp| *sp.jagged_shard_proof.as_ref().unwrap().clone())
                 .collect::<Vec<_>>();
             core_inputs.push(ZKMCoreBasefoldWitnessValues {
                 vk: vk.clone(),
@@ -1696,7 +1696,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Constructs `ZKMDeferredBasefoldWitnessValues` from each batch
-    /// by extracting the `basefold_shard_proof` side channel from
+    /// by extracting the `jagged_shard_proof` side channel from
     /// each input proof. Returns `None` when any deferred proof is
     /// missing the side channel (the caller treats that as a hard error).
     ///
@@ -1711,7 +1711,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         batch_size: usize,
     ) -> Option<Vec<ZKMDeferredBasefoldWitnessValues<InnerSC>>> {
         // All deferred proofs must carry a basefold side channel.
-        if !deferred_proofs.iter().all(|p| p.proof.basefold_shard_proof.is_some()) {
+        if !deferred_proofs.iter().all(|p| p.proof.jagged_shard_proof.is_some()) {
             return None;
         }
         let mut deferred_digest = [Val::<InnerSC>::ZERO; DIGEST_SIZE];
@@ -1721,7 +1721,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .iter()
                 .cloned()
                 .map(|proof| {
-                    let bf = *proof.proof.basefold_shard_proof.unwrap();
+                    let bf = *proof.proof.jagged_shard_proof.unwrap();
                     (proof.vk, bf)
                 })
                 .collect();
@@ -1755,7 +1755,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Generate the inputs for the first layer of recursive proofs.
     ///
-    /// Every shard carries a `basefold_shard_proof` side channel, so this
+    /// Every shard carries a `jagged_shard_proof` side channel, so this
     /// emits `ZKMCircuitWitness::CoreBasefold` witnesses that dispatch to
     /// the cluster-parametrized basefold Normalize program. Deferred
     /// proofs follow the same dispatch. A missing side channel is a
@@ -1774,7 +1774,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let bf_inputs = self
             .get_recursion_core_inputs_basefold(&vk.vk, shard_proofs, batch_size, is_complete)
-            .expect("core shard proof missing basefold_shard_proof side channel");
+            .expect("core shard proof missing jagged_shard_proof side channel");
         tracing::debug!("emitting {} CoreBasefold witness(es)", bf_inputs.len());
         inputs.extend(bf_inputs.into_iter().map(ZKMCircuitWitness::CoreBasefold));
 
@@ -1786,7 +1786,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 deferred_proofs,
                 batch_size,
             )
-            .expect("deferred proof missing basefold_shard_proof side channel");
+            .expect("deferred proof missing jagged_shard_proof side channel");
         inputs.extend(bf_deferred.into_iter().map(ZKMCircuitWitness::DeferredBasefold));
         inputs
     }
@@ -2155,7 +2155,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             .into_proofs()
                             .map(|(vk, proof)| {
                                 let bf = *proof
-                                    .basefold_shard_proof
+                                    .jagged_shard_proof
                                     .as_ref()
                                     .expect(
                                         "compress reduce worker: input proof missing \
@@ -2214,7 +2214,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // Make the compress proof.
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
         let basefold_proof = *compressed_proof
-            .basefold_shard_proof
+            .jagged_shard_proof
             .clone()
             .expect("shrink: input compressed proof missing basefold side-channel — legacy FRI shrink removed");
         // Bundle vk_merkle_data so verify_wrap_basefold
@@ -2254,11 +2254,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // BaseFold side-channel attach (GPU shrink)
         //
         // Byte-exact no-op on the CPU prover (`CpuProver::open` already
-        // populated `basefold_shard_proof` inline via
+        // populated `jagged_shard_proof` inline via
         // `prove_shard_with_data_boxed`); a `StarkGpuProver` OVERRIDES
         // `attach_shard_basefold_side_channel` and drives the device-native
         // BaseFold producer over its own in-crate `DeviceShardTraces`
-        // (its GPU `open()` returns `basefold_shard_proof: None`, and
+        // (its GPU `open()` returns `jagged_shard_proof: None`, and
         // `wrap_bn254` `.expect()`s that side channel).  `fn shrink` stays
         // backend-agnostic — no device-shaped provider on the host prover
         // surface.
@@ -2286,7 +2286,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // `KoalaBearPoseidon2Outer::prep_commit`.
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
         let basefold_proof = *compressed_proof
-            .basefold_shard_proof
+            .jagged_shard_proof
             .clone()
             .expect("wrap_bn254: input shrink proof missing basefold side-channel — legacy FRI wrap removed");
         // Bundle vk_merkle_data so verify_wrap_basefold
@@ -2355,8 +2355,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // verifies the BaseFold shard proof, so the witness MUST be built from the
         // wrap-basefold witness type — any other layout emits a flat witness
         // incompatible with the circuit (e.g. 523-flat vs the 15208-flat circuit).
-        let basefold_proof = *proof.proof.basefold_shard_proof.clone().expect(
-            "wrap_plonk_bn254: wrap proof missing basefold_shard_proof \
+        let basefold_proof = *proof.proof.jagged_shard_proof.clone().expect(
+            "wrap_plonk_bn254: wrap proof missing jagged_shard_proof \
                  (the outer ring must be a BaseFold config)",
         );
         let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
@@ -2402,8 +2402,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // verifies the BaseFold shard proof, so the witness MUST be built from the
         // wrap-basefold witness type — any other layout emits a flat witness
         // incompatible with the circuit (e.g. 523-flat vs the 15208-flat circuit).
-        let basefold_proof = *proof.proof.basefold_shard_proof.clone().expect(
-            "wrap_groth16_bn254: wrap proof missing basefold_shard_proof \
+        let basefold_proof = *proof.proof.jagged_shard_proof.clone().expect(
+            "wrap_groth16_bn254: wrap proof missing jagged_shard_proof \
                  (the outer ring must be a BaseFold config)",
         );
         let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
@@ -2454,8 +2454,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // Mirror `build_constraints_and_witness` (build.rs): the gnark wrap circuit
         // verifies the BaseFold shard proof, so the witness MUST be built from the
         // wrap-basefold witness type.
-        let basefold_proof = *proof.proof.basefold_shard_proof.clone().expect(
-            "wrap_dvsnark_bn254: wrap proof missing basefold_shard_proof \
+        let basefold_proof = *proof.proof.jagged_shard_proof.clone().expect(
+            "wrap_dvsnark_bn254: wrap proof missing jagged_shard_proof \
                  (the outer ring must be a BaseFold config)",
         );
         let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
@@ -2607,7 +2607,6 @@ pub mod tests {
     use build::{build_constraints_and_witness, try_build_groth16_bn254_artifacts_dev};
     use p3_field::PrimeField32;
 
-    use zkm_core_machine::shape::CoreShapeConfig;
     use zkm_recursion_circuit::machine::ZKMRecursionShape;
     use zkm_recursion_core::air::RecursionPublicValues;
 
@@ -2840,11 +2839,10 @@ pub mod tests {
         // Start from an ENUMERATED normalize shape, which is by construction
         // one `fix_shape` accepts.  Variants only SHRINK a chip, so they stay
         // inside the same band.
-        let core_shape_config = CoreShapeConfig::default();
         let recursion_shape_config =
             RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
         let base_os =
-            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, REDUCE_BATCH_SIZE)
+            ZKMProofShape::generate(&recursion_shape_config, REDUCE_BATCH_SIZE)
                 .find_map(|s| match s {
                     ZKMProofShape::Recursion(batch) => batch.into_iter().next(),
                     _ => None,
@@ -3628,10 +3626,10 @@ pub mod tests {
         // values (else the test is vacuous).  Compare the serialized
         // basefold shard proof bytes.
         let a_bytes =
-            bincode::serialize(wrap_a.proof.basefold_shard_proof.as_ref().expect("A bundle"))
+            bincode::serialize(wrap_a.proof.jagged_shard_proof.as_ref().expect("A bundle"))
                 .unwrap();
         let b_bytes =
-            bincode::serialize(wrap_b.proof.basefold_shard_proof.as_ref().expect("B bundle"))
+            bincode::serialize(wrap_b.proof.jagged_shard_proof.as_ref().expect("B bundle"))
                 .unwrap();
         tracing::info!(
             "[VI] wrap A bundle {} bytes, wrap B bundle {} bytes, identical={}",
@@ -3752,14 +3750,12 @@ pub mod tests {
         // is config-independent for the normalize re-key: it derives classes
         // from the machine, not the bands).  Mirrors
         // `multishard_normalize_arity_faithful`.
-        let core_cfg_owned = CoreShapeConfig::<KoalaBear>::default();
         let rec_cfg_owned = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
-        let core_cfg = &core_cfg_owned;
         let rec_cfg = prover.compress_shape_config.as_ref().unwrap_or(&rec_cfg_owned);
 
         // Enumerated per-shard normalize shapes (flattened across batches).
         let enum_norm: std::collections::BTreeSet<OrderedShape> =
-            ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE)
+            ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE)
                 .filter_map(|s| match s {
                     ZKMProofShape::Recursion(b) => Some(b),
                     _ => None,
@@ -3820,7 +3816,7 @@ pub mod tests {
         // shard to arity 2..4 builds a program that cannot exist.  Aggregation
         // across shards lives in COMPRESS.
         let real_bf = *real_sp
-            .basefold_shard_proof
+            .jagged_shard_proof
             .as_ref()
             .expect("real shard carries basefold side channel")
             .clone();
@@ -4212,12 +4208,10 @@ pub mod tests {
     #[serial]
     fn enumeration_size_probe() {
         use crate::shapes::ZKMProofShape;
-        use zkm_core_machine::shape::CoreShapeConfig;
         setup_logger();
-        let core_cfg = CoreShapeConfig::<KoalaBear>::default();
         let rec_cfg = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
         let all: Vec<ZKMProofShape> =
-            ZKMProofShape::generate(&core_cfg, &rec_cfg, REDUCE_BATCH_SIZE).collect();
+            ZKMProofShape::generate(&rec_cfg, REDUCE_BATCH_SIZE).collect();
         let normalize = all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
         eprintln!(
             "[ENUMSIZE] total={} normalize={} other={} capacity=2^{}={}",
@@ -4676,7 +4670,7 @@ pub mod tests {
         );
 
         // What the dummy computes for the same child, from the band's MAIN
-        // heights (`round_real(true)` in `dummy/basefold_shard_proof.rs`).
+        // heights (`round_real(true)` in `dummy/jagged_shard_proof.rs`).
         let band = prog.shape.as_ref().map(|sh| sh.clone_into_hash_map()).unwrap_or_default();
         let mut band_sorted: Vec<_> = band.iter().collect();
         band_sorted.sort();
@@ -5284,10 +5278,9 @@ pub mod tests {
         );
 
         // Enumerated shape cardinality (height-keyed).
-        let core_cfg = CoreShapeConfig::<KoalaBear>::default();
         let rec_cfg = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
         let all: Vec<ZKMProofShape> =
-            ZKMProofShape::generate(&core_cfg, &rec_cfg, REDUCE_BATCH_SIZE).collect();
+            ZKMProofShape::generate(&rec_cfg, REDUCE_BATCH_SIZE).collect();
 
         let mut norm_shapes: std::collections::BTreeSet<OrderedShape> =
             std::collections::BTreeSet::new();

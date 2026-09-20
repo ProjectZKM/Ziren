@@ -316,9 +316,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs>;
 
-    /// Attach the BaseFold shard side-channel (`ShardProof::basefold_shard_proof`)
+    /// Attach the BaseFold shard side-channel (`ShardProof::jagged_shard_proof`)
     /// for the SHRINK stage.  Default no-op: the CPU `StarkMachine::open`
-    /// already populates `basefold_shard_proof` inline, so on a `CpuProver`
+    /// already populates `jagged_shard_proof` inline, so on a `CpuProver`
     /// this is skipped.  A `StarkGpuProver` OVERRIDES this with the
     /// device-native attach — it re-runs the commit pipeline on the shrink
     /// machine, builds its own per-shard `DeviceShardTraces` in-crate, and
@@ -566,7 +566,7 @@ where
         // Produce the shard-level BaseFold proof: LogUp-GKR, zerocheck,
         // and the jagged-PCS opening, driven from the challenger
         // snapshot above.
-        let basefold_shard_proof = prove_shard_with_data_boxed::<SC, A>(
+        let jagged_shard_proof = prove_shard_with_data_boxed::<SC, A>(
             &chips,
             pk.preprocessed_mles(),
             <SC as crate::BasefoldRing>::prep_open_data(pk.preprocessed_data()),
@@ -581,7 +581,7 @@ where
 
         Ok(ShardProof::<SC> {
             public_values: data.public_values,
-            basefold_shard_proof,
+            jagged_shard_proof,
         })
     }
 
@@ -836,7 +836,7 @@ where
     );
 
     // Always `Some`: there is no decline path (see the no-fallback note above).
-    // The `Option` exists because it feeds `ShardProof::basefold_shard_proof`,
+    // The `Option` exists because it feeds `ShardProof::jagged_shard_proof`,
     // which IS optional in the proof format — `mock.rs` emits `None`.
     Some(Box::new(proof))
 }

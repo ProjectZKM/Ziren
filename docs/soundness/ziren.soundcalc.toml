@@ -40,12 +40,18 @@ trace_length = 4194304 # 2^22
 trace_columns = 36489
 dense_length = 2097152 # 2^21
 log_degree = 21
-# The lambda batch spans every stripe of every committed round, so its
+# The lambda batch spans every stripe of EVERY committed round, so its
 # cardinality is sum_r num_stripes[r] = sum_r area_r >> log_stacking_height,
 # NOT DEFAULT_BATCH_SIZE = 32, which is the interleave packing width and
-# carries no soundness meaning.  Bounded by the per-shard area cap ELEMENT_THRESHOLD = 460,000,000 cells:
-# ceil(460e6 / 2^21) = 220.  An upper bound, so the term is conservative.
-dense_batch = 220
+# carries no soundness meaning.
+#
+# The ceiling is what the enumerator admits for the two rounds TOGETHER, not
+# what the area cap gives the main round alone.  `shapes.rs` sets
+# MAX_BLOCKS = (ELEMENT_THRESHOLD >> 21) + 8 = 227 and rejects
+# prep_blocks + main_blocks >= MAX_BLOCKS, so 226 is admissible.
+# ceil(460e6 / 2^21) = 220 counts only the main round and is therefore NOT an
+# upper bound on a batch that also covers the preprocessed one.
+dense_batch = 226
 num_constraints = 23555
 air_max_degree = 3
 opening_points = 1

@@ -264,7 +264,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             preprocessed_round,
         ) = proof_tuple;
         // Clone public_values for the aggregate pass — it's moved into
-        // `assemble_basefold_shard_proof_variable` below.
+        // `assemble_jagged_shard_proof_variable` below.
         let _pubvals_for_aggregate: Vec<Felt<C::F>> = public_values.clone();
 
         // Derive chip names + per-round column counts from the
@@ -475,8 +475,8 @@ pub fn verify_compress_basefold<C, SC, A>(
         let _insertion_points = crate::shard_basefold::JaggedShardVerifier::<
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::insertion_points_from_column_counts(&_column_counts_by_round);
-        let _basefold_shard_proof_variable = evaluation_proof_var.map(|epv| {
-            crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
+        let _jagged_shard_proof_variable = evaluation_proof_var.map(|epv| {
+            crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
                 public_values.clone(),
                 &logup_gkr_proof,
@@ -486,7 +486,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             )
         });
         let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
-            crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
+            crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                 main_commit,
                 public_values,
                 &logup_gkr_proof,
@@ -635,7 +635,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                 _jagged_evaluator_fn,
             );
         } else {
-        let _basefold_shard_proof_variable = _basefold_shard_proof_variable
+        let _jagged_shard_proof_variable = _jagged_shard_proof_variable
             .as_ref()
             .expect("non-whir child lifts to the BaseFold variable");
         let per_proof_verifier;
@@ -674,7 +674,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             .verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
                 builder,
                 &_basefold_vk,
-                _basefold_shard_proof_variable,
+                _jagged_shard_proof_variable,
                 &_shard_chips,
                 &_chip_metadata,
                 &_opened_values,

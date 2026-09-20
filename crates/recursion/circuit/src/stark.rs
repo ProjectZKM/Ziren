@@ -118,11 +118,11 @@ where
         chip_heights_pairs.iter().map(|(_n, rows)| ceil_log2(*rows)).max().unwrap_or(0);
     assert!(
         shape_max_log <= max_log_row_count,
-        "dummy[basefold_shard_proof]: shape max log-height {shape_max_log} exceeds the \
+        "dummy[jagged_shard_proof]: shape max log-height {shape_max_log} exceeds the \
          fixed cube {max_log_row_count}",
     );
 
-    let proof = crate::dummy::dummy_basefold_shard_proof::<KoalaBear, InnerChallenge, A>(
+    let proof = crate::dummy::dummy_jagged_shard_proof::<KoalaBear, InnerChallenge, A>(
         &chips,
         &chip_heights_pairs,
         max_log_row_count,

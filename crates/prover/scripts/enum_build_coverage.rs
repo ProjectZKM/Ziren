@@ -28,12 +28,11 @@ fn main() {
 
     let stride: usize = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(1);
     let prover = ZKMProver::<DefaultProverComponents>::new();
-    let core_cfg = &zkm_core_machine::shape::CoreShapeConfig::default();
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
     let height = VK_MERKLE_TREE_HEIGHT;
 
     let all: Vec<ZKMProofShape> =
-        ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE).collect();
+        ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
     let sampled: Vec<(usize, ZKMProofShape)> =
         all.into_iter().enumerate().filter(|(i, _)| i % stride == 0).collect();
     eprintln!("[ENUM-COV] shapes to try = {} (stride {})", sampled.len(), stride);

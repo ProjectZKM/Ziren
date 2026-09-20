@@ -69,15 +69,19 @@ pub const PROOF_MAX_NUM_PVS: usize = 231;
 #[serde(bound = "")]
 pub struct ShardProof<SC: StarkGenericConfig> {
     pub public_values: Vec<Val<SC>>,
-    /// The shard-level BaseFold proof: one LogUp-GKR + one zerocheck +
-    /// one jagged-PCS opening per shard.  Every prover stage (core,
-    /// compress, shrink, wrap) emits it; a proof without one is
-    /// malformed and the verifier rejects it.
+    /// The shard-level proof: one LogUp-GKR + one zerocheck + one jagged-PCS
+    /// opening per shard.  Every prover stage (core, compress, shrink, wrap)
+    /// emits it; a proof without one is malformed and the verifier rejects it.
+    ///
+    /// Named for the jagged opening, not for a dense scheme: the opening
+    /// carries WHIR on the inner ring and BaseFold on the outer one, chosen
+    /// per proof, so calling this "the BaseFold proof" named something the
+    /// value need not be.
     ///
     /// `Box` keeps the ShardProof size footprint flat — the
     /// JaggedShardProof is ~KB of nested structs.
     #[serde(default)]
-    pub basefold_shard_proof:
+    pub jagged_shard_proof:
         Option<Box<crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, Challenge<SC>>>>,
 }
 
@@ -123,7 +127,7 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
     pub fn basefold(
         &self,
     ) -> &crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, Challenge<SC>> {
-        self.basefold_shard_proof.as_ref().expect("shard proof missing basefold payload")
+        self.jagged_shard_proof.as_ref().expect("shard proof missing basefold payload")
     }
 
     /// Sum of the per-chip global cumulative sums, read from the

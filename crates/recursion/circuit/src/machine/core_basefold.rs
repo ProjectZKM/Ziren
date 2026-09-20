@@ -479,8 +479,8 @@ pub fn verify_core_basefold<C, SC, A>(
             let insertion_points = crate::shard_basefold::JaggedShardVerifier::<
                 crate::basefold_verifier::RecursiveBasefoldVerifier,
             >::insertion_points_from_column_counts(&column_counts_by_round);
-            let basefold_shard_proof_variable = evaluation_proof_var.map(|epv| {
-                crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
+            let jagged_shard_proof_variable = evaluation_proof_var.map(|epv| {
+                crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                     main_commit,
                     public_values_raw.clone(),
                     &logup_gkr_proof,
@@ -490,7 +490,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 )
             });
             let whir_shard_proof_variable = whir_evaluation_proof_var.take().map(|epv| {
-                crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC, _>(
+                crate::shard_proof_variable_lift::assemble_jagged_shard_proof_variable::<C, SC, _>(
                     main_commit,
                     public_values_raw.clone(),
                     &logup_gkr_proof,
@@ -675,8 +675,8 @@ pub fn verify_core_basefold<C, SC, A>(
                     jagged_evaluator_fn,
                 );
             } else {
-            let basefold_shard_proof_variable =
-                basefold_shard_proof_variable.expect("non-whir proof lifts to the BaseFold variable");
+            let jagged_shard_proof_variable =
+                jagged_shard_proof_variable.expect("non-whir proof lifts to the BaseFold variable");
             let per_proof_verifier;
             let active_verifier = match &evaluation_proof {
                 // Only `host` is needed here -- this arm sizes the
@@ -718,7 +718,7 @@ pub fn verify_core_basefold<C, SC, A>(
             active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
                 builder,
                 basefold_vk_ref,
-                &basefold_shard_proof_variable,
+                &jagged_shard_proof_variable,
                 &shard_chips,
                 &chip_metadata,
                 &opened_values,

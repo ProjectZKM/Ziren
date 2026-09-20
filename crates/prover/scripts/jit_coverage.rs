@@ -22,11 +22,10 @@ fn main() {
     std::panic::set_hook(Box::new(|_| {}));
 
     let prover = ZKMProver::<DefaultProverComponents>::new();
-    let core_cfg = &zkm_core_machine::shape::CoreShapeConfig::default();
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
 
     let all: Vec<ZKMProofShape> =
-        ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE).collect();
+        ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
     eprintln!("[JIT-COV] {} shapes enumerated", all.len());
 
     // One program per category is enough to characterise the mix; the

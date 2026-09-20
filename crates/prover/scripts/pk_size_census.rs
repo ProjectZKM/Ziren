@@ -23,9 +23,8 @@ fn rss_mib() -> f64 {
 fn main() {
     let want = std::env::args().nth(1).unwrap_or_else(|| "compress".to_string());
     let prover = ZKMProver::<DefaultProverComponents>::new();
-    let core_cfg = &zkm_core_machine::shape::CoreShapeConfig::default();
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
-    let shape = ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE)
+    let shape = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE)
         .find(|s| {
             matches!(
                 (want.as_str(), s),

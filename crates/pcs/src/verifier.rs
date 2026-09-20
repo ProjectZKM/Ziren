@@ -57,10 +57,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         // BaseFold-over-BN254: every shard proof (inner KoalaBear and the OUTER
         // wrap) carries a shard-level BaseFold proof.  There is no
         // two-adic-quotient FRI/STARK verify fallback; a missing
-        // `basefold_shard_proof` is a hard error.
-        let basefold_proof = proof.basefold_shard_proof.as_ref().ok_or_else(|| {
+        // `jagged_shard_proof` is a hard error.
+        let basefold_proof = proof.jagged_shard_proof.as_ref().ok_or_else(|| {
             VerificationError::JaggedShardVerifier(
-                "shard proof missing basefold_shard_proof (FRI verify path retired)".to_string(),
+                "shard proof missing jagged_shard_proof (FRI verify path retired)".to_string(),
             )
         })?;
         let shard_verifier =

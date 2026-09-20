@@ -980,7 +980,14 @@ pub mod tests {
     #[test]
     fn test_simple_prove_no_shape() {
         // BaseFold control twin of the WHIR test below: same program, same
-        // `shape_config: None` harness, default inner PCS.
+        // `shape_config: None` harness, same EMPTY stdin, default inner PCS.
+        //
+        // The inputs have to match for the pair to be a control: the twins
+        // differ in the dense PCS and in nothing else, so a difference in
+        // outcome is attributable to that. `simple_program` is three `ADD`s
+        // and reads no input, so empty stdin is also the correct value --
+        // feeding it `fib_stdin()` was a stdin repair applied to a program
+        // that never reads one.
         utils::setup_logger();
         let program = simple_program();
         let runtime = {
@@ -988,7 +995,7 @@ pub mod tests {
             runtime.run().unwrap();
             runtime
         };
-        crate::utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), None).unwrap();
+        crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None).unwrap();
     }
 
     #[test]
@@ -1008,7 +1015,7 @@ pub mod tests {
         // Verified, AND actually under WHIR: a silently-false `whir_mode`
         // would prove plain BaseFold and pass anyway, so pin the dispatch.
         for sp in &result.unwrap().shard_proofs {
-            let bsp = sp.basefold_shard_proof.as_ref().expect("shard-level proof");
+            let bsp = sp.jagged_shard_proof.as_ref().expect("shard-level proof");
             match &bsp.evaluation_proof {
                 zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(b) => {
                     assert!(b.whir_proof.is_some(), "shard was proven under BaseFold");
@@ -1622,7 +1629,7 @@ pub mod tests {
         // circuit_output / main_trace_evaluations untouched.
         let mut forged = proof.clone();
         let bf = forged.shard_proofs[0]
-            .basefold_shard_proof
+            .jagged_shard_proof
             .as_mut()
             .expect("first shard must carry a basefold proof");
 
@@ -1789,7 +1796,7 @@ pub mod tests {
     fn stage0_apply_height_forgery(
         forged: &mut zkm_pcs::MachineProof<KoalaBearPoseidon2>,
     ) -> Option<String> {
-        let bf = forged.shard_proofs[0].basefold_shard_proof.as_mut()?;
+        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut()?;
         let nchips = bf.opened_values.chips.len();
         if nchips < 2 {
             return None;
@@ -1965,7 +1972,7 @@ pub mod tests {
         use p3_field::PrimeCharacteristicRing;
         // First do the degree-bit area-preserving move (records rc/lc/bit).
         let desc = {
-            let bf = forged.shard_proofs[0].basefold_shard_proof.as_mut()?;
+            let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut()?;
             let nchips = bf.opened_values.chips.len();
             if nchips < 2 {
                 return None;
@@ -2012,7 +2019,7 @@ pub mod tests {
         // these were a free variable the reconstruction reads in isolation, this
         // would let the adversary cancel the degree perturbation; the claim
         // binding (which ALSO reads `*_full`) must catch it.
-        let bf = forged.shard_proofs[0].basefold_shard_proof.as_mut()?;
+        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut()?;
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let scale = EF::from(KoalaBear::from_u32(2));
         let mut touched = 0usize;
@@ -2208,7 +2215,7 @@ pub mod tests {
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let scale = EF::from(KoalaBear::from_u32(3));
         let bf =
-            forged.shard_proofs[0].basefold_shard_proof.as_mut().expect("first shard basefold");
+            forged.shard_proofs[0].jagged_shard_proof.as_mut().expect("first shard basefold");
         let mut touched = 0usize;
         for ce in bf.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
             if let Some(mf) = ce.main_trace_evaluations_full.as_mut() {
@@ -2246,7 +2253,7 @@ pub mod tests {
 
         // Locate the SAME (rc,rb,lc,lb) the forgery helper would pick, on a clone.
         let mut forged = proof.clone();
-        let bf = forged.shard_proofs[0].basefold_shard_proof.as_mut().unwrap();
+        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut().unwrap();
         let nchips = bf.opened_values.chips.len();
         let bit_len = bf.opened_values.chips[0].quotient[0].len();
         let mut raise: Option<(usize, usize)> = None;
@@ -2286,7 +2293,7 @@ pub mod tests {
         );
 
         // Revert ONLY the two degree bits => recon-ON ACCEPTS again.
-        let bf2 = forged.shard_proofs[0].basefold_shard_proof.as_mut().unwrap();
+        let bf2 = forged.shard_proofs[0].jagged_shard_proof.as_mut().unwrap();
         bf2.opened_values.chips[rc].quotient[0][rb] = zero_ef; // back to 0
         bf2.opened_values.chips[lc].quotient[0][lb] = one_ef; // back to 1
         let reverted_on = stage3_verify_rev(&machine, &vk, &forged);

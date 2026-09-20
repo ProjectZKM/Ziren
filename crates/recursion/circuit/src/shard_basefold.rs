@@ -681,7 +681,7 @@ impl<P> JaggedShardVerifier<P> {
     }
 }
 
-/// Shape configuration for [`dummy_basefold_shard_proof_variable`].
+/// Shape configuration for [`dummy_jagged_shard_proof_variable`].
 ///
 /// Encapsulates the per-shard dimensions a dummy BaseFold proof
 /// needs: chip count, max-row count, public-value count, sumcheck
@@ -749,7 +749,7 @@ pub struct BasefoldProofShape {
 /// explicitly (mutating at least one payload cell).  See the
 /// recursion-verifier tests that take a dummy, flip one coefficient,
 /// and assert the verify routine panics.
-pub fn dummy_basefold_shard_proof_variable<C>(
+pub fn dummy_jagged_shard_proof_variable<C>(
     builder: &mut Builder<C>,
     shape: &BasefoldProofShape,
 ) -> JaggedShardProofVariable<C>
@@ -805,7 +805,7 @@ where
         let dummy_chip_evaluation = ChipEvaluation::<Ext<C::F, C::EF>> {
             // This coarse IR-side shape fixture (construction smoke test
             // only — NOT the witness-stream VK-regen dummy, which is
-            // `dummy::basefold_shard_proof`) carries None; the production
+            // `dummy::jagged_shard_proof`) carries None; the production
             // reconstruction reads the `*_full` threaded through the witness
             // path.
             main_trace_evaluations_full: None,
@@ -1045,12 +1045,12 @@ mod tests {
         let _ = &_evaluator;
     }
 
-    /// Construction smoke test: dummy_basefold_shard_proof_variable
+    /// Construction smoke test: dummy_jagged_shard_proof_variable
     /// builds a structurally-valid placeholder for the chosen shape
     /// without panicking — verifies the Vec lengths cascade through
     /// every nested proof type.
     #[test]
-    fn dummy_basefold_shard_proof_constructs() {
+    fn dummy_jagged_shard_proof_constructs() {
         let mut builder = AsmBuilder::<F, EF>::default();
         let shape = BasefoldProofShape {
             chips: vec![("Cpu".to_string(), 16), ("Memory".to_string(), 14)],
@@ -1062,7 +1062,7 @@ mod tests {
             log_stacking_height: 21,
             basefold_num_variables: 21,
         };
-        let proof = dummy_basefold_shard_proof_variable::<C>(&mut builder, &shape);
+        let proof = dummy_jagged_shard_proof_variable::<C>(&mut builder, &shape);
         assert_eq!(proof.public_values.len(), 64);
         assert_eq!(proof.chip_height_bits.len(), 2);
         assert_eq!(proof.zerocheck_proof.univariate_polys.len(), 21);

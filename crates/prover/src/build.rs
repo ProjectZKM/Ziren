@@ -183,8 +183,8 @@ pub fn build_constraints_and_witness(
     tracing::info!("building verifier constraints");
     // #H (BaseFold-over-BN254 wrap port): the wrap STARK is proved over
     // BaseFold-BN254; the gnark outer circuit verifies its basefold shard proof.
-    let basefold_proof = *template_proof.basefold_shard_proof.clone().expect(
-        "build_constraints_and_witness: wrap proof missing basefold_shard_proof \
+    let basefold_proof = *template_proof.jagged_shard_proof.clone().expect(
+        "build_constraints_and_witness: wrap proof missing jagged_shard_proof \
              (the outer ring must be a BaseFold config)",
     );
     let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
