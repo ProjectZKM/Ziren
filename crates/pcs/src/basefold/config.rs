@@ -187,7 +187,18 @@ impl<F: Field> FriConfig<F> {
     /// codeword.  The recursion circuit's size is set by the PCS it verifies,
     /// not by this parameter.
     pub fn from_env_or_default() -> Self {
-        let Ok(val) = std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP") else {
+        Self::from_env_value(std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP").ok().as_deref())
+    }
+
+    /// The pure mapping behind [`from_env_or_default`]: `None`, an unparsable
+    /// value, or one outside `1..=4` all give the default.
+    ///
+    /// Split out so the tests can exercise every accepted and rejected value
+    /// WITHOUT mutating the process environment — that variable is global, and
+    /// a test setting it races every other test in the suite that builds a
+    /// config, not just the ones that read it back.
+    pub fn from_env_value(val: Option<&str>) -> Self {
+        let Some(val) = val else {
             return Self::default_fri_config();
         };
         let Ok(log_blowup) = val.parse::<usize>() else {
@@ -271,10 +282,8 @@ mod env_override {
     /// An unset or out-of-range value must give exactly the default.
     #[test]
     fn a_rejected_value_falls_back_to_the_default() {
-        let prev = std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP").ok();
-        for bad in ["0", "5", "not-a-number", ""] {
-            std::env::set_var("ZIREN_BASEFOLD_LOG_BLOWUP", bad);
-            let c = FriConfig::<F>::from_env_or_default();
+        for bad in [Some("0"), Some("5"), Some("not-a-number"), Some(""), None] {
+            let c = FriConfig::<F>::from_env_value(bad);
             let d = FriConfig::<F>::default_fri_config();
             assert_eq!(
                 (c.log_blowup, c.num_queries, c.proof_of_work_bits, c.log_folding_arity),
@@ -282,29 +291,32 @@ mod env_override {
                 "{bad:?} must fall back to the default"
             );
         }
-        match prev {
-            Some(v) => std::env::set_var("ZIREN_BASEFOLD_LOG_BLOWUP", v),
-            None => std::env::remove_var("ZIREN_BASEFOLD_LOG_BLOWUP"),
-        }
     }
 
     /// When applied it must hold 100 bits and keep the arity: `new` hard-codes
     /// arity 1, and dropping to it changes the proof SHAPE, not just the margin.
     #[test]
     fn every_accepted_blowup_holds_the_target_and_the_arity() {
-        let prevb = std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP").ok();
         for k in 1..=4 {
-            std::env::set_var("ZIREN_BASEFOLD_LOG_BLOWUP", k.to_string());
-            let c = FriConfig::<F>::from_env_or_default();
+            let c = FriConfig::<F>::from_env_value(Some(&k.to_string()));
             assert_eq!(c.log_blowup, k);
             assert_eq!(c.log_folding_arity, INNER_LOG_FOLDING_ARITY, "arity dropped at blowup {k}");
             let bits = soundness_bits(&c);
             assert!(bits >= 100.0, "blowup {k}: {} queries = {bits:.1} bits", c.num_queries);
             assert!(bits < 101.5, "blowup {k}: {} queries overshoots at {bits:.1} bits", c.num_queries);
         }
-        match prevb {
-            Some(v) => std::env::set_var("ZIREN_BASEFOLD_LOG_BLOWUP", v),
-            None => std::env::remove_var("ZIREN_BASEFOLD_LOG_BLOWUP"),
+    }
+
+    /// The env reader is a thin wrapper over the pure mapping, so an UNSET
+    /// variable must give the default — the one property the pure tests above
+    /// cannot observe.
+    #[test]
+    fn the_env_reader_agrees_with_the_default_when_unset() {
+        if std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP").is_ok() {
+            return; // the ambient environment sets it; nothing to assert
         }
+        let c = FriConfig::<F>::from_env_or_default();
+        let d = FriConfig::<F>::default_fri_config();
+        assert_eq!((c.log_blowup, c.num_queries), (d.log_blowup, d.num_queries));
     }
 }
