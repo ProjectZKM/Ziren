@@ -117,20 +117,26 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 /// derivations could diverge and the witnessed merkle paths would desync
 /// from the program shape.  A fixed ceiling kills that circularity.
 ///
-/// It has to CONTAIN the enumeration, which is not a tuning knob.  A normalize
-/// key is a function of `(chip set, preprocessed blocks, main blocks,
-/// preprocessed pad columns, main pad columns)` — and the reachable main block
-/// counts run up to the prover's own
-/// per-shard area cap (`ELEMENT_THRESHOLD` = 120 stacking blocks).  MEASURED at
-/// 7,960 shapes (7,931 normalize + 14 compose + 14 deferred + 1 shrink).
+/// It has to contain the whole MAP, which is two sources, not one.
 ///
-/// A height that cannot hold them is not "a smaller map" — it is a map that
-/// rejects real proofs, which is what 2^11 (2048) did.  2^13 would fit today's
-/// 7,960 with 232 slots to spare; 2^14 is chosen instead because the height is
-/// baked into every compose program, so raising it is itself a vk-changing
-/// event, and `ELEMENT_THRESHOLD` (env-overridable) and the cluster list can
-/// both grow.  Pay for the headroom once.
-/// `tests::enumeration_size_probe` asserts the fit.
+/// The enumeration is now only the compose/deferred/shrink tail — 29 shapes —
+/// because those key on pin classes, which the machine fixes. Normalize keys
+/// are COLLECTED from real proofs instead (`ZIREN_VK_COLLECT`): a normalize
+/// program is selected by its core shard's chip NAME SET, and which chips a
+/// shard carries is a property of the block it executed, so no enumeration over
+/// the machine's chips can predict them. Enumerating them produced 7,834 keys
+/// that covered 9 of the 57 a real block needed.
+///
+/// So the occupancy that matters is 29 plus however many distinct normalize
+/// keys production has been seen to produce, and it GROWS with traffic rather
+/// than being a fixed census. A height that cannot hold them is not "a smaller
+/// map" — it is a map that rejects real proofs, which is what 2^11 (2048) did.
+/// 2^14 also leaves room because the height is baked into every compose
+/// program, so raising it is itself a vk-changing event. Pay for the headroom
+/// once.
+///
+/// `tests::enumeration_size_probe` asserts the enumerated tail fits; it cannot
+/// bound the collected half, which is why the headroom is deliberate.
 pub const VK_MERKLE_TREE_HEIGHT: usize = 14;
 
 /// Digest sink for `ZIREN_VK_COLLECT=<path>`.

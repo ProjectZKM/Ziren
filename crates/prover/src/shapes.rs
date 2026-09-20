@@ -755,19 +755,33 @@ impl ZKMProofShape {
             by_class.into_values().collect()
         };
 
-        // SINGLE-SHARD NORMALIZE: emit ONLY arity-1 normalize shapes.
-        // The production normalize is single-shard (`compress` →
-        // `get_first_layer_inputs` with first_layer_batch_size=1 →
-        // `get_recursion_core_inputs_basefold` chunks(1) → one core shard per
-        // `ZKMCoreBasefoldWitnessValues`, hard-asserted
-        // there).  Arity≥2 Recursion shapes are a PHANTOM
-        // VK class that NO real proof produces.  Cross-shard aggregation lives
-        // in COMPRESS (arity-4 + arity-1 tail), which has the full
-        // PV chain.  Emitting just arity-1 makes the enumerated normalize VK
-        // set match the runtime exactly (every real single-shard normalize
-        // lands in-map) and shrinks the map (4× fewer Recursion shapes).
-        let arity_recursion_shapes: Vec<Self> =
-            small_shapes.iter().map(|os| Self::Recursion(vec![os.clone()])).collect();
+        // NORMALIZE (leaf) SHAPES ARE NOT ENUMERATED.  They are COLLECTED from
+        // real proofs; see `vk_collect_record` / `ZIREN_VK_COLLECT`.
+        //
+        // The normalize program is selected by the core shard's chip NAME SET:
+        // `verify_core_basefold` filters the machine's chips by those names and
+        // derives `column_counts_by_round` from the survivors, so the set is a
+        // compile-time input (`ZKMCoreBasefoldWitnessValues::shape_key`, whose
+        // documentation also records that the height VALUES are not baked).
+        //
+        // Which chips a shard carries is a property of the BLOCK it executed --
+        // a shard that touched no BLS precompile has no BLS chips -- so the
+        // reachable sets are data, not a function of the machine, and no
+        // enumeration over the machine's chips can predict them.
+        //
+        // Enumerating them anyway was not merely incomplete, it was nearly
+        // disjoint.  MEASURED on block 26017940 at SHARD_SIZE=8388608: the
+        // enumeration emitted 7,834 normalize keys from full 38-chip shapes;
+        // the block produced 57 from 30-chip shards; NINE were common. The
+        // programs differ by about 4x in size (`BaseAlu` at 498,048 rows
+        // enumerated against 119,872 in production), which is the chip-set
+        // difference showing up as program size.
+        //
+        // So those 7,834 keys were weight without coverage, and the map is the
+        // union of what CAN be enumerated -- the compress/deferred/shrink tail
+        // below, keyed on pin classes rather than on block data -- with what
+        // must be collected.
+        let _ = &small_shapes;
 
         // Compress / Deferred / Shrink key on f(recursion chip set, arity,
         // the children's PIN CLASSES in order).
@@ -838,9 +852,8 @@ impl ZKMProofShape {
         // stability and `generate_maximal_shapes`.
         let _ = recursion_shape_config;
 
-        arity_recursion_shapes
+        arity_compress_shapes
             .into_iter()
-            .chain(arity_compress_shapes)
             .chain(deferred_shapes)
             .chain(shrink_shapes)
     }
@@ -1426,30 +1439,42 @@ mod tests {
         );
     }
 
-    /// ARITY-ENUM coverage: generate() emits ONLY arity-1 normalize shapes —
-    /// the production normalize is single-shard, so arity≥2 Recursion shapes
-    /// would be a phantom VK class no real proof produces.  Every Recursion
-    /// shape must be exactly one per-shard shape.
+    /// `generate` emits NO normalize shapes, and every shape it does emit is
+    /// one the machine determines rather than the block.
+    ///
+    /// A normalize program is selected by its core shard's chip NAME SET, and
+    /// which chips a shard carries is a property of the block it executed, so
+    /// enumerating over the machine's chips cannot predict them: doing so
+    /// produced 7,834 keys covering 9 of the 57 one real block needed. Those
+    /// keys are collected (`ZIREN_VK_COLLECT`), not enumerated.
+    ///
+    /// Compose, deferred and shrink stay enumerable because they key on the
+    /// children's PIN CLASSES, which `RECURSION_PIN_CLASSES` fixes — rows and
+    /// chip sets do not enter.
     #[test]
-    fn generate_emits_arity_1_to_reduce_batch_size() {
+    fn generate_emits_no_normalize_shapes() {
         use crate::REDUCE_BATCH_SIZE;
         let core_shape_config = CoreShapeConfig::default();
         let recursion_shape_config = RecursionShapeConfig::default();
-        let mut per_arity: BTreeMap<usize, usize> = BTreeMap::new();
-        for s in
+        let all: Vec<ZKMProofShape> =
             ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, REDUCE_BATCH_SIZE)
-        {
-            if let ZKMProofShape::Recursion(batch) = s {
-                *per_arity.entry(batch.len()).or_default() += 1;
-            }
-        }
-        let arities: BTreeSet<usize> = per_arity.keys().cloned().collect();
-        let expected: BTreeSet<usize> = BTreeSet::from([1]);
+                .collect();
+
+        let normalize = all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
         assert_eq!(
-            arities, expected,
-            "normalize is single-shard: must emit exactly arity {{1}}, got {arities:?}"
+            normalize, 0,
+            "normalize keys are collected from real proofs, not enumerated; \
+             emitting {normalize} of them is weight without coverage",
         );
-        eprintln!("[ARITY] per_arity_recursion_counts = {per_arity:?}");
+
+        // Non-vacuity: the tail it DOES emit is still there, so a `generate`
+        // that simply returned nothing would not pass this test.
+        let compress = all.iter().filter(|s| matches!(s, ZKMProofShape::Compress(_))).count();
+        let deferred = all.iter().filter(|s| matches!(s, ZKMProofShape::Deferred(_))).count();
+        let shrink = all.iter().filter(|s| matches!(s, ZKMProofShape::Shrink(_))).count();
+        assert!(compress > 0 && deferred > 0 && shrink > 0, "the enumerable tail must remain");
+        assert_eq!(all.len(), compress + deferred + shrink, "no other variant is emitted");
+        eprintln!("[ENUM] compress={compress} deferred={deferred} shrink={shrink}");
     }
 
     /// ARITY-ENUM GAP PROBE: does a HETEROGENEOUS batch (two shards of the
