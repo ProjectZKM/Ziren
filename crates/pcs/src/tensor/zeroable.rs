@@ -45,15 +45,21 @@ mod tests {
     use super::*;
     use p3_field::PrimeCharacteristicRing;
 
+    /// Only callable for a `T` that declares the all-zero pattern valid, so
+    /// this both exercises the bound and is the operation the bound licenses.
+    fn zeroed<T: Zeroable>() -> T {
+        // SAFETY: `T: Zeroable` is exactly the promise that this is a valid `T`.
+        unsafe { core::mem::zeroed() }
+    }
+
     /// The property the trait asserts, for the field element that motivates it:
     /// zeroed bytes must read back as the additive identity.
     #[test]
     fn zeroed_bytes_are_the_additive_identity() {
-        let zeroed: p3_koala_bear::KoalaBear =
-            unsafe { core::mem::zeroed::<p3_koala_bear::KoalaBear>() };
-        assert_eq!(zeroed, p3_koala_bear::KoalaBear::ZERO);
+        let z: p3_koala_bear::KoalaBear = zeroed();
+        assert_eq!(z, p3_koala_bear::KoalaBear::ZERO);
 
-        let zeroed_array: [p3_koala_bear::KoalaBear; 4] = unsafe { core::mem::zeroed() };
-        assert_eq!(zeroed_array, [p3_koala_bear::KoalaBear::ZERO; 4]);
+        let z_array: [p3_koala_bear::KoalaBear; 4] = zeroed();
+        assert_eq!(z_array, [p3_koala_bear::KoalaBear::ZERO; 4]);
     }
 }

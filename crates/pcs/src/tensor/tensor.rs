@@ -33,7 +33,7 @@ pub struct Tensor<T, A: Backend = CpuBackend> {
 // performed a byte copy.
 impl<T: Copy, A: Backend> Clone for Tensor<T, A> {
     fn clone(&self) -> Self {
-        Self { storage: self.storage.clone(), dimensions: self.dimensions.clone() }
+        Self { storage: self.storage.clone(), dimensions: self.dimensions }
     }
 }
 

@@ -998,7 +998,8 @@ mod test {
         match two_round_verify_with(0x5EAF_0421, |p| {
             let opening =
                 &mut p.basefold_proof.component_polynomials_query_openings_and_proofs[0];
-            opening.leaves[0].values[0].pop().expect("the matrix has a column to drop");
+            let _dropped =
+                opening.leaves[0].values[0].pop().expect("the matrix has a column to drop");
         }) {
             Err(StackedVerifierError::Basefold(BasefoldVerifierError::IncorrectShape(_))) => {}
             other => panic!("a narrow leaf must be rejected: {other:?}"),
