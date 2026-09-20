@@ -607,9 +607,21 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             prev_round0 = false;
         }
 
-        // Final PoW + final queries.
+        // Final PoW + final queries, with the revealed polynomial absorbed
+        // first.  The host prover and the native verifier bind it in the same
+        // place; a ring that skipped it here would draw a different final
+        // proof-of-work challenge and every index after it.
+        for c in proof.final_poly.iter() {
+            observe_ext_element::<C, FC>(builder, challenger, *c);
+        }
         challenger.check_witness(builder, self.config.final_pow_bits, proof.final_pow);
-        let final_openings = proof.round_query_openings.last().unwrap();
+        // The final round's openings sit at its own canonical index; the shape
+        // is fixed when the program is built, so this is the same entry, named
+        // rather than taken off the end.
+        let final_openings = proof
+            .round_query_openings
+            .get(self.config.round_parameters.len() - 1)
+            .expect("the final round's query openings");
         let leaves_per_query = if prev_round0 { commitments.len() } else { 1 };
         assert_eq!(
             final_openings.leaves.len(),
@@ -661,7 +673,10 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                         &leaf_felts,
                         &leaf.path,
                         bits,
-                        proof.round_commitments.last().unwrap(),
+                        // The last round that committed, at its own index —
+                        // the same entry the transcript absorbed, named rather
+                        // than taken off the end of the vector.
+                        &proof.round_commitments[self.config.round_parameters.len() - 2],
                     );
                     leaf.ef_values.clone()
                 };

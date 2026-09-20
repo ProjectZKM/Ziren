@@ -760,6 +760,20 @@ where
         // Final queries against the last committed codeword (or, when no round
         // ever commits, the stripe trees).
         let final_poly = folder.f_vec.clone();
+        // The revealed polynomial is transcript-bound BEFORE the final
+        // proof-of-work and the final query indices.
+        //
+        // It is the last oracle, revealed in the clear rather than committed,
+        // and it carries `2^final_log` coefficients of freedom.  Grinding and
+        // sampling first would hand a non-interactive prover every final
+        // position before it had to choose those coefficients, and the final
+        // round would stop being the committed-polynomial query experiment the
+        // soundness count is taken over.  Tampering one coefficient of an
+        // honest proof is rejected either way; that is not the case this
+        // ordering is about.
+        for c in final_poly.iter() {
+            challenger.observe_algebra_element(*c);
+        }
         let final_pow = {
             let _t_g = open_timing::Timer::new(&open_timing::FGRIND);
             ProofOfWork(challenger.grind(self.config.final_pow_bits))
@@ -887,6 +901,43 @@ where
         let whir = &proof.whir_proof;
         if whir.final_poly.len() != 1usize << final_log {
             return Err(WhirVerifierError::IncorrectShape("final_poly".into()));
+        }
+
+        // EXACT cardinalities for every proof vector, before a single challenge
+        // is drawn from any of them.
+        //
+        // Reading these with `get` rejects a SHORT proof but accepts a LONG
+        // one, and a surplus entry is not a harmless alternate encoding: the
+        // final phase used to select `round_commitments.last()` and
+        // `round_query_openings.last()`, while the rounds observe fixed
+        // indices.  One appended commitment therefore changed the root the
+        // final queries authenticate against WITHOUT changing anything the
+        // transcript absorbed — and the final indices are sampled before that
+        // root is checked, so the tree could be built once the positions were
+        // known.  The configuration fixes every one of these counts, so they
+        // are requirements.
+        {
+            let expect = |what: &'static str, got: usize, want: usize| {
+                if got == want {
+                    Ok(())
+                } else {
+                    Err(WhirVerifierError::IncorrectShape(alloc::format!(
+                        "{what}: {got} entries, the configuration fixes {want}"
+                    )))
+                }
+            };
+            // One commitment, OOD answer set and sumcheck message list per
+            // NON-final round; the final round's messages ride their own field.
+            let non_final = num_rounds - 1;
+            expect("round_commitments", whir.round_commitments.len(), non_final)?;
+            expect("round_ood_answers", whir.round_ood_answers.len(), non_final)?;
+            expect("round_sumcheck_polys", whir.round_sumcheck_polys.len(), non_final)?;
+            // Query openings: one per non-final round, plus the final round's.
+            expect("round_query_openings", whir.round_query_openings.len(), num_rounds)?;
+            expect("final_sumcheck_polys", whir.final_sumcheck_polys.len(), folds[num_rounds - 1])?;
+            // Folding proof-of-work: one per folded variable across all rounds,
+            // plus one gating each non-final round's query phase.
+            expect("folding_pow", whir.folding_pow.len(), folds.iter().sum::<usize>() + non_final)?;
         }
         if proof.batch_evaluations.len() != round_stripe_counts.len()
             || commitments.len() != round_stripe_counts.len()
@@ -1113,13 +1164,22 @@ where
             prev_round0 = false;
         }
 
-        // Final PoW + final queries.
+        // Final PoW + final queries, with the revealed polynomial absorbed
+        // first — the prover binds it in the same place, and the length was
+        // pinned to `2^final_log` at entry.
+        for c in whir.final_poly.iter() {
+            challenger.observe_algebra_element(*c);
+        }
         if !challenger.check_witness(self.config.final_pow_bits, whir.final_pow.0) {
             return Err(WhirVerifierError::PowMismatch { round: num_rounds, var: usize::MAX });
         }
         let final_mask = (1usize << prev_domain_log) - 1;
-        let final_openings =
-            whir.round_query_openings.last().ok_or_else(|| shape("final query openings"))?;
+        // The final round's openings are at its own canonical index, not
+        // whatever the vector happens to end with.
+        let final_openings = whir
+            .round_query_openings
+            .get(num_rounds - 1)
+            .ok_or_else(|| shape("final query openings"))?;
         let leaves_per_query = if prev_round0 { commitments.len() } else { 1 };
         if final_openings.leaves.len() != self.config.final_queries * leaves_per_query {
             return Err(WhirVerifierError::IncorrectShape("final query count".into()));
@@ -1166,7 +1226,14 @@ where
                 };
                 self.mmcs
                     .verify_batch(
-                        whir.round_commitments.last().ok_or_else(|| shape("final commitment"))?,
+                        // The last round that committed, at its own index.
+                        // `round_commitments` holds exactly `num_rounds - 1`
+                        // entries (pinned at entry), and this branch runs only
+                        // when a folding round has committed, so the index is
+                        // in range by the same pin that made the count exact.
+                        whir.round_commitments
+                            .get(num_rounds - 2)
+                            .ok_or_else(|| shape("final commitment"))?,
                         &dims,
                         idx,
                         opened,

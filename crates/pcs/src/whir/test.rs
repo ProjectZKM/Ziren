@@ -547,7 +547,7 @@ fn interleaved_roundtrip_verifies() {
 /// instance; honest verify + tamper rejection on a stripe leaf.
 #[test]
 fn stacked_roundtrip_verifies() {
-    use crate::whir::stacked::{StackedWhirProver, StackedWhirVerifier};
+    use crate::whir::stacked::{StackedWhirProof, StackedWhirProver, StackedWhirVerifier};
 
     type F = InnerVal;
     type EF = InnerChallenge;
@@ -622,6 +622,66 @@ fn stacked_roundtrip_verifies() {
     assert!(verifier
         .verify_trusted_evaluation(&commitments, &[3, 2], &stack_point, &bad, &mut v_chal)
         .is_err());
+
+    // A SURPLUS tail entry must be rejected.
+    //
+    // The rounds absorb `round_commitments[r]` at fixed indices, so appending
+    // one leaves the transcript untouched.  The final phase used to
+    // authenticate its queries against `round_commitments.last()` and open
+    // `round_query_openings.last()`, so one appended entry silently replaced
+    // the root and leaves the final STIR check runs against -- and the final
+    // indices are sampled before that root is verified, so a prover could build
+    // the substituted tree after learning the positions.
+    //
+    // Duplicating the honest last entry is the mildest possible surplus: it
+    // changes no value, only the length.  A verifier that rejects it is
+    // rejecting the CARDINALITY, which is what the configuration fixes; one
+    // that accepts it would accept an arbitrary tail just as readily.
+    let reject = |what: &str, surplus: &StackedWhirProof<F, EF, _>| {
+        let mut v_chal = build_challenger();
+        assert!(
+            verifier
+                .verify_trusted_evaluation(
+                    &commitments,
+                    &[3, 2],
+                    &stack_point,
+                    surplus,
+                    &mut v_chal
+                )
+                .is_err(),
+            "a surplus {what} must be rejected: the configuration fixes every one of these counts"
+        );
+    };
+    {
+        let mut p = proof.clone();
+        let last = p.whir_proof.round_commitments.last().unwrap().clone();
+        p.whir_proof.round_commitments.push(last);
+        reject("commitment", &p);
+    }
+    {
+        let mut p = proof.clone();
+        let last = p.whir_proof.round_query_openings.last().unwrap().clone();
+        p.whir_proof.round_query_openings.push(last);
+        reject("query-opening set", &p);
+    }
+    {
+        let mut p = proof.clone();
+        let last = p.whir_proof.round_ood_answers.last().unwrap().clone();
+        p.whir_proof.round_ood_answers.push(last);
+        reject("OOD answer set", &p);
+    }
+    {
+        let mut p = proof.clone();
+        let last = p.whir_proof.folding_pow.last().unwrap().clone();
+        p.whir_proof.folding_pow.push(last);
+        reject("folding proof-of-work", &p);
+    }
+    {
+        let mut p = proof.clone();
+        let last = p.whir_proof.round_sumcheck_polys.last().unwrap().clone();
+        p.whir_proof.round_sumcheck_polys.push(last);
+        reject("sumcheck message list", &p);
+    }
 
     // Tampering a stripe-leaf opening is rejected (Merkle authentication).
     let mut bad = proof.clone();

@@ -410,6 +410,12 @@ where
 
         // ---- Final round: reveal the final poly; final PoW + final queries. ----
         let final_poly = folder.f_vec.clone();
+        // Bound before the final proof-of-work and the final indices, as in
+        // the stacked prover: the revealed polynomial is the last oracle and
+        // its coefficients must not be chosen once the positions are known.
+        for c in final_poly.iter() {
+            challenger.observe_algebra_element(*c);
+        }
         let final_pow = ProofOfWork(challenger.grind(self.config.final_pow_bits));
         let final_mask = (1usize << prev_domain_log) - 1;
         let mut final_leaves = Vec::with_capacity(self.config.final_queries);
@@ -655,6 +661,13 @@ where
         // ---- Final PoW + final queries: the last committed codeword must fold
         //      (by the LAST round's randomness) to the revealed final_poly's
         //      monomial evaluation. ----
+        // The revealed polynomial is absorbed first, mirroring the prover: its
+        // length was pinned to `2^final_log` above, and binding it here is what
+        // stops its coefficients being chosen after the final positions are
+        // known.
+        for c in proof.final_poly.iter() {
+            challenger.observe_algebra_element(*c);
+        }
         if !challenger.check_witness(self.config.final_pow_bits, proof.final_pow.0) {
             return Err(WhirVerifierError::PowMismatch { round: num_rounds, var: usize::MAX });
         }
