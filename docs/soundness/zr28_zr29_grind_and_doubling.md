@@ -46,6 +46,15 @@ circuit. It uses 12 bits where we use 16. This was a Ziren-only gap.
 
 ## ZR-28 — the chord identities collapse on doubling
 
+> STATUS: FIXED, and only as a PAIR. The AIR half alone took production down:
+> the constraint needs a WITNESS column, and `GlobalChip` also has a `DeviceAir`
+> impl whose CUDA kernels left it zero. See "The device tracegen gap" below.
+>
+> GATE (non-vacuous): block 26015677, 453,517,134 cycles, proved end to end on
+> ONE GPU through the new server -- 0 LEAF_FUSE_ERR, 0 "extension field
+> division", proof generated. The same configuration produced 24 LEAF_FUSE_ERR
+> and a rolled-back deploy before the device half existed.
+
 For running sum `P1`, event point `P2`, claimed next sum `P3`, the AIR asserts
 
 ```text
@@ -133,6 +142,42 @@ Ziren ahead rather than level.
    identity case, false for doubling, where both checkers vanish identically. The
    offset-point sentence also reads as covering the whole trace when it
    establishes row 0. Not edited here — the paper is under review.
+
+### The device tracegen gap
+
+This is what makes ZR-28 a cross-repo change rather than a local one.
+`GlobalChip` has a `DeviceAir` impl in `ziren-gpu`
+(`core/src/tracegen/core.rs`): on GPU the trace is produced by
+`core_global_generate_trace_round_1/2/3`, and the matrix is memset to zero and
+sized from `BaseAir::width`. Widening the chip on the Ziren side ALONE therefore
+yields seven zero columns on device while the host tracegen fills them, so on
+every real row
+
+```text
+    is_real·((x2 - x1)·inv - 1) = is_real·(0 - 1) != 0
+```
+
+the zerocheck quotient stops dividing and every recursion leaf fails with
+"attempted to perform extension field division". Measured: 24 leaf failures, 0
+vk denials, 3 of 3 blocks, automatic rollback.
+
+`core_global_generate_trace_finalize_kernel` now fills the column on both row
+kinds, matching `populate_real`: for a real row `x1` is `initial_digest` -- the
+sum BEFORE the event, since `point` carries the NEGATED y so `sum += point`
+subtracts -- and `x2` is the lifted event point's x; for a padding row the
+`(final - dummy) + dummy` layout gives `x2 = dummy.x`, `x1 = initial.x`.
+`kb31_septic_extension_t::reciprocal()` already existed, so this is the septic
+arithmetic that was already there.
+
+WHY NO EARLIER GATE CAUGHT IT: every one was the CPU prover on fibonacci. The
+host tracegen fills the column, so the constraint held there, and fibonacci
+barely populates the `Global` unit in the first place. Neither condition reaches
+the device path, and `cargo check --workspace --all-targets` on Ziren cannot see
+a dependent repo. **A core-AIR change is gated by a reth block on the GPU, or it
+is not gated.** Watch for a vacuous pass while building that gate: two runs
+reported "0 LEAF_FUSE_ERR" having proved nothing at all (a missing `--rpc-url`,
+then `CUDA_RUN_DOCKER` defaulting to true and tripping ZR-10's digest pin), so
+the gate must assert that a proof was actually produced.
 
 ## Cross-repo consequence
 
