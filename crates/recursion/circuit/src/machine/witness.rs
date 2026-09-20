@@ -265,7 +265,7 @@ mod basefold_witness {
             self.shard_proofs.write(witness);
             // Write per-shard chip_cumulative_sums in matching order.
             for sp in self.shard_proofs.iter() {
-                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
                     sums.write(witness);
                 }
             }
@@ -323,7 +323,7 @@ mod basefold_witness {
             self.vks_and_proofs.write(witness);
             // Write chip_cumulative_sums per input.
             for (_, sp) in self.vks_and_proofs.iter() {
-                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
                     sums.write(witness);
                 }
             }
@@ -382,7 +382,7 @@ mod basefold_witness {
             self.vks_and_proofs.write(witness);
             // Write chip_cumulative_sums per input.
             for (_, sp) in self.vks_and_proofs.iter() {
-                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
                     sums.write(witness);
                 }
             }
@@ -437,7 +437,7 @@ mod basefold_witness {
             self.vks_and_proofs.write(witness);
             // Write chip_cumulative_sums per input.
             for (_, sp) in self.vks_and_proofs.iter() {
-                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
                     sums.write(witness);
                 }
             }
@@ -487,7 +487,7 @@ mod basefold_witness {
         fn write(&self, witness: &mut impl WitnessWriter<OuterCfg>) {
             self.vks_and_proofs.write(witness);
             for (_, sp) in self.vks_and_proofs.iter() {
-                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
                     sums.write(witness);
                 }
             }

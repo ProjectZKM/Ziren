@@ -71,8 +71,7 @@ pub fn cached_jit_function(
     syscall_handler: Option<SyscallHandler>,
 ) -> Result<std::sync::Arc<JitFunction>, RunnerError> {
     let key = program_fingerprint(program);
-    let cache =
-        JIT_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let cache = JIT_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
     if let Some(jit_fn) = cache.lock().expect("jit cache poisoned").get(&key) {
         return Ok(jit_fn.clone());
     }
@@ -218,8 +217,7 @@ impl JitMemoryBridge {
     /// Returns `Err(io::Error)` if `mmap` fails.
     pub fn enter_unconstrained(&mut self) -> std::io::Result<*mut u8> {
         if self.cow_ptr.is_some() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(std::io::Error::other(
                 "ENTER_UNCONSTRAINED while already inside an unconstrained block",
             ));
         }
@@ -337,12 +335,7 @@ impl JitMemoryBridge {
     /// (set by the syscall impl via `mw_traced` etc.) BACK to the
     /// host buffer so subsequent JIT'd loads observe the syscall's
     /// writes.  Word-aligned; rounds the range outward.
-    pub fn sync_range_from_executor(
-        &mut self,
-        executor: &Executor<'_>,
-        base: u32,
-        nbytes: u32,
-    ) {
+    pub fn sync_range_from_executor(&mut self, executor: &Executor<'_>, base: u32, nbytes: u32) {
         if nbytes == 0 {
             return;
         }
@@ -362,12 +355,7 @@ impl JitMemoryBridge {
     /// Only iterates the (ptr, len) range the syscall actually
     /// wrote — much cheaper than the old `refresh_from_executor`
     /// which iterated the entire 14k+ uninitialized_memory map.
-    pub fn sync_uninit_range_to_host(
-        &mut self,
-        executor: &Executor<'_>,
-        base: u32,
-        nbytes: u32,
-    ) {
+    pub fn sync_uninit_range_to_host(&mut self, executor: &Executor<'_>, base: u32, nbytes: u32) {
         if nbytes == 0 {
             return;
         }
@@ -665,9 +653,7 @@ pub unsafe extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
             mem_bridge.sync_range_to_executor(executor, a0, 32);
             mem_bridge.sync_range_to_executor(executor, a1, 32);
         }
-        SyscallCode::BN254_FP2_ADD
-        | SyscallCode::BN254_FP2_SUB
-        | SyscallCode::BN254_FP2_MUL => {
+        SyscallCode::BN254_FP2_ADD | SyscallCode::BN254_FP2_SUB | SyscallCode::BN254_FP2_MUL => {
             mem_bridge.sync_range_to_executor(executor, a0, 64);
             mem_bridge.sync_range_to_executor(executor, a1, 64);
         }
@@ -741,7 +727,7 @@ pub unsafe extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
             // the JIT short-circuits and the host can surface
             // UnsupportedSyscall via `runtime.report` after the
             // call returns.
-            ctx.exit_code = (syscall_id as u32) | 0x8000_0000;
+            ctx.exit_code = syscall_id | 0x8000_0000;
             return 1;
         }
     };
@@ -766,12 +752,12 @@ pub unsafe extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
     // their own.  So before EXIT runs we copy the diff's keys so we
     // can post-sync those addresses host-side after the executor
     // restores them.
-    let unconstrained_dirty_addrs: Vec<u32> =
-        if matches!(syscall, SyscallCode::EXIT_UNCONSTRAINED) {
-            executor.unconstrained_state.memory_diff.keys().copied().collect()
-        } else {
-            Vec::new()
-        };
+    let unconstrained_dirty_addrs: Vec<u32> = if matches!(syscall, SyscallCode::EXIT_UNCONSTRAINED)
+    {
+        executor.unconstrained_state.memory_diff.keys().copied().collect()
+    } else {
+        Vec::new()
+    };
 
     // ENTER_UNCONSTRAINED captures `executor.state.pc` for later
     // rollback.  The JIT codegen wrote the SYSCALL's guest PC into
@@ -970,9 +956,7 @@ pub unsafe extern "C" fn jit_syscall_handler(ctx: *mut JitContext) -> u64 {
         SyscallCode::BN254_FP_ADD | SyscallCode::BN254_FP_SUB | SyscallCode::BN254_FP_MUL => {
             mem_bridge.sync_range_from_executor(executor, a0, 32);
         }
-        SyscallCode::BN254_FP2_ADD
-        | SyscallCode::BN254_FP2_SUB
-        | SyscallCode::BN254_FP2_MUL => {
+        SyscallCode::BN254_FP2_ADD | SyscallCode::BN254_FP2_SUB | SyscallCode::BN254_FP2_MUL => {
             mem_bridge.sync_range_from_executor(executor, a0, 64);
         }
         SyscallCode::UINT256_MUL => {
@@ -1312,14 +1296,6 @@ pub struct JitRunOutcome {
     pub registers: [u32; 36],
 }
 
-/// Capabilities query: does the program contain any opcode the
-/// JIT can't currently handle in its default-on path?
-///
-/// Returns `Some(opcode_byte)` for the first unsupported instr,
-/// or `None` if the program is fully JIT-eligible.  Used by
-/// `Executor::run_fast` to skip the JIT path cheaply rather than
-/// spending transpile time only to hit `Err(Driver)`.
-
 /// Below this many *static* instructions the JIT transpile cost
 /// can outweigh the execution saving for straight-line programs.
 /// For looped programs the JIT'd code is re-executed many times,
@@ -1339,32 +1315,8 @@ pub fn first_unsupported_opcode(program: &Program) -> Option<u8> {
         return Some(0xff);
     }
 
-    for ins in &program.instructions {
-        match ins.opcode {
-            // UNIMPL trap-stub lowering exists; real ELFs run
-            // through the JIT.  Lifted in iteration 2.
-            // The driver returns Err on these; pre-screen so we
-            // don't waste a transpile round.
-            // LWL/LWR/SWL/SWR — handled by inline dynasm
-            // (task h).  Allowed.
-            // SYSCALL is now handled by the trampoline + memory
-            // bridge (tasks d/g).  Allowed.
-            // DIV/DIVU edge cases (div-by-zero trap and INT_MIN/-1
-            // overflow panic) are interpreter-specific contracts
-            // verified by tests/div_executor_edge_cases.rs.  The
-            // JIT path lowers via x86 IDIV which would SIGFPE the
-            // host process.  Real Ziren guests don't hit those
-            // edges in proven code, so we let DIV through; the
-            // edge-case tests are gated to interpreter-only via
-            // `#[ignore]` (re-enable by running with
-            // `--include-ignored ZIREN_DISABLE_JIT=1`).
-            // MIPS extension instructions: backend lowerings now
-            // present and validated against the executor by
-            // mipstest_instruction_suites under the control-flow
-            // JIT.  Lifted; if a regression appears,
-            // re-add the failing opcode to this match.
-            _ => {}
-        }
+    for _ins in &program.instructions {
+        {}
     }
     None
 }
@@ -1389,7 +1341,7 @@ mod tests {
 
     #[test]
     fn instructions_to_driver_stream_iter_yields_correct_count() {
-        let prog = vec![
+        let prog = [
             Instruction::new(Opcode::ADD, 1, 2, 3, false, false),
             Instruction::new(Opcode::SUB, 4, 5, 6, false, false),
             Instruction::new(Opcode::AND, 7, 8, 9, false, false),

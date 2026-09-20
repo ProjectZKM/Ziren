@@ -264,10 +264,10 @@ fn rlc_univariate_polynomials<EF: Field>(
     for p in polys {
         // acc = acc * lambda + p
         for slot in acc.iter_mut() {
-            *slot = *slot * lambda;
+            *slot *= lambda;
         }
         for (i, c) in p.coefficients.iter().enumerate() {
-            acc[i] = acc[i] + *c;
+            acc[i] += *c;
         }
     }
     UnivariatePolynomial { coefficients: acc }
@@ -502,7 +502,7 @@ mod tests {
             let two = EF::ONE.double();
             let mut s = self.c;
             for _ in 1..self.n {
-                s = s * two;
+                s *= two;
             }
             UnivariatePolynomial { coefficients: vec![s] }
         }
@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn rlc_one_poly_is_identity() {
         let p = UnivariatePolynomial { coefficients: vec![EF::from_u32(3), EF::from_u32(5)] };
-        let r = rlc_univariate_polynomials(&[p.clone()], EF::from_u32(99));
+        let r = rlc_univariate_polynomials(std::slice::from_ref(&p), EF::from_u32(99));
         assert_eq!(r.coefficients, p.coefficients);
     }
 

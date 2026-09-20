@@ -365,11 +365,11 @@ mod tests {
             }
         );
         // Index 1 = row-bit only set.
-        assert_eq!(bs[1].row_bit, true);
-        assert_eq!(bs[1].index_bit, false);
+        assert!(bs[1].row_bit);
+        assert!(!bs[1].index_bit);
         // Index 2 = index-bit only.
-        assert_eq!(bs[2].row_bit, false);
-        assert_eq!(bs[2].index_bit, true);
+        assert!(!bs[2].row_bit);
+        assert!(bs[2].index_bit);
         // Index 15 = all true.
         assert!(
             bs[15].row_bit

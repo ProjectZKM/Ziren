@@ -15,37 +15,57 @@ pub enum MipsRegister {
     Zero = 0,
     /// `$at` — assembler temporary.
     At,
-    /// Function return values.
+    /// `$v0` — function return value, low word.
     V0,
+    /// `$v1` — function return value, high word.
     V1,
-    /// Function arguments.
+    /// `$a0` — argument register 0.
     A0,
+    /// `$a1` — argument register 1.
     A1,
+    /// `$a2` — argument register 2.
     A2,
+    /// `$a3` — argument register 3.
     A3,
-    /// Caller-saved temporaries.
+    /// `$t0` — caller-saved temporary 0.
     T0,
+    /// `$t1` — caller-saved temporary 1.
     T1,
+    /// `$t2` — caller-saved temporary 2.
     T2,
+    /// `$t3` — caller-saved temporary 3.
     T3,
+    /// `$t4` — caller-saved temporary 4.
     T4,
+    /// `$t5` — caller-saved temporary 5.
     T5,
+    /// `$t6` — caller-saved temporary 6.
     T6,
+    /// `$t7` — caller-saved temporary 7.
     T7,
-    /// Callee-saved.
+    /// `$s0` — callee-saved register 0.
     S0,
+    /// `$s1` — callee-saved register 1.
     S1,
+    /// `$s2` — callee-saved register 2.
     S2,
+    /// `$s3` — callee-saved register 3.
     S3,
+    /// `$s4` — callee-saved register 4.
     S4,
+    /// `$s5` — callee-saved register 5.
     S5,
+    /// `$s6` — callee-saved register 6.
     S6,
+    /// `$s7` — callee-saved register 7.
     S7,
-    /// More temporaries.
+    /// `$t8` — caller-saved temporary 8.
     T8,
+    /// `$t9` — caller-saved temporary 9.
     T9,
-    /// Kernel registers (unused by user code).
+    /// `$k0` — kernel register 0, unused by user code.
     K0,
+    /// `$k1` — kernel register 1, unused by user code.
     K1,
     /// Global pointer.
     Gp,
@@ -55,21 +75,21 @@ pub enum MipsRegister {
     Fp,
     /// Return address.
     Ra,
-    /// Multiply / divide LO half (quotient).  Match the executor's
-    /// `Register::LO = 32` to keep the index encoding consistent so
-    /// instructions that name register 32 directly read LO on both
-    /// paths.  (Earlier this enum had Hi/Lo swapped, which caused
-    /// fib(N) to commit `[N, 0, 0]` once the loop ran enough
-    /// iterations to surface a HI-read after a DIV.)
+    /// Multiply / divide LO half: `rs * rt` low word, or the quotient
+    /// `rs / rt`.  The discriminant is pinned to the executor's
+    /// `Register::LO = 32`; the two index encodings must agree, or an
+    /// instruction naming register 32 reads LO on one path and HI on the
+    /// other.
     Lo,
-    /// Multiply / divide HI half (remainder).  Matches `Register::HI = 33`.
+    /// Multiply / divide HI half: `rs * rt` high word, or the remainder
+    /// `rs mod rt`.  Pinned to `Register::HI = 33`.
     Hi,
-    /// Brk / sbrk pointer (R34, matches `Register::BRK = 34`).
-    /// Used by the syscall path; we keep it backed by ctx.registers[34]
-    /// rather than packed into XMM (no slots left after Hi/Lo).
+    /// `brk`/`sbrk` pointer, pinned to `Register::BRK = 34`.  Backed by
+    /// `ctx.registers[34]` rather than an XMM lane — the packed lanes are
+    /// exhausted by `Lo` and `Hi`.
     Brk,
-    /// Heap pointer (R35, matches `Register::HEAP = 35`).  Same backing
-    /// as Brk — through ctx.registers, not XMM.
+    /// Heap pointer, pinned to `Register::HEAP = 35`.  Backed by
+    /// `ctx.registers[35]`, as for `Brk`.
     Heap,
 }
 

@@ -493,7 +493,7 @@ mod tests {
         // precompile | deferred | core | memory, exactly SP1's order, all in
         // one tree. The tree never learns which is which.
         let mut chain = ShardChain::new();
-        let ranges = vec![
+        let ranges = [
             chain.precompile(),
             chain.precompile(),
             chain.deferred(),
@@ -511,8 +511,7 @@ mod tests {
 
         let mut tree = CompressTree::<usize>::new(2);
         let mut in_flight = ranges.len();
-        let mut queue: VecDeque<(ShardRange, usize)> =
-            ranges.iter().copied().zip(0..).collect();
+        let mut queue: VecDeque<(ShardRange, usize)> = ranges.iter().copied().zip(0..).collect();
         let mut root = None;
         while let Some((range, proof)) = queue.pop_front() {
             in_flight -= 1;

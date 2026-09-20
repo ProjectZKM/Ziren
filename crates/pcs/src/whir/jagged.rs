@@ -55,7 +55,7 @@ pub struct JaggedWhirProverDataGeneric<MT: Mmcs<JaggedVal>> {
 /// Query/PoW budgets here are the TEST shape; the production budget is
 /// [`core_whir_config`].
 pub fn whir_config_for_stack(lsh: usize, ff: usize, final_log: usize) -> WhirConfig {
-    assert!(lsh > final_log && (lsh - final_log) % ff == 0, "lsh must fold evenly");
+    assert!(lsh > final_log && (lsh - final_log).is_multiple_of(ff), "lsh must fold evenly");
     let num_rounds = (lsh - final_log) / ff;
     whir_config_for_fold_schedule(lsh, &alloc::vec![ff; num_rounds], final_log)
 }
@@ -112,11 +112,11 @@ pub fn whir_config_for_fold_schedule(lsh: usize, folds: &[usize], final_log: usi
 /// provable (final round 12·0.99 + 16), 53 under the Johnson bound.
 ///
 /// Later rounds fold 6 (not 7) so the recursion leaf's Merkle-leaf hashing
-/// (queries x opened felts) stays near the old budget: 124·40·2^3 + 88·4·2^6
-/// + 85·4·2^6 ≈ 84 K felts vs 71 K before.  Wider queries at rate 1/4 double
-/// the round-0 codeword; the round-0 fold drops 4 -> 3 so a query leaf
-/// (`stripes x 2^ff0`) halves.  OOD samples 2 per committed round; folding
-/// PoW 0 (soundness rides on the query PoW).
+/// (queries x opened felts) stays near the old budget:
+/// `124·40·2^3 + 88·4·2^6 + 85·4·2^6 ≈ 84 K` felts vs 71 K before.  Wider
+/// queries at rate 1/4 double the round-0 codeword; the round-0 fold drops
+/// 4 -> 3 so a query leaf (`stripes x 2^ff0`) halves.  OOD samples 2 per
+/// committed round; folding PoW 0 (soundness rides on the query PoW).
 pub fn core_whir_config(lsh: usize) -> WhirConfig {
     // Round-0 folds FEWER variables than the later rounds.  A round-0 query
     // authenticates one coset row from EVERY stripe of every round — `chunks

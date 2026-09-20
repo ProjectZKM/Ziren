@@ -426,7 +426,7 @@ where
                             let chunked_main_traces = chunk_vec(main_traces, opts.shard_batch_size);
                             chunked_records
                                 .into_iter()
-                                .zip(chunked_main_traces.into_iter())
+                                .zip(chunked_main_traces)
                                 .for_each(|(records, main_traces)| {
                                     records_and_traces_tx
                                         .lock()

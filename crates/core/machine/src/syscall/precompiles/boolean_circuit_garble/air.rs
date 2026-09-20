@@ -203,8 +203,8 @@ impl BooleanCircuitGarbleChip {
         // memory; bind the one-hot `gate_type` to it (`OR` → `OR_GATE_ID`,
         // `AND` → 0).
         let bytes_shift = AB::F::from_u32(256);
-        let bs2 = bytes_shift.clone() * bytes_shift.clone();
-        let bs3 = bs2.clone() * bytes_shift.clone();
+        let bs2 = bytes_shift * bytes_shift;
+        let bs3 = bs2 * bytes_shift;
         let mem_gate_type = local.gates_input_mem[0].access.value.0[0]
             + local.gates_input_mem[0].access.value.0[1] * bytes_shift
             + local.gates_input_mem[0].access.value.0[2] * bs2

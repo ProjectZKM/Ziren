@@ -188,11 +188,15 @@ where
 ///
 /// Instead of materializing a global `eq` table of length
 /// `2^total_vars × 16 B`, we keep two factored slices:
+///
 ///   - `eq_int` of length `cols_r = 2^remaining_int_vars`
 ///   - `eq_row` of length `rows_r = 2^remaining_row_vars`
+///
 /// and reconstruct the per-index weight on the fly using the layout
 /// `flat[row * cols + col]`:
-///   `eq_full[idx] = eq_int[idx & (cols_r - 1)] * eq_row[idx >> lc]`
+///
+/// `eq_full[idx] = eq_int[idx & (cols_r - 1)] * eq_row[idx >> lc]`
+///
 /// where `lc = log2(cols_r)`.  When `cols_r == 1` (interaction
 /// fully bound), the mask is `0`, `eq_int[0]` becomes a constant
 /// scalar, and `eq_full[idx] = eq_int[0] * eq_row[idx]`.
@@ -523,7 +527,7 @@ fn lagrange_interp_4<EF: Field>(pts: [EF; 4], vals: [EF; 4]) -> [EF; 4] {
 ///   * the sumcheck identity gives `p(0) + p(1) = claim`, so
 ///     `p(1) = claim - p(0)` for free; and
 ///   * `p` vanishes at the eq-factor root
-///       `eq_root = (1 - c) / (1 - 2c)`   (since `eq(c, eq_root) = 0`).
+///     `eq_root = (1 - c) / (1 - 2c)`   (since `eq(c, eq_root) = 0`).
 ///
 /// Thus, having summed the round poly at only `X = 0` and `X = 1/2`,
 /// we know it at four DISTINCT nodes

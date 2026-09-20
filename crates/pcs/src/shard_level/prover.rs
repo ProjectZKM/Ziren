@@ -172,8 +172,7 @@ where
         // Build the ring-native BaseFold precompute via the `BasefoldRing`
         // trait method, INLINE during the prove pass.  The returned commit
         // already stamps `rev`.
-        let precomputed_generic =
-            <SC as BasefoldRing>::commit_multilinears(&named_inner, pin);
+        let precomputed_generic = <SC as BasefoldRing>::commit_multilinears(&named_inner, pin);
         // Ring-generic digest: NO jagged hash-bind on the outer ring (the
         // BN254 wrap re-binds in its registered hook).
         let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
@@ -562,7 +561,8 @@ where
     // The final `BasefoldShardProof` construction — including the witnessed
     // row/padding-column counts + the raw BaseFold root
     // (`jagged_original_commitment`), both derived from `evaluation_proof`.
-    let proof = assemble_basefold_shard_proof::<SC>(
+
+    assemble_basefold_shard_proof::<SC>(
         public_values,
         main_commitment,
         logup_gkr_proof,
@@ -572,8 +572,7 @@ where
         chip_cumulative_sums,
         evaluation_proof,
         orientation,
-    );
-    proof
+    )
 }
 
 // Shared NON-DEVICE shard-driver orchestration helpers, `pub` so the
@@ -733,7 +732,7 @@ pub fn observe_logup_gkr_openings<F, EF, Challenger>(
     Challenger: p3_challenger::FieldChallenger<F>,
 {
     challenger.observe(F::from_u64(num_chips as u64));
-    for (_name, opening) in logup_evaluations.chip_openings.iter() {
+    for opening in logup_evaluations.chip_openings.values() {
         observe_length_prefixed_ext::<F, EF, Challenger>(
             challenger,
             opening.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]),
@@ -790,8 +789,7 @@ pub fn observe_zerocheck_openings_from_residual<SC, A>(
     Challenge<SC>: BasedVectorSpace<Val<SC>>,
 {
     let mut name_sorted: Vec<&&Chip<Val<SC>, A>> = chips.iter().collect();
-    name_sorted
-        .sort_by(|a, b| MachineAir::<Val<SC>>::name(**a).cmp(&MachineAir::<Val<SC>>::name(**b)));
+    name_sorted.sort_by_key(|a| MachineAir::<Val<SC>>::name(**a));
     observe_zerocheck_openings::<Val<SC>, Challenge<SC>, SC::Challenger, _>(
         challenger,
         chips.len(),
@@ -839,7 +837,7 @@ where
                 // side-storage when there is one, else hand back the dummy
                 // (which projects to zero area, as the width-0 view did).
                 if let Some(m) = remat {
-                    let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                    let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(
                         RowMajorMatrix::new(m.values.clone(), m.width),
@@ -1017,8 +1015,7 @@ where
     A: MachineAir<Val<SC>>,
 {
     let mut name_sorted: Vec<&&Chip<Val<SC>, A>> = chips.iter().collect();
-    name_sorted
-        .sort_by(|a, b| MachineAir::<Val<SC>>::name(**a).cmp(&MachineAir::<Val<SC>>::name(**b)));
+    name_sorted.sort_by_key(|a| MachineAir::<Val<SC>>::name(**a));
     let chip_opened: Vec<crate::types::ChipOpenedValues<Val<SC>, Challenge<SC>>> = name_sorted
         .iter()
         .map(|chip| {
@@ -1358,11 +1355,10 @@ where
         .enumerate()
         .map(|(i, (_chip, pm))| {
             let (tvals, twidth) = crate::jagged::real_cells(pm);
-            let main_height = if twidth == 0 {
-                heights.get(i).copied().flatten().unwrap_or(1)
-            } else {
-                tvals.len() / twidth
-            };
+            let main_height = tvals
+                .len()
+                .checked_div(twidth)
+                .unwrap_or_else(|| heights.get(i).copied().flatten().unwrap_or(1));
             let log_h = main_height.max(1).next_power_of_two().trailing_zeros() as usize;
             let slice: &[Challenge<SC>] = if shared_eval_point.len() >= log_h {
                 &shared_eval_point[shared_eval_point.len() - log_h..]
@@ -1439,7 +1435,7 @@ where
         .iter()
         .map(|(_name, pm)| {
             let (tvals, twidth) = crate::jagged::real_cells(pm);
-            let h = if twidth == 0 { 1 } else { tvals.len() / twidth };
+            let h = tvals.len().checked_div(twidth).unwrap_or(1);
             let log_h = h.max(1).next_power_of_two().trailing_zeros() as usize;
             let slice: &[Challenge<SC>] = if shared_eval_point.len() >= log_h {
                 &shared_eval_point[shared_eval_point.len() - log_h..]

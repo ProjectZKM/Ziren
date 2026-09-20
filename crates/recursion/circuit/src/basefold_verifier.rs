@@ -1239,7 +1239,7 @@ where
             let mut idx = 0usize;
             for round in batch_evaluations.iter() {
                 for &v in round.iter() {
-                    claim_acc = claim_acc + batching_coefficients[idx] * v;
+                    claim_acc += batching_coefficients[idx] * v;
                     idx += 1;
                 }
             }
@@ -1363,7 +1363,7 @@ where
                         for mat_values in op.leaf_values.iter() {
                             for &v in mat_values.iter() {
                                 let c = batching_coefficients[batch_idx + poly_offset];
-                                acc = acc + c * v;
+                                acc += c * v;
                                 poly_offset += 1;
                             }
                         }
@@ -1402,7 +1402,7 @@ where
                             let path_len = op.merkle_path_digests.len();
                             for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate()
                             {
-                                let bit = query_indices[query_idx][level].clone();
+                                let bit = query_indices[query_idx][level];
                                 let pair = HV::select_chain_digest(
                                     builder,
                                     bit,
@@ -1511,7 +1511,7 @@ where
                             if half == 0 {
                                 break;
                             }
-                            let bit = query_indices[query_idx][bit_at + j].clone();
+                            let bit = query_indices[query_idx][bit_at + j];
                             let lo = cur[..half].to_vec();
                             let hi = cur[half..].to_vec();
                             // `select_chain_ef` swaps on a set bit, so the
@@ -1580,7 +1580,7 @@ where
                     for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate() {
                         // Witnessed DigestVariable, no const promotion.
                         let sibling_variable: HV::DigestVariable = *sibling_digest;
-                        let bit = path_bits[level].clone();
+                        let bit = path_bits[level];
                         let pair =
                             HV::select_chain_digest(builder, bit, [leaf_digest, sibling_variable]);
                         leaf_digest = HV::compress(builder, pair);

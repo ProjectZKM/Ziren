@@ -465,7 +465,7 @@ impl ShaCompressChip {
         builder.send(
             AirLookup::new(
                 send_carry,
-                (local.is_initialize + local.is_finalize).into(),
+                local.is_initialize + local.is_finalize,
                 LookupKind::PrecompileChain,
             ),
             LookupScope::Local,

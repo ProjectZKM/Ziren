@@ -592,7 +592,7 @@ mod tests {
             acc.add_opcode(opcode, count);
             reference[opcode] += count;
 
-            if rng % 3 == 0 {
+            if rng.is_multiple_of(3) {
                 acc.add_touched_address();
                 touched += 1;
             }

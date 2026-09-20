@@ -150,7 +150,7 @@ where
         // same one as before minus that first constraint's two identities.
         let acc_is_zero = symbolic_ext_is_zero::<C>(&self.accumulator);
         if !acc_is_zero {
-            self.accumulator = self.accumulator * self.alpha;
+            self.accumulator *= self.alpha;
         }
         if symbolic_ext_is_zero::<C>(&x) {
             return;

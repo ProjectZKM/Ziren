@@ -397,7 +397,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             &mut rows,
             || {
                 let mut row = [F::ZERO; NUM_DIVREM_COLS];
-                let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
+                let _cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
                 // A padding row's frame needs no neutralising: the
                 // typed R-type frame's register-access multiplicities
                 // are `is_real`.

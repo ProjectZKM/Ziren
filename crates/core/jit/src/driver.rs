@@ -297,7 +297,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
     // lowering expects an *absolute* target PC (per the existing
     // comment on beq/bne in instruction_impl.rs), so we resolve it
     // here once and pass the absolute value down.
-    let branch_target_pc = (current_pc.wrapping_add(4).wrapping_add(ins.op_c as u32)) as i32;
+    let branch_target_pc = (current_pc.wrapping_add(4).wrapping_add(ins.op_c)) as i32;
 
     match op {
         // ALU
@@ -340,7 +340,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
         JitOpcode::Srl => {
             if ins.imm_b && ins.imm_c {
                 let shamt = (ins.op_c & 0x1f) as u8;
-                let val = (ins.op_b as u32).wrapping_shr(shamt as u32);
+                let val = ins.op_b.wrapping_shr(shamt as u32);
                 t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
             } else if ins.imm_c {
                 t.srl(rd, rs, (ins.op_c & 0x1f) as u8);
@@ -362,7 +362,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
         JitOpcode::Ror => {
             if ins.imm_b && ins.imm_c {
                 let shamt = (ins.op_c & 0x1f) as u8;
-                let val = (ins.op_b as u32).rotate_right(shamt as u32);
+                let val = ins.op_b.rotate_right(shamt as u32);
                 t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
             } else if ins.imm_c {
                 t.ror(rd, rs, (ins.op_c & 0x1f) as u8);
@@ -372,7 +372,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
         }
         JitOpcode::Clz => {
             if ins.imm_b {
-                let val = (ins.op_b as u32).leading_zeros();
+                let val = ins.op_b.leading_zeros();
                 t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
             } else {
                 t.clz(rd, rs);
@@ -380,7 +380,7 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
         }
         JitOpcode::Clo => {
             if ins.imm_b {
-                let val = (ins.op_b as u32).leading_ones();
+                let val = ins.op_b.leading_ones();
                 t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
             } else {
                 t.clo(rd, rs);

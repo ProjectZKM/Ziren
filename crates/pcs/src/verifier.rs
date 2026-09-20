@@ -77,7 +77,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 pinned,
             )
             .map_err(|e| VerificationError::BasefoldShardVerifier(format!("{e}")))?;
-        return Ok(());
+        Ok(())
     }
 }
 

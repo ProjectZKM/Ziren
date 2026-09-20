@@ -383,7 +383,7 @@ mod basefold_over_bn254_generic_typecheck {
         proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, OuterValMmcs>,
         ch: &mut OuterChallenger,
         mmcs: OuterValMmcs,
-        dft: Arc<OuterDft>,
+        _dft: Arc<OuterDft>,
     ) -> Result<(), StackedVerifierError> {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs>(
@@ -488,7 +488,7 @@ mod basefold_over_bn254_roundtrip_test {
                 .collect();
             RowMajorMatrix::new(v, w)
         };
-        let traces = vec![("Cpu".to_string(), mk(20, 100, 1)), ("Add".to_string(), mk(8, 50, 7))];
+        let traces = [("Cpu".to_string(), mk(20, 100, 1)), ("Add".to_string(), mk(8, 50, 7))];
 
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
@@ -516,7 +516,7 @@ mod basefold_over_bn254_roundtrip_test {
             .iter()
             .map(|(name, m)| {
                 (name.clone(), {
-                    let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                    let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     zkm_pcs::multilinear::PaddedMle::padded_with_zeros(
                         std::sync::Arc::new(zkm_pcs::basefold::Mle::from_row_major(
@@ -635,7 +635,7 @@ mod basefold_over_bn254_roundtrip_test {
                 .collect();
             RowMajorMatrix::new(v, w)
         };
-        let traces = vec![("Cpu".to_string(), mk(4, 16, 1)), ("Add".to_string(), mk(2, 8, 7))];
+        let traces = [("Cpu".to_string(), mk(4, 16, 1)), ("Add".to_string(), mk(2, 8, 7))];
 
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
@@ -665,7 +665,7 @@ mod basefold_over_bn254_roundtrip_test {
             .iter()
             .map(|(name, m)| {
                 (name.clone(), {
-                    let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                    let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     zkm_pcs::multilinear::PaddedMle::padded_with_zeros(
                         std::sync::Arc::new(zkm_pcs::basefold::Mle::from_row_major(

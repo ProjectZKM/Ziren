@@ -13,8 +13,8 @@
 
 pub mod build;
 pub mod components;
-pub mod program_cache;
 pub mod compress_tree;
+pub mod program_cache;
 pub mod shapes;
 pub mod types;
 pub mod utils;
@@ -38,12 +38,12 @@ use zkm_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMC
 use zkm_core_machine::{
     io::ZKMStdin, mips::MipsAir, reduce::ZKMReduceProof, utils::ZKMCoreProverError,
 };
+use zkm_pcs::MachineProvingKey;
 use zkm_pcs::{
     air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge, MachineProver,
     ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
     ZKMProverOpts, DIGEST_SIZE,
 };
-use zkm_pcs::MachineProvingKey;
 // Used only by the `#[cfg(test)]` shape-cardinality census below; the
 // non-test build has no reader, which is why it needs the gate.
 #[cfg(test)]
@@ -71,8 +71,12 @@ use zkm_recursion_compiler::{
     ir::{Builder, Witness},
 };
 use zkm_recursion_core::{
-    air::RecursionPublicValues, hash_vkey_with_part_vk, machine::RecursionAir,
-    runtime::ExecutionRecord, shape::{RecursionShape, RecursionShapeConfig}, stark::KoalaBearPoseidon2Outer,
+    air::RecursionPublicValues,
+    hash_vkey_with_part_vk,
+    machine::RecursionAir,
+    runtime::ExecutionRecord,
+    shape::{RecursionShape, RecursionShapeConfig},
+    stark::KoalaBearPoseidon2Outer,
     RecursionProgram, Runtime as RecursionRuntime,
 };
 pub use zkm_recursion_gnark_ffi::proof::{DvSnarkBn254Proof, Groth16Bn254Proof, PlonkBn254Proof};
@@ -176,7 +180,8 @@ pub fn vk_collect_record(digest: &[KoalaBear; DIGEST_SIZE]) {
             let seed: BTreeSet<[KoalaBear; DIGEST_SIZE]> = std::fs::File::open(&path)
                 .ok()
                 .and_then(|f| {
-                    bincode::deserialize_from::<_, BTreeMap<[KoalaBear; DIGEST_SIZE], usize>>(f).ok()
+                    bincode::deserialize_from::<_, BTreeMap<[KoalaBear; DIGEST_SIZE], usize>>(f)
+                        .ok()
                 })
                 .map(|m| m.into_keys().collect())
                 .unwrap_or_default();
@@ -370,7 +375,10 @@ impl RecursionPkCache {
         self.pinned.insert(key);
     }
 
-    fn get(&mut self, key: &[u8; 32]) -> Option<Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>> {
+    fn get(
+        &mut self,
+        key: &[u8; 32],
+    ) -> Option<Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>> {
         match self.entries.get(key) {
             Some(v) => {
                 self.hits += 1;
@@ -828,7 +836,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             if std::env::var("ZIREN_SHAPE_KEY_DIAG").is_ok() {
                 let own = self.compose_band_for(&witness);
                 let last = self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
-                let keys: Vec<String> = (own.map_or(0, |b| b)..=last)
+                let keys: Vec<String> = (own.unwrap_or(0)..=last)
                     .map(|b| format!("{b}:{:016x}", Self::band_keyed(witness.shape_key(), Some(b))))
                     .collect();
                 eprintln!(
@@ -854,7 +862,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let own = self.compose_band_for(&witness).and_then(|b| self.dominating_band(&[b]));
             let last = self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
             let mut digest = [0u8; 32];
-            for band in own.map_or(0, |b| b)..=last {
+            for band in own.unwrap_or(0)..=last {
                 let (_program, d) = self.compose_program_basefold_at(&witness, Some(band));
                 digest = d;
             }
@@ -1130,7 +1138,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         b.packing.offsets.len(),
                         b.packing.column_counts,
                     ),
-                    other => format!("{}", if matches!(other, zkm_pcs::shard_level::shard_proof::EvaluationProof::Empty) { "empty" } else { "bytes" }),
+                    other => (if matches!(
+                        other,
+                        zkm_pcs::shard_level::shard_proof::EvaluationProof::Empty
+                    ) {
+                        "empty"
+                    } else {
+                        "bytes"
+                    })
+                    .to_string(),
                 })
                 .collect();
             // The basefold query-round Merkle LEAF COUNT — the dimension that
@@ -1211,9 +1227,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     fn band_of(&self, program: &RecursionProgram<KoalaBear>) -> Option<usize> {
         let config = self.compress_shape_config.as_ref()?;
-        let heights = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::program_heights(
-            program,
-        );
+        let heights =
+            RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::program_heights(program);
         config.band_index_for(&heights)
     }
 
@@ -1228,7 +1243,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     fn band_keyed(shape_key: u64, band: Option<usize>) -> u64 {
         match band {
             None => shape_key,
-            Some(b) => shape_key.rotate_left(17) ^ (0x9E37_79B9_7F4A_7C15_u64.wrapping_mul(b as u64 + 1)),
+            Some(b) => {
+                shape_key.rotate_left(17) ^ (0x9E37_79B9_7F4A_7C15_u64.wrapping_mul(b as u64 + 1))
+            }
         }
     }
 
@@ -1970,12 +1987,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
 
             // Spawn workers who generate the compress proofs.
-            let (proofs_tx, proofs_rx) =
-                sync_channel::<(
-                    crate::compress_tree::ShardRange,
-                    StarkVerifyingKey<InnerSC>,
-                    ShardProof<InnerSC>,
-                )>(num_first_layer_inputs * 2);
+            let (proofs_tx, proofs_rx) = sync_channel::<(
+                crate::compress_tree::ShardRange,
+                StarkVerifyingKey<InnerSC>,
+                ShardProof<InnerSC>,
+            )>(num_first_layer_inputs * 2);
             let proofs_tx = Arc::new(Mutex::new(proofs_tx));
             let proofs_rx = Arc::new(Mutex::new(proofs_rx));
             let mut prover_handles = Vec::new();
@@ -1989,7 +2005,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
                         if let Ok((range, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
-
                                 // Get the keys.
                                 let (pk, vk) = tracing::debug_span!("Setup compress program")
                                     .in_scope(|| self.compress_prover.setup(&program));
@@ -2075,8 +2090,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 s.spawn(move || {
                     let _span = span.enter();
                     type Item = (StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>);
-                    let mut tree =
-                        crate::compress_tree::CompressTree::<Item>::new(batch_size);
+                    let mut tree = crate::compress_tree::CompressTree::<Item>::new(batch_size);
                     // Everything dispatched and not yet landed. The tree needs
                     // it to tell "this run is short because the chain ends
                     // here" from "this run is short because more is coming" —
@@ -2174,7 +2188,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .expect("shrink: input compressed proof missing basefold side-channel — legacy FRI shrink removed");
         // Bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
-        let vk_merkle_data = self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
+        let vk_merkle_data = self.make_basefold_merkle_proofs(std::slice::from_ref(&compressed_vk));
         let input = ZKMWrapBasefoldWitnessValues {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
             vk_merkle_data,
@@ -2246,7 +2260,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .expect("wrap_bn254: input shrink proof missing basefold side-channel — legacy FRI wrap removed");
         // Bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
-        let vk_merkle_data = self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
+        let vk_merkle_data = self.make_basefold_merkle_proofs(std::slice::from_ref(&compressed_vk));
         let input = ZKMWrapBasefoldWitnessValues {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
             vk_merkle_data,
@@ -2275,7 +2289,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         if let Some(path) = std::env::var_os("ZIREN_DUMP_PART_STARK_VK") {
             match bincode::serialize(&wrap_vk.part_vk()) {
                 Ok(bytes) => match std::fs::write(&path, &bytes) {
-                    Ok(()) => eprintln!(">>> PART_STARK_VK written {} bytes to {:?}", bytes.len(), path),
+                    Ok(()) => {
+                        eprintln!(">>> PART_STARK_VK written {} bytes to {:?}", bytes.len(), path)
+                    }
                     Err(e) => eprintln!(">>> PART_STARK_VK write failed {:?}: {e}", path),
                 },
                 Err(e) => eprintln!(">>> PART_STARK_VK serialize failed: {e}"),
@@ -2513,6 +2529,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 }
 
+/// Whether to log one `NORMALIZE_KEY` line per normalize program request.
+/// Read once; off unless `ZIREN_NORMALIZE_KEY_CENSUS` is `1`/`true`.
+fn normalize_key_census_enabled() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| {
+        matches!(
+            std::env::var("ZIREN_NORMALIZE_KEY_CENSUS").ok().as_deref(),
+            Some("1") | Some("true")
+        )
+    })
+}
+
 #[cfg(test)]
 pub mod tests {
     use std::{
@@ -2599,11 +2627,8 @@ pub mod tests {
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let compress_machine = prover.compress_prover.machine();
 
-        let chip_names: Vec<String> = compress_machine
-            .chips()
-            .iter()
-            .map(|c| <_ as MachineAir<KoalaBear>>::name(c))
-            .collect();
+        let chip_names: Vec<String> =
+            compress_machine.chips().iter().map(<_ as MachineAir<KoalaBear>>::name).collect();
 
         let arity = 4usize;
         // Deliberately the UNCACHED builder: routing through
@@ -2746,7 +2771,7 @@ pub mod tests {
     #[serial]
     fn normalize_program_cache_key_implies_identical_program() {
         use crate::shapes::ZKMProofShape;
-        
+
         use zkm_pcs::shape::OrderedShape;
         use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
 
@@ -2879,7 +2904,7 @@ pub mod tests {
             .chips()
             .iter()
             .filter(|c| <_ as MachineAir<KoalaBear>>::preprocessed_width(*c) > 0)
-            .map(|c| <_ as MachineAir<KoalaBear>>::name(c))
+            .map(<_ as MachineAir<KoalaBear>>::name)
             .collect();
         let expected: BTreeSet<String> =
             ["Byte".to_string(), "Program".to_string()].into_iter().collect();
@@ -2946,7 +2971,7 @@ pub mod tests {
             .chips()
             .iter()
             .take(2)
-            .map(|c| <_ as MachineAir<KoalaBear>>::name(c))
+            .map(<_ as MachineAir<KoalaBear>>::name)
             .collect();
         let proof_shape = || {
             OrderedShape::from_rows(
@@ -3146,7 +3171,6 @@ pub mod tests {
         tracing::info!("Test the outer circuit");
         let (constraints, witness) =
             build_constraints_and_witness(&wrapped_bn254_proof.vk, &wrapped_bn254_proof.proof);
-        // test
         PlonkBn254Prover::test(constraints.clone(), witness.clone());
         tracing::info!("Circuit PLONK test succeeded");
         Groth16Bn254Prover::test(constraints, witness);
@@ -3296,7 +3320,6 @@ pub mod tests {
         stdin
     }
 
-
     /// Tests an end-to-end workflow of proving a program across the entire proof generation
     /// pipeline.
     ///
@@ -3314,13 +3337,7 @@ pub mod tests {
         // docker image which has a different API than the current. So we need to wait until the
         // next release (v1.2.0+), and then switch it back.
         let prover = ZKMProver::<DefaultProverComponents>::new();
-        test_e2e_prover::<DefaultProverComponents>(
-            &prover,
-            elf,
-            fib_stdin(10),
-            opts,
-            Test::All,
-        )
+        test_e2e_prover::<DefaultProverComponents>(&prover, elf, fib_stdin(10), opts, Test::All)
     }
 
     /// Tests an end-to-end workflow of proving a program across the entire proof generation
@@ -3430,13 +3447,7 @@ pub mod tests {
         setup_logger();
         let opts = ZKMProverOpts::default();
         let prover = ZKMProver::<DefaultProverComponents>::new();
-        test_e2e_prover::<DefaultProverComponents>(
-            &prover,
-            elf,
-            fib_stdin(10),
-            opts,
-            Test::Wrap,
-        )
+        test_e2e_prover::<DefaultProverComponents>(&prover, elf, fib_stdin(10), opts, Test::Wrap)
     }
 
     /// Runs through Test::CircuitTest — wrap_bn254 + the in-circuit
@@ -3632,13 +3643,7 @@ pub mod tests {
         setup_logger();
         let opts = ZKMProverOpts::default();
         let prover = ZKMProver::<DefaultProverComponents>::new();
-        test_e2e_prover::<DefaultProverComponents>(
-            &prover,
-            elf,
-            fib_stdin(10),
-            opts,
-            Test::Core,
-        )
+        test_e2e_prover::<DefaultProverComponents>(&prover, elf, fib_stdin(10), opts, Test::Core)
     }
 
     /// ARITY-ENUM DECISIVE (fast, single fib core prove): for a real
@@ -4392,8 +4397,11 @@ pub mod tests {
         }
         for (blocks, rows) in &by_class {
             let pads: BTreeSet<usize> = rows.iter().map(|(_, _, p)| *p).collect();
-            eprintln!("[PADCOL] main_blocks={blocks}: filler heights {:?} -> pad-col counts {:?}",
-                rows.iter().map(|(h, _, _)| *h).collect::<Vec<_>>(), pads);
+            eprintln!(
+                "[PADCOL] main_blocks={blocks}: filler heights {:?} -> pad-col counts {:?}",
+                rows.iter().map(|(h, _, _)| *h).collect::<Vec<_>>(),
+                pads
+            );
         }
 
         // Pick the first class that spans two different pad-column counts.
@@ -4432,7 +4440,9 @@ pub mod tests {
             let other = rows.iter().find(|r| r.0 != first.0 && r.2 == first.2)?;
             Some((*blocks, *first, *other))
         }) else {
-            eprintln!("[PADCOL] SUFFICIENCY INCONCLUSIVE: no class holds two heights at one pad count");
+            eprintln!(
+                "[PADCOL] SUFFICIENCY INCONCLUSIVE: no class holds two heights at one pad count"
+            );
             return;
         };
         eprintln!(
@@ -4678,8 +4688,7 @@ pub mod tests {
             );
         }
         eprintln!(
-            "[CSENS] CONCLUSION: a UNIFORM compose child {} reproduce the natural compose vk",
-            "see eq= above —"
+            "[CSENS] CONCLUSION: a UNIFORM compose child see eq= above — reproduce the natural compose vk"
         );
     }
 
@@ -5249,17 +5258,4 @@ pub mod tests {
             VK_MERKLE_TREE_HEIGHT
         );
     }
-}
-
-
-/// Whether to log one `NORMALIZE_KEY` line per normalize program request.
-/// Read once; off unless `ZIREN_NORMALIZE_KEY_CENSUS` is `1`/`true`.
-fn normalize_key_census_enabled() -> bool {
-    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FLAG.get_or_init(|| {
-        matches!(
-            std::env::var("ZIREN_NORMALIZE_KEY_CENSUS").ok().as_deref(),
-            Some("1") | Some("true")
-        )
-    })
 }

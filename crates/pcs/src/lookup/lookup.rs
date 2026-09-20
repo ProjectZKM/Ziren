@@ -184,7 +184,7 @@ impl<F: Field> Lookup<F> {
                 * Expr::from_usize(self.argument_index());
         for (column, beta) in self.values.iter().zip(betas_iter) {
             let v: Expr = column.apply::<Expr, Var>(prep_slice, main);
-            denominator = denominator + v * beta;
+            denominator += v * beta;
         }
 
         (numerator, denominator)

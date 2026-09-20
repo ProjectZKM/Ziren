@@ -650,7 +650,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
             builder,
             &basefold_vk,
-            &basefold_shard_proof_variable,
+            basefold_shard_proof_variable,
             &shard_chips,
             &chip_metadata,
             &opened_values,

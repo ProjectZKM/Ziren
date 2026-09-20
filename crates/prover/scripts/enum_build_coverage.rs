@@ -77,7 +77,7 @@ fn main() {
                 prover.program_from_shape_basefold(prog_shape)
             }));
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-            if n % 100 == 0 {
+            if n.is_multiple_of(100) {
                 eprintln!("[ENUM-COV] {n}/{total}");
             }
             let out = match built {

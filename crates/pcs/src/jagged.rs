@@ -283,7 +283,7 @@ fn compute_jagged_metadata_natural<F: Field>(
             // packs as zero-area.
             let (h, w) = pm
                 .real_trace_ref()
-                .map(|t| (if t.width == 0 { 0 } else { t.values.len() / t.width }, t.width))
+                .map(|t| (t.values.len().checked_div(t.width).unwrap_or(0), t.width))
                 .unwrap_or((0, 0));
             (name.clone(), h, w)
         })
@@ -359,7 +359,7 @@ pub fn materialize_dense_jagged<F: Field>(
     let mut chip_offsets: Vec<usize> = Vec::with_capacity(chip_cells.len());
     let mut total: usize = 0;
     for (vals, w) in chip_cells {
-        let h = if *w == 0 { 0 } else { vals.len() / *w };
+        let h = vals.len().checked_div(*w).unwrap_or(0);
         chip_offsets.push(total);
         total += h * *w;
     }
@@ -399,7 +399,7 @@ pub fn materialize_dense_jagged<F: Field>(
         chip_slots.into_par_iter().zip(chip_chunks.into_par_iter()).for_each(
             |(slot, ((trace_values, width), _))| {
                 let (trace_values, width) = (*trace_values, *width);
-                let height = if width == 0 { 0 } else { trace_values.len() / width };
+                let height = trace_values.len().checked_div(width).unwrap_or(0);
                 if width == 0 || height == 0 {
                     return;
                 }

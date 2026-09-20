@@ -71,7 +71,7 @@ pub fn build_chip_interaction_tables<
     alpha: EF,
     betas: &[EF],
 ) -> (RowMajorMatrix<F>, RowMajorMatrix<EF>) {
-    let height = if main_width == 0 { 0 } else { main_values.len() / main_width };
+    let height = main_values.len().checked_div(main_width).unwrap_or(0);
     let num_interactions = interactions.len();
 
     // FLAKE FIX: see round.rs::flatten_layer note about KoalaBear
@@ -261,8 +261,7 @@ where
         // beyond `num_real_rows` are resolved at access time inside
         // `ChipLayerState` using each quadrant's identity-fraction
         // pad value (n* → 0, d* → 1).
-        let chip_height: usize =
-            if num_interactions == 0 { 0 } else { numer_mat.values.len() / num_interactions };
+        let chip_height: usize = numer_mat.values.len().checked_div(num_interactions).unwrap_or(0);
         debug_assert!(chip_height <= 1usize << num_row_variables);
         // Parity split: quadrant 0 = even rows, quadrant 1 = odd rows.
         let real_upper = chip_height.div_ceil(2);

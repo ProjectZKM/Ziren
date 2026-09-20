@@ -237,7 +237,7 @@ impl ShiftLeft {
 
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
-        let c = event.c.to_le_bytes();
+        let _c = event.c.to_le_bytes();
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
         cols.is_real = F::ONE;

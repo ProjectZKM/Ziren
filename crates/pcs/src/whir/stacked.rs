@@ -233,7 +233,7 @@ mod open_timing {
             return;
         }
         let n = OPENS.fetch_add(1, Ordering::Relaxed) + 1;
-        if n % 32 == 0 {
+        if n.is_multiple_of(32) {
             let g = |a: &AtomicUsize| a.load(Ordering::Relaxed) as f64 / 1e9;
             eprintln!(
                 "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s | qgrind={:.2}s qr0={:.2}s qlater={:.2}s fgrind={:.2}s fopen={:.2}s cengine={:.2}s chost={:.2}s",
@@ -708,7 +708,7 @@ where
 
             for (&idx, stir) in indices.iter().zip(stir_values_new) {
                 stir_values.push(stir);
-                stir_points.push(map_to_pow_lsb(EF::from(g_prev.exp_u64(idx as u64)), rem));
+                stir_points.push(map_to_pow_lsb(g_prev.exp_u64(idx as u64), rem));
             }
             for leaves in per_query {
                 for o in leaves {
@@ -728,7 +728,7 @@ where
                 let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
                 engine
                     .as_deref_mut()
-                    .map_or(false, |e| e.absorb_ood(&mut folder.weight, &ood_points, &ood_coeffs))
+                    .is_some_and(|e| e.absorb_ood(&mut folder.weight, &ood_points, &ood_coeffs))
             };
             if !ood_absorbed {
                 assert!(!resident, "WhirRound0Engine declined absorb_ood while resident");
@@ -742,7 +742,7 @@ where
             let (mono_coeffs, _) = folder.monomial_coeffs(&stir_values, round_batch, start_coeff);
             let absorbed = {
                 let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
-                engine.as_deref_mut().map_or(false, |e| {
+                engine.as_deref_mut().is_some_and(|e| {
                     e.absorb_monomials(&mut folder.weight, &stir_points, &mono_coeffs)
                 })
             };
@@ -1093,7 +1093,7 @@ where
                 let stir = Mle::from_row_major(RowMajorMatrix::new(virt_leaf, 1))
                     .eval_at::<EF>(&this_round_randomness)[0];
                 stir_values.push(stir);
-                stir_points.push(map_to_pow_lsb(EF::from(g_prev.exp_u64(idx as u64)), rem));
+                stir_points.push(map_to_pow_lsb(g_prev.exp_u64(idx as u64), rem));
             }
 
             let round_batch: EF = challenger.sample_algebra_element();
@@ -1182,7 +1182,7 @@ where
                 .eval_at::<EF>(last_randomness)[0];
             let expected = mono_eval_lsb(
                 &whir.final_poly,
-                &map_to_pow_lsb(EF::from(g_final.exp_u64(idx as u64)), final_log),
+                &map_to_pow_lsb(g_final.exp_u64(idx as u64), final_log),
             );
             if folded != expected {
                 return Err(WhirVerifierError::TerminalMismatch);

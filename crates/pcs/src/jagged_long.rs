@@ -356,6 +356,7 @@ mod tests {
     ///   * round 0's `p(0) + p(1)` equals the claim `sum q*w`, and
     ///   * the final `q_at_z` equals the trace polynomial evaluated at the
     ///     recorded `eval_point`.
+    ///
     /// The second is the one that pins the binding order: with `push` vs
     /// `insert(0, ..)` reversed, the point no longer addresses the variable the
     /// fold actually bound and this fails.
@@ -448,7 +449,6 @@ mod tests {
         let mut pch = InnerChallenger::new(perm.clone());
         let proof = prove_jagged_reduction_hadamard(msg, lsh, weights, &mut pch);
 
-        // verifier replay
         let mut vch = InnerChallenger::new(perm);
         let mut current = claim;
         let mut sampled: Vec<InnerChallenge> = Vec::new();

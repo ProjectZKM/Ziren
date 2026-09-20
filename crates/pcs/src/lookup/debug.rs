@@ -101,12 +101,7 @@ pub fn debug_lookups<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
                     let expr: Val<SC> = value.apply(preprocessed_row, main.row_mut(row));
                     values.push(expr);
                 }
-                let key = format!(
-                    "{} {} {}",
-                    &lookup.scope.to_string(),
-                    &lookup.kind.to_string(),
-                    vec_to_string(values)
-                );
+                let key = format!("{} {} {}", lookup.scope, lookup.kind, vec_to_string(values));
                 key_to_vec_data.entry(key.clone()).or_insert_with(Vec::new).push(LookupData {
                     chip_name: chip.name(),
                     kind: lookup.kind,

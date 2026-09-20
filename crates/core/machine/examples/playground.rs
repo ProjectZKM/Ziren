@@ -4,8 +4,8 @@
 //! misbehaves, so an investigation does not need its own throwaway binary:
 //!
 //!   * `execute` — run a program and report shards, cycles and syscall usage.
-//!   * `buses`   — per-`LookupKind` send/receive balance, the diagnostic that
-//!                 localizes a `LogUp-GKR: public-values balance failed`.
+//!   * `buses`   — per-`LookupKind` send/receive balance, the diagnostic
+//!     that localizes a `LogUp-GKR: public-values balance failed`.
 //!   * `prove`   — full prove + verify.
 //!
 //! Reproducibility: every run prints a header naming the program, the commit,
@@ -213,8 +213,8 @@ fn main() {
                 MipsAir::machine(KoalaBearPoseidon2::new());
             let kinds = ALL_KINDS;
             eprintln!(
-                "{:<28} {:>6} {:>6} {:>5} {:>5} {:>5} {:>6}  {}",
-                "chip", "main_w", "prep_w", "send", "recv", "tot", "padded", "by kind"
+                "{:<28} {:>6} {:>6} {:>5} {:>5} {:>5} {:>6}  by kind",
+                "chip", "main_w", "prep_w", "send", "recv", "tot", "padded"
             );
             let mut static_rows: Vec<(String, usize, usize, usize, usize, usize, String)> = vec![];
             for c in machine.chips() {
@@ -267,8 +267,7 @@ fn main() {
             // One shard per `execute_record` batch: a real workload's full
             // record set does not fit in host memory (`rt.run()` retains
             // every shard), and the census only ever needs one at a time.
-            let mut opts = ZKMCoreOpts::default();
-            opts.shard_batch_size = 1;
+            let opts = ZKMCoreOpts { shard_batch_size: 1, ..Default::default() };
             let mut rt = Executor::new(program(), opts);
             // A third argument names a bincode-serialised `ZKMStdin`, so the
             // census can run the same input a perf gate does.

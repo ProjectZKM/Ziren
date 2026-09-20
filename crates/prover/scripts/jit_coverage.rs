@@ -139,7 +139,7 @@ fn main() {
                                 .instrs
                                 .iter()
                                 .map(|ai| match ai.inner() {
-                                    Instruction::BaseAlu(i) => 0 + i.opcode as u8 * 16,
+                                    Instruction::BaseAlu(i) => i.opcode as u8 * 16,
                                     Instruction::ExtAlu(i) => 1 + i.opcode as u8 * 16,
                                     Instruction::Mem(_) => 2,
                                     Instruction::Poseidon2(_) => 3,

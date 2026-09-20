@@ -646,24 +646,21 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             {
                 let (real_numerator, real_denominator) = interaction
                     .eval::<SymbolicExt<C::F, C::EF>, Ext<C::F, C::EF>>(
-                        prep,
-                        main,
-                        alpha_sym.clone(),
-                        &betas,
+                        prep, main, alpha_sym, &betas,
                     );
                 let (padding_numerator, padding_denominator) = interaction
                     .eval::<SymbolicExt<C::F, C::EF>, Ext<C::F, C::EF>>(
                         padding_prep.as_deref(),
                         &padding_main,
-                        alpha_sym.clone(),
+                        alpha_sym,
                         &betas,
                     );
 
                 // Degree-masked num/den, then sign for receives (host
                 // verifier.rs:1828-1832).
-                let numerator_eval_i = real_numerator - padding_numerator * geq_eval.clone();
+                let numerator_eval_i = real_numerator - padding_numerator * geq_eval;
                 let denominator_eval_i =
-                    real_denominator + (SymbolicExt::ONE - padding_denominator) * geq_eval.clone();
+                    real_denominator + (SymbolicExt::ONE - padding_denominator) * geq_eval;
                 let numerator_eval_i = if is_send { numerator_eval_i } else { -numerator_eval_i };
                 numerator_values.push(numerator_eval_i);
                 denominator_values.push(denominator_eval_i);
@@ -949,21 +946,13 @@ mod tests {
         let zero_ext: Ext<F, EF> = builder.constant(EF::ZERO);
         let padding_main: Vec<Ext<F, EF>> = vec![zero_ext; main_full.len()];
 
-        let (real_num, real_den) = lookup.eval::<SymbolicExt<F, EF>, Ext<F, EF>>(
-            None,
-            &main_full,
-            alpha_sym.clone(),
-            &betas,
-        );
-        let (pad_num, pad_den) = lookup.eval::<SymbolicExt<F, EF>, Ext<F, EF>>(
-            None,
-            &padding_main,
-            alpha_sym.clone(),
-            &betas,
-        );
+        let (real_num, real_den) =
+            lookup.eval::<SymbolicExt<F, EF>, Ext<F, EF>>(None, &main_full, alpha_sym, &betas);
+        let (pad_num, pad_den) =
+            lookup.eval::<SymbolicExt<F, EF>, Ext<F, EF>>(None, &padding_main, alpha_sym, &betas);
         let one_sym: SymbolicExt<F, EF> = SymbolicExt::ONE;
-        let num_i = real_num - pad_num * geq.clone(); // send
-        let den_i = real_den + (one_sym - pad_den) * geq.clone();
+        let num_i = real_num - pad_num * geq; // send
+        let den_i = real_den + (one_sym - pad_den) * geq;
 
         // (6)-(7) log_num_interactions = 0 ⇒ interaction_point empty ⇒ the
         // reconstructed MLE collapses to the single value.

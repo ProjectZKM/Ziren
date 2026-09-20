@@ -110,7 +110,7 @@ where
         .reduce(
             || vec![EF::ZERO; width],
             |mut l, r| {
-                for (a, b) in l.iter_mut().zip(r.into_iter()) {
+                for (a, b) in l.iter_mut().zip(r) {
                     *a += b;
                 }
                 l

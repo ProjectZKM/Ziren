@@ -226,7 +226,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         if orig_point_len < stack_dim {
             for r in &padded_point[orig_point_len..stack_dim] {
                 let r_sym: SymbolicExt<C::F, C::EF> = (*r).into();
-                claim_adj = claim_adj * (SymbolicExt::<C::F, C::EF>::ONE - r_sym);
+                claim_adj *= SymbolicExt::<C::F, C::EF>::ONE - r_sym;
             }
         }
         let claim_adj_ext: Ext<C::F, C::EF> = builder.eval(claim_adj);

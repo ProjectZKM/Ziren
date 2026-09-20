@@ -323,6 +323,7 @@ pub struct Executor<'a> {
     ///   - skips the `split_acct` trace-area / height accumulation (per cycle)
     ///   - skips the per-class branch/jump opcode-count adjustments
     ///     (~30 LOC of bookkeeping per cycle)
+    ///
     /// These are all duplicate work in TracingVM replay — they were
     /// already computed during the original checkpoint-gen pass, and
     /// the worker's `report`/`local_counts` outputs are discarded.
@@ -3099,7 +3100,11 @@ impl<'a> Executor<'a> {
                 // next chunk opens at `ptr` and keeps its own copy, so the entry
                 // is duplicated across the seam on purpose.
                 let from = prev.input_stream_ptr as usize;
-                let to = self.state.input_stream_ptr.saturating_add(1).min(self.state.input_stream.len());
+                let to = self
+                    .state
+                    .input_stream_ptr
+                    .saturating_add(1)
+                    .min(self.state.input_stream.len());
                 prev.input_stream_slice = Some(if from < to {
                     self.state.input_stream[from..to].to_vec()
                 } else {
@@ -3721,10 +3726,10 @@ impl<'a> Executor<'a> {
             // (= the program-entry snapshot on the first-cycle run_fast).
             if self.d4_capture_chunk {
                 let chunk =
-                    unsafe { crate::jit_runner::run_jit_capture_trace_chunk(&jit_fn, &mut ctx, 0) };
+                    unsafe { crate::jit_runner::run_jit_capture_trace_chunk(jit_fn, &mut ctx, 0) };
                 self.d4_captured_chunk = Some(chunk);
             } else {
-                unsafe { run_jit(&jit_fn, &mut ctx) };
+                unsafe { run_jit(jit_fn, &mut ctx) };
             }
 
             // Clear user_data immediately so a stale pointer can't be
@@ -3815,7 +3820,7 @@ impl<'a> Executor<'a> {
                 let cycles = (ctx.global_clk / 5).max(1);
                 self.report.opcode_counts[crate::Opcode::ADD] = cycles;
             }
-            return Ok(true);
+            Ok(true)
         }
         #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
         {
@@ -4189,7 +4194,6 @@ impl<'a> Executor<'a> {
     }
 
     fn postprocess(&mut self) {
-        // Flush remaining stdout/stderr
         for (fd, buf) in &self.io_buf {
             if !buf.is_empty() {
                 match fd {
@@ -4206,7 +4210,6 @@ impl<'a> Executor<'a> {
             }
         }
 
-        // Flush trace buf
         if let Some(ref mut buf) = self.trace_buf {
             buf.flush().unwrap();
         }

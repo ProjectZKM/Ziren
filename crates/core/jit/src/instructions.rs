@@ -52,13 +52,16 @@ pub trait ComputeInstructions {
     /// Arithmetic right shift (sign-preserving).
     fn sra(&mut self, rd: MipsRegister, rt: MipsRegister, shamt: u8);
 
-    /// Variable-shift versions (shamt comes from `rs`).
+    /// Variable logical left shift: `rd = rt << (rs mod 32)`.
     fn sllv(&mut self, rd: MipsRegister, rt: MipsRegister, rs: MipsRegister);
+    /// Variable logical right shift: `rd = rt >> (rs mod 32)`, zero-fill.
     fn srlv(&mut self, rd: MipsRegister, rt: MipsRegister, rs: MipsRegister);
+    /// Variable arithmetic right shift: `rd = rt >> (rs mod 32)`, sign-fill.
     fn srav(&mut self, rd: MipsRegister, rt: MipsRegister, rs: MipsRegister);
 
-    /// Set on less-than: `rd = (rs < rt) as u32`.
+    /// Set on less-than, signed: `rd = [rs <_s rt]`.
     fn slt(&mut self, rd: MipsRegister, rs: MipsOperand, rt: MipsOperand);
+    /// Set on less-than, unsigned: `rd = [rs <_u rt]`.
     fn sltu(&mut self, rd: MipsRegister, rs: MipsOperand, rt: MipsOperand);
 
     /// Count leading zeros of `rs` into `rd`.
@@ -98,8 +101,9 @@ pub trait ComputeInstructions {
     /// Bitfield insert: `rd[pos+size-1:pos] = rs[size-1:0]`.
     fn ins(&mut self, rd: MipsRegister, rs: MipsRegister, pos: u8, size: u8);
 
-    /// Sign-extend byte / halfword (`rd = sext(rt, 8)` or `sext(rt, 16)`).
+    /// Sign-extend byte: `rd = sext_8(rt[7:0])`.
     fn sext_b(&mut self, rd: MipsRegister, rt: MipsRegister);
+    /// Sign-extend half-word: `rd = sext_16(rt[15:0])`.
     fn sext_h(&mut self, rd: MipsRegister, rt: MipsRegister);
 }
 
@@ -120,20 +124,27 @@ pub trait MemoryInstructions {
     /// Load word (32-bit).
     fn lw(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32);
 
-    /// Load word left / right (unaligned word loads).
+    /// Load word left: with `a = rs1 + imm`, merges the `4 - (a mod 4)`
+    /// bytes at `a` into the high end of `rd`, leaving the low bytes intact.
     fn lwl(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32);
+    /// Load word right: merges the complementary `(a mod 4) + 1` bytes into
+    /// the low end of `rd`.  `lwl` then `lwr` load one unaligned word.
     fn lwr(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32);
 
     /// Load linked.
     fn ll(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32);
 
-    /// Store byte / half / word.
+    /// Store byte: `mem[rs1 + imm] = rs2[7:0]`.
     fn sb(&mut self, rs2: MipsRegister, rs1: MipsRegister, imm: i32);
+    /// Store half-word: `mem[rs1 + imm] = rs2[15:0]`.
     fn sh(&mut self, rs2: MipsRegister, rs1: MipsRegister, imm: i32);
+    /// Store word: `mem[rs1 + imm] = rs2`.
     fn sw(&mut self, rs2: MipsRegister, rs1: MipsRegister, imm: i32);
 
-    /// Store word left / right (unaligned).
+    /// Store word left: with `a = rs1 + imm`, writes the high
+    /// `4 - (a mod 4)` bytes of `rs2` at `a`.
     fn swl(&mut self, rs2: MipsRegister, rs1: MipsRegister, imm: i32);
+    /// Store word right: writes the complementary low bytes of `rs2`.
     fn swr(&mut self, rs2: MipsRegister, rs1: MipsRegister, imm: i32);
 
     /// Store conditional.  Stores `rs2` and writes 1 to `rs2` on
@@ -160,17 +171,26 @@ pub trait ControlFlowInstructions {
     /// Jump-and-link register: `rd = pc + 8; pc = rs`.
     fn jalr(&mut self, rd: MipsRegister, rs: MipsRegister);
 
-    /// Branch if equal: `if rs == rt: pc = pc + 4 + (offset << 2)`.
+    /// Branch if equal.  Taken branches set `pc = pc + 4 + (offset << 2)`;
+    /// this target rule is shared by the five predicates below.
+    ///
+    /// `if rs == rt`.
     fn beq(&mut self, rs: MipsRegister, rt: MipsRegister, offset: i32);
+    /// `if rs != rt`.
     fn bne(&mut self, rs: MipsRegister, rt: MipsRegister, offset: i32);
+    /// `if rs <=_s 0`.
     fn blez(&mut self, rs: MipsRegister, offset: i32);
+    /// `if rs >_s 0`.
     fn bgtz(&mut self, rs: MipsRegister, offset: i32);
+    /// `if rs <_s 0`.
     fn bltz(&mut self, rs: MipsRegister, offset: i32);
+    /// `if rs >=_s 0`.
     fn bgez(&mut self, rs: MipsRegister, offset: i32);
 
-    /// Branch + link variants (write `ra = pc + 8` even when branch not
-    /// taken).
+    /// Branch-and-link if `rs <_s 0`.  `ra = pc + 8` is written whether or
+    /// not the branch is taken, as for `bgezal`.
     fn bltzal(&mut self, rs: MipsRegister, offset: i32);
+    /// Branch-and-link if `rs >=_s 0`; `ra = pc + 8` unconditionally.
     fn bgezal(&mut self, rs: MipsRegister, offset: i32);
 
     /// Indirect jump via low PC bits (Ziren `Jumpi`).  `target_pc` is
@@ -220,8 +240,9 @@ pub trait SystemInstructions {
     /// doesn't ignore the immediate operand and silently miscompare.
     fn teq_imm(&mut self, rs: MipsRegister, imm: i32);
 
-    /// Conditional move on zero / non-zero.
+    /// Conditional move on zero: `if rt == 0: rd = rs`.
     fn movz(&mut self, rd: MipsRegister, rs: MipsRegister, rt: MipsRegister);
+    /// Conditional move on non-zero: `if rt != 0: rd = rs`.
     fn movn(&mut self, rd: MipsRegister, rs: MipsRegister, rt: MipsRegister);
 
     /// Move conditional on equality (Ziren `MEQ`): `if rs == rt: rd = rs1`.

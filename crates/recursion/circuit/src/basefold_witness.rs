@@ -181,7 +181,7 @@ where
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.point.write(witness);
-        for (_name, eval) in self.chip_openings.iter() {
+        for eval in self.chip_openings.values() {
             eval.write(witness);
         }
     }

@@ -387,7 +387,7 @@ impl<'a> Emitter<'a> {
             self.push_constraint(PicusConstraint::new_equality(b.clone(), hi * 128 + a1.clone()));
             return;
         }
-        self.abstract_call(name, &[b.clone(), c.clone()], &[a1.clone()]);
+        self.abstract_call(name, &[b.clone(), c.clone()], std::slice::from_ref(a1));
     }
 
     /// Precise summary for `ByteOpcode::ShrCarry` (values = [op, out, carry, input, shift]).
@@ -696,7 +696,7 @@ where
     let annotated = |ranges: &[(usize, usize, String)]| -> Vec<usize> {
         ranges
             .iter()
-            .flat_map(|(s, e, _)| (*s..*e))
+            .flat_map(|(s, e, _)| *s..*e)
             .filter(|c| *c < width && !env.contains_key(c))
             .collect()
     };

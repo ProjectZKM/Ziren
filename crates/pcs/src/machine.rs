@@ -680,7 +680,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     #[instrument("setup machine", level = "debug", skip_all)]
     #[allow(clippy::map_unwrap_or)]
     #[allow(clippy::redundant_closure_for_method_calls)]
-
     pub fn setup(&self, program: &A::Program) -> (StarkProvingKey<SC>, StarkVerifyingKey<SC>) {
         let parent_span = tracing::debug_span!("generate preprocessed traces");
         let (named_preprocessed_traces, num_constraints): (Vec<_>, Vec<_>) =
@@ -797,7 +796,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
         let constraints_map: HashMap<_, _> = num_constraints.into_iter().collect();
 
-        // Get the preprocessed traces
         let traces =
             named_preprocessed_traces.into_iter().map(|(_, trace)| trace).collect::<Vec<_>>();
 
@@ -949,7 +947,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
         let constraints_map: HashMap<_, _> = num_constraints.into_iter().collect();
 
-        // Get the preprocessed traces
         let traces =
             named_preprocessed_traces.into_iter().map(|(_, trace)| trace).collect::<Vec<_>>();
 
@@ -1042,8 +1039,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let serial = !std::env::var("ZIREN_DEPS_PARALLEL").is_ok_and(|v| v != "0");
         let first_consumer = chips.iter().position(|c| c.name() == "Global").unwrap_or(chips.len());
         for record in records.iter_mut() {
-            let (par_chips, seq_chips) =
-                if serial { (&chips[..0], &chips[..]) } else { (&chips[..first_consumer], &chips[first_consumer..]) };
+            let (par_chips, seq_chips) = if serial {
+                (&chips[..0], &chips[..])
+            } else {
+                (&chips[..first_consumer], &chips[first_consumer..])
+            };
             if !par_chips.is_empty() {
                 use rayon::prelude::*;
                 let t_par = std::time::Instant::now();
@@ -1072,13 +1072,17 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             }
                         }
                         Err(e) => {
-                            tracing::error!("Error generating dependencies (parallel phase): {:?}", e);
+                            tracing::error!(
+                                "Error generating dependencies (parallel phase): {:?}",
+                                e
+                            );
                             return Err(e);
                         }
                     }
                 }
                 if census {
-                    census_rows.push(("<parallel-phase-wall>".to_string(), t_par.elapsed().as_micros()));
+                    census_rows
+                        .push(("<parallel-phase-wall>".to_string(), t_par.elapsed().as_micros()));
                 }
             }
             for chip in seq_chips.iter() {

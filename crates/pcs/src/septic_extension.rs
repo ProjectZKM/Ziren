@@ -640,7 +640,7 @@ impl<F: PrimeField32> SepticExtension<F> {
     /// Returns whether the extension field element viewed as an y-coordinate of a digest represents a receive lookup.
     pub fn is_receive(&self) -> bool {
         let limb = self.0[6].as_canonical_u32();
-        1 <= limb && limb <= RECEIVE_Y6_MAX
+        (1..=RECEIVE_Y6_MAX).contains(&limb)
     }
 
     /// Returns whether the extension field element viewed as an y-coordinate of a digest represents a send lookup.

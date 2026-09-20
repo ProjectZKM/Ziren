@@ -26,7 +26,9 @@ enum Arg {
     TransitionInput,
     TransitionOutput,
     Selector,
-    Path(syn::Expr),
+    // Boxed: `syn::Expr` is ~248 bytes while every other variant carries none,
+    // so an unboxed field makes each `Arg` that large (`clippy::large_enum_variant`).
+    Path(Box<syn::Expr>),
 }
 
 impl Parse for Arg {
@@ -53,7 +55,7 @@ impl Parse for Arg {
         }
         if is("path") {
             input.parse::<Token![=]>()?;
-            return Ok(Arg::Path(input.parse()?));
+            return Ok(Arg::Path(Box::new(input.parse()?)));
         }
 
         Err(syn::Error::new_spanned(key, "unknown key in #[picus(...)]"))
@@ -75,7 +77,7 @@ fn parse_picus_attr(attr: &syn::Attribute) -> syn::Result<Option<PicusArgs>> {
             Arg::TransitionInput => out.transition_input = true,
             Arg::TransitionOutput => out.transition_output = true,
             Arg::Selector => out.selector = true,
-            Arg::Path(expr) => out.path = Some(expr),
+            Arg::Path(expr) => out.path = Some(*expr),
         }
     }
     Ok(Some(out))

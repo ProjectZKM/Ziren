@@ -388,7 +388,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             row_counts.iter().zip(column_counts.iter()).enumerate()
         {
             for (row, col) in round_rows.iter().zip(round_cols.iter()) {
-                repeated_row_counts.extend(core::iter::repeat(*row).take(*col));
+                repeated_row_counts.extend(std::iter::repeat_n(*row, *col));
             }
             if let Some(pads) = padding_row_heights.get(round_idx) {
                 repeated_row_counts.extend(pads.iter().copied());
@@ -561,7 +561,7 @@ impl<'a, P> RecursiveMachineJaggedPcsVerifier<'a, P> {
 mod tests {
     use super::*;
     use crate::basefold_verifier::{BasefoldVerifierParams, RecursiveBasefoldVerifier};
-    
+
     use zkm_recursion_compiler::config::InnerConfig;
 
     type C = InnerConfig;

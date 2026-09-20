@@ -24,7 +24,6 @@ impl<F: Field> AddDoubleOperation<F> {
         self.value = Word::from(expected as u32);
         self.value_hi = Word::from((expected >> 32) as u32);
 
-        // Range check
         {
             record.add_u8_range_checks(&a_u64.to_le_bytes());
             record.add_u8_range_checks(&b_u64.to_le_bytes());
@@ -42,8 +41,8 @@ impl<F: Field> AddDoubleOperation<F> {
         cols: AddDoubleOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let one = AB::Expr::ONE;
-        let base = AB::F::from_u32(256);
+        let _one = AB::Expr::ONE;
+        let _base = AB::F::from_u32(256);
 
         let mut builder_is_real = builder.when(is_real.clone());
 

@@ -294,7 +294,15 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // authoritative column count, cross-checked in `jagged_column_count`.
         let mut pack_info: Option<(usize, usize)> = None;
         let evaluation_proof_var = match &evaluation_proof {
-            crate::shard_level_witness::LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+            crate::shard_level_witness::LiftedEvalProof::WhirBundle {
+                host,
+                whir_proof,
+                sumcheck,
+                jagged_eval,
+                expected_eval,
+                commit_root,
+                modified_commitment,
+            } => {
                 pack_info = Some((
                     host.packing.offsets.len().saturating_sub(1),
                     host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
@@ -351,12 +359,14 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     &column_counts_by_round,
                 ))
             }
-            LiftedEvalProof::Empty => Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-                builder,
-                &[],
-                max_log_row_count,
-                &column_counts_by_round,
-            )),
+            LiftedEvalProof::Empty => {
+                Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                    builder,
+                    &[],
+                    max_log_row_count,
+                    &column_counts_by_round,
+                ))
+            }
             // OuterBundle is gnark-wrap-only (OuterConfig);
             // the deferred path is inner-only → unreachable.
             LiftedEvalProof::OuterBundle { .. } => {
@@ -422,25 +432,31 @@ pub fn verify_deferred_basefold<C, SC, A>(
             max_log_row_count,
         );
         let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
-        let jagged_evaluator_fn =
-            super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
-                builder,
-                // Chip columns + each round's stacking-padding column (see
-                // core_basefold.rs for why the pads have to be counted).
-                {
-                    let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
-                    let witness_pads: usize =
-                        preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
-                    match pack_info {
-                        // Both sources are populated on the inner ring, so the
-                        // cross-check is a real invariant here.
-                        Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
-                            total_cols, widths, packing_pads, Some(witness_pads), "deferred",
-                        ),
-                        None => widths + witness_pads,
-                    }
-                },
-            );
+        let jagged_evaluator_fn = super::compress_basefold::real_jagged_evaluator_fn::<
+            C,
+            SC::FriChallengerVariable,
+        >(
+            builder,
+            // Chip columns + each round's stacking-padding column (see
+            // core_basefold.rs for why the pads have to be counted).
+            {
+                let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
+                let witness_pads: usize =
+                    preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
+                match pack_info {
+                    // Both sources are populated on the inner ring, so the
+                    // cross-check is a real invariant here.
+                    Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
+                        total_cols,
+                        widths,
+                        packing_pads,
+                        Some(witness_pads),
+                        "deferred",
+                    ),
+                    None => widths + witness_pads,
+                }
+            },
+        );
         let mut challenger = machine.config().challenger_variable(builder);
 
         // Pre-prologue challenger seeding — port of
@@ -493,29 +509,25 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 jagged_evaluator_fn,
             );
         } else {
-        let basefold_shard_proof_variable = basefold_shard_proof_variable
-            .as_ref()
-            .expect("non-whir child lifts to the BaseFold variable");
-        // Per-proof override when bundle path is active.
-        // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
-        let per_proof_verifier;
-        let active_verifier = match &evaluation_proof {
-            // Only `host` is needed here -- this arm sizes the
-            // per-proof verifier; the proof's own fields are read
-            // where the verification actually happens.
-            LiftedEvalProof::Bundle { host, .. } => {
-                pack_info = Some((
-                    host.packing.offsets.len().saturating_sub(1),
-                    host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
-                ));
-                let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
-                // Fixed-height guard: see core_basefold.
-                crate::shard_level_witness::assert_recursion_stacking_height_fixed(
-                    bundle_num_vars,
-                    host.commit.log_stacking_height,
-                    "deferred_basefold",
-                );
-                per_proof_verifier =
+            let basefold_shard_proof_variable = basefold_shard_proof_variable
+                .as_ref()
+                .expect("non-whir child lifts to the BaseFold variable");
+            // Per-proof override when bundle path is active.
+            // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
+            let per_proof_verifier;
+            let active_verifier = match &evaluation_proof {
+                // Only `host` is needed here -- this arm sizes the
+                // per-proof verifier; the proof's own fields are read
+                // where the verification actually happens.
+                LiftedEvalProof::Bundle { host, .. } => {
+                    let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
+                    // Fixed-height guard: see core_basefold.
+                    crate::shard_level_witness::assert_recursion_stacking_height_fixed(
+                        bundle_num_vars,
+                        host.commit.log_stacking_height,
+                        "deferred_basefold",
+                    );
+                    per_proof_verifier =
                     crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<
                         SC,
                     >(
@@ -524,24 +536,24 @@ pub fn verify_deferred_basefold<C, SC, A>(
                         // VARIABLES, not commit rounds.
                         host.commit.log_stacking_height as usize,
                     );
-                &per_proof_verifier
-            }
-            _ => &basefold_shard_verifier,
-        };
+                    &per_proof_verifier
+                }
+                _ => &basefold_shard_verifier,
+            };
 
-        active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
-            builder,
-            &basefold_vk,
-            &basefold_shard_proof_variable,
-            &shard_chips,
-            &chip_metadata,
-            &opened_values,
-            &insertion_points,
-            &mut challenger,
-            machine.num_pv_elts(),
-            eval_public_values_fn,
-            jagged_evaluator_fn,
-        );
+            active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
+                builder,
+                &basefold_vk,
+                basefold_shard_proof_variable,
+                &shard_chips,
+                &chip_metadata,
+                &opened_values,
+                &insertion_points,
+                &mut challenger,
+                machine.num_pv_elts(),
+                eval_public_values_fn,
+                jagged_evaluator_fn,
+            );
         }
 
         // Interpret the deferred proof's public values as RecursionPublicValues.

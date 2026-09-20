@@ -156,7 +156,7 @@ pub fn build_weight_table_from_z_col(
 /// Returns `(z_col_lagrange, row_eq)` where:
 ///   * `z_col_lagrange = partial_lagrange(z_col)`  (per packed column k)
 ///   * `row_eq = eq_mle_table(rev(z_row))`         (full max-log-row eq table,
-///      indexed by the LITERAL row index 0..h_c)
+///     indexed by the LITERAL row index 0..h_c)
 ///
 /// BYTE-IDENTICAL to `build_weight_table` by construction: that fn computes
 /// exactly `w[off + row] = z_col_lagrange[k] * row_eq[row]` from these same
@@ -400,7 +400,7 @@ mod phase1_acceptance_gate {
             .iter()
             .map(|(n, m)| {
                 (n.clone(), {
-                    let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                    let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     crate::multilinear::PaddedMle::padded_with_zeros(
                         std::sync::Arc::new(crate::basefold::Mle::from_row_major(
@@ -417,8 +417,7 @@ mod phase1_acceptance_gate {
 
         // Dense q (column-by-column, natural row order) padded to 2^n.
         let dense_q = {
-            let mut d =
-                crate::jagged::materialize_dense_jagged(&trace_views, packing.dense_len);
+            let mut d = crate::jagged::materialize_dense_jagged(&trace_views, packing.dense_len);
             d.resize(1usize << packing.log_dense_size(), InnerVal::ZERO);
             d
         };

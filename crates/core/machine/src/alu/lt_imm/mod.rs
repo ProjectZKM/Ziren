@@ -201,7 +201,7 @@ impl LtImmChip {
         // Every Lt row is a real instruction owning its frame.
         cols.frame.populate_from_alu(event, program, shard, blu);
 
-        let a = event.a.to_le_bytes();
+        let _a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
 

@@ -36,9 +36,7 @@ pub fn zkm_vkey_digest_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) ->
 }
 
 /// Get the recursion verifying-key-allowlist root this reduce proof carries.
-pub fn zkm_vk_root_koalabear(
-    proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
-) -> [KoalaBear; 8] {
+pub fn zkm_vk_root_koalabear(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> [KoalaBear; 8] {
     let proof = &proof.proof;
     let pv: &RecursionPublicValues<KoalaBear> = proof.public_values.as_slice().borrow();
     pv.vk_root

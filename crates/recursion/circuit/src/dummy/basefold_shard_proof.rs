@@ -226,7 +226,7 @@ where
         let bit_len = max_log_row_count + 1;
         let heights_map: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
         let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
-        name_sorted.sort_by(|a, b| MachineAir::<F>::name(**a).cmp(&MachineAir::<F>::name(**b)));
+        name_sorted.sort_by_key(|a| MachineAir::<F>::name(**a));
         let chips_ov: Vec<ChipOpenedValues<F, EF>> = name_sorted
             .iter()
             .map(|chip| {
@@ -312,7 +312,7 @@ where
         {
             let heights: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
             let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
-            name_sorted.sort_by(|a, b| MachineAir::<F>::name(**a).cmp(&MachineAir::<F>::name(**b)));
+            name_sorted.sort_by_key(|a| MachineAir::<F>::name(**a));
             let chip_dims: Vec<(usize, usize)> = name_sorted
                 .iter()
                 .map(|chip| {

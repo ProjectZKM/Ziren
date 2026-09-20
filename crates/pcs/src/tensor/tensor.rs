@@ -185,7 +185,7 @@ impl<T> From<RowMajorMatrix<T>> for Tensor<T, CpuBackend> {
     #[inline]
     fn from(mat: RowMajorMatrix<T>) -> Self {
         let width = mat.width;
-        let height = if width == 0 { 0 } else { mat.values.len() / width };
+        let height = mat.values.len().checked_div(width).unwrap_or(0);
         Tensor { storage: Buffer::from(mat.values), dimensions: Dimensions::new(height, width) }
     }
 }

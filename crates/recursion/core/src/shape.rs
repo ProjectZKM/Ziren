@@ -251,10 +251,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
 
     /// The organic heights of a built program, for [`Self::band_index_for`].
     pub fn program_heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {
-        RecursionAir::<F, DEGREE>::heights(program)
-            .iter()
-            .map(|(n, h)| (n.clone(), *h))
-            .collect()
+        RecursionAir::<F, DEGREE>::heights(program).iter().map(|(n, h)| (n.clone(), *h)).collect()
     }
 }
 
@@ -291,7 +288,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // at 2^26.  Class 0 is its half, landing both rounds at 2^25.  The
         // SHRINK shape is separate: FROZEN in `zkm_prover::ZKMProver::shrink_shape`.
         let rows = |n: usize| -> usize {
-            assert!(n % 32 == 0, "recursion shape rows must be a multiple of 32: {n}");
+            assert!(n.is_multiple_of(32), "recursion shape rows must be a multiple of 32: {n}");
             n
         };
         // One entry per PIN CLASS (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`),

@@ -34,7 +34,7 @@ fn main() {
         .expect("failed to deserialize maximal shapes");
 
         // For each maximal shape, check if it is OOM.
-        for (_, shapes) in maximal_shapes.iter() {
+        for shapes in maximal_shapes.values() {
             for shape in shapes.iter() {
                 let lde_size = shape.estimate_lde_size(&costs);
                 if lde_size > args.lde_threshold_bytes {

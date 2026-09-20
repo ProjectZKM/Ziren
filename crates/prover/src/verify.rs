@@ -446,8 +446,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // precisely so it can be pinned here.  Inside the tree it is a witness,
         // so without this check a proof built around a substituted compose or
         // leaf program is indistinguishable from an honest one.
-        let expected_vk_root =
-            koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
+        let expected_vk_root = koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
         if vk_root != expected_vk_root {
             return Err(PlonkVerificationError::InvalidVerificationKey.into());
         }
@@ -478,8 +477,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // precisely so it can be pinned here.  Inside the tree it is a witness,
         // so without this check a proof built around a substituted compose or
         // leaf program is indistinguishable from an honest one.
-        let expected_vk_root =
-            koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
+        let expected_vk_root = koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
         if vk_root != expected_vk_root {
             return Err(Groth16VerificationError::InvalidVerificationKey.into());
         }

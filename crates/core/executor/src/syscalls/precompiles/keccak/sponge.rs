@@ -41,7 +41,7 @@ impl Syscall for KeccakSpongeSyscall {
         input_read_records.extend_from_slice(&input_records);
 
         let mut input_u64_values = Vec::new();
-        for values in input_values.chunks_exact(2) {
+        for values in input_values.as_chunks::<2>().0 {
             let least_sig = values[0];
             let most_sig = values[1];
             input_u64_values.push(least_sig as u64 + ((most_sig as u64) << 32));
@@ -49,8 +49,7 @@ impl Syscall for KeccakSpongeSyscall {
 
         let mut xored_state_list = vec![];
 
-        // Perform
-        for block in input_u64_values.chunks_exact(GENERAL_BLOCK_SIZE_U64S) {
+        for block in input_u64_values.as_chunks::<GENERAL_BLOCK_SIZE_U64S>().0 {
             for (i, value) in block.iter().enumerate() {
                 state[i] ^= *value;
             }

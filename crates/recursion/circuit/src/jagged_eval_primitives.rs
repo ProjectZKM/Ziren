@@ -182,12 +182,12 @@ pub fn emit_branching_program_eval<C: CircuitConfig>(
             let mut accum: [SymbolicExt<C::F, C::EF>; 4] = [SymbolicExt::ZERO; 4];
             for (bs, w) in eq_weights.iter().enumerate() {
                 if let Some(ms_out) = TRANSITIONS[ms_in][bs] {
-                    accum[ms_out as usize] = accum[ms_out as usize] + *w;
+                    accum[ms_out as usize] += *w;
                 }
             }
             let mut sum = SymbolicExt::ZERO;
             for (a, r) in accum.iter().zip(state_weights.iter()) {
-                sum = sum + *a * *r;
+                sum += *a * *r;
             }
             new_state_weights[ms_in] = sum;
         }
@@ -287,13 +287,12 @@ pub fn precompute_eq_factors<C: CircuitConfig>(
     let one: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
     let mut ratios = Vec::with_capacity(sumcheck_point.len());
     let mut scale_prefix = Vec::with_capacity(sumcheck_point.len() + 1);
-    let mut running: Ext<C::F, C::EF> =
-        builder.constant(<C::EF as PrimeCharacteristicRing>::ONE);
+    let mut running: Ext<C::F, C::EF> = builder.constant(<C::EF as PrimeCharacteristicRing>::ONE);
     scale_prefix.push(running);
     for p in sumcheck_point.iter() {
         let p_sym: SymbolicExt<C::F, C::EF> = (*p).into();
-        let one_minus_p: Ext<C::F, C::EF> = builder.eval(one - p_sym.clone());
-        let two_p_minus_one: Ext<C::F, C::EF> = builder.eval(p_sym.clone() + p_sym - one);
+        let one_minus_p: Ext<C::F, C::EF> = builder.eval(one - p_sym);
+        let two_p_minus_one: Ext<C::F, C::EF> = builder.eval(p_sym + p_sym - one);
         ratios.push(builder.eval(one_minus_p / two_p_minus_one));
         running = builder.eval(running * two_p_minus_one);
         scale_prefix.push(running);
@@ -311,7 +310,7 @@ pub fn emit_prefix_sum_lagrange_pre<C: CircuitConfig>(
     let mut lagrange: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
     for (bit, ratio) in merged_prefix_sum.iter().zip(eq_factors.ratios.iter()) {
         let bit_sym: SymbolicExt<C::F, C::EF> = SymbolicExt::from(*bit);
-        lagrange = lagrange * (SymbolicExt::from(*ratio) + bit_sym);
+        lagrange *= SymbolicExt::from(*ratio) + bit_sym;
     }
     lagrange
 }
@@ -326,7 +325,7 @@ pub fn emit_prefix_sum_lagrange<C: CircuitConfig>(
         let bit_sym: SymbolicExt<C::F, C::EF> = SymbolicExt::from(*bit);
         let point_sym: SymbolicExt<C::F, C::EF> = (*point).into();
         let eq = (one - point_sym) + bit_sym * (point_sym + point_sym - one);
-        lagrange = lagrange * eq;
+        lagrange *= eq;
     }
     lagrange
 }

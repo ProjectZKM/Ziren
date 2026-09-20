@@ -20,7 +20,7 @@ fn main() {
         if n == 0 {
             break;
         }
-        for chunk in buf[..n - n % 4].chunks_exact(4) {
+        for chunk in buf[..n - n % 4].as_chunks::<4>().0 {
             let pc = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
             *counts.entry(pc).or_insert(0) += 1;
             total += 1;

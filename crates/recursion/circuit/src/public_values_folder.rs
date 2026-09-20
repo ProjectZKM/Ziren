@@ -138,11 +138,10 @@ where
     ) -> SymbolicExt<C::F, C::EF> {
         let mut denominator: SymbolicExt<C::F, C::EF> = (*self.perm_challenges.0).into();
         let mut betas = self.perm_challenges.1.iter();
-        denominator = denominator
-            + betas.next().expect("beta_0 (kind term)").clone()
-                * C::F::from_usize(message.kind as usize);
+        denominator +=
+            *betas.next().expect("beta_0 (kind term)") * C::F::from_usize(message.kind as usize);
         for value in message.values {
-            denominator = denominator + value * betas.next().expect("beta_i (value term)").clone();
+            denominator += value * *betas.next().expect("beta_i (value term)");
         }
         message.multiplicity / denominator
     }
@@ -157,12 +156,12 @@ where
 {
     fn send(&mut self, message: AirLookup<SymbolicExt<C::F, C::EF>>, _scope: LookupScope) {
         let digest = self.interaction_fraction(message);
-        self.local_interaction_digest = self.local_interaction_digest.clone() + digest;
+        self.local_interaction_digest += digest;
     }
 
     fn receive(&mut self, message: AirLookup<SymbolicExt<C::F, C::EF>>, _scope: LookupScope) {
         let digest = self.interaction_fraction(message);
-        self.local_interaction_digest = self.local_interaction_digest.clone() - digest;
+        self.local_interaction_digest -= digest;
     }
 }
 

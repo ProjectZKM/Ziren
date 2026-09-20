@@ -115,7 +115,7 @@ pub fn hash_shard_proof_structure<H: Hasher>(
     // chip_cumulative_sums (BTreeMap) — witnessed after the proofs, in the
     // same per-input loop, by both stages' `Witnessable::write`.
     sp.chip_cumulative_sums.len().hash(h);
-    for (name, _) in sp.chip_cumulative_sums.iter() {
+    for name in sp.chip_cumulative_sums.keys() {
         name.hash(h);
         // Each ChipCumulativeSums has fixed shape (Ext + SepticDigest of
         // [F; 7] × 2) — no varlen.
@@ -174,7 +174,7 @@ pub fn describe_shard_proof_structure(
         }
         EvaluationProof::Bundle(bundle) => {
             v.push(("ev".into(), 2));
-            v.push(("L".into(), bundle.packing.log_dense_size as usize));
+            v.push(("L".into(), bundle.packing.log_dense_size));
             v.push(("offsets_len".into(), bundle.packing.offsets.len()));
             let mut h = std::collections::hash_map::DefaultHasher::new();
             bundle.packing.column_counts.hash(&mut h);
@@ -182,7 +182,7 @@ pub fn describe_shard_proof_structure(
             // Readable: the per-round column counts and the chip set with
             // heights, so a split on either is attributable to a chip.
             for (r, cc) in bundle.packing.column_counts.iter().enumerate() {
-                v.push((format!("cc{r}"), *cc as usize));
+                v.push((format!("cc{r}"), (*cc)));
             }
             let mut chips: Vec<(&String, &usize)> = sp.chip_heights.iter().collect();
             chips.sort();
@@ -243,13 +243,19 @@ pub fn describe_shard_proof_structure(
                     v.push(("whir_q_hash".into(), (h.finish() & 0xffff_ffff) as usize));
                     if let Some(op) = whir.round_query_openings.first() {
                         v.push(("whir_q0_leaves".into(), op.leaves.len()));
-                        v.push(("whir_q0_path".into(), op.leaves.first().map_or(0, |l| l.proof.len())));
+                        v.push((
+                            "whir_q0_path".into(),
+                            op.leaves.first().map_or(0, |l| l.proof.len()),
+                        ));
                     }
                     v.push(("whir_final_poly".into(), whir.final_poly.len()));
                     v.push(("whir_final_sc".into(), whir.final_sumcheck_polys.len()));
                     v.push(("whir_pow".into(), whir.folding_pow.len()));
                     v.push(("whir_batch_rounds".into(), wp.batch_evaluations.len()));
-                    v.push(("whir_batch_stripes".into(), wp.batch_evaluations.first().map_or(0, |r| r.len())));
+                    v.push((
+                        "whir_batch_stripes".into(),
+                        wp.batch_evaluations.first().map_or(0, |r| r.len()),
+                    ));
                 }
             }
             v.push(("red_rounds".into(), bundle.reduction.rounds.len()));

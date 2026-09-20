@@ -162,7 +162,7 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// remains, and NOTE it also feeds [`ZKMCoreOpts::max`] (hence the recursion
 /// prover), so a change here must be gated on the full core→compress→shrink→wrap
 /// chain, not core alone.
-
+///
 /// 460M, not the historical 500M: with the `Cpu` pseudo-height fence gone,
 /// shards genuinely close on THIS budget, and the biggest shard's LogUp-GKR
 /// round-0 slab scales with it.  Measured on a 32 GiB card (reth, Aug26):

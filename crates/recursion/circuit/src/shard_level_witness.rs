@@ -245,7 +245,7 @@ where
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.point.write(witness);
-        for (_name, eval) in self.chip_openings.iter() {
+        for eval in self.chip_openings.values() {
             eval.write(witness);
         }
     }
@@ -877,7 +877,9 @@ fn host_query_opening_to_recursive(
             // The row is the round's committed leaf: `2^arity` EF values, in
             // committed order.  At arity 1 that is the classic sibling pair.
             let block: Vec<InnerChallenge> = row
-                .chunks_exact(D)
+                .as_chunks::<D>()
+                .0
+                .iter()
                 .map(|c| {
                     <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
                         c.iter().copied(),
@@ -1067,7 +1069,9 @@ fn host_query_opening_to_recursive_outer(
             );
             // `2^arity` EF values in committed order; a pair at arity 1.
             let block: Vec<InnerChallenge> = row
-                .chunks_exact(D)
+                .as_chunks::<D>()
+                .0
+                .iter()
                 .map(|c| {
                     <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
                         c.iter().copied(),
@@ -1458,11 +1462,8 @@ where
     );
 
     // batch_evaluations = the WITNESSED values (reuse)
-    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = basefold_proof_var
-        .batch_evaluations
-        .iter()
-        .map(|round| round.iter().copied().collect())
-        .collect();
+    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> =
+        basefold_proof_var.batch_evaluations.iter().map(|round| round.to_vec()).collect();
 
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
         RecursiveBasefoldProof<
@@ -2396,7 +2397,7 @@ where
             let pads: &[Felt<C::F>] =
                 padding_heights.get(round_idx).map(|v| v.as_slice()).unwrap_or(&[]);
             let widths: Vec<usize> =
-                cc.iter().copied().chain(core::iter::repeat(1).take(pads.len())).collect();
+                cc.iter().copied().chain(std::iter::repeat_n(1, pads.len())).collect();
             let col_heights: Vec<Felt<C::F>> = (0..cc.len())
                 .map(|_| {
                     let h = heights
@@ -2660,6 +2661,57 @@ pub fn jagged_reduction_to_partial_sumcheck(
         claimed_sum,
         point_and_eval: (proof.eval_point.clone(), final_eval),
     }
+}
+
+/// BaseFold-typed wrapper over [`lift_jagged_bundle_generic`] — the
+/// historical entry point every BaseFold caller uses.  Extracts the
+/// stacked-layer batch evaluations from the pre-read proof (they ride
+/// inside `RecursiveBasefoldProof`) and delegates.
+#[allow(clippy::too_many_arguments)]
+pub fn lift_jagged_basefold_bundle<C, HV>(
+    builder: &mut Builder<C>,
+    bundle: &JaggedBasefoldBundle,
+    preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
+    preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
+    preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
+    preread_expected_eval: Ext<C::F, C::EF>,
+    preread_commit_root: [Felt<C::F>; 8],
+    preread_modified_commitment: [Felt<C::F>; 8],
+    preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
+    padding_heights: &[Vec<Felt<C::F>>],
+    max_log_row_count: usize,
+    column_counts_by_round: &[Vec<usize>],
+    row_counts_by_round: Option<&[Vec<usize>]>,
+    chip_height_felts: Option<&[Felt<C::F>]>,
+) -> JaggedPcsProofVariable<
+    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
+    HV::DigestVariable,
+    C::F,
+    C::EF,
+>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+{
+    let batch_evaluations = preread_basefold_proof.batch_evaluations.clone();
+    lift_jagged_bundle_generic::<C, HV, _>(
+        builder,
+        bundle,
+        preread_basefold_proof,
+        batch_evaluations,
+        preread_sumcheck,
+        preread_jagged_eval,
+        preread_expected_eval,
+        preread_commit_root,
+        preread_modified_commitment,
+        preceding_commitments,
+        padding_heights,
+        max_log_row_count,
+        column_counts_by_round,
+        row_counts_by_round,
+        chip_height_felts,
+    )
 }
 
 #[cfg(test)]
@@ -3267,7 +3319,7 @@ mod tests {
             let repeated: Vec<usize> = rows
                 .iter()
                 .zip(column_counts.iter())
-                .flat_map(|(&h, &c)| std::iter::repeat(h).take(c))
+                .flat_map(|(&h, &c)| std::iter::repeat_n(h, c))
                 .collect();
             let mut acc = 0usize;
             for (i, &h) in repeated.iter().enumerate() {
@@ -3361,55 +3413,4 @@ mod tests {
         // sumcheck_proof has one univariate poly (one reduction round).
         assert_eq!(var.sumcheck_proof.univariate_polys.len(), 1);
     }
-}
-
-/// BaseFold-typed wrapper over [`lift_jagged_bundle_generic`] — the
-/// historical entry point every BaseFold caller uses.  Extracts the
-/// stacked-layer batch evaluations from the pre-read proof (they ride
-/// inside `RecursiveBasefoldProof`) and delegates.
-#[allow(clippy::too_many_arguments)]
-pub fn lift_jagged_basefold_bundle<C, HV>(
-    builder: &mut Builder<C>,
-    bundle: &JaggedBasefoldBundle,
-    preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
-    preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
-    preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
-    preread_expected_eval: Ext<C::F, C::EF>,
-    preread_commit_root: [Felt<C::F>; 8],
-    preread_modified_commitment: [Felt<C::F>; 8],
-    preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
-    padding_heights: &[Vec<Felt<C::F>>],
-    max_log_row_count: usize,
-    column_counts_by_round: &[Vec<usize>],
-    row_counts_by_round: Option<&[Vec<usize>]>,
-    chip_height_felts: Option<&[Felt<C::F>]>,
-) -> JaggedPcsProofVariable<
-    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
-    HV::DigestVariable,
-    C::F,
-    C::EF,
->
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
-        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
-{
-    let batch_evaluations = preread_basefold_proof.batch_evaluations.clone();
-    lift_jagged_bundle_generic::<C, HV, _>(
-        builder,
-        bundle,
-        preread_basefold_proof,
-        batch_evaluations,
-        preread_sumcheck,
-        preread_jagged_eval,
-        preread_expected_eval,
-        preread_commit_root,
-        preread_modified_commitment,
-        preceding_commitments,
-        padding_heights,
-        max_log_row_count,
-        column_counts_by_round,
-        row_counts_by_round,
-        chip_height_felts,
-    )
 }

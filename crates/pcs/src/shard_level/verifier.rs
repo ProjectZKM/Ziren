@@ -1447,7 +1447,7 @@ where
         let mut gkr_batch_open_powers: Vec<Challenge<SC>> = Vec::with_capacity(max_elements);
         let mut acc_pow: Challenge<SC> = Challenge::<SC>::ONE;
         for _ in 0..max_elements {
-            acc_pow = acc_pow * gkr_batch_open;
+            acc_pow *= gkr_batch_open;
             gkr_batch_open_powers.push(acc_pow);
         }
         // SHARD-UNIFORM convention decision (mirror prover)
@@ -1599,7 +1599,7 @@ where
     {
         let mut acc = Challenge::<SC>::ONE;
         for _ in 0..max_elements {
-            acc = acc * gkr_batch_open;
+            acc *= gkr_batch_open;
             beta_powers.push(acc);
         }
     }
@@ -1658,8 +1658,6 @@ where
 
     rlc_eval
 }
-
-// LogUp-GKR stage: host-side verification helpers
 
 /// Host-side `eq_eval`: the multilinear equality indicator
 ///

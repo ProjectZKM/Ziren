@@ -131,7 +131,9 @@ pub fn host_stacked_whir_to_recursive(
                             const D: usize = 4;
                             assert_eq!(l.values.len(), 1, "whir ef leaf is one matrix");
                             let ef_values = l.values[0]
-                                .chunks_exact(D)
+                                .as_chunks::<D>()
+                                .0
+                                .iter()
                                 .map(|c| {
                                     <InnerChallenge as BasedVectorSpace<InnerVal>>::
                                         from_basis_coefficients_iter(c.iter().copied())
@@ -312,7 +314,7 @@ fn exp_bits_lsb<C: CircuitConfig>(
     let mut result: Felt<C::F> = builder.constant(C::F::ONE);
     let mut pow = base;
     for bit in bits {
-        let factor = C::select_const_f(builder, bit.clone(), C::F::ONE, pow);
+        let factor = C::select_const_f(builder, *bit, C::F::ONE, pow);
         result = builder.eval(result * factor);
         pow = pow * pow;
     }
@@ -335,7 +337,7 @@ fn merkle_bind_leaf<C, HV>(
     assert_eq!(path.len(), index_bits.len(), "whir merkle path must consume every index bit");
     let mut digest = HV::hash(builder, leaf_felts);
     for (level, sibling) in path.iter().enumerate() {
-        let bit = index_bits[level].clone();
+        let bit = index_bits[level];
         let pair = HV::select_chain_digest(builder, bit, [digest, *sibling]);
         digest = HV::compress(builder, pair);
     }
@@ -435,7 +437,7 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
         for round in batch_evaluations {
             let mut powers = Vec::with_capacity(round.len());
             for &e in round {
-                claim_sym = claim_sym + SymbolicExt::from(lam) * e;
+                claim_sym += SymbolicExt::from(lam) * e;
                 powers.push(lam);
                 lam = builder.eval(lam * lambda);
             }
@@ -446,11 +448,8 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
         // The (unused) starting-OOD batching draw — transcript sync.
         let _batch = challenger.sample_ext(builder);
 
-        let mut constraints: Vec<TerminalConstraint<C>> = vec![TerminalConstraint::Lagrange {
-            point: stack_point.to_vec(),
-            coeff: one,
-            vars: n,
-        }];
+        let mut constraints: Vec<TerminalConstraint<C>> =
+            vec![TerminalConstraint::Lagrange { point: stack_point.to_vec(), coeff: one, vars: n }];
 
         let mut prev_domain_log = (lsh - ff) + self.config.starting_log_inv_rate;
         let mut prev_round0 = true;
@@ -468,10 +467,8 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             for (var, poly) in msgs.iter().enumerate() {
                 let (c0, c1, c2) = (poly[0], poly[1], poly[2]);
                 // Host: c0 + (c0 + c1 + c2) == claim.
-                builder.assert_ext_eq(
-                    SymbolicExt::from(c0) + c0 + c1 + c2,
-                    SymbolicExt::from(claim),
-                );
+                builder
+                    .assert_ext_eq(SymbolicExt::from(c0) + c0 + c1 + c2, SymbolicExt::from(claim));
                 observe_ext_element::<C, FC>(builder, challenger, c0);
                 observe_ext_element::<C, FC>(builder, challenger, c1);
                 observe_ext_element::<C, FC>(builder, challenger, c2);
@@ -535,18 +532,27 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                 .enumerate()
                 .ir_par_map_collect(builder, |builder, (qi, bits)| {
                     let virt_leaf: Vec<Ext<C::F, C::EF>> = if prev_round0 {
-                        let mut acc =
-                            vec![SymbolicExt::<C::F, C::EF>::ZERO; 1usize << ff];
+                        let mut acc = vec![SymbolicExt::<C::F, C::EF>::ZERO; 1usize << ff];
                         for (ri, commitment) in commitments.iter().enumerate() {
                             let leaf = &openings.leaves[qi * leaves_per_query + ri];
-                            assert_eq!(leaf.values.len(), round_stripe_counts[ri], "whir stripe rows");
+                            assert_eq!(
+                                leaf.values.len(),
+                                round_stripe_counts[ri],
+                                "whir stripe rows"
+                            );
                             let leaf_felts: Vec<Felt<C::F>> =
                                 leaf.values.iter().flatten().copied().collect();
-                            merkle_bind_leaf::<C, HV>(builder, &leaf_felts, &leaf.path, bits, commitment);
+                            merkle_bind_leaf::<C, HV>(
+                                builder,
+                                &leaf_felts,
+                                &leaf.path,
+                                bits,
+                                commitment,
+                            );
                             for (row, &lp) in leaf.values.iter().zip(&lambda_powers_per_round[ri]) {
                                 assert_eq!(row.len(), 1usize << ff, "whir stripe row width");
                                 for (a, &s) in acc.iter_mut().zip(row.iter()) {
-                                    *a = *a + SymbolicExt::from(lp) * s;
+                                    *a += SymbolicExt::from(lp) * s;
                                 }
                             }
                         }
@@ -558,11 +564,8 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                             1usize << round_cfg.folding_factor,
                             "whir ef leaf width"
                         );
-                        let leaf_felts: Vec<Felt<C::F>> = leaf
-                            .ef_values
-                            .iter()
-                            .flat_map(|v| C::ext2felt(builder, *v))
-                            .collect();
+                        let leaf_felts: Vec<Felt<C::F>> =
+                            leaf.ef_values.iter().flat_map(|v| C::ext2felt(builder, *v)).collect();
                         merkle_bind_leaf::<C, HV>(
                             builder,
                             &leaf_felts,
@@ -588,20 +591,19 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             let mut cc = round_batch;
             let mut claim_add = SymbolicExt::<C::F, C::EF>::from(claim);
             for (ans, pt) in ood_answers.iter().zip(ood_points) {
-                claim_add = claim_add + SymbolicExt::from(cc) * *ans;
+                claim_add += SymbolicExt::from(cc) * *ans;
                 constraints.push(TerminalConstraint::Lagrange { point: pt, coeff: cc, vars: rem });
                 cc = builder.eval(cc * round_batch);
             }
             for (v, pt) in stir_pairs {
-                claim_add = claim_add + SymbolicExt::from(cc) * v;
+                claim_add += SymbolicExt::from(cc) * v;
                 constraints.push(TerminalConstraint::Monomial { point: pt, coeff: cc, vars: rem });
                 cc = builder.eval(cc * round_batch);
             }
             claim = builder.eval(claim_add);
 
             prev_domain_log =
-                (rem - self.config.round_parameters[r + 1].folding_factor)
-                    + round_cfg.log_inv_rate;
+                (rem - self.config.round_parameters[r + 1].folding_factor) + round_cfg.log_inv_rate;
             prev_round0 = false;
         }
 
@@ -628,49 +630,52 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
         final_index_bits.iter().enumerate().ir_par_map_collect::<Vec<()>, _, _>(
             builder,
             |builder, (q, bits)| {
-            let virt_leaf: Vec<Ext<C::F, C::EF>> = if prev_round0 {
-                let mut acc = vec![SymbolicExt::<C::F, C::EF>::ZERO; 1usize << last_ff];
-                for (ri, commitment) in commitments.iter().enumerate() {
-                    let leaf = &final_openings.leaves[q * leaves_per_query + ri];
-                    assert_eq!(leaf.values.len(), round_stripe_counts[ri], "whir final rows");
-                    let leaf_felts: Vec<Felt<C::F>> =
-                        leaf.values.iter().flatten().copied().collect();
-                    merkle_bind_leaf::<C, HV>(builder, &leaf_felts, &leaf.path, bits, commitment);
-                    for (row, &lp) in leaf.values.iter().zip(&lambda_powers_per_round[ri]) {
-                        for (a, &s) in acc.iter_mut().zip(row.iter()) {
-                            *a = *a + SymbolicExt::from(lp) * s;
+                let virt_leaf: Vec<Ext<C::F, C::EF>> = if prev_round0 {
+                    let mut acc = vec![SymbolicExt::<C::F, C::EF>::ZERO; 1usize << last_ff];
+                    for (ri, commitment) in commitments.iter().enumerate() {
+                        let leaf = &final_openings.leaves[q * leaves_per_query + ri];
+                        assert_eq!(leaf.values.len(), round_stripe_counts[ri], "whir final rows");
+                        let leaf_felts: Vec<Felt<C::F>> =
+                            leaf.values.iter().flatten().copied().collect();
+                        merkle_bind_leaf::<C, HV>(
+                            builder,
+                            &leaf_felts,
+                            &leaf.path,
+                            bits,
+                            commitment,
+                        );
+                        for (row, &lp) in leaf.values.iter().zip(&lambda_powers_per_round[ri]) {
+                            for (a, &s) in acc.iter_mut().zip(row.iter()) {
+                                *a += SymbolicExt::from(lp) * s;
+                            }
                         }
                     }
+                    acc.into_iter().map(|a| builder.eval(a)).collect()
+                } else {
+                    let leaf = &final_openings.leaves[q];
+                    assert_eq!(leaf.ef_values.len(), 1usize << last_ff, "whir final leaf width");
+                    let leaf_felts: Vec<Felt<C::F>> =
+                        leaf.ef_values.iter().flat_map(|v| C::ext2felt(builder, *v)).collect();
+                    merkle_bind_leaf::<C, HV>(
+                        builder,
+                        &leaf_felts,
+                        &leaf.path,
+                        bits,
+                        proof.round_commitments.last().unwrap(),
+                    );
+                    leaf.ef_values.clone()
+                };
+                let folded = evaluate_mle_ext::<C>(builder, &virt_leaf, &last_randomness);
+                // expected = mono_eval_lsb(final_poly, map_to_pow_lsb(g_final^idx)).
+                let x_felt = exp_bits_lsb::<C>(builder, g_final, bits);
+                let mut pt = Vec::with_capacity(final_log);
+                let mut cur: Ext<C::F, C::EF> = builder.eval(SymbolicExt::from(x_felt));
+                for _ in 0..final_log {
+                    pt.push(cur);
+                    cur = builder.eval(cur * cur);
                 }
-                acc.into_iter().map(|a| builder.eval(a)).collect()
-            } else {
-                let leaf = &final_openings.leaves[q];
-                assert_eq!(leaf.ef_values.len(), 1usize << last_ff, "whir final leaf width");
-                let leaf_felts: Vec<Felt<C::F>> = leaf
-                    .ef_values
-                    .iter()
-                    .flat_map(|v| C::ext2felt(builder, *v))
-                    .collect();
-                merkle_bind_leaf::<C, HV>(
-                    builder,
-                    &leaf_felts,
-                    &leaf.path,
-                    bits,
-                    proof.round_commitments.last().unwrap(),
-                );
-                leaf.ef_values.clone()
-            };
-            let folded = evaluate_mle_ext::<C>(builder, &virt_leaf, &last_randomness);
-            // expected = mono_eval_lsb(final_poly, map_to_pow_lsb(g_final^idx)).
-            let x_felt = exp_bits_lsb::<C>(builder, g_final, bits);
-            let mut pt = Vec::with_capacity(final_log);
-            let mut cur: Ext<C::F, C::EF> = builder.eval(SymbolicExt::from(x_felt));
-            for _ in 0..final_log {
-                pt.push(cur);
-                cur = builder.eval(cur * cur);
-            }
-            let expected = Self::mono_eval_lsb::<C>(builder, &proof.final_poly, &pt);
-            builder.assert_ext_eq(folded, expected);
+                let expected = Self::mono_eval_lsb::<C>(builder, &proof.final_poly, &pt);
+                builder.assert_ext_eq(folded, expected);
             },
         );
 
@@ -685,13 +690,12 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                     for (x, y) in point[..k].iter().zip(fr) {
                         let x_s = SymbolicExt::from(*x);
                         let y_s = SymbolicExt::from(*y);
-                        eq_part = eq_part
-                            * (x_s * y_s
-                                + (SymbolicExt::<C::F, C::EF>::ONE - x_s)
-                                    * (SymbolicExt::<C::F, C::EF>::ONE - y_s));
+                        eq_part *= x_s * y_s
+                            + (SymbolicExt::<C::F, C::EF>::ONE - x_s)
+                                * (SymbolicExt::<C::F, C::EF>::ONE - y_s);
                     }
                     let f_part = evaluate_mle_ext::<C>(builder, &proof.final_poly, &point[k..]);
-                    total = total + SymbolicExt::from(*coeff) * eq_part * f_part;
+                    total += SymbolicExt::from(*coeff) * eq_part * f_part;
                 }
                 TerminalConstraint::Monomial { point, coeff, vars } => {
                     let k = vars - final_log;
@@ -700,11 +704,10 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                     for (x, y) in point[..k].iter().zip(fr) {
                         let x_s = SymbolicExt::from(*x);
                         let y_s = SymbolicExt::from(*y);
-                        fold_part =
-                            fold_part * (SymbolicExt::<C::F, C::EF>::ONE - y_s + y_s * x_s);
+                        fold_part *= SymbolicExt::<C::F, C::EF>::ONE - y_s + y_s * x_s;
                     }
                     let f_part = Self::mono_eval_lsb::<C>(builder, &proof.final_poly, &point[k..]);
-                    total = total + SymbolicExt::from(*coeff) * fold_part * f_part;
+                    total += SymbolicExt::from(*coeff) * fold_part * f_part;
                 }
             }
         }
@@ -775,10 +778,10 @@ mod tests {
     use rand::{Rng, SeedableRng};
     use zkm_pcs::basefold::mle::Mle;
     use zkm_pcs::jagged_pcs::JaggedMmcs;
-    use zkm_pcs::{InnerChallenger, InnerCompress, InnerHash, InnerPerm};
     use zkm_pcs::whir::jagged::whir_config_for_stack;
     use zkm_pcs::whir::stacked::{StackedWhirProver, StackedWhirVerifier};
     use zkm_pcs::{InnerChallenge, InnerVal};
+    use zkm_pcs::{InnerChallenger, InnerCompress, InnerHash, InnerPerm};
     use zkm_primitives::poseidon2_init;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_compiler::ir::Builder;
@@ -808,9 +811,7 @@ mod tests {
     /// `tamper` mutates the proof's host mirror before witnessing, for the
     /// negative tests.
     fn run_whir_circuit_roundtrip(
-        tamper: impl FnOnce(
-            &mut RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
-        ),
+        tamper: impl FnOnce(&mut RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>),
     ) {
         let lsh = 9usize;
         run_whir_circuit_roundtrip_with(lsh, whir_config_for_stack(lsh, 3, 0), tamper);
@@ -819,9 +820,7 @@ mod tests {
     fn run_whir_circuit_roundtrip_with(
         lsh: usize,
         cfg: zkm_pcs::whir::config::WhirConfig,
-        tamper: impl FnOnce(
-            &mut RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
-        ),
+        tamper: impl FnOnce(&mut RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>),
     ) {
         let mut rng = StdRng::seed_from_u64(0x57AC);
 
@@ -890,13 +889,12 @@ mod tests {
             stack_point.iter().map(|x| x.read(&mut builder)).collect();
         let proof_var = read_stacked_whir_from_stream(&host_mirror, &mut builder);
         let mut challenger = DuplexChallengerVariable::new(&mut builder);
-        let verifier = RecursiveStackedWhirVerifier::<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-        > {
-            config: cfg,
-            log_stacking_height: lsh as u32,
-            _hasher: core::marker::PhantomData,
-        };
+        let verifier =
+            RecursiveStackedWhirVerifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
+                config: cfg,
+                log_stacking_height: lsh as u32,
+                _hasher: core::marker::PhantomData,
+            };
         verifier.verify::<InnerConfig, _, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
             &mut builder,
             &commit_vars,

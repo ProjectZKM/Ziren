@@ -674,7 +674,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             .verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
                 builder,
                 &_basefold_vk,
-                &_basefold_shard_proof_variable,
+                _basefold_shard_proof_variable,
                 &_shard_chips,
                 &_chip_metadata,
                 &_opened_values,
@@ -1217,7 +1217,6 @@ where
             .collect();
         prefix_sum_felts.extend(slot_of.iter().map(|&s| accs[s]));
 
-
         // Pass 2 — jagged-eval sum over the REAL columns only.  The host prover
         // sums over packing.offsets (prove_jagged_evaluation; num_chips =
         // packing.offsets.len()-1 = real_num_cols), column k = (offsets[k],
@@ -1295,16 +1294,16 @@ where
                             &merged,
                             &eq_factors,
                         );
-                    acc = acc + (z_col_lagrange[k] * full_lagrange);
+                    acc += z_col_lagrange[k] * full_lagrange;
                 }
                 let partial: Ext<C::F, C::EF> = b.eval(acc);
                 partial
             });
         for partial in partials {
-            expected_eval = expected_eval + partial;
+            expected_eval += partial;
         }
         if let Some(n) = eq_consumed {
-            expected_eval = expected_eval * eq_factors.scale_for_len(n);
+            expected_eval *= eq_factors.scale_for_len(n);
         }
 
         // (6) Multiply by the branching-program evaluation.
@@ -1353,7 +1352,7 @@ where
                 &first_half_symbolic,
                 &second_half_symbolic,
             );
-        expected_eval = expected_eval * bp_eval;
+        expected_eval *= bp_eval;
 
         // (7) Close the identity: accumulated expected_eval must equal
         //     the sumcheck's final point-eval claim.
@@ -1422,20 +1421,14 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
     pub fn shape_diag(&self) -> String {
         let mut s = format!("arity={}", self.vks_and_proofs.len());
         for (i, (_vk, sp)) in self.vks_and_proofs.iter().enumerate() {
-            for (name, v) in
-                crate::machine::shape_signature::describe_shard_proof_structure(sp)
-            {
+            for (name, v) in crate::machine::shape_signature::describe_shard_proof_structure(sp) {
                 s.push_str(&format!(" c{i}.{name}={v}"));
             }
         }
         s.push_str(&format!(
             " merkle_proofs={} paths={:?} values={} complete={}",
             self.vk_merkle_data.vk_merkle_proofs.len(),
-            self.vk_merkle_data
-                .vk_merkle_proofs
-                .iter()
-                .map(|p| p.path.len())
-                .collect::<Vec<_>>(),
+            self.vk_merkle_data.vk_merkle_proofs.iter().map(|p| p.path.len()).collect::<Vec<_>>(),
             self.vk_merkle_data.values.len(),
             self.is_complete,
         ));
@@ -1497,7 +1490,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use zkm_recursion_compiler::config::InnerConfig;
 
     type C = InnerConfig;

@@ -691,10 +691,6 @@ pub fn verify_core_basefold<C, SC, A>(
                 // per-proof verifier; the proof's own fields are read
                 // where the verification actually happens.
                 LiftedEvalProof::Bundle { host, .. } => {
-                    pack_info = Some((
-                        host.packing.offsets.len().saturating_sub(1),
-                        host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
-                    ));
                     let bundle_num_vars =
                         host.basefold_proof.basefold_proof.fri_commitments.len();
                     // Fixed-height guard: enumerability rests on every
@@ -1119,11 +1115,11 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
                         // Keep the largest representative height (deterministic);
                         // width (dims.0) is chip-constant across shards.
                         if ser_domain.log_size > d.log_size {
-                            *d = ser_domain.clone();
+                            *d = *ser_domain;
                             *m = *dims;
                         }
                     })
-                    .or_insert_with(|| (ser_domain.clone(), *dims));
+                    .or_insert_with(|| (*ser_domain, *dims));
             }
         }
         let mut chip_information: Vec<(

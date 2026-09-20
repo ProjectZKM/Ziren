@@ -692,10 +692,10 @@ impl ZKMProofShape {
         // single block, which fits in one column, so those classes only ever
         // land on 1; `shape_at_class` returns `None` for the unreachable
         // combinations rather than this bound having to know about them.
-        let max_pad_cols: usize =
-            (8usize << (zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize))
-                .div_ceil(pad_col_cells)
-                .max(1);
+        let max_pad_cols: usize = (8usize
+            << (zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize))
+            .div_ceil(pad_col_cells)
+            .max(1);
 
         let small_shapes: Vec<OrderedShape> = {
             // ONE representative per

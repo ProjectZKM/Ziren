@@ -163,7 +163,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             &mut rows,
             || {
                 let mut row = [F::ZERO; NUM_CLOCLZ_COLS];
-                let cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
+                let _cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
                 row
             },
             input.fixed_log2_rows::<F, _>(self),

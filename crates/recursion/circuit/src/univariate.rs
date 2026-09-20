@@ -197,7 +197,7 @@ mod tests {
     fn interpolate_3point_at_012_matches_generic_interpolate() {
         let evals = [F::ONE, F::TWO, F::from_u16(7)];
         let fast = interpolate_3point_evals_at_012(evals);
-        let slow = interpolate(&[F::ZERO, F::ONE, F::TWO], &evals.to_vec());
+        let slow = interpolate(&[F::ZERO, F::ONE, F::TWO], evals.as_ref());
         assert_eq!(fast.coefficients, slow.coefficients);
     }
 

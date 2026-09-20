@@ -281,14 +281,14 @@ pub fn eval_permutation_constraints<'a, F, AB>(
                 rlc = rlc.clone()
                     + betas.next().unwrap() * AB::ExprEF::from_usize(lookup.argument_index());
                 for (field, beta) in lookup.values.iter().zip(betas.clone()) {
-                    let elem = field.apply::<AB::Expr, AB::Var>(&preprocessed_local, main_local);
+                    let elem = field.apply::<AB::Expr, AB::Var>(preprocessed_local, main_local);
                     rlc = rlc.clone() + beta * elem;
                 }
                 rlcs.push(rlc);
 
                 let send_factor = if is_send { AB::F::ONE } else { -AB::F::ONE };
                 multiplicities.push(
-                    lookup.multiplicity.apply::<AB::Expr, AB::Var>(&preprocessed_local, main_local)
+                    lookup.multiplicity.apply::<AB::Expr, AB::Var>(preprocessed_local, main_local)
                         * send_factor,
                 );
             }

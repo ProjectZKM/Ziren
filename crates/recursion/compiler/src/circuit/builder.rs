@@ -314,8 +314,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         // threaded through `CircuitV2HintAddCurve` and the recursion runtime,
         // which is why it is not bundled here.
         let point_on_curve = SepticCurve::convert(point, |x| x.into());
-        let curve_formula =
-            SepticCurve::<SymbolicFelt<C::F>>::curve_formula(point_on_curve.x.clone());
+        let curve_formula = SepticCurve::<SymbolicFelt<C::F>>::curve_formula(point_on_curve.x);
         for (lhs, rhs) in point_on_curve.y.square().0.into_iter().zip_eq(curve_formula.0) {
             self.assert_felt_eq(lhs - rhs, C::F::ZERO);
         }
@@ -326,12 +325,10 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     /// Asserts that the SepticDigest is zero.
     fn assert_digest_zero_v2(&mut self, is_real: Felt<C::F>, digest: SepticDigest<Felt<C::F>>) {
         let zero = SepticDigest::<SymbolicFelt<C::F>>::zero();
-        for (digest_limb_x, zero_limb_x) in digest.0.x.0.into_iter().zip_eq(zero.0.x.0.into_iter())
-        {
+        for (digest_limb_x, zero_limb_x) in digest.0.x.0.into_iter().zip_eq(zero.0.x.0) {
             self.assert_felt_eq(is_real * digest_limb_x, is_real * zero_limb_x);
         }
-        for (digest_limb_y, zero_limb_y) in digest.0.y.0.into_iter().zip_eq(zero.0.y.0.into_iter())
-        {
+        for (digest_limb_y, zero_limb_y) in digest.0.y.0.into_iter().zip_eq(zero.0.y.0) {
             self.assert_felt_eq(is_real * digest_limb_y, is_real * zero_limb_y);
         }
     }

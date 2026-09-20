@@ -259,8 +259,7 @@ where
         // folds in the symbolic layer and emits nothing; only the terms that
         // reach `alpha` or a public value survive.  A row of `Ext` handles
         // emitted the chip's ENTIRE constraint polynomial a second time.
-        let preproc_row: Vec<SymbolicExt<C::F, C::EF>> =
-            vec![SymbolicExt::ZERO; preproc_width];
+        let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
         let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
         // Zero cumulative sums — match the host pra (`compute_padded_row_
         // adjustment` → `eval_air_constraints_at_row`, zero sums).
@@ -334,8 +333,7 @@ where
         // folds in the symbolic layer and emits nothing; only the terms that
         // reach `alpha` or a public value survive.  A row of `Ext` handles
         // emitted the chip's ENTIRE constraint polynomial a second time.
-        let preproc_row: Vec<SymbolicExt<C::F, C::EF>> =
-            vec![SymbolicExt::ZERO; preproc_width];
+        let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
         let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
         let mut folder = BasefoldConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
@@ -499,89 +497,91 @@ where
             .iter()
             .zip(opened_values.chips.iter())
             .ir_par_map_collect(builder, |builder, (chip, opening)| {
-            let degree = &opening.degree;
+                let degree = &opening.degree;
 
-            // (4a) Shape sanity check on the chip's openings.
-            verify_opening_shape_basefold::<C, SC, A>(chip, opening)
-                .expect("verify_zerocheck: chip opening shape mismatch");
+                // (4a) Shape sanity check on the chip's openings.
+                verify_opening_shape_basefold::<C, SC, A>(chip, opening)
+                    .expect("verify_zerocheck: chip opening shape mismatch");
 
-            // (4b) Sumcheck point dimension == PCS max_log_row_count.
-            let dimension = zerocheck_proof.point_and_eval.0.len();
-            assert_eq!(
-                dimension, pcs_max_log_row_count,
-                "verify_zerocheck: zerocheck point dimension {} != pcs max_log_row_count {}",
-                dimension, pcs_max_log_row_count,
-            );
+                // (4b) Sumcheck point dimension == PCS max_log_row_count.
+                let dimension = zerocheck_proof.point_and_eval.0.len();
+                assert_eq!(
+                    dimension, pcs_max_log_row_count,
+                    "verify_zerocheck: zerocheck point dimension {} != pcs max_log_row_count {}",
+                    dimension, pcs_max_log_row_count,
+                );
 
-            // (4c) Build the extended sumcheck point (one extra
-            // zero coordinate) for the geq comparison.  FRONT-insert
-            // (`values.insert(0, ..)`),
-            // NOT back-append: `full_geq` iterates MSB-first and
-            // `degree` is big-endian (MSB at index 0), so the extra
-            // high coordinate must pair with `degree`'s extra high bit.
-            // A back-append shifted every degree bit one slot vs `z`,
-            // giving the wrong padded-row mask on every padded chip.
-            let mut proof_point_extended = point_symbolic.clone();
-            proof_point_extended.insert(0, SymbolicExt::ZERO);
+                // (4c) Build the extended sumcheck point (one extra
+                // zero coordinate) for the geq comparison.  FRONT-insert
+                // (`values.insert(0, ..)`),
+                // NOT back-append: `full_geq` iterates MSB-first and
+                // `degree` is big-endian (MSB at index 0), so the extra
+                // high coordinate must pair with `degree`'s extra high bit.
+                // A back-append shifted every degree bit one slot vs `z`,
+                // giving the wrong padded-row mask on every padded chip.
+                let mut proof_point_extended = point_symbolic.clone();
+                proof_point_extended.insert(0, SymbolicExt::ZERO);
 
-            // (4d) Assert each degree coordinate is boolean and
-            // that all-but-the-first coordinates are zero unless
-            // the first is also zero (the BaseFold-pipeline
-            // big-endian-degree convention).
-            let degree_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
-                degree.iter().map(|x| (*x).into()).collect();
-            for (i, x) in degree_symbolic.iter().enumerate() {
-                builder.assert_ext_eq(*x * (*x - SymbolicExt::ONE), SymbolicExt::ZERO);
-                if i >= 1 {
-                    builder
-                        .assert_ext_eq(*x * *degree_symbolic.first().unwrap(), SymbolicExt::ZERO);
+                // (4d) Assert each degree coordinate is boolean and
+                // that all-but-the-first coordinates are zero unless
+                // the first is also zero (the BaseFold-pipeline
+                // big-endian-degree convention).
+                let degree_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+                    degree.iter().map(|x| (*x).into()).collect();
+                for (i, x) in degree_symbolic.iter().enumerate() {
+                    builder.assert_ext_eq(*x * (*x - SymbolicExt::ONE), SymbolicExt::ZERO);
+                    if i >= 1 {
+                        builder.assert_ext_eq(
+                            *x * *degree_symbolic.first().unwrap(),
+                            SymbolicExt::ZERO,
+                        );
+                    }
                 }
-            }
 
-            // (4e) Padded-row mask + adjustment.
-            let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
-            let padded_row_adjustment = Self::compute_padded_row_adjustment_basefold(
-                builder,
-                chip,
-                opening,
-                alpha,
-                public_values,
-            );
+                // (4e) Padded-row mask + adjustment.
+                let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
+                let padded_row_adjustment = Self::compute_padded_row_adjustment_basefold(
+                    builder,
+                    chip,
+                    opening,
+                    alpha,
+                    public_values,
+                );
 
-            // (4f) Constraint accumulator at the sumcheck point
-            // minus the padded-row contribution.
-            let constraint_eval_ext =
-                Self::eval_constraints_basefold(builder, chip, opening, alpha, public_values);
-            let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
-            let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
-            let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val.clone();
+                // (4f) Constraint accumulator at the sumcheck point
+                // minus the padded-row contribution.
+                let constraint_eval_ext =
+                    Self::eval_constraints_basefold(builder, chip, opening, alpha, public_values);
+                let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
+                let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
+                let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val;
 
-            // (4g) Batch the chip's openings (main first, then
-            // preprocessed) by the pre-computed challenge powers.
-            let openings_batch: SymbolicExt<C::F, C::EF> = opening
-                .main
-                .local
-                .iter()
-                .chain(opening.preprocessed.local.iter())
-                .copied()
-                .zip(
-                    gkr_batch_open_challenge_powers
-                        .iter()
-                        .take(opening.main.local.len() + opening.preprocessed.local.len())
-                        .copied(),
-                )
-                .map(|(opening, power)| {
-                    let o_sym: SymbolicExt<C::F, C::EF> = opening.into();
-                    o_sym * power
-                })
-                .sum();
+                // (4g) Batch the chip's openings (main first, then
+                // preprocessed) by the pre-computed challenge powers.
+                let openings_batch: SymbolicExt<C::F, C::EF> = opening
+                    .main
+                    .local
+                    .iter()
+                    .chain(opening.preprocessed.local.iter())
+                    .copied()
+                    .zip(
+                        gkr_batch_open_challenge_powers
+                            .iter()
+                            .take(opening.main.local.len() + opening.preprocessed.local.len())
+                            .copied(),
+                    )
+                    .map(|(opening, power)| {
+                        let o_sym: SymbolicExt<C::F, C::EF> = opening.into();
+                        o_sym * power
+                    })
+                    .sum();
 
-            // (4h) This chip's contribution to the cross-chip RLC.
-            let eq_sym: SymbolicExt<C::F, C::EF> = zerocheck_eq_val.into();
-            let contribution: Ext<C::F, C::EF> =
-                builder.eval(eq_sym * (constraint_eval + openings_batch));
-            contribution
-        });
+                // (4h) This chip's contribution to the cross-chip RLC.
+                let eq_sym: SymbolicExt<C::F, C::EF> = zerocheck_eq_val.into();
+                let contribution: Ext<C::F, C::EF> =
+                    builder.eval(eq_sym * (constraint_eval + openings_batch));
+                contribution
+            });
 
         // (4i) Cross-chip Horner fold, in chip order.
         for contribution in chip_contributions {
@@ -609,7 +609,7 @@ where
             .chip_openings
             .values()
             .zip(opened_values.chips.iter())
-            .map(|(chip_evaluation, opening)| {
+            .map(|(chip_evaluation, _opening)| {
                 // SINGLE-FIELD CLAIM COLLAPSE
                 // When the SHARD uses the collapsed convention, seed the
                 // per-chip claimed_sum term DIRECTLY from the FULL-POINT
@@ -948,17 +948,16 @@ mod padded_row_tests {
             )
         };
         let before = builder.get_mut_operations().vec.len();
-        let mut folder =
-            crate::basefold_constraint_folder::BasefoldConstraintFolder::<InnerConfig> {
-                preprocessed: PairWindow { local: &prep_row, next: &prep_row },
-                main: PairWindow { local: &main_row, next: &main_row },
-                alpha,
-                accumulator: SymbolicExt::ZERO,
-                public_values: pv,
-                local_cumulative_sum: lcs,
-                global_cumulative_sum: gcs,
-                _marker: std::marker::PhantomData,
-            };
+        let mut folder = crate::basefold_constraint_folder::BasefoldConstraintFolder::<InnerConfig> {
+            preprocessed: PairWindow { local: &prep_row, next: &prep_row },
+            main: PairWindow { local: &main_row, next: &main_row },
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values: pv,
+            local_cumulative_sum: lcs,
+            global_cumulative_sum: gcs,
+            _marker: std::marker::PhantomData,
+        };
         chip.eval(&mut folder);
         let _: Ext<F, EF> = builder.eval(folder.accumulator);
         builder.get_mut_operations().vec.len() - before

@@ -220,7 +220,7 @@ fn emit_one<F: PrimeField64>(
                         ; mov edi, r8d
                         ; mov esi, r9d
                         ; mov edx, DWORD flags as i32
-                        ; mov rax, QWORD div_f as usize as i64
+                        ; mov rax, QWORD div_f as *const () as usize as i64
                         ; call rax
                         ; mov rcx, rax
                         ; shr rcx, 32            // status in the high word;

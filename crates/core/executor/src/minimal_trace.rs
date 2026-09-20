@@ -193,10 +193,10 @@ pub struct TraceChunk {
     /// full final-memory carry for the LAST shard only.
     /// The global memory init/finalize argument (`postprocess`)
     /// iterates *every* touched address, so the terminal shard's
-    /// sub-executor needs the whole memory image (with full records)
-    /// + the uninitialized-memory (hint) image — data the sparse
-    /// `mem_reads` oracle cannot supply. Populated by the producer at
-    /// program halt; empty for every non-terminal chunk. Entries are
+    /// sub-executor needs the whole memory image (with full records) plus
+    /// the uninitialized-memory (hint) image — data the sparse `mem_reads`
+    /// oracle cannot supply. Populated by the producer at program halt;
+    /// empty for every non-terminal chunk. Entries are
     /// `(addr, value, shard, timestamp)`.
     pub final_memory: Vec<(u32, u32, u32, u32)>,
     /// full final-memory carry: the uninitialized-memory

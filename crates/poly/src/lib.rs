@@ -53,7 +53,7 @@ impl<T> Polynomial<T> {
         T: Field,
     {
         let powers = x.powers();
-        self.coefficients.iter().zip(powers).map(|(c, x)| x * c.clone()).sum()
+        self.coefficients.iter().zip(powers).map(|(c, x)| x * *c).sum()
     }
 
     /// Computes the root quotient of the polynomial.

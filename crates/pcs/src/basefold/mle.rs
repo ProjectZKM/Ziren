@@ -72,11 +72,7 @@ impl<'a, F> TraceRef<'a, F> {
     /// matching `RowMajorMatrix` / `DenseMatrix::height` bit-for-bit.
     #[inline]
     pub fn height(&self) -> usize {
-        if self.width == 0 {
-            0
-        } else {
-            self.values.len() / self.width
-        }
+        self.values.len().checked_div(self.width).unwrap_or(0)
     }
 }
 

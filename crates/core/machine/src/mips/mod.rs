@@ -1988,7 +1988,7 @@ pub mod tests {
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let scale = EF::from(KoalaBear::from_u32(2));
         let mut touched = 0usize;
-        for (_name, ce) in bf.logup_gkr_proof.logup_evaluations.chip_openings.iter_mut() {
+        for ce in bf.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
             if let Some(mf) = ce.main_trace_evaluations_full.as_mut() {
                 for v in mf.iter_mut() {
                     *v *= scale;
@@ -2178,7 +2178,7 @@ pub mod tests {
         let bf =
             forged.shard_proofs[0].basefold_shard_proof.as_mut().expect("first shard basefold");
         let mut touched = 0usize;
-        for (_n, ce) in bf.logup_gkr_proof.logup_evaluations.chip_openings.iter_mut() {
+        for ce in bf.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
             if let Some(mf) = ce.main_trace_evaluations_full.as_mut() {
                 if let Some(v) = mf.first_mut() {
                     *v *= scale; // perturb one coord — enough to break the claim sum.

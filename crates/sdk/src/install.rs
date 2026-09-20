@@ -142,7 +142,10 @@ fn extract_contained(archive: &std::path::Path, dest: &std::path::Path) -> std::
             match c {
                 Component::Normal(_) | Component::CurDir => {}
                 Component::ParentDir => {
-                    return Err(bad(format!("entry escapes the install directory: {}", p.display())))
+                    return Err(bad(format!(
+                        "entry escapes the install directory: {}",
+                        p.display()
+                    )))
                 }
                 Component::RootDir | Component::Prefix(_) => {
                     return Err(bad(format!("entry has an absolute path: {}", p.display())))
@@ -176,7 +179,10 @@ fn extract_contained(archive: &std::path::Path, dest: &std::path::Path) -> std::
                 dest_root.join(&path).parent().unwrap_or(&dest_root).to_path_buf()
             };
             if !base.join(&link).starts_with(&dest_root) {
-                return Err(bad(format!("link target escapes the install directory: {}", link.display())));
+                return Err(bad(format!(
+                    "link target escapes the install directory: {}",
+                    link.display()
+                )));
             }
         }
 
@@ -199,14 +205,12 @@ pub async fn download_file(
     url: &str,
     file: &mut impl std::io::Write,
 ) -> std::result::Result<(), String> {
-    let res = client.get(url).send().await.or(Err(format!("Failed to GET from '{}'", &url)))?;
+    let res = client.get(url).send().await.or(Err(format!("Failed to GET from '{}'", url)))?;
     // Without this a 404 body is happily written out as if it were the archive.
-    let res = res
-        .error_for_status()
-        .map_err(|e| format!("Request for '{}' failed: {}", &url, e))?;
+    let res = res.error_for_status().map_err(|e| format!("Request for '{}' failed: {}", url, e))?;
 
     let total_size =
-        res.content_length().ok_or(format!("Failed to get content length from '{}'", &url))?;
+        res.content_length().ok_or(format!("Failed to get content length from '{}'", url))?;
 
     let pb = ProgressBar::new(total_size);
     pb.set_style(ProgressStyle::default_bar()
@@ -291,8 +295,10 @@ mod tests {
         // The shape `tar -P` used to honour, and the reported arbitrary-write.
         let a = archive_with(file_header(), "/tmp/zkm-absolute-escape.bin", b"pwn");
         let err = extract_to_fresh_dir(&a).unwrap_err();
-        assert!(err.to_string().contains("absolute") || err.to_string().contains("escapes"),
-            "got: {err}");
+        assert!(
+            err.to_string().contains("absolute") || err.to_string().contains("escapes"),
+            "got: {err}"
+        );
         assert!(!Path::new("/tmp/zkm-absolute-escape.bin").exists(), "wrote outside dest");
     }
 
@@ -305,8 +311,10 @@ mod tests {
         h.set_cksum();
         let a = archive_with(h, "link", b"");
         let err = extract_to_fresh_dir(&a).unwrap_err();
-        assert!(err.to_string().contains("escapes") || err.to_string().contains("absolute"),
-            "got: {err}");
+        assert!(
+            err.to_string().contains("escapes") || err.to_string().contains("absolute"),
+            "got: {err}"
+        );
     }
 
     #[test]

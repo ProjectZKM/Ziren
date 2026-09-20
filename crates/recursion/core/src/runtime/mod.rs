@@ -532,9 +532,11 @@ where
                     use p3_maybe_rayon::prelude::*;
                     par_blocks.par_iter().try_for_each(
                         |sub: &RawProgram<AnalyzedInstruction<F>>| -> Result<(), RuntimeError<F, EF>> {
-                            let mut substate = WalkerState::<F>::default();
-                            substate.pc = state.pc;
-                            substate.clk = state.clk;
+                            let mut substate = WalkerState::<F> {
+                                pc: state.pc,
+                                clk: state.clk,
+                                ..Default::default()
+                            };
                             // Sub-walks: no witness / debug_stdout — verified
                             // pure-compute (hint_in_par=0).
                             self.execute_blocks(
@@ -676,7 +678,10 @@ where
                             "stored memory value should be the specified value"
                         );
                     }
-                    MemAccessKind::Write => drop(self.mw_us(*addr, *val, *mult)),
+                    MemAccessKind::Write => {
+                        self.mw_us(*addr, *val, *mult);
+                        drop(())
+                    }
                 }
                 // mem_const_count is pre-sized by `UnsafeRecord::new`
                 // from the analyzed Mem-instruction count.

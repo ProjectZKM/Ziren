@@ -68,8 +68,6 @@ use crate::Chip;
 // device dispatches, below rayon's profitable granularity, and the
 // injected tasks displaced trace generation (−12 % reth).
 
-// ported primitives
-
 /// `eq(point, -)` lagrange weights over the WHOLE `2^|point|` hypercube,
 /// big-endian (`point[0]` = MSB).
 ///
@@ -214,6 +212,7 @@ fn zerocheck_eq_root<EF: Field>(last: EF) -> Option<EF> {
 ///   * `p(0) = p0`, `p(2) = p2`, `p(4) = p4`  (the three computed samples);
 ///   * `p(1) = claim − p0`  (the sumcheck identity `p(0) + p(1) = claim`); and
 ///   * `p(eq_root) = 0`  (the eq factor `elf_X` vanishes at `eq_root`).
+///
 /// These uniquely determine `p`.  Re-evaluating the interpolant at
 /// `{0,1,2,3,4}` yields exactly the field elements the direct `{0,1,2,3,4}`
 /// sweep produces — the interpolant is unique and the field arithmetic is
@@ -300,8 +299,6 @@ impl<F: Field> VirtualGeq<F> {
         }
     }
 }
-
-// ZeroCheckPoly
 
 /// One chip's zerocheck sumcheck polynomial.
 ///
@@ -912,8 +909,6 @@ pub(crate) fn bitrev_rows<EF: Field>(cells: &[EF], ncols: usize, height: usize) 
     out
 }
 
-// trait impls
-
 impl<F, K, EF, A> SumcheckPolyBase for ZeroCheckPoly<'_, F, K, EF, A>
 where
     F: Field,
@@ -945,7 +940,7 @@ where
             if let Some(prep) = self.prep_cells.as_ref() {
                 out.extend(prep[..self.num_prep_cols.min(prep.len())].iter().map(|&v| EF::from(v)));
             } else {
-                out.extend(std::iter::repeat(EF::ZERO).take(self.num_prep_cols));
+                out.extend(std::iter::repeat_n(EF::ZERO, self.num_prep_cols));
             }
             out.extend(
                 self.main_cells[..self.num_main_cols.min(self.main_cells.len())]
@@ -953,7 +948,7 @@ where
                     .map(|&v| EF::from(v)),
             );
         } else {
-            out.extend(std::iter::repeat(EF::ZERO).take(self.num_prep_cols + self.num_main_cols));
+            out.extend(std::iter::repeat_n(EF::ZERO, self.num_prep_cols + self.num_main_cols));
         }
         out
     }

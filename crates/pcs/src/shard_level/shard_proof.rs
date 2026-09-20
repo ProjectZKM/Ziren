@@ -10,19 +10,14 @@ use crate::ShardOpenedValues;
 /// Fold direction for the per-shard LogUp-GKR proof; the verifier
 /// reverses `eval_point` for `Lsb`. `serde(default)` falls back to
 /// `Msb` for older proof bytes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FoldOrientation {
     /// High-order variable folded first.
+    #[default]
     Msb,
     /// Low-order variable folded first; known broken at round 1+,
     /// retained only as a forensics opt-in.
     Lsb,
-}
-
-impl Default for FoldOrientation {
-    fn default() -> Self {
-        FoldOrientation::Msb
-    }
 }
 
 /// Per-chip cumulative-sum exposures emitted by the LogUp-GKR
@@ -47,17 +42,12 @@ pub struct ChipCumulativeSums<F, EF> {
 /// * `Bundle(_)` — host path emits a structured bundle. Preferred in
 ///   the bundle-lift recursion shape because it skips rmp varint
 ///   reparsing, keeping the lifted bytes deterministic.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub enum EvaluationProof {
+    #[default]
     Empty,
     Bytes(Vec<u8>),
     Bundle(crate::jagged_pcs::jagged::JaggedBasefoldBundle),
-}
-
-impl Default for EvaluationProof {
-    fn default() -> Self {
-        Self::Empty
-    }
 }
 
 /// Host-side BaseFold-pipeline shard proof. No `Debug` derive: the

@@ -186,8 +186,8 @@ where
 
         // Bind `gates_num` to the `num_gates` word read from memory.
         let bytes_shift = AB::F::from_u32(256);
-        let bs2 = bytes_shift.clone() * bytes_shift.clone();
-        let bs3 = bs2.clone() * bytes_shift.clone();
+        let bs2 = bytes_shift * bytes_shift;
+        let bs3 = bs2 * bytes_shift;
         let mem_num_gates = local.num_gates_mem.access.value.0[0]
             + local.num_gates_mem.access.value.0[1] * bytes_shift
             + local.num_gates_mem.access.value.0[2] * bs2

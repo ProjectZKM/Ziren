@@ -368,7 +368,7 @@ where
             // placeholders when chip is missing from the map.
             let (local_cumulative_sum, global_cumulative_sum) =
                 if let Some(sums) = chip_cumulative_sums.get(name) {
-                    (sums.local, sums.global.clone())
+                    (sums.local, sums.global)
                 } else {
                     (
                         zero_ext,
@@ -452,7 +452,7 @@ where
             if let Some(n) = name {
                 if let Some(sums) = chip_cumulative_sums.get(n) {
                     chip_opening.local_cumulative_sum = sums.local;
-                    chip_opening.global_cumulative_sum = sums.global.clone();
+                    chip_opening.global_cumulative_sum = sums.global;
                 }
             }
 
@@ -616,10 +616,9 @@ where
     // bits, projects with `ext2felt`, and re-decomposes with `num2bits_v2_f`
     // (~22 + ~22 ops); the chain inside a chip is real, but nothing crosses
     // between chips, so the ~100 per-chip stretches need not run single-file.
-    sorted_names
-        .into_iter()
-        .enumerate()
-        .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (idx, name)| {
+    sorted_names.into_iter().enumerate().ir_par_map_collect::<Vec<_>, _, _>(
+        builder,
+        |builder, (idx, name)| {
             // The witnessed per-chip degree bits (big-endian bits of the
             // RAW height).  Fall back to a single zero stub when absent
             // (empty/legacy proofs) → height = 0.
@@ -655,7 +654,8 @@ where
             let mut bits: Vec<Felt<C::F>> = builder.num2bits_v2_f(height_felt, bit_len);
             bits.reverse();
             (name, bits)
-        })
+        },
+    )
 }
 
 /// Per-chip HEIGHT felts (`2^log_h`) derived from the WITNESSED per-chip
@@ -686,10 +686,9 @@ where
     sorted_names.sort();
     // PARALLEL over chips — same independence as
     // `chip_height_bits_from_opened_degrees` above.
-    sorted_names
-        .into_iter()
-        .enumerate()
-        .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (idx, _name)| {
+    sorted_names.into_iter().enumerate().ir_par_map_collect::<Vec<_>, _, _>(
+        builder,
+        |builder, (idx, _name)| {
             let degree: &[Ext<C::F, C::EF>] =
                 opened_values.chips.get(idx).map(|c| c.degree.as_slice()).unwrap_or(&[]);
             if degree.is_empty() {
@@ -702,7 +701,8 @@ where
                 acc = builder.eval(acc * two + *d);
             }
             C::ext2felt(builder, acc)[0]
-        })
+        },
+    )
 }
 
 #[cfg(test)]

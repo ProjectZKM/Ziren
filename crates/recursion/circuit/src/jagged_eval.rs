@@ -215,7 +215,7 @@ where
                 partial_sumcheck_proof.point_and_eval.0.clone(),
             );
             prefix_sum_felts.push(prefix_felt);
-            jagged_eval_expected = jagged_eval_expected + *z_col_eq * full_lagrange_eval;
+            jagged_eval_expected += *z_col_eq * full_lagrange_eval;
         }
 
         // Branching-program factor: `BranchingProgram(z_row, z_trace).eval(first, second)`.
@@ -226,7 +226,7 @@ where
             first_half,
             second_half,
         );
-        jagged_eval_expected = jagged_eval_expected * bp_factor;
+        jagged_eval_expected *= bp_factor;
 
         // Assert the reconstructed evaluation matches the
         // sumcheck proof's claimed evaluation.

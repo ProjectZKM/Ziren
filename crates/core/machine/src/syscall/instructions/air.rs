@@ -186,7 +186,7 @@ impl SyscallInstrsChip {
         let send_to_precompile = get_send_table::<AB>(local);
         builder.assert_bool(local.op_b_check);
         builder.assert_bool(local.op_c_check);
-        builder.when(send_to_precompile.clone()).assert_one(local.op_b_check);
+        builder.when(send_to_precompile).assert_one(local.op_b_check);
         builder.when(local.is_halt).assert_one(local.op_b_check);
         builder.when(send_to_precompile).assert_one(local.op_c_check);
         builder.when(local.is_commit_deferred_proofs.result).assert_one(local.op_c_check);

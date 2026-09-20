@@ -329,7 +329,7 @@ mod tests {
     fn row_major_table_idx_is_row_major() {
         let mut t: RowMajorTable<KoalaBear> = RowMajorTable::filled(2, 2, KoalaBear::from_u32(0));
         // 4 rows × 4 interactions = 16 cells; row 1 interaction 2 -> idx 6.
-        assert_eq!(t.idx(1, 2), 1 * 4 + 2);
+        assert_eq!(t.idx(1, 2), 4 + 2);
         t.set(1, 2, KoalaBear::from_u32(99));
         assert_eq!(*t.get(1, 2), KoalaBear::from_u32(99));
         assert_eq!(t.cells[6], KoalaBear::from_u32(99));

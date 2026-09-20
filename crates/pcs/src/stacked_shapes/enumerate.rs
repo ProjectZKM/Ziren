@@ -339,7 +339,7 @@ mod tests {
             want.insert("Global".to_string());
             want.insert(only.to_string());
             assert!(
-                ms.chip_clusters.iter().any(|c| *c == want),
+                ms.chip_clusters.contains(&want),
                 "no cluster for the {label} memory shard {want:?}"
             );
         }

@@ -609,8 +609,7 @@ mod tests {
         let pc_base = 0x1000_0000u32;
         let insns: Vec<Instruction> =
             (0..4000).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 1 << 10;
+        let opts = ZKMCoreOpts { shard_size: 1 << 10, ..Default::default() };
         let mut exec = Executor::new(Program::new(insns, pc_base, pc_base), opts);
         exec.minimal_trace_collector = Some(MinimalTrace::default());
         while !exec.execute_state(false).expect("execute_state").1 {}
@@ -653,8 +652,7 @@ mod tests {
         use crate::Executor;
 
         let program = crate::programs::tests::unconstrained_program();
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 1 << 12;
+        let opts = ZKMCoreOpts { shard_size: 1 << 12, ..Default::default() };
 
         let mut a = Executor::new(program.clone(), opts);
         a.run().expect("sequential run");
@@ -708,8 +706,7 @@ mod tests {
         use crate::Executor;
 
         let program = crate::programs::tests::sha3_chain_program();
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 1 << 12;
+        let opts = ZKMCoreOpts { shard_size: 1 << 12, ..Default::default() };
 
         let mut exec = Executor::new(program.clone(), opts);
         exec.write_stdin(&[1u8; 32]);
@@ -769,8 +766,7 @@ mod tests {
         // small shard size, and the point is to replay chunks that start deep
         // inside the program.
         let program = crate::programs::tests::sha3_chain_program();
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 1 << 12;
+        let opts = ZKMCoreOpts { shard_size: 1 << 12, ..Default::default() };
 
         // A: straight through.
         let mut a = Executor::new(program.clone(), opts);
@@ -866,8 +862,7 @@ mod tests {
         use std::collections::BTreeMap;
 
         let program = crate::programs::tests::secp256r1_add_program();
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 1 << 12;
+        let opts = ZKMCoreOpts { shard_size: 1 << 12, ..Default::default() };
 
         let mut a = Executor::new(program.clone(), opts);
         a.run().expect("sequential run");
@@ -946,8 +941,7 @@ mod tests {
                 (0..4000).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
             Program::new(insns, pc_base, pc_base)
         }
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 1 << 10;
+        let opts = ZKMCoreOpts { shard_size: 1 << 10, ..Default::default() };
 
         // Batched: run to completion, then take the whole collector.
         let mut exec = Executor::new(program(), opts);
@@ -1048,9 +1042,7 @@ mod tests {
         use crate::Executor;
         use std::sync::atomic::Ordering;
 
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 1 << 12;
-        opts.shard_batch_size = 2;
+        let opts = ZKMCoreOpts { shard_size: 1 << 12, shard_batch_size: 2, ..Default::default() };
 
         let run = |force_interpreter: bool| {
             let mut exec = Executor::new(program.clone(), opts);
@@ -1100,9 +1092,7 @@ mod tests {
         use crate::Executor;
         use std::sync::atomic::Ordering;
 
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 1 << 12;
-        opts.shard_batch_size = 2;
+        let opts = ZKMCoreOpts { shard_size: 1 << 12, shard_batch_size: 2, ..Default::default() };
 
         let run = |minimal: bool| {
             let mut exec = Executor::new(program.clone(), opts);
@@ -1354,7 +1344,7 @@ mod tests {
         for i in 0..40u32 {
             // Cycle reg index 1..15 so we hit a range of register addrs.
             let dst = ((i % 14) + 1) as u8;
-            insns.push(Instruction::new(Opcode::ADD, dst, 0, (i + 1) as u32, false, true));
+            insns.push(Instruction::new(Opcode::ADD, dst, 0, (i + 1), false, true));
         }
         // Then a chain of ADDs that read previously-written regs.
         for _ in 0..40 {
@@ -1632,10 +1622,8 @@ mod hint_seam_tests {
 
     fn run(padding: usize, hint: &[u8]) -> (Vec<Vec<u8>>, Vec<TraceChunk>) {
         let pc_base = 0x1000_0000u32;
-        let mut opts = ZKMCoreOpts::default();
-        opts.shard_size = 1 << 10;
-        let program =
-            Program::new(hint_seam_program(padding, hint.len() as u32), pc_base, pc_base);
+        let opts = ZKMCoreOpts { shard_size: 1 << 10, ..Default::default() };
+        let program = Program::new(hint_seam_program(padding, hint.len() as u32), pc_base, pc_base);
         let mut exec = Executor::new(program, opts);
         exec.write_vecs(&[hint.to_vec()]);
         exec.minimal_trace_collector = Some(MinimalTrace::default());
@@ -1663,9 +1651,8 @@ mod hint_seam_tests {
         let (stream, chunks) = run(6000, &hint);
         assert!(chunks.len() > 2, "only {} chunk(s): the fence never split the seam", chunks.len());
 
-        let sealed_in_seam: Vec<usize> = (0..chunks.len() - 1)
-            .filter(|&i| chunks[i].input_stream_ptr == 0)
-            .collect();
+        let sealed_in_seam: Vec<usize> =
+            (0..chunks.len() - 1).filter(|&i| chunks[i].input_stream_ptr == 0).collect();
         assert!(
             !sealed_in_seam.is_empty(),
             "no chunk was sealed between HINT_LEN and HINT_READ, so this test proves nothing; \

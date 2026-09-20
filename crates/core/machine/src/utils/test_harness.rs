@@ -126,7 +126,7 @@ where
         + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>
         + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
 {
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &vec![])
+    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &[])
 }
 
 /// `p3_uni_stark::verify` over a single hand-built AIR fixture.
@@ -145,7 +145,7 @@ where
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>
         + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
 {
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &vec![])
+    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &[])
 }
 
 /// Pad a row-major buffer of `N`-wide rows out to a power-of-two height (at

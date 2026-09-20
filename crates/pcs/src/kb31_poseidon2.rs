@@ -32,7 +32,6 @@ pub fn inner_perm() -> InnerPerm {
 }
 
 /// The recursion config used for recursive reduce circuit.
-
 pub mod koala_bear_poseidon2 {
 
     use p3_challenger::DuplexChallenger;
@@ -257,7 +256,7 @@ pub mod koala_bear_poseidon2 {
                 String,
                 p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
             )],
-                pin: Option<crate::jagged::AreaPin>,
+            pin: Option<crate::jagged::AreaPin>,
         ) -> Com<Self> {
             inner_prep_commit(named_preprocessed_traces, pin)
         }
@@ -269,7 +268,7 @@ pub mod koala_bear_poseidon2 {
                 String,
                 p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
             )],
-                pin: Option<crate::jagged::AreaPin>,
+            pin: Option<crate::jagged::AreaPin>,
         ) -> Self::PrepPrecomputed {
             inner_prep_precompute(named_preprocessed_traces, pin)
         }

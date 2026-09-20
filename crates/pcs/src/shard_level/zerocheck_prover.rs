@@ -26,17 +26,6 @@ use p3_challenger::FieldChallenger;
 use p3_field::{BasedVectorSpace, Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
-/// Shard-level zerocheck prover.
-///
-/// Pipeline:
-///   1. Receive `alpha` (per-chip constraint batching) and
-///      `gkr_batch_open` (transcript alignment with the verifier),
-///      `lambda` (inter-chip RLC).
-///   2. Build one lazy `ZeroCheckPoly` per chip (real rows only; the
-///      padded tail is handled analytically by `VirtualGeq`).
-///   3. Seed per-chip claims from the GKR openings.
-///   4. Reduce via `reduce_sumcheck_to_evaluation` (λ-RLC across chips).
-#[allow(clippy::too_many_arguments)]
 /// Squeeze the two batching challenges [`prove_shard_zerocheck`] consumes, in
 /// the order the verifier replays them.
 ///
@@ -57,6 +46,17 @@ where
     (alpha, gkr_batch_open)
 }
 
+/// Shard-level zerocheck prover.
+///
+/// Pipeline:
+///   1. Receive `alpha` (per-chip constraint batching) and
+///      `gkr_batch_open` (transcript alignment with the verifier),
+///      `lambda` (inter-chip RLC).
+///   2. Build one lazy `ZeroCheckPoly` per chip (real rows only; the
+///      padded tail is handled analytically by `VirtualGeq`).
+///   3. Seed per-chip claims from the GKR openings.
+///   4. Reduce via `reduce_sumcheck_to_evaluation` (λ-RLC across chips).
+#[allow(clippy::too_many_arguments)]
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
@@ -284,11 +284,9 @@ where
             };
             cells_src.iter().map(|v| <Val<SC>>::from(*v)).collect()
         };
-        let prep_cells: Option<Vec<Val<SC>>> = if let Some(pt) = prep_trace.real_trace_ref() {
-            Some(pt.values.iter().map(|v| <Val<SC>>::from(*v)).collect())
-        } else {
-            None
-        };
+        let prep_cells: Option<Vec<Val<SC>>> = prep_trace
+            .real_trace_ref()
+            .map(|pt| pt.values.iter().map(|v| <Val<SC>>::from(*v)).collect());
 
         // rev(zeta) CONVENTION CONVERGENCE
         // use_rev: feed NATURAL trace rows and anchor the poly on

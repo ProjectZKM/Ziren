@@ -264,10 +264,12 @@ mod unsafe_record_tests {
 
     #[test]
     fn new_pre_sizes_to_event_counts() {
-        let mut counts = RecursionAirEventCount::default();
-        counts.base_alu_events = 4;
-        counts.ext_alu_events = 2;
-        counts.poseidon2_wide_events = 1;
+        let counts = RecursionAirEventCount {
+            base_alu_events: 4,
+            ext_alu_events: 2,
+            poseidon2_wide_events: 1,
+            ..Default::default()
+        };
         let rec = UnsafeRecord::<KoalaBear>::new(counts);
         assert_eq!(rec.base_alu_events.len(), 4);
         assert_eq!(rec.ext_alu_events.len(), 2);
@@ -277,8 +279,7 @@ mod unsafe_record_tests {
 
     #[test]
     fn into_record_round_trip_after_offset_writes() {
-        let mut counts = RecursionAirEventCount::default();
-        counts.base_alu_events = 3;
+        let counts = RecursionAirEventCount { base_alu_events: 3, ..Default::default() };
         let mut rec = UnsafeRecord::<KoalaBear>::new(counts);
         let evs = [
             BaseAluEvent { out: k(7), in1: k(1), in2: k(2) },

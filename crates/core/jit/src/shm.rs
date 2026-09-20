@@ -186,7 +186,7 @@ impl ShmMemory {
         let fd = memfd::MemfdOptions::default()
             .close_on_exec(false)
             .create("zkm-jit-shm")
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         let raw_fd = fd.as_raw_fd();
 
         // Re-set length.

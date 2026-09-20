@@ -57,12 +57,12 @@
 use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
 
 use super::{
-    TranspilerBackend, AREA_LEFT_OFFSET, CLK_LIMIT_OFFSET, CLK_SHARD_OFFSET, CONTEXT,
-    DELAYED_JUMP_TARGET_OFFSET, EXIT_CODE_OFFSET, HEIGHT_LEFT_OFFSET, JIT_EXIT_BAD_JUMP,
-    JIT_EXIT_FALL_OFF, JIT_EXIT_ORACLE_FULL, JIT_EXIT_SHARD_FENCE, JUMP_TABLE, JUMP_TABLE_LEN_OFFSET,
-    JUMP_TABLE_OFFSET, MEMORY_OFFSET, MEMORY_PTR, ORACLE_END_OFFSET, ORACLE_TAIL_OFFSET, PC_OFFSET,
-    PENDING_JUMP_AT_START_OFFSET, REG_STAMPS_OFFSET, SHARD_OFFSET, TEMP_A, TEMP_B, TOUCHED_OFFSET,
-    BAD_JUMP_TARGET_OFFSET,
+    TranspilerBackend, AREA_LEFT_OFFSET, BAD_JUMP_TARGET_OFFSET, CLK_LIMIT_OFFSET,
+    CLK_SHARD_OFFSET, CONTEXT, DELAYED_JUMP_TARGET_OFFSET, EXIT_CODE_OFFSET, HEIGHT_LEFT_OFFSET,
+    JIT_EXIT_BAD_JUMP, JIT_EXIT_FALL_OFF, JIT_EXIT_ORACLE_FULL, JIT_EXIT_SHARD_FENCE, JUMP_TABLE,
+    JUMP_TABLE_LEN_OFFSET, JUMP_TABLE_OFFSET, MEMORY_OFFSET, MEMORY_PTR, ORACLE_END_OFFSET,
+    ORACLE_TAIL_OFFSET, PC_OFFSET, PENDING_JUMP_AT_START_OFFSET, REG_STAMPS_OFFSET, SHARD_OFFSET,
+    TEMP_A, TEMP_B, TOUCHED_OFFSET,
 };
 use crate::driver::{lower_one, DriverError, DriverInstruction, JitOpcode};
 use crate::risc::MipsRegister;
@@ -189,7 +189,12 @@ const fn is_load(op: JitOpcode) -> bool {
 const fn is_store(op: JitOpcode) -> bool {
     matches!(
         op,
-        JitOpcode::Sb | JitOpcode::Sh | JitOpcode::Sw | JitOpcode::Swl | JitOpcode::Swr | JitOpcode::Sc
+        JitOpcode::Sb
+            | JitOpcode::Sh
+            | JitOpcode::Sw
+            | JitOpcode::Swl
+            | JitOpcode::Swr
+            | JitOpcode::Sc
     )
 }
 
@@ -202,7 +207,9 @@ pub fn producer_reject(instrs: &[DriverInstruction]) -> Option<ProducerReject> {
         }
         let i = i as u32;
         match op {
-            JitOpcode::Beq | JitOpcode::Bne if ins.imm_b => return Some(ProducerReject::BranchForm(i)),
+            JitOpcode::Beq | JitOpcode::Bne if ins.imm_b => {
+                return Some(ProducerReject::BranchForm(i))
+            }
             JitOpcode::Jump if ins.imm_b => return Some(ProducerReject::BranchForm(i)),
             _ => {}
         }
@@ -356,7 +363,6 @@ pub fn build_producer(
         let control_flow = is_branch(op) || is_jump(op);
         let memory = is_load(op) || is_store(op);
 
-        // body
         if memory {
             let full = t.assembler.new_dynamic_label();
             let touch = t.assembler.new_dynamic_label();
@@ -387,7 +393,6 @@ pub fn build_producer(
             cold.push(Cold::Trap { label: trap, pc });
         }
 
-        // stamps, clock
         for &(reg, pos) in &plan.stamps[..plan.n_stamps as usize] {
             assert!(reg < 36 && (POS_C..=POS_HI).contains(&pos), "stamp ({reg}, {pos})");
             let off = REG_STAMPS_OFFSET + i32::from(reg) * 8;
@@ -405,7 +410,6 @@ pub fn build_producer(
         }
         dynasm!(t.assembler ; .arch x64 ; add Rq(CLK_SHARD), 5);
 
-        // charges and fence checks
         let area = i32::try_from(plan.area).expect("area charge fits i32");
         let heights = &plan.heights[..plan.n_heights as usize];
         if control_flow {
@@ -452,7 +456,7 @@ pub fn build_producer(
                 );
             }
             let charged = |slot: u8| heights.iter().any(|h| h.slot == slot);
-            let mut check_slot = |t: &mut TranspilerBackend, slot: u8| {
+            let check_slot = |t: &mut TranspilerBackend, slot: u8| {
                 let off = HEIGHT_LEFT_OFFSET + i32::from(slot) * 8;
                 dynasm!(t.assembler ; .arch x64
                     ; cmp QWORD [Rq(CONTEXT) + off], 0
@@ -489,7 +493,6 @@ pub fn build_producer(
             });
         }
 
-        // delay-slot dispatch
         if plan.delay_slot {
             let pc_base = cfg.pc_base;
             let bad = shared.bad_jump;
