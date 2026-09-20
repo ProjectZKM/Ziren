@@ -9,8 +9,8 @@ use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, PrimeField};
 
 use super::basefold_constraint_folder::{
-    compute_padded_row_adjustment_basefold_host, eval_constraints_basefold_host,
-    BasefoldConstraintFolder,
+    compute_padded_row_adjustment_shard_host, eval_constraints_shard_host,
+    ShardConstraintFolder,
 };
 use super::shard_proof::{JaggedShardProof, FoldOrientation};
 use super::types::{LogupGkrProof, PartialSumcheckProof};
@@ -142,7 +142,7 @@ impl JaggedShardVerifier {
     where
         SC: StarkGenericConfig + crate::BasefoldRing,
         A: MachineAir<Val<SC>>
-            + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
+            + for<'b> Air<ShardConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
         Val<SC>: PrimeField,
         Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
         // Threaded to `verify_jagged_pcs_host`'s static OUTER
@@ -332,7 +332,7 @@ impl JaggedShardVerifier {
         // per-chip openings that feed the following jagged-PCS phase.
         //
         // Reference:
-        //   crates/recursion/circuit/src/zerocheck.rs::BasefoldZerocheckVerifier::verify_zerocheck
+        //   crates/recursion/circuit/src/zerocheck.rs::ShardZerocheckVerifier::verify_zerocheck
         verify_zerocheck_host::<SC, A>(
             chips,
             &proof.zerocheck_proof,
@@ -1482,7 +1482,7 @@ fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
 ///
 /// Also binds the cross-chip constraint-RLC and the GKR sum-modification
 /// identity (in-circuit equivalent at
-/// [`crate::recursion_circuit::zerocheck::BasefoldZerocheckVerifier::verify_zerocheck`])
+/// [`crate::recursion_circuit::zerocheck::ShardZerocheckVerifier::verify_zerocheck`])
 /// against the direct `Σ_b C(b) == 0` sumcheck the shard-level prover
 /// ([`crate::shard_level::zerocheck_prover::prove_shard_zerocheck`]) emits.
 #[allow(clippy::too_many_arguments)]
@@ -1498,7 +1498,7 @@ fn verify_zerocheck_host<SC, A>(
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
-        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
+        + for<'b> Air<ShardConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
@@ -1668,7 +1668,7 @@ where
 /// Host recompute of the in-circuit zerocheck `rlc_eval`.
 ///
 /// Bit-for-bit mirror of the recursion verifier's
-/// `BasefoldZerocheckVerifier::verify_zerocheck` accumulator, executed over
+/// `ShardZerocheckVerifier::verify_zerocheck` accumulator, executed over
 /// concrete host field elements instead of symbolic circuit exprs.  The
 /// circuit asserts `rlc_eval == zerocheck_proof.point_and_eval.1`; the
 /// caller binds this recompute the same way.
@@ -1697,7 +1697,7 @@ fn recompute_zerocheck_rlc_eval_host<SC, A>(
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
-        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
+        + for<'b> Air<ShardConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
@@ -1758,7 +1758,7 @@ where
             // dimension mismatch: report it (degree placeholder/zero path).
             Challenge::<SC>::ONE
         };
-        let pra = compute_padded_row_adjustment_basefold_host::<Val<SC>, Challenge<SC>, A>(
+        let pra = compute_padded_row_adjustment_shard_host::<Val<SC>, Challenge<SC>, A>(
             chip,
             opening,
             alpha,
@@ -1766,7 +1766,7 @@ where
         );
 
         // (4f) constraint_eval = C(trace@z*, alpha) - pra·geq, circuit :566-577.
-        let ce = eval_constraints_basefold_host::<Val<SC>, Challenge<SC>, A>(
+        let ce = eval_constraints_shard_host::<Val<SC>, Challenge<SC>, A>(
             chip,
             opening,
             alpha,

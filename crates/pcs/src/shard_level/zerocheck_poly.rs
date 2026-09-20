@@ -16,7 +16,7 @@
 //! [`VirtualGeq`] — so cost grows as `Σ chip_height`, not
 //! `num_chips · 2^max_log_row_count`.
 //!
-//! # Conventions (must match `BasefoldConstraintFolder` + the recursion
+//! # Conventions (must match `ShardConstraintFolder` + the recursion
 //! circuit)
 //!
 //!   * MLE fold: adjacent pairs `(2i, 2i+1)` → `i`, last odd row
@@ -26,7 +26,7 @@
 //!     the row index; `zeta`'s last coordinate.
 //!   * `partial_lagrange`: big-endian, `point[0]` is the MSB.
 //!   * constraint α-RLC: Horner (`acc·α + c`) via
-//!     [`BasefoldConstraintFolder`] — algebraically identical to a
+//!     [`ShardConstraintFolder`] — algebraically identical to a
 //!     reversed `powers_of_alpha` array.
 //!   * GKR-opening batch powers: `[β¹, β², …]`, columns ordered
 //!     main-then-preprocessed.
@@ -51,7 +51,7 @@ use crate::folder::PairWindow;
 use crate::septic_curve::SepticCurve;
 use crate::septic_digest::SepticDigest;
 use crate::septic_extension::SepticExtension;
-use crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder;
+use crate::shard_level::basefold_constraint_folder::ShardConstraintFolder;
 use crate::shard_level::sumcheck_poly::{
     ComponentPoly, SumcheckPoly, SumcheckPolyBase, SumcheckPolyFirstRound,
 };
@@ -354,7 +354,7 @@ where
     F: Field,
     K: ExtensionField<F>,
     EF: ExtensionField<F> + ExtensionField<K>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, K, EF>>,
+    A: MachineAir<F> + for<'b> Air<ShardConstraintFolder<'b, F, K, EF>>,
 {
     /// Construct a chip's zerocheck poly.  `main_cells` / `prep_cells`
     /// are the real (un-padded) trace rows, row-major, in the cell field
@@ -403,7 +403,7 @@ where
     }
 
     /// Evaluate the chip's α-RLC'd constraints at a single `K` row,
-    /// accumulating in `EF` (see [`BasefoldConstraintFolder`]).
+    /// accumulating in `EF` (see [`ShardConstraintFolder`]).
     fn eval_air_at_row(&self, prep_row: &[K], main_row: &[K]) -> EF {
         eval_air_constraints_at_row::<F, K, EF, A>(
             self.air,
@@ -759,7 +759,7 @@ where
 }
 
 /// Evaluate a chip's α-RLC'd AIR constraints at one `K` row through the
-/// [`BasefoldConstraintFolder`] (Horner α accumulating in `EF`; cumulative
+/// [`ShardConstraintFolder`] (Horner α accumulating in `EF`; cumulative
 /// sums held at zero — lookup soundness rides on LogUp-GKR, not this
 /// zerocheck).  `K` is the cell field (base `F` for the first round, `EF`
 /// after a fold).
@@ -774,14 +774,14 @@ where
     F: Field,
     K: ExtensionField<F>,
     EF: ExtensionField<F> + ExtensionField<K>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, K, EF>>,
+    A: MachineAir<F> + for<'b> Air<ShardConstraintFolder<'b, F, K, EF>>,
 {
     let local_sum = EF::ZERO;
     let global_sum: SepticDigest<F> = SepticDigest(SepticCurve {
         x: SepticExtension::<F>([F::ZERO; 7]),
         y: SepticExtension::<F>([F::ZERO; 7]),
     });
-    let mut folder = BasefoldConstraintFolder::<F, K, EF> {
+    let mut folder = ShardConstraintFolder::<F, K, EF> {
         preprocessed: PairWindow { local: prep_row, next: prep_row },
         main: PairWindow { local: main_row, next: main_row },
         alpha,
@@ -809,7 +809,7 @@ pub fn compute_padded_row_adjustment<F, EF, A>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF, EF>>,
+    A: MachineAir<F> + for<'b> Air<ShardConstraintFolder<'b, F, EF, EF>>,
 {
     // A width-0 main trace (absent / placeholder chip in this shard) => main_height==0
     // => num_real==0 => sum_as_poly emits the degree-4 dummy and never uses this
@@ -966,7 +966,7 @@ impl<F, EF, A> SumcheckPoly<EF> for ZeroCheckPoly<'_, F, EF, EF, A>
 where
     F: Field,
     EF: ExtensionField<F>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF, EF>>,
+    A: MachineAir<F> + for<'b> Air<ShardConstraintFolder<'b, F, EF, EF>>,
 {
     fn fix_last_variable(self, alpha: EF) -> Self {
         self.fix_last(alpha)
@@ -994,8 +994,8 @@ where
     K: ExtensionField<F>,
     EF: ExtensionField<F> + ExtensionField<K>,
     A: MachineAir<F>
-        + for<'b> Air<BasefoldConstraintFolder<'b, F, K, EF>>
-        + for<'b> Air<BasefoldConstraintFolder<'b, F, EF, EF>>,
+        + for<'b> Air<ShardConstraintFolder<'b, F, K, EF>>
+        + for<'b> Air<ShardConstraintFolder<'b, F, EF, EF>>,
 {
     type NextRoundPoly = ZeroCheckPoly<'a, F, EF, EF, A>;
 

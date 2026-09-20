@@ -28,8 +28,8 @@ use zkm_pcs::air::MachineAir;
 use zkm_pcs::MachineChip;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
-use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
-use crate::basefold_constraint_folder::BasefoldConstraintFolder;
+use crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable;
+use crate::basefold_constraint_folder::ShardConstraintFolder;
 use crate::challenger::FieldChallengerVariable;
 use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
 use crate::{CircuitConfig, KoalaBearFriParametersVariable};
@@ -331,7 +331,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     chip_metadata: &LogupGkrShardChipMetadata,
     proof: &crate::logup_proof::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
     shard_chips: &[&MachineChip<SC, A>],
-    opened_values: &BasefoldShardOpenedValuesVariable<C>,
+    opened_values: &JaggedShardOpenedValuesVariable<C>,
     public_values: &[Felt<C::F>],
     max_log_row_count: usize,
     challenger: &mut FC,
@@ -339,7 +339,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
 ) where
     C: CircuitConfig<F = SC::Val>,
     SC: KoalaBearFriParametersVariable<C>,
-    A: MachineAir<C::F> + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
+    A: MachineAir<C::F> + for<'b> Air<ShardConstraintFolder<'b, C>>,
     FC: FieldChallengerVariable<C, C::Bit>,
     EVPV: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
     SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
@@ -695,7 +695,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     // (`row_gkr::top_level::prove_shard_logup_gkr_rows`) and of the host
     // verifier (end of `verify_logup_gkr_host`).
     //
-    // Position is load-bearing: `BasefoldZerocheckVerifier::verify_zerocheck`
+    // Position is load-bearing: `ShardZerocheckVerifier::verify_zerocheck`
     // opens by sampling α / γ / λ, and the zerocheck identity it then enforces
     // (`assert_ext_eq(claimed_sum, zerocheck_sum_modification)` plus the
     // rlc_eval assert) is only a Schwartz–Zippel test of those challenges if

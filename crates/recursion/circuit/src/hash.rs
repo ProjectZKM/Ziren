@@ -332,7 +332,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     fn chip_height_bits_dispatch(
         builder: &mut Builder<C>,
         chip_names: &[String],
-        opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        opened_values: &crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
         chip_heights: &std::collections::BTreeMap<String, usize>,
         max_log_row_count: usize,
     ) -> Vec<(String, Vec<Felt<C::F>>)>
@@ -628,7 +628,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
     fn chip_height_bits_dispatch(
         builder: &mut Builder<C>,
         chip_names: &[String],
-        opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        opened_values: &crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
         _chip_heights: &std::collections::BTreeMap<String, usize>,
         max_log_row_count: usize,
     ) -> Vec<(String, Vec<Felt<C::F>>)>
@@ -935,7 +935,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     fn chip_height_bits_dispatch(
         builder: &mut Builder<C>,
         chip_names: &[String],
-        _opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        _opened_values: &crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
         chip_heights: &std::collections::BTreeMap<String, usize>,
         max_log_row_count: usize,
     ) -> Vec<(String, Vec<Felt<C::F>>)>

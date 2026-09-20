@@ -312,7 +312,7 @@ impl CircuitConfig for InnerConfig {
         // incompatible with the BaseFold zerocheck: that chip's AIR uses
         // `when_transition` row selectors (the accum-squaring chain at
         // exp_reverse_bits.rs:421 and x-stability at :380), which
-        // `BasefoldConstraintFolder` cannot evaluate (it has no row
+        // `ShardConstraintFolder` cannot evaluate (it has no row
         // selectors — `unimplemented!`). Lowering to primitive
         // ALU/Select ops keeps the work in row-selector-free chips, so
         // `ExpReverseBitsLen` can be retired from the compress/shrink

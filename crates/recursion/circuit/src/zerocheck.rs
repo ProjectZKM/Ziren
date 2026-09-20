@@ -24,8 +24,8 @@ use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter, SymbolicExt};
 
-use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
-use crate::basefold_constraint_folder::BasefoldConstraintFolder;
+use crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable;
+use crate::basefold_constraint_folder::ShardConstraintFolder;
 use crate::challenger::FieldChallengerVariable;
 use crate::logup_proof::LogUpEvaluations;
 use crate::partial_sumcheck::PartialSumcheckProof;
@@ -124,7 +124,7 @@ where
 /// consumes the BaseFold-shape opening type.
 pub fn verify_opening_shape_basefold<C, SC, A>(
     chip: &MachineChip<SC, A>,
-    opening: &crate::basefold_chip_opened_values::BasefoldChipOpenedValuesVariable<C>,
+    opening: &crate::basefold_chip_opened_values::JaggedChipOpenedValuesVariable<C>,
 ) -> Result<(), OpeningShapeError>
 where
     C: CircuitConfig<F = SC::Val>,
@@ -144,7 +144,7 @@ where
 }
 
 /// Zerocheck verifier wrapper that threads the trait bounds needed
-/// for [`MachineChip::eval`] dispatch through a [`BasefoldConstraintFolder`].
+/// for [`MachineChip::eval`] dispatch through a [`ShardConstraintFolder`].
 ///
 /// Methods are gathered on this zero-sized struct so the
 /// `where SymbolicExt: Algebra<EF>` + `for<'a> Air<...>` bounds
@@ -161,14 +161,14 @@ where
 /// up front sounds cleaner but trips a normalisation gap where the
 /// compiler doesn't see `Chip<KoalaBear, A>::F` and `C::F` as the
 /// same type even with `C::F = KoalaBear` declared.
-pub struct BasefoldZerocheckVerifier<C, SC, A>(PhantomData<(C, SC, A)>);
+pub struct ShardZerocheckVerifier<C, SC, A>(PhantomData<(C, SC, A)>);
 
-impl<C, SC, A> BasefoldZerocheckVerifier<C, SC, A>
+impl<C, SC, A> ShardZerocheckVerifier<C, SC, A>
 where
     C::F: TwoAdicField,
     SC: KoalaBearFriParametersVariable<C>,
     C: CircuitConfig<F = SC::Val>,
-    A: MachineAir<C::F> + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
+    A: MachineAir<C::F> + for<'b> Air<ShardConstraintFolder<'b, C>>,
     SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
 {
     /// Evaluate a chip's constraint polynomial at the sumcheck point
@@ -182,13 +182,13 @@ where
     /// (in the BaseFold pipeline these come from the LogUp-GKR
     /// sumcheck output, not a per-chip permutation column).
     /// Variant of [`Self::eval_constraints`] consuming a
-    /// [`BasefoldChipOpenedValuesVariable`] (with the cumulative
+    /// [`JaggedChipOpenedValuesVariable`] (with the cumulative
     /// sums and degree bundled into the opening).
     #[allow(clippy::too_many_arguments)]
     pub fn eval_constraints_basefold<'a>(
         builder: &mut Builder<C>,
         chip: &MachineChip<SC, A>,
-        opening: &'a crate::basefold_chip_opened_values::BasefoldChipOpenedValuesVariable<C>,
+        opening: &'a crate::basefold_chip_opened_values::JaggedChipOpenedValuesVariable<C>,
         alpha: Ext<C::F, C::EF>,
         public_values: &'a [Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
@@ -208,7 +208,7 @@ where
         // `-local_cumulative_sum`, so the in-circuit `pra` came out 0 while
         // the host's was non-zero — dropping the `-pra*geq` correction).
         let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
-        let mut folder = BasefoldConstraintFolder::<C> {
+        let mut folder = ShardConstraintFolder::<C> {
             preprocessed,
             main,
             alpha,
@@ -240,14 +240,14 @@ where
     }
 
     /// Variant of [`Self::compute_padded_row_adjustment`]
-    /// consuming a [`BasefoldChipOpenedValuesVariable`] (so the
+    /// consuming a [`JaggedChipOpenedValuesVariable`] (so the
     /// per-chip cumulative-sum references come from the opening
     /// rather than parallel slices).
     #[allow(clippy::too_many_arguments)]
     pub fn compute_padded_row_adjustment_basefold<'a>(
         builder: &mut Builder<C>,
         chip: &MachineChip<SC, A>,
-        _opening: &'a crate::basefold_chip_opened_values::BasefoldChipOpenedValuesVariable<C>,
+        _opening: &'a crate::basefold_chip_opened_values::JaggedChipOpenedValuesVariable<C>,
         alpha: Ext<C::F, C::EF>,
         public_values: &'a [Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
@@ -264,7 +264,7 @@ where
         // Zero cumulative sums — match the host pra (`compute_padded_row_
         // adjustment` → `eval_air_constraints_at_row`, zero sums).
         let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
-        let mut folder = BasefoldConstraintFolder::<C> {
+        let mut folder = ShardConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
             main: PairWindow { local: &main_row, next: &main_row },
             alpha,
@@ -294,7 +294,7 @@ where
             opening.main.local.iter().map(|e| (*e).into()).collect();
         let preprocessed = PairWindow { local: &preprocessed_row, next: &preprocessed_row };
         let main = PairWindow { local: &main_row, next: &main_row };
-        let mut folder = BasefoldConstraintFolder::<C> {
+        let mut folder = ShardConstraintFolder::<C> {
             preprocessed,
             main,
             alpha,
@@ -335,7 +335,7 @@ where
         // emitted the chip's ENTIRE constraint polynomial a second time.
         let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
         let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
-        let mut folder = BasefoldConstraintFolder::<C> {
+        let mut folder = ShardConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
             main: PairWindow { local: &main_row, next: &main_row },
             alpha,
@@ -371,7 +371,7 @@ where
     ///   * `chip_degrees` — per-chip "degree point" (big-endian
     ///     boolean coordinates of the chip's height); used by
     ///     [`full_geq`] to compute the padded-row mask.  Passed
-    ///     separately until a `BasefoldChipOpenedValues` type is
+    ///     separately until a `JaggedChipOpenedValues` type is
     ///     introduced.
     ///   * `cumulative_sums` — per-chip local cumulative-sum value
     ///     from the LogUp-GKR sumcheck output (the BaseFold
@@ -396,7 +396,7 @@ where
     pub fn verify_zerocheck<'a, FC>(
         builder: &mut Builder<C>,
         shard_chips: &[&MachineChip<SC, A>],
-        opened_values: &'a BasefoldShardOpenedValuesVariable<C>,
+        opened_values: &'a JaggedShardOpenedValuesVariable<C>,
         gkr_evaluations: &LogUpEvaluations<Ext<C::F, C::EF>>,
         zerocheck_proof: &PartialSumcheckProof<Ext<C::F, C::EF>>,
         pcs_max_log_row_count: usize,
@@ -935,7 +935,7 @@ mod padded_row_tests {
     where
         A: zkm_pcs::air::MachineAir<F>
             + for<'b> p3_air::Air<
-                crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+                crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
             >,
     {
         let (main_row, prep_row) = if runtime_row {
@@ -948,7 +948,7 @@ mod padded_row_tests {
             )
         };
         let before = builder.get_mut_operations().vec.len();
-        let mut folder = crate::basefold_constraint_folder::BasefoldConstraintFolder::<InnerConfig> {
+        let mut folder = crate::basefold_constraint_folder::ShardConstraintFolder::<InnerConfig> {
             preprocessed: PairWindow { local: &prep_row, next: &prep_row },
             main: PairWindow { local: &main_row, next: &main_row },
             alpha,

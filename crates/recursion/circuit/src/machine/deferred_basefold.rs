@@ -85,7 +85,7 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
-            crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+            crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
             // The preprocessed opening round's witnessed inputs.
             crate::shard_level_witness::PreprocessedRoundWitness<C>,
         ),
@@ -149,7 +149,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         > + FieldHasherVariable<C>,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<p3_koala_bear::KoalaBear>>,
     A: MachineAir<SC::Val>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
+        + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
 {
     let ZKMDeferredBasefoldWitnessVariable {
         vks_and_proofs,

@@ -77,7 +77,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
             // BatchFRI and ExpReverseBitsLen are retired from the BaseFold
             // compress/shrink machine. Both carry `when_transition` /
-            // padded-row AIR constraints that `BasefoldConstraintFolder`
+            // padded-row AIR constraints that `ShardConstraintFolder`
             // cannot evaluate (it has no row selectors — `unimplemented!`).
             // BatchFRI emits zero events on this path: its only emitter,
             // the legacy `TwoAdicFriPcs` FRI verifier (`C::batch_fri`), is
@@ -139,7 +139,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         // (poseidon2_skinny/air.rs has when_first_row/when_transition AIR
         // constraints) and `BatchFRI` (FRI verifier chip, also row-selector +
         // padded-row constrained) — both `unimplemented!` in
-        // `BasefoldConstraintFolder`. On the BaseFold path the wrap program
+        // `ShardConstraintFolder`. On the BaseFold path the wrap program
         // (`verify_wrap_basefold`) emits zero BatchFRI events and uses the wide
         // Poseidon2, so the FRI-free compress/shrink chip set is correct here.
         let chips = [
@@ -269,9 +269,9 @@ impl From<RecursionShape> for OrderedShape {
 
 /// Compile-time proof that every
 /// `RecursionAir` chip implements
-/// `Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
+/// `Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
 ///
-/// The host-side `BasefoldConstraintFolder` (defined at
+/// The host-side `ShardConstraintFolder` (defined at
 /// `zkm-pcs::shard_level::basefold_constraint_folder`) is
 /// `AirBuilder + EmptyMessageBuilder`, which by way of the blanket impls
 /// `AB: AirBuilder<F: Field> + MessageBuilder<AirLookup<...>> => BaseAirBuilder`
@@ -302,18 +302,18 @@ mod basefold_air_assertions {
     use p3_air::Air;
     use p3_koala_bear::KoalaBear;
     use zkm_pcs::{
-        shard_level::basefold_constraint_folder::BasefoldConstraintFolder, InnerChallenge,
+        shard_level::basefold_constraint_folder::ShardConstraintFolder, InnerChallenge,
     };
 
-    /// Compile-time bound: `T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
+    /// Compile-time bound: `T: for<'a> Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
     fn assert_basefold_air<T>()
     where
-        T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>,
+        T: for<'a> Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>,
     {
     }
 
     /// Const used purely to force monomorphisation of every chip's
-    /// `Air<BasefoldConstraintFolder>` bound at compile time.  Never called --
+    /// `Air<ShardConstraintFolder>` bound at compile time.  Never called --
     /// the body is type-checked, which is the whole point, so it needs
     /// `allow(dead_code)` to keep the helper it references alive.
     /// Covers the 7 production chips plus the `RecursionAir` enum.
@@ -337,7 +337,7 @@ mod basefold_air_assertions {
         // Enum-level: the `#[derive(MachineAir)]` macro emits a generic
         // `impl<AB: ZKMRecursionAirBuilder<F = F>, AB::Var: 'static>
         // Air<AB> for RecursionAir<F, DEGREE>` (`crates/derive/src/lib.rs:320-328`).
-        // For `AB = BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>`,
+        // For `AB = ShardConstraintFolder<'a, KoalaBear, InnerChallenge>`,
         // `AB::F = KoalaBear` matches `F = KoalaBear` and `AB::Var =
         // InnerChallenge: 'static`, so the bound resolves.
         assert_basefold_air::<RecursionAir<KoalaBear, 9>>();

@@ -561,7 +561,7 @@ where
     // row/padding-column counts + the raw BaseFold root
     // (`jagged_original_commitment`), both derived from `evaluation_proof`.
 
-    assemble_basefold_shard_proof::<SC>(
+    assemble_jagged_shard_proof::<SC>(
         public_values,
         main_commitment,
         logup_gkr_proof,
@@ -1119,7 +1119,7 @@ where
 /// BaseFold root (`jagged_original_commitment`) from `evaluation_proof`, then
 /// moves every piece into the proof.  PURE DATA — no transcript.
 #[allow(clippy::too_many_arguments)]
-pub fn assemble_basefold_shard_proof<SC>(
+pub fn assemble_jagged_shard_proof<SC>(
     public_values: Vec<Val<SC>>,
     main_commitment: [Val<SC>; 8],
     logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,

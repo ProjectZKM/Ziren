@@ -34,7 +34,7 @@ use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
 ///
 /// `'a` borrows the per-chip opening references (preprocessed
 /// local row, main local row, public values).
-pub struct BasefoldConstraintFolder<'a, C: Config> {
+pub struct ShardConstraintFolder<'a, C: Config> {
     /// Local row of the preprocessed trace at the sumcheck point.
     /// Wrapped as a [`PairWindow`] where `local == next == &row`
     /// (the BaseFold pipeline has no next-row concept; the row
@@ -83,7 +83,7 @@ fn symbolic_ext_is_zero<C: Config>(x: &SymbolicExt<C::F, C::EF>) -> bool {
     }
 }
 
-impl<'a, C: Config> AirBuilder for BasefoldConstraintFolder<'a, C>
+impl<'a, C: Config> AirBuilder for ShardConstraintFolder<'a, C>
 where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
@@ -163,7 +163,7 @@ where
     }
 }
 
-impl<C: Config> ExtensionBuilder for BasefoldConstraintFolder<'_, C>
+impl<C: Config> ExtensionBuilder for ShardConstraintFolder<'_, C>
 where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
@@ -181,7 +181,7 @@ where
     }
 }
 
-impl<C: Config> zkm_pcs::air::EmptyMessageBuilder for BasefoldConstraintFolder<'_, C>
+impl<C: Config> zkm_pcs::air::EmptyMessageBuilder for ShardConstraintFolder<'_, C>
 where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
@@ -189,7 +189,7 @@ where
 {
 }
 
-impl<'a, C: Config> p3_air::PermutationAirBuilder for BasefoldConstraintFolder<'a, C>
+impl<'a, C: Config> p3_air::PermutationAirBuilder for ShardConstraintFolder<'a, C>
 where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
@@ -218,7 +218,7 @@ where
     }
 }
 
-impl<'a, C: Config> zkm_pcs::air::MultiTableAirBuilder<'a> for BasefoldConstraintFolder<'a, C>
+impl<'a, C: Config> zkm_pcs::air::MultiTableAirBuilder<'a> for ShardConstraintFolder<'a, C>
 where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
@@ -278,7 +278,7 @@ mod tests {
             ]),
         });
 
-        let mut folder = BasefoldConstraintFolder::<C> {
+        let mut folder = ShardConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
             main: PairWindow { local: &main_row, next: &main_row },
             alpha,
@@ -296,11 +296,11 @@ mod tests {
 
 /// Compile-time proof that every
 /// `RecursionAir` chip implements
-/// `Air<BasefoldConstraintFolder<'a, InnerConfig>>` — the in-circuit
+/// `Air<ShardConstraintFolder<'a, InnerConfig>>` — the in-circuit
 /// counterpart to the host-side assertion in
 /// `crates/recursion/core/src/machine.rs::basefold_air_assertions`.
 ///
-/// The in-circuit `BasefoldConstraintFolder<'a, C: Config>` (above)
+/// The in-circuit `ShardConstraintFolder<'a, C: Config>` (above)
 /// is `AirBuilder + EmptyMessageBuilder + ExtensionBuilder +
 /// PermutationAirBuilder + MultiTableAirBuilder`, which through the
 /// blanket impls in `crates/pcs/src/air/builder.rs:581-586`
@@ -311,7 +311,7 @@ mod tests {
 /// `impl<AB: ZKMRecursionAirBuilder> Air<AB>` blanket on every
 /// recursion chip therefore covers it — no new per-chip code needed.
 ///
-/// `BasefoldConstraintFolder::Var = Ext<C::F, C::EF>` is `Copy +
+/// `ShardConstraintFolder::Var = Ext<C::F, C::EF>` is `Copy +
 /// 'static`, so the `AB::Var: 'static` predicate emitted by the
 /// `#[derive(MachineAir)]` macro for `RecursionAir<F, DEGREE>`
 /// (`crates/derive/src/lib.rs:315-318`) is satisfied.
@@ -333,15 +333,15 @@ mod basefold_air_assertions_circuit {
 
     type C = InnerConfig;
 
-    /// Compile-time bound: `T: for<'a> Air<BasefoldConstraintFolder<'a, C>>`.
+    /// Compile-time bound: `T: for<'a> Air<ShardConstraintFolder<'a, C>>`.
     fn assert_basefold_air_circuit<T>()
     where
-        T: for<'a> Air<BasefoldConstraintFolder<'a, C>>,
+        T: for<'a> Air<ShardConstraintFolder<'a, C>>,
     {
     }
 
     /// Const used purely to force monomorphisation of every chip's
-    /// `Air<BasefoldConstraintFolder>` bound at compile time.  Never called --
+    /// `Air<ShardConstraintFolder>` bound at compile time.  Never called --
     /// the body is type-checked, which is the whole point, so it needs
     /// `allow(dead_code)` to keep the helper it references alive.
     /// Covers the 7 production chips plus the `RecursionAir` enum.
@@ -365,7 +365,7 @@ mod basefold_air_assertions_circuit {
         // Enum-level: derive-generated
         // `impl<F, const DEGREE, AB: ZKMRecursionAirBuilder<F = F>>
         // Air<AB> for RecursionAir<F, DEGREE> where AB::Var: 'static`.
-        // For AB = BasefoldConstraintFolder<'a, InnerConfig>:
+        // For AB = ShardConstraintFolder<'a, InnerConfig>:
         //   AB::F = InnerConfig::F = KoalaBear = InnerVal ✓
         //   AB::Var = Ext<KoalaBear, InnerChallenge>: 'static ✓
         assert_basefold_air_circuit::<RecursionAir<InnerVal, 9>>();

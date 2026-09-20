@@ -139,7 +139,7 @@ where
     }
 }
 
-/// Build a [`crate::shard_basefold::BasefoldVerifyingKeyVariable`]
+/// Build a [`crate::shard_basefold::ShardVerifyingKeyVariable`]
 /// from a legacy [`crate::VerifyingKeyVariable`].
 ///
 /// - `pc_start`: `[vk.pc_start, ZERO, ZERO]` — KoalaBear is 31-bit so
@@ -153,7 +153,7 @@ where
 pub fn build_basefold_verifying_key_variable<C, SC>(
     builder: &mut Builder<C>,
     vk: &crate::VerifyingKeyVariable<C, SC>,
-) -> crate::shard_basefold::BasefoldVerifyingKeyVariable<C>
+) -> crate::shard_basefold::ShardVerifyingKeyVariable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     SC: crate::KoalaBearFriParametersVariable<C, Val = InnerVal>,
@@ -164,7 +164,7 @@ where
     let preprocessed_commit: [Felt<C::F>; 8] =
         SC::vk_preprocessed_commit_felts(builder, vk.commitment);
     let enable_untrusted = builder.constant(C::F::ZERO);
-    crate::shard_basefold::BasefoldVerifyingKeyVariable::<C>::new(
+    crate::shard_basefold::ShardVerifyingKeyVariable::<C>::new(
         pc_start,
         preprocessed_commit,
         enable_untrusted,
@@ -259,7 +259,7 @@ pub fn build_basefold_shard_verifier_with_params<HV>(
     crate::shard_basefold::JaggedShardVerifier::new(stacked_pcs_verifier, max_log_row_count)
 }
 
-/// Build a [`crate::basefold_chip_opened_values::BasefoldShardOpenedValues`]
+/// Build a [`crate::basefold_chip_opened_values::JaggedShardOpenedValues`]
 /// from the per-chip `LogUpEvaluations.chip_openings` map.
 ///
 /// Per-chip mapping:
@@ -280,7 +280,7 @@ pub fn build_opened_values_from_chip_openings<C>(
         zkm_pcs::shard_level::types::ChipEvaluation<Ext<C::F, C::EF>>,
     >,
     max_log_row_count: usize,
-) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
+) -> crate::basefold_chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -305,11 +305,11 @@ where
             // `proof_point_extended` (= max_log_row_count + 1).
             let degree_bits: Vec<Ext<C::F, C::EF>> =
                 (0..max_log_row_count + 1).map(|_| builder.constant(C::EF::ZERO)).collect();
-            crate::basefold_chip_opened_values::BasefoldChipOpenedValues {
-                preprocessed: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+            crate::basefold_chip_opened_values::JaggedChipOpenedValues {
+                preprocessed: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
                     local: preprocessed_evals,
                 },
-                main: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+                main: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
                     local: main_evals,
                 },
                 degree: degree_bits,
@@ -321,7 +321,7 @@ where
             }
         })
         .collect();
-    crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
+    crate::basefold_chip_opened_values::JaggedShardOpenedValues { chips }
 }
 
 /// Variant of [`build_opened_values_from_chip_openings`]
@@ -343,7 +343,7 @@ pub fn build_opened_values_from_chip_openings_with_cumsums<C>(
         zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>,
     >,
     max_log_row_count: usize,
-) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
+) -> crate::basefold_chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -379,11 +379,11 @@ where
                     )
                 };
 
-            crate::basefold_chip_opened_values::BasefoldChipOpenedValues {
-                preprocessed: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+            crate::basefold_chip_opened_values::JaggedChipOpenedValues {
+                preprocessed: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
                     local: preprocessed_evals,
                 },
-                main: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+                main: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
                     local: main_evals,
                 },
                 degree: degree_bits,
@@ -392,7 +392,7 @@ where
             }
         })
         .collect();
-    crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
+    crate::basefold_chip_opened_values::JaggedShardOpenedValues { chips }
 }
 
 /// Finalize the per-chip opened values carried from
@@ -417,7 +417,7 @@ where
 /// `preprocessed.local` / `main.local` (trace@z) are kept verbatim.
 pub fn finalize_carried_opened_values<C>(
     _builder: &mut Builder<C>,
-    carried: crate::basefold_chip_opened_values::BasefoldShardOpenedValues<
+    carried: crate::basefold_chip_opened_values::JaggedShardOpenedValues<
         Felt<C::F>,
         Ext<C::F, C::EF>,
     >,
@@ -428,7 +428,7 @@ pub fn finalize_carried_opened_values<C>(
         zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>,
     >,
     max_log_row_count: usize,
-) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
+) -> crate::basefold_chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -459,7 +459,7 @@ where
             chip_opening
         })
         .collect();
-    crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
+    crate::basefold_chip_opened_values::JaggedShardOpenedValues { chips }
 }
 
 /// Build empty `chip_height_bits` placeholder of the given size.
@@ -594,7 +594,7 @@ where
 pub fn chip_height_bits_from_opened_degrees<C>(
     builder: &mut Builder<C>,
     chip_names: &[String],
-    opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+    opened_values: &crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
     max_log_row_count: usize,
 ) -> Vec<(String, Vec<Felt<C::F>>)>
 where
@@ -673,7 +673,7 @@ where
 pub fn chip_height_felts_from_opened_degrees<C>(
     builder: &mut Builder<C>,
     chip_names: &[String],
-    opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+    opened_values: &crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
 ) -> Vec<Felt<C::F>>
 where
     // The trait bound omits `C::Bit` (unused in the body) so the
@@ -726,7 +726,7 @@ mod tests {
     }
 
     /// Smoke test: build_opened_values_from_chip_openings
-    /// produces a per-chip BasefoldShardOpenedValues with the
+    /// produces a per-chip JaggedShardOpenedValues with the
     /// right cardinality.
     #[test]
     fn opened_values_constructs_per_chip() {

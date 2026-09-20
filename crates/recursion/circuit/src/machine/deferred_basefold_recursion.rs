@@ -20,7 +20,7 @@
 //!   [`ZKMDeferredBasefoldWitnessValues`] whose embedded
 //!   `JaggedShardProof` was produced over recursion-AIR traces.
 //! * Trait bound propagation — `RecursionAir<F, DEGREE>` satisfies
-//!   `Air<BasefoldConstraintFolder>` via the standard `MachineAir`
+//!   `Air<ShardConstraintFolder>` via the standard `MachineAir`
 //!   derive (see notes in
 //!   [`super::compress_basefold_recursion`]).
 //!
@@ -62,7 +62,7 @@ pub fn build_deferred_basefold_recursion_program<A>(
 where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
-            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
         >,
 {
     let builder_span = tracing::debug_span!("build deferred-basefold-recursion program").entered();

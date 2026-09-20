@@ -42,10 +42,10 @@
 //!   - Phase 2 calls [`crate::logup_gkr::verify_logup_gkr`] for
 //!     the LogUp sumcheck-stack replay.
 //!   - Phase 3 calls
-//!     [`crate::zerocheck::BasefoldZerocheckVerifier::verify_zerocheck`]
+//!     [`crate::zerocheck::ShardZerocheckVerifier::verify_zerocheck`]
 //!     for the transition-constraint zerocheck IOP — internally
 //!     dispatches `chip.eval` via
-//!     [`crate::basefold_constraint_folder::BasefoldConstraintFolder`].
+//!     [`crate::basefold_constraint_folder::ShardConstraintFolder`].
 //!   - Phase 4 constructs a
 //!     [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier`]
 //!     over the shard verifier's stacked-PCS wrapper and calls
@@ -69,8 +69,8 @@ use serde::{Deserialize, Serialize};
 use zkm_pcs::{air::MachineAir, MachineChip};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
-use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
-use crate::basefold_constraint_folder::BasefoldConstraintFolder;
+use crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable;
+use crate::basefold_constraint_folder::ShardConstraintFolder;
 use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::challenger::FieldChallengerVariable;
 use crate::jagged_circuit::{
@@ -82,7 +82,7 @@ use crate::partial_sumcheck::PartialSumcheckProof;
 use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
 use crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier;
 use crate::recursive_stacked_pcs::{RecursiveMultilinearPcsVerifier, RecursiveStackedPcsVerifier};
-use crate::zerocheck::BasefoldZerocheckVerifier;
+use crate::zerocheck::ShardZerocheckVerifier;
 use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 
 /// Host-side BaseFold shard proof — the concrete type the prover
@@ -175,7 +175,7 @@ pub struct JaggedShardProofVariable<
 /// commitment digest.
 ///
 /// Mirrors `MachineVerifyingKeyVariable` (crates/recursion/circuit/src/shard.rs).
-pub struct BasefoldVerifyingKeyVariable<C: CircuitConfig> {
+pub struct ShardVerifyingKeyVariable<C: CircuitConfig> {
     /// Program counter start (3 felts: low, mid, high words).
     pub pc_start: [Felt<C::F>; 3],
     /// Preprocessed-trace commitment digest.
@@ -185,7 +185,7 @@ pub struct BasefoldVerifyingKeyVariable<C: CircuitConfig> {
     _marker: PhantomData<C>,
 }
 
-impl<C: CircuitConfig> BasefoldVerifyingKeyVariable<C> {
+impl<C: CircuitConfig> ShardVerifyingKeyVariable<C> {
     pub fn new(
         pc_start: [Felt<C::F>; 3],
         preprocessed_commit: [Felt<C::F>; 8],
@@ -310,7 +310,7 @@ impl<P> JaggedShardVerifier<P> {
     ///   * `chip_degrees`, `cumulative_sums`, `global_cumulative_sums` —
     ///     per-chip degree points and cumulative-sum values.
     ///     These live on the BaseFold-pipeline opening wire; until
-    ///     a `BasefoldChipOpenedValues` type bundles them, the
+    ///     a `JaggedChipOpenedValues` type bundles them, the
     ///     caller passes them as parallel slices aligned to
     ///     `shard_chips` order.
     ///   * `insertion_points` — jagged-PCS zero-column insertion
@@ -329,11 +329,11 @@ impl<P> JaggedShardVerifier<P> {
     pub fn verify_shard<'a, C, SC, A, FC, HV, EVPV, JE>(
         &self,
         builder: &mut Builder<C>,
-        vk: &BasefoldVerifyingKeyVariable<C>,
+        vk: &ShardVerifyingKeyVariable<C>,
         proof: &'a JaggedShardProofVariable<C, HV, P::Proof>,
         shard_chips: &[&MachineChip<SC, A>],
         chip_metadata: &LogupGkrShardChipMetadata,
-        opened_values: &'a BasefoldShardOpenedValuesVariable<C>,
+        opened_values: &'a JaggedShardOpenedValuesVariable<C>,
         insertion_points: &[usize],
         challenger: &mut FC,
         num_pv_elts: usize,
@@ -343,7 +343,7 @@ impl<P> JaggedShardVerifier<P> {
         C: CircuitConfig<F = SC::Val>,
         C::F: TwoAdicField,
         SC: KoalaBearFriParametersVariable<C>,
-        A: MachineAir<C::F> + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
+        A: MachineAir<C::F> + for<'b> Air<ShardConstraintFolder<'b, C>>,
         FC: FieldChallengerVariable<C, C::Bit>
             + crate::challenger::CanObserveVariable<C, HV::DigestVariable>,
         SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
@@ -461,7 +461,7 @@ impl<P> JaggedShardVerifier<P> {
         // evaluation for the jagged-PCS opening phase to verify.
         builder.cycle_tracker_v2_exit();
         builder.cycle_tracker_v2_enter("verify_zerocheck".to_string());
-        BasefoldZerocheckVerifier::<C, SC, A>::verify_zerocheck::<FC>(
+        ShardZerocheckVerifier::<C, SC, A>::verify_zerocheck::<FC>(
             builder,
             shard_chips,
             opened_values,
@@ -969,7 +969,7 @@ mod tests {
     type F = InnerVal;
     type EF = InnerChallenge;
 
-    /// Construction smoke test: BasefoldVerifyingKeyVariable
+    /// Construction smoke test: ShardVerifyingKeyVariable
     /// constructs with the standard Ziren KoalaBear/8-digest shape.
     #[test]
     fn vk_variable_constructs() {
@@ -978,7 +978,7 @@ mod tests {
         let preprocessed_commit: [Felt<F>; 8] = std::array::from_fn(|_| builder.constant(F::ZERO));
         let enable_untrusted = builder.constant(F::ZERO);
         let _vk =
-            BasefoldVerifyingKeyVariable::<C>::new(pc_start, preprocessed_commit, enable_untrusted);
+            ShardVerifyingKeyVariable::<C>::new(pc_start, preprocessed_commit, enable_untrusted);
     }
 
     /// Phantom: ensure C parameter participates in inference.

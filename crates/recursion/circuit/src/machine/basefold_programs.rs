@@ -44,7 +44,7 @@ pub fn build_normalize_basefold_program<A>(
 where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
-            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
         >,
 {
     let builder_span = tracing::debug_span!("build normalize-basefold program").entered();
@@ -102,7 +102,7 @@ pub fn build_compose_basefold_program<A>(
 where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
-            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
         >,
 {
     let builder_span = tracing::debug_span!("build compose-basefold program").entered();
@@ -138,7 +138,7 @@ pub fn build_deferred_basefold_program<A>(
 where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
-            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
         >,
 {
     let builder_span = tracing::debug_span!("build deferred-basefold program").entered();
@@ -176,7 +176,7 @@ pub fn build_wrap_basefold_program<A>(
 where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
-            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
         >,
 {
     let builder_span = tracing::debug_span!("build wrap-basefold program").entered();

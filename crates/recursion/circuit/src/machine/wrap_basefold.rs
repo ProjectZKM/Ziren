@@ -63,7 +63,7 @@ pub struct ZKMWrapBasefoldWitnessVariable<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
-            crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+            crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
             // The preprocessed opening round's witnessed inputs.
             crate::shard_level_witness::PreprocessedRoundWitness<C>,
         ),
@@ -117,7 +117,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
     SC::FriChallengerVariable: crate::challenger::FieldChallengerVariable<C, C::Bit>,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     A: MachineAir<SC::Val>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
+        + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
 {
     let ZKMWrapBasefoldWitnessVariable {
         vks_and_proofs,
@@ -164,7 +164,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
         >,
         crate::shard_level_witness::LiftedEvalProof<C>,
-        crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
         // The preprocessed opening round's witnessed inputs.
         crate::shard_level_witness::PreprocessedRoundWitness<C>,
     ),
@@ -186,7 +186,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     SC::FriChallengerVariable: crate::challenger::FieldChallengerVariable<C, C::Bit>,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     A: MachineAir<SC::Val>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
+        + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
 {
     let basefold_vk = crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<
         C,

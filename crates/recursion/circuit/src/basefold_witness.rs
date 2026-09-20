@@ -13,8 +13,8 @@
 //!   - [`UnivariatePolynomial`] / [`PartialSumcheckProof`]
 //!   - [`LogUpGkrOutput`] / [`LogupGkrRoundProof`] /
 //!     [`LogupGkrProof`] / [`ChipEvaluation`] / [`LogUpEvaluations`]
-//!   - [`BasefoldAirOpenedValues`] / [`BasefoldChipOpenedValues`] /
-//!     [`BasefoldShardOpenedValues`]
+//!   - [`JaggedAirOpenedValues`] / [`JaggedChipOpenedValues`] /
+//!     [`JaggedShardOpenedValues`]
 //!   - [`JaggedDimensionMetadata`] / [`JaggedSumcheckEvalProof`] /
 //!     [`RecursiveStackedPcsProof`] / [`JaggedPcsProofVariable`]
 //!   - [`RecursiveBasefoldRound`] / [`RecursiveBasefoldOpening`] /
@@ -31,7 +31,7 @@ use zkm_pcs::septic_digest::SepticDigest;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
 use crate::basefold_chip_opened_values::{
-    BasefoldAirOpenedValues, BasefoldChipOpenedValues, BasefoldShardOpenedValues,
+    JaggedAirOpenedValues, JaggedChipOpenedValues, JaggedShardOpenedValues,
 };
 use crate::basefold_verifier::{
     RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldProof,
@@ -212,14 +212,14 @@ where
 
 // BaseFold opening types
 
-impl<C> Witnessable<C> for BasefoldAirOpenedValues<InnerChallenge>
+impl<C> Witnessable<C> for JaggedAirOpenedValues<InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = BasefoldAirOpenedValues<Ext<C::F, C::EF>>;
+    type WitnessVariable = JaggedAirOpenedValues<Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        BasefoldAirOpenedValues { local: self.local.read(builder) }
+        JaggedAirOpenedValues { local: self.local.read(builder) }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -227,11 +227,11 @@ where
     }
 }
 
-impl<C> Witnessable<C> for BasefoldChipOpenedValues<InnerVal, InnerChallenge>
+impl<C> Witnessable<C> for JaggedChipOpenedValues<InnerVal, InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = BasefoldChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
+    type WitnessVariable = JaggedChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         // SepticDigest<F> → SepticDigest<Felt<F>> — field-by-field
@@ -256,7 +256,7 @@ where
             core::array::from_fn(|i| self.global_cumulative_sum.0.x.0[i].read(builder));
         let y_felts: [Felt<C::F>; 7] =
             core::array::from_fn(|i| self.global_cumulative_sum.0.y.0[i].read(builder));
-        BasefoldChipOpenedValues {
+        JaggedChipOpenedValues {
             preprocessed,
             main,
             degree,
@@ -282,14 +282,14 @@ where
     }
 }
 
-impl<C> Witnessable<C> for BasefoldShardOpenedValues<InnerVal, InnerChallenge>
+impl<C> Witnessable<C> for JaggedShardOpenedValues<InnerVal, InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
+    type WitnessVariable = JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        BasefoldShardOpenedValues { chips: self.chips.read(builder) }
+        JaggedShardOpenedValues { chips: self.chips.read(builder) }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -809,14 +809,14 @@ mod tests {
             <PartialSumcheckProof<EF> as Witnessable<C>>::read(&host_proof, &mut builder);
     }
 
-    /// Construction smoke test: read a BasefoldAirOpenedValues
+    /// Construction smoke test: read a JaggedAirOpenedValues
     /// from a host-side value.
     #[test]
     fn basefold_air_opened_values_witnessable_reads() {
         let mut builder = AsmBuilder::<F, EF>::default();
-        let host_opening = BasefoldAirOpenedValues::<EF> { local: vec![EF::ZERO; 3] };
-        let var: BasefoldAirOpenedValues<Ext<F, EF>> =
-            <BasefoldAirOpenedValues<EF> as Witnessable<C>>::read(&host_opening, &mut builder);
+        let host_opening = JaggedAirOpenedValues::<EF> { local: vec![EF::ZERO; 3] };
+        let var: JaggedAirOpenedValues<Ext<F, EF>> =
+            <JaggedAirOpenedValues<EF> as Witnessable<C>>::read(&host_opening, &mut builder);
         assert_eq!(var.local.len(), 3);
     }
 }

@@ -33,7 +33,7 @@ use crate::Chip;
 /// Row-selector accessors panic: chips evaluated through this folder must
 /// have already folded `is_first_row`/`is_last_row`/transition selectors
 /// into their constraint expressions.
-pub struct BasefoldConstraintFolder<'a, F: Field, K: Field, EF: ExtensionField<F>> {
+pub struct ShardConstraintFolder<'a, F: Field, K: Field, EF: ExtensionField<F>> {
     /// Preprocessed row at the sumcheck point. `PairWindow` always
     /// has `local == next`; BaseFold has no transition window.
     pub preprocessed: PairWindow<'a, K>,
@@ -48,7 +48,7 @@ pub struct BasefoldConstraintFolder<'a, F: Field, K: Field, EF: ExtensionField<F
     pub _marker: PhantomData<(F, K, EF)>,
 }
 
-impl<'a, F, K, EF> AirBuilder for BasefoldConstraintFolder<'a, F, K, EF>
+impl<'a, F, K, EF> AirBuilder for ShardConstraintFolder<'a, F, K, EF>
 where
     F: Field,
     K: ExtensionField<F>,
@@ -70,15 +70,15 @@ where
     }
 
     fn is_first_row(&self) -> Self::Expr {
-        unimplemented!("BasefoldConstraintFolder has no row selectors")
+        unimplemented!("ShardConstraintFolder has no row selectors")
     }
 
     fn is_last_row(&self) -> Self::Expr {
-        unimplemented!("BasefoldConstraintFolder has no row selectors")
+        unimplemented!("ShardConstraintFolder has no row selectors")
     }
 
     fn is_transition_window(&self, _size: usize) -> Self::Expr {
-        unimplemented!("BasefoldConstraintFolder has no transition window")
+        unimplemented!("ShardConstraintFolder has no transition window")
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
@@ -94,7 +94,7 @@ where
     }
 }
 
-impl<F, K, EF> ExtensionBuilder for BasefoldConstraintFolder<'_, F, K, EF>
+impl<F, K, EF> ExtensionBuilder for ShardConstraintFolder<'_, F, K, EF>
 where
     F: Field,
     K: ExtensionField<F>,
@@ -118,7 +118,7 @@ where
     }
 }
 
-impl<F, K, EF> EmptyMessageBuilder for BasefoldConstraintFolder<'_, F, K, EF>
+impl<F, K, EF> EmptyMessageBuilder for ShardConstraintFolder<'_, F, K, EF>
 where
     F: Field,
     K: ExtensionField<F>,
@@ -126,7 +126,7 @@ where
 {
 }
 
-impl<'a, F, K, EF> PermutationAirBuilder for BasefoldConstraintFolder<'a, F, K, EF>
+impl<'a, F, K, EF> PermutationAirBuilder for ShardConstraintFolder<'a, F, K, EF>
 where
     F: Field,
     K: ExtensionField<F>,
@@ -149,7 +149,7 @@ where
     }
 }
 
-impl<'a, F, K, EF> MultiTableAirBuilder<'a> for BasefoldConstraintFolder<'a, F, K, EF>
+impl<'a, F, K, EF> MultiTableAirBuilder<'a> for ShardConstraintFolder<'a, F, K, EF>
 where
     F: Field,
     K: ExtensionField<F>,
@@ -169,7 +169,7 @@ where
 
 /// Evaluate `Σ alpha^(n-i) · c_i` for the chip's constraints at the
 /// zerocheck point.
-pub fn eval_constraints_basefold_host<F, EF, A>(
+pub fn eval_constraints_shard_host<F, EF, A>(
     chip: &Chip<F, A>,
     opening: &ChipOpenedValues<F, EF>,
     alpha: EF,
@@ -178,12 +178,12 @@ pub fn eval_constraints_basefold_host<F, EF, A>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF, EF>>,
+    A: MachineAir<F> + for<'b> Air<ShardConstraintFolder<'b, F, EF, EF>>,
 {
     let preprocessed =
         PairWindow { local: &opening.preprocessed.local, next: &opening.preprocessed.local };
     let main = PairWindow { local: &opening.main.local, next: &opening.main.local };
-    let mut folder = BasefoldConstraintFolder::<F, EF, EF> {
+    let mut folder = ShardConstraintFolder::<F, EF, EF> {
         preprocessed,
         main,
         alpha,
@@ -200,7 +200,7 @@ where
 /// Constraint accumulator the chip would produce on an all-zero
 /// row; the verifier subtracts this gated by `full_geq` outside the
 /// chip's real-data window.
-pub fn compute_padded_row_adjustment_basefold_host<F, EF, A>(
+pub fn compute_padded_row_adjustment_shard_host<F, EF, A>(
     chip: &Chip<F, A>,
     opening: &ChipOpenedValues<F, EF>,
     alpha: EF,
@@ -209,7 +209,7 @@ pub fn compute_padded_row_adjustment_basefold_host<F, EF, A>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF, EF>>,
+    A: MachineAir<F> + for<'b> Air<ShardConstraintFolder<'b, F, EF, EF>>,
 {
     use p3_air::BaseAir;
 
@@ -217,7 +217,7 @@ where
     let preproc_width = <A as MachineAir<F>>::preprocessed_width(&chip.air);
     let preproc_row: Vec<EF> = vec![EF::ZERO; preproc_width];
     let main_row: Vec<EF> = vec![EF::ZERO; main_width];
-    let mut folder = BasefoldConstraintFolder::<F, EF, EF> {
+    let mut folder = ShardConstraintFolder::<F, EF, EF> {
         preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
         main: PairWindow { local: &main_row, next: &main_row },
         alpha,
@@ -239,9 +239,9 @@ pub trait ShardProvableAir<SC: crate::StarkGenericConfig>:
     crate::air::MachineAir<SC::Val>
     + for<'b> p3_air::Air<crate::folder::VerifierConstraintFolder<'b, SC>>
     + for<'b> p3_air::Air<
-        BasefoldConstraintFolder<'b, crate::Val<SC>, crate::Challenge<SC>, crate::Challenge<SC>>,
+        ShardConstraintFolder<'b, crate::Val<SC>, crate::Challenge<SC>, crate::Challenge<SC>>,
     > + for<'b> p3_air::Air<
-        BasefoldConstraintFolder<'b, crate::Val<SC>, crate::Val<SC>, crate::Challenge<SC>>,
+        ShardConstraintFolder<'b, crate::Val<SC>, crate::Val<SC>, crate::Challenge<SC>>,
     > + Sync
 {
 }
@@ -250,14 +250,14 @@ impl<SC: crate::StarkGenericConfig, A> ShardProvableAir<SC> for A where
     A: crate::air::MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::folder::VerifierConstraintFolder<'b, SC>>
         + for<'b> p3_air::Air<
-            BasefoldConstraintFolder<
+            ShardConstraintFolder<
                 'b,
                 crate::Val<SC>,
                 crate::Challenge<SC>,
                 crate::Challenge<SC>,
             >,
         > + for<'b> p3_air::Air<
-            BasefoldConstraintFolder<'b, crate::Val<SC>, crate::Val<SC>, crate::Challenge<SC>>,
+            ShardConstraintFolder<'b, crate::Val<SC>, crate::Val<SC>, crate::Challenge<SC>>,
         > + Sync
 {
 }
@@ -285,7 +285,7 @@ mod tests {
             y: SepticExtension::<F>([F::ZERO; 7]),
         });
 
-        let mut folder = BasefoldConstraintFolder::<F, EF, EF> {
+        let mut folder = ShardConstraintFolder::<F, EF, EF> {
             preprocessed: PairWindow { local: &preproc, next: &preproc },
             main: PairWindow { local: &main, next: &main },
             alpha: EF::from_u64(2),
@@ -312,7 +312,7 @@ mod tests {
         });
 
         let alpha = EF::from_u64(7);
-        let mut folder = BasefoldConstraintFolder::<F, EF, EF> {
+        let mut folder = ShardConstraintFolder::<F, EF, EF> {
             preprocessed: PairWindow { local: &preproc, next: &preproc },
             main: PairWindow { local: &main, next: &main },
             alpha,

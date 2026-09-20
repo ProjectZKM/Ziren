@@ -86,7 +86,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
         // host proof so the in-circuit zerocheck verifier batches and
         // constrains the SAME values the prover reduced to the
         // zerocheck point (not the trace@z_gkr LogUp-GKR openings).
-        crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
         // The preprocessed opening round's witnessed inputs.
         crate::shard_level_witness::PreprocessedRoundWitness<C>,
     )>,
@@ -138,7 +138,7 @@ pub fn verify_core_basefold<C, SC, A>(
     >,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<p3_koala_bear::KoalaBear>>,
     A: MachineAir<SC::Val>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
+        + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
 {
     let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<
         SC,

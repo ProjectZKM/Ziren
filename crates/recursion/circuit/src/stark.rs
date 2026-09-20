@@ -273,6 +273,6 @@ pub mod tests {
         // opened_values.chips is intentionally empty in the basefold
         // pipeline — the recursion verifier builds per-chip openings
         // from LogUp-GKR's chip_openings instead (see prover.rs:207
-        // and shard_basefold.rs's BasefoldShardOpenedValuesVariable).
+        // and shard_basefold.rs's JaggedShardOpenedValuesVariable).
     }
 }

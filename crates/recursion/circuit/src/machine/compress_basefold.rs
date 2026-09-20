@@ -108,7 +108,7 @@ pub struct ZKMCompressBasefoldWitnessVariable<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
-            crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+            crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
             // The preprocessed opening round's witnessed inputs.
             crate::shard_level_witness::PreprocessedRoundWitness<C>,
         ),
@@ -179,7 +179,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         > + FieldHasherVariable<C>,
     C: CircuitConfig<F = zkm_pcs::InnerVal, EF = zkm_pcs::InnerChallenge>,
     A: MachineAir<SC::Val>
-        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
+        + for<'b> p3_air::Air<crate::basefold_constraint_folder::ShardConstraintFolder<'b, C>>,
 {
     use std::borrow::BorrowMut;
     let ZKMCompressBasefoldWitnessVariable {
@@ -496,7 +496,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             )
         });
 
-        // Build the BasefoldVerifyingKeyVariable from
+        // Build the ShardVerifyingKeyVariable from
         // the legacy VerifyingKeyVariable via the shared adapter.
         // Real `pc_start` (single felt) lifted into the BaseFold
         // 3-felt shape; preprocessed_commit + enable_untrusted

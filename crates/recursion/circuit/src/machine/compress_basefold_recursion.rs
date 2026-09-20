@@ -12,7 +12,7 @@
 //! # Architectural status (scaffold)
 //!
 //! The in-circuit verifier body [`super::compress_basefold::verify_compress_basefold`]
-//! is already generic over `A: MachineAir + Air<BasefoldConstraintFolder>`
+//! is already generic over `A: MachineAir + Air<ShardConstraintFolder>`
 //! — the MIPS-specific behaviour comes from CALL SITES that pass
 //! `MipsAir` as the machine's chip-type parameter.  This module
 //! therefore doesn't need a separate verifier body; it provides a
@@ -27,11 +27,11 @@
 //!   `ZKMCompressBasefoldWitnessValues` whose embedded
 //!   `JaggedShardProof` was produced over recursion-AIR traces.
 //! * Trait bound propagation — `RecursionAir<F, DEGREE>` satisfies
-//!   `Air<BasefoldConstraintFolder>` via the standard `MachineAir`
+//!   `Air<ShardConstraintFolder>` via the standard `MachineAir`
 //!   derive: the derive emits `Air<AB>` for any AB that satisfies
 //!   `ZKMRecursionAirBuilder = MachineAirBuilder + RecursionAirBuilder`,
 //!   both of which are blanket-implemented for `BaseAirBuilder`, and
-//!   `BasefoldConstraintFolder` implements `BaseAirBuilder` via its
+//!   `ShardConstraintFolder` implements `BaseAirBuilder` via its
 //!   `EmptyMessageBuilder` + `AirBuilder` impls
 //!   (`crates/recursion/circuit/src/basefold_constraint_folder.rs:81+152`).
 //!
@@ -46,7 +46,7 @@
 //!   bounds (e.g. requiring a specific `DEGREE`) would couple this
 //!   builder to a particular recursion-AIR machine variant; leaving
 //!   `const DEGREE: usize` generic preserves flexibility.
-//! * Per-chip `Air<BasefoldConstraintFolder>` impls for the 10
+//! * Per-chip `Air<ShardConstraintFolder>` impls for the 10
 //!   `RecursionAir` variants are NOT explicit ports — they follow
 //!   from the chip-side `Air<AB: ZKMRecursionAirBuilder>` impls that
 //!   already exist (see chip files under
@@ -98,7 +98,7 @@ use super::compress_basefold::{verify_compress_basefold, ZKMCompressBasefoldWitn
 /// 2. Invokes [`verify_compress_basefold`] with the recursion
 ///    machine's chip set — this is the same verifier body used by
 ///    MIPS; the only difference is the `A` type parameter, which
-///    flows through to chip resolution + `Air<BasefoldConstraintFolder>`
+///    flows through to chip resolution + `Air<ShardConstraintFolder>`
 ///    dispatch.
 /// 3. Compiles the operations via [`AsmCompiler`] into a
 ///    [`RecursionProgram`].
@@ -112,7 +112,7 @@ pub fn build_compose_basefold_recursion_program<A>(
 where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<
-            crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>,
+            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
         >,
 {
     let builder_span = tracing::debug_span!("build compose-basefold-recursion program").entered();

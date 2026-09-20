@@ -419,7 +419,7 @@ where
         // the lifted form carrying the inline-witnessed basefold proof.
         LiftedEvalProof<C>,
         // per-chip trace@z openings (name order).
-        crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        crate::basefold_chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
         // The preprocessed opening round's witnessed inputs.
         PreprocessedRoundWitness<C>,
     );
@@ -619,16 +619,16 @@ where
 /// length-prefixed by the `Vec<_>` Witnessable.
 fn basefold_opened_values_from_host(
     opened: &zkm_pcs::ShardOpenedValues<InnerVal, InnerChallenge>,
-) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<InnerVal, InnerChallenge> {
+) -> crate::basefold_chip_opened_values::JaggedShardOpenedValues<InnerVal, InnerChallenge> {
     use p3_field::PrimeCharacteristicRing;
     let chips = opened
         .chips
         .iter()
-        .map(|c| crate::basefold_chip_opened_values::BasefoldChipOpenedValues {
-            preprocessed: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+        .map(|c| crate::basefold_chip_opened_values::JaggedChipOpenedValues {
+            preprocessed: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
                 local: c.preprocessed.local.clone(),
             },
-            main: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+            main: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
                 local: c.main.local.clone(),
             },
             // the REAL big-endian height bits were carried
@@ -640,7 +640,7 @@ fn basefold_opened_values_from_host(
             global_cumulative_sum: c.global_cumulative_sum,
         })
         .collect();
-    crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
+    crate::basefold_chip_opened_values::JaggedShardOpenedValues { chips }
 }
 
 // Jagged-PCS bundle Witnessable surface

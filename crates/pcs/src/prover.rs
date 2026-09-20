@@ -396,7 +396,7 @@ where
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<
-            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
                 'a,
                 Val<SC>,
                 SC::Challenge,
@@ -405,7 +405,7 @@ where
         >
         // The K = F (base-field first round) folder instance.
         + for<'a> Air<
-            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
                 'a,
                 Val<SC>,
                 Val<SC>,

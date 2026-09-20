@@ -41,7 +41,7 @@ where
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
         + for<'b> Air<
-            zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            zkm_pcs::shard_level::basefold_constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
                 <SC as StarkGenericConfig>::Challenge,
@@ -50,7 +50,7 @@ where
         >
         // The K = F (base-field first round) folder instance.
         + for<'b> Air<
-            zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            zkm_pcs::shard_level::basefold_constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
                 Val<SC>,
@@ -106,7 +106,7 @@ where
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
         + for<'b> Air<
-            zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            zkm_pcs::shard_level::basefold_constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
                 <SC as StarkGenericConfig>::Challenge,
@@ -115,7 +115,7 @@ where
         >
         // The K = F (base-field first round) folder instance.
         + for<'b> Air<
-            zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            zkm_pcs::shard_level::basefold_constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
                 Val<SC>,

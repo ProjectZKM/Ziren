@@ -36,7 +36,7 @@ use zkm_recursion_compiler::ir::{Ext, Felt};
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(bound(serialize = "T: Serialize"))]
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
-pub struct BasefoldAirOpenedValues<T> {
+pub struct JaggedAirOpenedValues<T> {
     /// Row evaluations at the sumcheck-reduced point.
     pub local: Vec<T>,
 }
@@ -49,11 +49,11 @@ pub struct BasefoldAirOpenedValues<T> {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
 #[serde(bound(deserialize = "F: Deserialize<'de>, EF: Deserialize<'de>"))]
-pub struct BasefoldChipOpenedValues<F, EF> {
+pub struct JaggedChipOpenedValues<F, EF> {
     /// Preprocessed-trace evaluations at the sumcheck point.
-    pub preprocessed: BasefoldAirOpenedValues<EF>,
+    pub preprocessed: JaggedAirOpenedValues<EF>,
     /// Main-trace evaluations at the sumcheck point.
-    pub main: BasefoldAirOpenedValues<EF>,
+    pub main: JaggedAirOpenedValues<EF>,
     /// Big-endian boolean coordinates of the chip's height.
     /// Used by the zerocheck verifier's padded-row mask via
     /// [`crate::zerocheck::full_geq`].
@@ -68,21 +68,21 @@ pub struct BasefoldChipOpenedValues<F, EF> {
     pub global_cumulative_sum: SepticDigest<F>,
 }
 
-/// Per-shard opening bundle: one [`BasefoldChipOpenedValues`] per
+/// Per-shard opening bundle: one [`JaggedChipOpenedValues`] per
 /// chip, in the same order as the shard's chip list.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
 #[serde(bound(deserialize = "F: Deserialize<'de>, EF: Deserialize<'de>"))]
-pub struct BasefoldShardOpenedValues<F, EF> {
+pub struct JaggedShardOpenedValues<F, EF> {
     /// Per-chip openings.
-    pub chips: Vec<BasefoldChipOpenedValues<F, EF>>,
+    pub chips: Vec<JaggedChipOpenedValues<F, EF>>,
 }
 
 /// In-circuit variant — the field types are the recursion-
 /// compiler's `Felt` / `Ext` rather than raw base/extension
 /// values, so the orchestrator can borrow into them without
 /// witnessing.
-pub type BasefoldChipOpenedValuesVariable<C> = BasefoldChipOpenedValues<
+pub type JaggedChipOpenedValuesVariable<C> = JaggedChipOpenedValues<
     Felt<<C as zkm_recursion_compiler::ir::Config>::F>,
     Ext<
         <C as zkm_recursion_compiler::ir::Config>::F,
@@ -91,7 +91,7 @@ pub type BasefoldChipOpenedValuesVariable<C> = BasefoldChipOpenedValues<
 >;
 
 /// In-circuit per-shard opening bundle.
-pub type BasefoldShardOpenedValuesVariable<C> = BasefoldShardOpenedValues<
+pub type JaggedShardOpenedValuesVariable<C> = JaggedShardOpenedValues<
     Felt<<C as zkm_recursion_compiler::ir::Config>::F>,
     Ext<
         <C as zkm_recursion_compiler::ir::Config>::F,
@@ -114,9 +114,9 @@ mod tests {
     fn opening_bundle_constructs() {
         use zkm_pcs::septic_curve::SepticCurve;
         use zkm_pcs::septic_extension::SepticExtension;
-        let chip_opening: BasefoldChipOpenedValues<F, EF> = BasefoldChipOpenedValues {
-            preprocessed: BasefoldAirOpenedValues { local: vec![EF::ZERO; 2] },
-            main: BasefoldAirOpenedValues { local: vec![EF::ZERO; 4] },
+        let chip_opening: JaggedChipOpenedValues<F, EF> = JaggedChipOpenedValues {
+            preprocessed: JaggedAirOpenedValues { local: vec![EF::ZERO; 2] },
+            main: JaggedAirOpenedValues { local: vec![EF::ZERO; 4] },
             degree: vec![EF::ZERO; 5],
             local_cumulative_sum: EF::ZERO,
             global_cumulative_sum: SepticDigest(SepticCurve {
@@ -124,8 +124,8 @@ mod tests {
                 y: SepticExtension::<F>([F::ZERO; 7]),
             }),
         };
-        let shard: BasefoldShardOpenedValues<F, EF> =
-            BasefoldShardOpenedValues { chips: vec![chip_opening] };
+        let shard: JaggedShardOpenedValues<F, EF> =
+            JaggedShardOpenedValues { chips: vec![chip_opening] };
         assert_eq!(shard.chips.len(), 1);
         assert_eq!(shard.chips[0].main.local.len(), 4);
         assert_eq!(shard.chips[0].degree.len(), 5);

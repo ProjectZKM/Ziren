@@ -35,7 +35,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     where
         A: for<'a> Air<VerifierConstraintFolder<'a, SC>>
             + for<'b> Air<
-                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                crate::shard_level::basefold_constraint_folder::ShardConstraintFolder<
                     'b,
                     Val<SC>,
                     <SC as StarkGenericConfig>::Challenge,
