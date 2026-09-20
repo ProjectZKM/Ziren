@@ -5,8 +5,8 @@
 //!
 //! A shape that panics here is a shape `build_compress_vks` skips, so its
 //! verifying key never reaches `vk_map.bin` — which is the difference
-//! between an enumerated map (SP1's model) and one that has to be topped up
-//! by `ZIREN_VK_COLLECT` from production traffic.
+//! between an ENUMERATED map and one that has to be topped up by
+//! `ZIREN_VK_COLLECT` from production traffic.
 //!
 //! Run:
 //!   cargo run --release --bin enum_build_coverage [-- <stride>]

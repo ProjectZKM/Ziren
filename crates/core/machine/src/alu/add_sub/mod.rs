@@ -454,7 +454,7 @@ mod opened_width_tests {
     /// `&shorts[0]` an out-of-bounds index. Either way the result is a PANIC, not
     /// an error -- and the shard verifier reaches this with `opened_values.chips
     /// [i].main.local` taken straight from the proof, whose length nothing checks
-    /// against `chip.width()` (SP1 has `verify_opening_shape` for exactly this).
+    /// against `chip.width()`.
     ///
     /// So a malformed proof can abort a `Result`-returning verifier. This test
     /// pins the mechanism; the fix belongs in the verifier, which should reject

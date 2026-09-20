@@ -1356,9 +1356,8 @@ where
                     // committed one, and a prover could commit an unrelated
                     // round-0 codeword and still pass every Merkle path.  For
                     // rounds >= 1 the same equality is the ordinary FRI
-                    // round-to-round consistency check.  SP1 asserts it every
-                    // round too (`basefold/mod.rs` `assert_ext_eq(eval_ordered[0],
-                    // folded_eval)`).
+                    // round-to-round consistency check, so it is asserted on
+                    // every round.
                     //
                     // Skipped when the proof carries no component openings,
                     // where `initial_eval` falls back to `block[0]` itself and

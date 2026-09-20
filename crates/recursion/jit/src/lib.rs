@@ -6,8 +6,8 @@
 //! 13.95 s of host CPU** (mean 55.8 ms/node, p50 48, p90 85, max 182), a
 //! rate of 30.6 M instr/s.  Thirty-three nanoseconds is about a hundred
 //! cycles to do one field add and one store: almost all of it is dispatch.
-//! Ziren's guest JIT (`zkm-core-jit`, the same `dynasmrt` stack SP1 uses for
-//! `sp1-jit`) took the analogous MIPS loop from 9.1 s to 2.25 s.
+//! Ziren's guest JIT (`zkm-core-jit`, on the same `dynasmrt` stack) took the
+//! analogous MIPS loop from 9.1 s to 2.25 s.
 //!
 //! The recursion VM is a far easier target than MIPS:
 //!

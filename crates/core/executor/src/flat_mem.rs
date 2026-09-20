@@ -5,9 +5,8 @@
 //! bookkeeping was written for the checkpoint executor. The producer (the
 //! multi-GPU parent running `execute_minimal`) needs none of that: it runs in
 //! `Simple` mode, never restores a checkpoint, and rolls an unconstrained
-//! block back wholesale. SP1's producer (`sp1_jit`) keeps guest memory as one
-//! flat array of 16-byte `{clk, word}` entries for the same reason; this is
-//! the Ziren shape of it, `{value, timestamp, shard}` because Ziren's memory
+//! block back wholesale, so guest memory is one flat array:
+//! `{value, timestamp, shard}` because Ziren's memory
 //! records carry the shard as well.
 //!
 //! One entry per guest WORD, indexed by `addr >> 2` -- the same aliasing of

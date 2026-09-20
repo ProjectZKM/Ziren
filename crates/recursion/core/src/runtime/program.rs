@@ -22,9 +22,9 @@ pub struct RecursionProgram<F> {
     /// 34.8 ms.
     ///
     /// Holding the analyzed form as THE representation, rather than the raw
-    /// stream plus a memo, is what SP1's `RootProgram` does — it carries
+    /// stream plus a memo, means carrying
     /// `inner: RawProgram<AnalyzedInstruction<F>>` and `event_counts` as
-    /// fields and analyzes once at construction.  It also avoids storing the
+    /// fields and analyzing once at construction.  It also avoids storing the
     /// instruction stream twice, which for a 4.3 M-instruction leaf program
     /// is not a rounding error.
     ///
@@ -234,9 +234,7 @@ mod analyzed_at_construction_tests {
     use p3_koala_bear::KoalaBear;
 
     /// A program cannot exist un-analyzed: `new` is the only constructor and
-    /// it analyzes, so `run()` has nothing left to derive.  This is SP1's
-    /// arrangement — their `RootProgram` carries `inner` already analyzed and
-    /// `event_counts` beside it.
+    /// it analyzes, so `run()` has nothing left to derive.
     #[test]
     fn a_program_is_analyzed_when_it_is_built() {
         use crate::runtime::instruction as instr;

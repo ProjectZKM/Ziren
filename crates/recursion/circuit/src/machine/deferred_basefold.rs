@@ -605,7 +605,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
     // proof whose completeness predicates were never enforced.  Pin it to zero
     // and require the witness to agree; the honest prover already passes false
     // (`ZKMProver::get_recursion_deferred_inputs_basefold`), so this is a no-op
-    // on real proofs.  SP1 does the same in its deferred program.
+    // on real proofs.
     builder.assert_felt_eq(is_complete, C::F::ZERO);
     deferred_public_values.is_complete = builder.eval(C::F::ZERO);
     deferred_public_values.contains_execution_shard = builder.eval(C::F::ZERO);

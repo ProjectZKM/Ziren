@@ -2354,8 +2354,8 @@ where
             // downstream instead: the jagged verifier's step-(7) prefix-sum
             // walk asserts every column's Horner-recomposed entry against the
             // running row-count total, and the final entry against the
-            // committed area — the same binding SP1 relies on for its
-            // witnessed prefix-sum points.  Paying the in-`num2bits`
+            // committed area — the binding that pins the witnessed prefix-sum
+            // points.  Paying the in-`num2bits`
             // recomposition here as well bound each entry TWICE; measured, the
             // duplicate was ~119 base-ALU ops per real column, the single
             // largest slice of the leaf program (leaf_lift, 415-736K instrs).

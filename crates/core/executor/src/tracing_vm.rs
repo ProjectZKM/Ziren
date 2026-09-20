@@ -459,8 +459,8 @@ impl<'a> TracingVM<'a> {
 /// This is the whole consumer side for a distributed prover: a worker that has
 /// the program and a chunk needs nothing else to produce the record for that
 /// shard, so the trace generation happens on the worker rather than on the
-/// one process that hands work out. SP1 draws the same line -- its shard task
-/// carries a chunk and the worker calls its own `trace_chunk`.
+/// one process that hands work out: the shard task carries a chunk and the
+/// worker generates from it.
 ///
 /// The record is the replay's own, moved out whole; nothing is reserved up
 /// front.

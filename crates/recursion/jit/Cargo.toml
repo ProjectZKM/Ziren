@@ -13,7 +13,7 @@ zkm-recursion-core = { workspace = true }
 tracing = { workspace = true }
 thiserror = "1.0"
 
-# Same backend stack as `zkm-core-jit`, which mirrors SP1's sp1-jit.
+# Same backend stack as `zkm-core-jit`.
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
 dynasmrt = "2.0"
 

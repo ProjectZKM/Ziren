@@ -189,10 +189,9 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// Whether this ring's machines commit under the jagged-WHIR inner
     /// PCS.  The INNER ring (the core machine and every recursion stage
     /// below wrap: normalize/compose/shrink) is WHIR — ONE PCS family down
-    /// the whole proof tree, the SP1 proving path; the OUTER/wrap ring
-    /// stays BaseFold (its proof is consumed by the gnark circuit, which
-    /// has no WHIR verifier yet — SP1's snapshot keeps wrap on BaseFold
-    /// too).  The verifier needs no flag: it dispatches per proof on
+    /// the whole proof tree; the OUTER/wrap ring stays BaseFold, because its
+    /// proof is consumed by the gnark circuit, which has no WHIR verifier.
+    /// The verifier needs no flag: it dispatches per proof on
     /// `bundle.whir_proof`.
     const WHIR_INNER_PCS: bool;
 
@@ -343,9 +342,9 @@ pub trait BasefoldRing: StarkGenericConfig {
         // `prover_data`'s interleaved MLEs (the step-4 jagged reduction
         // reads them); its Merkle tree goes unused in WHIR mode.
         //
-        // ONE PCS down the whole tree (core, normalize, compose, shrink) —
-        // the SP1 proving path.  Only the OUTER/
-        // wrap ring keeps BaseFold (its proof feeds the gnark circuit).
+        // ONE PCS down the whole tree (core, normalize, compose, shrink).
+        // Only the OUTER/wrap ring keeps BaseFold, whose proof feeds the gnark
+        // circuit.
         // Commit and open stay consistent per-proof because the open
         // dispatches on the whir_data this decision populates; a proof this
         // routes to BaseFold verifies as BaseFold end-to-end (per-proof

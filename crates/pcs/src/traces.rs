@@ -7,7 +7,7 @@ use std::ops::{Deref, DerefMut};
 
 /// A collection of traces.
 ///
-/// The same shape as SP1's `hypercube::prover::Traces`: a newtype over
+/// A newtype over
 /// `BTreeMap<String, _>` with the field named `named_traces`, `Deref`,
 /// `DerefMut` and `IntoIterator`, and no other API — callers build it with the
 /// struct literal.
@@ -28,20 +28,18 @@ use std::ops::{Deref, DerefMut};
 ///    mismatch committed traces against the wrong AIRs instead of failing. A map
 ///    cannot express that state.)
 ///
-/// The element is a [`PaddedMle`], as in SP1: the trace is wrapped once, at
-/// generation, and carries its own cube from then on. The wrap is zero-copy —
+/// The element is a [`PaddedMle`]: the trace is wrapped once, at generation, and carries its own cube from then on. The wrap is zero-copy —
 /// `Mle::from_row_major` MOVES the matrix's `Vec` — and the cube is the fixed
 /// `CORE_MAX_LOG_ROW_COUNT` every stage proves at, so it is known at generation
 /// and never floated per proof. Holding the raw `RowMajorMatrix` instead would
 /// mean re-wrapping at each consumer and carrying the cube separately.
-/// Backend-parameterised like SP1's `Traces<F, B>`: `PaddedMle` already carries
-/// a backend (`CudaBackend` implements `Backend` in ziren-gpu), so a
+/// Backend-parameterised: `PaddedMle` already carries a backend (`CudaBackend` implements `Backend` in ziren-gpu), so a
 /// device-resident trace map is representable. `CpuBackend` is the default, so
 /// `Traces<F>` reads as before.
 ///
-/// (SP1 additionally derives `Serialize`/`Deserialize`, because its `Traces`
-/// crosses a process boundary. Ziren's `PaddedMle` is not serializable and
-/// nothing here serializes a `Traces`, so those derives are omitted rather than
+/// (`Serialize`/`Deserialize` would be needed only to cross a process
+/// boundary.  `PaddedMle` is not serializable and nothing here serializes a
+/// `Traces`, so those derives are omitted rather than
 /// forced onto the MLE.)
 #[derive(Debug, Clone, Default)]
 pub struct Traces<F, A: Backend = CpuBackend> {
@@ -104,8 +102,7 @@ mod tests {
         let traces = Traces { named_traces: [("Cpu".to_string(), pm)].into_iter().collect() };
         assert_eq!(traces.len(), 1);
 
-        let out: Vec<PaddedMle<KoalaBear>> =
-            traces.into_iter().map(|(_, mle)| mle).collect();
+        let out: Vec<PaddedMle<KoalaBear>> = traces.into_iter().map(|(_, mle)| mle).collect();
         let after = out[0].real_trace_ref().expect("a real trace").values.as_ptr();
         assert_eq!(after, before, "the trace was copied, not moved");
     }
@@ -119,9 +116,7 @@ mod tests {
         let (a, _) = wrap(vec![KoalaBear::ONE; 8], 4);
         let (b, _) = wrap(vec![KoalaBear::TWO; 8], 4);
         let t = Traces {
-            named_traces: [("Cpu".to_string(), a), ("Cpu".to_string(), b)]
-                .into_iter()
-                .collect(),
+            named_traces: [("Cpu".to_string(), a), ("Cpu".to_string(), b)].into_iter().collect(),
         };
         assert_eq!(t.len(), 1);
     }

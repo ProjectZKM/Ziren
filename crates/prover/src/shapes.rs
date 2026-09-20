@@ -535,9 +535,8 @@ impl ZKMProofShape {
         // Per-shard normalize shapes — ONE representative per CLASS.
         //
         // The class is `(chip set, preprocessed blocks, main blocks,
-        // preprocessed pad columns, main pad columns)` — SP1's `CoreProofShape`
-        // (sp1 crates/hypercube/src/prover/shard.rs), field for field.  Nothing
-        // finer reaches the program: the per-chip heights enter the proof only
+        // preprocessed pad columns, main pad columns)`.  Nothing finer reaches
+        // the program: the per-chip heights enter the proof only
         // as WITNESSED values (`row_counts`, the `quotient[0]` degree bits,
         // `log_degree`), never as a length, and the only lengths the commitment
         // contributes are the column count (chip widths, fixed by the chip set,
@@ -566,8 +565,8 @@ impl ZKMProofShape {
         // `CoreShapeConfig::find_canonical_cluster_shape_from_ordered`.  Both
         // are superseded: `log_dense` is too coarse (shapes sharing one can
         // commit different block counts), and the canonical lift is the
-        // fix-shape path SP1 itself abandoned — `ShapeCluster` survives in their
-        // tree referenced by nothing.  Production passes `None` for the shape
+        // fix-shape path, now referenced by nothing.  Production passes `None`
+        // for the shape
         // config, so no real proof is snapped to a cluster shape anyway.
         let cube = consts::CORE_MAX_LOG_ROW_COUNT;
         // Build the representative shape for one class: a chip set, a Program

@@ -119,8 +119,8 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 ///
 /// It has to CONTAIN the enumeration, which is not a tuning knob.  A normalize
 /// key is a function of `(chip set, preprocessed blocks, main blocks,
-/// preprocessed pad columns, main pad columns)` — SP1's `CoreProofShape`, field
-/// for field — and the reachable main block counts run up to the prover's own
+/// preprocessed pad columns, main pad columns)` — and the reachable main block
+/// counts run up to the prover's own
 /// per-shard area cap (`ELEMENT_THRESHOLD` = 120 stacking blocks).  MEASURED at
 /// 7,960 shapes (7,931 normalize + 14 compose + 14 deferred + 1 shrink).
 ///
@@ -1088,7 +1088,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         //
         // The stripe count is 2^(L - log_stacking_height): the shard's
         // committed AREA in stacking blocks, a finer measure than L (at L=28 it
-        // ranges 80..120).  It is exactly SP1's
+        // ranges 80..120), i.e.
         // `main_area.next_multiple_of(1 << log_stacking_height)`.  So leaf
         // program diversity is driven by committed area, and normalising it
         // means quantising that area more coarsely — NOT padding per-chip
@@ -1152,7 +1152,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // The basefold query-round Merkle LEAF COUNT — the dimension that
             // actually splits the diversity.  It is 2^(L - log_stacking_height),
             // i.e. the shard's committed area in stacking stripes, a FINER
-            // measure than L alone (at L=28 it ranges 80..120).  This is SP1's
+            // measure than L alone (at L=28 it ranges 80..120), i.e.
             // `main_area.next_multiple_of(1 << log_stacking_height)`.
             let rounds: Vec<String> = input
                 .shard_proofs
@@ -1795,9 +1795,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         //
         // Ziren's first level is core shards followed by deferred proofs (see
         // `get_first_layer_inputs`), so the chain advances the shard
-        // coordinate and then the deferred one. SP1 orders precompiles first
-        // because their range is degenerate; Ziren has no separate precompile
-        // shards at this level, so the question does not arise here.
+        // coordinate and then the deferred one.  There are no separate
+        // precompile shards at this level, so their (degenerate) range does not
+        // arise here.
         let num_first_layer_inputs = first_layer_inputs.len();
         let mut chain = crate::compress_tree::ShardChain::new();
         let first_layer_inputs: Vec<(crate::compress_tree::ShardRange, ZKMCircuitWitness)> =
@@ -2075,7 +2075,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // widest, because the top layers hold fewer nodes than there are
             // workers.
             //
-            // Ported from SP1 (`worker/controller/compress.rs`): a landing
+            // A landing
             // proof looks for the run ending where it begins, or beginning
             // where it ends, merges, and dispatches the moment the merged run
             // reaches the arity. Nothing is keyed by depth, so a pair can

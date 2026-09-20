@@ -523,8 +523,8 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             // and the Merkle path binds here are the Poseidon2 bulk of a
             // normalize program.  Each query becomes its own
             // `SeqBlock::Parallel` sub-program, which the recursion VM
-            // walks with rayon (SP1 chunks its tensor-CS openings the same
-            // way).  The collected (stir value, stir point) order is the
+            // walks with rayon.  The collected (stir value, stir point) order is
+            // the
             // query order, so the transcript-facing consumption below is
             // byte-identical to the sequential walk.
             let stir_pairs: Vec<(Ext<C::F, C::EF>, Vec<Ext<C::F, C::EF>>)> = index_bit_vecs

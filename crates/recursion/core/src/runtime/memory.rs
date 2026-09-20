@@ -122,8 +122,8 @@ unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
 ///
 /// Additive type, not yet wired into the runtime.
 ///
-/// `MemoryEntry` is the VALUE alone — 16 bytes, the exact shape SP1's
-/// recursion memory uses.  The `mult` field it used to carry was never
+/// `MemoryEntry` is the VALUE alone — 16 bytes.  The `mult` field it used to
+/// carry was never
 /// read at runtime (chips read multiplicities from the instruction-side
 /// preprocessed columns), so storing it cost a fifth of every entry's
 /// memory traffic in a VM measured bandwidth-bound; the `mw` APIs keep an

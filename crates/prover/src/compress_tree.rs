@@ -1,7 +1,5 @@
 //! The compress stage's reduction tree, keyed by SHARD RANGE.
 //!
-//! Ported from SP1's `crates/prover/src/worker/controller/compress.rs`.
-//!
 //! The reduction used to be driven in LAYERS: bucket finished proofs by tree
 //! height, wait for a bucket to reach `batch_size` or for its source layer to
 //! be exhausted, emit, repeat. That shape has a barrier in it — a node at
@@ -31,10 +29,6 @@ use std::collections::{BTreeMap, VecDeque};
 
 /// Where one proof's coverage of the execution ends and the next one's begins.
 ///
-/// Ported from SP1's `ShardBoundary` (`crates/hypercube/src/air/public_values.rs`),
-/// minus the two page-index coordinates, which are SP1's paged memory and have
-/// no Ziren analogue.
-///
 /// The point of the tuple is that EVERY kind of first-level proof advances
 /// exactly one coordinate, so all of them live on one lexicographically ordered
 /// chain and the tree can merge neighbours without caring what kind they are:
@@ -50,14 +44,13 @@ use std::collections::{BTreeMap, VecDeque};
 /// they can always find a sibling — otherwise a batch of them could never
 /// start reducing. That is why they sort first.
 ///
-/// ⚠ These are ASSIGNED BY THE DRIVER as it emits first-level work, exactly as
-/// SP1's controller does (`ShardRange::precompile()`, `::deferred(prev, cur)`).
-/// They are not read back out of a proof's public values: a compose output's
+/// ⚠ These are ASSIGNED BY THE DRIVER as it emits first-level work.  They are
+/// not read back out of a proof's public values: a compose output's
 /// range is just the union of its children's, and nothing in the circuit needs
 /// to agree with it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShardBoundary {
-    /// The core shard index — Ziren's analogue of SP1's `timestamp`.
+    /// The core shard index: the time coordinate of the range.
     pub shard: u64,
     /// MemoryInit address reached.
     pub init_addr: u64,
@@ -128,7 +121,7 @@ impl ShardRange {
 /// each call advances one coordinate from the cursor and returns the span it
 /// just crossed.
 ///
-/// The resulting order is SP1's:
+/// The resulting order is:
 ///
 /// ```text
 ///   precompile | deferred | core | memory
@@ -490,8 +483,8 @@ mod tests {
 
     #[test]
     fn a_chain_of_mixed_kinds_reduces_as_one_run() {
-        // precompile | deferred | core | memory, exactly SP1's order, all in
-        // one tree. The tree never learns which is which.
+        // precompile | deferred | core | memory, all in one tree.  The tree
+        // never learns which is which.
         let mut chain = ShardChain::new();
         let ranges = [
             chain.precompile(),

@@ -368,8 +368,8 @@ pub struct Executor<'a> {
     /// Replay source for user-memory accesses: the chunk's oracle as a CURSOR.
     ///
     /// When set, `mr` / `mw` take the next entry as the pre-access record and
-    /// never read a value out of `state.memory` -- the oracle IS the memory,
-    /// which is SP1's replay design (`vm.rs:604`).  Registers are excluded (the
+    /// never read a value out of `state.memory` -- the oracle IS the memory.
+    /// Registers are excluded (the
     /// producer records only `addr >= NUM_REGISTERS`); they come from the
     /// chunk's `start_register_records`.
     pub replay_mem: Option<crate::minimal_trace::ReplayMem>,
@@ -813,9 +813,9 @@ impl<'a> Executor<'a> {
 
     /// A syscall's read of a word it is about to overwrite and so does not
     /// record (`SyscallContext::slice_unsafe`): the value the producer saw
-    /// still has to reach the replay, whose page table is empty. SP1's
-    /// `mr_slice_unsafe`: the producer traces each word into the chunk's
-    /// oracle, the replay consumes it. Not an access -- no record is touched
+    /// still has to reach the replay, whose page table is empty: the producer
+    /// traces each word into the chunk's oracle and the replay consumes it.
+    /// Not an access -- no record is touched
     /// -- so the entry carries the address's current record as it stands.
     ///
     /// Without this the replay read 0 (or a stale write) for the point a
@@ -917,7 +917,7 @@ impl<'a> Executor<'a> {
             }
             return MemoryReadRecord::new(prev.value, shard, timestamp, prev.shard, prev.timestamp);
         }
-        // SP1 parity: under replay the oracle IS the memory.  Popped BEFORE
+        // Under replay the oracle IS the memory.  Popped BEFORE
         // `page_table.entry(addr)` takes `&mut self.state.memory` — the borrow
         // checker will not allow the call afterwards.
         let replay_prev = self.take_replay_mem(addr);
@@ -1240,7 +1240,7 @@ impl<'a> Executor<'a> {
                 prev.timestamp,
             );
         }
-        // SP1 parity: under replay the oracle IS the memory.  Popped BEFORE
+        // Under replay the oracle IS the memory.  Popped BEFORE
         // `page_table.entry(addr)` takes `&mut self.state.memory` — the borrow
         // checker will not allow the call afterwards.
         let replay_prev = self.take_replay_mem(addr);
@@ -3373,9 +3373,8 @@ impl<'a> Executor<'a> {
     /// Execute up to `self.shard_batch_size` shards for the minimal-trace
     /// collector alone, returning whether the program ended.
     ///
-    /// SP1's `MinimalExecutor::execute_chunk`: the controller that ships
-    /// `TraceChunk`s to workers needs the chunks and nothing else, and its
-    /// executor keeps no checkpoint. [`Self::execute_state`] is the
+    /// The controller that ships `TraceChunk`s to workers needs the chunks and
+    /// nothing else, and keeps no checkpoint. [`Self::execute_state`] is the
     /// `trace_checkpoint` producer -- it snapshots the state, records every
     /// first touch into `memory_checkpoint` and assembles an
     /// [`ExecutionState`] per call -- which is bookkeeping the chunk
@@ -3394,8 +3393,8 @@ impl<'a> Executor<'a> {
     pub fn execute_minimal(&mut self) -> Result<bool, ExecutionError> {
         self.executor_mode = ExecutorMode::Simple;
         self.emit_global_memory_events = false;
-        // The producer's memory is the flat array (SP1's `sp1_jit` layout),
-        // mapped before `initialize` lays the image down. Only the producer:
+        // The producer's memory is the flat array, mapped before `initialize`
+        // lays the image down. Only the producer:
         // a replay's oracle IS its memory, and a program already under way
         // on the paged table stays there.
         if self.state.global_clk == 0

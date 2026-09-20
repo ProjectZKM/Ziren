@@ -216,8 +216,8 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             let point_to_add = ith_point_to_add(i);
             let next_sum = ith_cumulative_sum(i);
             assert_on_curve(builder, next_sum.clone());
-            // `sum_checker_x` is degree 3 and is asserted UNCONDITIONALLY (SP1-hypercube
-            // shape): padding rows are laid out as the genuine addition
+            // `sum_checker_x` is degree 3 and is asserted UNCONDITIONALLY:
+            // padding rows are laid out as the genuine addition
             // `(final - dummy) + dummy == final` (`populate_dummy`), so no witnessed copy
             // is needed.  `sum_checker_y` is degree 2 and gated by
             // `is_real` (degree 3).  Together, on a real row, `next_sum == current_sum +

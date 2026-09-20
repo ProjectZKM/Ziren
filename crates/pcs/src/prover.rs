@@ -500,8 +500,8 @@ where
                 // the store IS the map -- no second pass and no name vector
                 // here. `PaddedMle::padded` asserted the height fits at that
                 // point, which is where an over-tall trace fails.
-                // `commit_traces` takes the name-keyed map, as SP1's does, so the
-                // names travel WITH the traces. This used to build the machine's
+                // `commit_traces` takes the name-keyed map, so the names travel
+                // WITH the traces. This used to build the machine's
                 // chip vector, assert it was the same length as the store, and
                 // then flatten the store to a nameless `Vec` for `commit_traces`
                 // to re-pair positionally -- a round trip that threw the keys away
@@ -778,9 +778,8 @@ where
         .expect("CpuProver::commit retains the main-trace store");
     let max_log_row_count =
         crate::shard_level::verifier::BasefoldShardVerifier::production_default().max_log_row_count;
-    // SP1 checks this at the same boundary and with a hard assert
-    // (`jagged/src/prover.rs`: `assert_eq!(padded_mle.num_variables(),
-    // self.max_log_row_count)`), because the cube is what every consumer reads
+    // A hard assert at this boundary, because the cube is what every consumer
+    // reads
     // back off an arbitrary entry. A `debug_assert` compiles out in release,
     // which is where a non-uniform store would be committed.
     assert!(

@@ -329,9 +329,9 @@ mod size_tests {
 
     /// Emitted bytes per instruction.
     ///
-    /// This matters more here than in a guest JIT.  SP1 JITs a MIPS program:
-    /// its code is the static program text, and a loop executed a million
-    /// times is compiled once.  A recursion program has NO control flow — it
+    /// This matters more here than in a guest JIT, where the code is the
+    /// static program text and a loop executed a million times is compiled
+    /// once.  A recursion program has NO control flow — it
     /// is already fully unrolled, so its instruction count IS its execution
     /// length, and a 1:1 emission produces code proportional to the trace.
     /// A leaf program is 4.3 M instructions, so bytes-per-instruction decides

@@ -356,14 +356,14 @@ where
         // and the disjoint-offset invariant from analyze make the
         // swap a one-liner.
         // ZIREN_REC_EXEC_TIMING=1 splits a recursion program's execution into
-        // its two host phases.  The walk is the interpreter SP1 JITs away for
-        // the guest (sp1-jit / crates/core/jit here); this is the measurement
+        // its two host phases.  The walk is the interpreter a JIT would replace
+        // (`crates/core/jit` does it for the guest); this is the measurement
         // that says what a recursion JIT would be worth.
         let timing = std::env::var("ZIREN_REC_EXEC_TIMING").is_ok_and(|v| v != "0");
         let t_analyze = std::time::Instant::now();
         let program_arc = self.program.clone();
-        // Nothing to derive: the program was analyzed once when it was built,
-        // as SP1's `RootProgram` is.  `analyze_secs` stays in the instrument
+        // Nothing to derive: the program was analyzed once when it was built.
+        // `analyze_secs` stays in the instrument
         // so the timing line keeps its shape and shows the phase at ~0.
         let analyzed_program = &program_arc.seq_blocks;
         let event_counts = program_arc.event_counts;

@@ -13,7 +13,7 @@ use crate::air::WordAirBuilder;
 pub struct AddOperation<T> {
     /// The result of `a + b`.  The ONLY column: the carries are recovered in
     /// the AIR as the linear expressions `(a_i + b_i - value_i + carry_in) / 256`
-    /// and asserted boolean (SP1's AddOperation shape).
+    /// and asserted boolean.
     pub value: Word<T>,
 }
 

@@ -280,8 +280,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // the class's pinned geometry rather than these rows, so all a dummy
         // shape has to do is land in its class — asserted below.
         //
-        // Class 1 is the single shape that replaced the bands (SP1 style,
-        // sized from 1,020 production nodes on Sep 11: per-chip maxima
+        // Class 1 is the single shape that replaced the bands (sized from
+        // 1,020 production nodes on Sep 11: per-chip maxima
         // MemoryVar 248,877 / Select 140,960 / Poseidon2 66,236 set by the
         // arity-4 compose, BaseAlu 452,760 / ExtAlu 578,441 / Ext2Felt 61,166
         // by a leaf verifying the largest core shard); it commits both rounds

@@ -25,9 +25,8 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// reinterpret) — no trace data is copied or moved, and no ownership
 /// round-trips through the return.
 pub fn commit_traces<SC>(
-    // The shard's traces KEYED BY CHIP NAME, as SP1's `commit_traces` takes
-    // them (`hypercube/src/prover/shard.rs:462` -- `traces: &Traces<F, B>`, then
-    // `traces.values()`).  The name comes from the key, so there is no chip
+    // The shard's traces KEYED BY CHIP NAME.  The name comes from the key, so
+    // there is no chip
     // slice to pair this against and no positional pairing to get wrong; the
     // previous signature took `(&[&Chip], &[PaddedMle])` and had to assert the
     // two were parallel because `zip` TRUNCATES, which meant a committed name
@@ -320,7 +319,7 @@ where
             // that build would have produced (same seam, same inputs, one
             // shard-phase earlier).
             Some(retained) => (retained.main_commitment, retained.precomputed),
-            // The name-keyed map, as SP1 passes it -- not `(chips, &trace_views)`.
+            // The name-keyed map -- not `(chips, &trace_views)`.
             None => commit_traces::<SC>(&main_traces, main_pin),
         }
     };

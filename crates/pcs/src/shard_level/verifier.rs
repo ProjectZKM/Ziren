@@ -188,8 +188,7 @@ impl BasefoldShardVerifier {
         // (recursion/circuit/src/zerocheck.rs:125, called at :510). So the
         // invariant is not new and honest proofs already satisfy it; every shard
         // proof production recursion consumes is checked there. The HOST path
-        // was simply the gap. SP1 checks it host-side too
-        // (`ShardVerifier::verify_opening_shape`).
+        // was simply the gap.
         //
         // Note the recursive twin `.expect()`s, so it panics rather than
         // returning its `OpeningShapeError` -- same defect class as this one,

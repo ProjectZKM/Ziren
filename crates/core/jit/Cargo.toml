@@ -17,7 +17,7 @@ thiserror = "1.0"
 serde = { workspace = true, features = ["derive"] }
 
 # JIT backend — dynasm-rt (runtime macro-assembler) on Linux x86_64.
-# Modeled on SP1's sp1-jit which uses the same dependency stack.
+# `dynasmrt` assembles at runtime; `iced-x86` decodes for the disassembly tests.
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
 dynasmrt = "2.0"
 memfd = "0.6"

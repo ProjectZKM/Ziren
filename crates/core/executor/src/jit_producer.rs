@@ -1,8 +1,8 @@
 //! Native minimal-trace producer: the parent's `execute_minimal` runs the
 //! guest as one program-wide JIT function instead of the interpreter.
 //!
-//! SP1's parent is its JIT (`sp1_jit`): native code executes the program,
-//! keeps the per-shard budgets in registers and hands the executor exactly
+//! Native code executes the program, keeps the per-shard budgets in registers
+//! and hands the executor exactly
 //! the interpreter's side effects — the flat memory, the register records,
 //! the clock, the oracle of pre-access values and the shard-split
 //! accounting. This module is the executor half of that design; the native
@@ -28,7 +28,7 @@
 //! The chunks the producer emits are byte-identical to the interpreter's
 //! (`tests::producer_matches_interpreter_*`); the parent's `execute_minimal`
 //! uses it whenever the executor is in the plain minimal-trace configuration
-//! (see `platform::eligible`), with no switch — SP1 has none either.
+//! (see `platform::eligible`), with no switch.
 //!
 //! Known, deliberate divergences from the interpreter (all shared with the
 //! block JIT, none reachable by a well-formed guest): a taken branch to pc 0

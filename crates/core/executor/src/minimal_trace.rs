@@ -52,9 +52,8 @@ use std::sync::Arc;
 /// Uses MIPS-native `u32` words. This is the PRE-access `MemoryRecord` and
 /// nothing else: the replay consumes entries positionally (`ReplayMem`), so
 /// the issuing clk and the address are redundant -- the Nth access of a
-/// deterministic replay IS the Nth entry. SP1's `MemValue` is `{clk, value}`
-/// for the same reason; ours carries `shard` because the MIPS memory argument
-/// keys on (shard, timestamp). 12 bytes, `Pod`: a chunk's oracle serializes as
+/// deterministic replay IS the Nth entry.  `shard` is carried because the MIPS
+/// memory argument keys on (shard, timestamp). 12 bytes, `Pod`: a chunk's oracle serializes as
 /// one raw byte run (reth: ~1.7M entries per shard, 210M per block), not
 /// field by field.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -240,10 +239,9 @@ pub struct TraceChunk {
 /// A chunk's `mem_reads` under replay: a cursor, not a lookup table.
 ///
 /// The producer pushes one entry per user-memory access in issue order, so the
-/// Nth access of a deterministic replay consumes the Nth entry.  This is SP1's
-/// `MemReads` (`sp1-gpu/crates/cuda`/`core/jit/src/risc.rs:285`) in safe Rust --
-/// theirs is a raw pointer pair into an mmap; ours is a shared `Arc` slice,
-/// which is what matters here (no per-worker clone).
+/// Nth access of a deterministic replay consumes the Nth entry.  A shared `Arc`
+/// slice rather than a raw pointer pair into an mmap, which is what matters
+/// here: no per-worker clone.
 #[derive(Debug, Clone)]
 pub struct ReplayMem {
     /// The chunk's oracle, shared across replay workers.

@@ -474,9 +474,9 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
     // Chip columns + each round's stacking-padding columns (see
     // core_basefold.rs for why the pads have to be counted).
-    // The column count comes from ONE source: the host packing.  SP1 derives
-    // its jagged layout from a single place (a scan over `column_counts_by_round`,
-    // with no pads at all); Ziren's WHIR stacking adds pad columns, and the
+    // The column count comes from ONE source: the host packing.  A layout with
+    // no pad columns needs only a scan over `column_counts_by_round`; Ziren's
+    // WHIR stacking adds pad columns, and the
     // second source that grew for them — the witness field
     // `preprocessed_round.padding_heights`, empty on the outer ring — is what
     // shipped a four-column undercount into the gnark wrap.  See ff3488dc.
@@ -684,8 +684,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // shard range with arbitrary initial memory, and neither the host wrap
     // verifier nor the on-chain Groth16 verifier can tell it from an honest
     // proof.  (`verify_compressed` checks the flag on the host, but a host
-    // check is not on an adversary's path to a wrapped proof.)  SP1 asserts
-    // the same thing in its two terminal circuits, root.rs and wrap.rs.
+    // check is not on an adversary's path to a wrapped proof.)  Both terminal
+    // circuits assert it.
     builder.assert_felt_eq(inner.is_complete, C::F::ONE);
 
     match output_digest_kind {
