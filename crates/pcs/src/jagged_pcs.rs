@@ -1317,6 +1317,45 @@ pub mod jagged {
     {
         assert!(!rounds.is_empty(), "prove_jagged_rounds: no rounds");
 
+        // Each round carries its geometry THREE times, and three different
+        // consumers read three different copies: the reduction and
+        // `effective_area` read `prover_data`, the WHIR opening reads
+        // `whir_data`, and the bundle hands `commit` to the verifier.  The
+        // agreement checks below compare BaseFold records with BaseFold records
+        // and WHIR records with WHIR records, so a round whose own three copies
+        // disagree passes all of them and then opens against one geometry while
+        // the verifier is told another.
+        //
+        // Validated HERE, before anything touches the challenger, so a rejected
+        // round set cannot leave a partially advanced transcript.
+        for (ri, r) in rounds.iter().enumerate() {
+            let pd = &r.precomputed.prover_data;
+            let c = &r.precomputed.commit;
+            assert_eq!(
+                c.area, pd.area,
+                "prove_jagged_rounds: round {ri} commit area {} != prover-data area {}",
+                c.area, pd.area,
+            );
+            assert_eq!(
+                c.log_stacking_height, pd.log_stacking_height,
+                "prove_jagged_rounds: round {ri} commit log_stacking_height {} != prover-data {}",
+                c.log_stacking_height, pd.log_stacking_height,
+            );
+            if let Some(wd) = r.precomputed.whir_data.as_ref() {
+                assert_eq!(
+                    wd.area, pd.area,
+                    "prove_jagged_rounds: round {ri} WHIR area {} != prover-data area {}",
+                    wd.area, pd.area,
+                );
+                assert_eq!(
+                    wd.log_stacking_height, pd.log_stacking_height,
+                    "prove_jagged_rounds: round {ri} WHIR log_stacking_height {} != \
+                     prover-data {}",
+                    wd.log_stacking_height, pd.log_stacking_height,
+                );
+            }
+        }
+
         let mut chip_infos: Vec<crate::jagged::JaggedChipInfo> = Vec::new();
         let mut offsets: Vec<usize> = Vec::new();
         let mut round_padding_heights: Vec<Vec<usize>> = Vec::with_capacity(rounds.len());
@@ -1761,6 +1800,14 @@ pub mod jagged {
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
     ) -> bool {
+        // ZR-30: the flat layout the reduction and `build_jagged_verify_inputs`
+        // consume must BE the per-round layout the machine pins.  Before any
+        // challenge is drawn from it.
+        if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "inner") {
+            eprintln!("[basefold verify] {why}");
+            return false;
+        }
+
         // COVERAGE CHECK (the #1 soundness guard — FIRST assertion)
         // Independently re-derive the round partition from the PUBLIC
         // name-sorted (name,row_count,column_count) the verifier already
@@ -1895,9 +1942,21 @@ pub mod jagged {
         let mut sum_open = InnerChallenge::ZERO;
         let mut k = 0usize;
         for (i, (yc, oc)) in y_per_chip.iter().zip(opened_main.iter()).enumerate() {
-            // `column_count ≤ BaseAir::width`, so an opening exposing fewer
-            // columns than the sumcheck consumed is malformed.
-            if oc.len() < yc.len() {
+            // EXACT, not `oc.len() >= yc.len()`.  `opened_main` is
+            // MACHINE-derived -- the AIR's own opening vector -- while
+            // `y_per_chip` and the packing's `column_counts` both come off the
+            // proof, so this is the only cardinality here anchored to something
+            // the prover does not choose.  Accepting a longer opening lets a
+            // proof shrink its claim vector AND its declared column counts
+            // together (ZR-30): every proof-internal check still agrees, the
+            // dropped columns contribute zero to the reduction, and the AIR
+            // consumes an opening suffix bound to no committed column.
+            //
+            // Equality is what honest proofs produce: every `column_count` in
+            // the tree is a trace width (`jagged.rs`), padding columns are one
+            // column against a one-element `[ZERO]` opening, and the prover
+            // asserts `claims[i].len() == column_count` when it builds them.
+            if oc.len() != yc.len() {
                 return Err(alloc::format!(
                     "chip {i}: opened {} columns, the reduction consumed {}",
                     oc.len(),
@@ -1979,11 +2038,20 @@ pub mod jagged {
         let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
         let z_col: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| challenger.sample_algebra_element()).collect();
+        // The round-0 claim comes from the MACHINE-validated openings, not from
+        // the proof's own `y_per_chip`.  The two give the same value on an
+        // honest proof -- that is precisely what the cross-bind above asserts,
+        // `Σ w·open == Σ w·y` -- but only `opened_main` has a cardinality the
+        // prover does not choose.  Sourcing the claim from the proof's vector
+        // let a short one drop columns from the sum while the AIR still
+        // consumed the corresponding openings (ZR-30).  The recursive verifier
+        // has always built its claim from `opened_values`; this is the native
+        // side agreeing with it.
         let red_result = verify_jagged_reduction(
             reduction,
             packing,
             r_row_per_chip,
-            y_per_chip,
+            opened_main,
             &z_col,
             z_row,
             challenger,
@@ -2213,6 +2281,14 @@ pub mod jagged {
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
+        // ZR-30, on the outer ring too: the flat layout must BE the canonical
+        // flattening of the per-round layout, checked before any challenge is
+        // drawn from it.
+        if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "outer") {
+            eprintln!("[basefold verify] {why}");
+            return false;
+        }
+
         // See `verify_one_jagged_group`: the stacking height is protocol, not
         // proof.  Bound here too because this entry point derives its own
         // `stack_dim` and WHIR config from it.
@@ -2243,11 +2319,13 @@ pub mod jagged {
             eprintln!("[basefold verify outer] CROSS-BIND FAILED — {why}");
             return false;
         }
+        // As on the inner ring: the claim is built from the machine-validated
+        // openings, not from the proof's `y_per_chip`.
         let red_result = crate::jagged_sumcheck::verify_jagged_reduction(
             &bundle.reduction,
             &packing,
             r_row_per_chip,
-            &bundle.y_per_chip,
+            opened_main,
             &z_col,
             z_row,
             challenger,
@@ -2311,6 +2389,67 @@ pub mod jagged {
         }
         res.is_ok()
     }
+}
+
+/// The ONE canonical flattening of a bundle's per-round geometry into the flat
+/// column layout, and the check that the proof's own flat fields agree with it.
+///
+/// `PackingMeta` serializes the layout TWICE -- per round in
+/// `round_counts`/`padding_heights`, and flat in `column_counts`/`offsets` --
+/// and different consumers read different copies: the machine width pin checks
+/// `round_counts`, while `build_jagged_verify_inputs` and the reduction consume
+/// `column_counts`.  Nothing required the two to describe the same layout, so a
+/// bundle could keep `round_counts` machine-correct while shrinking
+/// `column_counts`, `offsets` and `y_per_chip` together: every proof-internal
+/// check still agrees and the dropped columns contribute zero to the reduction
+/// (ZR-30).
+///
+/// The per-round form is authoritative because it is the one the machine pins.
+/// Flattening is round-major, each round's real chip widths followed by ONE
+/// column per padding entry, main round last.
+pub fn canonical_column_counts(
+    round_counts: &[Vec<(usize, usize)>],
+    padding_heights: &[Vec<usize>],
+) -> Vec<usize> {
+    round_counts
+        .iter()
+        .enumerate()
+        .flat_map(|(r, round)| {
+            let pads = padding_heights.get(r).map_or(0, |p| p.len());
+            round.iter().map(|(_row, col)| *col).chain(core::iter::repeat_n(1usize, pads))
+        })
+        .collect()
+}
+
+/// Reject a bundle whose flat geometry is not the canonical flattening of its
+/// per-round geometry.  Must run BEFORE `z_col` is sampled: the flat layout is
+/// what decides how many column variables the transcript draws.
+pub fn check_canonical_packing(
+    packing: &jagged::PackingMeta,
+    site: &str,
+) -> Result<(), alloc::string::String> {
+    if packing.round_counts.is_empty() {
+        // Legacy single-round bundles carry no per-round geometry; there is no
+        // second representation to disagree with.
+        return Ok(());
+    }
+    let canonical = canonical_column_counts(&packing.round_counts, &packing.padding_heights);
+    if packing.column_counts != canonical {
+        return Err(alloc::format!(
+            "{site}: the bundle's flat column_counts {:?} are not the canonical flattening of \
+             its per-round geometry {:?}",
+            packing.column_counts,
+            canonical,
+        ));
+    }
+    let columns: usize = canonical.iter().sum();
+    if packing.offsets.len().saturating_sub(1) != columns {
+        return Err(alloc::format!(
+            "{site}: offsets describe {} columns, the per-round geometry describes {columns}",
+            packing.offsets.len().saturating_sub(1),
+        ));
+    }
+    Ok(())
 }
 
 /// The jagged column-accounting invariant, with the packing as the SINGLE
@@ -2859,13 +2998,96 @@ mod test {
         );
     }
 
+    /// Move a round's geometry in ALL THREE records at once.
+    ///
+    /// The centralized validator rejects a round whose `commit`, `prover_data`
+    /// and `whir_data` disagree, and it runs FIRST -- so a control that corrupts
+    /// only `prover_data` trips that instead of the downstream invariant it was
+    /// written for.  These controls target the downstream ones, so the round
+    /// stays internally consistent and only differs from the OTHER round.
+    fn set_round_geometry(
+        pre: &mut crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        area: Option<usize>,
+        lsh: Option<u32>,
+    ) {
+        if let Some(a) = area {
+            pre.commit.area = a;
+            pre.prover_data.area = a;
+            if let Some(w) = pre.whir_data.as_mut() {
+                w.area = a;
+            }
+        }
+        if let Some(h) = lsh {
+            pre.commit.log_stacking_height = h;
+            pre.prover_data.log_stacking_height = h;
+            if let Some(w) = pre.whir_data.as_mut() {
+                w.log_stacking_height = h;
+            }
+        }
+    }
+
+    /// Fail-fast control: MIXED inner PCS across rounds.
+    ///
+    /// Each round's commitment was observed into the transcript as whatever its
+    /// commit produced -- a WHIR root for a WHIR-committed round, a BaseFold
+    /// root otherwise -- but the batched open picks ONE backend for all of
+    /// them.  Mixed, the open would run BaseFold against a WHIR root:
+    /// authenticating against a tree that was never built, while the verifier
+    /// (which dispatches on `bundle.whir_proof`) replays a different
+    /// transcript.  No honest prover reaches this state.
+    #[test]
+    #[should_panic(expected = "mixed WHIR rounds")]
+    fn two_round_rejects_mixed_whir_and_basefold_rounds() {
+        let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
+        // The inner ring commits under WHIR, so both rounds carry `whir_data`;
+        // drop it from ONE and the round set is no longer of one backend.
+        assert!(prep.whir_data.is_some(), "the inner ring must commit under WHIR");
+        assert!(main.whir_data.is_some(), "the inner ring must commit under WHIR");
+        main.whir_data = None;
+        prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
+    }
+
+    /// Fail-fast control: a round carries its geometry three times and three
+    /// different consumers read three different copies, so the copies must
+    /// agree with each other -- not merely with the same copy of other rounds.
+    /// The audit records this case as "not currently rejected".
+    #[test]
+    #[should_panic(expected = "commit area")]
+    fn two_round_rejects_commit_area_disagreeing_with_prover_data() {
+        let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
+        // Still a whole number of stripes, and still agreeing with the OTHER
+        // round's commit -- only its own `prover_data` now disagrees.
+        main.commit.area += 1usize << DEFAULT_LOG_STACKING_HEIGHT;
+        prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
+    }
+
+    /// Fail-fast control: the same, for the height rather than the area.
+    #[test]
+    #[should_panic(expected = "commit log_stacking_height")]
+    fn two_round_rejects_commit_height_disagreeing_with_prover_data() {
+        let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
+        main.commit.log_stacking_height = DEFAULT_LOG_STACKING_HEIGHT - 1;
+        prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
+    }
+
+    /// Fail-fast control: the public multi-round helper on an EMPTY round
+    /// slice.  There is no round 0 to take the stacking height from, so every
+    /// geometry check downstream would index out of bounds.
+    #[test]
+    #[should_panic(expected = "no rounds")]
+    fn zero_rounds_is_rejected() {
+        let z_row = mk_z_row(0x5013);
+        let mut chal = build_challenger();
+        prove_jagged_rounds(&[], &z_row, &mut chal);
+    }
+
     /// Fail-fast control: the batched open indexes every round's stripes with
     /// ROUND 0's height, so disagreeing heights cannot be opened at all.
     #[test]
     #[should_panic(expected = "rounds disagree on log_stacking_height")]
     fn two_round_rejects_mismatched_stacking_height() {
         let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
-        main.prover_data.log_stacking_height = DEFAULT_LOG_STACKING_HEIGHT - 1;
+        set_round_geometry(&mut main, None, Some(DEFAULT_LOG_STACKING_HEIGHT - 1));
         prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
     }
 
@@ -2875,7 +3097,8 @@ mod test {
     #[should_panic(expected = "is not a whole number of")]
     fn two_round_rejects_unaligned_area() {
         let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
-        main.prover_data.area += 1;
+        let unaligned = main.prover_data.area + 1;
+        set_round_geometry(&mut main, Some(unaligned), None);
         prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
     }
 
@@ -2887,7 +3110,9 @@ mod test {
     #[should_panic(expected = "commitment and packing metadata disagree")]
     fn two_round_rejects_area_below_real_cells() {
         let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
-        main.prover_data.area = 8; // below the round's 16 real cells
+        // Below the round's 16 real cells, and still a whole number of
+        // stripes is not required here -- the cells check fires first.
+        set_round_geometry(&mut main, Some(8), None);
         prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
     }
 

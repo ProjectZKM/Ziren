@@ -194,6 +194,37 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         return None;
     }
 
+    // ZR-30 coverage.  The chip COUNT agreeing is not coverage: the claim below
+    // sums only the values the proof supplies, so a per-chip vector that is a
+    // strict PREFIX of the chip's columns silently drops the suffix from the
+    // reduction -- and `cross_bind_openings` only rejects an opening vector
+    // SHORTER than the claims, so the matching opening suffix is dropped too.
+    // The AIR still consumes those openings, leaving them tied to no committed
+    // column.  Require the claims to cover every column the packing declares:
+    //
+    //   y_per_chip[i].len() == chip_infos[i].column_count   for every i, and
+    //   Σ_i y_per_chip[i].len() == offsets.len() - 1        (the column space).
+    for (i, (yc, info)) in y_per_chip.iter().zip(packing.chip_infos.iter()).enumerate() {
+        if yc.len() != info.column_count {
+            tracing::debug!(
+                "jagged reduction: chip {i} ({}) supplies {} column claims for {} columns",
+                info.name,
+                yc.len(),
+                info.column_count,
+            );
+            return None;
+        }
+    }
+    let supplied_columns: usize = y_per_chip.iter().map(|y| y.len()).sum();
+    let packed_columns = packing.offsets.len().saturating_sub(1);
+    if supplied_columns != packed_columns {
+        tracing::debug!(
+            "jagged reduction: {supplied_columns} column claims over a {packed_columns}-column \
+             packing",
+        );
+        return None;
+    }
+
     // `z_col` is sampled by the caller at the matching
     // transcript position; form the claimed sum as the z_col-weighted
     // column mix.  Column claims are already in the transcript.

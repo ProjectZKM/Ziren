@@ -1547,23 +1547,25 @@ where
     // `column_counts_by_round = [prep_widths, main_widths]`. The wrap machine
     // opens TWO rounds. The deferred conditional is already live.
     if let Some(key_cap) = vk_preprocessed_cap {
-        // One preceding round, one key commitment: the key's single preprocessed
-        // commitment covers the whole round (all preprocessed chips together).
-        // If a future shape opens more than one preceding round, this must fail
-        // here rather than silently pin only the first.
-        assert!(
-            bundle.preceding_commits.len() <= 1,
-            "outer lift: {} preceding rounds but the key carries one preprocessed \
-             commitment -- ZR-23's bind would cover only the first",
+        // EXACTLY one preceding round, not "at most one".  The key carrying a
+        // preprocessed cap IS the statement that the machine commits a
+        // preprocessed round, so a bundle with none is not a shorter honest
+        // proof -- it is a proof of a different, smaller statement, and the
+        // equality below would simply not be emitted (ZR-31).  The zerocheck
+        // still consumes `preprocessed.local` openings, which would then be
+        // authenticated to nothing.
+        assert_eq!(
+            bundle.preceding_commits.len(),
+            1,
+            "outer lift: the key carries a preprocessed commitment, so the bundle must open \
+             exactly one preceding round; it opens {}",
             bundle.preceding_commits.len(),
         );
-        if !bundle.preceding_commits.is_empty() {
-            <HV as crate::hash::FieldHasherVariable<C>>::assert_digest_eq(
-                builder,
-                original_commitments[0],
-                key_cap,
-            );
-        }
+        <HV as crate::hash::FieldHasherVariable<C>>::assert_digest_eq(
+            builder,
+            original_commitments[0],
+            key_cap,
+        );
     }
 
     // The in-circuit geometry rebind in

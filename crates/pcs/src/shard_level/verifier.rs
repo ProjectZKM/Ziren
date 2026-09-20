@@ -766,6 +766,37 @@ where
         // per-chip width pin above and the `round.len()` check cover the part of
         // that geometry the machine already knows; the row counts stay
         // proof-claimed until the outer key format carries them.
+        // ZR-31 coverage.  Comparing every SUPPLIED preceding root is not a
+        // coverage check: with `preceding_commits == []` the loop below is
+        // vacuous, the single supplied round is treated as MAIN, the
+        // preprocessed width/root branches are skipped, and BaseFold is handed
+        // only the main commitment -- while the zerocheck still consumes
+        // `opened_values.chips[*].preprocessed.local`, which is then
+        // authenticated to nothing.  The machine decides how many rounds there
+        // are, so require exactly that many.
+        let expected_preceding = usize::from(!prep_chip_dims.is_empty());
+        if bundle.preceding_commits.len() != expected_preceding {
+            return Err(BasefoldVerifyError::JaggedPcs(format!(
+                "outer bundle carries {} preceding round(s); the machine has {} preprocessed                  chip(s), so it must carry exactly {expected_preceding}",
+                bundle.preceding_commits.len(),
+                prep_chip_dims.len(),
+            )));
+        }
+        if bundle.packing.round_counts.len() != expected_preceding + 1 {
+            return Err(BasefoldVerifyError::JaggedPcs(format!(
+                "outer bundle describes {} round(s); the machine commits {}",
+                bundle.packing.round_counts.len(),
+                expected_preceding + 1,
+            )));
+        }
+        if bundle.packing.padding_heights.len() != bundle.packing.round_counts.len() {
+            return Err(BasefoldVerifyError::JaggedPcs(format!(
+                "outer bundle has padding heights for {} round(s) but geometry for {}",
+                bundle.packing.padding_heights.len(),
+                bundle.packing.round_counts.len(),
+            )));
+        }
+
         for raw in bundle.preceding_commits.iter() {
             match <SC as crate::BasefoldRing>::vk_commit_is_preceding_root(&vk.commit, raw) {
                 Some(true) => {}
