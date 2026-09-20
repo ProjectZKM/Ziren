@@ -1,4 +1,14 @@
-# Ziren (feat/upgrade-plonky3 @ fdcb6a07, Sep 5 2026).
+# Ziren (feat/upgrade-plonky3, Sep 2026).
+#
+# `grinding_bits_lookup = 16` is now PERFORMED on every circuit including wrap.
+# It previously described a transcript the wrap ring did not execute: its
+# LogUp-GKR grind returned zero without observing, and the recursive verifier's
+# check was a no-op, so the wrap figure credited 16 bits that were never earned
+# (ZR-29, docs/soundness/zr28_zr29_grind_and_doubling.md).  Both sides grind now,
+# so this input matches the implemented transcript.
+#
+# Regenerate the report whenever the schedule, the query counts or the grinding
+# bits move; the header revision is the thing that goes stale first.
 # Machine census from `cargo run -r -p zkm-prover --bin soundcalc_census`;
 # PCS parameters from crates/pcs (whir/jagged.rs core_whir_config,
 # basefold/config.rs wrap_fri_config, jagged_pcs.rs stacking constants).
