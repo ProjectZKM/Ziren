@@ -45,13 +45,23 @@ log_degree = 21
 # NOT DEFAULT_BATCH_SIZE = 32, which is the interleave packing width and
 # carries no soundness meaning.
 #
-# The ceiling is what the enumerator admits for the two rounds TOGETHER, not
-# what the area cap gives the main round alone.  `shapes.rs` sets
-# MAX_BLOCKS = (ELEMENT_THRESHOLD >> 21) + 8 = 227 and rejects
-# prep_blocks + main_blocks >= MAX_BLOCKS, so 226 is admissible.
-# ceil(460e6 / 2^21) = 220 counts only the main round and is therefore NOT an
-# upper bound on a batch that also covers the preprocessed one.
-dense_batch = 226
+# The ceiling is what the MACHINE admits for the two rounds together, derived
+# by `committed_stripe_bound_over_both_rounds` (zkm-core-machine, mips/mod.rs)
+# so this number moves with the source:
+#
+#   prep: Program 2^22 x 14 + Byte 2^16 x 12 + Range 2^11 x 2 = 59,510,784
+#         cells -> committed_dense_len -> 29 raw stripes -> 32 (multiple of 8)
+#   main: ELEMENT_THRESHOLD = 460,000,000 cells -> 220 raw -> 224
+#   batch = 32 + 224 = 256
+#
+# 2^22 is the largest Program band `allowed_preprocessed_log2_heights` admits.
+#
+# It is NOT the enumerator's MAX_BLOCKS = (ELEMENT_THRESHOLD >> 21) + 8 = 227.
+# That guard bounded ONE enumerated round, it never ran on normalize shapes
+# (which are collected, not enumerated), and neither the prover nor the
+# verifier enforces prep + main < 227 -- so 226 was not an upper bound.
+# ceil(460e6 / 2^21) = 220 counts the main round alone and is smaller still.
+dense_batch = 256
 num_constraints = 23555
 air_max_degree = 3
 opening_points = 1
@@ -102,9 +112,22 @@ log_degree = 21
 # The lambda batch spans every stripe of every committed round, so its
 # cardinality is sum_r num_stripes[r] = sum_r area_r >> log_stacking_height,
 # NOT DEFAULT_BATCH_SIZE = 32, which is the interleave packing width and
-# carries no soundness meaning.  Bounded by this circuit's own trace: 392 columns at height 2^20 is
-# 411,041,792 cells, and 411041792 >> 21 = 196.  An upper bound.
-dense_batch = 196
+# carries no soundness meaning.
+#
+# For a recursion node this is EXACT, not bounded: the node commits under a
+# pin class from `RECURSION_PIN_CLASSES`, `AreaPin::apply` panics past the
+# pin, and the node takes the smallest class both its rounds fit -- so the
+# largest class is the ceiling and it is reached (the root commits there by
+# construction).  Both rounds are pinned at 2^26 cells:
+#
+#   (2^26 >> 21) + (2^26 >> 21) = 32 + 32 = 64
+#
+# Pinned by `committed_stripe_bound_over_both_rounds` alongside the core
+# number.  The previous 196 came from this circuit's own widest trace
+# (392 columns at 2^20 = 411,041,792 cells >> 21), which counted one round
+# only and is unrelated to what the node commits; it happened to overstate
+# the batch, so it was conservative rather than wrong in direction.
+dense_batch = 64
 num_constraints = 396
 air_max_degree = 3
 opening_points = 1

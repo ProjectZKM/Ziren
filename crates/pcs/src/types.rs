@@ -25,7 +25,7 @@ pub type QuotientOpenedValues<T> = Vec<T>;
 pub struct MainTraceData<SC: StarkGenericConfig, M, P> {
     pub traces: Vec<Arc<M>>,
     /// Backend-owned prover data for the main-trace commit: the retained
-    /// jagged/BaseFold commitment built at `commit()` time, which
+    /// jagged commitment built at `commit()` time, which
     /// `open()` consumes so nothing is rebuilt late.  Device backends use
     /// the slot for their own resident commit state.
     pub main_data: P,
@@ -73,10 +73,9 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     /// opening per shard.  Every prover stage (core, compress, shrink, wrap)
     /// emits it; a proof without one is malformed and the verifier rejects it.
     ///
-    /// Named for the jagged opening, not for a dense scheme: the opening
-    /// carries WHIR on the inner ring and BaseFold on the outer one, chosen
-    /// per proof, so calling this "the BaseFold proof" named something the
-    /// value need not be.
+    /// Named for the jagged opening, not for a dense scheme: the dense PCS
+    /// underneath is WHIR on the inner ring and BaseFold on the outer one,
+    /// chosen per proof, so no single scheme name describes this value.
     ///
     /// `Box` keeps the ShardProof size footprint flat — the
     /// JaggedShardProof is ~KB of nested structs.
@@ -126,7 +125,7 @@ pub const EXECUTION_CHIP_NAMES: &[&str] = &[
 
 impl<SC: StarkGenericConfig> ShardProof<SC> {
     /// Sum of the per-chip global cumulative sums, read from the
-    /// transcript-bound `chip_cumulative_sums` of the BaseFold payload.
+    /// transcript-bound `chip_cumulative_sums` of the jagged shard proof.
     pub fn global_cumulative_sum(&self) -> SepticDigest<Val<SC>> {
         self.jagged_shard_proof.chip_cumulative_sums.values().map(|s| s.global).sum()
     }
@@ -189,7 +188,7 @@ impl From<[u32; 8]> for DeferredDigest {
 }
 
 impl<SC: StarkGenericConfig> ShardProof<SC> {
-    /// The shard's chip shape, from the BaseFold payload's per-chip RAW
+    /// The shard's chip shape, from the jagged shard proof's per-chip RAW
     /// heights (a name-sorted `BTreeMap`, which is exactly the shard's
     /// chip order).  Shapes are LOG-height keyed, so this derives
     /// ceil-log2 from the raw value — the transcript observes the raw
@@ -205,5 +204,90 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
                 })
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::koala_bear_poseidon2::KoalaBearPoseidon2;
+    use crate::shard_level::shard_proof::JaggedShardProof;
+    use p3_field::PrimeCharacteristicRing;
+
+    type SC = KoalaBearPoseidon2;
+    type F = p3_koala_bear::KoalaBear;
+    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+
+    /// The layout `ShardProof` had while `jagged_shard_proof` was optional.
+    /// Field order and types match it exactly, so serializing this is
+    /// serializing the old wire format.
+    #[derive(Serialize)]
+    #[serde(bound = "")]
+    struct OptionalPayloadShardProof {
+        public_values: Vec<F>,
+        jagged_shard_proof: Option<Box<JaggedShardProof<F, EF>>>,
+    }
+
+    fn old(payload: Option<Box<JaggedShardProof<F, EF>>>) -> OptionalPayloadShardProof {
+        OptionalPayloadShardProof { public_values: vec![F::ZERO; PROOF_MAX_NUM_PVS], jagged_shard_proof: payload }
+    }
+
+    fn payload() -> Box<JaggedShardProof<F, EF>> {
+        Box::new(JaggedShardProof::empty(std::array::from_fn(|_| F::ZERO), 16))
+    }
+
+    /// MessagePack is where the proof format's backward compatibility is
+    /// actually maintained -- the `#[serde(default)]` fields of
+    /// `JaggedShardProof` only take effect in a self-describing format -- and
+    /// there the mandatory payload is WIRE-NEUTRAL: rmp encodes `Some(x)` as
+    /// `x` itself, with no discriminant, so bytes written under the optional
+    /// layout decode unchanged.
+    #[test]
+    fn optional_payload_rmp_bytes_decode_as_mandatory() {
+        let bytes = rmp_serde::to_vec(&old(Some(payload()))).expect("old layout serializes");
+        let back: ShardProof<SC> =
+            rmp_serde::from_slice(&bytes).expect("old rmp bytes decode into the mandatory layout");
+        assert_eq!(back.public_values.len(), PROOF_MAX_NUM_PVS);
+        assert_eq!(back.jagged_shard_proof.public_values.len(), 16);
+
+        // Identical bytes in the other direction: the two layouts agree on rmp.
+        let new_bytes = rmp_serde::to_vec(&back).expect("mandatory layout serializes");
+        assert_eq!(bytes, new_bytes, "the optional layout and this one agree byte for byte on rmp");
+    }
+
+    /// `None` is the one rmp encoding the mandatory layout cannot accept, and
+    /// that is the point: it is the malformed proof the type now excludes.
+    #[test]
+    fn absent_payload_is_rejected() {
+        let bytes = rmp_serde::to_vec(&old(None)).expect("old layout serializes");
+        assert!(
+            rmp_serde::from_slice::<ShardProof<SC>>(&bytes).is_err(),
+            "a proof with no payload must not decode",
+        );
+    }
+
+    /// bincode is NOT wire-neutral across this change, and it never was across
+    /// any of the payload's field additions: it is not self-describing, so
+    /// `#[serde(default)]` cannot fill a field the bytes omit, and it writes a
+    /// one-byte discriminant for `Some` that the mandatory layout does not
+    /// read.  `ZKMProofWithPublicValues::bytes()` uses bincode for a
+    /// compressed proof, so bytes written under the optional layout must be
+    /// REJECTED rather than shifted into a wrong proof -- which is what this
+    /// pins.
+    #[test]
+    fn optional_payload_bincode_bytes_are_rejected() {
+        let bytes = bincode::serialize(&old(Some(payload()))).expect("old layout serializes");
+        let new_bytes =
+            bincode::serialize(&ShardProof::<SC> { public_values: vec![F::ZERO; PROOF_MAX_NUM_PVS], jagged_shard_proof: payload() })
+                .expect("mandatory layout serializes");
+        assert_eq!(
+            bytes.len(),
+            new_bytes.len() + 1,
+            "the optional layout costs exactly the Some discriminant",
+        );
+        assert!(
+            bincode::deserialize::<ShardProof<SC>>(&bytes).is_err(),
+            "old bincode bytes must be refused, not decoded into a shifted proof",
+        );
     }
 }

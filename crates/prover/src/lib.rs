@@ -2750,8 +2750,7 @@ pub mod tests {
     #[test]
     #[serial]
     fn normalize_program_cache_key_implies_identical_program() {
-        use crate::shapes::ZKMProofShape;
-
+        use zkm_core_machine::shape::CoreShapeConfig;
         use zkm_pcs::shape::OrderedShape;
         use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
 
@@ -2766,18 +2765,20 @@ pub mod tests {
                 .expect("serialize normalize program")
         };
 
-        // Start from an ENUMERATED normalize shape, which is by construction
-        // one `fix_shape` accepts.  Variants only SHRINK a chip, so they stay
-        // inside the same band.
-        let recursion_shape_config =
-            RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
-        let base_os =
-            ZKMProofShape::generate(&recursion_shape_config, REDUCE_BATCH_SIZE)
-                .find_map(|s| match s {
-                    ZKMProofShape::Recursion(batch) => batch.into_iter().next(),
-                    _ => None,
-                })
-                .expect("the enumeration emits normalize shapes");
+        // Start from a MAXIMAL core shape.  `generate` does not emit normalize
+        // shapes -- they are collected from real proofs, not enumerable from
+        // the machine -- so the base comes from the same source
+        // `generate_maximal_shapes` uses: a core shape the shape config admits.
+        // Variants only SHRINK a chip, so they stay inside the same band.
+        let core_shape_config = CoreShapeConfig::<KoalaBear>::default();
+        let base_os = core_shape_config
+            .maximal_core_shapes(21)
+            .into_iter()
+            .next()
+            .map(|core_shape| OrderedShape {
+                inner: core_shape.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            })
+            .expect("the shape config admits at least one maximal core shape");
         let base: Vec<(String, usize)> = base_os.inner.clone();
 
         let witness_of = |hs: &[(String, usize)]| -> ZKMCoreBasefoldWitnessValues<InnerSC> {

@@ -970,6 +970,98 @@ pub mod tests {
         serde_json::to_writer_pretty(file, &costs).unwrap();
     }
 
+    /// The two-round committed stripe count a core shard can reach, derived
+    /// from the machine instead of asserted in prose.
+    ///
+    /// A shard commits TWO rounds, preprocessed then main, and the jagged
+    /// lambda batch spans both: `committed_dense_len` rounds each round's raw
+    /// cell count up to whole `2^DEFAULT_LOG_STACKING_HEIGHT` stripes, and
+    /// above four stripes up to a multiple of eight.  The preprocessed round is
+    /// bounded by the LARGEST admitted Program band, the main round by the
+    /// executor's `ELEMENT_THRESHOLD` area fence -- and neither the fence nor
+    /// any enumeration guard constrains their SUM, so the sum is what a
+    /// soundness model of the batch has to use.
+    #[test]
+    fn committed_stripe_bound_over_both_rounds() {
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::jagged::committed_dense_len;
+        use zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
+
+        let log_stack = DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let stripe = 1usize << log_stack;
+        let machine = MipsAir::machine(zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2::default());
+
+        // Preprocessed widths come from the chips themselves.
+        let width_of = |name: &str| -> usize {
+            machine
+                .chips()
+                .iter()
+                .find(|c| <_ as MachineAir<KoalaBear>>::name(*c) == name)
+                .map(<_ as MachineAir<KoalaBear>>::preprocessed_width)
+                .unwrap_or_else(|| panic!("{name} is not a chip of the core machine"))
+        };
+
+        // Heights: Program at its largest admitted band, Byte and Range fixed.
+        let prog_rows = 1usize << 22;
+        let byte_rows = 1usize << 16;
+        let range_rows = crate::range::NUM_RANGE_ROWS;
+        let prep_cells = prog_rows * width_of("Program")
+            + byte_rows * width_of("Byte")
+            + range_rows * width_of("Range");
+
+        let prep_stripes = committed_dense_len(prep_cells, log_stack) / stripe;
+        let main_stripes = committed_dense_len(zkm_pcs::ELEMENT_THRESHOLD, log_stack) / stripe;
+
+        let batch = prep_stripes + main_stripes;
+        eprintln!(
+            "[STRIPES] prep {prep_cells} cells -> {prep_stripes}; \
+             main {} cells -> {main_stripes}; batch {batch}",
+            zkm_pcs::ELEMENT_THRESHOLD,
+        );
+        eprintln!(
+            "[STRIPES] widths Program={} Byte={} Range={}; rows Program=2^22 Byte=2^16 Range={}",
+            width_of("Program"),
+            width_of("Byte"),
+            width_of("Range"),
+            range_rows,
+        );
+
+        // Pinned so the number a soundness model of the lambda batch quotes
+        // moves when the machine does.  It is NOT `MAX_BLOCKS`: that guard
+        // bounds ONE round's enumerated blocks, and nothing in the prover or
+        // the verifier bounds the sum, so a model that uses `MAX_BLOCKS` for
+        // the batch understates it by the preprocessed round.
+        assert_eq!(
+            (prep_stripes, main_stripes, batch),
+            (32, 224, 256),
+            "the committed stripe bound moved; update the soundness model's \
+             batch cardinality to {batch} before relying on it",
+        );
+        assert!(
+            batch > (zkm_pcs::ELEMENT_THRESHOLD >> log_stack) + 8,
+            "the batch must exceed the main-round-only guard, else the model \
+             could legitimately use that guard in its place",
+        );
+
+        // The recursion machine's batch is EXACT rather than bounded: a node
+        // commits under a pin class, `AreaPin::apply` panics past the pin, and
+        // a node takes the smallest class both its rounds fit, so the largest
+        // class is the ceiling and it is reached.
+        let largest = zkm_pcs::jagged::RecursionPins::class(
+            zkm_pcs::jagged::RecursionPins::LAST_CLASS,
+        );
+        let rec_batch = (largest.prep.area >> log_stack) + (largest.main.area >> log_stack);
+        eprintln!(
+            "[STRIPES] recursion prep {} + main {} cells -> batch {rec_batch}",
+            largest.prep.area, largest.main.area,
+        );
+        assert_eq!(
+            rec_batch, 64,
+            "the recursion pin classes moved; update the soundness model's \
+             compress batch cardinality to {rec_batch}",
+        );
+    }
+
     #[test]
     fn test_simple_prove() {
         utils::setup_logger();
@@ -978,31 +1070,17 @@ pub mod tests {
     }
 
     #[test]
-    fn test_simple_prove_no_shape() {
-        // BaseFold control twin of the WHIR test below: same program, same
-        // `shape_config: None` harness, same EMPTY stdin, default inner PCS.
-        //
-        // The inputs have to match for the pair to be a control: the twins
-        // differ in the dense PCS and in nothing else, so a difference in
-        // outcome is attributable to that. `simple_program` is three `ADD`s
-        // and reads no input, so empty stdin is also the correct value --
-        // feeding it `fib_stdin()` was a stdin repair applied to a program
-        // that never reads one.
-        utils::setup_logger();
-        let program = simple_program();
-        let runtime = {
-            let mut runtime = zkm_core_executor::Executor::new(program, ZKMCoreOpts::default());
-            runtime.run().unwrap();
-            runtime
-        };
-        crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None).unwrap();
-    }
-
-    #[test]
     fn test_simple_prove_whir_inner_pcs() {
         utils::setup_logger();
-        // Prove + verify a shard with the jagged-WHIR inner PCS — the
-        // core-machine default (the verifier dispatches on the proof itself).
+        // Prove + verify a shard with the jagged-WHIR inner PCS.
+        //
+        // There is no BaseFold twin of this test to pair it against, because
+        // no core-machine ring selects BaseFold: `WHIR_INNER_PCS` is a const
+        // on the ring, `true` for every KoalaBear ring, and the one `false`
+        // impl is `KoalaBearPoseidon2Outer`, the BN254 wrap ring, whose
+        // BaseFold path the wrap tests cover instead.  A second CpuProver run
+        // over this same ring would be another WHIR run, so it could not
+        // attribute any difference to the dense PCS.
         let program = simple_program();
         let runtime = {
             let mut runtime = zkm_core_executor::Executor::new(program, ZKMCoreOpts::default());

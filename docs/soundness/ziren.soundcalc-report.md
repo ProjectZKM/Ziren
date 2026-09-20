@@ -8,6 +8,21 @@
 > rather than the packing constant 32 — and those corrections move the batching
 > term, so nothing below has been recomputed against them.
 >
+> The cardinalities themselves are now DERIVED FROM THE SOURCE rather than
+> argued in prose, and pinned by
+> `committed_stripe_bound_over_both_rounds` (zkm-core-machine, `mips/mod.rs`),
+> which fails if the machine moves without the model:
+>
+> * core `256` = prep `32` (Program `2^22`×14 + Byte `2^16`×12 + Range `2^11`×2
+>   = 59,510,784 cells, stacking-rounded) + main `224` (`ELEMENT_THRESHOLD`
+>   = 460,000,000 cells).  The earlier `226` came from the enumerator's
+>   `MAX_BLOCKS` guard, which bounds ONE round, never ran on normalize shapes,
+>   and is enforced by neither prover nor verifier — so it was not a bound.
+> * compress `64` = `(2^26 >> 21) × 2`, EXACT rather than bounded: a recursion
+>   node commits under a `RECURSION_PIN_CLASSES` pin and `AreaPin::apply`
+>   panics past it.  The earlier `196` measured this circuit's own widest
+>   trace, one round only.
+>
 > Regenerating needs a generator this repository does not name correctly.
 > Upstream `soundcalc` (openvm-org/soundcalc, `f849ea1`, the tip at the time of
 > writing) models WHIR with a single scalar `folding_factor`, so it cannot
