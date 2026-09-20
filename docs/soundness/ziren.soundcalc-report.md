@@ -1,5 +1,29 @@
 # 📊 Ziren (v2.0 (feat/upgrade-plonky3, UDR-100 schedule))
 
+> **Provenance: these figures are stale and are not a supported bound.**
+>
+> They were generated from `ziren.soundcalc.toml` BEFORE its batching model was
+> corrected. That model now states the implemented opening — powers of a single
+> challenge over every stripe of every round, cardinality `Σ_r area_r >> 21`
+> rather than the packing constant 32 — and those corrections move the batching
+> term, so nothing below has been recomputed against them.
+>
+> Regenerating needs a generator this repository does not name correctly.
+> Upstream `soundcalc` (openvm-org/soundcalc, `f849ea1`, the tip at the time of
+> writing) models WHIR with a single scalar `folding_factor`, so it cannot
+> express Ziren's non-uniform `folding_factors = [3, 6, 6]`; and
+> `soundcalc_jagged_over_whir.patch.py` here targets a different layout
+> (`circuits/jagged.py`, `JaggedCircuit`) that upstream does not have, so the
+> patch does not apply. Feeding this revision a single folding factor would
+> model a different protocol, which is the very defect the corrected model
+> fixes.
+>
+> So: treat the numbers below as a record of an earlier schedule under an
+> earlier model, not as the security of this tree. Restoring them needs the
+> soundcalc revision that supports per-round folding factors, the patch
+> rebased onto it, and a rerun against the corrected `.toml`.
+
+
 How to read this report:
 - Table rows correspond to security regimes
 - Table columns correspond to proof system components
