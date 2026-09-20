@@ -46,12 +46,6 @@ circuit. It uses 12 bits where we use 16. This was a Ziren-only gap.
 
 ## ZR-28 — the chord identities collapse on doubling
 
-> STATUS: DEFERRED, not fixed. The repair below was written, gated on CPU, and
-> then REVERTED after it broke every leaf on GPU. The reason is recorded under
-> "The device tracegen gap" at the end of this section: the fix adds a witness
-> column, and the `Global` trace is generated on DEVICE by CUDA kernels that do
-> not know about it. The analysis stands; the landing needs the device half.
-
 For running sum `P1`, event point `P2`, claimed next sum `P3`, the AIR asserts
 
 ```text
@@ -139,33 +133,6 @@ Ziren ahead rather than level.
    identity case, false for doubling, where both checkers vanish identically. The
    offset-point sentence also reads as covering the whole trace when it
    establishes row 0. Not edited here — the paper is under review.
-
-### The device tracegen gap
-
-The repair adds a witness column, and that is what makes it a cross-repo change
-rather than a local one. `GlobalChip` has a `DeviceAir` implementation in
-`ziren-gpu` (`core/src/tracegen/core.rs`): the trace is produced on device by
-`core_global_generate_trace_round_1` and `..._round_2`, and the matrix is
-memset to zero and sized from `BaseAir::width`. Widening the chip therefore
-yields seven ZERO columns on GPU while the host tracegen fills them correctly,
-so on every real row
-
-```text
-    is_real·((x2 - x1)·inv - 1) = is_real·(0 - 1) != 0
-```
-
-the zerocheck quotient does not divide, and every recursion leaf fails with
-"attempted to perform extension field division". Measured: 24 leaf failures, 0
-vk denials, all three blocks of the deploy window.
-
-Landing ZR-28 therefore requires `core_global_generate_trace_round_2` to compute
-the septic inverse and write those columns, matching `populate_real`.
-
-WHY NO GATE CAUGHT IT: every gate was the CPU prover on fibonacci. The host
-tracegen fills the column, so the constraint was satisfied there, and fibonacci
-barely populates the `Global` unit in the first place. Neither condition
-exercises the device path. A core-AIR change needs a RETH BLOCK ON THE GPU as
-its gate; nothing less reaches the code that broke.
 
 ## Cross-repo consequence
 
