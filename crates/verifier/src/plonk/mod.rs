@@ -65,6 +65,14 @@ impl PlonkVerifier {
         //
         // Ziren prepends the raw Plonk proof with the first 4 bytes of the plonk vkey to
         // facilitate this check.
+        // Guard the prefix read.  Groth16 has had `check_groth16_vk_prefix`
+        // (which returns `InvalidData` on a short proof) since the beginning;
+        // plonk was never given the equivalent, so a proof under 4 bytes
+        // panicked here instead of erroring -- from a public entry point, on
+        // caller-supplied bytes.
+        if proof.len() < 4 {
+            return Err(PlonkError::GeneralError(Error::InvalidData));
+        }
         if plonk_vk_hash != proof[..4] {
             return Err(PlonkError::PlonkVkeyHashMismatch);
         }
@@ -73,7 +81,7 @@ impl PlonkVerifier {
 
         Self::verify_gnark_proof(
             &proof[4..],
-            &[zkm_vkey_hash, hash_public_inputs(zkm_public_inputs)],
+            &[zkm_vkey_hash, hash_public_inputs(zkm_public_inputs), *crate::VK_ROOT_BYTES],
             plonk_vk,
         )
     }

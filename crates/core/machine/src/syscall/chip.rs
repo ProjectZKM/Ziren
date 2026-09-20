@@ -3,26 +3,23 @@ use std::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::IntoParallelRefIterator;
-use p3_maybe_rayon::prelude::ParallelBridge;
 use p3_maybe_rayon::prelude::ParallelIterator;
 
 use zkm_core_executor::events::{ByteRecord, GlobalLookupEvent, PrecompileEvent};
 use zkm_core_executor::{events::SyscallEvent, ByteOpcode, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-use zkm_stark::air::AirLookup;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
-use zkm_stark::LookupKind;
+use zkm_pcs::air::AirLookup;
+use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::LookupKind;
 
-use crate::{utils::next_power_of_two, CoreChipError};
+use crate::{utils::next_multiple_of_32, CoreChipError};
 
 /// The number of main trace columns for `SyscallChip`.
 pub const NUM_SYSCALL_COLS: usize = size_of::<SyscallCols<u8>>();
@@ -63,20 +60,24 @@ impl SyscallChip {
 }
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Clone, Copy)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+///
+/// `arg1` and `arg2` are NOT stored as columns. They are derived inline as
+/// `arg1_lo + arg1_hi * 65536` to avoid redundant columns while keeping the
+/// reduced field element available for local `send_syscall`/`receive_syscall`.
+///
+/// **Soundness**: `arg1_lo/hi` and `arg2_lo/hi` are U16Range-checked inside
+/// `send_syscall_result_packed` (see `crates/pcs/src/air/builder.rs`).
+/// Any chip using this interaction gets range-checked half-words automatically.
+#[derive(PicusAnnotations, AlignedBorrow, Clone, Copy)]
 #[repr(C)]
 pub struct SyscallCols<T: Copy> {
     /// The shard number of the syscall.
-    #[cfg_attr(feature = "picus", picus(input))]
     pub shard: T,
 
     /// The clk of the syscall.
-    #[cfg_attr(feature = "picus", picus(input))]
     pub clk: T,
 
     /// The syscall_id of the syscall.
-    #[cfg_attr(feature = "picus", picus(input))]
     pub syscall_id: T,
 
     /// Half-word packed arg1: low 16 bits (byte0 + byte1 * 256).
@@ -85,27 +86,20 @@ pub struct SyscallCols<T: Copy> {
     /// arg1/arg2 through receive_syscall and don't use the half-words.
     /// If a new precompile needs byte-level argument access, it should use
     /// receive_syscall_result_packed to get these half-words.
-    #[cfg_attr(feature = "picus", picus(input))]
     pub arg1_lo: T,
     /// Half-word packed arg1: high 16 bits (byte2 + byte3 * 256).
-    #[cfg_attr(feature = "picus", picus(input))]
     pub arg1_hi: T,
 
     /// Half-word packed arg2: low 16 bits.
-    #[cfg_attr(feature = "picus", picus(input))]
     pub arg2_lo: T,
     /// Half-word packed arg2: high 16 bits.
-    #[cfg_attr(feature = "picus", picus(input))]
     pub arg2_hi: T,
 
     /// Half-word packed result (lo = byte0 + byte1*256, hi = byte2 + byte3*256).
-    #[cfg_attr(feature = "picus", picus(output))]
     pub result_lo: T,
-    #[cfg_attr(feature = "picus", picus(output))]
     pub result_hi: T,
 
     /// Whether the syscall is a linux syscall.
-    #[cfg_attr(feature = "picus", picus(input))]
     pub is_linux: T,
 
     pub is_real: T,
@@ -122,13 +116,8 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         format!("Syscall{}", self.shard_kind).to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         SyscallCols::<u8>::picus_info()
-    }
-
-    fn local_only(&self) -> bool {
-        true
     }
 
     fn generate_dependencies(
@@ -209,7 +198,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         };
         let nb_rows = events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(
+        let padded_nb_rows = next_multiple_of_32(
             nb_rows,
             size_log2,
             <SyscallChip as MachineAir<F>>::name(self).as_str(),
@@ -226,15 +215,15 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             let mut row = [F::ZERO; NUM_SYSCALL_COLS];
             let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.shard = F::from_canonical_u32(syscall_event.shard);
-            cols.clk = F::from_canonical_u32(syscall_event.clk);
-            cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
+            cols.shard = F::from_u32(syscall_event.shard);
+            cols.clk = F::from_u32(syscall_event.clk);
+            cols.syscall_id = F::from_u32(syscall_event.syscall_id);
             let a1b = syscall_event.arg1.to_le_bytes();
-            cols.arg1_lo = F::from_canonical_u32(a1b[0] as u32 + (a1b[1] as u32) * 256);
-            cols.arg1_hi = F::from_canonical_u32(a1b[2] as u32 + (a1b[3] as u32) * 256);
+            cols.arg1_lo = F::from_u32(a1b[0] as u32 + (a1b[1] as u32) * 256);
+            cols.arg1_hi = F::from_u32(a1b[2] as u32 + (a1b[3] as u32) * 256);
             let a2b = syscall_event.arg2.to_le_bytes();
-            cols.arg2_lo = F::from_canonical_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
-            cols.arg2_hi = F::from_canonical_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
+            cols.arg2_lo = F::from_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
+            cols.arg2_hi = F::from_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
 
             // For Core shard, a_record has real prev_value with linux_sys byte.
             // For Precompile shard, a_record is default (prev_value=0), so detect
@@ -251,8 +240,8 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                     _ => syscall_event.a_record.value,
                 };
                 let rb = result.to_le_bytes();
-                cols.result_lo = F::from_canonical_u32(rb[0] as u32 + (rb[1] as u32) * 256);
-                cols.result_hi = F::from_canonical_u32(rb[2] as u32 + (rb[3] as u32) * 256);
+                cols.result_lo = F::from_u32(rb[0] as u32 + (rb[1] as u32) * 256);
+                cols.result_hi = F::from_u32(rb[2] as u32 + (rb[3] as u32) * 256);
             }
             cols.is_real = F::ONE;
 
@@ -269,10 +258,16 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 })
                 .map(|event| row_fn(event, None))
                 .collect::<Vec<_>>(),
+            // `all_events()` iterates the deterministic-ordered event map; collect
+            // the rows in that source order.  A previous `.par_bridge()` here was
+            // UNORDERED, so under RAYON_NUM_THREADS>1 the SyscallPrecompile trace
+            // rows came out in a nondeterministic order -> nondeterministic proof
+            // -> `zerocheck rlc_eval != point_and_eval` verify-fail.  Sequential is
+            // byte-identical to the RAYON=1 golden (par_bridge was already
+            // sequential there) at negligible cost for this small chip.
             SyscallShardKind::Precompile => input
                 .precompile_events
                 .all_events()
-                .par_bridge()
                 .map(|(event, precompile)| row_fn(event, Some(precompile)))
                 .collect::<Vec<_>>(),
         };
@@ -324,7 +319,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &SyscallCols<AB::Var> = (*local).borrow();
 
         builder.assert_bool(local.is_real);
@@ -339,35 +334,35 @@ where
         // Derive reduced arg1/arg2 inline from half-word columns.
         // These are NOT stored as columns — saves 2 columns per row.
         let arg1: AB::Expr = local.arg1_lo.into()
-            + Into::<AB::Expr>::into(local.arg1_hi) * AB::Expr::from_canonical_u32(65536);
+            + Into::<AB::Expr>::into(local.arg1_hi) * AB::Expr::from_u32(65536);
         let arg2: AB::Expr = local.arg2_lo.into()
-            + Into::<AB::Expr>::into(local.arg2_hi) * AB::Expr::from_canonical_u32(65536);
+            + Into::<AB::Expr>::into(local.arg2_hi) * AB::Expr::from_u32(65536);
 
         // U16Range checks for ALL syscalls (not just linux), gated by is_real.
         // This ensures the global lookup's half-word args are always canonical.
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg1_lo,
             AB::Expr::zero(),
             AB::Expr::zero(),
             local.is_real,
         );
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg1_hi,
             AB::Expr::zero(),
             AB::Expr::zero(),
             local.is_real,
         );
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg2_lo,
             AB::Expr::zero(),
             AB::Expr::zero(),
             local.is_real,
         );
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg2_hi,
             AB::Expr::zero(),
             AB::Expr::zero(),
@@ -376,12 +371,16 @@ where
 
         match self.shard_kind {
             SyscallShardKind::Core => {
-                builder.receive_syscall(
+                // Received as half-words from the instruction chip, so the four argument
+                // columns are inputs of this row rather than a prover-chosen decomposition of
+                // the reduced word.
+                builder.receive_syscall_halves(
                     local.shard,
                     local.clk,
                     local.syscall_id,
-                    arg1.clone(),
-                    arg2.clone(),
+                    [local.arg1_lo.into(), local.arg1_hi.into()],
+                    [local.arg2_lo.into(), local.arg2_hi.into()],
+                    local.is_linux,
                     local.is_real,
                     LookupScope::Local,
                 );
@@ -413,7 +412,7 @@ where
                             local.arg2_hi.into(),
                             local.is_real.into() * AB::Expr::one(),
                             local.is_real.into() * AB::Expr::zero(),
-                            AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
+                            AB::Expr::from_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,
@@ -435,7 +434,7 @@ where
                             AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::one(),
                             local.is_real.into() * AB::Expr::zero(),
-                            AB::Expr::from_canonical_u8(LookupKind::SyscallResult as u8),
+                            AB::Expr::from_u8(LookupKind::SyscallResult as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,
@@ -481,7 +480,7 @@ where
                             local.arg2_hi.into(),
                             local.is_real.into() * AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::one(),
-                            AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
+                            AB::Expr::from_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,
@@ -502,7 +501,7 @@ where
                             AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::one(),
-                            AB::Expr::from_canonical_u8(LookupKind::SyscallResult as u8),
+                            AB::Expr::from_u8(LookupKind::SyscallResult as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,

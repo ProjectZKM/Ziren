@@ -1,8 +1,8 @@
 use core::iter::once;
-use p3_air::{AirBuilder, AirBuilderWithPublicValues};
-use p3_field::FieldAlgebra;
-use zkm_stark::{
-    air::{AirLookup, BaseAirBuilder, LookupScope, MachineAirBuilder, OperationSummaryAirBuilder},
+use p3_air::AirBuilder;
+use p3_field::PrimeCharacteristicRing;
+use zkm_pcs::{
+    air::{AirLookup, BaseAirBuilder, LookupScope, MachineAirBuilder},
     LookupKind,
 };
 
@@ -13,17 +13,11 @@ use super::{
 
 /// A trait which contains all helper methods for building Ziren recursion machine AIRs.
 pub trait ZKMRecursionAirBuilder:
-    MachineAirBuilder
-    + RecursionMemoryAirBuilder
-    + RecursionLookupAirBuilder
-    + OperationSummaryAirBuilder
+    MachineAirBuilder + RecursionMemoryAirBuilder + RecursionLookupAirBuilder
 {
 }
 
-impl<AB: AirBuilderWithPublicValues + RecursionMemoryAirBuilder + OperationSummaryAirBuilder>
-    ZKMRecursionAirBuilder for AB
-{
-}
+impl<AB: RecursionMemoryAirBuilder> ZKMRecursionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionMemoryAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionLookupAirBuilder for AB {}
 
@@ -133,22 +127,17 @@ pub trait RecursionMemoryAirBuilder: RecursionLookupAirBuilder {
         // Verify that value = limb_16 + limb_12 * 2^16.
         self.when(is_real.clone()).assert_eq(
             value,
-            limb_16.clone().into()
-                + limb_12.clone().into() * Self::Expr::from_canonical_u32(1 << 16),
+            limb_16.clone().into() + limb_12.clone().into() * Self::Expr::from_u32(1 << 16),
         );
 
         // Send the range checks for the limbs.
         self.send_range_check(
-            Self::Expr::from_canonical_u8(RangeCheckOpcode::U16 as u8),
+            Self::Expr::from_u8(RangeCheckOpcode::U16 as u8),
             limb_16,
             is_real.clone(),
         );
 
-        self.send_range_check(
-            Self::Expr::from_canonical_u8(RangeCheckOpcode::U12 as u8),
-            limb_12,
-            is_real,
-        )
+        self.send_range_check(Self::Expr::from_u8(RangeCheckOpcode::U12 as u8), limb_12, is_real)
     }
 }
 

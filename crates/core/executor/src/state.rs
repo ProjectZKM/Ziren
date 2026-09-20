@@ -5,7 +5,7 @@ use std::{
 
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
-use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey};
+use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey};
 
 use crate::{
     events::MemoryRecord,
@@ -106,7 +106,6 @@ impl ExecutionState {
 
 /// Holds data to track changes made to the runtime since a fork point.
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
 pub struct ForkState {
     /// The `global_clk` value at the fork point.
     pub global_clk: u64,

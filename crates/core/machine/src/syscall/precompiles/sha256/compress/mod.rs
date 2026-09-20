@@ -1,6 +1,9 @@
 mod air;
 mod columns;
+mod control;
 mod trace;
+
+pub use control::{ShaCompressControlChip, ShaCompressControlCols, NUM_SHA_COMPRESS_CONTROL_COLS};
 
 pub const SHA_COMPRESS_K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -34,7 +37,7 @@ pub mod compress_tests {
 
     use test_artifacts::SHA_COMPRESS_ELF;
     use zkm_core_executor::{syscalls::SyscallCode, Instruction, Opcode, Program};
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 

@@ -1,6 +1,6 @@
 use alloc::format;
 
-use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -57,11 +57,18 @@ pub struct Witness<C: Config> {
     pub exts: Vec<C::EF>,
     pub vkey_hash: C::N,
     pub committed_values_digest: C::N,
+    /// Root of the Merkle tree of allowed recursion verifying keys.
+    ///
+    /// A public input of the wrap circuit: without it the recursion key
+    /// allowlist is bound only by an in-circuit witness the prover chooses, so
+    /// an outer verifier cannot tell an honest tree from one built around a
+    /// substituted compose or leaf program.
+    pub vk_root: C::N,
 }
 
 impl<C: Config> Witness<C> {
     pub fn size(&self) -> usize {
-        self.vars.len() + self.felts.len() + self.exts.len() + 2
+        self.vars.len() + self.felts.len() + self.exts.len() + 3
     }
 
     pub fn write_vkey_hash(&mut self, vkey_hash: C::N) {
@@ -72,6 +79,11 @@ impl<C: Config> Witness<C> {
     pub fn write_committed_values_digest(&mut self, committed_values_digest: C::N) {
         self.vars.push(committed_values_digest);
         self.committed_values_digest = committed_values_digest
+    }
+
+    pub fn write_vk_root(&mut self, vk_root: C::N) {
+        self.vars.push(vk_root);
+        self.vk_root = vk_root;
     }
 }
 
@@ -85,7 +97,7 @@ impl<N: Field> Usize<N> {
 
     pub fn materialize<C: Config<N = N>>(&self, builder: &mut Builder<C>) -> Var<C::N> {
         match self {
-            Usize::Const(c) => builder.eval(C::N::from_canonical_usize(*c)),
+            Usize::Const(c) => builder.eval(C::N::from_usize(*c)),
             Usize::Var(v) => *v,
         }
     }
@@ -174,7 +186,7 @@ impl<C: Config> Variable<C> for Usize<C::N> {
             }
             Usize::Var(v) => match src {
                 SymbolicUsize::Const(src) => {
-                    builder.assign(*v, C::N::from_canonical_usize(src));
+                    builder.assign(*v, C::N::from_usize(src));
                 }
                 SymbolicUsize::Var(src) => {
                     builder.assign(*v, src);
@@ -196,10 +208,10 @@ impl<C: Config> Variable<C> for Usize<C::N> {
                 assert_eq!(lhs, rhs, "constant usizes do not match");
             }
             (SymbolicUsize::Const(lhs), SymbolicUsize::Var(rhs)) => {
-                builder.assert_var_eq(C::N::from_canonical_usize(lhs), rhs);
+                builder.assert_var_eq(C::N::from_usize(lhs), rhs);
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Const(rhs)) => {
-                builder.assert_var_eq(lhs, C::N::from_canonical_usize(rhs));
+                builder.assert_var_eq(lhs, C::N::from_usize(rhs));
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Var(rhs)) => builder.assert_var_eq(lhs, rhs),
         }
@@ -218,10 +230,10 @@ impl<C: Config> Variable<C> for Usize<C::N> {
                 assert_ne!(lhs, rhs, "constant usizes do not match");
             }
             (SymbolicUsize::Const(lhs), SymbolicUsize::Var(rhs)) => {
-                builder.assert_var_ne(C::N::from_canonical_usize(lhs), rhs);
+                builder.assert_var_ne(C::N::from_usize(lhs), rhs);
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Const(rhs)) => {
-                builder.assert_var_ne(lhs, C::N::from_canonical_usize(rhs));
+                builder.assert_var_ne(lhs, C::N::from_usize(rhs));
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Var(rhs)) => {
                 builder.assert_var_ne(lhs, rhs);
@@ -415,7 +427,7 @@ impl<C: Config> Variable<C> for Ext<C::F, C::EF> {
             }
             SymbolicExt::Base(src) => match src {
                 SymbolicFelt::Const(src) => {
-                    builder.push_op(DslIr::ImmE(*self, C::EF::from_base(src)));
+                    builder.push_op(DslIr::ImmE(*self, C::EF::from(src)));
                 }
                 SymbolicFelt::Val(src) => {
                     builder.push_op(DslIr::AddEFFI(*self, src, C::EF::ZERO));

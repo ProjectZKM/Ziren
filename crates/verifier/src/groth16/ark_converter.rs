@@ -115,8 +115,12 @@ pub fn convert_ark_imm_wrap_vk(
 fn convert_endianness<const CHUNK_SIZE: usize, const ARRAY_SIZE: usize>(
     bytes: &[u8; ARRAY_SIZE],
 ) -> [u8; ARRAY_SIZE] {
-    let reversed: [_; ARRAY_SIZE] = bytes
-        .chunks_exact(CHUNK_SIZE)
+    // `as_chunks` rather than `chunks_exact`: the chunk size is a constant, so
+    // the array form carries it in the type and leaves no remainder to ignore.
+    let (chunks, remainder) = bytes.as_chunks::<CHUNK_SIZE>();
+    debug_assert!(remainder.is_empty(), "ARRAY_SIZE must be a whole number of CHUNK_SIZE chunks");
+    let reversed: [_; ARRAY_SIZE] = chunks
+        .iter()
         .flat_map(|chunk| chunk.iter().rev().copied())
         .enumerate()
         .fold([0u8; ARRAY_SIZE], |mut acc, (i, v)| {
@@ -131,7 +135,12 @@ fn convert_endianness<const CHUNK_SIZE: usize, const ARRAY_SIZE: usize>(
 /// Taken from https://github.com/anza-xyz/agave/blob/c54d840/curves/bn254/src/compression.rs#L219
 fn decompress_g1(g1_bytes: &[u8; 32]) -> Result<G1Affine, ArkGroth16Error> {
     let g1_bytes = gnark_compressed_x_to_ark_compressed_x(g1_bytes)?;
-    let g1_bytes = convert_endianness::<32, 32>(&g1_bytes.as_slice().try_into().unwrap());
+    // `gnark_compressed_x_to_ark_compressed_x` preserves length, so this is
+    // infallible; checked rather than unwrapped so no caller-reachable path in
+    // this module can panic.
+    let g1_bytes: [u8; 32] =
+        g1_bytes.as_slice().try_into().map_err(|_| ArkGroth16Error::InvalidInput)?;
+    let g1_bytes = convert_endianness::<32, 32>(&g1_bytes);
     let decompressed_g1 = G1Affine::deserialize_with_mode(
         convert_endianness::<32, 32>(&g1_bytes).as_slice(),
         Compress::Yes,
@@ -146,7 +155,12 @@ fn decompress_g1(g1_bytes: &[u8; 32]) -> Result<G1Affine, ArkGroth16Error> {
 /// Adapted from https://github.com/anza-xyz/agave/blob/c54d840/curves/bn254/src/compression.rs#L255
 fn decompress_g2(g2_bytes: &[u8; 64]) -> Result<G2Affine, ArkGroth16Error> {
     let g2_bytes = gnark_compressed_x_to_ark_compressed_x(g2_bytes)?;
-    let g2_bytes = convert_endianness::<64, 64>(&g2_bytes.as_slice().try_into().unwrap());
+    // `gnark_compressed_x_to_ark_compressed_x` preserves length, so this is
+    // infallible; checked rather than unwrapped so no caller-reachable path in
+    // this module can panic.
+    let g2_bytes: [u8; 64] =
+        g2_bytes.as_slice().try_into().map_err(|_| ArkGroth16Error::InvalidInput)?;
+    let g2_bytes = convert_endianness::<64, 64>(&g2_bytes);
     let decompressed_g2 = G2Affine::deserialize_with_mode(
         convert_endianness::<64, 64>(&g2_bytes).as_slice(),
         Compress::Yes,
@@ -218,12 +232,27 @@ fn gnark_decompressed_g2_to_ark_decompressed_g2(
     Ok(g2)
 }
 
+/// `buffer[off .. off+N]` as a fixed-size array, or `InvalidInput`.
+///
+/// The loaders below read caller-supplied bytes at fixed offsets and at offsets
+/// derived from counts INSIDE those bytes; both are untrusted, so every read is
+/// bounds-checked.  `checked_add` because `off` can come from the buffer.
+fn take<const N: usize>(buffer: &[u8], off: usize) -> Result<&[u8; N], ArkGroth16Error> {
+    let end = off.checked_add(N).ok_or(ArkGroth16Error::InvalidInput)?;
+    buffer.get(off..end).and_then(|s| s.try_into().ok()).ok_or(ArkGroth16Error::InvalidInput)
+}
+
+/// Big-endian `u32` at `off`, bounds-checked.
+fn take_u32(buffer: &[u8], off: usize) -> Result<u32, ArkGroth16Error> {
+    Ok(u32::from_be_bytes(*take::<4>(buffer, off)?))
+}
+
 /// Load a Groth16 proof from bytes in the arkworks format.
 pub fn load_ark_proof_from_bytes(buffer: &[u8]) -> Result<Proof<Bn254>, ArkGroth16Error> {
     Ok(Proof::<Bn254> {
-        a: gnark_decompressed_g1_to_ark_decompressed_g1(buffer[..64].try_into().unwrap())?,
-        b: gnark_decompressed_g2_to_ark_decompressed_g2(buffer[64..192].try_into().unwrap())?,
-        c: gnark_decompressed_g1_to_ark_decompressed_g1(&buffer[192..256].try_into().unwrap())?,
+        a: gnark_decompressed_g1_to_ark_decompressed_g1(take::<64>(buffer, 0)?)?,
+        b: gnark_decompressed_g2_to_ark_decompressed_g2(take::<128>(buffer, 64)?)?,
+        c: gnark_decompressed_g1_to_ark_decompressed_g1(take::<64>(buffer, 192)?)?,
     })
 }
 
@@ -232,37 +261,33 @@ pub fn load_ark_groth16_verifying_key_from_bytes(
     buffer: &[u8],
 ) -> Result<VerifyingKey<Bn254>, ArkGroth16Error> {
     // Note that g1_beta and g1_delta are not used in the verification process.
-    let alpha_g1 = decompress_g1(buffer[..32].try_into().unwrap())?;
-    let beta_g2 = decompress_g2(buffer[64..128].try_into().unwrap())?;
-    let gamma_g2 = decompress_g2(buffer[128..192].try_into().unwrap())?;
-    let delta_g2 = decompress_g2(buffer[224..288].try_into().unwrap())?;
+    let alpha_g1 = decompress_g1(take::<32>(buffer, 0)?)?;
+    let beta_g2 = decompress_g2(take::<64>(buffer, 64)?)?;
+    let gamma_g2 = decompress_g2(take::<64>(buffer, 128)?)?;
+    let delta_g2 = decompress_g2(take::<64>(buffer, 224)?)?;
 
-    let num_k = u32::from_be_bytes([buffer[288], buffer[289], buffer[290], buffer[291]]);
+    // `num_k` comes from the buffer, so the loop is bounded only by what the
+    // buffer can actually supply: each read is checked and a short buffer ends
+    // the load with `InvalidInput` rather than an out-of-range index.
+    let num_k = take_u32(buffer, 288)?;
     let mut k = Vec::new();
     let mut offset = 292;
     for _ in 0..num_k {
-        let point = decompress_g1(&buffer[offset..offset + 32].try_into().unwrap())?;
-        k.push(point);
-        offset += 32;
+        k.push(decompress_g1(take::<32>(buffer, offset)?)?);
+        offset = offset.checked_add(32).ok_or(ArkGroth16Error::InvalidInput)?;
     }
 
-    let num_of_array_of_public_and_commitment_committed = u32::from_be_bytes([
-        buffer[offset],
-        buffer[offset + 1],
-        buffer[offset + 2],
-        buffer[offset + 3],
-    ]);
-    offset += 4;
+    let num_of_array_of_public_and_commitment_committed = take_u32(buffer, offset)?;
+    offset = offset.checked_add(4).ok_or(ArkGroth16Error::InvalidInput)?;
     for _ in 0..num_of_array_of_public_and_commitment_committed {
-        let num = u32::from_be_bytes([
-            buffer[offset],
-            buffer[offset + 1],
-            buffer[offset + 2],
-            buffer[offset + 3],
-        ]);
-        offset += 4;
-        for _ in 0..num {
-            offset += 4;
+        let num = take_u32(buffer, offset)?;
+        offset = offset
+            .checked_add(4)
+            .and_then(|o| o.checked_add(4usize.checked_mul(num as usize)?))
+            .ok_or(ArkGroth16Error::InvalidInput)?;
+        // The skipped run must actually be present.
+        if offset > buffer.len() {
+            return Err(ArkGroth16Error::InvalidInput);
         }
     }
 
@@ -277,4 +302,49 @@ pub fn load_ark_public_inputs_from_bytes(
     committed_values_digest: &[u8; 32],
 ) -> [Fr; 2] {
     [Fr::from_be_bytes_mod_order(vkey_hash), Fr::from_be_bytes_mod_order(committed_values_digest)]
+}
+
+#[cfg(test)]
+mod malformed_input {
+    use super::*;
+
+    /// Every prefix of a well-formed-length buffer must be REJECTED, never
+    /// panic: the loaders read caller bytes at fixed offsets and at offsets
+    /// derived from counts inside those bytes.
+    #[test]
+    fn truncated_proof_bytes_are_rejected() {
+        for n in 0..256 {
+            let buf = vec![0u8; n];
+            assert!(
+                load_ark_proof_from_bytes(&buf).is_err(),
+                "a {n}-byte proof buffer must be an error, not a panic"
+            );
+        }
+    }
+
+    #[test]
+    fn truncated_verifying_key_bytes_are_rejected() {
+        for n in 0..300 {
+            let buf = vec![0u8; n];
+            assert!(
+                load_ark_groth16_verifying_key_from_bytes(&buf).is_err(),
+                "a {n}-byte vk buffer must be an error, not a panic"
+            );
+        }
+    }
+
+    /// `num_k` is read FROM the buffer, so it is attacker-controlled.
+    ///
+    /// NOTE this asserts TOTALITY only.  An all-zero buffer fails point
+    /// decompression at `alpha_g1` well before the `k` loop, so the test passes
+    /// with or without the bound below -- reaching the loop needs 288 bytes of
+    /// well-formed compressed points, which needs a real vk.  The bound itself is
+    /// covered by `truncated_verifying_key_bytes_are_rejected`, which does panic
+    /// without it.
+    #[test]
+    fn a_hostile_num_k_does_not_panic() {
+        let mut buf = vec![0u8; 292];
+        buf[288..292].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(load_ark_groth16_verifying_key_from_bytes(&buf).is_err());
+    }
 }

@@ -1,0 +1,265 @@
+//! Shard-level proof types — pure data, no prover/verifier logic.
+
+use std::collections::BTreeMap;
+
+use p3_field::{Field, PrimeCharacteristicRing};
+use serde::{Deserialize, Serialize};
+
+/// Univariate polynomial in coefficient form, low-degree-first.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct UnivariatePolynomial<K> {
+    pub coefficients: Vec<K>,
+}
+
+impl<K: PrimeCharacteristicRing + Copy> UnivariatePolynomial<K> {
+    pub fn new(coefficients: Vec<K>) -> Self {
+        Self { coefficients }
+    }
+
+    pub fn zero(degree: usize) -> Self {
+        Self { coefficients: vec![K::ZERO; degree + 1] }
+    }
+
+    /// Evaluate via Horner's method; returns `K::ZERO` for empty.
+    pub fn eval_at_point(&self, point: K) -> K {
+        let mut acc = K::ZERO;
+        for &c in self.coefficients.iter().rev() {
+            acc = acc * point + c;
+        }
+        acc
+    }
+}
+
+/// Sumcheck proof carrying per-round polys and final (point, eval)
+/// but no evaluation proofs for component polys — the "partial".
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct PartialSumcheckProof<K> {
+    pub univariate_polys: Vec<UnivariatePolynomial<K>>,
+    pub claimed_sum: K,
+    pub point_and_eval: (Vec<K>, K),
+}
+
+impl<K: Field> PartialSumcheckProof<K> {
+    /// Empty placeholder for shape fixtures; not a valid proof.
+    #[must_use]
+    pub fn dummy() -> Self {
+        Self {
+            univariate_polys: Vec::new(),
+            claimed_sum: K::ZERO,
+            point_and_eval: (Vec::new(), K::ZERO),
+        }
+    }
+}
+
+/// LogUp-GKR circuit output: numerator/denominator MLEs over the
+/// chip-index hypercube.
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub struct LogUpGkrOutput<EF> {
+    pub numerator: Vec<EF>,
+    pub denominator: Vec<EF>,
+}
+
+/// Per-round proof inside the LogUp-GKR sumcheck stack.
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub struct LogupGkrRoundProof<EF> {
+    pub numerator_0: EF,
+    pub numerator_1: EF,
+    pub denominator_0: EF,
+    pub denominator_1: EF,
+    pub sumcheck_proof: PartialSumcheckProof<EF>,
+}
+
+/// Per-chip trace evaluations passed from the LogUp-GKR prover to
+/// the zerocheck prover.
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub struct ChipEvaluation<EF> {
+    /// `log2(main_trace.height())`; drives the verifier's
+    /// padded-row mask. Defaults to 0 on older proof bytes —
+    /// verifier treats 0 as uniform-max-log-row-count padding.
+    #[serde(default)]
+    pub log_degree: u8,
+    /// The chip's main-trace columns evaluated at the SHARED GKR
+    /// `trace_point` — all `max_log_row_count` coords, LSB-first /
+    /// natural-row, the convention the LogUp last-layer reconstruction
+    /// needs (see `verify_logup_gkr_host`).
+    ///
+    /// Every chip opens at this ONE point.  Each also used to carry a second
+    /// opening at its own trailing-`log_h` coords, which the legacy claim
+    /// rescaled by `embed_LEAD = Π_{k<lead}(1 − zeta[k])`.  The shared-point
+    /// opening already carries that factor —
+    ///   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @ zeta[0..log_h])
+    /// — so the two were redundant, and carrying both cost every chip a second
+    /// eq-table, a second eval-at and a second length-prefixed transcript
+    /// observation, in the prover AND in the recursion circuit that witnesses
+    /// them.
+    /// `default = "none_opt_vec"` (not bare `default`) so serde does NOT
+    /// add an `EF: Default` bound to the derive (`Option::None` needs no
+    /// `EF: Default`).
+    #[serde(default = "none_opt_vec")]
+    pub main_trace_evaluations_full: Option<Vec<EF>>,
+    /// Companion preprocessed-trace opening at the same shared point (see
+    /// `main_trace_evaluations_full`).  `None` when the chip has no
+    /// preprocessed columns.
+    #[serde(default = "none_opt_vec")]
+    pub preprocessed_trace_evaluations_full: Option<Vec<EF>>,
+}
+
+/// serde default for the `*_full` Option fields — returns `None` without
+/// requiring `EF: Default` (a bare `#[serde(default)]` would).
+fn none_opt_vec<EF>() -> Option<Vec<EF>> {
+    None
+}
+
+/// Data passed from the LogUp-GKR prover to the zerocheck prover.
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub struct LogUpEvaluations<EF> {
+    pub point: Vec<EF>,
+    pub chip_openings: BTreeMap<String, ChipEvaluation<EF>>,
+}
+
+/// Shard-level LogUp-GKR proof.
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub struct LogupGkrProof<F, EF> {
+    pub circuit_output: LogUpGkrOutput<EF>,
+    pub round_proofs: Vec<LogupGkrRoundProof<EF>>,
+    pub logup_evaluations: LogUpEvaluations<EF>,
+    /// Proof-of-work output gating the initial alpha sample.
+    pub witness: F,
+}
+
+impl<F: Field, EF: Field> LogupGkrProof<F, EF> {
+    /// Empty placeholder for shape fixtures; not a valid proof.
+    #[must_use]
+    pub fn dummy() -> Self {
+        Self {
+            circuit_output: LogUpGkrOutput { numerator: Vec::new(), denominator: Vec::new() },
+            round_proofs: Vec::new(),
+            logup_evaluations: LogUpEvaluations {
+                point: Vec::new(),
+                chip_openings: BTreeMap::new(),
+            },
+            witness: F::ZERO,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type F = p3_koala_bear::KoalaBear;
+    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+
+    #[test]
+    fn logup_gkr_proof_rmp_roundtrip() {
+        use p3_field::PrimeCharacteristicRing;
+        let v = |n: u64| EF::from(F::from_u64(n));
+        let f = |n: u64| F::from_u64(n);
+
+        let proof = LogupGkrProof::<F, EF> {
+            circuit_output: LogUpGkrOutput {
+                numerator: vec![v(1), v(2)],
+                denominator: vec![v(3), v(4)],
+            },
+            round_proofs: vec![LogupGkrRoundProof {
+                numerator_0: v(5),
+                numerator_1: v(6),
+                denominator_0: v(7),
+                denominator_1: v(8),
+                sumcheck_proof: PartialSumcheckProof {
+                    univariate_polys: vec![UnivariatePolynomial { coefficients: vec![v(9)] }],
+                    claimed_sum: v(10),
+                    point_and_eval: (vec![v(11)], v(12)),
+                },
+            }],
+            logup_evaluations: LogUpEvaluations {
+                point: vec![v(13)],
+                chip_openings: BTreeMap::from([(
+                    "Cpu".to_string(),
+                    ChipEvaluation {
+                        log_degree: 0,
+                        main_trace_evaluations_full: Some(vec![v(14)]),
+                        preprocessed_trace_evaluations_full: Some(vec![v(15)]),
+                    },
+                )]),
+            },
+            witness: f(99),
+        };
+        let bytes = rmp_serde::to_vec(&proof).expect("serializes");
+        let back: LogupGkrProof<F, EF> = rmp_serde::from_slice(&bytes).expect("deserializes");
+        assert_eq!(back.circuit_output.numerator, vec![v(1), v(2)]);
+        assert_eq!(back.round_proofs.len(), 1);
+        assert_eq!(back.round_proofs[0].numerator_0, v(5));
+        assert_eq!(back.witness, f(99));
+        let opening = back.logup_evaluations.chip_openings.get("Cpu").unwrap();
+        assert_eq!(opening.main_trace_evaluations_full, Some(vec![v(14)]));
+    }
+
+    #[test]
+    fn partial_sumcheck_proof_rmp_roundtrip() {
+        use p3_field::PrimeCharacteristicRing;
+        let v = |n: u64| EF::from(F::from_u64(n));
+        let proof = PartialSumcheckProof::<EF> {
+            univariate_polys: vec![
+                UnivariatePolynomial { coefficients: vec![v(1), v(2), v(3)] },
+                UnivariatePolynomial { coefficients: vec![v(4), v(5)] },
+            ],
+            claimed_sum: v(42),
+            point_and_eval: (vec![v(7), v(11)], v(99)),
+        };
+        let bytes = rmp_serde::to_vec(&proof).expect("serializes");
+        let back: PartialSumcheckProof<EF> = rmp_serde::from_slice(&bytes).expect("deserializes");
+        assert_eq!(back.univariate_polys.len(), 2);
+        assert_eq!(back.univariate_polys[0].coefficients, vec![v(1), v(2), v(3)]);
+        assert_eq!(back.claimed_sum, v(42));
+        assert_eq!(back.point_and_eval.0, vec![v(7), v(11)]);
+        assert_eq!(back.point_and_eval.1, v(99));
+    }
+
+    #[test]
+    fn dummy_proofs_are_minimal() {
+        let psp: PartialSumcheckProof<EF> = PartialSumcheckProof::dummy();
+        assert_eq!(psp.univariate_polys.len(), 0);
+        assert_eq!(psp.point_and_eval.0.len(), 0);
+
+        let lgp: LogupGkrProof<F, EF> = LogupGkrProof::dummy();
+        assert_eq!(lgp.circuit_output.numerator.len(), 0);
+        assert_eq!(lgp.circuit_output.denominator.len(), 0);
+        assert_eq!(lgp.round_proofs.len(), 0);
+        assert_eq!(lgp.logup_evaluations.point.len(), 0);
+        assert_eq!(lgp.logup_evaluations.chip_openings.len(), 0);
+    }
+
+    #[test]
+    fn dummy_proofs_construct() {
+        let psp: PartialSumcheckProof<EF> = PartialSumcheckProof::dummy();
+        assert!(psp.univariate_polys.is_empty());
+
+        let lgp: LogupGkrProof<F, EF> = LogupGkrProof::dummy();
+        assert!(lgp.round_proofs.is_empty());
+        assert!(lgp.logup_evaluations.chip_openings.is_empty());
+    }
+
+    #[test]
+    fn univariate_zero_has_correct_length() {
+        let p: UnivariatePolynomial<EF> = UnivariatePolynomial::zero(3);
+        assert_eq!(p.coefficients.len(), 4); // degree+1
+    }
+
+    #[test]
+    fn univariate_zero_degree_zero() {
+        use p3_field::PrimeCharacteristicRing;
+        let p: UnivariatePolynomial<EF> = UnivariatePolynomial::zero(0);
+        assert_eq!(p.coefficients.len(), 1);
+        assert_eq!(p.coefficients[0], EF::ZERO);
+    }
+
+    #[test]
+    fn univariate_new_preserves_input() {
+        use p3_field::PrimeCharacteristicRing;
+        let coefs =
+            vec![EF::from(F::from_u64(1)), EF::from(F::from_u64(2)), EF::from(F::from_u64(3))];
+        let p = UnivariatePolynomial::new(coefs.clone());
+        assert_eq!(p.coefficients, coefs);
+    }
+}

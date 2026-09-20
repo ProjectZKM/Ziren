@@ -3,17 +3,18 @@ use std::mem::size_of;
 
 use p3_air::BaseAir;
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use tracing::instrument;
-use zkm_core_machine::utils::next_power_of_two;
+use zkm_core_machine::utils::next_multiple_of_32_rows;
+
+use zkm_pcs::air::MachineAir;
 #[cfg(not(feature = "sys"))]
 use zkm_primitives::RC_16_30_U32;
-use zkm_stark::air::MachineAir;
 
 #[cfg(not(feature = "sys"))]
 use crate::chips::mem::MemoryAccessColsChips;
@@ -65,14 +66,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.poseidon2_events;
-        match input.fixed_log2_rows(self) {
-            Some(log2_rows) => Some(1 << log2_rows),
-            None => Some(next_power_of_two(
-                events.len(),
-                None,
-                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
-            )),
-        }
+        Some(next_multiple_of_32_rows(
+            events.len(),
+            input.fixed_rows(self),
+            <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]
@@ -85,6 +83,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         let events = &input.poseidon2_events;
         let padded_nb_rows = self.num_rows(input).unwrap();
         let num_columns = <Self as BaseAir<F>>::width(self);
+
         let mut values = vec![F::ZERO; padded_nb_rows * num_columns];
 
         let populate_len = events.len() * num_columns;
@@ -123,14 +122,15 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             "generate_trace only supports KoalaBear field"
         );
 
+        let padded_nb_rows = self.num_rows(input).unwrap();
+        let num_columns = <Self as BaseAir<KoalaBear>>::width(self);
+
         let events = unsafe {
             std::mem::transmute::<&Vec<Poseidon2Io<F>>, &Vec<Poseidon2Io<KoalaBear>>>(
                 &input.poseidon2_events,
             )
         };
 
-        let padded_nb_rows = self.num_rows(input).unwrap();
-        let num_columns = <Self as BaseAir<KoalaBear>>::width(self);
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * num_columns];
 
         let populate_len = events.len() * num_columns;
@@ -171,31 +171,23 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         true
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
-
     fn preprocessed_width(&self) -> usize {
         PREPROCESSED_POSEIDON2_WIDTH
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
-        Some(match program.fixed_log2_rows(self) {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(
-                instrs_len,
-                None,
-                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
-            ),
-        })
+        Some(next_multiple_of_32_rows(
+            instrs_len,
+            program.fixed_rows(self),
+            <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         // Allocating an intermediate `Vec` is faster.
         let instrs = program
-            .instructions
-            .iter() // Faster than using `rayon` for some reason. Maybe vectorization?
+            .iter_instructions() // Faster than using `rayon` for some reason. Maybe vectorization?
             .filter_map(|instruction| match instruction {
                 Poseidon2(instr) => Some(instr.as_ref()),
                 _ => None,
@@ -236,8 +228,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         // Allocating an intermediate `Vec` is faster.
         let instrs: Vec<&Poseidon2SkinnyInstr<KoalaBear>> =
             program
-                .instructions
-                .iter() // Faster than using `rayon` for some reason. Maybe vectorization?
+                .iter_instructions() // Faster than using `rayon` for some reason. Maybe vectorization?
                 .filter_map(|instruction| match instruction {
                     Poseidon2(instr) => Some(unsafe {
                         std::mem::transmute::<
@@ -350,7 +341,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
             let mut add_rc = *round_state;
             for i in 0..WIDTH {
-                add_rc[i] += F::from_wrapped_u32(RC_16_30_U32[round][i]);
+                add_rc[i] += F::from_u32(RC_16_30_U32[round][i]);
             }
 
             // Apply the sboxes.
@@ -389,7 +380,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
             // columns for it, just like for external rounds.
             let round = r + NUM_EXTERNAL_ROUNDS / 2;
-            let add_rc = state[0] + F::from_wrapped_u32(RC_16_30_U32[round][0]);
+            let add_rc = state[0] + F::from_u32(RC_16_30_U32[round][0]);
 
             // Apply the sboxes.
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
@@ -425,16 +416,17 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
 #[cfg(test)]
 mod tests {
     use p3_air::BaseAir;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_maybe_rayon::prelude::{
         join, IndexedParallelIterator, ParallelIterator, ParallelSliceMut,
     };
     use p3_symmetric::Permutation;
-    use zkhash::ark_ff::UniformRand;
+    use rand::Rng;
+    
     use zkm_core_machine::operations::poseidon2::trace::populate_perm;
-    use zkm_stark::{air::MachineAir, inner_perm};
+    use zkm_pcs::{air::MachineAir, inner_perm};
 
     use crate::{
         chips::poseidon2_wide::{Poseidon2WideChip, WIDTH},
@@ -449,7 +441,7 @@ mod tests {
         let output_0 = permuter.permute(input_0);
         let mut rng = rand::thread_rng();
 
-        let input_1 = [F::rand(&mut rng); WIDTH];
+        let input_1: [F; WIDTH] = core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()));
         let output_1 = permuter.permute(input_1);
 
         let shard = ExecutionRecord {
@@ -474,7 +466,7 @@ mod tests {
         let output_0 = permuter.permute(input_0);
         let mut rng = rand::thread_rng();
 
-        let input_1 = [F::rand(&mut rng); WIDTH];
+        let input_1: [F; WIDTH] = core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()));
         let output_1 = permuter.permute(input_1);
 
         let shard = ExecutionRecord {
@@ -501,7 +493,7 @@ mod tests {
         let chip = Poseidon2WideChip::<DEGREE>;
         let padded_nb_rows = chip.num_rows(input).unwrap();
         let num_columns = <Poseidon2WideChip<DEGREE> as BaseAir<F>>::width(&chip);
-        let mut values = vec![F::zero(); padded_nb_rows * num_columns];
+        let mut values = vec![F::ZERO; padded_nb_rows * num_columns];
 
         let populate_len = events.len() * num_columns;
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
@@ -514,8 +506,8 @@ mod tests {
                 )
             },
             || {
-                let mut dummy_row = vec![F::zero(); num_columns];
-                populate_perm::<F, DEGREE>([F::zero(); WIDTH], None, &mut dummy_row);
+                let mut dummy_row = vec![F::ZERO; num_columns];
+                populate_perm::<F, DEGREE>([F::ZERO; WIDTH], None, &mut dummy_row);
                 values_dummy
                     .par_chunks_mut(num_columns)
                     .for_each(|row| row.copy_from_slice(&dummy_row))

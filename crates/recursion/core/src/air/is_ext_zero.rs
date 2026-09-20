@@ -8,10 +8,10 @@ use crate::air::Block;
 use p3_air::AirBuilder;
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    Field, FieldAlgebra,
+    Field, PrimeCharacteristicRing,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BinomialExtension, ZKMAirBuilder};
+use zkm_pcs::air::{BinomialExtension, ZKMAirBuilder};
 
 use crate::air::extension::BinomialExtensionUtils;
 

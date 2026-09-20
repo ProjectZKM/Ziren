@@ -1,24 +1,15 @@
 use crate::mips::MipsAir;
 use p3_maybe_rayon::prelude::*;
-use p3_uni_stark::SymbolicAirBuilder;
-use serde::{de::DeserializeOwned, Serialize};
-use size::Size;
 use std::thread::ScopedJoinHandle;
 use std::{
-    fs::File,
-    io::{
-        Seek, {self},
-    },
+    io,
     sync::{mpsc::sync_channel, Arc, Mutex},
 };
 use thiserror::Error;
 use web_time::Instant;
-use zkm_stark::{
-    koala_bear_poseidon2::KoalaBearPoseidon2, MachineProvingKey, MachineVerificationError,
-};
+use zkm_pcs::MachineProvingKey;
 
 use p3_field::PrimeField32;
-use p3_koala_bear::KoalaBear;
 
 use crate::shape::CoreShapeConfig;
 use crate::{
@@ -31,14 +22,11 @@ use zkm_core_executor::{
     ExecutionError, ExecutionRecord, ExecutionReport, ExecutionState, Executor, Program,
     ZKMContext,
 };
-use zkm_primitives::io::ZKMPublicValues;
 
-use zkm_stark::{
+use zkm_pcs::{
     air::{MachineAir, PublicValues},
-    Com, CpuProver, DebugConstraintBuilder, LookupBuilder, MachineProof, MachineProver,
-    MachineRecord, OpeningProof, PcsProverData, ProverConstraintFolder, StarkGenericConfig,
-    StarkMachine, StarkProvingKey, StarkVerifyingKey, UniConfig, Val, VerifierConstraintFolder,
-    ZKMCoreOpts,
+    Com, MachineProof, MachineProver, MachineRecord, OpeningProof, PcsProverData,
+    StarkGenericConfig, Val, ZKMCoreOpts,
 };
 
 #[derive(Error, Debug)]
@@ -53,48 +41,6 @@ pub enum ZKMCoreProverError {
     TracesGenerationError,
     #[error("dependencies generation error")]
     DependenciesGenerationError,
-}
-
-pub fn prove_simple<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
-    config: SC,
-    mut runtime: Executor,
-) -> Result<(MachineProof<SC>, u64), ZKMCoreProverError>
-where
-    SC::Challenger: Clone,
-    OpeningProof<SC>: Send + Sync,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
-    // ShardMainData<SC>: Serialize + DeserializeOwned,
-    <SC as StarkGenericConfig>::Val: PrimeField32,
-{
-    // Setup the machine.
-    let machine = MipsAir::machine(config);
-    let prover = P::new(machine);
-    let (pk, _) = prover.setup(runtime.program.as_ref());
-
-    // Set the shard numbers.
-    runtime.records.iter_mut().enumerate().for_each(|(i, shard)| {
-        shard.public_values.shard = (i + 1) as u32;
-    });
-
-    // Prove the program.
-    let mut challenger = prover.config().challenger();
-    let proving_start = Instant::now();
-    let proof =
-        prover.prove(&pk, runtime.records, &mut challenger, ZKMCoreOpts::default()).unwrap();
-    let proving_duration = proving_start.elapsed().as_millis();
-    let nb_bytes = bincode::serialize(&proof).unwrap().len();
-
-    // Print the summary.
-    tracing::info!(
-        "summary: cycles={}, e2e={}, khz={:.2}, proofSize={}",
-        runtime.state.global_clk,
-        proving_duration,
-        (runtime.state.global_clk as f64 / proving_duration as f64),
-        Size::from_bytes(nb_bytes),
-    );
-
-    Ok((proof, runtime.state.global_clk))
 }
 
 pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
@@ -162,50 +108,44 @@ where
     std::thread::scope(move |s| {
         let _span = span.enter();
 
-        // Spawn the checkpoint generator thread.
+        // Checkpoints travel in memory rather than through tempfiles.  An
+        // `ExecutionState` is dominated by the memory-image diff since the last
+        // checkpoint (a few MB per shard), and `checkpoints_channel_capacity`
+        // bounds how many are in flight.
         let checkpoint_generator_span = tracing::Span::current().clone();
         let (checkpoints_tx, checkpoints_rx) =
-            sync_channel::<(usize, File, bool, u64)>(opts.checkpoints_channel_capacity);
+            sync_channel::<(usize, ExecutionState, bool, u64)>(opts.checkpoints_channel_capacity);
         let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
                 tracing::debug_span!("checkpoint generator").in_scope(|| {
-                    let mut index = 0;
-                    loop {
-                        // Enter the span.
-                        let span = tracing::debug_span!("batch");
-                        let _span = span.enter();
-
-                        // Execute the runtime until we reach a checkpoint.
-                        let (checkpoint, done) = runtime
-                            .execute_state(false)
-                            .map_err(ZKMCoreProverError::ExecutionError)?;
-
-                        // Save the checkpoint to a temp file.
-                        let mut checkpoint_file =
-                            tempfile::tempfile().map_err(ZKMCoreProverError::IoError)?;
-                        checkpoint
-                            .save(&mut checkpoint_file)
-                            .map_err(ZKMCoreProverError::IoError)?;
-
-                        // Send the checkpoint.
-                        checkpoints_tx
-                            .send((index, checkpoint_file, done, runtime.state.global_clk))
-                            .unwrap();
-
-                        // If we've reached the final checkpoint, break out of the loop.
-                        if done {
-                            break Ok(runtime.state.public_values_stream);
-                        }
-
-                        // Update the index.
-                        index += 1;
-                    }
+                    // One JIT pass over the whole program fills
+                    // `public_values_stream` and the cycle count and captures a
+                    // whole-program MinimalTrace chunk. The consumer re-derives
+                    // the shard boundaries from `initial_state` alone, so it
+                    // sees what a per-shard checkpoint loop would have produced.
+                    // That state must stay pristine: full input/proof streams,
+                    // `global_clk == 0`, empty `records_clk`.
+                    let initial_state = runtime.state.clone();
+                    let chunk = runtime
+                        .run_fast_capture_whole_program_chunk()
+                        .map_err(ZKMCoreProverError::ExecutionError)?;
+                    let global_clk = runtime.state.global_clk;
+                    tracing::debug!(
+                        target = "checkpoint_pin",
+                        "whole-program chunk clk=[{}..{}] mem_reads_oracle={} global_clk={}",
+                        chunk.clk_start,
+                        chunk.clk_end,
+                        chunk.mem_reads.len(),
+                        global_clk,
+                    );
+                    checkpoints_tx.send((0, initial_state, true, global_clk)).unwrap();
+                    Ok(runtime.state.public_values_stream)
                 })
             });
 
         // Create the challenger and observe the verifying key.
-        let mut challenger = prover.config().challenger();
+        let mut challenger = prover.machine().config().challenger();
         pk.observe_into(&mut challenger);
 
         // Spawn the phase 2 record generator thread.
@@ -213,7 +153,7 @@ where
         let p2_trace_gen_sync = Arc::new(TurnBasedSync::new());
         let checkpoints_rx = Arc::new(Mutex::new(checkpoints_rx));
         let (p2_records_and_traces_tx, p2_records_and_traces_rx) =
-            sync_channel::<(Vec<ExecutionRecord>, Vec<Vec<(String, RowMajorMatrix<Val<SC>>)>>)>(
+            sync_channel::<(Vec<ExecutionRecord>, Vec<zkm_pcs::Traces<Val<SC>>>)>(
                 opts.records_and_traces_channel_capacity,
             );
         let p2_records_and_traces_tx = Arc::new(Mutex::new(p2_records_and_traces_tx));
@@ -241,27 +181,34 @@ where
             let handle = s.spawn(move || {
                 let _span = span.enter();
                 tracing::debug_span!("phase 2 trace generation").in_scope(|| {
-                    let _: () = loop {
-                        // Receive the latest checkpoint.
-                        let received = { checkpoints_rx.lock().unwrap().recv() };
-                        if let Ok((index, mut checkpoint, done, num_cycles)) = received {
-                            // Trace the checkpoint and reconstruct the execution records.
-                            let mut reader = io::BufReader::new(&checkpoint);
-                            let execution_state: ExecutionState =
-                                bincode::deserialize_from(&mut reader)
-                                    .expect("failed to deserialize state");
-                            let (mut records, report) = tracing::debug_span!("trace checkpoint")
-                                .in_scope(|| {
-                                    trace_checkpoint::<SC>(
-                                        program.clone(),
-                                        execution_state,
-                                        opts,
-                                        shape_config,
-                                    )
-                                });
+                    let _: () =
+                        loop {
+                            // Receive the latest checkpoint.
+                            let received = { checkpoints_rx.lock().unwrap().recv() };
+                            if let Ok((index, execution_state, done, num_cycles)) = received {
+                                tracing::trace!(
+                                    target = "checkpoint_pin",
+                                    event = "consume",
+                                    index = index,
+                                    done = done,
+                                    num_cycles = num_cycles,
+                                );
+                                // One `trace_checkpoint` cannot cover a
+                                // whole-program state -- `Executor::execute`
+                                // stops after `shard_batch_size` shards -- so
+                                // drive it to completion and feed each batch
+                                // through the body below, keeping peak memory
+                                // at one batch.
+                                let mut batch_index = index;
+                                let mut process_batch = |mut records: Vec<ExecutionRecord>,
+                                                     report: ExecutionReport,
+                                                     done: bool,
+                                                     num_cycles: u64|
+                             -> Result<(), ZKMCoreProverError> {
+                            let index = batch_index;
+                            batch_index += 1;
                             log::debug!("generated {} records", records.len());
                             *report_aggregate.lock().unwrap() += report;
-                            reset_seek(&mut checkpoint);
 
                             // Wait for our turn to update the state.
                             record_gen_sync.wait_for_turn(index);
@@ -274,6 +221,14 @@ where
                                 state.execution_shard = record.public_values.execution_shard;
                                 state.start_pc = record.public_values.start_pc;
                                 state.next_pc = record.public_values.next_pc;
+                                // The executor's finalization, not the running `state`,
+                                // populates the 2-pc endpoints and timestamps, so carry them
+                                // across: the `record.public_values = *state` write below
+                                // would otherwise zero them and unbalance the State bus.
+                                state.start_next_pc = record.public_values.start_next_pc;
+                                state.next_next_pc = record.public_values.next_next_pc;
+                                state.initial_timestamp = record.public_values.initial_timestamp;
+                                state.last_timestamp = record.public_values.last_timestamp;
                                 state.committed_value_digest =
                                     record.public_values.committed_value_digest;
                                 state.deferred_proofs_digest =
@@ -320,6 +275,11 @@ where
                                     state.last_finalize_addr_bits =
                                         record.public_values.last_finalize_addr_bits;
                                     state.start_pc = state.next_pc;
+                                    // A no-CPU shard has no Cpu row chain, so its PV-AIR
+                                    // send_state/receive_state must self-cancel: force both
+                                    // endpoints equal.
+                                    state.start_next_pc = state.next_next_pc;
+                                    state.last_timestamp = state.initial_timestamp;
                                     record.public_values = *state;
                                 }
                                 records_clone.append(&mut deferred);
@@ -353,6 +313,10 @@ where
                                     for record in records_clone.iter_mut() {
                                         if shape_config.fix_shape(record).is_err() {
                                             fixed_shape = false;
+                                        } else {
+                                            // VERIFY_VK multi-shard: canonical
+                                            // cluster chip set (see the other site).
+                                            crate::shape::canonicalize_shape_to_cluster(record);
                                         }
                                     }
                                 }
@@ -382,6 +346,11 @@ where
                                     state.last_finalize_addr_bits =
                                         record.public_values.last_finalize_addr_bits;
                                     state.start_pc = state.next_pc;
+                                    // A no-CPU shard has no Cpu row chain, so its PV-AIR
+                                    // send_state/receive_state must self-cancel: force both
+                                    // endpoints equal.
+                                    state.start_next_pc = state.next_next_pc;
+                                    state.last_timestamp = state.initial_timestamp;
                                     record.public_values = *state;
                                 }
                                 records.append(&mut deferred);
@@ -413,6 +382,11 @@ where
                                 if let Some(shape_config) = shape_config {
                                     for record in records.iter_mut() {
                                         shape_config.fix_shape(record).unwrap();
+                                        // VERIFY_VK multi-shard: extend the
+                                        // chosen shape up to the canonical stacked
+                                        // cluster so per-guest event-driven chip
+                                        // subsets don't explode the vk space.
+                                        crate::shape::canonicalize_shape_to_cluster(record);
                                     }
                                 }
                                 shape_fixed_records = Some(records);
@@ -452,7 +426,7 @@ where
                             let chunked_main_traces = chunk_vec(main_traces, opts.shard_batch_size);
                             chunked_records
                                 .into_iter()
-                                .zip(chunked_main_traces.into_iter())
+                                .zip(chunked_main_traces)
                                 .for_each(|(records, main_traces)| {
                                     records_and_traces_tx
                                         .lock()
@@ -462,10 +436,25 @@ where
                                 });
 
                             trace_gen_sync.advance_turn();
-                        } else {
-                            break;
-                        }
-                    };
+                            Ok(())
+                            };
+
+                                // Whole-program from-start checkpoint: loop
+                                // `execute_record` on ONE carried executor until
+                                // it reports `done`, mirroring the interpreter
+                                // producer's `execute_state` loop and the GPU
+                                // driver's.
+                                trace_checkpoint_to_completion::<SC, _>(
+                                    program.clone(),
+                                    execution_state,
+                                    opts,
+                                    shape_config,
+                                    &mut process_batch,
+                                )?;
+                            } else {
+                                break;
+                            }
+                        };
                     Ok(())
                 })
             });
@@ -474,6 +463,23 @@ where
         drop(p2_records_and_traces_tx);
         #[cfg(feature = "debug")]
         drop(all_records_tx);
+
+        // The invariant the `commit` call below relies on: whatever
+        // `FIX_CORE_SHAPES` says, the jagged commit pads to the canonical CLUSTER
+        // shape, so the recursion normalize VK depends on the chip SET alone and
+        // matches the production vk_map. With FIX off the records keep their raw
+        // heights and the STARK proves at those heights; only the commit is
+        // padded.
+        let cluster_shape_config = CoreShapeConfig::<SC::Val>::default();
+
+        // Chip NAME -> trace WIDTH, so `commit` can size the height-0 trace it
+        // injects for a missing chip.  Machine-static, built once.
+        let cluster_chip_widths: std::collections::BTreeMap<String, usize> = prover
+            .machine()
+            .chips()
+            .iter()
+            .map(|c| (MachineAir::<SC::Val>::name(c), p3_air::BaseAir::<SC::Val>::width(c).max(1)))
+            .collect();
 
         // Spawn the phase 2 prover thread.
         let p2_prover_span = tracing::Span::current().clone();
@@ -489,22 +495,75 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
-                                    let main_data = prover.commit(&record, main_traces);
+                                    // Hand `commit` this shard's canonical cluster;
+                                    // it injects a height-0 full-width trace for
+                                    // every chip in the cluster the shard lacks.
+                                    // Keyed by chip NAME because the PCS layer
+                                    // cannot depend on `MipsAirId`. A shard that
+                                    // overflows every cluster yields `None` and
+                                    // commits its own chip set.
+                                    let cluster_widths: Option<
+                                        std::collections::BTreeMap<String, usize>,
+                                    > = cluster_shape_config
+                                        .find_canonical_cluster_shape(&record)
+                                        .map(|shape| {
+                                            shape
+                                                .iter()
+                                                .filter_map(|(air, _log_h)| {
+                                                    // The shape carries a `Cpu` AXIS
+                                                    // (the cycle band) but no Cpu
+                                                    // CHIP; injecting a non-machine
+                                                    // name would shift the
+                                                    // alphabetical chips/traces zip.
+                                                    let name = air.to_string();
+                                                    let width =
+                                                        cluster_chip_widths.get(&name).copied()?;
+                                                    Some((name, width))
+                                                })
+                                                .collect()
+                                        });
+
+                                    // Rows are committed in one layout (natural), so
+                                    // commit, zerocheck and reduction cannot disagree
+                                    // about it.
+                                    let t_commit = std::time::Instant::now();
+                                    // CORE never pins the recursion AREA (that is a
+                                    // compress-only geometry) → `None` (NATURAL own-area
+                                    // commit, byte-identical).
+                                    let main_data =
+                                        prover.commit(&record, main_traces, cluster_widths);
+                                    let commit_ms = t_commit.elapsed().as_millis();
 
                                     let opening_span = tracing::debug_span!("opening").entered();
+                                    let t_open = std::time::Instant::now();
                                     let proof = prover
                                         .open(pk, main_data, &mut challenger.clone())
                                         .unwrap();
+                                    let open_ms = t_open.elapsed().as_millis();
                                     opening_span.exit();
+
+                                    tracing::info!(
+                                        "PCS timing: commit={}ms open={}ms total={}ms",
+                                        commit_ms,
+                                        open_ms,
+                                        commit_ms + open_ms
+                                    );
 
                                     #[cfg(debug_assertions)]
                                     {
                                         if let Some(ref shape) = record.shape {
+                                            // The fitted shape carries the VIRTUAL
+                                            // Cpu axis (the cycles axis used for
+                                            // splitting/banding); no chip backs it,
+                                            // so the proof legitimately lacks it.
                                             assert_eq!(
                                                 proof.shape(),
                                                 shape
                                                     .clone()
                                                     .into_iter()
+                                                    .filter(|(k, _)| {
+                                                        k != &zkm_core_executor::MipsAirId::Cpu
+                                                    })
                                                     .map(|(k, v)| (k.to_string(), v as usize))
                                                     .collect(),
                                             );
@@ -592,134 +651,64 @@ where
     })
 }
 
-/// Runs a program and returns the public values stream.
-pub fn run_test_io<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
-    mut program: Program,
-    inputs: ZKMStdin,
-) -> Result<ZKMPublicValues, MachineVerificationError<KoalaBearPoseidon2>> {
-    let shape_config = CoreShapeConfig::<KoalaBear>::default();
-    shape_config.fix_preprocessed_shape(&mut program).unwrap();
-    let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
-        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-        runtime.write_vecs(&inputs.buffer);
-        runtime.run().unwrap();
-        runtime
-    });
-    let public_values = ZKMPublicValues::from(&runtime.state.public_values_stream);
-
-    let _ = run_test_core::<P>(runtime, inputs, Some(&shape_config))?;
-    Ok(public_values)
-}
-
-pub fn run_test<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
-    mut program: Program,
-) -> Result<MachineProof<KoalaBearPoseidon2>, MachineVerificationError<KoalaBearPoseidon2>> {
-    let shape_config = CoreShapeConfig::default();
-    shape_config.fix_preprocessed_shape(&mut program).unwrap();
-    let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
-        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-        runtime.run().unwrap();
-        runtime
-    });
-    run_test_core::<P>(runtime, ZKMStdin::new(), Some(&shape_config))
-}
-
-#[allow(unused_variables)]
-pub fn run_test_core<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
-    runtime: Executor,
-    inputs: ZKMStdin,
-    shape_config: Option<&CoreShapeConfig<KoalaBear>>,
-) -> Result<MachineProof<KoalaBearPoseidon2>, MachineVerificationError<KoalaBearPoseidon2>> {
-    let config = KoalaBearPoseidon2::new();
-    let machine = MipsAir::machine(config);
-    let prover = P::new(machine);
-
-    let (pk, _) = prover.setup(runtime.program.as_ref());
-    let (proof, output, _) = prove_with_context(
-        &prover,
-        &pk,
-        Program::clone(&runtime.program),
-        &inputs,
-        ZKMCoreOpts::default(),
-        ZKMContext::default(),
-        shape_config,
-    )
-    .unwrap();
-
-    let config = KoalaBearPoseidon2::new();
-    let machine = MipsAir::machine(config);
-    let (pk, vk) = machine.setup(runtime.program.as_ref());
-    let mut challenger = machine.config().challenger();
-    machine.verify(&vk, &proof, &mut challenger).unwrap();
-
-    Ok(proof)
-}
-
-#[allow(unused_variables)]
-pub fn run_test_machine_with_prover<SC, A, P: MachineProver<SC, A>>(
-    prover: &P,
-    records: Vec<A::Record>,
-    pk: P::DeviceProvingKey,
-    vk: StarkVerifyingKey<SC>,
-) -> Result<MachineProof<SC>, MachineVerificationError<SC>>
+/// `trace_checkpoint`, driven to COMPLETION.
+///
+/// `trace_checkpoint` calls `Executor::execute_record` exactly ONCE, and
+/// `Executor::execute` returns as soon as it has closed `shard_batch_size`
+/// shards.  Over the multi-checkpoint producer that is correct — the producer
+/// sends one checkpoint per batch — but the JIT producer sends a SINGLE
+/// from-start, whole-program checkpoint, so one call covers only the first
+/// batch and every later shard is silently dropped.  The truncated proof then
+/// fails verification with
+/// `Invalid public values: next_pc != 0: execution should have halted`
+/// (invisible to any single-shard program, e.g. fibonacci).
+///
+/// This drives ONE carried executor with repeated `execute_record` calls until
+/// it reports `done` — the Trace-mode mirror of the interpreter producer's
+/// `execute_state` loop — and hands each batch to `on_batch` as it is
+/// produced, so peak memory stays at a single `shard_batch_size` batch rather
+/// than the whole program's records.
+///
+/// Per-batch semantics are IDENTICAL to the multi-checkpoint path: `execute`'s
+/// finalization stamps `execution_shard = start_shard + i` and broadcasts the
+/// batch's terminal public values over that batch's records either way, and
+/// `execute_record` takes the executor's records each call.
+pub fn trace_checkpoint_to_completion<SC: StarkGenericConfig, F>(
+    program: Program,
+    state: ExecutionState,
+    opts: ZKMCoreOpts,
+    shape_config: Option<&CoreShapeConfig<SC::Val>>,
+    mut on_batch: F,
+) -> Result<(), ZKMCoreProverError>
 where
-    A: MachineAir<SC::Val>
-        + Air<LookupBuilder<Val<SC>>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
-        + Air<SymbolicAirBuilder<SC::Val>>,
-    A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig,
-    SC::Val: p3_field::PrimeField32,
-    SC::Challenger: Clone,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
-    OpeningProof<SC>: Send + Sync,
+    <SC as StarkGenericConfig>::Val: PrimeField32,
+    F: FnMut(Vec<ExecutionRecord>, ExecutionReport, bool, u64) -> Result<(), ZKMCoreProverError>,
 {
-    let mut challenger = prover.config().challenger();
-    let prove_span = tracing::debug_span!("prove").entered();
+    let noop = NoOpSubproofVerifier;
 
-    #[cfg(feature = "debug")]
-    prover.machine().debug_constraints(
-        &prover.pk_to_host(&pk),
-        records.clone(),
-        &mut challenger.clone(),
-    );
+    let mut runtime = Executor::recover(program, state, opts);
+    runtime.maximal_shapes = shape_config.map(|config| {
+        config.maximal_core_shapes(opts.shard_size.ilog2() as usize).into_iter().collect()
+    });
+    runtime.subproof_verifier = Some(&noop);
 
-    let proof = prover.prove(&pk, records, &mut challenger, ZKMCoreOpts::default()).unwrap();
-    prove_span.exit();
-    let nb_bytes = bincode::serialize(&proof).unwrap().len();
+    loop {
+        let (records, done) =
+            runtime.execute_record(true).map_err(ZKMCoreProverError::ExecutionError)?;
+        let num_cycles = runtime.state.global_clk;
+        // `runtime.report` is CUMULATIVE over the carried executor, so only the
+        // terminal batch contributes it — summing it per batch would multiply
+        // every counter.  The multi-checkpoint path sums one fresh
+        // per-checkpoint report per batch, which totals the same.
+        let report =
+            if done { std::mem::take(&mut runtime.report) } else { ExecutionReport::default() };
+        on_batch(records, report, done, num_cycles)?;
+        if done {
+            break;
+        }
+    }
 
-    let mut challenger = prover.config().challenger();
-    prover.machine().verify(&vk, &proof, &mut challenger)?;
-
-    Ok(proof)
-}
-
-#[allow(unused_variables)]
-pub fn run_test_machine<SC, A>(
-    records: Vec<A::Record>,
-    machine: StarkMachine<SC, A>,
-    pk: StarkProvingKey<SC>,
-    vk: StarkVerifyingKey<SC>,
-) -> Result<MachineProof<SC>, MachineVerificationError<SC>>
-where
-    A: MachineAir<SC::Val>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + Air<LookupBuilder<Val<SC>>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
-        + Air<SymbolicAirBuilder<SC::Val>>,
-    A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig,
-    SC::Val: p3_field::PrimeField32,
-    SC::Challenger: Clone,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
-    OpeningProof<SC>: Send + Sync,
-{
-    let prover = CpuProver::new(machine);
-    run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)
+    Ok(())
 }
 
 pub fn trace_checkpoint<SC: StarkGenericConfig>(
@@ -747,75 +736,3 @@ where
 
     (records, runtime.report)
 }
-
-fn reset_seek(file: &mut File) {
-    file.seek(std::io::SeekFrom::Start(0)).expect("failed to seek to start of tempfile");
-}
-
-#[cfg(debug_assertions)]
-#[cfg(not(doctest))]
-pub fn uni_stark_prove<SC, A>(
-    config: &SC,
-    air: &A,
-    challenger: &mut SC::Challenger,
-    trace: RowMajorMatrix<SC::Val>,
-) -> Proof<UniConfig<SC>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, SC::Val>>,
-{
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, challenger, trace, &vec![])
-}
-
-#[cfg(not(debug_assertions))]
-pub fn uni_stark_prove<SC, A>(
-    config: &SC,
-    air: &A,
-    challenger: &mut SC::Challenger,
-    trace: RowMajorMatrix<SC::Val>,
-) -> Proof<UniConfig<SC>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>,
-{
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, challenger, trace, &vec![])
-}
-
-#[cfg(debug_assertions)]
-#[cfg(not(doctest))]
-pub fn uni_stark_verify<SC, A>(
-    config: &SC,
-    air: &A,
-    challenger: &mut SC::Challenger,
-    proof: &Proof<UniConfig<SC>>,
-) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, SC::Val>>,
-{
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![])
-}
-
-#[cfg(not(debug_assertions))]
-pub fn uni_stark_verify<SC, A>(
-    config: &SC,
-    air: &A,
-    challenger: &mut SC::Challenger,
-    proof: &Proof<UniConfig<SC>>,
-) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>,
-{
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![])
-}
-
-use p3_air::Air;
-use p3_matrix::dense::RowMajorMatrix;
-use p3_uni_stark::Proof;

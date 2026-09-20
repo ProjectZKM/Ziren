@@ -1,10 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    events::{MemoryReadRecord, MemoryWriteRecord},
-    OptionU32,
-};
-
 use super::memory::MemoryRecordEnum;
 
 /// CPU Event.
@@ -21,110 +16,133 @@ pub struct CpuEvent {
     pub next_pc: u32,
     /// The next after the next program counter.
     pub next_next_pc: u32,
-    /// The first operand.
-    pub a: u32,
-    /// The first operand memory record.
-    pub a_record: Option<MemoryRecordEnum>,
-    /// The second operand.
-    pub b: u32,
-    /// The second operand memory record.
-    pub b_record: Option<MemoryRecordEnum>,
-    /// The third operand.
-    pub c: u32,
-    /// The third operand memory record.
-    pub c_record: Option<MemoryRecordEnum>,
-    /// The fourth operand.
-    pub hi: Option<u32>,
-    /// The fourth operand memory record.
-    pub hi_record: Option<MemoryRecordEnum>,
-    /// The memory record.
-    pub memory_record: Option<MemoryRecordEnum>,
     /// The exit code.
     pub exit_code: u32,
 }
 
-#[derive(Debug, Copy, Clone)]
+/// A REGISTER read as the frame consumes it: the tag plus the three values
+/// `RegisterAccessCols::populate_access` actually witnesses.
+///
+/// A register access never crosses a shard boundary — `populate_access` records
+/// that `prev_shard` "is not witnessed, because it is guaranteed to equal
+/// `shard`" — so the `shard` / `prev_shard` pair of the wrapped
+/// `MemoryReadRecord` was 8 B per operand per cycle that reached no column.
+/// The equality they existed to assert is now checked once, here, at the
+/// conversion, where both are still in hand.
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[repr(C)]
-pub struct CpuEventFfi {
-    /// The clock cycle.
-    pub clk: u32,
-    /// The program counter.
-    pub pc: u32,
-    /// The next program counter.
-    pub next_pc: u32,
-    /// The next after the next program counter.
-    pub next_next_pc: u32,
-    /// The first operand.
-    pub a: u32,
-    /// The first operand memory record.
-    pub a_record: OptionMemoryRecordEnum,
-    /// The second operand.
-    pub b: u32,
-    /// The second operand memory record.
-    pub b_record: OptionMemoryRecordEnum,
-    /// The third operand.
-    pub c: u32,
-    /// The third operand memory record.
-    pub c_record: OptionMemoryRecordEnum,
-    /// The fourth operand.
-    pub hi: OptionU32,
-    /// The fourth operand memory record.
-    pub hi_record: OptionMemoryRecordEnum,
-    /// The memory record.
-    pub memory_record: OptionMemoryRecordEnum,
-    /// The exit code.
-    pub exit_code: u32,
+pub struct OptionMemoryReadRecord {
+    pub tag: OptionMemoryRecordEnumTag,
+    /// The value read.
+    pub value: u32,
+    /// The access timestamp.
+    pub timestamp: u32,
+    /// The timestamp of the previous access to this register.
+    pub prev_timestamp: u32,
 }
 
-impl From<&CpuEvent> for CpuEventFfi {
-    fn from(event: &CpuEvent) -> Self {
-        Self {
-            clk: event.clk,
-            pc: event.pc,
-            next_pc: event.next_pc,
-            next_next_pc: event.next_next_pc,
-            a: event.a,
-            a_record: event.a_record.into(),
-            b: event.b,
-            b_record: event.b_record.into(),
-            c: event.c,
-            c_record: event.c_record.into(),
-            hi: event.hi.into(),
-            hi_record: event.hi_record.into(),
-            memory_record: event.memory_record.into(),
-            exit_code: event.exit_code,
+impl OptionMemoryReadRecord {
+    /// The absent access; also what a `Write` collapses to, since nothing
+    /// consumes the write arm of a read-only operand.
+    #[must_use]
+    pub const fn none(tag: OptionMemoryRecordEnumTag) -> Self {
+        Self { tag, value: 0, timestamp: 0, prev_timestamp: 0 }
+    }
+}
+
+impl From<Option<MemoryRecordEnum>> for OptionMemoryReadRecord {
+    fn from(record: Option<MemoryRecordEnum>) -> Self {
+        match record {
+            Some(MemoryRecordEnum::Read(read)) => {
+                debug_assert_eq!(
+                    read.shard, read.prev_shard,
+                    "register read at addr-time {} has prev_shard {} != shard {}: the \
+                     MemoryBump shadow read is missing",
+                    read.timestamp, read.prev_shard, read.shard
+                );
+                OptionMemoryReadRecord {
+                    tag: OptionMemoryRecordEnumTag::Read,
+                    value: read.value,
+                    timestamp: read.timestamp,
+                    prev_timestamp: read.prev_timestamp,
+                }
+            }
+            Some(MemoryRecordEnum::Write(_)) => Self::none(OptionMemoryRecordEnumTag::Write),
+            None => Self::none(OptionMemoryRecordEnumTag::None),
         }
     }
 }
 
+/// A REGISTER read-and-write as the frame consumes it.  The read and write
+/// arms differ in exactly one witnessed column — `prev_value`, which a read
+/// leaves equal to its own `value` — so they collapse into one record and the
+/// consumer no longer branches on the tag except to skip an absent access.
+///
+/// See [`OptionMemoryReadRecord`] for why `shard` / `prev_shard` are gone.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[repr(C)]
 pub struct OptionMemoryRecordEnum {
     pub tag: OptionMemoryRecordEnumTag,
-    pub read: MemoryReadRecord,
-    pub write: MemoryWriteRecord,
+    /// The value after the access.
+    pub value: u32,
+    /// The access timestamp.
+    pub timestamp: u32,
+    /// The timestamp of the previous access to this register.
+    pub prev_timestamp: u32,
+    /// The value BEFORE the access: a write's `prev_value`, a read's own
+    /// `value` — which is what `RegisterReadWriteCols::populate` wrote into the
+    /// `prev_value` column for a read.
+    pub prev_value: u32,
+}
+
+impl OptionMemoryRecordEnum {
+    /// The absent access.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self {
+            tag: OptionMemoryRecordEnumTag::None,
+            value: 0,
+            timestamp: 0,
+            prev_timestamp: 0,
+            prev_value: 0,
+        }
+    }
 }
 
 impl From<Option<MemoryRecordEnum>> for OptionMemoryRecordEnum {
     fn from(record: Option<MemoryRecordEnum>) -> Self {
         match record {
-            Some(record) => match record {
-                MemoryRecordEnum::Read(read) => OptionMemoryRecordEnum {
+            Some(MemoryRecordEnum::Read(read)) => {
+                debug_assert_eq!(
+                    read.shard, read.prev_shard,
+                    "register read at addr-time {} has prev_shard {} != shard {}: the \
+                     MemoryBump shadow read is missing",
+                    read.timestamp, read.prev_shard, read.shard
+                );
+                OptionMemoryRecordEnum {
                     tag: OptionMemoryRecordEnumTag::Read,
-                    read,
-                    write: MemoryWriteRecord::default(),
-                },
-                MemoryRecordEnum::Write(write) => OptionMemoryRecordEnum {
+                    value: read.value,
+                    timestamp: read.timestamp,
+                    prev_timestamp: read.prev_timestamp,
+                    prev_value: read.value,
+                }
+            }
+            Some(MemoryRecordEnum::Write(write)) => {
+                debug_assert_eq!(
+                    write.shard, write.prev_shard,
+                    "register write at addr-time {} has prev_shard {} != shard {}: the \
+                     MemoryBump shadow read is missing",
+                    write.timestamp, write.prev_shard, write.shard
+                );
+                OptionMemoryRecordEnum {
                     tag: OptionMemoryRecordEnumTag::Write,
-                    read: MemoryReadRecord::default(),
-                    write,
-                },
-            },
-            None => OptionMemoryRecordEnum {
-                tag: OptionMemoryRecordEnumTag::None,
-                read: MemoryReadRecord::default(),
-                write: MemoryWriteRecord::default(),
-            },
+                    value: write.value,
+                    timestamp: write.timestamp,
+                    prev_timestamp: write.prev_timestamp,
+                    prev_value: write.prev_value,
+                }
+            }
+            None => Self::none(),
         }
     }
 }

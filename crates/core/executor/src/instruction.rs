@@ -392,7 +392,7 @@ impl Instruction {
             // MTLO: lo = rs
             (0b000000, 0b010011) => Ok(Self::new(Opcode::ADD, 32, rs, 0, false, true)), // MTLO: lo = rs
             // SYNC (nop)
-            (0b000000, 0b001111) => Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true)), // SYNC
+            (0b000000, 0b001111) => Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true)), // SYNC
             // CLZ: rd = count_leading_zeros(rs)
             (0b011100, 0b100000) => Ok(Self::new(Opcode::CLZ, rd, rs, 0, false, true)), // CLZ: rd = count_leading_zeros(rs)
             // CLO: rd = count_leading_ones(rs)
@@ -403,23 +403,28 @@ impl Instruction {
             (0x00, 0x09) => Ok(Self::new(Opcode::Jump, rd, rs, 0, false, true)), // JALR
             (0x01, _) => {
                 if rt == 1 {
-                    // BGEZ
+                    // BGEZ.  The zero comparand is READ FROM REGISTER 0
+                    // rather than carried as an immediate (zkVM-internal
+                    // normalisation, like the SYNC-class decodes): the value
+                    // compared is identically zero, and it makes every branch
+                    // I-type — `op_b` a register, `op_c` the offset — which
+                    // the typed frame relies on.
                     Ok(Self::new(
                         Opcode::BGEZ,
                         rs as u8,
                         0u32,
                         offset_ext16.overflowing_shl(2).0,
-                        true,
+                        false,
                         true,
                     ))
                 } else if rt == 0 {
-                    // BLTZ
+                    // BLTZ — zero comparand from register 0, as above.
                     Ok(Self::new(
                         Opcode::BLTZ,
                         rs as u8,
                         0u32,
                         offset_ext16.overflowing_shl(2).0,
-                        true,
+                        false,
                         true,
                     ))
                 } else if rt == 0x11 && rs == 0 {
@@ -434,7 +439,7 @@ impl Instruction {
                     ))
                 } else if rt == 0x1f {
                     // SYNCI
-                    Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true))
+                    Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true))
                 } else {
                     Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 }
@@ -461,22 +466,22 @@ impl Instruction {
                 false,
                 true,
             )),
-            // BLEZ
+            // BLEZ — zero comparand from register 0 (see BGEZ).
             (0x06, _) => Ok(Self::new(
                 Opcode::BLEZ,
                 rs as u8,
                 0u32,
                 offset_ext16.overflowing_shl(2).0,
-                true,
+                false,
                 true,
             )),
-            // BGTZ
+            // BGTZ — zero comparand from register 0 (see BGEZ).
             (0x07, _) => Ok(Self::new(
                 Opcode::BGTZ,
                 rs as u8,
                 0u32,
                 offset_ext16.overflowing_shl(2).0,
-                true,
+                false,
                 true,
             )),
 
@@ -526,8 +531,22 @@ impl Instruction {
             // SLTU: rd = rs < rt
             (0b000000, 0b101011) => Ok(Self::new(Opcode::SLTU, rd, rs, rt, false, false)), // SLTU: rd = rs < rt
 
-            // LUI: rt = imm << 16
-            (0b001111, _) => Ok(Self::new(Opcode::SLL, rt as u8, offset_ext16, 16, true, true)), // LUI: rt = imm << 16
+            // LUI: rt = imm << 16.  Decoded as an immediate ADD of the
+            // pre-shifted constant rather than an `SLL` whose FIRST operand is
+            // an immediate: the architectural effect (`rt = imm << 16`, one
+            // cycle) is identical, and it keeps every shift-chip row a pure
+            // operand form — `op_b` a register, `op_c` the shamt — which the
+            // typed frames rely on.  (zkVM-internal normalisation, like the
+            // SYNC-class decodes above; the sign-extension bits of the old
+            // `op_b` immediate shifted out anyway.)
+            (0b001111, _) => Ok(Self::new(
+                Opcode::ADD,
+                rt as u8,
+                0,
+                offset_ext16.overflowing_shl(16).0,
+                false,
+                true,
+            )), // LUI: rt = imm << 16
             // AND: rd = rs & rt
             (0b000000, 0b100100) => Ok(Self::new(Opcode::AND, rd, rs, rt, false, false)), // AND: rd = rs & rt
             // OR: rd = rs | rt
@@ -545,7 +564,7 @@ impl Instruction {
             // SYSCALL
             (0b000000, 0b001100) => Ok(Self::new(Opcode::SYSCALL, 2, 4, 5, false, false)), // Syscall
             // PREF (nop)
-            (0b110011, _) => Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true)), // Pref
+            (0b110011, _) => Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true)), // Pref
             // TEQ
             (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs as u8, rt, 0, false, true)), // teq
             (0b011111, 0b100000) => {

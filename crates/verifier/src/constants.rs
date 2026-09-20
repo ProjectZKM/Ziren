@@ -15,13 +15,20 @@ pub(crate) enum CompressedPointFlag {
     Infinity = COMPRESSED_INFINITY as isize,
 }
 
-impl From<u8> for CompressedPointFlag {
-    fn from(val: u8) -> Self {
+/// `MASK` keeps the top TWO bits, so a masked byte has four possible values and
+/// only three of them name a flag: `0b00` is unassigned.  That byte comes
+/// straight off the wire (`deserialize_with_flags` reads `buf[0] & MASK`), so
+/// the conversion has to be fallible -- as an infallible `From` it panicked
+/// inside a `Result`-returning verifier on a proof anyone can supply.
+impl TryFrom<u8> for CompressedPointFlag {
+    type Error = crate::error::Error;
+
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
         match val {
-            COMPRESSED_POSITIVE => CompressedPointFlag::Positive,
-            COMPRESSED_NEGATIVE => CompressedPointFlag::Negative,
-            COMPRESSED_INFINITY => CompressedPointFlag::Infinity,
-            _ => panic!("Invalid compressed point flag"),
+            COMPRESSED_POSITIVE => Ok(CompressedPointFlag::Positive),
+            COMPRESSED_NEGATIVE => Ok(CompressedPointFlag::Negative),
+            COMPRESSED_INFINITY => Ok(CompressedPointFlag::Infinity),
+            _ => Err(crate::error::Error::InvalidData),
         }
     }
 }

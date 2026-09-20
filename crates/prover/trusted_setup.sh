@@ -8,7 +8,11 @@ echo "--------Prerequisites--------"
 make build-circuits
 
 echo "--------Powers of Tau--------"
-export NB_CONSTRAINTS_LOG2=23
+# Bumped 23->25: the post-soundness wrap verifier R1CS is ~21.75M constraints
+# (>2^24=16.78M), so the ceremony needs ptau >= 2^25 (33.5M). The 2^25 ptau
+# (38.7GB) is pre-downloaded at /data/stephen/ptau25/powersOfTau28_hez_final_25.ptau;
+# symlink it to $FILE (see RUNBOOK) so the `[ -s "$FILE" ]` check skips the wget.
+export NB_CONSTRAINTS_LOG2=25
 URL="https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONSTRAINTS_LOG2}.ptau"
 FILE="powersOfTau28_hez_final.ptau"
 if [ -s "$FILE" ]; then

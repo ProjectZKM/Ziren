@@ -1,17 +1,15 @@
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use std::borrow::BorrowMut;
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, PrecompileEvent, ShaExtendEvent},
+    events::{ByteRecord, PrecompileEvent, ShaExtendEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::air::MachineAir;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::PicusInfo;
 
 use crate::CoreChipError;
 
@@ -28,7 +26,6 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         "ShaExtend".to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         ShaExtendCols::<u8>::picus_info()
     }
@@ -54,11 +51,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         if padded_nb_rows == 2 || padded_nb_rows == 1 {
             padded_nb_rows = 4;
         }
-        for i in nb_rows..padded_nb_rows {
-            let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
-            let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
-            cols.populate_flags(i);
-            rows.push(row);
+        // Padding rows are all-zero: `is_real = 0` makes them contribute nothing
+        // to the `PrecompileChain` bus, so no flag population is needed.
+        for _ in nb_rows..padded_nb_rows {
+            rows.push([F::ZERO; NUM_SHA_EXTEND_COLS]);
         }
 
         // Convert the trace to a row major matrix.
@@ -76,7 +72,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         let blu_batches = events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|(_, event)| {
                     let event = if let PrecompileEvent::ShaExtend(event) = event {
                         event
@@ -113,10 +109,12 @@ impl ShaExtendChip {
             let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
             cols.is_real = F::ONE;
-            cols.populate_flags(j);
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
+            // Loop index `i` for this row: 16, 17, …, 63.  Its sequencing is
+            // pinned by the `PrecompileChain` bus (see `eval_state_bus`).
+            cols.i = F::from_u32((16 + j) as u32);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
 
             cols.w_i_minus_15.populate(event.w_i_minus_15_reads[j], blu);
             cols.w_i_minus_2.populate(event.w_i_minus_2_reads[j], blu);

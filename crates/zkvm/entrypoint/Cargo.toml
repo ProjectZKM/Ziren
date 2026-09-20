@@ -33,3 +33,21 @@ verify = [
 # Use BLAKE3 instead of SHA256 to hash the public values, matching the Groth16 wrap circuit's
 # `imm-wrap-vk` mode. See `zkm-recursion-core`'s `zkm_imm_wrap_vk_mode` for the full picture.
 imm-wrap-vk = ["dep:blake3"]
+
+# The production guest ELF is built from this crate BY PATH (reth-processor
+# patches `zkm-zkvm`/`zkm-lib` onto this tree), so its bytes -- and therefore
+# the program vk that eth-proofs publishes -- move with any source edit here.
+# Style lints are therefore silenced in the MANIFEST rather than with in-source
+# `#[allow]`: a lint level reaches rustc as a flag and cannot perturb guest
+# codegen, whereas editing the `.rs` would rebuild the ELF for a style fix.
+[lints.clippy]
+# Fires on the byte-packing loops (`chunks_exact(8)` -> `as_chunks::<8>()`).
+# Rewriting them touches guest hot paths; defer to a landing that rebuilds and
+# gates the ELF deliberately.
+chunks_exact_to_as_chunks = "allow"
+
+[lints.rust]
+# `#![feature(asm_experimental_arch)]` is consumed by the `asm!` blocks under
+# `cfg(target_os = "zkvm")` (MIPS register operands).  A host-target clippy
+# build compiles those out, so the gate reads as unused there only.
+unused_features = "allow"

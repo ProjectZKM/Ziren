@@ -3,13 +3,15 @@ use core::{
     mem::size_of,
 };
 use std::marker::PhantomData;
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
 use crate::{air::MemoryAirBuilder, utils::pad_rows_fixed_with_err, CoreChipError};
 use generic_array::GenericArray;
 use num::{BigUint, One};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use typenum::U32;
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, EdDecompressEvent, FieldOperation, PrecompileEvent},
@@ -25,11 +27,7 @@ use zkm_curves::{
     CurveError,
 };
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
@@ -44,8 +42,7 @@ pub const NUM_ED_DECOMPRESS_COLS: usize = size_of::<EdDecompressCols<u8>>();
 /// compressed Y (without sign bit).
 ///
 /// After `EdDecompress`, the first 32 bytes of the slice are overwritten with the decompressed X.
-#[derive(Debug, Clone, AlignedBorrow)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct EdDecompressCols<T> {
     pub is_real: T,
@@ -73,9 +70,9 @@ impl<F: PrimeField32> EdDecompressCols<F> {
     ) -> Result<(), CurveError> {
         let mut new_byte_lookup_events = Vec::new();
         self.is_real = F::from_bool(true);
-        self.shard = F::from_canonical_u32(event.shard);
-        self.clk = F::from_canonical_u32(event.clk);
-        self.ptr = F::from_canonical_u32(event.ptr);
+        self.shard = F::from_u32(event.shard);
+        self.clk = F::from_u32(event.clk);
+        self.ptr = F::from_u32(event.ptr);
         self.sign = F::from_bool(event.sign);
         for i in 0..8 {
             self.x_access[i].populate(event.x_memory_records[i], &mut new_byte_lookup_events);
@@ -128,7 +125,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.u.eval(
             builder,
             &self.yy.result,
-            &[AB::Expr::one()].iter(),
+            &[AB::Expr::ONE].iter(),
             FieldOperation::Sub,
             self.is_real,
         );
@@ -137,7 +134,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.dyy.eval(builder, &d_const, &self.yy.result, FieldOperation::Mul, self.is_real);
         self.v.eval(
             builder,
-            &[AB::Expr::one()].iter(),
+            &[AB::Expr::ONE].iter(),
             &self.dyy.result,
             FieldOperation::Add,
             self.is_real,
@@ -152,7 +149,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.x.eval(builder, &self.u_div_v.result, AB::F::ZERO, self.is_real);
         self.neg_x.eval(
             builder,
-            &[AB::Expr::zero()].iter(),
+            &[AB::Expr::ZERO].iter(),
             &self.x.multiplication.result,
             FieldOperation::Sub,
             self.is_real,
@@ -168,7 +165,7 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.eval_memory_access_slice(
             self.shard,
             self.clk,
-            self.ptr.into() + AB::F::from_canonical_u32(32),
+            self.ptr.into() + AB::F::from_u32(32),
             &self.y_access,
             self.is_real,
         );
@@ -184,7 +181,7 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.receive_syscall(
             self.shard,
             self.clk,
-            AB::F::from_canonical_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
+            AB::F::from_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
             self.ptr,
             self.sign,
             self.is_real,
@@ -215,7 +212,6 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
         "EdDecompress".to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         EdDecompressCols::<u8>::picus_info()
     }
@@ -269,10 +265,6 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
             !shard.get_precompile_events(SyscallCode::ED_DECOMPRESS).is_empty()
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<F, E: EdwardsParameters> BaseAir<F> for EdDecompressChip<E> {
@@ -287,7 +279,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &EdDecompressCols<AB::Var> = (*local).borrow();
 
         local.eval::<AB, E::BaseField, E>(builder);
@@ -298,7 +290,7 @@ where
 pub mod tests {
     use test_artifacts::ED_DECOMPRESS_ELF;
     use zkm_core_executor::Program;
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     use crate::utils;
 

@@ -1,6 +1,5 @@
 use std::hash::Hash;
 
-use hashbrown::HashMap;
 use p3_field::{Field, PrimeField32};
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +7,17 @@ use crate::{ByteOpcode, Opcode};
 
 /// The number of different byte operations.
 pub const NUM_BYTE_OPS: usize = 10;
+
+/// Multiplicity map for byte lookups, on a trivial (Fx) hasher.
+///
+/// The key is 6 bytes and the map takes millions of inserts per shard;
+/// SipHash on it measured ~5% of prove-path host cycles (perf, combined
+/// reth).  Iteration order is unspecified under EITHER hasher (std's
+/// RandomState already randomizes per process), so no consumer may depend
+/// on it — the byte-table tracegen scatters multiplicities into fixed rows
+/// and every merge is a commutative add.
+pub type ByteLookupMap =
+    std::collections::HashMap<ByteLookupEvent, usize, rustc_hash::FxBuildHasher>;
 
 /// Byte Lookup Event.
 ///
@@ -35,7 +45,7 @@ pub trait ByteRecord {
     /// Adds a list of sharded [`ByteLookupEvent`]s to the record.
     fn add_byte_lookup_events_from_maps(
         &mut self,
-        new_blu_events_vec: Vec<&HashMap<ByteLookupEvent, usize>>,
+        new_blu_events_vec: Vec<&crate::events::ByteLookupMap>,
     );
 
     /// Adds a list of `ByteLookupEvent`s to the record.
@@ -54,6 +64,20 @@ pub trait ByteRecord {
             a2: 0,
             b: a,
             c: b,
+        });
+    }
+
+    /// Adds a `ByteLookupEvent` to verify `a < 2^bits` against the dedicated
+    /// range table.  `bits` must be at most `MAX_RANGE_BITS` (10) — the table
+    /// is sized for the widths the machine actually emits.
+    fn add_bit_range_check(&mut self, a: u16, bits: u8) {
+        debug_assert!(bits <= 10, "range table is sized for bits <= 10");
+        self.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::Range,
+            a1: a,
+            a2: 0,
+            b: bits,
+            c: 0,
         });
     }
 
@@ -94,6 +118,14 @@ pub trait ByteRecord {
         ls.iter().for_each(|x| self.add_u16_range_check(*x));
     }
 
+    /// Adds `ByteLookupEvent`s to verify that all the field elements in the input slice fit in
+    /// a u16.
+    fn add_u16_range_checks_field<F: PrimeField32>(&mut self, field_values: &[F]) {
+        self.add_u16_range_checks(
+            &field_values.iter().map(|x| x.as_canonical_u32() as u16).collect::<Vec<_>>(),
+        );
+    }
+
     /// Adds a `ByteLookupEvent` to compute the bitwise OR of the two input values.
     fn lookup_or(&mut self, b: u8, c: u8) {
         self.add_byte_lookup_event(ByteLookupEvent {
@@ -119,10 +151,7 @@ impl ByteRecord for Vec<ByteLookupEvent> {
         self.push(blu_event);
     }
 
-    fn add_byte_lookup_events_from_maps(
-        &mut self,
-        new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
-    ) {
+    fn add_byte_lookup_events_from_maps(&mut self, new_events: Vec<&crate::events::ByteLookupMap>) {
         for new_blu_map in new_events {
             for (blu_event, count) in new_blu_map.iter() {
                 self.extend(std::iter::repeat_n(*blu_event, *count));
@@ -131,16 +160,13 @@ impl ByteRecord for Vec<ByteLookupEvent> {
     }
 }
 
-impl ByteRecord for HashMap<ByteLookupEvent, usize> {
+impl ByteRecord for crate::events::ByteLookupMap {
     #[inline]
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
         self.entry(blu_event).and_modify(|e| *e += 1).or_insert(1);
     }
 
-    fn add_byte_lookup_events_from_maps(
-        &mut self,
-        new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
-    ) {
+    fn add_byte_lookup_events_from_maps(&mut self, new_events: Vec<&crate::events::ByteLookupMap>) {
         for new_blu_map in new_events {
             for (blu_event, count) in new_blu_map.iter() {
                 *self.entry(*blu_event).or_insert(0) += count;
@@ -186,7 +212,7 @@ impl ByteOpcode {
     /// Convert the opcode to a field element.
     #[must_use]
     pub fn as_field<F: Field>(self) -> F {
-        F::from_canonical_u8(self as u8)
+        F::from_u8(self as u8)
     }
 }
 
@@ -197,7 +223,7 @@ mod tests {
     #[test]
     fn test_vec_add_byte_lookup_events_from_maps_expands_counts() {
         let event = ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 1, 2);
-        let mut map = HashMap::new();
+        let mut map = crate::events::ByteLookupMap::default();
         map.insert(event, 3);
 
         let mut events = Vec::new();

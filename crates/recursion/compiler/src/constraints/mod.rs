@@ -1,7 +1,7 @@
 pub mod opcodes;
 
 use core::fmt::Debug;
-use p3_field::{FieldExtensionAlgebra, PrimeField};
+use p3_field::{BasedVectorSpace, PrimeField};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
@@ -61,7 +61,7 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
             args: vec![
                 vec![tmp_id.clone()],
                 value
-                    .as_base_slice()
+                    .as_basis_coefficients_slice()
                     .iter()
                     .map(|x| x.as_canonical_biguint().to_string())
                     .collect(),
@@ -87,7 +87,7 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                     opcode: ConstraintOpcode::ImmE,
                     args: vec![
                         vec![a.id()],
-                        b.as_base_slice()
+                        b.as_basis_coefficients_slice()
                             .iter()
                             .map(|x| x.as_canonical_biguint().to_string())
                             .collect(),
@@ -381,6 +381,10 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                     opcode: ConstraintOpcode::CommitCommittedValuesDigest,
                     args: vec![vec![a.id()]],
                 }),
+                DslIr::CircuitCommitVkRoot(a) => constraints.push(Constraint {
+                    opcode: ConstraintOpcode::CommitVkRoot,
+                    args: vec![vec![a.id()]],
+                }),
                 DslIr::CircuitFelts2Ext(a, b) => constraints.push(Constraint {
                     opcode: ConstraintOpcode::CircuitFelts2Ext,
                     args: vec![
@@ -389,6 +393,30 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                         vec![a[1].id()],
                         vec![a[2].id()],
                         vec![a[3].id()],
+                    ],
+                }),
+                DslIr::CircuitExt2Felt5(a, b) => {
+                    constraints.push(Constraint {
+                        opcode: ConstraintOpcode::Ext2Felt5,
+                        args: vec![
+                            vec![a[0].id()],
+                            vec![a[1].id()],
+                            vec![a[2].id()],
+                            vec![a[3].id()],
+                            vec![a[4].id()],
+                            vec![b.id()],
+                        ],
+                    });
+                }
+                DslIr::CircuitFelts2Ext5(a, b) => constraints.push(Constraint {
+                    opcode: ConstraintOpcode::CircuitFelts2Ext5,
+                    args: vec![
+                        vec![b.id()],
+                        vec![a[0].id()],
+                        vec![a[1].id()],
+                        vec![a[2].id()],
+                        vec![a[3].id()],
+                        vec![a[4].id()],
                     ],
                 }),
                 // Ignore cycle tracker instruction.
@@ -407,6 +435,17 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
 
                 // Version 2 instructions
                 DslIr::CircuitV2CommitPublicValues(_) => {}
+                // `ir_par_map_collect` (the per-chip parallel circuit walks)
+                // wraps independent sub-blocks in a `Parallel` op.  The gnark
+                // constraint list is one linear program, and the sub-blocks
+                // write disjoint address ranges, so emitting them in order is
+                // a valid sequential schedule — exactly what the inner
+                // compiler's `compile_block` does per `SeqBlock::Parallel`.
+                DslIr::Parallel(blocks) => {
+                    for block in blocks {
+                        constraints.extend(self.emit(block.ops));
+                    }
+                }
                 _ => panic!("unsupported {instruction:?}"),
             };
         }

@@ -8,12 +8,9 @@ use p3_field::PrimeField32;
 
 use zkm_core_executor::events::{ByteRecord, FieldOperation};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{Polynomial, ZKMAirBuilder};
 
-use super::{
-    util::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
-    util_air::eval_field_operation,
-};
+use super::{util::compute_root_quotient_and_shift, util_air::eval_field_operation};
 use zkm_curves::params::{FieldParameters, Limbs};
 
 use typenum::Unsigned;
@@ -37,8 +34,10 @@ pub struct FieldOpCols<T, P: FieldParameters> {
     /// The result of `a op b`, where a, b are field elements
     pub result: Limbs<T, P::Limbs>,
     pub carry: Limbs<T, P::Limbs>,
-    pub(crate) witness_low: Limbs<T, P::Witness>,
-    pub(crate) witness_high: Limbs<T, P::Witness>,
+    /// The root-quotient witness, offset-shifted into `[0, 2^16)`; one u16-checked limb per
+    /// coefficient (one column and one lookup where a (low, high) byte pair used to be two of
+    /// each).
+    pub(crate) witness: Limbs<T, P::Witness>,
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
@@ -64,7 +63,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         debug_assert_eq!(&carry * modulus, a * b + c - &result);
 
         let p_modulus_limbs =
-            modulus.to_bytes_le().iter().map(|x| F::from_canonical_u8(*x)).collect::<Vec<F>>();
+            modulus.to_bytes_le().iter().map(|x| F::from_u8(*x)).collect::<Vec<F>>();
         let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
         let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
@@ -79,20 +78,17 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             P::NB_WITNESS_LIMBS,
         );
 
-        let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
+        let mut p_witness = p_witness;
 
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness_low.resize(P::Witness::USIZE, F::ZERO);
-        p_witness_high.resize(P::Witness::USIZE, F::ZERO);
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        p_witness.resize(P::Witness::USIZE, F::from_canonical_u32(P::WITNESS_OFFSET as u32));
+        self.witness = Limbs(p_witness.try_into().unwrap());
 
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
+        record.add_u16_range_checks_field(&self.witness.0);
 
         (result, carry)
     }
@@ -123,7 +119,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         // the field, but modulus can == the field modulus so it can have 1 extra limb (ex.
         // uint256).
         let p_modulus_limbs =
-            modulus.to_bytes_le().iter().map(|x| F::from_canonical_u8(*x)).collect::<Vec<F>>();
+            modulus.to_bytes_le().iter().map(|x| F::from_u8(*x)).collect::<Vec<F>>();
         let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
         let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
@@ -142,15 +138,13 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             P::NB_BITS_PER_LIMB as u32,
             P::NB_WITNESS_LIMBS,
         );
-        let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
+        let mut p_witness = p_witness;
 
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness_low.resize(P::Witness::USIZE, F::ZERO);
-        p_witness_high.resize(P::Witness::USIZE, F::ZERO);
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        p_witness.resize(P::Witness::USIZE, F::from_canonical_u32(P::WITNESS_OFFSET as u32));
+        self.witness = Limbs(p_witness.try_into().unwrap());
 
         result
     }
@@ -175,7 +169,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             // If doing the subtraction operation, a - b = result, equivalent to a = result + b.
             FieldOperation::Sub => {
                 let result = (modulus.clone() + a - b) % modulus;
-                // We populate the carry, witness_low, witness_high as if we were doing an addition
+                // We populate the carry and witness as if we were doing an addition
                 // with result + b. But we populate `result` with the actual result
                 // of the subtraction because those columns are expected to contain
                 // the result by the user. Note that this reversal means we have to
@@ -203,7 +197,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
                             (a * b.modpow(&(modulus.clone() - 2u32), &modulus.clone())) % modulus.clone();
                     }
                 }
-                // We populate the carry, witness_low, witness_high as if we were doing a
+                // We populate the carry and witness as if we were doing a
                 // multiplication with result * b. But we populate `result` with the
                 // actual result of the multiplication because those columns are
                 // expected to contain the result by the user. Note that this
@@ -219,8 +213,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
+        record.add_u16_range_checks_field(&self.witness.0);
 
         result
     }
@@ -273,6 +266,103 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_mul = p_a_param.clone() * p_b.clone();
         let p_div = p_res_param * p_b.clone();
         let p_op = p_add * is_add + p_sub * is_sub + p_mul * is_mul + p_div * is_div;
+
+        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
+    }
+
+    /// Add/sub/mul, no division — for the fused `Fp` precompile chip.
+    ///
+    /// Semantically IDENTICAL to [`Self::eval_variable`] with `is_div = 0`, and
+    /// identical for the same reason [`Self::eval_addsub`] is: the selector
+    /// being a compile-time zero does not stop `eval_variable` building
+    /// `p_div = p_res * p_b`, an entire `NUM_LIMBS^2` expression tree, before
+    /// multiplying it away.
+    ///
+    /// `fptower::fp` passes `AB::F::ZERO` for `is_div` on every row, so the
+    /// whole chip has been paying for a second convolution it can never reach.
+    /// `Bn254FpOpAssign` is 1,182,662 rows on a BN254-heavy block, the single
+    /// largest precompile term there, so this is the cheapest large reduction
+    /// available: it needs no new chip and no executor change.
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval_addsubmul<AB: ZKMAirBuilder<Var = V>>(
+        &self,
+        builder: &mut AB,
+        a: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        b: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        modulus: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        is_add: impl Into<AB::Expr> + Clone,
+        is_sub: impl Into<AB::Expr> + Clone,
+        is_mul: impl Into<AB::Expr> + Clone,
+        is_real: impl Into<AB::Expr> + Clone,
+    ) where
+        V: Into<AB::Expr>,
+        Limbs<V, P::Limbs>: Copy,
+    {
+        let p_a_param: Polynomial<AB::Expr> = (a).clone().into();
+        let p_b: Polynomial<AB::Expr> = (b).clone().into();
+        let p_res_param: Polynomial<AB::Expr> = self.result.into();
+
+        let is_add: AB::Expr = is_add.into();
+        let is_sub: AB::Expr = is_sub.into();
+        let is_mul: AB::Expr = is_mul.into();
+
+        // `eval_variable` with is_div = 0, term for term.
+        let p_result =
+            p_res_param.clone() * (is_add.clone() + is_mul.clone()) + p_a_param.clone() * is_sub.clone();
+        let p_add = p_a_param.clone() + p_b.clone();
+        let p_sub = p_res_param + p_b.clone();
+        let p_mul = p_a_param * p_b;
+        let p_op = p_add * is_add + p_sub * is_sub + p_mul * is_mul;
+
+        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
+    }
+
+    /// Add/sub only: `result = a + b mod M` under `is_add`, `a - b mod M` under `is_sub`.
+    ///
+    /// Semantically IDENTICAL to [`Self::eval_variable`] called with
+    /// `is_mul = is_div = 0` — substitute the zeros into its `p_result` and
+    /// `p_op` and this is what remains — but it does not BUILD the terms it
+    /// then multiplies away.
+    ///
+    /// That distinction is the whole point.  `eval_variable` constructs
+    /// `p_mul = p_a * p_b` and `p_div = p_res * p_b` unconditionally, and a
+    /// polynomial product over `NUM_LIMBS` limbs is a `NUM_LIMBS^2` expression
+    /// tree.  Multiplying an already-built tree by a compile-time zero does not
+    /// delete its nodes, so an add/sub-only caller still pays the convolution.
+    ///
+    /// MEASURED (Sep 2026): `Bn254Fp2AddSubAssign` — a chip that can only add or
+    /// subtract, and which already passes `AB::F::ZERO` for both `is_mul` and
+    /// `is_div` — has tape 18,353, i.e. 2 x 9,176, exactly two copies of the
+    /// FUSED `Bn254FpOpAssign` chip's 9,215.  It was paying in full for a 32x32
+    /// = 1,024-product convolution it can never reach.
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval_addsub<AB: ZKMAirBuilder<Var = V>>(
+        &self,
+        builder: &mut AB,
+        a: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        b: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        modulus: &(impl Into<Polynomial<AB::Expr>> + Clone),
+        is_add: impl Into<AB::Expr> + Clone,
+        is_sub: impl Into<AB::Expr> + Clone,
+        is_real: impl Into<AB::Expr> + Clone,
+    ) where
+        V: Into<AB::Expr>,
+        Limbs<V, P::Limbs>: Copy,
+    {
+        let p_a_param: Polynomial<AB::Expr> = (a).clone().into();
+        let p_b: Polynomial<AB::Expr> = (b).clone().into();
+        let p_res_param: Polynomial<AB::Expr> = self.result.into();
+
+        let is_add: AB::Expr = is_add.into();
+        let is_sub: AB::Expr = is_sub.into();
+
+        // Mirrors `eval_variable` with the mul/div selectors set to zero:
+        //   add:  witness the result, constrain  a + b       == result (mod M)
+        //   sub:  witness `a`,        constrain  result + b  == a      (mod M)
+        let p_result = p_res_param.clone() * is_add.clone() + p_a_param.clone() * is_sub.clone();
+        let p_add = p_a_param + p_b.clone();
+        let p_sub = p_res_param + p_b;
+        let p_op = p_add * is_add + p_sub * is_sub;
 
         self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
     }
@@ -345,15 +435,13 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_carry: Polynomial<<AB as AirBuilder>::Expr> = self.carry.into();
         let p_op_minus_result: Polynomial<AB::Expr> = p_op - &p_result;
         let p_vanishing = p_op_minus_result - &(&p_carry * &p_modulus);
-        let p_witness_low = self.witness_low.0.iter().into();
-        let p_witness_high = self.witness_high.0.iter().into();
-        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high);
+        let p_witness = self.witness.0.iter().into();
+        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness);
 
         // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
-        builder.slice_range_check_u8(p_witness_low.coefficients(), is_real.clone());
-        builder.slice_range_check_u8(p_witness_high.coefficients(), is_real);
+        builder.slice_range_check_u16(&self.witness.0, is_real);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -377,10 +465,11 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
 mod tests {
     use num::BigUint;
     use p3_air::BaseAir;
+    use p3_air::WindowAccess;
     use p3_field::{Field, PrimeField32};
     use zkm_core_executor::{ExecutionRecord, Program};
     use zkm_curves::params::FieldParameters;
-    use zkm_stark::{
+    use zkm_pcs::{
         air::{MachineAir, ZKMAirBuilder},
         StarkGenericConfig,
     };
@@ -392,9 +481,9 @@ mod tests {
     use core::borrow::{Borrow, BorrowMut};
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
-    use p3_matrix::{dense::RowMajorMatrix, Matrix};
+    use p3_matrix::dense::RowMajorMatrix;
     use rand::thread_rng;
     use std::mem::size_of;
     use zkm_core_executor::events::ByteRecord;
@@ -402,7 +491,7 @@ mod tests {
         edwards::ed25519::Ed25519BaseField, weierstrass::secp256k1::Secp256k1BaseField,
     };
     use zkm_derive::AlignedBorrow;
-    use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
+    use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
 
     #[derive(AlignedBorrow, Debug, Clone)]
     pub struct TestCols<T, P: FieldParameters> {
@@ -501,7 +590,7 @@ mod tests {
     {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
-            let local = main.row_slice(0);
+            let local = main.current_slice();
             let local: &TestCols<AB::Var, P> = (*local).borrow();
             local.a_op_b.eval(builder, &local.a, &local.b, self.operation, AB::F::ONE);
         }

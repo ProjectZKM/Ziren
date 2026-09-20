@@ -3,7 +3,7 @@ use p3_koala_bear::KoalaBear;
 use p3_util::log2_ceil_usize;
 use zkm_core_executor::{Executor, MipsAirId, Program, ZKMContext};
 use zkm_core_machine::{io::ZKMStdin, mips::MipsAir, shape::CoreShapeConfig, utils::setup_logger};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

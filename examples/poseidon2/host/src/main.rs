@@ -33,7 +33,7 @@ fn main() {
     let hash = proof.public_values.read::<[u8; 32]>();
     assert_eq!(
         hex::encode(&hash),
-        "ae45b14fe23b9f584c76c67d4d9ef6635a27b553a7114427584cc87ba8919866"
+        "2f8cb27c50875703e37d9b648e95ae6543cc305f88e61976221fa34fe0354849"
     );
 
     // Verify proof and public values

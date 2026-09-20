@@ -25,7 +25,7 @@ dashu = "0.4.2"
 thiserror = "1.0.63"
 tracing = { workspace = true }
 
-zkm-stark = { workspace = true }
+zkm-poly = { workspace = true }
 
 zkm-primitives = { workspace = true }
 p3-field = { workspace = true }

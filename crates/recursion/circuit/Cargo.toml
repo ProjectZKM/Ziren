@@ -9,6 +9,21 @@ repository = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 
+# `ha_measure_base` is a NON-PRODUCTION measurement cfg: build with
+# `RUSTFLAGS="--cfg ha_measure_base"` to compile out the height-agnostic
+# round-count soundness binding (assert_num_vars_le_max call site in
+# basefold_verifier.rs) so the base instruction count can be measured for
+# the byte-identical delta.  Default builds DO include the binding.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(ha_measure_base)'] }
+
+[lints.clippy]
+# The jagged/BaseFold generics (`Challenger` x `Mmcs` x `Dft` over two rings)
+# make the honest signatures wide; factoring them behind aliases hides which
+# ring a function is instantiated for, which is exactly what the soundness
+# review needs to read off the signature.
+type_complexity = "allow"
+
 [dependencies]
 p3-air = { workspace = true }
 p3-field = { workspace = true }
@@ -24,7 +39,7 @@ p3-koala-bear = { workspace = true }
 
 zkm-core-machine = { workspace = true }
 zkm-core-executor = { workspace = true }
-zkm-stark = { workspace = true }
+zkm-pcs = { workspace = true }
 zkm-derive = { workspace = true }
 zkm-recursion-core = { workspace = true }
 zkm-recursion-compiler = { workspace = true }
@@ -40,8 +55,8 @@ num-traits = "0.2.19"
 rayon = "1.10.0"
 
 [dev-dependencies]
-#zkm-core-executor = { workspace = true, features = ["programs"] }
 zkm-core-executor = { workspace = true }
+zkm-test-fixtures = { workspace = true }
 ff = { version = "0.13", features = ["derive", "derive_bits"] }
 p3-challenger = { workspace = true }
 p3-symmetric = { workspace = true }
@@ -55,4 +70,4 @@ test-artifacts = { workspace = true }
 [features]
 default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
-debug = ["zkm-core-machine/debug"]
+debug = ["zkm-core-machine/debug", "zkm-test-fixtures/debug"]

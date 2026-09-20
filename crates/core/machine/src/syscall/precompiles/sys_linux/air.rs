@@ -1,10 +1,9 @@
 use core::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::FieldAlgebra;
-use p3_matrix::Matrix;
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::{syscalls::SyscallCode, Register};
-use zkm_stark::{
+use zkm_pcs::{
     air::{LookupScope, ZKMAirBuilder},
     Word,
 };
@@ -18,7 +17,7 @@ use crate::{
     memory::MemoryCols,
     operations::{AddOperation, GtColsBytes, IsZeroOperation},
 };
-use zkm_stark::air::BaseAirBuilder;
+use zkm_pcs::air::BaseAirBuilder;
 
 impl<F> BaseAir<F> for SysLinuxChip {
     fn width(&self) -> usize {
@@ -32,57 +31,57 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &SysLinuxCols<AB::Var> = (*local).borrow();
 
-        // ── Canonical syscall decoder ──────────────────────────────────
+        // Canonical syscall decoder
         let sid: AB::Expr = local.syscall_id.into();
 
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_MMAP as u32),
             local.decode_mmap,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_MMAP2 as u32),
             local.decode_mmap2,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_CLONE as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_CLONE as u32),
             local.decode_clone,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_EXT_GROUP as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_EXT_GROUP as u32),
             local.decode_exit_group,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_BRK as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_BRK as u32),
             local.decode_brk,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_FCNTL as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_FCNTL as u32),
             local.decode_fnctl,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_READ as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_READ as u32),
             local.decode_read,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_WRITE as u32),
+            sid - AB::Expr::from_u32(SyscallCode::SYS_WRITE as u32),
             local.decode_write,
             local.is_real.into(),
         );
@@ -109,7 +108,7 @@ where
         let is_nop: AB::Expr = local.is_real.into() - recognized_sum;
         builder.when(local.is_real).assert_bool(is_nop.clone());
 
-        // ── Canonical a0 / a1 decoder ──────────────────────────────────
+        // Canonical a0 / a1 decoder
         let a0_reduce = local.a0.reduce::<AB>();
         IsZeroOperation::<AB::F>::eval(
             builder,
@@ -139,7 +138,7 @@ where
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a1_reduce - AB::Expr::from_canonical_u32(3),
+            a1_reduce - AB::Expr::from_u32(3),
             local.decode_a1_3,
             local.is_real.into(),
         );
@@ -150,18 +149,18 @@ where
         let is_a1_1 = local.decode_a1_1.result;
         let is_a1_3 = local.decode_a1_3.result;
 
-        // ── Composite flags ────────────────────────────────────────────
+        // Composite flags
         builder.assert_eq(local.is_mmap_a0_0, local.is_mmap * is_a0_0);
         builder.assert_eq(local.is_fnctl_a1_1, is_fnctl * is_a1_1);
         builder.assert_eq(local.is_fnctl_a1_3, is_fnctl * is_a1_3);
 
-        // ── Structural read-only guard for inorout ─────────────────────
+        // Structural read-only guard for inorout
         // brk and write use inorout as a read; only mmap(a0==0) writes.
         builder
             .when(is_brk + is_write)
             .assert_word_eq(*local.inorout.value(), local.inorout.prev_value);
 
-        // ── Branch evaluations ─────────────────────────────────────────
+        // Branch evaluations
         self.eval_brk(builder, local, is_brk);
         self.eval_clone(builder, local, is_clone);
         self.eval_exit_group(builder, local, is_exit_group);
@@ -171,16 +170,16 @@ where
         self.eval_mmap(builder, local, is_a0_0);
         self.eval_nop(builder, local, is_nop);
 
-        // ── A3 output ──────────────────────────────────────────────────
+        // A3 output
         builder.eval_memory_access(
             local.shard,
             local.clk,
-            AB::Expr::from_canonical_u32(Register::A3 as u32),
+            AB::Expr::from_u32(Register::A3 as u32),
             &local.output,
             local.is_real,
         );
 
-        // ── Cross-chip interactions ────────────────────────────────────
+        // Cross-chip interactions
         builder.receive_syscall(
             local.shard,
             local.clk,
@@ -212,7 +211,7 @@ impl SysLinuxChip {
         builder.eval_memory_access(
             local.shard,
             local.clk,
-            AB::Expr::from_canonical_u32(Register::BRK as u32),
+            AB::Expr::from_u32(Register::BRK as u32),
             &local.inorout,
             is_brk,
         );
@@ -258,30 +257,27 @@ impl SysLinuxChip {
         builder.when(local.is_mmap).slice_range_check_u8(&local.a0.0, local.is_mmap.into());
         builder.when(local.is_mmap).slice_range_check_u8(&local.a1.0, local.is_mmap.into());
 
-        // ── Byte-level a1 decomposition ────────────────────────────────
+        // Byte-level a1 decomposition
         // Both nibbles of a1[1] are decomposed into 4 boolean bits each,
         // proving a1_byte1_lo ∈ [0,15] and a1_byte1_hi ∈ [0,15] without byte lookups.
         let mut a1_byte1_lo = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_lo_bits[bit]);
-            a1_byte1_lo =
-                a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
+            a1_byte1_lo = a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_u32(1 << bit);
         }
         let mut a1_byte1_hi = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_hi_bits[bit]);
-            a1_byte1_hi =
-                a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
+            a1_byte1_hi = a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_u32(1 << bit);
         }
         builder.when(local.is_mmap).assert_eq(
             local.a1[1],
-            a1_byte1_lo.clone() + a1_byte1_hi.clone() * AB::Expr::from_canonical_u32(16),
+            a1_byte1_lo.clone() + a1_byte1_hi.clone() * AB::Expr::from_u32(16),
         );
 
         // Inline page_offset (not stored). upper_address is no longer needed as a
         // single field expression — the mmap_size bytes are constrained directly.
-        let page_offset: AB::Expr =
-            local.a1[0].into() + a1_byte1_lo * AB::Expr::from_canonical_u32(256);
+        let page_offset: AB::Expr = local.a1[0].into() + a1_byte1_lo * AB::Expr::from_u32(256);
 
         // is_offset_0 = (page_offset == 0), derived from IsZero.
         IsZeroOperation::<AB::F>::eval(
@@ -292,7 +288,7 @@ impl SysLinuxChip {
         );
         let is_offset_0 = local.is_page_offset_zero.result;
 
-        // ── mmap size (byte-level, no reduce()) ──────────────────────────
+        // mmap size (byte-level, no reduce())
         // We avoid `mmap_size.reduce() == size_field` because reduce() can
         // collide modulo the KoalaBear prime for large byte[3] values.
         // Instead we constrain each byte of mmap_size directly.
@@ -304,8 +300,8 @@ impl SysLinuxChip {
         // Unaligned case (is_offset_0 = 0): mmap_size = upper_addr + 0x1000
         //   with carry propagation through bytes 1→2→3.
 
-        let base = AB::Expr::from_canonical_u32(256);
-        let sixteen = AB::Expr::from_canonical_u32(16);
+        let base = AB::Expr::from_u32(256);
+        let sixteen = AB::Expr::from_u32(16);
         // not_aligned = is_mmap_a0_0 * (1 - is_offset_0)
         let not_aligned: AB::Expr = local.is_mmap_a0_0.into() * (AB::Expr::one() - is_offset_0);
 
@@ -356,7 +352,7 @@ impl SysLinuxChip {
         builder.eval_memory_access(
             local.shard,
             local.clk,
-            AB::Expr::from_canonical_u32(Register::HEAP as u32),
+            AB::Expr::from_u32(Register::HEAP as u32),
             &local.inorout,
             local.is_mmap_a0_0,
         );
@@ -458,7 +454,7 @@ impl SysLinuxChip {
         builder.eval_memory_access(
             local.shard,
             local.clk,
-            AB::Expr::from_canonical_u32(Register::A2 as u32),
+            AB::Expr::from_u32(Register::A2 as u32),
             &local.inorout,
             is_write,
         );

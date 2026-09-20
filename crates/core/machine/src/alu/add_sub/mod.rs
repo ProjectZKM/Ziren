@@ -1,38 +1,33 @@
+use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
 
-use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
-    events::{AluEvent, ByteLookupEvent, ByteRecord},
+    events::{AluEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::{
-    air::{MachineAir, ZKMAirBuilder},
-    Word,
-};
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_pcs::air::{MachineAir, PicusInfo, ZKMAirBuilder};
 
 use crate::{
-    operations::AddOperation,
-    utils::{next_power_of_two, zeroed_f_vec},
+    frame::{eval_r_type_frame, RTypeFrameCols},
+    utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
 /// The number of main trace columns for `AddSubChip`.
 pub const NUM_ADD_SUB_COLS: usize = size_of::<AddSubCols<u8>>();
 
-/// A chip that implements addition for the opcode ADD, ADDU, ADDI, ADDIU, SUB and SUBU.
+/// A chip that implements addition for the register-form opcodes ADD, ADDU,
+/// SUB and SUBU.  The immediate forms (ADDI, ADDIU) prove on the narrower
+/// I-type frame in [`super::AddSubImmChip`].
 ///
 /// SUB is basically an ADD with a re-arrangement of the operands and result.
 /// E.g. given the standard ALU op variable name and positioning of `a` = `b` OP `c`,
@@ -42,31 +37,34 @@ pub const NUM_ADD_SUB_COLS: usize = size_of::<AddSubCols<u8>>();
 pub struct AddSubChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Clone, Copy)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
 pub struct AddSubCols<T> {
     /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
 
-    /// Instance of `AddOperation` to handle addition logic in `AddSubChip`'s ALU operations.
-    /// It's result will be `a` for the add operation and `b` for the sub operation.
-    pub add_operation: AddOperation<T>,
-
-    /// The first input operand.  This will be `b` for add operations and `a` for sub operations.
-    pub operand_1: Word<T>,
-
-    /// The second input operand.  This will be `c` for both operations.
-    pub operand_2: Word<T>,
+    /// `is_add * (1 - op_a_0)` — a discarded register-0 result leaves the
+    /// equation ungated (the frame pins the commit to zero, which the true
+    /// sum need not equal).  Materialized to keep the carry constraints at
+    /// degree 3.
+    pub add_gate: T,
+    /// `is_sub * (1 - op_a_0)`.
+    pub sub_gate: T,
 
     /// Flag indicating whether the opcode is `ADD`.
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_add: T,
 
     /// Flag indicating whether the opcode is `SUB`.
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_sub: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every AddSub row is an instruction — the Instruction bus and
+    /// its dependency rows are gone).  Register-form only, so the R-type frame
+    /// carries bare register indices instead of operand words.
+    pub frame: RTypeFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for AddSubChip {
@@ -81,7 +79,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.add_sub_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <AddSubChip as MachineAir<F>>::name(self).as_str(),
@@ -89,7 +87,6 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         Some(nb_rows)
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         AddSubCols::<u8>::picus_info()
     }
@@ -113,8 +110,17 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
                     if idx < input.add_sub_events.len() {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.add_sub_events[idx];
-                        self.event_to_row(event, cols, &mut byte_lookup_events);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut byte_lookup_events,
+                            &input.program,
+                            input.public_values.execution_shard,
+                        );
                     }
+                    // A PADDING row needs no neutralising: the R-type frame's
+                    // register-access multiplicities are `is_real`, which an
+                    // all-zero row leaves at zero.
                 });
             },
         );
@@ -135,11 +141,17 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
             .chunks(chunk_size)
             .par_bridge()
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                     let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    self.event_to_row(
+                        event,
+                        cols,
+                        &mut blu,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
                 });
                 blu
             })
@@ -156,33 +168,32 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
             !shard.add_sub_events.is_empty()
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl AddSubChip {
     /// Create a row from an event.
-    fn event_to_row<F: PrimeField>(
+    fn event_to_row<F: PrimeField32>(
         &self,
         event: &AluEvent,
         cols: &mut AddSubCols<F>,
         blu: &mut impl ByteRecord,
+        program: &Program,
+        shard: u32,
     ) {
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
+
+        // Every AddSub row is a real instruction owning its frame — program
+        // fetch, register access, `(clk, pc)` chaining.
+        cols.frame.populate_from_alu(event, program, shard, blu);
 
         cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
         cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
 
-        let is_add = event.opcode == Opcode::ADD;
-        let operand_1 = if is_add { event.b } else { event.a };
-        let operand_2 = event.c;
-
-        cols.add_operation.populate(blu, operand_1, operand_2);
-        cols.operand_1 = Word::from(operand_1);
-        cols.operand_2 = Word::from(operand_2);
+        let not_a0 = F::ONE - cols.frame.op_a_0;
+        cols.add_gate = cols.is_add * not_a0;
+        cols.sub_gate = cols.is_sub * not_a0;
+        let _ = blu;
     }
 }
 
@@ -198,63 +209,60 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &AddSubCols<AB::Var> = (*local).borrow();
-
-        // Evaluate the addition operation.
-        AddOperation::<AB::F>::eval(
-            builder,
-            local.operand_1,
-            local.operand_2,
-            local.add_operation,
-            local.is_add + local.is_sub,
-        );
-
-        builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
-            Opcode::ADD.as_field::<AB::F>(),
-            local.add_operation.value,
-            local.operand_1,
-            local.operand_2,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
-            local.is_add,
-        );
-
-        // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
-        builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
-            Opcode::SUB.as_field::<AB::F>(),
-            local.operand_1,
-            local.add_operation.value,
-            local.operand_2,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
-            local.is_sub,
-        );
 
         let is_real = local.is_add + local.is_sub;
         builder.assert_bool(local.is_add);
         builder.assert_bool(local.is_sub);
-        builder.assert_bool(is_real);
+        builder.assert_bool(is_real.clone());
+
+        // The addition runs DIRECTLY on the frame's register accesses — no
+        // operand or result mirror columns, and no byte range checks (see the
+        // column doc).  A discarded register-0 result ungates the equation.
+        builder.assert_eq(local.add_gate, local.is_add * (AB::Expr::ONE - local.frame.op_a_0));
+        builder.assert_eq(local.sub_gate, local.is_sub * (AB::Expr::ONE - local.frame.op_a_0));
+        let av = *local.frame.op_a_access.value();
+        let bv = local.frame.op_b_val();
+        let cv = local.frame.op_c_val();
+        // The carries are RECOVERED linear expressions, boolean-asserted under
+        // the case gate (no carry columns): `256*c_out = x_i + y_i - z_i + c_in`
+        // with all words byte-shaped has a unique boolean solution.
+        let base_inv = AB::F::from_u32(256).inverse();
+        // ADD: `a = b + c`.
+        let mut carry = AB::Expr::ZERO;
+        for i in 0..4 {
+            carry = (bv[i] + cv[i] - av[i] + carry) * base_inv;
+            builder
+                .when(local.add_gate)
+                .assert_zero(carry.clone() * (carry.clone() - AB::Expr::ONE));
+        }
+        // SUB: `a = b - c`, verified as `b = a + c`.
+        let mut carry = AB::Expr::ZERO;
+        for i in 0..4 {
+            carry = (av[i] + cv[i] - bv[i] + carry) * base_inv;
+            builder
+                .when(local.sub_gate)
+                .assert_zero(carry.clone() * (carry.clone() - AB::Expr::ONE));
+        }
+
+        // Every real row is an instruction carrying its own program fetch,
+        // register access and `(clk, pc)` chaining (the Instruction bus and
+        // its dependency rows are gone).  ADD/SUB are sequential, so
+        // `next_next_pc` is `next_pc + 4`.
+        eval_r_type_frame(
+            builder,
+            &local.frame,
+            local.is_add * Opcode::ADD.as_field::<AB::F>()
+                + local.is_sub * Opcode::SUB.as_field::<AB::F>(),
+            local.pc.into(),
+            local.next_pc.into(),
+            local.next_pc + AB::Expr::from_u32(4),
+            // ADD/SUB can never halt: the received continuation is `next_pc`.
+            local.next_pc.into(),
+            AB::Expr::ZERO,
+            is_real,
+        );
     }
 }
 
@@ -266,26 +274,25 @@ mod tests {
     use std::sync::LazyLock;
 
     #[cfg(feature = "sys")]
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     #[cfg(feature = "sys")]
     use p3_maybe_rayon::prelude::ParallelIterator;
     use rand::{thread_rng, Rng};
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm_stark::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_core_executor::{ExecutionRecord, Opcode};
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::AddSubChip;
     #[cfg(feature = "sys")]
     use super::{AddSubCols, NUM_ADD_SUB_COLS};
+    use crate::programs::tests::{alu_op, run_instructions};
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
 
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.add_sub_events = vec![AluEvent::new(0, Opcode::ADD, 14, 8, 6)];
+        let shard = run_instructions(alu_op(Opcode::ADD, 8, 6));
+        assert!(!shard.add_sub_events.is_empty());
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
@@ -293,35 +300,52 @@ mod tests {
     }
 
     #[test]
+    fn measure_addsub_degree() {
+        let chip = zkm_pcs::Chip::<KoalaBear, _>::new(AddSubChip::default());
+        // log_quotient_degree = log2_ceil(max_constraint_degree - 1):
+        //   1 => degree 3 ; 2 => degree 4 or 5.
+        println!("ADDSUB_LOG_QUOTIENT_DEGREE={}", chip.log_quotient_degree());
+    }
+
+    #[test]
     fn prove_koala_bear() {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let mut shard = ExecutionRecord::default();
-        for i in 0..255 {
+        // `p3_uni_stark::prove` needs a power-of-two height and
+        // `generate_trace` pads to next_multiple_of_32 only, so make the
+        // REGISTER-form event count exactly 1024: 511 + 511 alu_op triples
+        // (one register-form event each — the two immediate loads land on
+        // `AddSubImm`) plus two bare register-register ADDs.
+        let mut instructions = Vec::new();
+        for _ in 0..511 {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
-            let result = operand_1.wrapping_add(operand_2);
-            shard.add_sub_events.push(AluEvent::new(
-                i << 2,
-                Opcode::ADD,
-                result,
-                operand_1,
-                operand_2,
-            ));
+            instructions.extend(alu_op(Opcode::ADD, operand_1, operand_2));
         }
-        for i in 0..255 {
+        for _ in 0..511 {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
-            let result = operand_1.wrapping_sub(operand_2);
-            shard.add_sub_events.push(AluEvent::new(
-                i << 2,
-                Opcode::SUB,
-                result,
-                operand_1,
-                operand_2,
-            ));
+            instructions.extend(alu_op(Opcode::SUB, operand_1, operand_2));
         }
+        instructions.push(zkm_core_executor::Instruction::new(
+            Opcode::ADD,
+            28,
+            29,
+            30,
+            false,
+            false,
+        ));
+        instructions.push(zkm_core_executor::Instruction::new(
+            Opcode::ADD,
+            27,
+            29,
+            30,
+            false,
+            false,
+        ));
+        let shard = run_instructions(instructions);
+        assert_eq!(shard.add_sub_events.len(), 1024);
 
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
@@ -333,30 +357,17 @@ mod tests {
     }
 
     /// Lazily initialized record for use across multiple tests.
-    /// Consists of random `ADD` and `SUB` instructions.
+    /// Consists of executor-driven `ADD` and `SUB` instructions.
     #[cfg(feature = "sys")]
     static SHARD: LazyLock<ExecutionRecord> = LazyLock::new(|| {
-        let add_sub_events = (0..1)
-            .flat_map(|i| {
-                [{
-                    let operand_1 = 1u32;
-                    let operand_2 = 2u32;
-                    let result = operand_1.wrapping_add(operand_2);
-                    AluEvent::new(i % 2, Opcode::ADD, result, operand_1, operand_2)
-                }]
-            })
-            .collect::<Vec<_>>();
-        let _sub_events = (0..255)
-            .flat_map(|i| {
-                [{
-                    let operand_1 = thread_rng().gen_range(0..u32::MAX);
-                    let operand_2 = thread_rng().gen_range(0..u32::MAX);
-                    let result = operand_1.wrapping_sub(operand_2);
-                    AluEvent::new(i % 2, Opcode::SUB, result, operand_1, operand_2)
-                }]
-            })
-            .collect::<Vec<_>>();
-        ExecutionRecord { add_sub_events, ..Default::default() }
+        let mut instructions = Vec::new();
+        instructions.extend(alu_op(Opcode::ADD, 1, 2));
+        for _ in 0..255 {
+            let operand_1 = thread_rng().gen_range(0..u32::MAX);
+            let operand_2 = thread_rng().gen_range(0..u32::MAX);
+            instructions.extend(alu_op(Opcode::SUB, operand_1, operand_2));
+        }
+        run_instructions(instructions)
     });
 
     #[cfg(feature = "sys")]
@@ -376,7 +387,7 @@ mod tests {
     fn generate_trace_ffi(input: &ExecutionRecord) -> RowMajorMatrix<KoalaBear> {
         use rayon::slice::ParallelSlice;
 
-        use crate::utils::pad_rows_fixed;
+        use crate::utils::pad_rows_mult32;
 
         type F = KoalaBear;
 
@@ -391,8 +402,18 @@ mod tests {
                     .map(|event| {
                         let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                         let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
+                        // Every event is a real instruction, fetched from the
+                        // program by pc exactly as the Rust `event_to_row`
+                        // does.
+                        let instruction: zkm_core_executor::InstructionFfi =
+                            input.program.fetch(event.pc).into();
                         unsafe {
-                            crate::sys::add_sub_event_to_row_koalabear(event, cols);
+                            crate::sys::add_sub_event_to_row_koalabear(
+                                event,
+                                cols,
+                                instruction,
+                                input.public_values.execution_shard,
+                            );
                         }
                         row
                     })
@@ -406,9 +427,57 @@ mod tests {
             rows.extend(row_batch);
         }
 
-        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_ADD_SUB_COLS], None, "AddSub");
+        pad_rows_mult32(
+            &mut rows,
+            // Mirror `generate_trace`'s padding: the R-type frame needs no
+            // neutralising, so a padding row is simply zero.
+            || [F::ZERO; NUM_ADD_SUB_COLS],
+            None,
+            "AddSub",
+        );
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ADD_SUB_COLS)
+    }
+}
+
+#[cfg(test)]
+mod opened_width_tests {
+    use super::AddSubCols;
+    use core::borrow::Borrow;
+    use p3_koala_bear::KoalaBear;
+
+    /// What happens when a verifier hands an AIR a row of the WRONG width.
+    ///
+    /// `AlignedBorrow`'s only length check is a `debug_assert`, so in release it
+    /// is gone and `align_to` yields an EMPTY `shorts` for a short slice, making
+    /// `&shorts[0]` an out-of-bounds index. Either way the result is a PANIC, not
+    /// an error -- and the shard verifier reaches this with `opened_values.chips
+    /// [i].main.local` taken straight from the proof, whose length nothing checks
+    /// against `chip.width()`.
+    ///
+    /// So a malformed proof can abort a `Result`-returning verifier. This test
+    /// pins the mechanism; the fix belongs in the verifier, which should reject
+    /// the shape before any AIR sees it.
+    #[test]
+    fn a_short_row_panics_instead_of_erroring() {
+        let width = core::mem::size_of::<AddSubCols<u8>>();
+        let short = vec![KoalaBear::default(); width - 1];
+        let r = std::panic::catch_unwind(|| {
+            let cols: &AddSubCols<KoalaBear> = short.as_slice().borrow();
+            // Touch a field so nothing is optimised away.
+            let _ = core::hint::black_box(cols.pc);
+        });
+        assert!(r.is_err(), "a short row must not be silently accepted as a valid AIR row");
+    }
+
+    /// An exactly-sized row is fine, so the test above is about the length and
+    /// not about `Borrow` being broken.
+    #[test]
+    fn an_exact_row_borrows() {
+        let width = core::mem::size_of::<AddSubCols<u8>>();
+        let row = vec![KoalaBear::default(); width];
+        let cols: &AddSubCols<KoalaBear> = row.as_slice().borrow();
+        let _ = core::hint::black_box(cols.pc);
     }
 }

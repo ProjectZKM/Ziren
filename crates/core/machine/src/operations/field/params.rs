@@ -5,7 +5,7 @@ use std::slice::Iter;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use zkm_stark::air::Polynomial;
+use zkm_pcs::air::Polynomial;
 use typenum::Unsigned;
 use typenum::{U2, U4};
 
@@ -49,7 +49,7 @@ pub trait FieldParameters:
     fn modulus_field_iter<F: Field>() -> impl Iterator<Item = F> {
         Self::MODULUS
             .iter()
-            .map(|x| F::from_canonical_u8(*x))
+            .map(|x| F::from_u8(*x))
             .take(Self::NB_LIMBS)
     }
 
@@ -64,7 +64,7 @@ pub trait FieldParameters:
     fn to_limbs_field_vec<E: From<F>, F: Field>(x: &BigUint) -> Vec<E> {
         Self::to_limbs(x)
             .into_iter()
-            .map(|x| F::from_canonical_u8(x).into())
+            .map(|x| F::from_u8(x).into())
             .collect::<Vec<_>>()
     }
 

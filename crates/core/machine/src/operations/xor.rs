@@ -1,21 +1,11 @@
-#[cfg(feature = "picus")]
-use core::borrow::Borrow;
-#[cfg(feature = "picus")]
-use core::mem::{size_of, transmute};
-
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode,
 };
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusProjection;
+use zkm_pcs::{air::ZKMAirBuilder, Word};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::ZKMAirBuilder, Word};
-
-#[cfg(feature = "picus")]
-use crate::utils::indices_arr;
 
 /// A set of columns needed to compute the xor of two words.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
@@ -25,57 +15,6 @@ pub struct XorOperation<T> {
     pub value: Word<T>,
 }
 
-#[cfg(feature = "picus")]
-const NUM_XOR_OPERATION_SUMMARY_COLS: usize = size_of::<XorOperationSummaryCols<u8>>();
-
-#[cfg(feature = "picus")]
-const XOR_OPERATION_SUMMARY_COL_MAP: XorOperationSummaryCols<usize> =
-    make_xor_operation_summary_col_map();
-
-#[cfg(feature = "picus")]
-const fn make_xor_operation_summary_col_map() -> XorOperationSummaryCols<usize> {
-    let indices_arr = indices_arr::<NUM_XOR_OPERATION_SUMMARY_COLS>();
-    unsafe {
-        transmute::<[usize; NUM_XOR_OPERATION_SUMMARY_COLS], XorOperationSummaryCols<usize>>(
-            indices_arr,
-        )
-    }
-}
-
-/// Hidden witness layout used when Picus emits the exact XOR AIR as a local
-/// auxiliary module.
-///
-/// The caller should reason only about the semantic interface `(a, b, is_real)
-/// -> value`; the full internal witness row remains existential inside the
-/// summarized module.
-#[derive(AlignedBorrow, Clone, Copy)]
-#[repr(C)]
-#[cfg(feature = "picus")]
-struct XorOperationSummaryCols<T> {
-    pub a: Word<T>,
-    pub b: Word<T>,
-    pub is_real: T,
-    pub cols: XorOperation<T>,
-}
-
-#[cfg(feature = "picus")]
-#[cfg_attr(feature = "picus", derive(PicusProjection))]
-#[cfg_attr(feature = "picus", picus_projection(
-    source = XorOperationSummaryCols<u8>,
-    col_map = XOR_OPERATION_SUMMARY_COL_MAP
-))]
-#[allow(dead_code)]
-struct XorOperationSummaryProjection {
-    #[cfg_attr(feature = "picus", picus(input, path = a))]
-    pub a: Word<u8>,
-    #[cfg_attr(feature = "picus", picus(input, path = b))]
-    pub b: Word<u8>,
-    #[cfg_attr(feature = "picus", picus(input, path = is_real))]
-    pub is_real: u8,
-    #[cfg_attr(feature = "picus", picus(output, path = cols.value))]
-    pub value: Word<u8>,
-}
-
 impl<F: Field> XorOperation<F> {
     pub fn populate(&mut self, record: &mut impl ByteRecord, x: u32, y: u32) -> u32 {
         let expected = x ^ y;
@@ -83,7 +22,7 @@ impl<F: Field> XorOperation<F> {
         let y_bytes = y.to_le_bytes();
         for i in 0..WORD_SIZE {
             let xor = x_bytes[i] ^ y_bytes[i];
-            self.value[i] = F::from_canonical_u8(xor);
+            self.value[i] = F::from_u8(xor);
 
             let byte_event = ByteLookupEvent {
                 opcode: ByteOpcode::XOR,
@@ -97,24 +36,6 @@ impl<F: Field> XorOperation<F> {
         expected
     }
 
-    fn eval_exact<AB: ZKMAirBuilder>(
-        builder: &mut AB,
-        a: Word<AB::Var>,
-        b: Word<AB::Var>,
-        cols: XorOperation<AB::Var>,
-        is_real: AB::Var,
-    ) {
-        for i in 0..WORD_SIZE {
-            builder.send_byte(
-                AB::F::from_canonical_u32(ByteOpcode::XOR as u32),
-                cols.value[i],
-                a[i],
-                b[i],
-                is_real,
-            );
-        }
-    }
-
     #[allow(unused_variables)]
     pub fn eval<AB: ZKMAirBuilder>(
         builder: &mut AB,
@@ -123,42 +44,14 @@ impl<F: Field> XorOperation<F> {
         cols: XorOperation<AB::Var>,
         is_real: AB::Var,
     ) {
-        let is_real_expr = AB::Expr::zero() + is_real;
-        let mut current_inputs: Vec<AB::Expr> = Vec::with_capacity(WORD_SIZE * 2 + 1);
-        for limb in a.0 {
-            current_inputs.push(limb.into());
+        for i in 0..WORD_SIZE {
+            builder.send_byte(
+                AB::F::from_u32(ByteOpcode::XOR as u32),
+                cols.value[i],
+                a[i],
+                b[i],
+                is_real,
+            );
         }
-        for limb in b.0 {
-            current_inputs.push(limb.into());
-        }
-        current_inputs.push(is_real_expr.clone());
-
-        let current_outputs: Vec<AB::Expr> =
-            cols.value.0.iter().map(|limb| (*limb).into()).collect();
-
-        // Keep the exact byte-lookup AIR, but hide it behind a local projected
-        // submodule so callers only see the semantic word-level boundary.
-        //
-        // This operation is only functional when `is_real = 1`; otherwise the
-        // exact AIR leaves `cols.value` unconstrained. Only outline it once the
-        // guard has already been specialized to one.
-        #[cfg(feature = "picus")]
-        if builder.is_known_one(&is_real_expr)
-            && builder.try_emit_projected_summary(
-                "XorOperation",
-                &XorOperationSummaryProjection::picus_projection_info(),
-                &current_inputs,
-                &current_outputs,
-                size_of::<XorOperationSummaryCols<u8>>(),
-                |builder, source_row| {
-                    let source: &XorOperationSummaryCols<AB::Var> = (*source_row).borrow();
-                    Self::eval_exact(builder, source.a, source.b, source.cols, source.is_real);
-                },
-            )
-        {
-            return;
-        }
-
-        Self::eval_exact(builder, a, b, cols, is_real);
     }
 }

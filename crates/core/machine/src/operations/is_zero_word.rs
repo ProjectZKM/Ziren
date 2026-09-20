@@ -5,8 +5,8 @@
 use p3_air::AirBuilder;
 use p3_field::Field;
 use zkm_derive::AlignedBorrow;
+use zkm_pcs::{air::ZKMAirBuilder, Word};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use super::IsZeroOperation;
 
@@ -46,7 +46,7 @@ impl<F: Field> IsZeroWordOperation<F> {
         is_zero as u32
     }
 
-    fn eval_exact<AB: ZKMAirBuilder>(
+    pub fn eval<AB: ZKMAirBuilder>(
         builder: &mut AB,
         a: Word<AB::Expr>,
         cols: IsZeroWordOperation<AB::Var>,
@@ -79,24 +79,5 @@ impl<F: Field> IsZeroWordOperation<F> {
             cols.is_zero_byte[2].result * cols.is_zero_byte[3].result,
         );
         builder_is_real.assert_eq(cols.result, cols.is_lower_half_zero * cols.is_upper_half_zero);
-    }
-
-    pub fn eval<AB: ZKMAirBuilder>(
-        builder: &mut AB,
-        a: Word<AB::Expr>,
-        cols: IsZeroWordOperation<AB::Var>,
-        is_real: AB::Expr,
-    ) {
-        if builder.try_emit_is_zero_word_summary(
-            a.clone(),
-            cols.is_lower_half_zero.into(),
-            cols.is_upper_half_zero.into(),
-            cols.result.into(),
-            is_real.clone(),
-        ) {
-            return;
-        }
-
-        Self::eval_exact(builder, a, cols, is_real);
     }
 }

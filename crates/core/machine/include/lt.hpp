@@ -1,12 +1,21 @@
 #pragma once
 
 #include <cassert>
+#include "frame.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
 
 namespace zkm_core_machine_sys::lt {
 template<class F>
-__ZKM_HOSTDEV__ void event_to_row(const AluEvent& event, LtCols<F>& cols) {
+__ZKM_HOSTDEV__ void event_to_row(
+    const AluEvent& event,
+    LtCols<F>& cols,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
+    // Every row is a real instruction owning its frame.
+    frame::populate_from_alu_r<AluEvent, F>(cols.frame, event, instruction, shard);
+
     cols.pc = F::from_canonical_u32(event.pc);
     cols.next_pc = F::from_canonical_u32(event.next_pc);
 
@@ -14,9 +23,6 @@ __ZKM_HOSTDEV__ void event_to_row(const AluEvent& event, LtCols<F>& cols) {
     auto b = u32_to_le_bytes(event.b);
     auto c = u32_to_le_bytes(event.c);
 
-    write_word_from_le_bytes<F>(cols.a, a);
-    write_word_from_le_bytes<F>(cols.b, b);
-    write_word_from_le_bytes<F>(cols.c, c);
 
     // If this is SLT, mask the MSB of b & c before computing cols.bits.
     uint8_t masked_b = b[3] & 0x7f;
@@ -69,6 +75,5 @@ __ZKM_HOSTDEV__ void event_to_row(const AluEvent& event, LtCols<F>& cols) {
     cols.bit_b = cols.msb_b * cols.is_slt;
     cols.bit_c = cols.msb_c * cols.is_slt;
 
-    assert(cols.a._0[0] == cols.bit_b * (F::one() - cols.bit_c) + cols.is_sign_eq * cols.sltu);
 }
 }  // namespace zkm::lt

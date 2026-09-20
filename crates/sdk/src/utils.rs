@@ -2,7 +2,7 @@
 //!
 //! A collection of utilities for the Ziren SDK.
 
-use p3_field::{FieldAlgebra, PrimeField};
+use p3_field::{PrimeCharacteristicRing, PrimeField};
 use p3_koala_bear::KoalaBear;
 use zkm_core_machine::io::ZKMStdin;
 pub use zkm_core_machine::utils::setup_logger;
@@ -56,7 +56,7 @@ pub fn committed_public_values(guest_committed_values: &[u8]) -> String {
     let hash_result = ZKMPublicValues::from(guest_committed_values).hash();
 
     // Convert the [u8; 32] hash result into a [KoalaBear; 32] array.
-    let committed_values_digest_bytes = hash_result.map(KoalaBear::from_canonical_u8);
+    let committed_values_digest_bytes = hash_result.map(KoalaBear::from_u8);
 
     // Convert the KoalaBear bytes to a BN254 field element.
     let committed_values_digest = koalabear_bytes_to_bn254(&committed_values_digest_bytes);

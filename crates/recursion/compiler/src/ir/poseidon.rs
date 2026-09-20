@@ -1,4 +1,4 @@
-use p3_field::FieldAlgebra;
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use zkm_recursion_core::runtime::{DIGEST_SIZE, HASH_RATE, PERMUTATION_WIDTH};
 
 use super::{Array, Builder, Config, DslIr, Ext, Felt, Usize, Var};
@@ -120,7 +120,7 @@ impl<C: Config> Builder<C> {
         self.cycle_tracker("poseidon2-hash");
 
         let p2_hash_num = self.p2_hash_num;
-        let two_power_12: Var<_> = self.eval(C::N::from_canonical_u32(1 << 12));
+        let two_power_12: Var<_> = self.eval(C::N::from_u32(1 << 12));
 
         self.range(0, array.len()).for_each(|i, builder| {
             let subarray = builder.get(array, i);
@@ -151,11 +151,12 @@ impl<C: Config> Builder<C> {
             builder.range(0, subarray.len()).for_each(|j, builder| {
                 let element = builder.get(&subarray, j);
                 let felts = builder.ext2felt(element);
-                for i in 0..4 {
+                let dim = <C::EF as BasedVectorSpace<C::F>>::DIMENSION;
+                for i in 0..dim {
                     let felt = builder.get(&felts, i);
                     builder.set_value(&mut state, idx, felt);
                     builder.assign(idx, idx + C::N::ONE);
-                    builder.if_eq(idx, C::N::from_canonical_usize(HASH_RATE)).then(|builder| {
+                    builder.if_eq(idx, C::N::from_usize(HASH_RATE)).then(|builder| {
                         builder.poseidon2_permute_mut(&state);
                         builder.assign(idx, C::N::ZERO);
                     });

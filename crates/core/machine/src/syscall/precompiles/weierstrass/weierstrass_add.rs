@@ -3,13 +3,15 @@ use core::{
     mem::size_of,
 };
 use std::{fmt::Debug, marker::PhantomData};
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
 use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use num::BigUint;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use typenum::Unsigned;
 use zkm_core_executor::{
@@ -26,11 +28,7 @@ use zkm_curves::{
     AffinePoint, CurveError, CurveType, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryCols, MemoryReadCols, MemoryWriteCols},
@@ -46,8 +44,7 @@ pub const fn num_weierstrass_add_cols<P: FieldParameters + NumWords>() -> usize 
 ///
 /// Right now the number of limbs is assumed to be a constant, although this could be macro-ed or
 /// made generic in the future.
-#[derive(Debug, Clone, AlignedBorrow)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct WeierstrassAddAssignCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
@@ -146,7 +143,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         }
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         WeierstrassAddAssignCols::<u8, E::BaseField>::picus_info()
     }
@@ -269,10 +265,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
             }
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<F, E: EllipticCurve> BaseAir<F> for WeierstrassAddAssignChip<E> {
@@ -288,7 +280,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &WeierstrassAddAssignCols<AB::Var, E::BaseField> = (*local).borrow();
 
         let num_words_field_element = <E::BaseField as NumLimbs>::Limbs::USIZE / 4;
@@ -375,8 +367,8 @@ where
         );
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(1), /* We read p at +1 since p, q could be the
-                                                       * same. */
+            local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
+                                             * same. */
             local.p_ptr,
             &local.p_access,
             local.is_real,
@@ -384,16 +376,10 @@ where
 
         // Fetch the syscall id for the curve type.
         let syscall_id_felt = match E::CURVE_TYPE {
-            CurveType::Secp256k1 => {
-                AB::F::from_canonical_u32(SyscallCode::SECP256K1_ADD.syscall_id())
-            }
-            CurveType::Secp256r1 => {
-                AB::F::from_canonical_u32(SyscallCode::SECP256R1_ADD.syscall_id())
-            }
-            CurveType::Bn254 => AB::F::from_canonical_u32(SyscallCode::BN254_ADD.syscall_id()),
-            CurveType::Bls12381 => {
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_ADD.syscall_id())
-            }
+            CurveType::Secp256k1 => AB::F::from_u32(SyscallCode::SECP256K1_ADD.syscall_id()),
+            CurveType::Secp256r1 => AB::F::from_u32(SyscallCode::SECP256R1_ADD.syscall_id()),
+            CurveType::Bn254 => AB::F::from_u32(SyscallCode::BN254_ADD.syscall_id()),
+            CurveType::Bls12381 => AB::F::from_u32(SyscallCode::BLS12381_ADD.syscall_id()),
             _ => panic!("Unsupported curve"),
         };
 
@@ -425,10 +411,10 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
 
         // Populate basic columns.
         cols.is_real = F::ONE;
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.p_ptr = F::from_canonical_u32(event.p_ptr);
-        cols.q_ptr = F::from_canonical_u32(event.q_ptr);
+        cols.shard = F::from_u32(event.shard);
+        cols.clk = F::from_u32(event.clk);
+        cols.p_ptr = F::from_u32(event.p_ptr);
+        cols.q_ptr = F::from_u32(event.q_ptr);
 
         Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
 
@@ -450,7 +436,7 @@ mod tests {
         SECP256K1_ADD_ELF, SECP256K1_MUL_ELF, SECP256R1_ADD_ELF,
     };
     use zkm_core_executor::Program;
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 

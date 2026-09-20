@@ -82,6 +82,13 @@ impl Syscall for HintReadSyscall {
                     entry.insert(word);
                 }
             }
+            // Flat producer: the hint is the word's value until its first
+            // access, which the paged `mr`/`mw` read from
+            // `uninitialized_memory` at that moment; the flat entry carries
+            // it directly (a no-op on an already-accessed word, as there).
+            if let Some(flat) = ctx.rt.flat_mem.as_deref_mut() {
+                flat.seed_uninit(ptr + i, word);
+            }
         }
         Ok(None)
     }

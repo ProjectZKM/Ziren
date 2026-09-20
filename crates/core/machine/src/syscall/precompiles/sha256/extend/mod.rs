@@ -1,9 +1,10 @@
 mod air;
 mod columns;
-mod flags;
+mod control;
 mod trace;
 
 pub use columns::*;
+pub use control::{ShaExtendControlChip, ShaExtendControlCols, NUM_SHA_EXTEND_CONTROL_COLS};
 
 /// Implements the SHA extension operation which loops over i = [16, 63] and modifies w[i] in each
 /// iteration. The only input to the syscall is the 4byte-aligned pointer to the w array.
@@ -36,7 +37,7 @@ pub mod extend_tests {
     use zkm_core_executor::{
         events::AluEvent, syscalls::SyscallCode, ExecutionRecord, Instruction, Opcode, Program,
     };
-    use zkm_stark::{air::MachineAir, CpuProver};
+    use zkm_pcs::{air::MachineAir, CpuProver};
 
     use crate::utils::{self, run_test};
 

@@ -1,6 +1,6 @@
 use zkm_core_machine::utils::{run_test, setup_logger};
 use zkm_instruction_test_defs::{for_each_instruction_suite, InstructionTestSuite};
-use zkm_stark::CpuProver;
+use zkm_pcs::CpuProver;
 
 macro_rules! define_prover_suite_test {
     ($name:ident, $suite:expr) => {

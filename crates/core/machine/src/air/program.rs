@@ -1,12 +1,12 @@
 use std::iter::once;
 
 use p3_air::AirBuilder;
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, BaseAirBuilder, LookupScope},
     LookupKind,
 };
 
-use crate::cpu::columns::InstructionCols;
+use crate::instruction::InstructionCols;
 
 /// A trait which contains methods related to program lookups in an AIR.
 pub trait ProgramAirBuilder: BaseAirBuilder {
@@ -14,7 +14,10 @@ pub trait ProgramAirBuilder: BaseAirBuilder {
     fn send_program(
         &mut self,
         pc: impl Into<Self::Expr>,
-        instruction: InstructionCols<impl Into<Self::Expr> + Copy>,
+        // NOT `+ Copy`: a typed frame (`ITypeFrameCols`) rebuilds this tuple
+        // out of `Expr`s, since the slots its shape makes constant are no
+        // longer columns.  The tuple is consumed once, so `Copy` bought nothing.
+        instruction: InstructionCols<impl Into<Self::Expr>>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(pc.into()).chain(instruction.into_iter().map(|x| x.into())).collect();

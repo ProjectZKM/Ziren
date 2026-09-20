@@ -2,22 +2,21 @@
 use hashbrown::HashMap;
 use zkm_core_executor::{ZKMContext, ZKMReduceProof};
 use zkm_core_machine::io::ZKMStdin;
-use zkm_stark::{ShardCommitment, ShardOpenedValues, ShardProof, StarkVerifyingKey};
+use zkm_pcs::{shard_level::shard_proof::JaggedShardProof, ShardProof, StarkVerifyingKey};
 
 use crate::{
     Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey, ZKMVerificationError,
     ZKMVerifyingKey,
 };
 use anyhow::Result;
-use p3_field::{FieldAlgebra, PrimeField};
-use p3_fri::FriProof;
+use p3_field::{PrimeCharacteristicRing, PrimeField};
 use p3_koala_bear::KoalaBear;
+use zkm_pcs::septic_digest::SepticDigest;
 use zkm_prover::{
     components::DefaultProverComponents,
     verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
     DvSnarkBn254Proof, Groth16Bn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
 };
-use zkm_stark::septic_digest::SepticDigest;
 
 use super::{ProofOpts, ProverType};
 
@@ -72,25 +71,15 @@ impl Prover<DefaultProverComponents> for MockProver {
             ZKMProofKind::Compressed => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
 
+                // A shell with the shape of a compressed proof and none of
+                // its content: the mock prover executes but does not prove.
                 let shard_proof = ShardProof {
-                    commitment: ShardCommitment {
-                        main_commit: [KoalaBear::ZERO; 8].into(),
-                        permutation_commit: [KoalaBear::ZERO; 8].into(),
-                        quotient_commit: [KoalaBear::ZERO; 8].into(),
-                    },
-                    opened_values: ShardOpenedValues { chips: vec![] },
-                    opening_proof: FriProof {
-                        commit_phase_commits: vec![],
-                        query_proofs: vec![],
-                        final_poly: Default::default(),
-                        pow_witness: KoalaBear::ZERO,
-                    },
-                    chip_ordering: HashMap::new(),
                     public_values: vec![],
+                    jagged_shard_proof: Box::new(JaggedShardProof::empty([KoalaBear::ZERO; 8], 0)),
                 };
 
                 let reduce_vk = StarkVerifyingKey {
-                    commit: [KoalaBear::ZERO; 8].into(),
+                    commit: vec![[KoalaBear::ZERO; 8]].into(),
                     pc_start: KoalaBear::ZERO,
                     chip_information: vec![],
                     chip_ordering: HashMap::new(),
@@ -119,6 +108,10 @@ impl Prover<DefaultProverComponents> for MockProver {
                             public_inputs: [
                                 pk.vk.hash_bn254().as_canonical_biguint().to_string(),
                                 public_values.hash_bn254().to_string(),
+                                // vk_root: the mock prover produces no real
+                                // recursion tree, so there is no allowlist root
+                                // to report.
+                                "0".to_string(),
                             ],
                             encoded_proof: "".to_string(),
                             raw_proof: "".to_string(),
@@ -138,6 +131,10 @@ impl Prover<DefaultProverComponents> for MockProver {
                             public_inputs: [
                                 pk.vk.hash_bn254().as_canonical_biguint().to_string(),
                                 public_values.hash_bn254().to_string(),
+                                // vk_root: the mock prover produces no real
+                                // recursion tree, so there is no allowlist root
+                                // to report.
+                                "0".to_string(),
                             ],
                             encoded_proof: "".to_string(),
                             raw_proof: "".to_string(),

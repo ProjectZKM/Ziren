@@ -3,6 +3,8 @@ use core::{
     mem::size_of,
 };
 use std::fmt::Debug;
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
 use crate::{
     air::MemoryAirBuilder,
@@ -11,9 +13,9 @@ use crate::{
 };
 use generic_array::GenericArray;
 use num::{BigUint, One};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use std::marker::PhantomData;
 use typenum::Unsigned;
 use zkm_core_executor::{
@@ -30,11 +32,7 @@ use zkm_curves::{
     CurveError, CurveType, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryReadCols, MemoryReadWriteCols},
@@ -51,8 +49,7 @@ pub const fn num_weierstrass_decompress_cols<P: FieldParameters + NumWords>() ->
 
 /// A set of columns to compute `WeierstrassDecompress` that decompresses a point on a Weierstrass
 /// curve.
-#[derive(Debug, Clone, AlignedBorrow)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct WeierstrassDecompressCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
@@ -163,7 +160,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         }
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         WeierstrassDecompressCols::<u8, E::BaseField>::picus_info()
     }
@@ -201,9 +197,9 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
                 row[0..weierstrass_width].borrow_mut();
 
             cols.is_real = F::from_bool(true);
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.ptr = F::from_canonical_u32(event.ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.ptr = F::from_u32(event.ptr);
             cols.sign_bit = F::from_bool(event.sign_bit);
 
             let x = BigUint::from_bytes_le(&event.x_bytes);
@@ -225,8 +221,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
                 let decompressed_y = BigUint::from_bytes_le(&event.decompressed_y_bytes);
                 let neg_y = &modulus - &decompressed_y;
 
-                let is_y_eq_sqrt_y_result =
-                    F::from_canonical_u8(event.decompressed_y_bytes[0] % 2) == lsb;
+                let is_y_eq_sqrt_y_result = F::from_u8(event.decompressed_y_bytes[0] % 2) == lsb;
                 choice_cols.is_y_eq_sqrt_y_result = F::from_bool(is_y_eq_sqrt_y_result);
 
                 if is_y_eq_sqrt_y_result {
@@ -311,10 +306,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
             }
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<F, E: EllipticCurve> BaseAir<F> for WeierstrassDecompressChip<E> {
@@ -338,7 +329,7 @@ where
         let main = builder.main();
 
         let weierstrass_cols = num_weierstrass_decompress_cols::<E::BaseField>();
-        let local_slice = main.row_slice(0);
+        let local_slice = main.current_slice();
         let local: &WeierstrassDecompressCols<AB::Var, E::BaseField> =
             (*local_slice)[0..weierstrass_cols].borrow();
 
@@ -375,7 +366,7 @@ where
 
         local.neg_y.eval(
             builder,
-            &[AB::Expr::zero()].iter(),
+            &[AB::Expr::ZERO].iter(),
             &local.y.multiplication.result,
             FieldOperation::Sub,
             local.is_real,
@@ -396,7 +387,7 @@ where
                 // negative square root of the y value.
                 builder
                     .when(local.is_real)
-                    .when_ne(local.y.lsb, AB::Expr::one() - local.sign_bit)
+                    .when_ne(local.y.lsb, AB::Expr::ONE - local.sign_bit)
                     .assert_all_eq(local.y.multiplication.result, y_limbs);
                 builder
                     .when(local.is_real)
@@ -497,7 +488,7 @@ where
             builder.eval_memory_access(
                 local.shard,
                 local.clk,
-                local.ptr.into() + AB::F::from_canonical_u32((i as u32) * 4 + num_limbs as u32),
+                local.ptr.into() + AB::F::from_u32((i as u32) * 4 + num_limbs as u32),
                 &local.x_access[i],
                 local.is_real,
             );
@@ -506,22 +497,16 @@ where
             builder.eval_memory_access(
                 local.shard,
                 local.clk,
-                local.ptr.into() + AB::F::from_canonical_u32((i as u32) * 4),
+                local.ptr.into() + AB::F::from_u32((i as u32) * 4),
                 &local.y_access[i],
                 local.is_real,
             );
         }
 
         let syscall_id = match E::CURVE_TYPE {
-            CurveType::Secp256k1 => {
-                AB::F::from_canonical_u32(SyscallCode::SECP256K1_DECOMPRESS.syscall_id())
-            }
-            CurveType::Secp256r1 => {
-                AB::F::from_canonical_u32(SyscallCode::SECP256R1_DECOMPRESS.syscall_id())
-            }
-            CurveType::Bls12381 => {
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_DECOMPRESS.syscall_id())
-            }
+            CurveType::Secp256k1 => AB::F::from_u32(SyscallCode::SECP256K1_DECOMPRESS.syscall_id()),
+            CurveType::Secp256r1 => AB::F::from_u32(SyscallCode::SECP256R1_DECOMPRESS.syscall_id()),
+            CurveType::Bls12381 => AB::F::from_u32(SyscallCode::BLS12381_DECOMPRESS.syscall_id()),
             _ => panic!("Unsupported curve"),
         };
 
@@ -550,7 +535,7 @@ mod tests {
         BLS12381_DECOMPRESS_ELF, SECP256K1_DECOMPRESS_ELF, SECP256R1_DECOMPRESS_ELF,
     };
     use zkm_core_executor::Program;
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
     //
     use crate::utils::run_test_io;
     //

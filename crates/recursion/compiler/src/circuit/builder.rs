@@ -1,15 +1,14 @@
 //! An implementation of Poseidon2 over BN254.
 
-use std::iter::repeat;
-
 use itertools::Itertools;
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
+use zkm_pcs::septic_curve::SepticCurve;
+use zkm_pcs::septic_digest::SepticDigest;
+use zkm_pcs::septic_extension::SepticExtension;
+use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_core::air::RecursionPublicValues;
-use zkm_recursion_core::{chips::poseidon2_skinny::WIDTH, D, DIGEST_SIZE, HASH_RATE};
-use zkm_stark::septic_curve::SepticCurve;
-use zkm_stark::septic_digest::SepticDigest;
-use zkm_stark::septic_extension::SepticExtension;
+use zkm_recursion_core::{chips::poseidon2_wide::WIDTH, D, DIGEST_SIZE, HASH_RATE};
 
 use crate::prelude::*;
 pub trait CircuitV2Builder<C: Config> {
@@ -18,6 +17,7 @@ pub trait CircuitV2Builder<C: Config> {
         bits: impl IntoIterator<Item = Felt<<C as Config>::F>>,
     ) -> Felt<C::F>;
     fn num2bits_v2_f(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>>;
+    fn hint_bits_boolean_v2(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>>;
     fn exp_reverse_bits_v2(&mut self, input: Felt<C::F>, power_bits: Vec<Felt<C::F>>)
         -> Felt<C::F>;
     fn batch_fri_v2(
@@ -64,7 +64,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         let mut num: Felt<_> = self.eval(C::F::ZERO);
         for (i, bit) in bits.into_iter().enumerate() {
             // Add `bit * 2^i` to the sum.
-            num = self.eval(num + bit * C::F::from_wrapped_u32(1 << i));
+            num = self.eval(num + bit * C::F::from_u32(1 << i));
         }
         num
     }
@@ -79,7 +79,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             .enumerate()
             .map(|(i, &bit)| {
                 self.assert_felt_eq(bit * (bit - C::F::ONE), C::F::ZERO);
-                bit * C::F::from_wrapped_u32(1 << i)
+                bit * C::F::from_u32(1 << i)
             })
             .sum();
 
@@ -114,6 +114,32 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         // Check that the original number matches the bit decomposition.
         self.assert_felt_eq(x, num);
 
+        output
+    }
+
+    /// Hint the low `num_bits` bits of `num` WITHOUT binding them back to
+    /// `num`: booleanity is asserted per bit, and nothing else — no
+    /// recomposition assert and no modulus range check.
+    ///
+    /// Sound ONLY when the caller separately pins the bit vector's VALUE — the
+    /// jagged verifier does, through the step-(7) prefix-sum walk (every
+    /// column's Horner-recomposed prefix sum is asserted against the running
+    /// row-count total) and the final-area assert.  `num_bits <= 30` is a hard
+    /// requirement: a 30-bit boolean vector's value is at most 2^30 - 1, below
+    /// the KoalaBear modulus, so bits -> felt is injective and the walk's felt
+    /// equation pins the bits exactly; at 31 bits two boolean vectors can map
+    /// to one felt (wraparound) and the caller must use `num2bits_v2_f`.
+    fn hint_bits_boolean_v2(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>> {
+        assert!(
+            num_bits <= 30,
+            "hint_bits_boolean_v2: {num_bits} bits could wrap the modulus; \
+             use num2bits_v2_f"
+        );
+        let output = std::iter::from_fn(|| Some(self.uninit())).take(num_bits).collect::<Vec<_>>();
+        self.push_op(DslIr::CircuitV2HintBitsF(output.clone(), num));
+        for &bit in output.iter() {
+            self.assert_felt_eq(bit * (bit - C::F::ONE), C::F::ZERO);
+        }
         output
     }
 
@@ -169,8 +195,21 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         input: impl IntoIterator<Item = Felt<C::F>>,
     ) -> [Felt<C::F>; DIGEST_SIZE] {
         // debug_assert!(DIGEST_SIZE * N <= WIDTH);
-        let mut pre_iter = input.into_iter().chain(repeat(self.eval(C::F::default())));
-        let pre = core::array::from_fn(move |_| pre_iter.next().unwrap());
+        //
+        // Materialise the pad ONLY if the input is actually short.  Written as
+        // `chain(repeat(self.eval(..)))` the pad was built eagerly as an
+        // argument on EVERY call and then, for the production shape, never
+        // consumed: two DIGEST_SIZE=8 digests already fill WIDTH=16.  The DSL
+        // builder is imperative with no dead-code pass, so each of those was a
+        // real emitted instruction -- one per Merkle path level, ~37k per
+        // compose child, none of them read.
+        let mut collected: Vec<Felt<C::F>> = input.into_iter().take(WIDTH).collect();
+        if collected.len() < WIDTH {
+            let pad = self.eval(C::F::default());
+            collected.resize(WIDTH, pad);
+        }
+        let pre: [Felt<C::F>; WIDTH] =
+            collected.try_into().unwrap_or_else(|_| unreachable!("collected to WIDTH"));
         let post = self.poseidon2_permute_v2(pre);
         let post: [Felt<C::F>; DIGEST_SIZE] = post[..DIGEST_SIZE].try_into().unwrap();
         post
@@ -190,16 +229,33 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     /// Decomposes an ext into its felt coordinates.
     fn ext2felt_v2(&mut self, ext: Ext<C::F, C::EF>) -> [Felt<C::F>; D] {
         let felts = core::array::from_fn(|_| self.uninit());
-        self.push_op(DslIr::CircuitExt2Felt(felts, ext));
-        // Verify that the decomposed extension element is correct.
-        let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
-        for i in 0..4 {
-            let felt = felts[i];
-            let monomial: Ext<C::F, C::EF> = self.constant(C::EF::monomial(i));
-            reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);
-        }
+        match self.program_type {
+            // Programs proven on the compress machine have the `Ext2Felt`
+            // chip: it receives the input block and sends the limbs from the
+            // SAME trace cells, so the decomposition is sound with no DSL
+            // binding at all (the ~14-op monomial reconstruction below).
+            RecursionProgramType::Core
+            | RecursionProgramType::Deferred
+            | RecursionProgramType::Compress => {
+                self.push_op(DslIr::CircuitV2Ext2Felt(felts, ext));
+            }
+            // Shrink/wrap machines are FROZEN without the chip (the wrap
+            // R1CS — and the gnark ceremony — is built over the shrink
+            // proof's structure), so their programs keep the hint + binding.
+            RecursionProgramType::Shrink | RecursionProgramType::Wrap => {
+                self.push_op(DslIr::CircuitExt2Felt(felts, ext));
+                // Verify that the decomposed extension element is correct.
+                let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
+                for i in 0..D {
+                    let felt = felts[i];
+                    let monomial: Ext<C::F, C::EF> =
+                        self.constant(C::EF::ith_basis_element(i).unwrap());
+                    reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);
+                }
 
-        self.assert_ext_eq(reconstructed_ext, ext);
+                self.assert_ext_eq(reconstructed_ext, ext);
+            }
+        }
 
         felts
     }
@@ -239,18 +295,40 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             self.assert_felt_eq(limb, C::F::ZERO);
         }
 
+        // The hinted sum is ON THE CURVE.
+        //
+        // Both checkers above carry the factor `(x2 - x1)`, so when
+        // `point1 == point2` they vanish identically and constrain the hinted
+        // `point` not at all — the hint is prover-supplied, so without this the
+        // sum could be ANY septic pair at that coincidence.  The Global AIR
+        // keeps the same identities but does assert its running digests
+        // on-curve; this site did not, which made it the weaker of the two.
+        //
+        //   y^2 = x^3 + 3*zeta*x - 3
+        //
+        // Seven constraints, no new columns and no new hint.
+        //
+        // What this does NOT do is pin the addition at the coincidence: it
+        // confines the hint to the curve, exactly as the AIR does. Requiring
+        // `x2 != x1` here as well needs an inverse WITNESS, i.e. a new hint
+        // threaded through `CircuitV2HintAddCurve` and the recursion runtime,
+        // which is why it is not bundled here.
+        let point_on_curve = SepticCurve::convert(point, |x| x.into());
+        let curve_formula = SepticCurve::<SymbolicFelt<C::F>>::curve_formula(point_on_curve.x);
+        for (lhs, rhs) in point_on_curve.y.square().0.into_iter().zip_eq(curve_formula.0) {
+            self.assert_felt_eq(lhs - rhs, C::F::ZERO);
+        }
+
         point
     }
 
     /// Asserts that the SepticDigest is zero.
     fn assert_digest_zero_v2(&mut self, is_real: Felt<C::F>, digest: SepticDigest<Felt<C::F>>) {
         let zero = SepticDigest::<SymbolicFelt<C::F>>::zero();
-        for (digest_limb_x, zero_limb_x) in digest.0.x.0.into_iter().zip_eq(zero.0.x.0.into_iter())
-        {
+        for (digest_limb_x, zero_limb_x) in digest.0.x.0.into_iter().zip_eq(zero.0.x.0) {
             self.assert_felt_eq(is_real * digest_limb_x, is_real * zero_limb_x);
         }
-        for (digest_limb_y, zero_limb_y) in digest.0.y.0.into_iter().zip_eq(zero.0.y.0.into_iter())
-        {
+        for (digest_limb_y, zero_limb_y) in digest.0.y.0.into_iter().zip_eq(zero.0.y.0) {
             self.assert_felt_eq(is_real * digest_limb_y, is_real * zero_limb_y);
         }
     }

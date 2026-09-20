@@ -17,7 +17,7 @@ struct PicusArgs {
     transition_input: bool,
     transition_output: bool,
     selector: bool,
-    path: Option<Box<syn::Expr>>,
+    path: Option<syn::Expr>,
 }
 
 enum Arg {
@@ -26,6 +26,8 @@ enum Arg {
     TransitionInput,
     TransitionOutput,
     Selector,
+    // Boxed: `syn::Expr` is ~248 bytes while every other variant carries none,
+    // so an unboxed field makes each `Arg` that large (`clippy::large_enum_variant`).
     Path(Box<syn::Expr>),
 }
 
@@ -53,7 +55,7 @@ impl Parse for Arg {
         }
         if is("path") {
             input.parse::<Token![=]>()?;
-            return Ok(Arg::Path(input.parse()?));
+            return Ok(Arg::Path(Box::new(input.parse()?)));
         }
 
         Err(syn::Error::new_spanned(key, "unknown key in #[picus(...)]"))
@@ -75,7 +77,7 @@ fn parse_picus_attr(attr: &syn::Attribute) -> syn::Result<Option<PicusArgs>> {
             Arg::TransitionInput => out.transition_input = true,
             Arg::TransitionOutput => out.transition_output = true,
             Arg::Selector => out.selector = true,
-            Arg::Path(expr) => out.path = Some(Box::new(*expr)),
+            Arg::Path(expr) => out.path = Some(*expr),
         }
     }
     Ok(Some(out))
@@ -493,7 +495,7 @@ pub fn picus_projection_derive(input: TokenStream) -> TokenStream {
 
         steps.push(quote! {{
             let start: usize =
-                zkm_stark::PicusProjectionStart::projection_start(&((#col_map).#path_expr));
+                zkm_pcs::PicusProjectionStart::projection_start(&((#col_map).#path_expr));
             let width: usize = ::core::mem::size_of::<#field_ty>();
             let end = start + width;
             info.name_to_colrange.insert(#f_name.to_string(), (start, end));
@@ -507,8 +509,8 @@ pub fn picus_projection_derive(input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         impl #impl_generics #ident #ty_generics #where_clause {
-            pub fn picus_projection_info() -> zkm_stark::PicusProjectionInfo {
-                let mut info = zkm_stark::PicusProjectionInfo::default();
+            pub fn picus_projection_info() -> zkm_pcs::PicusProjectionInfo {
+                let mut info = zkm_pcs::PicusProjectionInfo::default();
                 let _ = ::core::mem::size_of::<#source_ty>();
                 #(#steps)*
                 info

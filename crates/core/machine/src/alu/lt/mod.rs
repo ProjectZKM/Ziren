@@ -1,30 +1,27 @@
+use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
 
-use hashbrown::HashMap;
 use itertools::{izip, Itertools};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::{
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_pcs::{
     air::{BaseAirBuilder, MachineAir, ZKMAirBuilder},
-    Word,
+    PicusInfo, Word,
 };
 
 use crate::{
-    utils::{next_power_of_two, zeroed_f_vec},
+    frame::{eval_r_type_frame, RTypeFrameCols},
+    utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
@@ -36,8 +33,7 @@ pub const NUM_LT_COLS: usize = size_of::<LtCols<u8>>();
 pub struct LtChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Clone, Copy)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
 pub struct LtCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -45,21 +41,19 @@ pub struct LtCols<T> {
     pub next_pc: T,
 
     /// If the opcode is SLT.
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_slt: T,
 
     /// If the opcode is SLTU.
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_sltu: T,
 
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every Lt row is an instruction — DivRem's comparison is
+    /// inlined and the Instruction bus is gone).
+    pub frame: RTypeFrameCols<T>,
+
     /// The output operand.
-    pub a: Word<T>,
-
-    /// The first input operand.
-    pub b: Word<T>,
-
-    /// The second input operand.
-    pub c: Word<T>,
 
     /// Boolean flag to indicate which byte pair differs if the operands are not equal.
     pub byte_flags: [T; 4],
@@ -90,14 +84,6 @@ pub struct LtCols<T> {
     pub comparison_bytes: [T; 2],
 }
 
-impl LtCols<u32> {
-    pub fn from_trace_row<F: PrimeField32>(row: &[F]) -> Self {
-        let sized: [u32; NUM_LT_COLS] =
-            row.iter().map(|x| x.as_canonical_u32()).collect::<Vec<u32>>().try_into().unwrap();
-        *sized.as_slice().borrow()
-    }
-}
-
 impl<F: PrimeField32> MachineAir<F> for LtChip {
     type Record = ExecutionRecord;
 
@@ -110,7 +96,7 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.lt_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <LtChip as MachineAir<F>>::name(self).as_str(),
@@ -118,7 +104,6 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
         Some(nb_rows)
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         LtCols::<u8>::picus_info()
     }
@@ -142,7 +127,17 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
                     if idx < input.lt_events.len() {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.lt_events[idx];
-                        self.event_to_row(event, cols, &mut byte_lookup_events);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut byte_lookup_events,
+                            &input.program,
+                            input.public_values.execution_shard,
+                        );
+                    } else {
+                        // A padding row's frame needs no neutralising: the
+                        // typed R-type frame's register-access multiplicities
+                        // are `is_real`.
                     }
                 });
             },
@@ -164,11 +159,17 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
             .lt_events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_LT_COLS];
                     let cols: &mut LtCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    self.event_to_row(
+                        event,
+                        cols,
+                        &mut blu,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
                 });
                 blu
             })
@@ -185,10 +186,6 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
             !shard.lt_events.is_empty()
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl LtChip {
@@ -198,22 +195,24 @@ impl LtChip {
         event: &AluEvent,
         cols: &mut LtCols<F>,
         blu: &mut impl ByteRecord,
+        program: &Program,
+        shard: u32,
     ) {
-        let a = event.a.to_le_bytes();
+        // Every Lt row is a real instruction owning its frame.
+        cols.frame.populate_from_alu(event, program, shard, blu);
+
+        let _a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
 
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
-        cols.a = Word(a.map(F::from_canonical_u8));
-        cols.b = Word(b.map(F::from_canonical_u8));
-        cols.c = Word(c.map(F::from_canonical_u8));
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
 
         // If this is SLT, mask the MSB of b & c before computing cols.bits.
         let masked_b = b[3] & 0x7f;
         let masked_c = c[3] & 0x7f;
-        cols.b_masked = F::from_canonical_u8(masked_b);
-        cols.c_masked = F::from_canonical_u8(masked_c);
+        cols.b_masked = F::from_u8(masked_b);
+        cols.c_masked = F::from_u8(masked_c);
 
         // Send the masked lookup.
         blu.add_byte_lookup_event(ByteLookupEvent {
@@ -247,16 +246,16 @@ impl LtChip {
             if c_byte != b_byte {
                 *flag = F::ONE;
                 cols.sltu = F::from_bool(b_byte < c_byte);
-                let b_byte = F::from_canonical_u8(*b_byte);
-                let c_byte = F::from_canonical_u8(*c_byte);
+                let b_byte = F::from_u8(*b_byte);
+                let c_byte = F::from_u8(*c_byte);
                 cols.not_eq_inv = (b_byte - c_byte).inverse();
                 cols.comparison_bytes = [b_byte, c_byte];
                 break;
             }
         }
 
-        cols.msb_b = F::from_canonical_u8((b[3] >> 7) & 1);
-        cols.msb_c = F::from_canonical_u8((c[3] >> 7) & 1);
+        cols.msb_b = F::from_u8((b[3] >> 7) & 1);
+        cols.msb_c = F::from_u8((c[3] >> 7) & 1);
         cols.is_sign_eq = if event.opcode == Opcode::SLT {
             F::from_bool((b[3] >> 7) == (c[3] >> 7))
         } else {
@@ -269,7 +268,10 @@ impl LtChip {
         cols.bit_b = cols.msb_b * cols.is_slt;
         cols.bit_c = cols.msb_c * cols.is_slt;
 
-        assert_eq!(cols.a[0], cols.bit_b * (F::ONE - cols.bit_c) + cols.is_sign_eq * cols.sltu);
+        debug_assert_eq!(
+            F::from_bool(event.a == 1),
+            cols.bit_b * (F::ONE - cols.bit_c) + cols.is_sign_eq * cols.sltu
+        );
 
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::LTU,
@@ -293,10 +295,13 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &LtCols<AB::Var> = (*local).borrow();
 
         let is_real = local.is_slt + local.is_sltu;
+        // The inputs live in the frame's register reads, not in columns here.
+        let op_b = local.frame.op_b_val();
+        let op_c = local.frame.op_c_val();
 
         // We can compute the signed set-less-than as follows:
         // SLT (signed) = b_s * (1 - c_s) + (b_s == c_s) * SLTU(b_<s, c_<s)
@@ -315,11 +320,11 @@ where
         // SLT = b_bit * (1 - c_bit) + (b_bit == c_bit) * SLTU(b_comp, c_comp)
 
         // First, we set up the values of `b_comp` and `c_comp`.
-        let mut b_comp: Word<AB::Expr> = local.b.map(|x| x.into());
-        let mut c_comp: Word<AB::Expr> = local.c.map(|x| x.into());
+        let mut b_comp: Word<AB::Expr> = op_b.map(|x| x.into());
+        let mut c_comp: Word<AB::Expr> = op_c.map(|x| x.into());
 
-        b_comp[3] = local.b[3] * local.is_sltu + local.b_masked * local.is_slt;
-        c_comp[3] = local.c[3] * local.is_sltu + local.c_masked * local.is_slt;
+        b_comp[3] = op_b[3] * local.is_sltu + local.b_masked * local.is_slt;
+        c_comp[3] = op_c[3] * local.is_sltu + local.c_masked * local.is_slt;
 
         // Constrain the `masked_b` and `masked_c` values via lookup.
         //
@@ -327,15 +332,15 @@ where
         builder.send_byte(
             ByteOpcode::AND.as_field::<AB::F>(),
             local.b_masked,
-            local.b[3],
-            AB::F::from_canonical_u8(0x7f),
+            op_b[3],
+            AB::F::from_u8(0x7f),
             is_real.clone(),
         );
         builder.send_byte(
             ByteOpcode::AND.as_field::<AB::F>(),
             local.c_masked,
-            local.c[3],
-            AB::F::from_canonical_u8(0x7f),
+            op_c[3],
+            AB::F::from_u8(0x7f),
             is_real.clone(),
         );
 
@@ -344,9 +349,9 @@ where
         builder.assert_eq(local.bit_c, local.msb_c * local.is_slt);
 
         // Assert the correctness of `local.msb_b` and `local.msb_c` using the mask.
-        let inv_128 = AB::F::from_canonical_u32(128).inverse();
-        builder.assert_eq(local.msb_b, (local.b[3] - local.b_masked) * inv_128);
-        builder.assert_eq(local.msb_c, (local.c[3] - local.c_masked) * inv_128);
+        let inv_128 = AB::F::from_u32(128).inverse();
+        builder.assert_eq(local.msb_b, (op_b[3] - local.b_masked) * inv_128);
+        builder.assert_eq(local.msb_c, (op_c[3] - local.c_masked) * inv_128);
 
         // Constrain that when is_sign_eq = (bit_b == bit_c).
 
@@ -360,17 +365,21 @@ where
             .when_not(local.is_sign_eq)
             .assert_one(local.bit_b + local.bit_c);
 
-        // Assert the final result `a` is correct.
-
-        // Check that `a[0]` is set correctly.
+        // Assert the final result is correct, directly on the frame's
+        // committed `op_a` register access — there is no result mirror
+        // column.  The frame pins the commit to ZERO when `op_a` is
+        // register 0 (the write is discarded), so the low byte binds through
+        // a `(1 - op_a_0)` factor; the three high bytes are zero in BOTH
+        // cases and bind directly.
+        let av = *local.frame.op_a_access.value();
         builder.assert_eq(
-            local.a[0],
-            local.bit_b * (AB::Expr::one() - local.bit_c) + local.is_sign_eq * local.sltu,
+            av[0],
+            (AB::Expr::ONE - local.frame.op_a_0)
+                * (local.bit_b * (AB::Expr::ONE - local.bit_c) + local.is_sign_eq * local.sltu),
         );
-        // Check the 3 most significant bytes of 'a' are zero.
-        builder.assert_zero(local.a[1]);
-        builder.assert_zero(local.a[2]);
-        builder.assert_zero(local.a[3]);
+        builder.assert_zero(av[1]);
+        builder.assert_zero(av[2]);
+        builder.assert_zero(av[3]);
 
         // Verify that the byte equality flags are set correctly, i.e. all are boolean and only
         // at most a single byte flag is set.
@@ -381,7 +390,7 @@ where
         builder.assert_bool(local.byte_flags[2]);
         builder.assert_bool(local.byte_flags[3]);
         builder.assert_bool(sum_flags.clone());
-        builder.when(is_real.clone()).assert_eq(AB::Expr::one() - local.is_comp_eq, sum_flags);
+        builder.when(is_real.clone()).assert_eq(AB::Expr::ONE - local.is_comp_eq, sum_flags);
 
         // Constrain `local.sltu == SLTU(b_comp, c_comp)`.
         //
@@ -398,11 +407,11 @@ where
 
         // A flag to indicate whether an equality check is necessary (this is for all bytes from
         // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::zero();
+        let mut is_inequality_visited = AB::Expr::ZERO;
 
         // Expressions for computing the comparison bytes.
-        let mut b_comparison_byte = AB::Expr::zero();
-        let mut c_comparison_byte = AB::Expr::zero();
+        let mut b_comparison_byte = AB::Expr::ZERO;
+        let mut c_comparison_byte = AB::Expr::ZERO;
         // Iterate over the bytes in reverse order and select the differing bytes using the byte
         // flag columns values.
         for (b_byte, c_byte, &flag) in
@@ -460,26 +469,21 @@ where
         // but this is included here to make sure the condition is met.
         builder.assert_bool(local.is_slt + local.is_sltu);
 
-        // Receive the arguments.
-        builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
-            local.is_slt * AB::F::from_canonical_u32(Opcode::SLT as u32)
-                + local.is_sltu * AB::F::from_canonical_u32(Opcode::SLTU as u32),
-            local.a,
-            local.b,
-            local.c,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
-            is_real,
+        // Every real row is an instruction carrying its own program fetch,
+        // register access and `(clk, pc)` chaining (the Instruction bus and
+        // its dependency rows are gone).  SLT/SLTU are sequential and can
+        // never halt.
+        eval_r_type_frame(
+            builder,
+            &local.frame,
+            local.is_slt * Opcode::SLT.as_field::<AB::F>()
+                + local.is_sltu * Opcode::SLTU.as_field::<AB::F>(),
+            local.pc.into(),
+            local.next_pc.into(),
+            local.next_pc + AB::Expr::from_u32(4),
+            local.next_pc.into(),
+            AB::Expr::ZERO,
+            is_real.clone(),
         );
     }
 }
@@ -490,24 +494,23 @@ mod tests {
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm_stark::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_core_executor::{ExecutionRecord, Opcode};
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::LtChip;
+    use crate::programs::tests::{alu_op, run_instructions};
 
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.lt_events = vec![AluEvent::new(0, Opcode::SLT, 0, 3, 2)];
+        let shard = run_instructions(alu_op(Opcode::SLT, 3, 2));
+        assert!(!shard.lt_events.is_empty());
         let chip = LtChip::default();
         let generate_trace = chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let trace: RowMajorMatrix<KoalaBear> = generate_trace;
         println!("{:?}", trace.values)
     }
 
-    fn prove_koalabear_template(shard: &mut ExecutionRecord) {
+    fn prove_koalabear_template(shard: &ExecutionRecord) {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
@@ -522,52 +525,37 @@ mod tests {
 
     #[test]
     fn prove_koalabear_slt() {
-        let mut shard = ExecutionRecord::default();
-
         const NEG_3: u32 = 0b11111111111111111111111111111101;
         const NEG_4: u32 = 0b11111111111111111111111111111100;
-        shard.lt_events = vec![
-            // 0 == 3 < 2
-            AluEvent::new(0, Opcode::SLT, 0, 3, 2),
-            // 1 == 2 < 3
-            AluEvent::new(0, Opcode::SLT, 1, 2, 3),
-            // 0 == 5 < -3
-            AluEvent::new(0, Opcode::SLT, 0, 5, NEG_3),
-            // 1 == -3 < 5
-            AluEvent::new(0, Opcode::SLT, 1, NEG_3, 5),
-            // 0 == -3 < -4
-            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_4),
-            // 1 == -4 < -3
-            AluEvent::new(0, Opcode::SLT, 1, NEG_4, NEG_3),
-            // 0 == 3 < 3
-            AluEvent::new(0, Opcode::SLT, 0, 3, 3),
-            // 0 == -3 < -3
-            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_3),
-        ];
+        let mut instructions = Vec::new();
+        for (b, c) in [
+            (3, 2),
+            (2, 3),
+            (5, NEG_3),
+            (NEG_3, 5),
+            (NEG_3, NEG_4),
+            (NEG_4, NEG_3),
+            (3, 3),
+            (NEG_3, NEG_3),
+        ] {
+            instructions.extend(alu_op(Opcode::SLT, b, c));
+        }
+        let shard = run_instructions(instructions);
+        assert!(!shard.lt_events.is_empty());
 
-        prove_koalabear_template(&mut shard);
+        prove_koalabear_template(&shard);
     }
 
     #[test]
     fn prove_koalabear_sltu() {
-        let mut shard = ExecutionRecord::default();
-
         const LARGE: u32 = 0b11111111111111111111111111111101;
-        shard.lt_events = vec![
-            // 0 == 3 < 2
-            AluEvent::new(0, Opcode::SLTU, 0, 3, 2),
-            // 1 == 2 < 3
-            AluEvent::new(0, Opcode::SLTU, 1, 2, 3),
-            // 0 == LARGE < 5
-            AluEvent::new(0, Opcode::SLTU, 0, LARGE, 5),
-            // 1 == 5 < LARGE
-            AluEvent::new(0, Opcode::SLTU, 1, 5, LARGE),
-            // 0 == 0 < 0
-            AluEvent::new(0, Opcode::SLTU, 0, 0, 0),
-            // 0 == LARGE < LARGE
-            AluEvent::new(0, Opcode::SLTU, 0, LARGE, LARGE),
-        ];
+        let mut instructions = Vec::new();
+        for (b, c) in [(3, 2), (2, 3), (LARGE, 5), (5, LARGE), (0, 0), (LARGE, LARGE)] {
+            instructions.extend(alu_op(Opcode::SLTU, b, c));
+        }
+        let shard = run_instructions(instructions);
+        assert!(!shard.lt_events.is_empty());
 
-        prove_koalabear_template(&mut shard);
+        prove_koalabear_template(&shard);
     }
 }

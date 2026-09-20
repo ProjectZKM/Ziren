@@ -3,18 +3,19 @@ use core::{
     mem::size_of,
 };
 use std::{fmt::Debug, marker::PhantomData};
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use num::BigUint;
 
 use crate::{air::MemoryAirBuilder, CoreChipError};
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, EllipticCurveAddEvent, FieldOperation, PrecompileEvent},
+    events::{ByteRecord, EllipticCurveAddEvent, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
@@ -24,11 +25,7 @@ use zkm_curves::{
     AffinePoint, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
@@ -43,8 +40,7 @@ pub const NUM_ED_ADD_COLS: usize = size_of::<EdAddAssignCols<u8>>();
 /// A set of columns to compute `EdAdd` where a, b are field elements.
 /// Right now the number of limbs is assumed to be a constant, although this could be macro-ed
 /// or made generic in the future.
-#[derive(Debug, Clone, AlignedBorrow)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct EdAddAssignCols<T> {
     pub is_real: T,
@@ -116,7 +112,6 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
         "EdAddAssign".to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         EdAddAssignCols::<u8>::picus_info()
     }
@@ -180,7 +175,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
         let blu_batches = events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|(_, event)| {
                     let event = if let PrecompileEvent::EdAdd(event) = event {
                         event
@@ -207,10 +202,6 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
             !shard.get_precompile_events(SyscallCode::ED_ADD).is_empty()
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<E: EllipticCurve + EdwardsParameters> EdAddAssignChip<E> {
@@ -231,10 +222,10 @@ impl<E: EllipticCurve + EdwardsParameters> EdAddAssignChip<E> {
 
         // Populate basic columns.
         cols.is_real = F::ONE;
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.p_ptr = F::from_canonical_u32(event.p_ptr);
-        cols.q_ptr = F::from_canonical_u32(event.q_ptr);
+        cols.shard = F::from_u32(event.shard);
+        cols.clk = F::from_u32(event.clk);
+        cols.p_ptr = F::from_u32(event.p_ptr);
+        cols.q_ptr = F::from_u32(event.q_ptr);
 
         Self::populate_field_ops(blu, cols, p_x, p_y, q_x, q_y);
 
@@ -260,7 +251,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &EdAddAssignCols<AB::Var> = (*local).borrow();
 
         let x1: Limbs<AB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
@@ -289,7 +280,7 @@ where
         // d * f.
         let f = local.f.result;
         let d_biguint = E::d_biguint();
-        let d_const = E::BaseField::to_limbs_field::<AB::Expr, _>(&d_biguint);
+        let d_const = E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&d_biguint);
         local.d_mul_f.eval(builder, &f, &d_const, FieldOperation::Mul, local.is_real);
 
         let d_mul_f = local.d_mul_f.result;
@@ -320,7 +311,7 @@ where
 
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(1),
+            local.clk + AB::F::from_u32(1),
             local.p_ptr,
             &local.p_access,
             local.is_real,
@@ -329,7 +320,7 @@ where
         builder.receive_syscall(
             local.shard,
             local.clk,
-            AB::F::from_canonical_u32(SyscallCode::ED_ADD.syscall_id()),
+            AB::F::from_u32(SyscallCode::ED_ADD.syscall_id()),
             local.p_ptr,
             local.q_ptr,
             local.is_real,
@@ -344,7 +335,7 @@ mod tests {
     use test_artifacts::{ED25519_ELF, ED_ADD_ELF};
     use zkm_core_executor::Executor;
     use zkm_core_executor::Program;
-    use zkm_stark::{CpuProver, ZKMCoreOpts};
+    use zkm_pcs::{CpuProver, ZKMCoreOpts};
 
     #[test]
     pub fn test_ed_add_program_execute() {

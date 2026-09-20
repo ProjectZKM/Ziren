@@ -26,9 +26,20 @@ var plonkWitnessPath string = "plonk_witness.json"
 var groth16WitnessPath string = "groth16_witness.json"
 var dvsnarkWitnessPath string = "dvsnark_witness.json"
 
+var LocLastConstraintIdx int = -1
+var LocLastOpcode string = ""
+
 type Circuit struct {
 	VkeyHash              frontend.Variable `gnark:",public"`
 	CommittedValuesDigest frontend.Variable `gnark:",public"`
+	// Root of the Merkle tree of allowed recursion verifying keys.
+	//
+	// Inside the recursion tree this root is a free witness, so the in-circuit
+	// checks only say that every child's key lies in a tree with THIS root --- a
+	// tree the prover supplies.  Exposing it lets the on-chain verifier require
+	// the published root, and so rules out a proof built around a substituted
+	// compose, leaf or shrink program.
+	VkRoot                frontend.Variable `gnark:",public"`
 	Vars                  []frontend.Variable
 	Felts                 []koalabear.Variable
 	Exts                  []koalabear.ExtensionVariable
@@ -45,10 +56,11 @@ type WitnessInput struct {
 	Exts                  [][]string `json:"exts"`
 	VkeyHash              string     `json:"vkey_hash"`
 	CommittedValuesDigest string     `json:"committed_values_digest"`
+	VkRoot                string     `json:"vk_root"`
 }
 
 type Proof struct {
-	PublicInputs [2]string `json:"public_inputs"`
+	PublicInputs [3]string `json:"public_inputs"`
 	EncodedProof string    `json:"encoded_proof"`
 	RawProof     string    `json:"raw_proof"`
 }
@@ -79,6 +91,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	vars := make(map[string]frontend.Variable)
 	felts := make(map[string]koalabear.Variable)
 	exts := make(map[string]koalabear.ExtensionVariable)
+	ext5s := make(map[string]koalabear.Ext5Variable)
 
 	// Iterate through the witnesses and range check them, if necessary.
 	for i := 0; i < len(circuit.Felts); i++ {
@@ -99,7 +112,9 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	}
 
 	// Iterate through the instructions and handle each opcode.
-	for _, cs := range constraints {
+	for idx, cs := range constraints {
+		LocLastConstraintIdx = idx
+		LocLastOpcode = cs.Opcode
 		switch cs.Opcode {
 		case "ImmV":
 			vars[cs.Args[0][0]] = frontend.Variable(cs.Args[1][0])
@@ -181,6 +196,11 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			for i := 0; i < 4; i++ {
 				felts[cs.Args[i][0]] = out[i]
 			}
+		case "Ext2Felt5":
+			out := fieldAPI.Ext5ToFelt(ext5s[cs.Args[5][0]])
+			for i := 0; i < 5; i++ {
+				felts[cs.Args[i][0]] = out[i]
+			}
 		case "AssertEqV":
 			api.AssertIsEqual(vars[cs.Args[0][0]], vars[cs.Args[1][0]])
 		case "AssertEqF":
@@ -224,8 +244,13 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		case "CommitCommittedValuesDigest":
 			element := vars[cs.Args[0][0]]
 			api.AssertIsEqual(circuit.CommittedValuesDigest, element)
+		case "CommitVkRoot":
+			element := vars[cs.Args[0][0]]
+			api.AssertIsEqual(circuit.VkRoot, element)
 		case "CircuitFelts2Ext":
 			exts[cs.Args[0][0]] = koalabear.Felts2Ext(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]])
+		case "CircuitFelts2Ext5":
+			ext5s[cs.Args[0][0]] = koalabear.Felts2Ext5(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]], felts[cs.Args[5][0]])
 		case "CircuitFelt2Var":
 			vars[cs.Args[0][0]] = fieldAPI.ReduceSlow(felts[cs.Args[1][0]]).Value
 		case "ReduceE":

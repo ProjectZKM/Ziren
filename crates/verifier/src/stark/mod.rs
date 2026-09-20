@@ -1,23 +1,19 @@
 extern crate alloc;
 
 use core::borrow::Borrow;
-use core::convert::AsRef;
 use itertools::Itertools;
 
-use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
-use p3_field::FieldAlgebra;
 use p3_field::PrimeField32;
-use p3_field::TwoAdicField;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumTryAs};
 use zkm_core_executor::ZKMReduceProof;
-use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
-use zkm_stark::ShardProof;
-use zkm_stark::{
-    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    StarkVerifyingKey, Word, DIGEST_SIZE,
+use zkm_pcs::ShardProof;
+use zkm_pcs::{
+    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey, Word,
+    DIGEST_SIZE,
 };
+use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 
 use error::StarkError;
 use verify::verify_stark_compressed_proof;
@@ -111,12 +107,28 @@ impl StarkVerifier {
     /// Compared to `verify_proof()`, it performs a consistency check between
     /// user-supplied public values and those committed in the proof.
     pub fn verify(proof: &[u8], zkm_public_inputs: &[u8], zkm_vk: &[u8]) -> Result<(), StarkError> {
-        let proof: ZKMProof = bincode::deserialize(proof).expect("failed to deserialize the proof");
-        let ZKMProof::Compressed(proof) = proof else { panic!("expected a compressed proof") };
+        // Both inputs are caller-supplied bytes and this function returns a
+        // Result, so a bad decode or a non-compressed variant is an error, not
+        // a panic that takes a verification service down with it.
+        let proof: ZKMProof =
+            bincode::deserialize(proof).map_err(|_| StarkError::MalformedProof)?;
+        let ZKMProof::Compressed(proof) = proof else {
+            return Err(StarkError::UnexpectedProofVariant);
+        };
         let public_inputs = ZKMPublicValues::from(zkm_public_inputs);
         let vk: ZKMVerifyingKey =
-            bincode::deserialize(zkm_vk).expect("failed to deserialize the vk");
+            bincode::deserialize(zkm_vk).map_err(|_| StarkError::MalformedVerifyingKey)?;
 
+        // `Borrow` here is an infallible reinterpret of a fixed layout over a
+        // proof-controlled vector; check the length first.
+        //
+        // EXACT, not `<`: a longer vector also passes `align_to`, so the cast
+        // would silently reinterpret its first `size_of::<PublicValues<..>>()`
+        // elements and ignore the rest.  Honest proofs are PADDED to exactly
+        // `PROOF_MAX_NUM_PVS`, so this rejects nothing valid.
+        if proof.proof.public_values.len() != zkm_pcs::PROOF_MAX_NUM_PVS {
+            return Err(StarkError::MalformedProof);
+        }
         let proof_public_values: &PublicValues<Word<_>, _> =
             proof.proof.public_values.as_slice().borrow();
 
@@ -147,36 +159,33 @@ impl StarkVerifier {
     /// Compared to `verify()`, it does not perform a consistency check between
     /// user-supplied public values and those committed in the proof.
     pub fn verify_proof(proof: &[u8], zkm_vk: &[u8]) -> Result<(), StarkError> {
-        let proof: ZKMProof = bincode::deserialize(proof).expect("failed to deserialize the proof");
-        let ZKMProof::Compressed(proof) = proof else { panic!("expected a compressed proof") };
+        let proof: ZKMProof =
+            bincode::deserialize(proof).map_err(|_| StarkError::MalformedProof)?;
+        let ZKMProof::Compressed(proof) = proof else {
+            return Err(StarkError::UnexpectedProofVariant);
+        };
         let vk: ZKMVerifyingKey =
-            bincode::deserialize(zkm_vk).expect("failed to deserialize the vk");
+            bincode::deserialize(zkm_vk).map_err(|_| StarkError::MalformedVerifyingKey)?;
 
         verify_stark_compressed_proof(&vk, &proof).map_err(StarkError::Recursion)
     }
 }
 
-impl<SC: StarkGenericConfig<Val = KoalaBear, Domain = TwoAdicMultiplicativeCoset<KoalaBear>>>
-    HashableKey for StarkVerifyingKey<SC>
-where
-    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: AsRef<[KoalaBear; DIGEST_SIZE]>,
-{
+impl HashableKey for StarkVerifyingKey<KoalaBearPoseidon2> {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        let prep_domains = self.chip_information.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 1 + 14 + (4 * prep_domains.len());
-        let mut inputs = Vec::with_capacity(num_inputs);
-        inputs.extend(self.commit.as_ref());
+        // The inputs, in order: the preprocessed commitment, pc_start, and the
+        // initial cumulative sum.  Nothing about the
+        // chips: the preprocessed commitment is hash-bound to its geometry, and
+        // the chip set is a property of the machine.  MUST stay byte-identical
+        // to the prover (prover/src/types.rs) and in-circuit
+        // (recursion/circuit/src/types.rs) folds.
+        let commit_elems: Vec<KoalaBear> =
+            self.commit.roots().iter().flat_map(|d| d.iter().copied()).collect();
+        let mut inputs: Vec<KoalaBear> = Vec::with_capacity(commit_elems.len() + 1 + 14);
+        inputs.extend(commit_elems);
         inputs.push(self.pc_start);
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
-        for domain in prep_domains {
-            inputs.push(KoalaBear::from_canonical_usize(domain.log_n));
-            let size = 1 << domain.log_n;
-            inputs.push(KoalaBear::from_canonical_usize(size));
-            let g = KoalaBear::two_adic_generator(domain.log_n);
-            inputs.push(domain.shift);
-            inputs.push(g);
-        }
 
         poseidon2_hash(inputs)
     }

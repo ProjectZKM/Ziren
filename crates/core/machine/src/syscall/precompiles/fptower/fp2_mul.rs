@@ -2,14 +2,16 @@ use std::{
     borrow::{Borrow, BorrowMut},
     marker::PhantomData,
 };
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
 use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use itertools::Itertools;
 use num::BigUint;
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use std::mem::size_of;
 use typenum::Unsigned;
 use zkm_core_executor::{
@@ -22,11 +24,7 @@ use zkm_curves::{
     weierstrass::{FieldType, FpOpField},
 };
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
@@ -39,8 +37,7 @@ pub const fn num_fp2_mul_cols<P: FieldParameters + NumWords>() -> usize {
 }
 
 /// A set of columns for the Fp2Mul operation.
-#[derive(Debug, Clone, AlignedBorrow)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct Fp2MulAssignCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
@@ -138,7 +135,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2MulAssignChip<P> {
         }
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         Fp2MulAssignCols::<u8, P>::picus_info()
     }
@@ -174,10 +170,10 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2MulAssignChip<P> {
             let q_y = BigUint::from_bytes_le(&words_to_bytes_le_vec(&q[q.len() / 2..]));
 
             cols.is_real = F::ONE;
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.x_ptr = F::from_canonical_u32(event.x_ptr);
-            cols.y_ptr = F::from_canonical_u32(event.y_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.x_ptr = F::from_u32(event.x_ptr);
+            cols.y_ptr = F::from_u32(event.y_ptr);
 
             Self::populate_field_ops(&mut new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
 
@@ -234,10 +230,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2MulAssignChip<P> {
             }
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<F, P: FpOpField> BaseAir<F> for Fp2MulAssignChip<P> {
@@ -253,7 +245,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &Fp2MulAssignCols<AB::Var, P> = (*local).borrow();
 
         let num_words_field_element = <P as NumLimbs>::Limbs::USIZE / 4;
@@ -263,8 +255,7 @@ where
         let q_x = limbs_from_prev_access(&local.y_access[0..num_words_field_element]);
         let q_y = limbs_from_prev_access(&local.y_access[num_words_field_element..]);
 
-        let modulus_coeffs =
-            P::MODULUS.iter().map(|&limbs| AB::Expr::from_canonical_u8(limbs)).collect_vec();
+        let modulus_coeffs = P::MODULUS.iter().map(|&limbs| AB::Expr::from_u8(limbs)).collect_vec();
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
         {
@@ -343,18 +334,16 @@ where
         );
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(1), /* We read p at +1 since p, q could be the
-                                                       * same. */
+            local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
+                                             * same. */
             local.x_ptr,
             &local.x_access,
             local.is_real,
         );
 
         let syscall_id_felt = match P::FIELD_TYPE {
-            FieldType::Bn254 => AB::F::from_canonical_u32(SyscallCode::BN254_FP2_MUL.syscall_id()),
-            FieldType::Bls12381 => {
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_FP2_MUL.syscall_id())
-            }
+            FieldType::Bn254 => AB::F::from_u32(SyscallCode::BN254_FP2_MUL.syscall_id()),
+            FieldType::Bls12381 => AB::F::from_u32(SyscallCode::BLS12381_FP2_MUL.syscall_id()),
         };
 
         builder.receive_syscall(

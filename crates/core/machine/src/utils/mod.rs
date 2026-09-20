@@ -1,19 +1,22 @@
 pub mod concurrency;
+#[cfg(test)]
+mod forgery_harness;
+pub mod global_sum;
 mod logger;
 mod prove;
 mod span;
+mod test_harness;
 mod tracer;
 
 pub use logger::*;
 use p3_field::Field;
 pub use prove::*;
 pub use span::*;
-pub use tracer::*;
+pub use test_harness::*;
 use zkm_curves::params::Limbs;
 
 use crate::{memory::MemoryCols, CoreChipError};
 use generic_array::ArrayLength;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 
 pub use zkm_primitives::consts::{
     bytes_to_words_le, bytes_to_words_le_vec, num_to_comma_separated, words_to_bytes_le,
@@ -28,15 +31,6 @@ pub const fn indices_arr<const N: usize>() -> [usize; N] {
         i += 1;
     }
     indices_arr
-}
-
-pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<T>) {
-    debug_assert!(values.len().is_multiple_of(N));
-    let mut n_real_rows = values.len() / N;
-    if n_real_rows < 16 {
-        n_real_rows = 16;
-    }
-    values.resize(n_real_rows.next_power_of_two() * N, T::default());
 }
 
 pub fn limbs_from_prev_access<T: Copy, N: ArrayLength, M: MemoryCols<T>>(
@@ -124,6 +118,81 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>, chip: &str) -> us
     }
 }
 
+/// Padded height: the next multiple of 32 that is `>= n` and
+/// `>= 32`.  If `fixed_power` is set, behaves exactly like
+/// [`next_power_of_two`] (a pinned shape height is still `2^power`).
+///
+/// The jagged PCS commits every chip at its RAW row count
+/// (`compute_jagged_metadata_from_dims`), and the zerocheck / LogUp-GKR treat
+/// rows beyond the real height as VIRTUAL zero rows (`VirtualGeq` carries the
+/// raw height as an arbitrary integer threshold), so a committed height never
+/// needed to be a power of two.  `next_power_of_two` was therefore charging up
+/// to a 2x area tax on every core chip; padding to a multiple of 32 avoids it.
+pub fn next_multiple_of_32(n: usize, fixed_power: Option<usize>, chip: &str) -> usize {
+    match fixed_power {
+        Some(_) => next_power_of_two(n, fixed_power, chip),
+        None => n.next_multiple_of(32).max(32),
+    }
+}
+
+/// Padded height for a chip whose shape pins an EXACT row count rather than a
+/// log2 one: the next multiple of 32 that is `>= n` and `>= 32`, or the pinned
+/// count itself when the shape supplies one.
+///
+/// This is the recursion side of [`next_multiple_of_32`].  A recursion shape
+/// used to carry per-chip LOG heights, so a shaped chip padded to `1 << log`
+/// and a single shape covering every program would have charged up to 2x on
+/// every chip.  Pinning the row count directly is what lets ONE shape be tight
+/// enough for all of them, which in turn is what makes a compose program a
+/// function of its arity alone.
+///
+/// Panics if the pinned count cannot hold `n` — a shape that does not fit is a
+/// programming error, not something to silently grow past.
+///
+/// The UNSHAPED branch still rounds to a power of two, unlike the core-side
+/// [`next_multiple_of_32`]. That is measured, not conservative: the recursion
+/// prove path calls `log2_strict_usize` on trace heights
+/// (`recursion/circuit/src/merkle_tree.rs:49`, `pcs/src/basefold/fri.rs:192`),
+/// and padding an unshaped recursion trace to a multiple of 32 fails four
+/// `zkm-recursion-core` unit tests with "Not a power of two"
+/// (`alu_base::four_ops`, `alu_ext::four_ops`, `select::prove_select`,
+/// `machine::field_norm`). Production recursion is always shaped, so the
+/// exact-row branch is the one the port needs; freeing the unshaped branch
+/// means clearing those call sites first.
+pub fn next_multiple_of_32_rows(n: usize, fixed_rows: Option<usize>, chip: &str) -> usize {
+    match fixed_rows {
+        Some(rows) => {
+            assert!(n <= rows, "chip {chip}: shape pins {rows} rows but the trace needs {n}",);
+            rows
+        }
+        None => next_power_of_two(n, None, chip),
+    }
+}
+
+/// [`pad_rows_fixed`] with [`next_multiple_of_32_rows`] padding.
+pub fn pad_rows_exact<R: Clone>(
+    rows: &mut Vec<R>,
+    row_fn: impl Fn() -> R,
+    fixed_rows: Option<usize>,
+    chip: &str,
+) {
+    let nb_rows = rows.len();
+    let dummy_row = row_fn();
+    rows.resize(next_multiple_of_32_rows(nb_rows, fixed_rows, chip), dummy_row);
+}
+
+/// [`pad_rows_fixed`] with [`next_multiple_of_32`] padding.
+pub fn pad_rows_mult32<R: Clone>(
+    rows: &mut Vec<R>,
+    row_fn: impl Fn() -> R,
+    size_log2: Option<usize>,
+    chip: &str,
+) {
+    let nb_rows = rows.len();
+    let dummy_row = row_fn();
+    rows.resize(next_multiple_of_32(nb_rows, size_log2, chip), dummy_row);
+}
+
 pub fn chunk_vec<T>(mut vec: Vec<T>, chunk_size: usize) -> Vec<Vec<T>> {
     let mut result = Vec::new();
     while !vec.is_empty() {
@@ -139,28 +208,6 @@ pub fn log2_strict_usize(n: usize) -> usize {
     let res = n.trailing_zeros();
     assert_eq!(n.wrapping_shr(res), 1, "Not a power of two: {n}");
     res as usize
-}
-
-pub fn par_for_each_row<P, F>(vec: &mut [F], num_elements_per_event: usize, processor: P)
-where
-    F: Send,
-    P: Fn(usize, &mut [F]) + Send + Sync,
-{
-    // Split the vector into `num_cpus` chunks, but at least `num_cpus` rows per chunk.
-    assert!(vec.len().is_multiple_of(num_elements_per_event));
-    let len = vec.len() / num_elements_per_event;
-    let cpus = num_cpus::get();
-    let ceil_div = len.div_ceil(cpus);
-    let chunk_size = std::cmp::max(ceil_div, cpus);
-
-    vec.chunks_mut(chunk_size * num_elements_per_event).enumerate().par_bridge().for_each(
-        |(i, chunk)| {
-            chunk.chunks_mut(num_elements_per_event).enumerate().for_each(|(j, row)| {
-                assert!(row.len() == num_elements_per_event);
-                processor(i * chunk_size + j, row);
-            });
-        },
-    );
 }
 
 /// Returns whether the `ZKM_DEBUG` environment variable is enabled or disabled.
@@ -188,7 +235,7 @@ pub fn zeroed_f_vec<F: Field>(len: usize) -> Vec<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
 
     #[test]

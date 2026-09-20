@@ -9,7 +9,12 @@ import (
 
 const KOALABEAR_WIDTH = 16
 const koalabearNumExternalRounds = 8
-const koalabearNumInternalRounds = 13
+// Must equal `zkm_primitives::poseidon2_init`'s ROUNDS_P.  Plonky3's
+// poseidon2_round_numbers_128 gives (8, 20) for a 31-bit prime at width 16 with
+// S-box degree 3; 13 is the degree-7 (BabyBear) number.  The rc16 table has 30
+// rows, and this loop indexes it as 0..4, 4..4+P, 4+P..8+P, the same layout the
+// Rust and CUDA implementations use, so 8 + 20 = 28 still fits.
+const koalabearNumInternalRounds = 20
 
 type Poseidon2KoalaBearChip struct {
 	api      frontend.API

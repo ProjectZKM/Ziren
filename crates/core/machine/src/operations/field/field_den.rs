@@ -6,12 +6,9 @@ use p3_field::PrimeField32;
 use zkm_core_executor::events::ByteRecord;
 use zkm_curves::params::{FieldParameters, Limbs};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{Polynomial, ZKMAirBuilder};
 
-use super::{
-    util::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
-    util_air::eval_field_operation,
-};
+use super::{util::compute_root_quotient_and_shift, util_air::eval_field_operation};
 use crate::air::WordAirBuilder;
 
 /// A set of columns to compute `FieldDen(a, b)` where `a`, `b` are field elements.
@@ -27,8 +24,9 @@ pub struct FieldDenCols<T, P: FieldParameters> {
     /// The result of `a den b`, where a, b are field elements
     pub result: Limbs<T, P::Limbs>,
     pub(crate) carry: Limbs<T, P::Limbs>,
-    pub(crate) witness_low: Limbs<T, P::Witness>,
-    pub(crate) witness_high: Limbs<T, P::Witness>,
+    /// The root-quotient witness, offset-shifted into `[0, 2^16)`; u16-checked (see
+    /// `FieldOpCols::witness`).
+    pub(crate) witness: Limbs<T, P::Witness>,
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
@@ -74,18 +72,15 @@ impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
             P::NB_BITS_PER_LIMB as u32,
             P::NB_WITNESS_LIMBS,
         );
-        let (p_witness_low, p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
 
         self.result = p_result.into();
         self.carry = p_carry.into();
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        self.witness = Limbs(p_witness.try_into().unwrap());
 
         // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
+        record.add_u16_range_checks_field(&self.witness.0);
 
         result
     }
@@ -126,16 +121,14 @@ where
         let p_vanishing: Polynomial<<AB as AirBuilder>::Expr> =
             p_lhs_minus_rhs - &p_carry * &p_limbs;
 
-        let p_witness_low = self.witness_low.0.iter().into();
-        let p_witness_high = self.witness_high.0.iter().into();
+        let p_witness = self.witness.0.iter().into();
 
-        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high);
+        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness);
 
         // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_low.0, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_high.0, is_real);
+        builder.slice_range_check_u16(&self.witness.0, is_real);
     }
 }
 
@@ -143,10 +136,11 @@ where
 mod tests {
     use num::BigUint;
     use p3_air::BaseAir;
+    use p3_air::WindowAccess;
     use p3_field::{Field, PrimeField32};
     use zkm_core_executor::{ExecutionRecord, Program};
     use zkm_curves::params::FieldParameters;
-    use zkm_stark::{
+    use zkm_pcs::{
         air::{MachineAir, ZKMAirBuilder},
         koala_bear_poseidon2::KoalaBearPoseidon2,
         StarkGenericConfig,
@@ -162,9 +156,9 @@ mod tests {
     };
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
-    use p3_matrix::{dense::RowMajorMatrix, Matrix};
+    use p3_matrix::dense::RowMajorMatrix;
     use rand::thread_rng;
     use zkm_curves::edwards::ed25519::Ed25519BaseField;
     use zkm_derive::AlignedBorrow;
@@ -261,7 +255,7 @@ mod tests {
     {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
-            let local = main.row_slice(0);
+            let local = main.current_slice();
             let local: &TestCols<AB::Var, P> = (*local).borrow();
             local.a_den_b.eval(builder, &local.a, &local.b, self.sign, AB::F::ZERO);
         }
@@ -288,7 +282,7 @@ mod tests {
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         // This it to test that the proof DOESN'T work if messed up.
         // let row = trace.row_mut(0);
-        // row[0] = KoalaBear::from_canonical_u8(0);
+        // row[0] = KoalaBear::from_u8(0);
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();

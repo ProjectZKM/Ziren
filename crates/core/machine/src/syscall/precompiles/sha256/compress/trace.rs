@@ -1,18 +1,16 @@
 use std::borrow::BorrowMut;
+use zkm_pcs::PicusInfo;
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, PrecompileEvent, ShaCompressEvent},
+    events::{ByteRecord, PrecompileEvent, ShaCompressEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_pcs::{air::MachineAir, Word};
 
 use super::{
     columns::{ShaCompressCols, NUM_SHA_COMPRESS_COLS},
@@ -31,22 +29,8 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
         "ShaCompress".to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         ShaCompressCols::<u8>::picus_info()
-    }
-
-    fn selectors_partition_real_rows(&self) -> bool {
-        true
-    }
-
-    fn picus_selector_specialization_allowed(&self, phase: &str, selector_name: &str) -> bool {
-        match phase {
-            "first_row" => selector_name == "is_initialize",
-            "boundary" => selector_name == "is_finalize",
-            "last_row" => false,
-            _ => true,
-        }
     }
 
     fn generate_trace(
@@ -83,6 +67,9 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
             cols.octet_num[octet_num] = F::ONE;
             cols.octet[octet] = F::ONE;
+            // Pin index = 8*octet_num + octet on padding rows too (the per-row
+            // `index` constraint is not gated by is_real).
+            cols.index = F::from_u32((8 * octet_num + octet) as u32);
 
             // If in the compression phase, set the k value.
             if octet_num != 0 && octet_num != 9 {
@@ -95,8 +82,6 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
             if octet == 0 {
                 octet_num = (octet_num + 1) % 10;
             }
-
-            cols.is_last_row = cols.octet[7] * cols.octet_num[9];
         }
 
         // Convert the trace to a row major matrix.
@@ -117,7 +102,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
         let blu_batches = events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|(_, event)| {
                     let event = if let PrecompileEvent::ShaCompress(event) = event {
                         event
@@ -159,17 +144,17 @@ impl ShaCompressChip {
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
-            cols.h_ptr = F::from_canonical_u32(event.h_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
+            cols.h_ptr = F::from_u32(event.h_ptr);
 
             cols.octet[j] = F::ONE;
             cols.octet_num[octet_num_idx] = F::ONE;
             cols.is_initialize = F::ONE;
 
             cols.mem.populate_read(event.h_read_records[j], blu);
-            cols.mem_addr = F::from_canonical_u32(event.h_ptr + (j * 4) as u32);
+            cols.mem_addr = F::from_u32(event.h_ptr + (j * 4) as u32);
 
             cols.a = Word::from(event.h_read_records[0].value);
             cols.b = Word::from(event.h_read_records[1].value);
@@ -181,7 +166,8 @@ impl ShaCompressChip {
             cols.h = Word::from(event.h_read_records[7].value);
 
             cols.is_real = F::ONE;
-            cols.start = cols.is_real * cols.octet_num[0] * cols.octet[0];
+            // index = j (octet_num 0, octet j) for the 8 init rows.
+            cols.index = F::from_u32(j as u32);
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);
             }
@@ -201,12 +187,12 @@ impl ShaCompressChip {
             cols.octet[j % 8] = F::ONE;
             cols.octet_num[octet_num_idx] = F::ONE;
 
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
-            cols.h_ptr = F::from_canonical_u32(event.h_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
+            cols.h_ptr = F::from_u32(event.h_ptr);
             cols.mem.populate_read(event.w_i_read_records[j], blu);
-            cols.mem_addr = F::from_canonical_u32(event.w_ptr + (j * 4) as u32);
+            cols.mem_addr = F::from_u32(event.w_ptr + (j * 4) as u32);
 
             let a = h_array[0];
             let b = h_array[1];
@@ -265,7 +251,8 @@ impl ShaCompressChip {
             h_array[0] = temp1_add_temp2;
 
             cols.is_real = F::ONE;
-            cols.start = cols.is_real * cols.octet_num[0] * cols.octet[0];
+            // index = 8*octet_num_idx + (j % 8) for the 64 compression rows.
+            cols.index = F::from_u32((8 * octet_num_idx + j % 8) as u32);
 
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);
@@ -280,10 +267,10 @@ impl ShaCompressChip {
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
-            cols.h_ptr = F::from_canonical_u32(event.h_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
+            cols.h_ptr = F::from_u32(event.h_ptr);
 
             cols.octet[j] = F::ONE;
             cols.octet_num[octet_num_idx] = F::ONE;
@@ -291,7 +278,7 @@ impl ShaCompressChip {
 
             cols.finalize_add.populate(blu, og_h[j], h_array[j]);
             cols.mem.populate_write(event.h_write_records[j], blu);
-            cols.mem_addr = F::from_canonical_u32(event.h_ptr + (j * 4) as u32);
+            cols.mem_addr = F::from_u32(event.h_ptr + (j * 4) as u32);
 
             v[j] = h_array[j];
             cols.a = Word::from(v[0]);
@@ -316,8 +303,8 @@ impl ShaCompressChip {
             };
 
             cols.is_real = F::ONE;
-            cols.is_last_row = cols.octet[7] * cols.octet_num[9];
-            cols.start = cols.is_real * cols.octet_num[0] * cols.octet[0];
+            // index = 72 + j (octet_num 9) for the 8 finalize rows.
+            cols.index = F::from_u32((8 * octet_num_idx + j) as u32);
 
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);

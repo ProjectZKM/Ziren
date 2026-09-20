@@ -196,7 +196,7 @@ impl ProverClient {
     ///
     /// // Setup the inputs.
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write(&10usize);
+    /// stdin.write(&10u32);
     ///
     /// // Execute the program on the inputs.
     /// let (public_values, report) = client.execute(elf, &stdin).run().unwrap();
@@ -229,7 +229,7 @@ impl ProverClient {
     ///
     /// // Setup the inputs.
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write(&10usize);
+    /// stdin.write(&10u32);
     ///
     /// // Generate the proof.
     /// let proof = client.prove(&pk, stdin).run().unwrap();
@@ -249,7 +249,7 @@ impl ProverClient {
     /// let client = ProverClient::new();
     /// let (pk, vk) = client.setup(elf);
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write(&10usize);
+    /// stdin.write(&10u32);
     /// let proof = client.prove(&pk, stdin).run().unwrap();
     /// client.verify(&proof, &vk).unwrap();
     /// ```
@@ -281,7 +281,7 @@ impl ProverClient {
     /// let elf = test_artifacts::FIBONACCI_ELF;
     /// let client = ProverClient::new();
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write(&10usize);
+    /// stdin.write(&10u32);
     /// let (pk, vk) = client.setup(elf);
     /// ```
     pub fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
@@ -301,7 +301,6 @@ pub struct ProverClientBuilder {
     mode: Option<ProverMode>,
     private_key: Option<String>,
     rpc_url: Option<String>,
-    skip_simulation: bool,
 }
 
 impl ProverClientBuilder {
@@ -323,13 +322,13 @@ impl ProverClientBuilder {
         self
     }
 
-    /// Skips simulation.
-    pub fn skip_simulation(mut self) -> Self {
-        self.skip_simulation = true;
-        self
-    }
-
-    /// Builds a [ProverClient], using the provided private key.
+    /// Builds a [ProverClient] from the configured mode, credentials and
+    /// endpoint.
+    ///
+    /// In network mode the `private_key` and `rpc_url` set on this builder are
+    /// used, with the environment as the fallback for whichever is absent.
+    /// They were previously accepted and then ignored, because this always
+    /// called `NetworkProver::from_env()`.
     pub fn build(self) -> ProverClient {
         match self.mode.expect("The prover mode is required") {
             ProverMode::Cpu => ProverClient::cpu(),
@@ -338,7 +337,10 @@ impl ProverClientBuilder {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
                         ProverClient {
-                            prover: Box::new(NetworkProver::from_env().unwrap()),
+                            prover: Box::new(
+                                NetworkProver::with_overrides(self.private_key, self.rpc_url)
+                                    .expect("failed to build the network prover"),
+                            ),
                         }
                     } else {
                         panic!("network feature is not enabled")
@@ -356,7 +358,6 @@ impl ProverClientBuilder {
 pub struct NetworkProverBuilder {
     private_key: Option<String>,
     rpc_url: Option<String>,
-    skip_simulation: bool,
 }
 
 #[cfg(feature = "network")]
@@ -373,10 +374,12 @@ impl NetworkProverBuilder {
         self
     }
 
-    /// Skips simulation.
-    pub fn skip_simulation(mut self) -> Self {
-        self.skip_simulation = true;
-        self
+    /// Builds the [`NetworkProver`].
+    ///
+    /// This builder had no `build` at all, so its setters could not be used for
+    /// anything.
+    pub fn build(self) -> anyhow::Result<NetworkProver> {
+        NetworkProver::with_overrides(self.private_key, self.rpc_url)
     }
 }
 
@@ -396,7 +399,7 @@ mod tests {
         let client = ProverClient::cpu();
         let elf = test_artifacts::FIBONACCI_ELF;
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
         let (_, _report) = client.execute(elf, &stdin).run().unwrap();
         // tracing::info!("gas = {}", report.estimate_gas());
     }
@@ -430,7 +433,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).run().unwrap();
@@ -450,7 +453,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).compressed().run().unwrap();
@@ -470,7 +473,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).plonk().run().unwrap();
@@ -503,7 +506,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, _vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         // Generate proof.
         let proof = client.prove(&pk, stdin).dvsnark().run().unwrap();
@@ -517,7 +520,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
         let proof = client.prove(&pk, stdin).plonk().run().unwrap();
         client.verify(&proof, &vk).unwrap();
     }

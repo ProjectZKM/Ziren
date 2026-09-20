@@ -99,7 +99,7 @@ mod sys {
             .with_sys_include("cstddef")
             .with_parse_deps(true)
             .with_parse_include(&[
-                "zkm-stark",
+                "zkm-pcs",
                 "zkm-primitives",
                 "zkm-core-machine",
                 "p3-koala-bear",
@@ -107,7 +107,7 @@ mod sys {
                 "zkm-core-executor",
             ])
             .with_parse_extra_bindings(&[
-                "zkm-stark",
+                "zkm-pcs",
                 "zkm-primitives",
                 "p3-koala-bear",
                 "p3-monty-31",
@@ -124,18 +124,6 @@ mod sys {
             .include_item("ExtAluValueCols")
             .include_item("ExtAluInstr")
             .include_item("ExtAluAccessCols")
-            .include_item("BatchFRIEvent")
-            .include_item("BatchFRICols")
-            .include_item("BatchFRIInstrFFI")
-            .include_item("BatchFRIPreprocessedCols")
-            .include_item("ExpReverseBitsEventFFI")
-            .include_item("ExpReverseBitsLenCols")
-            .include_item("ExpReverseBitsInstrFFI")
-            .include_item("ExpReverseBitsLenPreprocessedCols")
-            .include_item("FriFoldEvent")
-            .include_item("FriFoldCols")
-            .include_item("FriFoldInstrFFI")
-            .include_item("FriFoldPreprocessedCols")
             .include_item("SelectEvent")
             .include_item("SelectCols")
             .include_item("CommitPublicValuesEvent")
@@ -147,11 +135,10 @@ mod sys {
             .include_item("SelectInstr")
             .include_item("SelectPreprocessedCols")
             .include_item("Poseidon2Event")
-            .include_item("Poseidon2")
             .include_item("Poseidon2Instr")
-            .include_item("Poseidon2PreprocessedColsSkinny")
             .include_item("Poseidon2PreprocessedColsWide")
             .include_item("MemoryAccessColsChips")
+            .exclude_item("GLOBAL_CPU_BACKEND")
             .with_namespace("zkm_recursion_core_sys")
             .with_crate(crate_dir)
             .generate()

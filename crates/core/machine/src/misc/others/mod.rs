@@ -21,7 +21,7 @@ mod tests {
 
     use zkm_core_executor::{Instruction, Opcode, Program};
 
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     #[test]
     fn test_misc_prove() {

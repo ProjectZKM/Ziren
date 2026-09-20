@@ -15,7 +15,7 @@ p3-symmetric = { workspace = true }
 p3-koala-bear = { workspace = true }
 zkm-recursion-compiler = { workspace = true }
 zkm-core-machine = { workspace = true }
-zkm-stark = { workspace = true }
+zkm-pcs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3.10.1"

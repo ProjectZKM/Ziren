@@ -7,7 +7,7 @@ use enum_map::Enum;
 use enum_map::EnumMap;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
-use zkm_stark::shape::Shape;
+use zkm_pcs::shape::Shape;
 
 /// MIPS AIR Identifiers.
 ///
@@ -23,8 +23,18 @@ pub enum MipsAirId {
     Program = 1,
     /// The SHA-256 extend chip.
     ShaExtend = 2,
+    /// The SHA-256 extend control chip (bookends the `PrecompileChain` state bus).
+    //
+    // Declaration order is load-bearing: `MipsAirId::iter()` yields in declaration
+    // order and `test_primitives_and_machine_air_names_match` zips it against
+    // `MipsAir::chips()`, which builds extend, extend-control, compress,
+    // compress-control.  Discriminants stay pinned to their variants, so the
+    // numbering is unaffected by this ordering.
+    ShaExtendControl = 51,
     /// The SHA-256 compress chip.
     ShaCompress = 3,
+    /// The SHA-256 compress control chip (bookends the `PrecompileChain` state bus).
+    ShaCompressControl = 12,
     /// The Edwards add assign chip.
     EdAddAssign = 4,
     /// The Edwards decompress chip.
@@ -45,6 +55,8 @@ pub enum MipsAirId {
     Poseidon2Permute = 46,
     /// The Keccak sponge chip.
     KeccakSponge = 48,
+    /// The Keccak sponge control chip (bookends the `PrecompileChain` state buses).
+    KeccakSpongeControl = 53,
     /// The bn254 add assign chip.
     Bn254AddAssign = 13,
     /// The bn254 double assign chip.
@@ -77,18 +89,36 @@ pub enum MipsAirId {
     SyscallPrecompile = 27,
     /// The div rem chip.
     DivRem = 28,
-    /// The add sub chip.
+    /// The add sub chip — the register form.
     AddSub = 29,
-    /// The bitwise chip.
+    /// The immediate-form add sub chip (`ADDI` / `ADDIU`), on the narrower
+    /// I-type frame.  Declared beside `AddSub` because `MipsAirId::iter()`
+    /// yields declaration order and must match `MipsAir::chips()`.
+    AddSubImm = 60,
+    /// The bitwise chip — the register form.
     Bitwise = 30,
+    /// The immediate-form bitwise chip (`XORI` / `ORI` / `ANDI`), on the
+    /// narrower I-type frame.  Declared beside `Bitwise` for the
+    /// declaration-order zip against `MipsAir::chips()`.
+    BitwiseImm = 61,
     /// The mul chip.
     Mul = 31,
-    /// The shift right chip.
+    /// The shift right chip — the register form.
     ShiftRight = 32,
-    /// The shift left chip.
+    /// The immediate-form (shamt) shift right chip, on the narrower I-type
+    /// frame.  Declared beside its register sibling for the declaration-order
+    /// zip against `MipsAir::chips()`.
+    ShiftRightImm = 63,
+    /// The shift left chip — the register form.
     ShiftLeft = 33,
-    /// The lt chip.
+    /// The immediate-form (shamt) shift left chip, on the narrower I-type
+    /// frame.
+    ShiftLeftImm = 62,
+    /// The lt chip — the register form.
     Lt = 34,
+    /// The immediate-form compare chip (`SLTI` / `SLTIU`), on the narrower
+    /// I-type frame.
+    LtImm = 64,
     /// The CloClz chip.
     CloClz = 35,
     /// The branch chip.
@@ -97,8 +127,16 @@ pub enum MipsAirId {
     Jump = 37,
     /// The SyscallInstructionChip.
     SyscallInstrs = 38,
-    /// The MemoryInstructionChip.
-    MemoryInstrs = 39,
+    /// The narrow (sub-word) load chip: `LB`, `LBU`, `LH`, `LHU`.
+    LoadNarrow = 54,
+    /// The word-aligned load chip: `LW`, `LL`.
+    LoadWord = 55,
+    /// The narrow (sub-word) store chip: `SB`, `SH`.
+    StoreNarrow = 56,
+    /// The word-aligned store chip: `SW`, `SC`.
+    StoreWord = 57,
+    /// The unaligned load/store chip: `LWL`, `LWR`, `SWL`, `SWR`.
+    MemoryUnaligned = 58,
     /// The MiscInstrsChip.
     MiscInstrs = 40,
     /// The memory global init chip.
@@ -107,14 +145,29 @@ pub enum MipsAirId {
     MemoryGlobalFinalize = 42,
     /// The memory local chip.
     MemoryLocal = 43,
+    /// The memory bump chip: one shadow read per (register, shard).
+    MemoryBump = 59,
     /// The global chip.
     Global = 44,
     /// The byte chip.
     Byte = 45,
+    /// The parametric bit-width range table.
+    ///
+    /// Declared HERE, between `Byte` and `SysLinux`, because that is where
+    /// `MipsAir::get_chips_and_costs` pushes it, and the declaration order is
+    /// what `MipsAirId::iter()` yields.  The discriminant is pinned to the
+    /// variant, so its position in this list changes no serialized value, no
+    /// cost key and no shape key — only the iteration order that has to agree
+    /// with the chip list.
+    Range = 65,
     /// The SysLinux chip.
     SysLinux = 47,
     /// The MovCondChip.
     MovCond = 49,
+    // The BooleanCircuitGarble chip.
+    BooleanCircuitGarble = 50,
+    /// The BooleanCircuitGarble control chip (bookends the `PrecompileChain` state bus).
+    BooleanCircuitGarbleControl = 52,
 }
 
 impl MipsAirId {
@@ -125,15 +178,25 @@ impl MipsAirId {
         vec![
             MipsAirId::Cpu,
             MipsAirId::AddSub,
+            MipsAirId::AddSubImm,
             MipsAirId::Mul,
             MipsAirId::Bitwise,
+            MipsAirId::BitwiseImm,
             MipsAirId::ShiftLeft,
+            MipsAirId::ShiftLeftImm,
             MipsAirId::ShiftRight,
+            MipsAirId::ShiftRightImm,
+            MipsAirId::LtImm,
             MipsAirId::DivRem,
             MipsAirId::MemoryLocal,
+            MipsAirId::MemoryBump,
             MipsAirId::Branch,
             MipsAirId::Jump,
-            MipsAirId::MemoryInstrs,
+            MipsAirId::LoadNarrow,
+            MipsAirId::LoadWord,
+            MipsAirId::StoreNarrow,
+            MipsAirId::StoreWord,
+            MipsAirId::MemoryUnaligned,
             MipsAirId::SyscallInstrs,
             MipsAirId::MovCond,
             MipsAirId::MiscInstrs,
@@ -150,6 +213,8 @@ impl MipsAirId {
             Self::Program => "Program",
             Self::ShaExtend => "ShaExtend",
             Self::ShaCompress => "ShaCompress",
+            Self::ShaCompressControl => "ShaCompressControl",
+            Self::ShaExtendControl => "ShaExtendControl",
             Self::EdAddAssign => "EdAddAssign",
             Self::EdDecompress => "EdDecompress",
             Self::Secp256k1Decompress => "Secp256k1Decompress",
@@ -160,6 +225,7 @@ impl MipsAirId {
             Self::Secp256r1DoubleAssign => "Secp256r1DoubleAssign",
             Self::Poseidon2Permute => "Poseidon2Permute",
             Self::KeccakSponge => "KeccakSponge",
+            Self::KeccakSpongeControl => "KeccakSpongeControl",
             Self::Bn254AddAssign => "Bn254AddAssign",
             Self::Bn254DoubleAssign => "Bn254DoubleAssign",
             Self::Bls12381AddAssign => "Bls12381AddAssign",
@@ -177,24 +243,37 @@ impl MipsAirId {
             Self::SyscallPrecompile => "SyscallPrecompile",
             Self::DivRem => "DivRem",
             Self::AddSub => "AddSub",
+            Self::AddSubImm => "AddSubImm",
             Self::Bitwise => "Bitwise",
+            Self::BitwiseImm => "BitwiseImm",
             Self::Mul => "Mul",
             Self::ShiftRight => "ShiftRight",
+            Self::ShiftRightImm => "ShiftRightImm",
             Self::ShiftLeft => "ShiftLeft",
+            Self::ShiftLeftImm => "ShiftLeftImm",
             Self::Lt => "Lt",
+            Self::LtImm => "LtImm",
             Self::CloClz => "CloClz",
             Self::Branch => "Branch",
             Self::Jump => "Jump",
             Self::SyscallInstrs => "SyscallInstrs",
-            Self::MemoryInstrs => "MemoryInstrs",
+            Self::LoadNarrow => "LoadNarrow",
+            Self::LoadWord => "LoadWord",
+            Self::StoreNarrow => "StoreNarrow",
+            Self::StoreWord => "StoreWord",
+            Self::MemoryUnaligned => "MemoryUnaligned",
             Self::MiscInstrs => "MiscInstrs",
             Self::MemoryGlobalInit => "MemoryGlobalInit",
             Self::MemoryGlobalFinalize => "MemoryGlobalFinalize",
             Self::MemoryLocal => "MemoryLocal",
+            Self::MemoryBump => "MemoryBump",
             Self::Global => "Global",
             Self::Byte => "Byte",
+            Self::Range => "Range",
             Self::SysLinux => "SysLinux",
             Self::MovCond => "MovCond",
+            Self::BooleanCircuitGarble => "BooleanCircuitGarble",
+            Self::BooleanCircuitGarbleControl => "BooleanCircuitGarbleControl",
         }
     }
 }

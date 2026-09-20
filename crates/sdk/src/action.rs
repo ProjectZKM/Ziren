@@ -5,7 +5,7 @@ use zkm_prover::{components::DefaultProverComponents, ZKMProvingKey};
 
 use anyhow::{Ok, Result};
 use std::time::Duration;
-use zkm_stark::{ZKMCoreOpts, ZKMProverOpts};
+use zkm_pcs::{ZKMCoreOpts, ZKMProverOpts};
 
 use crate::{provers::ProofOpts, Prover, ZKMProofKind, ZKMProofWithPublicValues};
 

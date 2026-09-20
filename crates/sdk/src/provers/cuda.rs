@@ -47,7 +47,13 @@ impl CudaProver {
         }
 
         // Generate the core proof.
-        let proof = self.cuda_prover.prove_core_stateless(pk, stdin)?;
+        // Anything past Core sends the core proof straight back for
+        // compress, so let the server keep it rather than round-trip it.
+        let proof = self.cuda_prover.prove_core_stateless_retaining(
+            pk,
+            stdin,
+            kind != ZKMProofKind::Core,
+        )?;
         let cycles = proof.cycles;
         if kind == ZKMProofKind::Core {
             let proof_with_pv = ZKMProofWithPublicValues {
@@ -215,6 +221,10 @@ impl Prover<DefaultProverComponents> for CudaProver {
         &self.cpu_prover
     }
 
+    fn take_prove_ms(&self) -> Option<u64> {
+        self.cuda_prover.take_server_prove_ms()
+    }
+
     fn prove_impl<'a>(
         &'a self,
         pk: &ZKMProvingKey,
@@ -248,7 +258,7 @@ mod test {
         let client = ProverClient::cuda();
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         let proof = client.prove(&pk, stdin).run().unwrap();
         client.verify(&proof, &vk).unwrap();

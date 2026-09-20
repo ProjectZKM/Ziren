@@ -1,0 +1,155 @@
+//! In-circuit jagged-PCS proof types and verifier scaffolding.
+//!
+//! The jagged PCS layers a per-chip-evaluation reduction on top of
+//! the stacked-BaseFold PCS.  This module hosts the in-circuit
+//! data carriers and verifier-shape definitions for the jagged
+//! protocol.
+//!
+//! This module defines the proof-data type hierarchy:
+//!   - [`RecursiveStackedPcsProof`]: thin wrapper around the
+//!     underlying BaseFold proof + per-round batch evaluations
+//!   - [`JaggedSumcheckEvalProof`]: carrier for the jagged-eval
+//!     sumcheck reduction
+//!   - [`JaggedPcsProofVariable`]: top-level proof carrier
+//!     bundling the stacked-PCS proof, sumcheck reduction proof,
+//!     jagged-eval sub-proof, and per-chip dimension metadata
+//!
+//! The `verify_trusted_evaluations` orchestrator that consumes these
+//! types lives in [`crate::recursive_jagged_pcs`].
+
+use serde::{Deserialize, Serialize};
+use zkm_recursion_compiler::ir::{Ext, Felt};
+
+use crate::basefold_verifier::RecursiveBasefoldProof;
+use crate::partial_sumcheck::PartialSumcheckProof;
+
+/// In-circuit jagged-eval sumcheck reduction proof.
+///
+/// Wraps the [`PartialSumcheckProof`] that the jagged-eval
+/// protocol emits — the sumcheck reduction proves that the
+/// jagged-polynomial evaluation at the verifier-sampled point
+/// matches the value implied by the per-chip prefix-sum metadata.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct JaggedSumcheckEvalProof<F> {
+    pub partial_sumcheck_proof: PartialSumcheckProof<F>,
+}
+
+/// In-circuit stacked-PCS proof: the underlying BaseFold proof
+/// plus the per-round batch evaluations the jagged sumcheck
+/// reduces to.
+///
+/// `Pcs` is the underlying PCS proof type (typically a
+/// [`crate::basefold_verifier::RecursiveBasefoldProof`]).  `F` is
+/// the base field, `EF` the extension.
+pub struct RecursiveStackedPcsProof<Pcs, F, EF> {
+    /// Per-round per-stripe evaluations at the stack-portion of
+    /// the eval point.  One outer Vec per commit round (typically
+    /// just one), inner Vec is the per-stripe eval list.
+    pub batch_evaluations: Vec<Vec<Ext<F, EF>>>,
+    /// The underlying PCS opening proof.
+    pub pcs_proof: Pcs,
+}
+
+/// Per-chip dimension metadata carried alongside a jagged PCS
+/// proof.  Used by the verifier to reconstruct the jagged
+/// polynomial's prefix-sum structure and validate the eval-point
+/// dimensions.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct JaggedDimensionMetadata<F> {
+    /// `col_prefix_sums[k]` is the bit-decomposition of the
+    /// cumulative column-row offset of column `k` in the dense
+    /// jagged layout.  Length = `num_columns + 1`.
+    pub col_prefix_sums: Vec<Vec<F>>,
+}
+
+/// Top-level jagged PCS proof carrier — bundles the stacked PCS
+/// proof, the sumcheck reduction proof, the jagged-eval sub-
+/// proof, the per-chip dimension metadata, and the original
+/// commitment digest list.
+///
+/// `Pcs` is the underlying stacked-PCS proof type.  `Digest` is
+/// the field-hasher commitment digest type (typically
+/// `[Felt<F>; DIGEST_SIZE]`).
+pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
+    /// Per-chip dimension metadata (col prefix sums) at the
+    /// recursion-bit-decomposition layer (Felt-typed).
+    pub params: JaggedDimensionMetadata<Felt<F>>,
+    /// The sumcheck reduction proof — proves the column-claim
+    /// random-linear-combination matches the jagged sumcheck's
+    /// initial claim.
+    pub sumcheck_proof: PartialSumcheckProof<Ext<F, EF>>,
+    /// The jagged-eval sub-protocol proof — proves the sumcheck-
+    /// reduced jagged-polynomial evaluation matches the value
+    /// implied by the prefix sums.
+    pub jagged_eval_proof: JaggedSumcheckEvalProof<Ext<F, EF>>,
+    /// The underlying stacked PCS opening proof (wraps a
+    /// BaseFold proof + batch evaluations).
+    pub pcs_proof: RecursiveStackedPcsProof<Pcs, F, EF>,
+    /// Per-round per-chip column-count list.
+    pub column_counts: Vec<Vec<usize>>,
+    /// Per-round per-chip row-count list (one Felt per chip — the
+    /// WITNESSED per-chip height `2^log_h`, reconstructed in-circuit from
+    /// the opened `degree`).  Used by the step-(7) prefix-sum / area
+    /// consistency check.
+    ///
+    /// There are no baked NUMERIC `row_counts_usize` /
+    /// `padding_column_counts` fields: those would be a compile-time
+    /// height anchor that makes the recursion VK program-length-dependent
+    /// (a numeric pin asserting `row_count_felt == constant(2^log_h)`).
+    /// The verifier bounds per-chip heights via witnessed binds
+    /// (`assert_row_count_le_cube` + the main-padding-column
+    /// bit-bound) instead of baking them.
+    pub row_counts: Vec<Vec<Felt<F>>>,
+    /// Each round's stacking-padding column heights, in round order.
+    ///
+    /// The padding column is part of the committed COLUMN SPACE (it is what
+    /// closes a round out to its area) but not of the round's chip geometry, so
+    /// it belongs here rather than in `row_counts` / `column_counts` — those two
+    /// are what the hash-bind hashes, and the commitment binds the real chips
+    /// only.  The prefix-sum walk splices it back in at the round boundary.
+    pub padding_row_heights: Vec<Vec<Felt<F>>>,
+    /// Per-round original commitment digests (before any
+    /// chip-info-hash mix-in).  The BaseFold opening binds against THESE
+    /// (the RAW BaseFold roots).
+    pub original_commitments: Vec<Digest>,
+    /// Per-round MODIFIED commitment digests — the FS-observed
+    /// `compress([original_commitment, hash(once(len) ++ row_counts ++
+    /// column_counts)])` (hash-bind).  The in-circuit re-bind asserts
+    /// `compress([original_commitments[r], hash]) == modified_commitments[r]`,
+    /// tying the per-chip geometry to the observed commitment.  On the
+    /// hash-bind-off path these equal `original_commitments`.
+    pub modified_commitments: Vec<Digest>,
+    /// Expected evaluation claim — the value the jagged sumcheck
+    /// reduces to and the BaseFold opener verifies.
+    pub expected_eval: Ext<F, EF>,
+}
+
+/// Type alias bringing together the standard Ziren BaseFold
+/// recursion-circuit configuration (KoalaBear, 8-element digests).
+pub type DefaultJaggedPcsProof<F, EF> =
+    JaggedPcsProofVariable<RecursiveBasefoldProof<F, EF>, [Felt<F>; 8], F, EF>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+
+    type F = KoalaBear;
+
+    #[test]
+    fn jagged_sumcheck_eval_proof_constructs() {
+        let proof: JaggedSumcheckEvalProof<F> =
+            JaggedSumcheckEvalProof { partial_sumcheck_proof: PartialSumcheckProof::dummy() };
+        assert!(proof.partial_sumcheck_proof.univariate_polys.is_empty());
+    }
+
+    #[test]
+    fn jagged_dimension_metadata_constructs() {
+        let meta: JaggedDimensionMetadata<F> = JaggedDimensionMetadata {
+            col_prefix_sums: vec![vec![F::ZERO; 8], vec![F::ONE; 8], vec![F::ZERO; 8]],
+        };
+        assert_eq!(meta.col_prefix_sums.len(), 3);
+        assert_eq!(meta.col_prefix_sums[0].len(), 8);
+    }
+}

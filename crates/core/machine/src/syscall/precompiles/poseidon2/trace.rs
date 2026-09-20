@@ -4,19 +4,17 @@ use crate::syscall::precompiles::poseidon2::columns::{Poseidon2MemCols, NUM_COLS
 use crate::syscall::precompiles::poseidon2::Poseidon2PermuteChip;
 use crate::utils::pad_rows_fixed;
 use crate::CoreChipError;
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rayon::prelude::ParallelSlice;
 use std::borrow::BorrowMut;
-use zkm_core_executor::events::{
-    ByteLookupEvent, ByteRecord, Poseidon2PermuteEvent, PrecompileEvent,
-};
+use zkm_core_executor::events::{ByteRecord, Poseidon2PermuteEvent, PrecompileEvent};
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_core_executor::{ExecutionRecord, Program};
-use zkm_stark::MachineAir;
+use zkm_pcs::MachineAir;
+use zkm_pcs::PicusInfo;
 
 impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
     type Record = ExecutionRecord;
@@ -27,13 +25,8 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         "Poseidon2Permute".to_string()
     }
 
-    #[cfg(feature = "picus")]
-    fn picus_info(&self) -> zkm_stark::PicusInfo {
+    fn picus_info(&self) -> PicusInfo {
         Poseidon2MemCols::<u8>::picus_info()
-    }
-
-    fn local_only(&self) -> bool {
-        true
     }
 
     fn generate_trace(
@@ -83,7 +76,7 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         let blu_batches = events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|(_, event)| {
                     let event = if let PrecompileEvent::Poseidon2Permute(event) = event {
                         event
@@ -120,24 +113,20 @@ impl Poseidon2PermuteChip {
         blu: &mut impl ByteRecord,
     ) {
         let cols: &mut Poseidon2MemCols<F> = input_row.borrow_mut();
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.state_addr = F::from_canonical_u32(event.state_addr);
+        cols.clk = F::from_u32(event.clk);
+        cols.shard = F::from_u32(event.shard);
+        cols.state_addr = F::from_u32(event.state_addr);
         cols.is_real = F::ONE;
 
-        let input = event.pre_state.map(F::from_canonical_u32);
-        let output = event.post_state.map(F::from_canonical_u32);
+        let input = event.pre_state.map(F::from_u32);
+        let output = event.post_state.map(F::from_u32);
         cols.poseidon2 = populate_perm_deg3(input, Some(output));
 
         // Populate memory columns.
         for i in 0..WIDTH {
             cols.state_mem[i].populate(event.state_records[i], blu);
-            cols.pre_state_range_check_cols[i].populate(event.pre_state[i]);
-            cols.post_state_range_check_cols[i].populate(event.post_state[i]);
-
-            // Match AIR-side U8Range lookups for low three limbs of each word.
-            blu.add_u8_range_checks(&event.pre_state[i].to_le_bytes()[..3]);
-            blu.add_u8_range_checks(&event.post_state[i].to_le_bytes()[..3]);
+            cols.pre_state_range_check_cols[i].populate(blu, event.pre_state[i]);
+            cols.post_state_range_check_cols[i].populate(blu, event.post_state[i]);
         }
     }
 }

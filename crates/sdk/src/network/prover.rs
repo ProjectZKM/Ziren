@@ -49,38 +49,99 @@ pub struct NetworkProver {
 }
 
 impl NetworkProver {
+    /// Build from the environment alone.
     pub fn from_env() -> anyhow::Result<NetworkProver> {
-        let proof_network_privkey = Some(
-            env::var("ZKM_PRIVATE_KEY").expect("ZKM_PRIVATE_KEY must be set for remote proving"),
-        );
-        let endpoint =
-            Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
-        let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
-        // Default ca cert directory
+        Self::with_overrides(None, None)
+    }
+
+    /// Build from explicit credentials/endpoint, falling back to the
+    /// environment for whatever is not supplied.
+    ///
+    /// `ProverClientBuilder::private_key` / `rpc_url` used to be accepted and
+    /// then dropped, because network mode always called `from_env()`: a caller
+    /// could believe it had selected one key and endpoint while the SDK
+    /// connected with unrelated environment credentials.
+    pub fn with_overrides(
+        private_key: Option<String>,
+        rpc_url: Option<String>,
+    ) -> anyhow::Result<NetworkProver> {
+        let proof_network_privkey = match private_key {
+            Some(k) => k,
+            None => env::var("ZKM_PRIVATE_KEY")
+                .map_err(|_| anyhow::anyhow!("ZKM_PRIVATE_KEY must be set for remote proving"))?,
+        };
+        let endpoint = match rpc_url {
+            Some(u) => u,
+            None => env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()),
+        };
+        let domain_name = env::var("DOMAIN_NAME").unwrap_or("stage".to_string());
+        // The CA used to verify the proving network's certificate.
+        //
+        // This used to fall back SILENTLY to the repository's bundled
+        // `tool/ca.pem`, whose private key (`tool/ca.key`) is committed and
+        // therefore public: anyone can mint a certificate under it, so trusting
+        // it means any endpoint can impersonate the proving network -- and
+        // network proving sends the guest ELF and the private input stream
+        // there. The fixture is fine for tests; making it the default was not.
+        //
+        // `CA_CERT_PATH` is now required, with the bundled fixture reachable
+        // only by opting in explicitly.
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let ca_cert_path = Some(
-            env::var("CA_CERT_PATH")
-                .unwrap_or(manifest_dir.join("tool/ca.pem").to_string_lossy().to_string()),
-        );
+        let allow_test_ca = env::var("ZKM_ALLOW_INSECURE_TEST_CA")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let ca_cert_path = match env::var("CA_CERT_PATH") {
+            Ok(p) => Some(p),
+            Err(_) if allow_test_ca => {
+                // `tool/` is excluded from the published package (see the SDK
+                // manifest), so this path exists in a repository checkout and
+                // not in a crates.io copy. Say which of the two is missing
+                // rather than letting it surface as a file-not-found from
+                // inside the TLS setup.
+                let fixture = manifest_dir.join("tool/ca.pem");
+                if !fixture.exists() {
+                    return Err(anyhow::anyhow!(
+                        "ZKM_ALLOW_INSECURE_TEST_CA is set but {} does not exist. The test PKI \
+                         is not published with this crate -- its CA private key is committed -- \
+                         so it is reachable only from a repository checkout. Set CA_CERT_PATH to \
+                         the CA that signs the proving network's certificate.",
+                        fixture.display(),
+                    ));
+                }
+                tracing::warn!(
+                    "using the bundled INSECURE test CA: its private key is public, so this \
+                     connection can be impersonated. Never send sensitive witness data over it."
+                );
+                Some(fixture.to_string_lossy().to_string())
+            }
+            Err(_) => None,
+        };
         let ssl_cert_path = env::var("SSL_CERT_PATH").ok();
         let ssl_key_path = env::var("SSL_KEY_PATH").ok();
         let ssl_config = match (ssl_cert_path.as_ref(), ssl_key_path.as_ref()) {
             (Some(ssl_cert_path), Some(ssl_key_path)) => {
-                let (ca_cert, identity) = get_cert_and_identity(
-                    ca_cert_path.as_ref().expect("CA_CERT_PATH not set"),
-                    ssl_cert_path.as_ref(),
-                    ssl_key_path.as_ref(),
-                )?;
+                let ca = ca_cert_path.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "SSL_CERT_PATH/SSL_KEY_PATH are set but CA_CERT_PATH is not. Set it to \
+                         the CA that signs the proving network's certificate. To use the \
+                         repository's bundled test CA -- whose private key is PUBLIC, so the \
+                         connection can be impersonated -- set ZKM_ALLOW_INSECURE_TEST_CA=1."
+                    )
+                })?;
+                let (ca_cert, identity) =
+                    get_cert_and_identity(ca, ssl_cert_path.as_ref(), ssl_key_path.as_ref())?;
                 Some(Config { ca_cert, identity })
             }
             _ => None,
         };
 
-        let endpoint_para = endpoint.to_owned().expect("ENDPOINT must be set");
+        // Each of these was wrapped in `Some(..)` at construction and then
+        // `expect`ed back out, so the "must be set" panics could not fire; the
+        // Option was plumbing, not a failure mode. Bound directly now.
+        let endpoint_para = endpoint;
         let endpoint = match ssl_config {
             Some(config) => {
-                let mut tls_config = ClientTlsConfig::new()
-                    .domain_name(domain_name.to_owned().expect("DOMAIN_NAME must be set"));
+                let mut tls_config = ClientTlsConfig::new().domain_name(domain_name);
                 if let Some(ca_cert) = config.ca_cert {
                     tls_config = tls_config.ca_certificate(ca_cert);
                 }
@@ -92,9 +153,9 @@ impl NetworkProver {
             None => Endpoint::new(endpoint_para.to_owned())?,
         };
 
-        let private_key = proof_network_privkey.to_owned().expect("ZKM_PRIVATE_KEY must be set");
+        let private_key = proof_network_privkey;
         if private_key.is_empty() {
-            panic!("Please set the ZKM_PRIVATE_KEY");
+            anyhow::bail!("the proving-network private key is empty");
         }
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
@@ -126,14 +187,24 @@ impl NetworkProver {
 
     pub async fn download_file(url: &str) -> Result<Vec<u8>> {
         let response = reqwest::get(url).await?;
+        // Without this an error page is returned as if it were proof bytes, and
+        // the failure surfaces later as an unintelligible decode error.
+        let response = response
+            .error_for_status()
+            .map_err(|e| anyhow::anyhow!("downloading {url} failed: {e}"))?;
         let content = response.bytes().await?;
         Ok(content.to_vec())
     }
 
-    pub async fn connect(&self) -> StageServiceClient<Channel> {
+    /// Connect to the proving network.
+    ///
+    /// Fallible on purpose: an unreachable or misconfigured endpoint is an
+    /// ordinary remote failure, and this used to `expect` and take the caller's
+    /// process down with it.
+    pub async fn connect(&self) -> Result<StageServiceClient<Channel>> {
         StageServiceClient::connect(self.endpoint.clone())
             .await
-            .expect("connect: {self.endpoint:?}")
+            .map_err(|e| anyhow::anyhow!("could not connect to the proving network: {e}"))
     }
 
     async fn request_proof(&self, input: ProverInput, kind: ZKMProofKind) -> Result<String> {
@@ -176,7 +247,7 @@ impl NetworkProver {
         };
 
         self.sign_ecdsa(&mut request).await?;
-        let mut client = self.connect().await;
+        let mut client = self.connect().await?;
 
         let start = tokio::time::Instant::now();
         let response = client.generate_proof(request).await?.into_inner();
@@ -192,7 +263,7 @@ impl NetworkProver {
         timeout: Option<Duration>,
     ) -> Result<(ZKMProof, ZKMPublicValues, u64)> {
         let start_time = Instant::now();
-        let mut client = self.connect().await;
+        let mut client = self.connect().await?;
         loop {
             if let Some(timeout) = timeout {
                 if start_time.elapsed() > timeout {
@@ -205,9 +276,15 @@ impl NetworkProver {
 
             match Status::from_i32(get_status_response.status) {
                 Some(Status::Computing) => {
+                    // An unrecognised step means the server is newer than this
+                    // client, which is normal skew -- it is not grounds for
+                    // aborting a proof that is still progressing.
                     match Step::from_i32(get_status_response.step) {
                         Some(step) => log::info!("proof_id: {proof_id}, step: {step}"),
-                        None => todo!(),
+                        None => log::info!(
+                            "proof_id: {proof_id}, step: {} (unknown to this client)",
+                            get_status_response.step
+                        ),
                     }
                     sleep(Duration::from_millis(self.poll_interval)).await;
                 }
@@ -222,9 +299,18 @@ impl NetworkProver {
                     };
 
                     // proof
+                    // `proof_with_public_inputs` is SERVER-controlled, so a
+                    // malformed or truncated response must be an error, not a
+                    // panic in the caller's process. This is the ZR-18 case.
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
-                            .expect("Failed to deserialize proof");
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "proving network returned a proof this client cannot \
+                                     deserialize ({} bytes): {e}",
+                                    get_status_response.proof_with_public_inputs.len(),
+                                )
+                            })?;
                     let cycles = get_status_response.total_steps;
                     let proving_time = get_status_response.proving_time;
                     tracing::info!(
@@ -280,8 +366,15 @@ impl NetworkProver {
         let (proof, mut public_values, cycles) = self.wait_proof(&proof_id, kind, timeout).await?;
 
         if kind == ZKMProofKind::CompressToGroth16 {
-            assert_eq!(private_input.len(), 1);
-            public_values = bincode::deserialize(private_input.last().unwrap())?;
+            // Caller-supplied shape: an `assert_eq!` + `.unwrap()` here panicked
+            // this `Result`-returning API on a bad input length.
+            let [only] = private_input.as_slice() else {
+                anyhow::bail!(
+                    "CompressToGroth16 takes exactly one private input, got {}",
+                    private_input.len(),
+                );
+            };
+            public_values = bincode::deserialize(only)?;
         }
 
         Ok((
@@ -314,12 +407,14 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         &'a self,
         pk: &ZKMProvingKey,
         stdin: ZKMStdin,
-        _opts: ProofOpts,
+        opts: ProofOpts,
         _context: ZKMContext<'a>,
         kind: ZKMProofKind,
         elf_id: Option<String>,
     ) -> Result<(ZKMProofWithPublicValues, u64)> {
-        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, elf_id, None))
+        // `Prove::timeout` reaches `ProofOpts`; passing `None` here meant a
+        // stalled remote request polled forever despite an explicit timeout.
+        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, elf_id, opts.timeout))
     }
 }
 
