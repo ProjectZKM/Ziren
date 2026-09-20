@@ -89,3 +89,78 @@ where
 {
     challenger.check_witness(bits, from_f(witness))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_challenger::{CanObserve, CanSample};
+    use p3_field::PrimeCharacteristicRing;
+
+    use crate::jagged_pcs::{JaggedChallenger, JaggedVal};
+
+    /// A challenger seeded so the grind starts from a non-trivial state, and
+    /// reproducible so prover and verifier can be given the SAME state.
+    fn seeded() -> JaggedChallenger {
+        let perm = zkm_primitives::poseidon2_init();
+        let mut ch = JaggedChallenger::new(perm);
+        ch.observe(JaggedVal::from_u32(0xA11CE));
+        ch.observe(JaggedVal::from_u32(0xB0B));
+        ch
+    }
+
+    /// The grinding witness is what makes the LogUp-GKR transcript cost work to
+    /// steer, and ZR-29 was this check being a NO-OP on the wrap ring: the
+    /// override asserted nothing, so any witness passed and the challenger was
+    /// left un-advanced.  These pin both halves of the property — an honest
+    /// witness is accepted, and a witness off by one is not — so a future
+    /// no-op cannot pass them.
+    #[test]
+    fn gkr_grinding_witness_roundtrips() {
+        // The prover grinds from the seeded state.
+        let mut prover = seeded();
+        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+
+        // The verifier re-checks from the SAME pre-grind state, which is what
+        // "consuming the challenger exactly as gkr_grind did" means.
+        let mut verifier = seeded();
+        assert!(
+            gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness),
+            "the honest grinding witness must be accepted, or the negative case below \
+             proves nothing"
+        );
+    }
+
+    /// NEGATIVE: one off-by-one witness.  `check_witness` observes the witness
+    /// and requires the squeezed challenge's low `GKR_GRINDING_BITS` to be zero,
+    /// so a different witness re-seeds the sponge and (except with probability
+    /// 2^-16) fails.
+    #[test]
+    fn gkr_grinding_rejects_a_tampered_witness() {
+        let mut prover = seeded();
+        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+
+        let mut verifier = seeded();
+        assert!(
+            !gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness + JaggedVal::ONE),
+            "a tampered grinding witness must be rejected",
+        );
+    }
+
+    /// The grind is DETERMINISTIC (smallest-index witness), not `find_any`:
+    /// the witness is observed into the challenger, so a nondeterministic one
+    /// would make every downstream alpha/beta — and the whole LogUp-GKR proof —
+    /// vary run to run.
+    #[test]
+    fn gkr_grinding_is_deterministic() {
+        let mut a = seeded();
+        let mut b = seeded();
+        let wa: JaggedVal = gkr_grind(&mut a, GKR_GRINDING_BITS);
+        let wb: JaggedVal = gkr_grind(&mut b, GKR_GRINDING_BITS);
+        assert_eq!(wa, wb, "the grind must be reproducible across runs");
+        // And the two challengers must be left in the same state: the next
+        // squeeze is what the rest of the transcript is built on.
+        let na: JaggedVal = a.sample();
+        let nb: JaggedVal = b.sample();
+        assert_eq!(na, nb, "the post-grind challenger state must be reproducible");
+    }
+}
