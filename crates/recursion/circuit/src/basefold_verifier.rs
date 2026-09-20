@@ -593,39 +593,6 @@ pub fn fold_block_host_shape<EF: p3_field::Field>(evals: &[EF], xs: &[EF], betas
     cur[0]
 }
 
-pub fn emit_merkle_path<C, const DIGEST_SIZE: usize>(
-    builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
-    leaf: [zkm_recursion_compiler::prelude::Felt<C::F>; DIGEST_SIZE],
-    path: &[[zkm_recursion_compiler::prelude::Felt<C::F>; DIGEST_SIZE]],
-    position_bits: &[zkm_recursion_compiler::prelude::Felt<C::F>],
-) -> [zkm_recursion_compiler::prelude::Felt<C::F>; DIGEST_SIZE]
-where
-    C: zkm_recursion_compiler::prelude::Config,
-{
-    use zkm_recursion_compiler::ir::DslIr;
-    assert_eq!(DIGEST_SIZE, 8, "Poseidon2 KoalaBear digest is 8 felts");
-    assert_eq!(path.len(), position_bits.len(), "path/position_bits length mismatch");
-
-    let mut current = leaf;
-    for (sibling, &bit) in path.iter().zip(position_bits.iter()) {
-        let mut input: [zkm_recursion_compiler::prelude::Felt<C::F>; 16] = [current[0]; 16];
-        for i in 0..DIGEST_SIZE {
-            let left = builder.uninit();
-            let right = builder.uninit();
-            builder.push_op(DslIr::Select(bit, left, right, sibling[i], current[i]));
-            input[i] = left;
-            input[i + DIGEST_SIZE] = right;
-        }
-        let output: [zkm_recursion_compiler::prelude::Felt<C::F>; 16] =
-            core::array::from_fn(|_| builder.uninit());
-        // Tuple order is (dst, src) — see compiler.rs dispatch which
-        // calls `poseidon2_permute(data.0 as dst, data.1 as src)`.
-        builder.push_op(DslIr::CircuitV2Poseidon2PermuteKoalaBear(Box::new((output, input))));
-        current = core::array::from_fn(|i| output[i]);
-    }
-    current
-}
-
 /// **In-circuit BaseFold round-count soundness binding — TIGHT integer `<=`.**
 ///
 /// On the height-agnostic recursion path, binds a WITNESSED
@@ -734,104 +701,8 @@ pub fn assert_num_vars_le_max<C>(
     let _diff_bits = C::num2bits(builder, diff, nbits);
 }
 
-/// **In-circuit per-query FRI fold-chain emission.**
-///
-/// Emits the constraint sequence for verifying one query's
-/// commit-phase fold chain.  Per round:
-///
-/// 1. Use [`emit_merkle_path`] on the round's leaf + path to recompute
-///    the Merkle root; assert equals the round's commit.
-/// 2. Pull sibling pair from the leaf opening; check
-///    `pair[idx_low_bit] == folded_eval` via subtraction-to-zero.
-/// 3. Compute new folded:
-///    `folded' = pair[0] + (beta - x) * (pair[1] - pair[0]) / (-2x)`
-///    via DSL-IR Sub/Mul/Div ops (same pattern as
-///    [`crate::fri::verify_query`]).
-/// 4. Update `idx >>= 1`, `x = x.square()`.
-///
-/// Returns the final folded Ext after all rounds; caller asserts
-/// equality with `final_poly`.
-///
-/// Modeled after the retired legacy FRI `verify_query` body — the math
-/// is identical at arity 2.  Inlining gives us tighter control over the
-/// witness shape (no dependency on `KoalaBearFriParametersVariable`).
-///
-/// **Untested in this environment** (test-artifacts requires a
-/// MIPS toolchain not available).  The algorithm matches the
-/// host-shape verifier [`RecursiveBasefoldVerifier::verify_query_chain_host_shape`]
-/// (which IS unit-testable) so behavior is specified end-to-end.
-pub fn emit_basefold_query_chain<C>(
-    builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
-    initial_eval: zkm_recursion_compiler::prelude::Ext<C::F, C::EF>,
-    initial_x: zkm_recursion_compiler::prelude::Felt<C::F>,
-    index_bits: &[C::Bit],
-    sibling_pairs: &[[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>; 2]],
-    betas: &[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>],
-) -> zkm_recursion_compiler::prelude::Ext<C::F, C::EF>
-where
-    C: crate::CircuitConfig,
-{
-    use core::iter::once;
-    use p3_field::PrimeCharacteristicRing;
-    use zkm_recursion_compiler::ir::DslIr;
-    assert_eq!(sibling_pairs.len(), betas.len(), "round count mismatch");
-    assert!(index_bits.len() >= sibling_pairs.len(), "index_bits must cover every fold round");
-
-    let mut folded = initial_eval;
-    let mut x = initial_x;
-
-    for (round, ([eval0, eval1], beta)) in sibling_pairs.iter().zip(betas.iter()).enumerate() {
-        // The fold point depends on the query index's per-round bit
-        // (which sibling is at +x vs -x).  Mirror the
-        // host (crates/pcs/src/basefold/verifier.rs:378-387):
-        //   xs = [x, -x]   if bit == 0   (current at +x)
-        //   xs = [-x, x]   if bit == 1   (current at -x)
-        //   folded' = eval0 + (beta - xs[0]) * (eval1 - eval0) / (xs[1] - xs[0])
-        // Hardcoding xs = [x, -x] (the bit==0 case) would fold every odd
-        // query index through swapped points, failing the final
-        // `folded == final_poly` assert in gnark.
-        let zero: zkm_recursion_compiler::prelude::Felt<C::F> = builder.constant(C::F::ZERO);
-        let neg_x: zkm_recursion_compiler::prelude::Felt<C::F> = builder.uninit();
-        builder.push_op(DslIr::SubF(neg_x, zero, x));
-        let xs = C::select_chain_f(builder, index_bits[round], once(x), once(neg_x));
-
-        // diff = eval1 - eval0   (Ext - Ext)
-        let diff: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
-        builder.push_op(DslIr::SubE(diff, *eval1, *eval0));
-
-        // beta_minus_xs0 = beta - xs[0]   (Ext - Felt)
-        let beta_minus_xs0: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
-        builder.push_op(DslIr::SubEF(beta_minus_xs0, *beta, xs[0]));
-
-        // numer = beta_minus_xs0 * diff   (Ext * Ext)
-        let numer: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
-        builder.push_op(DslIr::MulE(numer, beta_minus_xs0, diff));
-
-        // denom = xs[1] - xs[0]   (Felt - Felt)
-        let denom: zkm_recursion_compiler::prelude::Felt<C::F> = builder.uninit();
-        builder.push_op(DslIr::SubF(denom, xs[1], xs[0]));
-
-        // ratio = numer / denom   (Ext / Felt)
-        let ratio: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
-        builder.push_op(DslIr::DivEF(ratio, numer, denom));
-
-        // new_folded = eval0 + ratio   (Ext + Ext)
-        let new_folded: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
-        builder.push_op(DslIr::AddE(new_folded, *eval0, ratio));
-
-        folded = new_folded;
-
-        // x ← x²  (Felt * Felt)
-        let x_squared: zkm_recursion_compiler::prelude::Felt<C::F> = builder.uninit();
-        builder.push_op(DslIr::MulF(x_squared, x, x));
-        x = x_squared;
-    }
-
-    folded
-}
-
-/// In-circuit block fold: the arity generalisation of
-/// [`emit_basefold_query_chain`]'s per-round step.
+/// In-circuit block fold: the arity generalisation of the per-round fold step
+/// that [`RecursiveBasefoldVerifier::verify_shard`] emits inline.
 ///
 /// Folds one commit-phase round's `2^k` opened codeword values down to a single
 /// value using `k` betas, which is what lets a round cover `k` variables
@@ -972,8 +843,8 @@ where
 ///   - When component openings are present, recompute each query's
 ///     batched initial evaluation from them and Merkle-verify it against
 ///     the original commitments.
-///   - Walk the commit-phase fold chain ([`emit_basefold_query_chain`])
-///     and bind each round's reconstructed root to its committed root.
+///   - Walk the commit-phase fold chain and bind each round's reconstructed
+///     root to its committed root.
 impl<C, FC, HV> crate::recursive_stacked_pcs::RecursiveMultilinearPcsVerifier<C, FC>
     for RecursiveBasefoldVerifier<HV>
 where
@@ -1856,6 +1727,191 @@ mod tests {
     // itself is covered by the merkle_tree.rs tests; here we pin the
     // residual-zero rule end-to-end through the runtime, where the
     // in-circuit `assert_bit_zero` actually fires).
+
+    // ---- Component-opening binding: the audit's regression gate 1 ----
+    //
+    // `verify_shard` binds each query's component opening to its round
+    // commitment with exactly this chain:
+    //
+    //   leaf_digest = HV::hash(op.leaf_values.flatten())
+    //   for (level, sibling) in op.merkle_path_digests.enumerate():
+    //       pair        = HV::select_chain_digest(bit[level], [leaf_digest, sibling])
+    //       leaf_digest = HV::compress(pair)
+    //   HV::assert_digest_eq(leaf_digest, commitments[round_idx])
+    //
+    // `merkle_tree.rs` covers the HONEST walk and nothing covered a MUTATED
+    // component, so none of the four bindings was shown to be load-bearing —
+    // the same shape as ZR-24, where an equality sat inert behind an
+    // always-empty vector and every honest test still passed.
+    //
+    // These runs use the production `HV` primitives (not a reimplementation)
+    // and execute end-to-end through the recursion runtime, so a mutation the
+    // constraint fails to catch surfaces as a `#[should_panic]` test that does
+    // not panic.
+
+    /// Which single component the run corrupts.  Exactly one felt moves in each
+    /// case, so a rejection can only come from the binding under test.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Corrupt {
+        /// Honest proof: the chain must accept.
+        Nothing,
+        /// One opened felt of the query's block — the leaf the chain hashes.
+        Leaf,
+        /// One sibling digest of the inclusion path.
+        Sibling,
+        /// The round commitment the recomputed root is compared against.
+        Root,
+        /// The query index, i.e. the leaf's POSITION: the same leaf and path
+        /// authenticated at a different place in the codeword domain.
+        Position,
+    }
+
+    /// Run the component chain over a `2^LOG_CW` codeword domain, natively
+    /// computing the honest root with the MMCS's own Poseidon2 primitives and
+    /// then re-deriving it in-circuit.
+    fn run_component_binding(corrupt: Corrupt) {
+        use crate::hash::FieldHasherVariable;
+        use crate::utils::tests::run_test_recursion;
+        use crate::CircuitConfig;
+        use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
+        use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as HV;
+        use zkm_pcs::{InnerCompress, InnerHash, InnerPerm};
+
+        const LOG_CW: usize = 4;
+        const BLOCK_WIDTH: usize = 3;
+        let index: usize = 0b1011;
+
+        // --- native mirror, with the primitives the Merkle MMCS commits under
+        let perm: InnerPerm = zkm_primitives::poseidon2_init();
+        let hasher = InnerHash::new(perm.clone());
+        let compressor = InnerCompress::new(perm);
+
+        let block: Vec<InnerVal> =
+            (0..BLOCK_WIDTH).map(|i| InnerVal::from_u64(7 + i as u64)).collect();
+        let siblings: Vec<[InnerVal; 8]> = (0..LOG_CW)
+            .map(|l| core::array::from_fn(|i| InnerVal::from_u64(100 * (l as u64 + 1) + i as u64)))
+            .collect();
+
+        let mut acc: [InnerVal; 8] = hasher.hash_iter(block.iter().copied());
+        for (level, sib) in siblings.iter().enumerate() {
+            // `should_swap = bit` swaps `[leaf, sibling]`, so an odd position
+            // puts the sibling on the left — the convention `merkle_tree::verify`
+            // documents and this chain shares.
+            acc = if (index >> level) & 1 == 1 {
+                compressor.compress([*sib, acc])
+            } else {
+                compressor.compress([acc, *sib])
+            };
+        }
+        let root = acc;
+
+        // --- the same chain in-circuit, with one component moved
+        let mut builder = Builder::<InnerConfig>::default();
+        let block_vars: Vec<Felt<InnerVal>> = block
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let v = if corrupt == Corrupt::Leaf && i == 0 { *f + InnerVal::ONE } else { *f };
+                builder.constant(v)
+            })
+            .collect();
+        let sibling_vars: Vec<[Felt<InnerVal>; 8]> = siblings
+            .iter()
+            .enumerate()
+            .map(|(l, sib)| {
+                core::array::from_fn(|i| {
+                    let v = if corrupt == Corrupt::Sibling && l == 0 && i == 0 {
+                        sib[i] + InnerVal::ONE
+                    } else {
+                        sib[i]
+                    };
+                    builder.constant(v)
+                })
+            })
+            .collect();
+        let root_vars: [Felt<InnerVal>; 8] = core::array::from_fn(|i| {
+            let v =
+                if corrupt == Corrupt::Root && i == 0 { root[i] + InnerVal::ONE } else { root[i] };
+            builder.constant(v)
+        });
+        // The position bits come from `num2bits`, as production derives them
+        // from the sampled query index.
+        let claimed_index = if corrupt == Corrupt::Position { index ^ 1 } else { index };
+        let index_felt: Felt<InnerVal> = builder.constant(InnerVal::from_u64(claimed_index as u64));
+        let index_bits = <InnerConfig as CircuitConfig>::num2bits(&mut builder, index_felt, LOG_CW);
+
+        let mut leaf_digest =
+            <HV as FieldHasherVariable<InnerConfig>>::hash(&mut builder, &block_vars);
+        for (level, sib) in sibling_vars.iter().enumerate() {
+            let pair = <HV as FieldHasherVariable<InnerConfig>>::select_chain_digest(
+                &mut builder,
+                index_bits[level],
+                [leaf_digest, *sib],
+            );
+            leaf_digest = <HV as FieldHasherVariable<InnerConfig>>::compress(&mut builder, pair);
+        }
+        <HV as FieldHasherVariable<InnerConfig>>::assert_digest_eq(
+            &mut builder,
+            leaf_digest,
+            root_vars,
+        );
+        run_test_recursion(builder.into_operations(), std::iter::empty());
+    }
+
+    /// POSITIVE, and the one that makes the four below mean anything: the
+    /// honest component opening verifies, which also confirms the native mirror
+    /// above reproduces the in-circuit chain (orientation included).
+    #[test]
+    fn component_binding_accepts_the_honest_opening() {
+        run_component_binding(Corrupt::Nothing);
+    }
+
+    /// NEGATIVE — one opened felt of the query's block.  The block is what the
+    /// query chain's inner product consumes, so an unbound leaf would let a
+    /// prover answer a query with values the commitment never covered.
+    #[test]
+    // A failed `assert_felt_eq` reaches the runtime as a division by zero
+    // (`DivFAssert`), so pinning it keeps the test from passing on an
+    // unrelated panic.
+    #[should_panic(expected = "DivFOutOfDomain")]
+    fn component_binding_rejects_a_corrupted_leaf() {
+        run_component_binding(Corrupt::Leaf);
+    }
+
+    /// NEGATIVE — one sibling digest of the inclusion path.
+    #[test]
+    // A failed `assert_felt_eq` reaches the runtime as a division by zero
+    // (`DivFAssert`), so pinning it keeps the test from passing on an
+    // unrelated panic.
+    #[should_panic(expected = "DivFOutOfDomain")]
+    fn component_binding_rejects_a_corrupted_path() {
+        run_component_binding(Corrupt::Sibling);
+    }
+
+    /// NEGATIVE — the round commitment itself.  This is the compare that ties
+    /// the whole walk to the observed root; ZR-24 was exactly this equality
+    /// being unreachable.
+    #[test]
+    // A failed `assert_felt_eq` reaches the runtime as a division by zero
+    // (`DivFAssert`), so pinning it keeps the test from passing on an
+    // unrelated panic.
+    #[should_panic(expected = "DivFOutOfDomain")]
+    fn component_binding_rejects_a_corrupted_root() {
+        run_component_binding(Corrupt::Root);
+    }
+
+    /// NEGATIVE — the leaf's POSITION.  The leaf and the path are both honest;
+    /// only the claimed index moves, so this is the binding that stops one
+    /// authenticated opening from being replayed at another point of the
+    /// codeword domain.
+    #[test]
+    // A failed `assert_felt_eq` reaches the runtime as a division by zero
+    // (`DivFAssert`), so pinning it keeps the test from passing on an
+    // unrelated panic.
+    #[should_panic(expected = "DivFOutOfDomain")]
+    fn component_binding_rejects_a_corrupted_position() {
+        run_component_binding(Corrupt::Position);
+    }
 
     /// Emit the residual rule: given a full `index` over `log_codeword`
     /// bits and a consumed `path_len`, assert `index >> path_len == 0`
