@@ -1247,6 +1247,16 @@ where
     for v in first_root.iter() {
         v.write(witness);
     }
+    // Then the RAW roots of every round committed before the main one, in the
+    // order the batched opening used: `preceding_commits` first, main last.
+    // `lift_jagged_basefold_bundle_outer` reads these back in the same order --
+    // it performs no other stream reads, so appending here is positionally safe.
+    for c in bundle.preceding_commits.iter() {
+        let root: OuterDigestRaw = outer_cap_root(c);
+        for v in root.iter() {
+            v.write(witness);
+        }
+    }
     true
 }
 
@@ -1416,19 +1426,42 @@ where
         pcs_proof: basefold_proof_var,
     };
 
-    // original_commitments[0] = WITNESSED BN254 commit root
-    // `HV::DigestVariable == [Var<Bn254>; 1] == [Var<C::N>; 1]` for the outer
-    // ring; the witnessed `preread_commit_root` replaces the baked const_digest.
-    let first_commit_digest: <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable =
-        preread_commit_root;
-    let zero_digest_var: <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable =
-        HV::const_digest(builder, <HV as crate::hash::FieldHasher<C::F>>::Digest::default());
+    // ── original_commitments, in the order the proof OPENS the rounds ──
+    //
+    // This used to be `[main_root, zero, zero, ..]`. The host proof and the
+    // native verifier order the rounds `preceding_commits` first and the main
+    // round LAST, and `component_polynomials_query_openings_and_proofs` follows
+    // that same order, so `component_openings[0]` belongs to the first
+    // PRECEDING (preprocessed) round -- not to main. Authenticating it against
+    // `main_root` is why activating component verification rejected an honest
+    // proof at the first `assert_digest_eq`, and why disabling the later
+    // query-chain equality changed nothing: the mismatch is upstream of it.
+    //
+    // The preceding roots are WITNESSED, not `const_digest`: they vary per
+    // proof, so baking them would make the R1CS proof-specific. Reading them
+    // here is positionally safe because this function performs no other stream
+    // reads and the writer appends them after the main root.
+    //
+    // NOTE, and this is a soundness limit rather than an oversight: accepting
+    // proof-supplied preceding roots repairs COMPLETENESS only. Each one still
+    // has to be re-bound to `vk.commit` with its geometry, which is ZR-23's
+    // second bind; until that lands, this vector is proof-controlled.
     let mut original_commitments: Vec<<HV as crate::hash::FieldHasherVariable<C>>::DigestVariable> =
         Vec::with_capacity(num_rounds);
-    original_commitments.push(first_commit_digest);
-    for _ in 1..num_rounds {
-        original_commitments.push(zero_digest_var);
+    for c in bundle.preceding_commits.iter() {
+        let root: OuterDigestRaw = outer_cap_root(c);
+        let witnessed: [zkm_recursion_compiler::ir::Var<C::N>; 1] =
+            core::array::from_fn(|i| root[i].read(builder));
+        original_commitments.push(witnessed);
     }
+    // `HV::DigestVariable == [Var<Bn254>; 1] == [Var<C::N>; 1]` for the outer ring.
+    original_commitments.push(preread_commit_root);
+    assert_eq!(
+        original_commitments.len(),
+        num_rounds,
+        "one raw commitment per opened round: {} preceding + main != {num_rounds} rounds",
+        bundle.preceding_commits.len(),
+    );
     // OUTER ring (gnark wrap): the BN254 hash-bind / re-bind is performed
     // inside the registered outer jagged-verify hook, NOT in this lift.  Carry
     // modified == original here so the in-circuit assert in

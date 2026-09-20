@@ -1465,22 +1465,16 @@ where
                     // where `initial_eval` falls back to `block[0]` itself and
                     // there is nothing to bind to.
                     //
-                    // MEASURED, and the honest state of things: that skip is
-                    // taken on the ONE path this verifier is known to run,
-                    // the wrap/outer ring.  `read_basefold_proof_outer_from_
-                    // stream` (`basefold_witness.rs`) sets `component_openings:
-                    // Vec::new()` on purpose -- "verifier discards
-                    // component_openings on this path", worth ~25MB of consts --
-                    // which was true only BECAUSE `initial_eval` fed nothing.
-                    // So this assert is correct but currently INERT: perturbing
-                    // it leaves `test_circuit_groth16_only` and both compress
-                    // tests green, whereas perturbing the sumcheck chain above
-                    // fails the gnark solve.  ZR-24 is therefore NOT closed by
-                    // this block alone -- the outer witness has to start
-                    // carrying and Merkle-verifying its component openings, and
-                    // that costs constraints on the ring with the least ptau
-                    // headroom.  Landed anyway so the check is in place the
-                    // moment the data is.
+                    // This was INERT on the one ring the verifier is known to
+                    // run: the outer witness reader set `component_openings:
+                    // Vec::new()` on purpose, so the skip was always taken and
+                    // perturbing the assert changed nothing.
+                    //
+                    // On this branch the outer witness carries the openings, so
+                    // the branch is live there and the binding does something.
+                    // The remaining skip is structural, not a production path:
+                    // the `Empty`/placeholder shapes have no openings and
+                    // nothing to bind, and they are built rather than proved.
                     if !proof.component_openings.is_empty() {
                         let mut cur: Vec<Ext<C::F, C::EF>> = block.to_vec();
                         // Halve on the most significant bit of `p` first.
