@@ -70,3 +70,22 @@ jobs:
           done
         env:
           RUSTFLAGS: "-C target-cpu=native"
+      - name: Verifier malformed-input guards, default AND `ark` features
+        # `zkm-verifier` is absent from the loop above, so its tests ran nowhere.
+        # That matters most for the `ark` loaders: they sit behind an OPTIONAL
+        # feature, so a default run compiles 9 of the 12 malformed-input tests
+        # and the three `groth16::ark_converter::malformed_input` ones are not
+        # built at all. A regression in the bounds-checked `ark` proof/VK loaders
+        # (ZR-03) would therefore be invisible until someone enabled the feature.
+        # Measured: 9 tests without `--features ark`, 12 with.
+        #
+        # Filtered to `malformed_input` on purpose: the crate's other tests drive
+        # gnark through the FFI and need prover artifacts this job does not
+        # build, so an unfiltered run aborts in `ProvePlonkBn254` for reasons
+        # unrelated to what this step is guarding.
+        run: |
+          source ~/.zkm-toolchain/env
+          cargo test -r -p zkm-verifier malformed_input
+          cargo test -r -p zkm-verifier --features ark malformed_input
+        env:
+          RUSTFLAGS: "-C target-cpu=native"
