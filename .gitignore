@@ -11,6 +11,10 @@ bins
 # every clone (the zkvm RuntimeExit commit-then-halt path lives here).
 !crates/go-runtime/zkvm_overlay/**/*.s
 *.txt
+# ...except the protocol profile the vk map is valid under.  It is `include_str!`d
+# by zkm-prover, so an untracked copy is a build that does not compile for anyone
+# who clones, and a silently absent one would be a guard that never runs.
+!crates/prover/vk_map_profile.txt
 *.codex
 
 # Proofs

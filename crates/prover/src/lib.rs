@@ -646,6 +646,31 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // 124-core box (~5 h serial); split it over machines with
             // `--start/--end` (or `crates/prover/scripts/parallel_vk_regen.sh`) and union
             // the partial maps with `merge_vk_maps`.
+            // The map is only meaningful under the transcript it was built
+            // for.  A key is the hash of a recursion verifying key, and every
+            // one of those moves when the transcript moves -- so a build whose
+            // protocol differs from the one that generated this map agrees
+            // with it on nothing, and `contains_key` misses for every proof.
+            //
+            // Without this check that surfaces as each leaf failing for a
+            // reason naming none of it.  With it, it is one startup error that
+            // names both profiles and says what to regenerate.  This is the
+            // consumer `zkm_pcs::profile` is written for: the two artifacts
+            // meeting here -- this binary and that file -- are built at
+            // different times and can disagree.
+            let map_profile = include_str!("../vk_map_profile.txt").trim();
+            if let Err(mismatch) = zkm_pcs::profile::check_peer_profile(map_profile) {
+                panic!(
+                    "vk_map.bin was generated for a different protocol.\n  \
+                     this build: {}\n  the map:    {}\n\
+                     Every recursion verifying key moves with the transcript, so no \
+                     key in the map can match a proof this build produces. Regenerate \
+                     the map (build_compress_vks + merge_vk_maps + write_vk_root) and \
+                     record the new digest in crates/prover/vk_map_profile.txt, or set \
+                     VERIFY_VK=false to run without membership.",
+                    mismatch.ours, mismatch.theirs,
+                );
+            }
             bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap()
         } else {
             // VERIFY_VK=false: the dummy map is a placeholder (membership is
@@ -2543,6 +2568,26 @@ fn normalize_key_census_enabled() -> bool {
 
 #[cfg(test)]
 pub mod tests {
+
+    /// The recorded profile must be THIS build's, so the mismatch is caught in
+    /// CI rather than at a prover's startup.
+    ///
+    /// A failure here means one of two things. Either the transcript moved, in
+    /// which case `vk_map.bin` is stale and regenerating it is the fix and this
+    /// file records the new digest afterwards. Or only the profile's own
+    /// representation changed, in which case the map is still valid and this
+    /// file is simply restated. The two are not distinguishable from here,
+    /// which is why updating this file is a deliberate act and not a default.
+    #[test]
+    fn vk_map_profile_matches_this_build() {
+        let recorded = include_str!("../vk_map_profile.txt").trim();
+        let ours = zkm_pcs::profile::transcript_profile_digest_hex();
+        assert_eq!(
+            recorded, ours,
+            "crates/prover/vk_map_profile.txt records {recorded}, but this build's \
+             protocol profile is {ours}; see this test's documentation",
+        );
+    }
     use std::{
         collections::BTreeSet,
         fs::File,
