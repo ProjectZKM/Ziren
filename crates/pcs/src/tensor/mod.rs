@@ -26,6 +26,7 @@ mod init;
 pub mod mem;
 mod raw_buffer;
 mod slice;
+mod zeroable;
 #[allow(clippy::module_inception)]
 mod tensor;
 
@@ -37,3 +38,4 @@ pub use init::Init;
 pub use raw_buffer::{RawBuffer, TryReserveError};
 pub use slice::Slice;
 pub use tensor::Tensor;
+pub use zeroable::Zeroable;

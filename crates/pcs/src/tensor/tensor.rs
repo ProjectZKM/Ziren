@@ -21,10 +21,20 @@ use super::dimensions::Dimensions;
 use super::raw_buffer::TryReserveError;
 
 /// A backend-generic 2D row-major tensor (see the module docs).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Tensor<T, A: Backend = CpuBackend> {
     storage: Buffer<T, A>,
     dimensions: Dimensions,
+}
+
+// Written out rather than derived: the derive would bound `T: Clone`, but the
+// storage is duplicated as BYTES through the backend's memcpy, which needs
+// `T: Copy`.  A derived `Clone` would have promised element-wise cloning and
+// performed a byte copy.
+impl<T: Copy, A: Backend> Clone for Tensor<T, A> {
+    fn clone(&self) -> Self {
+        Self { storage: self.storage.clone(), dimensions: self.dimensions.clone() }
+    }
 }
 
 impl<T, A: Backend> Tensor<T, A> {
@@ -63,15 +73,25 @@ impl<T, A: Backend> Tensor<T, A> {
     /// [`crate::tensor::mem::DeviceMemory::write_bytes`]), yielding a fully
     /// initialized tensor (`len == rows * cols`).
     ///
+    /// `T: Zeroable` because this declares the zeroed bytes to be initialized
+    /// values: the bound is the promise that the all-zero pattern IS a `T`.
+    /// Without it the call produced arbitrary invalid values for any type with
+    /// a niche at zero.
+    ///
     /// # Panics
     ///
     /// Panics if the allocator fails to allocate or the zeroing fails.
     #[inline]
     #[must_use]
-    pub fn zeros_in(sizes: [usize; 2], allocator: A) -> Self {
+    pub fn zeros_in(sizes: [usize; 2], allocator: A) -> Self
+    where
+        T: crate::tensor::Zeroable,
+    {
         let mut tensor = Self::with_sizes_in(sizes, allocator);
         let bytes = tensor.dimensions.total_len() * core::mem::size_of::<T>();
-        tensor.storage.write_bytes(0, bytes).unwrap();
+        // SAFETY: `T: Zeroable` is exactly `write_bytes`'s precondition for the
+        // zero pattern.
+        unsafe { tensor.storage.write_bytes(0, bytes) }.unwrap();
         tensor
     }
 

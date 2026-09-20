@@ -31,7 +31,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field};
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::tensor::{
-    backend::{Backend, CpuBackend, GLOBAL_CPU_BACKEND},
+    backend::{Backend, CpuBackend, HostAddressable, GLOBAL_CPU_BACKEND},
     mem::{CopyDirection, CopyError},
     slice::Slice,
     HasBackend, Init, RawBuffer, TryReserveError,
@@ -469,7 +469,13 @@ where
     /// assert_eq!(buffer2.len(), 3);
     /// ```
     #[track_caller]
-    pub fn extend_from_device_slice(&mut self, src: &Slice<T, A>) -> Result<(), CopyError> {
+    /// `T: Copy` because this duplicates the elements as BYTES through the
+    /// backend's memcpy, not by cloning them: for an owning `T` it would make
+    /// two owners of one resource.
+    pub fn extend_from_device_slice(&mut self, src: &Slice<T, A>) -> Result<(), CopyError>
+    where
+        T: Copy,
+    {
         // The panic code path was put into a cold function to not bloat the
         // call site.
         #[inline(never)]
@@ -532,7 +538,13 @@ where
     /// assert_eq!(buffer.len(), 5);
     /// ```
     #[track_caller]
-    pub fn extend_from_host_slice(&mut self, src: &[T]) -> Result<(), CopyError> {
+    /// `T: Copy` because this duplicates the elements as BYTES through the
+    /// backend's memcpy, not by cloning them: for an owning `T` it would make
+    /// two owners of one resource.
+    pub fn extend_from_host_slice(&mut self, src: &[T]) -> Result<(), CopyError>
+    where
+        T: Copy,
+    {
         // The panic code path was put into a cold function to not bloat the
         // call site.
         #[inline(never)]
@@ -647,12 +659,25 @@ where
     /// let mut buffer: Buffer<u32> = Buffer::with_capacity(10);
     ///
     /// // Write 12 bytes (3 u32s) of value 0xFF
-    /// buffer.write_bytes(0xFF, 12).unwrap();
+    /// unsafe { buffer.write_bytes(0xFF, 12) }.unwrap();
     /// assert_eq!(buffer.len(), 3);
     /// assert_eq!(*buffer[0], 0xFFFFFFFF);
     /// ```
+    ///
+    /// # Safety
+    ///
+    /// This extends the buffer's length, so the bytes written are thereafter
+    /// read as initialized `T`. The caller must ensure `value` repeated over
+    /// `size_of::<T>()` bytes is a VALID `T`. It is not enough for `T` to be
+    /// `Copy`: `bool`, `char`, `NonZero*` and enums are all `Copy` and all have
+    /// byte patterns that are not values, and producing one is undefined
+    /// behaviour before anything reads it.
+    ///
+    /// For the zero pattern specifically, prefer a caller bounded on
+    /// [`crate::tensor::Zeroable`], which carries exactly this obligation in
+    /// the type system.
     #[track_caller]
-    pub fn write_bytes(&mut self, value: u8, len: usize) -> Result<(), CopyError> {
+    pub unsafe fn write_bytes(&mut self, value: u8, len: usize) -> Result<(), CopyError> {
         // The panic code path was put into a cold function to not bloat the
         // call site.
         #[inline(never)]
@@ -929,8 +954,13 @@ impl<T> Buffer<T, CpuBackend> {
     /// buffer.extend_from_slice(&[4, 5, 6]);
     /// assert_eq!(&*buffer, &[1, 2, 3, 4, 5, 6]);
     /// ```
+    /// `T: Copy` because the append goes through `extend_from_host_slice`,
+    /// which duplicates the elements as bytes.
     #[inline]
-    pub fn extend_from_slice(&mut self, slice: &[T]) {
+    pub fn extend_from_slice(&mut self, slice: &[T])
+    where
+        T: Copy,
+    {
         // Check to see if capacity needs to be increased.
         if self.len() + slice.len() > self.capacity() {
             let additional_capacity = self.len() + slice.len() - self.capacity();
@@ -1200,7 +1230,7 @@ macro_rules! buffer {
 macro_rules! impl_index {
     ($($t:ty)*) => {
         $(
-            impl<T, A: Backend> Index<$t> for Buffer<T, A>
+            impl<T, A: HostAddressable> Index<$t> for Buffer<T, A>
             {
                 type Output = Slice<T, A>;
 
@@ -1213,7 +1243,7 @@ macro_rules! impl_index {
                 }
             }
 
-            impl<T, A: Backend> IndexMut<$t> for Buffer<T, A>
+            impl<T, A: HostAddressable> IndexMut<$t> for Buffer<T, A>
             {
                 fn index_mut(&mut self, index: $t) -> &mut Slice<T, A> {
                     unsafe {
@@ -1236,7 +1266,7 @@ impl_index! {
     RangeToInclusive<usize>
 }
 
-impl<T, A: Backend> Deref for Buffer<T, A> {
+impl<T, A: HostAddressable> Deref for Buffer<T, A> {
     type Target = Slice<T, A>;
 
     fn deref(&self) -> &Self::Target {
@@ -1244,13 +1274,13 @@ impl<T, A: Backend> Deref for Buffer<T, A> {
     }
 }
 
-impl<T, A: Backend> DerefMut for Buffer<T, A> {
+impl<T, A: HostAddressable> DerefMut for Buffer<T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self[..]
     }
 }
 
-impl<T, A: Backend> Index<usize> for Buffer<T, A> {
+impl<T, A: HostAddressable> Index<usize> for Buffer<T, A> {
     type Output = Init<T, A>;
 
     #[inline]
@@ -1259,14 +1289,19 @@ impl<T, A: Backend> Index<usize> for Buffer<T, A> {
     }
 }
 
-impl<T, A: Backend> IndexMut<usize> for Buffer<T, A> {
+impl<T, A: HostAddressable> IndexMut<usize> for Buffer<T, A> {
     #[inline]
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self[..][index]
     }
 }
 
-impl<T, A: Backend> Clone for Buffer<T, A> {
+// `T: Copy` because the body duplicates the elements as BYTES, through the
+// backend's `copy_nonoverlapping`, rather than cloning them one by one.  For a
+// `T` that owns something, that produces two owners of one resource and two
+// drops of it; `Copy` is exactly the guarantee that a byte-wise duplicate is a
+// legitimate independent value and that no destructor runs.
+impl<T: Copy, A: Backend> Clone for Buffer<T, A> {
     /// Returns a copy of the buffer.
     ///
     /// This allocates a new buffer with the same capacity as `self` and copies

@@ -42,6 +42,26 @@ pub unsafe trait Backend:
     }
 }
 
+/// A backend whose allocations are addressable by the HOST.
+///
+/// # Safety
+///
+/// A pointer this backend returns must be dereferenceable by the CPU for the
+/// lifetime of the allocation, so that `slice::from_raw_parts` over it is
+/// sound. A backend that allocates device-resident memory must NOT implement
+/// this: constructing a Rust reference or slice already requires host-valid
+/// memory, so `&buffer[..]` over a device pointer is undefined behaviour at
+/// the moment the reference is formed, before anything reads it.
+///
+/// This is what separates `Deref`/`Index` — which hand out host references —
+/// from the copy operations, which go through the backend's own memcpy and
+/// are therefore valid for either memory space.
+pub unsafe trait HostAddressable: Backend {}
+
+// The CPU backend allocates through the global allocator, so its pointers are
+// ordinary host pointers.
+unsafe impl HostAddressable for CpuBackend {}
+
 pub trait GlobalBackend: Backend + 'static {
     fn global() -> &'static Self;
 }

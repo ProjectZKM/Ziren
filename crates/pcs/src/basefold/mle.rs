@@ -36,9 +36,18 @@ use p3_matrix::dense::RowMajorMatrix;
 use crate::multilinear::base::MleBaseBackend;
 use crate::tensor::{Backend, CpuBackend, Tensor};
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Mle<F, A: Backend = CpuBackend> {
     guts: Tensor<F, A>,
+}
+
+// Written out rather than derived, for the reason `Tensor`'s is: the guts are
+// duplicated as bytes through the backend's memcpy, so the bound is `F: Copy`,
+// not `F: Clone`.  Every field element satisfies it.
+impl<F: Copy, A: Backend> Clone for Mle<F, A> {
+    fn clone(&self) -> Self {
+        Self { guts: self.guts.clone() }
+    }
 }
 
 /// A borrowed, zero-copy row-major view of a CPU-backed trace batch:
