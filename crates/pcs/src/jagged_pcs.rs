@@ -566,10 +566,11 @@ pub fn open_jagged_pcs(
 
 /// BaseFold-over-BN254 port: GC-generic host open core.  Parameterized
 /// over the challenger `Challenger` + MMCS `MT` + DFT `D`; the caller
-/// supplies the concrete `mmcs`/`dft`.  The inner path uses `JaggedChallenger`
-/// + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will pass the BN254
-/// challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge` stay KoalaBear /
-/// KoalaBear⁴ for both (the eval-point is over `JaggedChallenge`).
+/// supplies the concrete `mmcs`/`dft`.  The inner path uses
+/// `JaggedChallenger` + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will
+/// pass the BN254 challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge`
+/// stay KoalaBear / KoalaBear⁴ for both (the eval-point is over
+/// `JaggedChallenge`).
 #[allow(clippy::type_complexity)]
 pub fn open_jagged_pcs_generic<Challenger, MT, D>(
     prover_data: &JaggedProverDataGeneric<MT>,
@@ -738,10 +739,10 @@ pub fn verify_jagged_pcs(
 
 /// BaseFold-over-BN254 port: GC-generic verify core.  Parameterized
 /// over the challenger `Challenger` + MMCS `MT` + DFT `D`; the caller
-/// supplies the concrete `mmcs`/`dft`.  The inner path uses `JaggedChallenger`
-/// + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will pass the BN254
-/// challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge` stay KoalaBear /
-/// KoalaBear⁴ for both.
+/// supplies the concrete `mmcs`/`dft`.  The inner path uses
+/// `JaggedChallenger` + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will
+/// pass the BN254 challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge`
+/// stay KoalaBear / KoalaBear⁴ for both.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn verify_jagged_pcs_generic<Challenger, MT>(
     commitment: &<MT as p3_commit::Mmcs<JaggedVal>>::Commitment,
@@ -1143,7 +1144,7 @@ pub mod jagged {
                 // `num_variables` is the chip's own log-height: the packer
                 // reads dims and cells back off the real trace, and never
                 // consults the padding.
-                let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                let h = m.values.len().checked_div(m.width).unwrap_or(0);
                 let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                 let mle = alloc::sync::Arc::new(crate::basefold::Mle::from_row_major(
                     RowMajorMatrix::new(m.values.clone(), m.width),
@@ -1211,6 +1212,14 @@ pub mod jagged {
             &z_col,
             &z_trace_be,
             challenger,
+        );
+
+        // `target_dim` below reads `log2(area)` off `trailing_zeros()`, which is
+        // log2 ONLY for a power of two; for any other `area` it silently returns
+        // the 2-adic valuation and point-extends to the wrong dimension.
+        assert!(
+            area.is_power_of_two(),
+            "prove_jagged_basefold_linear_core: area {area} is not a power of two",
         );
 
         // (5) Point-extend: the BaseFold commit covers `area` cells
@@ -1299,15 +1308,42 @@ pub mod jagged {
     {
         assert!(!rounds.is_empty(), "prove_jagged_basefold_rounds: no rounds");
 
-        // Concatenate the rounds into one column space
         let mut chip_infos: Vec<crate::jagged::JaggedChipInfo> = Vec::new();
         let mut offsets: Vec<usize> = Vec::new();
         let mut round_padding_heights: Vec<Vec<usize>> = Vec::with_capacity(rounds.len());
         let mut y_per_chip: Vec<Vec<InnerChallenge>> = Vec::new();
         let mut r_row_per_chip: Vec<Vec<InnerChallenge>> = Vec::new();
         let mut base = 0usize;
-        for r in rounds.iter() {
+        for (ri, r) in rounds.iter().enumerate() {
             let pk = &r.precomputed.packing;
+            // The generic API takes the claims and row points as parallel arrays
+            // to `pk.chip_infos`; a length or width mismatch otherwise surfaces
+            // as an offset/opening failure far from the round that caused it.
+            assert_eq!(
+                r.claims.len(),
+                pk.chip_infos.len(),
+                "prove_jagged_basefold_rounds: round {ri} has {} claim groups for {} chips",
+                r.claims.len(),
+                pk.chip_infos.len(),
+            );
+            assert_eq!(
+                r.r_row_per_chip.len(),
+                pk.chip_infos.len(),
+                "prove_jagged_basefold_rounds: round {ri} has {} row points for {} chips",
+                r.r_row_per_chip.len(),
+                pk.chip_infos.len(),
+            );
+            for (ci, (claim, info)) in r.claims.iter().zip(pk.chip_infos.iter()).enumerate() {
+                assert_eq!(
+                    claim.len(),
+                    info.column_count,
+                    "prove_jagged_basefold_rounds: round {ri} chip {ci} ({}) has {} claims for \
+                     {} columns",
+                    info.name,
+                    claim.len(),
+                    info.column_count,
+                );
+            }
             chip_infos.extend(pk.chip_infos.iter().cloned());
             // Drop each round's sentinel; re-base its column offsets onto the
             // running total.
@@ -1333,7 +1369,18 @@ pub mod jagged {
             // interpolated batch evaluations (StackingMismatch).  The column
             // layout has to cover every committed cell.
             let area = r.precomputed.prover_data.area;
-            let pad = area.saturating_sub(pk.total_values);
+            // `area >= total_values` by construction (`area` is `total_values`
+            // rounded UP to a whole number of stripes).  `area < total_values`
+            // means the precomputed commitment and this packing describe
+            // different traces; folding that to `pad == 0` defers the failure to
+            // an unintelligible offset or opening mismatch.
+            let pad = area.checked_sub(pk.total_values).unwrap_or_else(|| {
+                panic!(
+                    "prove_jagged_basefold_rounds: round {ri} committed area {area} is below its \
+                     packing's {} real cells -- commitment and packing metadata disagree",
+                    pk.total_values,
+                )
+            });
             {
                 // Split the gap into whole COLUMNS bounded by the row cube —
                 // a column taller than `2^z_row.len()` has no eq table to be
@@ -1397,7 +1444,6 @@ pub mod jagged {
             dense_len: total_values,
         };
 
-        // The reduction, over the CONCATENATED dense
         let reduce = |z_col: &[InnerChallenge],
                       challenger: &mut Challenger|
          -> crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge> {
@@ -1534,10 +1580,45 @@ pub mod jagged {
                 .map(|r| r.precomputed.prover_data.log_stacking_height)
                 .collect::<alloc::vec::Vec<_>>(),
         );
+        // `area >> log_stacking_height` below is the round's stripe count only
+        // when the shift is exact.  A non-multiple would be truncated, dropping
+        // the round's last partial stripe from the batched open; a zero area
+        // would contribute no stripes at all.
+        let stripe = 1usize << log_stacking_height;
+        for (ri, r) in rounds.iter().enumerate() {
+            let area = r.precomputed.prover_data.area;
+            assert!(area > 0, "prove_jagged_basefold_rounds: round {ri} committed area is zero");
+            assert_eq!(
+                area % stripe,
+                0,
+                "prove_jagged_basefold_rounds: round {ri} area {area} is not a whole number of \
+                 2^{log_stacking_height} stripes",
+            );
+        }
         let total_stripes: usize =
             rounds.iter().map(|r| r.precomputed.prover_data.area >> log_stacking_height).sum();
         let batch_dim = total_stripes.max(1).next_power_of_two().trailing_zeros() as usize;
         let effective_area = 1usize << (log_stacking_height + batch_dim);
+        // With every `area` a multiple of the (power-of-two) stripe,
+        // `H * next_pow2(sum_r A_r / H) == next_pow2(sum_r A_r)`, and the
+        // reduction's hypercube (`log_dense_size` over `dense_len = sum_r A_r`)
+        // is that same power of two.  The opening dimension and the reduction
+        // dimension have to be the one number, or the stacked claim is checked
+        // against a differently sized batch.
+        let sum_areas: usize = rounds.iter().map(|r| r.precomputed.prover_data.area).sum();
+        assert_eq!(
+            effective_area,
+            sum_areas.next_power_of_two(),
+            "prove_jagged_basefold_rounds: opening area {effective_area} != \
+             next_power_of_two(sum of round areas {sum_areas})",
+        );
+        assert_eq!(
+            packing.log_dense_size(),
+            log_stacking_height + batch_dim,
+            "prove_jagged_basefold_rounds: reduction hypercube 2^{} != opening area 2^{}",
+            packing.log_dense_size(),
+            log_stacking_height + batch_dim,
+        );
 
         let (reduction, jagged_eval, proof) = prove_jagged_basefold_linear_core(
             &offsets,
@@ -2018,11 +2099,12 @@ pub mod jagged {
     }
 
     /// BaseFold-over-BN254 wrap port: build the ring-agnostic verifier
-    /// inputs (chip_infos / r_row_per_chip / z_row) from the bundle's PackingMeta
-    /// + per-chip column widths + the shared zerocheck eval point. Mirrors the
-    /// host verifier's construction (shard_level/verifier.rs) so the outer-ring
-    /// verify hook reuses the exact same logic. Names are debug-only (unused in
-    /// the verify math), so placeholders suffice.
+    /// inputs (chip_infos / r_row_per_chip / z_row) from the bundle's
+    /// `PackingMeta` + per-chip column widths + the shared zerocheck eval
+    /// point. Mirrors the host verifier's construction
+    /// (shard_level/verifier.rs) so the outer-ring verify hook reuses the
+    /// exact same logic. Names are debug-only (unused in the verify math),
+    /// so placeholders suffice.
     pub fn build_jagged_verify_inputs(
         packing: &PackingMeta,
         chip_widths: &[usize],
@@ -2215,6 +2297,71 @@ pub mod jagged {
     }
 }
 
+/// The jagged column-accounting invariant, with the packing as the SINGLE
+/// SOURCE OF TRUTH for how many columns a shard's proof covers.
+///
+/// SP1 has no stacking-padding columns at all: its recursion verifier derives
+/// the column layout from one place, a plain scan over `column_counts_by_round`
+/// (`crates/recursion/circuit/src/jagged/verifier.rs`).  Ziren's jagged-over-WHIR
+/// stacking DOES pad each opening round out to its committed area, so the count
+/// is `Σ widths + Σ pads` — and Ziren consequently grew a second source for the
+/// pad half, the witness field `preprocessed_round.padding_heights`.
+///
+/// Those two sources disagreed: the witness field is populated on the inner ring
+/// and EMPTY on the outer one, so the gnark wrap computed 410 columns against the
+/// packing's 414, truncated its jagged-eval column walk, and failed the closing
+/// identity — while the host, which derives its count from the packing, accepted
+/// the same proof.  See `ff3488dc`.
+///
+/// This restores SP1's property: **one authoritative count**, returned from here,
+/// with the reconstruction merely CHECKED against it.  Never derive the pads as
+/// `total_cols - widths` — that encodes the relationship instead of verifying it,
+/// which is exactly what hid the defect.
+///
+/// # Panics
+///
+/// If the packing is internally inconsistent, or if either reconstruction
+/// disagrees with it.  These are `assert!`s rather than `debug_assert!`s on
+/// purpose: the release build is the one that ships proofs.
+/// Arguments, in order:
+/// - `total_cols`: `packing.offsets.len() - 1`, the authoritative total.
+/// - `widths`: `Σ_r Σ column_counts_by_round[r]`.
+/// - `packing_pads`: `Σ_r packing.padding_heights[r].len()`.
+/// - `witness_pads`: `Σ_r preprocessed_round.padding_heights[r].len()`, the
+///   witness field — or `None` where that field is ABSENT rather than merely
+///   a second opinion.  Pass `None` on the outer/wrap path: the outer lift
+///   never populates it (shard_level_witness.rs:1548 bakes the outer column
+///   space from `bundle.packing.padding_heights` instead), so it reads 0
+///   against the packing's real pad count and asserting equality there would
+///   panic on every honest wrap.  Pass `Some(..)` from the inner consumers,
+///   where both sources are genuinely populated and a disagreement is a bug —
+///   which is where this check earns its keep.
+/// - `site`: for the panic message: "wrap", "compress", "core", "deferred".
+pub fn jagged_column_count(
+    total_cols: usize,
+    widths: usize,
+    packing_pads: usize,
+    witness_pads: Option<usize>,
+    site: &str,
+) -> usize {
+    assert_eq!(
+        total_cols,
+        widths + packing_pads,
+        "{site}: the jagged packing is internally inconsistent — offsets describe \
+{total_cols} columns but sum(widths)={widths} + sum(packing.padding_heights)={packing_pads}"
+    );
+    if let Some(wit) = witness_pads {
+        assert_eq!(
+            wit, packing_pads,
+            "{site}: stacking-pad count disagrees between its two sources — the witness \
+field carries {wit}, the packing carries {packing_pads}.  The packing is authoritative; \
+a consumer reading the witness field here would verify over the wrong number of columns \
+(this is the ff3488dc defect, which was invisible to the host verifier)."
+        );
+    }
+    total_cols
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -2350,7 +2497,7 @@ mod test {
             .iter()
             .map(|(name, t)| {
                 (name.clone(), {
-                    let h = if t.width == 0 { 0 } else { t.values.len() / t.width };
+                    let h = t.values.len().checked_div(t.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                     crate::multilinear::PaddedMle::padded_with_zeros(
                         std::sync::Arc::new(crate::basefold::Mle::from_row_major(
@@ -2397,7 +2544,7 @@ mod test {
             .iter()
             .map(|(_, pm)| {
                 let (tvals, w) = crate::jagged::real_cells(pm);
-                let h = if w == 0 { 0 } else { tvals.len() / w };
+                let h = tvals.len().checked_div(w).unwrap_or(0);
                 let log_h = h.max(1).next_power_of_two().trailing_zeros() as usize;
                 z_row[z_row.len() - log_h..].to_vec()
             })
@@ -2422,7 +2569,7 @@ mod test {
             .iter()
             .map(|(_, pm)| {
                 let (tvals, w) = crate::jagged::real_cells(pm);
-                let h = if w == 0 { 0 } else { tvals.len() / w };
+                let h = tvals.len().checked_div(w).unwrap_or(0);
                 if w == 0 {
                     return Vec::new();
                 }
@@ -2499,6 +2646,304 @@ mod test {
         );
     }
 
+    /// Deterministic chip traces under a NAME PREFIX, so two rounds' chips stay
+    /// distinct once the rounds are flattened into one column space.
+    fn mk_named_shard(
+        prefix: &str,
+        shapes: &[(usize, usize)],
+        seed: u64,
+    ) -> Vec<(String, RowMajorMatrix<JaggedVal>)> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        shapes
+            .iter()
+            .enumerate()
+            .map(|(i, &(w, h))| {
+                let v: Vec<JaggedVal> = (0..w * h).map(|_| rand_kb(&mut rng)).collect();
+                (alloc::format!("{prefix}{i:03}"), RowMajorMatrix::new(v, w))
+            })
+            .collect()
+    }
+
+    /// The shared eval point: `DEFAULT_LOG_STACKING_HEIGHT` coords, as `mk_shard`
+    /// builds it — so the row cube is `2^21` and a natural gap under one stripe
+    /// lays out as a single padding column.
+    fn mk_z_row(seed: u64) -> Vec<JaggedChallenge> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        (0..DEFAULT_LOG_STACKING_HEIGHT as usize).map(|_| rand_ef(&mut rng)).collect()
+    }
+
+    /// Commit a `[prep, main]` pair the way production does: the preprocessed
+    /// round first, each round its own stacked commit.
+    fn commit_two(
+        prep_views: &[ChipTraceView],
+        main_views: &[ChipTraceView],
+        prep_pin: Option<crate::jagged::AreaPin>,
+    ) -> (
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+    ) {
+        (
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+                prep_views, prep_pin,
+            ),
+            <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+                main_views, None,
+            ),
+        )
+    }
+
+    /// Prove the `[prep, main]` pair on a fresh transcript that observes the
+    /// rounds IN ROUND ORDER — the verifying key's preprocessed commit, then
+    /// the shard's own (the Phase 1 prologue analog).
+    fn prove_two(
+        prep_views: &[ChipTraceView],
+        main_views: &[ChipTraceView],
+        prep: &crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        main: &crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        z_row: &[JaggedChallenge],
+        main_claims: Option<Vec<Vec<JaggedChallenge>>>,
+    ) -> JaggedBasefoldBundle {
+        let mut p_chal = build_challenger();
+        p_chal.observe(prep.commit.original_commitment.clone());
+        p_chal.observe(main.commit.original_commitment.clone());
+        let prep_r_row = r_row_suffixes(prep_views, z_row);
+        let main_r_row = r_row_suffixes(main_views, z_row);
+        let rounds = [
+            JaggedOpenRound {
+                chip_traces: prep_views,
+                r_row_per_chip: &prep_r_row,
+                claims: column_claims(prep_views, z_row),
+                precomputed: prep,
+            },
+            JaggedOpenRound {
+                chip_traces: main_views,
+                r_row_per_chip: &main_r_row,
+                claims: main_claims.unwrap_or_else(|| column_claims(main_views, z_row)),
+                precomputed: main,
+            },
+        ];
+        prove_jagged_basefold_rounds(&rounds, z_row, &mut p_chal)
+    }
+
+    /// A cheap well-formed pair for the fail-fast controls: both rounds small
+    /// and natural, so every control below panics on its own invariant rather
+    /// than on cost.
+    fn small_two_rounds() -> (
+        Vec<ChipTraceView>,
+        Vec<ChipTraceView>,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        Vec<JaggedChallenge>,
+    ) {
+        let prep_traces = mk_named_shard("prep", &[(4, 16)], 0x5011);
+        let main_traces = mk_named_shard("main", &[(2, 8)], 0x5012);
+        let prep_views = as_chip_views(&prep_traces);
+        let main_views = as_chip_views(&main_traces);
+        let (prep, main) = commit_two(&prep_views, &main_views, None);
+        (prep_views, main_views, prep, main, mk_z_row(0x5013))
+    }
+
+    /// **Two-round contract** — the production `[preprocessed, main]` shape.
+    /// The single-round tests above cannot reach any of it: the rebasing of
+    /// round 1's offsets onto round 0's committed AREA, the per-round stacking
+    /// gap, the pinned (fixed column count) versus natural padding split, and
+    /// the bundle's commitment order.
+    ///
+    /// Round 0 is PINNED, so its gap is exactly `pad_columns` columns.  Round 1
+    /// is natural and sized to `16 x 2^17 = 2^21` cells — exactly one stripe —
+    /// so its gap is ZERO and it contributes only the one zero-height column the
+    /// layout always emits.
+    #[test]
+    fn test_jagged_basefold_two_round_layout() {
+        const STRIPE: usize = 1usize << DEFAULT_LOG_STACKING_HEIGHT;
+        const PREP_CELLS: usize = 4 * 16 + 2 * 8;
+        const PREP_PAD_COLS: usize = 16;
+
+        let prep_traces = mk_named_shard("prep", &[(4, 16), (2, 8)], 0x7A66_ED01);
+        let main_traces = mk_named_shard("main", &[(16, 1 << 17)], 0x7A66_ED02);
+        let z_row = mk_z_row(0x7A66_ED03);
+        let prep_views = as_chip_views(&prep_traces);
+        let main_views = as_chip_views(&main_traces);
+        let (prep, main) = commit_two(
+            &prep_views,
+            &main_views,
+            Some(crate::jagged::AreaPin { area: STRIPE, pad_columns: PREP_PAD_COLS }),
+        );
+
+        // The two gap regimes the layout has to handle.
+        assert_eq!(prep.fixed_pad_columns, Some(PREP_PAD_COLS));
+        assert_eq!(prep.prover_data.area, STRIPE);
+        assert_eq!(prep.packing.total_values, PREP_CELLS);
+        assert_eq!(main.prover_data.area, STRIPE, "the main round is exactly one stripe");
+        assert_eq!(main.packing.total_values, STRIPE, "... so it has no gap to pad");
+
+        let bundle = prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
+
+        // (a) Commitment order: the earlier round contributes its RAW root and
+        //     the LAST round's commit is the bundle's own.  This is the vector
+        //     the recursive verifier must reconstruct (ZR-23 / ZR-24).
+        assert_eq!(bundle.preceding_commits.len(), 1);
+        assert_eq!(bundle.preceding_commits[0], prep.commit.original_commitment);
+        assert_eq!(bundle.commit.original_commitment, main.commit.original_commitment);
+
+        // (b) Padding heights: the pinned round splits its gap into exactly
+        //     `PREP_PAD_COLS` columns, none taller than the row cube; the
+        //     stripe-aligned round still emits its single empty column.
+        let pads = &bundle.packing.padding_heights;
+        assert_eq!(pads.len(), 2);
+        assert_eq!(pads[0].len(), PREP_PAD_COLS);
+        assert_eq!(pads[0].iter().sum::<usize>(), STRIPE - PREP_CELLS);
+        assert!(pads[0].iter().all(|h| *h <= 1usize << z_row.len()));
+        assert_eq!(pads[1], vec![0], "a stripe-aligned round emits one empty pad column");
+
+        // (c) Offsets: round 0 at its own prefix sums, round 1 rebased by round
+        //     0's committed AREA (not by its real cells), sentinel at the total.
+        let off = &bundle.packing.offsets;
+        assert_eq!(off[..6], [0, 16, 32, 48, 64, 72], "round-0 real columns");
+        assert_eq!(off[6], PREP_CELLS, "round-0 padding starts after its real cells");
+        assert_eq!(off[6 + PREP_PAD_COLS], STRIPE, "round-1 is rebased by round 0's AREA");
+        assert_eq!(off[6 + PREP_PAD_COLS + 16], 2 * STRIPE, "round-1's empty pad column");
+        assert_eq!(*off.last().unwrap(), 2 * STRIPE);
+        assert_eq!(bundle.packing.total_values, 2 * STRIPE);
+        assert_eq!(bundle.packing.round_counts.len(), 2);
+
+        // (d) Native round-trip.
+        let widths: Vec<usize> =
+            prep_traces.iter().chain(main_traces.iter()).map(|(_, t)| t.width).collect();
+        let (chip_infos, r_row_v, z_row_v) =
+            build_jagged_verify_inputs(&bundle.packing, &widths, &z_row);
+        let verify_with = |preceding_root: &<crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
+            JaggedVal,
+        >>::Commitment| {
+            let mut v_chal = build_challenger();
+            v_chal.observe(prep.commit.original_commitment.clone());
+            v_chal.observe(main.commit.original_commitment.clone());
+            verify_jagged_basefold_no_observe(
+                &chip_infos,
+                &r_row_v,
+                &z_row_v,
+                &[(preceding_root.clone(), prep.prover_data.area)],
+                prep_traces.len(),
+                &bundle,
+                &bundle.y_per_chip,
+                &mut v_chal,
+            )
+        };
+        assert!(
+            verify_with(&prep.commit.original_commitment),
+            "an honest two-round bundle must verify"
+        );
+
+        // (e) NEGATIVE — the preceding entry is what binds round 0 to the
+        //     verifying key.  Substituting the MAIN round's root for it (the
+        //     ZR-23/ZR-24 shape) must be rejected, or (d) proves nothing.
+        assert!(
+            !verify_with(&main.commit.original_commitment),
+            "a substituted preceding root must be rejected"
+        );
+    }
+
+    /// Fail-fast control: the batched open indexes every round's stripes with
+    /// ROUND 0's height, so disagreeing heights cannot be opened at all.
+    #[test]
+    #[should_panic(expected = "rounds disagree on log_stacking_height")]
+    fn two_round_rejects_mismatched_stacking_height() {
+        let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
+        main.prover_data.log_stacking_height = DEFAULT_LOG_STACKING_HEIGHT - 1;
+        prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
+    }
+
+    /// Fail-fast control: a round's area must be a whole number of stripes, or
+    /// `area >> log_stacking_height` silently drops its last partial stripe.
+    #[test]
+    #[should_panic(expected = "is not a whole number of")]
+    fn two_round_rejects_unaligned_area() {
+        let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
+        main.prover_data.area += 1;
+        prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
+    }
+
+    /// Fail-fast control: `area < total_values` means the commitment and the
+    /// packing describe different traces.  Folding it to `pad == 0` (the old
+    /// `saturating_sub`) deferred the failure to an unintelligible offset or
+    /// opening mismatch.
+    #[test]
+    #[should_panic(expected = "commitment and packing metadata disagree")]
+    fn two_round_rejects_area_below_real_cells() {
+        let (prep_views, main_views, prep, mut main, z_row) = small_two_rounds();
+        main.prover_data.area = 8; // below the round's 16 real cells
+        prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
+    }
+
+    /// Fail-fast control: the claims are a parallel array to the round's chips,
+    /// one entry per COLUMN.  A malformed width otherwise surfaces far from the
+    /// round that caused it.
+    #[test]
+    #[should_panic(expected = "has 3 claims for 2 columns")]
+    fn two_round_rejects_malformed_claim_width() {
+        let (prep_views, main_views, prep, main, z_row) = small_two_rounds();
+        let mut claims = column_claims(&main_views, &z_row);
+        claims[0].push(JaggedChallenge::ONE); // the main chip is 2 columns wide
+        prove_two(&prep_views, &main_views, &prep, &main, &z_row, Some(claims));
+    }
+
+    /// **ZR-27 proof boundary** — the stacking height is part of the PROTOCOL,
+    /// not of the proof.  A bundle carrying any height other than
+    /// `DEFAULT_LOG_STACKING_HEIGHT` must be REJECTED, and rejected before any
+    /// geometry is derived from it: the height feeds `area >> h` and
+    /// `1 << (h + batch_dim)`, so a hostile `h` near `usize::BITS` would
+    /// otherwise reach a shift overflow rather than a verdict.
+    ///
+    /// Covers the boundary set the audit asks for — `0`, `2`, one below and one
+    /// above the production value, and the two shift-overflow edges.
+    #[test]
+    fn two_round_rejects_every_non_production_stacking_height() {
+        let (prep_views, main_views, prep, main, z_row) = small_two_rounds();
+        let bundle = prove_two(&prep_views, &main_views, &prep, &main, &z_row, None);
+        let widths: Vec<usize> = prep_views
+            .iter()
+            .chain(main_views.iter())
+            .map(|(_, pm)| crate::jagged::real_cells(pm).1)
+            .collect();
+        let (chip_infos, r_row_v, z_row_v) =
+            build_jagged_verify_inputs(&bundle.packing, &widths, &z_row);
+        let verify = |b: &JaggedBasefoldBundle| {
+            let mut v_chal = build_challenger();
+            v_chal.observe(prep.commit.original_commitment.clone());
+            v_chal.observe(main.commit.original_commitment.clone());
+            verify_jagged_basefold_no_observe(
+                &chip_infos,
+                &r_row_v,
+                &z_row_v,
+                &[(prep.commit.original_commitment.clone(), prep.prover_data.area)],
+                prep_views.len(),
+                b,
+                &b.y_per_chip,
+                &mut v_chal,
+            )
+        };
+
+        // Non-vacuity: the untampered bundle verifies, so the rejections below
+        // are the height being caught and not a verifier that refuses anything.
+        assert!(verify(&bundle), "the untampered bundle must verify");
+
+        for h in [
+            0u32,
+            2,
+            DEFAULT_LOG_STACKING_HEIGHT - 1,
+            DEFAULT_LOG_STACKING_HEIGHT + 1,
+            usize::BITS,
+            u32::MAX,
+        ] {
+            let mut tampered = bundle.clone();
+            tampered.commit.log_stacking_height = h;
+            assert!(
+                !verify(&tampered),
+                "a proof claiming log_stacking_height {h} must be rejected, not used"
+            );
+        }
+    }
+
     /// **Soundness sanity** — flipping any single field of the bundle
     /// must cause the verifier to reject.  Catches whole classes of
     /// "I forgot to observe X into the challenger" bugs that pass
@@ -2534,7 +2979,7 @@ mod test {
 
         // Tamper #1: corrupt the sumcheck final claim `q_at_z`.
         let mut tampered = bundle.clone();
-        tampered.reduction.q_at_z = tampered.reduction.q_at_z + JaggedChallenge::ONE;
+        tampered.reduction.q_at_z += JaggedChallenge::ONE;
         assert!(
             !verify_main_round(&tampered, &widths, &z_row, &tampered.y_per_chip),
             "verifier must reject q_at_z tampering"
@@ -2542,7 +2987,7 @@ mod test {
 
         // Tamper #2: corrupt one of the per-chip y_{c,j} column claims.
         let mut tampered = bundle.clone();
-        tampered.y_per_chip[0][0] = tampered.y_per_chip[0][0] + JaggedChallenge::ONE;
+        tampered.y_per_chip[0][0] += JaggedChallenge::ONE;
         assert!(
             !verify_main_round(&tampered, &widths, &z_row, &tampered.y_per_chip),
             "verifier must reject y_per_chip tampering"
@@ -2560,8 +3005,7 @@ mod test {
         if let Some(wp) = tampered.whir_proof.as_mut() {
             wp.whir_proof.final_poly[0] += JaggedChallenge::ONE;
         } else {
-            tampered.basefold_proof.basefold_proof.final_poly =
-                tampered.basefold_proof.basefold_proof.final_poly + JaggedChallenge::ONE;
+            tampered.basefold_proof.basefold_proof.final_poly += JaggedChallenge::ONE;
         }
         assert!(
             !verify_main_round(&tampered, &widths, &z_row, &tampered.y_per_chip),
@@ -2834,69 +3278,4 @@ mod test {
             );
         }
     }
-}
-
-/// The jagged column-accounting invariant, with the packing as the SINGLE
-/// SOURCE OF TRUTH for how many columns a shard's proof covers.
-///
-/// SP1 has no stacking-padding columns at all: its recursion verifier derives
-/// the column layout from one place, a plain scan over `column_counts_by_round`
-/// (`crates/recursion/circuit/src/jagged/verifier.rs`).  Ziren's jagged-over-WHIR
-/// stacking DOES pad each opening round out to its committed area, so the count
-/// is `Σ widths + Σ pads` — and Ziren consequently grew a second source for the
-/// pad half, the witness field `preprocessed_round.padding_heights`.
-///
-/// Those two sources disagreed: the witness field is populated on the inner ring
-/// and EMPTY on the outer one, so the gnark wrap computed 410 columns against the
-/// packing's 414, truncated its jagged-eval column walk, and failed the closing
-/// identity — while the host, which derives its count from the packing, accepted
-/// the same proof.  See `ff3488dc`.
-///
-/// This restores SP1's property: **one authoritative count**, returned from here,
-/// with the reconstruction merely CHECKED against it.  Never derive the pads as
-/// `total_cols - widths` — that encodes the relationship instead of verifying it,
-/// which is exactly what hid the defect.
-///
-/// # Panics
-///
-/// If the packing is internally inconsistent, or if either reconstruction
-/// disagrees with it.  These are `assert!`s rather than `debug_assert!`s on
-/// purpose: the release build is the one that ships proofs.
-/// Arguments, in order:
-/// - `total_cols`: `packing.offsets.len() - 1`, the authoritative total.
-/// - `widths`: `Σ_r Σ column_counts_by_round[r]`.
-/// - `packing_pads`: `Σ_r packing.padding_heights[r].len()`.
-/// - `witness_pads`: `Σ_r preprocessed_round.padding_heights[r].len()`, the
-///   witness field — or `None` where that field is ABSENT rather than merely
-///   a second opinion.  Pass `None` on the outer/wrap path: the outer lift
-///   never populates it (shard_level_witness.rs:1548 bakes the outer column
-///   space from `bundle.packing.padding_heights` instead), so it reads 0
-///   against the packing's real pad count and asserting equality there would
-///   panic on every honest wrap.  Pass `Some(..)` from the inner consumers,
-///   where both sources are genuinely populated and a disagreement is a bug —
-///   which is where this check earns its keep.
-/// - `site`: for the panic message: "wrap", "compress", "core", "deferred".
-pub fn jagged_column_count(
-    total_cols: usize,
-    widths: usize,
-    packing_pads: usize,
-    witness_pads: Option<usize>,
-    site: &str,
-) -> usize {
-    assert_eq!(
-        total_cols,
-        widths + packing_pads,
-        "{site}: the jagged packing is internally inconsistent — offsets describe \
-{total_cols} columns but sum(widths)={widths} + sum(packing.padding_heights)={packing_pads}"
-    );
-    if let Some(wit) = witness_pads {
-        assert_eq!(
-            wit, packing_pads,
-            "{site}: stacking-pad count disagrees between its two sources — the witness \
-field carries {wit}, the packing carries {packing_pads}.  The packing is authoritative; \
-a consumer reading the witness field here would verify over the wrong number of columns \
-(this is the ff3488dc defect, which was invisible to the host verifier)."
-        );
-    }
-    total_cols
 }
