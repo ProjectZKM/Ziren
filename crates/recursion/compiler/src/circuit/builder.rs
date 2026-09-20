@@ -296,6 +296,31 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             self.assert_felt_eq(limb, C::F::ZERO);
         }
 
+        // The hinted sum is ON THE CURVE.
+        //
+        // Both checkers above carry the factor `(x2 - x1)`, so when
+        // `point1 == point2` they vanish identically and constrain the hinted
+        // `point` not at all — the hint is prover-supplied, so without this the
+        // sum could be ANY septic pair at that coincidence.  The Global AIR
+        // keeps the same identities but does assert its running digests
+        // on-curve; this site did not, which made it the weaker of the two.
+        //
+        //   y^2 = x^3 + 3*zeta*x - 3
+        //
+        // Seven constraints, no new columns and no new hint.
+        //
+        // What this does NOT do is pin the addition at the coincidence: it
+        // confines the hint to the curve, exactly as the AIR does. Requiring
+        // `x2 != x1` here as well needs an inverse WITNESS, i.e. a new hint
+        // threaded through `CircuitV2HintAddCurve` and the recursion runtime,
+        // which is why it is not bundled here.
+        let point_on_curve = SepticCurve::convert(point, |x| x.into());
+        let curve_formula =
+            SepticCurve::<SymbolicFelt<C::F>>::curve_formula(point_on_curve.x.clone());
+        for (lhs, rhs) in point_on_curve.y.square().0.into_iter().zip_eq(curve_formula.0) {
+            self.assert_felt_eq(lhs - rhs, C::F::ZERO);
+        }
+
         point
     }
 
