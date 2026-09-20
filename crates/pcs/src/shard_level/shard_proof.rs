@@ -163,7 +163,14 @@ where
     F: p3_field::Field,
     EF: p3_field::Field,
 {
-    /// Placeholder proof with dummy() inner proofs; not valid.
+    /// An all-zero shell with the shape of a proof and none of its content:
+    /// empty GKR and zerocheck transcripts, no opened values, no evaluation
+    /// proof.  It proves nothing and verifies against nothing.
+    ///
+    /// It exists so that a caller with no proof to give -- the mock prover, a
+    /// dummy inner proof sized for a recursion program -- can name an invalid
+    /// value here, instead of the proof type carrying an `Option` that would
+    /// make "no proof" representable at every reader.
     pub fn empty(main_commit: [F; 8], num_pv: usize) -> Self {
         JaggedShardProof {
             public_values: vec![F::ZERO; num_pv],

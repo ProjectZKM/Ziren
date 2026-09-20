@@ -316,23 +316,23 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs>;
 
-    /// Attach the BaseFold shard side-channel (`ShardProof::jagged_shard_proof`)
-    /// for the SHRINK stage.  Default no-op: the CPU `StarkMachine::open`
-    /// already populates `jagged_shard_proof` inline, so on a `CpuProver`
-    /// this is skipped.  A `StarkGpuProver` OVERRIDES this with the
-    /// device-native attach — it re-runs the commit pipeline on the shrink
-    /// machine, builds its own per-shard `DeviceShardTraces` in-crate, and
-    /// drives the device BaseFold producer.  This keeps `fn shrink`
-    /// backend-agnostic and the device-shaped provider off the host prover
-    /// surface.
+    /// The SHRINK-stage jagged shard proof for `record`, for a backend whose
+    /// `open()` does not produce one.
+    ///
+    /// `None` -- the default -- means `open()` already returned a complete
+    /// proof, which is the case for `CpuProver`.  A device backend overrides
+    /// this: it re-runs the commit pipeline on the shrink machine over its own
+    /// in-crate device traces and drives the device jagged producer, so that
+    /// `fn shrink` stays backend-agnostic and no device-shaped provider
+    /// appears on the host prover surface.
     #[allow(unused_variables)]
-    fn attach_shard_basefold_side_channel(
+    fn reprove_shrink_shard(
         &self,
-        proof: &mut ShardProof<SC>,
         dev_pk: &Self::DeviceProvingKey,
         record: &A::Record,
         opts: &<A::Record as MachineRecord>::Config,
-    ) where
+    ) -> Option<Box<crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, crate::Challenge<SC>>>>
+    where
         SC: BasefoldRing,
         A: crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
         SC::Challenger: p3_challenger::CanObserve<
@@ -342,6 +342,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         >,
         Self: Sized,
     {
+        None
     }
 
     /// Compute the openings of the traces.
@@ -714,12 +715,10 @@ fn prove_shard_with_data_boxed<SC, A>(
 // The commit-time retained jagged commitment, threaded into
 // `ShardData.commit_data` for the driver to consume.
     commit_data: Option<RetainedJaggedCommit<SC>>,
-) -> Option<
-    Box<
-        crate::shard_level::shard_proof::JaggedShardProof<
-            Val<SC>,
-            <SC as StarkGenericConfig>::Challenge,
-        >,
+) -> Box<
+    crate::shard_level::shard_proof::JaggedShardProof<
+        Val<SC>,
+        <SC as StarkGenericConfig>::Challenge,
     >,
 >
 where
@@ -835,8 +834,5 @@ where
         &mut shard_challenger,
     );
 
-    // Always `Some`: there is no decline path (see the no-fallback note above).
-    // The `Option` exists because it feeds `ShardProof::jagged_shard_proof`,
-    // which IS optional in the proof format — `mock.rs` emits `None`.
-    Some(Box::new(proof))
+    Box::new(proof)
 }

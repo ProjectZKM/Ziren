@@ -2,7 +2,7 @@
 use hashbrown::HashMap;
 use zkm_core_executor::{ZKMContext, ZKMReduceProof};
 use zkm_core_machine::io::ZKMStdin;
-use zkm_pcs::{ShardProof, StarkVerifyingKey};
+use zkm_pcs::{shard_level::shard_proof::JaggedShardProof, ShardProof, StarkVerifyingKey};
 
 use crate::{
     Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey, ZKMVerificationError,
@@ -71,7 +71,12 @@ impl Prover<DefaultProverComponents> for MockProver {
             ZKMProofKind::Compressed => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
 
-                let shard_proof = ShardProof { public_values: vec![], jagged_shard_proof: None };
+                // A shell with the shape of a compressed proof and none of
+                // its content: the mock prover executes but does not prove.
+                let shard_proof = ShardProof {
+                    public_values: vec![],
+                    jagged_shard_proof: Box::new(JaggedShardProof::empty([KoalaBear::ZERO; 8], 0)),
+                };
 
                 let reduce_vk = StarkVerifyingKey {
                     commit: vec![[KoalaBear::ZERO; 8]].into(),

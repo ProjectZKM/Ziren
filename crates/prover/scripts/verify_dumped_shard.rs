@@ -41,7 +41,7 @@ fn main() {
 
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let machine = prover.core_prover.machine();
-    let chips = machine.shard_chips_named(&proof.basefold().chip_heights).collect::<Vec<_>>();
+    let chips = machine.shard_chips_named(&proof.jagged_shard_proof.chip_heights).collect::<Vec<_>>();
     let prep_chip_dims = machine.preprocessed_chip_dims();
 
     println!("proof   : {proof_path}");

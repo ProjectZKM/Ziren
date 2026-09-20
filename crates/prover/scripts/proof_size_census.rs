@@ -64,7 +64,7 @@ fn main() {
     let mut r = Report { total: bytes.len(), rows: Vec::new() };
     r.row("vk (StarkVerifyingKey)", sz(&reduce.vk));
     r.row("proof.public_values", sz(&reduce.proof.public_values));
-    let bsp = reduce.proof.jagged_shard_proof.as_ref().expect("jagged_shard_proof");
+    let bsp = reduce.proof.jagged_shard_proof.as_ref();
     r.row("jagged_shard_proof (all)", sz(bsp));
     r.row("  public_values", sz(&bsp.public_values));
     r.row("  main_commitment", sz(&bsp.main_commitment));

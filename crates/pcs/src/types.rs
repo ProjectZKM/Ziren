@@ -20,8 +20,8 @@ pub type QuotientOpenedValues<T> = Vec<T>;
 /// `Arc::clone` instead of (a) re-uploading from host or (b) cloning
 /// device buffers (impossible — `ColMajorMatrixDevice` /
 /// `DeviceBuffer` are not `Clone`).  Producer in `commit()` wraps each
-/// matrix in `Arc::new`; `open()` and the basefold side-channel both
-/// hold refcounted handles to the same allocation.
+/// matrix in `Arc::new`; `open()` and `reprove_shrink_shard` both hold
+/// refcounted handles to the same allocation.
 pub struct MainTraceData<SC: StarkGenericConfig, M, P> {
     pub traces: Vec<Arc<M>>,
     /// Backend-owned prover data for the main-trace commit: the retained
@@ -80,9 +80,13 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     ///
     /// `Box` keeps the ShardProof size footprint flat — the
     /// JaggedShardProof is ~KB of nested structs.
-    #[serde(default)]
+    ///
+    /// Not an `Option`: a shard proof without its payload is malformed, and a
+    /// type that can represent it needs every reader to re-check what the type
+    /// could have guaranteed. Producers construct the proof once they have the
+    /// payload rather than filling a shell afterwards.
     pub jagged_shard_proof:
-        Option<Box<crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, Challenge<SC>>>>,
+        Box<crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, Challenge<SC>>>,
 }
 
 impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {
@@ -121,19 +125,10 @@ pub const EXECUTION_CHIP_NAMES: &[&str] = &[
 ];
 
 impl<SC: StarkGenericConfig> ShardProof<SC> {
-    /// The shard-level BaseFold payload.  Every live producer emits it;
-    /// a proof without one is malformed (the verifier hard-errors on the
-    /// same condition).
-    pub fn basefold(
-        &self,
-    ) -> &crate::shard_level::shard_proof::JaggedShardProof<Val<SC>, Challenge<SC>> {
-        self.jagged_shard_proof.as_ref().expect("shard proof missing basefold payload")
-    }
-
     /// Sum of the per-chip global cumulative sums, read from the
     /// transcript-bound `chip_cumulative_sums` of the BaseFold payload.
     pub fn global_cumulative_sum(&self) -> SepticDigest<Val<SC>> {
-        self.basefold().chip_cumulative_sums.values().map(|s| s.global).sum()
+        self.jagged_shard_proof.chip_cumulative_sums.values().map(|s| s.global).sum()
     }
 
     /// Whether this shard proof carries any INSTRUCTION chip — the
@@ -142,16 +137,16 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
     /// is answered by the instruction-chip set instead: a memory-global or
     /// precompile shard contains none of these.
     pub fn contains_execution(&self) -> bool {
-        let heights = &self.basefold().chip_heights;
+        let heights = &self.jagged_shard_proof.chip_heights;
         EXECUTION_CHIP_NAMES.iter().any(|n| heights.contains_key(*n))
     }
 
     pub fn contains_global_memory_init(&self) -> bool {
-        self.basefold().chip_heights.contains_key("MemoryGlobalInit")
+        self.jagged_shard_proof.chip_heights.contains_key("MemoryGlobalInit")
     }
 
     pub fn contains_global_memory_finalize(&self) -> bool {
-        self.basefold().chip_heights.contains_key("MemoryGlobalFinalize")
+        self.jagged_shard_proof.chip_heights.contains_key("MemoryGlobalFinalize")
     }
 }
 
@@ -202,7 +197,7 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
     pub fn shape(&self) -> OrderedShape {
         OrderedShape {
             inner: self
-                .basefold()
+                .jagged_shard_proof
                 .chip_heights
                 .iter()
                 .map(|(name, height)| {

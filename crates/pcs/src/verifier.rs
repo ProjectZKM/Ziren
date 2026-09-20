@@ -54,15 +54,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 >>::Commitment,
             >,
     {
-        // BaseFold-over-BN254: every shard proof (inner KoalaBear and the OUTER
-        // wrap) carries a shard-level BaseFold proof.  There is no
-        // two-adic-quotient FRI/STARK verify fallback; a missing
-        // `jagged_shard_proof` is a hard error.
-        let basefold_proof = proof.jagged_shard_proof.as_ref().ok_or_else(|| {
-            VerificationError::JaggedShardVerifier(
-                "shard proof missing jagged_shard_proof (FRI verify path retired)".to_string(),
-            )
-        })?;
+        // Every shard proof, inner KoalaBear and the outer wrap alike, carries
+        // its shard-level payload: the field is not an `Option`, so there is no
+        // missing case left to check here.
+        let basefold_proof = &proof.jagged_shard_proof;
         let shard_verifier =
             crate::shard_level::verifier::JaggedShardVerifier::production_default();
         let num_pv_elts = proof.public_values.len();
