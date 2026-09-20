@@ -291,3 +291,104 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
         // global_cumulative_sum)).
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+    use zkm_pcs::septic_curve::{SepticCurve, SepticCurveComplete};
+    use zkm_pcs::septic_extension::SepticExtension;
+
+    type F = KoalaBear;
+
+    /// A deterministic on-curve point, lifted from an x the curve accepts.
+    fn point(seed: u32) -> SepticCurve<F> {
+        let x: SepticExtension<F> = SepticExtension::from_base_fn(|i| F::from_u32(seed + i as u32));
+        let (p, _) = SepticCurve::<F>::lift_x(x);
+        assert!(p.check_on_point(), "lift_x must land on the curve");
+        p
+    }
+
+    /// The witness the ZR-28 constraint checks is
+    /// `is_real * ((x2 - x1) * denominator_inv - 1) == 0`, so on an honest row
+    /// the populated inverse must satisfy `(x2 - x1) * inv == 1` EXACTLY.  A
+    /// populate path that filled zeros (as the GPU kernel did before the device
+    /// half of the fix) leaves the constraint unsatisfiable, which is how it
+    /// took production down — so this asserts the witness, not just that
+    /// populate returned.
+    fn assert_inverse_witness(
+        cols: &GlobalAccumulationOperation<F, 1>,
+        x2: SepticExtension<F>,
+        x1: SepticExtension<F>,
+    ) {
+        let inv = SepticExtension::<F>::from_base_fn(|j| cols.denominator_inv[0].0[j]);
+        let denom = x2 - x1;
+        assert_eq!(
+            denom * inv,
+            SepticExtension::<F>::ONE,
+            "the populated denominator_inv does not invert the chord denominator, so the \
+             ZR-28 constraint is unsatisfiable on an honest row",
+        );
+    }
+
+    /// ORDINARY ADDITION (`x2 != x1`): provable, and the witness inverts the
+    /// chord denominator.
+    #[test]
+    fn global_accumulation_ordinary_addition_is_provable() {
+        let p1 = point(0x2013);
+        let p2 = point(0x7777);
+        assert_ne!(p1.x, p2.x, "the fixture must be a genuine addition");
+        let sums = vec![
+            SepticCurveComplete::Affine(p1),
+            SepticCurveComplete::Affine(p1.add_incomplete(p2)),
+        ];
+        let mut cols = GlobalAccumulationOperation::<F, 1>::default();
+        cols.populate_real(&sums, p2.x);
+        assert_inverse_witness(&cols, p2.x, p1.x);
+    }
+
+    /// DOUBLING (`x2 == x1`, same point): the chord denominator vanishes, so the
+    /// row is the exceptional case and the trace is NOT provable.  This is the
+    /// case ZR-28 was about — before the fix the denominator was unconstrained,
+    /// so a doubling could be presented as an addition with an arbitrary
+    /// successor.
+    #[test]
+    #[should_panic(expected = "this trace is not provable")]
+    fn global_accumulation_doubling_is_not_provable() {
+        let p = point(0x2013);
+        let sums = vec![SepticCurveComplete::Affine(p), SepticCurveComplete::Affine(p.double())];
+        let mut cols = GlobalAccumulationOperation::<F, 1>::default();
+        // x2 == x1: adding the running sum to itself.
+        cols.populate_real(&sums, p.x);
+    }
+
+    /// INVERSE (`x2 == x1`, `y2 == -y1`): the other vanishing-denominator case.
+    /// Its sum is the point at infinity, which the digest cannot represent, so
+    /// it must fail for the same reason rather than produce a row.
+    #[test]
+    #[should_panic(expected = "this trace is not provable")]
+    fn global_accumulation_inverse_pair_is_not_provable() {
+        let p = point(0x2013);
+        let neg = p.neg();
+        assert_eq!(p.x, neg.x, "an inverse pair shares its x");
+        assert_ne!(p.y, neg.y, "...and negates its y");
+        let sums = vec![SepticCurveComplete::Affine(p), SepticCurveComplete::Affine(p)];
+        let mut cols = GlobalAccumulationOperation::<F, 1>::default();
+        cols.populate_real(&sums, neg.x);
+    }
+
+    /// PADDING / no-event rows: the dummy layout is the genuine addition
+    /// `(final - dummy) + dummy`, so it must be provable too — the padding rows
+    /// are the majority of the chip and a vanishing denominator there would make
+    /// every shard unprovable.
+    #[test]
+    fn global_accumulation_padding_row_is_provable() {
+        let final_digest = point(0x4242);
+        let dummy = SepticCurve::<F>::dummy();
+        let initial = final_digest.add_incomplete(dummy.neg());
+        let mut cols = GlobalAccumulationOperation::<F, 1>::default();
+        cols.populate_dummy(final_digest);
+        assert_inverse_witness(&cols, dummy.x, initial.x);
+    }
+}
