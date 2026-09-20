@@ -921,7 +921,7 @@ pub mod tests {
         io::ZKMStdin,
         mips::MipsAir,
         utils,
-        utils::{prove, run_test, setup_logger},
+        utils::{prove, run_test, run_test_with_stdin, setup_logger},
     };
 
     use hashbrown::HashMap;
@@ -988,7 +988,7 @@ pub mod tests {
             runtime.run().unwrap();
             runtime
         };
-        crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None).unwrap();
+        crate::utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), None).unwrap();
     }
 
     #[test]
@@ -1332,11 +1332,23 @@ pub mod tests {
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
+    /// The input the fibonacci guest reads.
+    ///
+    /// The guest used to hardcode `n` and ignore stdin; since it reads a `u32`
+    /// (`f52e7f7c`), a caller that supplies nothing fails execution with
+    /// `InvalidSyscallArgs` before any proving happens.  Ten keeps the cycle
+    /// counts these tests were tuned against.
+    fn fib_stdin() -> ZKMStdin {
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&10u32);
+        stdin
+    }
+
     #[test]
     fn test_fibonacci_prove_simple() {
         setup_logger();
         let program = fibonacci_program();
-        run_test::<CpuProver<_, _>>(program).unwrap();
+        run_test_with_stdin::<CpuProver<_, _>>(program, fib_stdin()).unwrap();
     }
 
     #[test]
@@ -1358,7 +1370,7 @@ pub mod tests {
         setup_logger();
 
         let program = fibonacci_program();
-        let stdin = ZKMStdin::new();
+        let stdin = fib_stdin();
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 1024;
         opts.shard_batch_size = 2;
@@ -1370,7 +1382,7 @@ pub mod tests {
     fn test_fibonacci_prove_batch() {
         setup_logger();
         let program = fibonacci_program();
-        let stdin = ZKMStdin::new();
+        let stdin = fib_stdin();
         prove::<_, CpuProver<_, _>>(
             program,
             &stdin,
@@ -1425,13 +1437,16 @@ pub mod tests {
         // is a single partially-filled shard.
         opts.shard_size = 262_144;
         let mut runtime = Executor::new(program, opts);
+        // The guest reads its input, so the executor needs it: a proving-time
+        // stdin arrives after execution has already failed.
+        runtime.write_vecs(&fib_stdin().buffer);
         runtime.run().unwrap();
         // FIX_CORE_SHAPES=false == `shape_config = None`: records stay at raw
         // heights, the STARK proves at those heights, the canonical-cluster
         // band-cap injects the missing chips.  `run_test_core` then runs
         // `machine.verify`, which checks every chip's constraints + the LogUp
         // lookups, including the injected chips.
-        utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None).unwrap();
+        utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), None).unwrap();
     }
 
     // FIX-ON control for the injected-chips gate: the SAME fibonacci /
@@ -1452,9 +1467,11 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 262_144;
         let mut runtime = Executor::new(program, opts);
+        // The guest reads its input, so the executor needs it: a proving-time
+        // stdin arrives after execution has already failed.
+        runtime.write_vecs(&fib_stdin().buffer);
         runtime.run().unwrap();
-        utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), Some(&shape_config))
-            .unwrap();
+        utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), Some(&shape_config)).unwrap();
     }
 
     // Degree-masked LogUp last-layer reconstruction (the
@@ -1499,6 +1516,9 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 262_144;
         let mut runtime = Executor::new(program, opts);
+        // A guest that reads needs its input HERE: `prove_with_context` below
+        // re-executes, so an empty stdin there fails after this run succeeded.
+        runtime.write_vecs(&fib_stdin().buffer);
         runtime.run().unwrap();
 
         let config = KoalaBearPoseidon2::new();
@@ -1509,7 +1529,7 @@ pub mod tests {
             &prover,
             &pk,
             Program::clone(&runtime.program),
-            &ZKMStdin::new(),
+            &fib_stdin(),
             ZKMCoreOpts::default(),
             zkm_core_executor::ZKMContext::default(),
             Some(&shape_config),
@@ -1542,6 +1562,9 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 262_144;
         let mut runtime = Executor::new(program, opts);
+        // The guest reads its input, so the executor needs it: a proving-time
+        // stdin arrives after execution has already failed.
+        runtime.write_vecs(&fib_stdin().buffer);
         runtime.run().unwrap();
 
         let config = KoalaBearPoseidon2::new();
@@ -1552,7 +1575,7 @@ pub mod tests {
             &prover,
             &pk,
             Program::clone(&runtime.program),
-            &ZKMStdin::new(),
+            &fib_stdin(),
             ZKMCoreOpts::default(),
             zkm_core_executor::ZKMContext::default(),
             Some(&shape_config),
@@ -1699,6 +1722,7 @@ pub mod tests {
     fn stage0_prove_fixoff(
         program: Program,
         shard_size: usize,
+        inputs: ZKMStdin,
     ) -> (
         zkm_pcs::MachineProof<KoalaBearPoseidon2>,
         StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
@@ -1710,6 +1734,9 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = shard_size;
         let mut runtime = Executor::new(program, opts);
+        // The guest reads its input, so the executor needs it: a proving-time
+        // stdin arrives after execution has already failed.
+        runtime.write_vecs(&inputs.buffer);
         runtime.run().unwrap();
 
         let config = KoalaBearPoseidon2::new();
@@ -1722,7 +1749,7 @@ pub mod tests {
             &prover,
             &pk,
             Program::clone(&runtime.program),
-            &ZKMStdin::new(),
+            &inputs,
             opts,
             zkm_core_executor::ZKMContext::default(),
             None,
@@ -1810,7 +1837,7 @@ pub mod tests {
     #[test]
     fn stage0_tiny_honest_fixoff() {
         setup_logger();
-        let (proof, machine, vk) = stage0_prove_fixoff(simple_program(), 262_144);
+        let (proof, machine, vk) = stage0_prove_fixoff(simple_program(), 262_144, ZKMStdin::new());
         let r = stage0_verify(&machine, &vk, &proof);
         eprintln!("[STAGE0-TINY-HONEST] FIX-off raw-height verify => {r}");
         assert_eq!(r, "OK", "honest FIX-off tiny proof must verify (stage-0 fast harness)");
@@ -1823,7 +1850,7 @@ pub mod tests {
     #[test]
     fn stage0_fib_honest_fixoff() {
         setup_logger();
-        let (proof, machine, vk) = stage0_prove_fixoff(fibonacci_program(), 262_144);
+        let (proof, machine, vk) = stage0_prove_fixoff(fibonacci_program(), 262_144, fib_stdin());
         let r = stage0_verify(&machine, &vk, &proof);
         eprintln!("[STAGE0-FIB-HONEST] FIX-off raw-height verify => {r}");
         assert_eq!(r, "OK", "honest FIX-off fibonacci proof must verify (mixed-height gate)");
@@ -1842,7 +1869,7 @@ pub mod tests {
     #[test]
     fn stage0_tiny_forgery_baseline_fixoff() {
         setup_logger();
-        let (proof, machine, vk) = stage0_prove_fixoff(simple_program(), 262_144);
+        let (proof, machine, vk) = stage0_prove_fixoff(simple_program(), 262_144, ZKMStdin::new());
 
         // sanity: the honest tiny proof verifies first.
         let honest = stage0_verify(&machine, &vk, &proof);
@@ -1891,6 +1918,7 @@ pub mod tests {
     fn stage3_prove_fixoff_rev(
         program: Program,
         shard_size: usize,
+        inputs: ZKMStdin,
     ) -> (
         zkm_pcs::MachineProof<KoalaBearPoseidon2>,
         StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
@@ -1898,7 +1926,7 @@ pub mod tests {
     ) {
         // Reconstruction is verifier-only + transcript-neutral, so its state
         // during proving is irrelevant; clear it so proving is unaffected.
-        stage0_prove_fixoff(program, shard_size)
+        stage0_prove_fixoff(program, shard_size, inputs)
     }
 
     // Shared helper: run the FULL machine.verify, returning the error string (or
@@ -2023,7 +2051,8 @@ pub mod tests {
     #[test]
     fn stage3_rev_tiny_flip() {
         setup_logger();
-        let (proof, machine, vk) = stage3_prove_fixoff_rev(simple_program(), 262_144);
+        let (proof, machine, vk) =
+            stage3_prove_fixoff_rev(simple_program(), 262_144, ZKMStdin::new());
 
         // (a) honest ACCEPTS with recon ON under rev (anti-confound).
         let honest_on = stage3_verify_rev(&machine, &vk, &proof);
@@ -2064,7 +2093,8 @@ pub mod tests {
     #[test]
     fn stage3_rev_fib_flip() {
         setup_logger();
-        let (proof, machine, vk) = stage3_prove_fixoff_rev(fibonacci_program(), 262_144);
+        let (proof, machine, vk) =
+            stage3_prove_fixoff_rev(fibonacci_program(), 262_144, fib_stdin());
 
         // (a) honest ACCEPTS with recon ON under rev (anti-confound).
         let honest_on = stage3_verify_rev(&machine, &vk, &proof);
@@ -2101,7 +2131,8 @@ pub mod tests {
     #[test]
     fn stage3_rev_adaptive_forgery() {
         setup_logger();
-        let (proof, machine, vk) = stage3_prove_fixoff_rev(fibonacci_program(), 262_144);
+        let (proof, machine, vk) =
+            stage3_prove_fixoff_rev(fibonacci_program(), 262_144, fib_stdin());
 
         // sanity: honest accepts both recon states under rev.
         let h_on = stage3_verify_rev(&machine, &vk, &proof);
@@ -2170,7 +2201,8 @@ pub mod tests {
     fn stage3_rev_full_binding_probe() {
         use p3_field::PrimeCharacteristicRing;
         setup_logger();
-        let (proof, machine, vk) = stage3_prove_fixoff_rev(fibonacci_program(), 262_144);
+        let (proof, machine, vk) =
+            stage3_prove_fixoff_rev(fibonacci_program(), 262_144, fib_stdin());
 
         let mut forged = proof.clone();
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
@@ -2206,7 +2238,8 @@ pub mod tests {
     fn stage3_rev_attributable() {
         use p3_field::PrimeCharacteristicRing;
         setup_logger();
-        let (proof, machine, vk) = stage3_prove_fixoff_rev(fibonacci_program(), 262_144);
+        let (proof, machine, vk) =
+            stage3_prove_fixoff_rev(fibonacci_program(), 262_144, fib_stdin());
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let one_ef = EF::from(KoalaBear::ONE);
         let zero_ef = EF::from(KoalaBear::ZERO);
@@ -2273,7 +2306,7 @@ pub mod tests {
     #[test]
     fn stage0_fib_forgery_baseline_fixoff() {
         setup_logger();
-        let (proof, machine, vk) = stage0_prove_fixoff(fibonacci_program(), 262_144);
+        let (proof, machine, vk) = stage0_prove_fixoff(fibonacci_program(), 262_144, fib_stdin());
 
         // sanity: the honest fib proof verifies first.
         let honest = stage0_verify(&machine, &vk, &proof);
@@ -2401,6 +2434,6 @@ pub mod tests {
     fn test_syscall_soundness_fibonacci() {
         setup_logger();
         let program = fibonacci_program();
-        run_test::<CpuProver<_, _>>(program).unwrap();
+        run_test_with_stdin::<CpuProver<_, _>>(program, fib_stdin()).unwrap();
     }
 }

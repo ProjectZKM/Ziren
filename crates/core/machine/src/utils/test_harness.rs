@@ -55,16 +55,30 @@ pub fn run_test_io<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
 }
 
 pub fn run_test<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
+    program: Program,
+) -> Result<MachineProof<KoalaBearPoseidon2>, MachineVerificationError<KoalaBearPoseidon2>> {
+    run_test_with_stdin::<P>(program, ZKMStdin::new())
+}
+
+/// [`run_test`] for a program that READS its input.
+///
+/// A guest that reads more than the caller wrote fails execution with
+/// `InvalidSyscallArgs`, before any proving happens — so the input has to reach
+/// the executor, not only the prover. `run_test` is this with an empty stdin,
+/// which is correct only for a guest that reads nothing.
+pub fn run_test_with_stdin<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
     mut program: Program,
+    inputs: ZKMStdin,
 ) -> Result<MachineProof<KoalaBearPoseidon2>, MachineVerificationError<KoalaBearPoseidon2>> {
     let shape_config = CoreShapeConfig::default();
     shape_config.fix_preprocessed_shape(&mut program).unwrap();
     let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.write_vecs(&inputs.buffer);
         runtime.run().unwrap();
         runtime
     });
-    run_test_core::<P>(runtime, ZKMStdin::new(), Some(&shape_config))
+    run_test_core::<P>(runtime, inputs, Some(&shape_config))
 }
 
 #[allow(unused_variables)]
