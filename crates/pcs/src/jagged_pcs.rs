@@ -1067,20 +1067,34 @@ pub mod jagged {
             rmp_serde::to_vec(self).expect("JaggedPcsProof serializes")
         }
 
-        /// Decode a bundle, rejecting one that cannot be a bundle of this
-        /// protocol.
+        /// Decode a bundle. STRUCTURAL only — this says the bytes parse, not
+        /// that the protocol would accept them.
         ///
-        /// The stacking height is a protocol constant, not a proof
-        /// field, and it feeds shift arithmetic (`area >> h`,
-        /// `1 << (h + batch_dim)`) the moment any geometry is derived. Checking
-        /// it at each use leaves the window between decode and use open for
-        /// every future consumer; checking it HERE means a decoded bundle
-        /// already has a representable height.
+        /// The recursion lift decodes through here as well as the verifier,
+        /// and it consumes a proof that has already been verified upstream.
+        /// A protocol-profile rejection in this constructor therefore does not
+        /// reject anything: the lift reads `None` as "malformed or empty" and
+        /// silently builds an all-zero placeholder instead. Verification-time
+        /// policy belongs to [`Self::from_bytes_for_verification`], which is
+        /// what the untrusted-input path calls.
+        pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+            rmp_serde::from_slice(bytes).ok()
+        }
+
+        /// Decode bytes arriving from an untrusted source, rejecting a bundle
+        /// that cannot be one of this protocol.
+        ///
+        /// The stacking height is a protocol constant, not a proof field, and
+        /// it feeds shift arithmetic (`area >> h`, `1 << (h + batch_dim)`) the
+        /// moment any geometry is derived. Checking it at each use leaves the
+        /// window between decode and use open for every future consumer;
+        /// checking it here means a bundle the verifier holds already has a
+        /// representable height.
         ///
         /// The per-use guards stay: `EvaluationProof::Bundle` carries an
         /// already-structured bundle that never passes through this function.
-        pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-            let bundle: Self = rmp_serde::from_slice(bytes).ok()?;
+        pub fn from_bytes_for_verification(bytes: &[u8]) -> Option<Self> {
+            let bundle = Self::from_bytes(bytes)?;
             if bundle.commit.log_stacking_height != crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT {
                 tracing::debug!(
                     "jagged bundle decode: log_stacking_height {} is not the protocol's {}",
@@ -3532,12 +3546,17 @@ mod test {
         }
     }
 
-    /// A bundle whose stacking height is not the protocol's must not decode
-    /// at all.
+    /// A bundle whose stacking height is not the protocol's must not survive
+    /// the decode the VERIFIER performs.
     ///
     /// The per-use guards catch it too, but each of those is a window a future
-    /// consumer can reopen by reading geometry before checking. `from_bytes` is
-    /// the one place every wire-format bundle passes through.
+    /// consumer can reopen by reading geometry before checking.
+    ///
+    /// The policy lives in `from_bytes_for_verification` rather than in
+    /// `from_bytes`, because the recursion lift decodes through the latter and
+    /// treats `None` as "malformed or empty" -- it then builds an all-zero
+    /// placeholder. A rejection there would not reject anything; it would
+    /// quietly substitute a different proof.
     #[test]
     fn a_bundle_with_a_foreign_stacking_height_does_not_decode() {
         let (prep_views, main_views, prep, main, z_row) = small_two_rounds();
@@ -3546,7 +3565,7 @@ mod test {
         // Non-vacuity: the honest bundle round-trips.
         let honest = bundle.to_bytes();
         assert!(
-            JaggedPcsProof::from_bytes(&honest).is_some(),
+            JaggedPcsProof::from_bytes_for_verification(&honest).is_some(),
             "the honest bundle must decode, or the rejections below are vacuous"
         );
 
@@ -3562,7 +3581,7 @@ mod test {
             tampered.commit.log_stacking_height = h;
             let bytes = tampered.to_bytes();
             assert!(
-                JaggedPcsProof::from_bytes(&bytes).is_none(),
+                JaggedPcsProof::from_bytes_for_verification(&bytes).is_none(),
                 "a bundle claiming log_stacking_height {h} must not decode"
             );
         }

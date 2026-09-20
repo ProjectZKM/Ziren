@@ -592,7 +592,7 @@ where
             }
         };
         let bundle =
-            match JaggedPcsProofGeneric::<<SC as crate::BasefoldRing>::BfMmcs>::from_bytes(bytes) {
+            match JaggedPcsProofGeneric::<<SC as crate::BasefoldRing>::BfMmcs>::from_bytes_for_verification(bytes) {
                 Some(b) => b,
                 None => {
                     return Err(BasefoldVerifyError::JaggedPcs(format!(
@@ -916,12 +916,13 @@ where
             ))
         }
         EvaluationProof::Bundle(b) => b.clone(),
-        EvaluationProof::Bytes(bytes) => JaggedPcsProof::from_bytes(bytes).ok_or_else(|| {
-            BasefoldVerifyError::JaggedPcs(format!(
-                "rmp-serde deserialize failed ({} bytes)",
-                bytes.len()
-            ))
-        })?,
+        EvaluationProof::Bytes(bytes) => JaggedPcsProof::from_bytes_for_verification(bytes)
+            .ok_or_else(|| {
+                BasefoldVerifyError::JaggedPcs(format!(
+                    "rmp-serde deserialize failed ({} bytes)",
+                    bytes.len()
+                ))
+            })?,
     };
 
     // Read per-chip `column_count` from the bundle's PackingMeta (written by

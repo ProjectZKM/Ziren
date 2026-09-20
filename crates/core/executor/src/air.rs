@@ -151,6 +151,15 @@ pub enum MipsAirId {
     Global = 44,
     /// The byte chip.
     Byte = 45,
+    /// The parametric bit-width range table.
+    ///
+    /// Declared HERE, between `Byte` and `SysLinux`, because that is where
+    /// `MipsAir::get_chips_and_costs` pushes it, and the declaration order is
+    /// what `MipsAirId::iter()` yields.  The discriminant is pinned to the
+    /// variant, so its position in this list changes no serialized value, no
+    /// cost key and no shape key — only the iteration order that has to agree
+    /// with the chip list.
+    Range = 65,
     /// The SysLinux chip.
     SysLinux = 47,
     /// The MovCondChip.
@@ -159,8 +168,6 @@ pub enum MipsAirId {
     BooleanCircuitGarble = 50,
     /// The BooleanCircuitGarble control chip (bookends the `PrecompileChain` state bus).
     BooleanCircuitGarbleControl = 52,
-    /// The parametric bit-width range table.
-    Range = 65,
 }
 
 impl MipsAirId {
