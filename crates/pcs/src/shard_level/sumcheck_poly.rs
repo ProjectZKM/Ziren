@@ -450,8 +450,8 @@ pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
 // name them.  The shard prover (`prove_trusted_evaluations`) and host
 // verifier (`verify_jagged_pcs_host`) reach them STATICALLY via the
 // `BasefoldRing` associated types
-// (`prove_jagged_basefold_rounds_generic` /
-// `build_jagged_verify_inputs` + `verify_jagged_basefold_inner_generic`);
+// (`prove_jagged_rounds_generic` /
+// `build_jagged_verify_inputs` + `verify_jagged_inner_generic`);
 // the setup commit is the typed `StarkGenericConfig::prep_commit` method,
 // implemented directly by the inner and wrap configs.  `Val`/`Challenge` are
 // identical KoalaBear / KoalaBear^4 for both rings, so trace/point payloads

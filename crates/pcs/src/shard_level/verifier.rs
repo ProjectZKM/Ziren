@@ -443,7 +443,7 @@ impl BasefoldShardVerifier {
         // Jagged-PCS opening verification
         //
         // Delegate to the existing host-side verifier at
-        // crate::jagged_pcs::jagged::verify_jagged_basefold_no_observe
+        // crate::jagged_pcs::jagged::verify_jagged_no_observe
         // after deserialising the bundle bytes.  See detailed rationale
         // in verify_jagged_pcs_host.
         verify_jagged_pcs_host::<SC, A>(
@@ -469,7 +469,7 @@ impl BasefoldShardVerifier {
 /// Host-side jagged-PCS opening verification.
 ///
 /// Deserialises the bundle bytes and delegates to the host-side verifier at
-/// [`crate::jagged_pcs::jagged::verify_jagged_basefold_no_observe`].
+/// [`crate::jagged_pcs::jagged::verify_jagged_no_observe`].
 ///
 /// The TypeId gate mirrors prove_trusted_evaluations — returns `Ok(())`
 /// for non-KoalaBear configs (nothing to verify in that path).
@@ -527,7 +527,7 @@ where
             >,
 {
     use crate::jagged::JaggedChipInfo;
-    use crate::jagged_pcs::jagged::{verify_jagged_basefold_no_observe, JaggedBasefoldBundle};
+    use crate::jagged_pcs::jagged::{verify_jagged_no_observe, JaggedPcsProof};
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{InnerChallenge, InnerVal};
     use core::any::{Any, TypeId};
@@ -548,14 +548,13 @@ where
     // OUTER (wrap) ring dispatch. Val/Challenge are KoalaBear / KoalaBear^4
     // here, but the challenger is OuterChallenger (not JaggedChallenger):
     // deserialize + `build_jagged_verify_inputs` +
-    // `verify_jagged_basefold_inner_generic` over the `BasefoldRing`
+    // `verify_jagged_inner_generic` over the `BasefoldRing`
     // associated types (on this branch `SC::Challenger == OuterChallenger`,
     // `SC::BfMmcs == OuterValMmcs`).  Verify-only: no VK / committed-byte
     // impact.
     if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
-            build_jagged_verify_inputs, verify_jagged_basefold_inner_generic,
-            JaggedBasefoldBundleGeneric,
+            build_jagged_verify_inputs, verify_jagged_inner_generic, JaggedPcsProofGeneric,
         };
         use p3_air::BaseAir;
         let bytes = match evaluation_proof {
@@ -584,9 +583,7 @@ where
             }
         };
         let bundle =
-            match JaggedBasefoldBundleGeneric::<<SC as crate::BasefoldRing>::BfMmcs>::from_bytes(
-                bytes,
-            ) {
+            match JaggedPcsProofGeneric::<<SC as crate::BasefoldRing>::BfMmcs>::from_bytes(bytes) {
                 Some(b) => b,
                 None => {
                     return Err(BasefoldVerifyError::JaggedPcs(format!(
@@ -788,10 +785,7 @@ where
 
         let mmcs = <SC as crate::BasefoldRing>::bf_mmcs();
         let fri = <SC as crate::BasefoldRing>::fri_config();
-        let ok = verify_jagged_basefold_inner_generic::<
-            SC::Challenger,
-            <SC as crate::BasefoldRing>::BfMmcs,
-        >(
+        let ok = verify_jagged_inner_generic::<SC::Challenger, <SC as crate::BasefoldRing>::BfMmcs>(
             &chip_infos,
             &r_row_per_chip,
             &z_row,
@@ -844,14 +838,12 @@ where
             ))
         }
         EvaluationProof::Bundle(b) => b.clone(),
-        EvaluationProof::Bytes(bytes) => {
-            JaggedBasefoldBundle::from_bytes(bytes).ok_or_else(|| {
-                BasefoldVerifyError::JaggedPcs(format!(
-                    "rmp-serde deserialize failed ({} bytes)",
-                    bytes.len()
-                ))
-            })?
-        }
+        EvaluationProof::Bytes(bytes) => JaggedPcsProof::from_bytes(bytes).ok_or_else(|| {
+            BasefoldVerifyError::JaggedPcs(format!(
+                "rmp-serde deserialize failed ({} bytes)",
+                bytes.len()
+            ))
+        })?,
     };
 
     // Read per-chip `column_count` from the bundle's PackingMeta (written by
@@ -1293,7 +1285,7 @@ where
     // Use the `_no_observe` variant so the verifier doesn't observe
     // the same digest a second time (which would desync the
     // transcript vs the prover).
-    if !verify_jagged_basefold_no_observe(
+    if !verify_jagged_no_observe(
         &chip_infos,
         &r_row_per_chip,
         &z_row_inner,
@@ -1307,7 +1299,7 @@ where
         lb_challenger,
     ) {
         return Err(BasefoldVerifyError::JaggedPcs(
-            "verify_jagged_basefold_no_observe rejected the bundle".into(),
+            "verify_jagged_no_observe rejected the bundle".into(),
         ));
     }
 

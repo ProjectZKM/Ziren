@@ -394,7 +394,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         LiftedEvalProof::Bytes(bytes) => {
             // Ring-aware dispatch.  SC is the field hasher (HV); its impl
             // deserializes the OUTER bundle
-            // (JaggedBasefoldBundleGeneric<OuterValMmcs>, BN254
+            // (JaggedPcsProofGeneric<OuterValMmcs>, BN254
             // commitments) for the gnark wrap and the INNER bundle for the
             // recursion wrap. The OUTER path lifts the real BN254 round
             // commitments (an all-zero placeholder would fail Groth16 setup
@@ -613,7 +613,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 &per_proof_verifier
             }
             // The OUTER wrap proof carries its bundle as Bytes
-            // (JaggedBasefoldBundleGeneric<OuterValMmcs>).
+            // (JaggedPcsProofGeneric<OuterValMmcs>).
             // The verifier's num_variables must match the OUTER bundle's FRI
             // round count (== fri_commitments.len()), not max_log_row_count,
             // and its log_stacking_height must match the OUTER commit — same
@@ -621,7 +621,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             // is Option, so a non-outer Bytes payload (placeholder/empty)
             // cleanly falls through to the default verifier.
             LiftedEvalProof::Bytes(bytes) => {
-                if let Some(outer_bundle) = zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+                if let Some(outer_bundle) = zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric::<
                     zkm_recursion_core::stark::OuterValMmcs,
                 >::from_bytes(bytes)
                 {

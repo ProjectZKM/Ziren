@@ -58,7 +58,7 @@ where
     /// #H (BaseFold-over-BN254 wrap port): observe a single commitment
     /// digest into the transcript.  The jagged layer calls this to absorb
     /// the main PCS commitment BEFORE sampling z_col (mirror of host
-    /// verify_jagged_basefold_inner_generic's leading
+    /// verify_jagged_inner_generic's leading
     /// `challenger.observe(commit)`).  Implemented where the digest's
     /// CanObserveVariable bound is available (the basefold verifier).
     fn observe_commitment(
@@ -129,7 +129,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // CRITICAL transcript fix (step9 desync): the reduction
         // sumcheck emits a point of length `log_dense_size`, which is
         // < the full commit-area dimension `log2(area)`.  The HOST
-        // verifier (`verify_jagged_basefold_inner_generic`,
+        // verifier (`verify_jagged_inner_generic`,
         // crates/pcs/src/jagged_pcs.rs:2702-2707) extends z_star up
         // to `target_dim = log2(area)` by *sampling* Fiat-Shamir coords
         // from the challenger:

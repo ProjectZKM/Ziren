@@ -3633,7 +3633,7 @@ pub mod tests {
     }
 
     /// Fast Test::Core fib (prove_core + host verify) — runs the host
-    /// verify (verify_jagged_basefold_inner) on the fib core shape without
+    /// verify (verify_jagged_inner) on the fib core shape without
     /// the 40-min compress.
     #[test]
     #[serial]
@@ -4583,7 +4583,7 @@ pub mod tests {
         // The preprocessed round's COLUMN COUNT, real vs. enumerated
         //
         // The real round's padding is `area - real` split into columns no
-        // taller than the row cube, at least one (`prove_jagged_basefold_rounds`).
+        // taller than the row cube, at least one (`prove_jagged_rounds`).
         // The dummy child the enumeration builds derives the SAME quantity from
         // the child's MAIN band heights, which is a different number whenever a
         // chip's preprocessed height differs from its main height.

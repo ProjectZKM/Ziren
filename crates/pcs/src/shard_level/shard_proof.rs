@@ -51,11 +51,11 @@ pub enum EvaluationProof {
     #[default]
     Empty,
     Bytes(Vec<u8>),
-    Bundle(crate::jagged_pcs::jagged::JaggedBasefoldBundle),
+    Bundle(crate::jagged_pcs::jagged::JaggedPcsProof),
 }
 
 /// Host-side BaseFold-pipeline shard proof. No `Debug` derive: the
-/// embedded `JaggedBasefoldBundle::MT::Proof` has no `Debug` bound.
+/// embedded `JaggedPcsProof::MT::Proof` has no `Debug` bound.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(
     bound = "F: p3_field::Field + Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>"

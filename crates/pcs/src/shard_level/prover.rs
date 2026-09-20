@@ -19,7 +19,7 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// `main_commitment`, and returns the precomputed commit so the caller
 /// threads it into the jagged-PCS opening.  The opening then skips its own
 /// commit step and the in-band commit observe, matching the verifier
-/// counterpart (`verify_jagged_basefold_no_observe`).  The `main_traces`
+/// counterpart (`verify_jagged_no_observe`).  The `main_traces`
 /// views are BORROWED and only
 /// relabeled to `InnerVal` for the commit build (a zero-copy slice
 /// reinterpret) — no trace data is copied or moved, and no ownership
@@ -56,7 +56,7 @@ where
 
     // The BaseFold commit is built HERE, during the prove pass, and is returned
     // UNCONDITIONALLY.  Do not reintroduce an early return: the verifier always
-    // uses `verify_jagged_basefold_no_observe`, so a path that skipped the commit
+    // uses `verify_jagged_no_observe`, so a path that skipped the commit
     // would leave the prover observing it in-band -- a transcript desync a green
     // test suite cannot see.
     //
@@ -293,7 +293,7 @@ where
     // `commit_traces` builds the BaseFold commit here and the jagged open
     // consumes it with the in-band commit observe SKIPPED.  That skip is
     // load-bearing: the verifier always uses
-    // `verify_jagged_basefold_no_observe`, so an in-band observe on the
+    // `verify_jagged_no_observe`, so an in-band observe on the
     // prover side would be a transcript desync.
     //
     // Every chip is host-resident here, so the device-residency parameters
@@ -424,14 +424,14 @@ where
         "shard phase done"
     );
 
-    // Openings-for-free: reuse the zerocheck residual as the
-    // jagged step-3 y_per_chip
+    // Openings-for-free: reuse the zerocheck residual as the jagged
+    // `y_per_chip`
     // `trace_at_z[name]` is the zerocheck reduction's component_poly_evals
     // (prep-then-main per chip, = padded-MLE_BE(bitrev(trace)) @ z) — exactly
-    // the per-column values jagged step (3) would recompute from the trace.
-    // Passing the main slice as pre_y_per_chip skips the host triple-nested
-    // step-3 reduction; the proof bytes are unchanged (identical values, and
-    // step 3 is transcript-silent).
+    // the per-column values the jagged open would otherwise recompute from the
+    // trace.  Passing the main slice as `pre_y_per_chip` skips that host
+    // triple-nested per-column reduction; the proof bytes are unchanged --
+    // identical values, and computing them is transcript-silent.
     // Per-chip metadata HEIGHT for the two jagged-open sites that branch on an
     // EMPTY commit trace (`compute_residual_y_openings` + the jagged-eval
     // producer) and so cannot reach `shared_trace_mles` directly.  A
@@ -852,9 +852,9 @@ where
 }
 
 /// Residual-y reuse: the zerocheck reduction residual (`trace_at_z` main
-/// slice) IS the jagged step-3 `y_per_chip`, so the host triple-nested
-/// recompute is skipped.  Step 3 is transcript-silent, so the proof bytes are
-/// unchanged.  Panics when any chip's residual is missing or
+/// slice) IS the jagged `y_per_chip`, so the host triple-nested recompute is
+/// skipped.  Computing those claims is transcript-silent, so the proof bytes
+/// are unchanged.  Panics when any chip's residual is missing or
 /// shape-mismatched, or on a non-pow2 height under the LEGACY (`!use_rev`)
 /// bitrev convention.
 pub fn compute_residual_y_openings<SC, A>(
@@ -1295,7 +1295,7 @@ where
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     // `SC::Challenger` drives the generic jagged BaseFold prover
     // directly on the OUTER (wrap) branch — the capability bounds
-    // `prove_jagged_basefold_rounds_generic` requires. Both rings satisfy them
+    // `prove_jagged_rounds_generic` requires. Both rings satisfy them
     // (inner `JaggedChallenger`, wrap `OuterChallenger`); NOT expressible as a
     // `BasefoldRing` implied bound, so threaded down the call chain.
     SC::Challenger:
@@ -1411,8 +1411,8 @@ where
     // Reinterpret the residual openings to InnerChallenge (Challenge<SC> ==
     // InnerChallenge under the TypeId gate — the same relabel
     // `r_row_per_chip` and `chip_traces` already went through).  The wrap
-    // ring's impl ignores these and keeps its own step-3 recompute —
-    // identical values either way.
+    // ring's impl ignores these and recomputes the claims itself — identical
+    // values either way.
     let pre_y_inner: Vec<Vec<InnerChallenge>> = pre_y_per_chip
         .into_iter()
         // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
@@ -1426,7 +1426,7 @@ where
     // `downcast_mut`.
     //
     // The inner rings return `EvaluationProof::Bundle`; the wrap ring returns
-    // `Bytes` (rmp-serialized `JaggedBasefoldBundleGeneric<OuterValMmcs>`) and
+    // `Bytes` (rmp-serialized `JaggedPcsProofGeneric<OuterValMmcs>`) and
     // passes `pre_y_per_chip = None`.
     // The PREPROCESSED round's views, mirroring the main round's
     //

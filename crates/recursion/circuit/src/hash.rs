@@ -140,11 +140,11 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// `JaggedPcsProofVariable`.
     ///
     /// The INNER ring (`KoalaBearPoseidon2`) payload is a
-    /// `JaggedBasefoldBundle` (KoalaBear MMCS) — the default impl routes to
+    /// `JaggedPcsProof` (KoalaBear MMCS) — the default impl routes to
     /// [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`].
     ///
     /// The OUTER ring (`KoalaBearPoseidon2Outer`) payload is a
-    /// `JaggedBasefoldBundleGeneric<OuterValMmcs>` carrying REAL BN254
+    /// `JaggedPcsProofGeneric<OuterValMmcs>` carrying REAL BN254
     /// commitments — the override deserializes the outer bundle and lifts its
     /// BN254 round commitments via
     /// [`crate::shard_level_witness::lift_jagged_basefold_bundle_outer`], so
@@ -187,7 +187,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     #[allow(clippy::too_many_arguments)]
     fn lift_whir_bundle_dispatch(
         builder: &mut Builder<C>,
-        host: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle,
+        host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProof,
         whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
@@ -219,8 +219,8 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
         Self: Sized;
 
-    /// Ring-aware Bundle dispatch: lift a WITNESSED inner
-    /// jagged-basefold bundle (the value-independent production path) into the
+    /// Ring-aware dispatch: lift a WITNESSED inner jagged PCS proof (the
+    /// value-independent production path) into the
     /// in-circuit [`crate::jagged_circuit::JaggedPcsProofVariable`].
     ///
     /// The INNER ring witnesses the bundle via
@@ -235,7 +235,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     #[allow(clippy::too_many_arguments)]
     fn lift_bundle_dispatch(
         builder: &mut Builder<C>,
-        host: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle,
+        host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProof,
         basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
@@ -277,7 +277,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         Self: Sized;
 
     /// P2c-for-outer (value-independent gnark wrap): lift a WITNESSED OUTER
-    /// (BN254) jagged-basefold bundle into the in-circuit
+    /// (BN254) jagged BaseFold proof into the in-circuit
     /// [`crate::jagged_circuit::JaggedPcsProofVariable`].
     ///
     /// The OUTER ring (`KoalaBearPoseidon2Outer`) routes to
@@ -291,7 +291,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     #[allow(clippy::too_many_arguments)]
     fn lift_outer_bundle_dispatch(
         builder: &mut Builder<C>,
-        host: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<
+        host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
             zkm_recursion_core::stark::OuterValMmcs,
         >,
         basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
@@ -473,7 +473,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
     #[allow(clippy::too_many_arguments)]
     fn lift_whir_bundle_dispatch(
         builder: &mut Builder<C>,
-        host: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle,
+        host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProof,
         whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
@@ -526,7 +526,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
     #[allow(clippy::too_many_arguments)]
     fn lift_bundle_dispatch(
         builder: &mut Builder<C>,
-        host: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle,
+        host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProof,
         basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
@@ -587,7 +587,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
     #[allow(clippy::too_many_arguments)]
     fn lift_outer_bundle_dispatch(
         builder: &mut Builder<C>,
-        _host: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<
+        _host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
             zkm_recursion_core::stark::OuterValMmcs,
         >,
         _basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
@@ -804,7 +804,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     #[allow(clippy::too_many_arguments)]
     fn lift_whir_bundle_dispatch(
         _builder: &mut Builder<C>,
-        _host: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle,
+        _host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProof,
         _whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
@@ -841,7 +841,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     #[allow(clippy::too_many_arguments)]
     fn lift_bundle_dispatch(
         builder: &mut Builder<C>,
-        _host: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle,
+        _host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProof,
         _basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
@@ -885,7 +885,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     #[allow(clippy::too_many_arguments)]
     fn lift_outer_bundle_dispatch(
         builder: &mut Builder<C>,
-        host: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<
+        host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
             zkm_recursion_core::stark::OuterValMmcs,
         >,
         basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<

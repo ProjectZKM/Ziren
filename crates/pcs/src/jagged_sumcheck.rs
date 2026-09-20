@@ -440,8 +440,7 @@ mod phase1_acceptance_gate {
             .collect();
 
         // y_per_chip = host column claims.  MUST mirror the PRODUCTION
-        // column-claim formula (the step-3 claims fed to
-        // `prove_jagged_basefold_rounds`): the full row_eq over z_row indexed by
+        // column-claim formula (the claims fed to `prove_jagged_rounds`): the full row_eq over z_row indexed by
         // the trace row in the SAME order `materialize_dense_jagged` writes the
         // dense column in, which `build_weight_table` then weights with
         // `eq_c[row]`.  Reading rows in a different order here makes the

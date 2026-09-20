@@ -444,7 +444,7 @@ where
     }
 }
 
-/// Build a SHAPE-FAITHFUL (zero-VALUE) [`JaggedBasefoldBundle`] for the
+/// Build a SHAPE-FAITHFUL (zero-VALUE) [`JaggedPcsProof`] for the
 /// dummy shard proof, so the witness stream the recursion program reads from a
 /// dummy matches the real prover's byte-for-byte (the recursion program is now
 /// value-independent — only field LENGTHS matter).  Replaces the prior
@@ -483,14 +483,14 @@ pub fn dummy_jagged_basefold_bundle(
     // columns as the gap needs).  The preprocessed round (first, when
     // present) takes `pins.prep`, the main round `pins.main`.
     pins: Option<zkm_pcs::jagged::RecursionPins>,
-) -> zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle {
+) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProof {
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
     use zkm_pcs::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
     use zkm_pcs::basefold::stacked::StackedBasefoldProof;
     use zkm_pcs::jagged::pack_traces_jagged;
     use zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
-    use zkm_pcs::jagged_pcs::jagged::{JaggedBasefoldBundle, PackingMeta};
+    use zkm_pcs::jagged_pcs::jagged::{JaggedPcsProof, PackingMeta};
     use zkm_pcs::jagged_pcs::{lb_fri_config, pick_log_stacking_height, JaggedCommit, JaggedMmcs};
     use zkm_pcs::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
     use zkm_pcs::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
@@ -516,7 +516,7 @@ pub fn dummy_jagged_basefold_bundle(
     // offsets / total_values / log_dense_size / column_counts.
     // The opening ROUNDS, as the prover lays them out
     //
-    // `prove_jagged_basefold_rounds_generic` concatenates the rounds into ONE
+    // `prove_jagged_rounds_generic` concatenates the rounds into ONE
     // column space: each round contributes its real columns rebased onto the
     // running total, then the stacking-padding columns that close it out to its
     // committed area, and the next round starts at that area.  Mirror it
@@ -818,7 +818,7 @@ pub fn dummy_jagged_basefold_bundle(
         },
     };
 
-    JaggedBasefoldBundle {
+    JaggedPcsProof {
         reduction,
         basefold_proof: stacked,
         whir_proof,
@@ -1098,7 +1098,7 @@ mod tests {
         // The prover does not stop at the packing: a committed round is closed
         // out to a whole number of stacking blocks by explicit padding COLUMNS,
         // each no taller than the row cube and always at least one
-        // (`prove_jagged_basefold_rounds_generic`).  Those columns are part of
+        // (`prove_jagged_rounds_generic`).  Those columns are part of
         // the column space the recursion lift walks, so the reference has to
         // carry them too — without them this compares against a layout no
         // prover produces.

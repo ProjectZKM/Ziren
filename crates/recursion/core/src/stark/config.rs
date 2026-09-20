@@ -275,7 +275,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         //
         // The round's `claims` reach the generic body, which weighs them into
         // the reduction; the ring only names its own commitment family here.
-        let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_basefold_rounds_generic::<
+        let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_rounds_generic::<
             Self::Challenger,
             Self::BfMmcs,
             zkm_pcs::jagged_pcs::JaggedDft,
@@ -612,15 +612,15 @@ mod basefold_over_bn254_roundtrip_test {
     // Full jagged-basefold BUNDLE pipeline (jagged sumcheck reduction +
     // jagged-eval + BaseFold open/verify) over the BN254 outer ring — one layer
     // above the PCS roundtrip; this is what the wrap shard's open/verify hooks
-    // drive: `prove_jagged_basefold_rounds_generic` with the single MAIN round
+    // drive: `prove_jagged_rounds_generic` with the single MAIN round
     // and the `build_jagged_verify_inputs` +
-    // `verify_jagged_basefold_inner_generic` mirror.
+    // `verify_jagged_inner_generic` mirror.
     #[test]
     fn test_jagged_basefold_bundle_roundtrip_bn254() {
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
-            build_jagged_verify_inputs, prove_jagged_basefold_rounds_generic,
-            verify_jagged_basefold_inner_generic, JaggedOpenRound,
+            build_jagged_verify_inputs, prove_jagged_rounds_generic, verify_jagged_inner_generic,
+            JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -713,7 +713,7 @@ mod basefold_over_bn254_roundtrip_test {
             claims,
             precomputed: &precompute,
         }];
-        let bundle = prove_jagged_basefold_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+        let bundle = prove_jagged_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             &rounds,
             &z_row,
             &mut p_chal,
@@ -730,7 +730,7 @@ mod basefold_over_bn254_roundtrip_test {
             build_jagged_verify_inputs(&bundle.packing, &chip_widths, &z_row);
         let mut v_chal = make_challenger();
         v_chal.observe(commitment.clone());
-        let ok = verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
+        let ok = verify_jagged_inner_generic::<OuterChallenger, OuterValMmcs>(
             &chip_infos,
             &r_row_v,
             &z_row_v,
@@ -761,7 +761,7 @@ mod basefold_over_bn254_roundtrip_test {
         let mut v_chal = make_challenger();
         v_chal.observe(commitment.clone());
         assert!(
-            verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
+            verify_jagged_inner_generic::<OuterChallenger, OuterValMmcs>(
                 &chip_infos,
                 &r_row_v,
                 &z_row_v,
@@ -784,7 +784,7 @@ mod basefold_over_bn254_roundtrip_test {
         let mut v_chal = make_challenger();
         v_chal.observe(commitment.clone());
         assert!(
-            !verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
+            !verify_jagged_inner_generic::<OuterChallenger, OuterValMmcs>(
                 &chip_infos,
                 &r_row_v,
                 &z_row_v,
@@ -817,8 +817,8 @@ mod basefold_over_bn254_roundtrip_test {
     fn outer_two_round_rejects_substituted_roots() {
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
-            build_jagged_verify_inputs, prove_jagged_basefold_rounds_generic,
-            verify_jagged_basefold_inner_generic, JaggedOpenRound,
+            build_jagged_verify_inputs, prove_jagged_rounds_generic, verify_jagged_inner_generic,
+            JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -928,7 +928,7 @@ mod basefold_over_bn254_roundtrip_test {
                 precomputed: &main,
             },
         ];
-        let bundle = prove_jagged_basefold_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+        let bundle = prove_jagged_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             &rounds,
             &z_row,
             &mut p_chal,
@@ -950,26 +950,25 @@ mod basefold_over_bn254_roundtrip_test {
 
         // The verifier holds the HONEST geometry (the verifying key pins it);
         // only the bundle varies below.
-        let verify =
-            |b: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<OuterValMmcs>,
-             preceding_root: &<OuterValMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment|
-             -> bool {
-                let mut v_chal = make_challenger();
-                v_chal.observe(prep_root.clone());
-                v_chal.observe(main_root.clone());
-                verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
-                    &chip_infos,
-                    &r_row_v,
-                    &z_row_v,
-                    b,
-                    &mut v_chal,
-                    mmcs.clone(),
-                    /* skip_commit_observe = */ true,
-                    fri.clone(),
-                    &[(preceding_root.clone(), prep.prover_data.area)],
-                    &b.y_per_chip.clone(),
-                )
-            };
+        let verify = |b: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<OuterValMmcs>,
+                      preceding_root: &<OuterValMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment|
+         -> bool {
+            let mut v_chal = make_challenger();
+            v_chal.observe(prep_root.clone());
+            v_chal.observe(main_root.clone());
+            verify_jagged_inner_generic::<OuterChallenger, OuterValMmcs>(
+                &chip_infos,
+                &r_row_v,
+                &z_row_v,
+                b,
+                &mut v_chal,
+                mmcs.clone(),
+                /* skip_commit_observe = */ true,
+                fri.clone(),
+                &[(preceding_root.clone(), prep.prover_data.area)],
+                &b.y_per_chip.clone(),
+            )
+        };
 
         assert!(verify(&bundle, &prep_root), "the honest two-round outer bundle must verify");
 

@@ -1,6 +1,6 @@
 //! BaseFold proof verifier for the recursion circuit (host-shape + emit hooks).
 //!
-//! Verifies BaseFold-based shard proofs emitted by `prove_jagged_basefold_rounds`.
+//! Verifies BaseFold-based shard proofs emitted by `prove_jagged_rounds`.
 //!
 //! This module holds:
 //!   - host-shape verification logic (real Rust math) so the
@@ -888,7 +888,7 @@ where
         // basefold open verifier `verify_mle_evaluations` (crates/pcs/src/
         // basefold/verifier.rs:91+).  The original per-round commitments are
         // observed by the JAGGED layer BEFORE z_col is sampled (mirror of
-        // host verify_jagged_basefold_inner_generic's leading
+        // host verify_jagged_inner_generic's leading
         // `challenger.observe(commit)`), so they are NOT re-observed here,
         // `commitments` + `batch_evaluations` are consumed by the per-query
         // component binding below, and `batch_evaluations` is now also

@@ -84,7 +84,7 @@ wrap machine opens TWO rounds; the deferred conditional was already live.
 
 ## ZR-23 bind #3 — the column claims are the openings
 
-`verify_jagged_basefold_inner_generic` had no `opened_main` parameter, so on the
+`verify_jagged_inner_generic` had no `opened_main` parameter, so on the
 outer ring the zerocheck (which consumes `opened_values`) and the jagged phase
 (which consumes `bundle.y_per_chip`) were two independent checks over two
 unrelated sets of column claims.

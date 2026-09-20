@@ -158,7 +158,7 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 ///   OuterSC — the recursion-core crate depends on stark, not vice versa).
 ///
 /// Both rings run BaseFold.  The higher-level jagged bundle / 8-felt digest
-/// stack (`JaggedBasefoldBundle`, `prove_shard_with_data`'s
+/// stack (`JaggedPcsProof`, `prove_shard_with_data`'s
 /// `main_commitment: [Val; 8]`) is still concrete rather than generic over
 /// `BfMmcs::Commitment`; genericizing it is what would let `bf_mmcs()` be
 /// consumed directly.
@@ -402,7 +402,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// `Self::Challenger`, and it must produce the matching
     /// [`crate::shard_level::shard_proof::EvaluationProof`] shape: the inner
     /// (KoalaBear/Poseidon2) rings emit a concrete `Bundle`, the wrap ring
-    /// emits `Bytes` (an rmp-serialized `JaggedBasefoldBundleGeneric<
+    /// emits `Bytes` (an rmp-serialized `JaggedPcsProofGeneric<
     /// OuterValMmcs>`, which has no concrete slot in the enum).  Dispatching
     /// that on `Self` puts the choice where the concrete types are known.
     ///
@@ -415,7 +415,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// Every round's `precomputed` commit is built by `commit_traces` before
     /// the open and handed over — the open itself must NOT observe the
     /// BaseFold commit in-band: the verifier uses
-    /// `verify_jagged_basefold_no_observe`, so an in-band observe here is a
+    /// `verify_jagged_no_observe`, so an in-band observe here is a
     /// transcript desync no green test suite can see.
     ///
     /// Opens the jagged PCS over one or more commitment ROUNDS at the shared

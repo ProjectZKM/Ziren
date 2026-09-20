@@ -381,8 +381,7 @@ pub mod koala_bear_poseidon2 {
         ) -> crate::shard_level::shard_proof::EvaluationProof {
             // ONE jagged proof spanning every round.  A
             // per-round proof would cost a reduction, an eval and an open each.
-            let bundle =
-                crate::jagged_pcs::jagged::prove_jagged_basefold_rounds(&rounds, z_row, challenger);
+            let bundle = crate::jagged_pcs::jagged::prove_jagged_rounds(&rounds, z_row, challenger);
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
         }
     }

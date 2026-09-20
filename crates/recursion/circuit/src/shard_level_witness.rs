@@ -286,7 +286,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     Empty,
     Bytes(Vec<u8>),
     Bundle {
-        host: JaggedBasefoldBundle,
+        host: JaggedPcsProof,
         basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
         // the reduction sumcheck, jagged-eval sub-sumcheck, and
         // expected_eval (q_at_z) — also pre-read from the witness stream.
@@ -315,7 +315,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     // q_at_z, commit roots); only the inner PCS proof type differs.  Core
     // (leaf) proofs only — recursion shards stay BaseFold.
     WhirBundle {
-        host: JaggedBasefoldBundle,
+        host: JaggedPcsProof,
         whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
@@ -328,7 +328,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         modified_commitment: [Felt<C::F>; 8],
     },
     // The gnark wrap path.  The host carries the outer bundle
-    // (`JaggedBasefoldBundleGeneric<OuterValMmcs>`, BN254 commitments) as
+    // (`JaggedPcsProofGeneric<OuterValMmcs>`, BN254 commitments) as
     // `EvaluationProof::Bytes`.  Rather than BAKE its proof-specific values in
     // `lift_jagged_basefold_bundle_outer` (which would make the
     // gnark R1CS proof-specific → a fresh proof trips `assertIsEqual`), we
@@ -338,7 +338,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     // for inner configs the field types still resolve (`Var<C::N>` is generic)
     // but the variant is never constructed.
     OuterBundle {
-        host: zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<
+        host: zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
             zkm_recursion_core::stark::OuterValMmcs,
         >,
         basefold_proof: RecursiveBasefoldProof<
@@ -649,7 +649,7 @@ fn basefold_opened_values_from_host(
 // pieces.  These compile against the existing in-circuit verifier
 // surface but are NOT yet wired into call sites.  Their purpose is to
 // establish the field-by-field witness mapping so the full
-// `JaggedBasefoldBundle::Witnessable` can be composed from these
+// `JaggedPcsProof::Witnessable` can be composed from these
 // primitives.
 //
 // The Ziren bundle stores per-round eval-form sumcheck rounds
@@ -660,7 +660,7 @@ fn basefold_opened_values_from_host(
 
 use zkm_pcs::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 use zkm_pcs::basefold::stacked::StackedBasefoldProof;
-use zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle;
+use zkm_pcs::jagged_pcs::jagged::JaggedPcsProof;
 use zkm_pcs::jagged_pcs::JaggedMmcs;
 use zkm_pcs::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
 
@@ -994,13 +994,13 @@ pub fn host_stacked_basefold_to_recursive(
 // BaseFold-over-BN254 wrap: OUTER-ring bundle lift.
 //
 // The OUTER wrap proof's `EvaluationProof::Bytes` carries a
-// `JaggedBasefoldBundleGeneric<OuterValMmcs>` whose commitments are
+// `JaggedPcsProofGeneric<OuterValMmcs>` whose commitments are
 // REAL BN254 MerkleCaps (`MerkleCap<KoalaBear, [Bn254; 1]>`).  The inner
 // lift (`lift_jagged_basefold_bundle`) reads KoalaBear MMCS roots and is
 // wrong for this ring.  These helpers read the BN254 roots and lift them
 // to the outer digest type (`KoalaBearPoseidon2Outer::Digest = [Bn254; 1]`,
 // `DigestVariable = [Var<Bn254>; 1]`), so the in-circuit challenger
-// observes the same BN254 digests the host `verify_jagged_basefold_inner_generic`
+// observes the same BN254 digests the host `verify_jagged_inner_generic`
 // absorbs (via `split_32` per BN254 element) — matching the Fiat-Shamir
 // transcript exactly.
 
@@ -1190,9 +1190,7 @@ where
         _ => return None,
     };
     let bundle =
-        zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<OuterValMmcs>::from_bytes(
-            bytes,
-        )?;
+        zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric::<OuterValMmcs>::from_bytes(bytes)?;
 
     // BaseFold proof (BN254 digests) — witnessed felt/ext + BN254 digests.
     assert!(bundle.whir_proof.is_none(), "WHIR proof in an OUTER-lift bundle: the outer circuit lifts recursion (BaseFold) proofs only — a core proof leaked past the leaf");
@@ -1256,9 +1254,8 @@ where
         _ => return false,
     };
     let bundle =
-        match zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<OuterValMmcs>::from_bytes(
-            bytes,
-        ) {
+        match zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric::<OuterValMmcs>::from_bytes(bytes)
+        {
             Some(b) => b,
             None => return false,
         };
@@ -1324,7 +1321,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub fn lift_jagged_basefold_bundle_outer<C>(
     builder: &mut Builder<C>,
-    bundle: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<OuterValMmcs>,
+    bundle: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<OuterValMmcs>,
 // Witnessed proof-specific values (replace the const-builds).
     preread_basefold_proof: RecursiveBasefoldProof<
         Felt<C::F>,
@@ -1701,7 +1698,7 @@ where
 /// Bytes-input adapter for [`lift_jagged_basefold_bundle`].
 ///
 /// Deserializes `evaluation_proof_bytes` (rmp-serde wire format) into
-/// a [`JaggedBasefoldBundle`] then calls
+/// a [`JaggedPcsProof`] then calls
 /// [`lift_jagged_basefold_bundle`].  When bytes are empty (the
 /// scaffolding-test path that the existing
 /// [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`] handles
@@ -1715,7 +1712,7 @@ where
 /// `lift_evaluation_proof_via_bundle(...)`.  A later cutover can
 /// finish the migration by changing the upstream
 /// `BasefoldShardProof.evaluation_proof` field type from `Vec<u8>` to
-/// `JaggedBasefoldBundle`, eliminating this adapter and the
+/// `JaggedPcsProof`, eliminating this adapter and the
 /// rmp-serde round trip — which is the actual fix for the
 /// serialization-induced determinism cascade.
 pub fn lift_evaluation_proof_via_bundle<C, HV>(
@@ -1735,7 +1732,7 @@ where
     HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
         + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
-    if let Some(bundle) = JaggedBasefoldBundle::from_bytes(bytes) {
+    if let Some(bundle) = JaggedPcsProof::from_bytes(bytes) {
         let (cp, sc, je, ee, cr) = const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
         // Bytes-path: const-build the MODIFIED (hash-bound) digest from the
         // bundle's raw root + packing (mirror of jagged_pcs_lift bytes path).
@@ -1855,7 +1852,7 @@ fn write_sumcheck_to_stream<C>(
     host.point_and_eval.1.write(witness);
 }
 
-/// Lift a host-side [`JaggedBasefoldBundle`] into the in-circuit
+/// Lift a host-side [`JaggedPcsProof`] into the in-circuit
 /// [`JaggedPcsProofVariable`] shape — the structured replacement for
 /// [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`].
 ///
@@ -1901,7 +1898,7 @@ fn write_sumcheck_to_stream<C>(
 ///   (loosens soundness — temporary unblock only).
 /// * Genericity of `BasefoldShardProof<F, EF>` — the wire-format
 ///   field `evaluation_proof: Vec<u8>` is generic-friendly but
-///   replacing it with `JaggedBasefoldBundle` (concrete
+///   replacing it with `JaggedPcsProof` (concrete
 ///   InnerVal/InnerChallenge) requires either dropping the struct
 ///   generics or cfg-gating the field per feature.  All real
 ///   instantiations use `<InnerVal, InnerChallenge>` so the
@@ -2088,7 +2085,7 @@ where
 /// the returned proof matches the verifier's `type Proof` digest type.
 #[allow(clippy::type_complexity)]
 pub fn const_basefold_proof_from_bundle<C, HV>(
-    bundle: &JaggedBasefoldBundle,
+    bundle: &JaggedPcsProof,
     builder: &mut Builder<C>,
 ) -> (
     RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
@@ -2135,7 +2132,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub fn lift_jagged_bundle_generic<C, HV, PP>(
     builder: &mut Builder<C>,
-    bundle: &JaggedBasefoldBundle,
+    bundle: &JaggedPcsProof,
     // the inner PCS proof's felt/ext values, PRE-READ from the
     // witness stream in `BasefoldShardProof::read`.  This is what makes the
     // recursion program value-independent: the proof values are witness
@@ -2204,7 +2201,7 @@ where
     // to the next power of two.  This drives `num_col_variables` =
     // the number of z_col challenges the in-circuit verifier samples —
     // it MUST equal the host's `log2(next_pow2(offsets.len()-1))`
-    // (jagged_pcs.rs verify_jagged_basefold_inner).  A
+    // (jagged_pcs.rs verify_jagged_inner).  A
     // `+ (cc[len-2]+1)` heuristic inflates this across a power-of-two
     // boundary for some chip sets (keccak shard: 568→1024 vs host 415→512),
     // desyncing the transcript under host-parity enforcement.
@@ -2674,7 +2671,7 @@ pub fn jagged_reduction_to_partial_sumcheck(
 #[allow(clippy::too_many_arguments)]
 pub fn lift_jagged_basefold_bundle<C, HV>(
     builder: &mut Builder<C>,
-    bundle: &JaggedBasefoldBundle,
+    bundle: &JaggedPcsProof,
     preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
     preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
@@ -3094,7 +3091,7 @@ mod tests {
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
-        let bundle = JaggedBasefoldBundle {
+        let bundle = JaggedPcsProof {
             reduction: JaggedReductionProof::<InnerChallenge> {
                 rounds: vec![JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] }],
                 eval_point: vec![InnerChallenge::ZERO],
@@ -3163,7 +3160,7 @@ mod tests {
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
-        let bundle = JaggedBasefoldBundle {
+        let bundle = JaggedPcsProof {
             reduction: JaggedReductionProof::<InnerChallenge> {
                 rounds: vec![JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] }],
                 eval_point: vec![InnerChallenge::ZERO],
@@ -3239,7 +3236,7 @@ mod tests {
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
-        let bundle = JaggedBasefoldBundle {
+        let bundle = JaggedPcsProof {
             reduction: JaggedReductionProof::<InnerChallenge> {
                 rounds: vec![JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] }],
                 eval_point: vec![InnerChallenge::ZERO],
@@ -3360,7 +3357,7 @@ mod tests {
         // Minimal-but-valid bundle: one reduction round, empty
         // basefold proof, single-cap commit.
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
-        let bundle = JaggedBasefoldBundle {
+        let bundle = JaggedPcsProof {
             reduction: JaggedReductionProof::<InnerChallenge> {
                 rounds: vec![JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] }],
                 eval_point: vec![InnerChallenge::ZERO],

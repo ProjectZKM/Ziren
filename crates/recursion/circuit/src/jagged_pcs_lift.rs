@@ -7,9 +7,9 @@
 //!
 //! # Pipeline
 //!
-//!   1. Deserialize bytes → host-side `JaggedBasefoldBundle`
+//!   1. Deserialize bytes → host-side `JaggedPcsProof`
 //!      (existing rmp-serde format from
-//!      `crate::stark::jagged_pcs::JaggedBasefoldBundle`).
+//!      `crate::stark::jagged_pcs::JaggedPcsProof`).
 //!   2. Map each nested piece through `Witnessable::read`.
 //!   3. Assemble into `JaggedPcsProofVariable`.
 //!
@@ -66,7 +66,7 @@ use zkm_pcs::{InnerChallenge, InnerVal};
 ///
 /// # Arguments
 ///
-/// - `bytes`: serialized `JaggedBasefoldBundle` (may be empty
+/// - `bytes`: serialized `JaggedPcsProof` (may be empty
 ///   for placeholder/test paths).
 /// - `builder`: recursion compiler builder.
 /// - `max_log_row_count`: shard-level PCS max log row count
@@ -97,14 +97,14 @@ where
         + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     // Part B: when bytes is non-empty, deserialize into a
-    // `JaggedBasefoldBundle` and delegate to
+    // `JaggedPcsProof` and delegate to
     // `lift_jagged_basefold_bundle` (real wire-format pieces, no
     // zero placeholders).  Empty / malformed bytes fall through to
     // the structural-only zero placeholder below — preserves the
     // scaffolding-test and `EvaluationProof::Empty` paths
     // byte-for-byte.
     if !bytes.is_empty() {
-        if let Some(bundle) = zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle::from_bytes(bytes) {
+        if let Some(bundle) = zkm_pcs::jagged_pcs::jagged::JaggedPcsProof::from_bytes(bytes) {
             let (cp, sc, je, ee, cr) = crate::shard_level_witness::const_basefold_proof_from_bundle::<
                 C,
                 HV,
@@ -266,7 +266,8 @@ where
         // verifier reads `query_phase_openings[round][query_idx]`
         // and collects one opened block per round, so outer length
         // must equal num_variables (== max_log_row_count here).
-        query_phase_openings: (0..max_log_row_count.div_ceil(zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)))
+        query_phase_openings: (0..max_log_row_count
+            .div_ceil(zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)))
             .map(|_| {
                 vec![crate::basefold_verifier::RecursiveBasefoldOpening::<
                     Felt<C::F>,
