@@ -528,10 +528,8 @@ mod basefold_over_bn254_roundtrip_test {
             })
             .collect();
         let packing = zkm_pcs::jagged::compute_jagged_metadata::<JaggedVal>(&trace_views);
-        let dense = zkm_pcs::jagged::materialize_dense_jagged::<JaggedVal>(
-            &trace_views,
-            packing.dense_len,
-        );
+        let dense =
+            zkm_pcs::jagged::materialize_dense_jagged::<JaggedVal>(&trace_views, packing.dense_len);
         let dense_traces = vec![("<jagged-dense>".to_string(), RowMajorMatrix::new(dense, 1))];
 
         // Self-consistency roundtrip: commit/open/verify must agree on ONE config;
@@ -680,10 +678,8 @@ mod basefold_over_bn254_roundtrip_test {
             .collect();
 
         let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
-        let precompute = <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(
-            &trace_views,
-            None,
-        );
+        let precompute =
+            <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(&trace_views, None);
         let commitment = precompute.commit.original_commitment.clone();
 
         // claim[c][col] = Σ_{row < h_c} eq(rev(z_row), row) · t[row·w + col]
@@ -815,8 +811,9 @@ mod basefold_over_bn254_roundtrip_test {
     fn outer_vk_commit_bind_is_not_vacuous() {
         type R = KoalaBearPoseidon2Outer;
         let traces = vec![("Cpu".to_string(), {
-            let v: Vec<JaggedVal> =
-                (0..64).map(|i| JaggedVal::from_u32((i * 2_654_435_761u64 % 1_000_003) as u32)).collect();
+            let v: Vec<JaggedVal> = (0..64)
+                .map(|i| JaggedVal::from_u32((i * 2_654_435_761u64 % 1_000_003) as u32))
+                .collect();
             RowMajorMatrix::new(v, 4)
         })];
         let real = crate::stark::config::outer_jagged_hooks::outer_prep_commit(&traces, None);

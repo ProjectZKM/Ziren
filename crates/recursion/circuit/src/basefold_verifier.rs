@@ -569,11 +569,7 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
 /// domain elements are the squares.
 ///
 /// At `k == 1` this is exactly one pair fold.
-pub fn fold_block_host_shape<EF: p3_field::Field>(
-    evals: &[EF],
-    xs: &[EF],
-    betas: &[EF],
-) -> EF {
+pub fn fold_block_host_shape<EF: p3_field::Field>(evals: &[EF], xs: &[EF], betas: &[EF]) -> EF {
     assert_eq!(evals.len(), xs.len(), "one domain element per block position");
     assert_eq!(evals.len(), 1 << betas.len(), "block must be 2^betas.len() wide");
     let two = EF::ONE + EF::ONE;
@@ -864,7 +860,8 @@ where
 {
     use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
     use zkm_recursion_compiler::ir::DslIr;
-    type Felt<C> = zkm_recursion_compiler::prelude::Felt<<C as zkm_recursion_compiler::ir::Config>::F>;
+    type Felt<C> =
+        zkm_recursion_compiler::prelude::Felt<<C as zkm_recursion_compiler::ir::Config>::F>;
 
     let k = betas.len();
     assert_eq!(block.len(), 1usize << k, "block must hold 2^k opened values");
@@ -1448,7 +1445,6 @@ where
                     })
                 };
 
-
                 use p3_field::TwoAdicField;
                 let two_adic_generator: zkm_recursion_compiler::prelude::Felt<C::F> =
                     builder.constant(C::F::two_adic_generator(log_codeword_size));
@@ -1540,7 +1536,6 @@ where
                 }
                 builder.assert_ext_eq(folded, final_poly_ext);
 
-
                 // Per-round Merkle binding — digest-generic via HV.
                 // Recompute each round's leaf digest from the sibling
                 // pair, walk the inclusion path with HV::select_chain_digest
@@ -1571,19 +1566,15 @@ where
                     // the block, `ext2felt`'d in committed order.  At arity 1
                     // that is the 8 limbs of the sibling pair; at arity `k` it
                     // is `2^k * 4`.
-                    let leaf_felts: Vec<zkm_recursion_compiler::prelude::Felt<C::F>> = blocks
-                        [round_idx]
-                        .iter()
-                        .flat_map(|v| C::ext2felt(builder, *v))
-                        .collect();
+                    let leaf_felts: Vec<zkm_recursion_compiler::prelude::Felt<C::F>> =
+                        blocks[round_idx].iter().flat_map(|v| C::ext2felt(builder, *v)).collect();
                     let mut leaf_digest: HV::DigestVariable = HV::hash(builder, &leaf_felts);
                     // Path direction bits: bits of (orig_query >> (round_idx+1)),
                     // LSB-first.  `query_indices[query_idx]` is LSB-first over
                     // log_codeword_size bits, so slice from `round_idx + 1`.
                     // The index has been shifted by every earlier round's
                     // arity plus this one's, not by `round_idx + 1`.
-                    let bits_consumed: usize =
-                        round_arities.iter().take(round_idx + 1).sum();
+                    let bits_consumed: usize = round_arities.iter().take(round_idx + 1).sum();
                     let path_bits = &query_indices[query_idx][bits_consumed..];
                     let path_len = op.merkle_path_digests.len();
                     for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate() {
@@ -1627,8 +1618,7 @@ where
                     // indexed per VARIABLE, and a group's members all carry
                     // their group's commitment, so take the group LEADER.  At
                     // arity 1 the two indices coincide.
-                    let leader: usize =
-                        round_arities.iter().take(round_idx).sum();
+                    let leader: usize = round_arities.iter().take(round_idx).sum();
                     if leader < proof.rounds.len() {
                         // commitment is a witnessed DigestVariable.
                         let round_commit: HV::DigestVariable = proof.rounds[leader].commitment;
@@ -1681,8 +1671,7 @@ mod tests {
                 }
                 r
             };
-            let xs: Vec<EF> =
-                (0..n).map(|p| x_base * zeta.exp_u64(bitrev(p, k) as u64)).collect();
+            let xs: Vec<EF> = (0..n).map(|p| x_base * zeta.exp_u64(bitrev(p, k) as u64)).collect();
             // Adjacent positions must be sign-flips of each other.
             for i in 0..n / 2 {
                 assert_eq!(xs[2 * i + 1], -xs[2 * i], "k={k}: block pair must be (+x, -x)");

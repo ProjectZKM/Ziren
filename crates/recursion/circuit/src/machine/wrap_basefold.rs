@@ -292,7 +292,15 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // column count, fed to `jagged_column_count` below.  Outer path only.
     let mut outer_pack_info: Option<(usize, usize)> = None;
     let evaluation_proof_var = match &evaluation_proof {
-        crate::shard_level_witness::LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
+        crate::shard_level_witness::LiftedEvalProof::WhirBundle {
+            host,
+            whir_proof,
+            sumcheck,
+            jagged_eval,
+            expected_eval,
+            commit_root,
+            modified_commitment,
+        } => {
             whir_evaluation_proof_var =
                 Some(<SC as FieldHasherVariable<C>>::lift_whir_bundle_dispatch(
                     builder,
@@ -333,26 +341,26 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
             ));
             Some(<SC as FieldHasherVariable<C>>::lift_outer_bundle_dispatch(
-            builder,
-            host,
-            basefold_proof.clone(),
-            sumcheck.clone(),
-            jagged_eval.clone(),
-            *expected_eval,
-            *commit_root,
-            preceding_roots,
-            max_log_row_count,
-            &column_counts_by_round,
-            None,
-            // ZR-23 bind #2: the KEY's preprocessed commitment, so the outer lift
-            // can pin the proof-supplied `preceding_commits[0]` to it. The other
-            // two arms get the same thing as the felt-shaped
-            // `preceding_commitments` pair above; this arm was the one that got
-            // nothing, which is the root of both ZR-23 and ZR-24.
-            // `vk_outer_cap` is `Some` only on the outer ring, which is the only
-            // ring that produces an `OuterBundle`.
-            <SC as FieldHasherVariable<C>>::vk_outer_cap(vk_legacy.commitment),
-        ))
+                builder,
+                host,
+                basefold_proof.clone(),
+                sumcheck.clone(),
+                jagged_eval.clone(),
+                *expected_eval,
+                *commit_root,
+                preceding_roots,
+                max_log_row_count,
+                &column_counts_by_round,
+                None,
+                // ZR-23 bind #2: the KEY's preprocessed commitment, so the outer lift
+                // can pin the proof-supplied `preceding_commits[0]` to it. The other
+                // two arms get the same thing as the felt-shaped
+                // `preceding_commitments` pair above; this arm was the one that got
+                // nothing, which is the root of both ZR-23 and ZR-24.
+                // `vk_outer_cap` is `Some` only on the outer ring, which is the only
+                // ring that produces an `OuterBundle`.
+                <SC as FieldHasherVariable<C>>::vk_outer_cap(vk_legacy.commitment),
+            ))
         }
         LiftedEvalProof::Bundle {
             host,
@@ -564,92 +572,94 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             jagged_evaluator_fn,
         );
     } else {
-    let basefold_shard_proof_variable = basefold_shard_proof_variable
-        .as_ref()
-        .expect("non-whir input lifts to the BaseFold variable");
-    // Per-proof verifier override when the bundle path is active.
-    // Mirrors core_basefold.rs:418-434 / compress_basefold.rs.
-    let per_proof_verifier;
-    let active_verifier = match &evaluation_proof {
-        // Only `host` is needed here -- this arm sizes the
-        // per-proof verifier; the proof's own fields are read
-        // where the verification actually happens.
-        LiftedEvalProof::Bundle { host, .. } => {
-            per_proof_verifier =
-                crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
-                    max_log_row_count,
-                    host.commit.log_stacking_height,
-                    // VARIABLES, not commit rounds: this arm reads an INNER
-                    // bundle, which folds `log_folding_arity` variables per
-                    // round, so `fri_commitments.len()` is the round count.
-                    // (The OUTER arms below stay at wrap arity 1, where the
-                    // two coincide.)
-                    host.commit.log_stacking_height as usize,
-                );
-            &per_proof_verifier
-        }
-        // The OUTER wrap proof is WITNESSED as OuterBundle.
-        // The verifier's num_variables / log_stacking_height come from the
-        // witnessed outer bundle's `host` (shape metadata) — same as the
-        // Bytes-deserialize override below (blowup=3 rate).
-        LiftedEvalProof::OuterBundle { host, .. } => {
-            let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
-            per_proof_verifier =
-                crate::shard_proof_variable_lift::build_basefold_shard_verifier_wrap::<SC>(
-                    max_log_row_count,
-                    host.commit.log_stacking_height,
-                    bundle_num_vars,
-                );
-            &per_proof_verifier
-        }
-        // The OUTER wrap proof carries its bundle as Bytes
-        // (JaggedBasefoldBundleGeneric<OuterValMmcs>).
-        // The verifier's num_variables must match the OUTER bundle's FRI
-        // round count (== fri_commitments.len()), not max_log_row_count,
-        // and its log_stacking_height must match the OUTER commit — same
-        // per-proof override the Bundle arm applies. Deserialization
-        // is Option, so a non-outer Bytes payload (placeholder/empty)
-        // cleanly falls through to the default verifier.
-        LiftedEvalProof::Bytes(bytes) => {
-            if let Some(outer_bundle) = zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
-                zkm_recursion_core::stark::OuterValMmcs,
-            >::from_bytes(bytes)
-            {
-                let bundle_num_vars =
-                    outer_bundle.basefold_proof.basefold_proof.fri_commitments.len();
-                // Soundness: the OUTER (wrap) proof was committed at the
-                // WRAP rate (log_blowup=3, pow=22 — `wrap_fri_config`), so the
-                // in-circuit verifier MUST read it at blowup=3 too (component
-                // Merkle path = log_stacking+3, query span = num_vars+3).  Using
-                // the inner blowup=1 here would (a) read the wrong codeword
-                // geometry and (b) accept a ~55-bit proof as if 100-bit.
+        let basefold_shard_proof_variable = basefold_shard_proof_variable
+            .as_ref()
+            .expect("non-whir input lifts to the BaseFold variable");
+        // Per-proof verifier override when the bundle path is active.
+        // Mirrors core_basefold.rs:418-434 / compress_basefold.rs.
+        let per_proof_verifier;
+        let active_verifier = match &evaluation_proof {
+            // Only `host` is needed here -- this arm sizes the
+            // per-proof verifier; the proof's own fields are read
+            // where the verification actually happens.
+            LiftedEvalProof::Bundle { host, .. } => {
+                per_proof_verifier =
+                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<
+                        SC,
+                    >(
+                        max_log_row_count,
+                        host.commit.log_stacking_height,
+                        // VARIABLES, not commit rounds: this arm reads an INNER
+                        // bundle, which folds `log_folding_arity` variables per
+                        // round, so `fri_commitments.len()` is the round count.
+                        // (The OUTER arms below stay at wrap arity 1, where the
+                        // two coincide.)
+                        host.commit.log_stacking_height as usize,
+                    );
+                &per_proof_verifier
+            }
+            // The OUTER wrap proof is WITNESSED as OuterBundle.
+            // The verifier's num_variables / log_stacking_height come from the
+            // witnessed outer bundle's `host` (shape metadata) — same as the
+            // Bytes-deserialize override below (blowup=3 rate).
+            LiftedEvalProof::OuterBundle { host, .. } => {
+                let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
                 per_proof_verifier =
                     crate::shard_proof_variable_lift::build_basefold_shard_verifier_wrap::<SC>(
                         max_log_row_count,
-                        outer_bundle.commit.log_stacking_height,
+                        host.commit.log_stacking_height,
                         bundle_num_vars,
                     );
                 &per_proof_verifier
-            } else {
-                &basefold_shard_verifier
             }
-        }
-        _ => &basefold_shard_verifier,
-    };
+            // The OUTER wrap proof carries its bundle as Bytes
+            // (JaggedBasefoldBundleGeneric<OuterValMmcs>).
+            // The verifier's num_variables must match the OUTER bundle's FRI
+            // round count (== fri_commitments.len()), not max_log_row_count,
+            // and its log_stacking_height must match the OUTER commit — same
+            // per-proof override the Bundle arm applies. Deserialization
+            // is Option, so a non-outer Bytes payload (placeholder/empty)
+            // cleanly falls through to the default verifier.
+            LiftedEvalProof::Bytes(bytes) => {
+                if let Some(outer_bundle) = zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+                    zkm_recursion_core::stark::OuterValMmcs,
+                >::from_bytes(bytes)
+                {
+                    let bundle_num_vars =
+                        outer_bundle.basefold_proof.basefold_proof.fri_commitments.len();
+                    // Soundness: the OUTER (wrap) proof was committed at the
+                    // WRAP rate (log_blowup=3, pow=22 — `wrap_fri_config`), so the
+                    // in-circuit verifier MUST read it at blowup=3 too (component
+                    // Merkle path = log_stacking+3, query span = num_vars+3).  Using
+                    // the inner blowup=1 here would (a) read the wrong codeword
+                    // geometry and (b) accept a ~55-bit proof as if 100-bit.
+                    per_proof_verifier =
+                        crate::shard_proof_variable_lift::build_basefold_shard_verifier_wrap::<SC>(
+                            max_log_row_count,
+                            outer_bundle.commit.log_stacking_height,
+                            bundle_num_vars,
+                        );
+                    &per_proof_verifier
+                } else {
+                    &basefold_shard_verifier
+                }
+            }
+            _ => &basefold_shard_verifier,
+        };
 
-    active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
-        builder,
-        &basefold_vk,
-        &basefold_shard_proof_variable,
-        &shard_chips,
-        &chip_metadata,
-        &opened_values,
-        &insertion_points,
-        &mut challenger,
-        machine.num_pv_elts(),
-        eval_public_values_fn,
-        jagged_evaluator_fn,
-    );
+        active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
+            builder,
+            &basefold_vk,
+            &basefold_shard_proof_variable,
+            &shard_chips,
+            &chip_metadata,
+            &opened_values,
+            &insertion_points,
+            &mut challenger,
+            machine.num_pv_elts(),
+            eval_public_values_fn,
+            jagged_evaluator_fn,
+        );
     }
 
     // Interpret public values as RootPublicValues.

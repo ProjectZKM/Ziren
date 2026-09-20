@@ -1,6 +1,5 @@
 //! An implementation of Poseidon2 over BN254.
 
-
 use itertools::Itertools;
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;

@@ -303,7 +303,11 @@ mod env_override {
             assert_eq!(c.log_folding_arity, INNER_LOG_FOLDING_ARITY, "arity dropped at blowup {k}");
             let bits = soundness_bits(&c);
             assert!(bits >= 100.0, "blowup {k}: {} queries = {bits:.1} bits", c.num_queries);
-            assert!(bits < 101.5, "blowup {k}: {} queries overshoots at {bits:.1} bits", c.num_queries);
+            assert!(
+                bits < 101.5,
+                "blowup {k}: {} queries overshoots at {bits:.1} bits",
+                c.num_queries
+            );
         }
     }
 

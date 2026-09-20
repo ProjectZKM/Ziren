@@ -1453,7 +1453,10 @@ pub mod jagged {
             "prove_jagged_basefold_rounds: mixed WHIR rounds -- per-round whir_data \
              presence = {:?} (round order: preceding/preprocessed first, main last); \
              the open would fall back to BaseFold against a WHIR root",
-            rounds.iter().map(|r| r.precomputed.whir_data.is_some()).collect::<alloc::vec::Vec<_>>(),
+            rounds
+                .iter()
+                .map(|r| r.precomputed.whir_data.is_some())
+                .collect::<alloc::vec::Vec<_>>(),
         );
         let whir_slot: core::cell::RefCell<
             Option<crate::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>>,
@@ -2260,8 +2263,7 @@ mod test {
         ];
         let views = as_chip_views(&traces);
         let packing = crate::jagged::compute_jagged_metadata::<JaggedVal>(&views);
-        let dense =
-            crate::jagged::materialize_dense_jagged::<JaggedVal>(&views, packing.dense_len);
+        let dense = crate::jagged::materialize_dense_jagged::<JaggedVal>(&views, packing.dense_len);
         let dense_traces = vec![("<jagged-dense>".to_string(), RowMajorMatrix::new(dense, 1))];
 
         let mut p_chal = build_challenger();
@@ -2607,10 +2609,7 @@ mod test {
             bundle.commit.log_stacking_height,
             crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT
         );
-        assert!(
-            verify_main_round(&bundle, &widths, &z_row, &opened),
-            "honest proof must verify"
-        );
+        assert!(verify_main_round(&bundle, &widths, &z_row, &opened), "honest proof must verify");
 
         // Any other height is refused, in both directions.
         let prod = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
@@ -2720,7 +2719,10 @@ mod test {
         // Honest verify: the identity cover passes coverage and the whole
         // pipeline accepts.
         let widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
-        assert!(verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip), "G==1 bundle must verify");
+        assert!(
+            verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
+            "G==1 bundle must verify"
+        );
         // The deserialized copy behaves identically (legacy-shape
         // equivalence).
         assert!(

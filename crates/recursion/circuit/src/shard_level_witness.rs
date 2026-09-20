@@ -479,8 +479,9 @@ where
                     let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive(
                         bundle.whir_proof.as_ref().unwrap(),
                     );
-                    let whir_proof =
-                        crate::whir_circuit::read_stacked_whir_from_stream::<C>(&whir_host, builder);
+                    let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C>(
+                        &whir_host, builder,
+                    );
                     let sumcheck = read_sumcheck_from_stream::<C>(
                         &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
                         builder,
@@ -924,13 +925,16 @@ pub fn host_basefold_proof_to_recursive(
     // observes it (see `basefold_verifier`'s replay).
     let commit_for_var: Vec<usize> = {
         let k = zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1);
-        (0..proof.univariate_messages.len()).map(|v| (v / k).min(proof.fri_commitments.len().saturating_sub(1))).collect()
+        (0..proof.univariate_messages.len())
+            .map(|v| (v / k).min(proof.fri_commitments.len().saturating_sub(1)))
+            .collect()
     };
     assert_eq!(
         proof.fri_commitments.len(),
-        proof.univariate_messages.len().div_ceil(
-            zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)
-        ),
+        proof
+            .univariate_messages
+            .len()
+            .div_ceil(zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY.max(1)),
         "BasefoldProof: fri_commitments.len() != ceil(univariate_messages.len() / arity)",
     );
 
@@ -1097,9 +1101,10 @@ fn host_basefold_proof_to_recursive_outer(
     // verifier (`BasefoldVerifierParams::wrap_default`) replays arity 1 too.
     // Reading the inner arity here made this assert fire (21 commitments vs
     // ceil(21 / 3) = 7) on every `Test::All` / gnark witness build.
-    let k = zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
-        .log_folding_arity()
-        .max(1);
+    let k =
+        zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
+            .log_folding_arity()
+            .max(1);
     let commit_for_var: Vec<usize> = (0..proof.univariate_messages.len())
         .map(|v| (v / k).min(proof.fri_commitments.len().saturating_sub(1)))
         .collect();
@@ -1326,16 +1331,16 @@ pub fn lift_jagged_basefold_bundle_outer<C>(
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_expected_eval: Ext<C::F, C::EF>,
     preread_commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1],
-    // The preceding rounds' raw roots, PRE-READ alongside `preread_commit_root`.
-    // Pre-read for the same reason every other value here is: the witness stream
-    // is positional and this function runs long after the reader.
+// The preceding rounds' raw roots, PRE-READ alongside `preread_commit_root`.
+// Pre-read for the same reason every other value here is: the witness stream
+// is positional and this function runs long after the reader.
     preread_preceding_roots: &[[zkm_recursion_compiler::ir::Var<C::N>; 1]],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
-    // The verifying key's preprocessed commitment (ZR-23 bind #2). See the
-    // `vk_preprocessed_cap` block below for what it is asserted against and why
-    // a plain equality is the right comparison on this ring.
+// The verifying key's preprocessed commitment (ZR-23 bind #2). See the
+// `vk_preprocessed_cap` block below for what it is asserted against and why
+// a plain equality is the right comparison on this ring.
     vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
 ) -> JaggedPcsProofVariable<
     RecursiveBasefoldProof<
