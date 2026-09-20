@@ -802,6 +802,199 @@ mod basefold_over_bn254_roundtrip_test {
         );
     }
 
+    /// **ZR-23 / ZR-24 on the ring that feeds gnark.**
+    ///
+    /// The outer BaseFold bundle is the artifact the Groth16 circuit verifies,
+    /// and both findings were a two-round commitment-ORDER defect there.  The
+    /// single-round fixture above cannot reach it: with no preceding round the
+    /// root vector has one entry, so every ordering of it is correct.
+    ///
+    /// Covers the substitutions the audit's cross-binding gate names, on this
+    /// ring: the raw MAIN root, the raw PRECEDING (preprocessed) root, and the
+    /// packing counts.  Each must be REJECTED — and the honest two-round bundle
+    /// must verify first, or the rejections below prove nothing.
+    #[test]
+    fn outer_two_round_rejects_substituted_roots() {
+        use p3_challenger::{CanObserve, FieldChallenger};
+        use zkm_pcs::jagged_pcs::jagged::{
+            build_jagged_verify_inputs, prove_jagged_basefold_rounds_generic,
+            verify_jagged_basefold_inner_generic, JaggedOpenRound,
+        };
+        use zkm_pcs::jagged_pcs::JaggedChallenge;
+
+        let mk = |w: usize, h: usize, seed: u64| -> RowMajorMatrix<JaggedVal> {
+            let v: Vec<JaggedVal> = (0..(w * h))
+                .map(|i| {
+                    JaggedVal::from_u32(
+                        (((i as u64).wrapping_mul(2_654_435_761).wrapping_add(seed)) % 1_000_003)
+                            as u32,
+                    )
+                })
+                .collect();
+            RowMajorMatrix::new(v, w)
+        };
+        // Distinct names across the rounds: the flattened column space carries
+        // both, and the coverage check partitions it by geometry.
+        let prep_traces =
+            [("PrepA".to_string(), mk(4, 16, 11)), ("PrepB".to_string(), mk(2, 8, 13))];
+        let main_traces = [("MainA".to_string(), mk(3, 32, 17))];
+
+        let views = |ts: &[(String, RowMajorMatrix<JaggedVal>)]| -> Vec<
+            zkm_pcs::jagged_pcs::jagged::ChipTraceView,
+        > {
+            ts.iter()
+                .map(|(name, m)| {
+                    (name.clone(), {
+                        let h = m.values.len().checked_div(m.width).unwrap_or(0);
+                        let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
+                        zkm_pcs::multilinear::PaddedMle::padded_with_zeros(
+                            std::sync::Arc::new(zkm_pcs::basefold::Mle::from_row_major(
+                                p3_matrix::dense::RowMajorMatrix::new(m.values.clone(), m.width),
+                            )),
+                            log_h,
+                        )
+                    })
+                })
+                .collect()
+        };
+        let prep_views = views(&prep_traces);
+        let main_views = views(&main_traces);
+
+        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
+        let dft = Arc::new(OuterDft::default());
+        let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
+        let prep =
+            <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(&prep_views, None);
+        let main =
+            <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(&main_views, None);
+        let prep_root = prep.commit.original_commitment.clone();
+        let main_root = main.commit.original_commitment.clone();
+        assert_ne!(
+            format!("{prep_root:?}"),
+            format!("{main_root:?}"),
+            "the two rounds must commit to different roots or the substitutions below are no-ops"
+        );
+
+        let mut pt = make_challenger();
+        let z_row: Vec<JaggedChallenge> = (0..zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT
+            as usize)
+            .map(|_| pt.sample_algebra_element())
+            .collect();
+        let r_row = |ts: &[(String, RowMajorMatrix<JaggedVal>)]| -> Vec<Vec<JaggedChallenge>> {
+            ts.iter()
+                .map(|(_, t)| {
+                    let h = t.values.len() / t.width.max(1);
+                    let log_h = h.next_power_of_two().trailing_zeros() as usize;
+                    z_row[z_row.len() - log_h..].to_vec()
+                })
+                .collect()
+        };
+        // claim[c][col] = Σ_{row < h_c} eq(rev(z_row), row) · t[row·w + col]
+        let claims = |ts: &[(String, RowMajorMatrix<JaggedVal>)]| -> Vec<Vec<JaggedChallenge>> {
+            let z_row_rev: Vec<JaggedChallenge> = z_row.iter().rev().copied().collect();
+            let eq_c = zkm_pcs::zerocheck_prover::eq_mle_table::<JaggedChallenge>(&z_row_rev);
+            ts.iter()
+                .map(|(_, t)| {
+                    let w = t.width;
+                    let h = t.values.len() / w;
+                    (0..w)
+                        .map(|col| {
+                            (0..h).fold(JaggedChallenge::ZERO, |acc, row| {
+                                acc + eq_c[row] * JaggedChallenge::from(t.values[row * w + col])
+                            })
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+        let prep_r_row = r_row(&prep_traces);
+        let main_r_row = r_row(&main_traces);
+
+        // Round order [preprocessed, main], observed in that order.
+        let mut p_chal = make_challenger();
+        p_chal.observe(prep_root.clone());
+        p_chal.observe(main_root.clone());
+        let rounds = [
+            JaggedOpenRound {
+                chip_traces: &prep_views,
+                r_row_per_chip: &prep_r_row,
+                claims: claims(&prep_traces),
+                precomputed: &prep,
+            },
+            JaggedOpenRound {
+                chip_traces: &main_views,
+                r_row_per_chip: &main_r_row,
+                claims: claims(&main_traces),
+                precomputed: &main,
+            },
+        ];
+        let bundle = prove_jagged_basefold_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            &rounds,
+            &z_row,
+            &mut p_chal,
+            mmcs.clone(),
+            dft,
+            fri.clone(),
+        );
+
+        // The bundle must carry the EARLIER round's raw root as preceding and
+        // the LAST round's as its own.
+        assert_eq!(bundle.preceding_commits.len(), 1);
+        assert_eq!(format!("{:?}", bundle.preceding_commits[0]), format!("{prep_root:?}"));
+        assert_eq!(format!("{:?}", bundle.commit.original_commitment), format!("{main_root:?}"));
+
+        let chip_widths: Vec<usize> =
+            prep_traces.iter().chain(main_traces.iter()).map(|(_, t)| t.width).collect();
+        let (chip_infos, r_row_v, z_row_v) =
+            build_jagged_verify_inputs(&bundle.packing, &chip_widths, &z_row);
+
+        // The verifier holds the HONEST geometry (the verifying key pins it);
+        // only the bundle varies below.
+        let verify =
+            |b: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<OuterValMmcs>,
+             preceding_root: &<OuterValMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment|
+             -> bool {
+                let mut v_chal = make_challenger();
+                v_chal.observe(prep_root.clone());
+                v_chal.observe(main_root.clone());
+                verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
+                    &chip_infos,
+                    &r_row_v,
+                    &z_row_v,
+                    b,
+                    &mut v_chal,
+                    mmcs.clone(),
+                    /* skip_commit_observe = */ true,
+                    fri.clone(),
+                    &[(preceding_root.clone(), prep.prover_data.area)],
+                    &b.y_per_chip.clone(),
+                )
+            };
+
+        assert!(verify(&bundle, &prep_root), "the honest two-round outer bundle must verify");
+
+        // (1) raw PRECEDING root substituted with the main round's.
+        assert!(
+            !verify(&bundle, &main_root),
+            "a substituted preceding (preprocessed) root must be rejected"
+        );
+
+        // (2) raw MAIN root substituted with the preceding round's: the batched
+        //     opening then authenticates against the wrong tree.
+        let mut tampered = bundle.clone();
+        tampered.commit.original_commitment = prep_root.clone();
+        assert!(!verify(&tampered, &prep_root), "a substituted main root must be rejected");
+
+        // The packing COUNTS are deliberately NOT checked here: geometry is
+        // pinned one layer up, by `shard_level::verifier::verify_jagged_pcs_host`,
+        // which compares each round's claimed per-chip widths against the
+        // machine's `BaseAir::width` and the key's `prep_chip_dims` before it
+        // ever reaches this function.  Asserting a rejection at this layer would
+        // be asserting a promise it does not make.  Row counts remain
+        // proof-claimed on this ring until the outer key format carries them --
+        // the residual the bind #2 comment records.
+    }
+
     /// ZR-23 bind #2 is dispatched through a trait method whose DEFAULT is
     /// `None` = "this ring cannot answer, re-derive instead".  A `None` here
     /// would make the host bind a silent no-op — the same way ZR-24's

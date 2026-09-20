@@ -692,6 +692,23 @@ where
                             opened_values.chips.len(),
                         )));
                     }
+                    // Widths come from the MACHINE on this round too.
+                    // `chip_widths` above is `BaseAir::width` of each chip, and
+                    // `build_jagged_verify_inputs` PREFERS the proof's
+                    // `column_counts` over it, so an unchecked claim silently
+                    // redefines the column layout this branch goes on to weigh.
+                    // The preprocessed round is pinned the same way below; this
+                    // is the main round's half of it.
+                    for (i, (_, claimed_width)) in round.iter().enumerate() {
+                        let width = chip_widths.get(i).copied().unwrap_or(0);
+                        if *claimed_width != width {
+                            return Err(BasefoldVerifyError::JaggedPcs(format!(
+                                "outer main round: chip {} is {claimed_width} columns in the \
+                                 proof but {width} in the machine",
+                                chips[i].name(),
+                            )));
+                        }
+                    }
                     om.extend(opened_values.chips.iter().map(|c| relabel(c.main.local.clone())));
                 } else {
                     // PREPROCESSED: the key's chips, in the key's order.
