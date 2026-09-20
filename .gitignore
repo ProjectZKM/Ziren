@@ -30,3 +30,6 @@ docs/whitepaper/*
 docs/*.md
 !docs/README.md
 .chainstack
+
+# The paper is drafted in this worktree but not carried by the repo.
+docs/paper/
