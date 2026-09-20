@@ -11,7 +11,6 @@ mod chip;
 mod config;
 mod debug;
 pub mod folder;
-pub mod gpu_worker_context;
 pub mod jagged;
 pub mod jagged_branching_program;
 pub mod jagged_eval_sumcheck;
