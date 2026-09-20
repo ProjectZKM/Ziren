@@ -18,6 +18,7 @@
 
 [zkevm]
 name = "Ziren"
+protocol_family = "JAGGED"
 field = "KoalaBear^4"
 version = "2.0 (feat/upgrade-plonky3, UDR-100 schedule)"
 hash_size_bits = 248
@@ -39,12 +40,23 @@ trace_length = 4194304 # 2^22
 trace_columns = 36489
 dense_length = 2097152 # 2^21
 log_degree = 21
-dense_batch = 32
+# The lambda batch spans every stripe of every committed round, so its
+# cardinality is sum_r num_stripes[r] = sum_r area_r >> log_stacking_height,
+# NOT DEFAULT_BATCH_SIZE = 32, which is the interleave packing width and
+# carries no soundness meaning.  Bounded by the per-shard area cap ELEMENT_THRESHOLD = 460,000,000 cells:
+# ceil(460e6 / 2^21) = 220.  An upper bound, so the term is conservative.
+dense_batch = 220
 num_constraints = 23555
 air_max_degree = 3
 opening_points = 1
-power_batching = false
-multilinear_batching = true
+# Powers of ONE challenge: stacked.rs draws a single lambda and folds with
+# `lam *= lambda` round-major.  `false` selects the independent-affine
+# model, which is STRONGER than powers and so overstated this term.
+power_batching = true
+# The multilinear reduction is the jagged interpolation at batch_point, one
+# layer above; the WHIR batch itself is not multilinear.
+multilinear_batching = false
+rho = 0.25  # 2^-log_inv_rate
 log_inv_rate = 2
 num_iterations = 3
 folding_factors = [3, 6, 6]
@@ -81,12 +93,23 @@ trace_length = 1048576 # 2^20
 trace_columns = 392
 dense_length = 2097152 # 2^21
 log_degree = 21
-dense_batch = 32
+# The lambda batch spans every stripe of every committed round, so its
+# cardinality is sum_r num_stripes[r] = sum_r area_r >> log_stacking_height,
+# NOT DEFAULT_BATCH_SIZE = 32, which is the interleave packing width and
+# carries no soundness meaning.  Bounded by this circuit's own trace: 392 columns at height 2^20 is
+# 411,041,792 cells, and 411041792 >> 21 = 196.  An upper bound.
+dense_batch = 196
 num_constraints = 396
 air_max_degree = 3
 opening_points = 1
-power_batching = false
-multilinear_batching = true
+# Powers of ONE challenge: stacked.rs draws a single lambda and folds with
+# `lam *= lambda` round-major.  `false` selects the independent-affine
+# model, which is STRONGER than powers and so overstated this term.
+power_batching = true
+# The multilinear reduction is the jagged interpolation at batch_point, one
+# layer above; the WHIR batch itself is not multilinear.
+multilinear_batching = false
+rho = 0.25  # 2^-log_inv_rate
 log_inv_rate = 2
 num_iterations = 3
 folding_factors = [3, 6, 6]
