@@ -73,6 +73,25 @@ pub struct FriConfig<F> {
     _marker: PhantomData<F>,
 }
 
+impl<F> FriConfig<F> {
+    /// The transcript-affecting parameters, in a fixed order, for
+    /// [`crate::profile`].
+    ///
+    /// Lives here rather than in `profile` because the destructuring below is
+    /// EXHAUSTIVE and `_marker` is private to this module. That exhaustiveness
+    /// is the point: reading `cfg.field` one at a time compiles however many
+    /// fields the struct grows, so a new parameter would be silently absent
+    /// from the protocol digest that claims to cover it. A binding for every
+    /// field makes adding one a compile error here instead.
+    ///
+    /// `_marker` is a `PhantomData` and carries no value, so it contributes
+    /// nothing to absorb.
+    pub(crate) fn transcript_parameters(&self) -> [usize; 4] {
+        let Self { log_blowup, num_queries, proof_of_work_bits, log_folding_arity, _marker } = self;
+        [*log_blowup, *num_queries, *proof_of_work_bits, *log_folding_arity]
+    }
+}
+
 impl<F: Field> FriConfig<F> {
     pub const fn new(log_blowup: usize, num_queries: usize, proof_of_work_bits: usize) -> Self {
         Self {

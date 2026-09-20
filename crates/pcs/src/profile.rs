@@ -43,8 +43,13 @@
 //! fold schedules, query counts, OOD counts, rates, folding proof-of-work —
 //! and a digest that silently misses a transcript parameter is worse than no
 //! digest, because it licenses the mixed deployment it was built to refuse.
-//! Absorbing the structs means a new field is covered by construction and a
-//! changed one moves the digest whether or not anybody edited this file.
+//!
+//! "By construction" means something specific and checkable here: every
+//! configuration is read through an EXHAUSTIVE destructure with no `..` rest
+//! pattern, so adding a field to `WhirConfig`, `RoundConfig` or `FriConfig`
+//! does not compile until this file accounts for it. Field-by-field access
+//! would not do that — `cfg.a; cfg.b;` keeps compiling as the struct grows,
+//! which is how a list silently falls behind the thing it describes.
 //!
 //! The BaseFold inner configuration is read through `from_env_or_default`, so
 //! an environment that overrides the query count moves the digest. That is the
@@ -168,33 +173,64 @@ fn push_usizes(felts: &mut Vec<JaggedVal>, values: &[usize]) {
 /// starting domain and rate, the OOD counts, the fold schedule, the per-round
 /// query and proof-of-work counts, and the final round.
 fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::WhirConfig) {
-    push_u64(felts, cfg.starting_ood_samples as u64);
-    push_u64(felts, cfg.starting_log_inv_rate as u64);
-    push_u64(felts, cfg.starting_interleaved_log_height as u64);
-    push_u64(felts, cfg.starting_domain_log_size as u64);
-    push_usizes(felts, &cfg.starting_folding_pow_bits);
-    felts.push(JaggedVal::from_canonical_usize(cfg.round_parameters.len()));
-    for r in cfg.round_parameters.iter() {
-        push_u64(felts, r.folding_factor as u64);
-        push_u64(felts, r.evaluation_domain_log_size as u64);
-        push_u64(felts, r.queries_pow_bits as u64);
-        push_usizes(felts, &r.pow_bits);
-        push_u64(felts, r.num_queries as u64);
-        push_u64(felts, r.ood_samples as u64);
-        push_u64(felts, r.log_inv_rate as u64);
+    // Destructured EXHAUSTIVELY, with no `..` rest pattern. This is the whole
+    // mechanism behind the coverage claim: reading `cfg.field` one at a time
+    // compiles no matter how many fields the struct grows, so a new
+    // transcript parameter would be silently absent from its own profile. A
+    // binding for every field means adding one is a COMPILE ERROR here, and
+    // whoever adds it has to decide whether it belongs in the digest.
+    let crate::whir::config::WhirConfig {
+        starting_ood_samples,
+        starting_log_inv_rate,
+        starting_interleaved_log_height,
+        starting_domain_log_size,
+        starting_folding_pow_bits,
+        round_parameters,
+        final_poly_log_degree,
+        final_queries,
+        final_pow_bits,
+        final_folding_pow_bits,
+    } = cfg;
+
+    push_u64(felts, *starting_ood_samples as u64);
+    push_u64(felts, *starting_log_inv_rate as u64);
+    push_u64(felts, *starting_interleaved_log_height as u64);
+    push_u64(felts, *starting_domain_log_size as u64);
+    push_usizes(felts, starting_folding_pow_bits);
+    felts.push(JaggedVal::from_canonical_usize(round_parameters.len()));
+    for r in round_parameters.iter() {
+        // Exhaustive for the same reason.
+        let crate::whir::config::RoundConfig {
+            folding_factor,
+            evaluation_domain_log_size,
+            queries_pow_bits,
+            pow_bits,
+            num_queries,
+            ood_samples,
+            log_inv_rate,
+        } = r;
+        push_u64(felts, *folding_factor as u64);
+        push_u64(felts, *evaluation_domain_log_size as u64);
+        push_u64(felts, *queries_pow_bits as u64);
+        push_usizes(felts, pow_bits);
+        push_u64(felts, *num_queries as u64);
+        push_u64(felts, *ood_samples as u64);
+        push_u64(felts, *log_inv_rate as u64);
     }
-    push_u64(felts, cfg.final_poly_log_degree as u64);
-    push_u64(felts, cfg.final_queries as u64);
-    push_u64(felts, cfg.final_pow_bits as u64);
-    push_usizes(felts, &cfg.final_folding_pow_bits);
+    push_u64(felts, *final_poly_log_degree as u64);
+    push_u64(felts, *final_queries as u64);
+    push_u64(felts, *final_pow_bits as u64);
+    push_usizes(felts, final_folding_pow_bits);
 }
 
 /// Every field of a BaseFold/FRI configuration that the transcript depends on.
 fn absorb_fri_config(felts: &mut Vec<JaggedVal>, cfg: &crate::basefold::FriConfig<JaggedVal>) {
-    push_u64(felts, cfg.log_blowup as u64);
-    push_u64(felts, cfg.num_queries as u64);
-    push_u64(felts, cfg.proof_of_work_bits as u64);
-    push_u64(felts, cfg.log_folding_arity as u64);
+    // The order and the values are unchanged; what changed is that the field
+    // LIST now lives behind an exhaustive destructure, so it cannot fall
+    // behind the struct it claims to describe.
+    for value in cfg.transcript_parameters() {
+        push_u64(felts, value as u64);
+    }
 }
 
 /// The profile digest as a lowercase hex string, for logs, deployment metadata
