@@ -309,13 +309,7 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                     let idx = i * chunk_size + j;
                     let cols: &mut GlobalCols<F> = row.borrow_mut();
                     if idx < nb_rows {
-                        // The row's event point x — the chord's `x2` — for the
-                        // ZR-28 denominator witness.  `cols.lookup` was filled
-                        // for every real row in the pass above.
-                        let point_to_add_x =
-                            zkm_pcs::septic_extension::SepticExtension(cols.lookup.x_coordinate.0);
-                        cols.accumulation
-                            .populate_real(&cumulative_sum[idx..idx + 2], point_to_add_x);
+                        cols.accumulation.populate_real(&cumulative_sum[idx..idx + 2]);
                     } else {
                         cols.lookup.populate_dummy();
                         cols.accumulation.populate_dummy(final_digest);

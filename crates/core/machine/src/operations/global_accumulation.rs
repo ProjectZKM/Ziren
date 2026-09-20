@@ -19,14 +19,6 @@ use zkm_pcs::{
 #[repr(C)]
 pub struct GlobalAccumulationOperation<T, const N: usize> {
     pub initial_digest: [SepticBlock<T>; 2],
-    /// `(x2 - x1)^{-1}` for each accumulation step — the witness that makes the
-    /// chord denominator provably nonzero (ZR-28).
-    ///
-    /// Placed BETWEEN `initial_digest` and `cumulative_sum` on purpose: the
-    /// struct must stay at the end of the main trace with `cumulative_sum` last
-    /// (the permutation constraints and the shard-digest read depend on it), and
-    /// `initial_digest` must stay at `GLOBAL_INITIAL_DIGEST_POS`.
-    pub denominator_inv: [SepticBlock<T>; N],
     pub cumulative_sum: [[SepticBlock<T>; 2]; N],
 }
 
@@ -34,7 +26,6 @@ impl<T: Default, const N: usize> Default for GlobalAccumulationOperation<T, N> {
     fn default() -> Self {
         Self {
             initial_digest: core::array::from_fn(|_| SepticBlock::<T>::default()),
-            denominator_inv: core::array::from_fn(|_| SepticBlock::<T>::default()),
             cumulative_sum: core::array::from_fn(|_| {
                 [SepticBlock::<T>::default(), SepticBlock::<T>::default()]
             }),
@@ -83,56 +74,18 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
         let initial = final_digest.add_incomplete(dummy.neg());
         self.initial_digest[0] = SepticBlock::from(initial.x.0);
         self.initial_digest[1] = SepticBlock::from(initial.y.0);
-        // ZR-28: the padding layout is the genuine addition
-        // `(final - dummy) + dummy`, so its chord denominator is
-        // `dummy.x - initial.x`, and it is nonzero for the same reason the row
-        // is a valid addition at all.
-        let denom = dummy.x - initial.x;
-        assert!(
-            denom != SepticExtension::<F>::ZERO,
-            "padding row: the dummy layout's chord denominator is zero, so the row is not a \
-             valid addition",
-        );
-        let inv = denom.inverse();
-        for i in 0..N {
-            self.denominator_inv[i] = SepticBlock::from(inv.0);
-        }
         for i in 0..N {
             self.cumulative_sum[i][0] = SepticBlock::from(final_digest.x.0);
             self.cumulative_sum[i][1] = SepticBlock::from(final_digest.y.0);
         }
     }
 
-    /// `point_to_add_x` is the row's event point x-coordinate — the `x2` of the
-    /// chord — needed for the ZR-28 denominator witness.
-    pub fn populate_real(
-        &mut self,
-        sums: &[SepticCurveComplete<F>],
-        point_to_add_x: SepticExtension<F>,
-    ) {
+    pub fn populate_real(&mut self, sums: &[SepticCurveComplete<F>]) {
         let len = sums.len();
         debug_assert!(len >= 2);
         let sums = sums.iter().map(|complete_point| complete_point.point()).collect::<Vec<_>>();
         self.initial_digest[0] = SepticBlock::from(sums[0].x.0);
         self.initial_digest[1] = SepticBlock::from(sums[0].y.0);
-        // ZR-28: `x2 - x1` is nonzero on every honest row — the running sum can
-        // equal neither the event point nor its negation (the latter would make
-        // the sum the point at infinity, which the generator cannot represent
-        // and panics on).  `inverse()` would panic on zero, which is the right
-        // failure: a trace that reaches the exceptional case is not provable
-        // rather than silently unconstrained.
-        let denom = point_to_add_x - sums[0].x;
-        // A named failure rather than `inverse()`'s bare division-by-zero: this
-        // is the exceptional case, and it should say so.
-        assert!(
-            denom != SepticExtension::<F>::ZERO,
-            "the running sum equals the event point, so the chord addition is exceptional \
-             (x2 == x1): this trace is not provable",
-        );
-        let inv = denom.inverse();
-        for i in 0..N {
-            self.denominator_inv[i] = SepticBlock::from(inv.0);
-        }
         for i in 0..N {
             let s = &sums[(i + 1).min(len - 1)];
             self.cumulative_sum[i][0] = SepticBlock::from(s.x.0);
@@ -227,11 +180,8 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
                 point_to_add.clone(),
                 next_sum.clone(),
             );
-            let sum_checker_y = SepticCurve::<AB::Expr>::sum_checker_y(
-                current_sum.clone(),
-                point_to_add,
-                next_sum,
-            );
+            let sum_checker_y =
+                SepticCurve::<AB::Expr>::sum_checker_y(current_sum, point_to_add, next_sum);
             builder.assert_septic_ext_eq(
                 sum_checker_x,
                 SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO),
@@ -239,49 +189,6 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             builder.when(local_is_real[i]).assert_septic_ext_eq(
                 sum_checker_y,
                 SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO),
-            );
-
-            // ZR-28: the chord denominator is NONZERO.
-            //
-            // Both checkers carry the factor `(x2 - x1)`:
-            //
-            //   Cx = (x1 + x2 + x3)(x2 - x1)^2 - (y2 - y1)^2
-            //   Cy = (y1 + y3)(x2 - x1)       - (y2 - y1)(x1 - x3)
-            //
-            // so at `P2 == P1` both differences vanish and `Cx = Cy = 0` holds
-            // for EVERY `P3` — the addition is unconstrained and the only
-            // surviving restriction on the next running digest is that it is on
-            // the curve.  (`P2 == -P1` is already rejected: there `Cx = -4y1^2`,
-            // nonzero whenever `y1 != 0`, and `y1 == 0` collapses into
-            // `P2 == P1`.)  Witnessing `(x2 - x1)^{-1}` and requiring
-            //
-            //   (x2 - x1) * inv = 1
-            //
-            // makes `x2 != x1` a constraint rather than an assumption, which is
-            // what closes the doubling case.
-            //
-            // Degree 3: `(x2 - x1)` and `inv` are degree 1, their septic product
-            // degree 2, and the `is_real` gate adds one — the same cap the
-            // existing `sum_checker_x` already sits at, so the quotient degree
-            // is unchanged.
-            //
-            // Gated by `is_real` because padding rows are laid out as
-            // `(final - dummy) + dummy`, whose denominator is likewise nonzero;
-            // the gate keeps a padding row that carries no meaningful inverse
-            // from being rejected.
-            let denominator = ith_point_to_add(i).x - current_sum.x.clone();
-            let denominator_inv = SepticExtension::<AB::Expr>::from_base_fn(|j| {
-                local_accumulation.denominator_inv[i].0[j].into()
-            });
-            builder.when(local_is_real[i]).assert_septic_ext_eq(
-                denominator * denominator_inv,
-                SepticExtension::<AB::Expr>::from_base_fn(|j| {
-                    if j == 0 {
-                        AB::Expr::ONE
-                    } else {
-                        AB::Expr::ZERO
-                    }
-                }),
             );
         }
 
