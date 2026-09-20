@@ -1082,25 +1082,37 @@ where
     // independent: a hash-bind that were ever vacuous (an empty round, a
     // relabelled digest) leaves the widths below falling back to
     // `BaseAir::width` and the row counts to whatever the offsets say.
-    // Applied only when the bundle's round structure is the one the machine
-    // commits — one round per preprocessed round plus the main one. A bundle
-    // that disagrees about how many rounds there are is rejected by the round
-    // accounting, not silently re-interpreted here.
+    // How many rounds there are is a property of the MACHINE: one per
+    // preprocessed round, plus the main one.  Required, not merely used when it
+    // happens to hold — a count this check only consults is a count the proof
+    // chooses, and choosing an empty list or a surplus one would skip the pin
+    // below entirely.  The canonical-packing check does not cover that: it
+    // accepts an empty legacy list, and for a non-empty one it proves only that
+    // the proof's two geometry representations agree WITH EACH OTHER.  The
+    // outer branch requires the same count unconditionally.
     let expected_rounds = usize::from(n_prep > 0) + 1;
-    if let Some(main_round) = combined_packing.round_counts.last() {
-        if combined_packing.round_counts.len() == expected_rounds {
-            let expected: Vec<(String, usize, usize)> = chips
-                .iter()
-                .map(|c| {
-                    let name = MachineAir::<Val<SC>>::name(*c);
-                    let h = observed_chip_heights.get(name.as_str()).copied().unwrap_or(0);
-                    (name, <_ as BaseAir<Val<SC>>>::width(*c), h)
-                })
-                .collect();
-            crate::jagged_pcs::check_round_geometry(main_round, &expected, "inner main round")
-                .map_err(BasefoldVerifyError::JaggedPcs)?;
-        }
+    if combined_packing.round_counts.len() != expected_rounds {
+        return Err(BasefoldVerifyError::JaggedPcs(format!(
+            "inner bundle describes {} round(s); the machine commits {expected_rounds} \
+             ({} preprocessed chip(s) plus the main round)",
+            combined_packing.round_counts.len(),
+            n_prep,
+        )));
     }
+    let main_round = combined_packing
+        .round_counts
+        .last()
+        .expect("the round count was just required to be at least one");
+    let expected: Vec<(String, usize, usize)> = chips
+        .iter()
+        .map(|c| {
+            let name = MachineAir::<Val<SC>>::name(*c);
+            let h = observed_chip_heights.get(name.as_str()).copied().unwrap_or(0);
+            (name, <_ as BaseAir<Val<SC>>>::width(*c), h)
+        })
+        .collect();
+    crate::jagged_pcs::check_round_geometry(main_round, &expected, "inner main round")
+        .map_err(BasefoldVerifyError::JaggedPcs)?;
 
     let main_column_counts: &[usize] =
         combined_packing.column_counts.get(n_prep_infos..).unwrap_or(&[]);

@@ -14,13 +14,30 @@
 //! about the build: two different builds of the same protocol agree, and a
 //! rebuild that changes an entry below does not.
 //!
-//! # Adding to the profile
+//! # What is covered
 //!
-//! An entry belongs here when changing it changes the transcript. That covers
-//! parameters with a value (grinding bits, the stacking height) and event
-//! ORDERS, which have no natural value — those carry a revision counter that is
-//! bumped by hand when the order moves. The `profile_digest_is_pinned` test
-//! fails on any change, so a bump is always a reviewed one.
+//! Two kinds of thing, absorbed in this order:
+//!
+//! 1. [`TRANSCRIPT_PROFILE`] — named scalars and event ORDERS. An order has no
+//!    natural value, so it carries a revision counter bumped by hand when the
+//!    order moves.
+//! 2. The production PCS configurations themselves, field by field, read from
+//!    the same constructors the provers call.
+//!
+//! The second exists because the first cannot be trusted to be complete. A
+//! hand-written list of constants omits whatever nobody remembered to add —
+//! fold schedules, query counts, OOD counts, rates, folding proof-of-work —
+//! and a digest that silently misses a transcript parameter is worse than no
+//! digest, because it licenses the mixed deployment it was built to refuse.
+//! Absorbing the structs means a new field is covered by construction and a
+//! changed one moves the digest whether or not anybody edited this file.
+//!
+//! The BaseFold inner configuration is read through `from_env_or_default`, so
+//! an environment that overrides the query count moves the digest. That is the
+//! intended behaviour: it is a different transcript.
+//!
+//! The `profile_digest_is_pinned` test fails on any change, so every move is a
+//! reviewed one.
 
 use alloc::vec::Vec;
 
@@ -76,10 +93,69 @@ pub fn transcript_profile_digest() -> [JaggedVal; 8] {
     for (name, value) in TRANSCRIPT_PROFILE {
         felts.push(JaggedVal::from_canonical_usize(name.len()));
         felts.extend(name.bytes().map(JaggedVal::from_u8));
-        felts.push(JaggedVal::from_canonical_u32((value & 0x7FFF_FFFF) as u32));
-        felts.push(JaggedVal::from_canonical_u32(((value >> 31) & 0x7FFF_FFFF) as u32));
+        push_u64(&mut felts, *value);
     }
+
+    // The production PCS configurations, field by field.  Read from the
+    // constructors the provers call, so a parameter cannot be in the protocol
+    // and absent from its digest.
+    absorb_whir_config(
+        &mut felts,
+        &crate::whir::jagged::core_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
+    );
+    absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::from_env_or_default());
+    absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::wrap_fri_config());
+
     hasher.hash_iter(felts)
+}
+
+/// A `u64` as two 31-bit halves: one does not fit a KoalaBear element, and
+/// splitting rather than reducing keeps distinct values distinct.
+fn push_u64(felts: &mut Vec<JaggedVal>, value: u64) {
+    felts.push(JaggedVal::from_canonical_u32((value & 0x7FFF_FFFF) as u32));
+    felts.push(JaggedVal::from_canonical_u32(((value >> 31) & 0x7FFF_FFFF) as u32));
+}
+
+/// A length-prefixed run of `usize`, so a shorter vector cannot alias a longer
+/// one that happens to start the same way.
+fn push_usizes(felts: &mut Vec<JaggedVal>, values: &[usize]) {
+    felts.push(JaggedVal::from_canonical_usize(values.len()));
+    for &v in values {
+        push_u64(felts, v as u64);
+    }
+}
+
+/// Every field of a WHIR configuration that the transcript depends on: the
+/// starting domain and rate, the OOD counts, the fold schedule, the per-round
+/// query and proof-of-work counts, and the final round.
+fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::WhirConfig) {
+    push_u64(felts, cfg.starting_ood_samples as u64);
+    push_u64(felts, cfg.starting_log_inv_rate as u64);
+    push_u64(felts, cfg.starting_interleaved_log_height as u64);
+    push_u64(felts, cfg.starting_domain_log_size as u64);
+    push_usizes(felts, &cfg.starting_folding_pow_bits);
+    felts.push(JaggedVal::from_canonical_usize(cfg.round_parameters.len()));
+    for r in cfg.round_parameters.iter() {
+        push_u64(felts, r.folding_factor as u64);
+        push_u64(felts, r.evaluation_domain_log_size as u64);
+        push_u64(felts, r.queries_pow_bits as u64);
+        push_usizes(felts, &r.pow_bits);
+        push_u64(felts, r.num_queries as u64);
+        push_u64(felts, r.ood_samples as u64);
+        push_u64(felts, r.log_inv_rate as u64);
+    }
+    push_u64(felts, cfg.final_poly_log_degree as u64);
+    push_u64(felts, cfg.final_queries as u64);
+    push_u64(felts, cfg.final_pow_bits as u64);
+    push_usizes(felts, &cfg.final_folding_pow_bits);
+}
+
+/// Every field of a BaseFold/FRI configuration that the transcript depends on.
+fn absorb_fri_config(felts: &mut Vec<JaggedVal>, cfg: &crate::basefold::FriConfig<JaggedVal>) {
+    push_u64(felts, cfg.log_blowup as u64);
+    push_u64(felts, cfg.num_queries as u64);
+    push_u64(felts, cfg.proof_of_work_bits as u64);
+    push_u64(felts, cfg.log_folding_arity as u64);
 }
 
 /// The profile digest as a lowercase hex string, for logs, deployment metadata
@@ -111,7 +187,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "2a00fa286b9bbd354a7c4fa57e76271b6c4d29a659d6d6007d5d8f4e38c39691",
+            "2968c9ff1a0811a467451d5f36fd9b167220bef01d686dcb4771800c2700a372",
             "the transcript profile changed -- see this test's documentation",
         );
     }
@@ -139,6 +215,84 @@ mod tests {
 
         let c: &[ProfileEntry] = &[("beta", 1), ("alpha", 2)];
         assert_ne!(digest_of(b), digest_of(c), "reordering entries must move the digest");
+    }
+
+    /// Coverage is by construction; this is the check that it actually is.
+    ///
+    /// Each mutation moves ONE field of the production WHIR configuration --
+    /// the fold schedule, a round's query count, its OOD count, its rate, its
+    /// query proof-of-work, and the final round's queries and degree -- and
+    /// every one of them must move the absorbed stream. A field the absorb
+    /// forgot would leave its mutation invisible, which is exactly the failure
+    /// a hand-written constant list makes easy.
+    #[test]
+    fn every_whir_parameter_moves_the_digest() {
+        let base = crate::whir::jagged::core_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize);
+        let absorbed = |cfg: &crate::whir::config::WhirConfig| -> Vec<JaggedVal> {
+            let mut f = Vec::new();
+            absorb_whir_config(&mut f, cfg);
+            f
+        };
+        let honest = absorbed(&base);
+        assert!(!base.round_parameters.is_empty(), "the production schedule has rounds");
+
+        let mutations: Vec<(&str, fn(&mut crate::whir::config::WhirConfig))> = alloc::vec![
+            ("starting_ood_samples", |c| c.starting_ood_samples += 1),
+            ("starting_log_inv_rate", |c| c.starting_log_inv_rate += 1),
+            ("starting_domain_log_size", |c| c.starting_domain_log_size += 1),
+            ("starting_interleaved_log_height", |c| c.starting_interleaved_log_height += 1),
+            ("starting_folding_pow_bits", |c| c.starting_folding_pow_bits.push(1)),
+            ("round folding_factor", |c| c.round_parameters[0].folding_factor += 1),
+            ("round num_queries", |c| c.round_parameters[0].num_queries += 1),
+            ("round ood_samples", |c| c.round_parameters[0].ood_samples += 1),
+            ("round log_inv_rate", |c| c.round_parameters[0].log_inv_rate += 1),
+            ("round queries_pow_bits", |c| c.round_parameters[0].queries_pow_bits += 1),
+            ("round pow_bits", |c| c.round_parameters[0].pow_bits.push(1)),
+            ("round evaluation_domain_log_size", |c| {
+                c.round_parameters[0].evaluation_domain_log_size += 1
+            }),
+            ("round count", |c| {
+                let r = c.round_parameters[0].clone();
+                c.round_parameters.push(r);
+            }),
+            ("final_poly_log_degree", |c| c.final_poly_log_degree += 1),
+            ("final_queries", |c| c.final_queries += 1),
+            ("final_pow_bits", |c| c.final_pow_bits += 1),
+            ("final_folding_pow_bits", |c| c.final_folding_pow_bits.push(1)),
+        ];
+        for (name, mutate) in mutations {
+            let mut cfg = base.clone();
+            mutate(&mut cfg);
+            assert_ne!(
+                absorbed(&cfg),
+                honest,
+                "changing {name} left the profile digest unmoved, so that parameter is \
+                 outside the digest that claims to cover the transcript"
+            );
+        }
+    }
+
+    /// The same for the BaseFold configuration.
+    #[test]
+    fn every_fri_parameter_moves_the_digest() {
+        let base = crate::basefold::FriConfig::<JaggedVal>::wrap_fri_config();
+        let absorbed = |cfg: &crate::basefold::FriConfig<JaggedVal>| -> Vec<JaggedVal> {
+            let mut f = Vec::new();
+            absorb_fri_config(&mut f, cfg);
+            f
+        };
+        let honest = absorbed(&base);
+        let mutations: Vec<(&str, fn(&mut crate::basefold::FriConfig<JaggedVal>))> = alloc::vec![
+            ("log_blowup", |c| c.log_blowup += 1),
+            ("num_queries", |c| c.num_queries += 1),
+            ("proof_of_work_bits", |c| c.proof_of_work_bits += 1),
+            ("log_folding_arity", |c| c.log_folding_arity += 1),
+        ];
+        for (name, mutate) in mutations {
+            let mut cfg = base.clone();
+            mutate(&mut cfg);
+            assert_ne!(absorbed(&cfg), honest, "changing {name} left the digest unmoved");
+        }
     }
 
     /// Every entry's name must be distinct, or the digest cannot say which
