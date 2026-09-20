@@ -69,8 +69,14 @@ pub struct Buffer<T, A: Backend = CpuBackend> {
     len: usize,
 }
 
-unsafe impl<T, A: Backend> Send for Buffer<T, A> {}
-unsafe impl<T, A: Backend> Sync for Buffer<T, A> {}
+// `Buffer` holds its elements behind a raw pointer, so the auto-traits are not
+// derived and have to be restated.  They must carry `T`'s own contract: without
+// the bounds, `Buffer<Rc<_>>` is `Send` and `Buffer<Cell<_>>` is `Sync`, and
+// `into_vec` hands the elements back on another thread, so a non-atomic
+// refcount is incremented concurrently.  `A: Backend` is already
+// `Send + Sync + 'static`, so the allocator half needs no extra bound.
+unsafe impl<T: Send, A: Backend> Send for Buffer<T, A> {}
+unsafe impl<T: Sync, A: Backend> Sync for Buffer<T, A> {}
 
 impl<T, A> Buffer<T, A>
 where

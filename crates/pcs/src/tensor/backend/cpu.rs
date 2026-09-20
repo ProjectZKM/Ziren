@@ -38,8 +38,14 @@ impl GlobalBackend for CpuBackend {
 unsafe impl Allocator for CpuBackend {
     #[inline]
     unsafe fn allocate(&self, layout: Layout) -> Result<ptr::NonNull<[u8]>, AllocError> {
-        let ptr = std::alloc::alloc(layout);
-        Ok(NonNull::slice_from_raw_parts(NonNull::new_unchecked(ptr), layout.size()))
+        // `alloc` returns null on failure.  `NonNull::new_unchecked` on that
+        // null breaks `NonNull`'s invariant at the moment of failure, before
+        // the `Result` this signature already carries can report it — so the
+        // OOM path was undefined behaviour rather than an `AllocError`.
+        // `RawBuffer` returns early for a zero-sized layout, so a null here is
+        // always a genuine allocation failure and never a zero-size artefact.
+        let ptr = NonNull::new(std::alloc::alloc(layout)).ok_or(AllocError)?;
+        Ok(NonNull::slice_from_raw_parts(ptr, layout.size()))
     }
 
     #[inline]

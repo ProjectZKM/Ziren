@@ -963,6 +963,48 @@ mod test {
         }
     }
 
+    /// A leaf WIDER than its round claims.
+    ///
+    /// The batching inner product reads `round_coeffs[poly_offset + k]`, and
+    /// `round_coeffs` has exactly the round's claim count. A leaf carrying one
+    /// extra column therefore indexes past the slice. The width equality that
+    /// rejects such a leaf ran AFTER that read, and Merkle verification is
+    /// later still, so nothing upstream could turn it into a verdict: an
+    /// overwide leaf terminated the process instead of returning `Err`.
+    ///
+    /// Both directions must be `IncorrectShape`; the narrow one always was.
+    #[test]
+    fn a_leaf_wider_than_its_round_is_rejected() {
+        // Non-vacuity: untouched, the same fixture verifies.
+        two_round_verify_with(0x5EAF_0420, |_| {}).expect("the honest two-round proof must verify");
+
+        match two_round_verify_with(0x5EAF_0420, |p| {
+            let opening =
+                &mut p.basefold_proof.component_polynomials_query_openings_and_proofs[0];
+            // One extra column in the first matrix of the first leaf.
+            opening.leaves[0].values[0].push(InnerVal::ONE);
+        }) {
+            Err(StackedVerifierError::Basefold(BasefoldVerifierError::IncorrectShape(_))) => {}
+            other => panic!("an overwide leaf must be rejected, not panic: {other:?}"),
+        }
+    }
+
+    /// The narrow direction, so the guard is shown to pin both sides of the
+    /// equality rather than only the one that used to panic.
+    #[test]
+    fn a_leaf_narrower_than_its_round_is_rejected() {
+        two_round_verify_with(0x5EAF_0421, |_| {}).expect("the honest two-round proof must verify");
+
+        match two_round_verify_with(0x5EAF_0421, |p| {
+            let opening =
+                &mut p.basefold_proof.component_polynomials_query_openings_and_proofs[0];
+            opening.leaves[0].values[0].pop().expect("the matrix has a column to drop");
+        }) {
+            Err(StackedVerifierError::Basefold(BasefoldVerifierError::IncorrectShape(_))) => {}
+            other => panic!("a narrow leaf must be rejected: {other:?}"),
+        }
+    }
+
     /// A TRUNCATED claim vector.
     ///
     /// Every round is present, but one of them claims fewer stripes than its

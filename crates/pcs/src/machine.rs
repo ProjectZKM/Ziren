@@ -31,6 +31,7 @@ use crate::{
 use super::{
     Chip, Com, MachineProof, PcsProverData, StarkGenericConfig, Val, VerificationError, Verifier,
 };
+use crate::shard_level::verifier::BasefoldVerifyError;
 
 /// A chip in a machine.
 pub type MachineChip<SC, A> = Chip<Val<SC>, A>;
@@ -1187,9 +1188,23 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // range error before the typed error could be produced -- a panic
         // inside a `Result`-returning verifier, on untrusted input.  Check the
         // shape up front instead.
-        if proof.shard_proofs.iter().any(|p| p.public_values.len() < self.num_pv_elts()) {
-            return Err(MachineVerificationError::InvalidPublicValues(
-                "a shard's public_values is shorter than the machine's num_pv_elts",
+        //
+        // The guard reports the error `verify_shard` would have reported for
+        // the same proof, carrying `expected`/`got`, so moving the check
+        // earlier changes WHEN the length is rejected and nothing about the
+        // verdict or the error a caller matches on.
+        let num_pv_elts = self.num_pv_elts();
+        if let Some(p) =
+            proof.shard_proofs.iter().find(|p| p.public_values.len() < num_pv_elts)
+        {
+            return Err(MachineVerificationError::InvalidShardProof(
+                VerificationError::BasefoldShardVerifier(
+                    BasefoldVerifyError::PublicValuesLengthMismatch {
+                        expected: num_pv_elts,
+                        got: p.public_values.len(),
+                    }
+                    .to_string(),
+                ),
             ));
         }
 

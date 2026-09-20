@@ -240,25 +240,43 @@ where
                     "round {round_idx}: query count mismatch"
                 )));
             }
-            let round_coeffs = &batching_coefficients[batch_idx..batch_idx + round_polys];
+            let round_coeffs = batching_coefficients
+                .get(batch_idx..batch_idx + round_polys)
+                .ok_or_else(|| {
+                    BasefoldVerifierError::IncorrectShape(format!(
+                        "round {round_idx}: claims [{batch_idx}, {}) exceed the {} batching coefficients",
+                        batch_idx + round_polys,
+                        batching_coefficients.len()
+                    ))
+                })?;
 
             for (q, leaf) in opening.leaves.iter().enumerate() {
                 // Each `leaf.values` entry is one committed matrix's
                 // row at this query index — width = that Mle's
                 // `n_polys` F elements (no EF packing in the per-MLE
                 // commit codewords).  Batch via inner product.
+                //
+                // The width is checked BEFORE it is used as an index. The
+                // inner product reads `round_coeffs[poly_offset + k]`, whose
+                // length is the round's claim count, so a leaf WIDER than
+                // claimed indexes past the slice and panics; the equality
+                // below would have rejected it, but only after the read.
+                // Merkle verification is later still, so nothing upstream
+                // turns this into a rejection. A narrow leaf was already
+                // rejected here; both widths now return `IncorrectShape`.
+                let leaf_width: usize = leaf.values.iter().map(|m| m.len()).sum();
+                if leaf_width != round_polys {
+                    return Err(BasefoldVerifierError::IncorrectShape(format!(
+                        "round {round_idx}: leaf {q} width {leaf_width} != claimed poly count {round_polys}"
+                    )));
+                }
+
                 let mut poly_offset = 0;
                 for mat_values in leaf.values.iter() {
-                    let polys_in_mat = mat_values.len();
-                    for k in 0..polys_in_mat {
-                        batched_query_evals[q] += round_coeffs[poly_offset + k] * mat_values[k];
+                    for (k, value) in mat_values.iter().enumerate() {
+                        batched_query_evals[q] += round_coeffs[poly_offset + k] * *value;
                     }
-                    poly_offset += polys_in_mat;
-                }
-                if poly_offset != round_polys {
-                    return Err(BasefoldVerifierError::IncorrectShape(format!(
-                        "round {round_idx}: leaf width {poly_offset} != claimed poly count {round_polys}"
-                    )));
+                    poly_offset += mat_values.len();
                 }
             }
 

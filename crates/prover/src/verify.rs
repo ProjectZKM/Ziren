@@ -13,8 +13,9 @@ use thiserror::Error;
 use zkm_pcs::{
     air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
+    shard_level::verifier::BasefoldVerifyError,
     MachineProof, MachineProver, MachineVerificationError, PartStarkVerifyingKey,
-    StarkGenericConfig, Word,
+    StarkGenericConfig, VerificationError, Word,
 };
 use zkm_recursion_circuit::machine::RootPublicValues;
 use zkm_recursion_core::{
@@ -86,10 +87,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // with a short `public_values` this panicked instead of returning the
         // typed error.  `ZKMCoreProofData` arrives from the wire, so it is
         // untrusted input to a `Result`-returning function.
+        //
+        // The guard reports the error `verify_shard` would have reported for
+        // the same proof, carrying `expected`/`got`, so moving the check
+        // earlier changes WHEN the length is rejected and nothing about the
+        // verdict or the error a caller matches on.
         let num_pv_elts = self.core_prover.machine().num_pv_elts();
-        if proof.0.iter().any(|p| p.public_values.len() < num_pv_elts) {
-            return Err(MachineVerificationError::InvalidPublicValues(
-                "a shard's public_values is shorter than the machine's num_pv_elts",
+        if let Some(p) = proof.0.iter().find(|p| p.public_values.len() < num_pv_elts) {
+            return Err(MachineVerificationError::InvalidShardProof(
+                VerificationError::BasefoldShardVerifier(
+                    BasefoldVerifyError::PublicValuesLengthMismatch {
+                        expected: num_pv_elts,
+                        got: p.public_values.len(),
+                    }
+                    .to_string(),
+                ),
             ));
         }
 

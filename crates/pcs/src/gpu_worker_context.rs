@@ -83,22 +83,108 @@ pub fn current_gpu_pool_worker_device() -> Option<usize> {
     GPU_POOL_WORKER_DEVICE.with(Cell::get)
 }
 
-/// RAII guard that sets the TLS on construction and clears it on
-/// drop (incl. panic).  Preferred over manual set/clear pairs.
-pub struct GpuPoolWorkerGuard(());
+/// RAII guard that sets the TLS on construction and RESTORES the previous
+/// value on drop (incl. panic).  Preferred over manual set/clear pairs.
+///
+/// Restores rather than clears, so the guards nest: dropping an inner guard
+/// returns the thread to the enclosing guard's device, not to "off pool".
+/// Clearing unconditionally makes an inner guard's scope end the outer one,
+/// after which the enclosing worker reads `None` and dispatches against
+/// whatever device it finds — the failure the context exists to prevent.
+pub struct GpuPoolWorkerGuard(Option<usize>);
 
 impl GpuPoolWorkerGuard {
-    /// Set the TLS to `device_id` and return a guard that clears
-    /// it on drop.
+    /// Set the TLS to `device_id` and return a guard that restores the
+    /// previous value on drop.
     #[must_use]
     pub fn new(device_id: usize) -> Self {
+        let previous = current_gpu_pool_worker_device();
         set_gpu_pool_worker_device(device_id);
-        Self(())
+        Self(previous)
     }
 }
 
 impl Drop for GpuPoolWorkerGuard {
     fn drop(&mut self) {
-        clear_gpu_pool_worker_device();
+        GPU_POOL_WORKER_DEVICE.with(|c| c.set(self.0));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The state is thread-local, so each case runs on its own thread and
+    /// cannot observe another's writes.
+    fn on_a_fresh_thread(f: impl FnOnce() + Send + 'static) {
+        std::thread::spawn(f).join().unwrap();
+    }
+
+    #[test]
+    fn a_thread_with_no_guard_is_off_pool() {
+        on_a_fresh_thread(|| {
+            assert_eq!(current_gpu_pool_worker_device(), None);
+        });
+    }
+
+    #[test]
+    fn one_guard_sets_and_then_releases() {
+        on_a_fresh_thread(|| {
+            {
+                let _g = GpuPoolWorkerGuard::new(3);
+                assert_eq!(current_gpu_pool_worker_device(), Some(3));
+            }
+            assert_eq!(current_gpu_pool_worker_device(), None, "the outermost guard restores None");
+        });
+    }
+
+    /// The defect: an inner guard's drop used to write `None`, so the
+    /// enclosing worker silently became off-pool while still running.
+    #[test]
+    fn an_inner_guard_returns_the_thread_to_the_outer_device() {
+        on_a_fresh_thread(|| {
+            let _outer = GpuPoolWorkerGuard::new(1);
+            assert_eq!(current_gpu_pool_worker_device(), Some(1));
+            {
+                let _inner = GpuPoolWorkerGuard::new(7);
+                assert_eq!(current_gpu_pool_worker_device(), Some(7));
+            }
+            assert_eq!(
+                current_gpu_pool_worker_device(),
+                Some(1),
+                "dropping the inner guard must not end the outer guard's scope"
+            );
+        });
+    }
+
+    /// Nesting to any depth unwinds in order.
+    #[test]
+    fn nesting_unwinds_in_order() {
+        on_a_fresh_thread(|| {
+            let _a = GpuPoolWorkerGuard::new(0);
+            {
+                let _b = GpuPoolWorkerGuard::new(1);
+                {
+                    let _c = GpuPoolWorkerGuard::new(2);
+                    assert_eq!(current_gpu_pool_worker_device(), Some(2));
+                }
+                assert_eq!(current_gpu_pool_worker_device(), Some(1));
+            }
+            assert_eq!(current_gpu_pool_worker_device(), Some(0));
+        });
+    }
+
+    /// The guard is RAII, so a panic through its scope restores too.
+    #[test]
+    fn a_panic_through_an_inner_scope_still_restores_the_outer_device() {
+        on_a_fresh_thread(|| {
+            let _outer = GpuPoolWorkerGuard::new(4);
+            let unwound = std::panic::catch_unwind(|| {
+                let _inner = GpuPoolWorkerGuard::new(5);
+                panic!("unwind through the inner guard");
+            });
+            assert!(unwound.is_err(), "the panic must have unwound");
+            assert_eq!(current_gpu_pool_worker_device(), Some(4));
+        });
     }
 }
