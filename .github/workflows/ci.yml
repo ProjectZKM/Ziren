@@ -66,6 +66,14 @@ jobs:
   test:
     name: Cargo Test
     runs-on: self-hosted-cpu
+    # The runner has 126 GB shared with other jobs.  A CPU proof of one shard at
+    # the production area fence (460M cells) peaks near 77 GB, and one test per
+    # core stacks several, so earlyoom kills the test binary.  Tests prove at a
+    # quarter of the fence (ed25519: 26 GB) two at a time; production-size
+    # shards are proved by the GPU gates.
+    env:
+      RUST_TEST_THREADS: "2"
+      ELEMENT_THRESHOLD: "115000000"
     # This job runs `cargo test` — contributor `build.rs` and test code as
     # NATIVE code — on a persistent self-hosted runner that also holds the
     # zkm toolchain, a warm cargo registry and its own runner credentials.
