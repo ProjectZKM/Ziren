@@ -503,12 +503,12 @@ pub fn open_jagged_pcs_rounds(
     let mmcs = JaggedMmcs::new(hash, compress, 0);
     let dft = Arc::new(JaggedDft::default());
     let log_stacking_height = rounds[0].log_stacking_height;
+    // One expected commitment per round.
     let prover = StackedPcsProver::new(
         BasefoldProver::<JaggedVal, JaggedChallenge, JaggedMmcs, JaggedDft>::new(
             FriConfig::<JaggedVal>::from_env_or_default(),
             dft,
             mmcs,
-            // One expected commitment PER ROUND.
             rounds.len(),
         ),
         log_stacking_height,
@@ -541,8 +541,8 @@ where
         + 'static,
 {
     let log_stacking_height = rounds[0].log_stacking_height;
+    // One expected commitment per round.
     let prover = StackedPcsProver::new(
-        // One expected commitment PER ROUND.
         BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(fri, dft, mmcs, rounds.len()),
         log_stacking_height,
         DEFAULT_BATCH_SIZE,
@@ -659,10 +659,10 @@ pub fn verify_jagged_pcs_rounds(
     let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
     let mmcs = JaggedMmcs::new(hash, compress, 0);
     let fri = FriConfig::<JaggedVal>::from_env_or_default();
+    // One expected commitment per round; the batched open covers them all in
+    // one proof.
     let verifier = crate::basefold::stacked::StackedPcsVerifier::new(
         crate::basefold::verifier::BasefoldVerifier::<JaggedVal, JaggedChallenge, JaggedMmcs>::new(
-            // One expected commitment PER ROUND — the batched open covers them
-            // all in a single proof.
             fri,
             mmcs,
             commitments.len(),
@@ -700,9 +700,9 @@ where
         + p3_challenger::GrindingChallenger<Witness = JaggedVal>
         + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
 {
+    // One expected commitment per round.
     let verifier = crate::basefold::stacked::StackedPcsVerifier::new(
         crate::basefold::verifier::BasefoldVerifier::<JaggedVal, JaggedChallenge, MT>::new(
-            // One expected commitment PER ROUND.
             fri,
             mmcs,
             commitments.len(),
@@ -821,11 +821,8 @@ pub mod jagged {
     /// to reconstruct the same `JaggedPacking` from chip_infos it receives
     /// separately.
     ///
-    /// It carries no dense cells. (The old doc said "we don't serialize
-    /// `dense_values` -- that's the multi-GB vector we just committed to
-    /// BaseFold". `JaggedPacking::dense_values` is `Vec::new()` on this path;
-    /// the dense is materialized transiently as `dense_q` inside the reduction
-    /// and dropped. The omission is right, the reason given for it was not.)
+    /// It carries no dense cells: the dense vector exists only transiently, as
+    /// `dense_q` inside the reduction.
     ///
     /// `column_counts`: the column count of every entry in the CONCATENATED
     /// column space, in that order -- the shard's real chips AND the synthetic
@@ -834,8 +831,7 @@ pub mod jagged {
     /// `compute_jagged_metadata`. The verifier reads it instead of
     /// `BaseAir::width(chip)` so the prover can send `trace.width` (the
     /// truly-populated columns) with no `chip.width()` pad.
-    /// Empty vec on the wire = legacy bundle → the caller falls back to the chip
-    /// widths (`jagged_pcs.rs:1980`).
+    /// Empty on the wire: the caller falls back to the chip widths.
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
     pub struct PackingMeta {
         pub offsets: Vec<usize>,
@@ -853,8 +849,7 @@ pub mod jagged {
         /// MAIN round to `main_commitment`) and the preprocessed-round check
         /// (which binds round 0 to `vk.commit`) — reads it from here instead.
         ///
-        /// `serde(default)` empty on a single-round bundle, which keeps the
-        /// legacy wire format byte-identical.
+        /// Empty on a single-round bundle (`serde(default)`).
         #[serde(default)]
         pub round_counts: Vec<Vec<(usize, usize)>>,
         /// Each round's stacking-padding column heights, in round order — the gap
@@ -871,23 +866,15 @@ pub mod jagged {
         /// * unpinned → as many cube-tall columns as the gap needs, and at least
         ///   one even when the gap is zero.
         ///
-        /// What is NOT derivable from `round_counts` is therefore the column COUNT,
-        /// for those two reasons. (The old doc gave a different reason: that a round
-        /// already filling whole stripes "still gets a full extra stripe, so
-        /// `next_multiple_of` under-counts it". It does not — `pad =
-        /// area.saturating_sub(total_values)` is then 0 and the round gets a single
-        /// ZERO-height column, so the area IS exactly `next_multiple_of`; it is the
-        /// count that cannot be recovered.)
+        /// So the area of a round is `next_multiple_of(total_values, 2^h)` —
+        /// a round that fills whole stripes gets one zero-height column — but the
+        /// column COUNT cannot be recovered from `round_counts`.
         ///
-        /// The recursion lift closes its column space from this, so it has to be the
-        /// prover's own value. Note the circuit calls the same data
-        /// `padding_row_heights` and consumes only its LENGTH, as a column count
-        /// (`recursive_jagged_pcs.rs:232`) — the "row_heights" half of that name is
-        /// misleading, and a wrong invariant about this field has already shipped a
-        /// four-column undercount into the gnark wrap once.
+        /// The recursion lift closes its column space from this, so it has to be
+        /// the prover's own value. The circuit calls the same data
+        /// `padding_row_heights` and reads only its length, as a column count.
         ///
-        /// `serde(default)` empty on a bundle with no padding columns, which
-        /// keeps the legacy wire format byte-identical.
+        /// Empty on a bundle with no padding columns (`serde(default)`).
         #[serde(default)]
         pub padding_heights: Vec<Vec<usize>>,
     }
@@ -975,8 +962,8 @@ pub mod jagged {
         /// verifier's coverage check validates against an independent
         /// [`crate::jagged::partition_from_chip_infos`] run.  Must be an
         /// exact cover (no drop, no dup, canonical name-sorted order).
-        /// `serde(default)` empty for G==1 / legacy bundles → the verifier
-        /// treats an empty map as the single-group identity cover.
+        /// Empty for G = 1 (`serde(default)`): the verifier reads an empty map
+        /// as the single-group identity cover.
         #[serde(default)]
         pub groups: Vec<Vec<usize>>,
     }
@@ -1038,8 +1025,8 @@ pub mod jagged {
                 &self.extra_jagged_eval[g - 1]
             }
         }
-        /// The group membership map, defaulting to the identity single-group
-        /// cover when empty (G==1 / legacy bundles).
+        /// The group membership map; the identity single-group cover when
+        /// empty (G = 1).
         #[must_use]
         pub fn groups_or_identity(&self, n_chips: usize) -> Vec<Vec<usize>> {
             if self.groups.is_empty() {
@@ -1309,15 +1296,12 @@ pub mod jagged {
     ///
     /// Round order is load-bearing — it fixes the column order the verifier
     /// reconstructs — and the preprocessed round comes first.
-    /// The dense multilinear scheme the jagged layer opens through.
     ///
-    /// Which scheme a ring uses is a property OF THE RING — `commit_multilinears`
-    /// builds WHIR data exactly when `BasefoldRing::WHIR_INNER_PCS`, so
-    /// `whir_data.is_some()` is that constant and nothing else. Carrying the
-    /// choice as a type says so, and makes the states the prover used to guard
-    /// against unwritable: there is no round set that is WHIR "in part", no
-    /// runtime `whir_mode` to compute, and no branch that could open one
-    /// scheme's data against the other's already-observed root.
+    /// The dense multilinear scheme the jagged layer opens through. It is a
+    /// property of the ring (`commit_multilinears` builds WHIR data exactly
+    /// when `BasefoldRing::WHIR_INNER_PCS`), and as a type it rules out a round
+    /// set that is WHIR in part, or opening one scheme's data against the
+    /// other's observed root.
     ///
     /// `open_rounds` is the whole variation. Everything before it — sampling
     /// `z_col`, the reduction, the jagged-eval sub-protocol, extending the point
@@ -1697,13 +1681,11 @@ pub mod jagged {
             // prefix sum if a column covers it — a DUMMY column of zeros with a
             // ZERO claim.
             //
-            // EVERY round pads, the last one included.  Its gap looks like it
-            // could be left to the hypercube padding the point extension covers
-            // — but `total_values` is what makes the reduction's hypercube equal
-            // the committed area, and dropping the last round's fill shrinks it
-            // below `effective_area`, so the stacked claim no longer equals the
-            // interpolated batch evaluations (StackingMismatch).  The column
-            // layout has to cover every committed cell.
+            // Every round pads, the last one included: `total_values` is what
+            // makes the reduction's hypercube equal the committed area, and
+            // without the last round's fill it falls below `effective_area`, so
+            // the stacked claim would differ from the interpolated batch
+            // evaluations. The column layout covers every committed cell.
             let area = r.precomputed.prover_data.area;
             // `area >= total_values` by construction (`area` is `total_values`
             // rounded UP to a whole number of stripes).  `area < total_values`
@@ -1823,17 +1805,8 @@ pub mod jagged {
         // ONE batched open across every round's committed data, through the
         // ring's dense scheme.
         //
-        // `P` is that scheme.  It used to be recovered from the DATA as
-        // `rounds.all(|r| r.whir_data.is_some())`, with an assert against the
-        // mixed case and a `RefCell` to smuggle the WHIR proof past a closure
-        // whose return type had to stay BaseFold-shaped.  None of that survives
-        // the choice becoming a type: `commit_multilinears` populates
-        // `whir_data` exactly when `WHIR_INNER_PCS`, so the runtime test WAS
-        // this type, and a round set that is WHIR only in part cannot be
-        // written down.
-        //
-        // The closure that remains carries no decision: it names `P` and
-        // forwards.  `prove_jagged_linear_core` owns the transcript order —
+        // `P` is that scheme. The closure carries no decision: it names `P`
+        // and forwards. `prove_jagged_linear_core` owns the transcript order —
         // `z_col`, the reduction, the jagged-eval, the point extension, then the
         // open — is generic over whatever the open returns, and is shared with
         // the device prover, which brings its own opening to the same order.
@@ -1958,35 +1931,34 @@ pub mod jagged {
         }
     }
 
-    /// Single-main-commit variant: verifier counterpart of
-    /// [`prove_jagged_rounds`].  Skips the in-band
-    /// `challenger.observe(commitment)` because the orchestrator's
-    /// Phase 1 prologue already observed the BaseFold commit's 8-felt
-    /// digest as `main_commitment`.
+    /// Verifier counterpart of [`prove_jagged_rounds`]. The commitment is not
+    /// observed here: the shard prologue already observed it as
+    /// `main_commitment`.
+    ///
+    /// * `z_row` — the full z*, for the embedding factor.
+    /// * `preceding_rounds` — the rounds committed before the proof's own, as
+    ///   (commitment, area); their commitments are the verifying key's (the
+    ///   preprocessed round).
+    /// * `n_prep` — the number of leading preprocessed entries in
+    ///   `chip_infos`: 0 for a main-only proof. Read off the key, never the
+    ///   proof: the coverage check measures the proof's group map against it.
+    /// * `opened_main` — per chip, the `main.local` openings the zerocheck
+    ///   consumed, index-aligned with `chip_infos` and `bundle.y_per_chip`.
+    ///   Required: the cross-bind ties those openings to the jagged column
+    ///   claims, so there is no way to verify a shard without it.
     #[allow(clippy::too_many_arguments)]
     pub fn verify_jagged_no_observe(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
-        z_row: &[InnerChallenge], // full z* for embedding factor
-        // Rounds committed BEFORE the proof's own, whose commitments come from
-        // the VERIFYING KEY (the preprocessed round), as (commitment, area).
+        z_row: &[InnerChallenge],
         preceding_rounds: &[(
             <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
                 crate::jagged_pcs::JaggedVal,
             >>::Commitment,
             usize,
         )],
-
-        // Number of leading PREPROCESSED entries in `chip_infos` — 0 for a
-        // main-only proof, otherwise the two-round (preprocessed + main)
-        // split.  Read off the VERIFYING KEY, never off the proof: it is what
-        // the coverage check measures the proof's group map against.
         n_prep: usize,
         bundle: &JaggedPcsProof,
-        // Cross-bind: per-chip `opened_values.chips[].main.local`, index-aligned
-        // with `chip_infos` / `bundle.y_per_chip`.  REQUIRED: the bind is what
-        // ties the zerocheck's openings to the jagged phase's column claims, so
-        // an `Option` here would be a way to verify a shard without it.
         opened_main: &[Vec<InnerChallenge>],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> bool {
@@ -2003,25 +1975,21 @@ pub mod jagged {
         )
     }
 
+    /// The body of [`verify_jagged_no_observe`], with the same arguments;
+    /// `skip_commit_observe` is true there.
     #[allow(clippy::too_many_arguments)]
     fn verify_jagged_inner(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
-        z_row: &[InnerChallenge], // full z* for embedding factor
+        z_row: &[InnerChallenge],
         _n_prep: usize,
-        // Rounds committed BEFORE the proof's own, whose commitments come from
-        // the VERIFYING KEY (the preprocessed round), as (commitment, area).
         preceding_rounds: &[(
             <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
                 crate::jagged_pcs::JaggedVal,
             >>::Commitment,
             usize,
         )],
-
         bundle: &JaggedPcsProof,
-        // Cross-bind: per-chip `opened_values.chips[].main.local` trace
-        // openings (index-aligned with `chip_infos` / `bundle.y_per_chip`), or
-        // `None` for synthetic-bundle unit tests with no shard openings.
         opened_main: &[Vec<InnerChallenge>],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
@@ -2098,6 +2066,8 @@ pub mod jagged {
                 // columns, so the committed length IS the column space.
                 dense_len: pkg.total_values,
             };
+            // Only the first group carries the rounds pinned by the key; with
+            // the batched shape there is exactly one group.
             if !verify_one_jagged_group(
                 &packing,
                 &r_row_g,
@@ -2110,8 +2080,6 @@ pub mod jagged {
                 bundle.basefold_proof_g(g),
                 if g == 0 { bundle.whir_proof.as_ref() } else { None },
                 challenger,
-                // Only the FIRST group carries the vk-pinned rounds; with the
-                // batched shape there is exactly one group.
                 if g == 0 { preceding_rounds } else { &[] },
                 g,
             ) {
@@ -2121,12 +2089,8 @@ pub mod jagged {
         true
     }
 
-    /// Verify ONE independent jagged instance (group `g`) against the shared
-    /// `z_row`: sample `z_col_g`, verify the reduction, replay the
-    /// jagged-eval transcript, extend `z*_g`, and verify the BaseFold open
-    /// of `C_g`.  Returns `false` on any rejection.
     /// Bind the bundle's column claims to the trace openings the AIR phases
-    /// consumed — the host analog of `recursive_jagged_pcs.rs:247`.
+    /// consumed; the recursive verifier asserts the same identity.
     ///
     /// Let `k` index the flattened column space in the order
     /// `verify_jagged_reduction` walks it (chip `i`'s first `y_per_chip[i].len()`
@@ -2139,9 +2103,8 @@ pub mod jagged {
     /// ```
     ///
     /// i.e. the two column vectors are equal AS MLEs at `z_col`. The right-hand
-    /// side is bit-for-bit the `t` that `verify_jagged_reduction` takes as its
-    /// round-0 claim (`jagged_sumcheck.rs:735-742`), so this is exactly "the
-    /// openings generate the claimed sum".
+    /// side is the `t` that `verify_jagged_reduction` takes as its round-0
+    /// claim, so this is exactly "the openings generate the claimed sum".
     ///
     /// The MLE form is not a weakening of an element-wise compare: under the
     /// `rev(zeta)` orientation the two vectors need not agree element-wise,
@@ -2209,15 +2172,17 @@ pub mod jagged {
         Ok(())
     }
 
+    /// Verify one jagged group. `opened_main` are this group's `main.local`
+    /// openings, index-aligned with `y_per_chip`; `whir_proof` is `Some`
+    /// when the shard was opened with WHIR; `preceding_rounds` are the rounds
+    /// before this one, as (commitment, area), whose commitments are the
+    /// verifying key's.
     #[allow(clippy::too_many_arguments)]
     fn verify_one_jagged_group(
         packing: &JaggedPacking<InnerVal>,
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         y_per_chip: &[Vec<InnerChallenge>],
-        // Cross-bind: this group's per-chip `opened_values.chips[].main.local`
-        // trace openings (index-aligned with `y_per_chip`), or `None` for callers
-        // (unit tests) that verify a synthetic bundle with no shard openings.
         opened_main: &[Vec<InnerChallenge>],
         reduction: &crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge>,
         jagged_eval: &crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
@@ -2227,8 +2192,6 @@ pub mod jagged {
             InnerChallenge,
             crate::jagged_pcs::JaggedMmcs,
         >,
-        // `Some` dispatches the batched open to the jagged-WHIR verifier
-        // (the shard was proven under the jagged-WHIR core PCS).
         whir_proof: Option<
             &crate::whir::stacked::StackedWhirProof<
                 InnerVal,
@@ -2237,8 +2200,6 @@ pub mod jagged {
             >,
         >,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        // Rounds committed BEFORE this one whose commitments come from the
-        // verifying key (the preprocessed round), as (commitment, area).
         preceding_rounds: &[(
             <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
                 crate::jagged_pcs::JaggedVal,
@@ -2287,24 +2248,13 @@ pub mod jagged {
             return false;
         };
 
-        // CROSS-BIND (host analog of recursive_jagged_pcs.rs:247)
-        //
-        // The recursion CIRCUIT ties the jagged sumcheck's claimed sum to the
-        // TRACE OPENINGS: it forms `column_claims = opened_values.chips[].main.local`
-        // (shard_basefold.rs:588 → recursive_jagged_pcs.rs:218) and asserts
-        //   evaluate_mle(column_claims, z_col) == sumcheck_proof.claimed_sum   (:247).
-        //
-        // The host, in contrast, DERIVES the claimed sum from the bundle's
-        // `y_per_chip` alone — `verify_jagged_reduction` uses
-        //   t = Σ_k z_col_lagrange[k]·y_flat[k] = evaluate_mle(y_flat, z_col)
-        // as its round-0 claim (jagged_sumcheck.rs:735-742) and NEVER checks
-        // `y_per_chip` against the openings.  So a malicious host proof could ship
-        // `y_per_chip ≠ opened_values.main.local` and be accepted by BOTH the
-        // zerocheck (which consumes `opened_values`) and this jagged phase (which
-        // consumes `y_per_chip`) independently — the soundness-parity gap.
-        //
-        // Close it exactly as the circuit does — `cross_bind_openings` below is
-        // that identity, shared with the OUTER ring so both check the same one.
+        // Cross-bind. The reduction takes its round-0 claim from the bundle,
+        //   t = Σ_k eq(z_col, k) · y_k,
+        // while the zerocheck consumed the openings o_k. Without
+        //   Σ_k eq(z_col, k) · o_k = Σ_k eq(z_col, k) · y_k
+        // a proof could carry y ≠ o and satisfy both halves separately. The
+        // recursive verifier asserts the same identity, and the outer ring
+        // shares this function.
         if let Err(why) = cross_bind_openings(y_per_chip, opened_main, &z_col) {
             eprintln!("[basefold verify] group {g}: CROSS-BIND FAILED — {why}");
             return false;
@@ -2422,12 +2372,11 @@ pub mod jagged {
     ) -> (Vec<crate::jagged::JaggedChipInfo>, Vec<Vec<InnerChallenge>>, Vec<InnerChallenge>) {
         use crate::jagged::JaggedChipInfo;
         let column_counts = &packing.column_counts;
-        // One entry per COLUMN GROUP the prover emitted — every round's chips
-        // AND the stacking-padding columns between them.  `chip_widths` (the
-        // machine's main chips) is only the legacy fallback for a bundle that
-        // predates `column_counts`: taking its LENGTH as the group count reads
-        // a two-round packing as if the preprocessed round's widths were the
-        // main chips', and stops before the main round entirely.
+        // One entry per column group the prover emitted: every round's chips
+        // and the stacking-padding columns between them. `chip_widths` (the
+        // machine's main chips) is the fallback for a bundle without
+        // `column_counts`; its length is not the group count of a two-round
+        // packing.
         let n_groups =
             if column_counts.is_empty() { chip_widths.len() } else { column_counts.len() };
         let mut chip_infos: Vec<JaggedChipInfo> = (0..n_groups)
@@ -2473,11 +2422,17 @@ pub mod jagged {
         (chip_infos, r_row_per_chip, z_row)
     }
 
-    /// BaseFold-over-BN254 wrap port: verifier mirror of
-    /// `prove_jagged_rounds_generic`, generic over the challenger + MMCS.
-    /// The OUTER (wrap) ring drives this with OuterChallenger + OuterValMmcs via
-    /// the registered verify hook; the inner ring keeps the concrete
+    /// Verifier counterpart of `prove_jagged_rounds_generic`, generic over the
+    /// challenger and the MMCS. The outer (wrap) ring runs it with
+    /// `OuterChallenger` and `OuterValMmcs`; the inner ring uses
     /// `verify_jagged_inner`.
+    ///
+    /// `preceding_rounds` are the rounds before the main one, as
+    /// (commitment, area): the preprocessed round, whose commitment the key
+    /// holds; empty for a machine without preprocessed traces.
+    /// `opened_main` are the openings the AIR phases consumed, index-aligned
+    /// with `chip_infos` and `bundle.y_per_chip`, for the cross-bind; required
+    /// on this ring as on the inner one.
     #[allow(clippy::too_many_arguments)]
     pub fn verify_jagged_inner_generic<Challenger, MT>(
         chip_infos: &[JaggedChipInfo],
@@ -2488,17 +2443,10 @@ pub mod jagged {
         mmcs: MT,
         skip_commit_observe: bool,
         fri: FriConfig<crate::jagged_pcs::JaggedVal>,
-        // Rounds committed BEFORE this one, as (commitment, area) — the
-        // preprocessed round, whose commitment the verifying key holds.  Empty
-        // for a machine with no preprocessed traces.
         preceding_rounds: &[(
             <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
             usize,
         )],
-        // The opening cross-bind: the trace openings the AIR phases consumed, index-
-        // aligned with `chip_infos` / `bundle.y_per_chip`, for
-        // `cross_bind_openings`.  REQUIRED, like every other binding input:
-        // making it optional is what let the outer ring verify without it.
         opened_main: &[Vec<InnerChallenge>],
     ) -> bool
     where
@@ -2731,7 +2679,7 @@ pub fn check_canonical_packing(
     site: &str,
 ) -> Result<(), alloc::string::String> {
     if packing.round_counts.is_empty() {
-        // Legacy single-round bundles carry no per-round geometry; there is no
+        // A single-round bundle carries no per-round geometry, so there is no
         // second representation to disagree with.
         return Ok(());
     }
@@ -2785,23 +2733,12 @@ pub fn check_canonical_packing(
 /// The jagged column-accounting invariant, with the packing as the SINGLE
 /// SOURCE OF TRUTH for how many columns a shard's proof covers.
 ///
-/// A layout with no stacking-padding columns needs no such invariant: the
-/// column count is a plain scan over `column_counts_by_round`, derived in one
-/// place.  Ziren's jagged-over-WHIR
-/// stacking DOES pad each opening round out to its committed area, so the count
-/// is `Σ widths + Σ pads` — and Ziren consequently grew a second source for the
-/// pad half, the witness field `preprocessed_round.padding_heights`.
-///
-/// Those two sources disagreed: the witness field is populated on the inner ring
-/// and EMPTY on the outer one, so the gnark wrap computed 410 columns against the
-/// packing's 414, truncated its jagged-eval column walk, and failed the closing
-/// identity — while the host, which derives its count from the packing, accepted
-/// the same proof.  See `ff3488dc`.
-///
-/// Hence **one authoritative count**, returned from here,
-/// with the reconstruction merely CHECKED against it.  Never derive the pads as
-/// `total_cols - widths` — that encodes the relationship instead of verifying it,
-/// which is exactly what hid the defect.
+/// Stacking pads each opening round out to its committed area, so the column
+/// count is `Σ widths + Σ pads`, and the pad half has two sources: the packing
+/// and the witness field `preprocessed_round.padding_heights`. The count is the
+/// packing's, returned from here; the reconstructions are checked against it.
+/// The pads are never derived as `total_cols - widths`, which would assume
+/// the relationship instead of checking it.
 ///
 /// # Panics
 ///
@@ -2813,14 +2750,11 @@ pub fn check_canonical_packing(
 /// - `widths`: `Σ_r Σ column_counts_by_round[r]`.
 /// - `packing_pads`: `Σ_r packing.padding_heights[r].len()`.
 /// - `witness_pads`: `Σ_r preprocessed_round.padding_heights[r].len()`, the
-///   witness field — or `None` where that field is ABSENT rather than merely
-///   a second opinion.  Pass `None` on the outer/wrap path: the outer lift
-///   never populates it (shard_level_witness.rs:1548 bakes the outer column
-///   space from `bundle.packing.padding_heights` instead), so it reads 0
-///   against the packing's real pad count and asserting equality there would
-///   panic on every honest wrap.  Pass `Some(..)` from the inner consumers,
-///   where both sources are genuinely populated and a disagreement is a bug —
-///   which is where this check earns its keep.
+///   witness field, or `None` where that field is absent. `None` on the outer
+///   (wrap) path, whose lift builds the column space from
+///   `bundle.packing.padding_heights` and never fills the field; `Some(..)`
+///   from the inner consumers, where both sources are populated and must
+///   agree.
 /// - `site`: for the panic message: "wrap", "compress", "core", "deferred".
 pub fn jagged_column_count(
     total_cols: usize,
@@ -3088,11 +3022,11 @@ mod test {
             build_jagged_verify_inputs(&bundle.packing, chip_widths, z_row);
         let mut v_chal = build_challenger();
         v_chal.observe(bundle.commit.original_commitment.clone());
+        // Main-only fixture: no preceding (preprocessed) round.
         verify_jagged_no_observe(
             &chip_infos,
             &r_row_per_chip,
             &z_row_v,
-            // Main-only fixture: no preceding (preprocessed) round.
             &[],
             0,
             bundle,
@@ -3365,9 +3299,8 @@ mod test {
     /// a tree that was never built, while the verifier (which dispatches on
     /// `bundle.whir_proof`) replays a different transcript.
     ///
-    /// The prover no longer asks which scheme the data describes — that is the
-    /// type — so the rejection now comes from the scheme finding a round it
-    /// cannot open, which is the same state named at the place that needs it.
+    /// The scheme is a type, so the rejection comes from the scheme finding a
+    /// round it cannot open.
     #[test]
     #[should_panic(expected = "carries no WHIR data")]
     fn two_round_rejects_a_round_committed_for_the_other_scheme() {
@@ -3890,8 +3823,7 @@ mod test {
             verify_main_round(&bundle, &widths, &z_row, &bundle.y_per_chip),
             "G==1 bundle must verify"
         );
-        // The deserialized copy behaves identically (legacy-shape
-        // equivalence).
+        // The deserialized copy behaves identically.
         assert!(
             verify_main_round(&bundle2, &widths, &z_row, &bundle2.y_per_chip),
             "deserialized G==1 bundle must verify identically"
@@ -3906,8 +3838,9 @@ mod test {
     #[test]
     fn g_host_hash_bind_roundtrip() {
         use crate::jagged_pcs::jagged::PackingMeta;
-        // A heterogeneous per-chip geometry (varied heights == a FIX-off
-        // natural-commit shard), with the SENTINEL offset (len = total_cols+1).
+        // A heterogeneous per-chip geometry (varied heights, as a shard that
+        // commits at its natural heights), with the sentinel offset
+        // (len = total_cols + 1).
         // chip heights:   3,      5,           2,        (a 0-col chip)
         // chip widths:    2,      1,           3,        0
         let column_counts: Vec<usize> = vec![2, 1, 3, 0];
