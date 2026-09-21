@@ -280,7 +280,7 @@ pub struct LogupGkrShardChipMetadata {
 /// Replays the LogUp-GKR sumcheck stack:
 ///
 ///   1. Check the GKR-grinding witness
-///   2. Sample (alpha, beta_seed, pv_challenge) from the transcript
+///   2. Sample (alpha, beta_seed) from the transcript
 ///   3. Evaluate public-value constraints (delegates to caller via
 ///      `eval_public_values_fn`); use the resulting digest as the
 ///      negated cumulative sum
@@ -304,23 +304,20 @@ pub struct LogupGkrShardChipMetadata {
 /// new `last_coordinate` is appended to the back of `eval_point`
 /// (LSB-first push: `eval_point[len-1] = last_coordinate`).
 ///
-/// Per-round transcript ops (in order — must match the prover):
+/// Per-round transcript operations, in the prover's order:
 ///
-/// | Step | Operation | Line |
-/// |---|---|---|
-/// | 1 | sample `lambda` | logup_gkr.rs:401 |
-/// | 2 | assert `claimed_sum == numerator_eval * lambda + denominator_eval` | logup_gkr.rs:406-407 |
-/// | 3 | `verify_sumcheck` | logup_gkr.rs:410-414 |
-/// | 4 | assert `final_eval == eq(point,eval_point) * ((n0*d1 + n1*d0)*λ + d0*d1)` | logup_gkr.rs:430-440 |
-/// | 5 | observe `n0` | logup_gkr.rs:447 |
-/// | 6 | observe `n1` | logup_gkr.rs:448 |
-/// | 7 | observe `d0` | logup_gkr.rs:449 |
-/// | 8 | observe `d1` | logup_gkr.rs:450 |
-/// | 9 | `eval_point = sumcheck_point.clone()` | logup_gkr.rs:461 |
-/// | 10 | sample `last_coordinate` | logup_gkr.rs:462 |
-/// | 11 | append `last_coordinate` to back of `eval_point` | logup_gkr.rs:463 (`push`) |
-/// | 12 | fold `num_eval = n0 + (n1 - n0) * last_coord` | logup_gkr.rs:469 |
-/// | 13 | fold `den_eval = d0 + (d1 - d0) * last_coord` | logup_gkr.rs:470 |
+/// | Step | Operation |
+/// |---|---|
+/// | 1 | sample λ |
+/// | 2 | assert `claimed_sum = numerator_eval · λ + denominator_eval` |
+/// | 3 | `verify_sumcheck` |
+/// | 4 | assert `final_eval = eq(point, eval_point) · ((n0·d1 + n1·d0)·λ + d0·d1)` |
+/// | 5–8 | observe n0, n1, d0, d1 |
+/// | 9 | `eval_point = sumcheck_point` |
+/// | 10 | sample r (the last coordinate) |
+/// | 11 | append r to the back of `eval_point` |
+/// | 12 | `num_eval = n0 + (n1 − n0)·r` |
+/// | 13 | `den_eval = d0 + (d1 − d0)·r` |
 ///
 /// Trace-evaluation reconstruction from per-chip openings is
 /// deferred to the zerocheck stage; consumed via
@@ -372,21 +369,12 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     // both rings.
     challenger.gkr_check_witness(builder, GKR_GRINDING_BITS, *witness);
 
-    // (2) Sample the permutation challenges (alpha + beta_seed).
-    // beta_seed dim is decided by chip metadata.  NOTE: the host
-    // prover (row_gkr/top_level.rs:71-86) and host verifier
-    // (shard_level/verifier.rs:1135-1138) sample ONLY [alpha, beta_seed]
-    // here — there is NO separate public-values challenge draw.  The
-    // public-values digest folds the record-level PV interactions under
-    // the SAME `alpha` (used as both the permutation challenge and the
-    // constraint-fold alpha; see `eval_public_values_digest_host`,
-    // public_values_folder.rs:132, which passes `alpha` for both the
-    // `perm_challenges.0` and `alpha` slots).  A prior version sampled an
-    // EXTRA `pv_challenge` here, which had no host counterpart: it
-    // desynced every post-alpha squeeze (eval_point, per-round lambda,
-    // the whole GKR sumcheck) from the prover's transcript.  Drop it and
-    // reuse `alpha` so the in-circuit transcript is byte-identical to the
-    // host from alpha onward.
+    // (2) Sample the permutation challenges (alpha, beta_seed); beta_seed's
+    // dimension comes from the chip metadata. There is no separate
+    // public-values challenge: the public-values digest folds the
+    // record-level interactions under the same alpha, used both as the
+    // permutation challenge and as the constraint-fold alpha, as the prover
+    // and the host verifier do.
     let alpha = challenger.sample_ext(builder);
     let beta_seed: Vec<Ext<C::F, C::EF>> =
         (0..chip_metadata.beta_seed_dim).map(|_| challenger.sample_ext(builder)).collect();
@@ -506,20 +494,17 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
 
     // DEGREE-MASKED LAST-LAYER RECONSTRUCTION
     //
-    // In-circuit mirror of the host `verify_logup_gkr_host` reconstruction
-    // (crates/pcs/src/shard_level/verifier.rs:1628-1881).
+    // The circuit counterpart of the host `verify_logup_gkr_host`
+    // reconstruction.
     //
-    // The round walk above reduced the GKR `circuit_output` num/den MLEs to
-    // (numerator_eval, denominator_eval) at the fully-reduced `eval_point`
-    // (dim = log_num_interactions + max_log_row_count).  Without this block
-    // those evals are DISCARDED — the verifier never ties the GKR output back
-    // to the chips' actual trace openings, leaving the area-preserving height-
-    // forgery hole.  We re-derive (num, den) from the per-chip trace openings
-    // masked by `full_geq(degree, ·)` and assert they equal the round walk's.
-    // A forged `degree` (height) moves the `full_geq` boundary, perturbing the
-    // reconstruction while the walk's evals (which never see `degree`) stay
-    // fixed → reject.  This is pure arithmetic over already-sampled challenges
-    // and already-observed openings: transcript- and proof-byte-neutral.
+    // The round walk reduced the `circuit_output` MLEs to
+    // (numerator_eval, denominator_eval) at `eval_point`, of dimension
+    // log_num_interactions + m. Those values are tied to the chips' trace
+    // openings here: (num, den) are rebuilt from the per-chip openings masked
+    // by `full_geq(degree, ·)` and asserted equal to the walk's. A forged
+    // height moves the `full_geq` boundary and changes the rebuild, while the
+    // walk never sees the height, so the forgery is rejected. Pure arithmetic
+    // over challenges already drawn and openings already observed.
     {
         let log_num_interactions = initial_num_variables - 1;
 
@@ -556,10 +541,9 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         }
 
         // (3) `point_extended` for the per-chip `full_geq` padding mask:
-        // [ZERO, ...trace_point.rev()] — REVERSED, the LSB-first GKR-leaf mask
-        // convention (host verifier.rs:1681-1683).  `full_geq` (zerocheck.rs:68,
-        // MSB-first internally) over this reproduces the LSB-first leaf mask
-        // geq = Σ_{row ≥ height} eq(row, trace_point).
+        // [0, rev(trace_point)...], the LSB-first leaf convention. `full_geq`
+        // is MSB-first internally, so over this it gives the leaf mask
+        //   geq = Σ_{row ≥ height} eq(row, trace_point).
         let mut point_extended: Vec<SymbolicExt<C::F, C::EF>> =
             Vec::with_capacity(max_log_row_count + 1);
         point_extended.push(SymbolicExt::ZERO);
@@ -619,10 +603,9 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             );
             let geq_eval = crate::zerocheck::full_geq::<C>(&degree_sym, &point_extended);
 
-            // FULL-POINT openings (the GKR leaf is LSB-first
-            // natural-row).  Production FIX-off proofs always carry `*_full`;
-            // panic if absent (matches the gated host assert semantics — the
-            // reconstruction is only meaningful on `*_full`-carrying proofs).
+            // The full-point openings (the GKR leaf is LSB-first, natural
+            // rows). Every proof carries them; the reconstruction has no
+            // meaning without them, so their absence panics.
             let main: &[Ext<C::F, C::EF>] = chip_eval
                 .main_trace_evaluations_full
                 .as_deref()
@@ -632,8 +615,8 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             let prep: Option<&[Ext<C::F, C::EF>]> =
                 chip_eval.preprocessed_trace_evaluations_full.as_deref();
 
-            // Zero padding openings (the trace eval on a fully-padding all-zero
-            // row), used to correct the padding region.
+            // A padding row is all zero; its openings correct the padding
+            // region.
             let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let padding_main: Vec<Ext<C::F, C::EF>> = vec![zero_ext; main.len()];
             let padding_prep: Option<Vec<Ext<C::F, C::EF>>> = prep.map(|p| vec![zero_ext; p.len()]);
@@ -656,8 +639,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
                         &betas,
                     );
 
-                // Degree-masked num/den, then sign for receives (host
-                // verifier.rs:1828-1832).
+                // Degree-masked num / den, the sign flipped for receives.
                 let numerator_eval_i = real_numerator - padding_numerator * geq_eval;
                 let denominator_eval_i =
                     real_denominator + (SymbolicExt::ONE - padding_denominator) * geq_eval;
@@ -691,24 +673,18 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
 
     // Observe slot 1 — the GKR trace openings (trace@ζ)
     //
-    // In-circuit mirror of the host prover
-    // (`row_gkr::top_level::prove_shard_logup_gkr_rows`) and of the host
-    // verifier (end of `verify_logup_gkr_host`).
+    // As the prover (`prove_shard_logup_gkr_rows`) and the host verifier do.
     //
-    // Position is load-bearing: `ShardZerocheckVerifier::verify_zerocheck`
-    // opens by sampling α / γ / λ, and the zerocheck identity it then enforces
-    // (`assert_ext_eq(claimed_sum, zerocheck_sum_modification)` plus the
-    // rlc_eval assert) is only a Schwartz–Zippel test of those challenges if
-    // this opening vector is already committed.  Observed here — before that
-    // sample — the openings are fixed; observed after (where this used to sit,
-    // as step (9) of verify_zerocheck) the identity degenerates to one linear
-    // equation a prover can solve for the openings.
+    // Position matters: `verify_zerocheck` begins by sampling α, γ, λ, and
+    // the identity it enforces is a Schwartz–Zippel test in those challenges
+    // only if these openings are fixed first. Observed after the draw, the
+    // identity would be one linear equation a prover could solve for the
+    // openings.
     //
-    // `shard_chips.len()` felt, then per chip in NAME order
-    // (`chip_openings` is a `BTreeMap`) the four length-prefixed slices:
-    // preprocessed, main, preprocessed_full, main_full.  Both opening sets are
-    // observed because Ziren's core stage drives the claim from `*_full` while
-    // the recursion / shrink / wrap stages drive it from the legacy set.
+    // n, then per chip in name order (`chip_openings` is a `BTreeMap`) four
+    // length-prefixed slices: preprocessed, main, preprocessed_full,
+    // main_full. Both sets are observed: the core stage drives the claim from
+    // the full-point openings, the recursion stages from the others.
     let num_chips_felt: Felt<C::F> =
         builder.constant(C::F::from_canonical_usize(shard_chips.len()));
     challenger.observe(builder, num_chips_felt);
@@ -811,16 +787,13 @@ mod tests {
 
     // in-circuit LogUp degree-masked reconstruction tests
     //
-    // The full `verify_logup_gkr` transcript replay is exercised end-to-end by
-    // the `test_e2e_compress_fibonacci` integration test (a real FIX-off proof
-    // through the recursion verifier).  Here we add EXECUTED-CIRCUIT tests
-    // (`run_test_recursion`) that drive the EXACT reconstruction arithmetic the
-    // in-circuit block at logup_gkr.rs:(reconstruction) computes — `Lookup::eval`
-    // (Var=Ext, Expr=SymbolicExt), `full_geq` over the reversed `point_extended`,
-    // and the degree-masked `num = real − pad·geq` / `den = real + (1−pad)·geq`
-    // — and assert it equals an OFF-CIRCUIT host re-computation of the same
-    // formula (the round-walk eval).  This proves both directions of the
-    // soundness contract WITHOUT a full GKR proof:
+    // The full `verify_logup_gkr` replay is exercised end to end by
+    // `test_e2e_compress_fibonacci`. These execute the reconstruction's
+    // arithmetic in a circuit (`run_test_recursion`) — `Lookup::eval`,
+    // `full_geq` over the reversed `point_extended`, and
+    //   num = real − pad · geq,   den = real + (1 − pad) · geq
+    // — and compare it with the same formula computed off-circuit (the
+    // round-walk value), both directions without a full GKR proof:
     //   * honest (degree, *_full) → reconstruction == round-walk eval (accepts);
     //   * forged `degree` (height) → `geq` mask shifts → reconstruction diverges
     //     from the (honest) round-walk eval → the `assert_ext_eq` trips (rejects).
@@ -1022,8 +995,7 @@ mod tests {
     /// 2^2 = 4 → [0,0,1,0]).  The forged `degree` moves the `full_geq` padding
     /// boundary, so the reconstructed num/den diverge from the honest
     /// round-walk eval → the in-circuit `assert_ext_eq` trips at runtime.  This
-    /// is the area-preserving height-forgery rejection (host analog:
-    /// verifier.rs:1867 mismatch).
+    /// is the area-preserving height-forgery rejection, as on the host.
     #[test]
     #[should_panic]
     fn reconstruction_rejects_forged_degree() {
