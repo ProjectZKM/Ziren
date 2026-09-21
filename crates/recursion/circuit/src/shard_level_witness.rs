@@ -1,14 +1,7 @@
-//! Witnessable impls for the shard-level proof types
-//! that live in [`zkm_pcs::shard_level`].
-//!
-//! Bridges the host-side types (raw `F`/`EF`) into recursion
-//! circuit variables (`Felt<F>` / `Ext<F, EF>`).  Mirrors the
-//! impls in [`crate::basefold_witness`] which serve the
-//! recursion-circuit-internal copies of these types — both sets
-//! coexist during the parallel-codebase window so the legacy
-//! verifier can keep using the recursion-circuit-internal types
-//! while the new shard-level prover output drives the new
-//! verifier through these impls.
+//! Witnessable impls for the shard-level proof types that live in
+//! [`zkm_pcs::shard_level`]: the host types (raw `F` / `EF`) become circuit
+//! variables (`Felt<F>` / `Ext<F, EF>`). [`crate::basefold_witness`] holds the
+//! impls for the recursion circuit's own copies of the same types.
 //!
 
 use std::collections::BTreeMap;
@@ -24,18 +17,14 @@ use crate::witness::{WitnessWriter, Witnessable};
 use crate::CircuitConfig;
 use zkm_pcs::{InnerChallenge, InnerVal};
 
-/// FIXED-HEIGHT GUARD: assert a recursion bundle commits at the FIXED
-/// `DEFAULT_LOG_STACKING_HEIGHT`.  Enumerability (recursion VK = f(chip-set,
-/// arity)) rests on `pick_log_stacking_height` being unconditional
-/// (jagged_pcs.rs:122): every bundle is honestly 21-round, so the per-proof
-/// verifier rebuild constant-folds to `num_variables = 21`.  A regression that
-/// re-introduced the area-clamp would make `bundle_num_vars` (=
-/// `fri_commitments.len()`) and `log_stacking_height` vary with the trace area
-/// → program-bytes/VK become clamp-dependent again (breaking enumerability) AND the
-/// masked-tail path Fiat-Shamir-desyncs.  This guard catches that at
-/// program-build time (it runs for both the real proof and the enum dummy,
-/// which take the same branch).  Called from every recursion stage's per-proof
-/// verifier rebuild (core / compress / deferred / shrink).
+/// Asserts a recursion bundle commits at `DEFAULT_LOG_STACKING_HEIGHT` = 21.
+///
+/// A recursion key is a function of the chip set and the arity only if every
+/// bundle has the same stacking height: then `num_variables = 21` in every
+/// verifier rebuild, whatever the trace area. A height that varied with the
+/// area would make the program, and its key, depend on the area. Called from
+/// every stage's per-proof verifier rebuild (core, compress, deferred,
+/// shrink), for the real proof and the enumeration dummy alike.
 pub fn assert_recursion_stacking_height_fixed(
     bundle_num_vars: usize,
     log_stacking_height: u32,
@@ -183,10 +172,9 @@ where
     type WitnessVariable = st::ChipEvaluation<Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        // CRITICAL: read MUST consume the felt stream in the SAME order
-        // `write` emits it — main, prep, main_full, prep_full.  The
-        // `Vec`/`Option` Witnessable impls carry no length prefix
-        // (witness/mod.rs:119), so the read here re-derives each field's
+        // `read` must consume the felt stream in the order `write` emits it —
+        // main, prep, main_full, prep_full. The `Vec` / `Option` Witnessable
+        // impls carry no length prefix, so the read here re-derives each field's
         // PRESENCE from `self` (the host-typed proof): `Some` reads, `None`
         // reads nothing.  Because read+write share `&self`, the Option
         // discriminants match by construction.
@@ -225,15 +213,11 @@ where
     type WitnessVariable = st::LogUpEvaluations<Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        // CRITICAL: read must consume the felt stream in the SAME order
-        // `write` emits it — `point` FIRST, then `chip_openings`.  The
-        // `Vec`/`BTreeMap` Witnessable impls carry no length prefix
-        // (witness/mod.rs:119), so reading `chip_openings` before `point`
-        // swapped the two regions in-circuit: `point` ended up holding
-        // the GKR trace@z_gkr opening felts and `chip_openings` held the
-        // point felts.  `verify_zerocheck` (zerocheck.rs:456) then
-        // computed `zerocheck_eq_val` from the opening felts, breaking
-        // the `rlc_eval == point_and_eval.1` identity (zerocheck.rs:579).
+        // `read` must consume the felt stream in the order `write` emits it —
+        // `point` first, then `chip_openings`. The `Vec` / `BTreeMap`
+        // Witnessable impls carry no length prefix, so the other order would
+        // swap the two regions in-circuit and `verify_zerocheck` would
+        // evaluate eq(·, z) at opening values.
         let point = self.point.read(builder);
         let chip_openings: BTreeMap<String, st::ChipEvaluation<Ext<C::F, C::EF>>> = self
             .chip_openings
@@ -410,17 +394,16 @@ impl<C> Witnessable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
+    /// (main commitment, public values, LogUp-GKR proof, zerocheck proof, the
+    /// lifted evaluation proof with its PCS proof witnessed inline, the
+    /// per-chip openings at z in name order, the preprocessed round's inputs).
     type WitnessVariable = (
         [Felt<C::F>; 8],
         Vec<Felt<C::F>>,
         st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
         st::PartialSumcheckProof<Ext<C::F, C::EF>>,
-        // was the host `EvaluationProof` enum (passthrough); now
-        // the lifted form carrying the inline-witnessed basefold proof.
         LiftedEvalProof<C>,
-        // per-chip trace@z openings (name order).
         crate::basefold_chip_opened_values::JaggedShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
-        // The preprocessed opening round's witnessed inputs.
         PreprocessedRoundWitness<C>,
     );
 
@@ -607,8 +590,7 @@ where
     }
 }
 
-/// Convert the host `ShardOpenedValues` (legacy 4-batch
-/// FRI shape) into the BaseFold-pipeline per-chip opening bundle.
+/// Convert the host `ShardOpenedValues` into the per-chip opening bundle.
 ///
 /// Only `preprocessed.local`, `main.local`, and the cumulative sums are
 /// carried; `next`/`permutation`/`quotient` have no analog in the
@@ -631,10 +613,9 @@ fn basefold_opened_values_from_host(
             main: crate::basefold_chip_opened_values::JaggedAirOpenedValues {
                 local: c.main.local.clone(),
             },
-            // the REAL big-endian height bits were carried
-            // host-side in `quotient[0]` (set by the host prover) — the
-            // VirtualGeq threshold for `full_geq`.  Fall back to a 1-elt zero stub if
-            // absent (legacy/empty proofs).
+            // The big-endian bits of the chip height, carried in
+            // `quotient[0]`: the threshold of `full_geq`. A single zero when
+            // the proof carries none (an empty shard).
             degree: c.quotient.first().cloned().unwrap_or_else(|| vec![InnerChallenge::ZERO]),
             local_cumulative_sum: c.local_cumulative_sum,
             global_cumulative_sum: c.global_cumulative_sum,
@@ -771,7 +752,7 @@ where
 /// lift fields that need bit-decomposed metadata
 /// (`params.col_prefix_sums[k]` and `row_counts[round][chip]`); the
 /// in-circuit verifier Horner-decodes these via
-/// `final_area = bit + 2*final_area` (recursive_jagged_pcs.rs:262-272).
+/// `final_area = bit + 2*final_area`.
 ///
 /// Convention: matches the verifier's MSB-first Horner accumulation
 /// — the first felt in the returned Vec is the MOST-SIGNIFICANT bit
@@ -811,11 +792,9 @@ where
 /// [`MerkleOpening`]) into the per-round per-query
 /// [`RecursiveBasefoldComponentOpening`] vector.
 ///
-/// `leaf_values` passes through verbatim.  `merkle_path_bytes` is
-/// left empty — the in-circuit verifier doesn't read these bytes,
-/// it walks the Merkle path through the digest field; bytes are a
-/// legacy carrier the recursion-circuit retains for
-/// witness-stream layout compatibility but does not consume.
+/// `leaf_values` passes through verbatim. `merkle_path_bytes` stays empty:
+/// the in-circuit verifier walks the Merkle path through the digests and
+/// never reads the bytes, which only keep the witness layout.
 fn host_component_opening_to_recursive(
     opening: &MerkleOpening<InnerVal, JaggedMmcs>,
 ) -> Vec<RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge>> {
@@ -845,13 +824,9 @@ fn host_component_opening_to_recursive(
 /// parses those into the in-circuit `[EF; 2]` shape and copies the
 /// Merkle siblings into `merkle_path_digests` for binding.
 ///
-/// **Position field**: set to `0` placeholder.  This is INFORMATIONAL
-/// ONLY — the in-circuit verifier samples its own query positions
-/// from the FRI challenger transcript at
-/// [`basefold_verifier.rs:837-839`] and never reads `.position`.
-/// (Confirmed by grep: zero `.position` reads in basefold_verifier.rs.)
-/// No fix needed at this site; binding-soundness happens through the
-/// `merkle_path_digests` field, not through `position`.
+/// `position` is set to 0: the in-circuit verifier samples its own query
+/// positions from the transcript and never reads it. The opening is bound
+/// through `merkle_path_digests`.
 fn host_query_opening_to_recursive(
     opening: &MerkleOpening<InnerVal, JaggedMmcs>,
 ) -> Vec<RecursiveBasefoldOpening<InnerVal, InnerChallenge>> {
@@ -887,9 +862,8 @@ fn host_query_opening_to_recursive(
                     .expect("EF parse from D base elements")
                 })
                 .collect();
-            // Thread the bundle's MT::Proof structured digests
-            // through.  See verifier site at
-            // basefold_verifier.rs:957-959 for promotion + binding.
+            // The Merkle siblings as structured digests; the verifier
+            // promotes and binds them.
             RecursiveBasefoldOpening {
                 position: 0,
                 block,
@@ -1310,19 +1284,21 @@ where
 /// `HV` is pinned to `KoalaBearPoseidon2Outer` (the only outer hasher); the
 /// generic param keeps the output type aligned with the dispatch call site.
 ///
-/// Value-independence: the proof-specific values
-/// (`preread_basefold_proof`, `preread_sumcheck`, `preread_jagged_eval`,
-/// `preread_expected_eval`, `preread_commit_root`) are PRE-READ from the gnark
-/// witness stream (`read_outer_eval_bundle_impl`, routed via
-/// `JaggedShardProof::read`) — witnessed rather than baked as `builder.constant`,
-/// so the gnark R1CS verifies any fresh wrap proof.  Only the SHAPE metadata
-/// (`bundle.packing`, column/row counts) is read here as compile-time constants
-/// (shape-derived, identical across proofs of the same shape).
+/// Value-independence: the proof-specific values (`preread_basefold_proof`,
+/// `preread_sumcheck`, `preread_jagged_eval`, `preread_expected_eval`,
+/// `preread_commit_root`, `preread_preceding_roots`) are read from the gnark
+/// witness stream ahead of time (`read_outer_eval_bundle_impl`, via
+/// `JaggedShardProof::read`), because the stream is positional and this
+/// function runs long after the reader. Witnessed rather than baked, so the
+/// R1CS verifies any wrap proof of the shape. Only the shape metadata
+/// (`bundle.packing`, column and row counts) is read here as constants.
+///
+/// `vk_preprocessed_cap` is the verifying key's preprocessed commitment; the
+/// preceding round's root is asserted equal to it (see the bind below).
 #[allow(clippy::too_many_arguments)]
 pub fn lift_jagged_basefold_bundle_outer<C>(
     builder: &mut Builder<C>,
     bundle: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<OuterValMmcs>,
-// Witnessed proof-specific values (replace the const-builds).
     preread_basefold_proof: RecursiveBasefoldProof<
         Felt<C::F>,
         Ext<C::F, C::EF>,
@@ -1332,9 +1308,6 @@ pub fn lift_jagged_basefold_bundle_outer<C>(
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_expected_eval: Ext<C::F, C::EF>,
     preread_commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1],
-// The preceding rounds' raw roots, PRE-READ alongside `preread_commit_root`.
-// Pre-read for the same reason every other value here is: the witness stream
-// is positional and this function runs long after the reader.
     preread_preceding_roots: &[[zkm_recursion_compiler::ir::Var<C::N>; 1]],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
@@ -1356,26 +1329,19 @@ where
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_core::stark::KoalaBearPoseidon2Outer as HV;
 
-    // REAL per-chip shaping from the OUTER bundle's packing
-    // `packing.round_counts` carries `(row_count, column_count)` for the REAL
-    // chips of each committed round, in round order and with NO stacking
-    // padding — which is exactly the shape this lift must hand the verifier,
-    // because the pads travel separately as `padding_row_heights`.
+    // Per-chip shape from the outer bundle's packing. `packing.round_counts`
+    // carries `(h_i, w_i)` for the real chips of each committed round, in
+    // round order and without stacking padding, which travels separately as
+    // `padding_row_heights`. That is the shape the verifier needs.
     //
-    // `packing.column_counts` is the FLATTENED column space and ALSO carries
-    // the `<stacking-pad:*>` groups (jagged_pcs.rs pushes one JaggedChipInfo
-    // per pad column).  Using it as the chip list therefore (a) double-counts
-    // every pad — once as a "chip" whose sentinel-walk height is the pad
-    // height, once as `padding_row_heights` — and (b) collapses the
-    // preprocessed + main rounds into one, which puts the round-boundary pads
-    // at the wrong column index.  MEASURED on the wrap bundle: 17 groups /
-    // 413 columns whose heights already sum to `total_values` (2^25), plus
-    // pads of [2, 1] columns worth 9,368,144 more rows, so step-7's
-    // `acc == final_area` assert failed 40,072,032 vs 33,554,432 inside the
-    // gnark outer circuit.
+    // `packing.column_counts` is the flattened column space and also carries
+    // one `<stacking-pad:*>` group per pad column. Read as the chip list it
+    // would count every pad twice and merge the two rounds, so that
+    //   Σ h_i · w_i + pads  ≠  total_values
+    // and the prefix-sum assert `acc = final_area` fails in the circuit.
     //
-    // The sentinel walk over `column_counts` stays as the fallback for a
-    // degenerate / legacy bundle that carries no `round_counts`.
+    // The walk over `column_counts` remains for a bundle without
+    // `round_counts` (an empty one).
     let packing_column_counts: Vec<usize> = bundle.packing.column_counts.clone();
     let packing_row_counts: Vec<usize> = {
         let offsets = &bundle.packing.offsets;
@@ -1515,35 +1481,20 @@ where
     // required them to be the roots the verifying key committed, so a prover
     // could open a preprocessed round of its own choosing. This is the bind.
     //
-    // A plain equality is the RIGHT comparison on this ring, and that is not an
-    // approximation of the inner bind: the outer key stores the RAW root
-    // (`PrepCommitRoot::commit_root` for `PrecomputedJaggedCommitGeneric<
-    // OuterValMmcs>` returns `commit.original_commitment` unmixed --
-    // recursion/core/src/stark/config.rs:426), whereas the inner key stores
-    // `compress([root, hash(counts)])` (pcs/src/kb31_poseidon2.rs:301). So the
-    // inner ring must re-derive the mix to compare, and here there is no mix to
-    // undo.
+    // A plain equality is the right comparison on this ring: the outer key
+    // stores the raw root (`PrepCommitRoot::commit_root` returns
+    // `commit.original_commitment` unmixed), whereas the inner key stores
+    // `compress(root, H(counts))`, which the inner ring re-derives to compare.
     //
-    // The consequence, stated plainly: this binds the preceding round's ROOT to
-    // the key, and it does NOT bind that round's GEOMETRY. The inner ring gets
-    // geometry for free because the key's digest has the counts hashed into it;
-    // the outer key has no counts in it, so pinning the outer geometry the same
-    // way means mixing counts into `commit_root` for this ring -- a verifying-key
-    // format change, hence new Groth16 artifacts. Left out deliberately: the
-    // root bind costs one BN254 equality and needs no ceremony, and shipping it
-    // separately is worth more than bundling it with a key migration.
+    // This binds the preceding round's root to the key, not its geometry.
+    // The inner key has the counts hashed into it; the outer key has none, so
+    // binding the outer geometry the same way would mean mixing the counts
+    // into the outer `commit_root`: a key-format change and new Groth16
+    // artifacts. The chip count and widths are fixed by the machine, so what
+    // stays proof-claimed is the row counts.
     //
-    // Why the skip was there: `jagged_hash_bind_in_circuit()` returns false for
-    // this ring (hash.rs) and `commit_root` returns the raw root, both justified
-    // by the same premise -- "the wrap machine also opens a single round, so
-    // there is no preceding round whose geometry would need pinning here", with
-    // the note "if the wrap ever grows a preprocessed opening round, it needs
-    // its own BN254 bind". That premise is false, and the same module contradicts
-    // it: `outer_prep_precompute` exists (config.rs:438) precisely "so the
-    // preprocessed round can be OPENED", every recursion chip has a nonzero
-    // `preprocessed_width`, and `wrap_basefold.rs` therefore builds
-    // `column_counts_by_round = [prep_widths, main_widths]`. The wrap machine
-    // opens TWO rounds. The deferred conditional is already live.
+    // The wrap machine opens two rounds, [prep, main]: every recursion chip
+    // has a preprocessed trace.
     if let Some(key_cap) = vk_preprocessed_cap {
         // EXACTLY one preceding round, not "at most one".  The key carrying a
         // preprocessed cap IS the statement that the machine commits a
@@ -1578,18 +1529,14 @@ where
     let jagged_eval_proof =
         JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> { partial_sumcheck_proof: preread_jagged_eval };
 
-    // REAL: col_prefix_sums with artificial-zero insertion (mirror)
-    // CRITICAL (mirror of the INNER lift, shard_level_witness.rs:1457): the
-    // per-entry bit width must equal the branching program's
-    // `half = proof_point.len()/2` (jagged_eval.rs), which the host jagged-eval
-    // prover sets to `log_m + 1` = z_trace.len() (jagged_eval_sumcheck.rs).
-    // Using `max_log_row_count + 1` is too narrow when the total column area
-    // exceeds 2^max_log_row_count (true for the wide WrapAir trace):
-    // col_prefix_sums.last() (= total_values) then CLAMPS and the step-7
-    // prefix-sum felt-assert (acc == final_area) fails
-    // (e.g. 10813456 vs 8388607).  Derive the width from the jagged-eval
-    // sumcheck point length, falling back to max_log_row_count+1 only for the
-    // dummy/empty jagged_eval.
+    // col_prefix_sums, with the artificial zero columns, as in the inner lift.
+    // Each entry is decomposed into `half = |proof_point| / 2 = log_m + 1`
+    // bits, the width the branching program reads. `max_log_row_count + 1`
+    // is too narrow once the total area exceeds 2^max_log_row_count (the wide
+    // wrap trace): the last entry, total_values, would not fit and the
+    // prefix-sum assert `acc = final_area` would fail. The width is read off
+    // the jagged-eval point, and `max_log_row_count + 1` is used only for an
+    // empty jagged_eval.
     let jagged_eval_point_len = bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
     let bits_per_entry =
         if jagged_eval_point_len >= 2 { jagged_eval_point_len / 2 } else { max_log_row_count + 1 };
@@ -1867,13 +1814,10 @@ fn write_sumcheck_to_stream<C>(
 ///   (witnessed as `[Felt<F>; 8]`).
 /// * `column_counts` ← caller-supplied `column_counts_by_round` (verbatim).
 ///
-/// **Resolved values (not placeholders)**:
-/// * `expected_eval` ← `bundle.reduction.q_at_z` — the verifier's
-///   closing identity at recursive_jagged_pcs.rs:279 asserts
-///   `jagged_eval * expected_eval == sumcheck.point_and_eval.1`
-///   which mirrors the host verifier's terminal
-///   `q_at_z * w(z) == current_claim` (jagged_sumcheck.rs verify
-///   path); `q_at_z` is exactly the prover-emitted `expected_eval`.
+/// **Resolved values**:
+/// * `expected_eval` ← `bundle.reduction.q_at_z`: the verifier's closing
+///   identity `jagged_eval · expected_eval = sumcheck.point_and_eval.1` is the
+///   host's terminal `q(z) · w(z) = claim`.
 /// * `params.col_prefix_sums` ← bundle.packing.offsets walked in
 ///   lock-step with column_counts_by_round, with cc[len-2]+1
 ///   artificial-zero columns inserted at round boundaries.  Final
@@ -1881,43 +1825,22 @@ fn write_sumcheck_to_stream<C>(
 /// * `row_counts` ← `row_counts_by_round` parameter when caller
 ///   supplies it (each per-chip count materialized as a single Felt
 ///   constant); falls back to zero placeholders when None.
-/// * `position` field on RecursiveBasefoldOpening — informational
-///   only; verifier samples positions from challenger transcript.
+/// * `position` on each opening — unused; the verifier samples positions
+///   from the transcript.
 ///
-/// **STRUCTURAL TODO** (the full call-site swap is blocked on these):
-/// * `jagged_eval_proof` — Ziren's bundle does not carry a
-///   jagged-eval sub-proof.  The placeholder zero-coefs satisfy the
-///   `real_jagged_evaluator_fn` closure trivially when ALL adjacent
-///   fields are also zero (the existing `lift_evaluation_proof_bytes`
-///   regime) but break under partial-real data (jagged_eval derived
-///   from zeros vs real expected_eval × real sumcheck.point_and_eval.1
-///   fails the closing identity).  To resolve: either (a) emit the
-///   stark-side jagged-eval sub-protocol so the bundle
-///   carries it, or (b) wire the verifier-side
-///   `placeholder_jagged_evaluator_fn` for the basefold path
-///   (loosens soundness — temporary unblock only).
-/// * Genericity of `JaggedShardProof<F, EF>` — the wire-format
-///   field `evaluation_proof: Vec<u8>` is generic-friendly but
-///   replacing it with `JaggedPcsProof` (concrete
-///   InnerVal/InnerChallenge) requires either dropping the struct
-///   generics or cfg-gating the field per feature.  All real
-///   instantiations use `<InnerVal, InnerChallenge>` so the
-///   generics aren't load-bearing — recommended fix is dropping
-///   them entirely (struct → concrete).
+/// Output type matches [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`].
 ///
-/// Output type matches [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
-/// so downstream callers can swap with no shape change.
-/// BaseFold-over-BN254 wrap: re-key a host BaseFold proof's
+/// Re-key a host BaseFold proof's
 /// raw digests (read as inner KoalaBear `[InnerVal; 8]` roots) onto the
 /// generic `HV::Digest` digest type.  Inner (`HV = KoalaBearPoseidon2`):
 /// identity (`Digest = [KoalaBear; 8]`).  Outer (`HV =
 /// KoalaBearPoseidon2Outer`): maps to the default BN254 digest — the
 /// OUTER ring's real BN254 commitments are bound by a dedicated outer
 /// bundle path, so the inner-root lift is never the binding digest there.
-// generic over the proof's base/ext type so it rekeys BOTH the raw
-// host proof (<InnerVal, InnerChallenge>) AND the witnessed variable
-// proof (<Felt, Ext>) — only the `[InnerVal;8]` digests are converted to
-// `HV::Digest`; uni_poly/sibling_pair/final_poly/etc. pass through unchanged.
+///
+/// Generic over the proof's base and extension types, so it re-keys both the
+/// host proof (`<InnerVal, InnerChallenge>`) and the witnessed one
+/// (`<Felt, Ext>`): only the `[InnerVal; 8]` digests become `HV::Digest`.
 fn rekey_basefold_digests_to_hv<C, HV, F, EF>(
     src: RecursiveBasefoldProof<F, EF, [InnerVal; 8]>,
 ) -> RecursiveBasefoldProof<F, EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>
@@ -1992,11 +1915,10 @@ where
 /// (`RecursiveBasefoldProof<Felt, Ext, HV::Digest>`) into the verifier's
 /// `HV::DigestVariable` digest form via `HV::const_digest`.  The verifier's
 /// `type Proof` carries `HV::DigestVariable` digests (not the raw host
-/// `FieldHasher::Digest`), so the const-build (bytes-fallback) inner path and
-/// the OUTER BN254 lift — both of which BAKE digest values — must promote.
-/// (The inner *production* path witnesses its digests in
-/// `read_basefold_proof_from_stream` instead; this is only for the baked
-/// legacy/outer paths where value-independence is unnecessary.)
+/// `FieldHasher::Digest`), so the paths that bake digest values — the
+/// bytes-decoded inner lift and the outer lift — must promote. The inner
+/// proving path witnesses its digests in `read_basefold_proof_from_stream`
+/// instead.
 fn proof_digests_to_digestvar<C, HV>(
     builder: &mut Builder<C>,
     src: RecursiveBasefoldProof<
@@ -2074,11 +1996,11 @@ where
 }
 
 /// const-build the basefold proof from a host bundle (the
-/// `Witnessable::read` path — values baked, NOT witnessed).  Used by
-/// the legacy bytes-deserialize lift paths (`lift_evaluation_proof_bytes`,
-/// `lift_jagged_basefold_bundle_from_bytes`) which deserialize the bundle at
-/// lift time and so have no inline pre-read proof.  The production inner path
-/// pre-reads in `JaggedShardProof::read` instead (value-independent).
+/// `Witnessable::read` path — values baked, not witnessed). Used by the lift
+/// paths that decode the bundle from bytes at lift time
+/// (`lift_evaluation_proof_bytes`, `lift_jagged_basefold_bundle_from_bytes`)
+/// and so have nothing read ahead. The proving path reads ahead in
+/// `JaggedShardProof::read` instead, which keeps the program value-independent.
 ///
 /// Digests are const-promoted to `HV::DigestVariable` (rekey raw
 /// KoalaBear roots → `HV::Digest`, read scalars, then const_digest each) so
@@ -2115,8 +2037,8 @@ where
         &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
     );
     let ee = builder.constant(bundle.reduction.q_at_z);
-    // const-build the commit cap root ([Felt;8]) for the bytes-fallback
-    // path (this legacy path bakes; the production inline path witnesses it).
+    // The commit cap root as constants: this path bakes, the proving path
+    // witnesses it.
     let cap_roots = bundle.commit.original_commitment.roots();
     let cr: [Felt<C::F>; 8] = if cap_roots.is_empty() {
         core::array::from_fn(|_| builder.constant(C::F::ZERO))
@@ -2126,62 +2048,51 @@ where
     (bp, sc, je, ee, cr)
 }
 
-// The lift reads every witness component the bundle carries, each named and
-// explicit, so the root vector's order `[preceding.., main]` is visible at the
-// call site rather than implied by a struct.
+/// Lift a jagged bundle into the circuit from values read ahead of time.
+///
+/// Every witness component is a named argument, so the root order
+/// `[preceding.., main]` is visible at the call site:
+///
+/// * `preread_pcs_proof` — the inner PCS proof (`RecursiveBasefoldProof`, or
+///   `RecursiveStackedWhirProof` under WHIR), read from the witness stream in
+///   `JaggedShardProof::read` with its digests. Its values are witness inputs,
+///   not constants, which keeps the program value-independent; the lift only
+///   threads it into the stacked wrapper.
+/// * `preread_batch_evaluations` — the per-round per-stripe evaluations the
+///   stacked layer interpolates; the same variables, not a second read.
+/// * `preread_sumcheck`, `preread_jagged_eval`, `preread_expected_eval` — the
+///   reduction sumcheck, the jagged-eval sub-sumcheck and its expected value.
+/// * `preread_commit_root` — the raw root the PCS opening binds against.
+/// * `preread_modified_commitment` — the observed commitment,
+///   `compress(root, H(geometry))`; equal to the root where no geometry is
+///   bound.
+/// * `preceding_commitments` — the rounds before the main one, in order. The
+///   preprocessed round's is the verifying key's, supplied by the verifier.
+///   Empty for a single-round proof.
+/// * `padding_heights` — one stacking-pad column height per round. The pad is
+///   part of the column space (it moves `col_prefix_sums` and the `z_col`
+///   count) but not of a round's geometry, which the hash-bind covers alone.
+/// * `column_counts_by_round` — each round's real chip widths, no pad.
+/// * `chip_height_felts` — the witnessed per-chip heights in name order,
+///   parallel to the widths. When given, `col_prefix_sums` and `row_counts`
+///   are rebuilt in the circuit from them; when `None`, they are read off the
+///   bundle as constants.
 #[allow(clippy::too_many_arguments)]
 pub fn lift_jagged_bundle_generic<C, HV, PP>(
     builder: &mut Builder<C>,
     bundle: &JaggedPcsProof,
-    // the inner PCS proof's felt/ext values, PRE-READ from the
-    // witness stream in `JaggedShardProof::read`.  This is what makes the
-    // recursion program value-independent: the proof values are witness
-    // inputs, not baked constants.  Digests are witnessed too ([Felt;8] =
-    // inner DigestVariable), so no rekey is needed below.  Generic over the
-    // inner PCS proof type (`RecursiveBasefoldProof` on the BaseFold path,
-    // `RecursiveStackedWhirProof` under the jagged-WHIR gate) — the lift
-    // only threads it into the stacked wrapper's `pcs_proof` slot.
     preread_pcs_proof: PP,
-    // the SAME witnessed per-round per-stripe evaluations the stacked layer
-    // interpolates (reuse, don't re-read → no double-consume).
     preread_batch_evaluations: Vec<Vec<Ext<C::F, C::EF>>>,
-    // pre-read (witnessed) reduction sumcheck, jagged-eval
-    // sub-sumcheck, and expected_eval — replace the lift's const-builds.
     preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_expected_eval: Ext<C::F, C::EF>,
-    // the witnessed RAW commit cap root for original_commitments[0] (the
-    // value the BaseFold open binds against); replaces the baked const_digest
-    // of the proof-specific root (value-independence).
     preread_commit_root: [Felt<C::F>; 8],
-    // the witnessed MODIFIED (FS-observed) digest = main_commitment, for
-    // modified_commitments[0] (the value the hash-bind assert checks).  On the
-    // hash-bind-off path this equals preread_commit_root.
     preread_modified_commitment: [Felt<C::F>; 8],
-    // The commitments of the rounds BEFORE the main one, in round order.  The
-    // preprocessed round's commitment
-    // is the VERIFYING KEY's, so the verifier supplies it rather than trusting
-    // the proof for it.  Empty for a single-round proof.
     preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
-    // One stacking-PADDING column height per opening round, in round order.
-    // The lift appends the column itself rather than taking it in
-    // `column_counts_by_round`, because the two lists are used for different
-    // things: the padding is part of the COLUMN SPACE (it moves
-    // `col_prefix_sums` and the z_col count) but NOT part of a round's
-    // GEOMETRY, and the hash-bind is taken over the geometry alone -- the host
-    // hashes `round_counts.last()`, its real chips (verifier.rs:379).
     padding_heights: &[Vec<Felt<C::F>>],
     max_log_row_count: usize,
-    // Each round's REAL chip widths, no padding column.
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
-    // per-chip WITNESSED height felts (2^log_h),
-    // name-sorted (parallel to each round's chip widths in
-    // `column_counts_by_round`).  When `Some`, `col_prefix_sums` and
-    // `row_counts` are reconstructed IN-CIRCUIT from these witnessed heights
-    // (value-independent program) instead of baked from the compile-time
-    // `bundle.packing.offsets` / `bundle.commit.chip_dims`.  When `None`,
-    // falls back to the legacy baked path (callers not yet wired / empty).
     chip_height_felts: Option<&[Felt<C::F>]>,
 ) -> JaggedPcsProofVariable<PP, HV::DigestVariable, C::F, C::EF>
 where
@@ -2278,32 +2189,19 @@ where
     let jagged_eval_proof =
         JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> { partial_sumcheck_proof: preread_jagged_eval };
 
-    // REAL: col_prefix_sums with artificial-zero insertion
-    // Walks column_counts_by_round + bundle.packing.offsets in
-    // lock-step, emitting per-real-column bit-decompositions and
-    // per-round artificial-zero columns (the cc[len-2]+1 padding
-    // rule the host prover applies for stripe alignment — see
-    // jagged_pcs_lift.rs:111-118 for the formula derivation).
+    // col_prefix_sums with the artificial zero columns: walk
+    // column_counts_by_round and bundle.packing.offsets together, emitting a
+    // bit decomposition per real column and the per-round zero columns
+    // (cc[len-2] + 1 of them) the prover adds for stripe alignment. A zero
+    // column does not advance the offset, so the sums are non-decreasing and
+    // the last one is total_values. An empty bundle decomposes to zeros.
     //
-    // Artificial columns have zero width, so their cumulative offset
-    // equals the previous column's offset (no advance).  This makes
-    // col_prefix_sums monotonic non-decreasing and ensures the final
-    // entry bit-decodes to bundle.packing.total_values.
-    //
-    // For empty bundles all decompositions reduce to zero-felts,
-    // preserving byte-for-byte compat with the prior placeholder.
-    //
-    // BaseFold-over-BN254 wrap — CRITICAL: the per-entry bit
-    // width must equal the branching program's `half = proof_point.len()/2`
-    // (jagged_eval.rs:223 + compress_basefold.rs:998), which the HOST
-    // jagged-eval prover sets to `log_m + 1` = z_trace.len()
-    // (jagged_eval_sumcheck.rs:534).  Using `max_log_row_count + 1` is too
-    // narrow when the total column area exceeds 2^max_log_row_count (true
-    // for the wide WrapAir trace): col_prefix_sums.last() (= total_values)
-    // then CLAMPS to 2^(max_log_row_count+1)-1 and the step-7 prefix-sum
-    // felt-assert (acc == final_area) fails (e.g. 201326592 vs 8388607).
-    // Derive the width from the jagged-eval sumcheck point length, falling
-    // back to max_log_row_count+1 only for the dummy/empty jagged_eval.
+    // Each entry has `half = |proof_point| / 2 = log_m + 1` bits, the width
+    // the branching program reads. `max_log_row_count + 1` is too narrow once
+    // the total area exceeds 2^max_log_row_count (the wide wrap trace): the
+    // last entry would not fit and `acc = final_area` would fail. The width is
+    // read off the jagged-eval point; `max_log_row_count + 1` only for an
+    // empty jagged_eval.
     let jagged_eval_point_len = bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
     let bits_per_entry =
         if jagged_eval_point_len >= 2 { jagged_eval_point_len / 2 } else { max_log_row_count + 1 };
@@ -2325,25 +2223,18 @@ where
         }
     };
     let jagged_dim_metadata = if let Some(heights) = chip_height_felts {
-        // reconstruct col_prefix_sums IN-CIRCUIT
-        // from the WITNESSED per-chip heights instead of baking
-        // bundle.packing.offsets.  offsets[k] = Σ (prior column heights);
-        // chip i (name-sorted) contributes column_counts[i] columns of
-        // height heights[i] (mirrors pack_traces_jagged jagged.rs:304-309).
-        // The artificial-zero + pad columns share the last real offset; the
-        // final slot is total_values = the running accumulator.
-        // `bits_per_entry = log2(total_area)+1` can reach
-        // 32 when the band-padded total column area lands in [2^30, 2^31)
-        // (band-5: ext_alu 2^24 etc. → total_values ≈ 1.28e9 → log_m=31 →
-        // bits=32).  This is reachable in BOTH FIX-on and FIX-off (band-5
-        // covers any program above band-4).  Every col_prefix_sum VALUE is < total_values < 2^31,
-        // so it genuinely fits in 31 bits — but `num2bits_v2_f` rejects a
-        // 32-bit WIDTH (a single KoalaBear felt is < 2^31; modulus
-        // 2^31-2^24+1).  Decompose only the low 31 bits (range-checked, valid
-        // because v < 2^31) and zero-extend the big-endian MSBs to the full
-        // `bits_per_entry` width.  The high bits are provably 0
-        // (total_values < 2^31).  No-op when bits_per_entry ≤ 31 (every proof
-        // landing on bands 1-4 + core) ⇒ byte-identical there.
+        // col_prefix_sums rebuilt in the circuit from the witnessed heights:
+        //   offset_k = Σ_{j<k} h(column j),
+        // chip i (name order) contributing w_i columns of height h_i, as the
+        // packer lays them out. The zero and pad columns share the last real
+        // offset; the final slot is total_values.
+        //
+        // `bits_per_entry = log2(total_area) + 1` can be 32 when the total
+        // area lies in [2^30, 2^31). Every value is < total_values < 2^31 and
+        // fits in 31 bits, but `num2bits_v2_f` rejects a 32-bit width (a
+        // KoalaBear element is < p < 2^31). So the low 31 bits are decomposed
+        // (range-checked) and the big-endian top bits are zero; for
+        // bits_per_entry ≤ 31 this is the plain decomposition.
         let num2bits_be = |b: &mut Builder<C>, v: Felt<C::F>| -> Vec<Felt<C::F>> {
             let dec_bits = bits_per_entry.min(31);
             // LEAN DECOMPOSITION — hint + booleanity only, no recomposition
@@ -2481,10 +2372,8 @@ where
                 bits_per_entry,
             ));
         }
-        // Final slot = bit-decomp of total_values.  This is what the
-        // verifier's final_area Horner-decode at
-        // recursive_jagged_pcs.rs:262-272 asserts equals the
-        // accumulated row-count sum.
+        // The final slot is total_values, which the verifier's Horner-decoded
+        // final_area must equal: the sum of h_i · w_i.
         if col_prefix_sums.len() < col_prefix_sums_len {
             col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
                 builder,
@@ -2500,11 +2389,9 @@ where
     // to column_counts_by_round).  When None, they are derived from the
     // packer's `bundle.commit.chip_dims` (see the else-branch) — NOT zeroed
     // (zeroing breaks the prefix-sum binding on real proofs).
-    // The verifier reads row_counts[round][chip] as a SINGLE Felt
-    // representing the chip's row count (recursive_jagged_pcs.rs:248-260
-    // dereferences row as a Felt and repeats it `col` times).  Since
-    // max_log_row_count is well within KoalaBear's 31-bit range, the
-    // raw count fits in a single Felt constant.
+    // The verifier reads row_counts[round][chip] as one element, the chip's
+    // row count, repeated once per column; h_i ≤ 2^max_log_row_count < p, so
+    // it fits.
     let row_counts: Vec<Vec<Felt<C::F>>> = if let Some(heights) = chip_height_felts {
         // per-chip row counts = the WITNESSED heights (2^log_h).  `heights` runs
         // across ALL rounds in column order, so each round takes its own SLICE —
@@ -2536,8 +2423,7 @@ where
         // row_counts NOT caller-plumbed: derive the padded per-chip heights
         // (2^log_height_padded) from the packer's own `bundle.commit.chip_dims`
         // — exactly the dimensions that produced `bundle.packing.offsets`, so
-        // the verifier's prefix-sum consistency check
-        // (recursive_jagged_pcs.rs:248-272) reconciles.  An all-zero
+        // the verifier's prefix-sum check reconciles. An all-zero
         // fallback would make that check assert the real (non-zero) offsets
         // equal 0, failing on every non-degenerate proof.  A chip's
         // preprocessed + main traces share one height,
@@ -2860,8 +2746,7 @@ mod tests {
 
     /// converter output flows through the existing
     /// `PartialSumcheckProof` Witnessable impl.  Confirms the bridge
-    /// composes with the pre-existing recursion-circuit witness
-    /// surface (basefold_witness.rs:73).
+    /// composes with the recursion circuit's witness surface.
     #[test]
     fn jagged_reduction_converter_witnessable_composition() {
         use p3_field::PrimeCharacteristicRing;
@@ -3000,8 +2885,7 @@ mod tests {
     }
 
     /// converter output flows through the existing
-    /// `RecursiveBasefoldProof` Witnessable impl
-    /// (basefold_witness.rs:443) — confirms the bridge composes
+    /// `RecursiveBasefoldProof` Witnessable impl — confirms the bridge composes
     /// end-to-end with the pre-existing witness surface.
     #[test]
     fn host_basefold_converter_witnessable_composition() {
@@ -3021,8 +2905,7 @@ mod tests {
     }
 
     /// bit_decompose_usize_to_felts uses MSB-first ordering that
-    /// matches the verifier's Horner decode at
-    /// recursive_jagged_pcs.rs:262-272 (`final_area = bit + 2*final_area`).
+    /// matches the verifier's Horner decode (`final_area = bit + 2*final_area`).
     #[test]
     fn bit_decompose_zero_yields_all_zero_felts() {
         use p3_field::PrimeCharacteristicRing;
@@ -3296,7 +3179,7 @@ mod tests {
     /// NEGATIVE binding guard: the per-chip
     /// heights derived from `bundle.commit.chip_dims` (2^log_height_padded)
     /// must reconcile the packer's `packing.offsets` via the verifier's
-    /// prefix-sum accumulation (recursive_jagged_pcs.rs:248-272), and an
+    /// prefix-sum accumulation, and an
     /// all-zero fallback must NOT (it would assert the real, non-zero offsets
     /// equal 0 — failing every non-degenerate proof).  Pure-usize mirror of
     /// the in-circuit check; the e2e compress gate exercises the same logic
@@ -3314,7 +3197,7 @@ mod tests {
         let heights: Vec<usize> = chip_dims.iter().map(|&(_w, log_h)| 1usize << log_h).collect();
         assert_eq!(heights, vec![16, 16, 16]);
 
-        // Verifier reconciliation (recursive_jagged_pcs.rs:248-272) in usize:
+        // The verifier's prefix-sum reconciliation, in usize:
         // repeat each chip's height `column_count` times, accumulate, and
         // assert the running sum equals each offset, ending at total_values.
         let reconciles = |rows: &[usize]| -> bool {
