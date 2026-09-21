@@ -9,10 +9,9 @@ use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, PrimeField};
 
 use super::basefold_constraint_folder::{
-    compute_padded_row_adjustment_shard_host, eval_constraints_shard_host,
-    ShardConstraintFolder,
+    compute_padded_row_adjustment_shard_host, eval_constraints_shard_host, ShardConstraintFolder,
 };
-use super::shard_proof::{JaggedShardProof, FoldOrientation};
+use super::shard_proof::{FoldOrientation, JaggedShardProof};
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
 use crate::lookup::LookupKind;

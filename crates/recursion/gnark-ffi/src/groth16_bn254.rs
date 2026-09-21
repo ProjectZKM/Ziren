@@ -1,8 +1,7 @@
 /// The recursion verifying-key-allowlist root baked into the generated Solidity
 /// verifier. Kept next to `crates/verifier/bn254-vk/vk_root.bin`, which
 /// `cargo run -p zkm-prover --bin write_vk_root --release` regenerates.
-static VK_ROOT_BYTES: &[u8; 32] =
-    include_bytes!("../../../verifier/bn254-vk/vk_root.bin");
+static VK_ROOT_BYTES: &[u8; 32] = include_bytes!("../../../verifier/bn254-vk/vk_root.bin");
 
 use std::{
     fs::File,

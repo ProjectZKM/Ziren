@@ -289,7 +289,16 @@ mod malformed_input {
 
     #[test]
     fn vkey_hash_decoding_is_total() {
-        for s in ["", "0", "0x", "0xzz", "00b005e0", "0x00b005e0", "not hex at all", "0x\u{20ac}\u{20ac}"] {
+        for s in [
+            "",
+            "0",
+            "0x",
+            "0xzz",
+            "00b005e0",
+            "0x00b005e0",
+            "not hex at all",
+            "0x\u{20ac}\u{20ac}",
+        ] {
             let _ = decode_zkm_vkey_hash(s);
         }
         assert!(decode_zkm_vkey_hash(HASH).is_ok());

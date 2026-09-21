@@ -196,7 +196,6 @@ pub enum SyscallCode {
     /// Executes the `POSEIDON2_PERMUTE` precompile.
     POSEIDON2_PERMUTE = 0x00_01_00_30,
 
-
     SYS_LINUX = 4000, // not real syscall, used for represent all linux syscalls
 
     UNIMPLEMENTED = 0xFF_FF_FF_FF,

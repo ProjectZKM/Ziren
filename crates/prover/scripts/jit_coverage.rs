@@ -24,8 +24,7 @@ fn main() {
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
 
-    let all: Vec<ZKMProofShape> =
-        ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
+    let all: Vec<ZKMProofShape> = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
     eprintln!("[JIT-COV] {} shapes enumerated", all.len());
 
     // One program per category is enough to characterise the mix; the

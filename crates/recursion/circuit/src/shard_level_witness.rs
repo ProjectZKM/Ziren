@@ -2732,10 +2732,11 @@ mod tests {
     #[test]
     fn shard_proof_witness_compiles() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let proof = zkm_pcs::shard_level::shard_proof::JaggedShardProof::<
-            InnerVal,
-            InnerChallenge,
-        >::empty(std::array::from_fn(|_| InnerVal::ZERO), 8);
+        let proof =
+            zkm_pcs::shard_level::shard_proof::JaggedShardProof::<InnerVal, InnerChallenge>::empty(
+                std::array::from_fn(|_| InnerVal::ZERO),
+                8,
+            );
         let (
             main_commit,
             pvs,

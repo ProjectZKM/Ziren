@@ -30,10 +30,7 @@ use zkm_derive::AlignedBorrow;
 use zkm_pcs::Word;
 
 use crate::{
-    air::{
-        WordAirBuilder, ZKMCoreAirBuilder, TIMESTAMP_HIGH_LIMB_BITS,
-        TIMESTAMP_HIGH_LIMB_MASK,
-    },
+    air::{WordAirBuilder, ZKMCoreAirBuilder, TIMESTAMP_HIGH_LIMB_BITS, TIMESTAMP_HIGH_LIMB_MASK},
     instruction::InstructionCols,
     memory::{RegisterCols, RegisterReadCols, RegisterReadWriteCols},
 };

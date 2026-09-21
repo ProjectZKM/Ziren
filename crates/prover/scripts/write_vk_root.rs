@@ -49,8 +49,7 @@ fn main() {
     let mut out = [0u8; 32];
     out[32 - be.len()..].copy_from_slice(&be);
 
-    let dest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../verifier/bn254-vk/vk_root.bin");
+    let dest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../verifier/bn254-vk/vk_root.bin");
     std::fs::write(&dest, out).expect("write vk_root.bin");
     println!("wrote {} = 0x{}", dest.display(), hex::encode(out));
 }

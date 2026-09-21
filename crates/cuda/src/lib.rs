@@ -159,9 +159,10 @@ impl Default for ZKMGpuServer {
                     None
                 };
             let port = if let Ok(port) = std::env::var("CUDA_PORT") {
-                Some(port.parse().unwrap_or_else(|e| {
-                    panic!("CUDA_PORT=`{port}` is not a port number: {e}")
-                }))
+                Some(
+                    port.parse()
+                        .unwrap_or_else(|e| panic!("CUDA_PORT=`{port}` is not a port number: {e}")),
+                )
             } else {
                 None
             };
@@ -182,7 +183,11 @@ fn core_transport(op: &'static str, e: impl std::fmt::Display) -> ZKMCoreProverE
     ZKMCoreProverError::IoError(std::io::Error::other(format!("CUDA RPC `{op}` failed: {e}")))
 }
 
-fn core_codec(op: &'static str, what: &'static str, e: impl std::fmt::Display) -> ZKMCoreProverError {
+fn core_codec(
+    op: &'static str,
+    what: &'static str,
+    e: impl std::fmt::Display,
+) -> ZKMCoreProverError {
     ZKMCoreProverError::SerializationError(Box::new(bincode::ErrorKind::Custom(format!(
         "CUDA RPC `{op}`: could not {what}: {e} (a truncated reply or a server/client version \
          mismatch reaches here)"
@@ -193,7 +198,11 @@ fn rec_transport(op: &'static str, e: impl std::fmt::Display) -> ZKMRecursionPro
     ZKMRecursionProverError::RuntimeError(format!("CUDA RPC `{op}` failed: {e}"))
 }
 
-fn rec_codec(op: &'static str, what: &'static str, e: impl std::fmt::Display) -> ZKMRecursionProverError {
+fn rec_codec(
+    op: &'static str,
+    what: &'static str,
+    e: impl std::fmt::Display,
+) -> ZKMRecursionProverError {
     ZKMRecursionProverError::RuntimeError(format!(
         "CUDA RPC `{op}`: could not {what}: {e} (a truncated reply or a server/client version \
          mismatch reaches here)"
@@ -362,8 +371,7 @@ impl ZKMCudaProver {
 
             // Poisoned <=> another thread panicked, i.e. exactly when cleanup
             // matters; recover the guard rather than leak the container.
-            let containers =
-                GPU_CONTAINERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let containers = GPU_CONTAINERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             for (container_name, cleanup_flag) in containers.iter() {
                 if !cleanup_flag.load(Ordering::SeqCst) {
                     cleanup_container(container_name);
@@ -377,8 +385,7 @@ impl ZKMCudaProver {
         std::thread::sleep(Duration::from_secs(2));
 
         let endpoint = format!("http://localhost:{port}/twirp/");
-        let url =
-            Url::parse(&endpoint).map_err(|e| format!("`{endpoint}` is not a URL: {e}"))?;
+        let url = Url::parse(&endpoint).map_err(|e| format!("`{endpoint}` is not a URL: {e}"))?;
         let client = Client::new(url, reqwest::Client::new(), reqwest_middlewares)
             .map_err(|e| format!("could not create the CUDA RPC client: {e}"))?;
 

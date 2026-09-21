@@ -979,8 +979,7 @@ mod test {
         two_round_verify_with(0x5EAF_0420, |_| {}).expect("the honest two-round proof must verify");
 
         match two_round_verify_with(0x5EAF_0420, |p| {
-            let opening =
-                &mut p.basefold_proof.component_polynomials_query_openings_and_proofs[0];
+            let opening = &mut p.basefold_proof.component_polynomials_query_openings_and_proofs[0];
             // One extra column in the first matrix of the first leaf.
             opening.leaves[0].values[0].push(InnerVal::ONE);
         }) {
@@ -996,8 +995,7 @@ mod test {
         two_round_verify_with(0x5EAF_0421, |_| {}).expect("the honest two-round proof must verify");
 
         match two_round_verify_with(0x5EAF_0421, |p| {
-            let opening =
-                &mut p.basefold_proof.component_polynomials_query_openings_and_proofs[0];
+            let opening = &mut p.basefold_proof.component_polynomials_query_openings_and_proofs[0];
             let _dropped =
                 opening.leaves[0].values[0].pop().expect("the matrix has a column to drop");
         }) {

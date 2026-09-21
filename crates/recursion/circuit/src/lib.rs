@@ -48,8 +48,8 @@ pub mod sumcheck;
 pub mod symbolic;
 pub mod univariate;
 pub(crate) mod utils;
-pub mod witness;
 pub mod whir_circuit;
+pub mod witness;
 pub mod zerocheck;
 
 pub use types::*;
@@ -221,8 +221,12 @@ pub trait CircuitConfig: Config {
     ) -> Felt<<Self as Config>::F> {
         let zero_f: Felt<_> = builder.constant(if_zero);
         let one_f: Felt<_> = builder.constant(if_one);
-        Self::select_chain_f(builder, should_swap, core::iter::once(zero_f), core::iter::once(one_f))
-            [0]
+        Self::select_chain_f(
+            builder,
+            should_swap,
+            core::iter::once(zero_f),
+            core::iter::once(one_f),
+        )[0]
     }
 
     fn range_check_felt(builder: &mut Builder<Self>, value: Felt<Self::F>, num_bits: usize) {
@@ -371,7 +375,6 @@ impl CircuitConfig for InnerConfig {
         out
     }
 
-
     fn select_chain_f(
         builder: &mut Builder<Self>,
         should_swap: Self::Bit,
@@ -513,7 +516,6 @@ impl CircuitConfig for WrapConfig {
         builder.push_op(DslIr::AddFI(out, scaled, if_zero));
         out
     }
-
 
     fn select_chain_f(
         builder: &mut Builder<Self>,

@@ -31,8 +31,7 @@ fn main() {
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
     let height = VK_MERKLE_TREE_HEIGHT;
 
-    let all: Vec<ZKMProofShape> =
-        ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
+    let all: Vec<ZKMProofShape> = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
     let sampled: Vec<(usize, ZKMProofShape)> =
         all.into_iter().enumerate().filter(|(i, _)| i % stride == 0).collect();
     eprintln!("[ENUM-COV] shapes to try = {} (stride {})", sampled.len(), stride);

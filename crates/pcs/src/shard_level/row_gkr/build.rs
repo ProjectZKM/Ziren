@@ -172,7 +172,6 @@ mod tests {
     use crate::air::LookupScope;
     use crate::lookup::{Lookup, LookupKind};
 
-
     /// Build a one-chip shard with a single send-interaction whose
     /// trace and lookup are deterministic.  Used to drive end-to-end
     /// shape sanity checks of the pipeline.

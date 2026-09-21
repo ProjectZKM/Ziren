@@ -629,12 +629,7 @@ mod tests {
                     mem_words: 4,
                     flags: PF_RX,
                 },
-                Seg {
-                    vaddr: 0x0040_0020,
-                    words: vec![addiu(0x20)],
-                    mem_words: 1,
-                    flags: PF_RX,
-                },
+                Seg { vaddr: 0x0040_0020, words: vec![addiu(0x20)], mem_words: 1, flags: PF_RX },
             ],
         );
         let err = Program::from(&elf).expect_err("a gapped executable image must be rejected");
@@ -692,10 +687,7 @@ mod tests {
                     flags: PF_RX,
                 }],
             );
-            assert_eq!(
-                Program::from(&elf).expect("an in-range entry must load").pc_start,
-                entry
-            );
+            assert_eq!(Program::from(&elf).expect("an in-range entry must load").pc_start, entry);
         }
     }
 
@@ -757,7 +749,8 @@ mod tests {
         // p_memsz sits 4 bytes after p_filesz in the 32-bit program header.
         let memsz_at = 52 + 20;
         elf[memsz_at..memsz_at + 4].copy_from_slice(&4u32.to_le_bytes());
-        let err = Program::from(&elf).expect_err("p_filesz > p_memsz maps fewer bytes than it reads");
+        let err =
+            Program::from(&elf).expect_err("p_filesz > p_memsz maps fewer bytes than it reads");
         assert!(format!("{err}").contains("exceeds p_memsz"), "got: {err}");
     }
 

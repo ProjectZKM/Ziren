@@ -162,11 +162,9 @@ pub fn build_vk_map<C: ZKMProverComponents>(
     tracing::info!("building compress vk map");
     let (vk_set, panic_indices, height) = if dummy {
         tracing::warn!("Making a dummy vk map");
-        let dummy_set = ZKMProofShape::dummy_vk_map(recursion_shape_config,
-            reduce_batch_size,
-        )
-        .into_keys()
-        .collect::<BTreeSet<_>>();
+        let dummy_set = ZKMProofShape::dummy_vk_map(recursion_shape_config, reduce_batch_size)
+            .into_keys()
+            .collect::<BTreeSet<_>>();
         let height = crate::VK_MERKLE_TREE_HEIGHT;
         assert!(dummy_set.len() <= (1 << height));
         (dummy_set, vec![], height)
@@ -184,9 +182,8 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         let setup_count = AtomicUsize::new(0);
 
         let indices_set = indices.map(|indices| indices.into_iter().collect::<HashSet<_>>());
-        let all_shapes =
-            ZKMProofShape::generate(recursion_shape_config, reduce_batch_size)
-                .collect::<BTreeSet<_>>();
+        let all_shapes = ZKMProofShape::generate(recursion_shape_config, reduce_batch_size)
+            .collect::<BTreeSet<_>>();
         let num_shapes = all_shapes.len();
         tracing::info!("number of shapes: {}", num_shapes);
 
@@ -463,10 +460,7 @@ impl ZKMProofShape {
         let shrink_shapes: Vec<Self> =
             compress_child_classes.last().map(|os| Self::Shrink(os.clone())).into_iter().collect();
 
-        arity_compress_shapes
-            .into_iter()
-            .chain(deferred_shapes)
-            .chain(shrink_shapes)
+        arity_compress_shapes.into_iter().chain(deferred_shapes).chain(shrink_shapes)
     }
 
     pub fn generate_maximal_shapes<'a>(
@@ -1065,8 +1059,7 @@ mod tests {
         use crate::REDUCE_BATCH_SIZE;
         let recursion_shape_config = RecursionShapeConfig::default();
         let all: Vec<ZKMProofShape> =
-            ZKMProofShape::generate(&recursion_shape_config, REDUCE_BATCH_SIZE)
-                .collect();
+            ZKMProofShape::generate(&recursion_shape_config, REDUCE_BATCH_SIZE).collect();
 
         let normalize = all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
         assert_eq!(
@@ -1251,9 +1244,8 @@ mod tests {
     fn test_generate_all_shapes() {
         let recursion_shape_config = RecursionShapeConfig::default();
         let reduce_batch_size = 2;
-        let all_shapes =
-            ZKMProofShape::generate(&recursion_shape_config, reduce_batch_size)
-                .collect::<BTreeSet<_>>();
+        let all_shapes = ZKMProofShape::generate(&recursion_shape_config, reduce_batch_size)
+            .collect::<BTreeSet<_>>();
 
         println!("Number of compress shapes: {}", all_shapes.len());
     }
@@ -1270,8 +1262,7 @@ mod tests {
         use crate::REDUCE_BATCH_SIZE;
         let recursion_shape_config = RecursionShapeConfig::default();
         let all_shapes: BTreeSet<_> =
-            ZKMProofShape::generate(&recursion_shape_config, REDUCE_BATCH_SIZE)
-                .collect();
+            ZKMProofShape::generate(&recursion_shape_config, REDUCE_BATCH_SIZE).collect();
         let num_shapes = all_shapes.len();
         let enum_height = num_shapes.next_power_of_two().ilog2() as usize;
 
@@ -1317,8 +1308,7 @@ mod tests {
         let reduce_batch_size = 2;
 
         let all: BTreeSet<_> =
-            ZKMProofShape::generate(&recursion_shape_config, reduce_batch_size)
-                .collect();
+            ZKMProofShape::generate(&recursion_shape_config, reduce_batch_size).collect();
         let recursion_count =
             all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
 

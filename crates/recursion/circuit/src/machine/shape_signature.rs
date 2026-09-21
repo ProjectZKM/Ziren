@@ -26,7 +26,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use zkm_pcs::shard_level::shard_proof::{JaggedShardProof, EvaluationProof};
+use zkm_pcs::shard_level::shard_proof::{EvaluationProof, JaggedShardProof};
 use zkm_pcs::{InnerChallenge, InnerVal};
 
 /// Hash the structural dimensions of one `JaggedShardProof`, in the order

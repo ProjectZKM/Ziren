@@ -5,7 +5,7 @@ use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::shard_proof::{JaggedShardProof, FoldOrientation};
+use super::shard_proof::{FoldOrientation, JaggedShardProof};
 use crate::air::MachineAir;
 use crate::prover::ShardData;
 use crate::shard_level::row_gkr::top_level::prove_shard_logup_gkr_rows;

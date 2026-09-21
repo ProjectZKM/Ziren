@@ -58,7 +58,10 @@ pub(crate) fn verify_stark_compressed_proof(
     // here made every proof fail with `vk_root mismatch` whenever the map was not exactly a
     // power of two.
     let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> = allowed_vk_map.keys().copied().collect();
-    assert!(leaves.len() <= (1 << VK_MERKLE_TREE_HEIGHT), "vk_map exceeds the fixed merkle capacity");
+    assert!(
+        leaves.len() <= (1 << VK_MERKLE_TREE_HEIGHT),
+        "vk_map exceeds the fixed merkle capacity"
+    );
     leaves.resize(1 << VK_MERKLE_TREE_HEIGHT, [KoalaBear::ZERO; DIGEST_SIZE]);
     let (recursion_vk_root, _merkle_tree) = MerkleTree::<KoalaBear, InnerSC>::commit(leaves);
 

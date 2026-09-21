@@ -307,8 +307,8 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let is_mul: AB::Expr = is_mul.into();
 
         // `eval_variable` with is_div = 0, term for term.
-        let p_result =
-            p_res_param.clone() * (is_add.clone() + is_mul.clone()) + p_a_param.clone() * is_sub.clone();
+        let p_result = p_res_param.clone() * (is_add.clone() + is_mul.clone())
+            + p_a_param.clone() * is_sub.clone();
         let p_add = p_a_param.clone() + p_b.clone();
         let p_sub = p_res_param + p_b.clone();
         let p_mul = p_a_param * p_b;

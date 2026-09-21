@@ -301,9 +301,7 @@ mod basefold_air_assertions {
     };
     use p3_air::Air;
     use p3_koala_bear::KoalaBear;
-    use zkm_pcs::{
-        shard_level::basefold_constraint_folder::ShardConstraintFolder, InnerChallenge,
-    };
+    use zkm_pcs::{shard_level::basefold_constraint_folder::ShardConstraintFolder, InnerChallenge};
 
     /// Compile-time bound: `T: for<'a> Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
     fn assert_basefold_air<T>()

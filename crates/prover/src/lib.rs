@@ -1054,8 +1054,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// any chip reaches `2^cube` rows, and every recursion band is
     /// asserted `<= cube` at shape construction.
     fn pcs_max_log_row_count() -> usize {
-        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-            .max_log_row_count
+        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count
     }
 
     /// Settle a recursion program's rows and pin class — see
@@ -2951,11 +2950,8 @@ pub mod tests {
         // splice indexes past the claim vector. A two-chip prefix used to be
         // accepted because the layout was taken from the proof; it is taken
         // from the machine now, so the fixture has to describe the machine.
-        let chip_names: Vec<String> = compress_machine
-            .chips()
-            .iter()
-            .map(<_ as MachineAir<KoalaBear>>::name)
-            .collect();
+        let chip_names: Vec<String> =
+            compress_machine.chips().iter().map(<_ as MachineAir<KoalaBear>>::name).collect();
         let proof_shape = || {
             OrderedShape::from_rows(
                 &chip_names
@@ -3494,7 +3490,8 @@ pub mod tests {
         let opts = ZKMProverOpts::default();
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let (_, pk_d, program, vk) = prover.setup(elf);
-        let core = prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
+        let core =
+            prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
         let n = core.proof.0.len();
 
         // Positive control: the honest proof passes both pins, halting row included.
@@ -3518,7 +3515,10 @@ pub mod tests {
 
         // Host verifier: a free entry lookahead, then a free exit lookahead.
         let entry = forge(0, &|pv| pv.start_next_pc = pv.start_pc + eight);
-        assert!(prover.verify(&entry, &vk).is_err(), "host verifier accepted a forged start_next_pc");
+        assert!(
+            prover.verify(&entry, &vk).is_err(),
+            "host verifier accepted a forged start_next_pc"
+        );
         let exit = forge(n - 1, &|pv| pv.next_next_pc = pv.next_pc + eight);
         assert!(prover.verify(&exit, &vk).is_err(), "host verifier accepted a forged next_next_pc");
 
@@ -3532,7 +3532,8 @@ pub mod tests {
             pv.initial_timestamp += KoalaBear::ONE;
             p
         };
-        let err = prover.verify(&outer_only, &vk).expect_err("divergent public-value copies accepted");
+        let err =
+            prover.verify(&outer_only, &vk).expect_err("divergent public-value copies accepted");
         assert!(
             format!("{err:?}").contains("public values mismatch"),
             "rejected for another reason: {err:?}"

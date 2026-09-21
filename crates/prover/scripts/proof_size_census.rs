@@ -95,7 +95,10 @@ fn main() {
     }
     r.row("  chip_heights", sz(&bsp.chip_heights));
     r.row("  chip_cumulative_sums", sz(&bsp.chip_cumulative_sums));
-    r.row("  row_counts + padding_column_counts", sz(&bsp.row_counts) + sz(&bsp.padding_column_counts));
+    r.row(
+        "  row_counts + padding_column_counts",
+        sz(&bsp.row_counts) + sz(&bsp.padding_column_counts),
+    );
     match &bsp.evaluation_proof {
         EvaluationProof::Empty => r.row("  evaluation_proof (Empty)", 0),
         EvaluationProof::Bytes(b) => r.row("  evaluation_proof (Bytes)", b.len()),
@@ -112,7 +115,10 @@ fn main() {
                 r.row("      batch_evaluations", sz(&w.batch_evaluations));
                 let p = &w.whir_proof;
                 r.row(
-                    &format!("      round_query_openings (x{} rounds)", p.round_query_openings.len()),
+                    &format!(
+                        "      round_query_openings (x{} rounds)",
+                        p.round_query_openings.len()
+                    ),
                     sz(&p.round_query_openings),
                 );
                 for (i, o) in p.round_query_openings.iter().enumerate() {

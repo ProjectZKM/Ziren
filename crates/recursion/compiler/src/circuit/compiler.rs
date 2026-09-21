@@ -775,7 +775,7 @@ where
         RecursionProgram::new(seq_blocks, total_memory, final_traces, None)
     }
 
-/// Compile a TracedVec of DSL ops into a `Vec<SeqBlock<Instruction<F>>>`.
+    /// Compile a TracedVec of DSL ops into a `Vec<SeqBlock<Instruction<F>>>`.
     ///
     /// Most ops accumulate into a "current Basic block" buffer.
     /// `DslIr::Parallel(par_blocks)` flushes the current buffer to a

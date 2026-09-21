@@ -942,7 +942,8 @@ pub mod tests {
 
         let log_stack = DEFAULT_LOG_STACKING_HEIGHT as usize;
         let stripe = 1usize << log_stack;
-        let machine = MipsAir::machine(zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2::default());
+        let machine =
+            MipsAir::machine(zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2::default());
 
         // Preprocessed widths come from the chips themselves.
         let width_of = |name: &str| -> usize {
@@ -1000,9 +1001,8 @@ pub mod tests {
         // commits under a pin class, `AreaPin::apply` panics past the pin, and
         // a node takes the smallest class both its rounds fit, so the largest
         // class is the ceiling and it is reached.
-        let largest = zkm_pcs::jagged::RecursionPins::class(
-            zkm_pcs::jagged::RecursionPins::LAST_CLASS,
-        );
+        let largest =
+            zkm_pcs::jagged::RecursionPins::class(zkm_pcs::jagged::RecursionPins::LAST_CLASS);
         let rec_batch = (largest.prep.area >> log_stack) + (largest.main.area >> log_stack);
         eprintln!(
             "[STRIPES] recursion prep {} + main {} cells -> batch {rec_batch}",
@@ -1668,9 +1668,7 @@ pub mod tests {
         // same bit, keeping total claimed area invariant and leaving
         // circuit_output / main_trace_evaluations untouched.
         let mut forged = proof.clone();
-        let bf = forged.shard_proofs[0]
-            .jagged_shard_proof
-            .as_mut();
+        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
 
         // Find two chips whose degree bit vectors let us move one bit each in
         // opposite directions (so the forgery is area-preserving and the
@@ -2253,8 +2251,7 @@ pub mod tests {
         let mut forged = proof.clone();
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let scale = EF::from(KoalaBear::from_u32(3));
-        let bf =
-            forged.shard_proofs[0].jagged_shard_proof.as_mut();
+        let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
         let mut touched = 0usize;
         for ce in bf.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
             if let Some(mf) = ce.main_trace_evaluations_full.as_mut() {

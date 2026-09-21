@@ -229,7 +229,10 @@ mod tests {
     }
 
     fn old(payload: Option<Box<JaggedShardProof<F, EF>>>) -> OptionalPayloadShardProof {
-        OptionalPayloadShardProof { public_values: vec![F::ZERO; PROOF_MAX_NUM_PVS], jagged_shard_proof: payload }
+        OptionalPayloadShardProof {
+            public_values: vec![F::ZERO; PROOF_MAX_NUM_PVS],
+            jagged_shard_proof: payload,
+        }
     }
 
     fn payload() -> Box<JaggedShardProof<F, EF>> {
@@ -277,9 +280,11 @@ mod tests {
     #[test]
     fn optional_payload_bincode_bytes_are_rejected() {
         let bytes = bincode::serialize(&old(Some(payload()))).expect("old layout serializes");
-        let new_bytes =
-            bincode::serialize(&ShardProof::<SC> { public_values: vec![F::ZERO; PROOF_MAX_NUM_PVS], jagged_shard_proof: payload() })
-                .expect("mandatory layout serializes");
+        let new_bytes = bincode::serialize(&ShardProof::<SC> {
+            public_values: vec![F::ZERO; PROOF_MAX_NUM_PVS],
+            jagged_shard_proof: payload(),
+        })
+        .expect("mandatory layout serializes");
         assert_eq!(
             bytes.len(),
             new_bytes.len() + 1,

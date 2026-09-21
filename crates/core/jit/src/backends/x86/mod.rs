@@ -72,8 +72,7 @@ pub(crate) const EXIT_CODE_OFFSET: i32 = offset_of!(JitContext, exit_code) as i3
 /// Bound for the indirect-dispatch index — see [`JitContext::jump_table_len`].
 pub(crate) const JUMP_TABLE_LEN_OFFSET: i32 = offset_of!(JitContext, jump_table_len) as i32;
 /// Where an out-of-range dispatch target is recorded.
-pub(crate) const BAD_JUMP_TARGET_OFFSET: i32 =
-    offset_of!(JitContext, bad_jump_target) as i32;
+pub(crate) const BAD_JUMP_TARGET_OFFSET: i32 = offset_of!(JitContext, bad_jump_target) as i32;
 /// `exit_code` written when the dispatch bounds check trips.  The
 /// `0x4000_0000` bit marks it as an ERROR exit rather than a halt, which
 /// is what the host's `state.exited` gate already keys on.

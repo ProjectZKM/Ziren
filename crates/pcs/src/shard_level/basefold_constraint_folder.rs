@@ -250,12 +250,7 @@ impl<SC: crate::StarkGenericConfig, A> ShardProvableAir<SC> for A where
     A: crate::air::MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::folder::VerifierConstraintFolder<'b, SC>>
         + for<'b> p3_air::Air<
-            ShardConstraintFolder<
-                'b,
-                crate::Val<SC>,
-                crate::Challenge<SC>,
-                crate::Challenge<SC>,
-            >,
+            ShardConstraintFolder<'b, crate::Val<SC>, crate::Challenge<SC>, crate::Challenge<SC>>,
         > + for<'b> p3_air::Air<
             ShardConstraintFolder<'b, crate::Val<SC>, crate::Val<SC>, crate::Challenge<SC>>,
         > + Sync

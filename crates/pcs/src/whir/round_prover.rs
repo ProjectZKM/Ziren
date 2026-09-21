@@ -146,9 +146,8 @@ where
                 Arc::clone(&ef_dft),
             );
             let ef_codewords = ef_encoder.encode_batch(alloc::vec![folded_mle]);
-            let base_codeword = codeword_from_ef::<F, EF>(
-                crate::basefold::fri::take_codeword_values(ef_codewords),
-            );
+            let base_codeword =
+                codeword_from_ef::<F, EF>(crate::basefold::fri::take_codeword_values(ef_codewords));
             let (commitment, prover_data) = self.mmcs.commit(alloc::vec![base_codeword.data]);
             challenger.observe(commitment.clone());
 

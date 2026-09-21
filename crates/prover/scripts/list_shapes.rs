@@ -2,13 +2,14 @@
 //! so a targeted `build_compress_vks --start/--end/--indices` run can cover
 //! just the compose / deferred / shrink classes.
 use std::collections::BTreeSet;
-use zkm_prover::{components::DefaultProverComponents, shapes::ZKMProofShape, ZKMProver, REDUCE_BATCH_SIZE};
+use zkm_prover::{
+    components::DefaultProverComponents, shapes::ZKMProofShape, ZKMProver, REDUCE_BATCH_SIZE,
+};
 
 fn main() {
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let rec = prover.compress_shape_config.as_ref().expect("recursion shape config");
-    let all: BTreeSet<ZKMProofShape> =
-        ZKMProofShape::generate(rec, REDUCE_BATCH_SIZE).collect();
+    let all: BTreeSet<ZKMProofShape> = ZKMProofShape::generate(rec, REDUCE_BATCH_SIZE).collect();
     for (i, s) in all.iter().enumerate() {
         let (variant, children) = match s {
             ZKMProofShape::Recursion(v) => ("Recursion", v.as_slice()),

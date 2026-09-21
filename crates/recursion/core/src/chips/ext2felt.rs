@@ -153,10 +153,7 @@ impl<F: PrimeField32> MachineAir<F> for Ext2FeltChip<F> {
             <Ext2FeltChip<F> as MachineAir<F>>::name(self).as_str(),
         );
 
-        Ok(RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_EXT2FELT_COLS,
-        ))
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_EXT2FELT_COLS))
     }
 
     fn included(&self, _record: &Self::Record) -> bool {

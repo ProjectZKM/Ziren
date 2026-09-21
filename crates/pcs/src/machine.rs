@@ -1194,9 +1194,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // earlier changes WHEN the length is rejected and nothing about the
         // verdict or the error a caller matches on.
         let num_pv_elts = self.num_pv_elts();
-        if let Some(p) =
-            proof.shard_proofs.iter().find(|p| p.public_values.len() < num_pv_elts)
-        {
+        if let Some(p) = proof.shard_proofs.iter().find(|p| p.public_values.len() < num_pv_elts) {
             return Err(MachineVerificationError::InvalidShardProof(
                 VerificationError::JaggedShardVerifier(
                     JaggedShardVerifyError::PublicValuesLengthMismatch {

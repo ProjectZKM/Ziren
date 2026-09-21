@@ -59,10 +59,8 @@ fn main() {
     // The fibonacci guest reads its `n` from stdin, so it has to be supplied.
     let mut fib_stdin = ZKMStdin::new();
     fib_stdin.write(&10u32);
-    let workloads: Vec<(&str, Vec<u8>, ZKMStdin)> = vec![
-        ("fibonacci", fib_elf, fib_stdin),
-        ("hello-world", hello_elf, ZKMStdin::default()),
-    ];
+    let workloads: Vec<(&str, Vec<u8>, ZKMStdin)> =
+        vec![("fibonacci", fib_elf, fib_stdin), ("hello-world", hello_elf, ZKMStdin::default())];
 
     let mut hashes: BTreeMap<[KB; DIGEST_SIZE], usize> = BTreeMap::new();
 

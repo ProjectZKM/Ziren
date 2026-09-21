@@ -249,8 +249,7 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
     // cube; the verifier asserts `zerocheck_proof.point.dim ==
     // pcs_max_log_row_count`, rejecting an input proof at any other cube.
     let max_log_row_count =
-        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
-            .max_log_row_count;
+        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();
     // Gnark-target circuit: the BN254 backend compiles `CircuitExt2Felt`

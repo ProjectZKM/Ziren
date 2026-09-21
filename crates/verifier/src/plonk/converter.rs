@@ -1,9 +1,9 @@
 use crate::{
-    cursor::Cursor,
     converter::{
         unchecked_compressed_x_to_g1_point, unchecked_compressed_x_to_g2_point,
         uncompressed_bytes_to_g1_point,
     },
+    cursor::Cursor,
     error::Error,
 };
 use alloc::vec::Vec;

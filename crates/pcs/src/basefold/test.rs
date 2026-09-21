@@ -263,8 +263,7 @@ fn roundtrip_at_point(
     }
     let mle = Arc::new(Mle::from_row_major(RowMajorMatrix::new(values, num_polys)));
 
-    let fri_config =
-        FriConfig::<F>::test_fri_config().with_log_folding_arity(log_folding_arity);
+    let fri_config = FriConfig::<F>::test_fri_config().with_log_folding_arity(log_folding_arity);
     let mmcs = build_mmcs();
     let dft = Arc::new(Radix2DitParallel::<F>::default());
     let prover = BasefoldProver::<F, EF, _, _>::new(fri_config.clone(), dft, mmcs.clone(), 1);

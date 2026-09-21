@@ -20,7 +20,7 @@ use zkm_pcs::{
     air::{LookupScope, MachineAir},
     septic_digest::SepticDigest,
     shard_level::{
-        shard_proof::{JaggedShardProof, ChipCumulativeSums, FoldOrientation},
+        shard_proof::{ChipCumulativeSums, FoldOrientation, JaggedShardProof},
         types::{
             ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof, LogupGkrRoundProof,
             PartialSumcheckProof, UnivariatePolynomial,
