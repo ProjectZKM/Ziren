@@ -58,6 +58,20 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         // its shard-level payload: the field is not an `Option`, so there is no
         // missing case left to check here.
         let basefold_proof = &proof.jagged_shard_proof;
+        // The proof carries its public values twice: `proof.public_values`,
+        // which the machine-level checks (pc chain, exit code, memory bounds)
+        // read, and `basefold_proof.public_values`, which the constraints are
+        // evaluated against.  Both are observed into the transcript, but
+        // observation binds each to the proof, not to the other; a proof built
+        // with a divergent pair would pass the machine checks on one copy and
+        // the constraints on the other.  Require them equal.
+        if proof.public_values.as_slice() != basefold_proof.public_values.as_slice() {
+            return Err(VerificationError::JaggedShardVerifier(
+                "public values mismatch: the shard's machine-level public values differ from \
+                 the ones its constraints were evaluated against"
+                    .to_string(),
+            ));
+        }
         let shard_verifier =
             crate::shard_level::verifier::JaggedShardVerifier::production_default();
         let num_pv_elts = proof.public_values.len();

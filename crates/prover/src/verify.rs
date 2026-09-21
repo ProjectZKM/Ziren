@@ -149,6 +149,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // - `next_pc` of the previous shard should equal `start_pc`.
         // - If it's not a shard with "CPU", then `start_pc` equals `next_pc`.
         // - If it's a shard with "CPU", then `start_pc` should never equal zero.
+        // - The delay-slot lookahead: `start_next_pc = start_pc + 4` and
+        //   `next_next_pc = next_pc + 4` on execution shards, equal to their pc
+        //   on the others (no shard boundary falls inside a delay slot).
         //
         // Finalization:
         // - `next_pc` should equal zero.
@@ -174,6 +177,24 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc == 0: execution should never start at halted state",
+                ));
+            } else if shard_proof.contains_execution()
+                && (public_values.start_next_pc != public_values.start_pc + KoalaBear::from_u32(4)
+                    || public_values.next_next_pc != public_values.next_pc + KoalaBear::from_u32(4))
+            {
+                // The 2-pc state: no shard boundary falls inside a delay slot,
+                // so both lookaheads are sequential (the halting row's too).
+                return Err(MachineVerificationError::InvalidPublicValues(
+                    "start_next_pc != start_pc + 4 or next_next_pc != next_pc + 4: \
+                     an execution shard enters and exits outside a delay slot",
+                ));
+            } else if !shard_proof.contains_execution()
+                && (public_values.start_next_pc != public_values.start_pc
+                    || public_values.next_next_pc != public_values.next_pc)
+            {
+                return Err(MachineVerificationError::InvalidPublicValues(
+                    "start_next_pc != start_pc or next_next_pc != next_pc: \
+                     a non-execution shard carries equal State-bus endpoints",
                 ));
             } else if i == proof.0.len() - 1 && public_values.next_pc != KoalaBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(

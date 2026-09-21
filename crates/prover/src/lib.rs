@@ -3477,6 +3477,89 @@ pub mod tests {
         )
     }
 
+    /// The MIPS 2-pc state `(pc, next_pc)` rides the State bus, and the bus's
+    /// entry endpoint is the public-value pair `(start_pc, start_next_pc)`.
+    /// `start_pc` is chained across shards; `start_next_pc` must be pinned too,
+    /// or row 0 continues wherever the prover says.  No shard boundary falls
+    /// inside a delay slot, so an execution shard enters and exits with the
+    /// sequential lookahead `pc + 4`, the halting row included -- which the
+    /// honest proof here exercises as the positive control.
+    #[test]
+    #[serial]
+    fn two_pc_lookahead_is_pinned_per_shard() -> Result<()> {
+        use std::borrow::BorrowMut;
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core = prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
+        let n = core.proof.0.len();
+
+        // Positive control: the honest proof passes both pins, halting row included.
+        prover.verify(&core.proof, &vk)?;
+
+        // A shard proof carries its public values twice: on `ShardProof`,
+        // which the host verifier reads, and inside `JaggedShardProof`, which
+        // is what the recursion witness is built from.  Forge both, so each
+        // verifier is shown the same forgery.
+        let forge = |idx: usize, f: &dyn Fn(&mut PublicValues<Word<KoalaBear>, KoalaBear>)| {
+            let mut p = core.proof.clone();
+            let outer: &mut PublicValues<Word<KoalaBear>, KoalaBear> =
+                p.0[idx].public_values.as_mut_slice().borrow_mut();
+            f(outer);
+            let inner: &mut PublicValues<Word<KoalaBear>, KoalaBear> =
+                p.0[idx].jagged_shard_proof.public_values.as_mut_slice().borrow_mut();
+            f(inner);
+            p
+        };
+        let eight = KoalaBear::from_u32(8);
+
+        // Host verifier: a free entry lookahead, then a free exit lookahead.
+        let entry = forge(0, &|pv| pv.start_next_pc = pv.start_pc + eight);
+        assert!(prover.verify(&entry, &vk).is_err(), "host verifier accepted a forged start_next_pc");
+        let exit = forge(n - 1, &|pv| pv.next_next_pc = pv.next_pc + eight);
+        assert!(prover.verify(&exit, &vk).is_err(), "host verifier accepted a forged next_next_pc");
+
+        // The two copies must agree: a forgery of the machine-level copy alone,
+        // on a value the pc chain never inspects, is caught by the machine
+        // verifier's equality check and by nothing else.
+        let outer_only = {
+            let mut p = core.proof.clone();
+            let pv: &mut PublicValues<Word<KoalaBear>, KoalaBear> =
+                p.0[0].public_values.as_mut_slice().borrow_mut();
+            pv.initial_timestamp += KoalaBear::ONE;
+            p
+        };
+        let err = prover.verify(&outer_only, &vk).expect_err("divergent public-value copies accepted");
+        assert!(
+            format!("{err:?}").contains("public values mismatch"),
+            "rejected for another reason: {err:?}"
+        );
+
+        // The normalize program: rejects the forgery, accepts the honest shard.
+        let accepts = |proof: &ZKMCoreProofData| -> bool {
+            let input = prover
+                .get_recursion_core_inputs_basefold(&vk.vk, &proof.0[..1], 1, n == 1)
+                .into_iter()
+                .next()
+                .unwrap();
+            let (program, _) = prover.recursion_program_basefold(&input);
+            let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                program,
+                prover.compress_prover.machine().config().perm.clone(),
+            );
+            let mut ws = Vec::new();
+            Witnessable::<InnerConfig>::write(&input, &mut ws);
+            runtime.witness_stream = ws.into();
+            matches!(catch_unwind(AssertUnwindSafe(|| runtime.run())), Ok(Ok(())))
+        };
+        assert!(accepts(&core.proof), "the normalize program rejected the honest first shard");
+        assert!(!accepts(&entry), "the normalize program accepted a forged start_next_pc");
+        Ok(())
+    }
+
     /// GROTH16-ONLY CIRCUIT GATE.
     ///
     /// [`test_e2e_circuit_fibonacci`] runs the PLONK test engine first, and that
