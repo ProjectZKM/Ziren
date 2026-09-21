@@ -398,7 +398,7 @@ pub fn take_logup_device_eq_row_point() -> Option<Vec<Ef4>> {
 }
 
 // ------------------------------------------------------------------
-// M1 (nv28 device-pack): per-chip first-layer metadata channel.
+// Device pack: per-chip first-layer metadata channel.
 //
 // The GPU device-pack kernel builds the packed first-layer slab from the
 // per-chip device tables (numerator/denominator).  Mapping those tables to

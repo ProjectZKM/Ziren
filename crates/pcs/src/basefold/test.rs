@@ -234,7 +234,7 @@ fn test_basefold_roundtrip_folding_arity() {
     }
 }
 
-/// ZR-22: openings at points containing ZERO must verify.
+/// Openings at points containing zero must verify.
 ///
 /// The prover derives `g(1)` from the claim by dividing by the coordinate `r`,
 /// which is impossible at `r == 0` -- there the claim fixes only `g(0)`. The old

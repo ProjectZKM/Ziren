@@ -194,7 +194,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         return None;
     }
 
-    // ZR-30 coverage.  The chip COUNT agreeing is not coverage: the claim below
+    // Coverage.  The chip COUNT agreeing is not coverage: the claim below
     // sums only the values the proof supplies, so a per-chip vector that is a
     // strict PREFIX of the chip's columns silently drops the suffix from the
     // reduction -- and `cross_bind_openings` only rejects an opening vector

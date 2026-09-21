@@ -753,7 +753,7 @@ mod basefold_over_bn254_roundtrip_test {
             "jagged-basefold full bundle pipeline should accept the honest proof over BN254"
         );
 
-        // ZR-23 bind #3, on this ring: the cross-bind
+        // The opening cross-bind, on this ring:
         //   Σ_k eq(z_col,k)·open_k = Σ_k eq(z_col,k)·y_k
         // is the only thing tying the bundle's column claims to the openings the
         // AIR phases consumed.  Two controls, because "accepts the honest proof"
@@ -804,12 +804,12 @@ mod basefold_over_bn254_roundtrip_test {
         );
     }
 
-    /// **ZR-23 / ZR-24 on the ring that feeds gnark.**
+    /// **Commitment order on the ring that feeds gnark.**
     ///
     /// The outer BaseFold bundle is the artifact the Groth16 circuit verifies,
-    /// and both findings were a two-round commitment-ORDER defect there.  The
-    /// single-round fixture above cannot reach it: with no preceding round the
-    /// root vector has one entry, so every ordering of it is correct.
+    /// and its roots must be witnessed in opening order `[preceding.., main]`.
+    /// The single-round fixture above cannot reach that: with no preceding
+    /// round the root vector has one entry, so every ordering of it is correct.
     ///
     /// Covers the substitutions the audit's cross-binding gate names, on this
     /// ring: the raw MAIN root, the raw PRECEDING (preprocessed) root, and the
@@ -994,11 +994,11 @@ mod basefold_over_bn254_roundtrip_test {
         // the residual the bind #2 comment records.
     }
 
-    /// ZR-23 bind #2 is dispatched through a trait method whose DEFAULT is
-    /// `None` = "this ring cannot answer, re-derive instead".  A `None` here
-    /// would make the host bind a silent no-op — the same way ZR-24's
-    /// query-chain equality sat inert behind an always-empty vector — so the
-    /// answer being `Some`, and discriminating, is the thing to test.
+    /// The preceding-root bind (the preprocessed round's root is the key's) is
+    /// dispatched through a trait method whose default is `None` = "this ring
+    /// cannot answer, re-derive instead". A `None` here would make the host
+    /// bind a silent no-op, so the answer being `Some`, and discriminating, is
+    /// the thing to test.
     #[test]
     fn outer_vk_commit_bind_is_not_vacuous() {
         type R = KoalaBearPoseidon2Outer;

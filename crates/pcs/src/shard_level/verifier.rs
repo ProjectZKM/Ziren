@@ -645,7 +645,7 @@ where
         let (chip_infos, r_row_per_chip, z_row) =
             build_jagged_verify_inputs(&bundle.packing, &chip_widths, eval_point_inner);
 
-        // ZR-23 bind #3: the openings the AIR phases consumed, index-aligned
+        // The opening cross-bind: the openings the AIR phases consumed, index-aligned
         // with `chip_infos`, so `cross_bind_openings` can require
         //   Σ_k eq(z_col,k)·open_k = Σ_k eq(z_col,k)·y_k
         // on this ring too.  Without it the outer zerocheck (which consumes
@@ -800,7 +800,7 @@ where
             om
         };
 
-        // ZR-23 bind #2, host side: the preceding (preprocessed) round's root
+        // The preceding-root bind, host side: the preceding (preprocessed) round's root
         // comes off the PROOF, and nothing above required it to be the root the
         // VERIFYING KEY committed — so a prover could open a preprocessed round
         // of its own choosing and every check so far would still pass.
@@ -812,7 +812,7 @@ where
         // per-chip width pin above and the `round.len()` check cover the part of
         // that geometry the machine already knows; the row counts stay
         // proof-claimed until the outer key format carries them.
-        // ZR-31 coverage.  Comparing every SUPPLIED preceding root is not a
+        // Coverage.  Comparing every SUPPLIED preceding root is not a
         // coverage check: with `preceding_commits == []` the loop below is
         // vacuous, the single supplied round is treated as MAIN, the
         // preprocessed width/root branches are skipped, and BaseFold is handed

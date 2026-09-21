@@ -84,10 +84,10 @@ pub const TRANSCRIPT_PROFILE: &[ProfileEntry] = &[
     ("logup_gkr.grinding_bits", crate::logup_gkr::GKR_GRINDING_BITS as u64),
     // Event orders.
     //
-    // rev 1: BaseFold absorbs the per-stripe claim vector BEFORE batch grinding
-    //        and before the batching point (ZR-26). Before that the batching
-    //        Lagrange vector was known to a prover that had not yet chosen the
-    //        claims, and the two linear equations were solvable.
+    // rev 1: BaseFold absorbs the per-stripe claim vector before batch grinding
+    //        and before the batching point. With the point drawn first, the
+    //        batching Lagrange vector is known to a prover that has not yet
+    //        chosen the claims, and the two linear equations are solvable.
     ("basefold.claims_before_batching_point", 1),
     // rev 1: the shard prologue absorbs public values, the main commitment, the
     //        chip count, then each chip's raw height and name.

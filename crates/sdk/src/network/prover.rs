@@ -301,7 +301,7 @@ impl NetworkProver {
                     // proof
                     // `proof_with_public_inputs` is SERVER-controlled, so a
                     // malformed or truncated response must be an error, not a
-                    // panic in the caller's process. This is the ZR-18 case.
+                    // panic in the caller's process.
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
                             .map_err(|e| {

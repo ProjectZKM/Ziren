@@ -1569,7 +1569,7 @@ mod tests {
     }
 }
 
-/// ZR-12: a regression that actually executes the hint seam.
+/// A regression that actually executes the hint seam.
 ///
 /// `hint_slices_match_the_finished_stream` above builds 4,000 `ADD`s and an
 /// EMPTY input stream, so it never executes `HINT_LEN` or `HINT_READ` and cannot

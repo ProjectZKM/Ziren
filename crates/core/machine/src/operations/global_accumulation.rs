@@ -20,7 +20,7 @@ use zkm_pcs::{
 pub struct GlobalAccumulationOperation<T, const N: usize> {
     pub initial_digest: [SepticBlock<T>; 2],
     /// `(x2 - x1)^{-1}` for each accumulation step — the witness that makes the
-    /// chord denominator provably nonzero (ZR-28).
+    /// chord denominator provably nonzero.
     ///
     /// Placed BETWEEN `initial_digest` and `cumulative_sum` on purpose: the
     /// struct must stay at the end of the main trace with `cumulative_sum` last
@@ -83,7 +83,7 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
         let initial = final_digest.add_incomplete(dummy.neg());
         self.initial_digest[0] = SepticBlock::from(initial.x.0);
         self.initial_digest[1] = SepticBlock::from(initial.y.0);
-        // ZR-28: the padding layout is the genuine addition
+        // The padding layout is the genuine addition
         // `(final - dummy) + dummy`, so its chord denominator is
         // `dummy.x - initial.x`, and it is nonzero for the same reason the row
         // is a valid addition at all.
@@ -104,7 +104,7 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
     }
 
     /// `point_to_add_x` is the row's event point x-coordinate — the `x2` of the
-    /// chord — needed for the ZR-28 denominator witness.
+    /// chord — needed for the denominator witness (x2 - x1)^{-1}.
     pub fn populate_real(
         &mut self,
         sums: &[SepticCurveComplete<F>],
@@ -115,7 +115,7 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
         let sums = sums.iter().map(|complete_point| complete_point.point()).collect::<Vec<_>>();
         self.initial_digest[0] = SepticBlock::from(sums[0].x.0);
         self.initial_digest[1] = SepticBlock::from(sums[0].y.0);
-        // ZR-28: `x2 - x1` is nonzero on every honest row — the running sum can
+        // `x2 - x1` is nonzero on every honest row — the running sum can
         // equal neither the event point nor its negation (the latter would make
         // the sum the point at infinity, which the generator cannot represent
         // and panics on).  `inverse()` would panic on zero, which is the right
@@ -238,7 +238,7 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
                 SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO),
             );
 
-            // ZR-28: the chord denominator is NONZERO.
+            // The chord denominator is nonzero.
             //
             // Both checkers carry the factor `(x2 - x1)`:
             //
@@ -310,13 +310,10 @@ mod tests {
         p
     }
 
-    /// The witness the ZR-28 constraint checks is
-    /// `is_real * ((x2 - x1) * denominator_inv - 1) == 0`, so on an honest row
-    /// the populated inverse must satisfy `(x2 - x1) * inv == 1` EXACTLY.  A
-    /// populate path that filled zeros (as the GPU kernel did before the device
-    /// half of the fix) leaves the constraint unsatisfiable, which is how it
-    /// took production down — so this asserts the witness, not just that
-    /// populate returned.
+    /// The constraint is `is_real · ((x2 - x1) · inv - 1) = 0`, so on an honest
+    /// row the populated inverse must satisfy `(x2 - x1) · inv = 1` exactly. A
+    /// populate path that leaves `inv = 0` makes every real row unsatisfiable,
+    /// so this asserts the witness, not just that populate returned.
     fn assert_inverse_witness(
         cols: &GlobalAccumulationOperation<F, 1>,
         x2: SepticExtension<F>,
@@ -328,7 +325,7 @@ mod tests {
             denom * inv,
             SepticExtension::<F>::ONE,
             "the populated denominator_inv does not invert the chord denominator, so the \
-             ZR-28 constraint is unsatisfiable on an honest row",
+             constraint is_real * ((x2 - x1) * inv - 1) = 0 is unsatisfiable on an honest row",
         );
     }
 
@@ -349,9 +346,9 @@ mod tests {
     }
 
     /// DOUBLING (`x2 == x1`, same point): the chord denominator vanishes, so the
-    /// row is the exceptional case and the trace is NOT provable.  This is the
-    /// case ZR-28 was about — before the fix the denominator was unconstrained,
-    /// so a doubling could be presented as an addition with an arbitrary
+    /// row is the exceptional case and the trace is not provable. With the
+    /// denominator unconstrained, both chord identities vanish at `x2 = x1` and
+    /// a doubling could be presented as an addition with any on-curve
     /// successor.
     #[test]
     #[should_panic(expected = "this trace is not provable")]

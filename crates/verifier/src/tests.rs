@@ -185,7 +185,7 @@ fn test_vkeys() {
     assert_eq!(s3_vkey_bytes, *crate::PLONK_VK_BYTES);
 }
 
-/// ZR-03: every public entry point must be total over arbitrary bytes.
+/// Every public entry point must be total over arbitrary bytes.
 ///
 /// These assert the *absence of panics*, not verification success: a
 /// verification service handed a short, empty or wrong-variant input must get

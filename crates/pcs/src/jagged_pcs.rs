@@ -2026,7 +2026,7 @@ pub mod jagged {
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
     ) -> bool {
-        // ZR-30: the flat layout the reduction and `build_jagged_verify_inputs`
+        // The flat layout the reduction and `build_jagged_verify_inputs`
         // consume must BE the per-round layout the machine pins.  Before any
         // challenge is drawn from it.
         if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "inner") {
@@ -2174,7 +2174,7 @@ pub mod jagged {
             // proof, so this is the only cardinality here anchored to something
             // the prover does not choose.  Accepting a longer opening lets a
             // proof shrink its claim vector AND its declared column counts
-            // together (ZR-30): every proof-internal check still agrees, the
+            // together: every proof-internal check still agrees, the
             // dropped columns contribute zero to the reduction, and the AIR
             // consumes an opening suffix bound to no committed column.
             //
@@ -2270,7 +2270,7 @@ pub mod jagged {
         // `Σ w·open == Σ w·y` -- but only `opened_main` has a cardinality the
         // prover does not choose.  Sourcing the claim from the proof's vector
         // let a short one drop columns from the sum while the AIR still
-        // consumed the corresponding openings (ZR-30).  The recursive verifier
+        // consumed the corresponding openings.  The recursive verifier
         // has always built its claim from `opened_values`; this is the native
         // side agreeing with it.
         let red_result = verify_jagged_reduction(
@@ -2495,7 +2495,7 @@ pub mod jagged {
             <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
             usize,
         )],
-        // ZR-23 bind #3: the trace openings the AIR phases consumed, index-
+        // The opening cross-bind: the trace openings the AIR phases consumed, index-
         // aligned with `chip_infos` / `bundle.y_per_chip`, for
         // `cross_bind_openings`.  REQUIRED, like every other binding input:
         // making it optional is what let the outer ring verify without it.
@@ -2507,7 +2507,7 @@ pub mod jagged {
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
-        // ZR-30, on the outer ring too: the flat layout must BE the canonical
+        // On the outer ring too, the flat layout must be the canonical
         // flattening of the per-round layout, checked before any challenge is
         // drawn from it.
         if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "outer") {
@@ -2540,7 +2540,7 @@ pub mod jagged {
         let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
         let z_col: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| challenger.sample_algebra_element()).collect();
-        // ZR-23 bind #3, on the same `z_col` the reduction is about to use.
+        // The opening cross-bind, on the same `z_col` the reduction is about to use.
         if let Err(why) = cross_bind_openings(&bundle.y_per_chip, opened_main, &z_col) {
             eprintln!("[basefold verify outer] CROSS-BIND FAILED — {why}");
             return false;
@@ -2627,8 +2627,7 @@ pub mod jagged {
 /// `column_counts`.  Nothing required the two to describe the same layout, so a
 /// bundle could keep `round_counts` machine-correct while shrinking
 /// `column_counts`, `offsets` and `y_per_chip` together: every proof-internal
-/// check still agrees and the dropped columns contribute zero to the reduction
-/// (ZR-30).
+/// check still agrees and the dropped columns contribute zero to the reduction.
 ///
 /// The per-round form is authoritative because it is the one the machine pins.
 /// Flattening is round-major, each round's real chip widths followed by ONE
@@ -3267,7 +3266,7 @@ mod test {
 
         // (a) Commitment order: the earlier round contributes its RAW root and
         //     the LAST round's commit is the bundle's own.  This is the vector
-        //     the recursive verifier must reconstruct (ZR-23 / ZR-24).
+        //     the recursive verifier must reconstruct.
         assert_eq!(bundle.preceding_commits.len(), 1);
         assert_eq!(bundle.preceding_commits[0], prep.commit.original_commitment);
         assert_eq!(bundle.commit.original_commitment, main.commit.original_commitment);
@@ -3321,8 +3320,8 @@ mod test {
         );
 
         // (e) NEGATIVE — the preceding entry is what binds round 0 to the
-        //     verifying key.  Substituting the MAIN round's root for it (the
-        //     ZR-23/ZR-24 shape) must be rejected, or (d) proves nothing.
+        //     verifying key.  Substituting the MAIN round's root for it must
+        //     be rejected, or (d) proves nothing.
         assert!(
             !verify_with(&main.commit.original_commitment),
             "a substituted preceding root must be rejected"
@@ -3489,7 +3488,7 @@ mod test {
         prove_two(&prep_views, &main_views, &prep, &main, &z_row, Some(claims));
     }
 
-    /// **ZR-27 proof boundary** — the stacking height is part of the PROTOCOL,
+    /// **Proof boundary** — the stacking height is part of the PROTOCOL,
     /// not of the proof.  A bundle carrying any height other than
     /// `DEFAULT_LOG_STACKING_HEIGHT` must be REJECTED, and rejected before any
     /// geometry is derived from it: the height feeds `area >> h` and
@@ -3747,17 +3746,7 @@ mod test {
         );
     }
 
-    /// The recursion circuit binds the jagged claimed sum to the trace
-    /// openings (recursive_jagged_pcs.rs:247); the host verifier mirrors
-    /// that bind.  This test proves the bind is load-bearing on the
-    /// production pipeline:
-    ///   (1) honest openings (== the bundle's column claims, the padding
-    ///       columns' zero claims included) verify;
-    ///   (2) openings that DIVERGE from the bundle's `y_per_chip` are
-    ///       REJECTED once threaded in (`Some`);
-    ///   (3) the SAME divergent case is (wrongly) ACCEPTED with the bind
-    ///       disabled (`None`) — the pre-fix gap the bind closes.
-    /// ZR-27: the verifier must not take its geometry from the proof.
+    /// The verifier must not take its geometry from the proof.
     ///
     /// `log_stacking_height` selects `stack_dim`, the target dimension and the
     /// WHIR configuration.  An honest commit always carries

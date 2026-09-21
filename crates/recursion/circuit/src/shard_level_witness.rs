@@ -1339,9 +1339,6 @@ pub fn lift_jagged_basefold_bundle_outer<C>(
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
-// The verifying key's preprocessed commitment (ZR-23 bind #2). See the
-// `vk_preprocessed_cap` block below for what it is asserted against and why
-// a plain equality is the right comparison on this ring.
     vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
 ) -> JaggedPcsProofVariable<
     RecursiveBasefoldProof<
@@ -1511,7 +1508,8 @@ where
         "one raw commitment per opened round: {} preceding + main != {num_rounds} rounds",
         bundle.preceding_commits.len(),
     );
-    // ZR-23 bind #2: pin the preceding (preprocessed) round to the KEY.
+    // The preceding-root bind: pin the preceding (preprocessed) round to the
+    // verifying key's commitment `vk_preprocessed_cap`.
     //
     // Everything above takes the preceding roots from the proof. Nothing then
     // required them to be the roots the verifying key committed, so a prover
@@ -1551,7 +1549,7 @@ where
         // preprocessed cap IS the statement that the machine commits a
         // preprocessed round, so a bundle with none is not a shorter honest
         // proof -- it is a proof of a different, smaller statement, and the
-        // equality below would simply not be emitted (ZR-31).  The zerocheck
+        // equality below would simply not be emitted.  The zerocheck
         // still consumes `preprocessed.local` openings, which would then be
         // authenticated to nothing.
         assert_eq!(
@@ -2128,9 +2126,9 @@ where
     (bp, sc, je, ee, cr)
 }
 
-// The lift reads every witness component the bundle carries; collapsing them
-// into a struct is what let ZR-24's root vector be assembled in the wrong
-// place to begin with, so they stay named and explicit here.
+// The lift reads every witness component the bundle carries, each named and
+// explicit, so the root vector's order `[preceding.., main]` is visible at the
+// call site rather than implied by a struct.
 #[allow(clippy::too_many_arguments)]
 pub fn lift_jagged_bundle_generic<C, HV, PP>(
     builder: &mut Builder<C>,

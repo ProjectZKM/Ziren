@@ -77,7 +77,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// The BN254 form of a verifying key's preprocessed commitment, for the ring
     /// that has one.
     ///
-    /// ZR-23 bind #2 needs the KEY's preprocessed root inside
+    /// The preceding-root bind needs the key's preprocessed root inside
     /// `lift_jagged_basefold_bundle_outer`, to pin the proof-supplied
     /// `preceding_commits[0]` against. `Self::DigestVariable` already IS that
     /// 1-cap on the outer ring, but `verify_wrap_basefold_core` is SC-generic,

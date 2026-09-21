@@ -645,7 +645,7 @@ mod tests {
         assert!(format!("{err}").contains("prove_core"), "the operation is named: {err}");
     }
 
-    /// ZR-10: an unpinned image is refused unless the insecure choice is made
+    /// An unpinned image is refused unless the insecure choice is made
     /// explicitly.  The container receives the private witness input, and a tag
     /// is resolved fresh from the registry on every run.
     #[test]

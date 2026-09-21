@@ -310,7 +310,7 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                     let cols: &mut GlobalCols<F> = row.borrow_mut();
                     if idx < nb_rows {
                         // The row's event point x — the chord's `x2` — for the
-                        // ZR-28 denominator witness.  `cols.lookup` was filled
+                        // denominator witness (x2 - x1)^{-1}.  `cols.lookup` was filled
                         // for every real row in the pass above.
                         let point_to_add_x =
                             zkm_pcs::septic_extension::SepticExtension(cols.lookup.x_coordinate.0);

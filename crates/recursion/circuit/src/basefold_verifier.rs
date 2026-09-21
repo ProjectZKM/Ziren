@@ -1739,9 +1739,9 @@ mod tests {
     //   HV::assert_digest_eq(leaf_digest, commitments[round_idx])
     //
     // `merkle_tree.rs` covers the HONEST walk and nothing covered a MUTATED
-    // component, so none of the four bindings was shown to be load-bearing —
-    // the same shape as ZR-24, where an equality sat inert behind an
-    // always-empty vector and every honest test still passed.
+    // component, so none of the four bindings was shown to be load-bearing:
+    // an equality inert behind an always-empty vector passes every honest
+    // test.
     //
     // These runs use the production `HV` primitives (not a reimplementation)
     // and execute end-to-end through the recursion runtime, so a mutation the
@@ -1888,8 +1888,7 @@ mod tests {
     }
 
     /// NEGATIVE — the round commitment itself.  This is the compare that ties
-    /// the whole walk to the observed root; ZR-24 was exactly this equality
-    /// being unreachable.
+    /// the whole walk to the observed root, so it must be reachable.
     #[test]
     // A failed `assert_felt_eq` reaches the runtime as a division by zero
     // (`DivFAssert`), so pinning it keeps the test from passing on an
