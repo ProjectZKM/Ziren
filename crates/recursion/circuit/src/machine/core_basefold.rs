@@ -15,7 +15,6 @@ use std::{
     array,
     borrow::{Borrow, BorrowMut},
     marker::PhantomData,
-    mem::MaybeUninit,
 };
 
 use itertools::Itertools;
@@ -158,24 +157,24 @@ pub fn verify_core_basefold<C, SC, A>(
     >(builder, &vk_legacy);
 
     // ---- Initialize shard-chain state (same layout as legacy core.rs:128-167) ----
-    let mut initial_shard: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
-    let mut current_shard: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
+    // Each placeholder is a fresh variable: a zeroed `Felt` is the handle of
+    // variable 0, shared by every placeholder, not an unset value.
+    let mut initial_shard: Felt<_> = builder.uninit();
+    let mut current_shard: Felt<_> = builder.uninit();
 
-    let mut initial_execution_shard: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
-    let mut current_execution_shard: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut initial_execution_shard: Felt<_> = builder.uninit();
+    let mut current_execution_shard: Felt<_> = builder.uninit();
 
-    let mut start_pc: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
-    let mut current_pc: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut start_pc: Felt<_> = builder.uninit();
+    let mut current_pc: Felt<_> = builder.uninit();
 
-    let mut initial_previous_init_addr_bits: [Felt<_>; 32] =
-        unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut initial_previous_init_addr_bits: [Felt<_>; 32] = array::from_fn(|_| builder.uninit());
     let mut initial_previous_finalize_addr_bits: [Felt<_>; 32] =
-        unsafe { MaybeUninit::zeroed().assume_init() };
-    let mut current_init_addr_bits: [Felt<_>; 32] = unsafe { MaybeUninit::zeroed().assume_init() };
-    let mut current_finalize_addr_bits: [Felt<_>; 32] =
-        unsafe { MaybeUninit::zeroed().assume_init() };
+        array::from_fn(|_| builder.uninit());
+    let mut current_init_addr_bits: [Felt<_>; 32] = array::from_fn(|_| builder.uninit());
+    let mut current_finalize_addr_bits: [Felt<_>; 32] = array::from_fn(|_| builder.uninit());
 
-    let mut exit_code: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut exit_code: Felt<_> = builder.uninit();
 
     let mut committed_value_digest: [Word<Felt<_>>; PV_DIGEST_NUM_WORDS] =
         array::from_fn(|_| Word(array::from_fn(|_| builder.uninit())));

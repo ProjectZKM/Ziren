@@ -36,7 +36,6 @@
 
 use std::array;
 use std::marker::PhantomData;
-use std::mem::MaybeUninit;
 
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
@@ -204,34 +203,30 @@ pub fn verify_compress_basefold<C, SC, A>(
     // lines 105-142 — the new compress aggregates the same
     // RecursionPublicValues shape from JaggedShardProof's
     // public_values vec.
-    let mut _reduce_public_values_stream: Vec<Felt<C::F>> = (0..RECURSIVE_PROOF_NUM_PV_ELTS)
-        .map(|_| unsafe { MaybeUninit::zeroed().assume_init() })
-        .collect();
+    // Each placeholder is a fresh variable: a zeroed `Felt` is the handle of
+    // variable 0, shared by every placeholder, not an unset value.
+    let mut _reduce_public_values_stream: Vec<Felt<C::F>> =
+        (0..RECURSIVE_PROOF_NUM_PV_ELTS).map(|_| builder.uninit()).collect();
     let _compress_public_values: &mut RecursionPublicValues<Felt<C::F>> =
         _reduce_public_values_stream.as_mut_slice().borrow_mut();
 
     assert!(!vks_and_proofs.is_empty());
 
-    let mut _zkm_vk_digest: [Felt<C::F>; DIGEST_SIZE] =
-        array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
-    let mut _pc: Felt<C::F> = unsafe { MaybeUninit::zeroed().assume_init() };
-    let mut _shard: Felt<C::F> = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut _zkm_vk_digest: [Felt<C::F>; DIGEST_SIZE] = array::from_fn(|_| builder.uninit());
+    let mut _pc: Felt<C::F> = builder.uninit();
+    let mut _shard: Felt<C::F> = builder.uninit();
     let mut _exit_code: Felt<C::F> = builder.uninit();
-    let mut _execution_shard: Felt<C::F> = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut _execution_shard: Felt<C::F> = builder.uninit();
     let mut _committed_value_digest: [Word<Felt<C::F>>; PV_DIGEST_NUM_WORDS] =
-        array::from_fn(|_| {
-            Word(array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() }))
-        });
+        array::from_fn(|_| Word(array::from_fn(|_| builder.uninit())));
     let mut _deferred_proofs_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
-        array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
+        array::from_fn(|_| builder.uninit());
     let mut _reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
-        array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
+        array::from_fn(|_| builder.uninit());
     let mut _global_cumulative_sums: Vec<zkm_pcs::septic_digest::SepticDigest<Felt<C::F>>> =
         Vec::new();
-    let mut _init_addr_bits: [Felt<C::F>; 32] =
-        array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
-    let mut _finalize_addr_bits: [Felt<C::F>; 32] =
-        array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
+    let mut _init_addr_bits: [Felt<C::F>; 32] = array::from_fn(|_| builder.uninit());
+    let mut _finalize_addr_bits: [Felt<C::F>; 32] = array::from_fn(|_| builder.uninit());
     use p3_field::PrimeCharacteristicRing;
     let mut _contains_execution_shard: Felt<C::F> = builder.eval(C::F::ZERO);
 
