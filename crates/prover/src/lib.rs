@@ -1447,7 +1447,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         last_proof_pv: &PublicValues<Word<KoalaBear>, KoalaBear>,
         deferred_proofs: &[ZKMReduceProof<InnerSC>],
         batch_size: usize,
-    ) -> Vec<ZKMDeferredBasefoldWitnessValues<InnerSC>> {
+    ) -> Result<Vec<ZKMDeferredBasefoldWitnessValues<InnerSC>>, VkNotAllowed> {
         let mut deferred_digest = [Val::<InnerSC>::ZERO; DIGEST_SIZE];
         let mut deferred_inputs = Vec::new();
         for batch in deferred_proofs.chunks(batch_size) {
@@ -1459,7 +1459,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
             let vks: Vec<StarkVerifyingKey<InnerSC>> =
                 vks_and_proofs.iter().map(|(vk, _)| vk.clone()).collect();
-            let merkle = self.make_basefold_merkle_proofs(&vks);
+            let merkle = self.make_basefold_merkle_proofs(&vks)?;
 
             deferred_inputs.push(ZKMDeferredBasefoldWitnessValues {
                 vks_and_proofs,
@@ -1477,7 +1477,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             });
             deferred_digest = Self::hash_deferred_proofs(deferred_digest, batch);
         }
-        deferred_inputs
+        Ok(deferred_inputs)
     }
 
     /// Generate the inputs for the first layer of recursive proofs.
@@ -1492,7 +1492,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shard_proofs: &[ShardProof<InnerSC>],
         deferred_proofs: &[ZKMReduceProof<InnerSC>],
         batch_size: usize,
-    ) -> Vec<ZKMCircuitWitness> {
+    ) -> Result<Vec<ZKMCircuitWitness>, VkNotAllowed> {
         let is_complete = shard_proofs.len() == 1 && deferred_proofs.is_empty();
 
         let mut inputs = Vec::new();
@@ -1508,9 +1508,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             last_proof_pv,
             deferred_proofs,
             batch_size,
-        );
+        )?;
         inputs.extend(bf_deferred.into_iter().map(ZKMCircuitWitness::DeferredBasefold));
-        inputs
+        Ok(inputs)
     }
 
     /// Reduce shard proofs to a single shard proof using the recursion prover.
@@ -1527,8 +1527,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let shard_proofs = &proof.proof.0;
 
-        let first_layer_inputs =
-            self.get_first_layer_inputs(vk, shard_proofs, &deferred_proofs, first_layer_batch_size);
+        let first_layer_inputs = self.get_first_layer_inputs(
+            vk,
+            shard_proofs,
+            &deferred_proofs,
+            first_layer_batch_size,
+        )?;
 
         let num_first_layer_inputs = first_layer_inputs.len();
         let mut chain = crate::compress_tree::ShardChain::new();
@@ -1547,7 +1551,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let passthrough = num_first_layer_inputs == 1;
 
         let span = tracing::Span::current().clone();
-        let (vk, proof) = thread::scope(|s| {
+        let (vk, proof) = thread::scope(|s| -> Result<_, VkNotAllowed> {
             let _span = span.enter();
 
             let (input_tx, input_rx) =
@@ -1749,7 +1753,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 let input_tx = Arc::clone(&input_tx);
                 let proofs_rx = Arc::clone(&proofs_rx);
                 let span = tracing::debug_span!("reduce proofs");
-                s.spawn(move || {
+                s.spawn(move || -> Result<(), VkNotAllowed> {
                     let _span = span.enter();
                     type Item = (StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>);
                     let mut tree = crate::compress_tree::CompressTree::<Item>::new(batch_size);
@@ -1780,7 +1784,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             .collect();
                         let vks_only: Vec<StarkVerifyingKey<InnerSC>> =
                             bf_vks_and_proofs.iter().map(|(vk, _)| vk.clone()).collect();
-                        let vk_merkle_data = self.make_basefold_merkle_proofs(&vks_only);
+                        let vk_merkle_data = match self.make_basefold_merkle_proofs(&vks_only) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                while in_flight > 0 && proofs_rx.lock().unwrap().recv().is_ok() {
+                                    in_flight -= 1;
+                                }
+                                return Err(e);
+                            }
+                        };
                         let compose_values = ZKMCompressBasefoldWitnessValues {
                             vks_and_proofs: bf_vks_and_proofs,
                             vk_merkle_data,
@@ -1795,6 +1807,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             break;
                         }
                     }
+                    Ok(())
                 })
             };
 
@@ -1804,11 +1817,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             for handle in prover_handles {
                 handle.join().unwrap();
             }
-            handle.join().unwrap();
+            handle.join().unwrap()?;
 
             let (_, vk, proof) = proofs_rx.lock().unwrap().recv().unwrap();
-            (vk, proof)
-        });
+            Ok((vk, proof))
+        })?;
 
         Ok(ZKMReduceProof { vk, proof })
     }
@@ -1822,7 +1835,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
         let basefold_proof = *compressed_proof.jagged_shard_proof;
-        let vk_merkle_data = self.make_basefold_merkle_proofs(std::slice::from_ref(&compressed_vk));
+        let vk_merkle_data =
+            self.make_basefold_merkle_proofs(std::slice::from_ref(&compressed_vk))?;
         let input = ZKMWrapBasefoldWitnessValues {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
             vk_merkle_data,
@@ -1869,7 +1883,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
         let basefold_proof = *compressed_proof.jagged_shard_proof;
-        let vk_merkle_data = self.make_basefold_merkle_proofs(std::slice::from_ref(&compressed_vk));
+        let vk_merkle_data =
+            self.make_basefold_merkle_proofs(std::slice::from_ref(&compressed_vk))?;
         let input = ZKMWrapBasefoldWitnessValues {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
             vk_merkle_data,
@@ -2056,10 +2071,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build a merkle witness for a slice of VKs.
     /// Used by basefold compose/wrap/deferred to bundle vk_merkle_data
     /// into the witness that the recursion program reads.
+    ///
+    /// Every digest is recorded for collection first.  With `vk_verification`
+    /// on, a digest outside the allowlist is [`VkNotAllowed`], which fails the
+    /// proof being built and nothing else.
     pub fn make_basefold_merkle_proofs(
         &self,
         vks: &[StarkVerifyingKey<InnerSC>],
-    ) -> ZKMMerkleProofWitnessValues<InnerSC> {
+    ) -> Result<ZKMMerkleProofWitnessValues<InnerSC>, VkNotAllowed> {
         let num_vks = self.recursion_vk_map.len();
         for vk in vks.iter() {
             vk_collect_record(&vk.hash_koalabear());
@@ -2068,18 +2087,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks.iter()
                 .map(|vk| {
                     let vk_digest = vk.hash_koalabear();
-                    *self.recursion_vk_map.get(&vk_digest).unwrap_or_else(|| {
-                        panic!(
-                            "vk not allowed: {:?} (map_size={})",
-                            vk_digest.map(|x| {
-                                use p3_field::PrimeField32;
-                                x.as_canonical_u32()
-                            }),
-                            self.recursion_vk_map.len()
-                        )
+                    self.recursion_vk_map.get(&vk_digest).copied().ok_or_else(|| VkNotAllowed {
+                        digest: vk_digest.map(|x| {
+                            use p3_field::PrimeField32;
+                            x.as_canonical_u32()
+                        }),
+                        map_size: self.recursion_vk_map.len(),
                     })
                 })
-                .collect()
+                .collect::<Result<_, _>>()?
         } else {
             vks.iter()
                 .map(|vk| {
@@ -2094,11 +2110,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .map(|index| MerkleTree::open(&self.recursion_vk_tree, *index))
             .unzip();
 
-        ZKMMerkleProofWitnessValues {
+        Ok(ZKMMerkleProofWitnessValues {
             root: self.recursion_vk_root,
             values,
             vk_merkle_proofs: proofs,
-        }
+        })
     }
 
     fn check_for_high_cycles(cycles: u64) {
@@ -2483,6 +2499,39 @@ pub mod tests {
             dummy_prep, expected,
             "dummy core VK chip_information diverges from the machine's preprocessed set"
         );
+    }
+
+    /// With the allowlist on, a vk outside it is a `VkNotAllowed` error for
+    /// the proof being built, carrying the digest and the map size, not a
+    /// panic.  A core-machine vk is never a recursion allowlist key.
+    #[test]
+    #[serial]
+    fn disallowed_vk_is_an_error_not_a_panic() {
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shape::OrderedShape;
+
+        let mut prover = ZKMProver::<DefaultProverComponents>::new();
+        prover.vk_verification = true;
+        let core_machine = prover.core_prover.machine();
+        let mut inner: Vec<(String, usize)> = core_machine
+            .chips()
+            .iter()
+            .filter(|c| <_ as MachineAir<KoalaBear>>::preprocessed_width(*c) > 0)
+            .map(|c| (<_ as MachineAir<KoalaBear>>::name(c), 16usize))
+            .collect();
+        inner.push(("AddSub".to_string(), 18));
+        let shape = OrderedShape::from_log2_heights(&inner);
+        let (vk, _proof) = zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
+            MipsAir<KoalaBear>,
+        >(core_machine, &shape);
+
+        let err = match prover.make_basefold_merkle_proofs(std::slice::from_ref(&vk)) {
+            Ok(_) => panic!("a core vk must not be in the recursion allowlist"),
+            Err(e) => e,
+        };
+        assert_eq!(err.map_size, prover.recursion_vk_map.len());
+        assert!(err.to_string().starts_with("vk not allowed: ["), "{err}");
     }
 
     /// The wrap proves ONE program — the verifier of the shrink proof at the

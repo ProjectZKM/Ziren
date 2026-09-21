@@ -219,6 +219,21 @@ pub enum ZKMRecursionProverError {
     DependenciesGenerationError,
 }
 
+/// A recursion vk whose KoalaBear digest `digest` is not one of the
+/// `map_size` keys of the vk allowlist.
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[error("vk not allowed: {digest:?} (map_size={map_size})")]
+pub struct VkNotAllowed {
+    pub digest: [u32; 8],
+    pub map_size: usize,
+}
+
+impl From<VkNotAllowed> for ZKMRecursionProverError {
+    fn from(e: VkNotAllowed) -> Self {
+        Self::RuntimeError(e.to_string())
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 pub enum ZKMCircuitWitness {
     /// Basefold-shape normalize input — consumes `JaggedShardProof`s from
