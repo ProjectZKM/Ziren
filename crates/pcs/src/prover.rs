@@ -682,38 +682,26 @@ impl Display for CpuProverError {
 
 impl Error for CpuProverError {}
 
-// Helper: drive prove_shard_with_data from inside `CpuProver::open()`.
-
-/// Drive [`crate::shard_level::prover::prove_shard_with_data`]
-/// using a cloned challenger so the caller's transcript isn't perturbed.
+/// Proves one shard for `CpuProver::open` on a clone of `challenger`, so the
+/// caller's transcript is left as it was.
 ///
-/// Always returns `Some(Box::new(basefold_proof))`; asserts
-/// `Val == KoalaBear` / `Challenge == KoalaBear^4` (shared by the inner
-/// and outer rings) on entry.
-///
-/// Bridges
-/// between the generic `CpuProver::open` state and the shard-level
-/// prover's KoalaBear-oriented API.
+/// The proving key supplies the preprocessed side: its multilinears
+/// (`pk_preprocessed_mles`, indexed through `pk_chip_ordering`), its
+/// precomputed commitment, opened as the first round of every shard proof,
+/// and the main round's area pin (the program's class). `commit_data` is the
+/// main-round commitment `commit` retained, together with the name-keyed
+/// traces it was built over.
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A>(
-// (The `machine` parameter is gone: it supplied the per-stage rev(zeta)
-// orientation, and there is one row orientation now. The area pin comes from
-// the proving key, not from here.)
     chips: &[&MachineChip<SC, A>],
     pk_preprocessed_mles: &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>],
-// The proving key's PRECOMPUTED preprocessed commit
-// (`StarkProvingKey::preprocessed_data`, via
-// `BasefoldRing::prep_open_data`), opened as a round of every shard proof.
     pk_preprocessed_jagged: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
         SC::BfMmcs,
     >,
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
-// The proving key's main-round pin (the program's class).
     pk_main_pin: Option<crate::jagged::AreaPin>,
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
-// The commit-time retained jagged commitment, threaded into
-// `ShardData.commit_data` for the driver to consume.
     commit_data: Option<RetainedJaggedCommit<SC>>,
 ) -> Box<
     crate::shard_level::shard_proof::JaggedShardProof<
@@ -735,9 +723,8 @@ where
     use crate::{InnerChallenge, InnerVal};
     use core::any::TypeId;
 
-    // A REAL assert, not a `debug_assert!`: it is the precondition the
-    // downstream per-ring jagged open relies on, and `debug_assert!` compiles
-    // out in release.
+    // Val = KoalaBear, Challenge = KoalaBear^4 on both rings; the jagged open
+    // downstream relies on it, so it is asserted in release too.
     assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
@@ -748,28 +735,13 @@ where
          prove_trusted_evaluations",
     );
 
-    // Unless `commit_data` already carries it, the BaseFold jagged-PCS commit
-    // is built inside `prove_shard_with_data` ->
-    // `commit_traces` (which observes its 8-felt digest as
-    // `main_commitment`, and applies the jagged HASH-BIND for the inner ring),
-    // so there is no digest to compute up-front here.
-
-    // Clone the outer challenger so the shard-level run doesn't
-    // perturb the caller's transcript state.
     let mut shard_challenger: SC::Challenger = challenger.clone();
 
-    // Convert &[&Chip] into &[&Chip<Val<SC>, A>] — Chip alias check.
     let chips_reborrow: Vec<&crate::Chip<Val<SC>, A>> =
         chips.iter().map(|c| *c as &crate::Chip<Val<SC>, A>).collect();
 
-    // BaseFold is the unconditional inner-shard path: prove the shard
-    // directly, with no panic-catch / legacy fallback.  A panic here is a
-    // genuine bug to surface.
-    //
-    // The name-keyed trace-MLE store was built ONCE at `commit()` (the
-    // matrices moved into their `Arc<Mle>`s there) and rides the retained
-    // commit data; every entry was padded to the FIXED config cube —
-    // asserted in debug builds.
+    // The name-keyed main traces `commit` built, each a padded multilinear on
+    // the fixed cube {0,1}^m.
     let mut commit_data = commit_data;
     let main_traces_named = commit_data
         .as_mut()
@@ -777,20 +749,16 @@ where
         .expect("CpuProver::commit retains the main-trace store");
     let max_log_row_count =
         crate::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
-    // A hard assert at this boundary, because the cube is what every consumer
-    // reads
-    // back off an arbitrary entry. A `debug_assert` compiles out in release,
-    // which is where a non-uniform store would be committed.
+    // Every consumer reads m off an arbitrary entry, so a store padded to two
+    // different cubes would be committed inconsistently; asserted in release.
     assert!(
         main_traces_named.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
         "retained main store padded to a cube != the fixed max_log_row_count \
          {max_log_row_count}",
     );
-    // Preprocessed traces in prove-path form: the per-key
-    // `Arc<Mle>`s are built once by `preprocessed_mles()` and shared by every
-    // shard; only the cube-dependent `PaddedMle` wrapper is per shard, and
-    // that is an `Arc` bump because the padding is virtual.  Chips with no
-    // preprocessed column get a width-0 dummy.
+    // Preprocessed traces, parallel to `chips`: the key's multilinears padded
+    // virtually to {0,1}^m (an `Arc` clone per shard), and a width-0 stand-in
+    // for a chip with no preprocessed column.
     let preprocessed_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
         .iter()
         .map(|chip| match pk_chip_ordering.get(&chip.name().to_string()) {
@@ -804,13 +772,10 @@ where
             ),
         })
         .collect();
-    // The pairing downstream is now BY NAME (`prove_shard_with_data` looks each
-    // chip's trace up in this map and panics by name if it is absent), so this no
-    // longer guards a positional misalignment. It still guards the other
-    // direction: a COMMITTED trace name that no AIR covers would be silently
-    // ignored by a name-keyed lookup, and a committed polynomial nothing
-    // constrains is a soundness gap, not a lookup miss. `assert_eq!` because
-    // release is where it matters.
+    // Traces are looked up by chip name downstream, which catches a chip
+    // without a trace but not a trace without a chip. The count closes that:
+    // a committed trace no AIR constrains would be a committed polynomial with
+    // nothing to bind it.
     assert_eq!(
         main_traces_named.len(),
         chips.len(),
@@ -823,12 +788,8 @@ where
             main_pin: pk_main_pin,
             preprocessed_traces: &preprocessed_traces,
             preprocessed_commit_data: pk_preprocessed_jagged,
-            // The ready-made name-keyed `PaddedMle` store built above.
             main_traces: main_traces_named,
             public_values,
-            // `max_log_row_count` / `orientation` (Msb) / `dense_rev` and the
-            // recursion AREA PIN are sourced inside `prove_shard_with_data`
-            // from the traces + the machine, not threaded here.
             commit_data,
         },
         &mut shard_challenger,

@@ -254,20 +254,11 @@ mod tests {
         assert_ne!(a, c);
     }
 
-    /// Produce a real (but empty-trace) JaggedShardProof via the
-    /// host-side prove_shard_with_data path.  Zero-filled traces
-    /// won't satisfy AIR constraints, but prove_shard_with_data
-    /// doesn't verify them — it just emits a wire-shape-correct
-    /// proof whose structural invariants match by construction.
-    /// That's exactly what the recursion verifier's shape asserts
-    /// expect.
+    /// A normalize witness for `machine` with the shape a real core proof of
+    /// that machine has: every chip present at 2^3 rows, both rounds
+    /// (preprocessed and main). The values are dummies; the shape is what a
+    /// program build reads.
     #[allow(clippy::type_complexity)]
-    /// Construct a minimal-but-real ZKMCoreBasefoldWitnessValues by
-    /// driving the host-side `prove_shard_with_data` path with a
-    /// single zero-filled AddSub trace.  The proof's structural
-    /// invariants (numerator/denominator/univariate_polys sizes, etc.)
-    /// match by construction — the recursion verifier's shape asserts
-    /// pass, even though cryptographic soundness wouldn't.
     fn dummy_core_basefold_witness(
         machine: &zkm_pcs::StarkMachine<
             zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
@@ -277,29 +268,10 @@ mod tests {
     {
         use zkm_pcs::shape::OrderedShape;
 
-        // Use the SHAPE-FAITHFUL dummy, built for the SAME machine the
-        // normalize circuit verifies.
-        //
-        // The previous helper hand-rolled a "real" proof by driving
-        // `prove_shard_with_data` over a synthetic ONE-CHIP machine (AddSub),
-        // then handed it to a circuit built for the full MipsAir machine.  The
-        // two disagree on everything the column layout is derived from: the
-        // circuit lays out insertion points for the full machine's rounds
-        // (`insertion index 45`) while the proof carries one round of nineteen
-        // columns.  AddSub also has `preprocessed_width() == 0`, so that
-        // machine had NO preprocessed chips at all and its proof was
-        // single-round, while every real core proof is two-round.  The dummy
-        // builder exists precisely to produce a witness whose shape matches
-        // what a real proof of that machine carries, so use it.
-        // EVERY chip of the machine, not a two-chip stand-in.
-        //
-        // The circuit lays out its column space from the FULL machine: the
-        // jagged verifier draws `z_col`'s dimension from `col_prefix_sums`
-        // (which spans every chip) while the column claims come from the
-        // shape.  A shape naming a subset makes those disagree, and
-        // `verify_trusted_evaluations` trips
-        // `evaluate_mle_ext`'s "mle eval vector size must be
-        // 2^point.dimension" -- 128 claims against a dimension-8 point.
+        // Every chip of the machine. The circuit sizes z_col from the prefix
+        // sums over all chips, the claims come from the shape, and the two
+        // agree only when the shape names every chip: the claim vector must
+        // have 2^dim(z_col) entries.
         use zkm_pcs::air::MachineAir;
         let heights: Vec<(String, usize)> = machine
             .chips()
@@ -313,38 +285,11 @@ mod tests {
         super::ZKMCoreBasefoldWitnessValues::dummy(machine, &shape)
     }
 
-    /// Compile-only smoke test: each program-builder function exists
-    /// at the right type and can be coerced to a function pointer
-    /// with the expected signature.  Validates the type bounds on
-    /// the public API without actually running the AsmCompiler
-    /// (which needs valid witness fixtures for a runtime end-to-end
-    /// test).
-    ///
-    /// Catches the most common breakage class — generic-bound drift
-    /// after upstream changes — without requiring proof fixtures.
-    /// End-to-end smoke test: construct a normalize
-    /// recursion program from a minimal dummy witness, verify the
-    /// AsmCompiler produces a non-empty `RecursionProgram`.
-    ///
-    /// Doesn't validate cryptographic soundness — the dummy proof
-    /// would not pass real verification.  Validates *only* that the
-    /// full pipeline (Witnessable::read → verify_core_basefold body
-    /// → real_jagged_evaluator_fn → AsmCompiler::compile) runs to
-    /// completion without panicking on a structurally-valid empty
-    /// shard.
-    ///
-    /// End-to-end structural smoke test: wires the real
-    /// `prove_shard_with_data` host path through the normalize
-    /// basefold program constructor.
-    ///
-    /// Validates the full shard-level pipeline end-to-end at the
-    /// structural level (all verifier layers — LogUp-GKR, zerocheck,
-    /// permutation short-circuit, jagged-PCS, stacked-PCS, basefold
-    /// query fold — run to completion without panicking on shape
-    /// mismatches).
-    ///
-    /// The zero-filled trace doesn't pass cryptographic soundness,
-    /// but the structural invariants are all satisfied by construction.
+    /// The normalize program builds from a witness shaped like a real core
+    /// proof: reading the witness, the verifier body (LogUp-GKR, zerocheck,
+    /// jagged and stacked openings) and the compilation all run without a
+    /// shape mismatch. The witness values are dummies, so nothing here says
+    /// the program accepts a real proof.
     #[test]
     fn build_normalize_basefold_program_compiles_dummy_witness() {
         use zkm_core_machine::mips::MipsAir;
@@ -353,12 +298,8 @@ mod tests {
         let config = KoalaBearPoseidon2::default();
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
         let witness = dummy_core_basefold_witness(&machine);
-        // Pass production_default().max_log_row_count — the prover
-        // pads zerocheck sumcheck out to this value regardless of the
-        // dummy trace's actual log_height (per shard_level/zerocheck_prover.rs:251).
-        // The verifier-side assertion at zerocheck.rs:488 enforces
-        // `zerocheck_proof.point.dim == pcs_max_log_row_count`, so
-        // both sides must agree on this number.
+        // The zerocheck runs on the fixed cube {0,1}^m whatever the trace
+        // heights, and the verifier requires dim(z*) = m.
         let max_log_row_count =
             zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
@@ -367,9 +308,6 @@ mod tests {
             &witness,
             max_log_row_count,
         );
-        // Bare-minimum sanity: program produced, has at least one
-        // instruction.  Tighter bounds + RecursionExecutor::run can be
-        // added once the dummy witness gains chip_openings entries.
         let _ = program;
     }
 
