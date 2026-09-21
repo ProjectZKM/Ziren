@@ -2846,30 +2846,19 @@ pub mod tests {
         );
     }
 
-    /// Faithful-dummy diagnostic: verify the
-    /// NORMALIZE dummy reproduces the REAL core VK's `vk.hash` structural
-    /// region.  The normalize recursion program hashes the verified CORE vk
-    /// (`vk_legacy.hash(builder)` at core_basefold.rs:759); that hash reads
-    /// ONE `[log_n,2^log_n,shift,g]` block per `chip_information` entry
-    /// (= per CORE preprocessed chip).  If the dummy core VK's
-    /// `chip_information.len()` differs from the real one, the dummy normalize
-    /// program reads a different number of witness slots ⇒ different program
-    /// ⇒ different VK ⇒ the enumerated vk_map misses the real normalize VK.
+    /// The normalize dummy core VK is faithful in its `chip_information`.
     ///
-    /// FINDING this test pins: the CORE machine has EXACTLY 2 preprocessed
-    /// chips — `Program` and `Byte` (mips/mod.rs:484 `preprocessed_heights`
-    /// returns `[(Program,..),(Byte,1<<16)]`) — INDEPENDENT of which
-    /// precompiles a shard uses.  And EVERY enumerated normalize cluster
-    /// carries `Program`+`Byte` (enumerate.rs `build_mips_machine_shape`:
-    /// every cluster is built atop `preprocessed_chips() = ["Program","Byte"]`).
-    /// So the dummy core VK's `chip_information` is ALWAYS the same 2 entries
-    /// the real core VK carries — the dummy IS faithful for the `vk.hash`
-    /// region.  ⇒ the multi-shard "vk not allowed" gap is NOT a dummy
-    /// chip_information/ordering-threading bug; it is an enumeration COVERAGE
-    /// gap (a reachable (cluster, arity) shape absent from the merged map).
+    /// `StarkMachine::setup` records one entry per chip with a preprocessed
+    /// trace, in name order; the dummy (`dummy_basefold_vk_and_shard_proof`)
+    /// records the chips OF THE SHAPE that have one.  The two agree on every
+    /// reachable shape because every preprocessed chip of the core machine is
+    /// included in every shard, so its name is in every shard's chip set.
+    /// Both halves are asserted: unconditional inclusion, and equality on a
+    /// representative shape.
     #[test]
     #[serial]
     fn normalize_dummy_core_vk_chip_information_is_faithful() {
+        use zkm_core_executor::ExecutionRecord;
         use zkm_core_machine::mips::MipsAir;
         use zkm_pcs::air::MachineAir;
         use zkm_pcs::shape::OrderedShape;
@@ -2877,34 +2866,32 @@ pub mod tests {
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let core_machine = prover.core_prover.machine();
 
-        // (a) The CORE machine's preprocessed chip set is exactly {Program,
-        //     Byte} — fixed, precompile-independent.
-        let prep_chip_names: BTreeSet<String> = core_machine
+        // (a) Every preprocessed chip is in every shard: `included` holds on
+        //     the empty record, the weakest shard there is.
+        let empty = ExecutionRecord::default();
+        let prep_chips: Vec<_> = core_machine
             .chips()
             .iter()
             .filter(|c| <_ as MachineAir<KoalaBear>>::preprocessed_width(*c) > 0)
-            .map(<_ as MachineAir<KoalaBear>>::name)
             .collect();
+        assert!(!prep_chips.is_empty(), "the core machine has no preprocessed chip");
+        for chip in &prep_chips {
+            assert!(
+                <_ as MachineAir<KoalaBear>>::included(*chip, &empty),
+                "preprocessed chip {} is not in every shard, so a shape without it gives \
+                 the dummy VK fewer chip_information entries than the real one",
+                <_ as MachineAir<KoalaBear>>::name(*chip)
+            );
+        }
         let expected: BTreeSet<String> =
-            ["Byte".to_string(), "Program".to_string()].into_iter().collect();
-        assert_eq!(
-            prep_chip_names, expected,
-            "[STEP-3] core preprocessed chip set drifted from {{Program, Byte}} \
-             — the dummy core VK chip_information assumption (always 2 entries) \
-             would no longer hold; re-derive the faithful-dummy argument",
-        );
+            prep_chips.iter().map(|c| <_ as MachineAir<KoalaBear>>::name(*c)).collect();
 
-        // (b) Build a normalize dummy core VK from a representative core
-        //     recursion shape that carries Program+Byte plus a few main
-        //     chips, and assert its chip_information == {Program, Byte}.
-        //     This is exactly what `dummy_basefold_vk_and_shard_proof`
-        //     produces inside `ZKMCoreBasefoldWitnessValues::dummy`.
-        let inner = vec![
-            ("Program".to_string(), 18usize),
-            ("Byte".to_string(), 16usize),
-            ("Cpu".to_string(), 18usize),
-            ("AddSub".to_string(), 18usize),
-        ];
+        // (b) A shape carrying those chips and two main chips: the dummy's
+        //     chip_information is exactly the machine's preprocessed set.
+        let mut inner: Vec<(String, usize)> =
+            expected.iter().map(|name| (name.clone(), 16usize)).collect();
+        inner.push(("AddSub".to_string(), 18));
+        inner.push(("Branch".to_string(), 18));
         let shape = OrderedShape::from_log2_heights(&inner);
         let (dummy_vk, _proof) = zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
             MipsAir<KoalaBear>,
@@ -2913,16 +2900,7 @@ pub mod tests {
             dummy_vk.chip_information.iter().map(|(n, _, _)| n.clone()).collect();
         assert_eq!(
             dummy_prep, expected,
-            "[STEP-3] dummy core VK chip_information ({:?}) != real core \
-             preprocessed set {{Program, Byte}} — dummy is NOT faithful for \
-             the vk.hash region (count mismatch ⇒ divergent normalize program)",
-            dummy_prep,
-        );
-        eprintln!(
-            "[STEP-3] PASS — dummy core VK chip_information == {{Program, Byte}} \
-             (2 entries), matching the real core VK. Dummy is faithful for the \
-             vk.hash region; the multi-shard gap is an enumeration COVERAGE \
-             gap, not a dummy chip_information bug.",
+            "dummy core VK chip_information diverges from the machine's preprocessed set"
         );
     }
 
