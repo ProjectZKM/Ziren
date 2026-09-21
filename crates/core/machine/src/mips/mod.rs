@@ -687,9 +687,9 @@ impl<F: PrimeField32> MipsAir<F> {
 
         airs.into_iter()
             .map(|air| {
-                // A bus-ported worker's paired control chip carries memory the
-                // worker no longer does itself (e.g. keccak's input/output
-                // reads+writes all live in `KeccakSpongeControl`).  Fold the
+                // A worker's paired control chip carries memory the worker does
+                // not (e.g. keccak's input/output reads and writes all live in
+                // `KeccakSpongeControl`).  Fold the
                 // control's per-row memory into the worker's
                 // `memory_events_per_row`, normalized by the worker's
                 // `rows_per_event` (the control emits 1 row per `rows_per_event`
@@ -1041,7 +1041,7 @@ pub mod tests {
             runtime
         };
         // `shape_config: None`: WHIR needs no shape banding, and the tiny test
-        // programs no longer fit a preprocessed band anyway.
+        // programs fit no preprocessed band.
         let result = crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None);
         // Verified, AND actually under WHIR: a silently-false `whir_mode`
         // would prove plain BaseFold and pass anyway, so pin the dispatch.
@@ -1381,10 +1381,9 @@ pub mod tests {
 
     /// The input the fibonacci guest reads.
     ///
-    /// The guest used to hardcode `n` and ignore stdin; since it reads a `u32`
-    /// (`f52e7f7c`), a caller that supplies nothing fails execution with
-    /// `InvalidSyscallArgs` before any proving happens.  Ten keeps the cycle
-    /// counts these tests were tuned against.
+    /// The guest reads `n: u32` from stdin, so a caller that supplies nothing
+    /// fails execution with `InvalidSyscallArgs` before any proving. Ten keeps
+    /// the cycle counts these tests were tuned against.
     fn fib_stdin() -> ZKMStdin {
         let mut stdin = ZKMStdin::new();
         stdin.write(&10u32);
@@ -1440,38 +1439,9 @@ pub mod tests {
         .unwrap();
     }
 
-    // The unfakeable gate — a
-    // FIX_CORE_SHAPES=false core proof of a PARTIALLY-FILLED shard must VERIFY
-    // end-to-end.  With FIX-off the records keep RAW heights
-    // (`shape_config = None`), so the per-shard canonical-cluster band-cap path
-    // INJECTS the missing canonical chips (DivRem / MiscInstrs / SyscallCore
-    // for this fibonacci shard) into the commit + chip_ordering.  This test
-    // injects each chip's REAL constraint-valid generated trace (FIX-on-faithful
-    // `MachineAir::generate_trace` over the canonical-shaped record) instead of
-    // all-zero matrices.
-    //
-    // The band-cap path pads the PRESENT chips' COMMIT traces up to the cluster
-    // band heights (`shard_level::prover.rs` ~431) while the zerocheck /
-    // LogUp-GKR / openings stay at the RAW heights (`shard_level::prover.rs`
-    // ~833 sources `chip_heights` from `main_traces`).  A band-height jagged
-    // reduction over raw-height evaluation claims would mismatch by the
-    // embed_factor Π_{log_raw<=k<log_band}(1-z[k]); the prover therefore declines
-    // the raw zerocheck residual (`trace_at_z`, embedded at raw log_h) whenever a
-    // band-cap is installed and RECOMPUTES `y_per_chip` from the band-padded
-    // commit traces (band-embedded by construction), so the jagged reduction
-    // agrees.  Core prove + HOST verify_shard pass end-to-end.
-    //
-    // The injected chips must carry each chip's REAL constraint-valid generated
-    // trace, not all-zero matrices (all-zero is unsound: e.g. CloClz's
-    // padding-row template `a=32, is_bb_zero=1` zeroes its SRL send, leaving that
-    // send at multiplicity 1 -> unbalanced lookup).
-    //
-    // Full recursion (in-circuit) verify additionally needs the same embed_factor
-    // applied to the evaluation_claims: the in-circuit recursion verifier derives
-    // the jagged claim from `opened_values` (RAW, shard_basefold.rs:536) rather
-    // than `bundle.y_per_chip` (BAND), so its step-4 assert (sumcheck_claim ==
-    // claimed_sum) must lift RAW->BAND.  The host verify (this test) uses
-    // `bundle.y_per_chip` directly and so does not exercise that linkage.
+    // A partially filled shard proved at its raw heights (`shape_config =
+    // None`) verifies end to end: every chip's constraints and the LogUp
+    // lookups, on a shard that lacks some of its cluster's chips.
     #[test]
     fn test_fix_off_core_verify_injected_chips_rollout1b() {
         use zkm_core_executor::Executor;
@@ -1496,13 +1466,8 @@ pub mod tests {
         utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), None).unwrap();
     }
 
-    // FIX-ON control for the injected-chips gate: the SAME fibonacci /
-    // shard-size run, but FIX_CORE_SHAPES=true (`Some(shape_config)`).  Here ALL
-    // chips (present + injected) are generated at the canonical band heights, so
-    // the zerocheck / commit / reduction all agree on heights and the proof
-    // verifies.  This passing while the FIX-off sibling fails localizes the
-    // blocker to FIX-off's raw-STARK-vs-band-commit height divergence,
-    // NOT the injected chips' content (which is identical to FIX-on's here).
+    // The same run with the shapes fixed (`Some(shape_config)`): every chip is
+    // generated at its shape height, and the proof verifies.
     #[test]
     fn test_fix_on_core_verify_control_rollout1b() {
         use crate::shape::CoreShapeConfig;
@@ -1521,34 +1486,9 @@ pub mod tests {
         utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), Some(&shape_config)).unwrap();
     }
 
-    // Degree-masked LogUp last-layer reconstruction (the
-    // height-soundness anchor).
-    //
-    // (b) NON-REGRESSION: with the reconstruction in its
-    // default state, an HONEST FIX-on proof still verifies (the new code path is
-    // additive and transcript-neutral).
-    //
-    // (c) SOUNDNESS: the reconstruction is the ACTIVE last-layer assert (it runs
-    // unconditionally since `22616c7a`); an area-preserving per-chip height
-    // forgery — tamper a chip's `degree` (quotient[0], the `full_geq` threshold
-    // the LogUp last-layer padding mask reads) without touching `circuit_output`
-    // / `main_trace_evaluations` — is REJECTED at the LogUp last-layer
-    // reconstruction, demonstrating the reconstruction reads + binds the degree
-    // bits the round walk alone ignores.
-    //
-    // The reconstruction runs UNCONDITIONALLY (`22616c7a` removed the
-    // `ZIREN_LOGUP_RECONSTRUCTION` escape hatch).  The exact interaction-axis MLE
-    // convention that makes it numerically match the GKR leaf on HONEST proofs is
-    // still being pinned (the per-chip embed lift + degree mask are verified; the
-    // residual is the leaf assembly orientation — see the crate REPORT).  So this
-    // test asserts the contract: (b) honest verify is OK; (c) the forgery is
-    // rejected at the reconstruction.
-    //
-    // Run serially (`--test-threads=1`):
-    // set/cleared around each verify.
-    // FAST diagnostic harness: prove one honest FIX-on fibonacci shard and run
-    // ONLY a recon-ON verify (no gate-B/C) — reads the walk-vs-reconstruction
-    // numbers in ~one prove + one verify. `#[ignore]` so it never runs in CI.
+    // Diagnostic: prove one honest fibonacci shard at shape heights and verify
+    // it once, printing the round walk against the last-layer reconstruction.
+    // Ignored in CI.
     #[test]
     #[ignore]
     fn recon_probe_honest_only() {
@@ -1589,12 +1529,12 @@ pub mod tests {
         eprintln!("[PROBE] recon-ON honest verify => {:?}", r.map(|_| "OK"));
     }
 
-    // Height-soundness anchor.  (b) honest
-    // verify OK on the default path; (b-ON) honest verify OK with the
-    // reconstruction enabled (the degree-masked last-layer asserts hold);
-    // (c) an area-preserving per-chip height forgery is REJECTED by the
-    // reconstruction (GREEN) while accepted without it (RED).  Run serially
-    // (`--test-threads=1`): the flag is a process-wide env var.
+    // Height soundness. The degree-masked LogUp last-layer reconstruction
+    // reads each chip's height bits (`quotient[0]`, the `full_geq` threshold),
+    // which the round walk alone ignores. So an honest proof verifies, and an
+    // area-preserving height forgery — one chip's claimed height ×2, another's
+    // ÷2, `circuit_output` and the main evaluations untouched — is rejected at
+    // the reconstruction.
     #[test]
     fn test_fix_on_height_forgery_red_green_gate_c() {
         use crate::shape::CoreShapeConfig;
@@ -1602,7 +1542,7 @@ pub mod tests {
         use zkm_pcs::{MachineProver, StarkGenericConfig};
         setup_logger();
 
-        // 1) Prove an honest FIX-on fibonacci shard (the gate-(b) control shape).
+        // 1) Prove an honest fibonacci shard at shape heights.
         let mut program = fibonacci_program();
         let shape_config = CoreShapeConfig::default();
         shape_config.fix_preprocessed_shape(&mut program).unwrap();
@@ -1716,15 +1656,7 @@ pub mod tests {
         bf.opened_values.chips[rc].quotient[0][rb] = one_ef; // raise: +2^? area
         bf.opened_values.chips[lc].quotient[0][lb] = zero_ef; // lower: -2^? area
 
-        // 4) With the reconstruction flag OFF (default), the forgery is STILL
-        // rejected at the last-layer reconstruction.  This half used to be the
-        // RED arm of a red/green pair: it asserted the reconstruction error was
-        // NOT raised, pinning the hole that the restructure had to close.  The
-        // degree-masked height-soundness assert is now on the default path, so
-        // the flag no longer gates it and the RED arm no longer exists.  Assert
-        // rejection in BOTH configurations instead -- weaker on attribution
-        // (rejection is no longer attributable to the flag) but stronger on
-        // soundness, which is what the gate is for.
+        // 4) The forgery is rejected on the default path.
         let red = verify(&forged);
         eprintln!("[GATE-C] flag-off forged verify => {red}");
         assert!(
@@ -1745,23 +1677,13 @@ pub mod tests {
         );
     }
 
-    // Fast validation harness for the single-FIELD-collapse
-    // height-soundness restructure.  TEST-ONLY: these add NO production logic;
-    // they wrap the existing FIX-off prove + machine.verify path so the later
-    // restructure stages are iterable, and they ESTABLISH THE FORGERY-SURVIVES
-    // BASELINE (the hole the restructure must flip accept->reject at Stage 3).
-    //
-    // All four prove at RAW heights (FIX-off, `shape_config = None`) — no shape
-    // padding => the zerocheck shape-padding tax is removed => fast.  The honest
-    // cases must verify GREEN; the forgery
-    // cases must be REJECTED with the reconstruction OFF (default).  These
-    // originally asserted the opposite -- that the forgery SURVIVED -- to pin
-    // the hole the restructure had to close; that flip has happened and the
-    // assertions now guard against it reopening.
+    // Height-soundness tests at raw heights (`shape_config = None`, no shape
+    // padding, so they are fast): the honest cases verify and the
+    // area-preserving height forgeries are rejected.
 
-    // Shared helper: FIX-off prove a single-shard program at RAW heights, then
-    // return (proof, machine, vk) so the caller can verify honest / forged
-    // variants.  `shard_size` is generous so the tiny/fib runs are one shard.
+    // Prove a single-shard program at raw heights and return (proof, machine,
+    // vk) for honest and forged verification. `shard_size` is generous so the
+    // tiny and fibonacci runs are one shard.
     #[cfg(test)]
     fn stage0_prove_fixoff(
         program: Program,
@@ -1820,15 +1742,12 @@ pub mod tests {
         }
     }
 
-    // Shared helper: apply the area-preserving per-chip height forgery used by
-    // the FIX-on gate_c test — pick two chips in the first shard's basefold
-    // opened_values and move ONE `degree` bit (quotient[0]) in opposite
-    // directions (raise one chip's claimed height by 2x at bit k, lower
-    // another's by 2x at bit k), keeping total claimed area invariant and
-    // leaving circuit_output / main_trace_evaluations untouched.  Returns
-    // Some(description) on success or None if the proof's chips cannot host a
-    // genuine area-preserving move (e.g. only one chip, or no opposite-bit
-    // pair) — the tiny 3-instruction program may fall in the None case.
+    // The area-preserving height forgery: in the first shard's openings, move
+    // one `degree` bit (`quotient[0]`) in opposite directions on two chips —
+    // one claimed height ×2 at bit k, another ÷2 at bit k — so the total
+    // claimed area is unchanged and `circuit_output` and the main evaluations
+    // are untouched. Returns a description, or `None` when the chips admit no
+    // such move (one chip, or no opposite-bit pair), as the tiny program may.
     #[cfg(test)]
     fn stage0_apply_height_forgery(
         forged: &mut zkm_pcs::MachineProof<KoalaBearPoseidon2>,
@@ -1875,9 +1794,7 @@ pub mod tests {
         ))
     }
 
-    // Fast honest harness: a RAW-height FIX-off prove+verify of the
-    // 3-instruction `simple_program`.  Target ~<20s (no shape padding).  GREEN
-    // = honest FIX-off verifies.
+    // The 3-instruction `simple_program` at raw heights proves and verifies.
     #[test]
     fn stage0_tiny_honest_fixoff() {
         setup_logger();
@@ -1887,10 +1804,9 @@ pub mod tests {
         assert_eq!(r, "OK", "honest FIX-off tiny proof must verify (stage-0 fast harness)");
     }
 
-    // Mixed-height honest gate: a RAW-height FIX-off prove+verify of
-    // fibonacci.  The forgery only manifests with a short chip beside a tall one
-    // (mixed heights), which the 3-instruction program may not exercise — so
-    // this fibonacci honest case is the mixed-height honest control.  GREEN.
+    // Fibonacci at raw heights proves and verifies: the honest control with
+    // mixed chip heights, which the forgery needs and the tiny program may not
+    // have.
     #[test]
     fn stage0_fib_honest_fixoff() {
         setup_logger();
@@ -1900,16 +1816,9 @@ pub mod tests {
         assert_eq!(r, "OK", "honest FIX-off fibonacci proof must verify (mixed-height gate)");
     }
 
-    // Forgery-survives baseline on the TINY program.  Apply the
-    // area-preserving height forgery to a RAW-height FIX-off tiny proof and,
-    // with the reconstruction OFF (default), CONFIRM THE FORGERY SURVIVES — the
-    // forged-height proof still VERIFIES.  This documents the hole the
-    // restructure must close (Stage 3 must flip this accept->reject).
-    //
-    // NOTE: the 3-instruction program may not host a genuine mixed-height
-    // forgery (too few chips / no opposite-bit pair).  If `stage0_apply_*`
-    // returns None we record that the tiny program cannot host the forgery and
-    // rely on the fibonacci baseline (0.3b) instead.
+    // The height forgery on the tiny program is rejected. The program may admit
+    // no such forgery (too few chips, no opposite-bit pair); then the
+    // fibonacci case below carries the check.
     #[test]
     fn stage0_tiny_forgery_baseline_fixoff() {
         setup_logger();
@@ -1930,15 +1839,8 @@ pub mod tests {
             }
             Some(desc) => {
                 eprintln!("[STAGE0-TINY-FORGERY] {desc}");
-                // The area-preserving height forgery must be REJECTED even with
-                // the reconstruction off.  This assertion used to demand the
-                // opposite -- it pinned the size of an open hole so a later fix
-                // could be shown to close it (accept -> reject).  The hole IS
-                // closed: the degree-masked height-soundness assert in the
-                // LogUp-GKR last-layer reconstruction now catches it, so the
-                // baseline has flipped exactly as that comment anticipated.
-                // Kept, inverted, as the regression guard that the hole stays
-                // closed.
+                // Rejected by the degree-masked LogUp-GKR last-layer
+                // reconstruction.
                 let baseline = stage0_verify(&machine, &vk, &forged);
                 eprintln!("[STAGE0-TINY-FORGERY] forged verify (recon off) => {baseline}");
                 assert_ne!(
@@ -1952,12 +1854,8 @@ pub mod tests {
         }
     }
 
-    // Shared helper: FIX-off prove a single-shard program at RAW heights.
-    // rev(zeta) is the CORE DEFAULT (the core prove path
-    // installs the `Some(true)` orientation carrier unconditionally), so the
-    // emitted core proof is rev without any env toggle — commit+y+weight all
-    // natural, claim seeded from `*_full` (no rev-zeta A/B env
-    // toggle).
+    // Prove a single-shard program at raw heights (the rev(ζ) orientation, the
+    // only one).
     #[cfg(test)]
     fn stage3_prove_fixoff_rev(
         program: Program,
@@ -2197,15 +2095,9 @@ pub mod tests {
              and must be collapsed onto the bound opening"
         );
 
-        // NOTE: this test used to ALSO isolate the rejection SITE by re-verifying
-        // with the reconstruction disabled, to show the tampered `*_full` is
-        // caught by the CLAIM binding and not only by the reconstruction.  That
-        // isolation is no longer expressible: `22616c7a` made the degree-masked
-        // last-layer reconstruction UNCONDITIONAL and removed the
-        // `ZIREN_LOGUP_RECONSTRUCTION` escape hatch, so every verify now runs it
-        // and it is simply the first check to fire.  The soundness property this
-        // test guards -- the adaptive forgery must not be accepted -- is asserted
-        // above and is strictly stronger than the old two-mode form.
+        // The reconstruction always runs, so it is the first check to fire;
+        // the property asserted above is that the adaptive forgery is not
+        // accepted.
 
         // DECISIVE conjunction: an adaptive adversary wins ONLY if SOME *_full
         // makes BOTH (recon-ON pass) AND (claim binding pass) for the forged
@@ -2341,11 +2233,8 @@ pub mod tests {
         );
     }
 
-    // Forgery-survives baseline on FIBONACCI (mixed-height).  The
-    // KEY deliverable: a genuinely area-preserving per-chip height forgery on a
-    // RAW-height FIX-off fibonacci proof must VERIFY (the forgery
-    // SURVIVES) with the reconstruction OFF.  This is the make-or-break baseline
-    // — Stage 3 of the restructure must flip this RED case accept->reject.
+    // The area-preserving height forgery on fibonacci (mixed heights) at raw
+    // heights is rejected.
     #[test]
     fn stage0_fib_forgery_baseline_fixoff() {
         setup_logger();
@@ -2360,13 +2249,7 @@ pub mod tests {
             .expect("fibonacci (mixed-height) must host an area-preserving height forgery");
         eprintln!("[STAGE0-FIB-FORGERY] {desc}");
 
-        // The area-preserving height forgery must be REJECTED even with the
-        // reconstruction off.  This used to assert the opposite: it pinned an
-        // open hole so the restructure could be shown to close it
-        // (accept -> reject).  That transition has happened -- the degree-masked
-        // height-soundness assert in the LogUp-GKR last-layer reconstruction now
-        // catches the forgery -- so the assertion is inverted and kept as the
-        // guard that the hole stays closed.
+        // Rejected by the degree-masked LogUp-GKR last-layer reconstruction.
         let baseline = stage0_verify(&machine, &vk, &forged);
         eprintln!("[STAGE0-FIB-FORGERY] forged verify (recon off) => {baseline}");
         assert_ne!(
