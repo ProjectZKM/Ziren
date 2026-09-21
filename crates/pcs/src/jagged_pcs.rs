@@ -1475,6 +1475,141 @@ pub mod jagged {
         )
     }
 
+    /// Checks every precondition of a multi-round jagged open before the
+    /// transcript is touched, and returns the common `log_stacking_height`.
+    ///
+    /// Each entry is one round `(precomputed, claims, r_row_per_chip)`.  With
+    /// `ℓ` the stacking height, `A_r` round `r`'s committed area, `n_r` its
+    /// packed cells and `c_i`, `h_i` chip `i`'s column and row counts:
+    ///
+    /// * the commit, the prover data and (when present) the WHIR data agree on
+    ///   `A_r` and `ℓ`, and every round has the same `ℓ`;
+    /// * `|claims| = |r_row_per_chip| = |chips|`, `|claims_i| = c_i`, and
+    ///   `h_i ≤ 2^{|z_row|}`;
+    /// * `0 < A_r`, `2^ℓ | A_r` and `n_r ≤ A_r`;
+    /// * `2^{ℓ + ⌈log₂(Σ_r A_r / 2^ℓ)⌉} = next_pow2(Σ_r A_r)`.
+    ///
+    /// These are the checks [`prove_jagged_rounds_generic`] makes; a device
+    /// prover that builds the same instance calls this first.
+    ///
+    /// # Panics
+    /// When any of the above fails.
+    #[allow(clippy::type_complexity)]
+    pub fn validate_jagged_rounds<MT, C>(
+        rounds: &[(&PrecomputedJaggedCommitGeneric<MT>, &[Vec<C>], &[Vec<C>])],
+        z_row_len: usize,
+    ) -> usize
+    where
+        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>,
+    {
+        assert!(!rounds.is_empty(), "prove_jagged_rounds: no rounds");
+        let row_cube = 1usize << z_row_len;
+        for (ri, (pre, claims, r_row)) in rounds.iter().enumerate() {
+            let pd = &pre.prover_data;
+            let c = &pre.commit;
+            assert_eq!(
+                c.area, pd.area,
+                "prove_jagged_rounds: round {ri} commit area {} != prover-data area {}",
+                c.area, pd.area,
+            );
+            assert_eq!(
+                c.log_stacking_height, pd.log_stacking_height,
+                "prove_jagged_rounds: round {ri} commit log_stacking_height {} != prover-data {}",
+                c.log_stacking_height, pd.log_stacking_height,
+            );
+            if let Some(wd) = pre.whir_data.as_ref() {
+                assert_eq!(
+                    wd.area, pd.area,
+                    "prove_jagged_rounds: round {ri} WHIR area {} != prover-data area {}",
+                    wd.area, pd.area,
+                );
+                assert_eq!(
+                    wd.log_stacking_height, pd.log_stacking_height,
+                    "prove_jagged_rounds: round {ri} WHIR log_stacking_height {} != \
+                     prover-data {}",
+                    wd.log_stacking_height, pd.log_stacking_height,
+                );
+            }
+            let pk = &pre.packing;
+            assert_eq!(
+                claims.len(),
+                pk.chip_infos.len(),
+                "prove_jagged_rounds: round {ri} has {} claim groups for {} chips",
+                claims.len(),
+                pk.chip_infos.len(),
+            );
+            assert_eq!(
+                r_row.len(),
+                pk.chip_infos.len(),
+                "prove_jagged_rounds: round {ri} has {} row points for {} chips",
+                r_row.len(),
+                pk.chip_infos.len(),
+            );
+            for (ci, (claim, info)) in claims.iter().zip(pk.chip_infos.iter()).enumerate() {
+                assert!(
+                    info.row_count <= row_cube,
+                    "prove_jagged_rounds: round {ri} chip {ci} ({}) has {} rows, above \
+                     the row cube 2^{z_row_len} the shared eval point spans",
+                    info.name,
+                    info.row_count,
+                );
+                assert_eq!(
+                    claim.len(),
+                    info.column_count,
+                    "prove_jagged_rounds: round {ri} chip {ci} ({}) has {} claims for \
+                     {} columns",
+                    info.name,
+                    claim.len(),
+                    info.column_count,
+                );
+            }
+            assert!(
+                pd.area >= pk.total_values,
+                "prove_jagged_rounds: round {ri} committed area {} is below its \
+                 packing's {} real cells -- commitment and packing metadata disagree",
+                pd.area,
+                pk.total_values,
+            );
+        }
+
+        let log_stacking_height = rounds[0].0.prover_data.log_stacking_height as usize;
+        assert!(
+            rounds
+                .iter()
+                .all(|(pre, _, _)| pre.prover_data.log_stacking_height as usize
+                    == log_stacking_height),
+            "prove_jagged_rounds: rounds disagree on log_stacking_height {:?}; the \
+             batched open indexes every round's stripes with round 0's height",
+            rounds
+                .iter()
+                .map(|(pre, _, _)| pre.prover_data.log_stacking_height)
+                .collect::<alloc::vec::Vec<_>>(),
+        );
+        let stripe = 1usize << log_stacking_height;
+        for (ri, (pre, _, _)) in rounds.iter().enumerate() {
+            let area = pre.prover_data.area;
+            assert!(area > 0, "prove_jagged_rounds: round {ri} committed area is zero");
+            assert_eq!(
+                area % stripe,
+                0,
+                "prove_jagged_rounds: round {ri} area {area} is not a whole number of \
+                 2^{log_stacking_height} stripes",
+            );
+        }
+        let total_stripes: usize =
+            rounds.iter().map(|(pre, _, _)| pre.prover_data.area >> log_stacking_height).sum();
+        let batch_dim = total_stripes.max(1).next_power_of_two().trailing_zeros() as usize;
+        let effective_area = 1usize << (log_stacking_height + batch_dim);
+        let sum_areas: usize = rounds.iter().map(|(pre, _, _)| pre.prover_data.area).sum();
+        assert_eq!(
+            effective_area,
+            sum_areas.next_power_of_two(),
+            "prove_jagged_rounds: opening area {effective_area} != \
+             next_power_of_two(sum of round areas {sum_areas})",
+        );
+        log_stacking_height
+    }
+
     /// Ring-generic body.  The INNER (Poseidon2-KoalaBear) ring reaches it
     /// through [`prove_jagged_rounds`]; the BN254 wrap ring names its
     /// own commitment family, which is what lets the terminal stage open a
@@ -2580,8 +2715,8 @@ mod test {
     // both sides (the shard-level Phase 1 prologue analog).
 
     use crate::jagged_pcs::jagged::{
-        build_jagged_verify_inputs, prove_jagged_rounds, verify_jagged_no_observe, ChipTraceView,
-        JaggedOpenRound, JaggedPcsProof,
+        build_jagged_verify_inputs, prove_jagged_rounds, validate_jagged_rounds,
+        verify_jagged_no_observe, ChipTraceView, JaggedOpenRound, JaggedPcsProof,
     };
     use crate::kb31_poseidon2::koala_bear_poseidon2::KoalaBearPoseidon2;
 
@@ -3067,6 +3202,50 @@ mod test {
         let mut claims = column_claims(&main_views, &z_row);
         claims[0].push(JaggedChallenge::ONE);
         prove_two(&prep_views, &main_views, &prep, &main, &z_row, Some(claims));
+    }
+
+    /// `validate_jagged_rounds` accepts the honest two-round instance and
+    /// returns the production stacking height.
+    #[test]
+    fn validate_jagged_rounds_accepts_honest_rounds() {
+        let (prep_views, main_views, prep, main, z_row) = small_two_rounds();
+        let (pc, mc) = (column_claims(&prep_views, &z_row), column_claims(&main_views, &z_row));
+        let (pr, mr) = (r_row_suffixes(&prep_views, &z_row), r_row_suffixes(&main_views, &z_row));
+        let h = validate_jagged_rounds(
+            &[(&prep, pc.as_slice(), pr.as_slice()), (&main, mc.as_slice(), mr.as_slice())],
+            z_row.len(),
+        );
+        assert_eq!(h, prep.prover_data.log_stacking_height as usize);
+    }
+
+    /// `validate_jagged_rounds` rejects a claim vector wider than its chip.
+    #[test]
+    #[should_panic(expected = "has 3 claims for 2 columns")]
+    fn validate_jagged_rounds_rejects_malformed_claim_width() {
+        let (prep_views, main_views, prep, main, z_row) = small_two_rounds();
+        let pc = column_claims(&prep_views, &z_row);
+        let mut mc = column_claims(&main_views, &z_row);
+        mc[0].push(JaggedChallenge::ONE);
+        let (pr, mr) = (r_row_suffixes(&prep_views, &z_row), r_row_suffixes(&main_views, &z_row));
+        validate_jagged_rounds(
+            &[(&prep, pc.as_slice(), pr.as_slice()), (&main, mc.as_slice(), mr.as_slice())],
+            z_row.len(),
+        );
+    }
+
+    /// `validate_jagged_rounds` rejects a round missing one chip's row point.
+    #[test]
+    #[should_panic(expected = "row points for")]
+    fn validate_jagged_rounds_rejects_short_row_points() {
+        let (prep_views, main_views, prep, main, z_row) = small_two_rounds();
+        let (pc, mc) = (column_claims(&prep_views, &z_row), column_claims(&main_views, &z_row));
+        let pr = r_row_suffixes(&prep_views, &z_row);
+        let mut mr = r_row_suffixes(&main_views, &z_row);
+        mr.pop();
+        validate_jagged_rounds(
+            &[(&prep, pc.as_slice(), pr.as_slice()), (&main, mc.as_slice(), mr.as_slice())],
+            z_row.len(),
+        );
     }
 
     /// **Proof boundary** — the stacking height is part of the PROTOCOL,

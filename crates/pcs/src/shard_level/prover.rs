@@ -890,22 +890,33 @@ where
     }
 }
 
-/// Prove the trusted evaluations `y_{i,k} = T̃_{i,k}(z)` for every chip `i`
-/// and main column `k`, the values zerocheck and LogUp-GKR constrain.
+/// Prove the trusted evaluations `y_k = T̃_k(z_row)` for every global column
+/// `k` of the preprocessed and main rounds, the openings zerocheck consumed.
 ///
-/// The proof is the whole chain: the jagged sumcheck reduces
-/// `Σ_{i,k} β^{(i,k)} y_{i,k}` to `F(r)·J(r)`, and the PCS opening proves
-/// `F(r)` against the committed dense polynomial `F`.  The preprocessed round
-/// opens `preprocessed_claims` first, against `preprocessed_commit`.
+/// Let `Q` be the dense polynomial of both rounds in the order
+/// `[preprocessed, main]`, each padded to its stacking area, and let column `k`
+/// start at packed offset `o_k`.  After the openings are observed, one fresh
+/// `z_col` is sampled for all columns of both rounds, and with
+/// `W[o_k + j] = χ_k(z_col)·χ_j(z_row)`
+///
+/// ```text
+///   t = Σ_k χ_k(z_col)·y_k = Σ_x Q[x]·W[x].
+/// ```
+///
+/// The jagged sumcheck reduces `t` to `Q(r)·W(r)`, the jagged-evaluation proof
+/// gives `W(r)` from the offsets, `z_row`, `z_col` and `r`, and the PCS opening
+/// proves `Q(r)` against every round commitment.
 ///
 /// * `main_traces`: borrowed views of the committed traces, never copied.
 /// * `precomputed_commit`: the main commit, whose digest the transcript
 ///   already observed, so it is not observed again.
-/// * `pre_y_per_chip[i]`: the `y_{i,·}` above, empty for an empty chip.
-/// * `heights[i]`: row count of a chip whose commit trace is empty; a missing
-///   entry falls back to the provider.
+/// * `pre_y_per_chip[i]`: chip `i`'s `w_i` main-column claims; `w_i` zeros when
+///   `h_i = 0`, empty only when `w_i = 0`.
+/// * `heights[i]`: `h_i` of a chip whose commit trace is empty; a missing entry
+///   means `h_i = 1`.
 ///
-/// The ring-specific open is [`crate::BasefoldRing::prove_jagged_open`].
+/// The ring-specific open is [`crate::BasefoldRing::prove_jagged_open`]; both
+/// rings open the claims above.
 ///
 /// # Panics
 /// Unless `Val<SC> = KoalaBear` and `Challenge<SC> = KoalaBear⁴`, which makes
