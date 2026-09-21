@@ -71,7 +71,7 @@ impl ProverClient {
             "mock" => Self { prover: Box::new(MockProver::new()) },
             "cpu" | "local" => {
                 #[cfg(debug_assertions)]
-                eprintln!("Warning: Local prover in dev mode is not recommended. Proof generation may be slow.");
+                tracing::info!("Warning: Local prover in dev mode is not recommended. Proof generation may be slow.");
                 Self {
                     prover: Box::new(CpuProver::new()),
                 }

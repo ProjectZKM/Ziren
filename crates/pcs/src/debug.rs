@@ -91,9 +91,9 @@ pub fn debug_constraints<SC, A>(
             chip.eval(&mut builder);
         }));
         if result.is_err() {
-            eprintln!("local: {main_local:?}");
-            eprintln!("next:  {main_next:?}");
-            eprintln!("failed at row {} of chip {}", i, chip.name());
+            tracing::info!("local: {main_local:?}");
+            tracing::info!("next:  {main_next:?}");
+            tracing::warn!("failed at row {} of chip {}", i, chip.name());
             exit(1);
         }
     });
@@ -172,7 +172,7 @@ where
     fn debug_constraint(&self, x: F, y: F) {
         if x != y {
             let backtrace = std::backtrace::Backtrace::force_capture();
-            eprintln!("constraint failed: {x:?} != {y:?}\n{backtrace}");
+            tracing::warn!("constraint failed: {x:?} != {y:?}\n{backtrace}");
             panic!();
         }
     }
@@ -231,7 +231,7 @@ where
         let x = x.into();
         if x != F::ZERO && x != F::ONE {
             let backtrace = std::backtrace::Backtrace::force_capture();
-            eprintln!("constraint failed: {x:?} is not a bool\n{backtrace}");
+            tracing::warn!("constraint failed: {x:?} is not a bool\n{backtrace}");
             panic!();
         }
     }

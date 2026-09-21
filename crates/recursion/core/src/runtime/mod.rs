@@ -461,8 +461,8 @@ where
                 .filter(|(_, &n)| n > 0)
                 .map(|(nm, n)| format!("{nm}={n} "))
                 .collect();
-            eprintln!("REC_MIX {mix_str}");
-            eprintln!(
+            tracing::info!("REC_MIX {mix_str}");
+            tracing::info!(
                 "REC_EXEC analyze={analyze_secs:.4}s walk={walk_secs:.4}s instrs={instrs} \
                  rate={:.2}M/s",
                 (instrs as f64) / walk_secs / 1e6
@@ -811,7 +811,7 @@ where
                     let f = self.mr_us(*addr).val[0];
                     match debug_stdout.as_mut() {
                         Some(w) => writeln!(w, "PRINTF={f}").map_err(RuntimeError::DebugPrint)?,
-                        None => eprintln!("PRINTF={f}"),
+                        None => tracing::info!("PRINTF={f}"),
                     }
                 }
                 FieldEltType::Extension => {
@@ -821,7 +821,7 @@ where
                         Some(w) => {
                             writeln!(w, "PRINTEF={ef:?}").map_err(RuntimeError::DebugPrint)?
                         }
-                        None => eprintln!("PRINTEF={ef:?}"),
+                        None => tracing::info!("PRINTEF={ef:?}"),
                     }
                 }
             },

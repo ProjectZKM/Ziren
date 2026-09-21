@@ -217,17 +217,17 @@ fn spec_vectors_match_the_oracle() {
         }
         std::fs::write(&path, serde_json::to_string_pretty(&decoded).unwrap())
             .expect("write decoded dump");
-        eprintln!("wrote {} decoded words to {path}", decoded.len());
+        tracing::info!("wrote {} decoded words to {path}", decoded.len());
     }
-    eprintln!("spec vector conformance (passed/total per instruction):");
+    tracing::info!("spec vector conformance (passed/total per instruction):");
     for (mn, (total, ok)) in &per_mnemonic {
-        eprintln!("  {mn:8} {ok:3}/{total}");
+        tracing::info!("  {mn:8} {ok:3}/{total}");
     }
     if !failures.is_empty() {
         for (name, problems) in &failures {
-            eprintln!("FAIL {name}");
+            tracing::warn!("FAIL {name}");
             for p in problems {
-                eprintln!("    {p}");
+                tracing::info!("    {p}");
             }
         }
         panic!("{} of {} spec vectors failed", failures.len(), vectors.len());
@@ -240,7 +240,7 @@ fn cannon_open_mips_tests() {
         "/data/stephen/cannon-mips/mipsevm/open_mips_tests/test/bin".to_string()
     });
     let Ok(entries) = std::fs::read_dir(&dir) else {
-        eprintln!("CANNON_MIPS_TESTS not found at {dir}; skipping");
+        tracing::info!("CANNON_MIPS_TESTS not found at {dir}; skipping");
         return;
     };
     let mut files: Vec<_> = entries
@@ -302,7 +302,7 @@ fn cannon_open_mips_tests() {
         // The programs end with `jr $ra`; $ra is zero, and pc == 0 terminates the executor.
         let done_addr = base + 4;
         let result_addr = base + 8;
-        eprintln!("cannon {name}");
+        tracing::info!("cannon {name}");
         let outcome = std::panic::catch_unwind(|| {
             run_words(&words, 0, &BTreeMap::new(), &[done_addr, result_addr])
         })
@@ -329,7 +329,7 @@ fn cannon_open_mips_tests() {
             Err(e) => failures.push(format!("{name}: {e}")),
         }
     }
-    eprintln!(
+    tracing::warn!(
         "cannon open_mips_tests: {passed} passed, {} failed, {} big-endian-only ({:?}), skipped {:?}",
         failures.len(),
         big_endian_only.len(),
@@ -337,7 +337,7 @@ fn cannon_open_mips_tests() {
         skipped
     );
     for f in &failures {
-        eprintln!("FAIL {f}");
+        tracing::warn!("FAIL {f}");
     }
     assert!(failures.is_empty(), "{} cannon vectors failed", failures.len());
 }

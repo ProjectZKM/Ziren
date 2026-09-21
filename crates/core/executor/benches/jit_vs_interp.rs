@@ -132,7 +132,7 @@ fn report(name: &str, samples: &[u64]) {
     let min = *samples.iter().min().unwrap() as f64;
     let max = *samples.iter().max().unwrap() as f64;
     let per_instr = mean / NUM_INSTRS as f64;
-    eprintln!(
+    tracing::info!(
         "{:<18} mean {:>9.2} ms  min {:>9.2} ms  max {:>9.2} ms  ({:>7.2} ns/instr)",
         name,
         mean / 1e6,
@@ -164,6 +164,7 @@ fn run_real_elf_run_fast(elf_bytes: &[u8], disable_jit: bool, n: u32) -> u64 {
 }
 
 fn main() {
+    let _ = tracing_subscriber::fmt().with_writer(std::io::stderr).try_init();
     let program = build_program();
 
     // Warmup — first run pays page-fault / icache costs we don't
@@ -182,9 +183,10 @@ fn main() {
         jit.push(run_jit_alu_chain(&program));
     }
 
-    eprintln!(
+    tracing::info!(
         "=== JIT vs interpreter ({} ADD instrs, {} repeats, after warmup) ===",
-        NUM_INSTRS, REPEATS
+        NUM_INSTRS,
+        REPEATS
     );
     report("interp very_fast", &very_fast);
     report("interp fast", &fast);
@@ -193,9 +195,9 @@ fn main() {
 
     let mean = |s: &[u64]| s.iter().sum::<u64>() as f64 / REPEATS as f64;
     let jit_mean = mean(&jit);
-    eprintln!("speedup vs very_fast: {:>7.2}x", mean(&very_fast) / jit_mean);
-    eprintln!("speedup vs fast:      {:>7.2}x", mean(&fast) / jit_mean);
-    eprintln!("speedup vs trace:     {:>7.2}x", mean(&trace) / jit_mean);
+    tracing::info!("speedup vs very_fast: {:>7.2}x", mean(&very_fast) / jit_mean);
+    tracing::info!("speedup vs fast:      {:>7.2}x", mean(&fast) / jit_mean);
+    tracing::info!("speedup vs trace:     {:>7.2}x", mean(&trace) / jit_mean);
 
     // Real-world end-to-end: time `Executor::run_fast` on the
     // fibonacci ELF through both code paths.  This is what the
@@ -205,8 +207,10 @@ fn main() {
     // Also try hello-world (no input) — exercises a different ELF.
     let hello_elf = "/data/stephen/Ziren/crates/test-artifacts/guests/target/elf-compilation/mipsel-zkm-zkvm-elf/release/hello-world";
     if let Ok(hello_bytes) = std::fs::read(hello_elf) {
-        eprintln!();
-        eprintln!("=== hello-world ELF (run_fast end-to-end, no input, {} repeats) ===", REPEATS);
+        tracing::info!(
+            "=== hello-world ELF (run_fast end-to-end, no input, {} repeats) ===",
+            REPEATS
+        );
         let _ = run_real_elf_run_fast(&hello_bytes, true, 0);
         let _ = run_real_elf_run_fast(&hello_bytes, false, 0);
         let mut interp_h = Vec::with_capacity(REPEATS);
@@ -215,9 +219,9 @@ fn main() {
             interp_h.push(run_real_elf_run_fast(&hello_bytes, true, 0));
             jit_h.push(run_real_elf_run_fast(&hello_bytes, false, 0));
         }
-        eprintln!("interp run_fast    mean {:>9.3} ms", mean(&interp_h) / 1e6);
-        eprintln!("JIT-by-default     mean {:>9.3} ms", mean(&jit_h) / 1e6);
-        eprintln!("JIT vs interp on hello-world: {:>5.2}x", mean(&interp_h) / mean(&jit_h));
+        tracing::info!("interp run_fast    mean {:>9.3} ms", mean(&interp_h) / 1e6);
+        tracing::info!("JIT-by-default     mean {:>9.3} ms", mean(&jit_h) / 1e6);
+        tracing::info!("JIT vs interp on hello-world: {:>5.2}x", mean(&interp_h) / mean(&jit_h));
     }
 
     if let Ok(elf_bytes) = std::fs::read(elf_path) {
@@ -226,8 +230,7 @@ fn main() {
         // inner loop is short, so larger N means more dynamic
         // cycles amortising the same static program.
         for &n in &[20u32, 1000, 50_000] {
-            eprintln!();
-            eprintln!(
+            tracing::info!(
                 "=== Real fibonacci ELF (run_fast end-to-end, n={n}, {} repeats) ===",
                 REPEATS,
             );
@@ -241,22 +244,21 @@ fn main() {
             }
             let interp_mean = mean(&interp_fib);
             let jit_fib_mean = mean(&jit_fib);
-            eprintln!(
+            tracing::info!(
                 "interp run_fast    mean {:>9.3} ms  min {:>9.3} ms  max {:>9.3} ms",
                 interp_mean / 1e6,
                 *interp_fib.iter().min().unwrap() as f64 / 1e6,
                 *interp_fib.iter().max().unwrap() as f64 / 1e6,
             );
-            eprintln!(
+            tracing::info!(
                 "JIT-by-default     mean {:>9.3} ms  min {:>9.3} ms  max {:>9.3} ms",
                 jit_fib_mean / 1e6,
                 *jit_fib.iter().min().unwrap() as f64 / 1e6,
                 *jit_fib.iter().max().unwrap() as f64 / 1e6,
             );
-            eprintln!("JIT vs interp on fib(n={n}): {:>5.2}x", interp_mean / jit_fib_mean);
+            tracing::info!("JIT vs interp on fib(n={n}): {:>5.2}x", interp_mean / jit_fib_mean);
         }
     } else {
-        eprintln!();
-        eprintln!("[skip real-fib bench] ELF not built at {elf_path}");
+        tracing::info!("[skip real-fib bench] ELF not built at {elf_path}");
     }
 }

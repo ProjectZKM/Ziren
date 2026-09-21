@@ -612,7 +612,7 @@ mod parity_tests {
         for (i, record) in runtime.records.iter().enumerate() {
             // Coverage note: a chip with zero events still validates its
             // padding shape, but not the live instruction frame.
-            eprintln!(
+            tracing::info!(
                 "{label}[shard {i}] events: add_sub={} add_sub_imm={} bitwise={} bitwise_imm={} lt={} lt_imm={} cloclz={} sll={} sll_imm={} sr={} sr_imm={} \
                  mul={} divrem={} branch={} jump={} movcond={} misc={} syscall={} \
                  mem(ln={} lw={} sn={} sw={} un={})",

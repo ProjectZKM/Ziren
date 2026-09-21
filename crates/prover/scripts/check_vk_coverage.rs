@@ -54,12 +54,13 @@ fn parse_digest(raw: &str) -> [KB; DIGEST_SIZE] {
 }
 
 fn main() {
+    zkm_core_machine::utils::setup_cli_logger();
     let args = Args::parse();
 
     let f = File::open(&args.map).unwrap_or_else(|e| panic!("open {:?}: {}", args.map, e));
     let map: BTreeMap<[KB; DIGEST_SIZE], usize> = bincode::deserialize_from(&f)
         .unwrap_or_else(|e| panic!("deserialize {:?}: {}", args.map, e));
-    eprintln!("[check] loaded {} keys from {:?}", map.len(), args.map);
+    tracing::info!("[check] loaded {} keys from {:?}", map.len(), args.map);
 
     let mut all_present = true;
     for (i, raw) in args.digests.iter().enumerate() {
@@ -69,17 +70,17 @@ fn main() {
         if !present {
             all_present = false;
         }
-        eprintln!(
+        tracing::info!(
             "[check] {label}: present={present} {}",
             if present { "IN-MAP" } else { "MISSING <<<" }
         );
     }
 
     if all_present {
-        eprintln!("[check] ALL {} digests present — coverage OK", args.digests.len());
+        tracing::info!("[check] ALL {} digests present — coverage OK", args.digests.len());
         std::process::exit(0);
     } else {
-        eprintln!("[check] COVERAGE GAP — at least one digest missing");
+        tracing::warn!("[check] COVERAGE GAP — at least one digest missing");
         std::process::exit(1);
     }
 }

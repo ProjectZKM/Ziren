@@ -25,7 +25,7 @@ struct Args {
 /// Hard-coded list of basefold compress_vk hashes captured by running
 /// `test_e2e_compress_fibonacci` and `collect_basefold_vks`. Each entry
 /// is the canonical-form `[u32; 8]` printed by
-/// `eprintln!("{:?}", vk.hash_koalabear())`.
+/// `tracing::info!("{:?}", vk.hash_koalabear())`.
 // STALE as of the Sep 2026 batch: the Poseidon2 round-count change moves every
 // verifying key, the terminal-stage and deferred completeness changes move the
 // recursion programs, and the fibonacci guest now reads its input so its ELF and
@@ -43,6 +43,7 @@ const HASHES: &[[u32; DIGEST_SIZE]] = &[
 ];
 
 fn main() {
+    zkm_core_machine::utils::setup_cli_logger();
     let args = Args::parse();
     let mut map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> = BTreeMap::new();
     for (i, h) in HASHES.iter().enumerate() {
@@ -52,7 +53,7 @@ fn main() {
     }
     let out = File::create(&args.output).unwrap();
     bincode::serialize_into(out, &map).unwrap();
-    eprintln!("wrote {} basefold compress_vk hashes to {:?}", map.len(), args.output);
+    tracing::info!("wrote {} basefold compress_vk hashes to {:?}", map.len(), args.output);
 }
 
 trait FromCanonicalU32 {

@@ -7,14 +7,14 @@
 //! 16 compress programs each compiled via `compress_program_from_input`.
 
 use std::time::Instant;
-use zkm_core_machine::utils::setup_logger;
+use zkm_core_machine::utils::setup_cli_logger;
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::ZKMProver;
 
 fn main() {
-    setup_logger();
-    eprintln!("[time-prover-new] VERIFY_VK={:?}", std::env::var("VERIFY_VK").ok(),);
+    setup_cli_logger();
+    tracing::info!("[time-prover-new] VERIFY_VK={:?}", std::env::var("VERIFY_VK").ok(),);
     let t = Instant::now();
     let _prover = ZKMProver::<DefaultProverComponents>::new();
-    eprintln!("[time-prover-new] new() took {:?}", t.elapsed());
+    tracing::info!("[time-prover-new] new() took {:?}", t.elapsed());
 }

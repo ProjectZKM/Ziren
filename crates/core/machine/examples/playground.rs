@@ -32,7 +32,7 @@ use zkm_core_executor::{Executor, Program};
 use zkm_core_machine::{
     io::ZKMStdin,
     mips::MipsAir,
-    utils::{run_test, run_test_io, setup_logger},
+    utils::{run_test, run_test_io, setup_cli_logger},
 };
 use zkm_pcs::air::MachineAir;
 use zkm_pcs::MachineRecord;
@@ -92,14 +92,14 @@ fn resolve(name: &str) -> Program {
 }
 
 fn banner(cmd: &str, program: &str) {
-    eprintln!("=== playground: {cmd} {program} ===");
+    tracing::info!("=== playground: {cmd} {program} ===");
     for k in REPRO_ENV {
-        eprintln!("    {k}={}", std::env::var(k).unwrap_or_else(|_| "<unset>".into()));
+        tracing::info!("    {k}={}", std::env::var(k).unwrap_or_else(|_| "<unset>".into()));
     }
 }
 
 fn main() {
-    setup_logger();
+    setup_cli_logger();
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_else(|| "buses".into());
     let name = args.next().unwrap_or_else(|| "fibonacci".into());
@@ -119,9 +119,9 @@ fn main() {
         "execute" => {
             let mut rt = Executor::new(program(), ZKMCoreOpts::default());
             rt.run().expect("execution failed");
-            eprintln!("shards       = {}", rt.records.len());
-            eprintln!("global_clk   = {}", rt.state.global_clk);
-            eprintln!("exited       = {}", rt.state.exited);
+            tracing::info!("shards       = {}", rt.records.len());
+            tracing::info!("global_clk   = {}", rt.state.global_clk);
+            tracing::info!("exited       = {}", rt.state.exited);
         }
         "buses" => {
             let program = program();
@@ -137,7 +137,7 @@ fn main() {
 
             for kind in ALL_KINDS {
                 for (i, shard) in shards.iter().enumerate() {
-                    eprintln!("--- shard {i} LOCAL {kind:?}");
+                    tracing::info!("--- shard {i} LOCAL {kind:?}");
                     debug_lookups_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
                         &machine,
                         &pkey,
@@ -146,7 +146,7 @@ fn main() {
                         LookupScope::Local,
                     );
                 }
-                eprintln!("--- GLOBAL {kind:?}");
+                tracing::info!("--- GLOBAL {kind:?}");
                 debug_lookups_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
                     &machine,
                     &pkey,
@@ -158,7 +158,7 @@ fn main() {
         }
         "prove" => {
             run_test::<CpuProver<_, _>>(program()).expect("prove + verify failed");
-            eprintln!("prove + verify OK");
+            tracing::info!("prove + verify OK");
         }
         "widths" => {
             // Per-chip main-trace WIDTH census.  "Where does the trace area go"
@@ -181,9 +181,9 @@ fn main() {
                 .collect();
             rows.sort_by_key(|r| Reverse(r.1));
             let total: usize = rows.iter().map(|r| r.1).sum();
-            eprintln!("{:<28} {:>7} {:>7}  {:>6}", "chip", "main_w", "prep_w", "%main");
+            tracing::info!("{:<28} {:>7} {:>7}  {:>6}", "chip", "main_w", "prep_w", "%main");
             for (name, w, pw) in &rows {
-                eprintln!(
+                tracing::info!(
                     "{:<28} {:>7} {:>7}  {:>5.1}%",
                     name,
                     w,
@@ -191,7 +191,7 @@ fn main() {
                     100.0 * *w as f64 / total as f64
                 );
             }
-            eprintln!("{:<28} {:>7}", "TOTAL main width", total);
+            tracing::info!("{:<28} {:>7}", "TOTAL main width", total);
         }
         "lookups" => {
             // Per-chip INTERACTION census, and the GKR cell budget it implies.
@@ -214,9 +214,15 @@ fn main() {
             let machine: StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>> =
                 MipsAir::machine(KoalaBearPoseidon2::new());
             let kinds = ALL_KINDS;
-            eprintln!(
+            tracing::info!(
                 "{:<28} {:>6} {:>6} {:>5} {:>5} {:>5} {:>6}  by kind",
-                "chip", "main_w", "prep_w", "send", "recv", "tot", "padded"
+                "chip",
+                "main_w",
+                "prep_w",
+                "send",
+                "recv",
+                "tot",
+                "padded"
             );
             let mut static_rows: Vec<(String, usize, usize, usize, usize, usize, String)> = vec![];
             for c in machine.chips() {
@@ -245,7 +251,7 @@ fn main() {
             }
             static_rows.sort_by(|a, b| b.5.cmp(&a.5).then(a.0.cmp(&b.0)));
             for (name, w, pw, s, r, padded, kinds_s) in &static_rows {
-                eprintln!(
+                tracing::info!(
                     "{:<28} {:>6} {:>6} {:>5} {:>5} {:>5} {:>6}  {}",
                     name,
                     w,
@@ -263,7 +269,7 @@ fn main() {
             // unless a real program is named, since the static table above
             // already answers "how wide is each chip".
             if name == "static" {
-                eprintln!("\n(no program given: static census only)");
+                tracing::info!("\n(no program given: static census only)");
                 return;
             }
             // One shard per `execute_record` batch: a real workload's full
@@ -406,33 +412,33 @@ fn main() {
                 }
             }
             shard_padded.sort_unstable();
-            eprintln!("\nshards = {num_shards}");
-            eprintln!(
+            tracing::info!("\nshards = {num_shards}");
+            tracing::info!(
                 "shard padded-interaction sum: min={} median={} max={}",
                 shard_padded.first().copied().unwrap_or(0),
                 shard_padded.get(shard_padded.len() / 2).copied().unwrap_or(0),
                 shard_padded.last().copied().unwrap_or(0)
             );
-            eprintln!("num_row_variables histogram      = {nrv_hist:?}");
-            eprintln!("num_interaction_variables hist   = {niv_hist:?}");
-            eprintln!("GKR grid cells (all shards)      = {grid_cells}");
+            tracing::info!("num_row_variables histogram      = {nrv_hist:?}");
+            tracing::info!("num_interaction_variables hist   = {niv_hist:?}");
+            tracing::info!("GKR grid cells (all shards)      = {grid_cells}");
             shard_raw.sort_unstable();
-            eprintln!(
+            tracing::info!(
                 "shard RAW-interaction sum:    min={} median={} max={}",
                 shard_raw.first().copied().unwrap_or(0),
                 shard_raw.get(shard_raw.len() / 2).copied().unwrap_or(0),
                 shard_raw.last().copied().unwrap_or(0)
             );
-            eprintln!("num_interaction_variables (RAW)  = {niv_raw_hist:?}");
-            eprintln!("GKR grid cells (RAW axis)        = {grid_cells_raw}");
-            eprintln!("committed log_dense histogram    = {dense_hist:?}");
+            tracing::info!("num_interaction_variables (RAW)  = {niv_raw_hist:?}");
+            tracing::info!("GKR grid cells (RAW axis)        = {grid_cells_raw}");
+            tracing::info!("committed log_dense histogram    = {dense_hist:?}");
             let mut by_class: std::collections::BTreeMap<usize, Vec<u128>> = Default::default();
             for (c, cols) in &dense_cols {
                 by_class.entry(*c).or_default().push(*cols);
             }
             for (c, mut v) in by_class {
                 v.sort_unstable();
-                eprintln!(
+                tracing::info!(
                     "  log_dense={c}: n={} agg_cols min={} median={} max={}",
                     v.len(),
                     v[0],
@@ -454,12 +460,17 @@ fn main() {
                 .collect();
             ranked.sort_by_key(|r| Reverse(r.1));
             let paid_total: u128 = ranked.iter().map(|r| r.1).sum();
-            eprintln!(
+            tracing::info!(
                 "\n{:<28} {:>16} {:>16} {:>7} {:>14} {:>6}",
-                "chip", "paid_cells", "real_cells", "shards", "rows(sum)", "%paid"
+                "chip",
+                "paid_cells",
+                "real_cells",
+                "shards",
+                "rows(sum)",
+                "%paid"
             );
             for (name, paid, real, rows, appear) in &ranked {
-                eprintln!(
+                tracing::info!(
                     "{:<28} {:>16} {:>16} {:>7} {:>14} {:>5.1}%",
                     name,
                     paid,
@@ -469,7 +480,7 @@ fn main() {
                     100.0 * *paid as f64 / paid_total as f64
                 );
             }
-            eprintln!("{:<28} {:>16}", "TOTAL paid (chip cols)", paid_total);
+            tracing::info!("{:<28} {:>16}", "TOTAL paid (chip cols)", paid_total);
         }
         "rows" => {
             // Per-chip ROW census.  Every row is a REAL instruction now: the
@@ -479,13 +490,13 @@ fn main() {
             rt.run().expect("execution failed");
             let mut cpu = 0usize;
             let mut tot = 0usize;
-            eprintln!("{:<22} {:>10}", "alu chip", "rows");
+            tracing::info!("{:<22} {:>10}", "alu chip", "rows");
             for rec in &rt.records {
                 cpu += rec.cpu_events.len();
             }
             let mut report = |name: &str, rows: usize| {
                 tot += rows;
-                eprintln!("{name:<22} {rows:>10}");
+                tracing::info!("{name:<22} {rows:>10}");
             };
             macro_rules! census {
                 ($field:ident, $label:literal) => {{
@@ -504,9 +515,9 @@ fn main() {
             census!(cloclz_events, "CloClz");
             census!(mul_events, "Mul");
             census!(divrem_events, "DivRem");
-            eprintln!("{:<22} {:>10}", "ALU TOTAL", tot);
-            eprintln!("cpu_events (one per executed instruction) = {cpu}");
-            eprintln!("shards = {}", rt.records.len());
+            tracing::info!("{:<22} {:>10}", "ALU TOTAL", tot);
+            tracing::info!("cpu_events (one per executed instruction) = {cpu}");
+            tracing::info!("shards = {}", rt.records.len());
         }
         "dump" => {
             // Write <out>/<name>/{program.bin,stdin.bin} for every test
@@ -592,7 +603,7 @@ fn main() {
                     _ => ZKMStdin::new(),
                 };
                 std::fs::write(dir.join("stdin.bin"), bincode::serialize(&stdin).unwrap()).unwrap();
-                eprintln!("dumped {name}");
+                tracing::info!("dumped {name}");
             }
         }
         "all" => {
@@ -687,25 +698,24 @@ fn main() {
                         continue;
                     }
                 }
-                eprint!("{name:<24} ");
                 let program = Program::from(elf).expect("artifact must parse");
                 let stdin = artifact_stdin(name);
                 match std::panic::catch_unwind(|| {
                     run_test_io::<CpuProver<_, _>>(program, stdin).map(|_| ())
                 }) {
-                    Ok(Ok(_)) => eprintln!("PASS"),
+                    Ok(Ok(_)) => tracing::info!("{name:<24} PASS"),
                     Ok(Err(e)) => {
-                        eprintln!("FAIL: {e:?}");
+                        tracing::warn!("{name:<24} FAIL: {e:?}");
                         failed.push(name);
                     }
                     Err(_) => {
-                        eprintln!("PANIC");
+                        tracing::warn!("{name:<24} PANIC");
                         failed.push(name);
                     }
                 }
             }
             if failed.is_empty() {
-                eprintln!("ALL {} ARTIFACTS PASS", artifacts.len());
+                tracing::info!("ALL {} ARTIFACTS PASS", artifacts.len());
             } else {
                 panic!("{} artifacts FAILED: {failed:?}", failed.len());
             }

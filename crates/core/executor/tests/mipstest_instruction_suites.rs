@@ -8,7 +8,11 @@ macro_rules! define_executor_suite_test {
         fn $name() {
             let suite = &$suite;
             for i in 0..suite.len() {
-                eprintln!("running executor suite={} case={}", suite.name(), suite.case_name(i));
+                tracing::info!(
+                    "running executor suite={} case={}",
+                    suite.name(),
+                    suite.case_name(i)
+                );
                 let mut runtime = Executor::new(suite.program(i), ZKMCoreOpts::default());
                 runtime.run_very_fast().unwrap();
                 let mut read_reg = |reg| runtime.register(reg);

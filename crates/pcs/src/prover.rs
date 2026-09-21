@@ -631,7 +631,7 @@ where
                     let proof = self.open(pk, shard_data, &mut challenger.clone());
                     let open_ms = t2.elapsed().as_millis();
 
-                    eprintln!(
+                    tracing::info!(
                         ">>> PCS_TIMING trace_gen={}ms commit={}ms open={}ms total={}ms",
                         trace_gen_ms, commit_ms, open_ms,
                         trace_gen_ms + commit_ms + open_ms

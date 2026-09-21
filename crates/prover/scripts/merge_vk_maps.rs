@@ -40,6 +40,7 @@ struct Args {
 }
 
 fn main() {
+    zkm_core_machine::utils::setup_cli_logger();
     let args = Args::parse();
 
     let mut union: BTreeMap<[KB; DIGEST_SIZE], usize> = BTreeMap::new();
@@ -48,7 +49,7 @@ fn main() {
         let f = File::open(input).unwrap_or_else(|e| panic!("open {:?}: {}", input, e));
         let map: BTreeMap<[KB; DIGEST_SIZE], usize> = bincode::deserialize_from(&f)
             .unwrap_or_else(|e| panic!("deserialize {:?}: {}", input, e));
-        eprintln!("[merge] {:?}: {} entries", input, map.len());
+        tracing::info!("[merge] {:?}: {} entries", input, map.len());
         total_input += map.len();
         for k in map.into_keys() {
             // Re-number sequentially after merge — discard the per-file index.
@@ -65,12 +66,12 @@ fn main() {
             .collect();
         assert_eq!(parts.len(), DIGEST_SIZE, "--add-hash needs exactly 8 u32 values");
         let h: [KB; DIGEST_SIZE] = std::array::from_fn(|i| KB::from_u32(parts[i]));
-        eprintln!("[merge] --add-hash: {:?}", h);
+        tracing::info!("[merge] --add-hash: {:?}", h);
         total_input += 1;
         union.entry(h).or_insert(0);
     }
 
-    eprintln!(
+    tracing::info!(
         "[merge] union: {} unique keys (from {} total inputs, {} duplicates dropped)",
         union.len(),
         total_input,
@@ -86,5 +87,5 @@ fn main() {
         File::create(&args.output).unwrap_or_else(|e| panic!("create {:?}: {}", args.output, e));
     bincode::serialize_into(&mut out_file, &renumbered)
         .unwrap_or_else(|e| panic!("serialize {:?}: {}", args.output, e));
-    eprintln!("[merge] wrote {} entries to {:?}", renumbered.len(), args.output);
+    tracing::info!("[merge] wrote {} entries to {:?}", renumbered.len(), args.output);
 }

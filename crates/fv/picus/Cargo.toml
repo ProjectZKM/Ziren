@@ -17,6 +17,7 @@ p3-field = {workspace = true}
 p3-koala-bear = {workspace = true}
 
 clap = { version = "4.5.7", features = ["derive", "env"] }
+tracing = { workspace = true }
 
 [lints.clippy]
 # The jagged/BaseFold generics (`Challenger` x `Mmcs` x `Dft` over two rings)

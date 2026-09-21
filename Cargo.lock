@@ -7875,6 +7875,7 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tracing",
+ "tracing-subscriber 0.3.23",
 ]
 
 [[package]]
@@ -8059,6 +8060,7 @@ dependencies = [
  "p3-field",
  "p3-koala-bear",
  "p3-matrix",
+ "tracing",
  "zkm-core-executor",
  "zkm-core-machine",
  "zkm-pcs",

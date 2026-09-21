@@ -233,6 +233,7 @@ fn format_env(env: &BTreeMap<usize, u64>, names: &HashMap<usize, String>) -> Str
 }
 
 fn main() {
+    zkm_core_machine::utils::setup_cli_logger();
     let args = Args::parse();
     let chips = MipsAir::<Felt>::chips();
 
@@ -294,7 +295,7 @@ fn main() {
         lean::write_project_files(&args.lean_out_dir).expect("write lean project files");
     }
     if !failures.is_empty() {
-        eprintln!("extraction FAILED for {} chip(s): {}", failures.len(), failures.join(", "));
+        tracing::warn!("extraction FAILED for {} chip(s): {}", failures.len(), failures.join(", "));
         std::process::exit(1);
     }
     println!("Done.");

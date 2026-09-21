@@ -34,13 +34,13 @@ fn main() {
     }
     let t = Instant::now();
     runtime.run().expect("execute");
-    eprintln!(
+    tracing::info!(
         "executed: {} cycles in {:.1} s (debug_assertions={})",
         runtime.state.global_clk,
         t.elapsed().as_secs_f64(),
         cfg!(debug_assertions)
     );
-    eprintln!(
+    tracing::info!(
         "touched_memory_addresses: {} ({:.1} MB) syscalls: {}",
         runtime.report.touched_memory_addresses,
         runtime.report.touched_memory_addresses as f64 * 4.0 / 1e6,
@@ -49,6 +49,6 @@ fn main() {
     let mut names: Vec<_> = runtime.report.cycle_tracker.iter().collect();
     names.sort_by(|a, b| b.1.cmp(a.1));
     for (name, cycles) in names {
-        eprintln!("cycle-tracker {name}: {cycles}");
+        tracing::info!("cycle-tracker {name}: {cycles}");
     }
 }

@@ -84,11 +84,8 @@ fn end_to_end_alu_to_zero() {
     t.end_instr();
     t.emit_epilogue();
     let func = t.finalize(0).expect("finalize");
-    eprintln!("alu_to_zero code ({} bytes):", func.code.len());
-    for b in &func.code[..] {
-        eprint!("{:02x} ", b);
-    }
-    eprintln!();
+    let hex: String = func.code.iter().map(|b| format!("{b:02x} ")).collect();
+    tracing::info!("alu_to_zero code ({} bytes): {hex}", func.code.len());
     let mut ctx = zkm_core_jit::context::JitContext::default();
     unsafe { func.call(&mut ctx) };
 }

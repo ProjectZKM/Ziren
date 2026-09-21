@@ -51,7 +51,7 @@ pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) -> Result<(), E
                 }
             }
         } else {
-            eprintln!("Warning: Stdout Received invalid UTF-8 data in slice: {slice:?}");
+            tracing::warn!("stdout received invalid UTF-8 data in slice: {slice:?}");
         }
     } else if fd == FD_STDERR {
         if let Ok(s) = core::str::from_utf8(slice) {
@@ -61,7 +61,7 @@ pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) -> Result<(), E
                 flush_s.into_iter().for_each(|line| tracing::info!("stderr: {line}"));
             }
         } else {
-            eprintln!("Warning: Stderr Received invalid UTF-8 data in slice: {slice:?}");
+            tracing::warn!("stderr received invalid UTF-8 data in slice: {slice:?}");
         }
     } else if fd == FD_PUBLIC_VALUES {
         rt.state.public_values_stream.extend_from_slice(slice);

@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 
 use zkm_core_machine::io::ZKMStdin;
-use zkm_core_machine::utils::setup_logger;
+use zkm_core_machine::utils::setup_cli_logger;
 use zkm_pcs::ZKMProverOpts;
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::{HashableKey, ZKMProver};
@@ -35,7 +35,7 @@ const HELLO_WORLD_ELF_PATH: &str =
     "crates/test-artifacts/guests/target/elf-compilation/mipsel-zkm-zkvm-elf/release/hello-world";
 
 fn main() {
-    setup_logger();
+    setup_cli_logger();
 
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let opts = ZKMProverOpts::default();
@@ -65,18 +65,18 @@ fn main() {
     let mut hashes: BTreeMap<[KB; DIGEST_SIZE], usize> = BTreeMap::new();
 
     for (idx, (label, elf, stdin)) in workloads.iter().enumerate() {
-        eprintln!("\n=== [{}/{}] workload: {} ===", idx + 1, workloads.len(), label);
+        tracing::info!("\n=== [{}/{}] workload: {} ===", idx + 1, workloads.len(), label);
 
         let context = zkm_core_executor::ZKMContext::default();
         let (_, pk_d, program, vk) = prover.setup(elf);
 
-        eprintln!("[regen] prove_core start");
+        tracing::info!("[regen] prove_core start");
         let core_proof = prover
             .prove_core(&pk_d, program, stdin, opts, context)
             .unwrap_or_else(|e| panic!("prove_core failed for {}: {:?}", label, e));
-        eprintln!("[regen] prove_core ok: {} shard proofs", core_proof.proof.0.len());
+        tracing::info!("[regen] prove_core ok: {} shard proofs", core_proof.proof.0.len());
 
-        eprintln!("[regen] compress start");
+        tracing::info!("[regen] compress start");
         let compressed = prover
             .compress(&vk, core_proof, vec![], opts)
             .unwrap_or_else(|e| panic!("compress failed for {}: {:?}", label, e));
@@ -85,14 +85,14 @@ fn main() {
         let new_idx = hashes.len();
         let was_new = !hashes.contains_key(&h);
         hashes.entry(h).or_insert(new_idx);
-        eprintln!("[regen] {} compress_vk hash = {:?} (new={})", label, h, was_new);
+        tracing::info!("[regen] {} compress_vk hash = {:?} (new={})", label, h, was_new);
 
         // Also drive shrink so we capture the shrink program's VK
         // hash — needed by `verify_shrink` under VERIFY_VK=true.  The
         // wrap_bn254 VK isn't checked against `recursion_vk_map`
         // (verify_wrap_bn254 uses `self.wrap_vk` directly), so we don't
         // need to capture it.
-        eprintln!("[regen] shrink start");
+        tracing::info!("[regen] shrink start");
         let shrunk = prover
             .shrink(compressed, opts)
             .unwrap_or_else(|e| panic!("shrink failed for {}: {:?}", label, e));
@@ -100,10 +100,10 @@ fn main() {
         let new_idx = hashes.len();
         let was_new = !hashes.contains_key(&sh);
         hashes.entry(sh).or_insert(new_idx);
-        eprintln!("[regen] {} shrink_vk hash = {:?} (new={})", label, sh, was_new);
+        tracing::info!("[regen] {} shrink_vk hash = {:?} (new={})", label, sh, was_new);
     }
 
-    eprintln!(
+    tracing::info!(
         "\n=== Collected {} unique compress VK hashes from {} workloads ===",
         hashes.len(),
         workloads.len()
@@ -113,5 +113,5 @@ fn main() {
     let mut out_file =
         File::create(out_path).unwrap_or_else(|e| panic!("create {}: {}", out_path, e));
     bincode::serialize_into(&mut out_file, &hashes).unwrap();
-    eprintln!("wrote vk_map to {}", out_path);
+    tracing::info!("wrote vk_map to {}", out_path);
 }

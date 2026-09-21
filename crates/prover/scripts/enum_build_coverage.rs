@@ -21,6 +21,7 @@ use zkm_prover::shapes::{ZKMCompressProgramShape, ZKMProofShape};
 use zkm_prover::{ZKMProver, REDUCE_BATCH_SIZE, VK_MERKLE_TREE_HEIGHT};
 
 fn main() {
+    zkm_core_machine::utils::setup_cli_logger();
     // Silence the default hook: across thousands of shapes its backtraces would
     // bury the output. The panic MESSAGE, captured per shape below, is the
     // diagnosis — it names the invariant the dummy trips.
@@ -34,7 +35,7 @@ fn main() {
     let all: Vec<ZKMProofShape> = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
     let sampled: Vec<(usize, ZKMProofShape)> =
         all.into_iter().enumerate().filter(|(i, _)| i % stride == 0).collect();
-    eprintln!("[ENUM-COV] shapes to try = {} (stride {})", sampled.len(), stride);
+    tracing::info!("[ENUM-COV] shapes to try = {} (stride {})", sampled.len(), stride);
 
     let done = AtomicUsize::new(0);
     let total = sampled.len();
@@ -77,7 +78,7 @@ fn main() {
             }));
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             if n.is_multiple_of(100) {
-                eprintln!("[ENUM-COV] {n}/{total}");
+                tracing::info!("[ENUM-COV] {n}/{total}");
             }
             let out = match built {
                 Ok(_) => Ok(()),
@@ -120,14 +121,14 @@ fn main() {
             }
         }
     }
-    eprintln!("[ENUM-COV] BUILT per category: {ok:?}");
-    eprintln!("[ENUM-COV] PANIC per category: {bad:?}");
-    eprintln!("[ENUM-COV] Recursion BUILT by cluster-marker: {ok_marker:?}");
-    eprintln!("[ENUM-COV] Recursion PANIC by cluster-marker: {bad_marker:?}");
-    eprintln!("[ENUM-COV] distinct panic causes:");
+    tracing::info!("[ENUM-COV] BUILT per category: {ok:?}");
+    tracing::warn!("[ENUM-COV] PANIC per category: {bad:?}");
+    tracing::info!("[ENUM-COV] Recursion BUILT by cluster-marker: {ok_marker:?}");
+    tracing::warn!("[ENUM-COV] Recursion PANIC by cluster-marker: {bad_marker:?}");
+    tracing::warn!("[ENUM-COV] distinct panic causes:");
     let mut v: Vec<_> = causes.into_iter().collect();
     v.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
     for (cause, n) in v {
-        eprintln!("[ENUM-COV]   {n:6}  {cause}");
+        tracing::info!("[ENUM-COV]   {n:6}  {cause}");
     }
 }

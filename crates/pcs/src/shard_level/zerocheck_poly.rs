@@ -1828,7 +1828,7 @@ mod tests {
         // rlc_eval (= eq·(C+batch) over the openings@z*) and rejecting when
         // it != point_and_eval.1 — the binding the structural layer omits.
         // This test stays as the witness for WHY that binding is required.
-        eprintln!(
+        tracing::warn!(
             "[rlc-binding] host-accepts/circuit-rejects WITNESS: claimed={claimed:?} circuit_recon={expected:?} (DIFFER) — all host STRUCTURAL sumcheck checks PASS (verify_zerocheck_host now binds rlc_eval,)"
         );
     }
@@ -2356,9 +2356,14 @@ mod tests {
         let mut any_fail = false;
         for &(nv, rv, zrv, nc) in configs.iter() {
             let (i1, i2) = run_sweep_case_z_rev(nv, rv, zrv, nc);
-            eprintln!(
+            tracing::info!(
                 "REVZETA nv={:>2} rv={:>2} zrv={:>2} nc={} | inv1={} inv2={}",
-                nv, rv, zrv, nc, i1, i2
+                nv,
+                rv,
+                zrv,
+                nc,
+                i1,
+                i2
             );
             if !i2 {
                 any_fail = true;
@@ -2394,9 +2399,15 @@ mod tests {
         for &(nv, rv, nc) in configs.iter() {
             let (i1f, i2f) = run_sweep_case(nv, rv, nc, true);
             let (i1n, i2n) = run_sweep_case(nv, rv, nc, false);
-            eprintln!(
+            tracing::info!(
                 "SWEEP nv={:>2} rv={:>2} nc={} | FIX inv1={} inv2={} | NOFIX inv1={} inv2={}",
-                nv, rv, nc, i1f, i2f, i1n, i2n
+                nv,
+                rv,
+                nc,
+                i1f,
+                i2f,
+                i1n,
+                i2n
             );
             if !i2f {
                 any_fix_inv2_fail = true;
@@ -2430,7 +2441,7 @@ mod tests {
         for &(nv, rv, zrv, nc) in configs.iter() {
             let (i1f, i2f) = run_sweep_case_z(nv, rv, zrv, nc, true);
             let (i1n, i2n) = run_sweep_case_z(nv, rv, zrv, nc, false);
-            eprintln!(
+            tracing::info!(
                 "MIXED nv={:>2} rv={:>2} zrv={:>2} nc={} | FIX inv1={} inv2={} | NOFIX inv1={} inv2={}",
                 nv, rv, zrv, nc, i1f, i2f, i1n, i2n
             );

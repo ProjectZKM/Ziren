@@ -1369,14 +1369,14 @@ mod tests {
                 };
                 let mle_f = mle(&f_arr, pp);
                 let mle_bp = mle(&bp_arr, pp);
-                eprintln!("   [mat] target == mle_f*mle_bp : {}", target == mle_f * mle_bp);
-                eprintln!(
+                tracing::info!("   [mat] target == mle_f*mle_bp : {}", target == mle_f * mle_bp);
+                tracing::info!(
                     "   [mat] bp.eval(pp[..h],pp[h..]) == mle_bp : {}",
                     bp_obj.eval(&pp[..h], &pp[h..]) == mle_bp
                 );
                 // combo-25 BP via the circuit_bp identity (zrow_rev, zeval=z*, fh_rev, sh_rev):
                 let c25 = circuit_bp(&rev(&z_row), &z_star, &rev(&pp[..h]), &rev(&pp[h..]));
-                eprintln!("   [mat] circuit_bp(combo25) == mle_bp : {}", c25 == mle_bp);
+                tracing::info!("   [mat] circuit_bp(combo25) == mle_bp : {}", c25 == mle_bp);
                 // lag with NO reversal == mle_f ?
                 let mut lag_nr = EF::ZERO;
                 for k in 0..num_cols {
@@ -1388,7 +1388,7 @@ mod tests {
                     }
                     lag_nr += z_col_lag[k] * e;
                 }
-                eprintln!("   [mat] lag(no-rev) == mle_f : {}", lag_nr == mle_f);
+                tracing::info!("   [mat] lag(no-rev) == mle_f : {}", lag_nr == mle_f);
             }
 
             let mut matched_here: Vec<[bool; 7]> = Vec::new();
@@ -1423,9 +1423,12 @@ mod tests {
                         .push([zrow_rev, zeval_rev, swap, fh_rev, sh_rev, lag_m_rev, lag_pp_rev]);
                 }
             }
-            eprintln!("shape {si} {chips:?}: half={half} n={n} matches={}", matched_here.len());
+            tracing::info!(
+                "shape {si} {chips:?}: half={half} n={n} matches={}",
+                matched_here.len()
+            );
             for m in &matched_here {
-                eprintln!("   combo zrow_rev={} zeval_rev={} swap={} fh_rev={} sh_rev={} lag_m_rev={} lag_pp_rev={}",
+                tracing::info!("   combo zrow_rev={} zeval_rev={} swap={} fh_rev={} sh_rev={} lag_m_rev={} lag_pp_rev={}",
                     m[0], m[1], m[2], m[3], m[4], m[5], m[6]);
             }
             if first {
@@ -1436,15 +1439,15 @@ mod tests {
             }
         }
 
-        eprintln!("=== survivors across ALL shapes: {} ===", survivors.len());
+        tracing::info!("=== survivors across ALL shapes: {} ===", survivors.len());
         for s in &survivors {
-            eprintln!("   FINAL zrow_rev={} zeval_rev={} swap={} fh_rev={} sh_rev={} lag_m_rev={} lag_pp_rev={}",
+            tracing::info!("   FINAL zrow_rev={} zeval_rev={} swap={} fh_rev={} sh_rev={} lag_m_rev={} lag_pp_rev={}",
                 s[0], s[1], s[2], s[3], s[4], s[5], s[6]);
         }
         // Informational only (no panic): empty survivors means the structural
         // prover's full_point layout is not a simple input-reversal of pp.
         if survivors.is_empty() {
-            eprintln!(
+            tracing::info!(
                 "   (no simple reversal matches — structural full_point layout is non-trivial)"
             );
         }

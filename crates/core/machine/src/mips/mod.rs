@@ -967,12 +967,12 @@ pub mod tests {
         let main_stripes = committed_dense_len(zkm_pcs::ELEMENT_THRESHOLD, log_stack) / stripe;
 
         let batch = prep_stripes + main_stripes;
-        eprintln!(
+        tracing::info!(
             "[STRIPES] prep {prep_cells} cells -> {prep_stripes}; \
              main {} cells -> {main_stripes}; batch {batch}",
             zkm_pcs::ELEMENT_THRESHOLD,
         );
-        eprintln!(
+        tracing::info!(
             "[STRIPES] widths Program={} Byte={} Range={}; rows Program=2^22 Byte=2^16 Range={}",
             width_of("Program"),
             width_of("Byte"),
@@ -1004,9 +1004,10 @@ pub mod tests {
         let largest =
             zkm_pcs::jagged::RecursionPins::class(zkm_pcs::jagged::RecursionPins::LAST_CLASS);
         let rec_batch = (largest.prep.area >> log_stack) + (largest.main.area >> log_stack);
-        eprintln!(
+        tracing::info!(
             "[STRIPES] recursion prep {} + main {} cells -> batch {rec_batch}",
-            largest.prep.area, largest.main.area,
+            largest.prep.area,
+            largest.main.area,
         );
         assert_eq!(
             rec_batch, 64,
@@ -1526,7 +1527,7 @@ pub mod tests {
 
         let mut challenger = machine.config().challenger();
         let r = machine.verify(&vk, &proof, &mut challenger);
-        eprintln!("[PROBE] recon-ON honest verify => {:?}", r.map(|_| "OK"));
+        tracing::info!("[PROBE] recon-ON honest verify => {:?}", r.map(|_| "OK"));
     }
 
     // Height soundness. The degree-masked LogUp last-layer reconstruction
@@ -1585,7 +1586,7 @@ pub mod tests {
         // reconstruction code is additive / transcript-neutral and does not
         // regress honest verification).
         let honest = verify(&proof);
-        eprintln!("[GATE-B] honest verify (default) => {honest}");
+        tracing::info!("[GATE-B] honest verify (default) => {honest}");
         assert_eq!(honest, "OK", "honest FIX-on proof must verify (gate-b)");
 
         // 2b) GATE-B-ON (the crux): the honest proof must ALSO verify with the
@@ -1594,7 +1595,7 @@ pub mod tests {
         // proof.  Only then is the gate-C GREEN reject attributable to the
         // forgery (and not to the reconstruction rejecting honest proofs too).
         let honest_on = verify(&proof);
-        eprintln!("[GATE-B-ON] honest verify (reconstruction ON) => {honest_on}");
+        tracing::info!("[GATE-B-ON] honest verify (reconstruction ON) => {honest_on}");
         assert_eq!(
             honest_on, "OK",
             "honest FIX-on proof must verify WITH the reconstruction ON (gate-b-on); \
@@ -1649,7 +1650,7 @@ pub mod tests {
         }
         let (rc, rb) = raise.expect("found a chip with a settable high degree bit");
         let (lc, lb) = lower.expect("found a chip with a clearable high degree bit");
-        eprintln!(
+        tracing::info!(
             "[GATE-C] area-preserving forgery: raise chip[{rc}] bit {rb} (0->1), \
              lower chip[{lc}] bit {lb} (1->0); bit_len={bit_len}"
         );
@@ -1658,7 +1659,7 @@ pub mod tests {
 
         // 4) The forgery is rejected on the default path.
         let red = verify(&forged);
-        eprintln!("[GATE-C] flag-off forged verify => {red}");
+        tracing::info!("[GATE-C] flag-off forged verify => {red}");
         assert!(
             red.contains("last-layer reconstruction"),
             "the area-preserving height forgery must be rejected at the last-layer \
@@ -1669,7 +1670,7 @@ pub mod tests {
         // LogUp last-layer reconstruction — the assert reads + binds the degree
         // bits the round walk alone ignores.
         let green = verify(&forged);
-        eprintln!("[GATE-C] GREEN (reconstruction on) verify => {green}");
+        tracing::info!("[GATE-C] GREEN (reconstruction on) verify => {green}");
         assert!(
             green.contains("last-layer reconstruction"),
             "GREEN: the reconstruction must reject the area-preserving height forgery \
@@ -1800,7 +1801,7 @@ pub mod tests {
         setup_logger();
         let (proof, machine, vk) = stage0_prove_fixoff(simple_program(), 262_144, ZKMStdin::new());
         let r = stage0_verify(&machine, &vk, &proof);
-        eprintln!("[STAGE0-TINY-HONEST] FIX-off raw-height verify => {r}");
+        tracing::info!("[STAGE0-TINY-HONEST] FIX-off raw-height verify => {r}");
         assert_eq!(r, "OK", "honest FIX-off tiny proof must verify (stage-0 fast harness)");
     }
 
@@ -1812,7 +1813,7 @@ pub mod tests {
         setup_logger();
         let (proof, machine, vk) = stage0_prove_fixoff(fibonacci_program(), 262_144, fib_stdin());
         let r = stage0_verify(&machine, &vk, &proof);
-        eprintln!("[STAGE0-FIB-HONEST] FIX-off raw-height verify => {r}");
+        tracing::info!("[STAGE0-FIB-HONEST] FIX-off raw-height verify => {r}");
         assert_eq!(r, "OK", "honest FIX-off fibonacci proof must verify (mixed-height gate)");
     }
 
@@ -1831,18 +1832,18 @@ pub mod tests {
         let mut forged = proof.clone();
         match stage0_apply_height_forgery(&mut forged) {
             None => {
-                eprintln!(
+                tracing::warn!(
                     "[STAGE0-TINY-FORGERY] tiny program cannot host a genuine \
                      area-preserving height forgery (too few chips / no opposite \
                      degree-bit pair); relying on the fibonacci baseline (0.3b)."
                 );
             }
             Some(desc) => {
-                eprintln!("[STAGE0-TINY-FORGERY] {desc}");
+                tracing::info!("[STAGE0-TINY-FORGERY] {desc}");
                 // Rejected by the degree-masked LogUp-GKR last-layer
                 // reconstruction.
                 let baseline = stage0_verify(&machine, &vk, &forged);
-                eprintln!("[STAGE0-TINY-FORGERY] forged verify (recon off) => {baseline}");
+                tracing::info!("[STAGE0-TINY-FORGERY] forged verify (recon off) => {baseline}");
                 assert_ne!(
                     baseline, "OK",
                     "FORGERY MUST BE REJECTED (tiny): an area-preserving height \
@@ -1998,7 +1999,7 @@ pub mod tests {
 
         // (a) honest ACCEPTS with recon ON under rev (anti-confound).
         let honest_on = stage3_verify_rev(&machine, &vk, &proof);
-        eprintln!("[STAGE3-TINY] (a) honest recon-ON under rev => {honest_on}");
+        tracing::info!("[STAGE3-TINY] (a) honest recon-ON under rev => {honest_on}");
         assert_eq!(
             honest_on, "OK",
             "ANTI-CONFOUND: honest tiny FIX-off proof must ACCEPT with the \
@@ -2010,17 +2011,17 @@ pub mod tests {
         let mut forged = proof.clone();
         match stage0_apply_height_forgery(&mut forged) {
             None => {
-                eprintln!(
+                tracing::warn!(
                     "[STAGE3-TINY] (b) tiny program cannot host an area-preserving \
                      height forgery (too few chips / no opposite-bit pair); the \
                      fibonacci flip (stage3_rev_fib_flip) is the binding gate."
                 );
             }
             Some(desc) => {
-                eprintln!("[STAGE3-TINY] (b) {desc}");
+                tracing::info!("[STAGE3-TINY] (b) {desc}");
                 // The forgery must REJECT at the reconstruction assert.
                 let on = stage3_verify_rev(&machine, &vk, &forged);
-                eprintln!("[STAGE3-TINY] (b) recon-ON forged => {on}");
+                tracing::info!("[STAGE3-TINY] (b) recon-ON forged => {on}");
                 assert!(
                     on.contains("last-layer reconstruction"),
                     "THE FLIP (tiny): the degree-only forgery must REJECT at the \
@@ -2040,7 +2041,7 @@ pub mod tests {
 
         // (a) honest ACCEPTS with recon ON under rev (anti-confound).
         let honest_on = stage3_verify_rev(&machine, &vk, &proof);
-        eprintln!("[STAGE3-FIB] (a) honest recon-ON under rev => {honest_on}");
+        tracing::info!("[STAGE3-FIB] (a) honest recon-ON under rev => {honest_on}");
         assert_eq!(
             honest_on, "OK",
             "ANTI-CONFOUND: honest fib FIX-off proof must ACCEPT with the \
@@ -2052,10 +2053,10 @@ pub mod tests {
         let mut forged = proof.clone();
         let desc = stage0_apply_height_forgery(&mut forged)
             .expect("fibonacci (mixed-height) must host an area-preserving forgery");
-        eprintln!("[STAGE3-FIB] (b) {desc}");
+        tracing::info!("[STAGE3-FIB] (b) {desc}");
         // The forgery must REJECT at the reconstruction assert.
         let on = stage3_verify_rev(&machine, &vk, &forged);
-        eprintln!("[STAGE3-FIB] (b) recon-ON forged => {on}");
+        tracing::info!("[STAGE3-FIB] (b) recon-ON forged => {on}");
         assert!(
             on.contains("last-layer reconstruction"),
             "THE FLIP (fib): the degree-only forgery must REJECT at the last-layer \
@@ -2083,11 +2084,11 @@ pub mod tests {
         let mut forged = proof.clone();
         let desc = stage0_apply_adaptive_full_forgery(&mut forged)
             .expect("fib must host the adaptive forgery");
-        eprintln!("[STAGE3-ADAPTIVE] {desc}");
+        tracing::info!("[STAGE3-ADAPTIVE] {desc}");
 
         // The adaptive forgery must reject under FULL verify with recon ON.
         let on = stage3_verify_rev(&machine, &vk, &forged);
-        eprintln!("[STAGE3-ADAPTIVE] recon-ON FULL verify => {on}");
+        tracing::info!("[STAGE3-ADAPTIVE] recon-ON FULL verify => {on}");
         assert_ne!(
             on, "OK",
             "SOUNDNESS: the adaptive forgery (degree + tampered *_full) MUST reject \
@@ -2110,7 +2111,7 @@ pub mod tests {
         let _ =
             stage0_apply_height_forgery(&mut deg_only).expect("fib hosts the degree-only forgery");
         let i_on = stage3_verify_rev(&machine, &vk, &deg_only);
-        eprintln!("[STAGE3-ADAPTIVE] (i) degree-only + honest *_full, recon-ON => {i_on}");
+        tracing::info!("[STAGE3-ADAPTIVE] (i) degree-only + honest *_full, recon-ON => {i_on}");
         assert!(
             i_on.contains("last-layer reconstruction"),
             "(i) forged degree with HONEST *_full must REJECT at the reconstruction \
@@ -2121,7 +2122,7 @@ pub mod tests {
         // perturbs ONLY `*_full`.  Together: no `*_full` satisfies both ⇒ the
         // adaptive forgery is impossible.  degree is the SOLE free variable and
         // `*_full` need NOT be retired (it is bound by the claim).
-        eprintln!(
+        tracing::warn!(
             "[STAGE3-ADAPTIVE] CONCLUSION: degree-only forgery is caught by the \
              reconstruction, and any *_full deviation is caught by the claim \
              binding (see stage3_rev_full_binding_probe) ⇒ adaptive forgery \
@@ -2153,10 +2154,10 @@ pub mod tests {
                 }
             }
         }
-        eprintln!("[STAGE3-BINDPROBE] perturbed *_full[0] on {touched} chip_openings");
+        tracing::info!("[STAGE3-BINDPROBE] perturbed *_full[0] on {touched} chip_openings");
 
         let off = stage3_verify_rev(&machine, &vk, &forged);
-        eprintln!("[STAGE3-BINDPROBE] FULL verify => {off}");
+        tracing::info!("[STAGE3-BINDPROBE] FULL verify => {off}");
         assert_ne!(
             off, "OK",
             "BINDING: perturbing *_full alone must reject — proves *_full is \
@@ -2208,13 +2209,13 @@ pub mod tests {
         let (lc, lb) = lower.unwrap();
         bf.opened_values.chips[rc].quotient[0][rb] = one_ef;
         bf.opened_values.chips[lc].quotient[0][lb] = zero_ef;
-        eprintln!(
+        tracing::info!(
             "[STAGE3-ATTR] forged degree raise chip[{rc}] bit {rb}, lower chip[{lc}] bit {lb}"
         );
 
         // forged => recon-ON REJECTS at the reconstruction.
         let forged_on = stage3_verify_rev(&machine, &vk, &forged);
-        eprintln!("[STAGE3-ATTR] forged recon-ON => {forged_on}");
+        tracing::info!("[STAGE3-ATTR] forged recon-ON => {forged_on}");
         assert!(
             forged_on.contains("last-layer reconstruction"),
             "forged degree must reject at the reconstruction; got: {forged_on}"
@@ -2225,7 +2226,7 @@ pub mod tests {
         bf2.opened_values.chips[rc].quotient[0][rb] = zero_ef; // back to 0
         bf2.opened_values.chips[lc].quotient[0][lb] = one_ef; // back to 1
         let reverted_on = stage3_verify_rev(&machine, &vk, &forged);
-        eprintln!("[STAGE3-ATTR] reverted (degree bits only) recon-ON => {reverted_on}");
+        tracing::info!("[STAGE3-ATTR] reverted (degree bits only) recon-ON => {reverted_on}");
         assert_eq!(
             reverted_on, "OK",
             "ATTRIBUTABLE: reverting ONLY the degree bits must restore acceptance \
@@ -2247,11 +2248,11 @@ pub mod tests {
         let mut forged = proof.clone();
         let desc = stage0_apply_height_forgery(&mut forged)
             .expect("fibonacci (mixed-height) must host an area-preserving height forgery");
-        eprintln!("[STAGE0-FIB-FORGERY] {desc}");
+        tracing::info!("[STAGE0-FIB-FORGERY] {desc}");
 
         // Rejected by the degree-masked LogUp-GKR last-layer reconstruction.
         let baseline = stage0_verify(&machine, &vk, &forged);
-        eprintln!("[STAGE0-FIB-FORGERY] forged verify (recon off) => {baseline}");
+        tracing::info!("[STAGE0-FIB-FORGERY] forged verify (recon off) => {baseline}");
         assert_ne!(
             baseline, "OK",
             "FORGERY MUST BE REJECTED (fib): an area-preserving height forgery \

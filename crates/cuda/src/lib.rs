@@ -564,7 +564,7 @@ impl Drop for ZKMCudaProver {
 /// Cleans up a Docker container with the given name.
 fn cleanup_container(container_name: &str) {
     if let Err(e) = Command::new("docker").args(["rm", "-f", container_name]).output() {
-        eprintln!(
+        tracing::warn!(
             "Failed to remove container: {e}. You may need to manually remove it using 'docker rm -f {container_name}'"
         );
     }

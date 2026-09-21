@@ -162,7 +162,7 @@ fn divu_mfhi_mflo_jit_matches_interpreter() {
     let jit_t2 = jit.register(Register::T2);
     let jit_t3 = jit.register(Register::T3);
 
-    eprintln!(
+    tracing::info!(
         "[divu] interp T0={interp_t0} T2={interp_t2} T3={interp_t3}; jit T0={jit_t0} T2={jit_t2} T3={jit_t3}"
     );
     assert_eq!(interp_t0, jit_t0, "DIVU loop final T0 mismatch");
@@ -217,7 +217,7 @@ fn jump_direct_target_is_relative_to_next_pc() {
     let (j0, j1, j2) =
         (jit.register(Register::T0), jit.register(Register::T1), jit.register(Register::T2));
 
-    eprintln!("[jump_direct] interp t0={i0} t1={i1} t2={i2}; jit t0={j0} t1={j1} t2={j2}");
+    tracing::info!("[jump_direct] interp t0={i0} t1={i1} t2={i2}; jit t0={j0} t1={j1} t2={j2}");
     assert_eq!(i0, 111, "interpreter: the jump must skip the t0=999 instruction");
     assert_eq!(i1, 1, "interpreter: the delay slot must run");
     assert_eq!((i0, i1, i2), (j0, j1, j2), "JumpDirect: JIT diverges from the interpreter");
@@ -277,7 +277,7 @@ fn multu_mfhi_mflo_jit_matches_interpreter() {
     let jit_t2 = jit.register(Register::T2);
     let jit_t3 = jit.register(Register::T3);
 
-    eprintln!(
+    tracing::info!(
         "[multu] interp lo={interp_t2:#x} hi={interp_t3:#x}; jit lo={jit_t2:#x} hi={jit_t3:#x}"
     );
     assert_eq!(interp_t2, jit_t2, "MULTU lo mismatch");
@@ -291,13 +291,13 @@ fn real_elf_parity(elf_path: &str, input_bytes: Option<Vec<u8>>) {
     let bytes = match std::fs::read(elf_path) {
         Ok(b) => b,
         Err(_) => {
-            eprintln!("[skip] ELF not built at {elf_path}");
+            tracing::info!("[skip] ELF not built at {elf_path}");
             return;
         }
     };
     let program = Program::from(&bytes[..]).expect("parse ELF");
     if let Some(op) = first_unsupported_opcode(&program) {
-        eprintln!("[skip] ELF contains JIT-unsupported opcode {op:#x}: {elf_path}");
+        tracing::info!("[skip] ELF contains JIT-unsupported opcode {op:#x}: {elf_path}");
         return;
     }
 
@@ -321,7 +321,7 @@ fn real_elf_parity(elf_path: &str, input_bytes: Option<Vec<u8>>) {
     let (interp_res, interp_pvs, interp_exited) = run_once(true);
     let (jit_res, jit_pvs, jit_exited) = run_once(false);
 
-    eprintln!(
+    tracing::info!(
         "[{elf_path}] interp: exited={interp_exited} pvs_len={} res={interp_res:?}, jit: exited={jit_exited} pvs_len={} res={jit_res:?}",
         interp_pvs.len(),
         jit_pvs.len(),

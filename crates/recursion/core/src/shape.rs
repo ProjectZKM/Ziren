@@ -98,7 +98,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
                 heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
             organic.sort();
             let rows: Vec<(String, usize)> = shape.iter().map(|(n, r)| (n.clone(), *r)).collect();
-            eprintln!("FIXSHAPE kind={kind} band_index={class} cells={cells} organic={organic:?} -> band={rows:?}");
+            tracing::info!("FIXSHAPE kind={kind} band_index={class} cells={cells} organic={organic:?} -> band={rows:?}");
         }
         *program.shape_mut() = Some(RecursionShape {
             inner: shape,

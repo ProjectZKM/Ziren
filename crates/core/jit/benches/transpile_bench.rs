@@ -14,6 +14,7 @@ use zkm_core_jit::risc::{MipsOperand, MipsRegister};
 const NUM_INSTRS: usize = 100_000;
 
 fn main() {
+    let _ = tracing_subscriber::fmt().with_writer(std::io::stderr).try_init();
     let mut t =
         <TranspilerBackend as MipsTranspiler>::new(NUM_INSTRS, 4096, 4096, 0, 0, 4).expect("init");
 
@@ -33,12 +34,12 @@ fn main() {
     let func = t.finalize(0).expect("finalize");
     let finalize_dur = finalize_start.elapsed();
 
-    eprintln!(
+    tracing::info!(
         "transpile: {} instr in {:?} ({:.1} ns/instr)",
         NUM_INSTRS,
         transpile_dur,
         transpile_dur.as_nanos() as f64 / NUM_INSTRS as f64
     );
-    eprintln!("finalize:  {} bytes in {:?}", func.code.len(), finalize_dur);
-    eprintln!("code/instr: {:.1} bytes", func.code.len() as f64 / NUM_INSTRS as f64);
+    tracing::info!("finalize:  {} bytes in {:?}", func.code.len(), finalize_dur);
+    tracing::info!("code/instr: {:.1} bytes", func.code.len() as f64 / NUM_INSTRS as f64);
 }

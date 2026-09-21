@@ -366,7 +366,7 @@ mod size_tests {
             let (analyzed, _) = prog.analyze();
             let c = compile(&analyzed).expect("compile");
             let bytes = c._buf.len();
-            eprintln!(
+            tracing::info!(
                 "JIT_SIZE {name}: {bytes} bytes / {N} instrs = {:.1} B/instr \
                  -> {:.0} MB for a 4.3 M-instruction leaf program",
                 bytes as f64 / N as f64,

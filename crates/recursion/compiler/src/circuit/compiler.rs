@@ -643,11 +643,11 @@ where
                 if let Some(span_builder) = span_builder {
                     let cycle_tracker_root_span = span_builder.finish().unwrap();
                     if region_census {
-                        eprintln!("REGION_CENSUS_BEGIN");
+                        tracing::info!("REGION_CENSUS_BEGIN");
                         for line in cycle_tracker_root_span.lines() {
-                            eprintln!("REGION_CENSUS {}", line);
+                            tracing::info!("REGION_CENSUS {}", line);
                         }
-                        eprintln!("REGION_CENSUS_END");
+                        tracing::info!("REGION_CENSUS_END");
                     } else {
                         for line in cycle_tracker_root_span.lines() {
                             tracing::info!("{}", line);

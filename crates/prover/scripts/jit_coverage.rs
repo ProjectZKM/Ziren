@@ -19,13 +19,14 @@ use zkm_prover::{ZKMProver, REDUCE_BATCH_SIZE, VK_MERKLE_TREE_HEIGHT};
 use zkm_recursion_jit::Plan;
 
 fn main() {
+    zkm_core_machine::utils::setup_cli_logger();
     std::panic::set_hook(Box::new(|_| {}));
 
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
 
     let all: Vec<ZKMProofShape> = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
-    eprintln!("[JIT-COV] {} shapes enumerated", all.len());
+    tracing::info!("[JIT-COV] {} shapes enumerated", all.len());
 
     // One program per category is enough to characterise the mix; the
     // categories differ in what they verify, not in the instruction set.

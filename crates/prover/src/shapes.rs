@@ -671,7 +671,7 @@ mod tests {
         let mut caps_sorted: Vec<(String, usize)> =
             caps.iter().map(|(n, r)| (n.clone(), *r)).collect();
         caps_sorted.sort();
-        eprintln!("[FIXPOINT] shape = {caps_sorted:?} cells={}", cells(&caps_sorted));
+        tracing::info!("[FIXPOINT] shape = {caps_sorted:?} cells={}", cells(&caps_sorted));
 
         let max_log_row_count = ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count();
         let machine = prover.compress_prover.machine();
@@ -723,7 +723,7 @@ mod tests {
         }
         for (chip, (rows, tag)) in worst.iter() {
             let cap = caps.get(chip).copied().unwrap_or(0);
-            eprintln!(
+            tracing::info!(
                 "[FIXPOINT] worst {chip:18} rows={rows:>9} cap={cap:>9} fill={:5.1}%  ({tag})",
                 100.0 * *rows as f64 / cap.max(1) as f64
             );
@@ -740,7 +740,7 @@ mod tests {
         ) {
             let mut hs: Vec<(String, usize)> = heights.to_vec();
             hs.sort();
-            eprintln!("[FIXPOINT] {tag}: organic={hs:?} cells={}", cells(&hs));
+            tracing::info!("[FIXPOINT] {tag}: organic={hs:?} cells={}", cells(&hs));
             for (chip, rows) in hs.iter() {
                 let cap = caps.get(chip).copied().unwrap_or(0);
                 if *rows > cap {
@@ -764,7 +764,7 @@ mod tests {
         let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
         let bands: Vec<OrderedShape> =
             rec_cfg.get_all_shape_combinations(1).map(|mut v| v.pop().unwrap()).collect();
-        eprintln!("[HDEP] bands = {}", bands.len());
+        tracing::info!("[HDEP] bands = {}", bands.len());
 
         let vk_of = |os: &OrderedShape, arity: usize| -> String {
             let compress_shape: ZKMCompressShape = vec![os.clone(); arity].into();
@@ -786,13 +786,13 @@ mod tests {
             for (i, os) in bands.iter().enumerate() {
                 seen.entry(vk_of(os, arity)).or_default().push(i);
             }
-            eprintln!(
+            tracing::info!(
                 "[HDEP] arity={arity}: {} distinct vks over {} bands",
                 seen.len(),
                 bands.len()
             );
             for (d, idxs) in &seen {
-                eprintln!("[HDEP]   {d} <- bands {idxs:?}");
+                tracing::info!("[HDEP]   {d} <- bands {idxs:?}");
             }
         }
     }
@@ -813,7 +813,7 @@ mod tests {
         let chips_by_name: BTreeMap<String, _> =
             core_machine.chips().iter().map(|c| (c.name(), c)).collect();
         let machine_shape = build_mips_machine_shape();
-        eprintln!("[BAND] clusters = {}", machine_shape.chip_clusters.len());
+        tracing::info!("[BAND] clusters = {}", machine_shape.chip_clusters.len());
 
         let mut total_per_shard_shapes = 0usize;
         let mut per_cluster_shape_counts: Vec<usize> = Vec::new();
@@ -848,19 +848,19 @@ mod tests {
             }
             total_per_shard_shapes += set.len();
             per_cluster_shape_counts.push(set.len());
-            eprintln!(
+            tracing::info!(
                 "[BAND] cluster {ci}: chips={} fillers={} distinct_OrderedShapes={}",
                 names.len(),
                 fillers.len(),
                 set.len()
             );
         }
-        eprintln!("[BAND] TOTAL per-shard OrderedShapes = {total_per_shard_shapes}");
+        tracing::info!("[BAND] TOTAL per-shard OrderedShapes = {total_per_shard_shapes}");
         let s = total_per_shard_shapes;
-        eprintln!("[BAND] uniform-replication arity 1..=4: {} (= {} per-shard x 4)", s * 4, s);
+        tracing::info!("[BAND] uniform-replication arity 1..=4: {} (= {} per-shard x 4)", s * 4, s);
         let per_cluster_uniform: usize = per_cluster_shape_counts.iter().map(|c| c * 4).sum();
-        eprintln!("[BAND] per-cluster uniform arity 1..=4 = {per_cluster_uniform}");
-        eprintln!("[BAND] nonempty clusters = {}", per_cluster_shape_counts.len());
+        tracing::info!("[BAND] per-cluster uniform arity 1..=4 = {per_cluster_uniform}");
+        tracing::info!("[BAND] nonempty clusters = {}", per_cluster_shape_counts.len());
     }
 
     /// TEMP analysis: dedup the per-shard OrderedShapes by their
@@ -942,18 +942,18 @@ mod tests {
                     Err(_) => total_failed += 1,
                 }
             }
-            eprintln!(
+            tracing::info!(
                 "[LD] cluster {ci}: chips={} distinct_log_dense={} bands={:?}",
                 names.len(),
                 cluster_classes.len(),
                 cluster_classes
             );
         }
-        eprintln!(
+        tracing::warn!(
             "[LD] TOTAL distinct (chip_set, log_dense) classes = {} (built={total_built} failed={total_failed})",
             classes.len()
         );
-        eprintln!("[LD] uniform-replication arity 1..=4 on classes = {}", classes.len() * 4);
+        tracing::info!("[LD] uniform-replication arity 1..=4 on classes = {}", classes.len() * 4);
     }
 
     /// `generate` emits NO normalize shapes, and every shape it does emit is
@@ -991,7 +991,9 @@ mod tests {
         assert!(compress > 0 && deferred > 0 && shrink > 0, "the enumerable tail must remain");
         assert_eq!(root, compress, "every compose tuple has its closing variant");
         assert_eq!(all.len(), compress + root + deferred + shrink, "no other variant is emitted");
-        eprintln!("[ENUM] compress={compress} root={root} deferred={deferred} shrink={shrink}");
+        tracing::info!(
+            "[ENUM] compress={compress} root={root} deferred={deferred} shrink={shrink}"
+        );
     }
 
     /// ARITY-ENUM GAP PROBE: does a HETEROGENEOUS batch (two shards of the
@@ -1098,7 +1100,7 @@ mod tests {
             band_reps.entry(log_dense_of(&os)).or_insert(os);
         }
         let bands: Vec<usize> = band_reps.keys().cloned().collect();
-        eprintln!("[HETERO] cluster chips={} bands={:?}", names.len(), bands);
+        tracing::info!("[HETERO] cluster chips={} bands={:?}", names.len(), bands);
 
         // Build the UNIFORM enumerated VK set for this cluster (arity 2).
         let setup_vk = |shape: &ZKMRecursionShape| -> Option<[KoalaBear; DIGEST_SIZE]> {
@@ -1121,7 +1123,7 @@ mod tests {
                 uniform_vks.insert(vk);
             }
         }
-        eprintln!("[HETERO] uniform arity-2 VKs (this cluster) = {}", uniform_vks.len());
+        tracing::info!("[HETERO] uniform arity-2 VKs (this cluster) = {}", uniform_vks.len());
 
         // Now build HETEROGENEOUS arity-2 batches: [band_i, band_j] for i<j
         // (full + partial tail). Check how many are NOT in the uniform set.
@@ -1142,10 +1144,10 @@ mod tests {
                 }
             }
         }
-        eprintln!(
+        tracing::info!(
             "[HETERO] heterogeneous arity-2 batches built={hetero_total} MISSED_by_uniform_enum={hetero_missed}"
         );
-        eprintln!(
+        tracing::info!(
             "[HETERO] VERDICT: {}",
             if hetero_missed == 0 {
                 "uniform enum COVERS heterogeneous batches (order/mix-independent VK)"
@@ -1196,13 +1198,13 @@ mod tests {
         let map_size = map.len();
         let prod_height = map_size.next_power_of_two().ilog2() as usize;
 
-        eprintln!("[VKROOT] REDUCE_BATCH_SIZE={REDUCE_BATCH_SIZE}");
-        eprintln!("[VKROOT] num_shapes={num_shapes} (recursion={recursion_count} compress={compress_count} deferred={deferred_count} shrink={shrink_count})");
-        eprintln!("[VKROOT] enum_height = ceil(log2({num_shapes})) = {enum_height}");
-        eprintln!(
+        tracing::info!("[VKROOT] REDUCE_BATCH_SIZE={REDUCE_BATCH_SIZE}");
+        tracing::info!("[VKROOT] num_shapes={num_shapes} (recursion={recursion_count} compress={compress_count} deferred={deferred_count} shrink={shrink_count})");
+        tracing::info!("[VKROOT] enum_height = ceil(log2({num_shapes})) = {enum_height}");
+        tracing::info!(
             "[VKROOT] map_size={map_size}  prod_height = ceil(log2({map_size})) = {prod_height}"
         );
-        eprintln!(
+        tracing::info!(
             "[VKROOT] HEIGHTS {}",
             if enum_height == prod_height {
                 "MATCH ✓ (no height circularity)"

@@ -561,10 +561,10 @@ mod phase1_acceptance_gate {
         for (ci, chips) in cases.iter().enumerate() {
             let (w_at_z, bp) = run_case(chips, 7000 + ci as u64);
             let ok = w_at_z == bp;
-            eprintln!("gate case {ci} {chips:?}: w_at_z==bp = {ok}");
+            tracing::info!("gate case {ci} {chips:?}: w_at_z==bp = {ok}");
             if !ok {
-                eprintln!("  w_at_z = {w_at_z:?}");
-                eprintln!("  bp     = {bp:?}");
+                tracing::info!("  w_at_z = {w_at_z:?}");
+                tracing::info!("  bp     = {bp:?}");
             }
             all_ok &= ok;
         }
@@ -682,7 +682,7 @@ mod phase1_acceptance_gate {
         // (A) BASELINE — raw claims with NO embed factor: must MISMATCH.
         let raw_eval = s4b_evaluate_mle(&raw_claims_flat, &z_col);
         let baseline_fail = raw_eval != claimed_sum;
-        eprintln!(
+        tracing::info!(
             "[S4b] BASELINE (no embed): assert {} (raw_eval==claimed_sum? {})",
             if baseline_fail { "FAILS (as expected)" } else { "PASSES (unexpected!)" },
             raw_eval == claimed_sum
@@ -722,7 +722,7 @@ mod phase1_acceptance_gate {
             }
             lifted.resize(padded, InnerChallenge::ZERO);
             let lifted_eval = s4b_evaluate_mle(&lifted, &z_col);
-            eprintln!(
+            tracing::info!(
                 "[S4b] candidate {cand}: assert {} (lifted_eval==claimed_sum? {})",
                 if lifted_eval == claimed_sum { "PASSES" } else { "FAILS" },
                 lifted_eval == claimed_sum
@@ -731,7 +731,7 @@ mod phase1_acceptance_gate {
 
         // (C) PROVE the band claims (the genuine value) DO satisfy the assert.
         let band_eval = s4b_evaluate_mle(&band_claims_flat, &z_col);
-        eprintln!(
+        tracing::info!(
             "[S4b] CONTROL (band claims direct): assert {} (band_eval==claimed_sum? {})",
             if band_eval == claimed_sum { "PASSES" } else { "FAILS" },
             band_eval == claimed_sum
@@ -753,7 +753,7 @@ mod phase1_acceptance_gate {
                     })
                     .collect();
                 let uniform = ratios.windows(2).all(|w| w[0] == w[1]);
-                eprintln!("[S4b] chip log_raw={lr} log_band={lb} w={}: per-col band/raw ratios uniform? {} ratios={:?}",
+                tracing::info!("[S4b] chip log_raw={lr} log_band={lb} w={}: per-col band/raw ratios uniform? {} ratios={:?}",
                     y_raw.len(), uniform, ratios);
             }
         }
@@ -861,7 +861,7 @@ mod phase1_acceptance_gate {
             claimed_sum_new, recursion_lhs,
             "low-placement: in-circuit step-4 assert holds with raw claims + no embed_factor"
         );
-        eprintln!("[S5] low-placement commit PROVEN: band_y==raw_y per column; recursion step-4 assert holds with NO embed_factor; offsets/total stay band-keyed.");
+        tracing::info!("[S5] low-placement commit PROVEN: band_y==raw_y per column; recursion step-4 assert holds with NO embed_factor; offsets/total stay band-keyed.");
     }
 }
 

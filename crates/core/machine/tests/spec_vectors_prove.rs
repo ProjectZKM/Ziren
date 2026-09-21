@@ -70,7 +70,7 @@ fn spec_vectors_prove_and_verify() {
         match outcome {
             Ok(Ok(_)) => {
                 proved += 1;
-                eprintln!("proved {name} in {:.1}s", started.elapsed().as_secs_f64());
+                tracing::info!("proved {name} in {:.1}s", started.elapsed().as_secs_f64());
             }
             Ok(Err(e)) => failures.push(format!("{name}: verification failed: {e:?}")),
             Err(p) => {
@@ -83,9 +83,9 @@ fn spec_vectors_prove_and_verify() {
             }
         }
     }
-    eprintln!("spec vectors proved: {proved}, failed: {}", failures.len());
+    tracing::warn!("spec vectors proved: {proved}, failed: {}", failures.len());
     for f in &failures {
-        eprintln!("FAIL {f}");
+        tracing::warn!("FAIL {f}");
     }
     assert!(failures.is_empty(), "{} spec vector programs did not prove", failures.len());
 }
@@ -100,7 +100,7 @@ fn cannon_programs_prove_and_verify() {
         "/data/stephen/cannon-mips/mipsevm/open_mips_tests/test/bin".to_string()
     });
     let Ok(entries) = std::fs::read_dir(&dir) else {
-        eprintln!("CANNON_MIPS_TESTS not found at {dir}; skipping");
+        tracing::info!("CANNON_MIPS_TESTS not found at {dir}; skipping");
         return;
     };
     let mut files: Vec<_> = entries
@@ -161,7 +161,7 @@ fn cannon_programs_prove_and_verify() {
         match outcome {
             Ok(Ok(_)) => {
                 proved += 1;
-                eprintln!("proved cannon {name} in {:.1}s", started.elapsed().as_secs_f64());
+                tracing::info!("proved cannon {name} in {:.1}s", started.elapsed().as_secs_f64());
             }
             Ok(Err(e)) => failures.push(format!("{name}: verification failed: {e:?}")),
             Err(p) => {
@@ -174,9 +174,9 @@ fn cannon_programs_prove_and_verify() {
             }
         }
     }
-    eprintln!("cannon programs proved: {proved}, failed: {}", failures.len());
+    tracing::warn!("cannon programs proved: {proved}, failed: {}", failures.len());
     for f in &failures {
-        eprintln!("FAIL {f}");
+        tracing::warn!("FAIL {f}");
     }
     assert!(failures.is_empty(), "{} cannon programs did not prove", failures.len());
 }

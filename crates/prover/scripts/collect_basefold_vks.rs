@@ -51,7 +51,7 @@ fn read_file(p: &PathBuf) -> Vec<u8> {
 }
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    zkm_core_machine::utils::setup_cli_logger();
 
     // Install a panic hook that flushes location + message to stderr
     // before unwinding. Without this, panics inside the rayon/thread
@@ -75,7 +75,7 @@ fn main() {
             .map(|s| s.to_string())
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "<non-string panic payload>".to_string());
-        eprintln!("[PANIC] thread={} at {}: {}", name, location, msg);
+        tracing::warn!("[PANIC] thread={} at {}: {}", name, location, msg);
         default_hook(info);
     }));
 
@@ -91,7 +91,7 @@ fn main() {
         let elf_path = dir.join("program.bin");
         let stdin_path = dir.join("stdin.bin");
 
-        eprintln!("\n=== [{}/{}] workload: {} ===", idx + 1, args.workloads.len(), workload);
+        tracing::info!("\n=== [{}/{}] workload: {} ===", idx + 1, args.workloads.len(), workload);
 
         let elf = read_file(&elf_path);
         let stdin: ZKMStdin = bincode::deserialize(&read_file(&stdin_path))
@@ -100,7 +100,7 @@ fn main() {
         let context = zkm_core_executor::ZKMContext::default();
         let (_, pk_d, program, vk) = prover.setup(&elf);
 
-        eprintln!("[collect] prove_core start");
+        tracing::info!("[collect] prove_core start");
         // Wrap prove_core in catch_unwind so an inner-thread panic
         // (e.g. on a multi-shard workload like reth that triggers a
         // shape-bin lookup miss inside the trace_gen worker pool)
@@ -114,27 +114,27 @@ fn main() {
         })) {
             Ok(Ok(p)) => p,
             Ok(Err(e)) => {
-                eprintln!("[collect] prove_core ERROR for {}: {:?}", workload, e);
+                tracing::warn!("[collect] prove_core ERROR for {}: {:?}", workload, e);
                 continue;
             }
             Err(_) => {
-                eprintln!("[collect] prove_core PANIC for {} (see [PANIC] above)", workload);
+                tracing::warn!("[collect] prove_core PANIC for {} (see [PANIC] above)", workload);
                 continue;
             }
         };
-        eprintln!("[collect] prove_core ok: {} shard proofs", core_proof.proof.0.len());
+        tracing::info!("[collect] prove_core ok: {} shard proofs", core_proof.proof.0.len());
 
-        eprintln!("[collect] compress start");
+        tracing::info!("[collect] compress start");
         let compressed = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             prover.compress(&vk, core_proof, vec![], opts)
         })) {
             Ok(Ok(c)) => c,
             Ok(Err(e)) => {
-                eprintln!("[collect] compress ERROR for {}: {:?}", workload, e);
+                tracing::warn!("[collect] compress ERROR for {}: {:?}", workload, e);
                 continue;
             }
             Err(_) => {
-                eprintln!("[collect] compress PANIC for {} (see [PANIC] above)", workload);
+                tracing::warn!("[collect] compress PANIC for {} (see [PANIC] above)", workload);
                 continue;
             }
         };
@@ -142,13 +142,13 @@ fn main() {
         let h = compressed.vk.hash_koalabear();
         let new = !hashes.contains_key(&h);
         hashes.insert(h, hashes.len());
-        eprintln!("[collect] {} compress_vk hash = {:?} (new={})", workload, h, new);
+        tracing::info!("[collect] {} compress_vk hash = {:?} (new={})", workload, h, new);
 
         // Also capture the shrink VK hash, since verify_shrink (verify.rs:367)
         // checks the SHRINK proof's vk against the same recursion_vk_map.
         // Without this, a workload that needed VERIFY_VK=true would pass
         // compress but fail shrink, requiring a follow-up regen.
-        eprintln!("[collect] shrink start");
+        tracing::info!("[collect] shrink start");
         let shrink_compressed = compressed.clone();
         let shrink_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             prover.shrink(shrink_compressed, opts)
@@ -158,18 +158,18 @@ fn main() {
                 let sh = shrunk.vk.hash_koalabear();
                 let snew = !hashes.contains_key(&sh);
                 hashes.insert(sh, hashes.len());
-                eprintln!("[collect] {} shrink_vk hash = {:?} (new={})", workload, sh, snew);
+                tracing::info!("[collect] {} shrink_vk hash = {:?} (new={})", workload, sh, snew);
             }
             Ok(Err(e)) => {
-                eprintln!("[collect] shrink ERROR for {}: {:?}", workload, e);
+                tracing::warn!("[collect] shrink ERROR for {}: {:?}", workload, e);
             }
             Err(_) => {
-                eprintln!("[collect] shrink PANIC for {} (see [PANIC] above)", workload);
+                tracing::warn!("[collect] shrink PANIC for {} (see [PANIC] above)", workload);
             }
         }
     }
 
-    eprintln!(
+    tracing::info!(
         "\n=== Collected {} unique compress VK hashes from {} workloads ===",
         hashes.len(),
         args.workloads.len()
@@ -177,7 +177,7 @@ fn main() {
 
     let mut out_file = File::create(&args.output).unwrap();
     bincode::serialize_into(&mut out_file, &hashes).unwrap();
-    eprintln!("wrote vk_map to {:?}", args.output);
+    tracing::info!("wrote vk_map to {:?}", args.output);
 
     let _: Val<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> = KB::default();
 }

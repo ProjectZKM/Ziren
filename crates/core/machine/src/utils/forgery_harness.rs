@@ -215,7 +215,7 @@ fn stage0_control_fixoff_honest_verifies() {
     setup_logger();
     let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
     let res = verify(&machine, &vk, &proof);
-    eprintln!("[STAGE0][CONTROL][fibonacci FIX-off] honest verify = {}", reject_tag(&res));
+    tracing::info!("[STAGE0][CONTROL][fibonacci FIX-off] honest verify = {}", reject_tag(&res));
     assert!(res.is_ok(), "honest FIX-off proof must verify (control)");
 }
 
@@ -236,7 +236,7 @@ fn stage0_control_fixon_honest_verifies() {
         ZKMStdin::new(),
         Some(&shape_config),
     );
-    eprintln!(
+    tracing::info!(
         "[STAGE0][CONTROL][fibonacci FIX-on] honest verify = {}",
         if res.is_ok() { "ACCEPTED" } else { "REJECTED" }
     );
@@ -279,7 +279,7 @@ fn run_forgery(
     );
 
     let (si, ci, name, log_h) = pick_forge_target(&proof);
-    eprintln!(
+    tracing::info!(
         "[STAGE0][FORGE][{label}] target shard={si} chip_idx={ci} chip='{name}' \
          log_height={log_h}"
     );
@@ -289,7 +289,7 @@ fn run_forgery(
 
     let res = verify(&machine, &vk, &forged);
     let tag = reject_tag(&res);
-    eprintln!("[STAGE0][FORGE][{label}] forged verify = {tag}");
+    tracing::info!("[STAGE0][FORGE][{label}] forged verify = {tag}");
 
     if expect_reject {
         assert!(
@@ -331,7 +331,7 @@ fn overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     degree[new_idx] = Challenge::ONE;
     opening.log_degree = new_shift;
     bf.chip_heights.insert(name.to_string(), 1usize << new_shift);
-    eprintln!(
+    tracing::info!(
         "[STAGE0][FORGE] OVER-claim chip='{name}': real_height={:?} -> claimed 2^{new_shift}",
         real_h
     );
@@ -361,7 +361,7 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     degree[new_idx] = Challenge::ONE;
     opening.log_degree = new_shift;
     bf.chip_heights.insert(name.to_string(), 1usize << new_shift);
-    eprintln!(
+    tracing::info!(
         "[STAGE0][FORGE] UNDER-claim chip='{name}': real_height={:?} -> claimed 2^{new_shift}",
         real_h
     );
@@ -394,7 +394,7 @@ fn forge_degree_only_overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
     // NOTE: log_degree and chip_heights LEFT HONEST on purpose.
-    eprintln!(
+    tracing::info!(
         "[STAGE0][FORGE] DEGREE-only OVER-claim chip='{name}': real_height={:?} -> degree bits claim 2^{new_shift} \
          (transcript log_height LEFT HONEST)",
         real_h
@@ -422,7 +422,7 @@ fn forge_degree_only_underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) 
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
     // NOTE: log_degree and chip_heights LEFT HONEST on purpose.
-    eprintln!(
+    tracing::info!(
         "[STAGE0][FORGE] DEGREE-only UNDER-claim chip='{name}': real_height={:?} -> degree bits claim 2^{new_shift} \
          (transcript log_height LEFT HONEST)",
         real_h
@@ -436,7 +436,7 @@ fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
     let cur = bf.chip_heights.get(name).copied().unwrap_or(0);
     let lie = cur.wrapping_add(1);
     bf.chip_heights.insert(name.to_string(), lie);
-    eprintln!("[STAGE0][FORGE] TRANSCRIPT-only chip='{name}': height {cur} -> {lie}");
+    tracing::info!("[STAGE0][FORGE] TRANSCRIPT-only chip='{name}': height {cur} -> {lie}");
 }
 
 // fibonacci (height-varied MIPS)
@@ -468,7 +468,7 @@ fn stage0_forge_overclaim_fibonacci() {
         true, // MUST reject
         overclaim,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci OVER-claim (transcript+degree) => {tag}");
+    tracing::info!("[STAGE0][VERDICT] fibonacci OVER-claim (transcript+degree) => {tag}");
 }
 
 #[test]
@@ -477,7 +477,7 @@ fn stage0_forge_underclaim_fibonacci() {
     setup_logger();
     let tag =
         run_forgery("fibonacci/underclaim", fibonacci_program(), ZKMStdin::new(), true, underclaim);
-    eprintln!("[STAGE0][VERDICT] fibonacci UNDER-claim (transcript+degree) => {tag}");
+    tracing::info!("[STAGE0][VERDICT] fibonacci UNDER-claim (transcript+degree) => {tag}");
 }
 
 #[test]
@@ -491,7 +491,7 @@ fn stage0_forge_transcript_only_fibonacci() {
         true,
         forge_transcript_only,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci TRANSCRIPT-only => {tag}");
+    tracing::info!("[STAGE0][VERDICT] fibonacci TRANSCRIPT-only => {tag}");
 }
 
 // (B) DEGREE-ONLY forgeries WITH the reconstruction gate ON — the pure
@@ -509,7 +509,7 @@ fn stage0_forge_degree_only_overclaim_fibonacci_recon_on() {
         true, // MUST reject
         forge_degree_only_overclaim,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci DEGREE-only OVER-claim => {tag}");
+    tracing::info!("[STAGE0][VERDICT] fibonacci DEGREE-only OVER-claim => {tag}");
 }
 
 #[test]
@@ -523,7 +523,7 @@ fn stage0_forge_degree_only_underclaim_fibonacci_recon_on() {
         true,
         forge_degree_only_underclaim,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci DEGREE-only UNDER-claim => {tag}");
+    tracing::info!("[STAGE0][VERDICT] fibonacci DEGREE-only UNDER-claim => {tag}");
 }
 
 // (B') DEGREE-ONLY forgery with the reconstruction EXPLICITLY DISABLED
@@ -545,7 +545,7 @@ fn stage0_degree_only_overclaim_fibonacci_survives_when_recon_off() {
         false, // SURVIVES (degree anchor disabled on purpose) — documented
         forge_degree_only_overclaim,
     );
-    eprintln!(
+    tracing::info!(
         "[STAGE0][CAVEAT] fibonacci DEGREE-only OVER-claim SURVIVES with \
          ZIREN_LOGUP_RECONSTRUCTION=0 (escape hatch disables the host degree \
          anchor) => {tag}"
@@ -573,7 +573,7 @@ fn stage1_degree_only_overclaim_fibonacci_rejected_on_default() {
         reject_tag(&honest)
     );
     let (si, ci, name, log_h) = pick_forge_target(&proof);
-    eprintln!(
+    tracing::info!(
         "[STAGE1][FORGE][degree-only-DEFAULT] target shard={si} chip_idx={ci} \
          chip='{name}' log_height={log_h}"
     );
@@ -581,13 +581,13 @@ fn stage1_degree_only_overclaim_fibonacci_rejected_on_default() {
     forge_degree_only_overclaim(&mut forged.shard_proofs[si], ci, &name);
     let res = verify(&machine, &vk, &forged);
     let tag = reject_tag(&res);
-    eprintln!("[STAGE1][FORGE][degree-only-DEFAULT] forged verify = {tag}");
+    tracing::info!("[STAGE1][FORGE][degree-only-DEFAULT] forged verify = {tag}");
     assert!(
         res.is_err(),
         "[stage1-default] DEGREE-only forgery SURVIVED on the un-gated \
          production default — the un-gate did NOT take effect (BLOCKER): {tag}"
     );
-    eprintln!(
+    tracing::warn!(
         "[STAGE1][VERDICT] fibonacci DEGREE-only OVER-claim REJECTED on the \
          un-gated production default => {tag}"
     );
@@ -601,7 +601,7 @@ fn stage0_forge_overclaim_keccak() {
     setup_logger();
     let tag =
         run_forgery("keccak/overclaim", sha3_chain_program(), ZKMStdin::new(), true, overclaim);
-    eprintln!("[STAGE0][VERDICT] keccak OVER-claim (transcript+degree) => {tag}");
+    tracing::info!("[STAGE0][VERDICT] keccak OVER-claim (transcript+degree) => {tag}");
 }
 
 #[test]
@@ -610,7 +610,7 @@ fn stage0_forge_underclaim_keccak() {
     setup_logger();
     let tag =
         run_forgery("keccak/underclaim", sha3_chain_program(), ZKMStdin::new(), true, underclaim);
-    eprintln!("[STAGE0][VERDICT] keccak UNDER-claim (transcript+degree) => {tag}");
+    tracing::info!("[STAGE0][VERDICT] keccak UNDER-claim (transcript+degree) => {tag}");
 }
 
 #[test]
@@ -624,7 +624,7 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
         true,
         forge_degree_only_overclaim,
     );
-    eprintln!("[STAGE0][VERDICT] keccak DEGREE-only OVER-claim => {tag}");
+    tracing::info!("[STAGE0][VERDICT] keccak DEGREE-only OVER-claim => {tag}");
 }
 
 // Jagged HASH-BIND forgeries.
@@ -659,7 +659,7 @@ fn forge_count_tamper_column(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
                 .expect("at least one chip with columns");
             let old = bundle.packing.column_counts[idx];
             bundle.packing.column_counts[idx] = old + 1;
-            eprintln!(
+            tracing::info!(
                 "[STAGE0][FORGE] COUNT-tamper column: packing.column_counts[{idx}] {old} -> {}",
                 old + 1
             );
@@ -683,7 +683,7 @@ fn forge_count_tamper_row(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
             let idx = 1.min(n - 2);
             let old = bundle.packing.offsets[idx];
             bundle.packing.offsets[idx] = old + 1;
-            eprintln!(
+            tracing::info!(
                 "[STAGE0][FORGE] COUNT-tamper row: packing.offsets[{idx}] {old} -> {} \
                  (changes a derived row_count)",
                 old + 1
@@ -704,7 +704,7 @@ fn stage0_forge_count_tamper_column_fibonacci() {
         true, // MUST reject (hash-bind)
         forge_count_tamper_column,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci COLUMN-count tamper (hash-bind) => {tag}");
+    tracing::info!("[STAGE0][VERDICT] fibonacci COLUMN-count tamper (hash-bind) => {tag}");
 }
 
 #[test]
@@ -718,7 +718,7 @@ fn stage0_forge_count_tamper_row_fibonacci() {
         true,
         forge_count_tamper_row,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci ROW-count tamper (hash-bind) => {tag}");
+    tracing::info!("[STAGE0][VERDICT] fibonacci ROW-count tamper (hash-bind) => {tag}");
 }
 
 // STAGE 1 — ZERO-DEGREE MODEL SOUNDNESS.
@@ -765,7 +765,7 @@ fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, Strin
             }
         }
     }
-    eprintln!(
+    tracing::warn!(
         "[STAGE1] HEIGHT-0/degree-0 missing chips in FIX-off proof: {} -> {:?}",
         found.len(),
         found,
@@ -791,7 +791,7 @@ fn forge_height0_claim_active(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     let new_shift = 1usize.min(bit_len.saturating_sub(1));
     let new_idx = bit_len - 1 - new_shift;
     degree[new_idx] = Challenge::ONE;
-    eprintln!(
+    tracing::warn!(
         "[STAGE1][FORGE] HEIGHT-0 chip='{name}': degree 0 (missing) -> claims 2^{new_shift} \
          ACTIVE (transcript log_height LEFT HONEST)"
     );
@@ -806,7 +806,7 @@ fn forge_present_claim_missing(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     for b in degree.iter_mut() {
         *b = Challenge::ZERO;
     }
-    eprintln!(
+    tracing::warn!(
         "[STAGE1][FORGE] PRESENT chip='{name}': real_height={real_h:?} -> degree ALL-ZERO \
          (claims missing/height-0, transcript log_height LEFT HONEST)"
     );
@@ -828,20 +828,22 @@ fn stage1_forge_height0_missing_claims_active_rejected() {
         reject_tag(&honest)
     );
     let (si, ci, name) = pick_height0_missing_target(&proof);
-    eprintln!(
+    tracing::info!(
         "[STAGE1][FORGE][height0-claims-active] target shard={si} chip_idx={ci} chip='{name}'"
     );
     let mut forged = proof.clone();
     forge_height0_claim_active(&mut forged.shard_proofs[si], ci, &name);
     let res = verify(&machine, &vk, &forged);
     let tag = reject_tag(&res);
-    eprintln!("[STAGE1][FORGE][height0-claims-active] forged verify = {tag}");
+    tracing::info!("[STAGE1][FORGE][height0-claims-active] forged verify = {tag}");
     assert!(
         res.is_err(),
         "[stage1-a] HEIGHT-0 missing chip forged to ACTIVE SURVIVED — the zero-degree \
          model is UNSOUND (SOUNDNESS HOLE / BLOCKER): {tag}"
     );
-    eprintln!("[STAGE1][VERDICT] (a) HEIGHT-0 missing chip claiming activity REJECTED => {tag}");
+    tracing::warn!(
+        "[STAGE1][VERDICT] (a) HEIGHT-0 missing chip claiming activity REJECTED => {tag}"
+    );
 }
 
 /// ★ FORGERY GATE (b): a real present active chip forged to claim it is
@@ -858,7 +860,7 @@ fn stage1_forge_present_active_claims_missing_rejected() {
         true, // MUST reject
         forge_present_claim_missing,
     );
-    eprintln!(
+    tracing::warn!(
         "[STAGE1][VERDICT] (b) PRESENT active chip claiming missing (degree=0) REJECTED => {tag}"
     );
 }
@@ -904,7 +906,7 @@ fn preprocessed_binding_cross_vk_probe() {
 
     let cross = verify(&machine, &vk_a, &proof_b);
     let tag = reject_tag(&cross);
-    eprintln!("[PREP-BIND] program B's proof verified against program A's vk => {tag}");
+    tracing::info!("[PREP-BIND] program B's proof verified against program A's vk => {tag}");
     assert!(
         cross.is_err(),
         "SOUNDNESS: a proof of one program MUST NOT verify against another \
@@ -925,7 +927,7 @@ fn stage0_control_fixoff_memory_programs_verify() {
     ] {
         let (proof, machine, vk) = prove_fixoff(program, ZKMStdin::new());
         let res = verify(&machine, &vk, &proof);
-        eprintln!(
+        tracing::info!(
             "[STAGE0][MEMGATE][{name} FIX-off] shards={} honest verify = {}",
             proof.shard_proofs.len(),
             reject_tag(&res)

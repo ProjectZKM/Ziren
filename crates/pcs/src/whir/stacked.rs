@@ -238,13 +238,17 @@ mod open_timing {
         let n = OPENS.fetch_add(1, Ordering::Relaxed) + 1;
         if n.is_multiple_of(32) {
             let g = |a: &AtomicUsize| a.load(Ordering::Relaxed) as f64 / 1e9;
-            eprintln!(
+            tracing::info!(
                 "#WHIR-OPEN-TIMING n={n} engine={:.2}s folds={:.2}s commits={:.2}s ood={:.2}s queries={:.2}s constraints={:.2}s final={:.2}s | qgrind={:.2}s qr0={:.2}s qlater={:.2}s fgrind={:.2}s fopen={:.2}s cengine={:.2}s chost={:.2}s",
                 g(&ENGINE), g(&FOLDS), g(&COMMITS), g(&OOD), g(&QUERIES), g(&CONSTRAINTS), g(&FINAL),
                 g(&GRINDQ), g(&QR0), g(&QLATER), g(&FGRIND), g(&FOPEN),
                 g(&CENGINE), g(&CHOST)
             );
-            eprintln!("#WHIR-OPEN-TIMING n={n} pevals={:.2}s pinit={:.2}s", g(&PEVALS), g(&PINIT));
+            tracing::info!(
+                "#WHIR-OPEN-TIMING n={n} pevals={:.2}s pinit={:.2}s",
+                g(&PEVALS),
+                g(&PINIT)
+            );
         }
     }
 }

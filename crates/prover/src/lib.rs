@@ -870,7 +870,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 let keys: Vec<String> = (own.unwrap_or(0)..=last)
                     .map(|b| format!("{b}:{:016x}", Self::band_keyed(witness.shape_key(), Some(b))))
                     .collect();
-                eprintln!(
+                tracing::info!(
                     "SHAPEDIAG prewarm band={band_index} arity={arity} own={own:?} shape_key={:016x} keys=[{}] {}",
                     witness.shape_key(),
                     keys.join(","),
@@ -1449,7 +1449,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         band: Option<usize>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         if std::env::var("ZIREN_SHAPE_KEY_DIAG").is_ok() {
-            eprintln!(
+            tracing::info!(
                 "SHAPEDIAG runtime band={band:?} shape_key={:016x} key={:016x} {}",
                 input.shape_key(),
                 Self::band_keyed(input.shape_key(), band),
@@ -2259,11 +2259,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             match bincode::serialize(&wrap_vk.part_vk()) {
                 Ok(bytes) => match std::fs::write(&path, &bytes) {
                     Ok(()) => {
-                        eprintln!(">>> PART_STARK_VK written {} bytes to {:?}", bytes.len(), path)
+                        tracing::info!(
+                            ">>> PART_STARK_VK written {} bytes to {:?}",
+                            bytes.len(),
+                            path
+                        )
                     }
-                    Err(e) => eprintln!(">>> PART_STARK_VK write failed {:?}: {e}", path),
+                    Err(e) => tracing::warn!(">>> PART_STARK_VK write failed {:?}: {e}", path),
                 },
-                Err(e) => eprintln!(">>> PART_STARK_VK serialize failed: {e}"),
+                Err(e) => tracing::warn!(">>> PART_STARK_VK serialize failed: {e}"),
             }
         }
 
@@ -2950,7 +2954,7 @@ pub mod tests {
         let stripes =
             |cells: usize| zkm_pcs::jagged::committed_dense_len(cells, log_stack) >> log_stack;
         let (prep_stripes, main_stripes) = (stripes(prep), stripes(main));
-        eprintln!(
+        tracing::info!(
             "[STRIPES] wrap prep {prep} cells -> {prep_stripes}, main {main} cells -> {main_stripes}, batch {}",
             prep_stripes + main_stripes
         );
@@ -3064,7 +3068,7 @@ pub mod tests {
 
         let total_instrs = program.instruction_count();
         let pct = 100.0 * n_par_instrs as f64 / total_instrs as f64;
-        eprintln!(
+        tracing::info!(
             "[compose_emits_parallel] N={} parallel_blocks={} subs={} parallel_instrs={}/{} ({:.1}%)",
             n_inputs, n_par, n_subs, n_par_instrs, total_instrs, pct,
         );
@@ -3099,7 +3103,7 @@ pub mod tests {
         for b in &program.seq_blocks.seq_blocks {
             walk(b, &mut hint_in_par, false);
         }
-        eprintln!("[compose_emits_parallel] hint_in_par={}", hint_in_par,);
+        tracing::info!("[compose_emits_parallel] hint_in_par={}", hint_in_par,);
     }
 
     pub fn bench_e2e_prover<C: ZKMProverComponents>(
@@ -3894,7 +3898,7 @@ pub mod tests {
                 .1
                 .hash_koalabear()
                 .map(|x| x.as_canonical_u32());
-            eprintln!(
+            tracing::info!(
                 "[ARITY-REPR] FAITHFUL? dummy_at_real_shape == real: {} \
                  (dummy={vk_dummy_at_real:?} real={vk_real_1:?})",
                 vk_dummy_at_real == vk_real_1,
@@ -4099,10 +4103,10 @@ pub mod tests {
             let rr = describe(&real_bf);
             for ((k, dv), (_, rv)) in dr.iter().zip(rr.iter()) {
                 if dv != rv {
-                    eprintln!("[DIFF] {k}:\n    dummy = {dv}\n    real  = {rv}");
+                    tracing::info!("[DIFF] {k}:\n    dummy = {dv}\n    real  = {rv}");
                 }
             }
-            eprintln!("[DIFF] fields compared = {}", dr.len());
+            tracing::info!("[DIFF] fields compared = {}", dr.len());
         }
 
         // Find the enumerated per-shard shape of the SAME (chip_set, log_dense) class.
@@ -4123,7 +4127,7 @@ pub mod tests {
                 );
             }
         };
-        eprintln!(
+        tracing::info!(
             "[ARITY-REPR] real_blocks={real_ld:?} real_chips={} enum_blocks={:?} enum_matched=true",
             real_names.len(),
             blocks_of(&enum_os),
@@ -4137,8 +4141,8 @@ pub mod tests {
                 real_os.inner.iter().map(|(n, h)| (n, h)).collect();
             let e: std::collections::BTreeMap<&String, &usize> =
                 enum_os.inner.iter().map(|(n, h)| (n, h)).collect();
-            eprintln!("[ARITY-REPR] real heights = {r:?}");
-            eprintln!("[ARITY-REPR] enum heights = {e:?}");
+            tracing::info!("[ARITY-REPR] real heights = {r:?}");
+            tracing::info!("[ARITY-REPR] enum heights = {e:?}");
             let diffs: Vec<String> = r
                 .iter()
                 .filter_map(|(n, h)| {
@@ -4146,7 +4150,7 @@ pub mod tests {
                     (eh != Some(*h)).then(|| format!("{n}: real={h} enum={eh:?}"))
                 })
                 .collect();
-            eprintln!("[ARITY-REPR] per-chip height MISMATCHES ({}): {diffs:?}", diffs.len());
+            tracing::warn!("[ARITY-REPR] per-chip height MISMATCHES ({}): {diffs:?}", diffs.len());
         }
 
         for arity in 1..=1 {
@@ -4170,7 +4174,7 @@ pub mod tests {
             let vk_enum = prover.compress_prover.setup(&prog_enum).1.hash_koalabear();
 
             let eq = vk_real == vk_enum;
-            eprintln!(
+            tracing::info!(
                 "[ARITY-REPR] arity={arity}: enum_repr_reproduces_real={eq} \
                  vk_real={:?} vk_enum={:?}",
                 vk_real.map(|x| {
@@ -4230,7 +4234,7 @@ pub mod tests {
                 &with_vkey,
             );
             let p = prover.compose_program_basefold(&d).0;
-            eprintln!(
+            tracing::info!(
                 "[PROGSIZE] merkle_height={} arity={arity} compose_instructions={}",
                 VK_MERKLE_TREE_HEIGHT,
                 p.instruction_count(),
@@ -4256,7 +4260,7 @@ pub mod tests {
         let all: Vec<ZKMProofShape> =
             ZKMProofShape::generate(&rec_cfg, REDUCE_BATCH_SIZE).collect();
         let normalize = all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
-        eprintln!(
+        tracing::info!(
             "[ENUMSIZE] total={} normalize={} other={} capacity=2^{}={}",
             all.len(),
             normalize,
@@ -4325,9 +4329,12 @@ pub mod tests {
             |tag: &str, hs: &[(&str, usize)]| -> ([u32; 8], (usize, usize, usize, usize)) {
                 let st = stats(hs);
                 let vk = vk_of(hs);
-                eprintln!(
+                tracing::info!(
                     "[AGGKEY] {tag}: total={} dense_len={} blocks={} log_dense={} vk={vk:?}",
-                    st.0, st.1, st.2, st.3,
+                    st.0,
+                    st.1,
+                    st.2,
+                    st.3,
                 );
                 (vk, st)
             };
@@ -4384,8 +4391,13 @@ pub mod tests {
             base.iter().map(|(n, h)| if *n == "Cpu" { (*n, 15) } else { (*n, *h) }).collect();
         let (vk_sl, st_sl) = report("more-blocks", &same_logdense);
 
-        eprintln!("[AGGKEY] (a) blocks {}=={} -> vk_eq={}", st_base.2, st_sb.2, vk_base == vk_sb,);
-        eprintln!(
+        tracing::info!(
+            "[AGGKEY] (a) blocks {}=={} -> vk_eq={}",
+            st_base.2,
+            st_sb.2,
+            vk_base == vk_sb,
+        );
+        tracing::info!(
             "[AGGKEY] (b) log_dense {}=={} but blocks {} vs {} -> vk_eq={}",
             st_base.3,
             st_sl.3,
@@ -4399,14 +4411,14 @@ pub mod tests {
         let prep_moved: Vec<(&str, usize)> =
             base.iter().map(|(n, h)| if *n == "Program" { (*n, 17) } else { (*n, *h) }).collect();
         let (vk_pm, st_pm) = report("prep-moved ", &prep_moved);
-        eprintln!(
+        tracing::info!(
             "[AGGKEY] (c) Program 19->17: blocks {} vs {} -> vk_eq={}",
             st_base.2,
             st_pm.2,
             vk_base == vk_pm,
         );
 
-        eprintln!(
+        tracing::info!(
             "[AGGKEY] CONCLUSION: the vk keys on the committed BLOCK COUNT, not log_dense: {}",
             (vk_base == vk_sb && st_base.2 == st_sb.2)
                 && !(vk_base == vk_sl && st_base.2 != st_sl.2),
@@ -4511,7 +4523,7 @@ pub mod tests {
         }
         for (blocks, rows) in &by_class {
             let pads: BTreeSet<usize> = rows.iter().map(|(_, _, p)| *p).collect();
-            eprintln!(
+            tracing::info!(
                 "[PADCOL] main_blocks={blocks}: filler heights {:?} -> pad-col counts {:?}",
                 rows.iter().map(|(h, _, _)| *h).collect::<Vec<_>>(),
                 pads
@@ -4524,19 +4536,21 @@ pub mod tests {
             let hi = rows.iter().max_by_key(|(_, _, p)| *p)?;
             (lo.2 != hi.2).then_some((*blocks, *lo, *hi))
         }) else {
-            eprintln!("[PADCOL] INCONCLUSIVE: no class in the sweep spans two pad-column counts");
+            tracing::info!(
+                "[PADCOL] INCONCLUSIVE: no class in the sweep spans two pad-column counts"
+            );
             return;
         };
 
-        eprintln!(
+        tracing::info!(
             "[PADCOL] class main_blocks={blocks}: A filler=2^{} cells={} pads={} | B filler=2^{} cells={} pads={}",
             a.0, a.1, a.2, b.0, b.1, b.2,
         );
         let vk_a = vk_of(&with_filler(a.0));
         let vk_b = vk_of(&with_filler(b.0));
-        eprintln!("[PADCOL] vk_A={vk_a:?}");
-        eprintln!("[PADCOL] vk_B={vk_b:?}");
-        eprintln!(
+        tracing::info!("[PADCOL] vk_A={vk_a:?}");
+        tracing::info!("[PADCOL] vk_B={vk_b:?}");
+        tracing::info!(
             "[PADCOL] NECESSARY: same (chip set, blocks), pad cols {} vs {} -> vk_eq={}.  \
              vk_eq=false means the pad-column count belongs in the enumeration key.",
             a.2,
@@ -4554,18 +4568,18 @@ pub mod tests {
             let other = rows.iter().find(|r| r.0 != first.0 && r.2 == first.2)?;
             Some((*blocks, *first, *other))
         }) else {
-            eprintln!(
+            tracing::info!(
                 "[PADCOL] SUFFICIENCY INCONCLUSIVE: no class holds two heights at one pad count"
             );
             return;
         };
-        eprintln!(
+        tracing::info!(
             "[PADCOL] class main_blocks={blocks} pads={}: C filler=2^{} cells={} | D filler=2^{} cells={}",
             c.2, c.0, c.1, d.0, d.1,
         );
         let vk_c = vk_of(&with_filler(c.0));
         let vk_d = vk_of(&with_filler(d.0));
-        eprintln!(
+        tracing::info!(
             "[PADCOL] SUFFICIENT: same (chip set, blocks, pad cols), cells {} vs {} -> vk_eq={}.  \
              vk_eq=true means one representative per class is faithful.",
             c.1,
@@ -4594,14 +4608,14 @@ pub mod tests {
                 break;
             }
         }
-        eprintln!(
+        tracing::info!(
             "[SHAPESPACE] all_shapes count={n}{} in {:?} (vk merkle capacity = 2^{} = {})",
             if n >= CAP { " (CAPPED)" } else { "" },
             t.elapsed(),
             VK_MERKLE_TREE_HEIGHT,
             1usize << VK_MERKLE_TREE_HEIGHT,
         );
-        eprintln!(
+        tracing::info!(
             "[SHAPESPACE] canonical cluster shapes = {}",
             cfg.enumerate_canonical_cluster_shapes().len(),
         );
@@ -4630,7 +4644,7 @@ pub mod tests {
         // preprocessed trace iff `preprocessed_width() > 0` (`machine.rs`
         // asserts it), so this is the round the key ought to commit.
         for c in prover.compress_prover.machine().chips().iter() {
-            eprintln!(
+            tracing::info!(
                 "[PREPROBE] compress chip {} preprocessed_width={}",
                 <_ as MachineAir<KoalaBear>>::name(c),
                 c.preprocessed_width(),
@@ -4677,19 +4691,21 @@ pub mod tests {
         let prog = prover.recursion_program_basefold(&dummy).0;
         let (pk, _vk) = prover.compress_prover.setup(&prog);
         let infos = &pk.preprocessed_data().packing.chip_infos;
-        eprintln!(
+        tracing::info!(
             "[PREPROBE] normalize pk: prep_chip_infos={} pk.traces={} chip_ordering={}",
             infos.len(),
             pk.traces.len(),
             pk.chip_ordering.len(),
         );
         for i in infos.iter() {
-            eprintln!(
+            tracing::info!(
                 "[PREPROBE]   committed prep chip {} rows={} cols={}",
-                i.name, i.row_count, i.column_count,
+                i.name,
+                i.row_count,
+                i.column_count,
             );
         }
-        eprintln!(
+        tracing::info!(
             "[PREPROBE] CONCLUSION: the recursion prove path opens {} round(s)",
             if infos.is_empty() { 1 } else { 2 },
         );
@@ -4706,7 +4722,7 @@ pub mod tests {
         let real_cells = packing.total_values;
         let real_area = packing.dense_len;
         let real_pads = real_area.saturating_sub(real_cells).div_ceil(cube).max(1);
-        eprintln!(
+        tracing::info!(
             "[PREPROBE] REAL prep round: cells={real_cells} area={real_area} \
              gap={} cube={cube} pad_columns={real_pads}",
             real_area.saturating_sub(real_cells),
@@ -4717,7 +4733,7 @@ pub mod tests {
         let band = prog.shape.as_ref().map(|sh| sh.clone_into_hash_map()).unwrap_or_default();
         let mut band_sorted: Vec<_> = band.iter().collect();
         band_sorted.sort();
-        eprintln!("[PREPROBE] program band (main heights) = {band_sorted:?}");
+        tracing::info!("[PREPROBE] program band (main heights) = {band_sorted:?}");
         let dummy_cells: usize = prover
             .compress_prover
             .machine()
@@ -4734,12 +4750,12 @@ pub mod tests {
             zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
         );
         let dummy_pads = dummy_area.saturating_sub(dummy_cells).div_ceil(cube).max(1);
-        eprintln!(
+        tracing::info!(
             "[PREPROBE] DUMMY prep round: cells={dummy_cells} area={dummy_area} \
              gap={} pad_columns={dummy_pads}",
             dummy_area.saturating_sub(dummy_cells),
         );
-        eprintln!(
+        tracing::info!(
             "[PREPROBE] VERDICT: real_pad_columns={real_pads} dummy_pad_columns={dummy_pads} \
              match={}",
             real_pads == dummy_pads,
@@ -4796,12 +4812,12 @@ pub mod tests {
         for arity in [1usize, 4] {
             let vn = vk_of(natural, arity);
             let vu = vk_of(&uniform18, arity);
-            eprintln!(
+            tracing::info!(
                 "[CSENS] arity={arity} natural_vk={vn:?} uniform18_vk={vu:?} eq={}",
                 vn == vu
             );
         }
-        eprintln!(
+        tracing::info!(
             "[CSENS] CONCLUSION: a UNIFORM compose child see eq= above — reproduce the natural compose vk"
         );
     }
@@ -4876,10 +4892,10 @@ pub mod tests {
         let v_real = vk_of(realcanon);
         let v_misc10 = vk_of(&misc10);
         let v_allcap = vk_of(&allcap);
-        eprintln!("[HSENS] realcanon   vk={v_real:?}");
-        eprintln!("[HSENS] misc1->10   vk={v_misc10:?} eq_real={}", v_misc10 == v_real);
-        eprintln!("[HSENS] all-core=14 vk={v_allcap:?} eq_real={}", v_allcap == v_real);
-        eprintln!(
+        tracing::info!("[HSENS] realcanon   vk={v_real:?}");
+        tracing::info!("[HSENS] misc1->10   vk={v_misc10:?} eq_real={}", v_misc10 == v_real);
+        tracing::info!("[HSENS] all-core=14 vk={v_allcap:?} eq_real={}", v_allcap == v_real);
+        tracing::info!(
             "[HSENS] CONCLUSION: normalize vk is {} to per-chip heights",
             if v_misc10 == v_real && v_allcap == v_real {
                 "INSENSITIVE (chip-SET only)"
@@ -4950,7 +4966,10 @@ pub mod tests {
         for c in machine.chips().iter() {
             let cname = <_ as MachineAir<KoalaBear>>::name(c);
             if cluster.contains(&cname.as_str()) {
-                eprintln!("[SITE5] {cname}: num_sent_byte_lookups={}", c.num_sent_byte_lookups());
+                tracing::info!(
+                    "[SITE5] {cname}: num_sent_byte_lookups={}",
+                    c.num_sent_byte_lookups()
+                );
             }
         }
 
@@ -4999,7 +5018,7 @@ pub mod tests {
                 }
             }
             let (vk, ld) = build(&hs);
-            eprintln!("[SITE5] fillers@{fh}: log_dense={ld} vk_eq_fib={}", vk == fib_vk);
+            tracing::info!("[SITE5] fillers@{fh}: log_dense={ld} vk_eq_fib={}", vk == fib_vk);
         }
     }
 
@@ -5123,7 +5142,7 @@ pub mod tests {
             // chip_set-DETERMINISM: every same-chip_set shape (fib + alts) must
             // produce the SAME vk (== fib's vk this run).  vk_eq_real is kept
             // for reference only.
-            eprintln!(
+            tracing::info!(
                 "[EQUIV] {tag}: total_values={tv} log_dense={ld} vk_eq_real={} vk_eq_fib={} vk={vk:?}",
                 vk == vk_real,
                 fib_vk.map(|f| f == vk).unwrap_or(true),
@@ -5156,7 +5175,7 @@ pub mod tests {
                 let first_diff = rb.iter().zip(db.iter()).position(|(a, b)| a != b);
                 let ri: Vec<_> = fp.iter_instructions().collect();
                 let di: Vec<_> = prog.iter_instructions().collect();
-                eprintln!(
+                tracing::info!(
                     "[EQUIV-DIFF] {tag} vs fib: prog_bytes fib={} alt={} first_byte_diff={:?} | instrs fib={} alt={} (delta={}) total_mem fib={} alt={}",
                     rb.len(), db.len(), first_diff, ri.len(), di.len(),
                     ri.len() as i64 - di.len() as i64, fp.total_memory, prog.total_memory,
@@ -5169,7 +5188,11 @@ pub mod tests {
                         if first_idx.is_none() {
                             first_idx = Some(k);
                         }
-                        eprintln!("[EQUIV-DIFF] {tag} diff@{k}: fib={:?} | alt={:?}", ri[k], di[k]);
+                        tracing::info!(
+                            "[EQUIV-DIFF] {tag} diff@{k}: fib={:?} | alt={:?}",
+                            ri[k],
+                            di[k]
+                        );
                         shown += 1;
                         if shown >= 8 {
                             break;
@@ -5217,7 +5240,7 @@ pub mod tests {
                                                 .to_string()
                                         })
                                         .unwrap_or_else(|| "(reader no trace)".to_string());
-                                    eprintln!("[EQUIV-RDR] {tag} const@{addr} (write instr{k}) read by instr{j}: {frame} | {:?}", ri[j]);
+                                    tracing::info!("[EQUIV-RDR] {tag} const@{addr} (write instr{k}) read by instr{j}: {frame} | {:?}", ri[j]);
                                     // Reader has no trace; scan a window around it
                                     // for the nearest traced instr → names the phase.
                                     let lo = j.saturating_sub(60);
@@ -5232,7 +5255,7 @@ pub mod tests {
                                                     || l.contains("stark/src"))
                                                     && !l.contains("shard_proof_variable_lift")
                                             }) {
-                                                eprintln!("[EQUIV-NEAR] {tag} @{j} nearest-traced@{w}: {}", line.trim());
+                                                tracing::info!("[EQUIV-NEAR] {tag} @{j} nearest-traced@{w}: {}", line.trim());
                                                 break;
                                             }
                                         }
@@ -5247,7 +5270,10 @@ pub mod tests {
                         }
                     }
                 }
-                eprintln!("[EQUIV-DIFF] {tag}: traces.len()={} (0 = ZKM_DEBUG unset)", rtr.len());
+                tracing::info!(
+                    "[EQUIV-DIFF] {tag}: traces.len()={} (0 = ZKM_DEBUG unset)",
+                    rtr.len()
+                );
             }
         }
     }
@@ -5313,7 +5339,7 @@ pub mod tests {
             bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap();
         let dummy_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
             bincode::deserialize(include_bytes!("../dummy_vk_map.bin")).unwrap();
-        eprintln!(
+        tracing::info!(
             "[STAGE0][MEMBERSHIP] CURRENT height-specific vk_map.bin = {} entries \
              (the collapse target for Stage 2); dummy_vk_map.bin = {} entries",
             real_vk_map.len(),
@@ -5344,7 +5370,7 @@ pub mod tests {
                 ZKMProofShape::Shrink(_) => shrink += 1,
             }
         }
-        eprintln!(
+        tracing::info!(
             "[STAGE0][MEMBERSHIP] enum total shapes = {} | distinct NORMALIZE per-shard shapes = {} \
              | COMPOSE by arity = {:?} | Deferred = {} | Shrink = {}",
             all.len(),
@@ -5353,7 +5379,7 @@ pub mod tests {
             deferred,
             shrink
         );
-        eprintln!(
+        tracing::info!(
             "[STAGE0][MEMBERSHIP] BASELINE (pre-hash-change): normalize enum_repr_eq=FALSE \
              (height-keyed normalize VK; the enumerated uniform representative misses the real \
              canonical-cluster VK) — see tests::multishard_normalize_arity_faithful \

@@ -9,7 +9,7 @@ macro_rules! define_prover_suite_test {
             setup_logger();
             let suite = &$suite;
             for i in 0..suite.len() {
-                eprintln!("running prover suite={} case={}", suite.name(), suite.case_name(i));
+                tracing::info!("running prover suite={} case={}", suite.name(), suite.case_name(i));
                 run_test::<CpuProver<_, _>>(suite.program(i)).unwrap_or_else(|err| {
                     panic!("{} {} failed: {err:?}", suite.name(), suite.case_name(i),)
                 });

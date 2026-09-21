@@ -2208,7 +2208,7 @@ where
     let total_values = bundle.packing.total_values;
     if bits_per_entry > 31 {
         // The 32-bit-width col_prefix_sum path is exercised.
-        eprintln!(
+        tracing::info!(
             "LIFT-BUNDLE-DIAG bits_per_entry={bits_per_entry} jagged_eval_point_len={jagged_eval_point_len} \
              total_values={total_values} max_log_row_count={max_log_row_count} \
              col_prefix_sums_len={col_prefix_sums_len} chip_height_felts={} (width capped at 31, MSBs zero-extended)",

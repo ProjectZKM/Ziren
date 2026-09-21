@@ -1126,7 +1126,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     .map(|(n, us)| format!("{n}={}us", us))
                     .collect::<Vec<_>>()
                     .join(" ");
-                eprintln!(">>> DEPS_CENSUS total_us={total} {top}");
+                tracing::info!(">>> DEPS_CENSUS total_us={total} {top}");
                 census_rows.clear();
             }
         }

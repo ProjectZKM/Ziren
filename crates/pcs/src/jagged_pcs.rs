@@ -1998,7 +1998,7 @@ pub mod jagged {
         // consume must BE the per-round layout the machine pins.  Before any
         // challenge is drawn from it.
         if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "inner") {
-            eprintln!("[basefold verify] {why}");
+            tracing::info!("[basefold verify] {why}");
             return false;
         }
 
@@ -2013,16 +2013,17 @@ pub mod jagged {
         let expected_groups = crate::jagged::partition_from_chip_infos(chip_infos);
         let proof_groups: Vec<Vec<usize>> = bundle.groups_or_identity(chip_infos.len());
         if proof_groups != expected_groups {
-            eprintln!(
+            tracing::warn!(
                 "[basefold verify] COVERAGE CHECK FAILED: proof groups {:?} != expected {:?}",
-                proof_groups, expected_groups
+                proof_groups,
+                expected_groups
             );
             return false;
         }
         // Structural agreement between the group map and the per-group data.
         let g_count = proof_groups.len();
         if bundle.num_groups() != g_count {
-            eprintln!(
+            tracing::warn!(
                 "[basefold verify] COVERAGE CHECK FAILED: bundle carries {} groups \
                  but the group map has G={}",
                 bundle.num_groups(),
@@ -2244,7 +2245,7 @@ pub mod jagged {
             challenger,
         );
         let Some((z_star, q_at_z, _w_at_z)) = red_result else {
-            eprintln!("[basefold verify] group {g}: jagged sumcheck reduction REJECTED");
+            tracing::warn!("[basefold verify] group {g}: jagged sumcheck reduction REJECTED");
             return false;
         };
 
@@ -2256,7 +2257,7 @@ pub mod jagged {
         // recursive verifier asserts the same identity, and the outer ring
         // shares this function.
         if let Err(why) = cross_bind_openings(y_per_chip, opened_main, &z_col) {
-            eprintln!("[basefold verify] group {g}: CROSS-BIND FAILED — {why}");
+            tracing::warn!("[basefold verify] group {g}: CROSS-BIND FAILED — {why}");
             return false;
         }
 
@@ -2339,7 +2340,7 @@ pub mod jagged {
                 challenger,
             );
             if let Err(e) = &res {
-                eprintln!("[whir verify] whir opening REJECTED: {:?}", e);
+                tracing::warn!("[whir verify] whir opening REJECTED: {:?}", e);
             }
             return res.is_ok();
         }
@@ -2353,7 +2354,7 @@ pub mod jagged {
             challenger,
         );
         if let Err(e) = &res {
-            eprintln!("[basefold verify] basefold opening REJECTED: {:?}", e);
+            tracing::warn!("[basefold verify] basefold opening REJECTED: {:?}", e);
         }
         res.is_ok()
     }
@@ -2459,7 +2460,7 @@ pub mod jagged {
         // flattening of the per-round layout, checked before any challenge is
         // drawn from it.
         if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "outer") {
-            eprintln!("[basefold verify] {why}");
+            tracing::info!("[basefold verify] {why}");
             return false;
         }
 
@@ -2490,7 +2491,7 @@ pub mod jagged {
             (0..num_col_vars).map(|_| challenger.sample_algebra_element()).collect();
         // The opening cross-bind, on the same `z_col` the reduction is about to use.
         if let Err(why) = cross_bind_openings(&bundle.y_per_chip, opened_main, &z_col) {
-            eprintln!("[basefold verify outer] CROSS-BIND FAILED — {why}");
+            tracing::warn!("[basefold verify outer] CROSS-BIND FAILED — {why}");
             return false;
         }
         // As on the inner ring: the claim is built from the machine-validated
@@ -2505,7 +2506,7 @@ pub mod jagged {
             challenger,
         );
         let Some((z_star, q_at_z, _w_at_z)) = red_result else {
-            eprintln!("[basefold verify outer] jagged sumcheck reduction REJECTED");
+            tracing::warn!("[basefold verify outer] jagged sumcheck reduction REJECTED");
             return false;
         };
         crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(
@@ -2559,7 +2560,7 @@ pub mod jagged {
             fri,
         );
         if let Err(e) = &res {
-            eprintln!("[basefold verify outer] basefold opening REJECTED: {:?}", e);
+            tracing::warn!("[basefold verify outer] basefold opening REJECTED: {:?}", e);
         }
         res.is_ok()
     }
@@ -3877,10 +3878,10 @@ mod test {
         let modified = jagged_hash_bind_modified(raw_root, &row_counts, &col_counts);
         let modified_from_packing = jagged_hash_bind_from_packing(raw_root, &packing);
 
-        eprintln!("[G-HOST] raw_root      = {raw_root:?}");
-        eprintln!("[G-HOST] geometry_hash = {hash:?}");
-        eprintln!("[G-HOST] modified      = {modified:?}");
-        eprintln!(
+        tracing::info!("[G-HOST] raw_root      = {raw_root:?}");
+        tracing::info!("[G-HOST] geometry_hash = {hash:?}");
+        tracing::info!("[G-HOST] modified      = {modified:?}");
+        tracing::info!(
             "[G-HOST] len(=col_counts.len())={} row_counts={row_counts:?} col_counts={col_counts:?}",
             col_counts.len()
         );

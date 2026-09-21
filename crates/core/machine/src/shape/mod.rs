@@ -1523,7 +1523,7 @@ pub mod tests {
                 v
             })
             .collect();
-        eprintln!("[ENUMCANON] set size = {}", set.len());
+        tracing::info!("[ENUMCANON] set size = {}", set.len());
         // The REALCANON the fib-1k CPU shard padded to (from prove.rs probe).
         let mut want: Vec<(String, usize)> = vec![
             ("AddSub", 13),
@@ -1569,9 +1569,9 @@ pub mod tests {
                 v == want_set
             })
             .collect();
-        eprintln!("[ENUMCANON] candidates with matching chip-set = {}", same_set.len());
+        tracing::info!("[ENUMCANON] candidates with matching chip-set = {}", same_set.len());
         for c in same_set.iter().take(4) {
-            eprintln!("[ENUMCANON] cand = {c:?}");
+            tracing::info!("[ENUMCANON] cand = {c:?}");
         }
         // FINDING (REPORT, not a pass/fail gate): the cluster-CAP
         // fast enumeration does NOT contain the fib-1k CPU-shard REALCANON.
@@ -1586,7 +1586,7 @@ pub mod tests {
         // the 2^11 budget).  The faithful fix is the height-agnostic recursion
         // port (normalize VK becomes chip-SET-only).
         let contains = set.contains(&want);
-        eprintln!(
+        tracing::info!(
             "[ENUMCANON] FINDING: cap-enum contains REALCANON = {contains} \
              (expected false — per-chip CLAMPED heights are not cap-enumerable)"
         );
@@ -1683,10 +1683,10 @@ pub mod tests {
         .map(|(n, h)| (n.to_string(), h))
         .collect();
         want.sort();
-        eprintln!("[RAWCANON] got ={got_v:?}");
-        eprintln!("[RAWCANON] want={want:?}");
+        tracing::info!("[RAWCANON] got ={got_v:?}");
+        tracing::info!("[RAWCANON] want={want:?}");
         assert_eq!(got_v, want, "[RAWCANON] raw canonical != fib CPU REALCANON");
-        eprintln!("[RAWCANON] PASS — raw path reproduces REALCANON");
+        tracing::info!("[RAWCANON] PASS — raw path reproduces REALCANON");
     }
 
     /// Does a per-machine-cluster RAW SWEEP (cheap, ~26
@@ -1788,7 +1788,7 @@ pub mod tests {
         .collect();
         want.sort();
         let contains = set.contains(&want);
-        eprintln!(
+        tracing::info!(
             "[RAWSWEEP] swept={swept} distinct_canonical={} REALCANON_in_set={contains}",
             set.len()
         );
@@ -1799,7 +1799,7 @@ pub mod tests {
                 let cs: Vec<String> = c.iter().map(|(n, _)| n.clone()).collect();
                 cs == want_set
             }) {
-                eprintln!("[RAWSWEEP] same-chipset cand = {c:?}");
+                tracing::info!("[RAWSWEEP] same-chipset cand = {c:?}");
             }
         }
     }
@@ -1893,11 +1893,11 @@ pub mod tests {
                     let mut v: Vec<(String, usize)> =
                         shape.iter().map(|(id, h)| (id.to_string(), *h)).collect();
                     v.sort();
-                    eprintln!("[STEP0] {tag}: canonical={v:?}");
+                    tracing::info!("[STEP0] {tag}: canonical={v:?}");
                     results.push((tag.to_string(), v));
                 }
                 None => {
-                    eprintln!("[STEP0] {tag}: NO cluster fits (None)");
+                    tracing::info!("[STEP0] {tag}: NO cluster fits (None)");
                     results.push((tag.to_string(), vec![]));
                 }
             }
@@ -1922,7 +1922,7 @@ pub mod tests {
         for (i, cs) in chipset_per_profile.iter().enumerate() {
             if cs != base_cs {
                 chipset_invariant = false;
-                eprintln!(
+                tracing::warn!(
                     "[STEP0] chip-SET DIFFERS at profile {}: only_here={:?} missing_here={:?}",
                     i,
                     cs.difference(base_cs).collect::<Vec<_>>(),
@@ -1930,16 +1930,16 @@ pub mod tests {
                 );
             }
         }
-        eprintln!("[STEP0] chipset_invariant={chipset_invariant}");
+        tracing::info!("[STEP0] chipset_invariant={chipset_invariant}");
 
         let mut bandcap_invariant = true;
         for (n, caps) in &per_chip {
             if caps.len() > 1 {
                 bandcap_invariant = false;
-                eprintln!("[STEP0] chip {n}: band-caps VARY across profiles = {caps:?}");
+                tracing::info!("[STEP0] chip {n}: band-caps VARY across profiles = {caps:?}");
             }
         }
-        eprintln!(
+        tracing::info!(
             "[STEP0] VERDICT: bandcap_invariant_for_fixed_chipset={bandcap_invariant} \
              (true => fix is enumerability-safe; false => the fix regresses)"
         );
@@ -1967,7 +1967,7 @@ pub mod tests {
                     .filter(|((n1, h1), (n2, h2))| n1 == n2 && h1 != h2)
                     .map(|((n, h1), (_, h2))| format!("{n}:{h1}->{h2}"))
                     .collect();
-                eprintln!(
+                tracing::info!(
                     "[STEP0] host-committed shapes DIFFER between '{}' and '{}' on {} chips: {:?}",
                     nonempty[0].0,
                     nonempty[nonempty.len() - 1].0,

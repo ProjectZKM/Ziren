@@ -1186,7 +1186,7 @@ mod tests {
             "register-only program produced {} oracle entries (expected 0)",
             total_reads
         );
-        eprintln!(
+        tracing::info!(
             "[D.4 oracle-checkpoint] chunks={} total_mem_reads={} (expected 0 for register-only program)",
             trace.chunks.len(), total_reads,
         );
@@ -1265,7 +1265,7 @@ mod tests {
         }
 
         let ratio = t_lifter.as_nanos() as f64 / t_baseline.as_nanos().max(1) as f64;
-        eprintln!(
+        tracing::info!(
             "[D.4 ] best-of-{SAMPLES}: baseline={:.3}ms lifter={:.3}ms ratio={ratio:.2}",
             t_baseline.as_secs_f64() * 1000.0,
             t_lifter.as_secs_f64() * 1000.0,

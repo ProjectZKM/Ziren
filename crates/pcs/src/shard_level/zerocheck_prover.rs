@@ -234,7 +234,7 @@ where
             (usize::BITS - main_height.leading_zeros()) as usize
         };
         if log_h > num_variables as usize {
-            eprintln!(
+            tracing::info!(
                 "ZC-DIAG OVERTALL chip='{}' chip_idx={} main_height={} main_width={} log_h={} num_variables(max_log_row_count)={}",
                 name, chip_idx, main_height, main_width, log_h, num_variables
             );
