@@ -17,6 +17,14 @@ namespace zkm_core_machine_sys::memory_local {
         cols->final_clk = F::from_canonical_u32(event->final_mem_access.timestamp);
         write_word_from_u32_v2<F>(cols->final_value, event->final_mem_access.value);
 
+        // Range-check limbs: the shards again, and each clk as `lo + hi * 2^16`.
+        cols->initial_shard_16bit_limb = cols->initial_shard;
+        cols->final_shard_16bit_limb = cols->final_shard;
+        cols->initial_clk_16bit_limb = F::from_canonical_u32(event->initial_mem_access.timestamp & 0xffff);
+        cols->initial_clk_high_limb = F::from_canonical_u32(event->initial_mem_access.timestamp >> 16);
+        cols->final_clk_16bit_limb = F::from_canonical_u32(event->final_mem_access.timestamp & 0xffff);
+        cols->final_clk_high_limb = F::from_canonical_u32(event->final_mem_access.timestamp >> 16);
+
         cols->is_real = F::one();
     }
 }  // namespace zkm::memory_local

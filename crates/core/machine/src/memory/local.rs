@@ -5,14 +5,14 @@ use std::{
 use zkm_derive::PicusAnnotations;
 use zkm_pcs::PicusInfo;
 
-use p3_air::{Air, BaseAir, WindowAccess};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
-use zkm_core_executor::events::{GlobalLookupEvent, MemoryLocalEvent};
+use zkm_core_executor::events::{ByteRecord, GlobalLookupEvent, MemoryLocalEvent};
 use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{
@@ -21,6 +21,7 @@ use zkm_pcs::{
 };
 
 use crate::{
+    air::{MemoryAirBuilder, WordAirBuilder, TIMESTAMP_HIGH_LIMB_BITS},
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
@@ -52,8 +53,40 @@ pub struct SingleMemoryLocal<T: Copy> {
     /// The final value of the memory access.
     pub final_value: Word<T>,
 
+    /// `initial_shard` again, range-checked to 16 bits.
+    pub initial_shard_16bit_limb: T,
+
+    /// `final_shard` again, range-checked to 16 bits.
+    pub final_shard_16bit_limb: T,
+
+    /// `initial_clk = initial_clk_16bit_limb + initial_clk_high_limb * 2^16`, the low limb
+    /// range-checked to 16 bits and the high one to `TIMESTAMP_HIGH_LIMB_BITS`.
+    pub initial_clk_16bit_limb: T,
+    pub initial_clk_high_limb: T,
+
+    /// `final_clk` split the same way.
+    pub final_clk_16bit_limb: T,
+    pub final_clk_high_limb: T,
+
     /// Whether the memory access is a real access.
     pub is_real: T,
+}
+
+/// The byte lookups one local-memory entry emits, shared by `generate_dependencies` and the
+/// constraints so the two cannot drift.
+///
+/// The memory argument's ordering proof assumes both comparands of every access are bounded --
+/// shards below 2^16 and timestamps below 2^`TIMESTAMP_BITS` -- and that every value limb is a
+/// byte.  A local entry is where a shard's view of an address begins and ends, and its initial
+/// side is otherwise a free witness: without these checks a prover could open the chain of an
+/// address at a shard, timestamp or value the argument was never proved for.
+fn local_entry_blu_events(event: &MemoryLocalEvent, blu: &mut impl ByteRecord) {
+    for access in [&event.initial_mem_access, &event.final_mem_access] {
+        blu.add_u8_range_checks(&access.value.to_le_bytes());
+        blu.add_u16_range_check(access.shard as u16);
+        blu.add_u16_range_check((access.timestamp & 0xffff) as u16);
+        blu.add_bit_range_check((access.timestamp >> 16) as u16, TIMESTAMP_HIGH_LIMB_BITS);
+    }
 }
 
 #[derive(PicusAnnotations, AlignedBorrow, Clone, Copy)]
@@ -117,6 +150,10 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
         // realloc storm from the remaining one.
         //
         // Byte-neutral: identical events pushed in identical order.
+        input
+            .get_local_mem_events()
+            .for_each(|mem_event| local_entry_blu_events(mem_event, output));
+
         let events = &mut output.global_lookup_events;
         events.reserve(2 * input.get_local_mem_events().count());
 
@@ -195,6 +232,16 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
                         cols.final_clk = F::from_u32(event.final_mem_access.timestamp);
                         cols.initial_value = event.initial_mem_access.value.into();
                         cols.final_value = event.final_mem_access.value.into();
+                        cols.initial_shard_16bit_limb = cols.initial_shard;
+                        cols.final_shard_16bit_limb = cols.final_shard;
+                        cols.initial_clk_16bit_limb =
+                            F::from_u32(event.initial_mem_access.timestamp & 0xffff);
+                        cols.initial_clk_high_limb =
+                            F::from_u32(event.initial_mem_access.timestamp >> 16);
+                        cols.final_clk_16bit_limb =
+                            F::from_u32(event.final_mem_access.timestamp & 0xffff);
+                        cols.final_clk_high_limb =
+                            F::from_u32(event.final_mem_access.timestamp >> 16);
                         cols.is_real = F::ONE;
                     }
                 }
@@ -229,6 +276,28 @@ where
 
         for local in local.memory_local_entries.iter() {
             builder.assert_bool(local.is_real);
+
+            // The bounds the memory argument assumes of every comparand and value it orders;
+            // see `local_entry_blu_events` for why this chip has to supply them.
+            builder.slice_range_check_u8(&local.initial_value.0, local.is_real);
+            builder.slice_range_check_u8(&local.final_value.0, local.is_real);
+            builder
+                .when(local.is_real)
+                .assert_eq(local.initial_shard, local.initial_shard_16bit_limb);
+            builder.when(local.is_real).assert_eq(local.final_shard, local.final_shard_16bit_limb);
+            builder.slice_range_check_u16(
+                &[local.initial_shard_16bit_limb, local.final_shard_16bit_limb],
+                local.is_real,
+            );
+            for (clk, limb_16, limb_high) in [
+                (local.initial_clk, local.initial_clk_16bit_limb, local.initial_clk_high_limb),
+                (local.final_clk, local.final_clk_16bit_limb, local.final_clk_high_limb),
+            ] {
+                builder
+                    .when(local.is_real)
+                    .assert_eq(clk, limb_16 + limb_high * AB::Expr::from_u32(1 << 16));
+                builder.send_timestamp_range_checks(limb_16, limb_high, local.is_real);
+            }
 
             let mut values =
                 vec![local.initial_shard.into(), local.initial_clk.into(), local.addr.into()];
