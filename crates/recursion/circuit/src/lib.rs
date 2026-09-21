@@ -746,13 +746,16 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriParamet
         builder.commit_public_values_v2(public_values);
     }
 
+    /// The inner wrap program reflects its public values unchanged: the vk
+    /// commitment and `pc_start` are folded into the vkey hash by the BN254
+    /// outer circuit that verifies the wrap proof, not here.
     fn commit_recursion_public_values_imm_wrap_vk(
-        _builder: &mut Builder<C>,
-        _public_values: RecursionPublicValues<Felt<<C>::F>>,
+        builder: &mut Builder<C>,
+        public_values: RecursionPublicValues<Felt<<C>::F>>,
         _vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
         _pc_start: Felt<<C as Config>::F>,
     ) {
-        unreachable!("commit_recursion_public_values_imm_wrap_vk not implemented");
+        builder.commit_public_values_v2(public_values);
     }
 
     fn vk_preprocessed_commit_felts(
