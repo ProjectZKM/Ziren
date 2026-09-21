@@ -2,7 +2,7 @@
 //! <out>/{program.bin,stdin.bin} with the SAME stdin the host proves.
 
 use tendermint_light_client_verifier::types::LightBlock;
-use zkm_sdk::{include_elf, ZKMStdin};
+use zkm_sdk::{include_elf, utils, ZKMStdin};
 
 const TENDERMINT_ELF: &[u8] = include_elf!("tendermint");
 
@@ -11,6 +11,7 @@ mod util;
 use util::load_light_block;
 
 fn main() {
+    utils::setup_cli_logger();
     let out = std::env::args().nth(1).expect("dump_stdin needs an output dir");
     let light_block_1: LightBlock =
         load_light_block(2279100).expect("Failed to generate light block 1");
@@ -25,5 +26,5 @@ fn main() {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join("program.bin"), TENDERMINT_ELF).unwrap();
     std::fs::write(dir.join("stdin.bin"), bincode::serialize(&stdin).unwrap()).unwrap();
-    eprintln!("dumped tendermint to {out}");
+    tracing::info!("dumped tendermint to {out}");
 }

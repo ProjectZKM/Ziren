@@ -3782,6 +3782,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum",
+ "tracing",
  "zkm-build",
  "zkm-core-executor",
  "zkm-sdk",
@@ -7186,6 +7187,7 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "tendermint-light-client-verifier",
+ "tracing",
  "zkm-build",
  "zkm-sdk",
 ]

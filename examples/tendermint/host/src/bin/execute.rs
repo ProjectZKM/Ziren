@@ -21,7 +21,7 @@ fn load_light_block(height: u64) -> LightBlock {
 }
 
 fn main() {
-    utils::setup_logger();
+    utils::setup_cli_logger();
 
     let block_1 = load_light_block(2279100);
     let block_2 = load_light_block(2279130);
@@ -36,7 +36,7 @@ fn main() {
         buf.extend_from_slice(&(encoded_2.len() as u64).to_le_bytes());
         buf.extend_from_slice(&encoded_2);
         std::fs::write(&path, &buf).expect("dump stdin");
-        eprintln!("[tendermint] stdin dumped to {path}");
+        tracing::info!("[tendermint] stdin dumped to {path}");
     }
 
     let runs: usize = std::env::var("RUNS")
@@ -57,14 +57,14 @@ fn main() {
         let (mut public_values, report) = match client.execute(TENDERMINT_ELF, &stdin).run() {
             Ok(o) => o,
             Err(e) => {
-                eprintln!("[run {run}] execute failed: {e:?}");
+                tracing::error!("[run {run}] execute failed: {e:?}");
                 std::process::exit(1);
             }
         };
         let dur: Duration = started.elapsed();
         let pvs = public_values.as_slice().to_vec();
         let cycles = report.total_instruction_count() + report.total_syscall_count();
-        eprintln!(
+        tracing::info!(
             "[tendermint run {run}] OK cycles={cycles} pvs_len={} dur={dur:?} first16={:02x?}",
             pvs.len(),
             &pvs[..pvs.len().min(16)],
@@ -80,5 +80,5 @@ fn main() {
             }
         }
     }
-    eprintln!("All {runs} runs succeeded.");
+    tracing::info!("All {runs} runs succeeded.");
 }

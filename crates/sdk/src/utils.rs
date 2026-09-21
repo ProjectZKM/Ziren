@@ -5,7 +5,7 @@
 use p3_field::{PrimeCharacteristicRing, PrimeField};
 use p3_koala_bear::KoalaBear;
 use zkm_core_machine::io::ZKMStdin;
-pub use zkm_core_machine::utils::setup_logger;
+pub use zkm_core_machine::utils::{setup_cli_logger, setup_logger};
 use zkm_primitives::io::ZKMPublicValues;
 use zkm_prover::utils::koalabear_bytes_to_bn254;
 use zkm_prover::{HashableKey, ZKMVerifyingKey};
