@@ -58,7 +58,6 @@ impl ShmTraceRing {
         assert!(capacity.is_power_of_two(), "capacity must be power of two");
         let total = std::mem::size_of::<ShmTraceRingHeader>() + capacity * event_size;
         let mut shm = ShmMemory::new(total)?;
-        // Zero the header.
         let header_ptr = shm.as_mut_ptr().cast::<ShmTraceRingHeader>();
         unsafe {
             std::ptr::write(
@@ -120,7 +119,6 @@ impl<'a> ProducerGuard<'a> {
         let header = unsafe { &*self.ring.header() };
         let tail = header.tail.load(std::sync::atomic::Ordering::Relaxed);
         let head = header.head.load(std::sync::atomic::Ordering::Acquire);
-        // Spin while ring is full.
         while tail.wrapping_sub(head) >= self.ring.capacity as u64 {
             std::hint::spin_loop();
         }
@@ -189,12 +187,10 @@ impl ShmMemory {
             .map_err(std::io::Error::other)?;
         let raw_fd = fd.as_raw_fd();
 
-        // Re-set length.
         if unsafe { libc::ftruncate(raw_fd, size as libc::off_t) } < 0 {
             return Err(std::io::Error::last_os_error());
         }
 
-        // Map shared so a forked child sees the same bytes.
         let map_ptr = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
@@ -209,8 +205,6 @@ impl ShmMemory {
             return Err(std::io::Error::last_os_error());
         }
 
-        // Persist the fd; once `Memfd` drops the kernel will reclaim
-        // the object on last close.
         let dup = unsafe { libc::dup(raw_fd) };
         if dup < 0 {
             return Err(std::io::Error::last_os_error());

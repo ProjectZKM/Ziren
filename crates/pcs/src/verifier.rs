@@ -17,19 +17,22 @@ pub struct Verifier<SC, A>(PhantomData<SC>, PhantomData<A>);
 
 impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     /// Verify a proof for a collection of air chips.
+    ///
+    /// * `prep_chip_dims`: the machine's preprocessed chip set
+    ///   `(name, preprocessed_width)`, name-ordered
+    ///   (`StarkMachine::preprocessed_chip_dims`).  The preprocessed opening
+    ///   round is over exactly these, taken from the machine rather than the
+    ///   shard's chip subset or the key.
+    /// * `pinned`: the machine's pins (`StarkMachine::recursion_pins`); `Some`
+    ///   means the rounds are pinned.
     #[allow(clippy::too_many_lines)]
     pub fn verify_shard(
         _config: &SC,
         vk: &StarkVerifyingKey<SC>,
         chips: &[&MachineChip<SC, A>],
-        // The MACHINE's preprocessed chip set (name, preprocessed_width), name
-        // ordered -- `StarkMachine::preprocessed_chip_dims`.  The preprocessed
-        // opening round is over exactly these, and they come from the machine
-        // rather than the shard's chip subset or the key.
         prep_chip_dims: &[(String, usize)],
         challenger: &mut SC::Challenger,
         proof: &ShardProof<SC>,
-        // The machine's pins (`StarkMachine::recursion_pins`), `Some` = pinned rounds.
         pinned: Option<crate::jagged::RecursionPins>,
     ) -> Result<(), VerificationError<SC>>
     where
@@ -42,8 +45,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             >,
-        // Threaded to the shard-level BaseFold verifier's static
-        // OUTER generic verify. Verify-only, both rings satisfy it.
         SC: crate::BasefoldRing,
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
@@ -54,17 +55,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 >>::Commitment,
             >,
     {
-        // Every shard proof, inner KoalaBear and the outer wrap alike, carries
-        // its shard-level payload: the field is not an `Option`, so there is no
-        // missing case left to check here.
         let basefold_proof = &proof.jagged_shard_proof;
-        // The proof carries its public values twice: `proof.public_values`,
-        // which the machine-level checks (pc chain, exit code, memory bounds)
-        // read, and `basefold_proof.public_values`, which the constraints are
-        // evaluated against.  Both are observed into the transcript, but
-        // observation binds each to the proof, not to the other; a proof built
-        // with a divergent pair would pass the machine checks on one copy and
-        // the constraints on the other.  Require them equal.
         if proof.public_values.as_slice() != basefold_proof.public_values.as_slice() {
             return Err(VerificationError::JaggedShardVerifier(
                 "public values mismatch: the shard's machine-level public values differ from \

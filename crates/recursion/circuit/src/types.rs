@@ -44,14 +44,10 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>>
     where
         Challenger: CanObserveVariable<C, Felt<C::F>> + CanObserveVariable<C, SC::DigestVariable>,
     {
-        // Observe the commitment.
         challenger.observe(builder, self.commitment);
-        // Observe the pc_start.
         challenger.observe(builder, self.pc_start);
-        // Observe the initial global cumulative sum.
         challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.x.0);
         challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.y.0);
-        // Observe the padding.
         let zero: Felt<_> = builder.eval(C::F::ZERO);
         challenger.observe(builder, zero);
     }

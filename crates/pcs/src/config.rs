@@ -52,7 +52,7 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     type Val: PrimeField + p3_field::PrimeField32 + p3_field::TwoAdicField + 'static;
     type Domain: PolynomialSpace<Val = Self::Val> + Sync;
 
-    /// The PCS used to commit to trace polynomials.
+    /// The PCS that commits to trace polynomials.
     type Pcs: Pcs<Self::Challenge, Self::Challenger, Domain = Self::Domain>
         + Sync
         + ZeroCommitment<Self>;
@@ -113,9 +113,8 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     /// Build the precomputed preprocessed commit.  Deterministic in its input,
     /// so a key that was deserialized without it can rebuild it on demand.
     /// The preprocessed round is opened at the same shard point as main, so it
-    /// must be committed under the SAME orientation — a preprocessed commit
-    /// built LEGACY-bitrev while the shard reduces natural-row makes the two
-    /// rounds disagree on row order, and the preprocessed reduction fails.
+    /// must be committed in the same (natural) row order as main; a
+    /// bit-reversed preprocessed commit fails the preprocessed reduction.
     fn prep_precompute(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
         pin: Option<crate::jagged::AreaPin>,
@@ -295,16 +294,6 @@ pub trait BasefoldRing: StarkGenericConfig {
 
         let mut packing =
             crate::jagged::compute_jagged_metadata_pinned::<crate::InnerVal>(chip_traces, pin);
-        // A round with NO CELLS still has to produce a well-formed commitment.
-        // `setup` drops every chip that generates no preprocessed trace, so a
-        // machine whose chips all have `preprocessed_width() == 0` reaches here
-        // with an empty trace list and a zero-length dense — and the Merkle
-        // commit cannot commit zero matrices ("all matrices have height 0").
-        // The shard prover already handles the empty round downstream: it reads
-        // the round's chips off `packing.chip_infos`, which stays EMPTY here, so
-        // no preprocessed round is opened and the proof is single-round.  All
-        // that is needed is one cell to hang a commitment on; nothing is ever
-        // opened against it.
         if packing.dense_len == 0 {
             packing.dense_len = 1;
         }
@@ -314,10 +303,6 @@ pub trait BasefoldRing: StarkGenericConfig {
                     chip_traces,
                     packing.dense_len,
                 );
-                // A real assert, not `debug_assert`: this is the shape of the
-                // data being COMMITTED, the compare is O(1), and release is
-                // exactly where a silent mismatch would be committed and then
-                // opened against a different length.
                 assert_eq!(
                     dense_q.len(),
                     packing.dense_len,
@@ -336,19 +321,6 @@ pub trait BasefoldRing: StarkGenericConfig {
                     crate::jagged_pcs::JaggedDft,
                 >(dense_traces, Self::bf_mmcs(), dft, Self::fri_config())
             };
-        // INNER-ring machines prove under jagged-WHIR: ALSO commit the same
-        // dense polynomial under WHIR and let ITS root be the observed
-        // commitment.  The BaseFold commit above is kept purely for
-        // `prover_data`'s interleaved MLEs (the step-4 jagged reduction
-        // reads them); its Merkle tree goes unused in WHIR mode.
-        //
-        // ONE PCS down the whole tree (core, normalize, compose, shrink).
-        // Only the OUTER/wrap ring keeps BaseFold, whose proof feeds the gnark
-        // circuit.
-        // Commit and open stay consistent per-proof because the open
-        // dispatches on the whir_data this decision populates; a proof this
-        // routes to BaseFold verifies as BaseFold end-to-end (per-proof
-        // dispatch), so correctness never rests on the flag.
         let whir_data = if Self::WHIR_INNER_PCS {
             let dense_traces = alloc::vec![(
                 alloc::string::String::from("<jagged-dense>"),
@@ -367,10 +339,6 @@ pub trait BasefoldRing: StarkGenericConfig {
                 Self::BfMmcs,
                 crate::jagged_pcs::JaggedDft,
             >(dense_traces, Self::bf_mmcs(), dft, cfg);
-            // Likewise real: in WHIR mode the returned `commit` is the WHIR root
-            // while `prover_data` stays the BaseFold one, so their areas
-            // disagreeing means the reduction reads interleaved MLEs that the
-            // observed commitment does not cover.
             assert_eq!(
                 wcommit.area, prover_data.area,
                 "WHIR commit area {} != BaseFold prover_data area {}",

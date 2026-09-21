@@ -97,15 +97,15 @@ fn de_mem_reads<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Arc<Vec<MemVal
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             f.write_str("mem_reads byte run")
         }
+        /// Copies `b` into an aligned `Vec<MemValue>`; the copy is sound because
+        /// `MemValue: Pod`, the destination holds `b.len()` bytes and does not
+        /// overlap `b`.
         fn visit_bytes<E: serde::de::Error>(self, b: &[u8]) -> Result<Self::Value, E> {
             let n = b.len() / std::mem::size_of::<MemValue>();
             if n * std::mem::size_of::<MemValue>() != b.len() {
                 return Err(E::custom("mem_reads byte run is not a whole number of entries"));
             }
             let mut v: Vec<MemValue> = Vec::with_capacity(n);
-            // SAFETY: `MemValue: Pod` (every bit pattern is a value), the
-            // destination has room for `b.len()` bytes and does not overlap
-            // the source.
             unsafe {
                 std::ptr::copy_nonoverlapping(b.as_ptr(), v.as_mut_ptr().cast::<u8>(), b.len());
                 v.set_len(n);
@@ -173,12 +173,11 @@ pub struct TraceChunk {
     pub clk_start: u64,
     /// Global clock at the end of this shard (exclusive).
     pub clk_end: u64,
-    /// full byte-exact reconstruction: the executor's
-    /// `state.current_shard` at the start of this shard. The memory
-    /// argument's `shard` field for every access in this shard derives
-    /// from it, so the Stage-2 sub-executor must seed
-    /// `state.current_shard = current_shard` to match the sequential
-    /// run byte-for-byte. `0` means "unset" (legacy chunks).
+    /// The executor's `state.current_shard` at the start of this shard. The
+    /// memory argument's `shard` field for every access in this shard derives
+    /// from it, so the Stage-2 sub-executor seeds
+    /// `state.current_shard = current_shard` to match the sequential run
+    /// byte-for-byte. `0` means unset.
     pub current_shard: u32,
     /// stream cursors at the start of this shard, so the
     /// Stage-2 sub-executor can service `HINT_READ` / proof-verify /
@@ -202,7 +201,7 @@ pub struct TraceChunk {
     /// (hint) image `(addr, value)`, needed for `initialize` events of
     /// hint-written addresses. Terminal chunk only.
     pub final_uninit_memory: Vec<(u32, u32)>,
-    /// The hint-stream entries THIS chunk consumes, `None` on the legacy
+    /// The hint-stream entries this chunk consumes, `None` on the
     /// whole-stream path.
     ///
     /// A streaming producer cannot hand out the finished `input_stream` with
@@ -306,10 +305,9 @@ pub struct MinimalTrace {
     /// [`crate::Executor::drain_sealed_chunks`].
     ///
     /// The streaming producer hands each sealed chunk to a worker and drops it,
-    /// so `chunks.len()` is no longer the number stamped so far and cannot
-    /// number the next one. This counter keeps `shard_index` monotonic across
-    /// drains; it stays `0` on the batched path, where nothing is removed, so
-    /// the indices there are byte-identical to before.
+    /// so `chunks.len()` is not the number stamped so far and cannot number
+    /// the next one. This counter keeps `shard_index` monotonic across drains;
+    /// it stays `0` on the batched path, where nothing is removed.
     pub emitted: u32,
 }
 
@@ -397,7 +395,6 @@ mod tests {
         assert_eq!(*round.chunks[0].mem_reads, reads);
         assert_eq!(round.public_values, vec![1, 2, 3, 4]);
 
-        // The reader may hand the byte run back through either visitor.
         let owned: MinimalTrace = bincode::deserialize_from(std::io::Cursor::new(&bytes)).unwrap();
         assert_eq!(*owned.chunks[0].mem_reads, reads);
     }
@@ -412,7 +409,6 @@ mod tests {
         );
         let bytes = bincode::serialize(&c).unwrap();
         let empty = bincode::serialize(&TraceChunk::empty(0, 0, 0)).unwrap();
-        // length prefix + 12 B per entry, no per-field framing
         assert_eq!(bytes.len() - empty.len(), n * 12);
         let round: TraceChunk = bincode::deserialize(&bytes).unwrap();
         assert_eq!(round.mem_reads, c.mem_reads);
@@ -420,8 +416,5 @@ mod tests {
     }
 
     #[test]
-    fn env_flag_default_off() {
-        // The flag may be set in some CI / dev environments. Just verify
-        // the helper does not panic regardless of state.
-    }
+    fn env_flag_default_off() {}
 }

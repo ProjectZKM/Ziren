@@ -58,8 +58,6 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
                 y: SepticExtension(global_lookup_cols[i].y_coordinate.0),
             };
             assert!(is_real[i] == F::ONE || is_real[i] == F::ZERO);
-            // Within a real row a padding slot (N > 1) keeps the running sum; whole
-            // padding rows are laid out by `populate_dummy`.
             let sum_point = if is_real[i] == F::ONE {
                 point_cur.add_incomplete(*initial_digest)
             } else {
@@ -83,10 +81,6 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
         let initial = final_digest.add_incomplete(dummy.neg());
         self.initial_digest[0] = SepticBlock::from(initial.x.0);
         self.initial_digest[1] = SepticBlock::from(initial.y.0);
-        // The padding layout is the genuine addition
-        // `(final - dummy) + dummy`, so its chord denominator is
-        // `dummy.x - initial.x`, and it is nonzero for the same reason the row
-        // is a valid addition at all.
         let denom = dummy.x - initial.x;
         assert!(
             denom != SepticExtension::<F>::ZERO,
@@ -115,15 +109,7 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
         let sums = sums.iter().map(|complete_point| complete_point.point()).collect::<Vec<_>>();
         self.initial_digest[0] = SepticBlock::from(sums[0].x.0);
         self.initial_digest[1] = SepticBlock::from(sums[0].y.0);
-        // `x2 - x1` is nonzero on every honest row — the running sum can
-        // equal neither the event point nor its negation (the latter would make
-        // the sum the point at infinity, which the generator cannot represent
-        // and panics on).  `inverse()` would panic on zero, which is the right
-        // failure: a trace that reaches the exceptional case is not provable
-        // rather than silently unconstrained.
         let denom = point_to_add_x - sums[0].x;
-        // A named failure rather than `inverse()`'s bare division-by-zero: this
-        // is the exceptional case, and it should say so.
         assert!(
             denom != SepticExtension::<F>::ZERO,
             "the running sum equals the event point, so the chord addition is exceptional \
@@ -148,24 +134,14 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
         local_is_real: [AB::Var; N],
         local_accumulation: GlobalAccumulationOperation<AB::Var, N>,
     ) {
-        // First, constrain the control flow regarding `is_real`.
-        // Constrain that all `is_real` values are boolean.
         for i in 0..N {
             builder.assert_bool(local_is_real[i]);
         }
 
-        // Constrain that `is_real = 0` implies the next `is_real` values are all zero
-        // (within-row, for N > 1).
         for i in 0..N - 1 {
-            // `is_real[i] == 0` implies `is_real[i + 1] == 0`.
             builder.when_not(local_is_real[i]).assert_zero(local_is_real[i + 1]);
         }
 
-        // Option 2: the cross-row `is_real` monotonicity is dropped — the
-        // GlobalAccumulation bus does not require a contiguous real-row
-        // prefix (the index chain + multiset balance handle it).
-
-        // Next, constrain the accumulation.
         let initial_digest = SepticCurve::<AB::Expr> {
             x: SepticExtension::<AB::Expr>::from_base_fn(|i| {
                 local_accumulation.initial_digest[0][i].into()
@@ -200,28 +176,14 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             }),
         };
 
-        // Option 2: the first-row `initial_digest == ZERO` anchor is
-        // dropped — the GlobalAccumulation bus's initial endpoint
-        // `(0, ZERO_DIGEST)`, emitted by the public-values AIR
-        // (`eval_global_sum`) and received by row 0, enforces it.
-
-        // Defense-in-depth: every witnessed running digest must stay on-curve even if the
-        // incomplete Weierstrass addition edge case is triggered.
         assert_on_curve(builder, initial_digest.clone());
 
-        // Constrain that when `is_real = 1`, addition is being carried out, and when `is_real = 0`, the sum remains the same.
         for i in 0..N {
             let current_sum =
                 if i == 0 { initial_digest.clone() } else { ith_cumulative_sum(i - 1) };
             let point_to_add = ith_point_to_add(i);
             let next_sum = ith_cumulative_sum(i);
             assert_on_curve(builder, next_sum.clone());
-            // `sum_checker_x` is degree 3 and is asserted UNCONDITIONALLY:
-            // padding rows are laid out as the genuine addition
-            // `(final - dummy) + dummy == final` (`populate_dummy`), so no witnessed copy
-            // is needed.  `sum_checker_y` is degree 2 and gated by
-            // `is_real` (degree 3).  Together, on a real row, `next_sum == current_sum +
-            // point_to_add` (incomplete addition, as before).
             let sum_checker_x = SepticCurve::<AB::Expr>::sum_checker_x(
                 current_sum.clone(),
                 point_to_add.clone(),
@@ -238,34 +200,6 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
                 SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO),
             );
 
-            // The chord denominator is nonzero.
-            //
-            // Both checkers carry the factor `(x2 - x1)`:
-            //
-            //   Cx = (x1 + x2 + x3)(x2 - x1)^2 - (y2 - y1)^2
-            //   Cy = (y1 + y3)(x2 - x1)       - (y2 - y1)(x1 - x3)
-            //
-            // so at `P2 == P1` both differences vanish and `Cx = Cy = 0` holds
-            // for EVERY `P3` — the addition is unconstrained and the only
-            // surviving restriction on the next running digest is that it is on
-            // the curve.  (`P2 == -P1` is already rejected: there `Cx = -4y1^2`,
-            // nonzero whenever `y1 != 0`, and `y1 == 0` collapses into
-            // `P2 == P1`.)  Witnessing `(x2 - x1)^{-1}` and requiring
-            //
-            //   (x2 - x1) * inv = 1
-            //
-            // makes `x2 != x1` a constraint rather than an assumption, which is
-            // what closes the doubling case.
-            //
-            // Degree 3: `(x2 - x1)` and `inv` are degree 1, their septic product
-            // degree 2, and the `is_real` gate adds one — the same cap the
-            // existing `sum_checker_x` already sits at, so the quotient degree
-            // is unchanged.
-            //
-            // Gated by `is_real` because padding rows are laid out as
-            // `(final - dummy) + dummy`, whose denominator is likewise nonzero;
-            // the gate keeps a padding row that carries no meaningful inverse
-            // from being rejected.
             let denominator = ith_point_to_add(i).x - current_sum.x.clone();
             let denominator_inv = SepticExtension::<AB::Expr>::from_base_fn(|j| {
                 local_accumulation.denominator_inv[i].0[j].into()
@@ -281,14 +215,6 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
                 }),
             );
         }
-
-        // Option 2: the cross-row `final_digest == next.initial_digest`
-        // chain is dropped — the GlobalAccumulation bus (emitted in
-        // GlobalChip::eval as receive(index, initial_digest) +
-        // send(index+1, cumulative_sum[N-1])) chains consecutive rows via
-        // the multiset balance, and the public-values AIR closes the chain
-        // at both ends (initial (0, ZERO), final (global_count,
-        // global_cumulative_sum)).
     }
 }
 
@@ -356,7 +282,6 @@ mod tests {
         let p = point(0x2013);
         let sums = vec![SepticCurveComplete::Affine(p), SepticCurveComplete::Affine(p.double())];
         let mut cols = GlobalAccumulationOperation::<F, 1>::default();
-        // x2 == x1: adding the running sum to itself.
         cols.populate_real(&sums, p.x);
     }
 

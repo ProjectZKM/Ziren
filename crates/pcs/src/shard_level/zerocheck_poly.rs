@@ -1,6 +1,6 @@
-//! Per-chip lazy `ZeroCheckPoly` for the shard zerocheck: the sum-as-poly /
-//! fix-last-variable round machinery plus the multilinear primitives it
-//! depends on (`VirtualGeq`, the LSB-adjacent MLE fold,
+//! Per-chip lazy `ZeroCheckPoly` for the shard zerocheck: the round machinery
+//! (sum as a univariate, then bind the last variable) plus the multilinear
+//! primitives it depends on (`VirtualGeq`, the LSB-adjacent MLE fold,
 //! `partial_lagrange`, univariate interpolation).
 //!
 //! # Transcript shape
@@ -113,7 +113,6 @@ pub(crate) fn partial_lagrange_prefix<EF: Field>(point: &[EF], n: usize) -> Vec<
     }
     let mut evals = vec![EF::ONE];
     for (j, &c) in point.iter().enumerate() {
-        // Slots of level `j + 1` that any index `< n` can reach.
         let shift = k - (j + 1);
         let need = (((n - 1) >> shift) + 1).min(1usize << (j + 1));
         let mut next: Vec<EF> = Vec::with_capacity(need);
@@ -142,7 +141,6 @@ pub fn interpolate_univariate_polynomial<EF: Field>(
     assert_eq!(xs.len(), ys.len());
     let mut result: Vec<EF> = vec![EF::ZERO];
     for (i, (&x, &y)) in xs.iter().zip(ys.iter()).enumerate() {
-        // numerator = y · Π_{j≠i}(X − xj); denominator = Π_{j≠i}(x − xj).
         let mut numerator: Vec<EF> = vec![y];
         let mut denominator = EF::ONE;
         for (j, &xj) in xs.iter().enumerate() {
@@ -150,12 +148,11 @@ pub fn interpolate_univariate_polynomial<EF: Field>(
                 continue;
             }
             denominator *= x - xj;
-            // numerator = numerator·X + numerator·(−xj)
             let neg_xj = -xj;
             let mut next = vec![EF::ZERO; numerator.len() + 1];
             for (k, c) in numerator.iter().enumerate() {
-                next[k + 1] += *c; // ·X
-                next[k] += *c * neg_xj; // ·(−xj)
+                next[k + 1] += *c;
+                next[k] += *c * neg_xj;
             }
             numerator = next;
         }
@@ -192,7 +189,6 @@ pub fn interpolate_univariate_polynomial<EF: Field>(
 fn zerocheck_eq_root<EF: Field>(last: EF) -> Option<EF> {
     let one = EF::ONE;
     let two = one.double();
-    // `last == 1/2` ⇒ `1 − 2·last == 0` ⇒ `try_inverse` is `None`.
     let eq_root = (one - last) * (one - two * last).try_inverse()?;
     let four = two.double();
     if eq_root == EF::ZERO || eq_root == one || eq_root == two || eq_root == four {
@@ -236,9 +232,6 @@ fn reconstruct_zerocheck_evals_from_eqroot<EF: Field>(
     let three = two + one;
     let four = two.double();
     let p1 = claim - p0;
-    // Interpolate the degree-4 `p` through {0, 1, 2, 4, eq_root}, then read
-    // off {0,1,2,3,4}.  Evaluating at the interpolation nodes returns the node
-    // values exactly, so this yields [p0, p1, p2, p(3), p4] with p(3) derived.
     let xs = [EF::ZERO, one, two, four, eq_root];
     let ys = [p0, p1, p2, p4, EF::ZERO];
     let poly = interpolate_univariate_polynomial(&xs, &ys);
@@ -359,9 +352,6 @@ where
     /// Construct a chip's zerocheck poly.  `main_cells` / `prep_cells`
     /// are the real (un-padded) trace rows, row-major, in the cell field
     /// `K` (base `F` for the first round, `EF` after a fold).
-    // `pub(crate)`, not `pub`: it takes a `pub(crate) VirtualGeq`, so a `pub`
-    // signature leaked a more-private type (the `private_interfaces` warning).
-    // Its only caller is `zerocheck_prover.rs`, in this crate.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         air: &'a Chip<F, A>,
@@ -431,11 +421,6 @@ where
     fn sum_as_poly(&self, claim: Option<EF>, is_first_round: bool) -> UnivariatePolynomial<EF> {
         let num_real = self.num_real_entries;
         if num_real == 0 {
-            // Pure-padding chip contributes nothing; emit a degree-4
-            // dummy (`UnivariatePolynomial::zero(4)` = vec![zero; degree+1]
-            // = 5 coefficients) to byte-match
-            // the recursion dummy `dummy_partial_sumcheck_proof(.., 4)`
-            // and the real-path degree-4 interpolant over {0,1,2,4,eq-root}.
             return UnivariatePolynomial { coefficients: vec![EF::ZERO; 5] };
         }
         let claim = claim.expect("sum_as_poly: claim required for the zerocheck poly");
@@ -443,30 +428,10 @@ where
         let dim = self.zeta.len();
         let last = self.zeta[dim - 1];
         let rest_point = &self.zeta[..dim - 1];
-        // Only `[0, num_pairs)` is ever read (the per-pair eq weight in
-        // `accumulate_y_tuple_host`, and `partial[threshold_half]` with
-        // `threshold_half = num_pairs - 1`), so build exactly that.
         let partial = partial_lagrange_prefix(rest_point, num_real.div_ceil(2));
 
-        // The per-pair degree-4 eq-weighted accumulation (the device zerocheck
-        // kernel's job) and the analytic finalize (host-only, transcript-
-        // critical) are split so a device path can replace ONLY the
-        // accumulator.  This is a pure extraction — byte-identical to the
-        // original fused loop (validated by `orientation_sweep` inv1/inv2 and
-        // `sum_as_poly_matches_spec_reference`).
-        //
-        // eq-root HALF trick: the finalize reconstructs `p(3)`
-        // analytically from the eq-factor root, so the host skips the entire
-        // `X = 3` per-pair constraint eval — EXCEPT for the degenerate
-        // coordinates where the reconstruction is ill posed, in which case the
-        // direct `{0,1,2,3,4}` sweep is used and `y_3` is required.  The skip
-        // decision is gated on `zerocheck_eq_root(last)` so accumulate and
-        // finalize stay in lock-step on the same `last`.
         let compute_y3 = zerocheck_eq_root(last).is_none();
         let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple(&partial, is_first_round, compute_y3);
-        // finalize needs only partial[threshold_half] (ZERO when the
-        // boundary index falls past the table — same guard as before the
-        // device-eq scalar refactor; `partial.len() == 2^{num_variables-1}`).
         let threshold_half = num_real.div_ceil(2) - 1;
         let partial_at_threshold = partial.get(threshold_half).copied().unwrap_or(EF::ZERO);
         self.finalize_round_poly(claim, last, partial_at_threshold, y_0, y_2, y_3, y_4)
@@ -510,26 +475,10 @@ where
         let np = self.num_prep_cols;
         let num_pairs = num_real.div_ceil(2);
 
-        // The `X = 3` scratch + its 1/2 factors are only needed on the
-        // degenerate fallback path; skip their allocation on the common
-        // eq-root path.  Sample point 3 lies on the row-pair line midway
-        // between 2 and 4 (interp_pair is affine in the sample point):
-        // m3 = (m2 + m4)/2.  The column interpolation runs in `K`
-        // (`half_cell`), the GKR-batch interpolation in `EF` (`half`); for
-        // `K = F`, `ι(1/2_F) = 1/2_EF` (ring-hom), so the two agree
-        // byte-for-byte with the all-`EF` fold.
         let half = EF::from_u64(2).inverse();
         let half_cell = K::from_u64(2).inverse();
         let prep_cells = self.prep_cells.as_ref();
 
-        // Each pair `(row0 = 2·pair, row1 = 2·pair+1)` contributes an
-        // INDEPENDENT degree-4 `(Δy_0, Δy_2, Δy_3, Δy_4)`, so the hypercube
-        // sum is parallelized across pairs.  Field
-        // addition is associative + commutative, so rayon's tree-reduction of
-        // the per-pair tuples is byte-identical to the serial left-fold.
-        // `map_init` reuses the cell-field scratch buffers per WORKER THREAD,
-        // so the reinterpolation allocations are
-        // amortized across pairs rather than re-allocated each pair.
         (0..num_pairs)
             .into_par_iter()
             .map_init(
@@ -540,12 +489,12 @@ where
                         (Vec::new(), Vec::new())
                     };
                     (
-                        vec![K::ZERO; nm], // m0
-                        vec![K::ZERO; nm], // m2
-                        vec![K::ZERO; nm], // m4
-                        vec![K::ZERO; np], // p0
-                        vec![K::ZERO; np], // p2
-                        vec![K::ZERO; np], // p4
+                        vec![K::ZERO; nm],
+                        vec![K::ZERO; nm],
+                        vec![K::ZERO; nm],
+                        vec![K::ZERO; np],
+                        vec![K::ZERO; np],
+                        vec![K::ZERO; np],
                         m3,
                         p3,
                     )
@@ -563,7 +512,7 @@ where
 
                     let g0 = self.gkr_batch(m0, p0);
                     let g2 = self.gkr_batch(m2, p2);
-                    let g4 = g2 + g2 - g0; // gkr is linear in the row values
+                    let g4 = g2 + g2 - g0;
 
                     let c0 = if is_first_round { EF::ZERO } else { self.eval_air_at_row(p0, m0) };
                     let c2 = self.eval_air_at_row(p2, m2);
@@ -573,9 +522,6 @@ where
                     let dy_2 = (c2 + g2) * eq;
                     let dy_4 = (c4 + g4) * eq;
 
-                    // eq-root HALF trick: the X = 3 sample is derived
-                    // analytically in finalize on the common path, so only
-                    // compute it on the degenerate fallback.
                     let dy_3 = if compute_y3 {
                         for c in 0..nm {
                             m3[c] = (m2[c] + m4[c]) * half_cell;
@@ -583,7 +529,7 @@ where
                         for c in 0..np {
                             p3[c] = (p2[c] + p4[c]) * half_cell;
                         }
-                        let g3 = (g2 + g4) * half; // linear interpolant at 3
+                        let g3 = (g2 + g4) * half;
                         let c3 = self.eval_air_at_row(p3, m3);
                         (c3 + g3) * eq
                     } else {
@@ -622,8 +568,6 @@ where
     /// undefined or colliding with a node) fall back to the direct
     /// `{0,1,2,3,4}` sweep, which additionally needs the `y_3` accumulator the
     /// caller computed (gated on the SAME `zerocheck_eq_root(last)` predicate).
-    // The five interpolation nodes plus the claim and the eq root; each one is
-    // a distinct scalar of the identity, not a field of some record.
     #[allow(clippy::too_many_arguments)]
     fn finalize_round_poly(
         &self,
@@ -637,8 +581,6 @@ where
     ) -> UnivariatePolynomial<EF> {
         let num_pairs = self.num_real_entries.div_ceil(2);
 
-        // Padded-row correction at the boundary index.  The caller resolved
-        // `partial_at_threshold = partial[threshold_half]` (ZERO out of range).
         let threshold_half = num_pairs - 1;
         let msb_lagrange_eval: EF = self.eq_adjustment * partial_at_threshold;
         let virtual_0 = self.virtual_geq.fix_last_variable(EF::ZERO).eval_at_usize(threshold_half);
@@ -647,8 +589,6 @@ where
         let virtual_4 =
             self.virtual_geq.fix_last_variable(EF::from_u64(4)).eval_at_usize(threshold_half);
 
-        // Corrected samples p(0), p(2), p(4) = y_X · (elf_X · eq_adjustment) −
-        // padded_row_adjustment · virtual_X · msb_lagrange_eval · elf_X.
         let elf_0 = EF::ONE - last;
         let p0 = y_0 * (elf_0 * self.eq_adjustment)
             - self.padded_row_adjustment * virtual_0 * msb_lagrange_eval * elf_0;
@@ -659,9 +599,6 @@ where
         let p4 = y_4 * (elf_4 * self.eq_adjustment)
             - self.padded_row_adjustment * virtual_4 * msb_lagrange_eval * elf_4;
 
-        // Common path: reconstruct the {0,1,2,3,4} evals from the eq-root
-        // (skips the X = 3 constraint eval).  Degenerate `last` → direct sweep,
-        // which corrects the caller-computed `y_3` at X = 3.
         let ys: [EF; 5] = match reconstruct_zerocheck_evals_from_eqroot(p0, p2, p4, claim, last) {
             Some(evals) => evals,
             None => {
@@ -685,9 +622,6 @@ where
     /// `ZeroCheckPoly<'a, F, EF, EF, A>` (for `K = EF` this is `Self`; for
     /// the base-field first round `K = F` it lifts on the fold).
     fn fix_last(self, alpha: EF) -> ZeroCheckPoly<'a, F, EF, EF, A> {
-        // C4: the host poly is host-cell-only (single-GPU device residency
-        // runs on the ziren-gpu `GpuZeroCheckPoly`); fold the host cells
-        // `K → EF`.
         let new_main: Vec<EF> =
             fold_cells::<K, EF>(&self.main_cells, self.num_main_cols, self.num_real_entries, alpha);
         let new_prep: Option<Vec<EF>> = self
@@ -702,10 +636,7 @@ where
         let last = self.zeta[dim - 1];
         let rest: Vec<EF> = self.zeta[..dim - 1].to_vec();
 
-        // Type changes `K → EF`, so the next-round poly is built explicitly
-        // (no `..self` struct-update, which would require `K == EF`).
         if self.num_real_entries == 0 {
-            // Pure padding: nothing to weight, keep eq/geq/pra as-is.
             return ZeroCheckPoly {
                 air: self.air,
                 public_values: self.public_values,
@@ -726,7 +657,6 @@ where
             };
         }
 
-        // Factor out the fixed eq coordinate as a constant.
         let eq_adjustment =
             self.eq_adjustment * ((alpha * last) + (EF::ONE - alpha) * (EF::ONE - last));
 
@@ -811,15 +741,9 @@ where
     EF: ExtensionField<F>,
     A: MachineAir<F> + for<'b> Air<ShardConstraintFolder<'b, F, EF, EF>>,
 {
-    // A width-0 main trace (absent / placeholder chip in this shard) => main_height==0
-    // => num_real==0 => sum_as_poly emits the degree-4 dummy and never uses this
-    // padded-row adjustment. Skip the eval, which would borrow the chip cols from an
-    // empty row and panic (index out of bounds len 0). Transcript-neutral (value unused).
     if main_width == 0 {
         return EF::ZERO;
     }
-    // The padded row is all-zero, so the cell field is immaterial — evaluate
-    // it in `EF` (`K = EF`), independent of the round.
     let main_row = vec![EF::ZERO; main_width];
     let prep_row = vec![EF::ZERO; prep_width];
     eval_air_constraints_at_row::<F, EF, EF, A>(chip, alpha, public_values, &prep_row, &main_row)
@@ -829,8 +753,6 @@ where
 /// points 0, 2, 4.  Out-of-range `row1` (odd tail) is the `ZERO`
 /// padding constant.  `vals_0 = r0`, `vals_2 = r0 + 2·slope`,
 /// `vals_4 = r0 + 4·slope`, `slope = r1 − r0`.
-// Strides and offsets of the pair being interpolated: passing them
-// individually keeps the indexing arithmetic visible at the call site.
 #[allow(clippy::too_many_arguments)]
 fn interp_pair<K: Field>(
     cells: &[K],
@@ -871,12 +793,6 @@ fn fold_cells<K: Field, EF: ExtensionField<K>>(
         return Vec::new();
     }
     let mut out = vec![EF::ZERO; num_real.div_ceil(2) * ncols];
-    // Each output row reads one row-pair and writes its own `ncols` slot —
-    // no reduction, no shared state — so the row loop is embarrassingly
-    // parallel and byte-identical to the serial walk.  It was serial, and
-    // measured (`ZeroCheckPoly::fix_last`, goat core, 9 shards) 16.9 s of
-    // 100%-serial calling-thread time (`thread_cpu == wall`) on the
-    // zerocheck driver's critical path while the rest of the box idled.
     use p3_maybe_rayon::prelude::*;
     out.par_chunks_mut(ncols).enumerate().for_each(|(i, out_row)| {
         let r0 = 2 * i;
@@ -1054,7 +970,6 @@ mod tests {
                 assert_eq!(pre.len(), n, "k={k} n={n}: wrong length");
                 assert_eq!(&pre[..], &full[..n], "k={k} n={n}: prefix diverges");
             }
-            // `n` past the end saturates rather than panicking.
             let over = partial_lagrange_prefix(&point, (1usize << k) + 5);
             assert_eq!(&over[..], &full[..]);
         }
@@ -1084,10 +999,6 @@ mod tests {
     /// `last ∈ {0, 1, 1/2, 1/3, 3/7}` that force the direct-sweep fallback.
     #[test]
     fn reconstruct_zerocheck_eqroot_matches_direct_sweep() {
-        // Concrete degree-4 poly of the TRUE finalize form p(X) = elf_X · g(X),
-        // elf_X = (2·last − 1)·X + (1 − last), g an arbitrary cubic.  A
-        // reconstruction that reproduces p at {0,1,2,3,4} is byte-identical to
-        // the interpolation the fallback performs.
         let last = EF::from_u64(123457);
         let two = EF::from_u64(2);
         let elf = |x: EF| (two * last - EF::ONE) * x + (EF::ONE - last);
@@ -1103,14 +1014,13 @@ mod tests {
         let p2 = p(two);
         let p3 = p(EF::from_u64(3));
         let p4 = p(EF::from_u64(4));
-        let claim = p(EF::ZERO) + p(EF::ONE); // sumcheck identity p(0)+p(1)=claim
+        let claim = p(EF::ZERO) + p(EF::ONE);
 
         let evals = reconstruct_zerocheck_evals_from_eqroot(p0, p2, p4, claim, last)
             .expect("non-degenerate last must reconstruct");
         let direct = [p0, claim - p0, p2, p3, p4];
         assert_eq!(evals, direct, "eq-root reconstruction != direct {{0,1,2,3,4}} sweep");
 
-        // The emitted round message (interpolated coeffs) is bit-identical.
         let xs = [EF::ZERO, EF::ONE, EF::from_u64(2), EF::from_u64(3), EF::from_u64(4)];
         let recon_poly = interpolate_univariate_polynomial(&xs, &evals);
         assert_eq!(
@@ -1118,15 +1028,11 @@ mod tests {
             interpolate_univariate_polynomial(&xs, &direct).coefficients,
             "reconstructed message != direct message",
         );
-        // Sanity: the corrected round poly genuinely factors through eq_root
-        // and is genuinely degree 4 (nonzero X^4 coeff).
         let eq_root = zerocheck_eq_root(last).unwrap();
         assert_eq!(recon_poly.eval_at_point(eq_root), EF::ZERO, "p must vanish at eq_root");
         assert_eq!(recon_poly.coefficients.len(), 5);
         assert_ne!(recon_poly.coefficients[4], EF::ZERO, "round poly is genuinely degree 4");
 
-        // Degenerate coordinates: eq_root undefined or collides with a node
-        // {0,1,2,4} → decline, so the caller uses the direct sweep (with y_3).
         let half = two.inverse();
         let third = EF::from_u64(3).inverse();
         let three_sevenths = EF::from_u64(3) * EF::from_u64(7).inverse();
@@ -1148,16 +1054,12 @@ mod tests {
     #[test]
     fn fold_cells_equals_padded_mle_at_z() {
         let num_vars = 3usize;
-        // Single column, 3 real rows; padded hypercube is 2^3 = 8.
         let c = [EF::from_u64(7), EF::from_u64(11), EF::from_u64(19)];
         let mut padded = vec![EF::ZERO; 1 << num_vars];
         padded[..c.len()].copy_from_slice(&c);
 
-        // Round challenges a_0..a_{num_vars-1}; round k fixes bit k.
         let alphas = [EF::from_u64(5), EF::from_u64(13), EF::from_u64(23)];
 
-        // Fold round-by-round: num_real halves via div_ceil; odd tail
-        // folds against the ZERO padding constant.
         let mut cells = c.to_vec();
         let mut num_real = c.len();
         for &alpha in alphas.iter() {
@@ -1177,14 +1079,13 @@ mod tests {
     fn fold_cells_multicol_equals_padded_mle() {
         let num_vars = 2usize;
         let ncols = 2usize;
-        // 3 real rows x 2 cols, row-major.
         let cells0 = vec![
             EF::from_u64(2),
-            EF::from_u64(3), // row 0
+            EF::from_u64(3),
             EF::from_u64(5),
-            EF::from_u64(7), // row 1
+            EF::from_u64(7),
             EF::from_u64(11),
-            EF::from_u64(13), // row 2
+            EF::from_u64(13),
         ];
         let alphas = [EF::from_u64(4), EF::from_u64(9)];
 
@@ -1214,17 +1115,12 @@ mod tests {
     /// padded-row correction used in `sum_as_poly`.
     #[test]
     fn virtual_geq_fold_matches_threshold_indicator() {
-        // threshold = 2 real rows, 3 variables, geq=1 eq=0 (as the prover sets).
         let vg = VirtualGeq::<EF>::new(2, EF::ONE, EF::ZERO, 3);
-        // After fixing the last variable to alpha, eval_at_usize at the
-        // halved threshold index must equal the analytic recurrence.
         let alpha = EF::from_u64(6);
         let folded = vg.fix_last_variable(alpha);
-        // threshold 2 is even -> new_threshold=1, new_eq=(1-alpha)*0=0, new_geq=1.
         assert_eq!(folded.threshold, 1);
         assert_eq!(folded.eq_coefficient, EF::ZERO);
         assert_eq!(folded.geq_coefficient, EF::ONE);
-        // index 1 == threshold -> eq+geq = 0 + 1 = 1; index 0 (< threshold) -> 0.
         assert_eq!(folded.eval_at_usize(1), EF::ONE);
         assert_eq!(folded.eval_at_usize(0), EF::ZERO);
     }
@@ -1239,14 +1135,13 @@ mod tests {
             [EF::from_u64(3), EF::from_u64(8), EF::from_u64(21), EF::from_u64(40), EF::from_u64(0)];
         let poly = interpolate_univariate_polynomial(&xs, &ys);
         for (x, y) in xs.iter().zip(ys.iter()) {
-            // Horner eval.
             let mut acc = EF::ZERO;
             for c in poly.coefficients.iter().rev() {
                 acc = acc * *x + *c;
             }
             assert_eq!(acc, *y, "interpolant must pass through node x={x:?}");
         }
-        let _ = InnerVal::ONE; // keep InnerVal import used
+        let _ = InnerVal::ONE;
     }
 
     // sumcheck-reduction end-to-end identity (host sum_as_poly)
@@ -1294,16 +1189,10 @@ mod tests {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
             let row = main.current_slice();
-            // Degree-3 algebraic constraint on column 0 (matches AddSub's degree).
             let x: AB::Expr = row[0].into();
-            // Degree-3 constraint x·(x-1)·(x-2), satisfied by rows in {0,1,2}.
             let one = AB::Expr::ONE;
             let two = AB::Expr::ONE + AB::Expr::ONE;
             builder.assert_zero(x.clone() * (x.clone() - one) * (x.clone() - two));
-            // One (no-op for the BaseFold folder) interaction so the chip has a
-            // permutation trace (permutation_trace_width > 0) — makes Chip::eval's
-            // eval_permutation_constraints early-return instead of panicking on
-            // empty permutation_randomness.
             builder.send(
                 AirLookup::new(vec![x.clone()], AB::Expr::ONE, LookupKind::Byte),
                 LookupScope::Local,
@@ -1355,20 +1244,15 @@ mod tests {
 
         let num_vars = 4u32;
         let ncols = 1usize;
-        let num_real = 2usize; // HEAVY padding: 2 real rows in a 2^4 = 16 hypercube
-                               // (high variables fully padded; fold sits at num_real=1)
+        let num_real = 2usize;
 
-        // Honest trace: every real row value in {0,1} → C=0 on real rows.
         let main_cells: Vec<EF> =
             (0..num_real * ncols).map(|i| EF::from_u64((i % 2) as u64)).collect();
-        // zeta MATCHES the real system: the GKR point is left-padded with ZERO
-        // for the high (MSB) row variables down to log2(num_real); only the
-        // trailing log2(num_real) coords are "real" sampled challenges.
-        let real_vars = (num_real as u32).trailing_zeros() as usize; // num_real is 2^k
+        let real_vars = (num_real as u32).trailing_zeros() as usize;
         let zeta: Vec<EF> = (0..num_vars as usize)
             .map(|k| {
                 if k < (num_vars as usize - real_vars) {
-                    EF::ZERO // leading-zero padding for fully-padded high variables
+                    EF::ZERO
                 } else {
                     EF::from_u64((k * 5 + 2) as u64 + 100)
                 }
@@ -1406,14 +1290,11 @@ mod tests {
         };
         let zero_row = vec![EF::ZERO; ncols];
         let h = |x: usize| -> EF {
-            // Padded rows (x >= num_real) are the ZERO row.
             let row: &[EF] =
                 if x < num_real { &main_cells[x * ncols..x * ncols + ncols] } else { &zero_row };
             cval(row) + batch(row)
         };
 
-        // claim = Σ_x eq(zeta, x) · h(x).  boolean_point(x)[k] = bit_{n-1-k}(x)
-        // matches the z = point_and_eval.0 = [a_{n-1},…,a_0] orientation.
         let n = num_vars as usize;
         let mut claim = EF::ZERO;
         for x in 0..(1usize << n) {
@@ -1455,8 +1336,6 @@ mod tests {
             lambda,
         );
 
-        // SANITY: a correct claim must satisfy p_0(0)+p_0(1)=claim.  If this
-        // fails, the bug is in this test's claim convention, not sum_as_poly.
         let p0 = &proof.univariate_polys[0].coefficients;
         assert_eq!(
             claim,
@@ -1464,10 +1343,8 @@ mod tests {
             "test claim convention wrong (round-0 sumcheck relation broken)"
         );
 
-        // THE IDENTITY: evals[0] (== point_and_eval.1) must equal
-        // eq(zeta,z)·(C(trace@z)+batch(trace@z)).
         let z = &proof.point_and_eval.0;
-        let trace_at_z = &cpe[0]; // prep-then-main; prep_width=0 → all main
+        let trace_at_z = &cpe[0];
         let main_at_z = &trace_at_z[prep_width..];
         let expected = eq_pt(&zeta, z) * (cval(main_at_z) + batch(main_at_z));
         assert_eq!(
@@ -1479,8 +1356,8 @@ mod tests {
     /// The base-field first round.  Build the SAME chip's
     /// round-0 `ZeroCheckPoly` twice: once with base-field cells (`K = F`,
     /// no up-front `EF` lift) and once with the cells lifted to `EF`
-    /// (`K = EF`, the legacy widest-round lift), then assert the round-0
-    /// univariate polynomials are BIT-FOR-BIT identical.  This is the whole
+    /// (`K = EF`, the widest-round lift), then assert the round-0
+    /// univariate polynomials are bit-for-bit identical.  This is the whole
     /// safety argument: `iota: F -> EF` is a ring homomorphism, so computing
     /// the `{0,2,3,4}` column values + the AIR constraint eval + the GKR
     /// batch in the base field and lifting yields the identical `EF` round
@@ -1492,9 +1369,7 @@ mod tests {
     fn base_field_round0_equals_ef_round0() {
         let num_vars = 4u32;
         let ncols = 2usize;
-        // 8 real rows in a 2^4 = 16 hypercube (exercises VirtualGeq padding).
         let height = 8usize;
-        // col0 ∈ {0,1,2} → MockAir x(x-1)(x-2) = 0 on real rows; col1 arbitrary.
         let col0 = [0u64, 1, 2, 1, 0, 2, 1, 0];
         let col1 = [9u64, 4, 7, 13, 5, 2, 8, 3];
         let trace_f: Vec<InnerVal> = (0..height)
@@ -1525,7 +1400,6 @@ mod tests {
         let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
         let claim = EF::from_u64(1234567);
 
-        // K = F (base-field cells, no lift).
         let poly_f = ZeroCheckPoly::<InnerVal, InnerVal, EF, MockAir>::new(
             &chip,
             &pv,
@@ -1543,7 +1417,6 @@ mod tests {
             pra,
             vg,
         );
-        // K = EF (legacy up-front lift).
         let poly_ef = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip,
             &pv,
@@ -1562,8 +1435,6 @@ mod tests {
             vg,
         );
 
-        // Round 0 (is_first_round = true): the point-0 constraint eval is
-        // skipped; {2,3,4} column evals + GKR batch run in the base field.
         let r0_f = poly_f.sum_as_poly(Some(claim), true);
         let r0_ef = poly_ef.sum_as_poly(Some(claim), true);
         assert_eq!(
@@ -1571,8 +1442,6 @@ mod tests {
             "K=F round-0 (first) poly must equal K=EF bit-for-bit",
         );
 
-        // Full degree-4 eval (is_first_round = false): also runs the point-0
-        // AIR constraint eval in the base field.
         let rf_f = poly_f.sum_as_poly(Some(claim), false);
         let rf_ef = poly_ef.sum_as_poly(Some(claim), false);
         assert_eq!(
@@ -1580,8 +1449,6 @@ mod tests {
             "K=F round-0 (full) poly must equal K=EF bit-for-bit",
         );
 
-        // The fold `K = F -> EF` must also produce the identical next-round
-        // poly (cells, eq_adjustment, geq, virtual_geq all match).
         let a1 = EF::from_u64(98765);
         let next_f = poly_f.fix_last(a1);
         let next_ef = poly_ef.fix_last(a1);
@@ -1601,34 +1468,32 @@ mod tests {
     // (the same helper `zerocheck_prover` feeds the poly), exercised below.
     use super::bitrev_rows;
 
-    /// REPRODUCTION of the zeta-orientation bug + REGRESSION for its fix.
+    /// Row orientation of the zerocheck poly against the GKR-forward claim.
     ///
-    /// Feeds the poly the *real* prover's GKR-forward claim — built from
-    /// `main_trace_evaluations = evaluate_trace_columns_at_point` over the
-    /// trailing `log2(height)` coords of `zeta` (forward: row-bit k ←
-    /// zeta[start+k]; `zerocheck_prover.rs:474-479`, `row_gkr/top_level.rs:
-    /// 330-347`) — NOT the poly-convention brute force used by the sibling
-    /// test.  The poly's own fold is LSB-first → it binds row-bit k ←
-    /// zeta[dim-1-k] (REVERSED).  So on a row-distinct trace the poly's
-    /// true boolean-cube sum (reversed batch) != the forward claim, and the
-    /// sumcheck reduces to a wrong value (`point_and_eval.1` !=
-    /// `eq(zeta,z)·(C+batch(trace@z))`) — the recursion verifier rejects.
+    /// Feeds the poly the prover's GKR-forward claim, built from
+    /// `evaluate_trace_columns_at_point` over the trailing `log2(height)`
+    /// coords of `zeta` (row-bit `k ← zeta[start+k]`, as in the zerocheck
+    /// prover and `prove_shard_logup_gkr_rows`), not the poly-convention
+    /// brute force of the sibling test.  The poly's fold is LSB-first, so it
+    /// binds row-bit `k ← zeta[dim-1-k]`.  With unreversed rows on a
+    /// row-distinct trace the cube sum differs from the forward claim and the
+    /// sumcheck reduces to `point_and_eval.1 ≠ eq(zeta,z)·(C + batch(trace@z))`,
+    /// which the recursion verifier rejects.
     ///
-    /// THE FIX (`fix = true`): bit-reverse the chip's real trace rows over
-    /// `log2(height)` bits before building the poly.  This re-aligns the
-    /// LSB fold to the GKR-forward orientation WITHOUT touching `zeta`, the
-    /// GKR openings, the jagged `r_row`, or any transcript-observe — so the
-    /// poly's cube-sum becomes the forward claim (invariant 1 restored) and
-    /// `point_and_eval.1 == eq_eval(zeta_ORIGINAL, z)·(C+batch)` still holds
-    /// (invariant 2 preserved, because zeta is untouched).
+    /// `fix = true`: bit-reverse the chip's trace rows over `log2(height)`
+    /// bits before building the poly.  This aligns the LSB fold with the
+    /// GKR-forward orientation without touching `zeta`, the GKR openings, the
+    /// jagged `r_row`, or any transcript observation, so the cube sum equals
+    /// the forward claim (invariant 1) and
+    /// `point_and_eval.1 = eq(zeta, z)·(C + batch)` holds (invariant 2).
     fn run_orientation_case(fix: bool) -> bool {
         run_orientation_case_full(fix).0
     }
 
     /// Same as [`run_orientation_case`] but also returns the proof
-    /// and the verifier-recon `expected` so the (b) test can show the host
-    /// structural sumcheck ACCEPTS the (unfixed/inconsistent) proof while the
-    /// circuit identity `point_and_eval.1 == eq·(C+batch)` is violated.
+    /// and the verifier-recon `expected`, so a test can show the host
+    /// structural sumcheck accepts the `fix = false` proof while the circuit
+    /// identity `point_and_eval.1 = eq·(C + batch)` fails.
     /// Returns (identity_holds, proof, point_and_eval.1, expected_recon).
     fn run_orientation_case_full(fix: bool) -> (bool, PartialSumcheckProof<EF>, EF, EF) {
         use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
@@ -1639,14 +1504,9 @@ mod tests {
 
         let num_vars = 4u32;
         let ncols = 2usize;
-        // 4 real rows in a 2^4 hypercube → 2 trailing real coords, 2 leading
-        // ZERO-pad coords (exercises the leading-zero padding offset).
         let height = 4usize;
-        let real_vars = (height as u32).trailing_zeros() as usize; // 2
+        let real_vars = (height as u32).trailing_zeros() as usize;
 
-        // Row-DISTINCT honest trace (so the trace MLE is orientation-
-        // sensitive).  Column 0 in {0,1,2} → MockAir x(x-1)(x-2) = 0 on real
-        // rows; column 1 arbitrary.
         let col0 = [0u64, 1, 2, 1];
         let col1 = [9u64, 4, 7, 13];
         let trace_base: Vec<InnerVal> = (0..height)
@@ -1654,7 +1514,6 @@ mod tests {
             .collect();
         let main_cells: Vec<EF> = trace_base.iter().map(|&v| EF::from(v)).collect();
 
-        // zeta: leading-ZERO padded, trailing `real_vars` sampled.
         let zeta: Vec<EF> = (0..num_vars as usize)
             .map(|k| {
                 if k < (num_vars as usize - real_vars) {
@@ -1695,8 +1554,6 @@ mod tests {
             )
         };
 
-        // *** THE REAL PROVER'S CLAIM ***  GKR-forward main_trace_evaluations
-        // at the trailing `real_vars` coords of zeta, then `Σ evals · β^(1..)`.
         let start = num_vars as usize - real_vars;
         let main_evals = evaluate_trace_columns_at_point::<InnerVal, EF>(
             &trace_base,
@@ -1706,8 +1563,6 @@ mod tests {
         let claim: EF =
             main_evals.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |acc, (o, p)| acc + *o * *p);
 
-        // The poly input: bit-reverse the trace rows iff `fix` (keeps zeta,
-        // GKR openings, jagged r_row, transcript-observe byte-identical).
         let poly_cells =
             if fix { bitrev_rows(&main_cells, ncols, height) } else { main_cells.clone() };
 
@@ -1741,10 +1596,6 @@ mod tests {
             lambda,
         );
 
-        // INVARIANT (2) — the exact identity the recursion verifier asserts
-        // (zerocheck.rs:628/648): reduced value == eq_eval(zeta_ORIGINAL, z)
-        // · (C(trace@z) + batch(trace@z)).  Returns whether it holds.  zeta is
-        // UNTOUCHED by the fix, so the verifier needs no change.
         let z = &proof.point_and_eval.0;
         let main_at_z = &cpe[0][prep_width..];
         let expected = eq_pt(&zeta, z) * (cval(main_at_z) + batch(main_at_z));
@@ -1752,24 +1603,19 @@ mod tests {
         (claimed == expected, proof, claimed, expected)
     }
 
-    /// DECISIVE (b) WITNESS, host-replicable.
+    /// A structurally consistent sumcheck with a wrong reduced value: the
+    /// host's structural check accepts it, the circuit identity rejects it.
     ///
-    /// Takes the UNFIXED orientation case: the prover emits an internally
-    /// CONSISTENT structural sumcheck (round-0 sums to claimed_sum; every round
-    /// telescopes; `p_last(α_last) == point_and_eval.1`) — so the HOST
-    /// `verify_zerocheck_host` / `verify_sumcheck_host` ACCEPTS it — BUT its
-    /// claimed `point_and_eval.1` does NOT equal the cross-chip RLC
-    /// `eq(zeta,z)·(C(trace@z)+batch(trace@z))` the circuit recomputes at
-    /// zerocheck.rs:613.  ⇒ host-accept, circuit-reject = the host is missing a
-    /// soundness check (explanation (b)).  We assert BOTH legs here so the
-    /// verdict is reproducible without GPU dumps.
+    /// With `fix = false` the prover emits a consistent structural sumcheck
+    /// (`p_0(0) + p_0(1) = claimed_sum`, every round telescopes,
+    /// `p_last(α_last) = point_and_eval.1`), so `verify_zerocheck_host` /
+    /// `verify_sumcheck_host` accept it, but `point_and_eval.1 ≠
+    /// eq(zeta,z)·(C(trace@z) + batch(trace@z))`, the value the circuit
+    /// recomputes in its zerocheck verifier.  Both legs are asserted.
     #[test]
     fn s8j_host_accepts_circuit_rejects_inconsistent_eval() {
-        // Unfixed prover → inconsistent proof.
         let (identity_holds, proof, claimed, expected) = run_orientation_case_full(false);
 
-        // Leg 1: the CIRCUIT identity is VIOLATED (this is what zerocheck.rs:613
-        // would reject).
         assert!(
             !identity_holds,
             "expected the inconsistent proof to violate point_and_eval.1 == eq·(C+batch)"
@@ -1779,31 +1625,19 @@ mod tests {
             "s8-J (b): claimed point_and_eval.1 ({claimed:?}) != circuit rlc_eval recon ({expected:?})"
         );
 
-        // Leg 2: the HOST structural sumcheck (verify_sumcheck_host) ACCEPTS the
-        // SAME proof.  We replicate its three checks against the proof's OWN
-        // (point_and_eval.0) reduced point, which is exactly the challenge
-        // sequence the host re-derives: (i) p_0(0)+p_0(1)==claimed_sum,
-        // (ii) telescoping p_{i-1}(z_i)==p_i(0)+p_i(1), (iii)
-        // p_last(z_last)==point_and_eval.1.  (Single-round here: num_vars=4 but
-        // the sumcheck has n=num_vars rounds; we check the full chain.)
         let polys = &proof.univariate_polys;
-        let z = &proof.point_and_eval.0; // reduced point = sampled challenges
+        let z = &proof.point_and_eval.0;
         assert_eq!(polys.len(), z.len(), "round count == point dim");
 
-        // (i) round 0 vs claimed_sum.
         let p0 = &polys[0].coefficients;
         assert_eq!(
             poly_horner(p0, EF::ZERO) + poly_horner(p0, EF::ONE),
             proof.claimed_sum,
             "host round-0 check: p0(0)+p0(1)==claimed_sum (host ACCEPTS)"
         );
-        // (ii) telescoping. The host samples challenges and insert(0,·)s them,
-        // so proof.point_and_eval.0 is the REVERSED challenge order; round i
-        // binds challenge z[n-1-i] (the i-th SAMPLED challenge). Walk the chain
-        // in sampling order.
         let n = polys.len();
         for i in 1..n {
-            let chal = z[n - i]; // i-th sampled challenge (insert-at-front ⇒ reverse)
+            let chal = z[n - i];
             let prev = &polys[i - 1].coefficients;
             let curr = &polys[i].coefficients;
             assert_eq!(
@@ -1812,22 +1646,14 @@ mod tests {
                 "host telescoping round {i} (host ACCEPTS)"
             );
         }
-        // (iii) final eval.
         let last = &polys[n - 1].coefficients;
-        let z_last = z[0]; // last sampled challenge (front of the reversed point)
+        let z_last = z[0];
         assert_eq!(
             poly_horner(last, z_last),
             proof.point_and_eval.1,
             "host final check: p_last(z_last)==point_and_eval.1 (host ACCEPTS)"
         );
 
-        // CONCLUSION: every host STRUCTURAL check (verify_sumcheck_host)
-        // passes on a proof whose claimed eval the circuit's rlc_eval assert
-        // rejects ⇒ the structural layer UNDER-CHECKS (explanation (b)).
-        // The verify_zerocheck_host hard-check closes this by recomputing
-        // rlc_eval (= eq·(C+batch) over the openings@z*) and rejecting when
-        // it != point_and_eval.1 — the binding the structural layer omits.
-        // This test stays as the witness for WHY that binding is required.
         tracing::warn!(
             "[rlc-binding] host-accepts/circuit-rejects WITNESS: claimed={claimed:?} circuit_recon={expected:?} (DIFFER) — all host STRUCTURAL sumcheck checks PASS (verify_zerocheck_host now binds rlc_eval,)"
         );
@@ -1849,13 +1675,12 @@ mod tests {
 
         let num_vars = 4u32;
         let ncols = 2usize;
-        let real_rows = 3usize; // NON power of two
-        let height_pow2 = real_rows.next_power_of_two(); // 4
-        let log_h = (height_pow2 as u32).trailing_zeros() as usize; // 2
+        let real_rows = 3usize;
+        let height_pow2 = real_rows.next_power_of_two();
+        let log_h = (height_pow2 as u32).trailing_zeros() as usize;
 
         let col0 = [0u64, 1, 2];
         let col1 = [9u64, 4, 7];
-        // pow2-padded base trace (GKR evaluates this).
         let trace_base: Vec<InnerVal> = (0..height_pow2)
             .flat_map(|r| {
                 if r < real_rows {
@@ -1905,7 +1730,6 @@ mod tests {
             )
         };
 
-        // GKR-forward claim over the pow2-padded trace at trailing log_h coords.
         let start = num_vars as usize - log_h;
         let main_evals = evaluate_trace_columns_at_point::<InnerVal, EF>(
             &trace_base,
@@ -1915,16 +1739,10 @@ mod tests {
         let claim: EF =
             main_evals.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |acc, (o, p)| acc + *o * *p);
 
-        // The poly cells.  Unfixed: contiguous real rows (VirtualGeq path),
-        // num_real = real_rows (NON-pow2).  Fixed: bit-reverse the FULL pow2
-        // trace (real rows scatter to bit-reversed slots, gaps stay ZERO),
-        // num_real = height_pow2 so the now-non-contiguous reals are all
-        // summed (VirtualGeq threshold = full height → inert padded term).
         let main_cells: Vec<EF> = trace_base.iter().map(|&v| EF::from(v)).collect();
         let (poly_cells, num_real, vg_threshold) = if fix {
             (bitrev_rows(&main_cells, ncols, height_pow2), height_pow2, height_pow2 as u32)
         } else {
-            // contiguous real-rows slice (length real_rows * ncols).
             (main_cells[..real_rows * ncols].to_vec(), real_rows, real_rows as u32)
         };
 
@@ -2002,8 +1820,6 @@ mod tests {
     /// Sweeps the unit-test shape up to the e2e shape to localize any
     /// shape-dependent break in the bit-reverse-rows fix.
     fn run_sweep_case(num_vars: u32, real_vars: u32, ncols: usize, fix: bool) -> (bool, bool) {
-        // Existing behaviour: nonzero-zeta width == real_vars (chip is the
-        // tallest in the shard, no nonzero-zeta padding rounds).
         run_sweep_case_z(num_vars, real_vars, real_vars, ncols, fix)
     }
 
@@ -2029,10 +1845,8 @@ mod tests {
         let mut challenger = DuplexChallenger::<InnerVal, _, 16, 8>::new(perm);
 
         assert!(real_vars <= zeta_real_vars && zeta_real_vars <= num_vars);
-        let height = 1usize << real_vars; // pow2 real rows
+        let height = 1usize << real_vars;
 
-        // Row-distinct honest trace: col0 cycles {0,1,2} (MockAir C=0 on real
-        // rows); other cols arbitrary-distinct (affect batch / trace-MLE only).
         let trace_base: Vec<InnerVal> = (0..height)
             .flat_map(|r| {
                 (0..ncols)
@@ -2096,15 +1910,6 @@ mod tests {
         let claim_gkr: EF =
             main_evals.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |a, (o, p)| a + *o * *p);
 
-        // CLAIM CORRECTION (PaddedMle::eval_at_eq embedding): a full
-        // max-dim-point opening would already
-        // carry Π_{extra}(1 − zeta[k]) over the nonzero zeta coords BETWEEN
-        // this chip's trailing log_h and the shard max (`num_row_variables`).
-        // Ziren's GKR opens at the trailing log_h only, dropping that factor.
-        // Re-apply it so the zerocheck claim equals the embedded boolean-cube
-        // sum.  The extra coords are zeta[num_vars - zeta_real_vars ..
-        // num_vars - real_vars]; for an equal-height chip this range is empty
-        // (factor = 1, no-op).
         let embed_factor: EF = zeta
             [(num_vars - zeta_real_vars) as usize..(num_vars - real_vars) as usize]
             .iter()
@@ -2136,9 +1941,6 @@ mod tests {
             vg,
         );
 
-        // INVARIANT (1): brute-force boolean-cube sum == claim.  The poly folds
-        // the LSB first and peels zeta[dim-1] first, so row-bit b ↔ zeta[dim-1-b];
-        // padding rows (x ≥ height) contribute eq·pra, which VirtualGeq cancels.
         let dim = num_vars as usize;
         let mut cube_sum = EF::ZERO;
         for x in 0..height {
@@ -2217,7 +2019,6 @@ mod tests {
                 }
             })
             .collect();
-        // The eq-anchor the poly is fed: the REVERSED GKR point.
         let zeta_rev: Vec<EF> = zeta.iter().rev().copied().collect();
 
         let alpha = EF::from_u64(17);
@@ -2249,16 +2050,6 @@ mod tests {
             )
         };
 
-        // Claim seed — the COLLAPSED claim: seed from the FULL-POINT
-        // opening `main_trace_evaluations_full` with NO embed_factor.  Under
-        // the rev(zeta) anchor the poly's cube-sum equals the full-point
-        // opening, which (Stage-1 transform) is `embed_TRAILING · MLE_lead`:
-        //   MLE_lead     = MLE(trace @ zeta[0..log_h])   (LEADING coords)
-        //   embed_TRAIL  = Π_{k=log_h}^{N-1}(1 − zeta[k]) (TRAILING coords)
-        // This is the bitrev-conjugate of the alternative claim (`MLE_trailing ·
-        // embed_LEAD`) and is GENUINELY a different value (that claim is
-        // NOT verifier-form, see zerocheck_prover comment) — the rev(zeta)
-        // convention is inseparable from this collapsed seed.
         let log_h = real_vars as usize;
         let mle_lead = evaluate_trace_columns_at_point::<InnerVal, EF>(
             &trace_base,
@@ -2271,7 +2062,6 @@ mod tests {
         let claim: EF =
             main_full.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |a, (o, p)| a + *o * *p);
 
-        // NATURAL cells (NO bitrev); anchor on rev(zeta).
         let poly_cells = main_cells.clone();
         let pra = compute_padded_row_adjustment::<InnerVal, EF, MockAir>(
             &chip, alpha, &pv, main_width, prep_width,
@@ -2295,9 +2085,6 @@ mod tests {
             vg,
         );
 
-        // INVARIANT (1): brute-force cube-sum under the rev(zeta) anchor.  The
-        // poly folds the LSB first and peels zeta_rev[dim-1] first, so row-bit
-        // b ↔ zeta_rev[dim-1-b] = zeta[b]; natural cells at row x.
         let dim = num_vars as usize;
         let mut cube_sum = EF::ZERO;
         for x in 0..height {
@@ -2321,8 +2108,6 @@ mod tests {
         );
         let z = &proof.point_and_eval.0;
         let main_at_z = &cpe[0][prep_width..];
-        // VERIFIER IDENTITY: anchored on rev(zeta) (the eq-bridge receives the
-        // reversed GKR point in lockstep with the rev-anchored poly).
         let expected = eq_pt(&zeta_rev, z) * (cval(main_at_z) + batch(main_at_z));
         let inv2 = proof.point_and_eval.1 == expected;
         (inv1, inv2)
@@ -2346,8 +2131,7 @@ mod tests {
             (10, 8, 8, 2),
             (12, 6, 6, 8),
             (16, 10, 10, 4),
-            (22, 16, 16, 2), // e2e shape (tallest chip)
-            // mixed-height (shorter chip beside taller): the embed-factor case.
+            (22, 16, 16, 2),
             (8, 2, 4, 2),
             (8, 2, 6, 2),
             (22, 10, 16, 2),
@@ -2383,17 +2167,17 @@ mod tests {
     #[test]
     fn orientation_sweep() {
         let configs = [
-            (4u32, 2u32, 2usize), // baseline == run_orientation_case
-            (4, 2, 5),            // wider
-            (5, 2, 2),            // +1 padding round
-            (6, 2, 2),            // +2 padding rounds (gap 4)
-            (8, 2, 2),            // gap 6 (== e2e gap), few real rounds
-            (6, 4, 2),            // 4 real rounds
-            (8, 4, 2),            // 4 real + gap 4
-            (10, 8, 2),           // 8 real rounds
-            (12, 6, 8),           // wide + medium
-            (16, 10, 4),          // large
-            (22, 16, 2),          // *** e2e shape (chip0 AddSub) ***
+            (4u32, 2u32, 2usize),
+            (4, 2, 5),
+            (5, 2, 2),
+            (6, 2, 2),
+            (8, 2, 2),
+            (6, 4, 2),
+            (8, 4, 2),
+            (10, 8, 2),
+            (12, 6, 8),
+            (16, 10, 4),
+            (22, 16, 2),
         ];
         let mut any_fix_inv2_fail = false;
         for &(nv, rv, nc) in configs.iter() {
@@ -2427,16 +2211,15 @@ mod tests {
     /// full pattern.
     #[test]
     fn orientation_sweep_mixed_height() {
-        // (num_vars, real_vars = log2(rows), zeta_real_vars = nonzero zeta coords, ncols)
         let configs = [
-            (8u32, 2u32, 2u32, 2usize), // equal-height control (should pass)
-            (8, 2, 3, 2),               // +1 nonzero-zeta padding round
-            (8, 2, 4, 2),               // +2 nonzero-zeta padding rounds
-            (8, 2, 6, 2),               // +4
-            (22, 10, 16, 2),            // e2e-like: 2^10 rows, 16 nonzero zeta coords
-            (22, 10, 20, 2),            // taller shard
-            (12, 6, 6, 4),              // equal-height control wide
-            (12, 4, 8, 4),              // shorter chip, wide
+            (8u32, 2u32, 2u32, 2usize),
+            (8, 2, 3, 2),
+            (8, 2, 4, 2),
+            (8, 2, 6, 2),
+            (22, 10, 16, 2),
+            (22, 10, 20, 2),
+            (12, 6, 6, 4),
+            (12, 4, 8, 4),
         ];
         for &(nv, rv, zrv, nc) in configs.iter() {
             let (i1f, i2f) = run_sweep_case_z(nv, rv, zrv, nc, true);
@@ -2480,8 +2263,6 @@ mod tests {
         let num_pairs = num_real.div_ceil(2);
         let gkr = &poly.gkr_powers;
 
-        // big-endian eq weight: bit k (LSB) of `pair` binds rest[rest.len()-1-k];
-        // bit set -> z, bit clear -> (1 - z).  (Reimplements partial_lagrange.)
         let eqw = |pair: usize| -> EF {
             let rl = rest.len();
             let mut acc = EF::ONE;
@@ -2491,7 +2272,6 @@ mod tests {
             }
             acc
         };
-        // field-mult LDE of one row-pair at sample X (odd tail -> partner ZERO).
         let lerp = |cells: &[EF], ncols: usize, r0: usize, r1: usize, x: u64| -> Vec<EF> {
             let xx = EF::from_u64(x);
             (0..ncols)
@@ -2536,7 +2316,6 @@ mod tests {
             } else {
                 (empty.clone(), empty.clone(), empty.clone(), empty.clone())
             };
-            // direct gkr at every sample (no g4=2g2-g0 extrapolation).
             let g0 = gkr_batch(&m0, &p0);
             let g2 = gkr_batch(&m2, &p2);
             let g3 = gkr_batch(&m3, &p3);
@@ -2551,8 +2330,6 @@ mod tests {
             y4 += (c4 + g4) * eq;
         }
 
-        // finalize: SCALE accumulated y_X by (elf_X · eq_adjustment), then
-        // SUBTRACT padded_row_adjustment · virtual_X · msb_lagrange_eval · elf_X.
         let threshold_half = num_pairs - 1;
         let eq_adj = poly.eq_adjustment;
         let msb = eq_adj
@@ -2660,7 +2437,6 @@ mod tests {
             vg,
         );
 
-        // Round 0 (is_first_round = true -> c0 skipped).
         let host0 = poly.sum_as_poly(Some(claim), true);
         let ref0 = cpu_ref_round_poly(&poly, claim, true);
         assert_eq!(
@@ -2673,7 +2449,6 @@ mod tests {
             "sumcheck relation p(0)+p(1)==claim nv={num_vars}"
         );
 
-        // Round 1 (fold by an arbitrary challenge; is_first_round = false).
         let alpha_fold = EF::from_u64(101);
         let claim1 = poly_horner(&host0.coefficients, alpha_fold);
         let poly1 = poly.fix_last(alpha_fold);
@@ -2709,7 +2484,6 @@ mod tests {
         let zeta: Vec<EF> =
             (0..num_vars as usize).map(|k| EF::from_u64((k * 7 + 3) as u64 + 200)).collect();
 
-        // pure padding.
         let vg0 = VirtualGeq::new(0, EF::ONE, EF::ZERO, num_vars);
         let poly0 = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip,
@@ -2734,7 +2508,6 @@ mod tests {
         assert_eq!(r0.coefficients, h0.coefficients, "pure-padding mismatch");
         assert_eq!(h0.coefficients, vec![EF::ZERO; 5], "pure-padding must be [0;5]");
 
-        // odd real (num_real=3): exercises interp odd-tail + non-zero virtual_X.
         let num_real = 3usize;
         let main_cells: Vec<EF> = (0..num_real)
             .flat_map(|r| {
@@ -2762,13 +2535,6 @@ mod tests {
             vg,
         );
 
-        // `sum_as_poly` reconstructs the round poly via the eq-root
-        // trick, which assumes the HONEST sumcheck claim `p(0)+p(1)=claim` (so
-        // the corrected poly factors through `eq_root`).  An arbitrary claim
-        // would legitimately diverge from the direct reference.  The honest
-        // claim (= physical trace sum) is the unique claim making the direct
-        // reference vanish at `eq_root` — and `cpu_ref_round_poly` is affine in
-        // the claim, so two evaluations pin it.
         let last = poly.zeta[poly.zeta.len() - 1];
         let eq_root = zerocheck_eq_root(last).expect("non-degenerate last for eq-root path");
         let v0 = cpu_ref_round_poly(&poly, EF::ZERO, true).eval_at_point(eq_root);
@@ -2778,13 +2544,9 @@ mod tests {
         let r = cpu_ref_round_poly(&poly, honest_claim, true);
         assert_eq!(r.coefficients, h.coefficients, "odd-tail mismatch (eq-root path)");
 
-        // Degenerate `last` (here `1/2`, where `eq_root` is undefined) forces
-        // the direct `{0,1,2,3,4}` sweep FALLBACK, which is byte-identical to
-        // the reference for ANY claim (incl. this arbitrary one) — i.e. the
-        // exact direct-sweep behavior.
         let mut zeta_deg = zeta.clone();
         let nz = zeta_deg.len();
-        zeta_deg[nz - 1] = EF::from_u64(2).inverse(); // last = 1/2 => no finite eq_root
+        zeta_deg[nz - 1] = EF::from_u64(2).inverse();
         assert!(zerocheck_eq_root(zeta_deg[nz - 1]).is_none());
         let poly_deg = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip,
@@ -2817,12 +2579,12 @@ mod tests {
     /// wide, e2e-like, pure-padding, and odd-tail fixtures.
     #[test]
     fn sum_as_poly_matches_spec_reference() {
-        check_sum_as_poly_ref(4, 2, 2, 2); // equal-height, padded
-        check_sum_as_poly_ref(4, 2, 3, 2); // mixed-height (embed_factor != 1)
-        check_sum_as_poly_ref(8, 2, 4, 2); // more padding rounds
-        check_sum_as_poly_ref(8, 3, 6, 3); // wider + taller, shorter chip
-        check_sum_as_poly_ref(6, 4, 4, 4); // wide, equal-height
-        check_sum_as_poly_ref(22, 10, 16, 2); // e2e-like (AddSub chip0 shape)
+        check_sum_as_poly_ref(4, 2, 2, 2);
+        check_sum_as_poly_ref(4, 2, 3, 2);
+        check_sum_as_poly_ref(8, 2, 4, 2);
+        check_sum_as_poly_ref(8, 3, 6, 3);
+        check_sum_as_poly_ref(6, 4, 4, 4);
+        check_sum_as_poly_ref(22, 10, 16, 2);
         check_pad_and_odd_tail();
     }
 }

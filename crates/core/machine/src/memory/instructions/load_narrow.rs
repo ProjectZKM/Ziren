@@ -4,10 +4,8 @@
 //! the only loads whose result is narrower than a word.  Splitting them out
 //! keeps the 5 sign/value columns off every other memory row.
 //!
-//! The sign extension itself is now done with byte constraints rather than a
-//! `send_alu(SUB, ..)`: a negative narrow load simply fills the high bytes of
-//! `op_a` with `0xFF`, so the `AddSub` dependency row the union chip emitted for
-//! every negative `LB`/`LH` is gone as well.
+//! Sign extension is a byte constraint, not an ALU request: a negative narrow
+//! load fills the bytes of `op_a` above the loaded value with `0xFF`.
 
 use std::{
     borrow::{Borrow, BorrowMut},
@@ -102,6 +100,9 @@ where
     AB: ZKMCoreAirBuilder,
     AB::Var: Sized,
 {
+    /// Constrains one `LB`/`LBU`/`LH`/`LHU` row. The selectors and their sum
+    /// `is_real` are boolean, so a real row has exactly one selector on; these
+    /// opcodes write `op_a`, so `op_a_immutable = 0`.
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
@@ -109,8 +110,6 @@ where
         let local: &LoadNarrowColumns<AB::Var> = (*local).borrow();
         let common = &local.common;
 
-        // SAFETY: All selectors are checked to be boolean, and `is_real` — their sum — is
-        // checked to be boolean too, so each real row has exactly one selector on.
         let is_real = local.is_lb + local.is_lbu + local.is_lh + local.is_lhu;
         builder.assert_bool(local.is_lb);
         builder.assert_bool(local.is_lbu);
@@ -128,17 +127,12 @@ where
             local.ls_bits_is_three,
         );
 
-        // Loads must not change the memory value: structural — the read-only
-        // consistency columns alias value and previous value.
-
-        // Half-word loads require the offset to be zero or two.
         builder
             .when(local.is_lh + local.is_lhu)
             .assert_zero(local.ls_bits_is_one + local.ls_bits_is_three);
 
         let mem_val = *local.memory_access.value();
 
-        // The selected byte, for `LB`/`LBU`.
         let mem_byte = mem_val[0] * offset_is_zero.clone()
             + mem_val[1] * local.ls_bits_is_one
             + mem_val[2] * local.ls_bits_is_two
@@ -146,7 +140,6 @@ where
         builder.when(local.is_lb + local.is_lbu).assert_eq(local.val_lo, mem_byte);
         builder.when(local.is_lb + local.is_lbu).assert_zero(local.val_hi);
 
-        // The selected half word, for `LH`/`LHU`.
         let use_lower_half = offset_is_zero;
         let use_upper_half = local.ls_bits_is_two;
         builder.when(local.is_lh + local.is_lhu).assert_eq(
@@ -157,9 +150,6 @@ where
             .when(local.is_lh + local.is_lhu)
             .assert_eq(local.val_hi, use_lower_half * mem_val[1] + use_upper_half * mem_val[3]);
 
-        // The sign bit of the loaded value.  The lookup only fires for the signed
-        // opcodes, so `most_sig_bit` is unconstrained on `LBU`/`LHU` rows — every use
-        // below multiplies it by `is_lb + is_lh`, which is zero there.
         builder.send_byte(
             ByteOpcode::MSB.as_field::<AB::F>(),
             local.most_sig_bit,
@@ -172,20 +162,12 @@ where
             local.is_lb * local.val_lo + local.is_lh * local.val_hi,
         );
 
-        // Sign extension without an `AddSub` dependency row: a negative narrow load
-        // just fills the bytes above the loaded value with `0xFF`.  The fills
-        // are witnessed (they are already degree 2) so the register binding
-        // below stays at the chip's existing degree.
         let ff = AB::Expr::from_u8(0xFF);
         let neg = (local.is_lb + local.is_lh) * local.most_sig_bit;
         let neg_byte = local.is_lb * local.most_sig_bit;
         builder.assert_eq(local.sign_fill_byte, ff.clone() * neg_byte);
         builder.assert_eq(local.sign_fill, ff * neg);
 
-        // Bind the loaded value to the frame's committed `op_a` register
-        // access.  The frame pins the commit to ZERO when `op_a` is register 0
-        // (the write is discarded), so the computed value is bound through a
-        // `(1 - op_a_0)` factor — same constraint degree as a plain bind.
         let not_a0 = AB::Expr::ONE - common.frame.op_a_0;
         let av = common.a_val();
         builder.when(is_real.clone()).assert_eq(av[0], not_a0.clone() * local.val_lo);
@@ -200,7 +182,6 @@ where
             + local.is_lh * Opcode::LH.as_field::<AB::F>()
             + local.is_lhu * Opcode::LHU.as_field::<AB::F>();
 
-        // SAFETY: `op_a` is written by these opcodes, so `op_a_immutable = 0`.
         receive_memory_instruction(builder, common, opcode, AB::Expr::ZERO, is_real);
     }
 }
@@ -304,8 +285,6 @@ impl<F: PrimeField32> MachineAir<F> for LoadNarrowChip {
                 let cols: &mut LoadNarrowColumns<F> = row.borrow_mut();
                 self.event_to_row(event, cols, blu, &input.program);
             },
-            // A padding row needs no neutralising: the typed frame's register-access
-            // multiplicities are `is_real`, which is zero here already.
             |_row| {},
         );
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());

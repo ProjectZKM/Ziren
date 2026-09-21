@@ -103,8 +103,6 @@ impl<T, A: Allocator> Slice<T, A> {
     where
         A: DeviceMemory,
     {
-        // The panic code path was put into a cold function to not bloat the
-        // call site.
         #[inline(never)]
         #[cold]
         #[track_caller]

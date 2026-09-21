@@ -143,9 +143,6 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
         )],
         pin: Option<zkm_pcs::jagged::AreaPin>,
     ) -> zkm_pcs::Com<Self> {
-        // The OuterSC wrap-machine PREPROCESSED commit goes through the jagged
-        // BaseFold path over the Poseidon2-BN254 `OuterValMmcs` (no two-adic
-        // coset LDE).
         outer_jagged_hooks::outer_prep_commit(named_preprocessed_traces, pin)
     }
 
@@ -220,11 +217,6 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     }
 
     fn fri_config() -> zkm_pcs::basefold::config::FriConfig<zkm_pcs::jagged_pcs::JaggedVal> {
-        // WRAP-stage params: (log_blowup=3, num_queries=94,
-        // pow_bits=22) for full 100-bit query-phase soundness on the on-chain
-        // wrap proof.  The inner env-default (1,94,16) here would be only
-        // ~55-bit.  Two-adicity: codeword = log_stacking(≤21) + 3 ≤ 24 = OK.
-        // See `FriConfig::wrap_fri_config`.
         zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
     }
 
@@ -242,12 +234,6 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     fn digest_felts(
         commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [zkm_pcs::jagged_pcs::JaggedVal; 8] {
-        // `commit: Hash<KoalaBear, Bn254, 1>`
-        // is the BN254 wrap commitment. Project it to 8 KoalaBear felts via
-        // `split_32` (the same BN254->base primitive the MultiField32 challenger
-        // uses) for the host `[F;8]` FS observe. The gnark step observes the BN254
-        // commit natively; this host projection only needs prover/verifier
-        // agreement, which split_32 gives deterministically.
         let roots = commit.roots();
         assert!(!roots.is_empty(), "BN254 wrap commitment MerkleCap must have at least one root",);
         let felts = p3_field::split_32::<Bn254, KoalaBear>(roots[0][0], 8);
@@ -268,16 +254,6 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         rounds: Vec<zkm_pcs::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> zkm_pcs::shard_level::shard_proof::EvaluationProof {
-        // ONE jagged proof spanning every round, exactly as the inner ring
-        // does — the wrap machine has preprocessed chips, so its terminal proof
-        // opens `[preprocessed, main]` and binds the preprocessed round to the
-        // key like every stage before it.
-        //
-        // The round's `claims` reach the generic body, which weighs them into
-        // the reduction; the ring only names its own commitment family here.
-        // The wrap ring opens under jagged-over-BaseFold: its proof is what the
-        // gnark circuit verifies.  Named as the type, so no round set can be
-        // WHIR in part.
         let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_rounds_generic::<
             Self::Challenger,
             Self::BfMmcs,
@@ -317,7 +293,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
 #[allow(dead_code, clippy::type_complexity)]
 mod basefold_over_bn254_generic_typecheck {
     use super::{KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
-    // The commit no longer observes internally, so the caller needs `CanObserve`.
+    // The commit does not observe internally; the caller needs `CanObserve`.
     use p3_challenger::CanObserve;
     use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;
@@ -355,7 +331,6 @@ mod basefold_over_bn254_generic_typecheck {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         let (commit, prover_data) =
             commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri);
-        // The transcript write lives HERE, at the caller, not inside the PCS helper.
         ch.observe(commit.original_commitment.clone());
         (commit, prover_data)
     }
@@ -374,9 +349,6 @@ mod basefold_over_bn254_generic_typecheck {
         )
     }
 
-    // verify over the BN254 MMCS — exercises the verifier-side
-    // `CanObserve<OuterValMmcs::Commitment>` (the BN254 commit observe the
-    // outer-path verifier prologue would perform).
     #[allow(clippy::too_many_arguments)]
     fn _verify(
         commitment: &<OuterValMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
@@ -455,8 +427,6 @@ pub mod outer_jagged_hooks {
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
         pin: Option<zkm_pcs::jagged::AreaPin>,
     ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs> {
-        // The commit consumes BORROWED views over the
-        // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
         let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_owned(chip_traces);
         <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::commit_multilinears(
             &chip_trace_views,
@@ -497,13 +467,6 @@ mod basefold_over_bn254_roundtrip_test {
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
 
-        // The commit/open/verify roundtrip body is inlined in this test.
-        //
-        // It lives HERE rather than next to the PCS purely because of crate layering: the outer-ring
-        // types (`OuterValMmcs` / `OuterChallenger` / `OuterDft`) are defined in this crate while the
-        // PCS is in `zkm-pcs`, so the test cannot sit beside the code it exercises.
-        // Do NOT "tidy" this back into a shared `pub fn` in the prover library — that ships a test
-        // fixture as public API.
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::basefold::FriConfig;
         use zkm_pcs::jagged_pcs::{
@@ -511,11 +474,6 @@ mod basefold_over_bn254_roundtrip_test {
             JaggedChallenge,
         };
 
-        // Committed the way PRODUCTION commits: as ONE width-1 jagged dense
-        // (`materialize_dense_jagged` over `committed_dense_len` cells — the
-        // precompute call shape).  Committing the raw per-chip matrices
-        // instead would round EACH chip's height up to whole 2^21 stacking
-        // blocks (28 stripes for this toy, vs the dense's single stripe).
         let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView> = traces
             .iter()
             .map(|(name, m)| {
@@ -536,8 +494,6 @@ mod basefold_over_bn254_roundtrip_test {
             zkm_pcs::jagged::materialize_dense_jagged::<JaggedVal>(&trace_views, packing.dense_len);
         let dense_traces = vec![("<jagged-dense>".to_string(), RowMajorMatrix::new(dense, 1))];
 
-        // Self-consistency roundtrip: commit/open/verify must agree on ONE config;
-        // env-default rate keeps prover == verifier (any rate works here).
         let rt_fri = FriConfig::<JaggedVal>::from_env_or_default();
         let mut p_chal = make_challenger();
         let (commit, prover_data) = commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(
@@ -546,7 +502,6 @@ mod basefold_over_bn254_roundtrip_test {
             dft.clone(),
             rt_fri.clone(),
         );
-        // Caller owns the transcript write, matching the prove path.
         p_chal.observe(commit.original_commitment.clone());
 
         let stack_dim = commit.log_stacking_height as usize;
@@ -554,13 +509,10 @@ mod basefold_over_bn254_roundtrip_test {
         let num_batch_vars = num_stripes.next_power_of_two().trailing_zeros() as usize;
         let total_vars = num_batch_vars + stack_dim;
 
-        // Deterministic eval point from a fresh (unobserved) challenger, so prover and
-        // verifier agree without an RNG dependency.
         let mut pt_chal = make_challenger();
         let eval_point: Vec<JaggedChallenge> =
             (0..total_vars).map(|_| pt_chal.sample_algebra_element()).collect();
 
-        // The honest evaluation claim, folded from the committed interleaved MLEs.
         let stack_point: Vec<JaggedChallenge> = eval_point[..stack_dim].to_vec();
         let batch_evals_flat: Vec<JaggedChallenge> = prover_data
             .stacked_data
@@ -568,9 +520,6 @@ mod basefold_over_bn254_roundtrip_test {
             .iter()
             .flat_map(|m| m.eval_at::<JaggedChallenge>(&stack_point))
             .collect();
-        // The verifier's `eval_multilinear_padded` (zkm-pcs basefold/stacked.rs)
-        // walks the point coords FORWARD (LSB-first, `point[0]` binds var 0), so
-        // this hand-rolled fold must too.
         let batch_point = &eval_point[stack_dim..];
         let evaluation_claim = {
             let target = 1usize << batch_point.len();
@@ -613,12 +562,6 @@ mod basefold_over_bn254_roundtrip_test {
         .expect("BaseFold jagged-PCS commit/open/verify roundtrip over the BN254 outer ring");
     }
 
-    // Full jagged-basefold BUNDLE pipeline (jagged sumcheck reduction +
-    // jagged-eval + BaseFold open/verify) over the BN254 outer ring — one layer
-    // above the PCS roundtrip; this is what the wrap shard's open/verify hooks
-    // drive: `prove_jagged_rounds_generic` with the single MAIN round
-    // and the `build_jagged_verify_inputs` +
-    // `verify_jagged_inner_generic` mirror.
     #[test]
     fn test_jagged_basefold_bundle_roundtrip_bn254() {
         use p3_challenger::{CanObserve, FieldChallenger};
@@ -644,11 +587,6 @@ mod basefold_over_bn254_roundtrip_test {
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
 
-        // z_row sampled deterministically from a fresh challenger, shared by
-        // prover and verifier — the production shape: ONE shared eval point of
-        // `DEFAULT_LOG_STACKING_HEIGHT` coords (the zerocheck z*), from which
-        // each chip's `r_row` is the trailing `log2(height)` slice
-        // (shard_level/prover.rs).
         let mut pt = make_challenger();
         let z_row: Vec<JaggedChallenge> = (0..zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT
             as usize)
@@ -663,8 +601,6 @@ mod basefold_over_bn254_roundtrip_test {
             })
             .collect();
 
-        // The jagged entry points take `(name, PaddedMle)` pairs, not owned
-        // matrices; build them once and reuse.
         let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView> = traces
             .iter()
             .map(|(name, m)| {
@@ -686,10 +622,6 @@ mod basefold_over_bn254_roundtrip_test {
             <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(&trace_views, None);
         let commitment = precompute.commit.original_commitment.clone();
 
-        // claim[c][col] = Σ_{row < h_c} eq(rev(z_row), row) · t[row·w + col]
-        //
-        // the row_eq over the reversed point indexed by the LITERAL row, as
-        // `jagged_sumcheck::build_weight_table` computes it.
         let claims: Vec<Vec<JaggedChallenge>> = {
             let z_row_rev: Vec<JaggedChallenge> = z_row.iter().rev().copied().collect();
             let eq_c = zkm_pcs::zerocheck_prover::eq_mle_table::<JaggedChallenge>(&z_row_rev);
@@ -724,9 +656,6 @@ mod basefold_over_bn254_roundtrip_test {
             BasefoldDenseOpen,
         >(&rounds, &z_row, &mut p_chal, mmcs.clone(), dft, fri.clone());
 
-        // Verifier inputs rebuilt from the bundle's packing — chip_infos
-        // carrying the EXPLICIT stacking-padding columns, exactly as the outer
-        // shard verifier rebuilds them (shard_level/verifier.rs).
         let chip_widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
         let (chip_infos, r_row_v, z_row_v) =
             build_jagged_verify_inputs(&bundle.packing, &chip_widths, &z_row);
@@ -739,13 +668,9 @@ mod basefold_over_bn254_roundtrip_test {
             &bundle,
             &mut v_chal,
             mmcs,
-            /* skip_commit_observe = */ true,
+            true,
             fri,
-            // Single-round fixture: no preceding rounds.
             &[],
-            // PCS-level fixture: there is no AIR above it, so the bundle's own
-            // claims ARE the openings.  Passed explicitly because the parameter
-            // is required — the two controls below are what give the bind teeth.
             &bundle.y_per_chip.clone(),
         );
         assert!(
@@ -753,12 +678,6 @@ mod basefold_over_bn254_roundtrip_test {
             "jagged-basefold full bundle pipeline should accept the honest proof over BN254"
         );
 
-        // The opening cross-bind, on this ring:
-        //   Σ_k eq(z_col,k)·open_k = Σ_k eq(z_col,k)·y_k
-        // is the only thing tying the bundle's column claims to the openings the
-        // AIR phases consumed.  Two controls, because "accepts the honest proof"
-        // and "rejects a mismatch" are independent failures — a bind that is
-        // never reached passes the first and fails the second.
         let honest: Vec<Vec<JaggedChallenge>> = bundle.y_per_chip.clone();
         let mut v_chal = make_challenger();
         v_chal.observe(commitment.clone());
@@ -778,9 +697,6 @@ mod basefold_over_bn254_roundtrip_test {
             "the cross-bind must accept openings that agree with the bundle's column claims"
         );
 
-        // Perturb ONE column claim.  Both sides are weighted by the same
-        // eq(z_col,·), so a single changed entry moves one side of the equality
-        // and nothing else in the proof notices.
         let mut tampered = honest.clone();
         tampered[0][0] += JaggedChallenge::ONE;
         let mut v_chal = make_challenger();
@@ -835,8 +751,6 @@ mod basefold_over_bn254_roundtrip_test {
                 .collect();
             RowMajorMatrix::new(v, w)
         };
-        // Distinct names across the rounds: the flattened column space carries
-        // both, and the coverage check partitions it by geometry.
         let prep_traces =
             [("PrepA".to_string(), mk(4, 16, 11)), ("PrepB".to_string(), mk(2, 8, 13))];
         let main_traces = [("MainA".to_string(), mk(3, 32, 17))];
@@ -891,7 +805,6 @@ mod basefold_over_bn254_roundtrip_test {
                 })
                 .collect()
         };
-        // claim[c][col] = Σ_{row < h_c} eq(rev(z_row), row) · t[row·w + col]
         let claims = |ts: &[(String, RowMajorMatrix<JaggedVal>)]| -> Vec<Vec<JaggedChallenge>> {
             let z_row_rev: Vec<JaggedChallenge> = z_row.iter().rev().copied().collect();
             let eq_c = zkm_pcs::zerocheck_prover::eq_mle_table::<JaggedChallenge>(&z_row_rev);
@@ -912,7 +825,6 @@ mod basefold_over_bn254_roundtrip_test {
         let prep_r_row = r_row(&prep_traces);
         let main_r_row = r_row(&main_traces);
 
-        // Round order [preprocessed, main], observed in that order.
         let mut p_chal = make_challenger();
         p_chal.observe(prep_root.clone());
         p_chal.observe(main_root.clone());
@@ -937,8 +849,6 @@ mod basefold_over_bn254_roundtrip_test {
             BasefoldDenseOpen,
         >(&rounds, &z_row, &mut p_chal, mmcs.clone(), dft, fri.clone());
 
-        // The bundle must carry the EARLIER round's raw root as preceding and
-        // the LAST round's as its own.
         assert_eq!(bundle.preceding_commits.len(), 1);
         assert_eq!(format!("{:?}", bundle.preceding_commits[0]), format!("{prep_root:?}"));
         assert_eq!(format!("{:?}", bundle.commit.original_commitment), format!("{main_root:?}"));
@@ -948,8 +858,6 @@ mod basefold_over_bn254_roundtrip_test {
         let (chip_infos, r_row_v, z_row_v) =
             build_jagged_verify_inputs(&bundle.packing, &chip_widths, &z_row);
 
-        // The verifier holds the HONEST geometry (the verifying key pins it);
-        // only the bundle varies below.
         let verify = |b: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<OuterValMmcs>,
                       preceding_root: &<OuterValMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment|
          -> bool {
@@ -963,7 +871,7 @@ mod basefold_over_bn254_roundtrip_test {
                 b,
                 &mut v_chal,
                 mmcs.clone(),
-                /* skip_commit_observe = */ true,
+                true,
                 fri.clone(),
                 &[(preceding_root.clone(), prep.prover_data.area)],
                 &b.y_per_chip.clone(),
@@ -972,26 +880,14 @@ mod basefold_over_bn254_roundtrip_test {
 
         assert!(verify(&bundle, &prep_root), "the honest two-round outer bundle must verify");
 
-        // (1) raw PRECEDING root substituted with the main round's.
         assert!(
             !verify(&bundle, &main_root),
             "a substituted preceding (preprocessed) root must be rejected"
         );
 
-        // (2) raw MAIN root substituted with the preceding round's: the batched
-        //     opening then authenticates against the wrong tree.
         let mut tampered = bundle.clone();
         tampered.commit.original_commitment = prep_root.clone();
         assert!(!verify(&tampered, &prep_root), "a substituted main root must be rejected");
-
-        // The packing COUNTS are deliberately NOT checked here: geometry is
-        // pinned one layer up, by `shard_level::verifier::verify_jagged_pcs_host`,
-        // which compares each round's claimed per-chip widths against the
-        // machine's `BaseAir::width` and the key's `prep_chip_dims` before it
-        // ever reaches this function.  Asserting a rejection at this layer would
-        // be asserting a promise it does not make.  Row counts remain
-        // proof-claimed on this ring until the outer key format carries them --
-        // the residual the bind #2 comment records.
     }
 
     /// The preceding-root bind (the preprocessed round's root is the key's) is

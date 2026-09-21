@@ -129,11 +129,8 @@ impl<F: Field> GlobalLookupOperation<F> {
         is_real: AB::Var,
         kind: AB::Var,
     ) {
-        // Constrain that the `is_real` is boolean.
         builder.assert_bool(is_real);
 
-        // Range check the first element in the message to be a u16 so that we can encode the
-        // interaction kind in the upper 8 bits.
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             values[0].clone(),
@@ -142,8 +139,6 @@ impl<F: Field> GlobalLookupOperation<F> {
             is_real,
         );
 
-        // `y6_value = y6_lo16 + y6_mid8 * 2^16 + y6_top * 2^24 < 63 * 2^24`, and the offset is
-        // a byte: one U16Range, one U8Range (pairing `y6_mid8` with `offset`) and one LTU.
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             cols.y6_lo16,
@@ -169,15 +164,6 @@ impl<F: Field> GlobalLookupOperation<F> {
         let x = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.x_coordinate[i].into());
         let y = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.y_coordinate[i].into());
 
-        // Constrain that x_coordinate is derived from (values, kind, offset) via the
-        // map-to-curve function. This is the critical link between the tuple columns
-        // (which participate in the cross-table lookup) and the witness curve point
-        // (which is accumulated into the global digest).
-        //
-        // The map-to-curve computes:
-        //   x[0] = values[0] + kind * 65536
-        //   x[i] = values[i]              for i in 1..6
-        //   x[6] = values[6] * 256 + offset
         builder
             .when(is_real)
             .assert_eq(x.0[0].clone(), values[0].clone() + kind.into() * AB::Expr::from_u32(65536));
@@ -188,7 +174,6 @@ impl<F: Field> GlobalLookupOperation<F> {
             .when(is_real)
             .assert_eq(x.0[6].clone(), values[6].clone() * AB::Expr::from_u32(256) + cols.offset);
 
-        // Constrain that `(x, y)` is a valid point on the curve.
         let y2 = y.square();
         let x3_3zx_m3 = SepticCurve::<AB::Expr>::curve_formula(x);
         builder.assert_septic_ext_eq(y2, x3_3zx_m3);
@@ -197,10 +182,6 @@ impl<F: Field> GlobalLookupOperation<F> {
             + cols.y6_mid8 * AB::F::from_u32(1 << 16)
             + cols.y6_top * AB::F::from_u32(1 << 24);
 
-        // Constrain that y has correct sign.
-        // If it's a receive: `1 <= y_6 <= RECEIVE_Y6_MAX`, so `y_6 - 1 = y6_value < RECEIVE_Y6_MAX`.
-        // If it's a send: `SEND_Y6_MIN <= y_6 <= p - 1`, so `y_6 - SEND_Y6_MIN = y6_value < RECEIVE_Y6_MAX`
-        // (`p - SEND_Y6_MIN == RECEIVE_Y6_MAX`).  The two ranges are disjoint.
         builder.when(is_receive).assert_eq(y.0[6].clone(), AB::Expr::ONE + y6_value.clone());
         builder.when(is_send).assert_eq(y.0[6].clone(), AB::Expr::from_u32(SEND_Y6_MIN) + y6_value);
     }

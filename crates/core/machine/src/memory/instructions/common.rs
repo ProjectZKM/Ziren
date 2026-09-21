@@ -1,16 +1,10 @@
 //! Columns and constraints shared by every memory-instruction chip.
 //!
-//! The memory instructions used to live in a single 79-column, 14-selector
-//! union chip (`MemoryInstrs`).  Every row of that chip paid for the columns of
-//! every other memory opcode: a `LW` row carried the store-masking flags, the
-//! sign-extension gadget and the unaligned-load scratch it never used.
-//!
-//! The union is now split into per-width chips (see the sibling modules), each
-//! of which embeds this shared block plus only the columns its own opcodes
-//! need.  The block also carries the *inlined* effective-address addition:
-//! `addr = op_b + op_c` is proven here with an [`AddOperation`] (value + 3
-//! carries) instead of being delegated to the `AddSub` chip over the ALU bus,
-//! which removes one 19-cell `AddSub` dependency row per memory instruction.
+//! The memory instructions are split into per-width chips (see the sibling
+//! modules), each of which embeds this shared block plus only the columns its
+//! own opcodes need.  The block carries the inlined effective-address
+//! addition: `addr = op_b + op_c` is proven here with an [`AddOperation`]
+//! (value + 3 carries) rather than by an `AddSub` row over the ALU bus.
 
 use crate::memory::RegisterCols;
 use std::mem::size_of;
@@ -53,14 +47,13 @@ pub struct MemoryInstrCommonCols<T> {
     /// The effective address `op_b + op_c`, computed INLINE.
     ///
     /// `addr_add.value` is the (unaligned) address word; the three carry bits
-    /// prove the byte-wise addition.  This replaces the `send_alu(ADD, ..)`
-    /// the union chip used to emit, and with it the `AddSub` row it required.
+    /// prove the byte-wise addition, so no `AddSub` row is needed.
     pub addr_add: AddOperation<T>,
 
     /// The address's least significant two bits, i.e. `addr_word[0] & 0b11`.
     ///
     /// The aligned address is the expression `addr_word.reduce() -
-    /// addr_ls_two_bits`; it is no longer a witnessed column.
+    /// addr_ls_two_bits`, not a witnessed column.
     pub addr_ls_two_bits: T,
 
     /// Gadget to verify that the address word is within the Koala-Bear field.
@@ -124,17 +117,14 @@ impl<T: Copy> MemoryInstrCommonCols<T> {
 /// 5. The memory access at the aligned address.
 ///
 /// Returns the aligned-address expression (`addr_word.reduce() - addr_ls_two_bits`).
+/// It is sound because `most_sig_bytes_zero = 1 ⇒ is_real = 1`, so the
+/// `addr_word ≥ NUM_REGISTERS` byte lookup fires only on real rows.
 pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
     builder: &mut AB,
     cols: &MemoryInstrCommonCols<AB::Var>,
     memory_access: &impl crate::memory::MemoryCols<AB::Var>,
     is_real: AB::Expr,
 ) -> AB::Expr {
-    // Verify `addr_word = op_b + op_c` in-place.  The OPERANDS need no
-    // re-check — `op_b` is a register-file read (every write into the file is
-    // range checked, so the multiset argument carries byte shape to every
-    // read) and `op_c` is the program-table immediate (committed in the vk) —
-    // so only the fresh address word is range checked.
     AddOperation::<AB::F>::eval_check_value_only(
         builder,
         cols.op_b_value(),
@@ -144,7 +134,6 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
     );
     let addr_word = cols.addr_add.value;
 
-    // Range check the addr_word to be a valid koalabear word.
     KoalaBearWordRangeChecker::<AB::F>::range_check(
         builder,
         addr_word,
@@ -152,9 +141,6 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
         is_real.clone(),
     );
 
-    // We check that `addr_word >= NUM_REGISTERS`, or `addr_word > NUM_REGISTERS - 1` to avoid
-    // registers.  Check that if the most significant bytes are zero, then the least significant
-    // byte is at least NUM_REGISTERS.
     builder.send_byte(
         ByteOpcode::LTU.as_field::<AB::F>(),
         AB::Expr::ONE,
@@ -163,11 +149,8 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
         cols.most_sig_bytes_zero.result,
     );
 
-    // SAFETY: Check that the above interaction is only sent if the row is real.
     builder.when(cols.most_sig_bytes_zero.result).assert_one(is_real.clone());
 
-    // Check the most_sig_byte_zero flag.  The three most significant bytes are byte range
-    // checked by `AddOperation::eval`, so the only way their sum is zero is if all are zero.
     IsZeroOperation::<AB::F>::eval(
         builder,
         addr_word[1] + addr_word[2] + addr_word[3],
@@ -175,7 +158,6 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
         is_real.clone(),
     );
 
-    // Check the correct value of addr_ls_two_bits.
     builder.send_byte(
         ByteOpcode::AND.as_field::<AB::F>(),
         cols.addr_ls_two_bits,
@@ -184,13 +166,8 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
         is_real.clone(),
     );
 
-    // The aligned address is now an expression rather than a witnessed column: the
-    // union chip witnessed `addr_aligned` and asserted `addr_aligned +
-    // addr_ls_two_bits == addr_word.reduce()`, which is exactly this definition.
     let addr_aligned = addr_word.reduce::<AB>() - cols.addr_ls_two_bits;
 
-    // Trusted: the word moves between memory and a register (see
-    // `MemoryAirBuilder::eval_memory_access_trusted`).
     builder.eval_memory_access_trusted(
         cols.shard(),
         crate::frame::clk_from_i_type_frame::<AB>(&cols.frame)
@@ -203,9 +180,8 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
     addr_aligned
 }
 
-/// The shared instruction plumbing for the memory chips (the Instruction-bus
-/// receive is gone: every row is a real instruction serving itself via the
-/// frame).
+/// The shared instruction plumbing for the memory chips: every row is a real
+/// instruction serving itself via the frame.
 ///
 /// Every memory chip supplies the same constants: `next_next_pc = next_pc + 4`,
 /// `num_extra_cycles = 0`, `is_rw_a = 1`, `is_check_memory = 1`, `is_halt = 0`,
@@ -217,10 +193,6 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     op_a_immutable: AB::Expr,
     is_real: AB::Expr,
 ) {
-    // A real instruction carries its own program fetch, register access and
-    // `(clk, pc)` chaining.  Memory instructions are sequential, never halt.
-    // The plain stores read op_a immutably (the per-chip `op_a_immutable`
-    // expr, NOT including SC).
     crate::frame::eval_i_type_frame(
         builder,
         &cols.frame,
@@ -232,14 +204,9 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
         AB::Expr::ZERO,
         is_real.clone(),
     );
-    // The plain stores read op_a immutably: the register write carries the
-    // previous value through unchanged.
     builder
         .when(op_a_immutable.clone() * is_real.clone())
         .assert_word_eq(*cols.frame.op_a_access.value(), cols.frame.op_a_access.prev_value);
-    // No `op_a_value` binding remains: the chips compute directly on the
-    // frame's committed register access (`a_val()`), and the frame itself
-    // pins that word to zero on register-0 rows.
     let _ = is_real;
 }
 
@@ -266,17 +233,12 @@ impl<F: PrimeField32> MemoryInstrCommonCols<F> {
         blu: &mut impl ByteRecord,
         program: &zkm_core_executor::Program,
     ) -> u8 {
-        // Every memory-instruction row is a real instruction owning its frame.
         self.frame.populate_from_mem(event, program, blu);
 
         debug_assert!(self.frame.shard != F::ZERO);
         self.pc = F::from_u32(event.pc);
         self.next_pc = F::from_u32(event.next_pc);
-        // The memory access is populated per chip (loads carry read-only
-        // consistency columns; stores carry read-write ones).
 
-        // Inline effective-address addition (emits the u8 range checks for the
-        // resulting address word only — the operands are pre-checked).
         let memory_addr = self.addr_add.populate_check_value_only(blu, event.b, event.c);
         debug_assert_eq!(memory_addr, event.b.wrapping_add(event.c));
         self.addr_word_range_checker.populate(blu, memory_addr);
@@ -284,7 +246,6 @@ impl<F: PrimeField32> MemoryInstrCommonCols<F> {
         let addr_ls_two_bits = (memory_addr % WORD_SIZE as u32) as u8;
         self.addr_ls_two_bits = F::from_u8(addr_ls_two_bits);
 
-        // Add byte lookup event to verify correct calculation of addr_ls_two_bits.
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::AND,
             a1: addr_ls_two_bits as u16,
@@ -339,9 +300,6 @@ pub(crate) fn generate_memory_trace<F: PrimeField32>(
                 if idx < events.len() {
                     event_to_row(&events[idx], row, &mut blu);
                 } else {
-                    // Padding rows carry no instruction: neutralise the frame
-                    // or its register-access multiplicities break the Memory
-                    // bus.
                     pad_row(row);
                 }
             });
@@ -356,7 +314,9 @@ pub(crate) fn generate_memory_trace<F: PrimeField32>(
 ///
 /// Returns the `offset_is_zero` expression (`1 - one - two - three`).  Only the
 /// chips whose opcodes can address a sub-word offset witness these flags; the
-/// word-aligned chips use [`assert_word_aligned`] instead.
+/// word-aligned chips use [`assert_word_aligned`] instead. It is sound because
+/// the constraints allow at most one non-zero flag and the flags sum to 1, so
+/// exactly one flag is 1.
 pub fn eval_offset_flags<AB: ZKMCoreAirBuilder>(
     builder: &mut AB,
     addr_ls_two_bits: AB::Var,
@@ -371,8 +331,6 @@ pub fn eval_offset_flags<AB: ZKMCoreAirBuilder>(
     builder.assert_bool(ls_bits_is_three);
     builder.assert_bool(offset_is_zero.clone());
 
-    // SAFETY: due to these constraints at most one of the four flags can be non-zero;
-    // as their sum is 1, exactly one flag is on with value 1.
     builder.when(offset_is_zero.clone()).assert_zero(addr_ls_two_bits);
     builder.when(ls_bits_is_one).assert_one(addr_ls_two_bits);
     builder.when(ls_bits_is_two).assert_eq(addr_ls_two_bits, AB::Expr::TWO);

@@ -14,26 +14,13 @@ pub struct RecursionProgram<F> {
     /// The program, already analyzed.
     ///
     /// `analyze()` assigns every instruction its offset in the execution
-    /// record.  It is a pure function of the instruction stream, so for a
-    /// given program it always gives the same answer — yet `Runtime::run`
-    /// used to recompute it on every call, deep-cloning the whole stream to
-    /// do so, while the recursion tree ran the same program on node after
-    /// node.  Measured on one node: analyze 25.2 ms against a walk of
-    /// 34.8 ms.
+    /// record. It is a pure function of the instruction stream, so it runs once
+    /// at construction and the analyzed stream is the only stored copy.
     ///
-    /// Holding the analyzed form as THE representation, rather than the raw
-    /// stream plus a memo, means carrying
-    /// `inner: RawProgram<AnalyzedInstruction<F>>` and `event_counts` as
-    /// fields and analyzing once at construction.  It also avoids storing the
-    /// instruction stream twice, which for a 4.3 M-instruction leaf program
-    /// is not a rounding error.
-    ///
-    /// INVARIANT: the offsets here and `event_counts` were derived together
-    /// from this exact instruction stream.  Mutating the stream after
-    /// construction desynchronizes both, and the record writes are unchecked
-    /// -- build a new program with [`RecursionProgram::new`] instead.  Every
-    /// current writer does: the compiler assembles the raw stream and then
-    /// calls `new`, and nothing mutates a built program.
+    /// Invariant: the offsets here and `event_counts` are derived together
+    /// from this exact instruction stream. Mutating the stream desynchronizes
+    /// both, and the record writes are unchecked, so build a new program with
+    /// [`RecursionProgram::new`] instead.
     #[serde(default = "RawProgram::default")]
     pub seq_blocks: RawProgram<AnalyzedInstruction<F>>,
     pub total_memory: usize,
@@ -91,8 +78,6 @@ pub fn setup_digest<F: Serialize>(program: &RecursionProgram<F>) -> [u8; 32] {
     }
 
     let mut w = HashWriter(Sha256::new());
-    // Domain separation, so a future change to what the digest covers cannot
-    // silently match a key built under the old definition.
     std::io::Write::write_all(&mut w, b"zkm-recursion-setup-digest-v1")
         .expect("hashing cannot fail");
     bincode::serialize_into(&mut w, &program.seq_blocks)
@@ -183,9 +168,7 @@ impl<F: p3_field::PrimeField64> RecursionProgram<F> {
                 }
                 Instruction::Hint(i) => {
                     i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
-                } // 9d1c21d4 retired these three chips, but their instructions
-                  // remain in the ISA and the VM still executes them, so their
-                  // addresses still count towards the allocation.
+                }
             }
         }
         max_addr.map_or(0, |m| m as usize + 1)
@@ -247,8 +230,6 @@ mod analyzed_at_construction_tests {
 
         assert_eq!(program.seq_blocks.instruction_count(), 8);
         assert_eq!(program.event_counts.mem_const_events, 8, "counts derived with the offsets");
-        // Offsets are assigned, and distinct, which is the property the
-        // record writes depend on.
         let offsets: Vec<usize> = program.seq_blocks.iter().map(|ai| ai.offset()).collect();
         let mut sorted = offsets.clone();
         sorted.sort_unstable();

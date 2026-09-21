@@ -34,7 +34,6 @@ impl Syscall for KeccakSpongeSyscall {
 
         let (input_length_record, input_len_u32s) = rt.mr(result_ptr + 16 * 4);
 
-        // General block size = 36 u32s
         assert_eq!(input_len_u32s as usize % GENERAL_BLOCK_SIZE_U32S, 0);
 
         let (input_records, input_values) = rt.mr_slice(input_ptr, input_len_u32s as usize);
@@ -58,7 +57,6 @@ impl Syscall for KeccakSpongeSyscall {
             keccakf(&mut state);
         }
 
-        // Increment the clk by 1 before writing because we read from memory at start_clk.
         rt.clk += 1;
         let mut values_to_write = Vec::new();
         #[allow(clippy::needless_range_loop)]
@@ -72,7 +70,6 @@ impl Syscall for KeccakSpongeSyscall {
         let write_records = rt.mw_slice(result_ptr, values_to_write.as_slice());
         output_write_records.extend_from_slice(&write_records);
 
-        // Push the Keccak sponge event.
         let shard = rt.current_shard();
         let sponge_event = PrecompileEvent::KeccakSponge(KeccakSpongeEvent {
             shard,

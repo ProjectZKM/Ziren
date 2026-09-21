@@ -27,16 +27,14 @@
 //! - `merged_prefix_sums[k] = bits(prefix_sums[k]) || bits(prefix_sums[k+1])`
 //! - `BP(z_row, z_trace, x, y)` is the branching-program eval defined
 //!   at [`crate::jagged_eval_branching_program`] (host counterpart of
-//!   `crates/recursion/circuit/src/jagged_eval_primitives.rs:emit_branching_program_eval`).
+//!   `emit_branching_program_eval` in the recursion circuit).
 //!
 //! The output `PartialSumcheckProof` reduces this 2*(log_m+1)-variable
 //! sumcheck to a point-and-eval pair `(z_full, P(z_full))`.
 //!
 //! # Verifier alignment
 //!
-//! The in-circuit verifier at
-//! [`crates/recursion/circuit/src/machine/compress_basefold.rs:827-937`]
-//! consumes `JaggedSumcheckEvalProof.partial_sumcheck_proof` and
+//! The in-circuit compress verifier consumes `JaggedSumcheckEvalProof.partial_sumcheck_proof` and
 //! recomputes the right-hand side of the closing identity:
 //!
 //!   jagged_eval × BP(z_row, z_trace, lower, upper) × Σ_k z_col_eq[k] × EQ(merged_ps_k, point)
@@ -66,8 +64,8 @@ use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 // the Fiat-Shamir challenger stays HOST-side (per-round observe/sample).  The
 // seam is a per-thread factory installed by `ziren-gpu` immediately around its
 // device-path `prove_jagged_linear_core` call.  When NO factory is
-// installed (the default, and every pure-host build), the sumcheck runs the
-// exact legacy host path below — byte-identical to today.
+// installed (the default, and every pure-host build), the sumcheck runs on the
+// host; both paths produce identical bytes.
 // ===========================================================================
 
 /// Setup inputs handed to a device jagged-eval round engine when it is built.
@@ -172,8 +170,8 @@ pub struct JaggedSumcheckEvalProof<EF> {
 }
 
 impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
-    /// Empty placeholder — used by [`prove_jagged_evaluation`] until
-    /// the real sumcheck body is implemented.
+    /// Empty proof, returned by [`prove_jagged_evaluation`] when there
+    /// are no columns.
     #[must_use]
     pub fn dummy() -> Self {
         Self { partial_sumcheck_proof: PartialSumcheckProof::dummy() }
@@ -188,48 +186,9 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 // differential check of the structural prover against this definition. Only the
 // test uses them, so a non-test build sees them as dead; hence `allow(dead_code)`
 // rather than deletion.
-//
-// (I first described these as uncalled. That was wrong: a
-// `#[cfg(debug_assertions)]` block in `prove_jagged_evaluation` did call them --
-// it just compared `claimed_sum` to itself, and never ran under `cargo test -r`.)
 
-/// Prove the jagged-evaluation sub-protocol.
-///
-/// Returns a structurally-valid
-/// placeholder.  The polynomial construction + sumcheck prover body
-/// is not yet implemented — see this module's "Math" section above.
-///
-/// **Inputs**:
-/// - `prefix_sums` — cumulative offsets (one per chip + final);
-///   sourced from the host-side `JaggedPacking::offsets`.  Length =
-///   num_chips + 1.
-/// - `z_row`, `z_col`, `z_trace` — outer challenger samples that
-///   parameterize the sumcheck claim.
-/// - `challenger` — Fiat-Shamir transcript shared with the outer
-///   reduction.
-///
-/// **Output**: a [`JaggedSumcheckEvalProof`] whose
-/// `partial_sumcheck_proof.claimed_sum` equals `jagged_eval` (the
-/// expected value the verifier recomputes from the same inputs).
-///
-/// # Implementation plan
-///
-/// 1. Build merged_prefix_sums (Vec of bit-decomposed Points, each of
-///    dimension 2*(log_m+1)).
-/// 2. Compute `z_col_lagrange = Mle::full_lagrange(z_col)` per chip.
-/// 3. Compute `expected_sum` via direct evaluation of the closed-form
-///    polynomial.
-/// 4. Run a standard 2*(log_m+1)-variable sumcheck via Ziren's
-///    existing sumcheck machinery (the sumcheck poly's degree is 2;
-///    each round emits a degree-2 univariate via 3 evals at x ∈ {0,
-///    1, 2} or {0, 1/2, 1}).
-/// 5. Wrap the PartialSumcheckProof in JaggedSumcheckEvalProof.
-///
-/// The prover is callable from
-/// [`crate::jagged_pcs::jagged::prove_jagged_rounds`]
-/// alongside the outer jagged-reduction sumcheck.
-/// Reverse the lowest `n` bits of `v`.  Used to align the LSB-first
-/// hypercube indexing (used by partial_lagrange) with the MSB-first
+/// Reverse the lowest `n` bits of `v`: maps the LSB-first hypercube
+/// indexing of `partial_lagrange` onto the MSB-first
 /// big-endian Point convention of `merged_prefix_sums`.
 #[allow(dead_code)]
 fn bit_reverse(v: usize, n: usize) -> usize {
@@ -292,7 +251,6 @@ fn materialize_bp_evals(bp: &BranchingProgram<InnerChallenge>, half: usize) -> V
     let total = 1usize << n;
     let mut evals = vec![InnerChallenge::ZERO; total];
     for (i, eval) in evals.iter_mut().enumerate() {
-        // Lower's big-endian bits = [bit_0(i), bit_1(i), ..., bit_{half-1}(i)]
         let lower_bits: Vec<InnerChallenge> = (0..half)
             .map(|j| if (i >> j) & 1 == 1 { InnerChallenge::ONE } else { InnerChallenge::ZERO })
             .collect();
@@ -307,8 +265,8 @@ fn materialize_bp_evals(bp: &BranchingProgram<InnerChallenge>, half: usize) -> V
 /// Construct a degree-2 univariate polynomial from 3 evaluations at
 /// xs = [0, 1/2, 1] via closed-form Lagrange interpolation.
 ///
-/// Returns coefficients `[c0, c1, c2]` such that
-/// `c0 + c1 * X + c2 * X² = p(X)` matches the 3 input evals.
+/// The output `[c0, c1, c2]` satisfies `c0 + c1·X + c2·X² = p(X)` at the
+/// three points.
 ///
 /// Closed form derivation (xs = {0, 1/2, 1}):
 ///   c0 = p(0)
@@ -371,24 +329,19 @@ fn naive_jagged_eval_sumcheck(
             let bp1 = bp[2 * i + 1];
             g0 += f0 * bp0;
             g1 += f1 * bp1;
-            // P at var_r = 1/2 is (F0+F1)*(BP0+BP1)/4 (cancels the
-            // two halve factors at once).
             g_half += (f0 + f1) * (bp0 + bp1) * four_inv;
         }
         let _ = half_inv;
 
         let poly = univariate_from_three_evals(g0, g_half, g1);
-        // Observe coefficients into the challenger.
         for &c in &poly.coefficients {
             challenger.observe_algebra_element(c);
         }
         univariate_polys.push(poly);
 
-        // Sample next challenge.
         let r: InnerChallenge = challenger.sample_algebra_element();
         points.push(r);
 
-        // Fold F and BP at r.
         let mut new_f = Vec::with_capacity(half_len);
         let mut new_bp = Vec::with_capacity(half_len);
         for i in 0..half_len {
@@ -487,24 +440,13 @@ impl<'a> StructuralJaggedEvalProver<'a> {
     ) -> InnerChallenge {
         let split = merged_prefix_sum.len() - self.round_num - 1;
         let (h_prefix_sum, eq_prefix_sum) = merged_prefix_sum.split_at(split);
-        // eq_prefix_sum[0] is the bit at position `split` — current
-        // round's variable in the merged big-endian layout.
         let bit = eq_prefix_sum[0];
 
-        // EQ factor for the current variable.
-        // - lambda=0: EQ(0, bit) = 1 - bit
-        // - lambda=1/2: EQ(1/2, bit) = 1/2 (the half cancels regardless of bit)
-        let eq_val = if lambda == InnerChallenge::ZERO {
-            InnerChallenge::ONE - bit
-        } else {
-            // lambda == self.half
-            self.half
-        };
+        let eq_val =
+            if lambda == InnerChallenge::ZERO { InnerChallenge::ONE - bit } else { self.half };
 
         let eq_eval = intermediate_eq_full_eval * eq_val;
 
-        // Build full point: h_prefix_sum bits || lambda || rhos
-        // (length = h_prefix_sum.len() + 1 + rhos.len() = num_dimensions).
         let mut full_point: Vec<InnerChallenge> = Vec::with_capacity(self.num_dimensions);
         full_point.extend_from_slice(h_prefix_sum);
         full_point.push(lambda);
@@ -521,8 +463,6 @@ impl<'a> StructuralJaggedEvalProver<'a> {
     /// Compute (y_0, y_half) — sums of all chip contributions at
     /// lambda = 0 and lambda = 1/2.
     fn compute_round_evals(&self) -> (InnerChallenge, InnerChallenge) {
-        // Field addition is associative + commutative, so a parallel tree-reduce
-        // over the independent per-column contributions is BYTE-IDENTICAL to the
         if self.par {
             use rayon::prelude::*;
             jeval_pool().install(|| {
@@ -560,7 +500,6 @@ impl<'a> StructuralJaggedEvalProver<'a> {
         let round_num = self.round_num;
         if self.par {
             use rayon::prelude::*;
-            // Per-column updates are independent -> BYTE-IDENTICAL parallel map.
             let inter = &mut self.intermediate_eq_full_evals;
             let mps_all = self.merged_prefix_sums;
             jeval_pool().install(|| {
@@ -574,16 +513,11 @@ impl<'a> StructuralJaggedEvalProver<'a> {
         } else {
             for (k, mps) in self.merged_prefix_sums.iter().enumerate() {
                 let bit = mps[mps.len() - 1 - round_num];
-                // EQ(alpha, bit) = alpha*bit + (1-alpha)*(1-bit)
                 let factor =
                     alpha * bit + (InnerChallenge::ONE - alpha) * (InnerChallenge::ONE - bit);
                 self.intermediate_eq_full_evals[k] *= factor;
             }
         }
-        // rhos accumulate at the FRONT (`insert(0, .)`), newest-first.
-        // Appending (push, oldest-first) instead would diverge the per-round
-        // full_point + final point_and_eval.0 ordering from the
-        // in-circuit half-split verifier.
         self.rhos.insert(0, alpha);
         self.round_num += 1;
     }
@@ -624,10 +558,6 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
     challenger: &mut C,
 ) -> PartialSumcheckProof<InnerChallenge> {
     let n = if merged_prefix_sums.is_empty() { 0 } else { merged_prefix_sums[0].len() };
-    // Parallelize the per-column inner loops of the structural sumcheck across
-    // host cores.  Byte-identical: field addition is associative and commutative,
-    // so the tree-reduce equals the sequential fold.  The 64-column floor skips
-    // tiny shards where the pool hand-off would dominate.
     let par = merged_prefix_sums.len() >= 64;
     let mut prover = StructuralJaggedEvalProver::new(
         z_row.to_vec(),
@@ -643,24 +573,18 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
     for _round in 0..n {
         let (y_0, y_half) = prover.compute_round_evals();
         let y_1 = current_claim - y_0;
-        // Construct degree-2 univariate poly via interpolation at
-        // xs = {0, 1/2, 1}.
         let poly = univariate_from_three_evals(y_0, y_half, y_1);
 
-        // Observe coefficients into challenger.
         for &c in &poly.coefficients {
             challenger.observe_algebra_element(c);
         }
 
-        // Sample next challenge.
         let alpha: InnerChallenge = challenger.sample_algebra_element();
 
-        // Update current_claim for next round = poly(alpha).
         current_claim = poly.eval_at_point(alpha);
 
         univariate_polys.push(poly);
 
-        // Fold for next round.
         prover.fold(alpha);
     }
 
@@ -695,8 +619,6 @@ fn structural_jagged_eval_sumcheck_with_engine<
 ) -> PartialSumcheckProof<InnerChallenge> {
     let n = if merged_prefix_sums.is_empty() { 0 } else { merged_prefix_sums[0].len() };
 
-    // Shadow host prover: built ONLY in verify mode, run in lockstep as the
-    // bit-identity oracle.  Uses the exact same `par` gate as the host path.
     let par = merged_prefix_sums.len() >= 64;
     let mut host_prover = if verify {
         Some(StructuralJaggedEvalProver::new(
@@ -710,10 +632,6 @@ fn structural_jagged_eval_sumcheck_with_engine<
         None
     };
 
-    // Device-resident Fiat-Shamir fast path (concrete challenger only, and
-    // never in verify mode — the shadow prover needs the per-round loop).
-    // The snapshot is taken AFTER the claimed-sum observe in the caller, so
-    // the device sponge starts at exactly this transcript position.
     if !verify {
         if let Some(dc) = (challenger as &mut dyn core::any::Any).downcast_mut::<InnerChallenger>()
         {
@@ -753,8 +671,6 @@ fn structural_jagged_eval_sumcheck_with_engine<
 
     let mut univariate_polys = Vec::with_capacity(n);
     let mut current_claim = claimed_sum;
-    // Accumulated challenges in prepend order (newest-first) — mirrors the
-    // host prover's `rhos` and the in-circuit half-split verifier ordering.
     let mut rhos_out: Vec<InnerChallenge> = Vec::with_capacity(n);
 
     for round in 0..n {
@@ -799,64 +715,40 @@ fn structural_jagged_eval_sumcheck_with_engine<
     }
 }
 
+/// Prove the jagged-evaluation sub-protocol: a `2·half`-variable sumcheck,
+/// `half = log_m + 1`, whose `claimed_sum` is the closed form
+/// `full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace)`.
+///
+/// * `prefix_sums`: column offsets from `JaggedPacking::offsets`, length
+///   `num_cols + 1`.
+/// * `z_row`, `z_col`, `z_trace`: outer challenger samples.
+/// * `challenger`: the transcript shared with the outer jagged reduction.
+///
+/// Called from [`crate::jagged_pcs::jagged::prove_jagged_rounds`].
+/// Generic over the challenger so the BN254 wrap reuses it.
 #[allow(clippy::too_many_arguments)]
-// Generic over the challenger (FieldChallenger only) so the BN254 wrap reuses it.
 pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal> + 'static>(
     prefix_sums: &[usize],
     z_row: &[InnerChallenge],
     z_col: &[InnerChallenge],
     z_trace: &[InnerChallenge],
     challenger: &mut C,
-    // The recursion-layer AREA PIN.
-    // `Some(_)` (a recursion/compress commit, whose dense was pinned to
-    // `2^RECURSION_LOG_TRACE_AREA`) => run the jagged-eval over the PINNED dense
-    // (`half = z_trace.len() + 1`) so its structural-sumcheck dimension
-    // `n = 2*half` is CONSTANT across heterogeneous recursion children (the
-    // precondition for an enumerable compose VK).  `None` (CORE / shrink / wrap,
-    // and every test) => the NATURAL `log_m + 1` (byte-identical to today).
 ) -> JaggedSumcheckEvalProof<InnerChallenge> {
-    // For small workloads: claimed_sum + naive
-    // sumcheck via materialization.
-    // Production large workloads still need the structural prover —
-    // fall back to dummy with real
-    // claimed_sum when n exceeds NAIVE_SUMCHECK_MAX_N.
-
     if prefix_sums.len() < 2 {
         challenger.observe_algebra_element(InnerChallenge::ZERO);
         return JaggedSumcheckEvalProof::dummy();
     }
 
-    // half = log_m + 1 = number of bits per prefix sum.  Derive this
-    // from the prefix sums (matching full_jagged_evaluation's num_bits), NOT
-    // from z_trace.len() (= log_dense_size = log_m), which is one bit SHORT and
-    // truncates the top prefix-sum bit (the same off-by-one as in
-    // full_jagged_evaluation).  z_trace.len()=log_m would desync the
-    // structural sumcheck (2*log_m vars) from the closed form (log_m+1 bits) and
-    // break the in-circuit jagged closing on real data (z_star.len = log_m).
     let last = prefix_sums.last().copied().unwrap_or(0);
     let log_m =
         if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
-    // The jagged-eval runs over the natural column geometry.
     let half = log_m + 1;
     let n = 2 * half;
 
-    // `z_col_lagrange` (per-column EQ factors).  Hoisted ABOVE the claimed-sum
-    // observe: the device jagged-eval engine needs `z_col_eq_vals` at
-    // construction, and the engine now supplies the claimed sum itself.  Every
-    // statement between here and the `observe` below is challenger-silent, so
-    // the hoist is transcript-neutral.
     let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
     let num_chips = prefix_sums.len() - 1;
     let z_col_eq_vals: Vec<InnerChallenge> = z_col_lagrange[..num_chips].to_vec();
 
-    // Production path (any size) — the structural prover.
-    // O(N × num_cols) per the fold structure; feasible at all scales.
-    //
-    // Engine seam: when `ziren-gpu` has installed a device
-    // round-engine factory for this thread, off-load the per-round polynomial
-    // COMPUTE to the device (the challenger stays host-side).  With NO factory
-    // installed (default / pure-host), fall through to the exact legacy host
-    // path — byte-identical to today.
     let mut engine_and_verify = JAGGED_EVAL_ENGINE_FACTORY.with(|c| {
         c.borrow().as_ref().map(|(factory, verify)| {
             let setup = JaggedEvalSetup {
@@ -871,16 +763,6 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal> + 'st
         })
     });
 
-    // `claimed_sum` — the closed-form jagged evaluation the sumcheck reduces to.
-    //
-    // The host form (`full_jagged_evaluation`) is a SINGLE-THREADED loop over
-    // every COLUMN of every chip, each running a ~`log_m`-layer branching-program
-    // DP: measured at 27.3 ms/shard of the reth serial path with the GPU 0% busy
-    // for all of it.  The device engine already holds the prefix-sum bit tensors,
-    // `z_row`, `z_index` and `z_col_eq_vals` on-device, and the branching-program
-    // kernel already has the matching `round_num == -1` mode, so ask the engine
-    // first.  `None` (no engine installed, or the engine declines) falls back to
-    // the host closed form.  Field arithmetic is exact, so both are BYTE-IDENTICAL.
     let claimed_sum = {
         let _s = tracing::info_span!("jeval_claimed_sum").entered();
         match engine_and_verify.as_mut().and_then(|(engine, _)| engine.claimed_sum()) {
@@ -890,9 +772,6 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal> + 'st
     };
     challenger.observe_algebra_element(claimed_sum);
 
-    // Build merged_prefix_sums (per-column 2*(log_m+1)-bit Points,
-    // each = bits(prefix_sums[k]) || bits(prefix_sums[k+1])).  Feeds the
-    // structural prover.
     let merged_prefix_sums: Vec<Vec<InnerChallenge>> = {
         let _s = tracing::info_span!("jeval_merged_prefix_sums").entered();
         (0..num_chips)
@@ -927,16 +806,6 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal> + 'st
         ),
     };
 
-    // (A `#[cfg(debug_assertions)]` block here used to run the naive prover as a
-    // "cross-check" and `debug_assert_eq!` its `claimed_sum` against the
-    // structural one. That could not fail: both provers are HANDED the same
-    // `claimed_sum` and return it unchanged, so it compared a value to itself.
-    // Its own note conceded that the comparison that would mean something --
-    // the round polynomials and the folded point -- "is not done here", and being
-    // debug-only it never ran under `cargo test -r` either. Replaced by
-    // `tests::structural_and_naive_jagged_eval_sumchecks_agree`, which compares
-    // both and runs in every profile.)
-
     JaggedSumcheckEvalProof { partial_sumcheck_proof }
 }
 
@@ -952,11 +821,6 @@ pub fn replay_jagged_evaluation_transcript<C: p3_challenger::FieldChallenger<Inn
     challenger: &mut C,
 ) {
     let psp = &proof.partial_sumcheck_proof;
-    // `prove_jagged_evaluation` observes the claimed sum first — it
-    // observes ZERO in the degenerate (<2 prefix sums) case, where the
-    // dummy proof's `claimed_sum` is also ZERO — then, per sumcheck
-    // round, observes the round polynomial's coefficients and samples
-    // one challenge.
     challenger.observe_algebra_element(psp.claimed_sum);
     for poly in &psp.univariate_polys {
         for &c in &poly.coefficients {
@@ -989,9 +853,6 @@ mod tests {
     fn prove_jagged_evaluation_naive_path_emits_round_polys() {
         let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
         let mut challenger = InnerChallenger::new(perm);
-        // prefix_sums=[0,16,32,48] → total area 48, log_m = log2_ceil(48) = 6,
-        // so half = log_m+1 = 7 and n = 2*half = 14.  (PHASE 2: half is derived
-        // from the prefix sums, not z_trace.len(); see prove_jagged_evaluation.)
         let proof = prove_jagged_evaluation(
             &[0, 16, 32, 48],
             &[InnerChallenge::ZERO; 5],
@@ -1013,27 +874,24 @@ mod tests {
         let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
         let mut challenger = InnerChallenger::new(perm);
 
-        // Tiny fixture: 2 columns of heights [3, 2], log_m=2, n=6.
         let prefix_sums = vec![0usize, 3, 5];
-        let half = 3; // log_m + 1
+        let half = 3;
         let z_row = vec![
             InnerChallenge::from_u8(7),
             InnerChallenge::from_u8(11),
             InnerChallenge::from_u8(13),
         ];
-        let z_col = vec![InnerChallenge::from_u8(17)]; // 2 cols → 1 challenge
+        let z_col = vec![InnerChallenge::from_u8(17)];
         let z_trace = vec![
             InnerChallenge::from_u8(19),
             InnerChallenge::from_u8(23),
             InnerChallenge::from_u8(29),
         ];
-        // half = z_trace.len() so n = 2*3 = 6 → 64-cell hypercube.
 
         let proof =
             prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger);
         let psp = &proof.partial_sumcheck_proof;
 
-        // Closed-form claimed_sum.
         let expected_sum = crate::jagged_branching_program::full_jagged_evaluation(
             &prefix_sums,
             &z_row,
@@ -1042,13 +900,10 @@ mod tests {
         );
         assert_eq!(psp.claimed_sum, expected_sum);
 
-        // n round polys.
         let n = 2 * half;
         assert_eq!(psp.univariate_polys.len(), n);
         assert_eq!(psp.point_and_eval.0.len(), n);
 
-        // Round identity: g_round(0) + g_round(1) == claim_so_far.
-        // claim_0 = claimed_sum; claim_{r+1} = g_r(challenge_r).
         let mut claim = psp.claimed_sum;
         for (round_idx, poly) in psp.univariate_polys.iter().enumerate() {
             let g0 = poly.eval_at_point(InnerChallenge::ZERO);
@@ -1058,14 +913,9 @@ mod tests {
                 claim,
                 "round {round_idx}: g(0) + g(1) should equal claim {claim:?}",
             );
-            // Next round's claim = poly evaluated at the round's challenge.
-            // point_and_eval.0 is prepend-order (newest-first), so
-            // round r's challenge is at index n-1-r.
             claim = poly.eval_at_point(psp.point_and_eval.0[n - 1 - round_idx]);
         }
 
-        // Final identity: last round's poly at last challenge equals
-        // point_and_eval.1.
         assert_eq!(claim, psp.point_and_eval.1);
     }
 
@@ -1095,17 +945,13 @@ mod tests {
         let psp = &proof.partial_sumcheck_proof;
         let n = 2 * half_bits;
         assert_eq!(psp.univariate_polys.len(), n);
-        // Round identity: g_round(0) + g_round(1) == claim_so_far.
         let mut claim = psp.claimed_sum;
         for (round_idx, poly) in psp.univariate_polys.iter().enumerate() {
             let g0 = poly.eval_at_point(InnerChallenge::ZERO);
             let g1 = poly.eval_at_point(InnerChallenge::ONE);
             assert_eq!(g0 + g1, claim);
-            // point_and_eval.0 is prepend-order; round r's
-            // challenge is at index n-1-r.
             claim = poly.eval_at_point(psp.point_and_eval.0[n - 1 - round_idx]);
         }
-        // Final identity: last claim == point_and_eval.1.
         assert_eq!(claim, psp.point_and_eval.1);
     }
 
@@ -1145,8 +991,6 @@ mod tests {
             InnerChallenge::from_u8(29),
         ];
 
-        // Derive the shared inputs exactly as `prove_jagged_evaluation` does, so
-        // the test cannot drift from the production derivation.
         let last = prefix_sums.last().copied().unwrap();
         let log_m =
             if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
@@ -1168,8 +1012,6 @@ mod tests {
             })
             .collect();
 
-        // Structural, on a challenger seeded with the claimed sum (what
-        // `prove_jagged_evaluation` observes before the sumcheck).
         let mut ch_structural = InnerChallenger::new(poseidon2_init());
         ch_structural.observe_algebra_element(claimed_sum);
         let structural = structural_jagged_eval_sumcheck(
@@ -1181,18 +1023,9 @@ mod tests {
             &mut ch_structural,
         );
 
-        // Naive, on an identically seeded challenger.
         let bp = BranchingProgram::new(z_row.clone(), z_trace.clone());
         let f_evals = materialize_f_evals(&z_col_lagrange, &prefix_sums, half);
         let bp_evals = materialize_bp_evals(&bp, half);
-        // The two fold from opposite ends: the naive prover folds the LOWEST index
-        // bit first (`f[2*i]`/`f[2*i+1]` pairs adjacent entries), while the
-        // structural one folds its highest variable first -- which is exactly why
-        // its point comes back in prepend order. Reverse the n-bit index of both
-        // materialized tables so round r folds the same variable on both sides.
-        // (Without this the round-0 polynomials mirror each other: one has
-        // `g(0)=0, g(1)=claimed`, the other the reverse, both summing to the same
-        // claimed value because they are the same polynomial read backwards.)
         let rev_index = |v: &[InnerChallenge]| -> Vec<InnerChallenge> {
             (0..v.len()).map(|i| v[bit_reverse(i, n)]).collect()
         };
@@ -1233,17 +1066,15 @@ mod tests {
     fn prove_jagged_evaluation_claimed_sum_matches_closed_form() {
         let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
         let mut challenger = InnerChallenger::new(perm);
-        // Single column, height 3, so t_0 = 0, t_1 = 3.
         let prefix_sums = vec![0usize, 3];
-        let log_m = 2; // log2_ceil(3) = 2
+        let log_m = 2;
         let z_row = vec![InnerChallenge::ZERO; log_m + 1];
-        let z_col: Vec<InnerChallenge> = vec![]; // 1 col → 0 challenge bits
+        let z_col: Vec<InnerChallenge> = vec![];
         let z_trace = vec![InnerChallenge::ZERO; log_m + 1];
 
         let proof =
             prove_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_trace, &mut challenger);
 
-        // Direct computation via the closed-form evaluator.
         let expected = crate::jagged_branching_program::full_jagged_evaluation(
             &prefix_sums,
             &z_row,
@@ -1253,18 +1084,8 @@ mod tests {
         assert_eq!(proof.partial_sumcheck_proof.claimed_sum, expected);
     }
 
-    // PHASE-2 circuit-orientation ORACLE.  The recursion verifier
-    // (real_jagged_evaluator_fn) reconstructs `expected_eval` and asserts
-    // it equals the eval-sumcheck closing claim `point_and_eval.1`.  The
-    // host BranchingProgram reads BIG-endian; the in-circuit
-    // emit_branching_program_eval reads LITTLE-endian.  This test runs the
-    // PRODUCTION prove_jagged_evaluation (z_trace = rev(z_star)) and
-    // brute-forces which orientation of the circuit's BP inputs + lagrange
-    // pairing reproduces point_and_eval.1, telling us the exact circuit edit.
     #[test]
     #[ignore] // PHASE-2 investigation tool: structural prover's full_point layout
-              // is not reproduced by any simple input reversal of the circuit;
-              // run with --ignored to iterate the circuit-side fix.
     fn phase2_circuit_orientation_oracle() {
         use crate::jagged_branching_program::{
             bits_big_endian, full_jagged_evaluation, partial_lagrange, BranchingProgram,
@@ -1275,23 +1096,20 @@ mod tests {
         type EF = InnerChallenge;
         let rev = |v: &[EF]| -> Vec<EF> { v.iter().rev().copied().collect() };
         let eq = |a: EF, b: EF| -> EF { a * b + (EF::ONE - a) * (EF::ONE - b) };
-        // circuit_emit(a,b,c,d) [little-endian] == BP_host(rev a, rev b).eval(rev c, rev d).
         let circuit_bp = |a: &[EF], b: &[EF], c: &[EF], d: &[EF]| -> EF {
             BranchingProgram::new(rev(a), rev(b)).eval(&rev(c), &rev(d))
         };
 
-        // (chips as (log_h, ncol)) -> column-wise offsets (jagged packing).
         let shapes: &[&[(usize, usize)]] = &[
             &[(4, 1), (3, 1), (2, 1)],
             &[(5, 2), (4, 3), (2, 1)],
             &[(6, 1), (4, 2), (3, 1)],
-            &[(2, 1)],         // single chip, single column (wrap-like)
-            &[(3, 1)],         // single chip
-            &[(3, 1), (2, 1)], // two chips
-            &[(4, 2)],         // single chip, 2 columns
+            &[(2, 1)],
+            &[(3, 1)],
+            &[(3, 1), (2, 1)],
+            &[(4, 2)],
         ];
 
-        // Knob combo -> set of shape-indices where it matched.
         let mut survivors: Vec<[bool; 7]> = Vec::new();
         let mut first = true;
 
@@ -1318,11 +1136,6 @@ mod tests {
             } else {
                 (num_cols as usize).next_power_of_two().trailing_zeros() as usize
             };
-            // PRODUCTION-FAITHFUL: z_star (= reduction.eval_point = BP z_index)
-            // has length log_dense_size = log2_ceil(total area) = log_m, which is
-            // ONE LESS than half (= log_m+1, the prefix-sum bit width).  The
-            // earlier oracle used z_star.len = half, accidentally masking the
-            // prove_jagged_evaluation `half = z_trace.len()` off-by-one.
             let log_dense_size =
                 if last <= 1 { 1 } else { last.next_power_of_two().trailing_zeros() as usize };
 
@@ -1330,25 +1143,19 @@ mod tests {
             let z_row: Vec<EF> = (0..max_log_row).map(|_| rk(&mut rng)).collect();
             let z_col: Vec<EF> = (0..z_col_len).map(|_| rk(&mut rng)).collect();
             let z_star: Vec<EF> = (0..log_dense_size).map(|_| rk(&mut rng)).collect();
-            let z_trace = rev(&z_star); // BP z_index (len log_dense_size).
+            let z_trace = rev(&z_star);
 
             let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
             let mut ch = InnerChallenger::new(perm);
             let proof = prove_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace, &mut ch);
             let psp = &proof.partial_sumcheck_proof;
-            // sanity: claimed_sum == closed form at rev(z_star).
             assert_eq!(psp.claimed_sum, full_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace));
             let target = psp.point_and_eval.1;
-            let pp = &psp.point_and_eval.0; // len n = 2*half
+            let pp = &psp.point_and_eval.0;
             let n = pp.len();
             let h = n / 2;
             let z_col_lag = partial_lagrange(&z_col);
 
-            // DEFINITIVE materialized oracle: the canonical polynomial is
-            // P = F .* BP over the boolean hypercube (see materialize_f_evals /
-            // materialize_bp_evals).  point_and_eval.1 of a standard sumcheck =
-            // MLE_F(pp) * MLE_BP(pp) where pp is read LSB-first (hypercube bit j
-            // <-> pp[j]).  This pins target with zero hand-tracing.
             {
                 let f_arr = super::materialize_f_evals(&z_col_lag, &offsets, half);
                 let bp_obj = BranchingProgram::new(z_row.clone(), z_trace.clone());
@@ -1374,10 +1181,8 @@ mod tests {
                     "   [mat] bp.eval(pp[..h],pp[h..]) == mle_bp : {}",
                     bp_obj.eval(&pp[..h], &pp[h..]) == mle_bp
                 );
-                // combo-25 BP via the circuit_bp identity (zrow_rev, zeval=z*, fh_rev, sh_rev):
                 let c25 = circuit_bp(&rev(&z_row), &z_star, &rev(&pp[..h]), &rev(&pp[h..]));
                 tracing::info!("   [mat] circuit_bp(combo25) == mle_bp : {}", c25 == mle_bp);
-                // lag with NO reversal == mle_f ?
                 let mut lag_nr = EF::ZERO;
                 for k in 0..num_cols {
                     let mut merged = bits_big_endian::<EF>(offsets[k], half);
@@ -1444,8 +1249,6 @@ mod tests {
             tracing::info!("   FINAL zrow_rev={} zeval_rev={} swap={} fh_rev={} sh_rev={} lag_m_rev={} lag_pp_rev={}",
                 s[0], s[1], s[2], s[3], s[4], s[5], s[6]);
         }
-        // Informational only (no panic): empty survivors means the structural
-        // prover's full_point layout is not a simple input-reversal of pp.
         if survivors.is_empty() {
             tracing::info!(
                 "   (no simple reversal matches — structural full_point layout is non-trivial)"

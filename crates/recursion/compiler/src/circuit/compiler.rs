@@ -94,7 +94,6 @@ where
             Entry::Vacant(_) => panic!("expected entry: virtual_physical[{vaddr:?}]"),
             Entry::Occupied(entry) => {
                 if increment_mult {
-                    // This is a read, so we increment the mult.
                     match self.addr_to_mult.get_mut(entry.get().as_usize()) {
                         Some(mult) => *mult += C::F::ONE,
                         None => panic!("expected entry: virtual_physical[{vaddr:?}]"),
@@ -113,7 +112,6 @@ where
         match self.virtual_to_physical.entry(vaddr) {
             Entry::Vacant(entry) => {
                 let addr = Self::alloc(&mut self.next_addr);
-                // This is a write, so we set the mult to zero.
                 if let Some(x) = self.addr_to_mult.insert(addr.as_usize(), C::F::ZERO) {
                     panic!("unexpected entry in addr_to_mult: {x:?}");
                 }
@@ -144,7 +142,6 @@ where
         match self.addr_to_mult.entry(addr.as_usize()) {
             Entry::Vacant(_) => panic!("expected entry: addr_to_mult[{:?}]", addr.as_usize()),
             Entry::Occupied(entry) => {
-                // This is a read, so we increment the mult.
                 let mult = entry.into_mut();
                 if increment_mult {
                     *mult += C::F::ONE;
@@ -173,9 +170,6 @@ where
             return *addr;
         }
         let addr = Self::alloc(&mut self.next_addr);
-        // Registered here, not in `consts`, so that reads of a variable
-        // aliased onto this constant land on the same counter as reads of
-        // any other address.
         if let Some(x) = self.addr_to_mult.insert(addr.as_usize(), C::F::ZERO) {
             panic!("unexpected entry in addr_to_mult: {x:?}");
         }
@@ -202,12 +196,9 @@ where
     /// Point `vaddr` at the shared address for `imm` instead of giving it an
     /// address of its own.
     ///
-    /// This is what makes `ImmF`/`ImmE`/`ImmV` free. Writing a constant into a
-    /// fresh variable used to emit one `Mem` write per occurrence, and a
-    /// compose child emitted 133,602 of them carrying just 274 distinct
-    /// values -- 8.6% of the program, nearly all of it the value zero. The
-    /// constant pool already materialises each distinct value exactly once in
-    /// the prologue, so the variable can simply BE that address.
+    /// This makes `ImmF`/`ImmE`/`ImmV` emit no instruction: the constant pool
+    /// materialises each distinct value once in the prologue, so the variable
+    /// is that address.
     ///
     /// Sound because a variable is written exactly once: every other write
     /// path goes through [`Self::write_fp`], which panics on a second write,
@@ -259,24 +250,13 @@ where
     /// `divisor * out = numerator` becomes `0 * out = (lhs - rhs)`,
     /// which has no solution unless `lhs == rhs`.
     ///
-    /// **`DivFAssert` — the recursion-assert soundness flip.**  The
-    /// four assert lowerings below emit `DivFAssert`/`DivEAssert`,
-    /// validated end-to-end: honest fib core→compress→shrink→wrap green
-    /// with enforcement ON, tampered-PV negative test rejects.  (The two
-    /// honest-unsatisfiability blockers — the fabricated vk-merkle leaf
-    /// `[index; 8]` under VERIFY_VK=false and the shrink-layer
-    /// root-digest assert on a compress output — were fixed first; see
-    /// `prover/src/lib.rs make_basefold_merkle_proofs` and
-    /// `machine/wrap_basefold.rs` Reduce arm.)  With
-    /// plain `DivF`, the assert row had `mult = 0` (nobody reads `out`),
-    /// so `is_div_active = is_div AND mult≠0 = 0` and the AIR identity
-    /// `when(is_div_active + is_div_soundness)·(in2·out − in1)` imposed
-    /// NO obligation — every recursion `assert_*` was VACUOUS (a prover
-    /// could satisfy the AIR with `in1 = diff ≠ 0`).  `DivFAssert` sets
-    /// `is_div_soundness = 1` (alu_base.rs:135) so the identity fires
-    /// unconditionally — the assert identity always fires.
-    /// Computational `DivF`s keep the mult=0 dead-branch guard (Select
-    /// branches); assert lowerings must not.
+    /// The four assert lowerings below emit `DivFAssert`/`DivEAssert`.  A
+    /// plain `DivF` assert row has `mult = 0` (nothing reads `out`), so
+    /// `is_div_active = is_div ∧ mult ≠ 0 = 0` and the identity
+    /// `(is_div_active + is_div_soundness)·(in2·out − in1) = 0` would impose
+    /// nothing.  `DivFAssert` sets `is_div_soundness = 1`, so the identity
+    /// always applies.  Computational `DivF`s keep the `mult = 0` dead-branch
+    /// guard (Select branches); assert lowerings must not.
     ///
     /// History: an earlier version lowered asserts to plain `DivF` —
     /// that conflated the dead-branch guard (needed for computational
@@ -477,8 +457,6 @@ where
         felts: [impl Reg<C>; D],
         ext: impl Reg<C>,
     ) -> Instruction<C::F> {
-        // Unlike the hint form, the chip RECEIVES the input block, so the
-        // read is counted (it consumes one multiplicity of the write).
         Instruction::Ext2Felts(HintExt2FeltsInstr {
             output_addrs_mults: felts.map(|r| (r.write(self), C::F::ZERO)),
             input_addr: ext.read(self),
@@ -504,7 +482,6 @@ where
         F: PrimeField + TwoAdicField,
         C: Config<N = F, F = F> + Debug,
     {
-        // For readability. Avoids polluting outer scope.
         use BaseAluOpcode::*;
         use ExtAluOpcode::*;
 
@@ -616,20 +593,8 @@ where
         F: PrimeField + TwoAdicField,
         C: Config<N = F, F = F> + Debug,
     {
-        // In debug mode, we perform cycle tracking and keep track of backtraces.
-        // Otherwise, we ignore cycle tracking instructions and pass around an empty Vec of traces.
         let debug_mode = zkm_debug_mode();
-        // REGION CENSUS env-gated compile-time tally of instructions per
-        // cycle-tracker region: the span builder runs WITHOUT debug_mode's
-        // per-instruction println/backtraces, and the map prints greppably.
         let region_census = std::env::var_os("ZIREN_RECURSION_REGION_CENSUS").is_some();
-        // Compile each IR instruction into a SeqBlock structure.
-        // Most ops accumulate into the current Basic block;
-        // a `DslIr::Parallel` op flushes the current Basic block and
-        // pushes a `SeqBlock::Parallel(per_subprogram_RawProgram)`.
-        // This step also counts the number of times each address is
-        // read from. Backfill below walks the resulting flat
-        // iter_mut, which descends into Parallel sub-programs.
         let (mut top_seq_blocks, traces) =
             tracing::debug_span!("compile_one loop").in_scope(|| {
                 let mut traces = vec![];
@@ -657,17 +622,11 @@ where
                 (blocks, traces)
             });
 
-        // Replace the mults using the address count data gathered in this previous.
-        // Exhaustive match for refactoring purposes.
-        // Constants are registered in `addr_to_mult` too, so this already counts them.
         let total_memory = self.addr_to_mult.len();
         let mut backfill = |(mult, addr): (&mut F, &Address<F>)| {
             *mult = self.addr_to_mult.remove(addr.as_usize()).unwrap()
         };
         tracing::debug_span!("backfill mult").in_scope(|| {
-            // Walk all instructions across the SeqBlock structure
-            // (descends into Parallel sub-programs via the SeqBlock
-            // iterator boilerplate in seq_block.rs).
             for asm_instr in top_seq_blocks.iter_mut().flatten() {
                 match asm_instr {
                     Instruction::BaseAlu(BaseAluInstr {
@@ -725,14 +684,12 @@ where
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
                     }
-                    // Instructions that do not write to memory.
                     Instruction::Mem(MemInstr { kind: MemAccessKind::Read, .. })
                     | Instruction::CommitPublicValues(_)
                     | Instruction::Print(_) => (),
                 }
             }
         });
-        // Initialize constants.
         let total_consts = self.consts.len();
         let consts: Vec<(Imm<C::F, C::EF>, Address<C::F>)> =
             self.consts.drain().sorted_by_key(|x| x.1 .0).collect();
@@ -747,17 +704,10 @@ where
                 })
             })
             .collect();
-        // Every address is accounted for now: the backfill above consumed the
-        // computed ones, and the constants consumed the rest.
         debug_assert!(self.addr_to_mult.is_empty());
         tracing::debug!("number of consts to initialize: {}", instrs_consts.len());
-        // Reset the other fields.
         self.next_addr = Default::default();
         self.virtual_to_physical.clear();
-        // Assemble the final SeqBlock structure. Constants
-        // are prepended as a Basic block; the user's compiled SeqBlocks
-        // (which may contain SeqBlock::Parallel) follow. Traces are
-        // prepended with `None`s for the const init prefix.
         let final_traces: Vec<_> = tracing::debug_span!("construct program").in_scope(|| {
             if debug_mode {
                 std::iter::repeat_n(None, total_consts).chain(traces).collect()
@@ -781,8 +731,7 @@ where
     /// `DslIr::Parallel(par_blocks)` flushes the current buffer to a
     /// `SeqBlock::Basic`, then recursively compiles each sub-block
     /// into its own `RawProgram`, and pushes a `SeqBlock::Parallel`.
-    /// Cycle-tracker enter/exit ops thread through `span_builder`
-    /// as in the legacy compile loop.
+    /// Cycle-tracker enter/exit ops thread through `span_builder`.
     fn compile_block<F>(
         &mut self,
         operations: TracedVec<DslIr<C>>,
@@ -797,9 +746,6 @@ where
         let mut seq_blocks: Vec<SeqBlock<Instruction<C::F>>> = Vec::new();
         let mut current_basic: Vec<Instruction<C::F>> = Vec::with_capacity(PREALLOC_INSTRUCTIONS);
         for (ir_instr, trace) in operations {
-            // Use an enum to pull the per-instruction outcomes out of
-            // the FnMut closure (the closure is Send-bound and we
-            // can't borrow span_builder mutably across it).
             enum Outcome<F> {
                 Push(F),
                 Enter(String),
@@ -808,38 +754,14 @@ where
             let mut outcomes: Vec<Outcome<Instruction<C::F>>> = Vec::new();
             match ir_instr {
                 DslIr::Parallel(par_blocks) => {
-                    // The runtime walks these children concurrently and writes
-                    // memory through SHARED references with `mw_unchecked`.
-                    // That is sound only while their written-address ranges are
-                    // pairwise disjoint: two children writing one address is an
-                    // actual Rust data race, not merely a wrong proof.
-                    //
-                    // `ir_par_map_collect` assigns each child
-                    // `next_addr..variable_count()` from a monotonically
-                    // increasing counter, so the ranges are disjoint by
-                    // construction — but that is a property of one emitter, and
-                    // lowering discarded `addrs_written` without ever looking
-                    // at it, so nothing tied the invariant to the code relying
-                    // on it. A second emitter, or a hand-built block, inherited
-                    // the unchecked writes with none of the discipline.
-                    //
-                    // Sorting by start and comparing neighbours decides pairwise
-                    // disjointness in one pass: sorted ranges overlap iff some
-                    // adjacent pair does. Empty ranges satisfy it trivially.
                     assert_disjoint_written_ranges(
                         &par_blocks.iter().map(|b| b.addrs_written.clone()).collect::<Vec<_>>(),
                     );
-                    // Flush the in-progress Basic block before opening the
-                    // Parallel boundary.
                     if !current_basic.is_empty() {
                         seq_blocks.push(SeqBlock::Basic(BasicBlock {
                             instrs: std::mem::take(&mut current_basic),
                         }));
                     }
-                    // Recursively compile each sub-block into its own
-                    // RawProgram. The span builder is threaded
-                    // through so cycle-tracker enter/exit ops nested
-                    // inside a Parallel block continue to register.
                     let sub_progs: Vec<zkm_recursion_core::runtime::RawProgram<Instruction<C::F>>> =
                         par_blocks
                             .into_iter()
@@ -867,8 +789,6 @@ where
                             panic!("unsupported instruction: {instr:?}\nbacktrace: {trace_clone:?}")
                         }
                     });
-                    // Drain outcomes outside the closure so we can
-                    // mutate span_builder freely.
                     for outcome in outcomes {
                         match outcome {
                             Outcome::Push(instr) => {
@@ -877,8 +797,6 @@ where
                                     #[cfg(feature = "debug")]
                                     traces.push(trace.clone());
                                 }
-                                // Tally whenever the span builder is present
-                                // (debug_mode OR the region census).
                                 if let Some(sb) = span_builder.as_deref_mut() {
                                     sb.item(instr_name(&instr));
                                 }
@@ -899,7 +817,6 @@ where
                 }
             }
         }
-        // Flush trailing Basic block.
         if !current_basic.is_empty() {
             seq_blocks.push(SeqBlock::Basic(BasicBlock { instrs: current_basic }));
         }
@@ -1066,7 +983,6 @@ mod tests {
 
         #[test]
         fn touching_ranges_are_disjoint() {
-            // `end` is exclusive, so `0..10` and `10..11` share no address.
             assert_disjoint_written_ranges(&[0..10, 10..11]);
         }
 
@@ -1077,14 +993,12 @@ mod tests {
 
         #[test]
         fn order_of_the_blocks_does_not_matter() {
-            // The emitter's order is not sorted order; the check sorts first.
             assert_disjoint_written_ranges(&[20..30, 0..10, 10..20]);
         }
 
         #[test]
         #[should_panic(expected = "write overlapping addresses")]
         fn a_shared_address_is_rejected() {
-            // Address 9 is written by both children.
             assert_disjoint_written_ranges(&[0..10, 9..20]);
         }
 
@@ -1097,7 +1011,6 @@ mod tests {
         #[test]
         #[should_panic(expected = "write overlapping addresses")]
         fn an_overlap_between_non_adjacent_blocks_is_still_found() {
-            // Unsorted, and the overlapping pair is not adjacent as given.
             assert_disjoint_written_ranges(&[0..10, 30..40, 5..8]);
         }
     }
@@ -1159,21 +1072,6 @@ mod tests {
         let program = Arc::new(compiler.compile(operations));
         let record = run(program.clone());
 
-        // Prove with the PRODUCTION recursion chip set (`compress_machine`).
-        //
-        // This used to run `machine_wide_with_all_chips` and then
-        // `machine_skinny_with_all_chips`.  Both include chips that production
-        // does not: `FriFold`, `BatchFRI`, `ExpReverseBitsLen` and (skinny)
-        // `Poseidon2Skinny`.  Those four are the only AIRs left that use row
-        // selectors, and the single-row BaseFold zerocheck folder has none
-        // (`basefold_constraint_folder.rs`: "no row selectors"), so every test
-        // routed through them panicked -- 8 of the 18 in this module.
-        //
-        // Testing the chip set production actually proves is both the honest
-        // thing and the one that passes.  Retiring the four dead chips outright
-        // is tracked separately: they reach the recursion ISA
-        // (`runtime/instruction.rs`), the C++ FFI codegen (`build.rs`, `sys.rs`)
-        // and the shape config, so it is not a chip-file deletion.
         let machine = RecursionAir::<_, 3>::compress_machine(KoalaBearPoseidon2::default());
         let (pk, vk) = machine.setup(&program);
         let result = run_test_machine(vec![record.clone()], machine, pk, vk);

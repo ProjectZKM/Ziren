@@ -177,7 +177,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2MulAssignChip<P> {
 
             Self::populate_field_ops(&mut new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
 
-            // Populate the memory access columns.
             for i in 0..cols.y_access.len() {
                 cols.y_access[i].populate(event.y_memory_records[i], &mut new_byte_lookup_events);
             }
@@ -209,7 +208,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2MulAssignChip<P> {
             <Fp2MulAssignChip<P> as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             num_fp2_mul_cols::<P>(),
@@ -334,8 +332,7 @@ where
         );
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
-                                             * same. */
+            local.clk + AB::F::from_u32(1),
             local.x_ptr,
             &local.x_access,
             local.is_real,

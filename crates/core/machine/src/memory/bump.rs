@@ -79,12 +79,8 @@ impl<F> BaseAir<F> for MemoryBumpChip {
 /// The byte lookups a single bump row emits, shared by `generate_dependencies` and
 /// `generate_trace` so the two can never drift.
 fn bump_row_blu_events(event: &MemoryBumpEvent, blu: &mut impl ByteRecord) {
-    // The shard is range-checked to 16 bits (the memory-argument ordering argument assumes both
-    // comparands are < 2^24).
     blu.add_u16_range_check(event.shard as u16);
 
-    // The address must be a register: bumping a non-register address would let the prover splice
-    // an extra link into that address's access chain.
     blu.add_byte_lookup_event(ByteLookupEvent {
         opcode: ByteOpcode::LTU,
         a1: 1,
@@ -121,7 +117,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryBumpChip {
                 let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 for event in events {
                     bump_row_blu_events(event, &mut blu);
-                    // The shadow read's own timestamp comparison limbs.
                     let mut cols = MemoryBumpCols::<F>::default();
                     cols.access.populate(read_record(event), &mut blu);
                 }
@@ -208,8 +203,6 @@ where
 
         builder.assert_bool(local.is_real);
 
-        // The shard must be within 16 bits: the memory ordering argument compares shards when the
-        // shards differ, and assumes both comparands are < 2^24.
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.shard,
@@ -218,14 +211,6 @@ where
             local.is_real,
         );
 
-        // The address must be a register, i.e. `addr < NUM_REGISTERS`.
-        //
-        // This is load-bearing.  A bump splices an extra link into an address's per-shard access
-        // chain at clk 0.  For a *register* that is harmless: register accesses only ever occur at
-        // sub-cycle positions `1..=4`, so the new link can only be the first one, and the chain
-        // stays sorted by clk.  For a general memory address, which can be accessed at sub-cycle
-        // position 0 (i.e. clk 0 on the shard's first instruction), a bump could be spliced in
-        // mid-shard and reset the chain, letting a later write be read by an earlier access.
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::LTU as u8),
             AB::Expr::ONE,
@@ -234,9 +219,6 @@ where
             local.is_real,
         );
 
-        // The shadow read itself, at `(shard, 0)`.  This is an ordinary memory access, so it
-        // carries the full shard-vs-clk comparison and proves `(shard, 0) > (prev_shard,
-        // prev_clk)`.
         builder.eval_memory_access(
             local.shard,
             AB::Expr::ZERO,

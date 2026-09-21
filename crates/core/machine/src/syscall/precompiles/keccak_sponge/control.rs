@@ -1,12 +1,12 @@
-//! Keccak-sponge **control** chip — the sponge layer + the two `PrecompileChain`
+//! Keccak-sponge control chip: the sponge layer + the two `PrecompileChain`
 //! bus endpoints, one row per sponge block.
 //!
 //! The [`super::KeccakSpongeChip`] worker only evaluates the bare keccak-f
-//! permutation (one round/row, round-chained on bus P).  Everything the legacy
-//! multi-row chip did with `next.*`/`when_*` selectors — the multi-block sponge
+//! permutation (one round/row, round-chained on bus P). The multi-block sponge
 //! (memory reads of each input block, the rate absorb XOR, the block-to-block
-//! state hand-off, the output squeeze + write, the syscall receive) — lives here
-//! instead, with the block-to-block state carried on bus B.
+//! state hand-off, the output squeeze + write, the syscall receive) lives
+//! here, with the block-to-block state carried on bus B and no `next.*`
+//! selectors.
 //!
 //! Per block `b` (state laid out as 50 `u32` words / 100 16-bit limbs):
 //!   * receive the syscall once (`is_first_block`);
@@ -96,9 +96,6 @@ impl KeccakSpongeControlChip {
         blu: &mut impl ByteRecord,
     ) {
         let block_num = event.num_blocks();
-        // `state_u32s` tracks the running sponge state in word form: it is the
-        // pre-absorb state at the start of each block and the post-permute state
-        // after `keccakf_u32s`.
         let mut state_u32s = [0u32; KECCAK_STATE_U32S];
 
         for b in 0..block_num {
@@ -118,12 +115,10 @@ impl KeccakSpongeControlChip {
                 event.input_addr + b as u32 * KECCAK_GENERAL_RATE_U32S as u32 * 4,
             );
 
-            // original_state = S_{b-1} (word form).
             for j in 0..KECCAK_STATE_U32S {
                 cols.original_state[j] = Word::from(state_u32s[j]);
             }
 
-            // Read this block's `rate` input words + absorb.
             for j in 0..KECCAK_GENERAL_RATE_U32S {
                 cols.block_mem[j]
                     .populate(event.input_read_records[b * KECCAK_GENERAL_RATE_U32S + j], blu);
@@ -135,18 +130,15 @@ impl KeccakSpongeControlChip {
                 state_u32s[j] = xored;
             }
 
-            // First block: read the input length.
             if b == 0 {
                 cols.input_length_mem.populate(event.input_length_record, blu);
             }
 
-            // Permute: state_u32s becomes S_b.
             keccakf_u32s(&mut state_u32s);
             for j in 0..KECCAK_STATE_U32S {
                 cols.recv_state[j] = Word::from(state_u32s[j]);
             }
 
-            // Final block: write the squeezed output.
             if b == block_num - 1 {
                 for j in 0..KECCAK_GENERAL_OUTPUT_U32S {
                     cols.output_mem[j].populate(event.output_write_records[j], blu);
@@ -249,13 +241,11 @@ where
         builder.assert_bool(local.is_real);
         builder.assert_bool(local.is_first_block);
         builder.assert_bool(local.is_final_block);
-        // Bus-B selectors.
         builder
             .assert_eq(local.do_block_recv, local.is_real * (AB::Expr::ONE - local.is_first_block));
         builder
             .assert_eq(local.do_block_send, local.is_real * (AB::Expr::ONE - local.is_final_block));
 
-        // Receive the syscall once (first block).
         builder.receive_syscall(
             local.shard,
             local.clk,
@@ -266,8 +256,6 @@ where
             LookupScope::Local,
         );
 
-        // Memory: input-length read (first block), rate-word reads (every block),
-        // output writes (final block).
         builder.eval_memory_access(
             local.shard,
             local.clk,
@@ -294,14 +282,12 @@ where
             );
         }
 
-        // The first block's pre-absorb state is zero.
         for w in 0..KECCAK_STATE_U32S {
             for k in 0..4 {
                 builder.when(local.is_first_block).assert_zero(local.original_state[w].0[k]);
             }
         }
 
-        // Absorb: xored[w] = original_state[w] XOR input[w] over the rate.
         for w in 0..KECCAK_GENERAL_RATE_U32S {
             XorOperation::<AB::F>::eval(
                 builder,
@@ -312,7 +298,6 @@ where
             );
         }
 
-        // Final block: the squeezed output words equal the permuted state.
         for j in 0..KECCAK_GENERAL_OUTPUT_U32S {
             builder
                 .when(local.is_final_block)
@@ -355,7 +340,6 @@ impl KeccakSpongeControlChip {
 
         let orig = |w: usize| local.original_state[w].0.map(Into::into);
         let recv = |w: usize| local.recv_state[w].0.map(Into::into);
-        // The absorbed state S_b': rate words = xored, capacity words = original.
         let absorbed = |w: usize| -> [AB::Expr; 4] {
             if w < KECCAK_GENERAL_RATE_U32S {
                 local.xored_general_rate[w].value.0.map(Into::into)
@@ -364,7 +348,6 @@ impl KeccakSpongeControlChip {
             }
         };
 
-        // --- Bus P (round chain): seed @ round 0, drain @ round 24. ---
         let p_header = |round: u32| -> Vec<AB::Expr> {
             vec![
                 pid.clone(),
@@ -387,7 +370,6 @@ impl KeccakSpongeControlChip {
             LookupScope::Local,
         );
 
-        // --- Bus B (block chain): receive original @ block, send permuted @ block+1. ---
         let b_header = |block: AB::Expr| -> Vec<AB::Expr> {
             vec![pid.clone(), AB::Expr::from_u32(KECCAK_BUS_BLOCK), local.clk.into(), block]
         };

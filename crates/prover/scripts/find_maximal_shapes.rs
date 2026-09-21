@@ -33,16 +33,12 @@ struct Args {
 }
 
 fn main() {
-    // Setup logger.
     setup_logger();
 
-    // Parse arguments.
     let args = Args::parse();
 
-    // Setup the options.
     let mut opts = ZKMCoreOpts { shard_batch_size: 1, ..Default::default() };
 
-    // Load the initial maximal shapes.
     let mut all_maximal_shapes: BTreeMap<usize, Vec<Shape<MipsAirId>>> =
         if let Some(initial) = args.initial {
             let initial = if !initial.to_string_lossy().ends_with(".json") {
@@ -59,7 +55,6 @@ fn main() {
             BTreeMap::new()
         };
 
-    // Print the initial maximal shapes.
     for log_shard_size in args.shard_sizes.iter() {
         tracing::info!(
             "there are {} initial maximal shapes for log shard size {}",
@@ -69,7 +64,6 @@ fn main() {
     }
 
     use std::thread::available_parallelism;
-    // For each program, collect the maximal shapes.
     let channel_size =
         available_parallelism().unwrap_or(std::num::NonZeroUsize::new(11).unwrap()).get();
     tracing::info!("using channel size: {}", channel_size);
@@ -84,7 +78,6 @@ fn main() {
         let elf = std::fs::read(&elf_path).expect("failed to read elf file");
 
         for block in start_block..=end_block {
-            // Read the program and stdin.
             let stdin = if args.reth {
                 let stdin_path = stdin_dir.clone() + format!("/{block}-stdin.bin").as_ref();
                 if File::open(&stdin_path).is_err() {
@@ -108,7 +101,6 @@ fn main() {
                 stdin
             };
 
-            // Collect the maximal shapes for each shard size.
             for &log_shard_size in args.shard_sizes.iter() {
                 let tx = tx.clone();
                 let elf = elf.clone();
@@ -132,13 +124,11 @@ fn main() {
         let program_list = args.list;
         for path in program_list {
             tracing::info!("running for program at path: {}", path);
-            // Read the program and stdin.
             let elf = std::fs::read(path.clone() + "/program.bin").expect("failed to read program");
             let stdin = std::fs::read(path.clone() + "/stdin.bin").expect("failed to read stdin");
             let stdin: ZKMStdin =
                 bincode::deserialize(&stdin).expect("failed to deserialize stdin");
 
-            // Collect the maximal shapes for each shard size.
             for &log_shard_size in args.shard_sizes.iter() {
                 let tx = tx.clone();
                 let elf = elf.clone();
@@ -161,7 +151,6 @@ fn main() {
     }
     drop(tx);
 
-    // As the shapes are collected, update the maximal shapes.
     for (log_shard_size, s3_path, collected_maximal_shapes) in rx {
         let current_maximal_shapes = all_maximal_shapes.entry(log_shard_size).or_default();
         for shape in collected_maximal_shapes {
@@ -177,7 +166,6 @@ fn main() {
         );
     }
 
-    // Print the total number of maximal shapes.
     for log_shard_size in args.shard_sizes {
         tracing::info!(
             "there are {} maximal shapes in total for log shard size {}",
@@ -186,7 +174,6 @@ fn main() {
         );
     }
 
-    // Write the maximal shapes to the output file.
     if let Some(output) = args.output {
         let output = if !output.to_string_lossy().ends_with(".json") {
             output.with_extension("json")
@@ -213,7 +200,6 @@ fn collect_maximal_shapes(
     opts: ZKMCoreOpts,
     context: ZKMContext,
 ) -> Vec<Shape<MipsAirId>> {
-    // Setup the executor.
     let program = Program::from(elf).unwrap();
     let mut executor = Executor::with_context(program, opts, context);
     executor.write_vecs(&stdin.buffer);
@@ -221,13 +207,11 @@ fn collect_maximal_shapes(
         executor.write_proof(proof.clone(), vkey.clone());
     }
 
-    // Use this to make sure we don't collect too many shapes that will just OOM out of the box.
     if opts.shard_size == 1 << 23 {
         executor.lde_size_check = true;
         executor.lde_size_threshold = 14 * 1_000_000_000;
     }
 
-    // Collect the maximal shapes.
     let mut maximal_shapes = Vec::new();
     let mut finished = false;
     while !finished {

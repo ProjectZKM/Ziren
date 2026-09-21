@@ -1,57 +1,39 @@
-//! HEIGHT-FORGERY DE-RISK HARNESS.
+//! Height-forgery harness.
 //!
-//! The VK-identity change drops the per-prep-domain height loop
-//! from `vk.hash` (crates/prover/src/types.rs:92-99) so that `VK =
-//! f(chip-SET)` instead of `f(chip-SET, per-chip-heights)`.  That change
-//! is IRREVERSIBLE (it re-keys the recursion vk_map).  Its safety rests
-//! on a single claim:
+//! Claim under test: per-chip heights are bound on the shard verify path
+//! independently of `vk.hash`, so `VK = f(chip set)` suffices. A forged
+//! height must be rejected by at least one of
+//!   * the Fiat-Shamir prologue, which observes `chip_heights`;
+//!   * the `full_geq(degree, ·)` padding mask in the LogUp-GKR
+//!     reconstruction and in the zerocheck;
+//!   * the jagged reduction.
 //!
-//!   > per-chip heights are REDUNDANTLY bound on the verify path — even
-//!   > with the hash height loop removed, a forged height is rejected by
-//!   > the substrate (witnessed degree bits → `full_geq` padding mask,
-//!   > the LogUp-GKR reconstruction identity, the zerocheck identity,
-//!   > and the jagged reduction).
+//! Proofs here are unshaped (`shape_config = None`, raw heights).
 //!
-//! This module PROVES that claim EMPIRICALLY, BEFORE the hash change, by
-//! FORGING a height in a real FIX-off shard proof and confirming the
-//! honest verify path REJECTS it.  The hash is left UNTOUCHED here
-//! (`vk.hash` still loops the heights) — these tests show the rejection
-//! does NOT come from the hash loop (the host `verify_shard` path does
-//! not even recompute the VK hash; it re-derives the transcript from the
-//! observed `chip_heights` and consumes the `degree` bits directly).
+//! Where a height lives in a host shard proof (`JaggedShardProof<F, EF>`):
+//!   * `chip_heights[name]`: observed into the transcript prologue.
+//!   * `opened_values.chips[c].quotient[0]`: the `degree` bits, the
+//!     big-endian (MSB at index 0) boolean decomposition of the real height
+//!     `h`; it is the `full_geq` threshold in both the LogUp-GKR
+//!     reconstruction and the zerocheck.
+//!   * `opened_values.chips[c].log_degree`: `log2 h`.
 //!
-//! WHERE THE HEIGHT LIVES IN A FIX-off HOST SHARD PROOF
-//! (`JaggedShardProof<F, EF>`):
-//!   * `chip_heights[name]`            — observed into the transcript
-//!     prologue (shard_level/verifier.rs:199-204).
-//!   * `opened_values.chips[c].quotient[0]`— the per-chip `degree` =
-//!     BIG-ENDIAN (MSB at index 0) boolean decomposition of the REAL
-//!     height (shard_level/prover.rs:948-969).  Consumed as the
-//!     `full_geq` threshold in BOTH the LogUp-GKR reconstruction
-//!     (verifier.rs:1714-1727) and the zerocheck (verifier.rs:1072-1084).
-//!   * `opened_values.chips[c].log_degree` — the per-chip log height.
+//! A height lie flips a `degree` bit: an over-claim sets a bit above the top
+//! bit of `h`, an under-claim clears the top bit. Either changes the
+//! `full_geq` mask, so the reconstructed `(num, den)` differ from the GKR
+//! round walk.
 //!
-//! A genuine height-LIE flips a `degree` bit: OVER-claim sets a higher
-//! bit (claims a taller chip than the trace), UNDER-claim clears the
-//! real top bit (claims a shorter chip).  Either perturbs the `full_geq`
-//! padding mask → the reconstructed numerator/denominator diverge from
-//! the GKR round walk → `LogupGkr(...)` reject.
+//! The rejecting check is read from the `JaggedShardVerifyError` inside
+//! `MachineVerificationError::InvalidShardProof`:
+//!   * `LogupGkr(_)`: reconstruction under the `full_geq` mask.
+//!   * `Zerocheck(_)`: zerocheck identity (also masked by `full_geq`).
+//!   * `JaggedPcs(_)`: jagged reduction.
 //!
-//! WHICH CHECK CATCHES IT is reported via the `JaggedShardVerifyError`
-//! variant carried inside `MachineVerificationError::InvalidShardProof`:
-//!   * `LogupGkr(_)`  — reconstruction / full_geq mask (PRIMARY host
-//!     substrate height bind).
-//!   * `Zerocheck(_)` — zerocheck identity (also full_geq over degree).
-//!   * `JaggedPcs(_)` — jagged reduction.
+//! Run (CPU, release):
+//!   CUDA_VISIBLE_DEVICES="" cargo test --release -p zkm-core-machine \
+//!       --features ... stage0_forgery -- --nocapture --test-threads=1 --ignored
 //!
-//! Run (CPU, release, target on /data):
-//!   CUDA_VISIBLE_DEVICES="" CARGO_TARGET_DIR=/data/ziren-divfix-target \
-//!     cargo test --release -p zkm-core-machine \
-//!       --features ... stage0_forgery -- --nocapture --test-threads=1
-//!
-//! NOTE: these are `#[ignore]`d by default (they prove real FIX-off
-//! proofs, which is multi-second) — run them explicitly with
-//! `-- --ignored`.
+//! The tests are `#[ignore]`d: each proves a real core proof (seconds).
 
 #![cfg(test)]
 #![allow(clippy::type_complexity)]
@@ -76,8 +58,8 @@ type SC = KoalaBearPoseidon2;
 type Val = KoalaBear;
 type Challenge = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
 
-/// Prove `program` on `stdin` with FIX_CORE_SHAPES OFF (raw heights —
-/// the `shape_config = None` path).  Returns the `MachineProof` and a
+/// Prove `program` on `stdin` unshaped (`shape_config = None`, raw
+/// heights).  Returns the `MachineProof` and a
 /// freshly-built machine+vk so the caller can verify (and re-verify
 /// mutated copies) honestly.
 fn prove_fixoff(
@@ -90,8 +72,6 @@ fn prove_fixoff(
 
     let (pk, _) = prover.setup(&program);
 
-    // FIX-off: shape_config = None ⇒ records stay at RAW heights.
-    // `prove_with_context` runs the program internally from `stdin`.
     let (proof, _output, _cycles) = prove_with_context::<SC, CpuProver<_, _>>(
         &prover,
         &pk,
@@ -103,7 +83,6 @@ fn prove_fixoff(
     )
     .expect("FIX-off prove_with_context");
 
-    // Independent machine + vk for verification.
     let config = KoalaBearPoseidon2::new();
     let machine = MipsAir::machine(config);
     let (_pk, vk) = machine.setup(&program);
@@ -118,19 +97,6 @@ fn verify(
 ) -> Result<(), MachineVerificationError<SC>> {
     let mut challenger = machine.config().challenger();
     machine.verify(vk, proof, &mut challenger)?;
-    // `StarkMachine::verify` is per-shard, so on its own it is not the whole
-    // verification and this harness's "accepted" would overstate what was
-    // checked.
-    //
-    // Note which adversary this covers.  The prologue observes EVERY public
-    // value, `global_cumulative_sum` included, so mutating a finished proof's
-    // digest desyncs Fiat-Shamir and the per-shard verify already rejects it —
-    // no mutation this harness can construct reaches the line below.  What the
-    // cross-shard sum catches is a dishonest PROVER: individually valid,
-    // FS-consistent shards whose global sends and receives do not cancel.
-    // Exercising that needs a perturbed record fed through proving, which this
-    // harness does not model; the call is here so a future case of that shape
-    // cannot pass by verifying only half the argument.
     crate::utils::global_sum::verify_global_cumulative_sum(vk, &proof.shard_proofs)
 }
 
@@ -140,8 +106,6 @@ fn reject_tag(res: &Result<(), MachineVerificationError<SC>>) -> String {
     match res {
         Ok(()) => "ACCEPTED".to_string(),
         Err(MachineVerificationError::InvalidShardProof(inner)) => {
-            // The Display of JaggedShardVerifyError carries the variant
-            // prefix (LogupGkr/Zerocheck/JaggedPcs/...).
             format!("REJECTED::InvalidShardProof[{inner}]")
         }
         Err(other) => format!("REJECTED::{other:?}"),
@@ -154,8 +118,7 @@ fn reject_tag(res: &Result<(), MachineVerificationError<SC>>) -> String {
 /// the chip name.  Prefers a height-VARIED chip (real height > 2) so the
 /// forgery is a meaningful "taller/shorter" lie.
 ///
-/// CRITICAL: `opened_values.chips` is NAME-SORTED at proof time
-/// (shard_level/prover.rs:927-931), so the `ci`-th opening corresponds to
+/// `opened_values.chips` is name-sorted by the shard prover, so the `ci`-th opening corresponds to
 /// the `ci`-th NAME in the name-sorted chip set — NOT the `chip_ordering`
 /// HashMap order.  We recover the name from the sorted `chip_ordering`
 /// keys so the transcript (`chip_heights[name]`) and the degree
@@ -164,8 +127,6 @@ fn pick_forge_target(proof: &MachineProof<SC>) -> (usize, usize, String, usize) 
     let mut fallback: Option<(usize, usize, String, usize)> = None;
     for (si, sp) in proof.shard_proofs.iter().enumerate() {
         let bf = sp.jagged_shard_proof.as_ref();
-        // Name-sorted chip names (the order `opened_values.chips` uses) —
-        // `chip_heights` is a name-sorted BTreeMap over the same set.
         let sorted_names: Vec<String> = bf.chip_heights.keys().cloned().collect();
         for (ci, opening) in bf.opened_values.chips.iter().enumerate() {
             if !opening.quotient.first().map(|q| !q.is_empty()).unwrap_or(false) {
@@ -173,7 +134,6 @@ fn pick_forge_target(proof: &MachineProof<SC>) -> (usize, usize, String, usize) 
             }
             let name = sorted_names.get(ci).cloned().unwrap_or_else(|| format!("chip{ci}"));
             let log_h = opening.log_degree;
-            // Prefer a height-varied chip (log_h >= 2 so over/under both move).
             if log_h >= 2 {
                 return (si, ci, name, log_h);
             }
@@ -187,14 +147,13 @@ fn pick_forge_target(proof: &MachineProof<SC>) -> (usize, usize, String, usize) 
 /// height (the index of the single set bit), or `None` if not a clean
 /// power-of-two indicator.
 fn degree_bits_to_height(degree: &[Challenge]) -> Option<usize> {
-    // BIG-ENDIAN, MSB at index 0. height = 2^(set-bit position from LSB).
     let bit_len = degree.len();
     let mut set: Option<usize> = None;
     for (i, &b) in degree.iter().enumerate() {
         if b == Challenge::ONE {
             let shift = bit_len - 1 - i;
             if set.is_some() {
-                return None; // more than one bit set — not a clean indicator
+                return None;
             }
             set = Some(shift);
         } else if b != Challenge::ZERO {
@@ -206,7 +165,7 @@ fn degree_bits_to_height(degree: &[Challenge]) -> Option<usize> {
 
 // CONTROL
 
-/// CONTROL: an honest FIX-off proof VERIFIES.  Proves the harness's
+/// Control: an honest unshaped proof verifies.  Proves the harness's
 /// verify path is REAL (not trivially rejecting everything), so a later
 /// rejection in the forgery tests is meaningful.
 #[test]
@@ -219,13 +178,11 @@ fn stage0_control_fixoff_honest_verifies() {
     assert!(res.is_ok(), "honest FIX-off proof must verify (control)");
 }
 
-/// CONTROL: an honest FIX-ON proof VERIFIES (sanity that the verify
-/// path agrees on the standard configuration too).
+/// Control: an honest shaped proof verifies.
 #[test]
 #[ignore = "proves a real FIX-on core proof (multi-second); run with --ignored"]
 fn stage0_control_fixon_honest_verifies() {
     setup_logger();
-    // FIX-on path: use the standard run_test_core helper (shape_config Some).
     let mut program = fibonacci_program();
     let shape_config = crate::shape::CoreShapeConfig::<Val>::default();
     shape_config.fix_preprocessed_shape(&mut program).unwrap();
@@ -245,15 +202,14 @@ fn stage0_control_fixon_honest_verifies() {
 
 // FORGERY
 
-/// Core forgery driver.  Proves a FIX-off proof, confirms it verifies
+/// Core forgery driver.  Proves an unshaped proof, confirms it verifies
 /// honestly, then for the chosen target chip applies the supplied
 /// `mutate` to the proof copy and re-verifies.  Asserts the outcome
 /// matches `expect_reject`.  Returns the reject tag so the caller can
 /// log it.
 ///
-/// The degree-masked last-layer reconstruction (the height anchor) always
-/// runs: `22616c7a` made it unconditional and removed the
-/// `ZIREN_LOGUP_RECONSTRUCTION` escape hatch.
+/// The degree-masked last-layer reconstruction (the height anchor) is
+/// unconditional.
 ///
 /// `expect_reject`: the de-risk assertion — `true` means the forgery
 /// MUST be rejected (heights redundantly bound on this path); `false`
@@ -268,9 +224,6 @@ fn run_forgery(
 ) -> String {
     let (proof, machine, vk) = prove_fixoff(program, stdin);
 
-    // Honest control first (per-call) — guards against a proof that is
-    // already invalid for unrelated reasons, AND confirms the verify
-    // path accepts honest proofs.
     let honest = verify(&machine, &vk, &proof);
     assert!(
         honest.is_ok(),
@@ -313,18 +266,14 @@ fn overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     let degree = &mut opening.quotient[0];
     let bit_len = degree.len();
     let real_h = degree_bits_to_height(degree);
-    // Find the current top set bit; set the bit ABOVE it (one taller
-    // power of two). Clear the old top bit so it stays a clean indicator
-    // (claims 2x the height).
     let mut top: Option<usize> = None;
     for (i, b) in degree.iter().enumerate() {
         if *b == Challenge::ONE {
-            top = Some(bit_len - 1 - i); // shift-from-LSB
+            top = Some(bit_len - 1 - i);
         }
     }
     let top_shift = top.unwrap_or(0);
     let new_shift = (top_shift + 1).min(bit_len - 1);
-    // big-endian index of `new_shift`
     let new_idx = bit_len - 1 - new_shift;
     let old_idx = bit_len - 1 - top_shift;
     degree[old_idx] = Challenge::ZERO;
@@ -345,8 +294,6 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     let degree = &mut opening.quotient[0];
     let bit_len = degree.len();
     let real_h = degree_bits_to_height(degree);
-    // Find the top set bit and clear it; set the bit below it (half the
-    // height) so it remains a clean single-bit indicator.
     let mut top: Option<usize> = None;
     for (i, b) in degree.iter().enumerate() {
         if *b == Challenge::ONE {
@@ -393,7 +340,6 @@ fn forge_degree_only_overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     let old_idx = bit_len - 1 - top_shift;
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
-    // NOTE: log_degree and chip_heights LEFT HONEST on purpose.
     tracing::info!(
         "[STAGE0][FORGE] DEGREE-only OVER-claim chip='{name}': real_height={:?} -> degree bits claim 2^{new_shift} \
          (transcript log_height LEFT HONEST)",
@@ -421,7 +367,6 @@ fn forge_degree_only_underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) 
     let new_idx = bit_len - 1 - new_shift;
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
-    // NOTE: log_degree and chip_heights LEFT HONEST on purpose.
     tracing::info!(
         "[STAGE0][FORGE] DEGREE-only UNDER-claim chip='{name}': real_height={:?} -> degree bits claim 2^{new_shift} \
          (transcript log_height LEFT HONEST)",
@@ -444,30 +389,22 @@ fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
 // Two height-binding mechanisms exist on the host shard-verify path:
 //   (A) TRANSCRIPT — `chip_heights` is observed into the Fiat-Shamir
 //       prologue.  Any height lie that touches it re-derives different
-//       challenges → grinding / consistency rejects.  Binds REGARDLESS
-//       of the `ZIREN_LOGUP_RECONSTRUCTION` gate.
+//       challenges → grinding / consistency rejects.
 //   (B) DEGREE-MASKED RECONSTRUCTION — the `degree` bits (`quotient[0]`)
 //       feed `full_geq`, the per-chip padding mask; the last-layer
 //       reconstruction re-derives num/den from the trace openings masked
 //       by `full_geq(degree, ·)` and asserts equality with the GKR round
-//       walk (verifier.rs:1861-1880).  This is the SUBSTRATE the
-//       VK-identity change relies on once heights leave both the hash and
-//       the transcript framing.  It always runs.
+//       walk.  This binds heights with neither the hash nor the
+//       transcript framing.  It always runs.
 
-// (A) TRANSCRIPT-COUPLED forgeries — reject via the transcript bind even
-//     with the reconstruction gate OFF (the production default).
+// (A) Transcript-coupled forgeries: rejected by the transcript bind alone.
 
 #[test]
 #[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
 fn stage0_forge_overclaim_fibonacci() {
     setup_logger();
-    let tag = run_forgery(
-        "fibonacci/overclaim",
-        fibonacci_program(),
-        ZKMStdin::new(),
-        true, // MUST reject
-        overclaim,
-    );
+    let tag =
+        run_forgery("fibonacci/overclaim", fibonacci_program(), ZKMStdin::new(), true, overclaim);
     tracing::info!("[STAGE0][VERDICT] fibonacci OVER-claim (transcript+degree) => {tag}");
 }
 
@@ -506,7 +443,7 @@ fn stage0_forge_degree_only_overclaim_fibonacci_recon_on() {
         "fibonacci/degree-only-overclaim",
         fibonacci_program(),
         ZKMStdin::new(),
-        true, // MUST reject
+        true,
         forge_degree_only_overclaim,
     );
     tracing::info!("[STAGE0][VERDICT] fibonacci DEGREE-only OVER-claim => {tag}");
@@ -542,7 +479,7 @@ fn stage0_degree_only_overclaim_fibonacci_survives_when_recon_off() {
         "fibonacci/degree-only-overclaim-EXPLICITLY-OFF",
         fibonacci_program(),
         ZKMStdin::new(),
-        false, // SURVIVES (degree anchor disabled on purpose) — documented
+        false,
         forge_degree_only_overclaim,
     );
     tracing::info!(
@@ -552,18 +489,10 @@ fn stage0_degree_only_overclaim_fibonacci_survives_when_recon_off() {
     );
 }
 
-// (B'') the SAME degree-only forgery, but on
-//       the TRUE PRODUCTION DEFAULT (env var UNSET) — the reconstruction
-//       runs by default, so the lie MUST be REJECTED.  This is the headline
-//       soundness assertion: with heights out of `vk.hash`,
-//       the degree-masked reconstruction is the host check that
-//       still binds height.  Does NOT use `run_forgery` (which forces the
-//       var) — it removes the var to exercise the real default.
 #[test]
 #[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
 fn stage1_degree_only_overclaim_fibonacci_rejected_on_default() {
     setup_logger();
-    // TRUE production default: the var is UNSET.
     let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
     let honest = verify(&machine, &vk, &proof);
     assert!(
@@ -632,14 +561,12 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
 // The hash-bind ties the per-chip (row_count, column_count) geometry to the
 // FS-observed commitment via
 //   main_commitment = compress([raw_root, hash(once(len) ++ rc ++ cc)]).
-// The host shard verifier re-check (shard_level/verifier.rs, the jagged
-// HASH-BIND re-check)
-// recomputes this from the bundle's RAW root + packing and asserts it equals
+// The host shard verifier recomputes this from the bundle's RAW root + packing and asserts it equals
 // `main_commitment`.  Tampering with ANY count (row or column) in the bundle's
 // packing — WITHOUT being able to forge the corresponding raw root — must make
 // the recompute diverge and REJECT (`JaggedPcs(... IncorrectTableSizes)`).
-// This is the count↔commitment tie that the legacy raw-root-only digest
-// lacked entirely (a prover could witness any geometry).
+// This is the count↔commitment tie; a raw-root-only digest would let a
+// prover witness any geometry.
 
 /// COLUMN-count tamper: bump a chip's `column_count` in the bundle's
 /// packing (leaving the committed raw root untouched).  The host re-check
@@ -650,7 +577,6 @@ fn forge_count_tamper_column(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
     let bf = sp.jagged_shard_proof.as_mut();
     match &mut bf.evaluation_proof {
         EvaluationProof::Bundle(bundle) => {
-            // Find a chip with a nonzero column count and bump it by 1.
             let idx = bundle
                 .packing
                 .column_counts
@@ -676,8 +602,6 @@ fn forge_count_tamper_row(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
     let bf = sp.jagged_shard_proof.as_mut();
     match &mut bf.evaluation_proof {
         EvaluationProof::Bundle(bundle) => {
-            // Bump an interior offset (not the first, not the sentinel) so the
-            // chip straddling it gets a different height.  Pick offset[1].
             let n = bundle.packing.offsets.len();
             assert!(n >= 3, "need >=3 offsets to tamper an interior boundary");
             let idx = 1.min(n - 2);
@@ -701,7 +625,7 @@ fn stage0_forge_count_tamper_column_fibonacci() {
         "fibonacci/count-tamper-column",
         fibonacci_program(),
         ZKMStdin::new(),
-        true, // MUST reject (hash-bind)
+        true,
         forge_count_tamper_column,
     );
     tracing::info!("[STAGE0][VERDICT] fibonacci COLUMN-count tamper (hash-bind) => {tag}");
@@ -724,7 +648,7 @@ fn stage0_forge_count_tamper_row_fibonacci() {
 // STAGE 1 — ZERO-DEGREE MODEL SOUNDNESS.
 //
 // The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
-// commit: a canonical-cluster chip a raw FIX-off shard lacks is committed
+// commit: a canonical-cluster chip an unshaped shard lacks is committed
 // with `row_count = 0`, so its `degree` bits (`quotient[0]`) are ALL ZERO
 // (=> `full_geq == 1` => identity fraction (0,1) => excluded from the
 // LogUp-GKR sum).  These two forgeries PROVE that model is sound — that the
@@ -749,15 +673,12 @@ fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, Strin
     let mut first: Option<(usize, usize, String)> = None;
     for (si, sp) in proof.shard_proofs.iter().enumerate() {
         let bf = sp.jagged_shard_proof.as_ref();
-        // Name-sorted chip names (the order `opened_values.chips` uses) —
-        // `chip_heights` is a name-sorted BTreeMap over the same set.
         let sorted_names: Vec<String> = bf.chip_heights.keys().cloned().collect();
         for (ci, opening) in bf.opened_values.chips.iter().enumerate() {
             let Some(degree) = opening.quotient.first() else { continue };
             if degree.is_empty() {
                 continue;
             }
-            // ALL-ZERO degree bits <=> real height 0 (a missing chip).
             if degree.iter().all(|b| *b == Challenge::ZERO) {
                 let name = sorted_names.get(ci).cloned().unwrap_or_else(|| format!("chip{ci}"));
                 found.push((si, name.clone()));
@@ -783,8 +704,6 @@ fn forge_height0_claim_active(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     let bf = sp.jagged_shard_proof.as_mut();
     let degree = &mut bf.opened_values.chips[ci].quotient[0];
     let bit_len = degree.len();
-    // Ensure a clean all-zero start (it already is — height 0), then set the
-    // bit for 2^1: big-endian index `bit_len - 1 - 1`.
     for b in degree.iter_mut() {
         *b = Challenge::ZERO;
     }
@@ -819,7 +738,6 @@ fn forge_present_claim_missing(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 #[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
 fn stage1_forge_height0_missing_claims_active_rejected() {
     setup_logger();
-    // TRUE production default: the reconstruction runs unless explicitly "0".
     let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
     let honest = verify(&machine, &vk, &proof);
     assert!(
@@ -857,7 +775,7 @@ fn stage1_forge_present_active_claims_missing_rejected() {
         "present-claims-missing",
         fibonacci_program(),
         ZKMStdin::new(),
-        true, // MUST reject
+        true,
         forge_present_claim_missing,
     );
     tracing::warn!(
@@ -888,13 +806,10 @@ fn preprocessed_binding_cross_vk_probe() {
     use crate::programs::tests::{fibonacci_program, simple_program};
     setup_logger();
 
-    // Honest proof of program B (`simple`).
     let (proof_b, machine, vk_b) = prove_fixoff(simple_program(), ZKMStdin::new());
     let honest = verify(&machine, &vk_b, &proof_b);
     assert!(honest.is_ok(), "anti-confound: program B must verify under its OWN vk");
 
-    // Program A's vk (`fibonacci`) -- a different program, different
-    // preprocessed traces, therefore a different `vk.commit`.
     let config = KoalaBearPoseidon2::new();
     let machine_a = MipsAir::machine(config);
     let (_pk_a, vk_a) = machine_a.setup(&fibonacci_program());
@@ -915,7 +830,7 @@ fn preprocessed_binding_cross_vk_probe() {
     );
 }
 
-/// GATE (memory chips): honest FIX-off proofs of memory-heavy programs verify.
+/// Gate (memory chips): honest unshaped proofs of memory-heavy programs verify.
 #[test]
 #[ignore = "proves three real FIX-off core proofs; run with --ignored"]
 fn stage0_control_fixoff_memory_programs_verify() {

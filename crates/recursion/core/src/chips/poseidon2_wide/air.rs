@@ -41,7 +41,6 @@ where
         let prep_local = prepr.current_slice();
         let prep_local: &Poseidon2PreprocessedColsWide<_> = (*prep_local).borrow();
 
-        // Dummy constraints to normalize to DEGREE.
         let lhs = (0..DEGREE)
             .map(|_| local_row.external_rounds_state()[0][0].into())
             .product::<AB::Expr>();
@@ -50,7 +49,6 @@ where
             .product::<AB::Expr>();
         builder.assert_eq(lhs, rhs);
 
-        // Enforce the memory argument for input and output words.
         (0..WIDTH).for_each(|i| {
             builder.send_single(
                 prep_local.input[i],
@@ -67,12 +65,10 @@ where
             )
         });
 
-        // Apply the external rounds.
         for r in 0..NUM_EXTERNAL_ROUNDS {
             self.eval_external_round(builder, local_row.as_ref(), r);
         }
 
-        // Apply the internal rounds.
         self.eval_internal_rounds(builder, local_row.as_ref());
     }
 }
@@ -97,19 +93,14 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         let mut local_state: [AB::Expr; WIDTH] =
             array::from_fn(|i| local_row.external_rounds_state()[r][i].into());
 
-        // For the first round, apply the linear layer.
         if r == 0 {
             external_linear_layer(&mut local_state);
         }
 
-        // Add the round constants.
         let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
         let add_rc: [AB::Expr; WIDTH] =
             array::from_fn(|i| local_state[i].clone() + AB::F::from_u32(RC_16_30_U32[round][i]));
 
-        // Apply the sboxes.
-        // See `populate_external_round` for why we don't have columns for the sbox output here.
-        // let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
         let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
         for i in 0..WIDTH {
             let calculated_sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
@@ -120,11 +111,8 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             } else {
                 sbox_deg_3[i] = calculated_sbox_deg_3;
             }
-
-            // sbox_deg_7[i] = sbox_deg_3[i].clone() * sbox_deg_3[i].clone() * add_rc[i].clone();
         }
 
-        // Apply the linear layer.
         let mut state = sbox_deg_3;
         external_linear_layer(&mut state);
 
@@ -154,7 +142,6 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         let s0 = local_row.internal_rounds_s0();
         let mut state: [AB::Expr; WIDTH] = core::array::from_fn(|i| state[i].into());
         for r in 0..NUM_INTERNAL_ROUNDS {
-            // Add the round constant.
             let round = r + NUM_EXTERNAL_ROUNDS / 2;
             let add_rc = if r == 0 { state[0].clone() } else { s0[r - 1].into() }
                 + AB::Expr::from_u32(RC_16_30_U32[round][0]);
@@ -165,12 +152,6 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
                 sbox_deg_3 = internal_sbox[r].into();
             }
 
-            // // See `populate_internal_rounds` for why we don't have columns for the sbox output
-            // // here.
-            // let sbox_deg_7 = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc.clone();
-
-            // Apply the linear layer.
-            // See `populate_internal_rounds` for why we don't have columns for the new state here.
             state[0] = sbox_deg_3.clone();
             internal_linear_layer(&mut state);
 

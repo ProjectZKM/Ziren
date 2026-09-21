@@ -75,18 +75,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
-            // BatchFRI and ExpReverseBitsLen are retired from the BaseFold
-            // compress/shrink machine. Both carry `when_transition` /
-            // padded-row AIR constraints that `ShardConstraintFolder`
-            // cannot evaluate (it has no row selectors — `unimplemented!`).
-            // BatchFRI emits zero events on this path: its only emitter,
-            // the legacy `TwoAdicFriPcs` FRI verifier (`C::batch_fri`), is
-            // retired, and BaseFold never exercises it. ExpReverseBitsLen
-            // is now lowered inline to ALU/Select ops in
-            // `InnerConfig::exp_reverse_bits` (circuit/lib.rs), so it too
-            // emits zero events here. Both chips remain in the legacy-FRI
-            // `wrap_machine` / `machine_*_with_all_chips`, which use the
-            // row-selector STARK prover.
             RecursionAir::Select(SelectChip),
             RecursionAir::Ext2Felt(Ext2FeltChip::default()),
             RecursionAir::PublicValues(PublicValuesChip),
@@ -94,24 +82,11 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         .map(Chip::new)
         .into_iter()
         .collect::<Vec<_>>();
-        // Every COMPRESS-machine proof (leaf, compose, deferred) commits both of
-        // its rounds under `RECURSION_PINS`: a fixed committed area and a fixed
-        // padding-column count.  That makes the program verifying such a proof
-        // a function of arity alone — its geometry no longer reads the child's
-        // row counts — which is what lets every node be proved at its own
-        // multiple-of-32 rows (`RecursionShapeConfig::fix_shape`) instead of a
-        // shape sized for the largest.  (An earlier pin was a floor nobody
-        // reached; this one is sized above every organic area and asserted.)
         StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
             .with_recursion_pins(Some(zkm_pcs::jagged::RECURSION_PINS))
     }
 
     pub fn shrink_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
-        // SHRINK's chip set is FROZEN at the pre-`Ext2Felt` compress set: the
-        // shrink proof's structure is what the BN254 wrap R1CS — and through
-        // it the gnark ceremony — is built over, so a chip added to compress
-        // must NOT appear here.  Shrink programs correspondingly keep the
-        // legacy `HintExt2Felts` + monomial re-binding (see `ext2felt_v2`).
         let chips = [
             RecursionAir::MemoryConst(MemoryConstChip::default()),
             RecursionAir::MemoryVar(MemoryVarChip::default()),
@@ -132,16 +107,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
     /// This machine assumes that the `shrink` stage has a fixed shape, so there is no need to
     /// fix the trace sizes.
     pub fn wrap_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
-        // #H (BaseFold-over-BN254 wrap port): the wrap STARK now proves via
-        // BaseFold, so its
-        // machine must be selector-free, exactly like the compress/shrink
-        // BaseFold machine. The legacy wrap chip set used `Poseidon2Skinny`
-        // (poseidon2_skinny/air.rs has when_first_row/when_transition AIR
-        // constraints) and `BatchFRI` (FRI verifier chip, also row-selector +
-        // padded-row constrained) — both `unimplemented!` in
-        // `ShardConstraintFolder`. On the BaseFold path the wrap program
-        // (`verify_wrap_basefold`) emits zero BatchFRI events and uses the wide
-        // Poseidon2, so the FRI-free compress/shrink chip set is correct here.
         let chips = [
             RecursionAir::MemoryConst(MemoryConstChip::default()),
             RecursionAir::MemoryVar(MemoryVarChip::default()),
@@ -158,15 +123,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
     }
 
     pub fn shrink_shape() -> RecursionShape {
-        // Row counts, not log2 heights — a recursion shape pins rows exactly
-        // (`next_multiple_of_32_rows`).  Written as `1 << n` because that is
-        // what these were, and shrink is FROZEN: nothing re-tunes it.
         let shape: std::collections::BTreeMap<String, usize> = [
             (Self::MemoryVar(MemoryVarChip::default()), 1 << 18),
             (Self::Select(SelectChip), 1 << 18),
             (Self::MemoryConst(MemoryConstChip::default()), 1 << 17),
-            // BatchFRI / ExpReverseBitsLen are no longer in the BaseFold
-            // compress/shrink *machine* (see `compress_machine`), but their
             (Self::BaseAlu(BaseAluChip), 1 << 17),
             (Self::ExtAlu(ExtAluChip), 1 << 15),
             (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 1 << 16),
@@ -219,32 +179,19 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             Instruction::Mem(_) => self.mem_const_events += 1,
             Instruction::Poseidon2(_) => self.poseidon2_wide_events += 1,
             Instruction::Select(_) => self.select_events += 1,
-            // Runtime emits ONE event per instruction (the event carries
-            // `exp: Vec<F>` of all bits). Was over-counting by exp.len();
-            // benign for push-based reserve, but UB-prone for offset
-            // writes via UnsafeRecord (uninit slots → bad transmute).
             Instruction::Hint(HintInstr { output_addrs_mults })
-            | Instruction::HintBits(HintBitsInstr {
-                output_addrs_mults,
-                input_addr: _, // No receive lookup for the hint operation
-            }) => self.mem_var_events += output_addrs_mults.len(),
+            | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
+                self.mem_var_events += output_addrs_mults.len()
+            }
             Instruction::HintExt2Felts(HintExt2FeltsInstr {
                 output_addrs_mults,
-                input_addr: _, // No receive lookup for the hint operation
+                input_addr: _,
             }) => self.mem_var_events += output_addrs_mults.len(),
             Instruction::Ext2Felts(_) => self.ext2felt_events += 1,
-            // FriFold runtime emits ps_at_z.len() events per instruction
-            // (one per polynomial in the batch); was off-by-default-1. Benign
-            // for push-based reserve, but UB-prone for offset writes via
-            // UnsafeRecord (uninit slots → bad transmute).
             Instruction::HintAddCurve(instr) => {
                 self.mem_var_events += instr.output_x_addrs_mults.len();
                 self.mem_var_events += instr.output_y_addrs_mults.len();
             }
-            // Populate the new counters so `UnsafeRecord::new` can
-            // pre-size these vecs once the runtime walker swaps to
-            // offset-based writes. CommitPublicValues emits exactly
-            // one commit_pv_hash event per instruction.
             Instruction::CommitPublicValues(_) => self.commit_pv_hash_events += 1,
             Instruction::Print(_) => {}
         }
@@ -275,9 +222,9 @@ impl From<RecursionShape> for OrderedShape {
 /// `zkm-pcs::shard_level::basefold_constraint_folder`) is
 /// `AirBuilder + EmptyMessageBuilder`, which by way of the blanket impls
 /// `AB: AirBuilder<F: Field> + MessageBuilder<AirLookup<...>> => BaseAirBuilder`
-/// (`crates/pcs/src/air/builder.rs:581`) and
-/// `AB: BaseAirBuilder => RecursionAirBuilder` (`crates/recursion/core/src/builder.rs:15`)
-/// and `AB: RecursionAirBuilder => ZKMRecursionAirBuilder` (`crates/recursion/core/src/builder.rs:14`)
+/// (in `zkm_pcs::air`),
+/// `AB: BaseAirBuilder => RecursionAirBuilder` and
+/// `AB: RecursionAirBuilder => ZKMRecursionAirBuilder` (in `crate::builder`)
 /// automatically becomes a `ZKMRecursionAirBuilder` — so the existing
 /// generic `impl<AB: ZKMRecursionAirBuilder> Air<AB> for ChipName` on
 /// every recursion chip already covers it.  No new per-chip code is
@@ -334,7 +281,8 @@ mod basefold_air_assertions {
 
         // Enum-level: the `#[derive(MachineAir)]` macro emits a generic
         // `impl<AB: ZKMRecursionAirBuilder<F = F>, AB::Var: 'static>
-        // Air<AB> for RecursionAir<F, DEGREE>` (`crates/derive/src/lib.rs:320-328`).
+        // Air<AB> for RecursionAir<F, DEGREE>`.
+
         // For `AB = ShardConstraintFolder<'a, KoalaBear, InnerChallenge>`,
         // `AB::F = KoalaBear` matches `F = KoalaBear` and `AB::Var =
         // InnerChallenge: 'static`, so the bound resolves.
@@ -372,11 +320,6 @@ pub mod tests {
 
     /// Runs the given program on machines that use the wide and skinny Poseidon2 chips.
     pub fn run_recursion_test_machines(mut program: RecursionProgram<F>) {
-        // Programs assembled directly from instructions (as these tests do)
-        // never run the compiler, which is what normally sets `total_memory`.
-        // `Runtime::new` sizes its `ParMemVec` from it and the vec never grows,
-        // so leaving it at `Default::default()` makes the first memory write
-        // panic with "address N out of bounds (len=0)".
         if program.total_memory == 0 {
             program.total_memory = program.computed_total_memory();
         }
@@ -387,7 +330,6 @@ pub mod tests {
         );
         runtime.run().unwrap();
 
-        // Prove with the production chip set.
         let machine = A::compress_machine(KoalaBearPoseidon2::default());
         let (pk, vk) = machine.setup(&program);
         let result = run_test_machine(vec![runtime.record], machine, pk, vk);

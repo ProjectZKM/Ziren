@@ -6,7 +6,6 @@ use super::{Array, Builder, Config, DslIr, Felt, Usize, Var};
 impl<C: Config> Builder<C> {
     /// Converts a variable to LE bits.
     pub fn num2bits_v(&mut self, num: Var<C::N>) -> Array<C, Var<C::N>> {
-        // This function is only used when the native field is Koalabear.
         assert!(C::N::bits() == NUM_BITS);
 
         let output = self.dyn_array::<Var<_>>(NUM_BITS);
@@ -115,7 +114,6 @@ impl<C: Config> Builder<C> {
         let num: Felt<_> = self.eval(C::F::ZERO);
         for i in 0..NUM_BITS {
             let bit = self.get(bits, i);
-            // Add `bit * 2^i` to the sum.
             self.if_eq(bit, C::N::ONE).then(|builder| {
                 builder.assign(num, num + C::F::from_u32(1 << i));
             });
@@ -193,8 +191,6 @@ impl<C: Config> Builder<C> {
             sum_least_sig_bits = self.eval(bit + sum_least_sig_bits);
         }
 
-        // If the most significant 7 bits are all 1, then check the sum of the least significant
-        // bits, else return zero.
         let check: Var<_> =
             self.eval(most_sig_7_bits * sum_least_sig_bits + (one - most_sig_7_bits) * zero);
         self.assert_var_eq(check, zero);

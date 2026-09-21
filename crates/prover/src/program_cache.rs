@@ -59,7 +59,6 @@ fn binary_fingerprint() -> u64 {
             bytes.len().hash(&mut h);
             bytes.hash(&mut h);
         }
-        // No exe (unusual) -> a fixed fallback; the dir still isolates by env.
         Err(_) => 0u64.hash(&mut h),
     }
     h.finish()
@@ -97,17 +96,6 @@ pub fn disk_load<F: serde::de::DeserializeOwned>(
     let bytes = std::fs::read(&path).ok()?;
     match bincode::deserialize::<zkm_recursion_core::RecursionProgram<F>>(&bytes) {
         Ok(p) => {
-            // A cache entry is NOT a program this process built: it is bytes
-            // from a directory, and `RecursionProgram`'s `Deserialize` is
-            // derived, so nothing has re-run `analyze()` on it.  The runtime
-            // sizes `UnsafeRecord` from `event_counts` and writes every event
-            // unchecked at its instruction's offset, so an entry whose counts
-            // are too small (they are `#[serde(default)]` -- a truncated file
-            // deserializes them to all zeros) would leave record slots
-            // uninitialized for `into_record` to read as field elements.
-            // Re-derive the offsets and compare before handing the program
-            // over; a mismatch is treated exactly like a corrupt file, which
-            // this loader already promises to survive by rebuilding.
             if let Err(e) = p.seq_blocks.validate_offsets(&p.event_counts) {
                 tracing::warn!(
                     "program disk cache: {} fails its offset invariant ({e}); rebuilding",
@@ -145,7 +133,6 @@ pub fn disk_store<F: serde::Serialize>(
             return;
         }
     };
-    // Unique tmp name so concurrent writers do not collide on the rename source.
     let tmp = dir.join(format!("{stage}-{key:016x}.{}.tmp", std::process::id()));
     if std::fs::write(&tmp, &bytes).is_ok() && std::fs::rename(&tmp, &path).is_ok() {
         DISK_STORES.fetch_add(1, Ordering::Relaxed);

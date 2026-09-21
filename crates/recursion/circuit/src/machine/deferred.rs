@@ -1,12 +1,10 @@
-//! Deferred-stage **shape carrier**.
+//! Deferred-stage shape carrier.
 //!
-//! The legacy FRI-shaped deferred verifier and its witness types
-//! (`ZKMDeferredWitnessValues` / `ZKMDeferredWitnessVariable`) have been
-//! retired. The production deferred verifier lives in
+//! The deferred verifier lives in
 //! [`super::deferred_basefold::verify_deferred_basefold`]; the recursion-AIR
 //! variant lives in [`super::deferred_basefold_recursion`].
 //!
-//! [`ZKMDeferredShape`] remains the shape-enumeration carrier on the
+//! [`ZKMDeferredShape`] is the shape-enumeration carrier on the
 //! compress branch (consumed by
 //! [`super::deferred_basefold::ZKMDeferredBasefoldWitnessValues::dummy`])
 //! and references [`super::ZKMCompressShape`] from [`super::compress`].

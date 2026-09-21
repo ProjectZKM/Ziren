@@ -138,18 +138,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<(), Self::Error> {
-        // Build straight into `output`, reserving up front.  This chip emits
-        // exactly two global lookups per local memory event and is the largest
-        // producer of them (measured on reth: 247,706 of the 369,781 global
-        // lookup events per shard, 67%).  Staging them in a local `Vec` first
-        // cost a full extra materialisation — the `Vec` grows by doubling, then
-        // `extend` copies it into `output`, then `MachineRecord::append` copies
-        // it again into the record.  Reserving and pushing directly drops one
-        // of those three passes (measured 1.4 ms/shard of serial host time
-        // inside the `generate_dependencies` critical section) and removes the
-        // realloc storm from the remaining one.
-        //
-        // Byte-neutral: identical events pushed in identical order.
         input
             .get_local_mem_events()
             .for_each(|mem_event| local_entry_blu_events(mem_event, output));
@@ -205,7 +193,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows for each event.
         let events = input.get_local_mem_events().collect::<Vec<_>>();
         let nb_rows = nb_rows(events.len());
         let padded_nb_rows = <MemoryLocalChip as MachineAir<F>>::num_rows(self, input).unwrap();
@@ -248,7 +235,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
             });
         });
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_MEMORY_LOCAL_INIT_COLS))
     }
 
@@ -277,8 +263,6 @@ where
         for local in local.memory_local_entries.iter() {
             builder.assert_bool(local.is_real);
 
-            // The bounds the memory argument assumes of every comparand and value it orders;
-            // see `local_entry_blu_events` for why this chip has to supply them.
             builder.slice_range_check_u8(&local.initial_value.0, local.is_real);
             builder.slice_range_check_u8(&local.final_value.0, local.is_real);
             builder
@@ -307,7 +291,6 @@ where
                 LookupScope::Local,
             );
 
-            // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
                     vec![
@@ -328,7 +311,6 @@ where
                 LookupScope::Local,
             );
 
-            // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
                     vec![
@@ -522,7 +504,6 @@ mod tests {
         };
 
         type F = KoalaBear;
-        // Generate the trace rows for each event.
         let events = input.get_local_mem_events().collect::<Vec<_>>();
         let nb_rows = events.len().div_ceil(4);
         let padded_nb_rows = height;
@@ -548,7 +529,6 @@ mod tests {
             });
         });
 
-        // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, NUM_MEMORY_LOCAL_INIT_COLS)
     }
 }

@@ -45,11 +45,9 @@ impl Groth16Bn254Prover {
     pub fn test<C: Config>(constraints: Vec<Constraint>, witness: Witness<C>) {
         let serialized = serde_json::to_string(&constraints).unwrap();
 
-        // Write constraints.
         let mut constraints_file = tempfile::NamedTempFile::new().unwrap();
         constraints_file.write_all(serialized.as_bytes()).unwrap();
 
-        // Write witness.
         let mut witness_file = tempfile::NamedTempFile::new().unwrap();
         let gnark_witness = GnarkWitness::new(witness);
         let serialized = serde_json::to_string(&gnark_witness).unwrap();
@@ -62,7 +60,6 @@ impl Groth16Bn254Prover {
     }
 
     pub fn build_contracts(build_dir: PathBuf) {
-        // Write the corresponding asset files to the build dir.
         let zkm_verifier_path = build_dir.join("ZKMVerifierGroth16.sol");
         let vkey_hash = Self::get_vkey_hash(&build_dir);
         let zkm_verifier_str = include_str!("../assets/ZKMVerifierGroth16.txt")
@@ -81,28 +78,23 @@ impl Groth16Bn254Prover {
     pub fn build<C: Config>(constraints: Vec<Constraint>, witness: Witness<C>, build_dir: PathBuf) {
         let serialized = serde_json::to_string(&constraints).unwrap();
 
-        // Write constraints.
         let constraints_path = build_dir.join("constraints.json");
         let mut file = File::create(constraints_path).unwrap();
         file.write_all(serialized.as_bytes()).unwrap();
 
-        // Write witness.
         let witness_path = build_dir.join("groth16_witness.json");
         let gnark_witness = GnarkWitness::new(witness);
         let mut file = File::create(witness_path).unwrap();
         let serialized = serde_json::to_string(&gnark_witness).unwrap();
         file.write_all(serialized.as_bytes()).unwrap();
 
-        // Build the circuit.
         build_groth16_bn254(build_dir.to_str().unwrap());
 
-        // Build the contracts.
         Self::build_contracts(build_dir);
     }
 
     /// Generates a Groth16 proof given a witness.
     pub fn prove<C: Config>(&self, witness: Witness<C>, build_dir: PathBuf) -> Groth16Bn254Proof {
-        // Write witness.
         let mut witness_file = tempfile::NamedTempFile::new().unwrap();
         let gnark_witness = GnarkWitness::new(witness);
         let serialized = serde_json::to_string(&gnark_witness).unwrap();

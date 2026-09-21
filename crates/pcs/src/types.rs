@@ -253,7 +253,6 @@ mod tests {
         assert_eq!(back.public_values.len(), PROOF_MAX_NUM_PVS);
         assert_eq!(back.jagged_shard_proof.public_values.len(), 16);
 
-        // Identical bytes in the other direction: the two layouts agree on rmp.
         let new_bytes = rmp_serde::to_vec(&back).expect("mandatory layout serializes");
         assert_eq!(bytes, new_bytes, "the optional layout and this one agree byte for byte on rmp");
     }

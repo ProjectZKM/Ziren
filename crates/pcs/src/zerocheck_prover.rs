@@ -119,16 +119,11 @@ where
         assert_eq!(preprocessed.height(), n, "preprocessed trace height must equal 2^num_vars");
     }
 
-    // Lift the full main + preprocessed traces to extension field, so the
-    // VerifierConstraintFolder (which expects Var = SC::Challenge) can
-    // consume them row-by-row.
     let main_ext: Vec<Challenge<SC>> =
         main.values.iter().map(|&v| Challenge::<SC>::from(v)).collect();
     let preproc_ext: Vec<Challenge<SC>> =
         preprocessed.values.iter().map(|&v| Challenge::<SC>::from(v)).collect();
 
-    // Pre-build "wrapped" next rows so that row (i+1) mod n can be sliced
-    // without branching in the hot loop.
     let wrap_main: Vec<Challenge<SC>> = {
         let mut v = Vec::with_capacity(main_ext.len());
         v.extend_from_slice(&main_ext[main_width..]);
@@ -144,16 +139,12 @@ where
         v
     };
 
-    // Empty permutation placeholder (this path skips permutation;
-    // lookup integrity is handled by Logup-GKR in phase 2b).
-    // Cumulative sums now come from the caller ().
     let empty_perm_ext: Vec<Challenge<SC>> = Vec::new();
     let zero_challenge: Challenge<SC> = local_cumulative_sum;
     let global_sum: SepticDigest<Val<SC>> = global_cumulative_sum;
 
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        // Row i = local, row (i+1) mod n = next.
         let main_local = &main_ext[i * main_width..(i + 1) * main_width];
         let main_next = &wrap_main[i * main_width..(i + 1) * main_width];
         let main_view = PairWindow { local: main_local, next: main_next };
@@ -166,8 +157,6 @@ where
             PairWindow { local, next }
         };
 
-        // This path skips the permutation trace entirely (LogUp-GKR handles
-        // lookup integrity), so the window is empty in both rows.
         let empty_view = PairWindow { local: &empty_perm_ext[..], next: &empty_perm_ext[..] };
 
         let is_first = if i == 0 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO };
@@ -208,7 +197,6 @@ mod tests {
 
     #[test]
     fn eq_mle_table_correct_on_boolean_cube() {
-        // eq(r, b) should be non-trivial; verify Σ_b eq(r,b) = 1.
         let r: Vec<EF> = vec![EF::from_u32(5), EF::from_u32(7), EF::from_u32(11)];
         let table = eq_mle_table::<EF>(&r);
         let sum: EF = table.iter().copied().sum();

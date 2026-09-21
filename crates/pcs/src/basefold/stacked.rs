@@ -91,7 +91,6 @@ pub fn dense_from_interleaved_mles<F: Field + Send + Sync>(
          not the committed data",
     );
 
-    // FLAKE FIX: see round.rs note about KoalaBear u32 serde — safe zero init.
     let mut out: Vec<F> = vec![F::ZERO; dense_len];
     let mut base = 0usize;
     for mle in interleaved {
@@ -104,18 +103,8 @@ pub fn dense_from_interleaved_mles<F: Field + Send + Sync>(
             continue;
         }
         let height = vals.len() / width;
-        // The final stripe is zero-padded past `dense_len`; clip it.
         let span = (width * height).min(dense_len - base);
 
-        // ROW-BLOCKED transpose.  The naive "one parallel task per output
-        // column" walk re-streams the whole `width`-column stripe once per
-        // column, and a 64-byte line holds 16 consecutive `vals` belonging to
-        // 16 DIFFERENT columns — so with a stripe far larger than LLC the
-        // source is pulled from DRAM ~`width/threads` times.  Blocking the row
-        // axis so every task works inside the same `ROW_BLOCK × width` window
-        // (a few MiB, LLC-resident) pulls each source line once and serves the
-        // remaining columns from cache.  Blocks are sequential and each task
-        // owns one column slice, so no aliasing and no `unsafe`.
         const ROW_BLOCK: usize = 1 << 15;
         let mut cols: Vec<&mut [F]> = out[base..base + span].chunks_mut(height).collect();
         let mut r0 = 0usize;
@@ -123,7 +112,6 @@ pub fn dense_from_interleaved_mles<F: Field + Send + Sync>(
             let r1 = (r0 + ROW_BLOCK).min(height);
             let block = &vals[r0 * width..r1 * width];
             cols.par_iter_mut().enumerate().for_each(|(c, col)| {
-                // The clipped final stripe can leave a short trailing column.
                 let hi = r1.min(col.len());
                 for r in r0..hi {
                     col[r] = block[(r - r0) * width + c];
@@ -175,31 +163,14 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
     let mut overflow: Vec<F> = Vec::with_capacity(stripe_capacity);
 
     for mle in multilinears {
-        // Ziren stores row-major with rows =
-        // hypercube points and cols = polys, so the transpose
-        // walks `(poly, hypercube)` in raster order.
-        //
-        // Performance optimization: parallelize the column-major
-        // transpose. For a 2^27-cell jagged dense polynomial this
-        // single inner loop dominates the BaseFold commit path
-        // (~30s/40s pre-fix). Each output column is independent, so
-        // chunk the output by column and fan out across cores.
         let width = mle.num_polynomials();
-        // Obtain the flat row-major slice ONCE (zero-copy borrow) and
-        // index it directly in the transpose below.
         let mle_vals = mle.guts().as_slice();
         let height = mle_vals.len() / width.max(1);
         use p3_maybe_rayon::prelude::*;
-        // Allocator opt: skip the F::ZERO init; every slot is written
-        // by the column-major transpose loop below.  For 134M cells
-        // this avoids ~500 MiB of redundant writes on the commit path.
         let total = width * height;
-        // WIDTH-1 BORROW (see the fn header): the transpose is the identity,
-        // so read the source slice directly instead of copying it.
         let owned: Vec<F> = if width == 1 {
             Vec::new()
         } else {
-            // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
             let mut data: Vec<F> = vec![F::ZERO; total];
             if width > 0 {
                 data.par_chunks_mut(height).enumerate().for_each(|(col, dst)| {
@@ -212,13 +183,6 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         };
         let data: &[F] = if width == 1 { mle_vals } else { &owned };
 
-        // Performance optimization: the previous `data.split_off(needed)`
-        // pattern has O(N²) cost when N = 134M and needed = 16384 (each
-        // split_off COPIES the entire remaining suffix, ~134M elements,
-        // and we do that 8192 times — measured ~30s on hello_world).
-        // Replace with an in-place CURSOR walk: track an index into
-        // `data` and slice without copying until we're ready to push the
-        // final chunk into `overflow`.
         let data_len = data.len();
         let mut data_pos: usize = 0;
         let mut needed = stripe_capacity - overflow.len();
@@ -226,28 +190,19 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
             let chunk = &data[data_pos..data_pos + needed];
             data_pos += needed;
 
-            // Stitch overflow + chunk into a single stripe-sized buffer.
-            // overflow is short (< stripe_capacity); the dominant work
-            // is the chunk read which is already a contiguous slice.
             let mut elements = Vec::with_capacity(stripe_capacity);
             elements.append(&mut overflow);
             elements.extend_from_slice(chunk);
             debug_assert_eq!(elements.len(), stripe_capacity);
 
-            // Reshape to [batch_size, stack_height] then transpose so
-            // the stored Mle has hypercube points as rows and polys
-            // as columns — matches the per-Mle convention used by
-            // BaseFold's encoder.
             let mat = transpose_row_major(&elements, batch_size, stack_height);
             batch_multilinears.push(Arc::new(Mle::from_row_major(mat)));
 
             needed = stripe_capacity;
         }
-        // Append the leftover (< stripe_capacity) to the overflow buffer.
         overflow.extend_from_slice(&data[data_pos..]);
     }
 
-    // Final stripe: pad with zeros up to the next full stripe.
     let new_len = overflow.len().next_multiple_of(stack_height);
     overflow.resize(new_len, F::ZERO);
     let overflow_batch = overflow.len() / stack_height;
@@ -272,10 +227,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
 fn transpose_row_major<F: Field>(src: &[F], rows: usize, cols: usize) -> RowMajorMatrix<F> {
     debug_assert_eq!(src.len(), rows * cols);
     use p3_maybe_rayon::prelude::*;
-    // Allocator opt: skip F::ZERO init; every slot is unconditionally
-    // written by the column-chunk transpose below.
     let total = rows * cols;
-    // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
     let mut out: Vec<F> = vec![F::ZERO; total];
     out.par_chunks_mut(rows).enumerate().for_each(|(c, dst_row)| {
         for r in 0..rows {
@@ -353,10 +305,6 @@ where
     pub fn prove_trusted_evaluation<Challenger>(
         &self,
         eval_point: Vec<EF>,
-        // BORROWED for the same reason as
-        // `BasefoldProver::prove_trusted_mle_evaluations`: the committed data is
-        // read, never consumed, so a commit built once (preprocessed, at setup)
-        // can be opened by every shard without copying its Merkle tree.
         prover_data: &[&StackedBasefoldProverData<F, MT>],
         challenger: &mut Challenger,
     ) -> StackedBasefoldProof<F, EF, MT>
@@ -366,32 +314,17 @@ where
             + CanObserve<MT::Commitment>
             + 'static,
     {
-        // First `log_stacking_height` coords fold the per-stripe
-        // hypercube (the lowest bits of the underlying dense index);
-        // the remaining coords are the batch point (which stripe /
-        // which column).  Matches the unified first-var-first
-        // convention used by `Mle::eval_at` and the BaseFold prover.
         let stack_dim = self.log_stacking_height as usize;
         let stack_point: Vec<EF> = eval_point[..stack_dim].to_vec();
 
-        // Compute batch evaluations per round (one EF per interleaved
-        // stripe).  These get echoed in the proof — the verifier uses
-        // them as BaseFold's `evaluation_claims` argument.
         let batch_evaluations: Vec<Vec<EF>> =
             prover_data.iter().map(|d| self.round_batch_evaluations(&stack_point, d)).collect();
 
-        // `interleaved_mles` is `Vec<Arc<Mle>>`, so this clone is a refcount
-        // bump per stripe, not a copy of any trace.
         let mle_rounds: Vec<Vec<Arc<Mle<F>>>> =
             prover_data.iter().map(|d| d.interleaved_mles.clone()).collect();
         let pcs_prover_data: Vec<&BasefoldProverData<F, MT>> =
             prover_data.iter().map(|d| &d.pcs_batch_data).collect();
 
-        // The OPEN/prove GPU hook lives one level up at
-        // `jagged_pcs::open_jagged_pcs_generic` (a statically-provided
-        // `GpuBasefoldOpenFn`), where it can see the full `JaggedProverData`;
-        // there is no dispatch at this site.  (The COMMIT side is the
-        // `StarkGpuProver` override of `MachineProver::commit_multilinears`.)
         let basefold_proof = self.basefold_prover.prove_trusted_mle_evaluations(
             stack_point,
             mle_rounds,
@@ -458,8 +391,6 @@ where
             return Err(StackedVerifierError::IncorrectShape);
         }
 
-        // Sanity: each round's interleaved-stripe count must match the
-        // claimed `round_areas` (rounded up to the stacking height).
         for (area, round_evals) in round_areas.iter().zip(proof.batch_evaluations.iter()) {
             if !area.is_multiple_of(1usize << self.log_stacking_height) {
                 return Err(StackedVerifierError::IncorrectShape);
@@ -470,10 +401,6 @@ where
             }
         }
 
-        // Interpolate the flat list of batch_evaluations as a
-        // multilinear in `batch_point.len()` variables and check the
-        // claim.  Uses the same partial-Lagrange evaluation as
-        // BaseFold's batching.
         let total: Vec<EF> = proof.batch_evaluations.iter().flatten().copied().collect();
         let expected = eval_multilinear_padded(&total, batch_point);
         if evaluation_claim != expected {
@@ -562,7 +489,7 @@ mod test {
         type F = InnerVal;
         type EF = InnerChallenge;
 
-        let log_stacking_height = 4u32; // stripe height = 16
+        let log_stacking_height = 4u32;
         let batch_size = 2usize;
 
         let mut rng = StdRng::seed_from_u64(0x57AC_CED1);
@@ -573,19 +500,15 @@ mod test {
             Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, width)))
         };
 
-        let mle_a = make_mle(2, 3, &mut rng); // 8 rows × 2 polys = 16 entries
-        let mle_b = make_mle(1, 4, &mut rng); // 16 rows × 1 poly = 16 entries
+        let mle_a = make_mle(2, 3, &mut rng);
+        let mle_b = make_mle(1, 4, &mut rng);
 
         let fri_config = FriConfig::<F>::test_fri_config();
         let mmcs = build_mmcs();
         let dft = Arc::new(Radix2DitParallel::<F>::default());
 
-        let basefold_prover = BasefoldProver::<F, EF, _, _>::new(
-            fri_config.clone(),
-            dft,
-            mmcs.clone(),
-            1, // num_expected_commitments
-        );
+        let basefold_prover =
+            BasefoldProver::<F, EF, _, _>::new(fri_config.clone(), dft, mmcs.clone(), 1);
         let basefold_verifier = BasefoldVerifier::<F, EF, _>::new(fri_config, mmcs, 1);
 
         let prover = StackedPcsProver::new(basefold_prover, log_stacking_height, batch_size);
@@ -595,8 +518,6 @@ mod test {
         let (commit, data) = prover.commit_multilinears(vec![mle_a.clone(), mle_b.clone()]);
         p_chal.observe(commit.clone());
 
-        // Total area = (1 << log_stacking_height) per stripe * stripes.
-        // A: 16 entries, B: 16 entries → 32 entries → 2 stripes of 16.
         let stack_height = 1usize << log_stacking_height;
         let total_entries = 32usize;
         let area = total_entries.next_multiple_of(stack_height);
@@ -606,10 +527,6 @@ mod test {
 
         let eval_point: Vec<EF> = (0..total_point_vars).map(|_| rand_ef(&mut rng)).collect();
 
-        // The honest "evaluation claim" the verifier checks is: the
-        // virtual concatenated MLE (zero-padded to area) evaluated at
-        // eval_point.  We synthesize it directly from the round
-        // batch_evaluations the prover would compute.
         let stack_point: Vec<EF> = eval_point[..log_stacking_height as usize].to_vec();
         let batch_evals_flat: Vec<EF> =
             data.interleaved_mles.iter().flat_map(|m| m.eval_at::<EF>(&stack_point)).collect();
@@ -653,7 +570,7 @@ mod test {
         type F = InnerVal;
         type EF = InnerChallenge;
 
-        let log_stacking_height = 4u32; // stripe height = 16
+        let log_stacking_height = 4u32;
         let batch_size = 2usize;
         let stack_height = 1usize << log_stacking_height;
 
@@ -665,10 +582,8 @@ mod test {
             Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, width)))
         };
 
-        // Round 0: two MLEs (heterogeneous), 16 + 16 = 32 entries.
         let r0_a = make_mle(2, 3, &mut rng);
         let r0_b = make_mle(1, 4, &mut rng);
-        // Round 1: two MLEs, 16 + 32 = 48 entries.
         let r1_a = make_mle(1, 4, &mut rng);
         let r1_b = make_mle(2, 4, &mut rng);
 
@@ -676,25 +591,19 @@ mod test {
         let mmcs = build_mmcs();
         let dft = Arc::new(Radix2DitParallel::<F>::default());
 
-        let basefold_prover = BasefoldProver::<F, EF, _, _>::new(
-            fri_config.clone(),
-            dft,
-            mmcs.clone(),
-            2, // num_expected_commitments = G = 2
-        );
+        let basefold_prover =
+            BasefoldProver::<F, EF, _, _>::new(fri_config.clone(), dft, mmcs.clone(), 2);
         let basefold_verifier = BasefoldVerifier::<F, EF, _>::new(fri_config, mmcs, 2);
 
         let prover = StackedPcsProver::new(basefold_prover, log_stacking_height, batch_size);
         let verifier = StackedPcsVerifier::new(basefold_verifier, log_stacking_height);
 
-        // Commit each round separately; observe BOTH digests IN ORDER.
         let mut p_chal = build_challenger();
         let (commit0, data0) = prover.commit_multilinears(vec![r0_a.clone(), r0_b.clone()]);
         p_chal.observe(commit0.clone());
         let (commit1, data1) = prover.commit_multilinears(vec![r1_a.clone(), r1_b.clone()]);
         p_chal.observe(commit1.clone());
 
-        // Per-round areas (each padded to the stacking height independently).
         let area0 = 32usize.next_multiple_of(stack_height);
         let area1 = 48usize.next_multiple_of(stack_height);
         let stripes0 = area0 >> log_stacking_height;
@@ -707,9 +616,6 @@ mod test {
         let stack_point: Vec<EF> = eval_point[..log_stacking_height as usize].to_vec();
         let batch_point = &eval_point[log_stacking_height as usize..];
 
-        // Honest claim: flatten the per-round stripe-evals (round 0 then
-        // round 1) and interpolate at the batch point — the SAME walk the
-        // verifier does (`eval_multilinear_padded(flatten(batch_evals))`).
         let mut batch_evals_flat: Vec<EF> = Vec::new();
         for m in data0.interleaved_mles.iter() {
             batch_evals_flat.extend(m.eval_at::<EF>(&stack_point));
@@ -719,11 +625,9 @@ mod test {
         }
         let evaluation_claim = eval_multilinear_padded::<F, EF>(&batch_evals_flat, batch_point);
 
-        // Open over BOTH rounds' prover data, in partition order.
         let proof =
             prover.prove_trusted_evaluation(eval_point.clone(), &[&data0, &data1], &mut p_chal);
 
-        // Verifier replays the SAME observe order before verifying.
         let mut v_chal = build_challenger();
         v_chal.observe(commit0.clone());
         v_chal.observe(commit1.clone());
@@ -741,19 +645,17 @@ mod test {
 
     /// The adaptive correction vector.
     ///
-    /// The stacked layer checks `sum_i a_i y_i = q` at the batch point, and
-    /// BaseFold proves `sum_i lambda_i y_i = sum_i lambda_i v_i` at a point it
-    /// samples itself. Before the repair, `lambda` was sampled without `y` in
-    /// the transcript, so a prover could pick `y` knowing BOTH coefficient
-    /// vectors: choose `d != 0` with `sum_i lambda_i d_i = 0` and
-    /// `sum_i a_i d_i = delta != 0`, send `y + d`, and claim `q + delta` while
-    /// opening the honest random combination. Two linear equations, two or more
-    /// stripe claims, an affine space of solutions.
+    /// The stacked layer checks `Σ_i a_i y_i = q` at the batch point, and
+    /// BaseFold proves `Σ_i λ_i y_i = Σ_i λ_i v_i` at a point it samples itself.
+    /// If `λ` were sampled without `y` in the transcript, a prover knowing both
+    /// coefficient vectors could send `y + d` with `d ≠ 0`, `Σ_i λ_i d_i = 0`,
+    /// `Σ_i a_i d_i = δ ≠ 0`, and claim `q + δ` while opening the honest random
+    /// combination: two linear equations in ≥ 2 unknowns have an affine space
+    /// of solutions.
     ///
-    /// The repair absorbs `y` before grinding and before `lambda`. This test
-    /// mounts the attack's free half — restate the claim vector and move the
-    /// outer claim with it, so the STACKED equation is satisfied by
-    /// construction — and requires the proof to be rejected anyway.
+    /// `y` is absorbed before grinding and before `λ`. This test restates the
+    /// claim vector and moves the outer claim with it, so the stacked equation
+    /// holds by construction, and requires the proof to be rejected anyway.
     ///
     /// The rejection is pinned to `Basefold(BatchPow)`, which is the mechanism
     /// and not merely the outcome: the batch proof-of-work was ground against a
@@ -775,8 +677,6 @@ mod test {
             Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, width)))
         };
 
-        // Two rounds, so the flattened claim vector has several entries: the
-        // attack needs at least two to have a correction space at all.
         let r0 = make_mle(2, 3, &mut rng);
         let r1 = make_mle(2, 4, &mut rng);
 
@@ -835,12 +735,8 @@ mod test {
             )
         };
 
-        // Non-vacuity: the untampered proof verifies against its honest claim.
         verify(&proof, honest_claim).expect("the honest two-round proof must verify");
 
-        // The attack's free half: restate one stripe claim and move the outer
-        // claim by exactly the amount the stacked equation demands. Nothing
-        // here touches the opening, the sumcheck or the Merkle paths.
         let mut tampered = proof.clone();
         assert!(
             tampered.batch_evaluations.iter().map(|r| r.len()).sum::<usize>() >= 2,
@@ -851,9 +747,6 @@ mod test {
         let tampered_claim = eval_multilinear_padded::<F, EF>(&tampered_flat, batch_point);
         assert_ne!(tampered_claim, honest_claim, "the restated vector must move the outer claim");
 
-        // The stacked equation is satisfied by construction, so a rejection
-        // here is the transcript refusing the restatement -- not the shape or
-        // the stacking identity.
         match verify(&tampered, tampered_claim) {
             Err(StackedVerifierError::Basefold(BasefoldVerifierError::BatchPow)) => {}
             other => panic!(
@@ -884,8 +777,6 @@ mod test {
             let v: Vec<F> = (0..n).map(|_| rand_kb(rng)).collect();
             Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, width)))
         };
-        // Round 1 spans TWO stripes, so a truncated claim vector is
-        // representable without removing the round itself.
         let r0 = make_mle(2, 3, &mut rng);
         let r1 = make_mle(2, 5, &mut rng);
 
@@ -952,7 +843,6 @@ mod test {
     /// would simply weigh a shorter vector.
     #[test]
     fn a_proof_missing_a_round_is_rejected() {
-        // Non-vacuity: untouched, the same fixture verifies.
         two_round_verify_with(0x2C24_0417, |_| {}).expect("the honest two-round proof must verify");
 
         match two_round_verify_with(0x2C24_0417, |p| {
@@ -975,12 +865,10 @@ mod test {
     /// Both directions must be `IncorrectShape`; the narrow one always was.
     #[test]
     fn a_leaf_wider_than_its_round_is_rejected() {
-        // Non-vacuity: untouched, the same fixture verifies.
         two_round_verify_with(0x5EAF_0420, |_| {}).expect("the honest two-round proof must verify");
 
         match two_round_verify_with(0x5EAF_0420, |p| {
             let opening = &mut p.basefold_proof.component_polynomials_query_openings_and_proofs[0];
-            // One extra column in the first matrix of the first leaf.
             opening.leaves[0].values[0].push(InnerVal::ONE);
         }) {
             Err(StackedVerifierError::Basefold(BasefoldVerifierError::IncorrectShape(_))) => {}
@@ -988,8 +876,7 @@ mod test {
         }
     }
 
-    /// The narrow direction, so the guard is shown to pin both sides of the
-    /// equality rather than only the one that used to panic.
+    /// The narrow direction: the guard pins both sides of the width equality.
     #[test]
     fn a_leaf_narrower_than_its_round_is_rejected() {
         two_round_verify_with(0x5EAF_0421, |_| {}).expect("the honest two-round proof must verify");
@@ -1083,7 +970,6 @@ mod test {
         let claim = eval_multilinear_padded::<F, EF>(&bef, bp);
         let proof = prover.prove_trusted_evaluation(eval_point.clone(), &[&d0, &d1], &mut p_chal);
 
-        // WRONG order: observe c1 then c0.
         let mut v_chal = build_challenger();
         v_chal.observe(c1.clone());
         v_chal.observe(c0.clone());

@@ -144,13 +144,11 @@ impl<F: Field> LtOperation<F> {
     ) {
         let is_real = is_slt.clone() + is_sltu.clone();
 
-        // Masked comparison operands: raw bytes for SLTU, `& 0x7fffffff` for SLT.
         let mut b_comp: Word<AB::Expr> = b.map(|x| x.into());
         let mut c_comp: Word<AB::Expr> = c.map(|x| x.into());
         b_comp[3] = b[3] * is_sltu.clone() + cols.b_masked * is_slt.clone();
         c_comp[3] = c[3] * is_sltu.clone() + cols.c_masked * is_slt.clone();
 
-        // The masks hold: `b_masked = b[3] & 0x7f`, `c_masked = c[3] & 0x7f`.
         builder.send_byte(
             ByteOpcode::AND.as_field::<AB::F>(),
             cols.b_masked,
@@ -166,25 +164,21 @@ impl<F: Field> LtOperation<F> {
             is_real.clone(),
         );
 
-        // Effective sign bits.
         builder.assert_eq(cols.bit_b, cols.msb_b * is_slt.clone());
         builder.assert_eq(cols.bit_c, cols.msb_c * is_slt.clone());
         let inv_128 = AB::F::from_u32(128).inverse();
         builder.assert_eq(cols.msb_b, (b[3] - cols.b_masked) * inv_128);
         builder.assert_eq(cols.msb_c, (c[3] - cols.c_masked) * inv_128);
 
-        // `is_sign_eq <=> bit_b == bit_c`.
         builder.assert_bool(cols.is_sign_eq);
         builder.when(cols.is_sign_eq).assert_eq(cols.bit_b, cols.bit_c);
         builder.when(is_real.clone()).when_not(cols.is_sign_eq).assert_one(cols.bit_b + cols.bit_c);
 
-        // The result: `lt = bit_b·(1 − bit_c) + is_sign_eq·sltu`.
         builder.assert_eq(
             cols.lt,
             cols.bit_b * (AB::Expr::ONE - cols.bit_c) + cols.is_sign_eq * cols.sltu,
         );
 
-        // Byte flags: boolean, at most one set, none set iff masked equality.
         let sum_flags =
             cols.byte_flags[0] + cols.byte_flags[1] + cols.byte_flags[2] + cols.byte_flags[3];
         builder.assert_bool(cols.byte_flags[0]);
@@ -195,8 +189,6 @@ impl<F: Field> LtOperation<F> {
         builder.when(is_real.clone()).assert_eq(AB::Expr::ONE - cols.is_comp_eq, sum_flags);
         builder.assert_bool(cols.is_comp_eq);
 
-        // Walk bytes most-significant first: everything above the flagged
-        // byte must be equal, and the flagged pair feeds the LTU lookup.
         let mut is_inequality_visited = AB::Expr::ZERO;
         let mut b_comparison_byte = AB::Expr::ZERO;
         let mut c_comparison_byte = AB::Expr::ZERO;
@@ -215,12 +207,10 @@ impl<F: Field> LtOperation<F> {
         builder.assert_eq(b_comp_byte, b_comparison_byte);
         builder.assert_eq(c_comp_byte, c_comparison_byte);
 
-        // When not equal, the comparison bytes genuinely differ.
         builder
             .when_not(cols.is_comp_eq)
             .assert_eq(cols.not_eq_inv * (b_comp_byte - c_comp_byte), is_real.clone());
 
-        // `sltu = LTU(b_comp_byte, c_comp_byte)` via lookup.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             cols.sltu,

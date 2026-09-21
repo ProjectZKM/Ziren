@@ -16,22 +16,20 @@ use super::mem::MemoryAccessCols;
 /// Constrained ext-to-felts decomposition.
 ///
 /// An `Ext` in recursion memory is one `Block` of `D` felts, but the felt
-/// side of the ISA can only address whole blocks — so handing an extension
+/// side of the ISA can only address whole blocks, so handing an extension
 /// element's coordinates to felt consumers (Fiat-Shamir absorption, Merkle
-/// digests) used to go through `HintExt2Felts`, whose outputs are
-/// UNCONSTRAINED hint writes that every call site then re-bound with a
-/// monomial reconstruction: ~14 ExtAlu rows per call, ~18K calls per leaf,
-/// a quarter of the leaf's ExtAlu area spent restating "these felts are the
-/// limbs of that block".
+/// digests) needs a decomposition.  The alternative, `HintExt2Felts`, writes
+/// unconstrained hints that each call site re-binds with a monomial
+/// reconstruction (~14 ExtAlu rows per call).
 ///
-/// This chip states it as wiring instead: each row RECEIVES the input block
-/// and SENDS its four limbs as single-felt blocks from the SAME value
-/// columns.  There is no arithmetic constraint at all — sharing the columns
-/// between the receive and the sends IS the decomposition — so the ~14-row
-/// binding collapses to one 4-cell row.
+/// This chip states it as wiring: each row receives the input block
+/// `(x_0, x_1, x_2, x_3)` and sends each `x_i` as a single-felt block from
+/// the same value columns.  There is no arithmetic constraint: sharing the
+/// columns between the receive and the sends is the decomposition, one
+/// 4-cell row per call.
 ///
-/// The chip lives in the COMPRESS machine only.  `shrink_machine` and
-/// `wrap_machine` keep the legacy chip set (their programs keep emitting
+/// The chip lives in the compress machine only.  `shrink_machine` and
+/// `wrap_machine` use the chip set without it (their programs emit
 /// `HintExt2Felts` + the monomial re-binding, see `ext2felt_v2`), because the
 /// shrink proof's structure is what the BN254 wrap R1CS — and through it the
 /// gnark ceremony — is built over.
@@ -173,8 +171,6 @@ where
         let prep_local = prep.current_slice();
         let prep_local: &Ext2FeltPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
-        // The decomposition is the column sharing: the block received here and
-        // the four limbs sent below are the SAME trace cells.
         builder.receive_block(prep_local.input_addr, local.values, prep_local.is_real);
         for (i, access) in prep_local.accesses.iter().enumerate() {
             builder.send_single(access.addr, local.values.0[i], access.mult);

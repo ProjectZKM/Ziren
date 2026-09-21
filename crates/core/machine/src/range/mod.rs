@@ -47,7 +47,6 @@ pub struct RangeMultCols<T> {
 impl<F: Field> RangeChip<F> {
     fn preprocessed_trace() -> RowMajorMatrix<F> {
         let mut values = zeroed_f_vec::<F>(NUM_RANGE_PREPROCESSED_COLS * NUM_RANGE_ROWS);
-        // Row 0 is (0, 0); rows [2^bits, 2^{bits+1}) hold (a, bits).
         for bits in 0..=MAX_RANGE_BITS {
             for a in 0..(1usize << bits) {
                 let row = (1usize << bits) + a;

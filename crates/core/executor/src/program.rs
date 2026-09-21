@@ -93,8 +93,6 @@ impl Program {
             bail!("Too many program headers");
         }
 
-        // Narrow and bounds-check every PT_LOAD header BEFORE materializing any of
-        // them, so a rejection cannot leave a half-built image behind.
         let mut loads: Vec<LoadSegment> = Vec::new();
         for segment in segments.iter().filter(|x| x.p_type == elf::abi::PT_LOAD) {
             let file_size: u32 = segment
@@ -111,8 +109,6 @@ impl Program {
             if mem_size >= max_mem {
                 bail!("Invalid segment mem_size");
             }
-            // A file image larger than the memory image would read bytes the
-            // segment never maps.
             if file_size > mem_size {
                 bail!("Invalid segment: p_filesz 0x{file_size:x} exceeds p_memsz 0x{mem_size:x}");
             }
@@ -128,8 +124,6 @@ impl Program {
                 .try_into()
                 .map_err(|err| anyhow!("offset is larger than 32 bits. {err}"))?;
             let executable = (segment.p_flags & elf::abi::PF_X) != 0;
-            // The instruction image is indexed by word, so a trailing partial word
-            // of executable memory has no slot to live in.
             if executable && !mem_size.is_multiple_of(WORD_SIZE as u32) {
                 bail!("executable segment at 0x{vaddr:08x} has unaligned p_memsz 0x{mem_size:x}");
             }
@@ -144,12 +138,10 @@ impl Program {
             loads.push(LoadSegment { vaddr, offset, file_size, mem_size, executable });
         }
 
-        // Both readers index the image as `i = (pc - pc_base) / 4`, so placement is
-        // by vaddr, not header order. Overlaps are rejected: `i` must be injective.
         loads.sort_by_key(|s| s.vaddr);
         for pair in loads.windows(2) {
             let (prev, next) = (&pair[0], &pair[1]);
-            let prev_end = prev.vaddr + prev.mem_size; // no overflow: checked above
+            let prev_end = prev.vaddr + prev.mem_size;
             if next.vaddr < prev_end {
                 bail!(
                     "PT_LOAD segments overlap: 0x{:08x}..0x{prev_end:08x} and 0x{:08x}",
@@ -159,8 +151,6 @@ impl Program {
             }
         }
 
-        // Executable segments must tile one interval [pc_base, exec_end) exactly:
-        // the AIR stamps pc = pc_base + i·4 for every row, so a hole has no encoding.
         let exec: Vec<&LoadSegment> = loads.iter().filter(|s| s.executable).collect();
         let (Some(first_exec), Some(last_exec)) = (exec.first(), exec.last()) else {
             bail!("No executable PT_LOAD segment: there is nothing to run");
@@ -180,12 +170,9 @@ impl Program {
         let base_address = first_exec.vaddr;
         let exec_end = last_exec.vaddr + last_exec.mem_size;
         let n_words = ((exec_end - base_address) / WORD_SIZE as u32) as usize;
-        // p_memsz is attacker-declared and need not be file-backed, so bound the
-        // image independently of the ELF size.
         if n_words > MAX_INSTRUCTIONS {
             bail!("executable image is {n_words} words, over the {MAX_INSTRUCTIONS}-word limit");
         }
-        // `pc_start` is the first index read out of that image.
         if entry < base_address || entry >= exec_end {
             bail!(
                 "entrypoint 0x{entry:08x} is outside the executable range \
@@ -198,15 +185,13 @@ impl Program {
 
         for &LoadSegment { vaddr, offset, file_size, mem_size, executable } in &loads {
             for i in (0..mem_size).step_by(WORD_SIZE) {
-                let addr = vaddr + i; // no overflow: `vaddr + mem_size` was checked
+                let addr = vaddr + i;
                 let word = if i >= file_size {
-                    // Past the file size, all zeros.
                     0
                 } else if let Some(patched) = patch_list.get(&addr) {
                     *patched
                 } else {
                     let mut word = 0;
-                    // Don't read past the end of the file.
                     let len = core::cmp::min(file_size - i, WORD_SIZE as u32);
                     for j in 0..len {
                         let offset = (offset + i + j) as usize;
@@ -217,8 +202,6 @@ impl Program {
                 };
                 image.insert(addr, word);
                 if executable {
-                    // Every mapped word gets a slot, including the zero tail where
-                    // p_memsz > p_filesz, so `i` stays aligned with the address.
                     words[((addr - base_address) / WORD_SIZE as u32) as usize] = word;
                 }
                 if addr > hiaddr {
@@ -227,12 +210,11 @@ impl Program {
             }
         }
 
-        image.insert(Register::BRK as u32, hiaddr); // $brk
-        image.insert(Register::HEAP as u32, 0x20000000); // $heap
+        image.insert(Register::BRK as u32, hiaddr);
+        image.insert(Register::HEAP as u32, 0x20000000);
 
         patch_stack(&mut image);
 
-        // decode each instruction
         let instructions: Vec<_> = words
             .par_iter()
             .enumerate()
@@ -271,8 +253,6 @@ impl Program {
     /// is checked by `Program::from`; every later pc is constrained by the Program
     /// table lookup, whose domain is exactly that interval.
     pub fn fetch(&self, pc: u32) -> Instruction {
-        // `wrapping_sub` + `get`: one bounds check, and pc < pc_base wraps out of
-        // range rather than underflowing.
         let idx = (pc.wrapping_sub(self.pc_base) / 4) as usize;
         match self.instructions.get(idx) {
             Some(instruction) => *instruction,
@@ -297,7 +277,6 @@ pub fn patch_elf(
         anyhow::anyhow!("failed to parse the ELF symbol table, cannot patch program: {e}")
     })? {
         Some(symbols) => symbols,
-        // Stripped: nothing to patch, which is not an error.
         None => return Ok(()),
     };
 
@@ -323,38 +302,23 @@ pub fn patch_elf(
                 | "runtime.checkfds"
                 | "_dl_discover_osversion"
                 | "internal/runtime/exithook.Run" => {
-                    patch_list.insert(
-                        symbol.st_value as u32,
-                        0x03e00008, // jalr $ra, $zero
-                    );
-                    patch_list.insert(
-                        (symbol.st_value + 4) as u32,
-                        0x0, // nop
-                    );
+                    patch_list.insert(symbol.st_value as u32, 0x03e00008);
+                    patch_list.insert((symbol.st_value + 4) as u32, 0x0);
                 }
 
                 "runtime.exit" => {
                     exit_old = symbol.st_value as u32;
                 }
                 "runtime.MemProfileRate" => {
-                    patch_list.insert(
-                        symbol.st_value as u32,
-                        0x0, // nop
-                    );
+                    patch_list.insert(symbol.st_value as u32, 0x0);
                 }
                 "zkvm.RuntimeExit" => {
                     exit_new = symbol.st_value as u32;
                 }
                 _ => {
                     if name.contains("sys_common") && name.contains("thread_info") {
-                        patch_list.insert(
-                            symbol.st_value as u32,
-                            0x03e00008, // jalr $ra, $zero
-                        );
-                        patch_list.insert(
-                            (symbol.st_value + 4) as u32,
-                            0x0, // nop
-                        );
+                        patch_list.insert(symbol.st_value as u32, 0x03e00008);
+                        patch_list.insert((symbol.st_value + 4) as u32, 0x0);
                     }
                 }
             },
@@ -366,14 +330,8 @@ pub fn patch_elf(
     }
 
     if exit_new != 0 && exit_old != 0 {
-        patch_list.insert(
-            exit_old,
-            0x08000000 | (exit_new >> 2), // j exit_new
-        );
-        patch_list.insert(
-            exit_old + 4,
-            0x0, // nop
-        );
+        patch_list.insert(exit_old, 0x08000000 | (exit_new >> 2));
+        patch_list.insert(exit_old + 4, 0x0);
     }
     Ok(())
 }
@@ -381,58 +339,57 @@ pub fn patch_elf(
 pub fn patch_stack(image: &mut BTreeMap<u32, u32>) {
     let sp: u32 = INIT_SP;
 
-    image.insert(Register::SP as u32, sp); // $sp
+    image.insert(Register::SP as u32, sp);
 
     let mut store_mem = |addr: u32, v: u32| {
         image.insert(addr, v);
     };
 
     let index = 0;
-    // init argc,  argv, aux on stack
     store_mem(sp, index);
     let mut cur_sp = sp + 4 * (index + 1);
-    store_mem(cur_sp, 0x00); // argv[n] = 0 (terminating argv)
+    store_mem(cur_sp, 0x00);
     cur_sp += 4;
-    store_mem(cur_sp, 0x00); // envp[term] = 0 (no env vars)
+    store_mem(cur_sp, 0x00);
     cur_sp += 4;
 
-    store_mem(cur_sp, 0x06); // auxv[0] = _AT_PAGESZ = 6 (key)
-    store_mem(cur_sp + 4, 0x1000); // auxv[1] = page size of 4 KiB (value)
+    store_mem(cur_sp, 0x06);
+    store_mem(cur_sp + 4, 0x1000);
     cur_sp += 8;
 
-    store_mem(cur_sp, 0x0b); // auxv[0] = AT_UID = 11 (key)
-    store_mem(cur_sp + 4, 0x3e8); // auxv[1] = Real uid (value)
+    store_mem(cur_sp, 0x0b);
+    store_mem(cur_sp + 4, 0x3e8);
     cur_sp += 8;
-    store_mem(cur_sp, 0x0c); // auxv[0] = AT_EUID = 12 (key)
-    store_mem(cur_sp + 4, 0x3e8); // auxv[1] = Effective uid (value)
+    store_mem(cur_sp, 0x0c);
+    store_mem(cur_sp + 4, 0x3e8);
     cur_sp += 8;
-    store_mem(cur_sp, 0x0d); // auxv[0] = AT_GID = 13 (key)
-    store_mem(cur_sp + 4, 0x3e8); // auxv[1] = Real gid (value)
+    store_mem(cur_sp, 0x0d);
+    store_mem(cur_sp + 4, 0x3e8);
     cur_sp += 8;
-    store_mem(cur_sp, 0x0e); // auxv[0] = AT_EGID = 14 (key)
-    store_mem(cur_sp + 4, 0x3e8); // auxv[1] = Effective gid (value)
+    store_mem(cur_sp, 0x0e);
+    store_mem(cur_sp + 4, 0x3e8);
     cur_sp += 8;
-    store_mem(cur_sp, 0x10); // auxv[0] = AT_HWCAP = 16 (key)
-    store_mem(cur_sp + 4, 0x00); // auxv[1] =  arch dependent hints at CPU capabilities (value)
+    store_mem(cur_sp, 0x10);
+    store_mem(cur_sp + 4, 0x00);
     cur_sp += 8;
-    store_mem(cur_sp, 0x11); // auxv[0] = AT_CLKTCK = 17 (key)
-    store_mem(cur_sp + 4, 0x64); // auxv[1] = Frequency of times() (value)
+    store_mem(cur_sp, 0x11);
+    store_mem(cur_sp + 4, 0x64);
     cur_sp += 8;
-    store_mem(cur_sp, 0x17); // auxv[0] = AT_SECURE = 23 (key)
-    store_mem(cur_sp + 4, 0x00); // auxv[1] = secure mode boolean (value)
+    store_mem(cur_sp, 0x17);
+    store_mem(cur_sp + 4, 0x00);
     cur_sp += 8;
 
-    store_mem(cur_sp, 0x19); // auxv[4] = AT_RANDOM = 25 (key)
-    store_mem(cur_sp + 4, cur_sp + 12); // auxv[5] = address of 16 bytes containing random value
+    store_mem(cur_sp, 0x19);
+    store_mem(cur_sp + 4, cur_sp + 12);
     cur_sp += 8;
-    store_mem(cur_sp, 0); // auxv[term] = 0
+    store_mem(cur_sp, 0);
     cur_sp += 4;
-    store_mem(cur_sp, 0x5f28df1d); // auxv[term] = 0
-    store_mem(cur_sp + 4, 0x2cd1002a); // auxv[term] = 0
-    store_mem(cur_sp + 8, 0x5ff9f682); // auxv[term] = 0
-    store_mem(cur_sp + 12, 0xd4d8d538); // auxv[term] = 0
+    store_mem(cur_sp, 0x5f28df1d);
+    store_mem(cur_sp + 4, 0x2cd1002a);
+    store_mem(cur_sp + 8, 0x5ff9f682);
+    store_mem(cur_sp + 12, 0xd4d8d538);
     cur_sp += 16;
-    store_mem(cur_sp, 0x00); // auxv[term] = 0
+    store_mem(cur_sp, 0x00);
 }
 
 impl<F: PrimeField32> MachineProgram<F> for Program {
@@ -512,37 +469,37 @@ mod tests {
 
         let mut e = Vec::new();
         e.extend_from_slice(&[0x7f, b'E', b'L', b'F']);
-        e.push(1); // ELFCLASS32
-        e.push(1); // ELFDATA2LSB
-        e.push(1); // EV_CURRENT
-        e.extend_from_slice(&[0u8; 9]); // padding
-        e.extend_from_slice(&2u16.to_le_bytes()); // ET_EXEC
-        e.extend_from_slice(&8u16.to_le_bytes()); // EM_MIPS
-        e.extend_from_slice(&1u32.to_le_bytes()); // e_version
-        e.extend_from_slice(&entry.to_le_bytes()); // e_entry
-        e.extend_from_slice(&(EHDR as u32).to_le_bytes()); // e_phoff
-        e.extend_from_slice(&0u32.to_le_bytes()); // e_shoff: none -> stripped
-        e.extend_from_slice(&0u32.to_le_bytes()); // e_flags
-        e.extend_from_slice(&(EHDR as u16).to_le_bytes()); // e_ehsize
-        e.extend_from_slice(&(PHDR as u16).to_le_bytes()); // e_phentsize
-        e.extend_from_slice(&(phnum as u16).to_le_bytes()); // e_phnum
-        e.extend_from_slice(&0u16.to_le_bytes()); // e_shentsize
-        e.extend_from_slice(&0u16.to_le_bytes()); // e_shnum
-        e.extend_from_slice(&0u16.to_le_bytes()); // e_shstrndx
+        e.push(1);
+        e.push(1);
+        e.push(1);
+        e.extend_from_slice(&[0u8; 9]);
+        e.extend_from_slice(&2u16.to_le_bytes());
+        e.extend_from_slice(&8u16.to_le_bytes());
+        e.extend_from_slice(&1u32.to_le_bytes());
+        e.extend_from_slice(&entry.to_le_bytes());
+        e.extend_from_slice(&(EHDR as u32).to_le_bytes());
+        e.extend_from_slice(&0u32.to_le_bytes());
+        e.extend_from_slice(&0u32.to_le_bytes());
+        e.extend_from_slice(&(EHDR as u16).to_le_bytes());
+        e.extend_from_slice(&(PHDR as u16).to_le_bytes());
+        e.extend_from_slice(&(phnum as u16).to_le_bytes());
+        e.extend_from_slice(&0u16.to_le_bytes());
+        e.extend_from_slice(&0u16.to_le_bytes());
+        e.extend_from_slice(&0u16.to_le_bytes());
         assert_eq!(e.len(), EHDR);
 
         let mut body = Vec::new();
         for seg in segs {
             let file_sz = (seg.words.len() * 4) as u32;
             let mem_sz = (seg.mem_words * 4) as u32;
-            e.extend_from_slice(&1u32.to_le_bytes()); // PT_LOAD
-            e.extend_from_slice(&(body_off as u32).to_le_bytes()); // p_offset
-            e.extend_from_slice(&seg.vaddr.to_le_bytes()); // p_vaddr
-            e.extend_from_slice(&seg.vaddr.to_le_bytes()); // p_paddr
-            e.extend_from_slice(&file_sz.to_le_bytes()); // p_filesz
-            e.extend_from_slice(&mem_sz.to_le_bytes()); // p_memsz
+            e.extend_from_slice(&1u32.to_le_bytes());
+            e.extend_from_slice(&(body_off as u32).to_le_bytes());
+            e.extend_from_slice(&seg.vaddr.to_le_bytes());
+            e.extend_from_slice(&seg.vaddr.to_le_bytes());
+            e.extend_from_slice(&file_sz.to_le_bytes());
+            e.extend_from_slice(&mem_sz.to_le_bytes());
             e.extend_from_slice(&seg.flags.to_le_bytes());
-            e.extend_from_slice(&4u32.to_le_bytes()); // p_align
+            e.extend_from_slice(&4u32.to_le_bytes());
             for w in &seg.words {
                 body.extend_from_slice(&w.to_le_bytes());
             }
@@ -570,7 +527,6 @@ mod tests {
     #[test]
     fn a_truncated_elf_is_an_error() {
         let full = stripped_mips_elf();
-        // Every prefix: none may panic, and none may load.
         for n in 0..full.len() {
             assert!(
                 Program::from(&full[..n]).is_err(),
@@ -581,9 +537,6 @@ mod tests {
 
     #[test]
     fn executable_segments_are_placed_by_virtual_address_not_header_order() {
-        // Two adjacent executable segments, emitted HIGHEST FIRST. Appending in
-        // header order put the 0x400010 words at pc 0x400000 and vice versa; every
-        // pc in the program decoded the other segment's instruction.
         let elf = mips_elf(
             0x0040_0000,
             &[
@@ -604,22 +557,17 @@ mod tests {
         let p = Program::from(&elf).expect("two adjacent executable segments are one image");
         assert_eq!(p.pc_base, 0x0040_0000, "pc_base is the LOWEST executable vaddr");
         assert_eq!(p.instructions.len(), 8);
-        // The instruction at each pc must be the word the ELF maps there, which is
-        // exactly what `image` says independently of the layout decision.
         for i in 0..8u32 {
             let pc = 0x0040_0000 + i * 4;
             let expected = Instruction::decode_from(p.image[&pc]).unwrap();
             assert_eq!(p.fetch(pc), expected, "pc 0x{pc:08x} decoded the wrong word");
         }
-        // And concretely: the second header's words come first.
         assert_eq!(p.fetch(0x0040_0000).op_c, 0);
         assert_eq!(p.fetch(0x0040_0010).op_c, 0x10);
     }
 
     #[test]
     fn a_gap_between_executable_segments_is_an_error() {
-        // 0x400000..0x400010 and 0x400020..: `(pc - pc_base) / 4` cannot describe a
-        // hole, so this must be refused rather than silently compacted.
         let elf = mips_elf(
             0x0040_0000,
             &[
@@ -650,7 +598,6 @@ mod tests {
                     mem_words: 4,
                     flags: PF_RX,
                 },
-                // Starts inside the first segment: `i` would not be injective.
                 Seg { vaddr: 0x0040_0008, words: vec![0xdead_beef], mem_words: 1, flags: PF_RW },
             ],
         );
@@ -660,7 +607,6 @@ mod tests {
 
     #[test]
     fn an_entrypoint_outside_the_executable_range_is_an_error() {
-        // pc_base - 4 and pc_base + 4·n: both outside the image interval.
         for entry in [0x003f_fffc, 0x0040_0010] {
             let elf = mips_elf(
                 entry,
@@ -676,7 +622,6 @@ mod tests {
                 .unwrap_or_else(|| panic!("entry 0x{entry:08x} must be rejected"));
             assert!(format!("{err}").contains("entrypoint"), "got: {err}");
         }
-        // The boundary values themselves are fine.
         for entry in [0x0040_0000, 0x0040_000c] {
             let elf = mips_elf(
                 entry,
@@ -693,9 +638,6 @@ mod tests {
 
     #[test]
     fn an_executable_zero_tail_still_gets_its_own_pcs() {
-        // `p_memsz > p_filesz` on an executable segment: the tail is mapped zeros.
-        // Pushing only file-backed words left `instructions` two short, so the next
-        // segment's words answered for the tail's PCs.
         let elf = mips_elf(
             0x0040_0000,
             &[
@@ -717,10 +659,8 @@ mod tests {
         assert_eq!(p.instructions.len(), 6);
         assert_eq!(p.fetch(0x0040_0000).op_c, 0);
         assert_eq!(p.fetch(0x0040_0004).op_c, 1);
-        // The tail: word 0 decodes as `sll $0, $0, 0`, and `image` agrees.
         assert_eq!(p.image[&0x0040_0008], 0);
         assert_eq!(p.fetch(0x0040_0008), Instruction::decode_from(0).unwrap());
-        // And the next segment is still on its own PCs, not shifted down.
         assert_eq!(p.fetch(0x0040_0010).op_c, 0x10);
         assert_eq!(p.fetch(0x0040_0014).op_c, 0x11);
     }
@@ -746,7 +686,6 @@ mod tests {
                 flags: PF_RX,
             }],
         );
-        // p_memsz sits 4 bytes after p_filesz in the 32-bit program header.
         let memsz_at = 52 + 20;
         elf[memsz_at..memsz_at + 4].copy_from_slice(&4u32.to_le_bytes());
         let err =
@@ -756,18 +695,11 @@ mod tests {
 
     #[test]
     fn the_test_artifact_loads_as_one_contiguous_executable_image() {
-        // The guard behind the contiguity requirement: if a toolchain change ever
-        // emits a second, non-adjacent executable segment, the load fails here
-        // rather than decoding at the wrong PCs inside a proof. Asserted
-        // structurally, not against pinned values, so regenerating the guest is
-        // not a spurious failure.
         let p = Program::from(include_bytes!("../../../prover/elf/mipsel-zkm-zkvm-elf"))
             .expect("the test artifact must load");
         assert!(!p.instructions.is_empty());
         let end = p.pc_base + 4 * p.instructions.len() as u32;
         assert!(p.pc_start >= p.pc_base && p.pc_start < end, "the entrypoint is in range");
-        // Every pc the instruction image claims is actually mapped: that is what
-        // "one contiguous interval indexed from pc_base" means.
         for i in 0..p.instructions.len() as u32 {
             let pc = p.pc_base + i * 4;
             let word = *p.image.get(&pc).unwrap_or_else(|| panic!("pc 0x{pc:08x} is not mapped"));

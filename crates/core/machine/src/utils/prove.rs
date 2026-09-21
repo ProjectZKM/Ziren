@@ -87,7 +87,6 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
-    // Setup the runtime.
     let mut runtime = Executor::with_context(program.clone(), opts, context);
     runtime.maximal_shapes = shape_config.map(|config| {
         config.maximal_core_shapes(opts.shard_size.ilog2() as usize).into_iter().collect()
@@ -102,16 +101,11 @@ where
     #[cfg(feature = "debug")]
     let (all_records_tx, all_records_rx) = std::sync::mpsc::channel::<Vec<ExecutionRecord>>();
 
-    // Record the start of the process.
     let proving_start = Instant::now();
     let span = tracing::Span::current().clone();
     std::thread::scope(move |s| {
         let _span = span.enter();
 
-        // Checkpoints travel in memory rather than through tempfiles.  An
-        // `ExecutionState` is dominated by the memory-image diff since the last
-        // checkpoint (a few MB per shard), and `checkpoints_channel_capacity`
-        // bounds how many are in flight.
         let checkpoint_generator_span = tracing::Span::current().clone();
         let (checkpoints_tx, checkpoints_rx) =
             sync_channel::<(usize, ExecutionState, bool, u64)>(opts.checkpoints_channel_capacity);
@@ -119,13 +113,6 @@ where
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
                 tracing::debug_span!("checkpoint generator").in_scope(|| {
-                    // One JIT pass over the whole program fills
-                    // `public_values_stream` and the cycle count and captures a
-                    // whole-program MinimalTrace chunk. The consumer re-derives
-                    // the shard boundaries from `initial_state` alone, so it
-                    // sees what a per-shard checkpoint loop would have produced.
-                    // That state must stay pristine: full input/proof streams,
-                    // `global_clk == 0`, empty `records_clk`.
                     let initial_state = runtime.state.clone();
                     let chunk = runtime
                         .run_fast_capture_whole_program_chunk()
@@ -144,11 +131,9 @@ where
                 })
             });
 
-        // Create the challenger and observe the verifying key.
         let mut challenger = prover.machine().config().challenger();
         pk.observe_into(&mut challenger);
 
-        // Spawn the phase 2 record generator thread.
         let p2_record_gen_sync = Arc::new(TurnBasedSync::new());
         let p2_trace_gen_sync = Arc::new(TurnBasedSync::new());
         let checkpoints_rx = Arc::new(Mutex::new(checkpoints_rx));
@@ -183,7 +168,6 @@ where
                 tracing::debug_span!("phase 2 trace generation").in_scope(|| {
                     let _: () =
                         loop {
-                            // Receive the latest checkpoint.
                             let received = { checkpoints_rx.lock().unwrap().recv() };
                             if let Ok((index, execution_state, done, num_cycles)) = received {
                                 tracing::trace!(
@@ -193,12 +177,6 @@ where
                                     done = done,
                                     num_cycles = num_cycles,
                                 );
-                                // One `trace_checkpoint` cannot cover a
-                                // whole-program state -- `Executor::execute`
-                                // stops after `shard_batch_size` shards -- so
-                                // drive it to completion and feed each batch
-                                // through the body below, keeping peak memory
-                                // at one batch.
                                 let mut batch_index = index;
                                 let mut process_batch = |mut records: Vec<ExecutionRecord>,
                                                      report: ExecutionReport,
@@ -210,21 +188,14 @@ where
                             log::debug!("generated {} records", records.len());
                             *report_aggregate.lock().unwrap() += report;
 
-                            // Wait for our turn to update the state.
                             record_gen_sync.wait_for_turn(index);
 
-                            // Update the public values & prover state for the shards which contain
-                            // "cpu events".
                             let mut state = state.lock().unwrap();
                             for record in records.iter_mut() {
                                 state.shard += 1;
                                 state.execution_shard = record.public_values.execution_shard;
                                 state.start_pc = record.public_values.start_pc;
                                 state.next_pc = record.public_values.next_pc;
-                                // The executor's finalization, not the running `state`,
-                                // populates the 2-pc endpoints and timestamps, so carry them
-                                // across: the `record.public_values = *state` write below
-                                // would otherwise zero them and unbalance the State bus.
                                 state.start_next_pc = record.public_values.start_next_pc;
                                 state.next_next_pc = record.public_values.next_next_pc;
                                 state.initial_timestamp = record.public_values.initial_timestamp;
@@ -236,14 +207,11 @@ where
                                 record.public_values = *state;
                             }
 
-                            // Defer events that are too expensive to include in every shard.
                             let mut deferred = deferred.lock().unwrap();
                             for record in records.iter_mut() {
                                 deferred.append(&mut record.defer());
                             }
 
-                            // We combine the memory init/finalize events if they are "small"
-                            // and would affect performance.
                             let mut shape_fixed_records = if done
                                 && num_cycles < 1 << 21
                                 && deferred.global_memory_initialize_events.len()
@@ -253,14 +221,10 @@ where
                             {
                                 let mut records_clone = records.clone();
                                 let last_record = records_clone.last_mut();
-                                // See if any deferred shards are ready to be committed to.
                                 let mut deferred =
                                     deferred.split(done, last_record, opts.split_opts);
                                 tracing::debug!("deferred {} records", deferred.len());
 
-                                // Update the public values & prover state for the shards which do
-                                // not contain "cpu events" before
-                                // committing to them.
                                 if !done {
                                     state.execution_shard += 1;
                                 }
@@ -275,16 +239,12 @@ where
                                     state.last_finalize_addr_bits =
                                         record.public_values.last_finalize_addr_bits;
                                     state.start_pc = state.next_pc;
-                                    // A no-CPU shard has no Cpu row chain, so its PV-AIR
-                                    // send_state/receive_state must self-cancel: force both
-                                    // endpoints equal.
                                     state.start_next_pc = state.next_next_pc;
                                     state.last_timestamp = state.initial_timestamp;
                                     record.public_values = *state;
                                 }
                                 records_clone.append(&mut deferred);
 
-                                // Generate the dependencies.
                                 tracing::debug_span!("generate dependencies", index).in_scope(
                                     || -> Result<(), ZKMCoreProverError> {
                                         match prover.machine().generate_dependencies(
@@ -304,18 +264,14 @@ where
                                     },
                                 )?;
 
-                                // Let another worker update the state.
                                 record_gen_sync.advance_turn();
 
-                                // Fix the shape of the records.
                                 let mut fixed_shape = true;
                                 if let Some(shape_config) = shape_config {
                                     for record in records_clone.iter_mut() {
                                         if shape_config.fix_shape(record).is_err() {
                                             fixed_shape = false;
                                         } else {
-                                            // VERIFY_VK multi-shard: canonical
-                                            // cluster chip set (see the other site).
                                             crate::shape::canonicalize_shape_to_cluster(record);
                                         }
                                     }
@@ -326,12 +282,9 @@ where
                             };
 
                             if shape_fixed_records.is_none() {
-                                // See if any deferred shards are ready to be committed to.
                                 let mut deferred = deferred.split(done, None, opts.split_opts);
                                 log::debug!("deferred {} records", deferred.len());
 
-                                // Update the public values & prover state for the shards which do not
-                                // contain "cpu events" before committing to them.
                                 if !done {
                                     state.execution_shard += 1;
                                 }
@@ -346,16 +299,12 @@ where
                                     state.last_finalize_addr_bits =
                                         record.public_values.last_finalize_addr_bits;
                                     state.start_pc = state.next_pc;
-                                    // A no-CPU shard has no Cpu row chain, so its PV-AIR
-                                    // send_state/receive_state must self-cancel: force both
-                                    // endpoints equal.
                                     state.start_next_pc = state.next_next_pc;
                                     state.last_timestamp = state.initial_timestamp;
                                     record.public_values = *state;
                                 }
                                 records.append(&mut deferred);
 
-                                // Generate the dependencies.
                                 tracing::debug_span!("generate dependencies", index).in_scope(
                                     || -> Result<(), ZKMCoreProverError> {
                                         match prover.machine().generate_dependencies(
@@ -375,17 +324,11 @@ where
                                     },
                                 )?;
 
-                                // Let another worker update the state.
                                 record_gen_sync.advance_turn();
 
-                                // Fix the shape of the records.
                                 if let Some(shape_config) = shape_config {
                                     for record in records.iter_mut() {
                                         shape_config.fix_shape(record).unwrap();
-                                        // VERIFY_VK multi-shard: extend the
-                                        // chosen shape up to the canonical stacked
-                                        // cluster so per-guest event-driven chip
-                                        // subsets don't explode the vk space.
                                         crate::shape::canonicalize_shape_to_cluster(record);
                                     }
                                 }
@@ -421,7 +364,6 @@ where
 
                             trace_gen_sync.wait_for_turn(index);
 
-                            // Send the records to the phase 2 prover.
                             let chunked_records = chunk_vec(records, opts.shard_batch_size);
                             let chunked_main_traces = chunk_vec(main_traces, opts.shard_batch_size);
                             chunked_records
@@ -439,11 +381,6 @@ where
                             Ok(())
                             };
 
-                                // Whole-program from-start checkpoint: loop
-                                // `execute_record` on ONE carried executor until
-                                // it reports `done`, mirroring the interpreter
-                                // producer's `execute_state` loop and the GPU
-                                // driver's.
                                 trace_checkpoint_to_completion::<SC, _>(
                                     program.clone(),
                                     execution_state,
@@ -464,16 +401,8 @@ where
         #[cfg(feature = "debug")]
         drop(all_records_tx);
 
-        // The invariant the `commit` call below relies on: whatever
-        // `FIX_CORE_SHAPES` says, the jagged commit pads to the canonical CLUSTER
-        // shape, so the recursion normalize VK depends on the chip SET alone and
-        // matches the production vk_map. With FIX off the records keep their raw
-        // heights and the STARK proves at those heights; only the commit is
-        // padded.
         let cluster_shape_config = CoreShapeConfig::<SC::Val>::default();
 
-        // Chip NAME -> trace WIDTH, so `commit` can size the height-0 trace it
-        // injects for a missing chip.  Machine-static, built once.
         let cluster_chip_widths: std::collections::BTreeMap<String, usize> = prover
             .machine()
             .chips()
@@ -481,7 +410,6 @@ where
             .map(|c| (MachineAir::<SC::Val>::name(c), p3_air::BaseAir::<SC::Val>::width(c).max(1)))
             .collect();
 
-        // Spawn the phase 2 prover thread.
         let p2_prover_span = tracing::Span::current().clone();
         let p2_prover_handle = s.spawn(move || {
             let _span = p2_prover_span.enter();
@@ -495,13 +423,6 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
-                                    // Hand `commit` this shard's canonical cluster;
-                                    // it injects a height-0 full-width trace for
-                                    // every chip in the cluster the shard lacks.
-                                    // Keyed by chip NAME because the PCS layer
-                                    // cannot depend on `MipsAirId`. A shard that
-                                    // overflows every cluster yields `None` and
-                                    // commits its own chip set.
                                     let cluster_widths: Option<
                                         std::collections::BTreeMap<String, usize>,
                                     > = cluster_shape_config
@@ -510,11 +431,6 @@ where
                                             shape
                                                 .iter()
                                                 .filter_map(|(air, _log_h)| {
-                                                    // The shape carries a `Cpu` AXIS
-                                                    // (the cycle band) but no Cpu
-                                                    // CHIP; injecting a non-machine
-                                                    // name would shift the
-                                                    // alphabetical chips/traces zip.
                                                     let name = air.to_string();
                                                     let width =
                                                         cluster_chip_widths.get(&name).copied()?;
@@ -523,13 +439,7 @@ where
                                                 .collect()
                                         });
 
-                                    // Rows are committed in one layout (natural), so
-                                    // commit, zerocheck and reduction cannot disagree
-                                    // about it.
                                     let t_commit = std::time::Instant::now();
-                                    // CORE never pins the recursion AREA (that is a
-                                    // compress-only geometry) → `None` (NATURAL own-area
-                                    // commit, byte-identical).
                                     let main_data =
                                         prover.commit(&record, main_traces, cluster_widths);
                                     let commit_ms = t_commit.elapsed().as_millis();
@@ -552,10 +462,6 @@ where
                                     #[cfg(debug_assertions)]
                                     {
                                         if let Some(ref shape) = record.shape {
-                                            // The fitted shape carries the VIRTUAL
-                                            // Cpu axis (the cycles axis used for
-                                            // splitting/banding); no chip backs it,
-                                            // so the proof legitimately lacks it.
                                             assert_eq!(
                                                 proof.shape(),
                                                 shape
@@ -584,18 +490,14 @@ where
             shard_proofs
         });
 
-        // Wait until the checkpoint generator handle has fully finished.
         let public_values_stream = checkpoint_generator_handle.join().unwrap()?;
 
-        // Wait until the records and traces have been fully generated for phase 2.
         for handle in p2_record_and_trace_gen_handles {
             handle.join().unwrap()?;
         }
 
-        // Wait until the phase 2 prover has finished.
         let shard_proofs = p2_prover_handle.join().unwrap();
 
-        // Log some of the `ExecutionReport` information.
         let report_aggregate = report_aggregate.lock().unwrap();
         tracing::info!(
             "execution report (totals): total_cycles={}, total_syscall_cycles={}, touched_memory_addresses={}",
@@ -604,8 +506,6 @@ where
             report_aggregate.touched_memory_addresses,
         );
 
-        // Print the opcode and syscall count tables like `du`: sorted by count (descending) and
-        // with the count in the first column.
         tracing::info!("execution report (opcode counts):");
         let (width, lines) = sorted_table_lines(report_aggregate.opcode_counts.as_ref());
         for (label, count) in lines {
@@ -629,7 +529,6 @@ where
         let proof = MachineProof::<SC> { shard_proofs };
         let cycles = report_aggregate.total_instruction_count();
 
-        // Print the summary.
         let proving_time = proving_start.elapsed().as_secs_f64();
         tracing::info!(
             "summary: cycles={}, e2e={}s, khz={:.2}, proofSize={}",
@@ -696,10 +595,6 @@ where
         let (records, done) =
             runtime.execute_record(true).map_err(ZKMCoreProverError::ExecutionError)?;
         let num_cycles = runtime.state.global_clk;
-        // `runtime.report` is CUMULATIVE over the carried executor, so only the
-        // terminal batch contributes it — summing it per batch would multiply
-        // every counter.  The multi-checkpoint path sums one fresh
-        // per-checkpoint report per batch, which totals the same.
         let report =
             if done { std::mem::take(&mut runtime.report) } else { ExecutionReport::default() };
         on_batch(records, report, done, num_cycles)?;
@@ -727,11 +622,8 @@ where
         config.maximal_core_shapes(opts.shard_size.ilog2() as usize).into_iter().collect()
     });
 
-    // We already passed the deferred proof verifier when creating checkpoints, so the proofs were
-    // already verified. So here we use a noop verifier to not print any warnings.
     runtime.subproof_verifier = Some(&noop);
 
-    // Execute from the checkpoint.
     let (records, _) = runtime.execute_record(true).unwrap();
 
     (records, runtime.report)

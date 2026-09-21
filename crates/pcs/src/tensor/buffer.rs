@@ -383,8 +383,6 @@ where
     /// ```
     #[track_caller]
     pub unsafe fn copy_from_host_slice(&mut self, src: &[T]) -> Result<(), CopyError> {
-        // The panic code path was put into a cold function to not bloat the
-        // call site.
         #[inline(never)]
         #[cold]
         #[track_caller]
@@ -476,8 +474,6 @@ where
     where
         T: Copy,
     {
-        // The panic code path was put into a cold function to not bloat the
-        // call site.
         #[inline(never)]
         #[cold]
         #[track_caller]
@@ -502,7 +498,6 @@ where
             )?;
         }
 
-        // Extend the length of the buffer to include the new elements.
         self.len += src.len();
 
         Ok(())
@@ -545,8 +540,6 @@ where
     where
         T: Copy,
     {
-        // The panic code path was put into a cold function to not bloat the
-        // call site.
         #[inline(never)]
         #[cold]
         #[track_caller]
@@ -571,7 +564,6 @@ where
             )?;
         }
 
-        // Extend the length of the buffer to include the new elements.
         self.len += src.len();
 
         Ok(())
@@ -589,8 +581,6 @@ where
     /// destination is valid for the duration of the operation.
     #[track_caller]
     pub unsafe fn copy_into_host(&self, dst: &mut [MaybeUninit<T>]) -> Result<(), CopyError> {
-        // The panic code path was put into a cold function to not bloat the
-        // call site.
         #[inline(never)]
         #[cold]
         #[track_caller]
@@ -678,8 +668,6 @@ where
     /// the type system.
     #[track_caller]
     pub unsafe fn write_bytes(&mut self, value: u8, len: usize) -> Result<(), CopyError> {
-        // The panic code path was put into a cold function to not bloat the
-        // call site.
         #[inline(never)]
         #[cold]
         #[track_caller]
@@ -687,8 +675,6 @@ where
             panic!("Cannot write {len} bytes to buffer of length {dst_len} and capacity {cap}");
         }
 
-        // The panic code path was put into a cold function to not bloat the
-        // call site.
         #[inline(never)]
         #[cold]
         #[track_caller]
@@ -696,18 +682,15 @@ where
             panic!("Number of bytes ({len}) does not match the size of the type ({size})");
         }
 
-        // Check that the number of bytes matches the size of the type.
         if !len.is_multiple_of(std::mem::size_of::<T>()) {
             align_fail(len, std::mem::size_of::<T>());
         }
 
-        // Check that the buffer has enough capacity.
         if self.len() * std::mem::size_of::<T>() + len > self.capacity() * std::mem::size_of::<T>()
         {
             capacity_fail(self.len(), len, self.capacity());
         }
 
-        // Write the bytes to the buffer.
         unsafe {
             self.buf.allocator().write_bytes(
                 self.buf.ptr().add(self.len()) as *mut u8,
@@ -716,7 +699,6 @@ where
             )?;
         }
 
-        // Extend the length of the buffer to include the new elements.
         self.len += len / std::mem::size_of::<T>();
 
         Ok(())
@@ -876,7 +858,6 @@ impl<T> Buffer<T, CpuBackend> {
             return None;
         }
 
-        // This is safe because we have just checked that the buffer is not empty.
         unsafe {
             let len = self.len();
             let ptr = &mut self[len - 1] as *mut _ as *mut T;
@@ -889,6 +870,8 @@ impl<T> Buffer<T, CpuBackend> {
     /// Clears the buffer, removing all values.
     ///
     /// Note that this method has no effect on the allocated capacity of the buffer.
+    /// Setting `len = 0` before `drop_in_place` makes a panicking element `Drop`
+    /// leak the rest instead of dropping any element twice.
     ///
     /// # Examples
     ///
@@ -902,11 +885,6 @@ impl<T> Buffer<T, CpuBackend> {
     pub fn clear(&mut self) {
         let elems: *mut [T] = self.as_mut_slice();
 
-        // SAFETY:
-        // - `elems` comes directly from `as_mut_slice` and is therefore valid.
-        // - Setting `self.len` before calling `drop_in_place` means that, if an element's `Drop`
-        //   impl panics, the vector's `Drop` impl will do nothing (leaking the rest of the
-        //   elements) instead of dropping some twice.
         unsafe {
             self.len = 0;
             std::ptr::drop_in_place(elems);
@@ -961,7 +939,6 @@ impl<T> Buffer<T, CpuBackend> {
     where
         T: Copy,
     {
-        // Check to see if capacity needs to be increased.
         if self.len() + slice.len() > self.capacity() {
             let additional_capacity = self.len() + slice.len() - self.capacity();
             let owned_self = std::mem::take(self);
@@ -1165,9 +1142,6 @@ impl<T> From<Buffer<T, CpuBackend>> for Vec<T> {
     /// ```
     fn from(value: Buffer<T, CpuBackend>) -> Self {
         if value.is_foreign() {
-            // Foreign storage never reaches the global allocator: copy out,
-            // and let the buffer's drop release its region reference.  The
-            // region holds `Copy` data by construction (`from_foreign`).
             let mut vec = Vec::with_capacity(value.len());
             unsafe {
                 std::ptr::copy_nonoverlapping(value.as_ptr(), vec.as_mut_ptr(), value.len());
@@ -1408,7 +1382,6 @@ mod tests {
         let host_vec = Vec::from(buffer);
         assert_eq!(host_vec, [1, 2, 4, 5, 6]);
 
-        // Test the host_buffer!() macro
         let buffer = buffer![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         assert_eq!(buffer.len(), 10);
         assert_eq!(buffer.capacity(), 10);

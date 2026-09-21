@@ -62,7 +62,6 @@ pub extern "C" fn syscall_bls12381_double(p: *mut [u32; 24]) {
 pub extern "C" fn syscall_bls12381_decompress(point: &mut [u8; 96], sign_bit: bool) {
     #[cfg(target_os = "zkvm")]
     {
-        // Memory system/FpOps are little endian so we'll just flip the whole array before/after
         point.reverse();
         let p = point.as_mut_ptr();
         unsafe {

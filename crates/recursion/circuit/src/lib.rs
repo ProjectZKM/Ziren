@@ -310,19 +310,6 @@ impl CircuitConfig for InnerConfig {
         input: Felt<<Self as Config>::F>,
         power_bits: Vec<Felt<<Self as Config>::F>>,
     ) -> Felt<<Self as Config>::F> {
-        // Inline repeated-squaring lowering (identical to
-        // WrapConfig below).
-        // Emitting the dedicated `ExpReverseBitsLen` instruction is
-        // incompatible with the BaseFold zerocheck: that chip's AIR uses
-        // `when_transition` row selectors (the accum-squaring chain at
-        // exp_reverse_bits.rs:421 and x-stability at :380), which
-        // `ShardConstraintFolder` cannot evaluate (it has no row
-        // selectors — `unimplemented!`). Lowering to primitive
-        // ALU/Select ops keeps the work in row-selector-free chips, so
-        // `ExpReverseBitsLen` can be retired from the compress/shrink
-        // machine (see `machine.rs::compress_machine`). The chip remains
-        // in the legacy-FRI `wrap_machine`, which uses the row-selector
-        // STARK prover, not the BaseFold folder.
         let mut result = builder.constant(Self::F::ONE);
         let mut power_f = input;
         let bit_len = power_bits.len();
@@ -367,7 +354,6 @@ impl CircuitConfig for InnerConfig {
         if_zero: <Self as Config>::F,
         if_one: <Self as Config>::F,
     ) -> Felt<<Self as Config>::F> {
-        // `if_zero + b*(if_one - if_zero)`, both branches being constants.
         let scaled: Felt<_> = builder.uninit();
         builder.push_op(DslIr::MulFI(scaled, should_swap, if_one - if_zero));
         let out: Felt<_> = builder.uninit();
@@ -464,7 +450,6 @@ impl CircuitConfig for WrapConfig {
         input: Felt<<Self as Config>::F>,
         power_bits: Vec<Felt<<Self as Config>::F>>,
     ) -> Felt<<Self as Config>::F> {
-        // builder.exp_reverse_bits_v2(input, power_bits)
         let mut result = builder.constant(Self::F::ONE);
         let mut power_f = input;
         let bit_len = power_bits.len();
@@ -509,7 +494,6 @@ impl CircuitConfig for WrapConfig {
         if_zero: <Self as Config>::F,
         if_one: <Self as Config>::F,
     ) -> Felt<<Self as Config>::F> {
-        // `if_zero + b*(if_one - if_zero)`, both branches being constants.
         let scaled: Felt<_> = builder.uninit();
         builder.push_op(DslIr::MulFI(scaled, should_swap, if_one - if_zero));
         let out: Felt<_> = builder.uninit();
@@ -775,7 +759,6 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriParamet
         _builder: &mut Builder<C>,
         commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
     ) -> [Felt<<C as Config>::F>; 8] {
-        // inner: DigestVariable is already [Felt;8].
         commitment
     }
 }
@@ -802,14 +785,6 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriP
         let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
         builder.commit_vkey_hash_circuit(vkey_hash);
 
-        // The recursion verifying-key-allowlist root, as a public input.
-        //
-        // Inside the tree this root is a free witness (compress_basefold.rs
-        // sources it from the merkle witness), so the in-circuit checks only say
-        // "every child's key is in a tree with THIS root" --- a tree the prover
-        // supplies.  Exposing it here is what lets a verifier outside the proof
-        // system require the root to be the published one, and so rules out a
-        // tree built around a substituted compose, leaf or shrink program.
         let vk_root = felts_to_bn254_var(builder, &public_values.vk_root);
         builder.commit_vk_root_circuit(vk_root);
     }
@@ -834,9 +809,6 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriP
         let vkey_hash = state[0];
         builder.commit_vkey_hash_circuit(vkey_hash);
 
-        // Same public input as the plain path above: folding the wrap vk into
-        // the vkey hash pins the WRAP program, not the recursion programs
-        // beneath it, so the allowlist root still has to be exposed.
         let vk_root = felts_to_bn254_var(builder, &public_values.vk_root);
         builder.commit_vk_root_circuit(vk_root);
     }
@@ -845,12 +817,6 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriP
         builder: &mut Builder<C>,
         commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
     ) -> [Felt<<C as Config>::F>; 8] {
-        // outer: project the [Var<Bn254>;1] commit to 8 KoalaBear felts —
-        // in-circuit twin of host digest_felts (p3_field::split_32::<Bn254,
-        // KoalaBear>(., 8)). The host uses 64-bit limbs; BN254 < 2^256 = 4 limbs,
-        // and host zero-pads limbs 4..8. The in-circuit split_32 reads 256 bits
-        // (4 limbs), so split to 4 and zero-pad to 8 to match exactly. (Each limb
-        // = (64-bit chunk) mod KoalaBear prime, identical to from_wrapped_u64.)
         let limbs = crate::challenger::split_32(builder, commitment[0], 4);
         let zero: Felt<<C as Config>::F> = builder.eval(<C as Config>::F::ZERO);
         [limbs[0], limbs[1], limbs[2], limbs[3], zero, zero, zero, zero]

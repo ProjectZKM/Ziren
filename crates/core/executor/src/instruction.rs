@@ -224,7 +224,7 @@ impl Instruction {
                 | Opcode::SWR
                 | Opcode::LL
                 | Opcode::SC
-                | Opcode::LB // | Opcode::SDC1
+                | Opcode::LB
         )
     }
 
@@ -316,99 +316,65 @@ impl Instruction {
         let rs = ((insn >> 21) & 0x1F).to_le_bytes()[0] as u32;
         let rd = ((insn >> 11) & 0x1F).to_le_bytes()[0];
         let sa = ((insn >> 6) & 0x1F).to_le_bytes()[0] as u32;
-        let offset = insn & 0xffff; // as known as imm
+        let offset = insn & 0xffff;
         let offset_ext16 = sign_extend::<16>(offset);
         let target = insn & 0x3ffffff;
         log::trace!("op {opcode}, func {func}, rt {rt}, rs {rs}, rd {rd}");
         log::trace!("decode: insn {insn:X}, opcode {opcode:X}, func {func:X}");
 
         match (opcode, func) {
-            // MOVZ: rd = rs if rt == 0
-            (0b000000, 0b001010) => Ok(Self::new(Opcode::MEQ, rd, rs, rt, false, false)), // MOVZ: rd = rs if rt == 0
-            // MOVN: rd = rs if rt != 0
-            (0b000000, 0b001011) => Ok(Self::new(Opcode::MNE, rd, rs, rt, false, false)), // MOVN: rd = rs if rt != 0
-            // ADD: rd = rs + rt
-            (0b000000, 0b100000) => Ok(Self::new(Opcode::ADD, rd, rs, rt, false, false)), // ADD: rd = rs+rt
-            // ADDU: rd = rs + rt
-            (0b000000, 0b100001) => Ok(Self::new(Opcode::ADD, rd, rs, rt, false, false)), // ADDU: rd = rs+rt
-            // SUB: rd = rs - rt
-            (0b000000, 0b100010) => {
-                Ok(Self::new(Opcode::SUB, rd, rs, rt, false, false)) // SUB: rd = rs-rt
-            }
-            // SUBU: rd = rs - rt
-            (0b000000, 0b100011) => Ok(Self::new(Opcode::SUB, rd, rs, rt, false, false)), // SUBU: rd = rs-rt
-            // SLL: rd = rt << sa
-            (0b000000, 0b000000) => Ok(Self::new(Opcode::SLL, rd, rt, sa, false, true)), // SLL: rd = rt << sa
-            // SRL: rd = rt >> sa
+            (0b000000, 0b001010) => Ok(Self::new(Opcode::MEQ, rd, rs, rt, false, false)),
+            (0b000000, 0b001011) => Ok(Self::new(Opcode::MNE, rd, rs, rt, false, false)),
+            (0b000000, 0b100000) => Ok(Self::new(Opcode::ADD, rd, rs, rt, false, false)),
+            (0b000000, 0b100001) => Ok(Self::new(Opcode::ADD, rd, rs, rt, false, false)),
+            (0b000000, 0b100010) => Ok(Self::new(Opcode::SUB, rd, rs, rt, false, false)),
+            (0b000000, 0b100011) => Ok(Self::new(Opcode::SUB, rd, rs, rt, false, false)),
+            (0b000000, 0b000000) => Ok(Self::new(Opcode::SLL, rd, rt, sa, false, true)),
             (0b000000, 0b000010) => {
                 if rs == 1 {
-                    Ok(Self::new(Opcode::ROR, rd, rt, sa, false, true)) // ROTR
+                    Ok(Self::new(Opcode::ROR, rd, rt, sa, false, true))
                 } else {
-                    Ok(Self::new(Opcode::SRL, rd, rt, sa, false, true)) // SRL: rd = rt >> sa
+                    Ok(Self::new(Opcode::SRL, rd, rt, sa, false, true))
                 }
             }
-            // SRA: rd = rt >> sa
-            (0b000000, 0b000011) => Ok(Self::new(Opcode::SRA, rd, rt, sa, false, true)), // SRA: rd = rt >> sa
-            // SLLV: rd = rt << rs[4:0]
-            (0b000000, 0b000100) => Ok(Self::new(Opcode::SLL, rd, rt, rs, false, false)), // SLLV: rd = rt << rs[4:0]
-            // SRLV: rd = rt >> rs[4:0]
+            (0b000000, 0b000011) => Ok(Self::new(Opcode::SRA, rd, rt, sa, false, true)),
+            (0b000000, 0b000100) => Ok(Self::new(Opcode::SLL, rd, rt, rs, false, false)),
             (0b000000, 0b000110) => {
                 if sa == 1 {
-                    Ok(Self::new(Opcode::ROR, rd, rt, rs, false, false)) // ROTRV
+                    Ok(Self::new(Opcode::ROR, rd, rt, rs, false, false))
                 } else {
-                    Ok(Self::new(Opcode::SRL, rd, rt, rs, false, false)) // SRLV: rd = rt >> rs[4:0]
+                    Ok(Self::new(Opcode::SRL, rd, rt, rs, false, false))
                 }
             }
-            // SRAV: rd = rt >> rs[4:0]
-            (0b000000, 0b000111) => Ok(Self::new(Opcode::SRA, rd, rt, rs, false, false)), // SRAV: rd = rt >> rs[4:0]
-            // MUL: rd = rt * rs
-            (0b011100, 0b000010) => Ok(Self::new(Opcode::MUL, rd, rt, rs, false, false)), // MUL: rd = rt * rs
-            // MULT: (hi, lo) = rt * rs
-            (0b000000, 0b011000) => Ok(Self::new(Opcode::MULT, 32, rt, rs, false, false)), // MULT: (hi, lo) = rt * rs
-            // MULTU: (hi, lo) = rt * rs
-            (0b000000, 0b011001) => Ok(Self::new(Opcode::MULTU, 32, rt, rs, false, false)), // MULTU: (hi, lo) = rt * rs
-            // DIV: hi = rt % rs, lo = rt / rs, signed
+            (0b000000, 0b000111) => Ok(Self::new(Opcode::SRA, rd, rt, rs, false, false)),
+            (0b011100, 0b000010) => Ok(Self::new(Opcode::MUL, rd, rt, rs, false, false)),
+            (0b000000, 0b011000) => Ok(Self::new(Opcode::MULT, 32, rt, rs, false, false)),
+            (0b000000, 0b011001) => Ok(Self::new(Opcode::MULTU, 32, rt, rs, false, false)),
             (0b000000, 0b011010) => {
                 if sa == 3 {
-                    Ok(Self::new(Opcode::MOD, rd, rs, rt, false, false)) // MOD: rd = rs % rt
+                    Ok(Self::new(Opcode::MOD, rd, rs, rt, false, false))
                 } else {
-                    Ok(Self::new(Opcode::DIV, 32, rs, rt, false, false)) // DIV: (hi, lo) = rs / rt
+                    Ok(Self::new(Opcode::DIV, 32, rs, rt, false, false))
                 }
             }
-            // DIVU: hi = rt % rs, lo = rt / rs, unsigned
             (0b000000, 0b011011) => {
                 if sa == 3 {
-                    Ok(Self::new(Opcode::MODU, rd, rs, rt, false, false)) // MODU: rd = rs % rt
+                    Ok(Self::new(Opcode::MODU, rd, rs, rt, false, false))
                 } else {
-                    Ok(Self::new(Opcode::DIVU, 32, rs, rt, false, false)) // DIVU: (hi, lo) = rs / rt
+                    Ok(Self::new(Opcode::DIVU, 32, rs, rt, false, false))
                 }
             }
-            // MFHI: rd = hi
-            (0b000000, 0b010000) => Ok(Self::new(Opcode::ADD, rd, 33, 0, false, true)), // MFHI: rd = hi
-            // MTHI: hi = rs
-            (0b000000, 0b010001) => Ok(Self::new(Opcode::ADD, 33, rs, 0, false, true)), // MTHI: hi = rs
-            // MFLO: rd = lo
-            (0b000000, 0b010010) => Ok(Self::new(Opcode::ADD, rd, 32, 0, false, true)), // MFLO: rd = lo
-            // MTLO: lo = rs
-            (0b000000, 0b010011) => Ok(Self::new(Opcode::ADD, 32, rs, 0, false, true)), // MTLO: lo = rs
-            // SYNC (nop)
-            (0b000000, 0b001111) => Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true)), // SYNC
-            // CLZ: rd = count_leading_zeros(rs)
-            (0b011100, 0b100000) => Ok(Self::new(Opcode::CLZ, rd, rs, 0, false, true)), // CLZ: rd = count_leading_zeros(rs)
-            // CLO: rd = count_leading_ones(rs)
-            (0b011100, 0b100001) => Ok(Self::new(Opcode::CLO, rd, rs, 0, false, true)), // CLO: rd = count_leading_ones(rs)
-            // JR
-            (0x00, 0x08) => Ok(Self::new(Opcode::Jump, 0u8, rs, 0, false, true)), // JR
-            // JALR
-            (0x00, 0x09) => Ok(Self::new(Opcode::Jump, rd, rs, 0, false, true)), // JALR
+            (0b000000, 0b010000) => Ok(Self::new(Opcode::ADD, rd, 33, 0, false, true)),
+            (0b000000, 0b010001) => Ok(Self::new(Opcode::ADD, 33, rs, 0, false, true)),
+            (0b000000, 0b010010) => Ok(Self::new(Opcode::ADD, rd, 32, 0, false, true)),
+            (0b000000, 0b010011) => Ok(Self::new(Opcode::ADD, 32, rs, 0, false, true)),
+            (0b000000, 0b001111) => Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true)),
+            (0b011100, 0b100000) => Ok(Self::new(Opcode::CLZ, rd, rs, 0, false, true)),
+            (0b011100, 0b100001) => Ok(Self::new(Opcode::CLO, rd, rs, 0, false, true)),
+            (0x00, 0x08) => Ok(Self::new(Opcode::Jump, 0u8, rs, 0, false, true)),
+            (0x00, 0x09) => Ok(Self::new(Opcode::Jump, rd, rs, 0, false, true)),
             (0x01, _) => {
                 if rt == 1 {
-                    // BGEZ.  The zero comparand is READ FROM REGISTER 0
-                    // rather than carried as an immediate (zkVM-internal
-                    // normalisation, like the SYNC-class decodes): the value
-                    // compared is identically zero, and it makes every branch
-                    // I-type — `op_b` a register, `op_c` the offset — which
-                    // the typed frame relies on.
                     Ok(Self::new(
                         Opcode::BGEZ,
                         rs as u8,
@@ -418,7 +384,6 @@ impl Instruction {
                         true,
                     ))
                 } else if rt == 0 {
-                    // BLTZ — zero comparand from register 0, as above.
                     Ok(Self::new(
                         Opcode::BLTZ,
                         rs as u8,
@@ -428,7 +393,6 @@ impl Instruction {
                         true,
                     ))
                 } else if rt == 0x11 && rs == 0 {
-                    // BAL
                     Ok(Self::new(
                         Opcode::JumpDirect,
                         31,
@@ -438,17 +402,13 @@ impl Instruction {
                         true,
                     ))
                 } else if rt == 0x1f {
-                    // SYNCI
                     Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true))
                 } else {
                     Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 }
             }
-            // J: target is unsigned (not sign-extended) per MIPS spec.
             (0x02, _) => Ok(Self::new(Opcode::Jumpi, 0u8, target << 2, 0, true, true)),
-            // JAL: target is unsigned (not sign-extended) per MIPS spec.
             (0x03, _) => Ok(Self::new(Opcode::Jumpi, 31u8, target << 2, 0, true, true)),
-            // BEQ
             (0x04, _) => Ok(Self::new(
                 Opcode::BEQ,
                 rs as u8,
@@ -457,7 +417,6 @@ impl Instruction {
                 false,
                 true,
             )),
-            // BNE
             (0x05, _) => Ok(Self::new(
                 Opcode::BNE,
                 rs as u8,
@@ -466,7 +425,6 @@ impl Instruction {
                 false,
                 true,
             )),
-            // BLEZ — zero comparand from register 0 (see BGEZ).
             (0x06, _) => Ok(Self::new(
                 Opcode::BLEZ,
                 rs as u8,
@@ -475,7 +433,6 @@ impl Instruction {
                 false,
                 true,
             )),
-            // BGTZ — zero comparand from register 0 (see BGEZ).
             (0x07, _) => Ok(Self::new(
                 Opcode::BGTZ,
                 rs as u8,
@@ -485,60 +442,32 @@ impl Instruction {
                 true,
             )),
 
-            // LB
             (0b100000, _) => Ok(Self::new(Opcode::LB, rt as u8, rs, offset_ext16, false, true)),
-            // LH
             (0b100001, _) => Ok(Self::new(Opcode::LH, rt as u8, rs, offset_ext16, false, true)),
-            // LWL
             (0b100010, _) => Ok(Self::new(Opcode::LWL, rt as u8, rs, offset_ext16, false, true)),
-            // LW
             (0b100011, _) => Ok(Self::new(Opcode::LW, rt as u8, rs, offset_ext16, false, true)),
-            // LBU
             (0b100100, _) => Ok(Self::new(Opcode::LBU, rt as u8, rs, offset_ext16, false, true)),
-            // LHU
             (0b100101, _) => Ok(Self::new(Opcode::LHU, rt as u8, rs, offset_ext16, false, true)),
-            // LWR
             (0b100110, _) => Ok(Self::new(Opcode::LWR, rt as u8, rs, offset_ext16, false, true)),
-            // LL
             (0b110000, _) => Ok(Self::new(Opcode::LL, rt as u8, rs, offset_ext16, false, true)),
-            // SB
             (0b101000, _) => Ok(Self::new(Opcode::SB, rt as u8, rs, offset_ext16, false, true)),
-            // SH
             (0b101001, _) => Ok(Self::new(Opcode::SH, rt as u8, rs, offset_ext16, false, true)),
-            // SWL
             (0b101010, _) => Ok(Self::new(Opcode::SWL, rt as u8, rs, offset_ext16, false, true)),
-            // SW
             (0b101011, _) => Ok(Self::new(Opcode::SW, rt as u8, rs, offset_ext16, false, true)),
-            // SWR
             (0b101110, _) => Ok(Self::new(Opcode::SWR, rt as u8, rs, offset_ext16, false, true)),
-            // SC
             (0b111000, _) => Ok(Self::new(Opcode::SC, rt as u8, rs, offset_ext16, false, true)),
-            // ADDI: rt = rs + sext(imm)
-            (0b001000, _) => Ok(Self::new(Opcode::ADD, rt as u8, rs, offset_ext16, false, true)), // ADDI: rt = rs + sext(imm)
+            (0b001000, _) => Ok(Self::new(Opcode::ADD, rt as u8, rs, offset_ext16, false, true)),
 
-            // ADDIU: rt = rs + sext(imm)
-            (0b001001, _) => Ok(Self::new(Opcode::ADD, rt as u8, rs, offset_ext16, false, true)), // ADDIU: rt = rs + sext(imm)
+            (0b001001, _) => Ok(Self::new(Opcode::ADD, rt as u8, rs, offset_ext16, false, true)),
 
-            // SLTI: rt = rs < sext(imm)
-            (0b001010, _) => Ok(Self::new(Opcode::SLT, rt as u8, rs, offset_ext16, false, true)), // SLTI: rt = rs < sext(imm)
+            (0b001010, _) => Ok(Self::new(Opcode::SLT, rt as u8, rs, offset_ext16, false, true)),
 
-            // SLTIU: rt = rs < sext(imm)
-            (0b001011, _) => Ok(Self::new(Opcode::SLTU, rt as u8, rs, offset_ext16, false, true)), // SLTIU: rt = rs < sext(imm)
+            (0b001011, _) => Ok(Self::new(Opcode::SLTU, rt as u8, rs, offset_ext16, false, true)),
 
-            // SLT: rd = rs < rt
-            (0b000000, 0b101010) => Ok(Self::new(Opcode::SLT, rd, rs, rt, false, false)), // SLT: rd = rs < rt
+            (0b000000, 0b101010) => Ok(Self::new(Opcode::SLT, rd, rs, rt, false, false)),
 
-            // SLTU: rd = rs < rt
-            (0b000000, 0b101011) => Ok(Self::new(Opcode::SLTU, rd, rs, rt, false, false)), // SLTU: rd = rs < rt
+            (0b000000, 0b101011) => Ok(Self::new(Opcode::SLTU, rd, rs, rt, false, false)),
 
-            // LUI: rt = imm << 16.  Decoded as an immediate ADD of the
-            // pre-shifted constant rather than an `SLL` whose FIRST operand is
-            // an immediate: the architectural effect (`rt = imm << 16`, one
-            // cycle) is identical, and it keeps every shift-chip row a pure
-            // operand form — `op_b` a register, `op_c` the shamt — which the
-            // typed frames rely on.  (zkVM-internal normalisation, like the
-            // SYNC-class decodes above; the sign-extension bits of the old
-            // `op_b` immediate shifted out anyway.)
             (0b001111, _) => Ok(Self::new(
                 Opcode::ADD,
                 rt as u8,
@@ -546,56 +475,37 @@ impl Instruction {
                 offset_ext16.overflowing_shl(16).0,
                 false,
                 true,
-            )), // LUI: rt = imm << 16
-            // AND: rd = rs & rt
-            (0b000000, 0b100100) => Ok(Self::new(Opcode::AND, rd, rs, rt, false, false)), // AND: rd = rs & rt
-            // OR: rd = rs | rt
-            (0b000000, 0b100101) => Ok(Self::new(Opcode::OR, rd, rs, rt, false, false)), // OR: rd = rs | rt
-            // XOR: rd = rs ^ rt
-            (0b000000, 0b100110) => Ok(Self::new(Opcode::XOR, rd, rs, rt, false, false)), // XOR: rd = rs ^ rt
-            // NOR: rd = ! rs | rt
-            (0b000000, 0b100111) => Ok(Self::new(Opcode::NOR, rd, rs, rt, false, false)), // NOR: rd = ! rs | rt
-            // ANDI: rt = rs + zext(imm)
-            (0b001100, _) => Ok(Self::new(Opcode::AND, rt as u8, rs, offset, false, true)), // ANDI: rt = rs + zext(imm)
-            // ORI: rt = rs + zext(imm)
-            (0b001101, _) => Ok(Self::new(Opcode::OR, rt as u8, rs, offset, false, true)), // ORI: rt = rs + zext(imm)
-            // XORI: rt = rs + zext(imm)
-            (0b001110, _) => Ok(Self::new(Opcode::XOR, rt as u8, rs, offset, false, true)), // XORI: rt = rs + zext(imm)
-            // SYSCALL
-            (0b000000, 0b001100) => Ok(Self::new(Opcode::SYSCALL, 2, 4, 5, false, false)), // Syscall
-            // PREF (nop)
-            (0b110011, _) => Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true)), // Pref
-            // TEQ
-            (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs as u8, rt, 0, false, true)), // teq
+            )),
+            (0b000000, 0b100100) => Ok(Self::new(Opcode::AND, rd, rs, rt, false, false)),
+            (0b000000, 0b100101) => Ok(Self::new(Opcode::OR, rd, rs, rt, false, false)),
+            (0b000000, 0b100110) => Ok(Self::new(Opcode::XOR, rd, rs, rt, false, false)),
+            (0b000000, 0b100111) => Ok(Self::new(Opcode::NOR, rd, rs, rt, false, false)),
+            (0b001100, _) => Ok(Self::new(Opcode::AND, rt as u8, rs, offset, false, true)),
+            (0b001101, _) => Ok(Self::new(Opcode::OR, rt as u8, rs, offset, false, true)),
+            (0b001110, _) => Ok(Self::new(Opcode::XOR, rt as u8, rs, offset, false, true)),
+            (0b000000, 0b001100) => Ok(Self::new(Opcode::SYSCALL, 2, 4, 5, false, false)),
+            (0b110011, _) => Ok(Self::new(Opcode::ADD, 0, 0, 0, false, true)),
+            (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs as u8, rt, 0, false, true)),
             (0b011111, 0b100000) => {
                 if sa == 0b010000 {
-                    // SEB
                     Ok(Self::new(Opcode::SEXT, rd, rt, 0, false, true))
                 } else if sa == 0b011000 {
-                    // SEH
                     Ok(Self::new(Opcode::SEXT, rd, rt, 1, false, true))
                 } else if sa == 0b000010 {
-                    // WSBH
                     Ok(Self::new(Opcode::WSBH, rd, rt, 0, false, true))
                 } else {
                     Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 }
             }
-            // EXT
             (0b011111, 0b000000) => {
                 Ok(Self::new(Opcode::EXT, rt as u8, rs, (rd as u32) << 5 | sa, false, true))
             }
-            // INS
             (0b011111, 0b000100) => {
                 Ok(Self::new(Opcode::INS, rt as u8, rs, (rd as u32) << 5 | sa, false, true))
             }
-            // MADDU
             (0b011100, 0b000001) => Ok(Self::new(Opcode::MADDU, 32, rt, rs, false, false)),
-            // MSUBU
             (0b011100, 0b000101) => Ok(Self::new(Opcode::MSUBU, 32, rt, rs, false, false)),
-            // MADD
             (0b011100, 0b000000) => Ok(Self::new(Opcode::MADD, 32, rt, rs, false, false)),
-            // MSUB
             (0b011100, 0b000100) => Ok(Self::new(Opcode::MSUB, 32, rt, rs, false, false)),
             _ => {
                 log::debug!("decode: invalid opcode {opcode:#08b} {func:#08b}");

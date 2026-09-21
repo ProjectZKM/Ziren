@@ -52,10 +52,8 @@ impl<AB: AirBuilder> Air<AB> for FibonacciAir {
 
         let mut when_transition = builder.when_transition();
 
-        // a' <- b
         when_transition.assert_eq(local.right, next.left);
 
-        // b' <- a + b
         when_transition.assert_eq(local.left + local.right, next.right);
 
         builder.when_last_row().assert_eq(local.right, x);
@@ -181,10 +179,6 @@ fn test_incorrect_public_value() {
     let pcs = Pcs { mmcs: val_mmcs, fri_params, _phantom: PhantomData };
     let challenger = Challenger::from_hasher(vec![], byte_hash);
     let config = p3_uni_stark::StarkConfig::new(pcs, challenger);
-    let pis = vec![
-        Mersenne31::from_u64(0),
-        Mersenne31::from_u64(1),
-        Mersenne31::from_u64(123_123), // incorrect result
-    ];
+    let pis = vec![Mersenne31::from_u64(0), Mersenne31::from_u64(1), Mersenne31::from_u64(123_123)];
     p3_uni_stark::prove(&config, &FibonacciAir {}, trace, &pis);
 }

@@ -32,8 +32,8 @@ pub struct ShaCompressCols<T> {
     pub h_ptr: T,
 
     /// Per-row position in `0..80` (`index = 8*octet_num + octet`), carried on the
-    /// `PrecompileChain` bus.  Replaces the legacy `start` syscall-anchor column —
-    /// the syscall is now received by `ShaCompressControlChip`.
+    /// `PrecompileChain` bus; the syscall itself is received by
+    /// `ShaCompressControlChip`.
     pub index: T,
 
     /// Which cycle within the octet we are currently processing.
@@ -45,8 +45,8 @@ pub struct ShaCompressCols<T> {
     ///  - The last octet is for finalize.
     pub octet_num: [T; 10],
 
-    /// Memory access. During init and compression, this is read only. During finalize, this is
-    /// used to write the result into memory.
+    /// Memory access: read-only during init and compression; during finalize it
+    /// writes the result into memory.
     pub mem: MemoryReadWriteCols<T>,
     /// Current memory address being written/read. During init and finalize, this is A-H. During
     /// compression, this is w[i] being read only.

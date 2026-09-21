@@ -68,30 +68,6 @@ where
     use zkm_pcs::shard_level::ceil_log2;
     use zkm_pcs::shard_level::verifier::JaggedShardVerifier;
 
-    // Build the dummy shard proof by directly zero-filling every
-    // field (chip log heights, cumulative sums, logup-GKR round
-    // proofs, openings, evaluation proof bytes) at the shapes
-    // dictated by the input `shape`. This replaces a previous slow
-    // path that drove `prove_shard_with_data` against zero traces
-    // (~15s per call × REDUCE_BATCH_SIZE during pre-warm); the
-    // zero-fill allocator runs in microseconds because no field
-    // arithmetic happens.
-    //
-    // Resolve each chip in the shape to a concrete &Chip from the
-    // machine, KEEPING ITS OWN log_height. Skip names that don't
-    // exist (the legacy `allowed_shapes` still carry retired chips —
-    // BatchFRI / ExpReverseBitsLen — that the basefold machine no
-    // longer has).
-    //
-    // VERIFY_VK=true fix: the previous code filtered the
-    // chip list but then `zip`'d it against the UNFILTERED
-    // `shape.inner`, so for shapes containing retired names every
-    // chip after the first dropped entry received the NEXT entry's
-    // height (e.g. ExtAlu got BatchFRI's 21). Every Compress /
-    // Deferred / Shrink vk enumerated into vk_map.bin was therefore
-    // built against misaligned dummy input shapes no real proof can
-    // produce. Localized by `zkm_prover::tests::vkroot_shrink_vkeq`
-    // (EQUAL=true, real shape == allowed shape, vk ∉ map).
     let chips_and_heights: Vec<(&Chip<KoalaBear, A>, usize)> = rows
         .iter()
         .filter_map(|(name, rows)| {
@@ -108,11 +84,6 @@ where
         })
         .collect();
 
-    // The DUMMY shard proof's zerocheck dim must match what a REAL proof at
-    // this `shape` produces: the fixed cube.  Every admitted shape fits it —
-    // recursion bands are asserted `<= cube` at shape construction
-    // (recursion/core shape.rs) — so an over-tall shape here is a bug;
-    // assert rather than grow the dummy's cube.
     let max_log_row_count = JaggedShardVerifier::production_default().max_log_row_count;
     let shape_max_log =
         chip_heights_pairs.iter().map(|(_n, rows)| ceil_log2(*rows)).max().unwrap_or(0);
@@ -126,36 +97,14 @@ where
         &chips,
         &chip_heights_pairs,
         max_log_row_count,
-        // A COMPRESS-machine child commits under the pin class its rows
-        // take; a core child has none.
         machine.pins_for_rows(&chip_heights_pairs),
     );
 
-    // Build a minimal-but-shape-correct VK matching the legacy
-    // dummy: empty chip_information (preprocessed-keyed), name-keyed
-    // chip_ordering. Recursion-side reads chip_ordering when fixing
-    // the witness-stream order; chip_information is only consumed
-    // by the legacy FRI vk-commit path which the basefold pipeline
-    // doesn't exercise on the dummy fixture.
-    // Same filtering as above: the real vk's chip_ordering only
-    // contains chips the machine actually has, so the dummy must
-    // not leak retired shape names (BatchFRI / ExpReverseBitsLen)
-    // into it either.
     let chip_ordering = chip_heights_pairs
         .iter()
         .enumerate()
         .map(|(i, (name, _))| (name.to_owned(), i))
         .collect::<HashMap<_, _>>();
-    // The vk hash (recursion/circuit/src/types.rs:hash) absorbs one
-    // prep-domain record per `chip_information` entry — (log_n, 2^log_n, shift,
-    // two_adic_generator(log_n)).  The dummy MUST carry the same preprocessed
-    // domains as the real vk (else the recursion program's vk.hash bakes a
-    // different number of inputs → the program diverges in assert_complete's
-    // vk-hash region).  Real builds these from the PREPROCESSED traces
-    // (machine.rs:457-464), sorted by (Reverse(height), name); the natural
-    // domain has shift = ONE.  For the chips that carry a preprocessed trace
-    // (preprocessed_width > 0), the prep height equals the chip height for the
-    // program-keyed chips on the shapes we enumerate (Program / Byte etc.).
     let chip_information: Vec<(String, zkm_pcs::SerializableDomain<KoalaBear>, (usize, usize))> = {
         let mut prep: Vec<(String, usize, usize)> = chip_heights_pairs
             .iter()
@@ -169,16 +118,11 @@ where
                 }
             })
             .collect();
-        // `StarkMachine::setup` records the preprocessed chips in NAME order.
         prep.sort_by(|a, b| a.0.cmp(&b.0));
         prep.into_iter()
             .map(|(name, pw, rows)| {
                 (
                     name,
-                    // The record `setup` writes: the two-adic domain ENCLOSING
-                    // the trace (`ceil_log2(rows)`, natural shift).  The
-                    // basefold verifier never reads it — the vk hash absorbs
-                    // commitment / pc_start / digest only.
                     zkm_pcs::SerializableDomain {
                         shift: KoalaBear::ONE,
                         log_size: ceil_log2(rows),
@@ -245,9 +189,6 @@ pub mod tests {
     #[test]
     fn dummy_basefold_vk_and_shard_proof_shape_stable() {
         let machine = MipsAir::<KoalaBear>::machine(KoalaBearPoseidon2::default());
-        // Pick two real chips with deterministic widths.  AddSub +
-        // Bitwise both exist in MipsAir and have small preprocessed
-        // widths — keeps the dummy proof inexpensive.
         let shape = OrderedShape::from_log2_heights(&[
             ("AddSub".to_string(), 3),
             ("Bitwise".to_string(), 3),
@@ -270,9 +211,5 @@ pub mod tests {
             shape.inner.len(),
             "chip_heights must have one entry per chip in the shape",
         );
-        // opened_values.chips is intentionally empty in the basefold
-        // pipeline — the recursion verifier builds per-chip openings
-        // from LogUp-GKR's chip_openings instead (see prover.rs:207
-        // and shard_basefold.rs's JaggedShardOpenedValuesVariable).
     }
 }

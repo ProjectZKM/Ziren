@@ -1,13 +1,8 @@
 //! Compose-stage **shape carriers** shared by the basefold compose pipeline.
 //!
-//! The legacy FRI-shaped compose verifier and its witness types
-//! (`ZKMCompressWitnessValues` / `ZKMCompressWitnessVariable`) have been
-//! retired. The production compose verifier lives in
-//! [`super::compress_basefold::verify_compress_basefold`]; the recursion-AIR
-//! variant lives in [`super::compress_basefold_recursion`]. Both consume the
-//! basefold-shaped witness layouts from those modules.
-//!
-//! What remains here:
+//! The compose verifier is [`super::compress_basefold::verify_compress_basefold`],
+//! with the recursion-AIR variant in [`super::compress_basefold_recursion`];
+//! both consume the basefold-shaped witness layouts from those modules.
 //!
 //! - [`PublicValuesOutputDigest`] — imported by all basefold compose
 //!   builders (`compress_basefold.rs`, `compress_basefold_recursion.rs`,

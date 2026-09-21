@@ -50,8 +50,8 @@ pub enum LookupKind {
     /// CPU-state chaining bus (clk, pc).  Each instruction-bearing row
     /// `receive_state`s its current (clk, pc) and `send_state`s the next
     /// (clk', next_pc); the LogUp multiset balance forces consecutive
-    /// rows to chain — the local-only replacement for the legacy
-    /// `when_transition(local.next_pc == next.pc)` constraints.
+    /// rows to chain, with no `when_transition(local.next_pc == next.pc)`
+    /// constraint.
     /// Boundary endpoints (initial / final pc, clk) are emitted by the
     /// public-values AIR.
     State = 9,
@@ -73,8 +73,8 @@ pub enum LookupKind {
     /// the initial state at `index = 0` and drains the final state at the
     /// terminal index; each worker row receives `state @ index` and sends
     /// `state @ index + 1`, so the per-row ordering is pinned by lookup
-    /// multiplicity instead of the legacy `when_first_row`/`when_transition`
-    /// machinery (which the single-row BaseFold zerocheck folder cannot
+    /// multiplicity rather than `when_first_row`/`when_transition`
+    /// constraints (which the single-row BaseFold zerocheck folder cannot
     /// evaluate).  A leading precompile-ID field in the tuple isolates each
     /// precompile's chain (e.g. SHA_COMPRESS sends only balance SHA_COMPRESS
     /// receives), so a single kind serves all multi-row precompiles.
@@ -174,10 +174,8 @@ impl<F: Field> Lookup<F> {
         let empty: &[Var] = &[];
         let prep_slice = prep.unwrap_or(empty);
 
-        // Numerator = signed (later) multiplicity, evaluated as a virtual column.
         let numerator: Expr = self.multiplicity.apply::<Expr, Var>(prep_slice, main);
 
-        // Denominator = α + β₀·argument_index + Σ_k βₖ·v_k.
         let mut betas_iter = betas.iter().cloned();
         let mut denominator: Expr = alpha
             + betas_iter.next().expect("at least one beta (argument_index slot)")
@@ -231,37 +229,27 @@ mod eval_tests {
 
     type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
 
-    // `Lookup::eval` (generic, UNSIGNED numerator) must agree with the prover's
-    // base-field analog `generate_interaction_vals` (signed eagerly) on the SAME
-    // interaction + openings.  This anchors the host/circuit-shared `eval` to the
-    // proven prover hot path WITHOUT a full prove, so a math regression in `eval`
-    // is caught cheaply (independently of the heavy core gate-(b)/(c) tests).
     #[test]
     fn eval_matches_generate_interaction_vals_send_and_receive() {
-        // Interaction: multiplicity = main[0]; values = [main[1], 2*main[2]+3].
         let lookup = Lookup::<KoalaBear> {
             values: vec![
                 VirtualPairCol::single_main(1),
                 VirtualPairCol::new_main(vec![(2, KoalaBear::from_u32(2))], KoalaBear::from_u32(3)),
             ],
             multiplicity: VirtualPairCol::single_main(0),
-            kind: LookupKind::Byte, // argument_index = 4
+            kind: LookupKind::Byte,
             scope: LookupScope::Local,
         };
 
-        // Treat the prover's base-field row as the EF opening point (lift).
         let main_base: Vec<KoalaBear> =
             vec![KoalaBear::from_u32(5), KoalaBear::from_u32(7), KoalaBear::from_u32(9)];
         let main_ef: Vec<EF> = main_base.iter().map(|&v| EF::from(v)).collect();
 
         let alpha = EF::from_u32(11);
-        // betas: argument_index slot + two value slots.
         let betas = vec![EF::from_u32(13), EF::from_u32(17), EF::from_u32(19)];
 
-        // `Lookup::eval` (Var = EF), unsigned numerator.
         let (num_eval, den_eval) = lookup.eval::<EF, EF>(None, &main_ef, alpha, &betas);
 
-        // Prover analog (base field), signed numerator.
         let (num_gen_send, den_gen) =
             crate::shard_level::row_gkr::first_layer::generate_interaction_vals::<KoalaBear, EF>(
                 &lookup,
@@ -276,13 +264,10 @@ mod eval_tests {
             EF,
         >(&lookup, &[], &main_base, false, alpha, &betas);
 
-        // Denominators must match exactly.
         assert_eq!(den_eval, den_gen, "denominator: eval vs generate_interaction_vals");
-        // `eval` numerator is unsigned; send = +num, receive = -num.
         assert_eq!(num_eval, EF::from(num_gen_send), "send numerator");
         assert_eq!(-num_eval, EF::from(num_gen_recv), "receive numerator");
 
-        // Spot-check the formula: den = alpha + b0*4 + b1*7 + b2*(2*9+3).
         let expected_den = alpha
             + betas[0] * EF::from_u32(4)
             + betas[1] * EF::from_u32(7)

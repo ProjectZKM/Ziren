@@ -19,9 +19,6 @@ use super::{
 pub(crate) fn load_plonk_verifying_key_from_bytes(
     buffer: &[u8],
 ) -> Result<PlonkVerifyingKey, PlonkError> {
-    // Reached from the public `verify_gnark_proof`, so the verifying key is as
-    // untrusted as the proof: both `num_qcp` and
-    // `num_commitment_constraint_indexes` come out of these same bytes.
     let mut c = Cursor::new(buffer);
     let fr = |c: &mut Cursor<'_>| -> Result<Fr, PlonkError> {
         Fr::from_slice(c.take(32)?).map_err(|e| PlonkError::GeneralError(Error::Field(e)))
@@ -56,8 +53,6 @@ pub(crate) fn load_plonk_verifying_key_from_bytes(
 
     c.skip(33788)?;
 
-    // `count` refuses a length the remaining bytes could not back, so a hostile
-    // u64 cannot reserve gigabytes before the reads fail.
     let num_commitment_constraint_indexes = c.count(8)?;
     let mut commitment_constraint_indexes = Vec::with_capacity(num_commitment_constraint_indexes);
     for _ in 0..num_commitment_constraint_indexes {
@@ -97,9 +92,6 @@ pub(crate) fn load_plonk_proof_from_bytes(
     buffer: &[u8],
     num_bsb22_commitments: usize,
 ) -> Result<PlonkProof, PlonkError> {
-    // Every read goes through the cursor: a guard on the leading 384 bytes is
-    // not enough, because the very next field starts there and `num_bsb22_
-    // commitments` makes the tail variable-length.
     let mut c = Cursor::new(buffer);
     let g1 = |c: &mut Cursor<'_>| -> Result<AffineG1, PlonkError> {
         Ok(uncompressed_bytes_to_g1_point(c.take(64)?)?)
@@ -115,7 +107,6 @@ pub(crate) fn load_plonk_proof_from_bytes(
         Fr::from_slice(c.take(32)?).map_err(|e| PlonkError::GeneralError(Error::Field(e)))
     };
 
-    // Stores l_at_zeta, r_at_zeta, o_at_zeta, s1_at_zeta, s2_at_zeta, bsb22_commitments
     let mut claimed_values = Vec::with_capacity(5 + num_bsb22_commitments);
     for _ in 1..6 {
         claimed_values.push(fr(&mut c)?);
@@ -177,8 +168,8 @@ mod tests {
     /// so that it actually walks past byte 384.
     fn g1_generator() -> [u8; 64] {
         let mut b = [0u8; 64];
-        b[31] = 1; // x = 1
-        b[63] = 2; // y = 2
+        b[31] = 1;
+        b[63] = 2;
         b
     }
 
@@ -194,8 +185,6 @@ mod tests {
 
     #[test]
     fn proof_loader_is_total() {
-        // Every boundary through and well past 384, where `buffer[384..416]`
-        // used to panic, and with a commitment count that extends the tail.
         for commitments in [0usize, 1, 3] {
             for n in 0..1100usize {
                 let _ = load_plonk_proof_from_bytes(&well_formed_prefix(n), commitments);
@@ -205,8 +194,6 @@ mod tests {
 
     #[test]
     fn proof_loader_survives_the_384_boundary() {
-        // The exact input the first attempt at this fix still panicked on: six
-        // valid points and nothing after them.
         assert!(load_plonk_proof_from_bytes(&well_formed_prefix(384), 0).is_err());
         for n in 384..520usize {
             assert!(load_plonk_proof_from_bytes(&well_formed_prefix(n), 0).is_err());
@@ -228,8 +215,6 @@ mod tests {
 
     #[test]
     fn vk_loader_rejects_hostile_counts() {
-        // num_qcp at 368..372 and the index count near the end are both read
-        // out of the buffer being parsed.
         let mut vk = vec![0u8; 40000];
         vk[368..372].copy_from_slice(&u32::MAX.to_be_bytes());
         assert!(load_plonk_verifying_key_from_bytes(&vk).is_err());

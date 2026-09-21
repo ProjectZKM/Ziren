@@ -19,7 +19,7 @@ pub struct Var<N> {
 
 /// A variable that represents an emulated field element.
 ///
-/// Used to do field arithmetic for recursive verification.
+/// Carries field arithmetic in recursive verification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Felt<F> {
     pub idx: u32,
@@ -28,7 +28,7 @@ pub struct Felt<F> {
 
 /// A variable that represents an emulated extension field element.
 ///
-/// Used to do extension field arithmetic for recursive verification.
+/// Carries extension field arithmetic in recursive verification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ext<F, EF> {
     pub idx: u32,

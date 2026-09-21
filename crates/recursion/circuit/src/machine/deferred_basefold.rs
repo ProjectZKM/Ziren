@@ -72,6 +72,8 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
     C: CircuitConfig<F = p3_koala_bear::KoalaBear>,
     SC: FieldHasherVariable<C> + KoalaBearFriParametersVariable<C>,
 > {
+    /// Per input: the child vk and its shard-proof pieces; the last tuple
+    /// entry is the preprocessed opening round's witnessed inputs.
     pub vks_and_proofs: Vec<(
         VerifyingKeyVariable<C, SC>,
         (
@@ -86,7 +88,6 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
             crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
-            // The preprocessed opening round's witnessed inputs.
             crate::shard_level_witness::PreprocessedRoundWitness<C>,
         ),
     )>,
@@ -204,21 +205,11 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let chip_names: Vec<String> =
             logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
-        // Compute column_counts_by_round BEFORE the
-        // lift_evaluation_proof_bytes call.  An empty placeholder would make
-        // the JaggedPcsParams see num_cols = 1 (post-padding) →
-        // num_col_variables = 0 → z_col empty, while column_claims (built
-        // downstream from real evaluation_claims) is sized to the REAL padded
-        // column count (~1024 for chip-heavy Deferred shapes), so the MLE
-        // evaluation `evaluate_mle_ext(column_claims, z_col)` would panic
-        // on `column_claims.len() != 2^z_col.len()` (1024 vs 1).
-        // Mirrors the compress_basefold flow at compress_basefold.rs:268-275.
         let mut shard_chips: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
             .chips()
             .iter()
             .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
             .collect();
-        // Sort by name to match BTreeMap-ordered opened_values.
         shard_chips.sort_by(|a, b| {
             MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a).cmp(&MachineAir::<
                 <SC as zkm_pcs::StarkGenericConfig>::Val,
@@ -235,8 +226,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .iter()
             .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
             .collect();
-        // Two opening rounds: [preprocessed, main] — same shape as
-        // core/compress; the machine's preprocessed chips in chip-NAME order.
         let prep_widths: Vec<usize> = {
             let mut dims: Vec<(String, usize)> = machine
                 .chips()
@@ -260,8 +249,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
             vec![prep_widths.clone(), main_widths]
         };
 
-        // Heights across BOTH rounds: preprocessed WITNESSED, main from the
-        // opened degrees.
         let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
             let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
             hs.extend(
@@ -284,14 +271,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 vec![(preprocessed_round.raw_commit, basefold_vk_pre.preprocessed_commit)]
             };
 
-        // Bundle lift is the production (and only) path.
         use crate::shard_level_witness::LiftedEvalProof;
-        // ONE PCS down the tree: deferred children (compress-stage proofs)
-        // prove under jagged-WHIR like every inner-ring shard — same
-        // whir/basefold split as compress_basefold.
         let mut whir_evaluation_proof_var = None;
-        // (packing.offsets.len()-1, pad_cols) from the host packing — the
-        // authoritative column count, cross-checked in `jagged_column_count`.
         let mut pack_info: Option<(usize, usize)> = None;
         let evaluation_proof_var = match &evaluation_proof {
             crate::shard_level_witness::LiftedEvalProof::WhirBundle {
@@ -367,15 +348,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     &column_counts_by_round,
                 ))
             }
-            // OuterBundle is gnark-wrap-only (OuterConfig);
-            // the deferred path is inner-only → unreachable.
             LiftedEvalProof::OuterBundle { .. } => {
                 unreachable!("deferred path never carries an OUTER (gnark) bundle")
             }
         };
-        // VERIFY_VK=true: derive from the WITNESSED opened
-        // `degree` instead of baking from host-side chip_heights
-        // (mirrors core/compress).
         let empty_heights_deferred = std::collections::BTreeMap::<String, usize>::new();
         let chip_heights_for_input =
             chip_heights_per_input.get(_deferred_i).unwrap_or(&empty_heights_deferred);
@@ -414,11 +390,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 chip_height_bits,
             )
         });
-        // consume real per-chip cumulative_sums.
-        // Use the CARRIED trace@z openings with REAL degree bits (mirror of
-        // core_basefold.rs:417 and compress_basefold.rs) — a chip_openings
-        // rebuild emits all-zero `degree`, breaking the zerocheck embedding
-        // factor.
         let empty_cumsums_deferred = std::collections::BTreeMap::new();
         let cumsums_for_input =
             chip_cumulative_sums_per_input.get(_deferred_i).unwrap_or(&empty_cumsums_deferred);
@@ -435,37 +406,23 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let jagged_evaluator_fn = super::compress_basefold::real_jagged_evaluator_fn::<
             C,
             SC::FriChallengerVariable,
-        >(
-            builder,
-            // Chip columns + each round's stacking-padding column (see
-            // core_basefold.rs for why the pads have to be counted).
-            {
-                let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
-                let witness_pads: usize =
-                    preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
-                match pack_info {
-                    // Both sources are populated on the inner ring, so the
-                    // cross-check is a real invariant here.
-                    Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
-                        total_cols,
-                        widths,
-                        packing_pads,
-                        Some(witness_pads),
-                        "deferred",
-                    ),
-                    None => widths + witness_pads,
-                }
-            },
-        );
+        >(builder, {
+            let widths: usize = column_counts_by_round.iter().flatten().sum::<usize>();
+            let witness_pads: usize =
+                preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
+            match pack_info {
+                Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
+                    total_cols,
+                    widths,
+                    packing_pads,
+                    Some(witness_pads),
+                    "deferred",
+                ),
+                None => widths + witness_pads,
+            }
+        });
         let mut challenger = machine.config().challenger_variable(builder);
 
-        // Pre-prologue challenger seeding — port of
-        // core_basefold.rs:443-468 / wrap_basefold.rs:370-390 /
-        // compress_basefold.rs: the host machine verifier seeds
-        // the challenger with vk.observe_into + public_values[0..num_pv]
-        // BEFORE the shard prologue (crates/pcs/src/machine.rs:693-707).
-        // A fresh challenger that skips either step desyncs the transcript
-        // (same class as the compose path); replicate the host seed.
         {
             use crate::challenger::CanObserveVariable;
             let num_pv = machine.num_pv_elts();
@@ -475,7 +432,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
             }
         }
 
-        // The jagged-WHIR verify branch (mirror of compress_basefold)
         if let Some(whir_pv) = &whir_shard_proof_variable {
             let lsh = match &evaluation_proof {
                 LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
@@ -512,16 +468,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
             let jagged_shard_proof_variable = jagged_shard_proof_variable
                 .as_ref()
                 .expect("non-whir child lifts to the BaseFold variable");
-            // Per-proof override when bundle path is active.
-            // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
             let per_proof_verifier;
             let active_verifier = match &evaluation_proof {
-                // Only `host` is needed here -- this arm sizes the
-                // per-proof verifier; the proof's own fields are read
-                // where the verification actually happens.
                 LiftedEvalProof::Bundle { host, .. } => {
                     let bundle_num_vars = host.basefold_proof.basefold_proof.fri_commitments.len();
-                    // Fixed-height guard: see core_basefold.
                     crate::shard_level_witness::assert_recursion_stacking_height_fixed(
                         bundle_num_vars,
                         host.commit.log_stacking_height,
@@ -533,7 +483,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     >(
                         max_log_row_count,
                         host.commit.log_stacking_height,
-                        // VARIABLES, not commit rounds.
                         host.commit.log_stacking_height as usize,
                     );
                     &per_proof_verifier
@@ -556,7 +505,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
             );
         }
 
-        // Interpret the deferred proof's public values as RecursionPublicValues.
         let current_public_values: &RecursionPublicValues<Felt<C::F>> =
             public_values_raw.as_slice().borrow();
 
@@ -567,8 +515,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
         assert_recursion_public_values_valid::<C, SC>(builder, current_public_values);
         builder.assert_felt_eq(current_public_values.is_complete, C::F::ONE);
 
-        // reconstruct_deferred_digest update:
-        //   poseidon2(current_digest || zkm_vk_digest || committed_value_digest)
         let mut inputs: [Felt<C::F>; 48] = array::from_fn(|_| builder.uninit());
         inputs[0..DIGEST_SIZE].copy_from_slice(&reconstruct_deferred_digest);
         inputs[DIGEST_SIZE..DIGEST_SIZE + DIGEST_SIZE]
@@ -597,15 +543,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
     deferred_public_values.deferred_proofs_digest = deferred_proofs_digest;
     deferred_public_values.exit_code = builder.eval(C::F::ZERO);
     deferred_public_values.end_reconstruct_deferred_digest = reconstruct_deferred_digest;
-    // A deferred node is NEVER a complete execution proof: it absorbs
-    // externally supplied proofs into the deferred-digest chain and asserts
-    // nothing about the execution's own boundary, so `assert_complete` is not
-    // run on its output.  If it could emit `is_complete = 1`, the flag the
-    // terminal stages now pin (wrap_basefold.rs) would be satisfiable by a
-    // proof whose completeness predicates were never enforced.  Pin it to zero
-    // and require the witness to agree; the honest prover already passes false
-    // (`ZKMProver::get_recursion_deferred_inputs_basefold`), so this is a no-op
-    // on real proofs.
     builder.assert_felt_eq(is_complete, C::F::ZERO);
     deferred_public_values.is_complete = builder.eval(C::F::ZERO);
     deferred_public_values.contains_execution_shard = builder.eval(C::F::ZERO);
@@ -638,9 +575,6 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             >,
     {
         use p3_field::PrimeCharacteristicRing;
-        // The compress dummy requires the full ZKMCompressWithVkeyShape so
-        // its vk_merkle_data can be sized.  Deferred overrides vk_merkle_data
-        // below with its own proof set, so the inner one is throwaway.
         let inner_shape = super::ZKMCompressWithVkeyShape {
             compress_shape: shape.inner.clone(),
             merkle_tree_height: shape.height,

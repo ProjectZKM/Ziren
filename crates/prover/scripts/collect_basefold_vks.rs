@@ -53,14 +53,6 @@ fn read_file(p: &PathBuf) -> Vec<u8> {
 fn main() {
     zkm_core_machine::utils::setup_cli_logger();
 
-    // Install a panic hook that flushes location + message to stderr
-    // before unwinding. Without this, panics inside the rayon/thread
-    // pools that prove_core/compress spawn can be swallowed by Rust's
-    // default abort-on-panic behaviour and the binary exits silently
-    // — the task "diagnose collect_basefold_vks silent crash on
-    // multi-shard workloads". With this hook, every panicking thread
-    // logs `[PANIC] thread=... at file:line: msg` so the source is
-    // visible without a debugger.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current();
@@ -101,14 +93,6 @@ fn main() {
         let (_, pk_d, program, vk) = prover.setup(&elf);
 
         tracing::info!("[collect] prove_core start");
-        // Wrap prove_core in catch_unwind so an inner-thread panic
-        // (e.g. on a multi-shard workload like reth that triggers a
-        // shape-bin lookup miss inside the trace_gen worker pool)
-        // surfaces as a logged failure instead of silently aborting
-        // the whole process. Without this wrapper, the binary
-        // historically exited with no error message between
-        // "prove_core start" and the next workload, leaving the
-        // diagnostician guessing at which shard / which thread.
         let core_proof = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             prover.prove_core(&pk_d, program.clone(), &stdin, opts, context.clone())
         })) {
@@ -144,10 +128,6 @@ fn main() {
         hashes.insert(h, hashes.len());
         tracing::info!("[collect] {} compress_vk hash = {:?} (new={})", workload, h, new);
 
-        // Also capture the shrink VK hash, since verify_shrink (verify.rs:367)
-        // checks the SHRINK proof's vk against the same recursion_vk_map.
-        // Without this, a workload that needed VERIFY_VK=true would pass
-        // compress but fail shrink, requiring a follow-up regen.
         tracing::info!("[collect] shrink start");
         let shrink_compressed = compressed.clone();
         let shrink_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

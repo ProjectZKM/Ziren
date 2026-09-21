@@ -13,14 +13,11 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
 
     let mut general_result = [0u32; 17];
     let mut keccak256_result = [0u8; 32];
-    // Write the number which indicate the rate length (bytes) in the first cell of result.
     general_result[16] = u32_array.len() as u32;
-    // Call precompile
     unsafe {
         syscall_keccak_sponge(u32_array.as_ptr(), &mut general_result);
     }
 
-    // digest = words[0..8] little-endian (mipsel guest and test host are both LE).
     for (out, word) in keccak256_result.chunks_exact_mut(4).zip(&general_result[..8]) {
         out.copy_from_slice(&word.to_le_bytes());
     }
@@ -37,6 +34,8 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
 ///
 /// Padding is keccak's `10*1` over the last block: bit 0 of byte `len mod R`,
 /// bit 7 of byte `R-1`.  Both land in word 33 when `len mod R ∈ [132, 136)`.
+/// The uninitialized buffer is sound because all `total` words are written
+/// (data, two stride words per block, and the last block's tail, padding and zeros).
 pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
     const RATE: usize = 136;
     const RATE_WORDS: usize = RATE / 4;
@@ -44,8 +43,6 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
 
     let blocks = data.len() / RATE + 1;
     let total = blocks * STRIDE;
-    // `MaybeUninit<u32>`, not a zero-filled `Vec<u32>`: all `total` slots are
-    // written below, and uninitialised is not a valid `u32`.
     let mut out_vec: Vec<u32> = Vec::with_capacity(total);
     let words = &mut out_vec.spare_capacity_mut()[..total];
 
@@ -61,7 +58,6 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
         base += STRIDE;
     }
 
-    // Last block: rem = len mod R bytes of data, then the `10*1` padding.
     let rem = full.remainder();
     let out = &mut words[base..base + STRIDE];
     let mut tail = rem.chunks_exact(4);
@@ -75,7 +71,6 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
         last |= (byte as u32) << (8 * k);
     }
     last |= 1u32 << (8 * (rem.len() % 4));
-    // w = ⌊rem/4⌋ ≤ 33; at w = 33 the 0x80 shares the word with the 0x01.
     if w == RATE_WORDS - 1 {
         last |= 0x80u32 << 24;
     }
@@ -87,8 +82,6 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
         out[RATE_WORDS - 1].write(0x80u32 << 24);
     }
 
-    // SAFETY: all `total` slots written above (data words, two stride words per
-    // block, and the last block's tail + padding + zero fill).
     unsafe { out_vec.set_len(total) };
     out_vec
 }

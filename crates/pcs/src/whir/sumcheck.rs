@@ -195,7 +195,6 @@ where
     let n = f.num_variables() as usize;
     debug_assert_eq!(query_point.len(), n);
 
-    // Batch the claim and the OOD answers by powers of a drawn coefficient.
     let batch: EF = challenger.sample_algebra_element();
     let mut claimed_sum = claim;
     let mut coeff = batch;
@@ -204,7 +203,6 @@ where
         coeff *= batch;
     }
 
-    // Lift f and the batched weight to EF, then fold every variable.
     let mut folder = WhirFolder {
         f_vec: f.guts().as_slice().iter().map(|&v| EF::from(v)).collect(),
         weight: batched_eq_weight(n, query_point, ood_points, batch),

@@ -1,12 +1,11 @@
 //! Prove-and-verify harnesses shared by the recursion crates' tests.
 //!
 //! `run_test_machine` sets up a prover, proves every record and verifies the
-//! resulting proof in one call.  No proving path calls it — it used to live in
-//! `zkm_core_machine::utils`, in the shipped API of a crate the CPU and CUDA
-//! provers link, where nothing distinguished it from the real entry points
-//! (`prove`, `prove_with_context`, `trace_checkpoint`).
+//! resulting proof in one call.  No proving path calls it, so it lives outside
+//! the shipped API of `zkm_core_machine::utils` and cannot be mistaken for the
+//! real entry points (`prove`, `prove_with_context`, `trace_checkpoint`).
 //!
-//! It cannot be `#[cfg(test)]` there: Rust does not share test-cfg code across
+//! It cannot be `#[cfg(test)]` in `zkm-core-machine`: Rust does not share test-cfg code across
 //! crate boundaries, and the callers are the unit tests of `zkm-recursion-core`,
 //! `zkm-recursion-compiler` and `zkm-recursion-circuit`.  Each takes this crate
 //! as a `[dev-dependencies]` entry, so it never enters a non-test build.
@@ -47,9 +46,7 @@ where
                 <SC as StarkGenericConfig>::Challenge,
                 <SC as StarkGenericConfig>::Challenge,
             >,
-        >
-        // The K = F (base-field first round) folder instance.
-        + for<'b> Air<
+        > + for<'b> Air<
             zkm_pcs::shard_level::basefold_constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
@@ -66,8 +63,6 @@ where
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
     zkm_pcs::ShardProof<SC>: Sync,
-    // Required by `StarkMachine::verify` (its static OUTER BaseFold
-    // verify threads these challenger capability bounds). Both rings satisfy it.
     SC::Challenger: p3_challenger::FieldChallenger<zkm_pcs::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = zkm_pcs::jagged_pcs::JaggedVal>
         + p3_challenger::CanObserve<zkm_pcs::BfCommitment<SC>>,
@@ -112,9 +107,7 @@ where
                 <SC as StarkGenericConfig>::Challenge,
                 <SC as StarkGenericConfig>::Challenge,
             >,
-        >
-        // The K = F (base-field first round) folder instance.
-        + for<'b> Air<
+        > + for<'b> Air<
             zkm_pcs::shard_level::basefold_constraint_folder::ShardConstraintFolder<
                 'b,
                 Val<SC>,
@@ -129,8 +122,6 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
-    // Required by `CpuProver: MachineProver` (the impl threads the
-    // static outer BaseFold open bound). Both rings satisfy it.
     SC::Challenger: p3_challenger::FieldChallenger<zkm_pcs::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = zkm_pcs::jagged_pcs::JaggedVal>
         + p3_challenger::CanObserve<zkm_pcs::BfCommitment<SC>>,

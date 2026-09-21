@@ -12,7 +12,6 @@ use zkm_prover::ZKMProver;
 use zkm_pcs::ZKMProverOpts;
 
 fn main() {
-    // Setup tracer.
     let default_filter = "off";
     let log_appender = tracing_appender::rolling::never("scripts/results", "fibonacci_sweep.log");
     let env_filter = EnvFilter::try_from_default_env()
@@ -33,13 +32,10 @@ fn main() {
         .finish()
         .init();
 
-    // Setup environment variables.
     std::env::set_var("RECONSTRUCT_COMMITMENTS", "false");
 
-    // Initialize prover.
     let prover = ZKMProver::<DefaultProverComponents>::new();
 
-    // Setup sweep.
     let iterations = [480000u32];
     let shard_sizes = [1 << 19, 1 << 20, 1 << 21, 1 << 22];
     let batch_sizes = [2, 3, 4];

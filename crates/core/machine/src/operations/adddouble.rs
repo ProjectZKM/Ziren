@@ -46,8 +46,6 @@ impl<F: Field> AddDoubleOperation<F> {
 
         let mut builder_is_real = builder.when(is_real.clone());
 
-        // Recover each carry as a LINEAR expression across the 8 limbs of the
-        // 64-bit sum and force it boolean (see `AddOperation::eval`).
         let base_inv = AB::F::from_u32(256).inverse();
         let lo = [a[0], a[1], a[2], a[3]];
         let hi = [a_hi[0], a_hi[1], a_hi[2], a_hi[3]];
@@ -64,7 +62,6 @@ impl<F: Field> AddDoubleOperation<F> {
         }
         builder_is_real.assert_bool(is_real.clone());
 
-        // Range check each byte.
         {
             builder.slice_range_check_u8(&a.0, is_real.clone());
             builder.slice_range_check_u8(&a_hi.0, is_real.clone());

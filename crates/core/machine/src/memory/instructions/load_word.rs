@@ -68,6 +68,9 @@ where
     AB: ZKMCoreAirBuilder,
     AB::Var: Sized,
 {
+    /// Constrains one word-load row. Both selectors and their sum are boolean, so
+    /// a real row has exactly one selector on; these opcodes write `op_a`, so
+    /// `op_a_immutable = 0`.
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
@@ -75,8 +78,6 @@ where
         let local: &LoadWordColumns<AB::Var> = (*local).borrow();
         let common = &local.common;
 
-        // SAFETY: both selectors are boolean and so is their sum, so each real row
-        // has exactly one selector on.
         let is_real = local.is_lw + local.is_ll;
         builder.assert_bool(local.is_lw);
         builder.assert_bool(local.is_ll);
@@ -85,13 +86,6 @@ where
         eval_memory_common(builder, common, &local.memory_access, is_real.clone());
         assert_word_aligned(builder, common, is_real.clone());
 
-        // Loads must not change the memory value: structural now — the
-        // read-only consistency columns alias value and previous value.
-
-        // The full word is loaded into `op_a`.  The frame pins the committed
-        // register value to ZERO when `op_a` is register 0 (the write is
-        // discarded), so the memory value is bound through a `(1 - op_a_0)`
-        // factor rather than a gate — same constraint degree.
         let not_a0 = AB::Expr::ONE - common.frame.op_a_0;
         builder.when(is_real.clone()).assert_word_eq(
             common.a_val().map(Into::into),
@@ -101,7 +95,6 @@ where
         let opcode = local.is_lw * Opcode::LW.as_field::<AB::F>()
             + local.is_ll * Opcode::LL.as_field::<AB::F>();
 
-        // SAFETY: `op_a` is written by these opcodes, so `op_a_immutable = 0`.
         receive_memory_instruction(builder, common, opcode, AB::Expr::ZERO, is_real);
     }
 }
@@ -161,8 +154,6 @@ impl<F: PrimeField32> MachineAir<F> for LoadWordChip {
                 let cols: &mut LoadWordColumns<F> = row.borrow_mut();
                 self.event_to_row(event, cols, blu, &input.program);
             },
-            // A padding row needs no neutralising: the typed frame's register-access
-            // multiplicities are `is_real`, which is zero here already.
             |_row| {},
         );
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());

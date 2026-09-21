@@ -53,7 +53,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldInnerProductCols<F, P> {
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(result).into();
         let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(carry).into();
 
-        // Compute the vanishing polynomial.
         let p_inner_product = p_a_vec
             .into_iter()
             .zip(p_b_vec)
@@ -72,7 +71,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldInnerProductCols<F, P> {
         self.carry = p_carry.into();
         self.witness = Limbs(p_witness.try_into().unwrap());
 
-        // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
         record.add_u16_range_checks_field(&self.witness.0);
@@ -117,7 +115,6 @@ where
 
         eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness);
 
-        // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
         builder.slice_range_check_u16(&self.witness.0, is_real);
@@ -214,11 +211,9 @@ mod tests {
                     row
                 })
                 .collect::<Vec<_>>();
-            // Convert the trace to a row major matrix.
             let mut trace =
                 RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_TEST_COLS);
 
-            // Pad the trace to a power of two.
             pad_to_power_of_two::<NUM_TEST_COLS, F>(&mut trace.values);
 
             Ok(trace)

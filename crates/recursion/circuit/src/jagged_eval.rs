@@ -87,11 +87,6 @@ impl<C: CircuitConfig> RecursiveJaggedEvalConfig<C, ()> for RecursiveTrivialJagg
         let _ = z_row;
         let _ = z_col;
         let _ = z_trace;
-        // Trivial-evaluator stand-in: returns (0, empty).  The
-        // outer jagged verifier's `jagged_eval * expected_eval ==
-        // sumcheck.eval` assertion still holds against an `expected_eval`
-        // of zero; production callers should bind this to a
-        // soundness-equivalent sumcheck-based evaluator instead.
         (SymbolicExt::ZERO, Vec::new())
     }
 }
@@ -169,36 +164,23 @@ where
 
         let JaggedSumcheckEvalProof { partial_sumcheck_proof } = proof;
 
-        // Lift inputs to symbolic for the branching-program /
-        // prefix-sum callbacks.
         let z_row_sym: Vec<SymbolicExt<C::F, C::EF>> = z_row.iter().map(|&x| x.into()).collect();
         let z_col_sym: Vec<SymbolicExt<C::F, C::EF>> = z_col.iter().map(|&x| x.into()).collect();
         let z_trace_sym: Vec<SymbolicExt<C::F, C::EF>> =
             z_trace.iter().map(|&x| x.into()).collect();
 
-        // Partial-Lagrange expansion of z_col — one weight per
-        // column position, used to weight each column's branching
-        // program evaluation.
         let z_col_partial_lagrange = partial_lagrange_symbolic::<C>(&z_col_sym);
 
-        // Bind the sumcheck's claimed_sum as the jagged evaluation
-        // and observe it into the transcript before running the
-        // sumcheck replay.
         let jagged_eval = partial_sumcheck_proof.claimed_sum;
         observe_ext_element::<C, Chal>(builder, challenger, jagged_eval);
 
         verify_sumcheck::<C, Chal>(builder, challenger, partial_sumcheck_proof);
 
-        // Split the sumcheck-reduced point into (first, second)
-        // halves for the branching-program evaluation.
         let proof_point: Vec<SymbolicExt<C::F, C::EF>> =
             partial_sumcheck_proof.point_and_eval.0.iter().map(|&x| x.into()).collect();
         let half = proof_point.len() / 2;
         let (first_half, second_half) = proof_point.split_at(half);
 
-        // For each (current_prefix_sum, next_prefix_sum) pair,
-        // merge them into a single Horner vector and run the
-        // prefix-sum check, accumulating the column-weighted sum.
         let current_column_prefix_sums = params.col_prefix_sums.iter();
         let next_column_prefix_sums = params.col_prefix_sums.iter().skip(1);
         let mut prefix_sum_felts: Vec<Felt<C::F>> = Vec::new();
@@ -218,7 +200,6 @@ where
             jagged_eval_expected += *z_col_eq * full_lagrange_eval;
         }
 
-        // Branching-program factor: `BranchingProgram(z_row, z_trace).eval(first, second)`.
         let bp_factor = (self.branching_program_eval)(
             builder,
             &z_row_sym,
@@ -228,8 +209,6 @@ where
         );
         jagged_eval_expected *= bp_factor;
 
-        // Assert the reconstructed evaluation matches the
-        // sumcheck proof's claimed evaluation.
         let expected_ext: Ext<C::F, C::EF> = builder.eval(jagged_eval_expected);
         builder.assert_ext_eq(expected_ext, partial_sumcheck_proof.point_and_eval.1);
 
@@ -268,11 +247,7 @@ mod tests {
             &(),
             &mut (),
         );
-        // SymbolicExt doesn't impl PartialEq; assert via the side
-        // effect that the evaluator produces an empty prefix-sum
-        // witness (the documented trivial-evaluator return shape).
         assert!(prefix_sums.is_empty());
-        // Silence: type-inference for C participates via builder.
         let _phantom: std::marker::PhantomData<C> = std::marker::PhantomData;
         let _phantom2: std::marker::PhantomData<DuplexChallengerVariable<C>> =
             std::marker::PhantomData;

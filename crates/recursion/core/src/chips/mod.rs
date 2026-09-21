@@ -45,9 +45,9 @@ pub mod test_fixtures {
             let in1 = KoalaBear::from_u32(rng.gen());
             let in2 = KoalaBear::from_u32(rng.gen());
             let out = match rng.gen_range(0..4) {
-                0 => in1 + in2, // Add
-                1 => in1 - in2, // Sub
-                2 => in1 * in2, // Mul
+                0 => in1 + in2,
+                1 => in1 - in2,
+                2 => in1 * in2,
                 _ => {
                     let in2 = if in2.is_zero() { KoalaBear::ONE } else { in2 };
                     in1 / in2

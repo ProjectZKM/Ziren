@@ -46,9 +46,9 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
 
     /// Only callable for a `T` that declares the all-zero pattern valid, so
-    /// this both exercises the bound and is the operation the bound licenses.
+    /// this both exercises the bound and is the operation the bound licenses:
+    /// `T: Zeroable` is exactly the promise that `mem::zeroed()` is a valid `T`.
     fn zeroed<T: Zeroable>() -> T {
-        // SAFETY: `T: Zeroable` is exactly the promise that this is a valid `T`.
         unsafe { core::mem::zeroed() }
     }
 

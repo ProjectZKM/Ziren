@@ -261,10 +261,6 @@ impl TranspilerBackend {
     /// Returns `Err` if dynasm fails to allocate its initial buffer.
     pub fn new() -> std::io::Result<Self> {
         let mut assembler = dynasmrt::x64::Assembler::new()?;
-        // Reserve the exit label up front so any per-instruction prologue
-        // can reference it before it's bound.  The driver binds it via
-        // `bind_exit_label()` between the last instruction and the
-        // spill/epilogue tail.
         let exit_label = assembler.new_dynamic_label();
         Ok(Self {
             assembler,
@@ -321,8 +317,6 @@ impl TranspilerBackend {
             ; mov eax, DWORD pc_start as i32
             ; sub eax, DWORD pc_base as i32
             ; shr eax, 2
-            // Never dispatch through an index the table does not hold —
-            // see `JitContext::jump_table_len`.
             ; cmp eax, DWORD [Rq(CONTEXT) + JUMP_TABLE_LEN_OFFSET]
             ; jae >bad_entry_dispatch
             ; jmp QWORD [Rq(JUMP_TABLE) + rax * 8]
@@ -399,10 +393,8 @@ impl TranspilerBackend {
             }
             Location::Xmm(xmm, half) => {
                 if half == 0 {
-                    // Move low 64 bits → GPR; truncate to 32-bit by Rd.
                     dynasm!(self.assembler ; .arch x64 ; movd Rd(dst_gpr), Rx(xmm));
                 } else {
-                    // Move high 64 bits → GPR via PEXTRD (low 32 bits of high half).
                     dynasm!(self.assembler ; .arch x64 ; pextrd Rd(dst_gpr), Rx(xmm), 2);
                 }
             }
@@ -421,16 +413,14 @@ impl TranspilerBackend {
         use dynasmrt::{dynasm, DynasmApi};
         let loc = LOCATION[reg.index() as usize];
         match loc {
-            Location::Zero => { /* writes to $zero are dropped */ }
+            Location::Zero => {}
             Location::Gpr(g) => {
                 dynasm!(self.assembler ; .arch x64 ; mov Rd(g), Rd(src_gpr));
             }
             Location::Xmm(xmm, half) => {
                 if half == 0 {
-                    // Replace low 32 bits of XMM via PINSRD lane 0.
                     dynasm!(self.assembler ; .arch x64 ; pinsrd Rx(xmm), Rd(src_gpr), 0);
                 } else {
-                    // Replace lane 2 (low 32 bits of high half).
                     dynasm!(self.assembler ; .arch x64 ; pinsrd Rx(xmm), Rd(src_gpr), 2);
                 }
             }
@@ -506,22 +496,13 @@ impl TranspilerBackend {
         let Some(recorder) = self.mem_read_recorder else { return };
         let target = recorder as usize;
         dynasm!(self.assembler ; .arch x64
-            // Move value FIRST (before addr) — if addr_reg and value_reg
-            // alias (the LW codegen reuses TEMP_A for both, see
-            // instruction_impl.rs::lw), reading addr post-load yields
-            // wrong data; require caller to save addr to a separate reg.
             ; mov edx, Rd(value_reg)
             ; mov esi, Rd(addr_reg)
             ; mov rdi, [Rq(CONTEXT) + GLOBAL_CLK_OFFSET]
-            // Stack align: prologue pushed 6 callee-saved qwords (rbx,
-            // rbp, r12, r13, r14, r15) + the return address from JIT
-            // dispatch entry = 7 qwords = misaligned to 8. Push one
-            // more to realign to 16 before the call.
             ; push rax
             ; mov rax, QWORD target as i64
             ; call rax
             ; pop rax
-            // R10 (MEMORY_PTR) is caller-saved; restore it from ctx.
             ; mov Rq(MEMORY_PTR), [Rq(CONTEXT) + MEMORY_OFFSET]
         );
     }
@@ -538,13 +519,9 @@ impl TranspilerBackend {
         self.emit_register_load(rs1, TEMP_A);
         dynasm!(self.assembler ; .arch x64
             ; add Rd(TEMP_A), DWORD imm
-            // edx = i = vaddr & 3
             ; mov edx, Rd(TEMP_A)
             ; and edx, 3
-            // align vaddr down to 4 (MIPS word boundary).
             ; and Rd(TEMP_A), -4
-            // Host-address translation under the doubled paired
-            // layout: host = (aligned & ~7) * 2 + 8 + (aligned & 7).
             ; mov ecx, Rd(TEMP_A)
             ; and ecx, 7
             ; and Rd(TEMP_A), -8
@@ -552,7 +529,6 @@ impl TranspilerBackend {
             ; add Rq(TEMP_A), Rq(MEMORY_PTR)
             ; add Rq(TEMP_A), 8
             ; add Rq(TEMP_A), rcx
-            // Load the 4-byte aligned word.
             ; mov eax, DWORD [Rq(TEMP_A)]
         );
     }
@@ -572,13 +548,13 @@ impl TranspilerBackend {
         self.emit_register_load(rs1, dst_gpr);
         dynasm!(self.assembler ; .arch x64
             ; add Rd(dst_gpr), DWORD imm
-            ; mov eax, Rd(dst_gpr)         // intra-word offset → RAX
+            ; mov eax, Rd(dst_gpr)
             ; and eax, 7
-            ; and Rd(dst_gpr), -8           // align down to word
-            ; shl Rq(dst_gpr), 1             // scale by 2 (word-pair layout)
+            ; and Rd(dst_gpr), -8
+            ; shl Rq(dst_gpr), 1
             ; add Rq(dst_gpr), Rq(MEMORY_PTR)
-            ; add Rq(dst_gpr), 8             // skip 8-byte header
-            ; add Rq(dst_gpr), rax           // re-add intra-word offset
+            ; add Rq(dst_gpr), 8
+            ; add Rq(dst_gpr), rax
         );
     }
 }

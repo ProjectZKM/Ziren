@@ -111,47 +111,9 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         FC: FieldChallengerVariable<C, C::Bit>,
         P: RecursiveMultilinearPcsVerifier<C, FC>,
     {
-        // #H (BaseFold-over-BN254 wrap port): the HOST stacked verifier
-        // (crates/pcs/src/basefold/stacked.rs verify_trusted_evaluation)
-        // does NOT observe the evaluation claim into the transcript — it
-        // only checks `evaluation_claim == eval_multilinear_padded(...)`.
-        // The previous in-circuit observe of claim_ext was a spurious
-        // transcript injection that desync'd every downstream challenge
-        // (masked by vacuous recursion-VM asserts, ENFORCED in gnark).
-        // We still bind the claim via the non-transcript MLE equality
-        // below (assert_ext_eq claim_ext == expected_evaluation).
         let claim_ext: Ext<_, _> = builder.eval(evaluation_claim);
 
-        // Split point into (stack_point, batch_point).  Convention:
-        // first `log_stacking_height` coords are stack (within a
-        // stripe), the remaining coords are batch (which stripe).
-        //
-        // CRITICAL transcript fix (step9 desync): the reduction
-        // sumcheck emits a point of length `log_dense_size`, which is
-        // < the full commit-area dimension `log2(area)`.  The HOST
-        // verifier (`verify_jagged_inner_generic`,
-        // crates/pcs/src/jagged_pcs.rs:2702-2707) extends z_star up
-        // to `target_dim = log2(area)` by *sampling* Fiat-Shamir coords
-        // from the challenger:
-        //     while extended_z_star.len() < target_dim {
-        //         extended_z_star.push(challenger.sample_algebra_element());
-        //     }
-        // The previous in-circuit code ZERO-PADDED the stack portion
-        // instead of sampling it.  That left the challenger un-advanced
-        // for `(stack_dim - point.len())` draws, so every downstream
-        // challenge in the basefold open (the per-round `beta`s and the
-        // query indices that derive `initial_x`) diverged from the host
-        // — producing a wrong final FRI fold value while the lifted
-        // proof data (sibling pairs, final_poly) matched.  Masked by the
-        // vacuous recursion-VM asserts; ENFORCED (and thus failing) in
-        // the gnark OUTER wrap.  Mirror the host exactly: SAMPLE every
-        // extension coord, never zero-pad.
         let stack_dim = self.log_stacking_height as usize;
-        // Inferred target dim: the proof's batch_evaluations are flat
-        // 2^batch_dim entries; batch_dim = log2(batch_evals_flat.len()).
-        // Combined with the known stack_dim, the target total dim is
-        // stack_dim + log2(batch_evals_flat.len().next_power_of_two())
-        // == log2(area), matching the host's `target_dim`.
         let proof_batch_evals_count: usize = proof.batch_evaluations.iter().map(|r| r.len()).sum();
         let needed_batch_dim = if proof_batch_evals_count <= 1 {
             0
@@ -165,29 +127,8 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         }
         let total_dim = padded_point.len();
         let batch_dim = total_dim - stack_dim;
-        // Align with Ziren prover convention.  The prover at
-        // `crates/pcs/src/basefold/stacked.rs` uses
-        // `eval_point[..stack_dim]` (LSB-first) as stack_point because
-        // Ziren's dense_q layout puts row (= stack) bits at the LSBs of
-        // the flat index and column (= batch) bits at the MSBs.  The
-        // prior `split_at(batch_dim)` assumed the opposite convention
-        // (stack at MSBs) and gave stack_point as the *trailing*
-        // coords, mismatching the prover's *leading* coords for any
-        // workload with batch_dim>0 (multi-stripe).
-        // Fibonacci has batch_dim==0 so both ranges coincide; tendermint
-        // / reth have batch_dim>0 and tripped recursive_stacked_pcs.rs:159.
         let (stack_point, batch_point) = padded_point.split_at(stack_dim);
 
-        // Flatten the per-round per-stripe evaluations into one
-        // batch_evaluations Mle over `batch_dim` variables.
-        //
-        // The rounds' stripes need not add up to a power of two — the batch
-        // hypercube is the CEILING, and the cells past the last real stripe are
-        // committed as nothing, i.e. zero.  So the tail is zero-padded, exactly
-        // as the host verifier's `eval_multilinear_padded` does
-        // (`crates/pcs/src/basefold/stacked.rs`).  A proof with several opening
-        // rounds makes a non-power-of-two total the norm rather than the
-        // exception: the preprocessed round contributes its own stripes.
         let mut batch_evals_flat: Vec<Ext<C::F, C::EF>> =
             proof.batch_evaluations.iter().flatten().copied().collect();
         assert!(
@@ -208,19 +149,8 @@ impl<P> RecursiveStackedPcsVerifier<P> {
             batch_evals_flat.push(builder.constant(C::EF::ZERO));
         }
 
-        // Reconstructed evaluation at batch_point must equal claim.
         let expected_evaluation = evaluate_mle_ext::<C>(builder, &batch_evals_flat, batch_point);
 
-        // FIX-off sub-stripe commits: when the reduced point is SHORTER than the
-        // (de-clamped) log_stacking_height, the FS-extension coords that fall in
-        // the STACK portion `[point.len(), stack_dim)` correspond to the ZERO
-        // high-half padding of the stripe (the dense poly of `point.len()` vars
-        // is zero-padded up to `2^stack_dim`).  By the MLE zero-padding identity,
-        // the committed stripe's eval at `stack_point` carries a Π(1 - r_k)
-        // factor over those coords that the reduced-point claim lacks, so the
-        // batch reconstruction equals Π(1 - r_k) · claim.  Multiply the claim to
-        // match.  No-op when point.len() >= stack_dim (all FIX-on and large
-        // FIX-off commits) ⇒ byte-identical there.
         let mut claim_adj: SymbolicExt<C::F, C::EF> = claim_ext.into();
         let orig_point_len = point.len();
         if orig_point_len < stack_dim {
@@ -232,9 +162,6 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         let claim_adj_ext: Ext<C::F, C::EF> = builder.eval(claim_adj);
         builder.assert_ext_eq(claim_adj_ext, expected_evaluation);
 
-        // Forward to the underlying PCS verifier with the per-
-        // stripe batch_evaluations as the inner-PCS evaluation
-        // claims at stack_point.
         self.recursive_pcs_verifier.verify_untrusted_evaluations(
             builder,
             commitments,
@@ -279,7 +206,6 @@ mod tests {
             _proof: &Self::Proof,
             _challenger: &mut DuplexChallengerVariable<C>,
         ) {
-            // intentionally empty — stub for type-checking only
         }
 
         fn observe_commitment(
@@ -288,7 +214,6 @@ mod tests {
             _challenger: &mut DuplexChallengerVariable<C>,
             _commitment: &Self::Commitment,
         ) {
-            // intentionally empty — stub for type-checking only
         }
     }
 

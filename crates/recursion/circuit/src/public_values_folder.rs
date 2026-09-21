@@ -130,8 +130,7 @@ where
 {
     /// In-circuit LogUp fraction `multiplicity / (alpha + beta_0*kind +
     /// sum beta_i*value_i)` — mirrors the host
-    /// [`zkm_pcs::air::PublicValuesConstraintFolder`] and
-    /// `permutation.rs:50-57`.
+    /// [`zkm_pcs::air::PublicValuesConstraintFolder`].
     fn interaction_fraction(
         &self,
         message: AirLookup<SymbolicExt<C::F, C::EF>>,
@@ -197,7 +196,6 @@ mod tests {
             _marker: PhantomData,
         };
 
-        // Asserting zero on a zero expression is a soundness no-op.
         folder.assert_zero(SymbolicExt::<F, EF>::ZERO);
         let _ = folder.public_values();
     }

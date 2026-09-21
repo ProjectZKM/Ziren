@@ -84,11 +84,9 @@ pub struct ChipEvaluation<EF> {
     /// (all `max_log_row_count` coords, LSB-first / natural-row).  Mirrors
     /// the host
     /// `zkm_pcs::shard_level::types::ChipEvaluation::main_trace_evaluations_full`.
-    /// Every chip opens at this ONE point: it is what the in-circuit LogUp
-    /// last-layer degree-masked reconstruction consumes AND what seeds the
-    /// zerocheck claim, so the second trailing-`log_h` opening each chip used
-    /// to carry -- witnessed and observed here too -- is gone with the legacy
-    /// claim that needed it.
+    /// Every chip opens at this one point: the in-circuit LogUp last-layer
+    /// degree-masked reconstruction consumes it and it seeds the zerocheck
+    /// claim.
     pub main_trace_evaluations_full: Option<Vec<EF>>,
     /// Companion FULL-POINT preprocessed-trace opening (see
     /// `main_trace_evaluations_full`).
@@ -116,9 +114,6 @@ mod tests {
 
     #[test]
     fn types_construct_with_default_shape() {
-        // Smoke test: all proof types construct + serialize through
-        // the BTreeMap-and-Vec layout.  No real proof data — just
-        // shape parity.
         let chip_eval: ChipEvaluation<F> = ChipEvaluation {
             main_trace_evaluations_full: Some(vec![F::ZERO; 4]),
             preprocessed_trace_evaluations_full: Some(vec![F::ONE; 2]),

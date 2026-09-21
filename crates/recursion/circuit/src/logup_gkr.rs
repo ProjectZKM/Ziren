@@ -124,11 +124,6 @@ pub fn evaluate_mle_ext<C: CircuitConfig>(
     let dim = point.len();
     assert_eq!(mle_evals.len(), 1 << dim, "mle eval vector size must be 2^point.dimension");
 
-    // partial_lagrange — index-as-MSB expansion (LSB-first point):
-    // for each new coord, double the table by `(1-r)` and `r`
-    // factors, putting the i_k=0 contribution at index `j` and the
-    // i_k=1 contribution at index `j + old_len`.  LSB-first
-    // partial-lagrange convention shared by the BaseFold pipeline.
     let mut weights: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ONE];
     for &r in point {
         let r_sym: SymbolicExt<C::F, C::EF> = r.into();
@@ -142,8 +137,6 @@ pub fn evaluate_mle_ext<C: CircuitConfig>(
         weights = next;
     }
 
-    // Dot product Σ_i mle_evals[i] · weights[i] inside the
-    // symbolic algebra.
     let acc: SymbolicExt<C::F, C::EF> = mle_evals
         .iter()
         .zip(weights.iter())
@@ -227,8 +220,6 @@ where
     C: CircuitConfig,
     F: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
 {
-    // Lift beta_seed into the symbolic algebra and expand to per-
-    // interaction beta-powers via partial Lagrange.
     let beta_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
         beta_seed.iter().map(|e| SymbolicExt::from(*e)).collect();
     let betas = partial_lagrange_symbolic::<C>(&beta_symbolic);
@@ -244,8 +235,6 @@ where
 
     eval_public_values_fn(&mut folder);
 
-    // Assert the accumulator is zero — the constraints emitted
-    // through the folder must hold for the proof to be sound.
     builder.assert_ext_eq(folder.accumulator, SymbolicExt::ZERO);
 
     folder.local_interaction_digest
@@ -349,40 +338,18 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     } = proof;
     let crate::logup_proof::LogUpGkrOutput { numerator, denominator } = circuit_output;
 
-    // The GKR round count is FIXED — the prover
-    // pads to max_log_row_count-1 rounds and the verifier asserts
-    // `round_proofs.len() + 1 == max_log_row_count`.  The count is
-    // STRUCTURAL in the recursion program (the loop below unrolls over
-    // the lifted vec), so enforcement happens at program build: refuse
-    // to build a verifier circuit for a shortened reduction.  Mirrors
-    // the host check in shard_level/verifier.rs::verify_logup_gkr_host.
     assert_eq!(
         round_proofs.len() + 1,
         max_log_row_count,
         "LogUp-GKR proof must carry exactly max_log_row_count-1 padded rounds"
     );
 
-    // (1) Check the proof-of-work grinding witness.  Use `gkr_check_witness`
-    // (NOT `check_witness`): the host gates GKR grinding to the inner
-    // challenger — inner advances + checks, the OUTER/wrap ring is a no-op.
-    // The BaseFold open uses the distinct `check_witness`, which advances on
-    // both rings.
     challenger.gkr_check_witness(builder, GKR_GRINDING_BITS, *witness);
 
-    // (2) Sample the permutation challenges (alpha, beta_seed); beta_seed's
-    // dimension comes from the chip metadata. There is no separate
-    // public-values challenge: the public-values digest folds the
-    // record-level interactions under the same alpha, used both as the
-    // permutation challenge and as the constraint-fold alpha, as the prover
-    // and the host verifier do.
     let alpha = challenger.sample_ext(builder);
     let beta_seed: Vec<Ext<C::F, C::EF>> =
         (0..chip_metadata.beta_seed_dim).map(|_| challenger.sample_ext(builder)).collect();
 
-    // (3) Evaluate public-values constraints.  Negated digest =
-    // cumulative_sum (matches the sign convention upstream).  The
-    // constraint-fold alpha is `alpha` itself (host parity), not a
-    // separate challenge.
     let local_interaction_digest = verify_public_values::<C, _>(
         builder,
         alpha,
@@ -393,11 +360,9 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     );
     let cumulative_sum: SymbolicExt<C::F, C::EF> = -local_interaction_digest;
 
-    // (4) Observe the GKR circuit output (per-element ext slice).
     observe_ext_slice::<C, FC>(builder, challenger, numerator);
     observe_ext_slice::<C, FC>(builder, challenger, denominator);
 
-    // (5) Assert Σ (numerator[i] / denominator[i]) == cumulative_sum.
     let output_cumulative_sum: SymbolicExt<C::F, C::EF> = numerator
         .iter()
         .zip(denominator.iter())
@@ -409,43 +374,24 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         .fold(SymbolicExt::ZERO, |acc, x| acc + x);
     builder.assert_ext_eq(output_cumulative_sum, cumulative_sum);
 
-    // (6) Sample the first evaluation point.  Dimension =
-    // log_num_interactions + 1 (one extra var for the GKR circuit
-    // output's MLE depth above the per-interaction layer).
     let initial_num_variables = chip_metadata.log_num_interactions + 1;
     let mut eval_point: Vec<Ext<C::F, C::EF>> =
         sample_point::<C, FC>(builder, challenger, initial_num_variables);
 
-    // Initial evaluation of the numerator/denominator MLEs at the
-    // sampled point — this is what gets reduced through GKR.
     let mut numerator_eval: SymbolicExt<C::F, C::EF> =
         evaluate_mle_ext::<C>(builder, numerator, &eval_point).into();
     let mut denominator_eval: SymbolicExt<C::F, C::EF> =
         evaluate_mle_ext::<C>(builder, denominator, &eval_point).into();
 
-    // (7) Iterate round_proofs in order.
     for round_proof in round_proofs.iter() {
-        // Sample the batching challenge λ for combining the two
-        // claims (numerator + denominator) into one sumcheck.
         let lambda = challenger.sample_ext(builder);
         let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
 
-        // Per-round soundness: the sumcheck's claimed_sum must
-        // equal `numerator_eval * λ + denominator_eval`.
         let expected_claim = numerator_eval * lambda_sym + denominator_eval;
         builder.assert_ext_eq(round_proof.sumcheck_proof.claimed_sum, expected_claim);
 
-        // Verify the per-round sumcheck.
         crate::sumcheck::verify_sumcheck::<C, FC>(builder, challenger, &round_proof.sumcheck_proof);
 
-        // Verify the eval claim is consistent with the prover's
-        // 4-tuple message.  The tuple encodes (num_0, num_1,
-        // den_0, den_1) — values with the round's last coord
-        // fixed to 0 and 1.  Combined into the GKR identity:
-        //
-        //   final_eval = eq(point, eval_point) *
-        //     (num_0 * den_1 + num_1 * den_0) * λ +
-        //     (den_0 * den_1)
         let (sumcheck_point, final_eval) = (
             &round_proof.sumcheck_proof.point_and_eval.0,
             round_proof.sumcheck_proof.point_and_eval.1,
@@ -465,51 +411,23 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             eq_eval_value * (numerator_sumcheck_eval * lambda_sym + denominator_sumcheck_eval);
         builder.assert_ext_eq(final_eval, expected_final_eval);
 
-        // Observe the prover's 4-tuple message into the transcript.
-        // Order MUST be the `(n0, n1, d0, d1)` sequence
-        // — any reorder shifts every subsequent α-sample and
-        // produces an OOD mismatch.
         observe_ext_element::<C, FC>(builder, challenger, round_proof.numerator_0);
         observe_ext_element::<C, FC>(builder, challenger, round_proof.numerator_1);
         observe_ext_element::<C, FC>(builder, challenger, round_proof.denominator_0);
         observe_ext_element::<C, FC>(builder, challenger, round_proof.denominator_1);
 
-        // Update eval_point: take the sumcheck-reduced point and INSERT a
-        // freshly-sampled line coordinate at index `log_num_interactions`
-        // (the row LSB of the LSB-first flat index).  The prover's layer
-        // transition pairs ADJACENT rows, so the peeled variable is the row
-        // LSB and the reduced point's row coordinates shift up by one.
-        // Mirrors `row_gkr/top_level.rs` and `shard_level/verifier.rs`.
         eval_point = sumcheck_point.clone();
         let last_coordinate = challenger.sample_ext(builder);
         eval_point.insert(chip_metadata.log_num_interactions, last_coordinate);
 
-        // Update numerator/denominator evals via the linear
-        // interpolation at last_coordinate:
-        //   eval_new = eval_0 + (eval_1 - eval_0) * last_coord
         let last_coord_sym: SymbolicExt<C::F, C::EF> = last_coordinate.into();
         numerator_eval = n0_sym + (n1_sym - n0_sym) * last_coord_sym;
         denominator_eval = d0_sym + (d1_sym - d0_sym) * last_coord_sym;
     }
 
-    // DEGREE-MASKED LAST-LAYER RECONSTRUCTION
-    //
-    // The circuit counterpart of the host `verify_logup_gkr_host`
-    // reconstruction.
-    //
-    // The round walk reduced the `circuit_output` MLEs to
-    // (numerator_eval, denominator_eval) at `eval_point`, of dimension
-    // log_num_interactions + m. Those values are tied to the chips' trace
-    // openings here: (num, den) are rebuilt from the per-chip openings masked
-    // by `full_geq(degree, ·)` and asserted equal to the walk's. A forged
-    // height moves the `full_geq` boundary and changes the rebuild, while the
-    // walk never sees the height, so the forgery is rejected. Pure arithmetic
-    // over challenges already drawn and openings already observed.
     {
         let log_num_interactions = initial_num_variables - 1;
 
-        // (1) Split the reduced eval_point into (interaction, trace) axes.
-        // The round walk leaves `eval_point` LSB-first, interaction axis low.
         assert_eq!(
             eval_point.len(),
             log_num_interactions + max_log_row_count,
@@ -521,7 +439,6 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         );
         let (interaction_point, trace_point) = eval_point.split_at(log_num_interactions);
 
-        // (2) The trace point must equal the claimed opening point.
         assert_eq!(
             trace_point.len(),
             max_log_row_count,
@@ -540,30 +457,17 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             builder.assert_ext_eq(*claimed, *expected);
         }
 
-        // (3) `point_extended` for the per-chip `full_geq` padding mask:
-        // [0, rev(trace_point)...], the LSB-first leaf convention. `full_geq`
-        // is MSB-first internally, so over this it gives the leaf mask
-        //   geq = Σ_{row ≥ height} eq(row, trace_point).
         let mut point_extended: Vec<SymbolicExt<C::F, C::EF>> =
             Vec::with_capacity(max_log_row_count + 1);
         point_extended.push(SymbolicExt::ZERO);
         point_extended
             .extend(trace_point.iter().rev().map(|p| -> SymbolicExt<C::F, C::EF> { (*p).into() }));
 
-        // (4) Expand the LogUp challenges into the symbolic algebra.  `betas`
-        // = partial-Lagrange table over `beta_seed` (= host `eq_mle_table`,
-        // both LSB-first); `betas[0]` is the argument_index weight.
         let alpha_sym: SymbolicExt<C::F, C::EF> = alpha.into();
         let beta_seed_sym: Vec<SymbolicExt<C::F, C::EF>> =
             beta_seed.iter().map(|b| -> SymbolicExt<C::F, C::EF> { (*b).into() }).collect();
         let betas: Vec<SymbolicExt<C::F, C::EF>> = partial_lagrange_symbolic::<C>(&beta_seed_sym);
 
-        // (5) Per-chip reconstruction.  `shard_chips`, `opened_values.chips`,
-        // and `logup_evaluations.chip_openings.values()` are ALL name-ordered
-        // (the call site sorts `shard_chips` by name; both maps are name-keyed),
-        // so they align positionally — matching the host's
-        // name-keyed lookup.  RAW-contiguous packing (Ziren extract.rs), padded
-        // to the global interaction axis below.
         assert_eq!(
             opened_values.chips.len(),
             shard_chips.len(),
@@ -587,8 +491,6 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             .zip(opened_values.chips.iter())
             .zip(logup_evaluations.chip_openings.values())
         {
-            // degree = big-endian boolean coords of the chip HEIGHT (2^log_h),
-            // the in-circuit analog of host `opening.quotient.first()`.
             let degree_sym: Vec<SymbolicExt<C::F, C::EF>> = opening
                 .degree
                 .iter()
@@ -603,9 +505,6 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             );
             let geq_eval = crate::zerocheck::full_geq::<C>(&degree_sym, &point_extended);
 
-            // The full-point openings (the GKR leaf is LSB-first, natural
-            // rows). Every proof carries them; the reconstruction has no
-            // meaning without them, so their absence panics.
             let main: &[Ext<C::F, C::EF>] = chip_eval
                 .main_trace_evaluations_full
                 .as_deref()
@@ -615,8 +514,6 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             let prep: Option<&[Ext<C::F, C::EF>]> =
                 chip_eval.preprocessed_trace_evaluations_full.as_deref();
 
-            // A padding row is all zero; its openings correct the padding
-            // region.
             let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let padding_main: Vec<Ext<C::F, C::EF>> = vec![zero_ext; main.len()];
             let padding_prep: Option<Vec<Ext<C::F, C::EF>>> = prep.map(|p| vec![zero_ext; p.len()]);
@@ -639,7 +536,6 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
                         &betas,
                     );
 
-                // Degree-masked num / den, the sign flipped for receives.
                 let numerator_eval_i = real_numerator - padding_numerator * geq_eval;
                 let denominator_eval_i =
                     real_denominator + (SymbolicExt::ONE - padding_denominator) * geq_eval;
@@ -649,8 +545,6 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             }
         }
 
-        // (6) Pad to the global interaction-axis size: numerator with 0,
-        // denominator with 1 (the identity fraction).  Materialize to Ext.
         numerator_values.resize(1usize << interaction_point.len(), SymbolicExt::ZERO);
         denominator_values.resize(1usize << interaction_point.len(), SymbolicExt::ONE);
         let numerator_values_ext: Vec<Ext<C::F, C::EF>> =
@@ -658,33 +552,15 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         let denominator_values_ext: Vec<Ext<C::F, C::EF>> =
             denominator_values.into_iter().map(|x| builder.eval(x)).collect();
 
-        // (7) Evaluate the reconstructed MLEs at the interaction point
-        // (LSB-first — matches host `evaluate_mle_host`).
         let expected_numerator =
             evaluate_mle_ext::<C>(builder, &numerator_values_ext, interaction_point);
         let expected_denominator =
             evaluate_mle_ext::<C>(builder, &denominator_values_ext, interaction_point);
 
-        // (8) The height-soundness assert: the round walk's reduced final
-        // evals MUST equal the reconstruction from the chips' trace openings.
         builder.assert_ext_eq(numerator_eval, expected_numerator);
         builder.assert_ext_eq(denominator_eval, expected_denominator);
     }
 
-    // Observe slot 1 — the GKR trace openings (trace@ζ)
-    //
-    // As the prover (`prove_shard_logup_gkr_rows`) and the host verifier do.
-    //
-    // Position matters: `verify_zerocheck` begins by sampling α, γ, λ, and
-    // the identity it enforces is a Schwartz–Zippel test in those challenges
-    // only if these openings are fixed first. Observed after the draw, the
-    // identity would be one linear equation a prover could solve for the
-    // openings.
-    //
-    // n, then per chip in name order (`chip_openings` is a `BTreeMap`) four
-    // length-prefixed slices: preprocessed, main, preprocessed_full,
-    // main_full. Both sets are observed: the core stage drives the claim from
-    // the full-point openings, the recursion stages from the others.
     let num_chips_felt: Felt<C::F> =
         builder.constant(C::F::from_canonical_usize(shard_chips.len()));
     challenger.observe(builder, num_chips_felt);
@@ -721,15 +597,9 @@ mod tests {
     fn evaluate_mle_ext_constructs_for_constant_polynomial() {
         let mut builder = AsmBuilder::<F, EF>::default();
 
-        // 2^3 = 8 evaluations, all = 1 (constant-1 polynomial).
         let mle: Vec<Ext<F, EF>> = (0..8).map(|_| builder.constant(EF::ONE)).collect();
         let point: Vec<Ext<F, EF>> = (0..3).map(|_| builder.constant(EF::ZERO)).collect();
         let result = evaluate_mle_ext(&mut builder, &mle, &point);
-        // Construction succeeded; the `Ext<F, EF>` is now part of
-        // the IR.  Body intentionally elides runtime execution to
-        // keep the test self-contained — IR-shape correctness is
-        // covered by the `verify_shard_inner` end-to-end test in
-        // [`crate::stark::tests`].
         let _ = result;
     }
 
@@ -779,9 +649,7 @@ mod tests {
             &alpha,
             &beta_seed,
             &public_values,
-            |_folder| {
-                // intentionally empty — no per-record constraints
-            },
+            |_folder| {},
         );
     }
 
@@ -852,7 +720,6 @@ mod tests {
         beta_seed: &[EF],
         trace_point: &[EF],
     ) -> (EF, EF) {
-        // point_extended = [ZERO, ...trace_point.rev()]
         let mut point_extended = Vec::with_capacity(trace_point.len() + 1);
         point_extended.push(EF::ZERO);
         point_extended.extend(trace_point.iter().rev().copied());
@@ -861,7 +728,7 @@ mod tests {
         let zeros = vec![EF::ZERO; main_full.len()];
         let (real_num, real_den) = lookup.eval::<EF, EF>(None, main_full, alpha, &betas);
         let (pad_num, pad_den) = lookup.eval::<EF, EF>(None, &zeros, alpha, &betas);
-        let num = real_num - pad_num * geq; // send → +num
+        let num = real_num - pad_num * geq;
         let den = real_den + (EF::ONE - pad_den) * geq;
         (num, den)
     }
@@ -871,8 +738,6 @@ mod tests {
     /// `(rw_num, rw_den)` constants — the exact height-soundness
     /// `assert_ext_eq` (logup_gkr.rs step (8)).  Runs the DSL so the assert
     /// fires at runtime.
-    // A test harness that pins one reconstruction; each argument is a case
-    // parameter it varies.
     #[allow(clippy::too_many_arguments)]
     fn run_single_send_reconstruction(
         lookup: &Lookup<F>,
@@ -890,7 +755,6 @@ mod tests {
 
         let mut builder = Builder::<C>::default();
 
-        // Constants for all inputs.
         let main_full: Vec<Ext<F, EF>> =
             main_full_vals.iter().map(|&v| builder.constant(v)).collect();
         let alpha: Ext<F, EF> = builder.constant(alpha_val);
@@ -902,19 +766,16 @@ mod tests {
         let rw_num_ext: Ext<F, EF> = builder.constant(rw_num);
         let rw_den_ext: Ext<F, EF> = builder.constant(rw_den);
 
-        // (3) point_extended = [ZERO, ...trace_point.rev()].
         let mut point_extended: Vec<SymbolicExt<F, EF>> = Vec::with_capacity(trace_point.len() + 1);
         point_extended.push(SymbolicExt::ZERO);
         point_extended
             .extend(trace_point.iter().rev().map(|p| -> SymbolicExt<F, EF> { (*p).into() }));
 
-        // (4) betas + alpha into the symbolic algebra.
         let alpha_sym: SymbolicExt<F, EF> = alpha.into();
         let beta_seed_sym: Vec<SymbolicExt<F, EF>> =
             beta_seed.iter().map(|b| -> SymbolicExt<F, EF> { (*b).into() }).collect();
         let betas = partial_lagrange_symbolic::<C>(&beta_seed_sym);
 
-        // (5) degree mask + the single send interaction.
         let degree_sym: Vec<SymbolicExt<F, EF>> =
             degree.iter().map(|d| -> SymbolicExt<F, EF> { (*d).into() }).collect();
         let geq = crate::zerocheck::full_geq::<C>(&degree_sym, &point_extended);
@@ -927,15 +788,12 @@ mod tests {
         let (pad_num, pad_den) =
             lookup.eval::<SymbolicExt<F, EF>, Ext<F, EF>>(None, &padding_main, alpha_sym, &betas);
         let one_sym: SymbolicExt<F, EF> = SymbolicExt::ONE;
-        let num_i = real_num - pad_num * geq; // send
+        let num_i = real_num - pad_num * geq;
         let den_i = real_den + (one_sym - pad_den) * geq;
 
-        // (6)-(7) log_num_interactions = 0 ⇒ interaction_point empty ⇒ the
-        // reconstructed MLE collapses to the single value.
         let recon_num: Ext<F, EF> = builder.eval(num_i);
         let recon_den: Ext<F, EF> = builder.eval(den_i);
 
-        // (8) the height-soundness assert.
         builder.assert_ext_eq(rw_num_ext, recon_num);
         builder.assert_ext_eq(rw_den_ext, recon_den);
 
@@ -959,15 +817,11 @@ mod tests {
     #[test]
     fn reconstruction_accepts_honest_degree() {
         let lookup = sample_lookup();
-        // main_full = [multiplicity=5, value=7]; height 2^2 over a 3-coord cube.
         let main_full = vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7))];
         let alpha = EF::from(F::from_u32(11));
-        let beta_seed = vec![EF::from(F::from_u32(13))]; // arity 2 → beta_seed_dim 1
-                                                         // max_log_row_count = 3 → point_extended dim 4 → degree dim 4.
+        let beta_seed = vec![EF::from(F::from_u32(13))];
         let trace_point =
             vec![EF::from(F::from_u32(2)), EF::from(F::from_u32(3)), EF::from(F::from_u32(4))];
-        // Honest degree = big-endian bits of height 2^2 = 4 over 4 slots:
-        // 0b0100 → [0,1,0,0].
         let degree = vec![EF::ZERO, EF::ONE, EF::ZERO, EF::ZERO];
 
         let (rw_num, rw_den) = host_reconstruct_single_send(
@@ -1005,7 +859,6 @@ mod tests {
         let beta_seed = vec![EF::from(F::from_u32(13))];
         let trace_point =
             vec![EF::from(F::from_u32(2)), EF::from(F::from_u32(3)), EF::from(F::from_u32(4))];
-        // HONEST round-walk eval (height 2^2 = 4 → [0,1,0,0]).
         let honest_degree = vec![EF::ZERO, EF::ONE, EF::ZERO, EF::ZERO];
         let (rw_num, rw_den) = host_reconstruct_single_send(
             &lookup,
@@ -1015,8 +868,6 @@ mod tests {
             &beta_seed,
             &trace_point,
         );
-        // FORGED degree (height 2^1 = 2 → [0,0,1,0]); the round-walk eval is
-        // still the honest one above → mismatch → assert trips.
         let forged_degree = vec![EF::ZERO, EF::ZERO, EF::ONE, EF::ZERO];
         run_single_send_reconstruction(
             &lookup,
@@ -1048,7 +899,6 @@ mod tests {
         let trace_point =
             vec![EF::from(F::from_u32(2)), EF::from(F::from_u32(3)), EF::from(F::from_u32(4))];
         let degree = vec![EF::ZERO, EF::ONE, EF::ZERO, EF::ZERO];
-        // HONEST round-walk eval from the HONEST *_full.
         let (rw_num, rw_den) = host_reconstruct_single_send(
             &lookup,
             &honest_main_full,
@@ -1057,7 +907,6 @@ mod tests {
             &beta_seed,
             &trace_point,
         );
-        // FORGED *_full (multiplicity 5→6) → reconstruction diverges → trips.
         let forged_main_full = vec![EF::from(F::from_u32(6)), EF::from(F::from_u32(7))];
         run_single_send_reconstruction(
             &lookup,

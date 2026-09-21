@@ -1,22 +1,11 @@
-//! The per-instruction "frame" that every instruction-bearing chip needs once
-//! the `Cpu` dispatch hub is gone.
+//! The per-instruction "frame" every instruction-bearing chip carries.
 //!
-//! Today `CpuChip` is a hub: it fetches the instruction (`send_program`), reads
-//! and writes the registers (`eval_registers`), chains `(clk, pc)` on the
-//! `State` bus, and then hands a fully decoded instruction to the opcode chip
-//! over the `Instruction` bus.  The opcode chips are pure receivers.  That costs
-//! a second full row per executed instruction: `Cpu` is 59 columns wide and has
-//! one row for EVERY instruction, on top of the opcode row that also exists.
-//!
-//! The hub is unnecessary — each instruction chip can carry its own frame, with
-//! `Program` / `InstructionFetch` / `InstructionDecode` alongside.  This module
-//! is the shared piece that makes that possible: a chip embeds
-//! [`InstructionFrameCols`] and calls [`eval_instruction_frame`], after which it
-//! no longer needs `receive_instruction` and `Cpu` no longer needs a row for it.
-//!
-//! Migration note: the columns here duplicate `CpuCols` deliberately.  While
-//! both exist the area is WORSE (both rows are present), so the win only lands
-//! when the last chip migrates and `Cpu` is dropped from `MipsAir`.
+//! Each instruction chip owns its frame: it fetches its instruction
+//! (`send_program`), reads and writes its registers, and chains `(clk, pc)` on
+//! the `State` bus itself, so an executed instruction costs one row, in its
+//! opcode chip.  A chip embeds [`InstructionFrameCols`] (or a narrower
+//! I/R-type/shamt frame) and calls [`eval_instruction_frame`] (or the matching
+//! `eval_*_frame`).
 
 use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
@@ -85,25 +74,26 @@ pub fn clk_from_frame<AB: AirBuilder>(frame: &InstructionFrameCols<AB::Var>) -> 
 
 /// Evaluate the frame: program fetch, register access, and `(clk, pc)` chaining.
 ///
-/// This is the union of what `CpuChip::eval` does today minus the
-/// `send_instruction` dispatch, which disappears entirely once every chip owns
-/// its frame.  `is_real` must already be constrained boolean by the caller.
+/// `is_real` must already be constrained boolean by the caller.
+///
+/// * `opcode`: the chip's own opcode, as an expression over its selector flags.
+/// * `pc`, `next_pc`, `next_next_pc`: expressions, since the control-flow and
+///   memory chips carry `next_pc` / `next_next_pc` as `Word` columns and pass
+///   `word.reduce::<AB>()`.
+/// * `recv_next_pc`: what the `State` receive carries; equals `next_pc`
+///   except on the syscall chip's halt row, which receives its predecessor's
+///   `pc + 4` while its own `next_pc` is the exit signal 0.
+/// * `num_extra_cycles`: cycles this instruction adds to `clk`; 0 except for
+///   syscalls.
 #[allow(clippy::too_many_arguments)]
 pub fn eval_instruction_frame<AB>(
     builder: &mut AB,
     frame: &InstructionFrameCols<AB::Var>,
-    // The chip's OWN opcode, as an expression over its selector flags.
     opcode: AB::Expr,
-    // Exprs, not Vars: the control-flow and memory chips carry `next_pc` /
-    // `next_next_pc` as `Word` columns and pass `word.reduce::<AB>()`.
     pc: AB::Expr,
     next_pc: AB::Expr,
     next_next_pc: AB::Expr,
-    // What the `State` receive carries.  Equal to `next_pc` everywhere except
-    // the syscall chip's halt row, which receives its predecessor's `pc + 4`
-    // lookahead while its own `next_pc` is the exit signal 0.
     recv_next_pc: AB::Expr,
-    // Extra cycles this instruction adds to `clk` — ZERO except syscalls.
     num_extra_cycles: AB::Expr,
     is_real: AB::Expr,
 ) where
@@ -111,35 +101,14 @@ pub fn eval_instruction_frame<AB>(
 {
     let clk = clk_from_frame::<AB>(frame);
 
-    // ★ On a NON-instruction row every frame column is zero, which would leave
-    // the op_b / op_c register-access multiplicities below (`ONE - imm_b`)
-    // equal to ONE — the chip would RECEIVE register accesses nobody sent and
-    // the LogUp multiset would break with "public-values balance failed".
-    //
-    // Force the immediate flags high there instead of multiplying the
-    // multiplicities by `is_real`: that keeps them degree 1, where
-    // `is_real * (ONE - imm_b)` would be degree 2 and risks "degree multiple is
-    // too high".  This is exactly the trick `CpuChip::eval` already uses for its
-    // padding rows.
     let not_real = AB::Expr::ONE - is_real.clone();
     builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - frame.instruction.imm_b);
     builder.when(not_real).assert_zero(AB::Expr::ONE - frame.instruction.imm_c);
 
-    // The instruction at `pc` must be the one the program committed to.
     builder.send_program(pc.clone(), frame.instruction, is_real.clone());
 
-    // ...and the chip's SELECTORS must be that instruction.  The opcode column
-    // is bound to the program table by the send above, but nothing ties the
-    // selectors to it: without this a row could satisfy every constraint while
-    // computing a different operation than the program holds at `pc`, and a
-    // chip could claim a `pc` belonging to another chip entirely.  The caller
-    // passes the opcode as an expression over its own selectors, so the two
-    // cannot disagree.
     builder.when(is_real.clone()).assert_eq(frame.instruction.opcode, opcode);
 
-    // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
-    // Mirrors `CpuChip::eval_shard_clk` — the trace side must add the matching
-    // U16Range/U8Range byte events for every instruction row.
     builder.send_byte(
         AB::Expr::from_u8(ByteOpcode::U16Range as u8),
         frame.shard,
@@ -147,13 +116,8 @@ pub fn eval_instruction_frame<AB>(
         AB::Expr::ZERO,
         is_real.clone(),
     );
-    // `clk` is BUILT from these limbs above, so the reconstruction identity is free and only
-    // the limb bounds have to be paid: 16 + 8 bits from the byte table, and the top bit
-    // constrained boolean.  The boolean assertion is unguarded — the column is zero on every
-    // padding / dependency row — which keeps it degree 2.
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
-    // Immediates bypass the register read.
     builder.when(frame.instruction.imm_b).assert_word_eq(frame.op_b_val(), frame.instruction.op_b);
     builder.when(frame.instruction.imm_c).assert_word_eq(frame.op_c_val(), frame.instruction.op_c);
 
@@ -172,12 +136,7 @@ pub fn eval_instruction_frame<AB>(
         AB::Expr::ONE - frame.instruction.imm_c,
     );
 
-    // Writes to register 0 are discarded.
     builder.when(frame.instruction.op_a_0).assert_word_zero(*frame.op_a_access.value());
-    // The immutable-read rule (`op_a_access.value == prev_value`) lives in the
-    // chips that read op_a immutably (Branch, TEQ, the plain stores) — NOT
-    // here with a ZERO guard: a zero-guarded constraint still consumes an RLC
-    // slot on the verifier while the device bytecode optimizer may elide it.
 
     builder.eval_register_access(
         frame.shard,
@@ -187,13 +146,8 @@ pub fn eval_instruction_frame<AB>(
         is_real.clone(),
     );
 
-    // Always range check the word written to `op_a` — mirrors
-    // `CpuChip::eval_registers` (JUMP instructions may witness an invalid word).
     builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
 
-    // `(clk, pc)` chaining.  The LogUp multiset balance forces row i+1's
-    // `(pc, next_pc)` to equal row i's `(next_pc, next_next_pc)`; the boundary
-    // endpoints are emitted by the public-values AIR.
     builder.receive_state(frame.shard, clk.clone(), pc, recv_next_pc, is_real.clone());
     builder.send_state(
         frame.shard,
@@ -290,12 +244,6 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             self.op_c_access.populate_register(c_record, blu);
         }
 
-        // The op_a word range check reads back the COLUMN value, exactly as
-        // `cpu/trace.rs` does — NOT `a`.  `populate` above overwrites
-        // `access.value` with the RECORD's value, and the two differ on a
-        // no-link jump (op_a = r0: record value 0, while `a` carries the link).
-        // Supplying `a`'s bytes there leaves the AIR's request for (0, 0)
-        // unmatched and breaks the Byte bus by exactly 2 events per such row.
         let a_bytes = self
             .op_a_access
             .access
@@ -348,7 +296,7 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
 
     /// `BranchEvent` variant of [`Self::populate_from_alu`].  The caller must
     /// additionally set `op_a_immutable = ONE`: a branch READS `op_a`, and both
-    /// the frame rule and Cpu's legacy bus tuple carry that flag high.
+    /// the frame rule carries that flag high.
     pub fn populate_from_branch(
         &mut self,
         event: &BranchEvent,
@@ -506,9 +454,9 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
 /// only ever executes I-type instructions knows all of that statically, so it
 /// pays for none of it:
 ///
-/// * `op_c_access` (7 columns) is gone — `op_c` is never a register read, so
-///   its access multiplicity was identically zero.
-/// * `imm_b` / `imm_c` (2 columns) are gone — they are the constants 0 and 1.
+/// * no `op_c_access` (7 columns): `op_c` is never a register read, so its
+///   access multiplicity is identically zero.
+/// * no `imm_b` / `imm_c` (2 columns): they are the constants 0 and 1.
 /// * `op_b` narrows from a `Word` to a single column (3 saved): it is a
 ///   register index.  Nothing here has to *assert* that the upper three limbs
 ///   are zero — the `Program` bus binds all four limbs against the preprocessed
@@ -527,8 +475,6 @@ pub struct ITypeFrameCols<T> {
     pub clk_16bit_limb: T,
     /// The middle 8 bit limb of clk.
     pub clk_high_limb: T,
-    /// The most significant bit of clk, i.e. bit 24.  See
-
     /// The opcode for this cycle.
     pub opcode: T,
     /// The first operand — a register index.
@@ -598,7 +544,6 @@ fn i_type_instruction<AB: AirBuilder>(
 pub fn eval_i_type_frame<AB>(
     builder: &mut AB,
     frame: &ITypeFrameCols<AB::Var>,
-    // The chip's OWN opcode -- see [`eval_instruction_frame`].
     opcode: AB::Expr,
     pc: AB::Expr,
     next_pc: AB::Expr,
@@ -611,11 +556,9 @@ pub fn eval_i_type_frame<AB>(
 {
     let clk = clk_from_i_type_frame::<AB>(frame);
 
-    // The instruction at `pc` must be the one the program committed to.
     builder.send_program(pc.clone(), i_type_instruction::<AB>(frame), is_real.clone());
     builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
-    // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
     builder.send_byte(
         AB::Expr::from_u8(ByteOpcode::U16Range as u8),
         frame.shard,
@@ -625,8 +568,6 @@ pub fn eval_i_type_frame<AB>(
     );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
-    // `op_b` is read from the register file; `op_c` is the immediate and needs
-    // no access at all.
     builder.eval_register_access(
         frame.shard,
         clk.clone() + AB::F::from_u32(MemoryAccessPosition::B as u32),
@@ -635,7 +576,6 @@ pub fn eval_i_type_frame<AB>(
         is_real.clone(),
     );
 
-    // Writes to register 0 are discarded.
     builder.when(frame.op_a_0).assert_word_zero(*frame.op_a_access.value());
 
     builder.eval_register_access(
@@ -648,7 +588,6 @@ pub fn eval_i_type_frame<AB>(
 
     builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
 
-    // `(clk, pc)` chaining.
     builder.receive_state(frame.shard, clk.clone(), pc, recv_next_pc, is_real.clone());
     builder.send_state(
         frame.shard,
@@ -693,21 +632,13 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         ));
 
         let instruction = program.fetch(event.pc);
-        // The shape this frame is specialised for.  A chip that ever violates
-        // this would silently commit an instruction the `Program` bus cannot
-        // match, so it is worth asserting where the assumption is made.
         debug_assert!(
             !instruction.imm_b && instruction.imm_c,
             "an I-type frame received a non-I-type instruction: {:?}",
             instruction.opcode
         );
         debug_assert!(instruction.op_b < 256, "op_b is not a register index");
-        // Dropping `op_c_access` also drops the byte events its `populate`
-        // emitted.  That is only sound because an immediate `op_c` never
-        // produces a register read to record — the AIR gave the access
-        // multiplicity `ONE - imm_c = 0`, so any event here was already
-        // unmatched on the byte bus.  `MemInstrEvent` no longer carries a
-        // `c_record` at all; `Executor::emit_mem_instr_event` asserts it.
+
         self.opcode = instruction.opcode.as_field::<F>();
         self.op_a = F::from_u32(instruction.op_a as u32);
         self.op_b = F::from_u32(instruction.op_b);
@@ -723,9 +654,6 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             self.op_b_access.populate_register(event.b_record, blu);
         }
 
-        // Read the op_a range check back off the COLUMN, not the event — see
-        // [`InstructionFrameCols::populate_raw`] for the no-link-jump case that
-        // makes the two differ.
         let a_bytes = self
             .op_a_access
             .access
@@ -841,8 +769,6 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
         ));
 
         let instruction = program.fetch(pc);
-        // The shape this frame is specialised for — see
-        // [`Self::populate_from_mem`] for why this is asserted here.
         debug_assert!(
             !instruction.imm_b && instruction.imm_c,
             "an I-type frame received a non-I-type instruction: {:?}",
@@ -864,8 +790,6 @@ impl<F: PrimeField32> ITypeFrameCols<F> {
             self.op_b_access.populate_register(b_record, blu);
         }
 
-        // Column-read-back for the op_a range check, as in
-        // [`Self::populate_from_mem`].
         let a_bytes = self
             .op_a_access
             .access
@@ -909,8 +833,6 @@ pub struct RTypeFrameCols<T> {
     pub clk_16bit_limb: T,
     /// The middle 8 bit limb of clk.
     pub clk_high_limb: T,
-    /// The most significant bit of clk, i.e. bit 24.  See
-
     /// The opcode for this cycle.
     pub opcode: T,
     /// The first operand — a register index.
@@ -971,7 +893,6 @@ fn r_type_instruction<AB: AirBuilder>(
 pub fn eval_r_type_frame<AB>(
     builder: &mut AB,
     frame: &RTypeFrameCols<AB::Var>,
-    // The chip's OWN opcode -- see [`eval_instruction_frame`].
     opcode: AB::Expr,
     pc: AB::Expr,
     next_pc: AB::Expr,
@@ -984,11 +905,9 @@ pub fn eval_r_type_frame<AB>(
 {
     let clk = clk_from_r_type_frame::<AB>(frame);
 
-    // The instruction at `pc` must be the one the program committed to.
     builder.send_program(pc.clone(), r_type_instruction::<AB>(frame), is_real.clone());
     builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
-    // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
     builder.send_byte(
         AB::Expr::from_u8(ByteOpcode::U16Range as u8),
         frame.shard,
@@ -998,7 +917,6 @@ pub fn eval_r_type_frame<AB>(
     );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
-    // Both source operands are read from the register file.
     builder.eval_register_access(
         frame.shard,
         clk.clone() + AB::F::from_u32(MemoryAccessPosition::B as u32),
@@ -1014,7 +932,6 @@ pub fn eval_r_type_frame<AB>(
         is_real.clone(),
     );
 
-    // Writes to register 0 are discarded.
     builder.when(frame.op_a_0).assert_word_zero(*frame.op_a_access.value());
 
     builder.eval_register_access(
@@ -1026,7 +943,6 @@ pub fn eval_r_type_frame<AB>(
     );
     builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
 
-    // `(clk, pc)` chaining.
     builder.receive_state(frame.shard, clk.clone(), pc, recv_next_pc, is_real.clone());
     builder.send_state(
         frame.shard,
@@ -1156,8 +1072,6 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
         ));
 
         let instruction = program.fetch(pc);
-        // The shape this frame is specialised for — see
-        // [`ITypeFrameCols::populate_from_mem`] for why this is asserted here.
         debug_assert!(
             !instruction.imm_b && !instruction.imm_c,
             "an R-type frame received a non-R-type instruction: {:?}",
@@ -1184,9 +1098,6 @@ impl<F: PrimeField32> RTypeFrameCols<F> {
             self.op_c_access.populate_register(c_record, blu);
         }
 
-        // Read the op_a range check back off the COLUMN, not the event — see
-        // [`InstructionFrameCols::populate_raw`] for the no-link-jump case
-        // that makes the two differ.
         let a_bytes = self
             .op_a_access
             .access
@@ -1226,8 +1137,6 @@ pub struct ShamtFrameCols<T> {
     pub clk_16bit_limb: T,
     /// The middle 8 bit limb of clk.
     pub clk_high_limb: T,
-    /// The most significant bit of clk, i.e. bit 24.  See
-
     /// The opcode for this cycle.
     pub opcode: T,
     /// The first operand — a register index.
@@ -1281,7 +1190,6 @@ fn shamt_instruction<AB: AirBuilder>(frame: &ShamtFrameCols<AB::Var>) -> Instruc
 pub fn eval_shamt_frame<AB>(
     builder: &mut AB,
     frame: &ShamtFrameCols<AB::Var>,
-    // The chip's OWN opcode -- see [`eval_instruction_frame`].
     opcode: AB::Expr,
     pc: AB::Expr,
     next_pc: AB::Expr,
@@ -1294,11 +1202,9 @@ pub fn eval_shamt_frame<AB>(
 {
     let clk = clk_from_shamt_frame::<AB>(frame);
 
-    // The instruction at `pc` must be the one the program committed to.
     builder.send_program(pc.clone(), shamt_instruction::<AB>(frame), is_real.clone());
     builder.when(is_real.clone()).assert_eq(frame.opcode, opcode);
 
-    // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
     builder.send_byte(
         AB::Expr::from_u8(ByteOpcode::U16Range as u8),
         frame.shard,
@@ -1308,7 +1214,6 @@ pub fn eval_shamt_frame<AB>(
     );
     builder.send_timestamp_range_checks(frame.clk_16bit_limb, frame.clk_high_limb, is_real.clone());
 
-    // `op_b` is read from the register file; the shamt needs no access.
     builder.eval_register_access(
         frame.shard,
         clk.clone() + AB::F::from_u32(MemoryAccessPosition::B as u32),
@@ -1317,7 +1222,6 @@ pub fn eval_shamt_frame<AB>(
         is_real.clone(),
     );
 
-    // Writes to register 0 are discarded.
     builder.when(frame.op_a_0).assert_word_zero(*frame.op_a_access.value());
 
     builder.eval_register_access(
@@ -1330,7 +1234,6 @@ pub fn eval_shamt_frame<AB>(
 
     builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
 
-    // `(clk, pc)` chaining.
     builder.receive_state(frame.shard, clk.clone(), pc, recv_next_pc, is_real.clone());
     builder.send_state(
         frame.shard,
@@ -1374,8 +1277,6 @@ impl<F: PrimeField32> ShamtFrameCols<F> {
         ));
 
         let instruction = program.fetch(event.pc);
-        // The shape this frame is specialised for — see
-        // [`ITypeFrameCols::populate_from_mem`] for why this is asserted here.
         debug_assert!(
             !instruction.imm_b && instruction.imm_c,
             "a shamt frame received a non-immediate instruction: {:?}",
@@ -1402,8 +1303,6 @@ impl<F: PrimeField32> ShamtFrameCols<F> {
             self.op_b_access.populate_register(event.b_record, blu);
         }
 
-        // Column-read-back for the op_a range check, as in
-        // [`ITypeFrameCols::populate_from_mem`].
         let a_bytes = self
             .op_a_access
             .access

@@ -39,7 +39,6 @@ pub trait Poseidon2KoalaBearHasherVariable<C: CircuitConfig> {
     /// Reference: [p3_symmetric::PaddingFreeSponge]
     #[track_caller]
     fn poseidon2_hash(builder: &mut Builder<C>, input: &[Felt<C::F>]) -> [Felt<C::F>; DIGEST_SIZE] {
-        // static_assert(RATE < WIDTH)
         let mut state = core::array::from_fn(|_| builder.eval(C::F::ZERO));
         for input_chunk in input.chunks(HASH_RATE) {
             state[..input_chunk.len()].copy_from_slice(input_chunk);
@@ -151,13 +150,6 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// the in-circuit challenger observes the same BN254 digests the host
     /// outer verifier absorbs (the all-zero placeholder for those
     /// commitments was the residual gnark constraint failure).
-    //
-    // Both lift dispatchers are REQUIRED (no default body).  A
-    // default that delegated to the inner const/witness lifts would need
-    // `Self::DigestVariable = [Felt;8]`, and a restrictive where-clause on a
-    // trait method propagates to EVERY caller (breaking the SC-generic wrap
-    // core for the outer ring).  Making them required lets each ring's impl
-    // supply a body specialized to its concrete `DigestVariable`.
     fn lift_evaluation_proof_bytes_dispatch(
         builder: &mut Builder<C>,
         bytes: &[u8],
@@ -232,6 +224,17 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// needs to TYPE-CHECK with `Self::DigestVariable = [Var<Bn254>; 1]`.  This
     /// is the escape hatch that lets the SC-generic
     /// `verify_wrap_basefold_core` compile for both rings.
+    ///
+    /// * `modified_commitment`: the Fiat–Shamir-observed digest, equal to the
+    ///   main commitment; the inner impl threads it into the modified
+    ///   commitments, the outer impl ignores it.
+    /// * `preceding_commitments`: `(raw root, key digest)` of every round
+    ///   committed before the main one (the preprocessed round); empty when the
+    ///   machine has no preprocessed traces.
+    /// * `padding_heights`: each round's stacking-padding column heights.
+    /// * `chip_height_felts`: witnessed per-chip heights `2^{log h}` from the
+    ///   opened `degree`, so the inner lift derives `col_prefix_sums` and
+    ///   `row_counts` value-independently; the outer impl ignores it.
     #[allow(clippy::too_many_arguments)]
     fn lift_bundle_dispatch(
         builder: &mut Builder<C>,
@@ -245,22 +248,12 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
         expected_eval: Ext<C::F, C::EF>,
         commit_root: [Felt<C::F>; 8],
-        // Hash-bind: the MODIFIED (FS-observed) digest = main_commitment.
-        // The inner impl threads it into modified_commitments; the outer impl
-        // (dead bundle arm) ignores it.
         modified_commitment: [Felt<C::F>; 8],
-        // Rounds committed BEFORE the main one, as (raw root, key digest) — the
-        // preprocessed round.  Empty on a machine with no preprocessed traces.
         preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
-        // Each round's stacking-padding column heights.
         padding_heights: &[Vec<Felt<C::F>>],
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
-        // Per-chip WITNESSED height felts (2^log_h, from the
-        // opened `degree`) so the inner bundle lift reconstructs
-        // col_prefix_sums / row_counts value-independently.  The outer
-        // (BN254) impl's bundle arm is dead and ignores it.
         chip_height_felts: Option<&[Felt<C::F>]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
         crate::basefold_verifier::RecursiveBasefoldProof<
@@ -436,7 +429,6 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
     fn digest_from_koalabear_root(
         root: [KoalaBear; 8],
     ) -> <Self as FieldHasher<KoalaBear>>::Digest {
-        // Inner digest IS [KoalaBear; 8] — identity.
         root
     }
 
@@ -537,10 +529,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
         expected_eval: Ext<C::F, C::EF>,
         commit_root: [Felt<C::F>; 8],
         modified_commitment: [Felt<C::F>; 8],
-        // Rounds committed BEFORE the main one, as (raw root, key digest) — the
-        // preprocessed round.  Empty on a machine with no preprocessed traces.
         preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
-        // Each round's stacking-padding column heights.
         padding_heights: &[Vec<Felt<C::F>>],
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
@@ -574,13 +563,11 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
             max_log_row_count,
             column_counts_by_round,
             row_counts_by_round,
-            // Witnessed per-chip heights forwarded from the
-            // SC-generic wrap verifier (None = baked fallback).
             chip_height_felts,
         )
     }
 
-    /// P2c-for-outer: the INNER ring never carries a `LiftedEvalProof::Outer
+    /// The inner ring never carries a `LiftedEvalProof::Outer
     /// Bundle` (it's an inner KoalaBear bundle, lifted via `lift_bundle_dispatch`).
     /// This arm is dead — build a structural `[Felt;8]` placeholder so the
     /// SC-generic `verify_wrap_basefold_core` type-checks for the inner ring.
@@ -635,7 +622,6 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
     where
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
     {
-        // INNER ring: WITNESSED (value-independent).
         crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
             builder,
             chip_names,
@@ -671,8 +657,8 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     }
 
     /// OUTER ring: the verifying key's commitment IS the raw BN254 preprocessed
-    /// root (`recursion/core/src/stark/config.rs:426` returns
-    /// `commit.original_commitment` unmixed), so it is exactly the value the
+    /// root (the outer config's vk commitment is
+    /// `commit.original_commitment`, unmixed), so it is exactly the value the
     /// preceding round's proof-supplied root must equal. No geometry mix to undo.
     fn vk_outer_cap(
         commitment: Self::DigestVariable,
@@ -750,9 +736,6 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     fn digest_from_koalabear_root(
         _root: [KoalaBear; 8],
     ) -> <Self as FieldHasher<KoalaBear>>::Digest {
-        // OUTER ring digests are BN254 and come from the dedicated
-        // outer bundle lift; the inner-KoalaBear-root conversion is
-        // never the binding digest here.
         <Self as FieldHasher<KoalaBear>>::Digest::default()
     }
 
@@ -775,17 +758,6 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
         Self: Sized,
     {
-        // OUTER ring: deserialize the BN254 bundle and lift its real
-        // commitments.  Falls back to the structural zero placeholder only
-        // if deserialization fails (empty/placeholder paths).
-        //
-        // P2c-for-outer: the PRODUCTION outer wrap path no longer reaches this
-        // bytes lift — `JaggedShardProof::read` now witnesses the outer bundle
-        // into a `LiftedEvalProof::OuterBundle` (value-independent), and
-        // `verify_wrap_basefold_core` lifts it via `lift_outer_bundle_dispatch`.
-        // This bytes arm survives only as the empty/deserialize-failure fallback
-        // (the OuterBundle read returns None there), so it builds the structural
-        // placeholder (it has no witnessed values to thread).
         let _ = bytes;
         crate::jagged_pcs_lift::lift_empty_placeholder::<C, Self>(
             builder,
@@ -942,10 +914,6 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     where
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
     {
-        // OUTER/gnark ring: BAKED from the RAW chip_heights — the gnark
-        // constraint compiler has no CircuitV2HintBitsF, and the single
-        // gnark artifact's inputs have canonical shapes (earlier baked wrap
-        // behavior preserved on this ring).
         crate::shard_proof_variable_lift::chip_height_bits_from_heights::<C>(
             builder,
             chip_names,

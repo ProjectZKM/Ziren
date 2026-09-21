@@ -73,9 +73,7 @@ pub struct ShiftLeftCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// The output operand.
-
-    /// The least significant byte of `c`. Used to verify `shift_by_n_bits` and `shift_by_n_bytes`.
+    /// The least significant byte of `c`; checks `shift_by_n_bits` and `shift_by_n_bytes`.
     pub c_least_sig_byte: [T; BYTE_SIZE],
 
     /// A boolean array whose `i`th element indicates whether `num_bits_to_shift = i`.
@@ -130,7 +128,6 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows for each event.
         let mut rows: Vec<[F; NUM_SHIFT_LEFT_COLS]> = vec![];
         let shift_left_events = input.shift_left_events.clone();
         for event in shift_left_events.iter() {
@@ -147,7 +144,6 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             rows.push(row);
         }
 
-        // Pad the trace to a power of two depending on the proof shape in `input`.
         pad_rows_mult32(
             &mut rows,
             || [F::ZERO; NUM_SHIFT_LEFT_COLS],
@@ -155,22 +151,17 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             <ShiftLeft as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         let mut trace = RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             NUM_SHIFT_LEFT_COLS,
         );
 
-        // Create the template for the padded rows. These are fake rows that don't fail on some
-        // sanity checks.
         let padded_row_template = {
             let mut row = [F::ZERO; NUM_SHIFT_LEFT_COLS];
             let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
             cols.shift_by_n_bits[0] = F::ONE;
             cols.shift_by_n_bytes[0] = F::ONE;
             cols.bit_shift_multiplier = F::ONE;
-            // A padding row's frame needs no neutralising: the typed frame's
-            // register-access multiplicities are `is_real`.
             row
         };
         debug_assert!(padded_row_template.len() == NUM_SHIFT_LEFT_COLS);
@@ -231,7 +222,6 @@ impl ShiftLeft {
         program: &Program,
         shard: u32,
     ) {
-        // Every SLL row is a real instruction owning its frame.
         cols.frame.populate_from_alu(event, program, shard, blu);
 
         let a = event.a.to_le_bytes();
@@ -244,7 +234,6 @@ impl ShiftLeft {
             cols.c_least_sig_byte[i] = F::from_u32((event.c >> i) & 1);
         }
 
-        // Variables for bit shifting.
         let num_bits_to_shift = event.c as usize % BYTE_SIZE;
         for i in 0..BYTE_SIZE {
             cols.shift_by_n_bits[i] = F::from_bool(num_bits_to_shift == i);
@@ -266,19 +255,16 @@ impl ShiftLeft {
         cols.bit_shift_result = bit_shift_result.map(F::from_u8);
         cols.bit_shift_result_carry = bit_shift_result_carry.map(F::from_u8);
 
-        // Variables for byte shifting.
         let num_bytes_to_shift = (event.c & 0b11111) as usize / BYTE_SIZE;
         for i in 0..WORD_SIZE {
             cols.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
         }
 
-        // Range checks.
         {
             blu.add_u8_range_checks(&bit_shift_result);
             blu.add_u8_range_checks(&bit_shift_result_carry);
         }
 
-        // Sanity check.
         for i in num_bytes_to_shift..WORD_SIZE {
             debug_assert_eq!(cols.bit_shift_result[i - num_bytes_to_shift], F::from_u8(a[i]));
         }
@@ -299,7 +285,6 @@ where
         let main = builder.main();
         let local = main.current_slice();
         let local: &ShiftLeftCols<AB::Var> = (*local).borrow();
-        // The inputs are the frame's register reads, not columns of this chip.
         let op_b = local.frame.op_b_val();
         let op_c = local.frame.op_c_val();
 
@@ -307,12 +292,6 @@ where
         let one: AB::Expr = AB::F::ONE.into();
         let base: AB::Expr = AB::F::from_u32(1 << BYTE_SIZE).into();
 
-        // We first "bit shift" and next we "byte shift". Then we compare the results with a.
-        // Finally, we perform some misc checks.
-
-        // Step 1: Perform the fine-grained bit shift (i.e., shifting b by c % 8 bits).
-
-        // Check the sum of c_least_sig_byte[i] * 2^i equals c[0].
         let mut c_byte_sum = zero.clone();
         for i in 0..BYTE_SIZE {
             let val: AB::Expr = AB::F::from_u32(1 << i).into();
@@ -320,11 +299,8 @@ where
         }
         builder.assert_eq(c_byte_sum, op_c[0]);
 
-        // Check shift_by_n_bits[i] is 1 iff i = num_bits_to_shift.
         let mut num_bits_to_shift = zero.clone();
 
-        // 3 is the maximum number of bits necessary to represent num_bits_to_shift as
-        // num_bits_to_shift is in [0, 7].
         for i in 0..3 {
             num_bits_to_shift =
                 num_bits_to_shift.clone() + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
@@ -335,15 +311,12 @@ where
                 .assert_eq(num_bits_to_shift.clone(), AB::F::from_usize(i));
         }
 
-        // Check bit_shift_multiplier = 2^num_bits_to_shift by using shift_by_n_bits.
         for i in 0..BYTE_SIZE {
             builder
                 .when(local.shift_by_n_bits[i])
                 .assert_eq(local.bit_shift_multiplier, AB::F::from_usize(1 << i));
         }
 
-        // Check bit_shift_result = b * bit_shift_multiplier by using bit_shift_result_carry to
-        // carry-propagate.
         for i in 0..WORD_SIZE {
             let mut v = op_b[i] * local.bit_shift_multiplier
                 - local.bit_shift_result_carry[i] * base.clone();
@@ -353,33 +326,21 @@ where
             builder.assert_eq(local.bit_shift_result[i], v);
         }
 
-        // Step 2: Perform the coarser bit shift (i.e., shifting b by c // 8 bits).
-
-        // The two-bit number represented by the 3rd and 4th least significant bits of c is the
-        // number of bytes to shift.
         let num_bytes_to_shift =
             local.c_least_sig_byte[3] + local.c_least_sig_byte[4] * AB::F::from_u32(2);
 
-        // Verify that shift_by_n_bytes[i] = 1 if and only if i = num_bytes_to_shift.
         for i in 0..WORD_SIZE {
             builder
                 .when(local.shift_by_n_bytes[i])
                 .assert_eq(num_bytes_to_shift.clone(), AB::F::from_usize(i));
         }
 
-        // The result binds DIRECTLY to the frame's committed `op_a` register
-        // access, taking the byte shifting into account — there is no result
-        // mirror column.  The frame pins the commit to ZERO for a register-0
-        // destination (the write is discarded), so the value-carrying bytes
-        // bind through a `(1 - op_a_0)` factor; the shifted-in zero bytes are
-        // zero in BOTH cases and bind directly.
         let av = *local.frame.op_a_access.value();
         let not_a0 = AB::Expr::ONE - local.frame.op_a_0;
         for num_bytes_to_shift in 0..WORD_SIZE {
             let mut shifting = builder.when(local.shift_by_n_bytes[num_bytes_to_shift]);
             for i in 0..WORD_SIZE {
                 if i < num_bytes_to_shift {
-                    // The first num_bytes_to_shift bytes must be zero.
                     shifting.assert_eq(av[i], zero.clone());
                 } else {
                     shifting.assert_eq(
@@ -390,7 +351,6 @@ where
             }
         }
 
-        // Step 3: Misc checks such as range checks & bool checks.
         for bit in local.c_least_sig_byte.iter() {
             builder.assert_bool(*bit);
         }
@@ -403,7 +363,6 @@ where
             one.clone(),
         );
 
-        // Range check.
         {
             builder.slice_range_check_u8(&local.bit_shift_result, local.is_real);
             builder.slice_range_check_u8(&local.bit_shift_result_carry, local.is_real);
@@ -420,10 +379,6 @@ where
 
         builder.assert_bool(local.is_real);
 
-        // Every real row is an instruction carrying its own program fetch,
-        // register access and `(clk, pc)` chaining (the Instruction bus and
-        // its dependency rows are gone).  SLL is sequential and can never
-        // halt.
         eval_r_type_frame(
             builder,
             &local.frame,
@@ -490,7 +445,6 @@ mod tests {
         for &(b, c) in shift_instructions.iter() {
             instructions.extend(alu_op(Opcode::SLL, b, c));
         }
-        // Append more until we have 1000 shift events.
         for _ in 0..(1000 - shift_instructions.len()) {
             instructions.extend(alu_op(Opcode::SLL, 1, 0));
         }

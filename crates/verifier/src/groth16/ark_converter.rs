@@ -63,7 +63,6 @@ pub fn convert_ark(
         Groth16VkPrefixError::Mismatch => ArkGroth16Error::Groth16VkeyHashMismatch,
     })?;
 
-    // Convert gnark proof to arkworks proof
     let ark_proof = load_ark_proof_from_bytes(&proof[4..])?;
     let ark_groth16_vk = load_ark_groth16_verifying_key_from_bytes(groth16_vk)?;
     let ark_public_inputs = load_ark_public_inputs_from_bytes(
@@ -96,7 +95,6 @@ pub fn convert_ark_imm_wrap_vk(
     let vk_hash = hash_vkey_with_part_vk(&zkm_vkey_hash, part_start_vk)
         .map_err(|_| ArkGroth16Error::InvalidData)?;
 
-    // Convert gnark proof to arkworks proof
     let ark_proof = load_ark_proof_from_bytes(&proof[4..])?;
     let ark_groth16_vk = load_ark_groth16_verifying_key_from_bytes(imm_groth16_vk)?;
     let ark_public_inputs =
@@ -115,8 +113,6 @@ pub fn convert_ark_imm_wrap_vk(
 fn convert_endianness<const CHUNK_SIZE: usize, const ARRAY_SIZE: usize>(
     bytes: &[u8; ARRAY_SIZE],
 ) -> [u8; ARRAY_SIZE] {
-    // `as_chunks` rather than `chunks_exact`: the chunk size is a constant, so
-    // the array form carries it in the type and leaves no remainder to ignore.
     let (chunks, remainder) = bytes.as_chunks::<CHUNK_SIZE>();
     debug_assert!(remainder.is_empty(), "ARRAY_SIZE must be a whole number of CHUNK_SIZE chunks");
     let reversed: [_; ARRAY_SIZE] = chunks
@@ -135,9 +131,6 @@ fn convert_endianness<const CHUNK_SIZE: usize, const ARRAY_SIZE: usize>(
 /// Taken from https://github.com/anza-xyz/agave/blob/c54d840/curves/bn254/src/compression.rs#L219
 fn decompress_g1(g1_bytes: &[u8; 32]) -> Result<G1Affine, ArkGroth16Error> {
     let g1_bytes = gnark_compressed_x_to_ark_compressed_x(g1_bytes)?;
-    // `gnark_compressed_x_to_ark_compressed_x` preserves length, so this is
-    // infallible; checked rather than unwrapped so no caller-reachable path in
-    // this module can panic.
     let g1_bytes: [u8; 32] =
         g1_bytes.as_slice().try_into().map_err(|_| ArkGroth16Error::InvalidInput)?;
     let g1_bytes = convert_endianness::<32, 32>(&g1_bytes);
@@ -155,9 +148,6 @@ fn decompress_g1(g1_bytes: &[u8; 32]) -> Result<G1Affine, ArkGroth16Error> {
 /// Adapted from https://github.com/anza-xyz/agave/blob/c54d840/curves/bn254/src/compression.rs#L255
 fn decompress_g2(g2_bytes: &[u8; 64]) -> Result<G2Affine, ArkGroth16Error> {
     let g2_bytes = gnark_compressed_x_to_ark_compressed_x(g2_bytes)?;
-    // `gnark_compressed_x_to_ark_compressed_x` preserves length, so this is
-    // infallible; checked rather than unwrapped so no caller-reachable path in
-    // this module can panic.
     let g2_bytes: [u8; 64] =
         g2_bytes.as_slice().try_into().map_err(|_| ArkGroth16Error::InvalidInput)?;
     let g2_bytes = convert_endianness::<64, 64>(&g2_bytes);
@@ -260,15 +250,11 @@ pub fn load_ark_proof_from_bytes(buffer: &[u8]) -> Result<Proof<Bn254>, ArkGroth
 pub fn load_ark_groth16_verifying_key_from_bytes(
     buffer: &[u8],
 ) -> Result<VerifyingKey<Bn254>, ArkGroth16Error> {
-    // Note that g1_beta and g1_delta are not used in the verification process.
     let alpha_g1 = decompress_g1(take::<32>(buffer, 0)?)?;
     let beta_g2 = decompress_g2(take::<64>(buffer, 64)?)?;
     let gamma_g2 = decompress_g2(take::<64>(buffer, 128)?)?;
     let delta_g2 = decompress_g2(take::<64>(buffer, 224)?)?;
 
-    // `num_k` comes from the buffer, so the loop is bounded only by what the
-    // buffer can actually supply: each read is checked and a short buffer ends
-    // the load with `InvalidInput` rather than an out-of-range index.
     let num_k = take_u32(buffer, 288)?;
     let mut k = Vec::new();
     let mut offset = 292;
@@ -285,7 +271,6 @@ pub fn load_ark_groth16_verifying_key_from_bytes(
             .checked_add(4)
             .and_then(|o| o.checked_add(4usize.checked_mul(num as usize)?))
             .ok_or(ArkGroth16Error::InvalidInput)?;
-        // The skipped run must actually be present.
         if offset > buffer.len() {
             return Err(ArkGroth16Error::InvalidInput);
         }

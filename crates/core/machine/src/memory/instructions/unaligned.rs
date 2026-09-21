@@ -88,6 +88,9 @@ where
     AB: ZKMCoreAirBuilder,
     AB::Var: Sized,
 {
+    /// Constrains an unaligned load/store row. It is sound because all
+    /// selectors are boolean and so is their sum; the stores keep `op_a`
+    /// immutable and the loads write it.
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
@@ -95,7 +98,6 @@ where
         let local: &MemoryUnalignedColumns<AB::Var> = (*local).borrow();
         let common = &local.common;
 
-        // SAFETY: all selectors are boolean and so is their sum.
         let is_real = local.is_lwl + local.is_lwr + local.is_swl + local.is_swr;
         builder.assert_bool(local.is_lwl);
         builder.assert_bool(local.is_lwr);
@@ -113,14 +115,10 @@ where
             local.ls_bits_is_three,
         );
 
-        // The loads must not change the memory value.
         builder
             .when(local.is_lwl + local.is_lwr)
             .assert_word_eq(*local.memory_access.value(), *local.memory_access.prev_value());
 
-        // The load-side register binds run against the frame's committed
-        // `op_a` access; the gates carry the `(1 - op_a_0)` factor as witness
-        // columns so the binds keep their existing degree.
         builder.assert_eq(local.lwl_gate, local.is_lwl * (AB::Expr::ONE - common.frame.op_a_0));
         builder.assert_eq(local.lwr_gate, local.is_lwr * (AB::Expr::ONE - common.frame.op_a_0));
 
@@ -130,7 +128,6 @@ where
         let mem_val = *local.memory_access.value();
         let prev_mem_val = *local.memory_access.prev_value();
 
-        // `LWR`: merge the bytes at and above the offset into the low bytes of `op_a`.
         let lwr_expected_load_value = Word([
             mem_val[0] * offset_is_zero.clone()
                 + mem_val[1] * local.ls_bits_is_one
@@ -148,7 +145,6 @@ where
         ]);
         builder.when(local.lwr_gate).assert_word_eq(a_val, lwr_expected_load_value);
 
-        // `LWL`: merge the bytes at and below the offset into the high bytes of `op_a`.
         let lwl_expected_load_value = Word([
             mem_val[0] * local.ls_bits_is_three
                 + prev_a_val[0] * (one.clone() - local.ls_bits_is_three),
@@ -167,7 +163,6 @@ where
         ]);
         builder.when(local.lwl_gate).assert_word_eq(a_val, lwl_expected_load_value);
 
-        // `SWL`: store the high bytes of `op_a` at and below the offset.
         let swl_expected_stored_value = Word([
             a_val[3] * offset_is_zero.clone()
                 + a_val[2] * local.ls_bits_is_one
@@ -187,7 +182,6 @@ where
             .when(local.is_swl)
             .assert_word_eq(mem_val.map(|x| x.into()), swl_expected_stored_value);
 
-        // `SWR`: store the low bytes of `op_a` at and above the offset.
         let swr_expected_stored_value = Word([
             a_val[0] * offset_is_zero.clone()
                 + prev_mem_val[0] * (one.clone() - offset_is_zero.clone()),
@@ -212,7 +206,6 @@ where
             + local.is_swl * Opcode::SWL.as_field::<AB::F>()
             + local.is_swr * Opcode::SWR.as_field::<AB::F>();
 
-        // SAFETY: the stores keep `op_a` immutable; the loads write it.
         receive_memory_instruction(builder, common, opcode, local.is_swl + local.is_swr, is_real);
     }
 }
@@ -237,7 +230,6 @@ impl MemoryUnalignedChip {
         cols.is_lwr = F::from_bool(matches!(event.opcode, Opcode::LWR));
         cols.is_swl = F::from_bool(matches!(event.opcode, Opcode::SWL));
         cols.is_swr = F::from_bool(matches!(event.opcode, Opcode::SWR));
-        // `op_a_0` was just populated by the frame from the fetched instruction.
         let op_a_not_zero = F::ONE - cols.common.frame.op_a_0;
         cols.lwl_gate = cols.is_lwl * op_a_not_zero;
         cols.lwr_gate = cols.is_lwr * op_a_not_zero;
@@ -283,8 +275,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryUnalignedChip {
                 let cols: &mut MemoryUnalignedColumns<F> = row.borrow_mut();
                 self.event_to_row(event, cols, blu, &input.program);
             },
-            // A padding row needs no neutralising: the typed frame's register-access
-            // multiplicities are `is_real`, which is zero here already.
             |_row| {},
         );
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());

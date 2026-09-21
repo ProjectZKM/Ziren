@@ -28,7 +28,6 @@ where
     AB: ZKMAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
-        // Initialize columns.
         let main = builder.main();
         let local = main.current_slice();
         let local: &ShaExtendCols<AB::Var> = (*local).borrow();
@@ -36,17 +35,10 @@ where
         let i_start = AB::F::from_u32(16);
         let nb_bytes_in_word = AB::F::from_u32(4);
 
-        // Assert that `is_real` is a bool.
         builder.assert_bool(local.is_real);
 
-        // PrecompileChain state bus: receive `i`, send `i + 1`.  This pins the
-        // per-row `i` sequencing (and the `shard`/`clk`/`w_ptr` constancy via the
-        // matched tuple) that the legacy `cycle_16`/`cycle_48` flag machinery used
-        // to enforce, without the row selectors the single-row BaseFold zerocheck
-        // folder cannot evaluate.
         self.eval_state_bus(builder, local);
 
-        // Read w[i-15].
         builder.eval_memory_access(
             local.shard,
             local.clk + (local.i - i_start),
@@ -55,7 +47,6 @@ where
             local.is_real,
         );
 
-        // Read w[i-2].
         builder.eval_memory_access(
             local.shard,
             local.clk + (local.i - i_start),
@@ -64,7 +55,6 @@ where
             local.is_real,
         );
 
-        // Read w[i-16].
         builder.eval_memory_access(
             local.shard,
             local.clk + (local.i - i_start),
@@ -73,7 +63,6 @@ where
             local.is_real,
         );
 
-        // Read w[i-7].
         builder.eval_memory_access(
             local.shard,
             local.clk + (local.i - i_start),
@@ -82,8 +71,6 @@ where
             local.is_real,
         );
 
-        // Compute `s0`.
-        // w[i-15] rightrotate 7.
         FixedRotateRightOperation::<AB::F>::eval(
             builder,
             *local.w_i_minus_15.value(),
@@ -91,7 +78,6 @@ where
             local.w_i_minus_15_rr_7,
             local.is_real,
         );
-        // w[i-15] rightrotate 18.
         FixedRotateRightOperation::<AB::F>::eval(
             builder,
             *local.w_i_minus_15.value(),
@@ -99,7 +85,6 @@ where
             local.w_i_minus_15_rr_18,
             local.is_real,
         );
-        // w[i-15] rightshift 3.
         FixedShiftRightOperation::<AB::F>::eval(
             builder,
             *local.w_i_minus_15.value(),
@@ -107,7 +92,6 @@ where
             local.w_i_minus_15_rs_3,
             local.is_real.into(),
         );
-        // (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18)
         XorOperation::<AB::F>::eval(
             builder,
             local.w_i_minus_15_rr_7.value,
@@ -115,7 +99,6 @@ where
             local.s0_intermediate,
             local.is_real,
         );
-        // s0 := (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18) xor (w[i-15] rightshift 3)
         XorOperation::<AB::F>::eval(
             builder,
             local.s0_intermediate.value,
@@ -124,8 +107,6 @@ where
             local.is_real,
         );
 
-        // Compute `s1`.
-        // w[i-2] rightrotate 17.
         FixedRotateRightOperation::<AB::F>::eval(
             builder,
             *local.w_i_minus_2.value(),
@@ -133,7 +114,6 @@ where
             local.w_i_minus_2_rr_17,
             local.is_real,
         );
-        // w[i-2] rightrotate 19.
         FixedRotateRightOperation::<AB::F>::eval(
             builder,
             *local.w_i_minus_2.value(),
@@ -141,7 +121,6 @@ where
             local.w_i_minus_2_rr_19,
             local.is_real,
         );
-        // w[i-2] rightshift 10.
         FixedShiftRightOperation::<AB::F>::eval(
             builder,
             *local.w_i_minus_2.value(),
@@ -149,7 +128,6 @@ where
             local.w_i_minus_2_rs_10,
             local.is_real.into(),
         );
-        // (w[i-2] rightrotate 17) xor (w[i-2] rightrotate 19)
         XorOperation::<AB::F>::eval(
             builder,
             local.w_i_minus_2_rr_17.value,
@@ -157,7 +135,6 @@ where
             local.s1_intermediate,
             local.is_real,
         );
-        // s1 := (w[i-2] rightrotate 17) xor (w[i-2] rightrotate 19) xor (w[i-2] rightshift 10)
         XorOperation::<AB::F>::eval(
             builder,
             local.s1_intermediate.value,
@@ -166,7 +143,6 @@ where
             local.is_real,
         );
 
-        // s2 := w[i-16] + s0 + w[i-7] + s1.
         Add4Operation::<AB::F>::eval(
             builder,
             *local.w_i_minus_16.value(),
@@ -177,7 +153,6 @@ where
             local.s2,
         );
 
-        // Write `s2` to `w[i]`.
         builder.eval_memory_access(
             local.shard,
             local.clk + (local.i - i_start),
@@ -205,7 +180,6 @@ impl ShaExtendChip {
             vec![pid.clone(), local.shard.into(), local.clk.into(), local.w_ptr.into(), index]
         };
 
-        // Receive the current index `i`.
         builder.receive(
             AirLookup::new(
                 tuple(local.i.into()),
@@ -215,7 +189,6 @@ impl ShaExtendChip {
             LookupScope::Local,
         );
 
-        // Send the next index `i + 1`.
         builder.send(
             AirLookup::new(
                 tuple(local.i.into() + AB::Expr::ONE),

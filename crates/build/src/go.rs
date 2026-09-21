@@ -43,7 +43,6 @@ pub fn generate_go_overlay(out_dir: &Path) -> Option<PathBuf> {
     } else if let Ok(zkm_dir) = env::var("ZKM_DIR") {
         PathBuf::from(zkm_dir).join("crates/go-runtime/zkvm_overlay")
     } else {
-        // zkm-build lives at crates/build/, so go two levels up to repo root.
         let build_crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         build_crate_dir.join("../go-runtime/zkvm_overlay")
     };
@@ -59,7 +58,6 @@ pub fn generate_go_overlay(out_dir: &Path) -> Option<PathBuf> {
     let patched_file = patched_file.canonicalize().unwrap();
     println!("cargo:rerun-if-changed={}", patched_file.display());
 
-    // Detect the Go toolchain's runtime source path.
     let go_root = Command::new("go")
         .arg("env")
         .arg("GOROOT")
@@ -68,7 +66,6 @@ pub fn generate_go_overlay(out_dir: &Path) -> Option<PathBuf> {
     let go_root = String::from_utf8(go_root.stdout).unwrap().trim().to_string();
     let original_file = PathBuf::from(&go_root).join("src/runtime/sys_linux_mipsx.s");
 
-    // Write overlay.json to OUT_DIR.
     let overlay_path = out_dir.join("go_overlay.json");
     let overlay_json = format!(
         "{{\n  \"Replace\": {{\n    \"{}\": \"{}\"\n  }}\n}}\n",

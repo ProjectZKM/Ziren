@@ -63,17 +63,13 @@ impl<'a> HookRegistry<'a> {
     /// doing.
     #[must_use]
     pub fn get(&self, fd: u32) -> Option<RwLockWriteGuard<'_, dyn Hook + Send + Sync + 'a>> {
-        // Calling `.unwrap()` panics on a poisoned lock. Should never happen normally.
         self.table.get(&fd).map(|x| x.write().unwrap())
     }
 }
 
 impl Default for HookRegistry<'_> {
     fn default() -> Self {
-        // When `LazyCell` gets stabilized (1.81.0), we can use it to avoid unnecessary allocations.
         let table = HashMap::from([
-            // Note: To ensure any `fd` value is synced with `zkvm/precompiles/src/io.rs`,
-            // add an assertion to the test `hook_fds_match` below.
             (FD_ECRECOVER_HOOK, hookify(hook_ecrecover)),
             (FD_FP_SQRT, hookify(fp_ops::hook_fp_sqrt)),
             (FD_FP_INV, hookify(fp_ops::hook_fp_inverse)),
@@ -156,7 +152,6 @@ mod ecrecover {
         let alpha = K256FieldElement::from_bytes(&K256FieldBytes::from(alpha)).unwrap();
         assert!(!bool::from(alpha.is_zero()), "alpha should not be zero");
 
-        // normalize the y-coordinate always to be consistent.
         if let Some(mut y_coord) = alpha.sqrt().into_option().map(|y| y.normalize()) {
             let r = K256Scalar::from_repr(r.to_bytes()).unwrap();
             let r_inv = r.invert().expect("Non zero r scalar");
@@ -209,11 +204,8 @@ mod ecrecover {
 
 /// Pads a big uint to the given length in big endian.
 fn pad_to_be(val: &BigUint, len: usize) -> Vec<u8> {
-    // First take the byes in little endian
     let mut bytes = val.to_bytes_le();
-    // Resize so we get the full padding correctly.
     bytes.resize(len, 0);
-    // Convert back to big endian.
     bytes.reverse();
 
     bytes
@@ -234,12 +226,13 @@ mod fp_ops {
     ///     - len is the u32 length of the element and modulus in big endian.
     ///     - Element is the field element to compute the inverse of, interpreted as a big endian
     ///       integer of `len` bytes.
+    ///     - Modulus is the prime `p`, a big endian integer of `len` bytes.
     ///
     /// # Returns:
-    /// A single 32 byte vector containing the inverse.
+    /// One vector holding `element^(p−2) mod p = element⁻¹`, `len` bytes big endian.
     ///
     /// # Errors
-    /// Returns an [`ExecutionError`] if:
+    /// An [`ExecutionError`] if:
     /// - the buffer length is not valid.
     /// - the element is zero.
     pub fn hook_fp_inverse(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
@@ -293,7 +286,7 @@ mod fp_ops {
     /// If the status is 1, this is the root of element.
     ///
     /// # Errors
-    /// Returns an [`ExecutionError`] if:
+    /// An [`ExecutionError`] if:
     /// - the buffer length is not valid.
     /// - the element is not less than the modulus.
     /// - the nqr is not less than the modulus.
@@ -335,13 +328,10 @@ mod fp_ops {
             return Err(ExecutionError::NqrNotCanonical(nqr.to_string(), modulus.to_string()));
         }
 
-        // The sqrt of zero is zero.
         if element.is_zero() {
             return Ok(vec![vec![1], vec![0; len]]);
         }
 
-        // Compute the square root of the element using the general Tonelli-Shanks algorithm.
-        // The implementation can be used for any field as it is field-agnostic.
         if let Some(root) = sqrt_fp(&element, &modulus, &nqr) {
             Ok(vec![vec![1], pad_to_be(&root, len)])
         } else {
@@ -356,8 +346,6 @@ mod fp_ops {
     ///
     /// Requires a known non-quadratic residue of the field.
     fn sqrt_fp(element: &BigUint, modulus: &BigUint, nqr: &BigUint) -> Option<BigUint> {
-        // If the prime field is of the form p = 3 mod 4, and `x` is a quadratic residue modulo `p`,
-        // then one square root of `x` is given by `x^(p+1 / 4) mod p`.
         if modulus % BigUint::from(4u64) == BigUint::from(3u64) {
             let maybe_root =
                 element.modpow(&((modulus + BigUint::from(1u64)) / BigUint::from(4u64)), modulus);
@@ -381,13 +369,10 @@ mod fp_ops {
     /// Ref: <https://en.wikipedia.org/wiki/Tonelli%E2%80%93Shanks_algorithm>
     #[allow(clippy::many_single_char_names)]
     fn tonelli_shanks(element: &BigUint, modulus: &BigUint, nqr: &BigUint) -> Option<BigUint> {
-        // First, compute the Legendre symbol of the element.
-        // If the symbol is not 1, then the element is not a quadratic residue.
         if legendre_symbol(element, modulus) != BigUint::one() {
             return None;
         }
 
-        // Find the values of Q and S such that modulus - 1 = Q * 2^S.
         let mut s = BigUint::zero();
         let mut q = modulus - BigUint::one();
         while &q % &BigUint::from(2u64) == BigUint::zero() {
@@ -444,7 +429,6 @@ mod fp_ops {
 
         #[test]
         fn test_legendre_symbol() {
-            // The modulus of the secp256k1 base field.
             let modulus = BigUint::from_str(
                 "115792089237316195423570985008687907853269984665640564039457584007908834671663",
             )
@@ -465,7 +449,6 @@ mod fp_ops {
 
         #[test]
         fn test_tonelli_shanks() {
-            // The modulus of the secp256k1 base field.
             let p = BigUint::from_str(
                 "115792089237316195423570985008687907853269984665640564039457584007908834671663",
             )
@@ -528,30 +511,20 @@ mod bls {
         }
         let field_element = BigUint::from_bytes_be(&buf[..48]);
 
-        // This should be checked in the VM as its easier than dispatching a hook call.
-        // But for completeness we include this happy path also.
         if field_element.is_zero() {
             return Ok(vec![vec![1], vec![0; 48]]);
         }
 
         let modulus = BigUint::from_bytes_le(BLS12_381_MODULUS);
 
-        // Since `BLS12_381_MODULUS` == 3 mod 4,. we can use shanks methods.
-        // This means we only need to exponentiate by `(modulus + 1) / 4`.
         let exp = (&modulus + BigUint::from(1u64)) / BigUint::from(4u64);
         let sqrt = field_element.modpow(&exp, &modulus);
 
-        // Shanks methods only works if the field element is a quadratic residue.
-        // So we need to check if the square of the sqrt is equal to the field element.
         let square = (&sqrt * &sqrt) % &modulus;
         if square != field_element {
             let nqr = BigUint::from_bytes_be(&NQR_BLS12_381);
             let qr = (&nqr * &field_element) % &modulus;
 
-            // By now, the product of two non-quadratic residues is a quadratic residue.
-            // So we can use shanks methods again to get its square root.
-            //
-            // We pass this root back to the VM to constrain the "failure" case.
             let root = qr.modpow(&exp, &modulus);
 
             if (&root * &root) % &modulus != qr {
@@ -579,7 +552,6 @@ mod bls {
         }
         let field_element = BigUint::from_bytes_be(&buf[..48]);
 
-        // Zero is not invertible, and we don't want to have to return a status from here.
         if field_element.is_zero() {
             tracing::error!("Field element is the additive identity");
             return Err(ExecutionError::ElementZero(field_element.to_string()));
@@ -587,7 +559,6 @@ mod bls {
 
         let modulus = BigUint::from_bytes_le(BLS12_381_MODULUS);
 
-        // Compute the inverse using Fermat's little theorem, ie, a^(p-2) = a^-1 mod p.
         let inverse = field_element.modpow(&(&modulus - BigUint::from(2u64)), &modulus);
 
         Ok(vec![pad_to_be(&inverse, 48)])

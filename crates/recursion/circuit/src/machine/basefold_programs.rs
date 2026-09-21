@@ -2,7 +2,7 @@
 //!
 //! Each function builds + compiles one of the four recursion programs
 //! (Normalize / Compose / Deferred / Wrap) that consume the
-//! shard-level basefold proof shape.  They mirror the legacy
+//! shard-level basefold proof shape.  They follow the
 //! [`zkm_prover::compress_program_from_input`] pattern: read the
 //! witness, invoke the verifier body, compile the operations into a
 //! [`RecursionProgram`].
@@ -50,19 +50,6 @@ where
     let builder_span = tracing::debug_span!("build normalize-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Core);
     let input_var = input.read(&mut builder);
-    // Populate per-shard chip_heights from each shard's
-    // `JaggedShardProof.chip_heights`.  Fed into
-    // `verify_core_basefold` which drives
-    // `chip_height_bits_from_heights` at the lift site (real
-    // Horner-recomposed heights — same value the prover prologue
-    // observes via host transcript at
-    // `crates/pcs/src/shard_level/prover.rs:260-269`).
-    //
-    // The padded-row mask constraint applies to
-    // `opened_values.chips[*].degree` (the per-chip zerocheck
-    // degree bits) — a DIFFERENT consumer.  `chip_height_bits` is
-    // the recursion-verifier's transcript prologue input, not the
-    // constraint-side degree mask.
     let chip_heights_per_shard: Vec<std::collections::BTreeMap<String, usize>> =
         input.shard_proofs.iter().map(|sp| sp.chip_heights.clone()).collect();
     verify_core_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
@@ -180,8 +167,6 @@ where
         >,
 {
     let builder_span = tracing::debug_span!("build wrap-basefold program").entered();
-    // This is the SHRINK program: `shrink_machine` is frozen without the
-    // `Ext2Felt` chip, so the builder must keep the legacy hint + binding.
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Shrink);
     let input_var = input.read(&mut builder);
     verify_wrap_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
@@ -190,7 +175,6 @@ where
         machine,
         value_assertions,
         max_log_row_count,
-        // Shrink is an intermediate layer: keep the recursion digest.
         crate::machine::compress::PublicValuesOutputDigest::Reduce,
     );
     let operations = builder.into_operations();
@@ -268,10 +252,6 @@ mod tests {
     {
         use zkm_pcs::shape::OrderedShape;
 
-        // Every chip of the machine. The circuit sizes z_col from the prefix
-        // sums over all chips, the claims come from the shape, and the two
-        // agree only when the shape names every chip: the claim vector must
-        // have 2^dim(z_col) entries.
         use zkm_pcs::air::MachineAir;
         let heights: Vec<(String, usize)> = machine
             .chips()
@@ -298,8 +278,6 @@ mod tests {
         let config = KoalaBearPoseidon2::default();
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
         let witness = dummy_core_basefold_witness(&machine);
-        // The zerocheck runs on the fixed cube {0,1}^m whatever the trace
-        // heights, and the verifier requires dim(z*) = m.
         let max_log_row_count =
             zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
@@ -335,8 +313,7 @@ mod tests {
     ///
     /// For a FIXED chip-set, does the normalize program (hence its VK)
     /// depend on the per-proof `log_stacking_height` *clamp*
-    /// (`pick_log_stacking_height(total_values)`,
-    /// `crates/pcs/src/jagged_pcs.rs:114`)?
+    /// (`pick_log_stacking_height(total_values)`)?
     ///
     /// `total_values = Σ_chip (width × height)`, so a single chip-set
     /// produces DIFFERENT `total_values` (hence different clamped
@@ -384,8 +361,6 @@ mod tests {
             zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default()
                 .max_log_row_count;
 
-        // Resolve AddSub's real trace width so we can size heights that
-        // straddle the clamp boundary precisely.
         let addsub_width = {
             use p3_air::BaseAir;
             let c = machine
@@ -396,8 +371,6 @@ mod tests {
             BaseAir::<p3_koala_bear::KoalaBear>::width(c).max(1)
         };
 
-        // Helper: build the normalize program for AddSub at one height and
-        // return (instruction_count, clamped log_stacking).
         let build_at = |log_h: usize| -> (usize, u32) {
             let shape = super::super::core::ZKMRecursionShape {
                 proof_shapes: vec![OrderedShape::from_log2_heights(&[(
@@ -418,10 +391,7 @@ mod tests {
             (program.instruction_count(), log_stacking)
         };
 
-        // SMALL: log_h = 4 → total = width·16 ≪ 2^22 → clamp well below 21.
         let (small_count, small_stk) = build_at(4);
-        // LARGE: pick a height so total ≥ 2^22 → log_stacking == 21.
-        // need width·2^log_h ≥ 2^22  ⇒  log_h ≥ 22 − log2(width).
         let log_width = addsub_width.next_power_of_two().trailing_zeros() as usize;
         let large_log_h = 22usize.saturating_sub(log_width).max(4);
         let (large_count, large_stk) = build_at(large_log_h);
@@ -432,10 +402,6 @@ mod tests {
              LARGE(log_h={large_log_h} log_stacking={large_stk} instr={large_count})"
         );
 
-        // The stacking height is FIXED at 21 for BOTH heights — the
-        // prover does not clamp small commits down
-        // (`pick_log_stacking_height` ignores area; the call site pads the
-        // area up to 2^21, ).
         assert_eq!(
             small_stk, 21,
             "SMALL commit must now use the FIXED stacking height (got {small_stk}); de-clamp regressed"
@@ -445,10 +411,6 @@ mod tests {
             "LARGE height must use the FIXED stacking height (got {large_stk})"
         );
 
-        // Clamp-INDEPENDENT — for one chip-set the normalize program (hence
-        // its VK) is IDENTICAL across heights, since both build at
-        // num_variables=21.  This is the precondition for a chip-set-keyed
-        // vk_map and retiring FIX_CORE_SHAPES.
         assert_eq!(
             small_count, large_count,
             "EXPECTED clamp-INDEPENDENCE (equal instr counts) after the prover de-clamp; \
@@ -467,10 +429,6 @@ mod tests {
         use zkm_pcs::shape::OrderedShape;
 
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(KoalaBearPoseidon2::default());
-        // Normalize is arity-1, so the dummy takes exactly ONE per-shard
-        // shape (the multi-shard normalize VK is a phantom — only the
-        // enumerator ever emitted arity≥2 Recursion).
-        // Single-shard shape with 2 chips.
         let shape = super::super::core::ZKMRecursionShape {
             proof_shapes: vec![OrderedShape::from_log2_heights(&[
                 ("AddSub".to_string(), 3),
@@ -488,9 +446,6 @@ mod tests {
 
     #[test]
     fn program_builders_have_expected_signatures() {
-        // Take each builder as a `fn` pointer.  If the signature
-        // changes (e.g. a new generic bound or extra parameter
-        // added), this test fails to compile.
         use p3_koala_bear::KoalaBear;
         use zkm_core_machine::mips::MipsAir;
 
@@ -524,9 +479,6 @@ mod tests {
             >,
             &super::ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
             usize,
-            // `build_wrap_basefold_program` takes `value_assertions: bool`
-            // to control whether constraint failures panic (debug) or
-            // become returned errors (production).
             bool,
         ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
             build_wrap_basefold_program::<MipsAir<KoalaBear>>;

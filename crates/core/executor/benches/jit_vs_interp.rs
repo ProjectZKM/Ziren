@@ -36,7 +36,6 @@ const NUM_INSTRS: usize = 100_000;
 const REPEATS: usize = 5;
 
 fn build_program() -> Program {
-    // `t0 = t0 + 1` repeated NUM_INSTRS times.
     let mut instrs = Vec::with_capacity(NUM_INSTRS);
     for _ in 0..NUM_INSTRS {
         instrs.push(Instruction::new(
@@ -44,8 +43,8 @@ fn build_program() -> Program {
             Register::T0 as u8,
             Register::T0 as u32,
             1,
-            false, // imm_b: false (op_b is a register)
-            true,  // imm_c: true (op_c is the immediate 1)
+            false,
+            true,
         ));
     }
     Program::new(instrs, 0, 0)
@@ -63,16 +62,10 @@ enum InterpMode {
 }
 
 fn run_interpreter(program: &Program, mode: InterpMode) -> Result<u64, ExecutionError> {
-    // `Executor::run_fast` / `run_very_fast` now dispatch to the JIT by
-    // default on supported programs.  For this bench the "interp" rows
-    // are meant to measure the actual interpreter, so we force the
-    // fallback via the runtime gate.
     let prev = std::env::var_os("ZIREN_DISABLE_JIT");
     std::env::set_var("ZIREN_DISABLE_JIT", "1");
     let mut runtime = Executor::new(program.clone(), ZKMCoreOpts::default());
     let start = Instant::now();
-    // ExceptionOrTrap is expected once PC walks off the end — count
-    // it as a normal termination for this microbench.
     let res = match mode {
         InterpMode::VeryFast => runtime.run_very_fast(),
         InterpMode::Fast => runtime.run_fast(),
@@ -94,9 +87,6 @@ fn run_jit_alu_chain(program: &Program) -> u64 {
     use std::ptr;
     use zkm_core_executor::jit_runner::{build_context, build_jit_function, run_jit, BuildParams};
 
-    // Use the same end-to-end path the executor would call if the
-    // JIT were the default — `jit_runner::build_jit_function` (which
-    // wraps the driver with prologue/epilogue/regs).
     let params = BuildParams {
         program_size: NUM_INSTRS,
         memory_size: 4096,
@@ -151,8 +141,6 @@ fn run_real_elf_run_fast(elf_bytes: &[u8], disable_jit: bool, n: u32) -> u64 {
     } else {
         std::env::remove_var("ZIREN_DISABLE_JIT");
     }
-    // Parse outside the timer — both paths pay it identically and
-    // it's not the JIT's cost.
     let program = Program::from(elf_bytes).expect("parse fibonacci ELF");
     let mut rt = Executor::new(program, ZKMCoreOpts::default());
     rt.state.input_stream.push(n.to_le_bytes().to_vec());
@@ -167,8 +155,6 @@ fn main() {
     let _ = tracing_subscriber::fmt().with_writer(std::io::stderr).try_init();
     let program = build_program();
 
-    // Warmup — first run pays page-fault / icache costs we don't
-    // want polluting the measurement.
     let _ = run_interpreter(&program, InterpMode::VeryFast).expect("warmup");
     let _ = run_jit_alu_chain(&program);
 
@@ -199,12 +185,8 @@ fn main() {
     tracing::info!("speedup vs fast:      {:>7.2}x", mean(&fast) / jit_mean);
     tracing::info!("speedup vs trace:     {:>7.2}x", mean(&trace) / jit_mean);
 
-    // Real-world end-to-end: time `Executor::run_fast` on the
-    // fibonacci ELF through both code paths.  This is what the
-    // prover's `execute()` pre-pass actually measures.
     let elf_path =
         "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/fibonacci";
-    // Also try hello-world (no input) — exercises a different ELF.
     let hello_elf = "/data/stephen/Ziren/crates/test-artifacts/guests/target/elf-compilation/mipsel-zkm-zkvm-elf/release/hello-world";
     if let Ok(hello_bytes) = std::fs::read(hello_elf) {
         tracing::info!(
@@ -225,10 +207,6 @@ fn main() {
     }
 
     if let Ok(elf_bytes) = std::fs::read(elf_path) {
-        // Sweep across input sizes so we can see where the
-        // per-call transpile + mmap setup pays back.  fibonacci's
-        // inner loop is short, so larger N means more dynamic
-        // cycles amortising the same static program.
         for &n in &[20u32, 1000, 50_000] {
             tracing::info!(
                 "=== Real fibonacci ELF (run_fast end-to-end, n={n}, {} repeats) ===",

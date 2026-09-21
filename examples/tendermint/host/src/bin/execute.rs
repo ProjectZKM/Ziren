@@ -12,8 +12,6 @@ use zkm_sdk::{include_elf, utils, ProverClient, ZKMStdin};
 const TENDERMINT_ELF: &[u8] = include_elf!("tendermint");
 
 fn load_light_block(height: u64) -> LightBlock {
-    // Resolve relative to this crate's host directory so `cargo run`
-    // works regardless of cwd.
     let crate_dir = env!("CARGO_MANIFEST_DIR");
     let path = format!("{crate_dir}/files/block_{height}.json");
     let raw = std::fs::read_to_string(&path)
@@ -30,9 +28,6 @@ fn main() {
     let encoded_1 = serde_cbor::to_vec(&block_1).unwrap();
     let encoded_2 = serde_cbor::to_vec(&block_2).unwrap();
 
-    // Optionally dump the encoded stdin for the JIT bisect helper
-    // to consume (set DUMP_STDIN=path to enable).  Format: bincode
-    // Vec<Vec<u8>> with little-endian u64 length prefixes.
     if let Ok(path) = std::env::var("DUMP_STDIN") {
         let mut buf = Vec::new();
         buf.extend_from_slice(&(2u64).to_le_bytes());

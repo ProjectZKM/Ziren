@@ -73,9 +73,6 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
                             input.public_values.execution_shard,
                         );
                     } else {
-                        // Padding rows carry no instruction: neutralise the
-                        // frame or its register-access multiplicities break the
-                        // Memory bus.
                         cols.frame.populate_dependency();
                     }
                 });
@@ -85,7 +82,6 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
 
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_MISC_INSTR_COLS))
     }
 
@@ -107,8 +103,6 @@ impl MiscInstrsChip {
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {
-        // Every Misc row is a real instruction (no chip outsources to Misc,
-        // and its sub-operations are inlined).
         cols.frame.populate_from_misc(event, program, shard, blu);
 
         cols.pc = F::from_u32(event.pc);
@@ -176,7 +170,6 @@ impl MiscInstrsChip {
         }
 
         let is_sign = event.opcode == Opcode::MADD || event.opcode == Opcode::MSUB;
-        // The inlined multiplication (the MULT/MULTU request row).
         cols.maddsub_mul.populate(blu, event.b, event.c, is_sign);
         let maddsub_cols = cols.misc_specific_columns.maddsub_mut();
         let multiply = if is_sign {
@@ -196,9 +189,6 @@ impl MiscInstrsChip {
         maddsub_cols.src2_lo = Word::from(src2_lo);
         maddsub_cols.src2_hi = Word::from(src2_hi);
 
-        // For maddu/msubu instructions, pass in a dummy byte lookup vector.
-        // This maddu/msubu instruction chip also has a op_hi_access field that will be
-        // populated and that will contribute to the byte lookup dependencies.
         maddsub_cols.op_hi_access.populate(MemoryRecordEnum::Write(event.hi_record), blu);
     }
 
@@ -214,7 +204,6 @@ impl MiscInstrsChip {
         let lsb = event.c & 0x1f;
         let msbd = event.c >> 5;
         let shift_left = event.b << (31 - lsb - msbd);
-        // The inlined shifts (the SLL and SRL request rows).
         cols.ext_sll.populate(blu, event.b, 31 - lsb - msbd);
         cols.ext_srl.populate(blu, Opcode::SRL, shift_left, 31 - msbd);
         let ext_cols = cols.misc_specific_columns.ext_mut();
@@ -253,7 +242,6 @@ impl MiscInstrsChip {
         let srl_val = srl1_val >> (msb - lsb);
         let sll_val = event.b << (31 - msb + lsb);
         let add_val = srl_val.wrapping_add(sll_val);
-        // The inlined sub-operations (the 6 request rows).
         cols.ins_ror.populate(blu, Opcode::ROR, event.prev_a, lsb);
         cols.ins_srl1.populate(blu, Opcode::SRL, ror_val, 1);
         cols.ins_srl.populate(blu, Opcode::SRL, srl1_val, msb - lsb);

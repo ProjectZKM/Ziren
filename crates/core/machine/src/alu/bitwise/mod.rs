@@ -122,18 +122,13 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
             })
             .collect::<Vec<_>>();
 
-        // Pad the trace to a power of two.
         pad_rows_mult32(
             &mut rows,
-            // A padding row needs no neutralising: the R-type frame's
-            // register-access multiplicities are `is_real`, which an all-zero
-            // row leaves at zero.
             || [F::ZERO; NUM_BITWISE_COLS],
             input.fixed_log2_rows::<F, _>(self),
             <BitwiseChip as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_BITWISE_COLS))
     }
 
@@ -187,7 +182,6 @@ impl BitwiseChip {
         program: &Program,
         shard: u32,
     ) {
-        // Every Bitwise row is a real instruction owning its frame.
         cols.frame.populate_from_alu(event, program, shard, blu);
 
         let a = event.a.to_le_bytes();
@@ -202,8 +196,6 @@ impl BitwiseChip {
         cols.is_or = F::from_bool(event.opcode == Opcode::OR);
         cols.is_and = F::from_bool(event.opcode == Opcode::AND);
 
-        // The lookups run against the committed result; a discarded
-        // register-0 write sends none (mirrors the gated multiplicity).
         if cols.frame.op_a_0 == F::ZERO {
             cols.lookup_gate = F::ONE;
             for ((b_a, b_b), b_c) in a.into_iter().zip(b).zip(c) {
@@ -235,17 +227,12 @@ where
         let local = main.current_slice();
         let local: &BitwiseCols<AB::Var> = (*local).borrow();
 
-        // Get the opcode for the operation.
         let opcode = local.is_xor * ByteOpcode::XOR.as_field::<AB::F>()
             + local.is_or * ByteOpcode::OR.as_field::<AB::F>()
             + local.is_and * ByteOpcode::AND.as_field::<AB::F>()
             + local.is_nor * ByteOpcode::NOR.as_field::<AB::F>();
 
         let is_real = local.is_xor + local.is_or + local.is_and + local.is_nor;
-        // The lookup multiplicity: real rows whose result write is NOT a
-        // discarded register-0 write (a zero-multiplicity entry contributes
-        // nothing regardless of its tuple values, so the pinned-zero result
-        // word on those rows is harmless).
         builder
             .assert_eq(local.lookup_gate, is_real.clone() * (AB::Expr::ONE - local.frame.op_a_0));
         let av = *local.frame.op_a_access.value();
@@ -259,10 +246,6 @@ where
         builder.assert_bool(local.is_nor);
         builder.assert_bool(is_real.clone());
 
-        // Every real row is an instruction carrying its own program fetch,
-        // register access and `(clk, pc)` chaining (the Instruction bus and
-        // its dependency rows are gone).  Bitwise ops are sequential and can
-        // never halt.
         eval_r_type_frame(
             builder,
             &local.frame,
@@ -323,7 +306,6 @@ mod tests {
         let (b, c) = (0b1100u32, 0b0011u32);
         assert_eq!(b | c, b ^ c, "the forgery needs OR and XOR to agree here");
 
-        // `p3_uni_stark::prove` needs a power-of-two height.
         let mut instructions = Vec::new();
         for _ in 0..1024 {
             instructions.extend(alu_op(Opcode::OR, b, c));
@@ -384,9 +366,6 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        // `p3_uni_stark::prove` requires a power-of-two height;
-        // `generate_trace` pads to `next_multiple_of_32` only, so keep the
-        // bitwise event count a power of two: 4 ops x 256 reps = 1024 rows.
         let mut instructions = Vec::new();
         for _ in 0..256 {
             for opcode in [Opcode::XOR, Opcode::OR, Opcode::AND, Opcode::NOR] {

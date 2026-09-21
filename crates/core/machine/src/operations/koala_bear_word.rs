@@ -58,20 +58,11 @@ impl<F: Field> KoalaBearWordRangeChecker<F> {
     ) {
         let is_max: AB::Expr = cols.most_sig_byte_is_max.into();
         builder.assert_bool(is_max.clone());
-        // The flag may only be set where the check is on, which makes
-        // `is_real - is_max` a boolean and keeps the lookup multiplicity
-        // degree 1 in `is_real`.
         builder.when_not(is_real.clone()).assert_zero(is_max.clone());
 
-        // Case `v[3] == 0x7F`: pin the byte and force the lower limbs to zero,
-        // i.e. `v == P - 1`.
         builder.when(is_max.clone()).assert_eq(value[3], AB::Expr::from_u8(MOST_SIG_BYTE_MAX));
         builder.when(is_max.clone()).assert_zero(value[0] + value[1] + value[2]);
 
-        // Case `v[3] != 0x7F`: `v[3] < 0x7F`, so `v <= 0x7EFFFFFF < P`
-        // regardless of the lower limbs.  Asking the table for the row whose
-        // `LTU` output is ONE is what makes this an assertion rather than a
-        // reported comparison.
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::LTU as u8),
             AB::Expr::ONE,

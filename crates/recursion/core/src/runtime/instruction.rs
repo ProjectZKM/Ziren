@@ -219,12 +219,7 @@ impl<F: Copy> Instruction<F> {
         match self {
             Instruction::BaseAlu(i) => f(i.addrs.out),
             Instruction::ExtAlu(i) => f(i.addrs.out),
-            Instruction::Mem(i) => {
-                // A `Read` asserts the cell already holds `val`; only a
-                // `Write` produces one.  Treated as a write either way:
-                // over-reporting is the safe direction.
-                f(i.addrs.inner)
-            }
+            Instruction::Mem(i) => f(i.addrs.inner),
             Instruction::Poseidon2(i) => i.addrs.output.iter().copied().for_each(f),
             Instruction::Select(i) => {
                 f(i.addrs.out1);

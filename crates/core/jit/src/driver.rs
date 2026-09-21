@@ -284,31 +284,20 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
     let rd = MipsRegister::from_u8(ins.op_a);
     let rs = MipsRegister::from_u8(ins.op_b as u8);
     let rt = MipsRegister::from_u8(ins.op_c as u8);
-    // For ALU-style ops the second operand can be an immediate.
     let op_b: MipsOperand =
         if ins.imm_b { MipsOperand::Imm(i64::from(ins.op_b as i32)) } else { MipsOperand::Reg(rs) };
     let op_c: MipsOperand =
         if ins.imm_c { MipsOperand::Imm(i64::from(ins.op_c as i32)) } else { MipsOperand::Reg(rt) };
     let imm32 = ins.op_c as i32;
-    // For branches, the executor encodes `op_c` as a *byte offset
-    // relative to next_pc* (= current_pc + 4); see
-    // crates/core/executor/src/executor.rs:execute_branch where
-    // `next_next_pc = offset.wrapping_add(next_pc)`.  The transpiler
-    // lowering expects an *absolute* target PC (per the existing
-    // comment on beq/bne in instruction_impl.rs), so we resolve it
-    // here once and pass the absolute value down.
     let branch_target_pc = (current_pc.wrapping_add(4).wrapping_add(ins.op_c)) as i32;
 
     match op {
-        // ALU
         JitOpcode::Add => t.add(rd, op_b, op_c),
         JitOpcode::Sub => t.sub(rd, op_b, op_c),
         JitOpcode::And => t.and(rd, op_b, op_c),
         JitOpcode::Or => t.or(rd, op_b, op_c),
         JitOpcode::Xor => t.xor(rd, op_b, op_c),
         JitOpcode::Nor => {
-            // NOR's raw signature takes two registers; honour imm
-            // by constant-folding (mirrors the SLL/SRL/.. immediate fix).
             if ins.imm_b || ins.imm_c {
                 let b = if ins.imm_b { ins.op_b } else { 0 };
                 let c = if ins.imm_c { ins.op_c } else { 0 };
@@ -321,12 +310,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
         JitOpcode::Slt => t.slt(rd, op_b, op_c),
         JitOpcode::Sltu => t.sltu(rd, op_b, op_c),
         JitOpcode::Sll => {
-            // Ziren's SLL doubles as MIPS LUI when `imm_b` is set:
-            // e.g. `SLL $sp, 0x7f00, 16` means `$sp = 0x7f00 << 16`.
-            // The interpreter handles this via `b << (c & 0x1f)` where
-            // both b and c may come from registers OR immediates.
-            // imm_c controls whether op_c is the literal shamt (true)
-            // or a register holding the shamt (false → use SLLV).
             if ins.imm_b && ins.imm_c {
                 let shamt = (ins.op_c & 0x1f) as u8;
                 let val = (ins.op_b as i32).wrapping_shl(shamt as u32) as u32;
@@ -387,13 +370,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
 
-        // Multiply / divide
-        // These all take two register source operands.  Ziren's
-        // instruction format allows op_b/op_c to be immediates too,
-        // but the JIT lowerings only accept registers — so when imm
-        // is set we constant-fold to the result and synthesize a
-        // single-operand register write.  Same pattern as the
-        // SLL/SRL/SRA/ROR/CLZ/CLO immediate fix.
         JitOpcode::Mul => {
             if ins.imm_b || ins.imm_c {
                 let b = if ins.imm_b { ins.op_b } else { 0 };
@@ -404,11 +380,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
                 t.mul3(rd, rs, rt);
             }
         }
-        // Dual-source ops: when imm_b/imm_c is set, the lowerings
-        // would silently use $zero.  Real compilers
-        // never emit "MULT $rs, imm", but Ziren's instruction format
-        // allows it.  Return UnsupportedOpcode so try_run_fast_jit
-        // falls back to the interpreter for that program.
         JitOpcode::Mult => {
             if ins.imm_b || ins.imm_c {
                 return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
@@ -470,7 +441,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             t.msubu(rs, rt);
         }
 
-        // ZKM extension ALU
         JitOpcode::Wsbh => {
             if ins.imm_b {
                 let v = ins.op_b;
@@ -481,13 +451,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
         JitOpcode::Ext => {
-            // Ziren encoding mirrors the executor (`execute_ext` in
-            // executor.rs): low 5 bits of op_c = lsb (pos), high 5 bits
-            // = msbd (= size − 1).  So the actual extract width is
-            // `msbd + 1`, NOT msbd.  Earlier the driver passed `msbd`
-            // directly, which extracted one bit too few — the format
-            // machinery's UTF-8 byte-length lookup got mangled and
-            // tendermint's panic strings showed garbled bytes.
             let pos = (ins.op_c & 0x1f) as u8;
             let msbd = ((ins.op_c >> 5) & 0x1f) as u8;
             let size = msbd.saturating_add(1).min(32);
@@ -500,8 +463,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
         JitOpcode::Ins => {
-            // INS encoding: low 5 bits of op_c = lsb (pos), high 5 bits
-            // = msb.  Width = msb − lsb + 1 (mirrors `execute_ins`).
             let lsb = (ins.op_c & 0x1f) as u8;
             let msb = ((ins.op_c >> 5) & 0x1f) as u8;
             let size = msb.saturating_sub(lsb).saturating_add(1).min(32);
@@ -511,14 +472,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             t.ins(rd, rs, lsb, size);
         }
         JitOpcode::Sext => {
-            // Mirror executor's `execute_sext` semantics (executor.rs):
-            //   if c > 0 { (b & 0xffff) as i16 as i32 as u32 }   // half
-            //   else      { (b & 0xff)   as i8  as i32 as u32 }  // byte
-            // i.e. `op_c == 0` is byte mode, anything else is half mode.
-            // Earlier the driver used `op_c == 8` for byte, which made
-            // every SEXT $rd, $rs, 0 fall to the half path and skipped
-            // the high-byte sign-extension — tendermint's SEXT after a
-            // signed-byte LBU returned 0xc0 instead of 0xffffffc0.
             let is_byte = ins.op_c == 0;
             if ins.imm_b {
                 let v = ins.op_b;
@@ -532,14 +485,11 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
 
-        // Memory
         JitOpcode::Lb => t.lb(rd, rs, imm32),
         JitOpcode::Lbu => t.lbu(rd, rs, imm32),
         JitOpcode::Lh => t.lh(rd, rs, imm32),
         JitOpcode::Lhu => t.lhu(rd, rs, imm32),
         JitOpcode::Lw => t.lw(rd, rs, imm32),
-        // Unaligned loads/stores — inline dynasm in the x86 backend
-        // (mirrors executor.rs::execute_load/store semantics).
         JitOpcode::Lwl => t.lwl(rd, rs, imm32),
         JitOpcode::Lwr => t.lwr(rd, rs, imm32),
         JitOpcode::Ll => t.ll(rd, rs, imm32),
@@ -550,17 +500,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
         JitOpcode::Swr => t.swr(rd, rs, imm32),
         JitOpcode::Sc => t.sc(rd, rs, imm32),
 
-        // Control flow
-        // Source register encoding (mirrors `execute_branch` in
-        // executor.rs which reads `src1 = op_a` for ALL branches):
-        // - Two-source (BEQ/BNE): src1=op_a, src2=op_b  → t.beq(rd, rs, ...)
-        // - Single-source (BGEZ/BGTZ/BLEZ/BLTZ/BLTZAL/BGEZAL):
-        //     src1=op_a → must pass `rd` (= MipsRegister::from_u8(op_a)),
-        //     NOT `rs` (= MipsRegister::from_u8(op_b)).
-        //   Earlier the driver passed `rs`, which on tendermint's
-        //   `BLTZ $at, ...` (encoded with op_a=$at, op_b=0) tested
-        //   $zero instead of $at — never branched, control flow
-        //   diverged from the interpreter.
         JitOpcode::Beq => t.beq(rd, rs, branch_target_pc),
         JitOpcode::Bne => t.bne(rd, rs, branch_target_pc),
         JitOpcode::Bgez => t.bgez(rd, branch_target_pc),
@@ -568,22 +507,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
         JitOpcode::Blez => t.blez(rd, branch_target_pc),
         JitOpcode::Bltz => t.bltz(rd, branch_target_pc),
         JitOpcode::Jump => {
-            // Two encodings on this opcode in the executor:
-            //   - register-mode (`imm_b == false`): JR rs / JALR rd, rs
-            //   - immediate-mode (`imm_b == true`): J target / JAL target
-            // The executor signals JAL/JALR by writing back to a non-zero
-            // register in `op_a`.  The transpiler trait splits these into
-            // `j` / `jal` / `jr` / `jalr` so we dispatch on (imm_b, rd).
-            //
-            // CRITICAL: for JAL/JALR the executor writes
-            // `rd = next_pc + 4 = current_pc + 8` as the return
-            // address.  The trait `jal`/`jalr` lowerings only set
-            // delayed_jump_target; the comment on `jal` says "Driver
-            // responsibility: also emit a write to $ra" — we now do
-            // that here.  Without it, every function call returns
-            // through JR $ra to garbage (typically 0), which falls
-            // through to the next static instruction creating an
-            // unbounded recursion.
             let return_pc = current_pc.wrapping_add(8);
             if ins.imm_b {
                 let target = ins.op_b;
@@ -601,10 +524,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
         JitOpcode::Jumpi => {
-            // Per executor::execute_jumpi: link = op_a, target = op_b.
-            // ALWAYS writes link = next_pc + 4 = current_pc + 8.
-            // Skip the link write only when op_a is $zero (which the
-            // executor's rw_cpu silently drops anyway).
             t.jumpi(ins.op_b);
             if rd != MipsRegister::Zero {
                 let return_pc = current_pc.wrapping_add(8);
@@ -612,18 +531,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
         JitOpcode::JumpDirect => {
-            // Per executor::execute_jump_direct: link = op_a,
-            // target_pc = op_b + next_pc.  Same link write as Jumpi.
-            //
-            // `op_b` is a byte offset RELATIVE to next_pc — unlike
-            // `Jumpi`, whose `op_b` is already absolute.  The lowering
-            // takes an absolute target (it forwards straight to `j`), so
-            // the `+ next_pc` has to happen here, exactly as it does for
-            // the branches above.  Passing the raw offset made the JIT
-            // jump to it as if it were an address: for a program based at
-            // `0x1332a0` a call to `0x136c20` dispatched to `0x3980`,
-            // which is outside the program, so the index computed from it
-            // wrapped and the indirect jump left the table entirely.
             t.jump_direct(current_pc.wrapping_add(4).wrapping_add(ins.op_b));
             if rd != MipsRegister::Zero {
                 let return_pc = current_pc.wrapping_add(8);
@@ -631,28 +538,15 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
             }
         }
 
-        // System
         JitOpcode::Syscall => t.syscall(current_pc),
         JitOpcode::Teq => {
-            // Source register mapping (mirrors `execute_teq` in
-            // executor.rs which reads `src1 = op_a, src2 = op_b`):
-            // - `rd` (= MipsRegister::from_u8(op_a)) is src1
-            // - `rs` (= MipsRegister::from_u8(op_b)) is src2
-            // - `op_c` is the MIPS trap-code field, NOT a comparison operand
-            //
-            // Earlier the driver passed `rs`/`rt` (= op_b/op_c) which
-            // tested the WRONG register, causing tendermint to spuriously
-            // trap at instr ~931K when op_a held a value matching op_c.
             if ins.imm_b {
-                // op_b is an immediate ("teq $rs, imm"-style encoding).
                 t.teq_imm(rd, ins.op_b as i32);
             } else {
-                // op_b is a register — teq $op_a, $op_b.
                 t.teq(rd, rs);
             }
         }
 
-        // Move-on-condition (Ziren extension)
         JitOpcode::Meq => {
             if ins.imm_b || ins.imm_c {
                 return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
@@ -667,13 +561,6 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
         }
 
         JitOpcode::Unimpl => {
-            // UNIMPL = compiler-emitted unreachable sentinel.  Lower
-            // as a trap stub so the JIT can be built; the host-level
-            // pre-screen `first_unsupported_opcode` still gates real
-            // ELFs to the interpreter until the `$sp`-corruption
-            // root cause is fixed.  This combo lets the jit_probe
-            // example exercise the full path with PC trace + halt-
-            // after-N bisection on.
             t.unimpl_trap();
         }
     }
@@ -689,9 +576,8 @@ pub(crate) fn lower_one<T: MipsTranspiler>(
 ///
 /// # Errors
 ///
-/// Returns `Err` on the first opcode the driver can't lower.  The
-/// caller can either bail or fall back to the interpreter for the
-/// remainder.
+/// `Err` on the first opcode the driver can't lower; the caller either
+/// bails or falls back to the interpreter for the remainder.
 ///
 /// # Panics
 ///
@@ -743,8 +629,6 @@ where
 /// Returns `Err` on memfd failure, oversized code buffer, or an
 /// unsupported opcode.
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-// The emitter's inputs: program geometry, the instruction stream and the
-// per-opcode callbacks.
 #[allow(clippy::too_many_arguments)]
 pub fn build_jit_function<T, I, F>(
     program_size: usize,
@@ -787,13 +671,10 @@ mod tests {
 
     #[test]
     fn driver_instruction_layout_is_12_bytes() {
-        // Layout: 1 (opcode) + 1 (op_a) + 4 (op_b) + 4 (op_c) + 1 (imm_b) + 1 (imm_c) = 12 bytes.
-        // The Rust struct layout reorders fields to minimize padding,
-        // so the size is exactly 12 even with a u32 in the middle.
         assert_eq!(std::mem::size_of::<DriverInstruction>(), 12);
     }
 
-    /// Pure-rust sketch transpiler used to exercise the dispatch table
+    /// Pure-rust sketch transpiler that exercises the dispatch table
     /// without pulling in the dynasmrt-backed x86 backend.  Records
     /// each `MipsTranspiler` method as a string so the test can assert
     /// the dispatch is correct.
@@ -1093,7 +974,6 @@ mod tests {
             imm_c: false,
         };
         drive_instructions(&mut t, [jal]).unwrap();
-        // log: start, jal 0x1000, end
         assert!(t.log[1].starts_with("jal"), "got {}", t.log[1]);
     }
 
@@ -1114,12 +994,6 @@ mod tests {
 
     #[test]
     fn dispatch_unsupported_opcode_emits_trap_stub() {
-        // Compiler-emitted UNIMPL bytes (opcode 0xff and any other
-        // unmapped value) lower to an `unimpl_trap` stub rather than
-        // failing the build.  This lets JIT'd programs contain dead
-        // UNIMPL slots without aborting transpilation; the per-program
-        // pre-screen `first_unsupported_opcode` is what actually keeps
-        // unsupported-opcode programs off the JIT fast path.
         let mut t = LogTranspiler::default();
         let bad = DriverInstruction {
             opcode: 0xff,

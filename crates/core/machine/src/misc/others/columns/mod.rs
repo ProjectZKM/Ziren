@@ -34,12 +34,11 @@ pub struct MiscInstrColumns<T: Copy> {
     /// Columns for specific type of instructions.
     pub misc_specific_columns: MiscSpecificCols<T>,
 
-    /// The inlined sub-operations that used to be Instruction-bus request
-    /// rows.  These live OUTSIDE the union: gadget-internal constraints are
+    /// The inlined sub-operations.  These live outside the union: gadget-internal constraints are
     /// evaluated on every row, so their columns must be all-zero (not another
     /// variant's data) on rows where the gadget is off.
     ///
-    /// MADD/MADDU/MSUB/MSUBU: `op_b * op_c` (the MULT/MULTU request row).
+    /// MADD/MADDU/MSUB/MSUBU: `op_b * op_c`.
     pub maddsub_mul: crate::operations::MulOperation<T>,
 
     /// INS: `ror_val = rotate_right(prev_a, lsb)`.

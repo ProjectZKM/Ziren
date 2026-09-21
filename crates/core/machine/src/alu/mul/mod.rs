@@ -88,7 +88,6 @@ pub struct MulCols<T> {
     pub hi: Word<T>,
 
     /// The output operand.
-
     /// Trace.
     pub carry: [T; PRODUCT_SIZE],
 
@@ -162,7 +161,6 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows for each event.
         let padded_nb_rows = <MulChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MUL_COLS);
         let nb_rows = input.mul_events.len();
@@ -184,16 +182,11 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
                             &input.program,
                             input.public_values.execution_shard,
                         );
-                    } else {
-                        // A padding row's frame needs no neutralising: the
-                        // typed R-type frame's register-access multiplicities
-                        // are `is_real`.
                     }
                 });
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_MUL_COLS))
     }
 
@@ -247,7 +240,6 @@ impl MulChip {
         program: &Program,
         shard: u32,
     ) {
-        // Every Mul row is a real instruction owning its frame.
         cols.frame.populate_from_comp_alu(event, program, shard, blu);
 
         cols.pc = F::from_u32(event.pc);
@@ -255,9 +247,6 @@ impl MulChip {
 
         cols.hi_record_is_real = F::from_bool(event.hi_record_is_real);
         if event.hi_record_is_real {
-            // For madd[u]/msub[u] instructions, pass in a dummy byte lookup vector.  This madd[u]/msub[u]
-            // instruction chip also has a op_hi_access field that will be populated and that will contribute
-            // to the byte lookup dependencies.
             cols.op_hi_access.populate(MemoryRecordEnum::Write(event.hi_record), blu);
         }
 
@@ -268,26 +257,22 @@ impl MulChip {
         let mut b = b_word.to_vec();
         let mut c = c_word.to_vec();
 
-        // Handle b and c's signs.
         {
             let b_msb = get_msb(b_word);
             cols.b_msb = F::from_u8(b_msb);
             let c_msb = get_msb(c_word);
             cols.c_msb = F::from_u8(c_msb);
 
-            // If b is signed and it is negative, sign extend b.
             if event.opcode == Opcode::MULT && b_msb == 1 {
                 cols.b_sign_extend = F::ONE;
                 b.resize(PRODUCT_SIZE, BYTE_MASK);
             }
 
-            // If c is signed and it is negative, sign extend c.
             if event.opcode == Opcode::MULT && c_msb == 1 {
                 cols.c_sign_extend = F::ONE;
                 c.resize(PRODUCT_SIZE, BYTE_MASK);
             }
 
-            // Insert the MSB lookup events.
             {
                 let words = [b_word, c_word];
                 let mut blu_events: Vec<ByteLookupEvent> = vec![];
@@ -314,8 +299,6 @@ impl MulChip {
             }
         }
 
-        // Calculate the correct product using the `product` array. We store the
-        // correct carry value for verification.
         let base = (1 << BYTE_SIZE) as u32;
         let mut carry = [0u32; PRODUCT_SIZE];
         for i in 0..PRODUCT_SIZE {
@@ -334,7 +317,6 @@ impl MulChip {
         cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);
         cols.is_multu = F::from_bool(event.opcode == Opcode::MULTU);
 
-        // Range check.
         {
             blu.add_u16_range_checks(&carry.map(|x| x as u16));
             blu.add_u8_range_checks(&product.map(|x| x as u8));
@@ -356,7 +338,6 @@ where
         let main = builder.main();
         let local = main.current_slice();
         let local: &MulCols<AB::Var> = (*local).borrow();
-        // The inputs are the frame's register reads, not columns of this chip.
         let op_b = local.frame.op_b_val();
         let op_c = local.frame.op_c_val();
         let base = AB::F::from_u32(1 << 8);
@@ -365,7 +346,6 @@ where
         let one: AB::Expr = AB::F::ONE.into();
         let byte_mask = AB::F::from_u8(BYTE_MASK);
 
-        // Calculate the MSBs.
         let (b_msb, c_msb) = {
             let msb_pairs =
                 [(local.b_msb, op_b[WORD_SIZE - 1]), (local.c_msb, op_c[WORD_SIZE - 1])];
@@ -378,7 +358,6 @@ where
             (local.b_msb, local.c_msb)
         };
 
-        // Calculate whether to extend b and c's sign.
         let (b_sign_extend, c_sign_extend) = {
             let is_b_i32 = local.is_mult;
             let is_c_i32 = local.is_mult;
@@ -388,7 +367,6 @@ where
             (local.b_sign_extend, local.c_sign_extend)
         };
 
-        // Sign extend op_b and op_c whenever appropriate.
         let (b, c) = {
             let mut b: Vec<AB::Expr> = vec![AB::F::ZERO.into(); PRODUCT_SIZE];
             let mut c: Vec<AB::Expr> = vec![AB::F::ZERO.into(); PRODUCT_SIZE];
@@ -404,7 +382,6 @@ where
             (b, c)
         };
 
-        // Compute the uncarried product b(x) * c(x) = m(x).
         let mut m: Vec<AB::Expr> = vec![AB::F::ZERO.into(); PRODUCT_SIZE];
         for i in 0..PRODUCT_SIZE {
             for j in 0..PRODUCT_SIZE {
@@ -414,7 +391,6 @@ where
             }
         }
 
-        // Propagate carry.
         let product = {
             for i in 0..PRODUCT_SIZE {
                 if i == 0 {
@@ -429,7 +405,6 @@ where
             local.product
         };
 
-        // Compare the product's appropriate bytes with that of the result.
         {
             let has_hi = local.is_mult + local.is_multu;
             for i in 0..WORD_SIZE {
@@ -437,7 +412,6 @@ where
             }
         }
 
-        // Check that the boolean values are indeed boolean values.
         {
             let booleans = [
                 local.b_msb,
@@ -455,13 +429,10 @@ where
             }
         }
 
-        // If signed extended, the MSB better be 1.
         builder.when(local.b_sign_extend).assert_eq(local.b_msb, one.clone());
         builder.when(local.c_sign_extend).assert_eq(local.c_msb, one.clone());
 
-        // Calculate the opcode.
         let opcode = {
-            // Exactly one of the op codes must be on.
             builder.when(local.is_real).assert_one(local.is_mul + local.is_mult + local.is_multu);
 
             let mul: AB::Expr = AB::F::from_u32(Opcode::MUL as u32).into();
@@ -470,11 +441,7 @@ where
             local.is_mul * mul + local.is_mult * mult + local.is_multu * multu
         };
 
-        // Range check.
         {
-            // Ensure that the carry is at most 2^16. This ensures that
-            // product_before_carry_propagation - carry * base + last_carry never overflows or
-            // underflows enough to "wrap" around to create a second solution.
             builder.slice_range_check_u16(&local.carry, local.is_real);
 
             builder.slice_range_check_u8(&local.product, local.is_real);
@@ -482,18 +449,11 @@ where
 
         let _ = opcode;
 
-        // Bind the product's LOW WORD to the frame's register-file view
-        // directly — the old `a` column was a pure mirror of `product[0..4]`.
-        // A discarded register-0 write is frame-pinned to zero, so the bind
-        // gates on `op_a_0` exactly as before.
         builder.when(local.is_real).when_not(local.frame.op_a_0).assert_word_eq(
             Word([local.product[0], local.product[1], local.product[2], local.product[3]]),
             *local.frame.op_a_access.value(),
         );
 
-        // Every real row is an instruction carrying its own program fetch,
-        // register access and `(clk, pc)` chaining.  MUL/MULT/MULTU are
-        // sequential and never halt.
         eval_r_type_frame(
             builder,
             &local.frame,
@@ -507,10 +467,6 @@ where
             AB::Expr::ZERO,
             local.is_real.into(),
         );
-        // The HI-register write below rides the frame's shard/clk directly.  Mul
-        // used to keep private copies, tied to the frame on hi-writing rows and
-        // forced zero elsewhere; the access is gated by `hi_record_is_real`, so
-        // the value on a non-writing row was never read in the first place.
         builder.eval_memory_access(
             local.frame.shard,
             crate::frame::clk_from_r_type_frame::<AB>(&local.frame)
@@ -520,13 +476,8 @@ where
             local.hi_record_is_real,
         );
 
-        // Check hi_record_is_real.
-        // hi_record_is_real can only be set for MULT and MULTU instruction when is_real = 1.
-        // if hi_record_is_real = 0, both clk and shard should be zero.
         builder.when_not(local.is_real).assert_zero(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
-        // Every MULT/MULTU row writes HI (there are no dependency-only
-        // multiply rows any more).
         builder.when(local.is_mult + local.is_multu).assert_one(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
         builder.when(local.is_mul).assert_word_zero(local.hi);
@@ -560,8 +511,6 @@ mod tests {
     #[cfg(feature = "sys")]
     #[test]
     fn test_mul_generate_trace_ffi_eq_rust() {
-        // Every Mul row carries an instruction frame, so drive the record
-        // through the executor.
         let shard = run_instructions(alu_op(Opcode::MULT, 274417, 3776743705));
         assert!(!shard.mul_events.is_empty());
 
@@ -607,14 +556,11 @@ mod tests {
                                 input.public_values.execution_shard,
                             );
                         }
-                    } else {
-                        // Typed R-type frame: padding rows stay zero.
                     }
                 });
             },
         );
 
-        // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, NUM_MUL_COLS)
     }
 
@@ -646,7 +592,6 @@ mod tests {
             instructions.extend(alu_op(opcode, b, c));
         }
 
-        // Append more events until we have ~1000 mul rows.
         for _ in 0..(1000 - mul_instructions.len()) {
             instructions.extend(alu_op(Opcode::MUL, 1, 1));
         }

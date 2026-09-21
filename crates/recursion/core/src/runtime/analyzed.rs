@@ -85,10 +85,6 @@ fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) 
         Instruction::Mem(_) => incr(&mut counts.mem_const_events, 1),
         Instruction::Poseidon2(_) => incr(&mut counts.poseidon2_wide_events, 1),
         Instruction::Select(_) => incr(&mut counts.select_events, 1),
-        // ExpReverseBitsLen: 1 event per instruction (event carries
-        // `exp: Vec<F>` of all bits inline). Match runtime push.
-        // FriFold: runtime emits ps_at_z.len() events per instruction
-        // (one per polynomial in the batch). Was off-by-default-1.
         Instruction::Hint(HintInstr { output_addrs_mults })
         | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
             incr(&mut counts.mem_var_events, output_addrs_mults.len())
@@ -96,17 +92,12 @@ fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) 
         Instruction::HintExt2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr: _ }) => {
             incr(&mut counts.mem_var_events, output_addrs_mults.len())
         }
-        // One event per instruction: the event carries the input
-        // block; the addresses ride the preprocessed trace.
         Instruction::Ext2Felts(_) => incr(&mut counts.ext2felt_events, 1),
         Instruction::HintAddCurve(instr) => incr(
             &mut counts.mem_var_events,
             instr.output_x_addrs_mults.len() + instr.output_y_addrs_mults.len(),
         ),
-        // Assign event-vec offsets for the two newly-tracked
-        // event types.
         Instruction::CommitPublicValues(_) => incr(&mut counts.commit_pv_hash_events, 1),
-        // No event-vector slot consumed; offset is meaningless.
         Instruction::Print(_) => 0,
     }
 }
@@ -315,11 +306,8 @@ mod tests {
         assert_eq!(mem_offsets, vec![0]);
     }
 
-    // (removed) sumcheck_verify_carries_secondary_offset test:
-    // SumcheckVerify pipeline deleted, no multi-chip emitters remain.
-
     /// `validate_offsets` must accept what `analyze` produces, and reject a
-    /// program whose counts no longer describe its instruction stream -- the
+    /// program whose counts do not describe its instruction stream -- the
     /// shape a truncated or hand-built disk-cache entry takes (`event_counts`
     /// is `#[serde(default)]`, so it deserializes to zeros).
     #[test]
@@ -344,18 +332,14 @@ mod tests {
         let (analyzed, counts) = prog.analyze();
         assert!(analyzed.validate_offsets(&counts).is_ok());
 
-        // All-zero counts: what a file missing the field deserializes to.
         let zeroed = RecursionAirEventCount::default();
         let err = analyzed.validate_offsets(&zeroed).unwrap_err();
         assert!(err.contains("event counts disagree"), "{err}");
 
-        // One count too small by one: `UnsafeRecord` would be sized short and
-        // the last BaseAlu write would land in an uninitialized slot.
         let mut short = counts;
         short.base_alu_events -= 1;
         assert!(analyzed.validate_offsets(&short).is_err());
 
-        // A tampered offset, counts left intact.
         let mut bad = analyzed;
         if let SeqBlock::Basic(basic) = &mut bad.seq_blocks[0] {
             basic.instrs[2].offset = 0;
@@ -376,16 +360,11 @@ mod tests {
             seq_blocks: vec![make_basic(), SeqBlock::Parallel(par_subs), make_basic()],
         };
         let (_, counts) = prog.analyze();
-        // 4 outer (2+2) + 2 sub × 2 instrs each = 4 + 4 = 8 base_alu events.
         assert_eq!(counts.base_alu_events, 8);
     }
 
     #[test]
     fn event_counts_matches_analyze_for_parallel_program() {
-        // Same shape as analyze_handles_parallel_blocks, but verify the
-        // non-consuming `event_counts()` produces the same totals as
-        // the consuming `analyze()` path. This is the contract that
-        // `Runtime::preallocate_record` relies on.
         let make_basic = || {
             SeqBlock::Basic(BasicBlock {
                 instrs: vec![dummy_base_alu(), dummy_base_alu(), dummy_mem()],
@@ -407,8 +386,6 @@ mod tests {
             counts_via_event_counts.poseidon2_wide_events,
             counts_via_analyze.poseidon2_wide_events
         );
-        // Total instructions: 1 outer + 3 inner sub-progs + 1 outer trailer
-        // = 5 basic blocks × 3 instrs each = 15 → 10 base_alu + 5 mem.
         assert_eq!(counts_via_event_counts.base_alu_events, 10);
         assert_eq!(counts_via_event_counts.mem_const_events, 5);
     }

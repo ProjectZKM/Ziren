@@ -51,12 +51,10 @@ fn n44_div_by_zero_traps() {
 /// `-2^31 / -1` is the one overflow case of signed division, and every part of
 /// the system agrees on its value: MIPS defines it, the JIT returns
 /// `0x8000_0000`, and the AIR proves it (`is_overflow` in `alu/divrem` wants
-/// quotient `-2^31`, remainder `0`).  The interpreter used to disagree by
-/// panicking ("attempt to divide with overflow"), which took the prover down
-/// on a program the AIR is built for; it now uses `wrapping_div`/`wrapping_rem`.
+/// quotient `-2^31`, remainder `0`).  The interpreter uses
+/// `wrapping_div`/`wrapping_rem`, so it must not panic here.
 ///
-/// This test asserted that panic.  It is now the parity test for the agreed
-/// value instead, so it runs on both engines and no longer needs ignoring.
+/// Parity test for that value on both engines.
 #[test]
 fn n44_div_int_min_overflow_matches_the_air() {
     {

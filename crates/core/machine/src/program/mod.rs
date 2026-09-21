@@ -70,7 +70,6 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
             !program.instructions.is_empty() || program.preprocessed_shape.is_some(),
             "empty program"
         );
-        // Generate the trace rows for each event.
         let nb_rows = program.instructions.len();
         let size_log2 = program.fixed_log2_rows::<F, _>(self);
         let padded_nb_rows = next_power_of_two(
@@ -99,7 +98,6 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
                 });
             });
 
-        // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(values, NUM_PROGRAM_PREPROCESSED_COLS))
     }
 
@@ -108,7 +106,6 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
         _input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> Result<(), Self::Error> {
-        // Do nothing since this chip has no dependencies.
         Ok(())
     }
 
@@ -117,10 +114,6 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows for each event.
-
-        // Collect the number of times each instruction is called from the cpu events.
-        // Store it as a map of PC -> count.
         let mut instruction_counts = HashMap::new();
         input.cpu_events.iter().for_each(|event| {
             let pc = event.pc;
@@ -142,7 +135,6 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
             })
             .collect::<Vec<_>>();
 
-        // Pad the trace to a power of two depending on the proof shape in `input`.
         pad_rows_fixed(
             &mut rows,
             || [F::ZERO; NUM_PROGRAM_MULT_COLS],
@@ -180,7 +172,6 @@ where
         let mult_local = main.current_slice();
         let mult_local: &ProgramMultiplicityCols<AB::Var> = (*mult_local).borrow();
 
-        // Constrain the lookup with CPU table
         builder.receive_program(prep_local.pc, prep_local.instruction, mult_local.multiplicity);
     }
 }
@@ -199,10 +190,6 @@ mod tests {
 
     #[test]
     fn generate_trace() {
-        // main:
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     add x31, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),

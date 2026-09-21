@@ -15,26 +15,20 @@ pub struct AluEvent {
     pub next_pc: u32,
     /// The opcode.
     pub opcode: Opcode,
-    /// instruction frame
-    /// Non-zero when this event is a REAL instruction, i.e. when the chip must
-    /// carry its own program fetch / state chaining / register access rather
-    /// than receiving a decoded instruction from `CpuChip` over the
-    /// `Instruction` bus.  See `zkm_core_machine::frame`.
+    /// Non-zero when this event is a real instruction, i.e. when the chip
+    /// carries its own program fetch / state chaining / register access. See
+    /// `zkm_core_machine::frame`.
     ///
-    /// ★ The ALU event vectors ALSO carry SYNTHETIC dependency rows that
-    /// the deleted `dependencies.rs` used to push, so DivRem and friends could
-    /// outsource sub-computations.  Those rows have no instruction at their pc,
-    /// no clk and no registers: `is_instruction == 0` and every field below is
-    /// meaningless.  ANY frame constraint in an AIR must be gated on it.
-    /// Measured share (playground `rows`): Lt is 73-87% dependency, but in
-    /// absolute cells that is <0.5% of the area at stake, so gating beats
-    /// splitting the chip.
+    /// The ALU event vectors also carry synthetic dependency rows, through
+    /// which DivRem and friends outsource sub-computations. Those rows have no
+    /// instruction at their pc, no clk and no registers: `is_instruction = 0`
+    /// and every field below is meaningless, so every frame constraint in an
+    /// AIR is gated on it.
     ///
-    /// ⚠ FFI: this is a `u32` and the records use the `Option*` MIRROR types,
-    /// NOT `bool` / `Option<T>`.  `crates/core/machine/include/*.hpp` consume
-    /// `AluEvent` directly through cbindgen, and a plain `Option<T>` there
-    /// compiles on the host while failing `--features sys` with "field has
-    /// incomplete type".
+    /// FFI: this is a `u32` and the records use the `Option*` mirror types,
+    /// not `bool` / `Option<T>`: cbindgen exposes `AluEvent` to
+    /// `crates/core/machine/include/*.hpp`, where `Option<T>` is an incomplete
+    /// type under `--features sys`.
     pub is_instruction: u32,
     /// The clock cycle (frame).
     pub clk: u32,
@@ -192,9 +186,7 @@ pub struct MemInstrEvent {
     /// There is no `c_record`: every memory instruction is I-TYPE, so `op_c` is
     /// an immediate and never produces a register read. `ITypeFrameCols` has no
     /// `op_c_access` column to populate from one, and both the host and the CUDA
-    /// frame populate read only these two -- the field this struct used to carry
-    /// existed solely to be `debug_assert!`ed `None`. That assertion now lives at
-    /// the emit site, where it costs nothing per cycle.
+    /// frame populate read only these two.
     pub a_record: OptionMemoryRecordEnum,
     pub b_record: OptionMemoryReadRecord,
 }

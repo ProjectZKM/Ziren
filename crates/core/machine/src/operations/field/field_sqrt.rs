@@ -52,17 +52,12 @@ impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
         assert!(a < &modulus);
         let sqrt = sqrt_fn(a)?;
 
-        // Use FieldOpCols to compute result * result.
         let sqrt_squared = self.multiplication.populate(record, &sqrt, &sqrt, FieldOperation::Mul);
 
-        // If the result is indeed the square root of a, then result * result = a.
         assert_eq!(sqrt_squared, a.clone());
 
-        // This is a hack to save a column in FieldSqrtCols. We will receive the value a again in
-        // the eval function, so we'll overwrite it with the sqrt.
         self.multiplication.result = P::to_limbs_field::<F, _>(&sqrt);
 
-        // Populate the range columns.
         self.range.populate(record, &sqrt, &modulus);
 
         let sqrt_bytes = P::to_limbs(&sqrt);
@@ -77,7 +72,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
         };
         record.add_byte_lookup_event(and_event);
 
-        // Add the byte range check for `sqrt`.
         record.add_u8_range_checks(
             self.multiplication
                 .result
@@ -107,14 +101,10 @@ where
     ) where
         V: Into<AB::Expr>,
     {
-        // As a space-saving hack, we store the sqrt of the input in `self.multiplication.result`
-        // even though it's technically not the result of the multiplication. Now, we should
-        // retrieve that value and overwrite that member variable with a.
         let sqrt = self.multiplication.result;
         let mut multiplication = self.multiplication.clone();
         multiplication.result = *a;
 
-        // Compute sqrt * sqrt. We pass in P since we want its BaseField to be the mod.
         multiplication.eval(builder, &sqrt, &sqrt, FieldOperation::Mul, is_real.clone());
 
         let modulus_limbs = P::to_limbs_field_vec(&P::modulus());
@@ -125,11 +115,8 @@ where
             is_real.clone(),
         );
 
-        // Range check that `sqrt` limbs are bytes.
         builder.slice_range_check_u8(sqrt.0.as_slice(), is_real.clone());
 
-        // Assert that the square root is the positive one, i.e., with least significant bit 0.
-        // This is done by computing LSB = least_significant_byte & 1.
         builder.assert_bool(self.lsb);
         builder.when(is_real.clone()).assert_eq(self.lsb, is_odd);
         builder.send_byte(
@@ -209,15 +196,12 @@ mod tests {
             let num_rows = 1 << 8;
             let mut operands: Vec<BigUint> = (0..num_rows - 2)
                 .map(|_| {
-                    // Take the square of a random number to make sure that the square root exists.
                     let a = rng.gen_biguint(256);
                     let sq = a.clone() * a.clone();
-                    // We want to mod by the ed25519 modulus.
                     sq % &Ed25519BaseField::modulus()
                 })
                 .collect();
 
-            // hardcoded edge cases.
             operands.extend(vec![BigUint::ZERO, BigUint::one()]);
 
             let rows = operands
@@ -232,11 +216,9 @@ mod tests {
                     row
                 })
                 .collect::<Vec<_>>();
-            // Convert the trace to a row major matrix.
             let mut trace =
                 RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_TEST_COLS);
 
-            // Pad the trace to a power of two.
             pad_to_power_of_two::<NUM_TEST_COLS, F>(&mut trace.values);
 
             Ok(trace)
@@ -263,7 +245,6 @@ mod tests {
             let local = main.current_slice();
             let local: &TestCols<AB::Var, P> = (*local).borrow();
 
-            // eval verifies that local.sqrt.result is indeed the square root of local.a.
             local.sqrt.eval(builder, &local.a, AB::F::ZERO, AB::F::ONE);
         }
     }
@@ -274,7 +255,6 @@ mod tests {
         let shard = ExecutionRecord::default();
         let _: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
-        // println!("{:?}", trace.values)
     }
 
     #[test]

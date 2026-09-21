@@ -10,7 +10,6 @@ use core::{mem::transmute, str::FromStr};
 const MODULUS: &str = "4002409555221667393417789825735904156556882819939007885332058136124031650490837864442687629129015664037894272559787";
 
 fn random_u64_6(modulus: &BigUint) -> [u64; 6] {
-    //let mut rng = rand::thread_rng();
     let mut arr = [0u64; 6];
     let modulus_bytes = modulus.to_bytes_le();
     let modulus_u64: [u64; 6] = [
@@ -23,7 +22,7 @@ fn random_u64_6(modulus: &BigUint) -> [u64; 6] {
     ];
 
     for i in 0..6 {
-        arr[i] = 1; // rng.gen_range(0..modulus_u64[i]);
+        arr[i] = 1;
     }
     arr
 }
@@ -111,7 +110,6 @@ pub fn main() {
         assert_eq!(b_c0, _b_c0);
         assert_eq!(b_c1, _b_c1);
 
-        // Fp2 Addition test
         let c0 = (a_c0_bigint + b_c0_bigint) % &modulus;
         let c1 = (a_c1_bigint + b_c1_bigint) % &modulus;
 
@@ -120,7 +118,6 @@ pub fn main() {
         assert_eq!(c0, u64_6_to_biguint(&res_c0) % &modulus);
         assert_eq!(c1, u64_6_to_biguint(&res_c1) % &modulus);
 
-        // Fp2 Subtraction test
         let c0 = (a_c0_bigint + &modulus - b_c0_bigint) % &modulus;
         let c1 = (a_c1_bigint + &modulus - b_c1_bigint) % &modulus;
 
@@ -130,5 +127,4 @@ pub fn main() {
         assert_eq!(c1, u64_6_to_biguint(&res_c1) % &modulus);
     }
 
-    // println!("All tests passed!");
 }

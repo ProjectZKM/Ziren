@@ -278,10 +278,10 @@ pub struct ExecutionRecord {
 impl ExecutionRecord {
     /// Create a new [`ExecutionRecord`].
     ///
-    /// When the `pre-alloc` feature is enabled, the legacy fixed-size reservation
-    /// (`1 << 22` for cpu/add_sub, `1 << 21` for memory_instr) is kept for backward
-    /// compatibility. New code should prefer [`Self::new_preallocated`] which sizes
-    /// every hot event Vec from a single `reservation_size` hint (e.g. `shard_size / 8`).
+    /// With the `pre-alloc` feature, reserves fixed capacities (`2^22` for
+    /// cpu/add_sub, `2^21` for memory_instr). [`Self::new_preallocated`] instead
+    /// sizes every hot event Vec from one `reservation_size` hint (e.g.
+    /// `shard_size / 8`).
     #[must_use]
     #[cfg(feature = "pre-alloc")]
     pub fn new(program: Arc<Program>) -> Self {
@@ -323,7 +323,6 @@ impl ExecutionRecord {
             return result;
         }
 
-        // CPU + ALU family — touch every (or nearly every) cycle.
         result.cpu_events.reserve(reservation_size);
         result.add_sub_events.reserve(reservation_size);
         result.add_sub_imm_events.reserve(reservation_size);
@@ -338,7 +337,6 @@ impl ExecutionRecord {
         result.mul_events.reserve(reservation_size);
         result.divrem_events.reserve(reservation_size);
         result.cloclz_events.reserve(reservation_size);
-        // Memory + branch + jump + misc are also common per-shard event sinks.
         result.memory_load_word_events.reserve(reservation_size);
         result.memory_store_word_events.reserve(reservation_size);
         result.memory_load_narrow_events.reserve(reservation_size / 4);
@@ -347,7 +345,6 @@ impl ExecutionRecord {
         result.jump_events.reserve(reservation_size);
         result.movcond_events.reserve(reservation_size);
         result.misc_events.reserve(reservation_size);
-        // Byte lookups dominate the hash-map insert path; pre-size to dodge rehash.
         result.byte_lookups.reserve(reservation_size);
 
         result
@@ -389,8 +386,6 @@ impl ExecutionRecord {
         let precompile_events = take(&mut self.precompile_events);
 
         for (syscall_code, events) in precompile_events.into_iter() {
-            // Shared with `deferred_plan`: a controller that only sees event
-            // weights must cut exactly where this does.
             let threshold = crate::deferred_plan::precompile_split_threshold(syscall_code, &opts);
 
             let mut shards_input = Vec::new();
@@ -445,12 +440,9 @@ impl ExecutionRecord {
             self.global_memory_initialize_events.sort_by_key(|event| event.addr);
             self.global_memory_finalize_events.sort_by_key(|event| event.addr);
 
-            // If there are no precompile shards, and `last_record` is provided, pack the memory events
-            // into the last record.
             let pack_memory_events_into_last_record = last_record.is_some() && shards.is_empty();
             let mut blank_record = ExecutionRecord::new(self.program.clone());
 
-            // If `last_record` is None, use a blank record to store the memory events.
             let last_record_ref = if pack_memory_events_into_last_record {
                 last_record.unwrap()
             } else {
@@ -489,12 +481,8 @@ impl ExecutionRecord {
                 last_record_ref.public_values.last_finalize_addr_bits = finalize_addr_bits;
 
                 if !pack_memory_events_into_last_record {
-                    // If not packing memory events into the last record, add 'last_record_ref'
-                    // to the returned records. `take` replaces `blank_program` with the default.
                     shards.push(take(last_record_ref));
 
-                    // Reset the last record so its program is the correct one. (The default program
-                    // provided by `take` contains no instructions.)
                     last_record_ref.program = self.program.clone();
                 }
             }
@@ -612,7 +600,6 @@ impl MachineRecord for ExecutionRecord {
         if !self.cpu_events.is_empty() {
             stats.insert("byte_lookups".to_string(), self.byte_lookups.len());
         }
-        // Filter out the empty events.
         stats.retain(|_, v| *v != 0);
         stats
     }
@@ -656,15 +643,8 @@ impl MachineRecord for ExecutionRecord {
         self.cpu_local_memory_access.append(&mut other.cpu_local_memory_access);
         self.bump_memory_events.append(&mut other.bump_memory_events);
         self.global_lookup_events.append(&mut other.global_lookup_events);
-        // The event vector just changed: any previously published digest is
-        // stale.  (The length tag in `GlobalCumulativeSumCell` would already
-        // reject it; this makes the invalidation explicit at the mutation
-        // site.)
         self.global_cumulative_sum.clear();
         other.global_cumulative_sum.clear();
-        // `global_digests` / `global_byte_lookups` are guarded by their event-count
-        // tag alone: an append that brings no events leaves them valid (the
-        // dependency pass appends an event-less output record after publishing).
     }
 
     fn byte_multiplicity_planes(&self) -> Option<(Vec<u32>, Vec<u32>)> {
@@ -691,20 +671,9 @@ impl MachineRecord for ExecutionRecord {
     /// Retrieves the public values.  This method is needed for the `MachineRecord` trait, since
     fn public_values<F: PrimeCharacteristicRing>(&self) -> Vec<F> {
         let mut pv = self.public_values;
-        // Option 2 (local-only): the global public values are derived from
-        // the cross-chip events, which exist only after
-        // `generate_dependencies` — so they are finalised lazily here,
-        // at the point the shard prover
-        // reads the public values to feed the commitment.  The public-values
-        // AIR's GlobalAccumulation / MemoryGlobalInit / MemoryGlobalFinalize
-        // buses consume these endpoints.
         pv.global_count = self.global_lookup_events.len() as u32;
         pv.global_init_count = self.global_memory_initialize_events.len() as u32;
         pv.global_finalize_count = self.global_memory_finalize_events.len() as u32;
-        // Read the digest the `GlobalChip` trace generator already
-        // produced instead of re-folding every event.
-        // The fallback keeps every caller that has no `GlobalChip` trace (unit
-        // tests, `debug_constraints`, any future prover stage) correct.
         pv.global_cumulative_sum =
             match self.global_cumulative_sum.get(self.global_lookup_events.len()) {
                 Some(digest) => digest,
@@ -715,10 +684,8 @@ impl MachineRecord for ExecutionRecord {
 }
 
 /// Compute the global cumulative-sum digest from the populated global lookup
-/// events.  Mirrors `GlobalChip::generate_trace`
-/// (`crates/core/machine/src/global/mod.rs:136-185`) and
-/// `GlobalLookupOperation::get_digest`
-/// (`crates/core/machine/src/operations/global_lookup.rs:31-37`): each event
+/// events.  Mirrors `GlobalChip::generate_trace` and
+/// `GlobalLookupOperation::get_digest`: each event
 /// lifts to a septic-curve point (negated for a send), and the digest is the
 /// running sum seeded by the `SepticDigest::zero()` offset — exactly the value
 /// the last real `GlobalChip` row sends on the GlobalAccumulation bus.  The
@@ -768,8 +735,6 @@ fn compute_global_cumulative_sum(events: &[GlobalLookupEvent]) -> SepticDigest<u
             SepticCurveComplete::Affine(point)
         })
         .reduce(|| SepticCurveComplete::Infinity, |a, b| a + b);
-    // Seed with the `SepticDigest::zero()` OFFSET (not the group identity) —
-    // added last so the offset lands exactly where the serial fold put it.
     let acc = SepticCurveComplete::Affine(SepticDigest::<F>::zero().0) + acc;
     let final_digest = acc.point();
     SepticDigest(SepticCurve::convert(final_digest, |x: F| x.as_canonical_u32()))

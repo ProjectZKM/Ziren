@@ -63,40 +63,25 @@ where
     debug_assert!(height >= 2 && height.is_power_of_two());
     debug_assert_eq!(width, EF::DIMENSION, "codeword width must equal EF::DIMENSION");
 
-    // (1) Build the EF view first by BORROWING the storage — the
-    // base→EF parse only needs read access.  We then move the storage
-    // into the leaves matrix without ever cloning the (potentially
-    // multi-MB) Vec.  Saves one full O(N) memcpy per round per shard.
-    //
-    // Order is byte-identical to the prior (clone-based) impl: the
-    // only challenger interaction below is observe(commit) followed by
-    // sample(beta), unchanged.
     let codeword_storage = current_codeword.data.values;
     let codeword_ef: Vec<EF> = codeword_storage
         .par_chunks_exact(EF::DIMENSION)
         .map(|chunk| EF::from_basis_coefficients_iter(chunk.iter().copied()).unwrap())
         .collect();
 
-    // (2) Reshape into Merkle leaves: pair adjacent rows.  Each leaf
-    // is 2 * EF::D base elements (one pair of EF values).  Moves
-    // codeword_storage into the leaves matrix (no copy).
     let leaves_mat = RowMajorMatrix::new(codeword_storage, 2 * width);
 
-    // (3) Commit leaves via the MMCS — moves into commit, no extra copy.
     let (commitment, prover_data) = mmcs.commit(vec![leaves_mat]);
     challenger.observe(commitment.clone());
 
-    // (4) Sample fold randomness.
     let beta: EF = challenger.sample_algebra_element();
 
-    // (5) Fold codeword using the EF view we built in (1).
     debug_assert_eq!(codeword_ef.len(), height);
     let folded_ef = fold_even_odd_ext::<F, EF>(codeword_ef, beta);
     debug_assert_eq!(folded_ef.len(), height / 2);
     let folded_storage = <EF as BasedVectorSpace<F>>::flatten_to_base(folded_ef);
     let folded_codeword = RsCodeWord::new(RowMajorMatrix::new(folded_storage, EF::DIMENSION));
 
-    // (5) Fold the running MLE algebraically.
     let folded_mle = current_mle.fold(beta);
 
     CommitPhaseRound { beta, folded_mle, folded_codeword, commitment, prover_data }
@@ -141,8 +126,6 @@ where
     let arity = 1usize << log_folding_arity;
     debug_assert!(height >= arity && height.is_power_of_two());
 
-    // Borrow for the EF view, then move the same storage into the leaves — no
-    // clone of a possibly multi-MB codeword.
     let codeword_storage = current_codeword.data.values;
     let codeword_ef: Vec<EF> = codeword_storage
         .par_chunks_exact(EF::DIMENSION)
@@ -197,11 +180,9 @@ where
 
 /// Arity-2 fold over an EF-valued bit-reversed evaluation vector.
 ///
-/// Inlined from `p3_fri::TwoAdicFriFolding::fold_matrix` (arity-1
-/// branch) — the upstream `p3_fri::fold_even_odd` free function is
-/// no longer publicly exported in this Plonky3 revision.  Math is
-/// identical: pair adjacent rows, do
-/// `(lo + hi)/2 + (lo - hi) * beta * g_inv^i / 2`.
+/// The arity-1 branch of `p3_fri::TwoAdicFriFolding::fold_matrix`: pair
+/// adjacent rows `(lo, hi)` and return
+/// `(lo + hi)/2 + (lo - hi) · β · g^{-i} / 2`.
 fn fold_even_odd_ext<F: TwoAdicField, EF: ExtensionField<F>>(poly: Vec<EF>, beta: EF) -> Vec<EF> {
     let m = RowMajorMatrix::new(poly, 2);
     let g_inv = F::two_adic_generator(log2_strict_usize(m.height()) + 1).inverse();

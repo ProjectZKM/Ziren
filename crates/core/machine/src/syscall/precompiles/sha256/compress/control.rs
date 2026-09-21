@@ -1,9 +1,9 @@
 //! SHA-256 compress **control chip** — the two endpoints of the
 //! [`LookupKind::PrecompileChain`] state-chaining bus for SHA-256 compress.
 //!
-//! The single-row BaseFold zerocheck folder cannot evaluate the worker's
-//! legacy `when_first_row`/`when_transition`/`next.*` state machinery, so
-//! the per-row state transition is carried on a LogUp bus instead.  This
+//! The single-row BaseFold zerocheck folder evaluates no
+//! `when_first_row`/`when_transition`/`next.*` constraints, so the per-row
+//! state transition is carried on a LogUp bus instead.  This
 //! control chip emits exactly one row per `SHA_COMPRESS` syscall: it
 //! receives the syscall, **sends** the initial `a..h` digest at `index = 0`,
 //! and **receives** the final `a..h` delta at `index = 80`.  Each
@@ -99,8 +99,6 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressControlChip {
             for i in 0..8 {
                 let prev = event.h[i];
                 let written = event.h_write_records[i].value;
-                // Initial state = input H; final state = the accumulated a..h
-                // (written H minus the input H), matching the worker's bus.
                 cols.initial_state[i] = Word::from(prev);
                 cols.final_state[i] = Word::from(written.wrapping_sub(prev));
             }
@@ -140,7 +138,6 @@ where
 
         builder.assert_bool(local.is_real);
 
-        // Receive the SHA_COMPRESS syscall once per real invocation.
         builder.receive_syscall(
             local.shard,
             local.clk,
@@ -151,11 +148,8 @@ where
             LookupScope::Local,
         );
 
-        // Leading precompile-ID field isolates this chain from other
-        // precompiles sharing `LookupKind::PrecompileChain`.
         let pid = AB::Expr::from_u32(SyscallCode::SHA_COMPRESS.syscall_id());
 
-        // Send the initial state `(pid, shard, clk, w_ptr, h_ptr, 0, a..h)`.
         let mut send_vals: Vec<AB::Expr> = vec![
             pid.clone(),
             local.shard.into(),
@@ -174,7 +168,6 @@ where
             LookupScope::Local,
         );
 
-        // Receive the final state `(pid, shard, clk, w_ptr, h_ptr, 80, a..h)`.
         let mut recv_vals: Vec<AB::Expr> = vec![
             pid,
             local.shard.into(),

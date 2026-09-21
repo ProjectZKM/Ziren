@@ -52,11 +52,6 @@ pub(crate) fn verify_stark_compressed_proof(
 ) -> Result<(), MachineVerificationError<InnerSC>> {
     let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
         bincode::deserialize(&VK_MAP).unwrap();
-    // The prover commits the key set padded with the all-zero digest to the FIXED capacity
-    // `2^VK_MERKLE_TREE_HEIGHT` (the height baked into the recursion programs), so the root in
-    // the proof's public values is the root of the padded tree.  Committing the bare key list
-    // here made every proof fail with `vk_root mismatch` whenever the map was not exactly a
-    // power of two.
     let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> = allowed_vk_map.keys().copied().collect();
     assert!(
         leaves.len() <= (1 << VK_MERKLE_TREE_HEIGHT),
@@ -74,16 +69,6 @@ pub(crate) fn verify_stark_compressed_proof(
         return Err(MachineVerificationError::InvalidVerificationKey);
     }
 
-    // Validate public values.
-    //
-    // `Borrow` is the `AlignedBorrow` reinterpret: its length and alignment checks
-    // are `debug_assert`, so in release a SHORT slice panics indexing `shorts[0]`
-    // and a LONG one silently reinterprets the first struct-worth.
-    //
-    // Exact length, which is unambiguous here:
-    //   RECURSIVE_PROOF_NUM_PV_ELTS = size_of::<RecursionPublicValues<u8>>()
-    //   const_assert_eq!(RECURSIVE_PROOF_NUM_PV_ELTS, PROOF_MAX_NUM_PVS)   // = 231
-    // so the struct exactly fills the padded vec and `!=` rejects nothing honest.
     if proof.public_values.len() != zkm_recursion_core::air::RECURSIVE_PROOF_NUM_PV_ELTS {
         return Err(MachineVerificationError::InvalidPublicValues(
             "recursion public values have the wrong length",
@@ -100,13 +85,10 @@ pub(crate) fn verify_stark_compressed_proof(
         return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
     }
 
-    // `is_complete` should be 1. In the reduce program, this ensures that the proof is fully
-    // reduced.
     if public_values.is_complete != KoalaBear::ONE {
         return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
     }
 
-    // Verify that the proof is for the Ziren vkey we are expecting.
     let vkey_hash = vk.vk.hash_koalabear();
     if public_values.zkm_vk_digest != vkey_hash {
         return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
@@ -179,22 +161,18 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let new_len = leaves.len().next_power_of_two();
         let height = log2_strict_usize(new_len);
 
-        // Pre-allocate the vector.
         let mut digest_layers = Vec::with_capacity(2 * new_len - 2);
 
-        // If `leaves.len()` is not a power of 2, we pad the leaves with default values.
         let mut last_layer = leaves;
         let old_len = last_layer.len();
         for _ in old_len..new_len {
             last_layer.push(HV::Digest::default());
         }
 
-        // Store the leaves in bit-reversed order.
         reverse_slice_index_bits(&mut last_layer);
 
         digest_layers.extend(last_layer.iter());
 
-        // Compute the rest of the layers.
         for _ in 0..height - 1 {
             let mut next_layer = Vec::with_capacity(last_layer.len() / 2);
             last_layer

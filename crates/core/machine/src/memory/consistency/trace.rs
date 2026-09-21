@@ -153,11 +153,8 @@ impl<F: PrimeField32> RegisterAccessCols<F> {
         let diff_16bit_limb = (diff_minus_one & 0xffff) as u16;
         self.diff_16bit_limb = F::from_u16(diff_16bit_limb);
 
-        // Add a byte table lookup with the 16Range op.
         output.add_u16_range_check(diff_16bit_limb);
 
-        // The 9-bit high limb is a recovered linear expression in the AIR, not
-        // a column; it is checked against the parametric range table.
         output.add_bit_range_check(
             ((diff_minus_one >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16,
             TIMESTAMP_HIGH_LIMB_BITS,
@@ -219,7 +216,6 @@ impl<F: PrimeField32> MemoryReadWriteCols<F> {
     /// Populate for a chip that evaluates the access with `eval_memory_access_trusted`
     /// (no byte range checks); see `MemoryReadCols::populate_trusted`.
     pub fn populate_trusted(&mut self, record: MemoryRecordEnum, output: &mut impl ByteRecord) {
-        // `output` still receives the timestamp range checks; only the value byte checks go.
         match record {
             MemoryRecordEnum::Read(r) => self.populate_read_with(r, ByteChecks::None, output),
             MemoryRecordEnum::Write(w) => self.populate_write_with(w, ByteChecks::None, output),
@@ -279,10 +275,6 @@ impl<F: PrimeField32> MemoryAccessCols<F> {
     ) {
         self.value = current_record.value.into();
 
-        // Match the byte range checks emitted by `eval_memory_access`: one per memory word
-        // (`Both`), one for a read-only access whose `prev_value` IS `value` (`ValueOnly`,
-        // `MemoryCols::value_aliases_prev`), none for the memory-instruction chips
-        // (`None`, `eval_memory_access_trusted`).
         match byte_checks {
             ByteChecks::Both => {
                 output.add_u8_range_checks(&prev_record.value.to_le_bytes());
@@ -297,8 +289,6 @@ impl<F: PrimeField32> MemoryAccessCols<F> {
         self.prev_shard = F::from_u32(prev_record.shard);
         self.prev_clk = F::from_u32(prev_record.timestamp);
 
-        // Fill columns used for verifying current memory access time value is greater than
-        // previous's.
         let use_clk_comparison = prev_record.shard == current_record.shard;
         self.compare_clk = F::from_bool(use_clk_comparison);
         let prev_time_value =
@@ -312,10 +302,8 @@ impl<F: PrimeField32> MemoryAccessCols<F> {
         let diff_high_limb = ((diff_minus_one >> 16) & TIMESTAMP_HIGH_LIMB_MASK) as u16;
         self.diff_high_limb = F::from_u16(diff_high_limb);
 
-        // Add a byte table lookup with the 16Range op.
         output.add_u16_range_check(diff_16bit_limb);
 
-        // Bound the high limb against the parametric range table.
         output.add_bit_range_check(diff_high_limb, TIMESTAMP_HIGH_LIMB_BITS);
     }
 }

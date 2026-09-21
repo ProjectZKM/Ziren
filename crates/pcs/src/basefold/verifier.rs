@@ -90,44 +90,22 @@ where
         Challenger:
             FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
     {
-        // (0) Bind the claims: the claimed evaluations are absorbed BEFORE any randomness that
-        // weighs them.
-        //
-        // These values are prover-supplied and were trusted for transcript
-        // purposes: grinding and the batching point were derived without them.
-        // That makes the batching vector `lambda` predictable to a prover who
-        // has not yet chosen `y`.  The stacked layer checks `sum_i a_i y_i = q`
-        // for the outer claim `q`, and BaseFold proves only
-        // `sum_i lambda_i y_i = sum_i lambda_i v_i` -- two linear equations in
-        // `y`.  With two or more stripe claims and independent `a`, `lambda`,
-        // they can be solved for ANY target `q`: the prover opens the honest
-        // random combination while the stacked equation reports a value that is
-        // not the committed polynomial's.  A correct sumcheck, FRI chain and
-        // Merkle path do not help, because the choice happens before them.
-        //
-        // Absorbing first removes the adaptivity.  The order below -- claims,
-        // then batch grinding, then the batching point -- is the contract, and
-        // the host prover, the native verifier, the recursive verifier and the
-        // CUDA prover all have to keep it or the transcript forks.
         for round in evaluation_claims.iter() {
             for &claim in round.iter() {
                 challenger.observe_algebra_element(claim);
             }
         }
 
-        // (1) Verify batch grinding.
         if !challenger.check_witness(BATCH_GRINDING_BITS, proof.batch_grinding_witness) {
             return Err(BasefoldVerifierError::BatchPow);
         }
 
-        // (2) Sample batching point + Lagrange coefficients.
         let total_polys: usize = evaluation_claims.iter().map(|c| c.len()).sum();
         let num_batching_vars = total_polys.next_power_of_two().trailing_zeros() as usize;
         let batching_point: Vec<EF> =
             (0..num_batching_vars).map(|_| challenger.sample_algebra_element()).collect();
         let batching_coefficients = Self::partial_lagrange(&batching_point);
 
-        // (3) Compute the batched evaluation claim.
         let mut eval_claim = EF::ZERO;
         let mut idx = 0;
         for round in evaluation_claims {
@@ -137,7 +115,6 @@ where
             }
         }
 
-        // Shape checks.
         if commitments.len() != evaluation_claims.len()
             || commitments.len() != proof.component_polynomials_query_openings_and_proofs.len()
             || commitments.len() != self.num_expected_commitments
@@ -147,8 +124,6 @@ where
             ));
         }
         let num_variables = eval_point.len();
-        // One sumcheck message per VARIABLE, but only one commitment per
-        // commit-phase ROUND -- and a round folds `log_folding_arity` of them.
         if proof.univariate_messages.len() != num_variables
             || proof.fri_commitments.len()
                 != Self::round_arities(num_variables, self.fri_config.log_folding_arity()).len()
@@ -157,20 +132,10 @@ where
             return Err(BasefoldVerifierError::SumcheckFriLengthMismatch);
         }
 
-        // The prover folds first-coordinate-first (matching the
-        // even/odd FRI fold pairing); the verifier consumes coords
-        // in the same natural order.
         let point_rev = eval_point.clone();
 
-        // (4) Observe number of FRI rounds.
         challenger.observe(F::from_usize(num_variables));
 
-        // (5) Walk the commit-phase rounds.
-        //
-        // One commitment covers `arity` variables: the prover emits the FIRST
-        // univariate message, then the commitment, then alternates
-        // beta / message for the rest of the group.  Mirror that exactly, or
-        // the transcript diverges.
         let log_folding_arity = self.fri_config.log_folding_arity();
         let round_arities = Self::round_arities(num_variables, log_folding_arity);
         let mut betas = Vec::with_capacity(num_variables);
@@ -191,7 +156,6 @@ where
             return Err(BasefoldVerifierError::SumcheckFriLengthMismatch);
         }
 
-        // First sumcheck consistency: (1-x_0)*p[0] + x_0*p[1] == eval_claim
         let first_poly = proof.univariate_messages[0];
         if eval_claim != (EF::ONE - point_rev[0]) * first_poly[0] + point_rev[0] * first_poly[1] {
             return Err(BasefoldVerifierError::SumcheckMismatch { round: 0 });
@@ -208,7 +172,6 @@ where
             expected_eval = poly[0] + *beta * poly[1];
         }
 
-        // (6) Observe final poly + check PoW.
         challenger.observe_algebra_element(proof.final_poly);
         if !challenger.check_witness(self.fri_config.proof_of_work_bits, proof.pow_witness) {
             return Err(BasefoldVerifierError::Pow);
@@ -218,14 +181,10 @@ where
             return Err(BasefoldVerifierError::TwoAdicityOverflow);
         }
 
-        // (7) Sample queries.
         let query_indices: Vec<usize> = (0..self.fri_config.num_queries)
             .map(|_| challenger.sample_bits(log_max_height))
             .collect();
 
-        // (8) Compute batched query evaluations from component openings.
-        // Each round-r component opening yields, per query index, a leaf
-        // whose width-`EF::DIMENSION` chunks correspond one-per-Mle.
         let mut batched_query_evals = vec![EF::ZERO; query_indices.len()];
         let mut batch_idx = 0;
         for ((round_idx, opening), claims) in proof
@@ -251,19 +210,6 @@ where
                 })?;
 
             for (q, leaf) in opening.leaves.iter().enumerate() {
-                // Each `leaf.values` entry is one committed matrix's
-                // row at this query index — width = that Mle's
-                // `n_polys` F elements (no EF packing in the per-MLE
-                // commit codewords).  Batch via inner product.
-                //
-                // The width is checked BEFORE it is used as an index. The
-                // inner product reads `round_coeffs[poly_offset + k]`, whose
-                // length is the round's claim count, so a leaf WIDER than
-                // claimed indexes past the slice and panics; the equality
-                // below would have rejected it, but only after the read.
-                // Merkle verification is later still, so nothing upstream
-                // turns this into a rejection. A narrow leaf was already
-                // rejected here; both widths now return `IncorrectShape`.
                 let leaf_width: usize = leaf.values.iter().map(|m| m.len()).sum();
                 if leaf_width != round_polys {
                     return Err(BasefoldVerifierError::IncorrectShape(format!(
@@ -283,9 +229,6 @@ where
             batch_idx += round_polys;
         }
 
-        // (9) Verify component-poly Merkle proofs.  Each round's
-        // commitment was over codewords on a domain of size
-        // `1 << log_max_height` — one matrix per Mle in the round.
         for (round_idx, (commit, opening)) in commitments
             .iter()
             .zip_eq(proof.component_polynomials_query_openings_and_proofs.iter())
@@ -308,9 +251,6 @@ where
                             opening_proof: &leaf.proof,
                         },
                     )
-                    // Name the ROUND: with a batched multi-round open, a bare
-                    // `CapMismatch` says nothing about which commitment the
-                    // openings failed against.
                     .map_err(|e| {
                         BasefoldVerifierError::Mmcs(format!(
                             "{e:?} (round {round_idx} of {}, query {q})",
@@ -320,7 +260,6 @@ where
             }
         }
 
-        // (10) Verify FRI query consistency.
         self.verify_queries(
             &proof.fri_commitments,
             &query_indices,
@@ -330,7 +269,6 @@ where
             &betas,
         )?;
 
-        // (11) Final consistency check: final_poly == last_uni[0] + last_beta * last_uni[1].
         let last_uni = proof.univariate_messages.last().unwrap();
         if proof.final_poly != last_uni[0] + *betas.last().unwrap() * last_uni[1] {
             return Err(BasefoldVerifierError::SumcheckFinalPolyMismatch);
@@ -374,8 +312,6 @@ where
             ));
         }
 
-        // `log_h` is the log height of the codeword this round commits to; it
-        // drops by the round's arity, not by one.
         let mut log_h = log_max_height;
         let mut beta_at = 0usize;
         for (round_ord, ((commit, opening), &arity)) in
@@ -391,7 +327,6 @@ where
                 ));
             }
 
-            // Per-query verification.
             for (q, (index, folded_eval)) in
                 indices.iter_mut().zip_eq(folded.iter_mut()).enumerate()
             {
@@ -408,8 +343,6 @@ where
                     )));
                 }
 
-                // The leaf is the contiguous block of `2^arity` bit-reversed
-                // codeword rows that this query's value descends from.
                 let mut evals: Vec<EF> = mat_values
                     .chunks_exact(EF::DIMENSION)
                     .map(|c| EF::from_basis_coefficients_iter(c.iter().copied()).unwrap())
@@ -422,17 +355,11 @@ where
                     return Err(BasefoldVerifierError::QueryValueMismatch);
                 }
 
-                // Domain element of each row in the block.  The codeword is
-                // bit-reversed, so row `base + p` sits at `g^bitrev(base + p)`;
-                // for p = 0,1 this is the familiar {x, -x} pair.
                 let g = F::two_adic_generator(log_h);
                 let mut xs: Vec<F> = (0..=mask)
                     .map(|p| g.exp_u64(reverse_bits_len(base + p, log_h) as u64))
                     .collect();
 
-                // Fold the block down, one level per beta: linear interpolation
-                // through (x, v) and (-x, v') evaluated at beta -- the same
-                // relation the arity-2 protocol uses, applied `arity` times.
                 for &beta in round_betas.iter() {
                     let half = evals.len() / 2;
                     let mut next_evals = Vec::with_capacity(half);
@@ -451,7 +378,6 @@ where
                 *folded_eval = evals[0];
                 *index = base >> arity;
 
-                // Verify the leaf inclusion proof.
                 let dims = vec![Dimensions { height: 1usize << (log_h - arity), width }];
                 self.mmcs
                     .verify_batch(

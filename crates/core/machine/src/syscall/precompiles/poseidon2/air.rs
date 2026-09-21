@@ -30,12 +30,9 @@ where
         let local = main.current_slice();
         let local: &Poseidon2MemCols<AB::Var> = (*local).borrow();
 
-        // Assert that is_real is a boolean.
         builder.assert_bool(local.is_real);
 
         for i in 0..WIDTH {
-            // Range check the previous value of the state in memory. This ensures that each part
-            // of the state is in KoalaBear field.
             KoalaBearWordRangeChecker::<AB::F>::range_check(
                 builder,
                 *local.state_mem[i].prev_value(),
@@ -48,23 +45,18 @@ where
                 .enumerate()
                 .map(|(j, limb)| (*limb).into() * AB::Expr::from_u32(1 << (j * 8)))
                 .sum::<AB::Expr>();
-            // If this is a real operation, assert that the reconstructed pre-state from memory
-            // matches the input to the Poseidon2 permutation AIR.
             builder.when(local.is_real).assert_eq(
                 local.poseidon2.permutation.external_rounds_state()[0][i].into(),
                 pre_state,
             );
         }
 
-        // Constrain the permutation.
         for r in 0..NUM_EXTERNAL_ROUNDS {
             eval_external_round(builder, &local.poseidon2.permutation, r);
         }
         eval_internal_rounds(builder, &local.poseidon2.permutation);
 
         for i in 0..WIDTH {
-            // Range check the current value of the state in memory. This ensures that each part
-            // of the state is in KoalaBear field.
             KoalaBearWordRangeChecker::<AB::F>::range_check(
                 builder,
                 *local.state_mem[i].value(),
@@ -77,14 +69,11 @@ where
                 .enumerate()
                 .map(|(j, limb)| (*limb).into() * AB::Expr::from_u32(1 << (j * 8)))
                 .sum::<AB::Expr>();
-            // If this is a real operation, assert that the reconstructed post-state from memory
-            // matches the output from the Poseidon2 permutation AIR.
             builder
                 .when(local.is_real)
                 .assert_eq(local.poseidon2.permutation.perm_output()[i].into(), post_state);
         }
 
-        // Read and write the state memory.
         builder.eval_memory_access_slice(
             local.shard,
             local.clk.into(),
@@ -93,7 +82,6 @@ where
             local.is_real,
         );
 
-        // Receive the arguments.
         builder.receive_syscall(
             local.shard,
             local.clk,

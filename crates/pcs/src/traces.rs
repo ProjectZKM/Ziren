@@ -109,9 +109,6 @@ mod tests {
 
     #[test]
     fn a_repeated_chip_name_cannot_survive() {
-        // The property the `Vec` form could not express: `commit_traces` zips
-        // chips and traces positionally, so two entries under one name would
-        // shift every later pair.
         use p3_field::PrimeCharacteristicRing;
         let (a, _) = wrap(vec![KoalaBear::ONE; 8], 4);
         let (b, _) = wrap(vec![KoalaBear::TWO; 8], 4);
@@ -123,8 +120,6 @@ mod tests {
 
     #[test]
     fn iteration_is_name_ordered() {
-        // The commit order the recursion verifier's compile-time `column_counts`
-        // assume, with no sort at the call site.
         use p3_field::PrimeCharacteristicRing;
         let names = ["ShiftLeft", "AddSub", "Memory"];
         let t = Traces {

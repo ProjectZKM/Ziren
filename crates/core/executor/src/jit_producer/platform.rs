@@ -69,7 +69,9 @@ struct Bridge<'a> {
 }
 
 /// Bring the native state back into the executor. Idempotent: calling it
-/// again without native progress in between changes nothing.
+/// again without native progress in between changes nothing. Reading the
+/// oracle buffer is sound because the native code wrote `len` complete entries
+/// from `oracle_base`, below `oracle_end` ≤ capacity.
 fn sync_in(exec: &mut Executor<'_>, ctx: &JitContext, br: &mut Bridge<'_>) {
     let regs = &mut exec.state.memory.registers.registers;
     for (i, reg) in regs.iter_mut().enumerate().take(NUM_REGISTERS) {
@@ -87,17 +89,11 @@ fn sync_in(exec: &mut Executor<'_>, ctx: &JitContext, br: &mut Bridge<'_>) {
     exec.state.clk = clk_now;
     exec.state.global_clk += executed;
     if !exec.unconstrained {
-        // The interpreter counts every constrained instruction by opcode;
-        // the native code counts them once. `total_instruction_count`
-        // stays exact.
         exec.report.opcode_counts[Opcode::ADD] += executed;
         exec.split_acct.import_budgets(ctx.area_left, &ctx.height_left, ctx.touched);
     }
     let len = (ctx.oracle_tail as usize - br.oracle_base as usize) / ORACLE_ENTRY;
     debug_assert!(len <= exec.recording_chunk_mem_reads.capacity());
-    // SAFETY: the native code wrote `len` complete entries starting at
-    // the buffer the last sync-out handed it (`oracle_base`), staying
-    // below `oracle_end`, which sits inside the capacity.
     unsafe { exec.recording_chunk_mem_reads.set_len(len) };
     br.clk_base = clk_now;
 }
@@ -112,7 +108,8 @@ fn clk_limit(exec: &Executor<'_>) -> u32 {
     cpu.min(clk).saturating_add(3)
 }
 
-/// Hand the executor state to the native code.
+/// Hand the executor state to the native code. The pointer offsets stay inside
+/// (or one past) their allocations.
 fn sync_out(exec: &mut Executor<'_>, ctx: &mut JitContext, br: &mut Bridge<'_>) {
     ctx.pc = exec.state.pc;
     let regs = &exec.state.memory.registers.registers;
@@ -132,7 +129,6 @@ fn sync_out(exec: &mut Executor<'_>, ctx: &mut JitContext, br: &mut Bridge<'_>) 
     ctx.clk_shard = (u64::from(shard) << 32) | u64::from(clk.wrapping_add(3));
     br.clk_base = clk;
     if exec.unconstrained {
-        // Nothing inside an unconstrained block is charged or fenced.
         ctx.clk_limit = u32::MAX;
         ctx.area_left = i64::MAX / 2;
         ctx.height_left.fill(i64::MAX / 2);
@@ -140,7 +136,6 @@ fn sync_out(exec: &mut Executor<'_>, ctx: &mut JitContext, br: &mut Bridge<'_>) 
         ctx.clk_limit = clk_limit(exec);
         exec.split_acct.export_budgets(&mut ctx.area_left, &mut ctx.height_left, &mut ctx.touched);
     }
-    // The active view changes at ENTER/EXIT (copy-on-write inside a block).
     let flat = exec.flat_mem.as_deref().expect("producer runs on the flat memory");
     ctx.memory = NonNull::new(flat.as_ptr().cast::<u8>());
     let oracle = &mut exec.recording_chunk_mem_reads;
@@ -149,13 +144,8 @@ fn sync_out(exec: &mut Executor<'_>, ctx: &mut JitContext, br: &mut Bridge<'_>) 
     }
     let base = oracle.as_mut_ptr().cast::<u8>();
     br.oracle_base = base;
-    // SAFETY: offsets inside (or one past) the allocation.
     ctx.oracle_tail = unsafe { base.add(oracle.len() * ORACLE_ENTRY) };
     ctx.oracle_end = unsafe { base.add((oracle.capacity() - 1) * ORACLE_ENTRY) };
-    // NOT `exit_code`: the handler sets it to stop the native code and
-    // then syncs out, so clearing it here would swallow the request and
-    // let the guest run on past a fence or a halt. `run` clears it before
-    // each entry instead.
 }
 
 fn is_control_flow(ins: &Instruction) -> bool {
@@ -175,10 +165,10 @@ fn program_done(exec: &Executor<'_>) -> bool {
     pc == 0 || pc.wrapping_sub(exec.program.pc_base) >= (exec.program.instructions.len() * 4) as u32
 }
 
-/// The native trap site: run one instruction in the interpreter.
+/// The native trap site: run one instruction in the interpreter. Dereferencing
+/// `user_data` is sound because `run` installs it and keeps the bridge and the
+/// executor alive for the whole native call.
 extern "C" fn producer_handler(ctx: *mut JitContext) -> u64 {
-    // SAFETY: `run` installs `user_data` and keeps the bridge and the
-    // executor alive for the whole native call.
     let ctx = unsafe { &mut *ctx };
     let br = unsafe { &mut *ctx.user_data.cast::<Bridge<'_>>() };
     let exec = unsafe { &mut *br.exec };
@@ -281,8 +271,6 @@ fn cached_producer(exec: &Executor<'_>) -> Option<Arc<JitFunction>> {
 }
 
 fn build(exec: &Executor<'_>) -> Built {
-    // Both sides are compile-time constants, so this is a build error, not a
-    // runtime one.
     const _: () = assert!(
         <MipsAirId as enum_map::Enum>::LENGTH <= PRODUCER_HEIGHT_SLOTS,
         "JitContext::height_left has too few slots for MipsAirId"
@@ -430,8 +418,6 @@ fn plan_stamps(ins: &Instruction, plan: &mut ProducerInstr) {
             push(a, POS_A);
         }
         Opcode::Jumpi | Opcode::JumpDirect => push(a, POS_A),
-        // Syscalls and invalid encodings run in the interpreter, so they
-        // never reach here; the arms above cover every other opcode.
         Opcode::SYSCALL | Opcode::UNIMPL => {}
         _ => unreachable!("{ins:?}: opcode with no stamp plan"),
     }
@@ -462,7 +448,9 @@ fn finish(exec: &Executor<'_>) -> Result<Option<bool>, ExecutionError> {
 /// Run the producer from the current state until the program ends
 /// (`Some(true)`) or the batch is complete (`Some(false)`), or `None`
 /// when this executor configuration is not the producer's — the caller
-/// then interprets.
+/// then interprets. The native call is sound because `ctx` points at live
+/// memory, the jump table and the oracle buffer (refreshed by every sync-out),
+/// and `user_data` at the bridge over this executor for the whole call.
 pub(crate) fn run(
     exec: &mut Executor<'_>,
     num_shards_executed: &mut u32,
@@ -490,9 +478,6 @@ pub(crate) fn run(
     sync_out(exec, &mut ctx, &mut br);
     loop {
         ctx.exit_code = 0;
-        // SAFETY: `ctx` points at live memory, the jump table and the
-        // oracle buffer (refreshed by every sync-out), and `user_data`
-        // at the bridge over this executor for the whole call.
         unsafe { jit_fn.call(&mut *ctx) };
         if let Some(e) = br.error.take() {
             return Err(e);

@@ -70,7 +70,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         _: &Self::Record,
         _: &mut Self::Record,
     ) -> Result<(), Self::Error> {
-        // This is a no-op.
         Ok(())
     }
 
@@ -96,8 +95,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             tracing::warn!("Expected exactly one CommitPVHash instruction.");
         }
 
-        // We only take 1 commit pv hash instruction, since our air only checks for one public
-        // values hash.
         for instr in commit_pv_hash_instrs.iter().take(1) {
             for (i, addr) in instr.pv_addrs.digest.iter().enumerate() {
                 let mut row = [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS];
@@ -108,8 +105,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             }
         }
 
-        // Pad the preprocessed rows to 8 rows.
-        // gpu code breaks for small traces
         pad_rows_fixed(
             &mut rows,
             || [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS],
@@ -153,8 +148,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             tracing::warn!("Expected exactly one CommitPVHash instruction.");
         }
 
-        // We only take 1 commit pv hash instruction, since our air only checks for one public
-        // values hash.
         for instr in commit_pv_hash_instrs.iter().take(1) {
             for i in 0..DIGEST_SIZE {
                 let mut row = [KoalaBear::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS];
@@ -167,8 +160,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             }
         }
 
-        // Pad the preprocessed rows to 8 rows.
-        // gpu code breaks for small traces
         pad_rows_fixed(
             &mut rows,
             || [KoalaBear::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS],
@@ -199,8 +190,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
 
         let mut rows: Vec<[F; NUM_PUBLIC_VALUES_COLS]> = Vec::new();
 
-        // We only take 1 commit pv hash instruction, since our air only checks for one public
-        // values hash.
         for event in input.commit_pv_hash_events.iter().take(1) {
             for element in event.public_values.digest.iter() {
                 let mut row = [F::ZERO; NUM_PUBLIC_VALUES_COLS];
@@ -211,7 +200,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             }
         }
 
-        // Pad the trace to 8 rows.
         pad_rows_fixed(
             &mut rows,
             || [F::ZERO; NUM_PUBLIC_VALUES_COLS],
@@ -219,7 +207,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             <PublicValuesChip as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_PUBLIC_VALUES_COLS))
     }
 
@@ -241,8 +228,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
 
         let mut rows: Vec<[KoalaBear; NUM_PUBLIC_VALUES_COLS]> = Vec::new();
 
-        // We only take 1 commit pv hash instruction, since our air only checks for one public
-        // values hash.
         for event in input.commit_pv_hash_events.iter().take(1) {
             let bb_event = unsafe {
                 std::mem::transmute::<
@@ -260,7 +245,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             }
         }
 
-        // Pad the trace to 8 rows.
         pad_rows_fixed(
             &mut rows,
             || [KoalaBear::ZERO; NUM_PUBLIC_VALUES_COLS],
@@ -268,7 +252,6 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             <PublicValuesChip as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(
             unsafe {
                 std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
@@ -300,12 +283,9 @@ where
             core::array::from_fn(|i| pv[i].into());
         let public_values: &RecursionPublicValues<AB::Expr> = pv_elms.as_slice().borrow();
 
-        // Constrain mem read for the public value element.
         builder.send_single(local_prepr.pv_mem.addr, local.pv_element, local_prepr.pv_mem.mult);
 
         for (i, pv_elm) in public_values.digest.iter().enumerate() {
-            // Ensure that the public value element is the same for all rows within a fri fold
-            // invocation.
             builder.when(local_prepr.pv_idx[i]).assert_eq(pv_elm.clone(), local.pv_element);
         }
     }
@@ -346,7 +326,6 @@ mod tests {
             array::from_fn(|i| i as u32 + addr);
 
         let mut instructions = Vec::new();
-        // Allocate the memory for the public values hash.
 
         for i in 0..RECURSIVE_PROOF_NUM_PV_ELTS {
             let mult = (NUM_PV_ELMS_TO_HASH..NUM_PV_ELMS_TO_HASH + DIGEST_SIZE).contains(&i);

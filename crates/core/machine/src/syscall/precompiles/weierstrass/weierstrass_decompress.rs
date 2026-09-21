@@ -118,7 +118,6 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDecompressChip<E> {
         cols: &mut WeierstrassDecompressCols<F, E::BaseField>,
         x: BigUint,
     ) -> Result<(), CurveError> {
-        // Y = sqrt(x^3 + ax + b)
         cols.range_x.populate(record, &x, &E::BaseField::modulus());
         let x_2 = cols.x_2.populate(record, &x.clone(), &x.clone(), FieldOperation::Mul);
         let x_3 = cols.x_3.populate(record, &x_2, &x, FieldOperation::Mul);
@@ -269,7 +268,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
                 let cols: &mut WeierstrassDecompressCols<F, E::BaseField> =
                     row.as_mut_slice()[0..weierstrass_width].borrow_mut();
 
-                // take X of the generator as a dummy value to make sure Y^2 = X^3 + b holds
                 let dummy_value = E::generator().0;
                 let dummy_bytes = dummy_value.to_bytes_le();
                 let words = bytes_to_words_le_vec(&dummy_bytes);
@@ -377,14 +375,8 @@ where
         let y_limbs: Limbs<AB::Var, <E::BaseField as NumLimbs>::Limbs> =
             limbs_from_access(&local.y_access);
 
-        // Constrain the y value according the sign rule convention.
         match self.sign_rule {
             SignChoiceRule::LeastSignificantBit => {
-                // When the sign rule is LeastSignificantBit, the sign_bit should match the parity
-                // of the result. The parity of the square root result is given by the local.y.lsb
-                // value. Thus, if the sign_bit matches the local.y.lsb value, then the result
-                // should be the square root of the y value. Otherwise, the result should be the
-                // negative square root of the y value.
                 builder
                     .when(local.is_real)
                     .when_ne(local.y.lsb, AB::Expr::ONE - local.sign_bit)
@@ -395,20 +387,12 @@ where
                     .assert_all_eq(local.neg_y.result, y_limbs);
             }
             SignChoiceRule::Lexicographic => {
-                // When the sign rule is Lexicographic, the sign_bit corresponds to whether
-                // the result is greater than or less its negative with respect to the lexicographic
-                // ordering, embedding prime field values as integers.
-                //
-                // In order to enforce these constraints, we will use the auxiliary choice columns.
-
-                // Get the choice columns from the row slice
                 let choice_cols: &LexicographicChoiceCols<AB::Var, E::BaseField> = (*local_slice)
                     [weierstrass_cols
                         ..weierstrass_cols
                             + size_of::<LexicographicChoiceCols<u8, E::BaseField>>()]
                     .borrow();
 
-                // Range check the neg_y value since we are now using a lexicographic comparison.
                 let modulus_limbs = E::BaseField::to_limbs_field_vec(&E::BaseField::modulus());
                 let modulus_limbs =
                     limbs_from_vec::<AB::Expr, <E::BaseField as NumLimbs>::Limbs, AB::F>(
@@ -421,17 +405,13 @@ where
                     local.is_real,
                 );
 
-                // Assert that the flags are booleans.
                 builder.assert_bool(choice_cols.is_y_eq_sqrt_y_result);
                 builder.assert_bool(choice_cols.when_sqrt_y_res_is_lt);
                 builder.assert_bool(choice_cols.when_neg_y_res_is_lt);
 
-                // Assert that the `when` flags are disjoint:
                 builder.when(local.is_real).assert_one(
                     choice_cols.when_sqrt_y_res_is_lt + choice_cols.when_neg_y_res_is_lt,
                 );
-
-                // Assert that the value of `y` matches the claimed value by the flags.
 
                 builder
                     .when(local.is_real)
@@ -443,20 +423,9 @@ where
                     .when_not(choice_cols.is_y_eq_sqrt_y_result)
                     .assert_all_eq(local.neg_y.result, y_limbs);
 
-                // Assert that the comparison only turns on when `is_real` is true.
                 builder.when_not(local.is_real).assert_zero(choice_cols.when_sqrt_y_res_is_lt);
                 builder.when_not(local.is_real).assert_zero(choice_cols.when_neg_y_res_is_lt);
 
-                // Assert that the flags are set correctly. When the sign_bit is true, we want that
-                // `neg_y < y`, and vice versa when the sign_bit is false. Hence, when should have:
-                // - When `sign_bit` is true , then when_sqrt_y_res_is_lt = (y != sqrt(y)).
-                // - When `sign_bit` is false, then when_neg_y_res_is_lt = (y == sqrt(y)).
-                // - When `sign_bit` is true , then when_sqrt_y_res_is_lt = (y != sqrt(y)).
-                // - When `sign_bit` is false, then when_neg_y_res_is_lt = (y == sqrt(y)).
-                //
-                // Since the when less-than flags are disjoint, we can assert that:
-                // - When `sign_bit` is true , then is_y_eq_sqrt_y_result == when_neg_y_res_is_lt.
-                // - When `sign_bit` is false, then is_y_eq_sqrt_y_result == when_sqrt_y_res_is_lt.
                 builder
                     .when(local.is_real)
                     .when(local.sign_bit)
@@ -465,8 +434,6 @@ where
                     choice_cols.is_y_eq_sqrt_y_result,
                     choice_cols.when_sqrt_y_res_is_lt,
                 );
-
-                // Assert the less-than comparisons according to the flags.
 
                 choice_cols.comparison_lt_cols.eval(
                     builder,
@@ -538,31 +505,25 @@ mod tests {
     use zkm_pcs::CpuProver;
     //
     use crate::utils::run_test_io;
-    //
     #[test]
     fn test_weierstrass_bls_decompress() {
         utils::setup_logger();
         let mut rng = thread_rng();
         let mut rand = RAND::new();
-        //
         let len = 100;
         let num_tests = 10;
         let random_slice = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<u8>>();
         rand.seed(len, &random_slice);
-        //
         for _ in 0..num_tests {
             let (_, compressed) = key_pair_generate_g2(&mut rand);
-            //
             let stdin = ZKMStdin::from(&compressed);
             let mut public_values = run_test_io::<CpuProver<_, _>>(
                 Program::from(BLS12381_DECOMPRESS_ELF).unwrap(),
                 stdin,
             )
             .unwrap();
-            //
             let mut result = [0; 96];
             public_values.read_slice(&mut result);
-            //
             let point = deserialize_g1(&compressed).unwrap();
             let x = point.getx().to_string();
             let y = point.gety().to_string();
@@ -570,24 +531,18 @@ mod tests {
             assert_eq!(result, decompressed.as_slice());
         }
     }
-    //
     #[test]
     fn test_weierstrass_k256_decompress() {
         utils::setup_logger();
-        //
         let mut rng = thread_rng();
-        //
         let num_tests = 10;
-        //
         for _ in 0..num_tests {
             let secret_key = k256::SecretKey::random(&mut rng);
             let public_key = secret_key.public_key();
             let encoded = public_key.to_encoded_point(false);
             let decompressed = encoded.as_bytes();
             let compressed = public_key.to_sec1_bytes();
-            //
             let inputs = ZKMStdin::from(&compressed);
-            //
             let mut public_values = run_test_io::<CpuProver<_, _>>(
                 Program::from(SECP256K1_DECOMPRESS_ELF).unwrap(),
                 inputs,
@@ -598,15 +553,11 @@ mod tests {
             assert_eq!(result, decompressed);
         }
     }
-    //
     #[test]
     fn test_weierstrass_p256_decompress() {
         utils::setup_logger();
-        //
         let mut rng = thread_rng();
-        //
         let num_tests = 10;
-        //
         for _ in 0..num_tests {
             let secret_key = p256::SecretKey::random(&mut rng);
             let public_key = secret_key.public_key();
@@ -614,9 +565,7 @@ mod tests {
             let decompressed = encoded.as_bytes();
             let encoded_compressed = public_key.to_encoded_point(true);
             let compressed = encoded_compressed.as_bytes();
-            //
             let inputs = ZKMStdin::from(compressed);
-            //
             let mut public_values = run_test_io::<CpuProver<_, _>>(
                 Program::from(SECP256R1_DECOMPRESS_ELF).unwrap(),
                 inputs,

@@ -63,7 +63,6 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     ) -> Felt<<C as Config>::F> {
         let mut num: Felt<_> = self.eval(C::F::ZERO);
         for (i, bit) in bits.into_iter().enumerate() {
-            // Add `bit * 2^i` to the sum.
             num = self.eval(num + bit * C::F::from_u32(1 << i));
         }
         num
@@ -83,18 +82,9 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             })
             .sum();
 
-        // Range check the bits to be less than the KoalaBear modulus.
-
         assert!(num_bits <= 31, "num_bits must be less than or equal to 31");
 
-        // If there are less than 31 bits, there is nothing to check.
         if num_bits > 30 {
-            // Since KoalaBear modulus is 2^31 - 2^24 + 1, if any of the top `7` bits are zero, the
-            // number is less than 2^24, and we can stop the iteration. Otherwise, if all the top
-            // `7` bits are '1`, we need to check that all the bottom `24` are '0`
-
-            // Get a flag that is zero if any of the top `7` bits are zero, and one otherwise. We
-            // can do this by simply taking their product (which is bitwise AND).
             let are_all_top_bits_one: Felt<_> = self.eval(
                 output
                     .iter()
@@ -105,13 +95,11 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
                     .product::<SymbolicFelt<_>>(),
             );
 
-            // Assert that if all the top `7` bits are one, then all the bottom `24` bits are zero.
             for bit in output.iter().take(24).copied() {
                 self.assert_felt_eq(bit * are_all_top_bits_one, C::F::ZERO);
             }
         }
 
-        // Check that the original number matches the bit decomposition.
         self.assert_felt_eq(x, num);
 
         output
@@ -177,7 +165,6 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     ///
     /// Reference: [p3_symmetric::PaddingFreeSponge]
     fn poseidon2_hash_v2(&mut self, input: &[Felt<C::F>]) -> [Felt<C::F>; DIGEST_SIZE] {
-        // static_assert(RATE < WIDTH)
         let mut state = core::array::from_fn(|_| self.eval(C::F::ZERO));
         for input_chunk in input.chunks(HASH_RATE) {
             state[..input_chunk.len()].copy_from_slice(input_chunk);
@@ -194,15 +181,6 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         &mut self,
         input: impl IntoIterator<Item = Felt<C::F>>,
     ) -> [Felt<C::F>; DIGEST_SIZE] {
-        // debug_assert!(DIGEST_SIZE * N <= WIDTH);
-        //
-        // Materialise the pad ONLY if the input is actually short.  Written as
-        // `chain(repeat(self.eval(..)))` the pad was built eagerly as an
-        // argument on EVERY call and then, for the production shape, never
-        // consumed: two DIGEST_SIZE=8 digests already fill WIDTH=16.  The DSL
-        // builder is imperative with no dead-code pass, so each of those was a
-        // real emitted instruction -- one per Merkle path level, ~37k per
-        // compose child, none of them read.
         let mut collected: Vec<Felt<C::F>> = input.into_iter().take(WIDTH).collect();
         if collected.len() < WIDTH {
             let pad = self.eval(C::F::default());
@@ -230,21 +208,13 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     fn ext2felt_v2(&mut self, ext: Ext<C::F, C::EF>) -> [Felt<C::F>; D] {
         let felts = core::array::from_fn(|_| self.uninit());
         match self.program_type {
-            // Programs proven on the compress machine have the `Ext2Felt`
-            // chip: it receives the input block and sends the limbs from the
-            // SAME trace cells, so the decomposition is sound with no DSL
-            // binding at all (the ~14-op monomial reconstruction below).
             RecursionProgramType::Core
             | RecursionProgramType::Deferred
             | RecursionProgramType::Compress => {
                 self.push_op(DslIr::CircuitV2Ext2Felt(felts, ext));
             }
-            // Shrink/wrap machines are FROZEN without the chip (the wrap
-            // R1CS — and the gnark ceremony — is built over the shrink
-            // proof's structure), so their programs keep the hint + binding.
             RecursionProgramType::Shrink | RecursionProgramType::Wrap => {
                 self.push_op(DslIr::CircuitExt2Felt(felts, ext));
-                // Verify that the decomposed extension element is correct.
                 let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
                 for i in 0..D {
                     let felt = felts[i];
@@ -295,24 +265,6 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             self.assert_felt_eq(limb, C::F::ZERO);
         }
 
-        // The hinted sum is ON THE CURVE.
-        //
-        // Both checkers above carry the factor `(x2 - x1)`, so when
-        // `point1 == point2` they vanish identically and constrain the hinted
-        // `point` not at all — the hint is prover-supplied, so without this the
-        // sum could be ANY septic pair at that coincidence.  The Global AIR
-        // keeps the same identities but does assert its running digests
-        // on-curve; this site did not, which made it the weaker of the two.
-        //
-        //   y^2 = x^3 + 3*zeta*x - 3
-        //
-        // Seven constraints, no new columns and no new hint.
-        //
-        // What this does NOT do is pin the addition at the coincidence: it
-        // confines the hint to the curve, exactly as the AIR does. Requiring
-        // `x2 != x1` here as well needs an inverse WITNESS, i.e. a new hint
-        // threaded through `CircuitV2HintAddCurve` and the recursion runtime,
-        // which is why it is not bundled here.
         let point_on_curve = SepticCurve::convert(point, |x| x.into());
         let curve_formula = SepticCurve::<SymbolicFelt<C::F>>::curve_formula(point_on_curve.x);
         for (lhs, rhs) in point_on_curve.y.square().0.into_iter().zip_eq(curve_formula.0) {

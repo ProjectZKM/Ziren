@@ -160,7 +160,6 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
             <EdAddAssignChip<E> as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ED_ADD_COLS))
     }
 
@@ -212,7 +211,6 @@ impl<E: EllipticCurve + EdwardsParameters> EdAddAssignChip<E> {
         cols: &mut EdAddAssignCols<F>,
         blu: &mut impl ByteRecord,
     ) {
-        // Decode affine points.
         let p = &event.p;
         let q = &event.q;
         let p = AffinePoint::<E>::from_words_le(p);
@@ -220,7 +218,6 @@ impl<E: EllipticCurve + EdwardsParameters> EdAddAssignChip<E> {
         let q = AffinePoint::<E>::from_words_le(q);
         let (q_x, q_y) = (q.x, q.y);
 
-        // Populate basic columns.
         cols.is_real = F::ONE;
         cols.shard = F::from_u32(event.shard);
         cols.clk = F::from_u32(event.clk);
@@ -229,7 +226,6 @@ impl<E: EllipticCurve + EdwardsParameters> EdAddAssignChip<E> {
 
         Self::populate_field_ops(blu, cols, p_x, p_y, q_x, q_y);
 
-        // Populate the memory access columns.
         for i in 0..WORDS_CURVE_POINT {
             cols.q_access[i].populate(event.q_memory_records[i], blu);
         }
@@ -263,13 +259,10 @@ where
         let y2: Limbs<AB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
             limbs_from_prev_access(&local.q_access[8..16]);
 
-        // x3_numerator = x1 * y2 + x2 * y1.
         local.x3_numerator.eval(builder, &[x1, x2], &[y2, y1], local.is_real);
 
-        // y3_numerator = y1 * y2 + x1 * x2.
         local.y3_numerator.eval(builder, &[y1, x1], &[y2, x2], local.is_real);
 
-        // f = x1 * x2 * y1 * y2.
         local.x1_mul_y1.eval(builder, &x1, &y1, FieldOperation::Mul, local.is_real);
         local.x2_mul_y2.eval(builder, &x2, &y2, FieldOperation::Mul, local.is_real);
 
@@ -277,7 +270,6 @@ where
         let x2_mul_y2 = local.x2_mul_y2.result;
         local.f.eval(builder, &x1_mul_y1, &x2_mul_y2, FieldOperation::Mul, local.is_real);
 
-        // d * f.
         let f = local.f.result;
         let d_biguint = E::d_biguint();
         let d_const = E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&d_biguint);
@@ -285,14 +277,10 @@ where
 
         let d_mul_f = local.d_mul_f.result;
 
-        // x3 = x3_numerator / (1 + d * f).
         local.x3_ins.eval(builder, &local.x3_numerator.result, &d_mul_f, true, local.is_real);
 
-        // y3 = y3_numerator / (1 - d * f).
         local.y3_ins.eval(builder, &local.y3_numerator.result, &d_mul_f, false, local.is_real);
 
-        // Constraint self.p_access.value = [self.x3_ins.result, self.y3_ins.result]
-        // This is to ensure that p_access is updated with the new value.
         let p_access_vec = value_as_limbs(&local.p_access);
         builder
             .when(local.is_real)

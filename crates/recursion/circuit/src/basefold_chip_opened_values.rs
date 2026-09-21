@@ -1,8 +1,8 @@
 //! Per-chip opening data for the BaseFold-pipeline shard verifier.
 //!
-//! The legacy [`zkm_pcs::ChipOpenedValues`] was designed for the
-//! 4-batch FRI shape (preprocessed + main + permutation + quotient,
-//! each with `local` + `next` rows).  The BaseFold pipeline:
+//! Unlike [`zkm_pcs::ChipOpenedValues`] (the 4-batch FRI shape:
+//! preprocessed + main + permutation + quotient, each with `local` +
+//! `next` rows), the BaseFold pipeline:
 //!
 //!   - reduces every chip's polynomial to a single hypercube point
 //!     (no `next`-row concept),
@@ -15,9 +15,8 @@
 //!     padded-row mask.
 //!
 //! This module hosts the BaseFold-shape opening type that bundles
-//! exactly those fields, eliminating the parallel-slice plumbing
-//! (`chip_degrees`, `cumulative_sums`, `global_cumulative_sums`)
-//! the prior wiring threaded through the orchestrator.
+//! exactly those fields per chip, instead of parallel slices
+//! (`chip_degrees`, `cumulative_sums`, `global_cumulative_sums`).
 //!
 //! Uses Ziren's recursion-compiler `Felt`/`Ext` types (the
 //! in-circuit variant); the corresponding host-side variant lives
@@ -43,9 +42,8 @@ pub struct JaggedAirOpenedValues<T> {
 
 /// Per-chip opening bundle for the BaseFold pipeline.
 ///
-/// Replaces the legacy [`zkm_pcs::ChipOpenedValues`] for the
-/// in-circuit verifier; the legacy type stays in place for the
-/// 4-batch FRI verifier path until shim retirement deletes it.
+/// The in-circuit verifier's counterpart of [`zkm_pcs::ChipOpenedValues`],
+/// which serves the 4-batch FRI verifier path.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
 #[serde(bound(deserialize = "F: Deserialize<'de>, EF: Deserialize<'de>"))]
@@ -59,9 +57,8 @@ pub struct JaggedChipOpenedValues<F, EF> {
     /// [`crate::zerocheck::full_geq`].
     pub degree: Vec<EF>,
     /// Per-chip local cumulative sum from the LogUp-GKR sumcheck
-    /// output.  In the legacy verifier this was opened from a
-    /// permutation column; the BaseFold pipeline emits it
-    /// directly from the GKR layer's reduced eval.
+    /// output, taken directly from the GKR layer's reduced eval (no
+    /// permutation column).
     pub local_cumulative_sum: EF,
     /// Per-chip global cumulative sum digest.  Same source as
     /// `local_cumulative_sum`.

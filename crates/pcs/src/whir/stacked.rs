@@ -344,7 +344,6 @@ where
         let num_rounds = self.config.round_parameters.len();
         debug_assert_eq!(stack_point.len(), lsh);
 
-        // Per-round per-stripe claims at the stack point (echoed in the proof).
         let _t_pevals = open_timing::Timer::new(&open_timing::PEVALS);
         let batch_evaluations: Vec<Vec<EF>> = if let Some(e) = engine.as_deref_mut() {
             e.stripe_evals(&stack_point)
@@ -360,9 +359,6 @@ where
             }
         }
 
-        // λ batches all stripes of all rounds into one virtual polynomial.
-        // The claim is the same λ-combination of the echoed evaluations; the
-        // materialized `virt` vector is host-mode only (the engine holds it).
         drop(_t_pevals);
         let _t_pinit = open_timing::Timer::new(&open_timing::PINIT);
         let batch_grinding_witness = challenger.grind(self.config.batch_pow_bits);
@@ -391,11 +387,6 @@ where
             Vec::new()
         };
 
-        // ---- WHIR on the virtual polynomial. ----
-        // Starting OOD on `virt`.  An engine carries no starting-OOD path:
-        // the stacked configuration pins `starting_ood_samples = 0` (OOD
-        // rides in round constraints), so the loop below is empty there and
-        // `virt_mle` is never evaluated.
         let n = lsh;
         assert!(
             engine.is_none() || self.config.starting_ood_samples == 0,
@@ -419,9 +410,6 @@ where
             coeff *= batch;
         }
         let mut folder = if let Some(e) = engine.as_deref_mut() {
-            // The engine holds virt + eq(stack_point) device-side; the host
-            // folder starts EMPTY and receives the folded (small) vectors
-            // after the first fold batch.
             e.init(lambda, &stack_point);
             WhirFolder { f_vec: Vec::new(), weight: Vec::new(), claimed_sum }
         } else {
@@ -440,9 +428,6 @@ where
         };
 
         let mut prev_domain_log = (lsh - ff) + self.config.starting_log_inv_rate;
-        // Round 0 queries the STRIPE trees (multi-matrix, base field); later
-        // rounds query the single folded EF codeword, whose tree lives on the
-        // ENGINE (device commit) or the host.
         enum PrevTree<D> {
             Stripes,
             Engine,
@@ -456,10 +441,6 @@ where
         let mut round_query_openings: Vec<MerkleOpening<F, MT>> = Vec::new();
         let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
 
-        // `resident`: the engine holds (f, weight) device-side; the host
-        // folder's vectors are empty until `extract`.  `cur_log`: the
-        // remaining variables (the vectors' log length), tracked here since
-        // the host vectors are absent while resident.
         let mut resident = engine.is_some();
         let mut cur_log = lsh;
 
@@ -472,10 +453,6 @@ where
             });
             let mut this_round_randomness = Vec::new();
             let polys = if resident {
-                // Fold batch on the engine: SAME transcript as
-                // `WhirFolder::fold_variables`, with (c0, c2) and the folds
-                // computed device-side.  Once the engine lets go, the folded
-                // (small) vectors seed the host folder for the later rounds.
                 let e = engine.as_deref_mut().unwrap();
                 let mut out = Vec::with_capacity(round_cfg.folding_factor);
                 for var in 0..round_cfg.folding_factor {
@@ -521,19 +498,9 @@ where
 
             drop(_t_fold);
             let _t_commit = open_timing::Timer::new(&open_timing::COMMITS);
-            // Commit the folded polynomial (single EF poly, interleaved).
-            // Leaf width follows the NEXT round's folding factor - that
-            // round's stir fold consumes one leaf per query.
             let next_ff = self.config.round_parameters[r + 1].folding_factor;
             let rem = cur_log;
             let this_domain_log = (rem - next_ff) + round_cfg.log_inv_rate;
-            // The engine encodes + commits the codeword from its resident
-            // polynomial, or from the vector it handed out at `extract`
-            // (the host commit of the round-1 vector -- an interleaved DFT
-            // plus a 2^10-row Merkle tree at the production stack -- is
-            // host time on the prover's critical path).  A backend
-            // commitment is byte-identical to the host mmcs commit, so the
-            // transcript cannot tell.
             let engine_commit = engine
                 .as_deref_mut()
                 .and_then(|e| e.commit_folded(next_ff, round_cfg.log_inv_rate));
@@ -545,8 +512,6 @@ where
                 }
                 None => {
                     if resident {
-                        // The engine declined the shape: the host commits,
-                        // so it needs the vectors from here on.
                         let e = engine.as_deref_mut().unwrap();
                         let (f, w) = e.extract();
                         folder.f_vec = f;
@@ -573,9 +538,6 @@ where
 
             drop(_t_commit);
             let _t_ood = open_timing::Timer::new(&open_timing::OOD);
-            // Fresh OOD on the folded polynomial (answered by the engine
-            // while it holds the vector: the host `eval_at` on the 2^17
-            // post-round-0 vector was ~9 ms per open).
             let folded = (!resident)
                 .then(|| Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1)));
             let mut ood_points = Vec::with_capacity(round_cfg.ood_samples);
@@ -594,7 +556,6 @@ where
 
             drop(_t_ood);
             let _t_q = open_timing::Timer::new(&open_timing::QUERIES);
-            // Query PoW + indices into the PREVIOUS codeword.
             {
                 let _t_g = open_timing::Timer::new(&open_timing::GRINDQ);
                 folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
@@ -608,16 +569,11 @@ where
             let mut leaves_open = Vec::with_capacity(indices.len());
             let mut stir_points: Vec<Vec<EF>> = Vec::with_capacity(indices.len());
             let mut stir_values = Vec::with_capacity(indices.len());
-            // Round 0 with an engine: fetch every query's openings in ONE
-            // batched call (device gather + path walk over all indices),
-            // then serve the loop from the batch.
             let mut engine_batch: Option<alloc::collections::VecDeque<Vec<LeafOpening<F, MT>>>> =
                 match (&prev_single, engine.as_deref_mut()) {
                     (PrevTree::Stripes, Some(e)) => Some(e.open_queries(&indices).into()),
                     _ => None,
                 };
-            // Round-1-codeword queries against an ENGINE-committed tree:
-            // fetched in one batched call, served from the queue below.
             let mut engine_folded_batch: Option<alloc::collections::VecDeque<LeafOpening<F, MT>>> =
                 match (&prev_single, engine.as_deref_mut()) {
                     (PrevTree::Engine, Some(e)) => Some(e.open_folded_queries(&indices).into()),
@@ -628,18 +584,11 @@ where
             } else {
                 &open_timing::QLATER
             });
-            // PHASE 1 -- fetch each query's leaf openings, IN ORDER.  The
-            // engine serves them from a queue and the host path walks Merkle
-            // trees, so this half is inherently sequential.  It is also the
-            // cheap half: the cost of `qr0` is the combine below.
             let stripes_mode = matches!(prev_single, PrevTree::Stripes);
             let mut per_query: Vec<Vec<LeafOpening<F, MT>>> = Vec::with_capacity(indices.len());
             for &idx in &indices {
                 let opened: Vec<LeafOpening<F, MT>> = match &prev_single {
                     PrevTree::Stripes => {
-                        // Round 0: open every stripe row of every round tree.
-                        // With an engine the openings come off the
-                        // device-resident trees.
                         if let Some(batch) = engine_batch.as_mut() {
                             batch.pop_front().expect("one batch entry per query index")
                         } else {
@@ -673,11 +622,6 @@ where
                 per_query.push(opened);
             }
 
-            // PHASE 2 -- the lambda-combine and the MLE evaluation are pure
-            // field arithmetic over one query's leaves: independent across
-            // queries and touching no `Mmcs`.  Borrowing only `values` keeps
-            // `MT::Proof` out of the parallel walk, so no `Sync` bound has to
-            // be added to the signature.
             let stir_values_new: Vec<EF> = {
                 use p3_maybe_rayon::prelude::*;
                 let value_views: Vec<Vec<&Vec<Vec<F>>>> = per_query
@@ -729,8 +673,6 @@ where
             drop(_t_q);
             let _t_c = open_timing::Timer::new(&open_timing::CONSTRAINTS);
             let round_batch: EF = challenger.sample_algebra_element();
-            // OOD eq-table absorption goes to the backend when one is
-            // present (value-identical); the transcript half stays host.
             let ood_coeffs = folder.ood_coeffs(&ood_answers, round_batch);
             let ood_absorbed = {
                 let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
@@ -744,9 +686,6 @@ where
                 folder.absorb_eq_tables(&ood_points, &ood_coeffs);
             }
             let start_coeff = round_batch.exp_u64((ood_points.len() + 1) as u64);
-            // The weight absorption goes to the backend when one is present
-            // (value-identical - field ops are exact in any order); the
-            // transcript half stays host either way.
             let (mono_coeffs, _) = folder.monomial_coeffs(&stir_values, round_batch, start_coeff);
             let absorbed = {
                 let _t_e = open_timing::Timer::new(&open_timing::CENGINE);
@@ -765,20 +704,7 @@ where
         }
 
         let _t_final = open_timing::Timer::new(&open_timing::FINAL);
-        // Final queries against the last committed codeword (or, when no round
-        // ever commits, the stripe trees).
         let final_poly = folder.f_vec.clone();
-        // The revealed polynomial is transcript-bound BEFORE the final
-        // proof-of-work and the final query indices.
-        //
-        // It is the last oracle, revealed in the clear rather than committed,
-        // and it carries `2^final_log` coefficients of freedom.  Grinding and
-        // sampling first would hand a non-interactive prover every final
-        // position before it had to choose those coefficients, and the final
-        // round would stop being the committed-polynomial query experiment the
-        // soundness count is taken over.  Tampering one coefficient of an
-        // honest proof is rejected either way; that is not the case this
-        // ordering is about.
         for c in final_poly.iter() {
             challenger.observe_algebra_element(*c);
         }
@@ -789,8 +715,6 @@ where
         let final_mask = (1usize << prev_domain_log) - 1;
         let _t_fopen = open_timing::Timer::new(&open_timing::FOPEN);
         let mut final_leaves = Vec::with_capacity(self.config.final_queries);
-        // The indices are drawn up front: no opening feeds the transcript,
-        // so an engine tree is opened in ONE batched call.
         let final_indices: Vec<usize> = (0..self.config.final_queries)
             .map(|_| challenger.sample_bits(prev_domain_log) & final_mask)
             .collect();
@@ -811,9 +735,6 @@ where
                 }
                 PrevTree::Engine => {}
                 PrevTree::Stripes => {
-                    // Single-round shape: the final queries open the stripe
-                    // trees directly.  The engine path pins num_rounds >= 2
-                    // (production shape), so this arm stays host-only.
                     assert!(
                         engine.is_none(),
                         "WhirRound0Engine requires >= 2 rounds (final queries open a folded codeword)"
@@ -912,19 +833,6 @@ where
             return Err(WhirVerifierError::IncorrectShape("final_poly".into()));
         }
 
-        // EXACT cardinalities for every proof vector, before a single challenge
-        // is drawn from any of them.
-        //
-        // Reading these with `get` rejects a SHORT proof but accepts a LONG
-        // one, and a surplus entry is not a harmless alternate encoding: the
-        // final phase used to select `round_commitments.last()` and
-        // `round_query_openings.last()`, while the rounds observe fixed
-        // indices.  One appended commitment therefore changed the root the
-        // final queries authenticate against WITHOUT changing anything the
-        // transcript absorbed — and the final indices are sampled before that
-        // root is checked, so the tree could be built once the positions were
-        // known.  The configuration fixes every one of these counts, so they
-        // are requirements.
         {
             let expect = |what: &'static str, got: usize, want: usize| {
                 if got == want {
@@ -935,17 +843,12 @@ where
                     )))
                 }
             };
-            // One commitment, OOD answer set and sumcheck message list per
-            // NON-final round; the final round's messages ride their own field.
             let non_final = num_rounds - 1;
             expect("round_commitments", whir.round_commitments.len(), non_final)?;
             expect("round_ood_answers", whir.round_ood_answers.len(), non_final)?;
             expect("round_sumcheck_polys", whir.round_sumcheck_polys.len(), non_final)?;
-            // Query openings: one per non-final round, plus the final round's.
             expect("round_query_openings", whir.round_query_openings.len(), num_rounds)?;
             expect("final_sumcheck_polys", whir.final_sumcheck_polys.len(), folds[num_rounds - 1])?;
-            // Folding proof-of-work: one per folded variable across all rounds,
-            // plus one gating each non-final round's query phase.
             expect("folding_pow", whir.folding_pow.len(), folds.iter().sum::<usize>() + non_final)?;
         }
         if proof.batch_evaluations.len() != round_stripe_counts.len()
@@ -959,8 +862,6 @@ where
             }
         }
 
-        // Replay claim batching: the grind sits between the absorbed claims
-        // and the challenge they are combined with.
         for round in &proof.batch_evaluations {
             for &e in round {
                 challenger.observe_algebra_element(e);
@@ -983,15 +884,6 @@ where
             lambda_powers_per_round.push(powers);
         }
 
-        // Starting OOD replay (points re-derived, answers read from... the
-        // prover observed answers it computed; here the answers are carried in
-        // the round-0 slot of the transcript — the stacked prover observes
-        // them, so re-derive by sampling points and reading the observed
-        // answers is impossible without them in the proof.  The stacked WHIR
-        // start OOD answers ride in `whir.round_ood_answers`?  No — they are
-        // BOUND via the constraint system below, so the proof carries them in
-        // the first entry of `start_ood` — see `StackedWhirProof` layout.
-        // For now the start OOD count is zero in the stacked configuration.
         if self.config.starting_ood_samples != 0 {
             return Err(WhirVerifierError::IncorrectShape(
                 "stacked WHIR carries its OOD in round constraints; set starting_ood_samples=0"
@@ -1012,9 +904,6 @@ where
         let mut all_fr: Vec<EF> = Vec::with_capacity(n - final_log);
         let mut pow_flat = 0usize;
         let mut folded_vars = 0usize;
-        // Every vector below is PROOF-SUPPLIED.  Reach them with `get`, never
-        // `[..]`: this is a `Result`-returning verifier and a truncated proof
-        // must be a rejection, not a panic.
         let shape = |what: &'static str| WhirVerifierError::IncorrectShape(what.into());
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
             let msgs: &[SumcheckPoly<EF>] = if r + 1 == num_rounds {
@@ -1061,15 +950,6 @@ where
             );
             let rem = n - folded_vars;
             let ood_answers = whir.round_ood_answers.get(r).ok_or_else(|| shape("round ood"))?;
-            // The OOD sample count is a CONFIG parameter.  Reading it off the
-            // proof's own vector let a proof choose how many out-of-domain
-            // constraints it had to satisfy -- zero of them, in the limit --
-            // and the transcript stayed self-consistent either way, so the
-            // verifier accepted at a soundness level below the advertised
-            // schedule.  The recursive verifier has always pinned this
-            // (`whir_circuit.rs`, `assert_eq!(ood_answers.len(),
-            // round_cfg.ood_samples)`); the native one now agrees, so both
-            // accept the same language.
             if ood_answers.len() != round_cfg.ood_samples {
                 return Err(shape("round ood count"));
             }
@@ -1177,9 +1057,6 @@ where
             prev_round0 = false;
         }
 
-        // Final PoW + final queries, with the revealed polynomial absorbed
-        // first — the prover binds it in the same place, and the length was
-        // pinned to `2^final_log` at entry.
         for c in whir.final_poly.iter() {
             challenger.observe_algebra_element(*c);
         }
@@ -1187,8 +1064,6 @@ where
             return Err(WhirVerifierError::PowMismatch { round: num_rounds, var: usize::MAX });
         }
         let final_mask = (1usize << prev_domain_log) - 1;
-        // The final round's openings are at its own canonical index, not
-        // whatever the vector happens to end with.
         let final_openings = whir
             .round_query_openings
             .get(num_rounds - 1)
@@ -1239,11 +1114,6 @@ where
                 };
                 self.mmcs
                     .verify_batch(
-                        // The last round that committed, at its own index.
-                        // `round_commitments` holds exactly `num_rounds - 1`
-                        // entries (pinned at entry), and this branch runs only
-                        // when a folding round has committed, so the index is
-                        // in range by the same pin that made the count exact.
                         whir.round_commitments
                             .get(num_rounds - 2)
                             .ok_or_else(|| shape("final commitment"))?,
@@ -1268,7 +1138,6 @@ where
             }
         }
 
-        // Terminal identity.
         let final_mle = Mle::from_row_major(RowMajorMatrix::new(whir.final_poly.clone(), 1));
         let mut total = EF::ZERO;
         for c in &constraints {

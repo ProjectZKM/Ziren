@@ -76,7 +76,7 @@ where
 {
     /// Run the folding tower over `mle`, opening the claim `f(point) = eval`.
     ///
-    /// `ef_dft` is the DFT used to re-encode the folded (EF-valued) polynomial
+    /// `ef_dft` is the DFT that re-encodes the folded (EF-valued) polynomial
     /// each round; the starting commit reuses `self.encoder`'s base DFT.
     pub fn prove_rounds<EFDft, Challenger>(
         &self,
@@ -94,11 +94,8 @@ where
         let n = mle.num_variables() as usize;
         debug_assert_eq!(point.len(), n);
 
-        // Phase 1: commit + starting OOD.
         let start = self.commit_with_ood(challenger, Arc::clone(&mle));
 
-        // Batch the starting claim with the starting OOD answers, and build the
-        // batched eq weight, then seat the folder.
         let batch: EF = challenger.sample_algebra_element();
         let mut claimed_sum = eval;
         let mut coeff = batch;
@@ -119,7 +116,6 @@ where
         let mut rounds: Vec<RoundCommitment<F, EF, MT>> = Vec::new();
 
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
-            // (1) Fold this round's variables.
             let polys = folder.fold_variables::<F, _>(
                 round_cfg.folding_factor,
                 &round_cfg.pow_bits,
@@ -128,16 +124,10 @@ where
             );
             round_polys.extend(polys);
 
-            // The final round's folded polynomial is revealed in the clear, so
-            // it is neither re-committed nor OOD-constrained.
             if r + 1 == num_rounds {
                 break;
             }
 
-            // (2) Re-encode the folded polynomial at this round's rate and
-            //     Merkle-commit it.  The folded polynomial is EF-valued, so it
-            //     is encoded by the EF DFT then flattened to base storage and
-            //     committed with the same Merkle scheme as the base codewords.
             let rem = folder.f_vec.len().trailing_zeros() as usize;
             let folded_mle =
                 Arc::new(Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1)));
@@ -151,7 +141,6 @@ where
             let (commitment, prover_data) = self.mmcs.commit(alloc::vec![base_codeword.data]);
             challenger.observe(commitment.clone());
 
-            // (3) Draw fresh OOD on the folded polynomial (over `rem` vars).
             let folded = Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1));
             let mut ood_points: Vec<Vec<EF>> = Vec::with_capacity(round_cfg.ood_samples);
             let mut ood_answers: Vec<EF> = Vec::with_capacity(round_cfg.ood_samples);
@@ -163,7 +152,6 @@ where
                 ood_answers.push(ans);
             }
 
-            // (4) Fold the OOD constraints into the running claim/weight.
             let round_batch: EF = challenger.sample_algebra_element();
             folder.add_ood_constraints(&ood_points, &ood_answers, round_batch);
 

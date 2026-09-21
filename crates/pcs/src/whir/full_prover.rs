@@ -78,11 +78,9 @@ where
         let ff = self.config.round_parameters[0].folding_factor;
         let num_rounds = self.config.round_parameters.len();
 
-        // ---- Starting commitment: encode, pack 2^ff rows/leaf, commit, OOD. ----
         let start_cw = self.encoder.encode_batch(alloc::vec![Arc::clone(&mle)]);
-        // 2^ff rows per leaf over the width-1 base storage.
         let start_values = crate::basefold::fri::take_codeword_values(start_cw);
-        let start_rows = start_values.len(); // width-1 base storage
+        let start_rows = start_values.len();
         let start_leaves = RowMajorMatrix::new(start_values, 1usize << ff);
         let (start_commit, start_data) = self.mmcs.commit(alloc::vec![start_leaves]);
         challenger.observe(start_commit.clone());
@@ -96,7 +94,6 @@ where
             start_ood_answers.push(ans);
         }
 
-        // ---- Seat the folder (starting claim + OOD batched in). ----
         let batch: EF = challenger.sample_algebra_element();
         let mut claimed_sum = eval;
         let mut coeff = batch;
@@ -110,8 +107,6 @@ where
             claimed_sum,
         };
 
-        // The codeword currently open for querying: base-field start codeword,
-        // then each round's EF codeword.  `prev_data` is owned and moved forward.
         let mut prev_domain_log = start_rows.trailing_zeros() as usize;
         let mut prev_base = true;
         let mut prev_data = start_data;
@@ -123,7 +118,6 @@ where
         let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
 
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
-            // (1) Fold this round's variables (sumcheck + PoW).
             let mut this_round_randomness = Vec::new();
             let polys = folder.fold_variables::<F, _>(
                 round_cfg.folding_factor,
@@ -140,7 +134,6 @@ where
                 break;
             }
 
-            // (2) Re-encode the folded polynomial, pack 2^ff rows/leaf, commit.
             let folded_mle =
                 Arc::new(Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1)));
             let ef_encoder = DftEncoder::new(
@@ -156,7 +149,6 @@ where
             challenger.observe(commitment.clone());
             round_commitments.push(commitment);
 
-            // (3) Fresh OOD on the folded polynomial.
             let rem = folder.f_vec.len().trailing_zeros() as usize;
             let folded = Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1));
             let mut ood_points = Vec::with_capacity(round_cfg.ood_samples);
@@ -170,18 +162,16 @@ where
             }
             round_ood_answers.push(ood_answers.clone());
 
-            // (4) Query PoW, then sample query indices into the PREVIOUS codeword.
             folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
             let mask = (1usize << prev_domain_log) - 1;
             let indices: Vec<usize> = (0..round_cfg.num_queries)
                 .map(|_| challenger.sample_bits(prev_domain_log) & mask)
                 .collect();
 
-            // (5) Open the previous codeword at those indices; fold each coset.
             let mut leaves_open = Vec::with_capacity(indices.len());
             let mut stir_values = Vec::with_capacity(indices.len());
             for &idx in &indices {
-                let leaf_idx = idx >> ff; // 2^ff rows per leaf
+                let leaf_idx = idx >> ff;
                 let opening = self.mmcs.open_batch(leaf_idx, &prev_data);
                 let leaf = &opening.opened_values[0];
                 stir_values.push(coset_stir_value::<F, EF>(
@@ -197,9 +187,6 @@ where
             }
             round_query_openings.push(MerkleOpening { leaves: leaves_open });
 
-            // (6) Fold OOD + stir constraints into the running claim (the stir
-            //     points enter the weight in phase 3; here we accumulate the
-            //     claim so the batching work is timed).
             let round_batch: EF = challenger.sample_algebra_element();
             folder.add_ood_constraints(&ood_points, &ood_answers, round_batch);
             let mut c = round_batch;
@@ -208,13 +195,11 @@ where
                 c *= round_batch;
             }
 
-            // Advance the "previous codeword" pointers.
             prev_domain_log = rem + round_cfg.log_inv_rate;
             prev_base = false;
             prev_data = prover_data;
         }
 
-        // ---- Final round: reveal the final poly, final PoW + final queries. ----
         let final_poly = folder.f_vec.clone();
         let final_pow = ProofOfWork(challenger.grind(self.config.final_pow_bits));
         let final_mask = (1usize << prev_domain_log) - 1;

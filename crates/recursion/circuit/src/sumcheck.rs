@@ -82,25 +82,15 @@ pub fn verify_sumcheck_with_order<C, FC>(
         "sumcheck round count must match point dimension"
     );
 
-    // Round 0: verify the initial soundness claim
-    // `p_0(0) + p_0(1) == claimed_sum`.
     let first_poly = &proof.univariate_polys[0];
     let first_poly_symbolic = lift_to_symbolic::<C>(first_poly);
     builder.assert_ext_eq(first_poly_symbolic.eval_one_plus_eval_zero(), proof.claimed_sum);
 
-    // Observe round-0 coefficients into the transcript so the
-    // verifier's α_0 sample matches the prover's.
     observe_poly_coeffs::<C, FC>(builder, challenger, first_poly);
 
     let mut accumulated_point: Vec<Ext<C::F, C::EF>> = Vec::with_capacity(num_variables);
     let mut previous_poly = first_poly_symbolic;
 
-    // Rounds 1 .. n-1.
-    //
-    // Sumcheck convention: the prover runs an MSB fold
-    // and `insert(0, α)`s each freshly-sampled challenge at the front
-    // of `reduced_point`.  We mirror the prover here so the per-coord
-    // equality check below (verifier α[i] == prover point[i]) holds.
     for round_poly in proof.univariate_polys.iter().skip(1) {
         let alpha = challenger.sample_ext(builder);
         match point_order {
@@ -111,18 +101,12 @@ pub fn verify_sumcheck_with_order<C, FC>(
         let round_poly_symbolic = lift_to_symbolic::<C>(round_poly);
         let expected_eval = previous_poly.eval_at_point(alpha.into());
 
-        // Per-round soundness identity:
-        //   p_i(0) + p_i(1) = p_{i-1}(α_{i-1}).
         builder.assert_ext_eq(expected_eval, round_poly_symbolic.eval_one_plus_eval_zero());
 
         observe_poly_coeffs::<C, FC>(builder, challenger, round_poly);
         previous_poly = round_poly_symbolic;
     }
 
-    // Final round: sample the last α, accumulate (insert-at-front),
-    // then close the transcript by checking that the verifier's
-    // challenge point matches the prover's claimed point and that
-    // p_{n-1}(α_n) == point_and_eval.1.
     let alpha = challenger.sample_ext(builder);
     match point_order {
         PointOrder::Reversed => accumulated_point.insert(0, alpha),
@@ -132,7 +116,7 @@ pub fn verify_sumcheck_with_order<C, FC>(
     for (i, (verifier_alpha, prover_point_coord)) in
         accumulated_point.iter().zip(proof.point_and_eval.0.iter()).enumerate()
     {
-        let _ = i; // silence unused in release; kept for IDE inspection
+        let _ = i;
         builder.assert_ext_eq(*verifier_alpha, *prover_point_coord);
     }
 

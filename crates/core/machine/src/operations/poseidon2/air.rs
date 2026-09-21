@@ -64,7 +64,6 @@ pub fn external_linear_layer<AF: PrimeCharacteristicRing + Copy>(
 pub fn internal_linear_layer_mut<F: PrimeCharacteristicRing>(state: &mut [F; WIDTH]) {
     let matmul_constants: [F; WIDTH] =
         core::array::from_fn(|i| F::from_u32(INTERNAL_DIAG_MONTY_16[i].as_canonical_u32()));
-    // Implement matmul_internal inline: (1 + diag(v))state
     let sum: F = state.iter().cloned().sum();
     for i in 0..WIDTH {
         state[i] *= matmul_constants[i].clone();
@@ -80,18 +79,14 @@ where
     let mut local_state: [AB::Expr; WIDTH] =
         array::from_fn(|i| local_row.external_rounds_state()[r][i].into());
 
-    // For the first round, apply the linear layer.
     if r == 0 {
         external_linear_layer_mut(&mut local_state);
     }
 
-    // Add the round constants.
     let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
     let add_rc: [AB::Expr; WIDTH] =
         array::from_fn(|i| local_state[i].clone() + AB::F::from_u32(RC_16_30_U32[round][i]));
 
-    // Apply the sboxes.
-    // See `populate_external_round` for why we don't have columns for the sbox output here.
     let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
     for i in 0..WIDTH {
         let calculated_sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
@@ -104,7 +99,6 @@ where
         }
     }
 
-    // Apply the linear layer.
     let mut state = sbox_deg_3;
     external_linear_layer_mut(&mut state);
 
@@ -130,7 +124,6 @@ where
     let s0 = local_row.internal_rounds_s0();
     let mut state: [AB::Expr; WIDTH] = core::array::from_fn(|i| state[i].into());
     for r in 0..NUM_INTERNAL_ROUNDS {
-        // Add the round constant.
         let round = r + NUM_EXTERNAL_ROUNDS / 2;
         let add_rc = if r == 0 { state[0].clone() } else { s0[r - 1].into() }
             + AB::Expr::from_u32(RC_16_30_U32[round][0]);
@@ -141,8 +134,6 @@ where
             sbox_deg_3 = internal_sbox[r].into();
         }
 
-        // Apply the linear layer.
-        // See `populate_internal_rounds` for why we don't have columns for the new state here.
         state[0] = sbox_deg_3.clone();
         internal_linear_layer_mut(&mut state);
 

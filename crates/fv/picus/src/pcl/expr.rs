@@ -54,7 +54,6 @@ pub type Felt = p3_koala_bear::KoalaBear;
 
 /// Sets the field modulus for PCL
 pub fn set_field_modulus(p: u64) -> Result<(), u64> {
-    // set only once; returns Err(p) if already set
     FIELD_MODULUS.set(Arc::new(p)).map_err(|arc| Arc::try_unwrap(arc).unwrap_or_else(|a| *a))
 }
 

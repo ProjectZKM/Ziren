@@ -32,9 +32,6 @@ fn setup_logger_with_default(default: &'static str, to_stderr: bool) {
             .add_directive("p3_challenger=off".parse().unwrap())
             .add_directive("zkm_cuda=off".parse().unwrap());
 
-        // if the RUST_LOGGER environment variable is set, use it to determine which logger to
-        // configure (tracing_forest or tracing_subscriber)
-        // otherwise, default to 'forest'
         let logger_type = std::env::var("RUST_LOGGER").unwrap_or_else(|_| "flat".to_string());
         match logger_type.as_str() {
             "forest" => {

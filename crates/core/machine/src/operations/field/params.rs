@@ -181,15 +181,11 @@ mod tests {
 
     #[test]
     fn test_modulus() {
-        // Convert the MODULUS array to BigUint
         let array_modulus = BigUint::from_bytes_le(Ed25519BaseField::MODULUS);
 
-        // Get the modulus from the function
         let func_modulus = Ed25519BaseField::modulus();
 
-        // println!("array_modulus: {:?}", func_modulus.to_bytes_le());
 
-        // Assert equality
         assert_eq!(
             array_modulus, func_modulus,
             "MODULUS array does not match the modulus() function output."

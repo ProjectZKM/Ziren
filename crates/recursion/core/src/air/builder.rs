@@ -97,12 +97,9 @@ pub trait RecursionMemoryAirBuilder: RecursionLookupAirBuilder {
         mem_access: &impl MemoryAccessTimestampCols<E>,
         is_real: impl Into<Self::Expr> + Clone,
     ) {
-        // We subtract one since a diff of zero is not valid.
         let diff_minus_one: Self::Expr =
             timestamp.into() - mem_access.prev_timestamp().clone().into() - Self::Expr::ONE;
 
-        // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb
-        // + mem_access.ts_diff_12bit_limb * 2^16.
         self.eval_range_check_28bits(
             diff_minus_one,
             mem_access.diff_16bit_limb().clone(),
@@ -124,13 +121,11 @@ pub trait RecursionMemoryAirBuilder: RecursionLookupAirBuilder {
         limb_12: impl Into<Self::Expr> + Clone,
         is_real: impl Into<Self::Expr> + Clone,
     ) {
-        // Verify that value = limb_16 + limb_12 * 2^16.
         self.when(is_real.clone()).assert_eq(
             value,
             limb_16.clone().into() + limb_12.clone().into() * Self::Expr::from_u32(1 << 16),
         );
 
-        // Send the range checks for the limbs.
         self.send_range_check(
             Self::Expr::from_u8(RangeCheckOpcode::U16 as u8),
             limb_16,

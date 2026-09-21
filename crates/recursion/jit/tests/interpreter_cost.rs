@@ -43,14 +43,11 @@ fn homogeneous(n: usize, kind: &str) -> RecursionProgram<F> {
         .map(|(i, s)| instr::mem(MemAccessKind::Write, 1, i as u32, *s))
         .collect();
 
-    // One fresh destination address per generated instruction.
     let first_out = SEEDS.len() as u32;
     let mut s: u64 = 0x9e37_79b9_7f4a_7c15;
     for next in first_out..first_out + n as u32 {
         s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         let a = ((s >> 33) as u32) % next;
-        // Never divide by a live cell: a zero divisor makes the interpreter
-        // error out, and this measures cost, not semantics.
         let b = ((s >> 45) as u32) % SEEDS.len() as u32;
         let one = |op| {
             Instruction::BaseAlu(BaseAluInstr {
@@ -94,9 +91,6 @@ fn per_opcode_interpreter_cost() {
     const N: usize = 400_000;
     let perm = SC::new().perm;
 
-    // One discarded pass before the table: the first kind measured otherwise
-    // absorbs allocator warm-up and first-touch of the record, which showed up
-    // as BaseAlu/Add costing 72 ns against Sub's 48 for identical work.
     {
         let p = Arc::new(homogeneous(N, "BaseAlu/Add"));
         let mut r = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(p, perm.clone());
@@ -114,8 +108,6 @@ fn per_opcode_interpreter_cost() {
         "ExtAlu/Div",
     ] {
         let program = Arc::new(homogeneous(N, kind));
-        // Best of three: the walk allocates its record up front, so a single
-        // run mixes allocation and first-touch into the number.
         let mut best = f64::MAX;
         for _ in 0..3 {
             let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
@@ -146,7 +138,6 @@ fn where_the_division_cost_is() {
         xs.push(F::from_u32(((s >> 33) as u32) % 0x7f00_0001));
     }
 
-    // Multiplication, as the baseline the inverse is measured against.
     let t = std::time::Instant::now();
     let mut acc = F::ONE;
     for x in &xs {
@@ -189,7 +180,6 @@ fn a_specialized_quartic_multiply_against_the_generic_one() {
     const W: u32 = 3;
     const N: usize = 1_000_000;
 
-    // x * 3, as an add chain rather than a Montgomery multiply.
     #[inline(always)]
     fn w3(x: F) -> F {
         x + x + x
@@ -212,7 +202,6 @@ fn a_specialized_quartic_multiply_against_the_generic_one() {
     };
     let xs: Vec<[F; 4]> = (0..N).map(|_| [rnd(), rnd(), rnd(), rnd()]).collect();
 
-    // Equal on every input, first — a faster wrong multiply is worthless.
     for w in xs.windows(2).take(10_000) {
         let (a, b) = (w[0], w[1]);
         let want = E::from_basis_coefficients_slice(&a).unwrap()

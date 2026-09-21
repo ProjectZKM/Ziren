@@ -43,12 +43,10 @@ impl<F: Field> FixedShiftRightOperation<F> {
         let input_bytes = input.to_le_bytes().map(F::from_u8);
         let expected = input >> rotation;
 
-        // Compute some constants with respect to the rotation needed for the rotation.
         let nb_bytes_to_shift = Self::nb_bytes_to_shift(rotation);
         let nb_bits_to_shift = Self::nb_bits_to_shift(rotation);
         let carry_multiplier = F::from_u32(Self::carry_multiplier(rotation));
 
-        // Perform the byte shift.
         let mut word = [F::ZERO; WORD_SIZE];
         for i in 0..WORD_SIZE {
             if i + nb_bytes_to_shift < WORD_SIZE {
@@ -57,8 +55,6 @@ impl<F: Field> FixedShiftRightOperation<F> {
         }
         let input_bytes_rotated = Word(word);
 
-        // For each byte, calculate the shift and carry. If it's not the first byte, calculate the
-        // new byte value using the current shifted byte and the last carry.
         let mut first_shift = F::ZERO;
         let mut last_carry = F::ZERO;
         for i in (0..WORD_SIZE).rev() {
@@ -81,10 +77,8 @@ impl<F: Field> FixedShiftRightOperation<F> {
             last_carry = self.carry[i];
         }
 
-        // For the first byte, we don't move over the carry as this is a shift, not a rotate.
         self.value[WORD_SIZE - 1] = first_shift;
 
-        // Assert the answer is correct.
         assert_eq!(self.value.to_u32(), expected);
 
         expected
@@ -97,12 +91,10 @@ impl<F: Field> FixedShiftRightOperation<F> {
         cols: FixedShiftRightOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
-        // Compute some constants with respect to the rotation needed for the rotation.
         let nb_bytes_to_shift = Self::nb_bytes_to_shift(rotation);
         let nb_bits_to_shift = Self::nb_bits_to_shift(rotation);
         let carry_multiplier = AB::F::from_u32(Self::carry_multiplier(rotation));
 
-        // Perform the byte shift.
         let input_bytes_rotated = Word(std::array::from_fn(|i| {
             if i + nb_bytes_to_shift < WORD_SIZE {
                 input[(i + nb_bytes_to_shift) % WORD_SIZE].into()
@@ -111,8 +103,6 @@ impl<F: Field> FixedShiftRightOperation<F> {
             }
         }));
 
-        // For each byte, calculate the shift and carry. If it's not the first byte, calculate the
-        // new byte value using the current shifted byte and the last carry.
         let mut first_shift = AB::Expr::ZERO;
         let mut last_carry = AB::Expr::ZERO;
         for i in (0..WORD_SIZE).rev() {
@@ -134,7 +124,6 @@ impl<F: Field> FixedShiftRightOperation<F> {
             last_carry = cols.carry[i].into();
         }
 
-        // For the first byte, we don't move over the carry as this is a shift, not a rotate.
         builder.assert_eq(cols.value[WORD_SIZE - 1], first_shift);
     }
 }

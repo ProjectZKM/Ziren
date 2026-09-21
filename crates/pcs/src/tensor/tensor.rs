@@ -8,8 +8,7 @@
 //! they read only the [`Dimensions`].  The *data* accessors
 //! (`as_slice`, `into_buffer`, `to_row_major_matrix`, `From<RowMajorMatrix>`)
 //! are CPU-only and zero-copy, so `Tensor<T, CpuBackend>` is a
-//! byte-identical, allocation-neutral stand-in for the `RowMajorMatrix`
-//! that `Mle` used to hold directly.
+//! byte-identical, allocation-neutral stand-in for a `RowMajorMatrix`.
 
 use alloc::vec::Vec;
 
@@ -74,9 +73,8 @@ impl<T, A: Backend> Tensor<T, A> {
     /// initialized tensor (`len == rows * cols`).
     ///
     /// `T: Zeroable` because this declares the zeroed bytes to be initialized
-    /// values: the bound is the promise that the all-zero pattern IS a `T`.
-    /// Without it the call produced arbitrary invalid values for any type with
-    /// a niche at zero.
+    /// values: the bound promises that the all-zero pattern is a `T`, which is
+    /// exactly `write_bytes`'s precondition, so the `unsafe` zeroing is sound.
     ///
     /// # Panics
     ///
@@ -89,8 +87,6 @@ impl<T, A: Backend> Tensor<T, A> {
     {
         let mut tensor = Self::with_sizes_in(sizes, allocator);
         let bytes = tensor.dimensions.total_len() * core::mem::size_of::<T>();
-        // SAFETY: `T: Zeroable` is exactly `write_bytes`'s precondition for the
-        // zero pattern.
         unsafe { tensor.storage.write_bytes(0, bytes) }.unwrap();
         tensor
     }

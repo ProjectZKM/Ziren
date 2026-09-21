@@ -58,7 +58,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
         let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
 
-        // Compute the vanishing polynomial.
         let vanishing_poly = if sign {
             &p_b * &p_result + &p_result - &p_a - &p_carry * &p_p
         } else {
@@ -77,7 +76,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
         self.carry = p_carry.into();
         self.witness = Limbs(p_witness.try_into().unwrap());
 
-        // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
         record.add_u16_range_checks_field(&self.witness.0);
@@ -106,10 +104,6 @@ where
         let p_result: Polynomial<<AB as AirBuilder>::Expr> = self.result.into();
         let p_carry: Polynomial<<AB as AirBuilder>::Expr> = self.carry.into();
 
-        // Compute the vanishing polynomial:
-        //      lhs(x) = sign * (b(x) * result(x) + result(x)) + (1 - sign) * (b(x) * result(x) +
-        // a(x))      rhs(x) = sign * a(x) + (1 - sign) * result(x)
-        //      lhs(x) - rhs(x) - carry(x) * p(x)
         let p_equation_lhs =
             if sign { &p_b * &p_result + &p_result } else { &p_b * &p_result + &p_a };
         let p_equation_rhs = if sign { p_a } else { p_result };
@@ -125,7 +119,6 @@ where
 
         eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness);
 
-        // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
         builder.slice_range_check_u16(&self.witness.0, is_real);
@@ -208,15 +201,12 @@ mod tests {
                     (a, b)
                 })
                 .collect();
-            // Hardcoded edge cases.
             operands.extend(vec![
                 (BigUint::from(0u32), BigUint::from(0u32)),
                 (BigUint::from(1u32), BigUint::from(2u32)),
                 (BigUint::from(4u32), BigUint::from(5u32)),
                 (BigUint::from(10u32), BigUint::from(19u32)),
             ]);
-            // It is important that the number of rows is an exact power of 2,
-            // otherwise the padding will not work correctly.
             assert_eq!(operands.len(), num_rows);
 
             let rows = operands
@@ -230,9 +220,6 @@ mod tests {
                     row
                 })
                 .collect::<Vec<_>>();
-            // Convert the trace to a row major matrix.
-
-            // Note we do not pad the trace here because we cannot just pad with all 0s.
 
             Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_TEST_COLS))
         }
@@ -280,9 +267,6 @@ mod tests {
         let chip: FieldDenChip<Ed25519BaseField> = FieldDenChip::new(true);
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
-        // This it to test that the proof DOESN'T work if messed up.
-        // let row = trace.row_mut(0);
-        // row[0] = KoalaBear::from_u8(0);
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();

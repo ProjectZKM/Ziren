@@ -84,7 +84,6 @@ impl<F: PrimeField32> ShiftRightOperation<F> {
         let num_bytes_to_shift = (c as usize % 32) / BYTE_SIZE;
         let num_bits_to_shift = c as usize % BYTE_SIZE;
 
-        // Byte shifting.
         let mut byte_shift_result = [0u8; LONG_WORD_SIZE];
         for i in 0..WORD_SIZE {
             self.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
@@ -101,7 +100,6 @@ impl<F: PrimeField32> ShiftRightOperation<F> {
         }
         self.byte_shift_result = byte_shift_result.map(F::from_u8);
 
-        // Bit shifting.
         for i in 0..BYTE_SIZE {
             self.shift_by_n_bits[i] = F::from_bool(num_bits_to_shift == i);
         }
@@ -154,7 +152,6 @@ impl<F: Field> ShiftRightOperation<F> {
         let zero: AB::Expr = AB::Expr::ZERO;
         let one: AB::Expr = AB::Expr::ONE;
 
-        // `b_msb` is the MSB of `b`, via lookup.
         builder.send_byte(
             AB::F::from_u32(ByteOpcode::MSB as u32),
             cols.b_msb,
@@ -163,15 +160,12 @@ impl<F: Field> ShiftRightOperation<F> {
             is_real.clone(),
         );
 
-        // Decompose the shift amount from `c[0]`.
         {
             let mut c_byte_sum = zero.clone();
             for i in 0..BYTE_SIZE {
                 let val: AB::Expr = AB::F::from_u32(1 << i).into();
                 c_byte_sum = c_byte_sum.clone() + val * cols.c_least_sig_byte[i];
             }
-            // Gated: the caller's `c` expression is only meaningful on live
-            // rows (it may be nonzero while the gadget is off).
             builder.when(is_real.clone()).assert_eq(c_byte_sum, c[0].clone());
 
             let mut num_bits_to_shift = zero.clone();
@@ -202,8 +196,6 @@ impl<F: Field> ShiftRightOperation<F> {
             );
         }
 
-        // Byte shift the extended `b`: leading bytes are 0xff·b_msb for SRA,
-        // a copy of `b` for ROR, zero for SRL.
         {
             let mut extended_b: Vec<AB::Expr> = vec![];
             for i in 0..WORD_SIZE {
@@ -224,7 +216,6 @@ impl<F: Field> ShiftRightOperation<F> {
             }
         }
 
-        // Bit shift the byte-shift result through the ShrCarry byte table.
         {
             let mut carry_multiplier = AB::Expr::from_u8(0);
             for i in 0..BYTE_SIZE {
@@ -256,7 +247,6 @@ impl<F: Field> ShiftRightOperation<F> {
             }
         }
 
-        // Booleans.
         {
             builder.assert_bool(cols.b_msb);
             for flag in cols.shift_by_n_bytes.iter() {
@@ -270,7 +260,6 @@ impl<F: Field> ShiftRightOperation<F> {
             }
         }
 
-        // Range check bytes.
         {
             let long_words = [
                 cols.byte_shift_result,

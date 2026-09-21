@@ -92,7 +92,6 @@ where
             )));
         }
 
-        // ---- Replay the starting commit + OOD (commit_with_ood order). ----
         challenger.observe(proof.starting.commitment[0].clone());
         for (k, ans) in proof.starting.ood_answers.iter().enumerate() {
             let pt: Vec<EF> = (0..n).map(|_| challenger.sample_algebra_element()).collect();
@@ -103,7 +102,6 @@ where
         }
         let batch: EF = challenger.sample_algebra_element();
 
-        // Running claim, and the constraint accumulator (point, coeff, v-vars).
         let mut claim = eval;
         let mut constraints: Vec<(Vec<EF>, EF, usize)> = alloc::vec![(point.to_vec(), EF::ONE, n)];
         let mut coeff = batch;
@@ -113,7 +111,6 @@ where
             coeff *= batch;
         }
 
-        // ---- Per-round sumcheck + OOD replay. ----
         let mut flat = 0usize;
         let mut all_fr: Vec<EF> = Vec::with_capacity(n - final_log);
         let mut folded_vars = 0usize;
@@ -126,7 +123,6 @@ where
                     return Err(WhirVerifierError::IncorrectShape("degree-2 message".into()));
                 }
                 let (c0, c1, c2) = (c[0], c[1], c[2]);
-                // g(0) + g(1) == claim.
                 if c0 + (c0 + c1 + c2) != claim {
                     return Err(WhirVerifierError::SumcheckMismatch { round: r, var });
                 }
@@ -148,7 +144,6 @@ where
                 break;
             }
 
-            // Round commitment + OOD (the tower does NOT commit the last round).
             let round = &proof.rounds[r];
             challenger.observe(round.parsed.commitment[0].clone());
             let rem = n - folded_vars;
@@ -171,7 +166,6 @@ where
             return Err(WhirVerifierError::IncorrectShape("leftover sumcheck messages".into()));
         }
 
-        // ---- Terminal identity. ----
         let final_mle =
             Mle::from_row_major(p3_matrix::dense::RowMajorMatrix::new(proof.final_poly.clone(), 1));
         let mut total = EF::ZERO;

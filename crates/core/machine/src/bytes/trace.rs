@@ -39,7 +39,6 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip<F> {
         _input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> Result<(), Self::Error> {
-        // Do nothing since this chip has no dependencies.
         Ok(())
     }
 
@@ -52,7 +51,6 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip<F> {
             RowMajorMatrix::new(zeroed_f_vec(NUM_BYTE_MULT_COLS * NUM_ROWS), NUM_BYTE_MULT_COLS);
 
         for (lookup, mult) in input.byte_lookups.iter() {
-            // Range lookups are served by the dedicated `RangeChip`.
             if lookup.opcode == ByteOpcode::Range {
                 continue;
             }

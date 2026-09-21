@@ -142,16 +142,6 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
 
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
-        // Aggregate per chunk into a COUNTING map, exactly like every other
-        // chip in this machine.  `U16Range(message[0])` collapses to a couple
-        // of dozen distinct keys per shard (`message[0]` is a shard index).
-        //
-        // The three range-check lookups of the digest columns (`y6_lo16`,
-        // `y6_mid8`+`offset`, `LTU(y6_top, 63)`) need the lifted point.  On the
-        // host path the rows are computed here ONCE (parallel), published in
-        // `global_digests` for `generate_trace`, and counted; on the device path
-        // (`global_byte_lookups_on_device()`) the GPU trace generator derives
-        // and publishes those multiplicities itself.
         let digests = if global_byte_lookups_on_device() {
             None
         } else {
@@ -214,7 +204,6 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
 
         let nb_rows = events.len();
         let padded_nb_rows = <GlobalChip as MachineAir<F>>::num_rows(self, input).unwrap();
-        // One `lift_x` per event: reuse the rows the dependency pass published.
         let digests = input
             .global_digests
             .get(nb_rows)
@@ -242,9 +231,6 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                     cols.kind = F::from_u8(event.kind);
                     cols.lookup.populate_from_row(&digests[idx]);
                     cols.is_real = F::ONE;
-                    // Option 2: running index for the GlobalAccumulation
-                    // bus chain (real rows are placed contiguously at
-                    // rows 0..nb_rows, so `idx` is the chain position).
                     cols.index = F::from_u32(idx as u32);
                     if event.is_receive {
                         cols.is_receive = F::ONE;
@@ -267,14 +253,6 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
             .scan(|a, b| *a + *b, SepticCurveComplete::Infinity)
             .collect::<Vec<SepticCurveComplete<F>>>();
 
-        // Publish the digest this scan just produced instead of making
-        // `public_values()` re-fold every event from scratch.  `points` is the
-        // `SepticDigest::zero()` offset followed by one point per event, so the
-        // last element of the inclusive scan IS
-        // `compute_global_cumulative_sum(events)`.  With no events the scan is
-        // empty and the digest is the bare offset — note this differs from
-        // `final_digest` below, which deliberately uses `dummy()` for the AIR's
-        // padding rows.
         input.global_cumulative_sum.publish(
             nb_rows,
             SepticDigest(SepticCurve::convert(
@@ -285,18 +263,6 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                 |x: F| x.as_canonical_u32(),
             )),
         );
-        // Padding rows carry the shard digest in their trailing columns (see
-        // `GlobalAccumulationOperation::populate_dummy`).
-        //
-        // With NO events the shard's cumulative sum is the offset point `D`
-        // itself — the scan never runs, so there is nothing to read from it.
-        // This used to fall back to `dummy()`, which made `populate_dummy`
-        // compute `dummy + (-dummy)`: an exceptional addition whose denominator
-        // `x2 - x1` is zero, so `add_incomplete` inverted zero and panicked. Any
-        // shard with no global interactions could therefore not generate this
-        // trace at all (it is reachable from a unit test that skips the
-        // dependency pass, and it panicked there).  `D` is also the right value
-        // on its own terms: it is what a zero cumulative sum is represented by.
         let final_digest = match cumulative_sum.last() {
             Some(digest) => digest.point(),
             None => SepticDigest::<F>::zero().0,
@@ -309,9 +275,6 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                     let idx = i * chunk_size + j;
                     let cols: &mut GlobalCols<F> = row.borrow_mut();
                     if idx < nb_rows {
-                        // The row's event point x — the chord's `x2` — for the
-                        // denominator witness (x2 - x1)^{-1}.  `cols.lookup` was filled
-                        // for every real row in the pass above.
                         let point_to_add_x =
                             zkm_pcs::septic_extension::SepticExtension(cols.lookup.x_coordinate.0);
                         cols.accumulation
@@ -351,14 +314,6 @@ where
         let local = main.current_slice();
         let local: &GlobalCols<AB::Var> = (*local).borrow();
 
-        // Receive the arguments, which consists of 7 message columns, `is_send`, `is_receive`, and `kind`.
-        // In MemoryGlobal, MemoryLocal, Syscall chips, `is_send`, `is_receive`, `kind` are sent with correct constant values.
-        // For a global send lookup, `is_send = 1` and `is_receive = 0` are used.
-        // For a global receive lookup, `is_send = 0` and `is_receive = 1` are used.
-        // For a memory global lookup, `kind = LookupKind::Memory` is used.
-        // For a syscall global lookup, `kind = LookupKind::Syscall` is used.
-        // Therefore, `is_send`, `is_receive` are already known to be boolean, and `kind` is also known to be a `u8` value.
-        // Note that `local.is_real` is constrained to be boolean in `eval_single_digest`.
         builder.receive(
             AirLookup::new(
                 vec![
@@ -379,7 +334,6 @@ where
             LookupScope::Local,
         );
 
-        // Evaluate the lookup.
         GlobalLookupOperation::<AB::F>::eval_single_digest(
             builder,
             local.message.map(Into::into),
@@ -390,7 +344,6 @@ where
             local.kind,
         );
 
-        // Evaluate the local (is_real-gated) curve accumulation.
         GlobalAccumulationOperation::<AB::F, 1>::eval_accumulation(
             builder,
             [local.lookup],
@@ -398,16 +351,6 @@ where
             local.accumulation,
         );
 
-        // Option 2 GlobalAccumulation bus: chain the running digest via a
-        // multiset-balanced control interaction instead of the legacy
-        // when_transition `final_digest == next.initial_digest`.  Each
-        // real row RECEIVEs (index, initial_digest) and SENDs (index+1,
-        // cumulative_sum); the public-values AIR (`eval_global_sum`)
-        // closes the chain at both ends — initial `(0, ZERO_DIGEST)`
-        // (matched to row 0's initial_digest) and final `(global_count,
-        // global_cumulative_sum)` (matched to the last real row's
-        // cumulative_sum).  Multiplicity is `is_real`, so the chain spans
-        // exactly the real rows and `global_count` equals the real count.
         let mut recv_vals: Vec<AB::Expr> = Vec::with_capacity(15);
         recv_vals.push(local.index.into());
         for i in 0..7 {

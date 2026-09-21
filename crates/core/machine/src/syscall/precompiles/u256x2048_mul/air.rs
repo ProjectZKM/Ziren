@@ -110,7 +110,6 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Implement trace generation logic.
         let rows_and_records = input
             .get_precompile_events(SyscallCode::U256XU2048_MUL)
             .chunks(1)
@@ -129,7 +128,6 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
                         let mut row: [F; NUM_COLS] = [F::ZERO; NUM_COLS];
                         let cols: &mut U256x2048MulCols<F> = row.as_mut_slice().borrow_mut();
 
-                        // Assign basic values to the columns.
                         cols.is_real = F::ONE;
                         cols.shard = F::from_u32(event.shard);
                         cols.clk = F::from_u32(event.clk);
@@ -138,7 +136,6 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
                         cols.lo_ptr = F::from_u32(event.lo_ptr);
                         cols.hi_ptr = F::from_u32(event.hi_ptr);
 
-                        // Populate memory accesses for lo_ptr and hi_ptr.
                         cols.lo_ptr_memory
                             .populate(event.lo_ptr_memory, &mut new_byte_lookup_events);
                         cols.hi_ptr_memory
@@ -148,7 +145,6 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
                         cols.hi_ptr_range_checker
                             .populate(&mut new_byte_lookup_events, event.hi_ptr_memory.value);
 
-                        // Populate memory columns.
                         for i in 0..WORDS_FIELD_ELEMENT {
                             cols.a_memory[i]
                                 .populate(event.a_memory_records[i], &mut new_byte_lookup_events);
@@ -210,7 +206,6 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
             })
             .collect::<Vec<_>>();
 
-        // Generate the trace rows for each event.
         let mut rows = Vec::new();
         for (row, mut record) in rows_and_records {
             rows.extend(row);
@@ -228,7 +223,6 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
                 let z = BigUint::ZERO;
                 let modulus = BigUint::one() << 256;
 
-                // Populate all the mul and carry columns with zero values.
                 cols.a_mul_b1.populate(&mut vec![], &x, &y, FieldOperation::Mul);
                 cols.ab2_plus_carry.populate_mul_and_carry(&mut vec![], &x, &y, &z, &modulus);
                 cols.ab3_plus_carry.populate_mul_and_carry(&mut vec![], &x, &y, &z, &modulus);
@@ -244,7 +238,6 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
             <U256x2048MulChip as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))
     }
 
@@ -272,10 +265,8 @@ where
         let local = main.current_slice();
         let local: &U256x2048MulCols<AB::Var> = (*local).borrow();
 
-        // Assert that is_real is a boolean.
         builder.assert_bool(local.is_real);
 
-        // Receive the arguments.
         builder.receive_syscall(
             local.shard,
             local.clk,
@@ -286,7 +277,6 @@ where
             LookupScope::Local,
         );
 
-        // Evaluate that the lo_ptr and hi_ptr are read from the correct memory locations.
         builder.eval_memory_access(
             local.shard,
             local.clk.into(),
@@ -303,7 +293,6 @@ where
             local.is_real,
         );
 
-        // Evaluate the memory accesses for a_memory and b_memory.
         builder.eval_memory_access_slice(
             local.shard,
             local.clk.into(),
@@ -320,7 +309,6 @@ where
             local.is_real,
         );
 
-        // Evaluate the memory accesses for lo_memory and hi_memory.
         builder.eval_memory_access_slice(
             local.shard,
             local.clk.into() + AB::Expr::ONE,
@@ -340,7 +328,6 @@ where
         let a_limbs =
             limbs_from_access::<AB::Var, <U256Field as NumLimbs>::Limbs, _>(&local.a_memory);
 
-        // Iterate through chunks of 8 for b_memory and convert each chunk to its limbs.
         let b_limb_array = local
             .b_memory
             .chunks(8)
@@ -352,7 +339,6 @@ where
         coeff_2_256.push(AB::Expr::ONE);
         let modulus_polynomial: Polynomial<AB::Expr> = Polynomial::from_coefficients(&coeff_2_256);
 
-        // Evaluate that each of the mul and carry columns are valid.
         let outputs = [
             &local.a_mul_b1,
             &local.ab2_plus_carry,
@@ -368,7 +354,7 @@ where
             builder,
             &a_limbs,
             &b_limb_array[0],
-            &Polynomial::from_coefficients(&[AB::Expr::ZERO]), // Zero polynomial for no previous carry
+            &Polynomial::from_coefficients(&[AB::Expr::ZERO]),
             &modulus_polynomial,
             local.is_real,
         );
@@ -384,12 +370,10 @@ where
             );
         }
 
-        // Assert that the correct result is being written to hi_memory.
         builder
             .when(local.is_real)
             .assert_all_eq(outputs[outputs.len() - 1].carry, value_as_limbs(&local.hi_memory));
 
-        // Loop through chunks of 8 for lo_memory and assert that each chunk is equal to corresponding result of outputs.
         for i in 0..8 {
             builder.when(local.is_real).assert_all_eq(
                 outputs[i].result,
@@ -399,8 +383,6 @@ where
             );
         }
 
-        // Range-check the raw pointer words before reducing them to field
-        // addresses, so the reduction is injective for these memory values.
         KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,
             *local.lo_ptr_memory.value(),
@@ -414,12 +396,10 @@ where
             local.is_real.into(),
         );
 
-        // Constrain that the lo_ptr is the value of lo_ptr_memory.
         builder
             .when(local.is_real)
             .assert_eq(local.lo_ptr, local.lo_ptr_memory.value().reduce::<AB>());
 
-        // Constrain that the hi_ptr is the value of hi_ptr_memory.
         builder
             .when(local.is_real)
             .assert_eq(local.hi_ptr, local.hi_ptr_memory.value().reduce::<AB>());

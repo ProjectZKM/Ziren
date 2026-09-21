@@ -62,10 +62,6 @@ pub fn into_padded<F: p3_field::Field>(
     baked_height: Option<usize>,
 ) -> crate::multilinear::PaddedMle<F> {
     if mat.width == 0 {
-        // Device-resident or unexercised chip: no host cells. Bake the device
-        // height when the caller knows it, so `metadata_height()` is the only
-        // source; otherwise a plain dummy and the height falls back to the
-        // provider.
         match baked_height {
             Some(h) => crate::multilinear::PaddedMle::dummy_with_height(
                 cube,
@@ -78,7 +74,6 @@ pub fn into_padded<F: p3_field::Field>(
             ),
         }
     } else {
-        // MOVE the trace's backing buffer into the Mle (zero-copy).
         let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(mat));
         crate::multilinear::PaddedMle::padded_with_zeros(mle, cube)
     }
@@ -251,7 +246,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn generate_traces(&self, record: &A::Record) -> Result<crate::Traces<Val<SC>>, A::Error> {
         let shard_chips = self.machine().shard_chips(record).collect::<Vec<_>>();
 
-        // For each chip, generate the trace.
         let parent_span = tracing::debug_span!("generate traces for shard");
         let traces = parent_span.in_scope(|| {
             shard_chips
@@ -282,12 +276,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 })
                 .collect::<Result<Vec<_>, A::Error>>()
         })?;
-        // Wrap once, here, at the FIXED cube every stage proves at: the trace
-        // then carries its own shape and no consumer re-wraps it. The wrap is
-        // zero-copy -- `Mle::from_row_major` moves the matrix's `Vec`.
-        //
-        // One chip generates one trace, so the collect into a name-keyed map is
-        // lossless: `shard_chips` yields each chip once.
         let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
             .max_log_row_count as u32;
         Ok(crate::Traces {
@@ -463,18 +451,10 @@ where
         mut named_traces: crate::Traces<Val<SC>>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> PcsMainTraceData<SC, Self::Pcs> {
-        // MISSING-CHIP INJECTION, mirroring the GPU `commit`.
-        //
-        // Chips commit at their event-driven heights, so which chips a shard has
-        // varies with what it executed. Injecting the cluster's absent chips at
-        // height 0 makes the committed chip SET uniform -- which is what keeps
-        // one normalize vk valid across shards -- without committing any cells
-        // for them.
         let cube = crate::shard_level::verifier::JaggedShardVerifier::production_default()
             .max_log_row_count as u32;
         if let Some(cluster_widths) = cluster_widths {
             for (name, width) in cluster_widths.iter() {
-                // Full width, no rows: present in the set, committing nothing.
                 let w = (*width).max(1);
                 named_traces.entry(name.clone()).or_insert_with(|| {
                     into_padded(RowMajorMatrix::new(Vec::<Val<SC>>::new(), w), cube, None)
@@ -482,34 +462,15 @@ where
             }
         }
 
-        // `Traces` is name-keyed, so the commit order the recursion verifier's
-        // compile-time `column_counts` / `opened_values` expect is the map's own
-        // order -- there is nothing to sort and no duplicate to guard against.
         let chip_ordering: hashbrown::HashMap<String, usize> = named_traces
             .keys()
             .enumerate()
             .map(|(i, name)| (name.to_owned(), i))
             .collect();
 
-        // Commit through the ring-dispatched builder and RETAIN
-        // {digest, precompute, store} for `open()`, so the commit and the prove
-        // read the same cells rather than each building their own view.
         let retained: Option<RetainedJaggedCommit<SC>> = {
             use core::any::TypeId;
             if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
-                // The traces were padded to the cube in `generate_traces`, so
-                // the store IS the map -- no second pass and no name vector
-                // here. `PaddedMle::padded` asserted the height fits at that
-                // point, which is where an over-tall trace fails.
-                // `commit_traces` takes the name-keyed map, so the names travel
-                // WITH the traces. This used to build the machine's
-                // chip vector, assert it was the same length as the store, and
-                // then flatten the store to a nameless `Vec` for `commit_traces`
-                // to re-pair positionally -- a round trip that threw the keys away
-                // and recovered them by position, where a committed name the
-                // machine had no chip for would shift every later pair and commit
-                // traces against the wrong AIRs. Passing the map removes the
-                // hazard rather than asserting against it.
                 let (main_commitment, precomputed) =
                     crate::shard_level::prover::commit_traces::<SC>(
                         &named_traces,
@@ -522,16 +483,11 @@ where
                     main_store: Some(named_traces),
                 })
             } else {
-                // Non-KoalaBear config: nothing provable downstream (the
-                // shard-level prover hard-asserts the ring); retain nothing.
                 None
             }
         };
 
         MainTraceData {
-            // The host store lives on `main_data`; there are no raw
-            // matrices to carry (device provers use this slot for their
-            // resident trace Arcs).
             traces: Vec::new(),
             main_data: retained,
             chip_ordering,
@@ -551,22 +507,10 @@ where
     ) -> Result<ShardProof<SC>, ShardPcsError<SC, Self::Pcs>> {
         let chips = self.machine().shard_chips_ordered(&data.chip_ordering).collect::<Vec<_>>();
 
-        // Observe the public values.
         challenger.observe_slice(&data.public_values[0..self.machine().num_pv_elts()]);
 
-        // Snapshot the challenger at the state the BaseFold verifier will
-        // see at entry to `JaggedShardVerifier::verify_shard`:
-        // `machine::verify_shard` observes `public_values[0..num_pv_elts]`
-        // before calling `Verifier::verify_shard`, which dispatches to
-        // `JaggedShardVerifier::verify_shard` WITHOUT doing any further
-        // ops on the challenger.  Capture that state here so the
-        // shard-level prover's prologue sees an aligned transcript
-        // (otherwise round 0's claimed_sum check desyncs).
         let basefold_challenger_snapshot: SC::Challenger = challenger.clone();
 
-        // Produce the shard-level BaseFold proof: LogUp-GKR, zerocheck,
-        // and the jagged-PCS opening, driven from the challenger
-        // snapshot above.
         let jagged_shard_proof = prove_shard_with_data_boxed::<SC, A>(
             &chips,
             pk.preprocessed_mles(),
@@ -575,8 +519,6 @@ where
             pk.main_pin,
             data.public_values.clone(),
             &basefold_challenger_snapshot,
-            // The commit-time retained jagged commitment (`None` on the
-            // wrap ring).
             data.main_data,
         );
 
@@ -601,12 +543,10 @@ where
     where
         A: for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>,
     {
-        // Generate dependencies.
         self.machine()
             .generate_dependencies(&mut records, &opts, None)
             .map_err(|_| CpuProverError)?;
 
-        // Observe the preprocessed commitment.
         pk.observe_into(challenger);
 
         let shard_proofs = tracing::info_span!("prove_shards").in_scope(|| {
@@ -621,9 +561,6 @@ where
                     let trace_gen_ms = t0.elapsed().as_millis();
 
                     let t1 = std::time::Instant::now();
-                    // Generic prove-shard helper: own-chip-set commit (no
-                    // canonical-cluster missing-chip injection).  The wrap
-                    // STARK proves via this default `prove` → NATURAL own-area
                     let shard_data = self.commit(&record, named_traces, None);
                     let commit_ms = t1.elapsed().as_millis();
 
@@ -723,8 +660,6 @@ where
     use crate::{InnerChallenge, InnerVal};
     use core::any::TypeId;
 
-    // Val = KoalaBear, Challenge = KoalaBear^4 on both rings; the jagged open
-    // downstream relies on it, so it is asserted in release too.
     assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
@@ -740,8 +675,6 @@ where
     let chips_reborrow: Vec<&crate::Chip<Val<SC>, A>> =
         chips.iter().map(|c| *c as &crate::Chip<Val<SC>, A>).collect();
 
-    // The name-keyed main traces `commit` built, each a padded multilinear on
-    // the fixed cube {0,1}^m.
     let mut commit_data = commit_data;
     let main_traces_named = commit_data
         .as_mut()
@@ -749,16 +682,11 @@ where
         .expect("CpuProver::commit retains the main-trace store");
     let max_log_row_count =
         crate::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
-    // Every consumer reads m off an arbitrary entry, so a store padded to two
-    // different cubes would be committed inconsistently; asserted in release.
     assert!(
         main_traces_named.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
         "retained main store padded to a cube != the fixed max_log_row_count \
          {max_log_row_count}",
     );
-    // Preprocessed traces, parallel to `chips`: the key's multilinears padded
-    // virtually to {0,1}^m (an `Arc` clone per shard), and a width-0 stand-in
-    // for a chip with no preprocessed column.
     let preprocessed_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
         .iter()
         .map(|chip| match pk_chip_ordering.get(&chip.name().to_string()) {
@@ -772,10 +700,6 @@ where
             ),
         })
         .collect();
-    // Traces are looked up by chip name downstream, which catches a chip
-    // without a trace but not a trace without a chip. The count closes that:
-    // a committed trace no AIR constrains would be a committed polynomial with
-    // nothing to bind it.
     assert_eq!(
         main_traces_named.len(),
         chips.len(),

@@ -19,7 +19,7 @@ impl Syscall for SysCloneSyscall {
         a1: u32,
     ) -> Result<Option<u32>, ExecutionError> {
         let start_clk = rt.clk;
-        let v0 = 1; // Simulate a successful clone operation
+        let v0 = 1;
         let a3_record = rt.rw_traced(Register::A3, 0);
         let shard = rt.current_shard();
         let event = PrecompileEvent::Linux(LinuxEvent {

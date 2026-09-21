@@ -135,8 +135,6 @@ impl<F: Field> Mle<F, CpuBackend> {
     /// the old `RowMajorMatrix::new_col`).
     pub fn from_values(values: Vec<F>) -> Self {
         debug_assert!(values.len().is_power_of_two());
-        // `Tensor::from(Vec<F>)` reshapes to `[len, 1]` (zero-copy move),
-        // byte-identical to the old `RowMajorMatrix::new_col(values)`.
         Self { guts: Tensor::from(values) }
     }
 
@@ -164,16 +162,7 @@ impl<F: Field> Mle<F, CpuBackend> {
         debug_assert_eq!(point.len(), self.num_variables() as usize);
         let n_polys = self.num_polynomials();
         use p3_maybe_rayon::prelude::*;
-        // Obtain the flat row-major slice ONCE (zero-copy borrow) and
-        // index it directly — never a per-element 2D stride multiply.
         let values = self.guts.as_slice();
-        // Parallelize only the initial F → EF lift (the largest single
-        // pass).  The per-round Lagrange fold remains sequential to
-        // preserve in-place write semantics — earlier attempts to
-        // parallelize the fold via fresh-vec allocation broke the
-        // recursion-circuit's bit-exact OOD checks (root cause not
-        // isolated; the algorithm here still produces the same Vec<EF>
-        // but the proof bytes change in a way the verifier rejects).
         let mut current: Vec<EF> = values.par_iter().map(|&v| EF::from(v)).collect();
         let mut n_rows = self.hypercube_size();
         for &r in point {
@@ -212,13 +201,8 @@ impl<F: Field> Mle<F, CpuBackend> {
         debug_assert!(height >= 2);
         let half = height / 2;
 
-        // MOVE the backing Vec out of the tensor (zero-copy), never a
-        // clone — the fold consumes `self`.
         let values = self.guts.into_buffer().into_vec();
-        // Allocator opt: skip vec![EF::ZERO; half*width] zero-init; every
-        // slot is written by the for_each closure below.
         let new_len = half * width;
-        // See round.rs note about KoalaBear u32 serde.
         let mut folded: Vec<EF> = vec![EF::ZERO; new_len];
         if width > 0 {
             use p3_maybe_rayon::prelude::*;

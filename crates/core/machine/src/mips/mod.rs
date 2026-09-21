@@ -234,7 +234,6 @@ impl<F: PrimeField32> MipsAir<F> {
     pub fn get_chips_and_costs() -> (Vec<Chip<F, Self>>, HashMap<String, u64>) {
         let mut costs: HashMap<String, u64> = HashMap::new();
 
-        // The order of the chips is used to determine the order of trace generation.
         let mut chips = vec![];
         let program = Chip::new(MipsAir::Program(ProgramChip::default()));
         costs.insert(program.name(), program.cost());
@@ -539,9 +538,6 @@ impl<F: PrimeField32> MipsAir<F> {
             (MipsAirId::Branch, record.branch_events.len()),
             (MipsAirId::Jump, record.jump_events.len()),
             (MipsAirId::MovCond, record.movcond_events.len()),
-            // The VIRTUAL cycles axis: no Cpu chip exists, but the shape
-            // system (shard-size banding, cluster fitting, the vk
-            // enumeration) keys the shard's cycle count under this id.
             (MipsAirId::Cpu, record.cpu_events.len()),
             (MipsAirId::MiscInstrs, record.misc_events.len()),
             (MipsAirId::LoadNarrow, record.memory_load_narrow_events.len()),
@@ -595,10 +591,6 @@ impl<F: PrimeField32> MipsAir<F> {
                 };
                 let num_rows = events_len * self.rows_per_event();
                 let num_local_mem_events = match self {
-                    // The control chips have no memory access of their own — the
-                    // syscall's local memory events belong to the worker chip
-                    // (`ShaCompressChip` / `ShaExtendChip`), so they must report 0
-                    // here (their `memory_events_per_row` is 0).
                     Self::Sha256CompressControl(_) | Self::Sha256ExtendControl(_) => 0,
                     _ => events.get_local_mem_events().into_iter().count(),
                 };
@@ -671,31 +663,16 @@ impl<F: PrimeField32> MipsAir<F> {
 
         airs.remove(&Self::SyscallPrecompile(SyscallChip::precompile()));
 
-        // Remove the preprocessed chips.
         airs.remove(&Self::Program(ProgramChip::default()));
         airs.remove(&Self::ByteLookup(ByteChip::default()));
         airs.remove(&Self::RangeLookup(RangeChip::default()));
 
-        // Remove the `PrecompileChain` bus-control chips: they are never matched
-        // independently — instead `get_precompile_shapes` appends each control to
-        // its worker's shape so the worker+control pair is sized together (else a
-        // control matched alone under-sizes `MemoryLocal` for the worker's memory
-        // events).
         airs.remove(&Self::Sha256CompressControl(ShaCompressControlChip::default()));
         airs.remove(&Self::Sha256ExtendControl(ShaExtendControlChip::default()));
         airs.remove(&Self::KeccakSpongeControl(KeccakSpongeControlChip::default()));
 
         airs.into_iter()
             .map(|air| {
-                // A worker's paired control chip carries memory the worker does
-                // not (e.g. keccak's input/output reads and writes all live in
-                // `KeccakSpongeControl`).  Fold the
-                // control's per-row memory into the worker's
-                // `memory_events_per_row`, normalized by the worker's
-                // `rows_per_event` (the control emits 1 row per `rows_per_event`
-                // worker rows), so `get_precompile_shapes` sizes `MemoryLocal`
-                // for the worker+control pair.  Workers whose control has no
-                // memory (sha256) are unaffected.
                 let control_air = air.precompile_control_air();
                 let rows_per_event = air.rows_per_event();
                 let chip = Chip::new(air);
@@ -814,7 +791,6 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::MemoryLocal(_) => unreachable!("Invalid for memory local"),
             Self::MemoryBump(_) => unreachable!("Invalid for memory bump"),
             Self::Global(_) => unreachable!("Invalid for global chip"),
-            // Self::ProgramMemory(_) => unreachable!("Invalid for memory program"),
             Self::Program(_) => unreachable!("Invalid for core chip"),
             Self::Mul(_) => unreachable!("Invalid for core chip"),
             Self::Lt(_) => unreachable!("Invalid for core chip"),
@@ -892,8 +868,6 @@ pub mod tests {
     #[test]
     fn test_primitives_and_machine_air_names_match() {
         let chips = MipsAir::<KoalaBear>::chips();
-        // `MipsAirId::Cpu` survives only as the VIRTUAL cycles axis for shard
-        // splitting / shape banding — there is no chip behind it.
         for (a, b) in chips.iter().zip_eq(MipsAirId::iter().filter(|id| *id != MipsAirId::Cpu)) {
             assert_eq!(a.name(), b.to_string());
         }
@@ -903,7 +877,6 @@ pub mod tests {
     fn core_air_cost_consistency() {
         let file = std::fs::File::open("../executor/src/artifacts/mips_costs.json").unwrap();
         let costs: HashMap<String, u64> = serde_json::from_reader(file).unwrap();
-        // Compare with costs computed by machine
         let machine_costs = MipsAir::<KoalaBear>::costs();
         log::info!("{machine_costs:?}");
         assert_eq!(costs, machine_costs);
@@ -913,8 +886,6 @@ pub mod tests {
     fn write_core_air_costs() {
         let costs = MipsAir::<KoalaBear>::costs();
         println!("{costs:?}");
-        // write to file
-        // Create directory if it doesn't exist
         let dir = std::path::Path::new("../executor/src/artifacts");
         if !dir.exists() {
             std::fs::create_dir_all(dir).unwrap();
@@ -945,7 +916,6 @@ pub mod tests {
         let machine =
             MipsAir::machine(zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2::default());
 
-        // Preprocessed widths come from the chips themselves.
         let width_of = |name: &str| -> usize {
             machine
                 .chips()
@@ -955,7 +925,6 @@ pub mod tests {
                 .unwrap_or_else(|| panic!("{name} is not a chip of the core machine"))
         };
 
-        // Heights: Program at its largest admitted band, Byte and Range fixed.
         let prog_rows = 1usize << 22;
         let byte_rows = 1usize << 16;
         let range_rows = crate::range::NUM_RANGE_ROWS;
@@ -980,11 +949,6 @@ pub mod tests {
             range_rows,
         );
 
-        // Pinned so the number a soundness model of the lambda batch quotes
-        // moves when the machine does.  It is NOT `MAX_BLOCKS`: that guard
-        // bounds ONE round's enumerated blocks, and nothing in the prover or
-        // the verifier bounds the sum, so a model that uses `MAX_BLOCKS` for
-        // the batch understates it by the preprocessed round.
         assert_eq!(
             (prep_stripes, main_stripes, batch),
             (32, 224, 256),
@@ -997,10 +961,6 @@ pub mod tests {
              could legitimately use that guard in its place",
         );
 
-        // The recursion machine's batch is EXACT rather than bounded: a node
-        // commits under a pin class, `AreaPin::apply` panics past the pin, and
-        // a node takes the smallest class both its rounds fit, so the largest
-        // class is the ceiling and it is reached.
         let largest =
             zkm_pcs::jagged::RecursionPins::class(zkm_pcs::jagged::RecursionPins::LAST_CLASS);
         let rec_batch = (largest.prep.area >> log_stack) + (largest.main.area >> log_stack);
@@ -1026,26 +986,13 @@ pub mod tests {
     #[test]
     fn test_simple_prove_whir_inner_pcs() {
         utils::setup_logger();
-        // Prove + verify a shard with the jagged-WHIR inner PCS.
-        //
-        // There is no BaseFold twin of this test to pair it against, because
-        // no core-machine ring selects BaseFold: `WHIR_INNER_PCS` is a const
-        // on the ring, `true` for every KoalaBear ring, and the one `false`
-        // impl is `KoalaBearPoseidon2Outer`, the BN254 wrap ring, whose
-        // BaseFold path the wrap tests cover instead.  A second CpuProver run
-        // over this same ring would be another WHIR run, so it could not
-        // attribute any difference to the dense PCS.
         let program = simple_program();
         let runtime = {
             let mut runtime = zkm_core_executor::Executor::new(program, ZKMCoreOpts::default());
             runtime.run().unwrap();
             runtime
         };
-        // `shape_config: None`: WHIR needs no shape banding, and the tiny test
-        // programs fit no preprocessed band.
         let result = crate::utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None);
-        // Verified, AND actually under WHIR: a silently-false `whir_mode`
-        // would prove plain BaseFold and pass anyway, so pin the dispatch.
         for sp in &result.unwrap().shard_proofs {
             let bsp = sp.jagged_shard_proof.as_ref();
             match &bsp.evaluation_proof {
@@ -1296,9 +1243,6 @@ pub mod tests {
 
     #[test]
     fn test_j_prove() {
-        //   j 100
-        //
-        // The j instruction performs an unconditional jump to a specified address.
         setup_logger();
         let instructions = vec![
             Instruction::new(Opcode::ADD, 11, 0, 100, false, true),
@@ -1311,10 +1255,6 @@ pub mod tests {
 
     #[test]
     fn test_jr_prove() {
-        //   addi x11, x11, 100
-        //   jr x11
-        //
-        // The jr instruction jumps to an address stored in a register.
         setup_logger();
         let instructions = vec![
             Instruction::new(Opcode::ADD, 11, 0, 100, false, true),
@@ -1327,10 +1267,6 @@ pub mod tests {
 
     #[test]
     fn test_jal_prove() {
-        //   addi x11, x11, 100
-        //   jal x11
-        //
-        // The jal instruction jumps to an address and stores the return address in $ra.
         setup_logger();
         let instructions = vec![
             Instruction::new(Opcode::ADD, 31, 0, 0, false, true),
@@ -1343,10 +1279,6 @@ pub mod tests {
 
     #[test]
     fn test_jalr_prove() {
-        //   addi x11, x11, 100
-        //   jalr x11
-        //
-        // Similar to jal, but jumps to an address stored in a register.
         setup_logger();
         let instructions = vec![
             Instruction::new(Opcode::ADD, 5, 0, 0, false, true),
@@ -1363,7 +1295,6 @@ pub mod tests {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 0x12348765, false, true),
             Instruction::new(Opcode::SW, 29, 0, 0x27654320, false, true),
-            // LL and SC
             Instruction::new(Opcode::LL, 28, 0, 0x27654320, false, true),
             Instruction::new(Opcode::ADD, 28, 28, 1, false, true),
             Instruction::new(Opcode::SC, 28, 0, 0x27654320, false, true),
@@ -1440,35 +1371,19 @@ pub mod tests {
         .unwrap();
     }
 
-    // A partially filled shard proved at its raw heights (`shape_config =
-    // None`) verifies end to end: every chip's constraints and the LogUp
-    // lookups, on a shard that lacks some of its cluster's chips.
     #[test]
     fn test_fix_off_core_verify_injected_chips_rollout1b() {
         use zkm_core_executor::Executor;
         setup_logger();
-        // A partially-filled single shard so the canonical cluster has chips the
-        // raw record is MISSING (the injected chips this test gates).
         let program = fibonacci_program();
         let mut opts = ZKMCoreOpts::default();
-        // 262144 cycles/shard (the task's SHARD_SIZE) -> the small fibonacci run
-        // is a single partially-filled shard.
         opts.shard_size = 262_144;
         let mut runtime = Executor::new(program, opts);
-        // The guest reads its input, so the executor needs it: a proving-time
-        // stdin arrives after execution has already failed.
         runtime.write_vecs(&fib_stdin().buffer);
         runtime.run().unwrap();
-        // FIX_CORE_SHAPES=false == `shape_config = None`: records stay at raw
-        // heights, the STARK proves at those heights, the canonical-cluster
-        // band-cap injects the missing chips.  `run_test_core` then runs
-        // `machine.verify`, which checks every chip's constraints + the LogUp
-        // lookups, including the injected chips.
         utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), None).unwrap();
     }
 
-    // The same run with the shapes fixed (`Some(shape_config)`): every chip is
-    // generated at its shape height, and the proof verifies.
     #[test]
     fn test_fix_on_core_verify_control_rollout1b() {
         use crate::shape::CoreShapeConfig;
@@ -1480,16 +1395,11 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 262_144;
         let mut runtime = Executor::new(program, opts);
-        // The guest reads its input, so the executor needs it: a proving-time
-        // stdin arrives after execution has already failed.
         runtime.write_vecs(&fib_stdin().buffer);
         runtime.run().unwrap();
         utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), Some(&shape_config)).unwrap();
     }
 
-    // Diagnostic: prove one honest fibonacci shard at shape heights and verify
-    // it once, printing the round walk against the last-layer reconstruction.
-    // Ignored in CI.
     #[test]
     #[ignore]
     fn recon_probe_honest_only() {
@@ -1504,8 +1414,6 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 262_144;
         let mut runtime = Executor::new(program, opts);
-        // A guest that reads needs its input HERE: `prove_with_context` below
-        // re-executes, so an empty stdin there fails after this run succeeded.
         runtime.write_vecs(&fib_stdin().buffer);
         runtime.run().unwrap();
 
@@ -1530,12 +1438,6 @@ pub mod tests {
         tracing::info!("[PROBE] recon-ON honest verify => {:?}", r.map(|_| "OK"));
     }
 
-    // Height soundness. The degree-masked LogUp last-layer reconstruction
-    // reads each chip's height bits (`quotient[0]`, the `full_geq` threshold),
-    // which the round walk alone ignores. So an honest proof verifies, and an
-    // area-preserving height forgery — one chip's claimed height ×2, another's
-    // ÷2, `circuit_output` and the main evaluations untouched — is rejected at
-    // the reconstruction.
     #[test]
     fn test_fix_on_height_forgery_red_green_gate_c() {
         use crate::shape::CoreShapeConfig;
@@ -1543,15 +1445,12 @@ pub mod tests {
         use zkm_pcs::{MachineProver, StarkGenericConfig};
         setup_logger();
 
-        // 1) Prove an honest fibonacci shard at shape heights.
         let mut program = fibonacci_program();
         let shape_config = CoreShapeConfig::default();
         shape_config.fix_preprocessed_shape(&mut program).unwrap();
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 262_144;
         let mut runtime = Executor::new(program, opts);
-        // The guest reads its input, so the executor needs it: a proving-time
-        // stdin arrives after execution has already failed.
         runtime.write_vecs(&fib_stdin().buffer);
         runtime.run().unwrap();
 
@@ -1572,8 +1471,6 @@ pub mod tests {
 
         let (_pk, vk) = machine.setup(runtime.program.as_ref());
 
-        // Helper: run `machine.verify` on a (possibly tampered) proof, returning
-        // the error string (or "OK").
         let verify = |p: &zkm_pcs::MachineProof<KoalaBearPoseidon2>| -> String {
             let mut challenger = machine.config().challenger();
             match machine.verify(&vk, p, &mut challenger) {
@@ -1582,18 +1479,10 @@ pub mod tests {
             }
         };
 
-        // 2) GATE-(b): the honest proof verifies on the DEFAULT path (the
-        // reconstruction code is additive / transcript-neutral and does not
-        // regress honest verification).
         let honest = verify(&proof);
         tracing::info!("[GATE-B] honest verify (default) => {honest}");
         assert_eq!(honest, "OK", "honest FIX-on proof must verify (gate-b)");
 
-        // 2b) GATE-B-ON (the crux): the honest proof must ALSO verify with the
-        // reconstruction ENABLED — i.e. the degree-masked last-layer
-        // reconstruction's numerator AND denominator asserts hold for an honest
-        // proof.  Only then is the gate-C GREEN reject attributable to the
-        // forgery (and not to the reconstruction rejecting honest proofs too).
         let honest_on = verify(&proof);
         tracing::info!("[GATE-B-ON] honest verify (reconstruction ON) => {honest_on}");
         assert_eq!(
@@ -1602,33 +1491,20 @@ pub mod tests {
              a reconstruction error here means the leaf-assembly transform is wrong"
         );
 
-        // 3) Build the area-preserving height forgery: pick TWO chips in the
-        // first shard's basefold opened_values and swap one bit of `degree`
-        // (quotient[0], big-endian real-height bits) between them — raise one
-        // chip's claimed height by 2x at bit `k`, lower another's by 2x at the
-        // same bit, keeping total claimed area invariant and leaving
-        // circuit_output / main_trace_evaluations untouched.
         let mut forged = proof.clone();
         let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
 
-        // Find two chips whose degree bit vectors let us move one bit each in
-        // opposite directions (so the forgery is area-preserving and the
-        // per-chip degree dim stays valid).  We flip a HIGH bit (index toward
-        // the MSB) that is currently 0→1 on one chip and 1→0 on another.
         let nchips = bf.opened_values.chips.len();
         assert!(nchips >= 2, "need >=2 chips to forge area-preserving heights");
 
-        // Locate a chip with a settable (0) high bit and another with a
-        // clearable (1) high bit, at the same bit index, both at index >= 1
-        // (index 0 is the extra MSB guard coord).
         let bit_len = bf.opened_values.chips[0].quotient[0].len();
         let one = <KoalaBear as p3_field::PrimeCharacteristicRing>::ONE;
         let zero = <KoalaBear as p3_field::PrimeCharacteristicRing>::ZERO;
         let one_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(one);
         let zero_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(zero);
 
-        let mut raise: Option<(usize, usize)> = None; // (chip, bit) currently 0 -> set to 1
-        let mut lower: Option<(usize, usize)> = None; // (chip, bit) currently 1 -> set to 0
+        let mut raise: Option<(usize, usize)> = None;
+        let mut lower: Option<(usize, usize)> = None;
         'outer: for bit in (1..bit_len).rev() {
             let mut r = None;
             let mut l = None;
@@ -1654,10 +1530,9 @@ pub mod tests {
             "[GATE-C] area-preserving forgery: raise chip[{rc}] bit {rb} (0->1), \
              lower chip[{lc}] bit {lb} (1->0); bit_len={bit_len}"
         );
-        bf.opened_values.chips[rc].quotient[0][rb] = one_ef; // raise: +2^? area
-        bf.opened_values.chips[lc].quotient[0][lb] = zero_ef; // lower: -2^? area
+        bf.opened_values.chips[rc].quotient[0][rb] = one_ef;
+        bf.opened_values.chips[lc].quotient[0][lb] = zero_ef;
 
-        // 4) The forgery is rejected on the default path.
         let red = verify(&forged);
         tracing::info!("[GATE-C] flag-off forged verify => {red}");
         assert!(
@@ -1666,9 +1541,6 @@ pub mod tests {
              reconstruction (it runs unconditionally); got: {red}"
         );
 
-        // 5) GREEN: with the reconstruction ON, the forgery is REJECTED at the
-        // LogUp last-layer reconstruction — the assert reads + binds the degree
-        // bits the round walk alone ignores.
         let green = verify(&forged);
         tracing::info!("[GATE-C] GREEN (reconstruction on) verify => {green}");
         assert!(
@@ -1682,9 +1554,6 @@ pub mod tests {
     // padding, so they are fast): the honest cases verify and the
     // area-preserving height forgeries are rejected.
 
-    // Prove a single-shard program at raw heights and return (proof, machine,
-    // vk) for honest and forged verification. `shard_size` is generous so the
-    // tiny and fibonacci runs are one shard.
     #[cfg(test)]
     fn stage0_prove_fixoff(
         program: Program,
@@ -1701,8 +1570,6 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = shard_size;
         let mut runtime = Executor::new(program, opts);
-        // The guest reads its input, so the executor needs it: a proving-time
-        // stdin arrives after execution has already failed.
         runtime.write_vecs(&inputs.buffer);
         runtime.run().unwrap();
 
@@ -1710,8 +1577,6 @@ pub mod tests {
         let machine = MipsAir::machine(config);
         let prover = CpuProver::new(MipsAir::machine(KoalaBearPoseidon2::new()));
         let (pk, _) = prover.setup(runtime.program.as_ref());
-        // shape_config = None  ==  FIX_CORE_SHAPES=false: records stay at RAW
-        // heights, the STARK proves at those heights (no shape padding).
         let (proof, _output, _) = utils::prove_with_context::<_, CpuProver<_, _>>(
             &prover,
             &pk,
@@ -1726,9 +1591,6 @@ pub mod tests {
         (proof, machine, vk)
     }
 
-    // Shared helper: run machine.verify on a (possibly tampered) proof with the
-    // reconstruction in whatever env state the caller has set, returning the
-    // error string (or "OK").
     #[cfg(test)]
     fn stage0_verify(
         machine: &StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
@@ -1743,12 +1605,6 @@ pub mod tests {
         }
     }
 
-    // The area-preserving height forgery: in the first shard's openings, move
-    // one `degree` bit (`quotient[0]`) in opposite directions on two chips —
-    // one claimed height ×2 at bit k, another ÷2 at bit k — so the total
-    // claimed area is unchanged and `circuit_output` and the main evaluations
-    // are untouched. Returns a description, or `None` when the chips admit no
-    // such move (one chip, or no opposite-bit pair), as the tiny program may.
     #[cfg(test)]
     fn stage0_apply_height_forgery(
         forged: &mut zkm_pcs::MachineProof<KoalaBearPoseidon2>,
@@ -1764,8 +1620,8 @@ pub mod tests {
         let one_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(one);
         let zero_ef = p3_field::extension::BinomialExtensionField::<KoalaBear, 4>::from(zero);
 
-        let mut raise: Option<(usize, usize)> = None; // (chip, bit) 0 -> set 1
-        let mut lower: Option<(usize, usize)> = None; // (chip, bit) 1 -> set 0
+        let mut raise: Option<(usize, usize)> = None;
+        let mut lower: Option<(usize, usize)> = None;
         'outer: for bit in (1..bit_len).rev() {
             let mut r = None;
             let mut l = None;
@@ -1787,15 +1643,14 @@ pub mod tests {
         }
         let (rc, rb) = raise?;
         let (lc, lb) = lower?;
-        bf.opened_values.chips[rc].quotient[0][rb] = one_ef; // +2^? area
-        bf.opened_values.chips[lc].quotient[0][lb] = zero_ef; // -2^? area
+        bf.opened_values.chips[rc].quotient[0][rb] = one_ef;
+        bf.opened_values.chips[lc].quotient[0][lb] = zero_ef;
         Some(format!(
             "area-preserving forgery: raise chip[{rc}] bit {rb} (0->1), \
              lower chip[{lc}] bit {lb} (1->0); nchips={nchips} bit_len={bit_len}"
         ))
     }
 
-    // The 3-instruction `simple_program` at raw heights proves and verifies.
     #[test]
     fn stage0_tiny_honest_fixoff() {
         setup_logger();
@@ -1805,9 +1660,6 @@ pub mod tests {
         assert_eq!(r, "OK", "honest FIX-off tiny proof must verify (stage-0 fast harness)");
     }
 
-    // Fibonacci at raw heights proves and verifies: the honest control with
-    // mixed chip heights, which the forgery needs and the tiny program may not
-    // have.
     #[test]
     fn stage0_fib_honest_fixoff() {
         setup_logger();
@@ -1817,15 +1669,11 @@ pub mod tests {
         assert_eq!(r, "OK", "honest FIX-off fibonacci proof must verify (mixed-height gate)");
     }
 
-    // The height forgery on the tiny program is rejected. The program may admit
-    // no such forgery (too few chips, no opposite-bit pair); then the
-    // fibonacci case below carries the check.
     #[test]
     fn stage0_tiny_forgery_baseline_fixoff() {
         setup_logger();
         let (proof, machine, vk) = stage0_prove_fixoff(simple_program(), 262_144, ZKMStdin::new());
 
-        // sanity: the honest tiny proof verifies first.
         let honest = stage0_verify(&machine, &vk, &proof);
         assert_eq!(honest, "OK", "honest tiny proof must verify before forging");
 
@@ -1840,8 +1688,6 @@ pub mod tests {
             }
             Some(desc) => {
                 tracing::info!("[STAGE0-TINY-FORGERY] {desc}");
-                // Rejected by the degree-masked LogUp-GKR last-layer
-                // reconstruction.
                 let baseline = stage0_verify(&machine, &vk, &forged);
                 tracing::info!("[STAGE0-TINY-FORGERY] forged verify (recon off) => {baseline}");
                 assert_ne!(
@@ -1855,8 +1701,6 @@ pub mod tests {
         }
     }
 
-    // Prove a single-shard program at raw heights (the rev(ζ) orientation, the
-    // only one).
     #[cfg(test)]
     fn stage3_prove_fixoff_rev(
         program: Program,
@@ -1867,15 +1711,9 @@ pub mod tests {
         StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
         StarkVerifyingKey<KoalaBearPoseidon2>,
     ) {
-        // Reconstruction is verifier-only + transcript-neutral, so its state
-        // during proving is irrelevant; clear it so proving is unaffected.
         stage0_prove_fixoff(program, shard_size, inputs)
     }
 
-    // Shared helper: run the FULL machine.verify, returning the error string (or
-    // "OK").  The CORE (MIPS) machine host-verifies rev by construction
-    // (`core_rev` flag), and the degree-masked last-layer reconstruction runs
-    // unconditionally, so there is nothing to toggle.
     #[cfg(test)]
     fn stage3_verify_rev(
         machine: &StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
@@ -1890,23 +1728,11 @@ pub mod tests {
         }
     }
 
-    // Helper: ADAPTIVE forgery.  Forge a degree bit (area-preserving, as
-    // stage0_apply_height_forgery) AND ALSO tamper the trace openings the
-    // reconstruction consumes (`main_trace_evaluations_full`) on the two
-    // affected chips — modelling an adversary that forges the height AND tries
-    // to "solve for" compensating trace openings to keep the reconstruction
-    // assert passing.  Returns Some(desc) on success (>=2 chips, opposite-bit
-    // pair, both chips carry `*_full`) or None.  The point is NOT to make the
-    // reconstruction actually pass (that requires the per-interaction inverse);
-    // it is to demonstrate that ANY adversarial freedom on `*_full` is removed
-    // by the claim/commitment binding — so the FULL verify must reject
-    // regardless of how `*_full` is set.
     #[cfg(test)]
     fn stage0_apply_adaptive_full_forgery(
         forged: &mut zkm_pcs::MachineProof<KoalaBearPoseidon2>,
     ) -> Option<String> {
         use p3_field::PrimeCharacteristicRing;
-        // First do the degree-bit area-preserving move (records rc/lc/bit).
         let desc = {
             let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
             let nchips = bf.opened_values.chips.len();
@@ -1942,19 +1768,10 @@ pub mod tests {
             let (lc, lb) = lower?;
             bf.opened_values.chips[rc].quotient[0][rb] = one_ef;
             bf.opened_values.chips[lc].quotient[0][lb] = zero_ef;
-            // names of the two affected chips (chip slice order == opened_values
-            // chip order in the proof).
             (rc, rb, lc, lb, nchips, bit_len)
         };
         let (rc, rb, lc, lb, nchips, bit_len) = desc;
 
-        // Now tamper `main_trace_evaluations_full` on EVERY chip_opening (the
-        // reconstruction + the rev claim-collapse both read these).  We scale by
-        // a nontrivial factor so the values genuinely differ — modelling the
-        // adversary "adjusting" the openings the reconstruction consumes.  If
-        // these were a free variable the reconstruction reads in isolation, this
-        // would let the adversary cancel the degree perturbation; the claim
-        // binding (which ALSO reads `*_full`) must catch it.
         let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
         let scale = EF::from(KoalaBear::from_u32(2));
@@ -1979,25 +1796,12 @@ pub mod tests {
         ))
     }
 
-    // A/B transcript-neutrality probe.  Prove ONE honest fib proof,
-    // The forgery flip under rev.  Under the rev/natural core path, with the
-    // degree-masked last-layer reconstruction active (unconditional):
-    //   (a) the HONEST proof still ACCEPTS (anti-confound: the flip is only real
-    //       if honest is green with the reconstruction on);
-    //   (b) the DEGREE-ONLY area-preserving height forgery now REJECTS at the
-    //       reconstruction assert (accept->reject = THE FLIP);
-    //   (c) the ADAPTIVE forgery (degree + tampered `*_full`) ALSO rejects —
-    //       at the COMMITMENT/claim binding, since `*_full` is bound through the
-    //       rev claim-collapse (zerocheck_sum_mod == claimed_sum).
-    //
-    // TINY honest+degree-forgery flip under rev.
     #[test]
     fn stage3_rev_tiny_flip() {
         setup_logger();
         let (proof, machine, vk) =
             stage3_prove_fixoff_rev(simple_program(), 262_144, ZKMStdin::new());
 
-        // (a) honest ACCEPTS with recon ON under rev (anti-confound).
         let honest_on = stage3_verify_rev(&machine, &vk, &proof);
         tracing::info!("[STAGE3-TINY] (a) honest recon-ON under rev => {honest_on}");
         assert_eq!(
@@ -2007,7 +1811,6 @@ pub mod tests {
              the rev/natural convention)"
         );
 
-        // (b) degree-only forgery REJECTS with recon ON under rev (the flip).
         let mut forged = proof.clone();
         match stage0_apply_height_forgery(&mut forged) {
             None => {
@@ -2019,7 +1822,6 @@ pub mod tests {
             }
             Some(desc) => {
                 tracing::info!("[STAGE3-TINY] (b) {desc}");
-                // The forgery must REJECT at the reconstruction assert.
                 let on = stage3_verify_rev(&machine, &vk, &forged);
                 tracing::info!("[STAGE3-TINY] (b) recon-ON forged => {on}");
                 assert!(
@@ -2031,15 +1833,12 @@ pub mod tests {
         }
     }
 
-    // FIBONACCI (mixed-height) honest+degree-forgery flip under rev.
-    // This is the binding gate (fib hosts a genuine mixed-height forgery).
     #[test]
     fn stage3_rev_fib_flip() {
         setup_logger();
         let (proof, machine, vk) =
             stage3_prove_fixoff_rev(fibonacci_program(), 262_144, fib_stdin());
 
-        // (a) honest ACCEPTS with recon ON under rev (anti-confound).
         let honest_on = stage3_verify_rev(&machine, &vk, &proof);
         tracing::info!("[STAGE3-FIB] (a) honest recon-ON under rev => {honest_on}");
         assert_eq!(
@@ -2049,12 +1848,10 @@ pub mod tests {
              the rev/natural convention)"
         );
 
-        // (b) degree-only forgery REJECTS with recon ON under rev (the flip).
         let mut forged = proof.clone();
         let desc = stage0_apply_height_forgery(&mut forged)
             .expect("fibonacci (mixed-height) must host an area-preserving forgery");
         tracing::info!("[STAGE3-FIB] (b) {desc}");
-        // The forgery must REJECT at the reconstruction assert.
         let on = stage3_verify_rev(&machine, &vk, &forged);
         tracing::info!("[STAGE3-FIB] (b) recon-ON forged => {on}");
         assert!(
@@ -2064,20 +1861,12 @@ pub mod tests {
         );
     }
 
-    // ADAPTIVE forgery under rev: forge degree AND tamper the trace
-    // openings the reconstruction consumes (`*_full`).  MUST reject under FULL
-    // verify.  Reports the rejection site: if it rejects at the COMMITMENT/claim
-    // binding (the rev claim-collapse reads `*_full` and binds it to
-    // `claimed_sum`), then `degree` is the SOLE free variable and `*_full` is
-    // sufficiently bound — no collapse needed.  If it SURVIVES, `*_full` is an
-    // unbound free variable and must be collapsed onto the bound opening.
     #[test]
     fn stage3_rev_adaptive_forgery() {
         setup_logger();
         let (proof, machine, vk) =
             stage3_prove_fixoff_rev(fibonacci_program(), 262_144, fib_stdin());
 
-        // sanity: honest accepts both recon states under rev.
         let h_on = stage3_verify_rev(&machine, &vk, &proof);
         assert_eq!(h_on, "OK", "honest must accept recon-ON under rev before adaptive");
 
@@ -2086,7 +1875,6 @@ pub mod tests {
             .expect("fib must host the adaptive forgery");
         tracing::info!("[STAGE3-ADAPTIVE] {desc}");
 
-        // The adaptive forgery must reject under FULL verify with recon ON.
         let on = stage3_verify_rev(&machine, &vk, &forged);
         tracing::info!("[STAGE3-ADAPTIVE] recon-ON FULL verify => {on}");
         assert_ne!(
@@ -2096,17 +1884,6 @@ pub mod tests {
              and must be collapsed onto the bound opening"
         );
 
-        // The reconstruction always runs, so it is the first check to fire;
-        // the property asserted above is that the adaptive forgery is not
-        // accepted.
-
-        // DECISIVE conjunction: an adaptive adversary wins ONLY if SOME *_full
-        // makes BOTH (recon-ON pass) AND (claim binding pass) for the forged
-        // degree.  We prove this set is EMPTY by the two endpoints:
-        //   (i)  forged degree + HONEST *_full  → recon-ON REJECTS (must change
-        //        *_full to satisfy the reconstruction), and
-        //   (ii) forged degree + ANY changed *_full → claim binding REJECTS.
-        // Endpoint (i): reuse the degree-ONLY forgery (honest *_full).
         let mut deg_only = proof.clone();
         let _ =
             stage0_apply_height_forgery(&mut deg_only).expect("fib hosts the degree-only forgery");
@@ -2117,11 +1894,6 @@ pub mod tests {
             "(i) forged degree with HONEST *_full must REJECT at the reconstruction \
              (so the adversary is forced to change *_full); got: {i_on}"
         );
-        // Endpoint (ii) -- any change to *_full breaks the claim binding -- is
-        // covered independently by `stage3_rev_full_binding_probe`, which
-        // perturbs ONLY `*_full`.  Together: no `*_full` satisfies both ⇒ the
-        // adaptive forgery is impossible.  degree is the SOLE free variable and
-        // `*_full` need NOT be retired (it is bound by the claim).
         tracing::warn!(
             "[STAGE3-ADAPTIVE] CONCLUSION: degree-only forgery is caught by the \
              reconstruction, and any *_full deviation is caught by the claim \
@@ -2130,10 +1902,6 @@ pub mod tests {
         );
     }
 
-    // *_full BINDING PROBE: tamper ONLY `*_full` (leave degree and
-    // everything else honest).  If `*_full` is bound (via the rev claim-collapse)
-    // the FULL verify rejects even with recon OFF.  This is the cleanest test of
-    // "is *_full a free variable for the adversary".
     #[test]
     fn stage3_rev_full_binding_probe() {
         use p3_field::PrimeCharacteristicRing;
@@ -2149,7 +1917,7 @@ pub mod tests {
         for ce in bf.logup_gkr_proof.logup_evaluations.chip_openings.values_mut() {
             if let Some(mf) = ce.main_trace_evaluations_full.as_mut() {
                 if let Some(v) = mf.first_mut() {
-                    *v *= scale; // perturb one coord — enough to break the claim sum.
+                    *v *= scale;
                     touched += 1;
                 }
             }
@@ -2165,11 +1933,6 @@ pub mod tests {
         );
     }
 
-    // ATTRIBUTABILITY (independent validation).  Apply the degree
-    // forgery to an honest fib proof, confirm recon-ON REJECTS, then revert ONLY
-    // the two tampered degree bits (restore quotient[0][rb]=0, quotient[0][lb]=1)
-    // and confirm recon-ON ACCEPTS again.  Proves the reconstruction reject is
-    // CAUSED BY the degree tamper, not a side effect of cloning/serialisation.
     #[test]
     fn stage3_rev_attributable() {
         use p3_field::PrimeCharacteristicRing;
@@ -2180,7 +1943,6 @@ pub mod tests {
         let one_ef = EF::from(KoalaBear::ONE);
         let zero_ef = EF::from(KoalaBear::ZERO);
 
-        // Locate the SAME (rc,rb,lc,lb) the forgery helper would pick, on a clone.
         let mut forged = proof.clone();
         let bf = forged.shard_proofs[0].jagged_shard_proof.as_mut();
         let nchips = bf.opened_values.chips.len();
@@ -2213,7 +1975,6 @@ pub mod tests {
             "[STAGE3-ATTR] forged degree raise chip[{rc}] bit {rb}, lower chip[{lc}] bit {lb}"
         );
 
-        // forged => recon-ON REJECTS at the reconstruction.
         let forged_on = stage3_verify_rev(&machine, &vk, &forged);
         tracing::info!("[STAGE3-ATTR] forged recon-ON => {forged_on}");
         assert!(
@@ -2221,10 +1982,9 @@ pub mod tests {
             "forged degree must reject at the reconstruction; got: {forged_on}"
         );
 
-        // Revert ONLY the two degree bits => recon-ON ACCEPTS again.
         let bf2 = forged.shard_proofs[0].jagged_shard_proof.as_mut();
-        bf2.opened_values.chips[rc].quotient[0][rb] = zero_ef; // back to 0
-        bf2.opened_values.chips[lc].quotient[0][lb] = one_ef; // back to 1
+        bf2.opened_values.chips[rc].quotient[0][rb] = zero_ef;
+        bf2.opened_values.chips[lc].quotient[0][lb] = one_ef;
         let reverted_on = stage3_verify_rev(&machine, &vk, &forged);
         tracing::info!("[STAGE3-ATTR] reverted (degree bits only) recon-ON => {reverted_on}");
         assert_eq!(
@@ -2234,14 +1994,11 @@ pub mod tests {
         );
     }
 
-    // The area-preserving height forgery on fibonacci (mixed heights) at raw
-    // heights is rejected.
     #[test]
     fn stage0_fib_forgery_baseline_fixoff() {
         setup_logger();
         let (proof, machine, vk) = stage0_prove_fixoff(fibonacci_program(), 262_144, fib_stdin());
 
-        // sanity: the honest fib proof verifies first.
         let honest = stage0_verify(&machine, &vk, &proof);
         assert_eq!(honest, "OK", "honest fibonacci proof must verify before forging");
 
@@ -2250,7 +2007,6 @@ pub mod tests {
             .expect("fibonacci (mixed-height) must host an area-preserving height forgery");
         tracing::info!("[STAGE0-FIB-FORGERY] {desc}");
 
-        // Rejected by the degree-masked LogUp-GKR last-layer reconstruction.
         let baseline = stage0_verify(&machine, &vk, &forged);
         tracing::info!("[STAGE0-FIB-FORGERY] forged verify (recon off) => {baseline}");
         assert_ne!(

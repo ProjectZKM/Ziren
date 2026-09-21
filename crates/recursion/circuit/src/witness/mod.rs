@@ -88,7 +88,6 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C> for Inn
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        // vec![Block::from(self.as_basis_coefficients_slice())]
         witness.write_ext(*self);
     }
 }
@@ -98,10 +97,7 @@ impl<C: CircuitConfig, T: Witnessable<C>, const N: usize> Witnessable<C> for [T;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         self.iter().map(|x| x.read(builder)).collect::<Vec<_>>().try_into().unwrap_or_else(
-            |x: Vec<_>| {
-                // Cannot just `.unwrap()` without requiring Debug bounds.
-                panic!("could not coerce vec of len {} into array of len {N}", x.len())
-            },
+            |x: Vec<_>| panic!("could not coerce vec of len {} into array of len {N}", x.len()),
         )
     }
 

@@ -109,8 +109,8 @@ impl<'a> TracingVM<'a> {
     ///
     /// Streams: a chunk carrying its own `input_stream_slice` is self
     /// contained, so this is the whole call the consumer needs. Use
-    /// [`Self::execute_from_chunk_with_streams`] only for a legacy chunk
-    /// without one, which has to be handed the whole program's streams.
+    /// [`Self::execute_from_chunk_with_streams`] for a chunk without one,
+    /// which has to be handed the whole program's streams.
     pub fn execute_from_chunk(&mut self, chunk: &TraceChunk) -> Result<(), ExecutionError> {
         self.execute_from_chunk_with_streams(chunk, &[], &[])
     }
@@ -130,20 +130,11 @@ impl<'a> TracingVM<'a> {
         )],
     ) -> Result<(), ExecutionError> {
         use crate::events::MemoryRecord;
-        // Rebuild an ExecutionState from the chunk header. For byte-exact
-        // reconstruction we mirror EVERY piece of shard-start state the
-        // sequential run had: pc, global_clk, current_shard, register
-        // records (value+shard+timestamp), the touched-memory records,
-        // and the stream cursors.
         let mut state = ExecutionState::new(chunk.pc_start, chunk.pc_start.wrapping_add(4));
         state.global_clk = chunk.clk_start;
         if chunk.current_shard != 0 {
             state.current_shard = chunk.current_shard;
         }
-        // Seed the register file. Prefer the full records (with
-        // shard/timestamp) so the first per-shard register access
-        // reconstructs prev_shard/prev_timestamp; fall back to value-only
-        // (JIT path) with shard/timestamp 0.
         if chunk.start_register_records.len() == 36 {
             for (i, &(v, sh, ts)) in chunk.start_register_records.iter().enumerate() {
                 state
@@ -159,15 +150,6 @@ impl<'a> TracingVM<'a> {
                     .insert(i as u32, MemoryRecord { value: v, shard: 0, timestamp: 0 });
             }
         }
-        // Seed the shared streams at the chunk-start cursor positions.
-        //
-        // A chunk that carries its own hint window is seeded from THAT, cursor
-        // at 0. The whole-stream branch below copies the entire program's
-        // stream into every worker, which is O(workers x program) host memory
-        // for data each worker reads a few entries of; the slice is the window
-        // this chunk actually consumes. `Some(vec![])` still means
-        // prerecorded -- a chunk that consumed no hints must not re-run the
-        // hint and hook syscalls.
         let stream_prerecorded = match chunk.input_stream_slice.as_ref() {
             Some(slice) => {
                 state.input_stream = slice.clone();
@@ -189,30 +171,11 @@ impl<'a> TracingVM<'a> {
         }
         state.public_values_stream_ptr = chunk.public_values_stream_ptr as usize;
 
-        // Spawn the sub-Executor and let it walk the chunk. The program goes
-        // in by `Arc`: the executor wraps it in one anyway, and a deep clone
-        // here is 800K instructions plus the image PER SHARD.
         let mut sub = Executor::recover_shared(self.program.clone(), state, self.opts);
-        // Mirror `trace_checkpoint`: the same shard-boundary inputs, and a
-        // no-op deferred-proof verifier because the checkpoint pass already
-        // verified them (re-verifying here would redo the work and warn).
         sub.maximal_shapes = self.maximal_shapes.clone();
         const NOOP: &NoOpSubproofVerifier = &NoOpSubproofVerifier;
         sub.subproof_verifier = Some(NOOP);
 
-        // Seed sub-Executor memory from the chunk's mem_reads oracle. Each
-        // entry carries the FULL pre-access record (value+shard+timestamp)
-        // captured by the sequential producer; the FIRST entry per address
-        // = the memory state at shard start, so the first touch replays
-        // prev_shard/prev_timestamp byte-exactly. `or_insert` keeps
-        // first-seen. For the terminal chunk, the full final memory is
-        // also seeded below so postprocess can finalize every address.
-        // The oracle is a CURSOR, not a seed.  Seeding a page table kept only
-        // the FIRST entry per address, so any address whose value changed
-        // within the shard replayed against a stale one, and any address the
-        // producer reached by a path the seed did not cover (hint blocks, the
-        // uninitialized image) read as zero.  Consuming positionally removes
-        // both failure modes: the Nth access gets the Nth recorded record.
         if !chunk.mem_reads.is_empty() {
             sub.replay_mem = Some(crate::minimal_trace::ReplayMem {
                 entries: chunk.mem_reads.clone(),
@@ -221,52 +184,22 @@ impl<'a> TracingVM<'a> {
             });
         }
 
-        // bound this worker to chunk.clk_end. Without
-        // this bound every TracingVM worker re-executes from
-        // chunk.pc_start *to program halt*, defeating parallelism.
-        //
-        // Mechanism: `max_cycles` already exists on Executor for the
-        // cycle-limit feature; setting it = chunk.clk_end makes
-        // execute_cycle return `ExceededCycleLimit` the moment we cross
-        // the shard boundary. We catch that and treat it as "worker
-        // done with its chunk".
         sub.executor_mode = crate::ExecutorMode::Trace;
         sub.max_cycles = Some(chunk.clk_end);
-        // skip replay-irrelevant
-        // bookkeeping (opcode_counts, local_counts, syscall_counts).
-        // These are estimation/report counters, not trace events, so
-        // they don't affect the reconstructed records' bytes.
         sub.skip_replay_bookkeeping = true;
-        // The seeded stream already contains every hint and hook result the
-        // producer generated, so the syscalls that would produce them must not
-        // run again — see `Executor::hint_stream_prerecorded`.
         sub.hint_stream_prerecorded = stream_prerecorded;
-        // The global memory init/finalize argument iterates EVERY touched
-        // address at program halt — data the sparse per-shard oracle
-        // can't supply. So we suppress the sub-executor's own
-        // (necessarily incomplete) finalize pass and inject the
-        // producer-captured full-memory events below for the terminal
-        // chunk. Non-terminal chunks never reach postprocess (they exit
-        // via ExceededCycleLimit, not `done`), so this is a no-op there.
         sub.emit_global_memory_events = false;
         let exit_reason = loop {
             match sub.execute() {
-                Ok(true) => break "halt", // natural halt within the chunk
+                Ok(true) => break "halt",
                 Ok(false) => {}
-                Err(ExecutionError::ExceededCycleLimit(_)) => break "clk_end", // shard boundary
+                Err(ExecutionError::ExceededCycleLimit(_)) => break "clk_end",
                 Err(e) => return Err(e),
             }
         };
-        // LOCKSTEP CHECK.  The oracle is positional: the Nth access of the
-        // replay must be the Nth access the producer captured.  When that
-        // stops being true the replay does not fail -- reads fall through to
-        // the unseeded paged image and yield zeros, and a full record is
-        // produced for an execution that never happened.  Catch it here, where
-        // the chunk is finished and `pos` is final.
         if let Some(m) = sub.replay_mem.as_ref() {
             let consumed = m.pos;
             let total = m.entries.len();
-            // Running dry is unambiguous: every read after it was invented.
             if m.exhausted {
                 return Err(ExecutionError::ReplayOracleDesync {
                     consumed,
@@ -274,17 +207,6 @@ impl<'a> TracingVM<'a> {
                     exhausted: true,
                 });
             }
-            // Leftover entries mean the replay took a different path through
-            // the same cycles: equally a desync, and equally a record produced
-            // for an execution that did not happen.
-            //
-            // This warned by default until a campaign could show it stays
-            // quiet, because shipping it as a hard error untested would fail
-            // healthy blocks. That campaign has now run: 2,331 production
-            // blocks (26005269..26007605, 8h18m) emitted the warning ZERO
-            // times, and no chunk desynced either way. So it fails closed, and
-            // the `ZKM_REPLAY_STRICT` knob is gone -- a soundness check should
-            // not have a fail-open override.
             if consumed != total {
                 return Err(ExecutionError::ReplayOracleDesync {
                     consumed,
@@ -294,18 +216,9 @@ impl<'a> TracingVM<'a> {
             }
         }
 
-        // bump the worker's live record into its
-        // records vec. When `ExceededCycleLimit` triggers, the normal
-        // trailing bump_record path in execute() is bypassed, leaving
-        // events stranded in the live record. Without this step the
-        // parallel replay loses all events from the final partial
-        // shard inside each worker.
         if !sub.record.cpu_events.is_empty() {
             sub.bump_record();
         }
-        // A chunk that covers cycles but replays to nothing is always a bug --
-        // silently proving an empty shard is far worse than a loud warning, and
-        // the caller sees only an empty record with no way to tell why.
         if sub.records.iter().all(|r| r.cpu_events.is_empty()) && chunk.num_cycles() > 0 {
             tracing::warn!(
                 target: "tracing_vm",
@@ -324,31 +237,10 @@ impl<'a> TracingVM<'a> {
             );
         }
 
-        // Capture the shard-end public-value inputs BEFORE draining: the
-        // sub-executor exits this single shard via `ExceededCycleLimit`
-        // (or natural halt), so `Executor::execute`'s trailing
-        // public-values finalization loop — which normally stamps
-        // execution_shard / start_pc / next_pc / timestamps — is skipped.
-        // We replicate it below (a chunk == exactly one CPU shard, so the
-        // per-shard values are self-contained; empty/no-CPU shards are
-        // produced by the deferred-memory path in prove.rs, not here).
         let shard_last_timestamp = sub.state.clk;
         let committed_value_digest = sub.record.public_values.committed_value_digest;
         let deferred_proofs_digest = sub.record.public_values.deferred_proofs_digest;
 
-        // The Executor pushes finished records into `sub.records` via
-        // `bump_record()`; the live `sub.record` is empty at this
-        // point. Merge everything from `sub.records` into `self.record`
-        // so the caller gets a single combined ExecutionRecord per
-        // chunk. a future revision will skip the intermediate Vec entirely.
-        //
-        // A chunk is exactly one shard, so `sub.records` holds one record and
-        // it moves into `self.record` whole.  Appending it copied every event
-        // Vec into the caller's pre-reserved record (~0.5 GB of writes and
-        // first-touch page faults per shard, a third of the replay) and then
-        // freed the source.  The fields `append` does not carry stay as the
-        // caller's fresh record had them.  Anything else -- several records,
-        // or a caller record that already holds events -- still merges.
         use zkm_pcs::MachineRecord;
         if sub.records.len() == 1 && self.record.cpu_events.is_empty() {
             let mut only = sub.records.pop().expect("one record");
@@ -366,9 +258,6 @@ impl<'a> TracingVM<'a> {
             }
         }
 
-        // Replicate `Executor::execute`'s per-shard public-values stamp
-        // (executor.rs finalization loop) so prove.rs reads byte-exact
-        // execution_shard / pc / timestamp fields off this record.
         if !self.record.cpu_events.is_empty() {
             let first_pc = self.record.cpu_events[0].pc;
             let first_next_pc = self.record.cpu_events[0].next_pc;
@@ -391,19 +280,12 @@ impl<'a> TracingVM<'a> {
             pv.next_next_pc = last_next_next_pc;
         }
 
-        // Terminal chunk: inject the global memory init/finalize events
-        // the producer captured from the FULL final memory (postprocess
-        // over every touched address, which the sub-executor's partial
-        // memory can't reproduce). Mirrors `Executor::postprocess` so the
-        // event SET matches byte-for-byte (they're addr-sorted before the
-        // memory shards are split, so push order is irrelevant).
         if !chunk.final_memory.is_empty() {
             use crate::events::{MemoryInitializeFinalizeEvent, MemoryRecord};
             let image = &self.program.image;
             let uninit: std::collections::HashMap<u32, u32> =
                 chunk.final_uninit_memory.iter().copied().collect();
 
-            // addr = 0 is constrained first in the finalize table.
             let addr0 = chunk
                 .final_memory
                 .iter()
@@ -437,23 +319,6 @@ impl<'a> TracingVM<'a> {
     }
 }
 
-/// Drive an entire [`MinimalTrace`] through parallel TracingVM workers
-/// and return one [`ExecutionRecord`] per shard in input order.
-///
-/// For an N-shard program on an M-core host,
-/// runtime drops from `sum(per_shard_emit)` to `max(per_shard_emit) +
-/// dispatch_overhead`, i.e. ~M× speedup of the trace-emit stage.
-///
-/// # scaffold caveat
-///
-/// Because [`TracingVM::execute_from_chunk`] currently re-runs each
-/// chunk via the full Executor loop, each worker still does the full
-/// (slow) per-shard interpreter walk. The parallelism is real and lands
-/// today — the per-shard cost shrinks once a future revision wires the oracle and
-/// the bespoke lifter. Without that, this is a "correct but no-faster"
-/// drop-in: useful for nailing down the API and shaking out the
-/// per-shard `ExecutionState` capture before the lifter lands.
-///
 /// Replay ONE chunk into its own `ExecutionRecord`.
 ///
 /// This is the whole consumer side for a distributed prover: a worker that has
@@ -476,9 +341,6 @@ pub fn trace_chunk(
     chunk: &TraceChunk,
     maximal_shapes: Option<MaximalShapes>,
 ) -> Result<ExecutionRecord, ExecutionError> {
-    // No reservation: the replay's own record moves in whole (see
-    // `execute_from_chunk_with_streams`), so a pre-reserved shell here would
-    // only be mapped and unmapped.
     let mut record = ExecutionRecord::new_preallocated(program.clone(), 0);
     let mut vm = TracingVM::new_with_shapes(program, opts, &mut record, maximal_shapes);
     vm.execute_from_chunk(chunk)?;
@@ -532,8 +394,6 @@ pub fn drive_tracing_vm_parallel_with_shapes(
 ) -> Result<Vec<ExecutionRecord>, ExecutionError> {
     use p3_maybe_rayon::prelude::*;
 
-    // Pre-allocate one record per chunk so the parallel section can
-    // operate on `&mut Vec<ExecutionRecord>` slices without contention.
     let mut records: Vec<ExecutionRecord> = trace
         .chunks
         .iter()
@@ -543,9 +403,6 @@ pub fn drive_tracing_vm_parallel_with_shapes(
         })
         .collect();
 
-    // Rayon par_iter_mut over (chunk, &mut record) pairs. Each worker
-    // owns a TracingVM bound to its own record — no cross-shard sharing,
-    // so no Mutex / channel overhead.
     let results: Result<Vec<()>, ExecutionError> = trace
         .chunks
         .par_iter()
@@ -584,7 +441,6 @@ mod tests {
         let opts = ZKMCoreOpts::default();
         let mut record = ExecutionRecord::new(program.clone());
         let _vm = TracingVM::new(program, opts, &mut record);
-        // If we got here without panic, the lifetime story holds.
     }
 
     /// Option B Checkpoint-mode oracle test. The
@@ -620,8 +476,6 @@ mod tests {
         assert!(chunks.len() > 1, "test program produced only {} chunk(s)", chunks.len());
         for (i, c) in chunks.iter().enumerate() {
             let Some(slice) = c.input_stream_slice.as_ref() else {
-                // Only the terminal chunk may still be open-ended; every chunk
-                // sealed by a `bump_record` must have committed its window.
                 assert_eq!(i, chunks.len() - 1, "chunk {i} sealed without a hint window");
                 continue;
             };
@@ -637,15 +491,12 @@ mod tests {
 
     /// A chunk whose end lands inside an unconstrained block still replays.
     ///
-    /// `enter_unconstrained` PARKS the live record in `unconstrained_state` and
-    /// keeps incrementing the clock, so a replay bounded by `max_cycles` used to
-    /// abort inside the block and hand back an EMPTY record for a shard that had
-    /// really executed millions of cycles. Measured on reth: 4 of 126 chunks,
-    /// with the oracle 99.97% consumed and `exit_reason="clk_end"`.
+    /// `enter_unconstrained` parks the live record in `unconstrained_state` and
+    /// keeps incrementing the clock, so a replay bounded by `max_cycles` could
+    /// stop inside the block with an empty record for a shard that executed.
     ///
-    /// This is the guard for that: the unconstrained program's chunks must
-    /// replay to the same events as running it straight through, and in
-    /// particular none of them may come back empty.
+    /// The unconstrained program's chunks must replay to the same events as
+    /// running it straight through, and none of them may come back empty.
     #[test]
     fn chunks_ending_in_unconstrained_still_replay() {
         use crate::minimal_trace::MinimalTrace;
@@ -726,7 +577,6 @@ mod tests {
         assert!(chunks.len() > 2, "only {} chunk(s)", chunks.len());
 
         let program = Arc::new(program);
-        // One at a time, the way a worker would.
         let one_at_a_time: Vec<_> = chunks
             .iter()
             .map(|c| trace_chunk(program.clone(), opts, c, None).expect("trace_chunk"))
@@ -762,20 +612,15 @@ mod tests {
         use crate::minimal_trace::MinimalTrace;
         use crate::Executor;
 
-        // sha3-chain, not fibonacci: fibonacci fits in two chunks even at a
-        // small shard size, and the point is to replay chunks that start deep
-        // inside the program.
         let program = crate::programs::tests::sha3_chain_program();
         let opts = ZKMCoreOpts { shard_size: 1 << 12, ..Default::default() };
 
-        // A: straight through.
         let mut a = Executor::new(program.clone(), opts);
         a.write_stdin(&[1u8; 32]);
         a.write_stdin(&1u32);
         a.run().expect("sequential run");
         let records_a = std::mem::take(&mut a.records);
 
-        // B: stream the chunks out as they seal, then replay them.
         let mut b = Executor::new(program.clone(), opts);
         b.write_stdin(&[1u8; 32]);
         b.write_stdin(&1u32);
@@ -792,8 +637,6 @@ mod tests {
             }
         }
         assert!(chunks.len() > 2, "only {} chunk(s); raise the cycle count", chunks.len());
-        // Every chunk carries its own hint window, so the replay takes the
-        // sliced path -- the whole-program stream below is deliberately empty.
         assert!(
             chunks.iter().all(|c| c.input_stream_slice.is_some()),
             "a streamed chunk went out without its hint window"
@@ -825,12 +668,6 @@ mod tests {
             "memory store event count"
         );
 
-        // CONTENT, not just counts. Counts matching proves nothing about a
-        // read-modify-write store: a narrow store whose containing word was
-        // read as zero emits exactly as many events, each carrying a wrong
-        // written value. Measured on reth, that divergence reached the memory
-        // argument and made the global cumulative sum non-zero while every
-        // event count still agreed.
         let flat_a: Vec<&crate::events::CpuEvent> =
             records_a.iter().flat_map(|r| r.cpu_events.iter()).collect();
         let flat_b: Vec<&crate::events::CpuEvent> =
@@ -884,8 +721,6 @@ mod tests {
         let trace = MinimalTrace { chunks, ..Default::default() };
         let records_b = drive_tracing_vm_parallel(Arc::new(program), opts, &trace).expect("replay");
 
-        // Per code, every event in stream order, serialized: the bytes a
-        // worker would store for the controller.
         let flatten = |rs: &[crate::ExecutionRecord]| -> BTreeMap<SyscallCode, Vec<Vec<u8>>> {
             let mut out: BTreeMap<SyscallCode, Vec<Vec<u8>>> = BTreeMap::new();
             for r in rs {
@@ -923,9 +758,8 @@ mod tests {
     /// The streaming producer is only a safe swap for the batched one if
     /// draining after every `execute_state` changes nothing but WHEN a chunk
     /// becomes available -- so this runs one program both ways and compares the
-    /// sealed sequences field by field, `shard_index` included (the field a
-    /// naive drain silently restarts at 0, because it used to be
-    /// `chunks.len()`).
+    /// sealed sequences field by field, `shard_index` included (a naive drain
+    /// that derives it from `chunks.len()` restarts it at 0).
     #[test]
     fn streamed_chunks_match_batched_chunks() {
         use crate::instruction::Instruction;
@@ -935,29 +769,23 @@ mod tests {
 
         fn program() -> Program {
             let pc_base = 0x1000_0000u32;
-            // Enough cycles to cross several shard boundaries at a small
-            // shard size, so there is more than one chunk to compare.
             let insns: Vec<Instruction> =
                 (0..4000).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
             Program::new(insns, pc_base, pc_base)
         }
         let opts = ZKMCoreOpts { shard_size: 1 << 10, ..Default::default() };
 
-        // Batched: run to completion, then take the whole collector.
         let mut exec = Executor::new(program(), opts);
         exec.minimal_trace_collector = Some(MinimalTrace::default());
         while !exec.execute_state(false).expect("execute_state").1 {}
         exec.seal_minimal_trace_final_memory();
         let batched = exec.minimal_trace_collector.take().unwrap().chunks;
 
-        // Streamed: drain after every turn, and once more after the seal.
         let mut exec = Executor::new(program(), opts);
         exec.minimal_trace_collector = Some(MinimalTrace::default());
         let mut streamed = Vec::new();
         loop {
             let (_state, done) = exec.execute_state(false).expect("execute_state");
-            // Seal BEFORE the final drain, or the terminal chunk leaves without
-            // its final-memory image. See `drain_sealed_chunks`.
             if done {
                 exec.seal_minimal_trace_final_memory();
             }
@@ -1155,8 +983,6 @@ mod tests {
         use crate::opcode::Opcode;
         use crate::Executor;
 
-        // 100 ADDs targeting reg 1 — no user-memory I/O, so oracle
-        // should remain empty (sanity).
         let pc_base = 0x1000_0000u32;
         let insns: Vec<Instruction> =
             (0..100).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
@@ -1164,7 +990,6 @@ mod tests {
         let mut exec = Executor::new(program, ZKMCoreOpts::default());
         exec.minimal_trace_collector = Some(MinimalTrace::default());
 
-        // Drive via execute_state — Checkpoint mode path
         let mut steps = 0;
         loop {
             let (_state, done) = exec.execute_state(false).expect("execute_state");
@@ -1175,11 +1000,6 @@ mod tests {
         }
 
         let trace = exec.minimal_trace_collector.take().unwrap();
-        // Sanity: trace has at least one chunk (executor bumped at done).
-        // Register-only program → empty mem_reads everywhere (filter
-        // skips addr < 36). That's the sanity check: oracle infra is
-        // hooked but only collects when there are real user-mem
-        // accesses.
         let total_reads: usize = trace.chunks.iter().map(|c| c.mem_reads.len()).sum();
         assert_eq!(
             total_reads, 0,
@@ -1219,7 +1039,6 @@ mod tests {
         exec_b.run().expect("lifter run");
         let cpu_b: usize = exec_b.records.iter().map(|r| r.cpu_events.len()).sum();
 
-        // The real correctness property: the flag drops COUNTERS, never events.
         assert_eq!(cpu_a, cpu_b, "lifter flag changed cpu_events: baseline={cpu_a} lifter={cpu_b}");
     }
 
@@ -1291,7 +1110,6 @@ mod tests {
             (0..50).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
         let program = Program::new(insns, pc_base, pc_base);
 
-        // Sequential pass A: capture records + MinimalTrace
         let mut exec_a = Executor::new(program.clone(), ZKMCoreOpts::default());
         exec_a.minimal_trace_collector = Some(MinimalTrace::default());
         exec_a.run().expect("sequential run A");
@@ -1301,15 +1119,12 @@ mod tests {
         let total_cpu_a: usize = records_a.iter().map(|r| r.cpu_events.len()).sum();
         let total_addsub_a: usize = records_a.iter().map(|r| r.add_sub_events.len()).sum();
 
-        // Parallel pass B: replay via TracingVM workers
         let program_arc = Arc::new(program);
         let records_b = drive_tracing_vm_parallel(program_arc, ZKMCoreOpts::default(), &trace)
             .expect("parallel replay B");
         let total_cpu_b: usize = records_b.iter().map(|r| r.cpu_events.len()).sum();
         let total_addsub_b: usize = records_b.iter().map(|r| r.add_sub_events.len()).sum();
 
-        // Structural equivalence: both paths must emit the same number
-        // of CPU + ADD events. (Per-field byte-equivalence is covered by the record tests.)
         assert_eq!(
             total_cpu_a,
             total_cpu_b,
@@ -1336,23 +1151,17 @@ mod tests {
         use crate::opcode::Opcode;
         use crate::Executor;
 
-        // Mix of opcodes to exercise multiple event types: ADDs to
-        // populate add_sub_events; chained reg updates so dependencies
-        // are non-trivial.
         let pc_base = 0x1000_0000u32;
         let mut insns: Vec<Instruction> = Vec::with_capacity(80);
         for i in 0..40u32 {
-            // Cycle reg index 1..15 so we hit a range of register addrs.
             let dst = ((i % 14) + 1) as u8;
             insns.push(Instruction::new(Opcode::ADD, dst, 0, i + 1, false, true));
         }
-        // Then a chain of ADDs that read previously-written regs.
         for _ in 0..40 {
             insns.push(Instruction::new(Opcode::ADD, 1, 1, 2, false, false));
         }
         let program = Program::new(insns, pc_base, pc_base);
 
-        // Sequential
         let mut exec_a = Executor::new(program.clone(), ZKMCoreOpts::default());
         exec_a.minimal_trace_collector = Some(MinimalTrace::default());
         exec_a.run().expect("seq run");
@@ -1360,23 +1169,15 @@ mod tests {
         trace.finalize(exec_a.state.global_clk);
         let records_a = std::mem::take(&mut exec_a.records);
 
-        // Parallel
         let records_b =
             drive_tracing_vm_parallel(Arc::new(program), ZKMCoreOpts::default(), &trace)
                 .expect("par replay");
 
-        // Flatten per-shard CpuEvent streams for comparison.
         let cpu_a: Vec<_> = records_a.iter().flat_map(|r| r.cpu_events.iter()).collect();
         let cpu_b: Vec<_> = records_b.iter().flat_map(|r| r.cpu_events.iter()).collect();
         assert_eq!(cpu_a.len(), cpu_b.len(), "cpu_event count");
 
         for (i, (a, b)) in cpu_a.iter().zip(cpu_b.iter()).enumerate() {
-            // The clk/pc fields are the load-bearing identity for the
-            // event — drift here means the worker diverged from the
-            // sequential timeline. The operands used to be checked here too;
-            // they now live only in the per-chip events (`add_sub_events` and
-            // friends, compared below), which is where the computational
-            // outputs actually are.
             assert_eq!(a.clk, b.clk, "cpu_events[{i}] clk: seq={} par={}", a.clk, b.clk);
             assert_eq!(a.pc, b.pc, "cpu_events[{i}] pc: seq={:#x} par={:#x}", a.pc, b.pc);
             assert_eq!(a.next_pc, b.next_pc, "cpu_events[{i}] next_pc");
@@ -1384,7 +1185,6 @@ mod tests {
             assert_eq!(a.exit_code, b.exit_code, "cpu_events[{i}] exit_code");
         }
 
-        // Same for add_sub_events.
         let add_a: Vec<_> = records_a.iter().flat_map(|r| r.add_sub_events.iter()).collect();
         let add_b: Vec<_> = records_b.iter().flat_map(|r| r.add_sub_events.iter()).collect();
         assert_eq!(add_a.len(), add_b.len(), "add_sub_event count");
@@ -1405,10 +1205,6 @@ mod tests {
         use crate::opcode::Opcode;
         use crate::Executor;
 
-        // 200 straight-line ADDs. With shard_size large the executor
-        // emits a single trailing chunk; with shard_size small it
-        // emits several. We just assert contiguity + ordering, not
-        // an exact count (shard sizing is set by ZKMCoreOpts).
         let pc_base = 0x1000_0000u32;
         let insns: Vec<Instruction> =
             (0..200).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
@@ -1420,9 +1216,6 @@ mod tests {
         let mut trace = exec.minimal_trace_collector.take().unwrap();
         trace.finalize(exec.state.global_clk);
 
-        // Sanity: chunks are ordered and contiguous (chunk[i].clk_end ==
-        // chunk[i+1].clk_start). Worker correctness comes from the
-        // `execute_from_chunk` bound — already tested above.
         for w in trace.chunks.windows(2) {
             assert_eq!(
                 w[0].clk_end, w[1].clk_start,
@@ -1430,7 +1223,6 @@ mod tests {
                 w[0].shard_index, w[0].clk_end, w[1].shard_index, w[1].clk_start
             );
         }
-        // Final chunk must cover up to executor halt.
         if let Some(last) = trace.chunks.last() {
             assert!(last.clk_end >= exec.state.global_clk);
         }
@@ -1462,9 +1254,6 @@ mod tests {
         use crate::instruction::Instruction;
         use crate::opcode::Opcode;
         let pc_base = 0x1000_0000u32;
-        // LW rd, rs, imm — read 0x2000_0000, which is well past NUM_REGISTERS
-        // so it goes through the replay oracle rather than the register
-        // short-circuit.
         let insns: Vec<Instruction> = (0..loads)
             .map(|_| Instruction::new(Opcode::LW, 2, 0, 0x2000_0000, false, true))
             .collect();
@@ -1494,10 +1283,9 @@ mod tests {
         (program, chunk)
     }
 
-    /// A truncated oracle used to degrade silently: the read fell through to
-    /// the unseeded paged image, returned zero, and the worker produced a full
-    /// record for an execution that never happened — reported at most once per
-    /// PROCESS through a `std::sync::Once`.  It must now fail the chunk.
+    /// A truncated oracle must fail the chunk: otherwise the read falls
+    /// through to the unseeded paged image, returns zero, and the worker
+    /// produces a full record for an execution that never happened.
     #[test]
     fn a_truncated_replay_oracle_fails_the_chunk() {
         let (program, chunk) = chunk_with_short_oracle(8, 2);
@@ -1534,7 +1322,6 @@ mod tests {
     fn execute_from_chunk_respects_clk_end_bound() {
         use crate::instruction::Instruction;
         use crate::opcode::Opcode;
-        // 200 ADDs — each is 5 clk → 1000 clk if unbounded.
         let pc_base = 0x1000_0000u32;
         let insns: Vec<Instruction> =
             (0..200).map(|_| Instruction::new(Opcode::ADD, 1, 0, 1, false, true)).collect();
@@ -1553,7 +1340,7 @@ mod tests {
             start_register_records: Vec::new(),
             pc_start: pc_base,
             clk_start: 0,
-            clk_end: 100, // bounds worker to ~20 ADDs (5 clk each)
+            clk_end: 100,
             current_shard: 0,
             input_stream_ptr: 0,
             proof_stream_ptr: 0,
@@ -1562,9 +1349,6 @@ mod tests {
             final_uninit_memory: Vec::new(),
             mem_reads: Arc::new(Vec::new()),
         };
-        // Bound MUST trigger ExceededCycleLimit which execute_from_chunk
-        // catches; otherwise the test would fail with a leaked error or
-        // run to the natural 200-ADD halt.
         vm.execute_from_chunk(&chunk).expect("bounded worker exits cleanly");
     }
 }
@@ -1647,7 +1431,6 @@ mod hint_seam_tests {
     #[test]
     fn a_chunk_sealed_inside_the_hint_seam_carries_the_peeked_entry() {
         let hint: Vec<u8> = (0..16u8).collect();
-        // Enough padding that the seam spans several shard fences.
         let (stream, chunks) = run(6000, &hint);
         assert!(chunks.len() > 2, "only {} chunk(s): the fence never split the seam", chunks.len());
 

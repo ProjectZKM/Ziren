@@ -5,7 +5,6 @@ use std::process::Command;
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    // Use local go-ethereum if GETH_DIR is set, otherwise clone from GitHub.
     let geth_dir = if let Ok(dir) = env::var("GETH_DIR") {
         let p = PathBuf::from(dir);
         assert!(p.exists(), "GETH_DIR does not exist: {}", p.display());
@@ -38,7 +37,6 @@ fn main() {
         keeper_dir.display()
     );
 
-    // Use zkm-build to generate the Go runtime overlay for zkVM.
     let overlay_path = zkm_build::generate_go_overlay(&out_dir);
     let mut cmd = Command::new("go");
     cmd.arg("build")
@@ -63,7 +61,6 @@ fn main() {
     let elf_dest_path = out_dir.join("keeper.elf");
     std::fs::copy(&keeper_path, &elf_dest_path).unwrap();
 
-    // Rerun if local geth source changes.
     if let Ok(dir) = env::var("GETH_DIR") {
         rerun_if_changed_recursive(&Path::new(&dir).join("cmd/keeper"));
         rerun_if_changed_recursive(&Path::new(&dir).join("crypto"));

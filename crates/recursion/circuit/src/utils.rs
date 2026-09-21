@@ -32,8 +32,6 @@ pub fn felt_bytes_to_bn254_var<C: Config>(
     for (i, byte) in bytes.iter().enumerate() {
         let byte_bits = builder.num2bits_f_circuit(*byte);
         if i == 0 {
-            // Since 32 bytes doesn't fit into Bn254, we need to truncate the top 3 bits.
-            // For first byte, zero out 3 most significant bits.
             for i in 0..3 {
                 builder.assign(byte_bits[8 - i - 1], zero_var);
             }
@@ -97,7 +95,6 @@ pub(crate) mod tests {
 
         let records = vec![runtime.record];
 
-        // Run with the poseidon2 wide chip.
         let proof_wide_span = tracing::debug_span!("Run test with wide machine").entered();
         let wide_machine = RecursionAir::<_, 3>::compress_machine(SC::default());
         let (pk, vk) = wide_machine.setup(&program);

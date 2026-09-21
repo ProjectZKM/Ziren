@@ -117,7 +117,7 @@ pub fn interpolate<K: Field>(xs: &[K], ys: &[K]) -> UnivariatePolynomial<K> {
 /// Recover a degree-2 polynomial in coefficient form from its
 /// evaluations at `x = 0, 1, 2`.
 ///
-/// Used to bridge Ziren's eval-form jagged-sumcheck rounds (host
+/// Bridges Ziren's eval-form jagged-sumcheck rounds (host
 /// emits `[p(0), p(1), p(2)]` from
 /// [`zkm_pcs::jagged_sumcheck::JaggedReductionRound`], where
 /// `p(2)` comes from linear extrapolation `q1.double() - q0`) to the
@@ -139,12 +139,9 @@ pub fn interpolate_3point_evals_at_012<K: Field>(evals: [K; 3]) -> UnivariatePol
     let [p0, p1, p2] = evals;
     let two_inv = K::from_u8(2).inverse();
     let c0 = p0;
-    // p(1) - p(0) - (p(2) - 2 p(1) + p(0)) / 2
-    //   = p(0) · (-3/2) + p(1) · 2 + p(2) · (-1/2)
     let three_halves_p0 = (p0 + p0 + p0) * two_inv;
     let half_p2 = p2 * two_inv;
     let c1 = -three_halves_p0 + p1 + p1 - half_p2;
-    // (p(2) - 2 p(1) + p(0)) / 2
     let half_p0 = p0 * two_inv;
     let c2 = half_p0 - p1 + half_p2;
     UnivariatePolynomial::new(vec![c0, c1, c2])
@@ -160,21 +157,18 @@ mod tests {
 
     #[test]
     fn eval_at_point_uses_horners_method() {
-        // p(x) = 1 + x + x^2  →  p(2) = 1 + 2 + 4 = 7.
         let poly = UnivariatePolynomial::new(vec![F::ONE, F::ONE, F::ONE]);
         assert_eq!(poly.eval_at_point(F::TWO), F::from_u16(7));
     }
 
     #[test]
     fn eval_one_plus_zero_matches_sumcheck_identity() {
-        // p(x) = 1 + x + x^2  →  p(0) = 1, p(1) = 3  →  sum = 4.
         let poly = UnivariatePolynomial::new(vec![F::ONE, F::ONE, F::ONE]);
         assert_eq!(poly.eval_one_plus_eval_zero(), F::from_u16(4));
     }
 
     #[test]
     fn mul_by_x_shifts_coefficients_up_one_position() {
-        // (1 + 2x) * x = x + 2x^2  →  coefficients [0, 1, 2].
         let poly = UnivariatePolynomial::new(vec![F::ONE, F::TWO]);
         let shifted = poly.mul_by_x();
         assert_eq!(shifted.coefficients, vec![F::ZERO, F::ONE, F::TWO]);
@@ -182,7 +176,6 @@ mod tests {
 
     #[test]
     fn interpolation_recovers_evaluations_at_sample_points() {
-        // Interpolate (0, 1), (1, 2), (2, 7).
         let xs = vec![F::ZERO, F::ONE, F::TWO];
         let ys = vec![F::ONE, F::TWO, F::from_u16(7)];
         let poly = interpolate(&xs, &ys);
@@ -226,7 +219,6 @@ mod tests {
     /// interpolating recovers the same coefficients.
     #[test]
     fn interpolate_3point_round_trip() {
-        // p(X) = 1 + 3X + 5X²  →  p(0)=1, p(1)=9, p(2)=27.
         let original = UnivariatePolynomial::new(vec![F::ONE, F::from_u8(3), F::from_u8(5)]);
         let evals = [
             original.eval_at_point(F::ZERO),

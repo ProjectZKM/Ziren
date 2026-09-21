@@ -27,8 +27,6 @@ impl Syscall for Poseidon2PermuteSyscall {
             panic!("state_ptr must be aligned");
         }
 
-        // First read the words for the state. We can read a slice_unsafe here because we write
-        // the post-state to state_ptr later.
         let pre_state = ctx.slice_unsafe(state_ptr, STATE_SIZE);
         let pre_state: [u32; 16] = pre_state.as_slice().try_into().unwrap();
 
@@ -40,7 +38,6 @@ impl Syscall for Poseidon2PermuteSyscall {
         let post_state = state.map(|x| x.as_canonical_u32());
         let state_records = ctx.mw_slice(state_ptr, &post_state);
 
-        // Push the Poseidon2 permute event.
         let shard = ctx.current_shard();
         let event = PrecompileEvent::Poseidon2Permute(Poseidon2PermuteEvent {
             shard,

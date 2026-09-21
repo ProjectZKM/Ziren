@@ -79,8 +79,6 @@ impl ZKMProofWithPublicValues {
             }
             ZKMProof::Plonk(plonk_proof) => {
                 if plonk_proof.encoded_proof.is_empty() {
-                    // If the proof is empty, then this is a mock proof. The mock Ziren verifier
-                    // expects an empty byte array for verification, so return an empty byte array.
                     return Vec::new();
                 }
 
@@ -90,8 +88,6 @@ impl ZKMProofWithPublicValues {
             }
             ZKMProof::Groth16(groth16_proof) => {
                 if groth16_proof.encoded_proof.is_empty() {
-                    // If the proof is empty, then this is a mock proof. The mock Ziren verifier
-                    // expects an empty byte array for verification, so return an empty byte array.
                     return Vec::new();
                 }
 

@@ -45,9 +45,6 @@ where
     D: TwoAdicSubgroupDft<F>,
 {
     pub fn new(dft: Arc<D>, mmcs: MT, config: WhirConfig) -> Self {
-        // The starting RS rate is the WHIR schedule's; the query count / pow at
-        // commit time are unused (folding sets them per round), so a nominal
-        // FriConfig carries only the blowup the encoder needs.
         let fri = FriConfig::new(config.starting_log_inv_rate, 0, 0);
         Self { encoder: DftEncoder::new(fri, dft), mmcs, config, _ef: core::marker::PhantomData }
     }
@@ -66,22 +63,17 @@ where
     {
         let num_variables = mle.num_variables() as usize;
 
-        // Encode + Merkle-commit, exactly BaseFold's commit path.
         let codewords = self.encoder.encode_batch(alloc::vec![Arc::clone(&mle)]);
         let mats: Vec<p3_matrix::dense::RowMajorMatrix<F>> =
             codewords.iter().map(|c| c.data.clone()).collect();
         let (commitment, prover_data) = self.mmcs.commit(mats);
         challenger.observe(commitment.clone());
 
-        // Draw `starting_ood_samples` OOD points and answer them.  Each point
-        // is a full `num_variables`-coordinate evaluation point in EF, drawn
-        // from the transcript so the verifier redraws the same points.
         let mut ood_points: Vec<Vec<EF>> = Vec::with_capacity(self.config.starting_ood_samples);
         let mut ood_answers: Vec<EF> = Vec::with_capacity(self.config.starting_ood_samples);
         for _ in 0..self.config.starting_ood_samples {
             let point: Vec<EF> =
                 (0..num_variables).map(|_| challenger.sample_algebra_element()).collect();
-            // The committed polynomial evaluated at the OOD point.
             let answer = mle.eval_at::<EF>(&point)[0];
             challenger.observe_algebra_element(answer);
             ood_points.push(point);

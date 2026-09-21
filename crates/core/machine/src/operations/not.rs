@@ -42,7 +42,6 @@ impl<F: Field> NotOperation<F> {
             );
         }
 
-        // For any byte b, b + !b = 0xFF.
         for i in 0..WORD_SIZE {
             builder.when(is_real).assert_eq(cols.value[i] + a[i], AB::F::from_u8(u8::MAX));
         }

@@ -70,9 +70,8 @@ pub struct JaggedShardProof<F, EF> {
     /// — the value the Fiat-Shamir transcript observes (so the per-chip
     /// geometry is cryptographically tied to the commitment).  The RAW
     /// BaseFold root (the value the BaseFold opening binds against) is carried
-    /// separately in [`Self::jagged_original_commitment`].  On the legacy
-    /// (hash-bind-off) path this equals the raw root and
-    /// `jagged_original_commitment` is empty.
+    /// separately in [`Self::jagged_original_commitment`].  With hash-bind
+    /// off this equals the raw root and `jagged_original_commitment` is empty.
     pub main_commitment: [F; 8],
     /// Shard-level LogUp-GKR sumcheck-stack proof.
     pub logup_gkr_proof: LogupGkrProof<F, EF>,
@@ -119,10 +118,9 @@ pub struct JaggedShardProof<F, EF> {
     /// (pre-hash-bind) — the value the BaseFold opening binds against and
     /// the recursion lift populates `original_commitments` from.  The
     /// FS-observed [`Self::main_commitment`] is the MODIFIED digest
-    /// `compress([raw_root, hash(counts)])`.  Empty `[F;8]`/absent on the
-    /// legacy hash-bind-off path (then `main_commitment` IS the raw root and
-    /// the lift falls back to it).  `#[serde(default)]` keeps old proof bytes
-    /// deserializable.
+    /// `compress([raw_root, hash(counts)])`.  Zero/absent with hash-bind off
+    /// (then `main_commitment` is the raw root and the lift falls back to it);
+    /// `#[serde(default)]` makes the field optional in proof bytes.
     #[serde(default = "default_zero_digest")]
     pub jagged_original_commitment: [F; 8],
     /// The PREPROCESSED opening round's **RAW** BaseFold cap root — the same
@@ -182,11 +180,8 @@ where
             chip_cumulative_sums: std::collections::BTreeMap::new(),
             evaluation_proof: EvaluationProof::Empty,
             fold_orientation: FoldOrientation::Msb,
-            // Height-agnostic groundwork: empty placeholders for the
-            // empty/dummy-inner proof (no packing to derive from).
             row_counts: Vec::new(),
             padding_column_counts: Vec::new(),
-            // Hash-bind: no raw root for the empty/dummy proof.
             jagged_original_commitment: [F::ZERO; 8],
             preprocessed_original_commitment: [F::ZERO; 8],
             preprocessed_row_counts: Vec::new(),
@@ -255,11 +250,9 @@ mod tests {
             fold_orientation: FoldOrientation::Msb,
         };
         let old_bytes = rmp_serde::to_vec(&old).expect("old serializes");
-        // Decode old (shorter) bytes into the NEW struct.
         let back: JaggedShardProof<F, EF> = rmp_serde::from_slice(&old_bytes)
             .expect("old-format proof deserializes into new struct");
         assert_eq!(back.public_values.len(), 7);
-        // The new fields default to empty (serde(default)).
         assert!(back.row_counts.is_empty(), "row_counts must default empty");
         assert!(back.padding_column_counts.is_empty(), "padding_column_counts must default empty");
     }

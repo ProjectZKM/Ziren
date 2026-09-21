@@ -34,9 +34,8 @@ pub struct FieldOpCols<T, P: FieldParameters> {
     /// The result of `a op b`, where a, b are field elements
     pub result: Limbs<T, P::Limbs>,
     pub carry: Limbs<T, P::Limbs>,
-    /// The root-quotient witness, offset-shifted into `[0, 2^16)`; one u16-checked limb per
-    /// coefficient (one column and one lookup where a (low, high) byte pair used to be two of
-    /// each).
+    /// The root-quotient witness, offset-shifted into `[0, 2^16)`: one u16-checked limb
+    /// (one column, one lookup) per coefficient.
     pub(crate) witness: Limbs<T, P::Witness>,
 }
 
@@ -115,16 +114,12 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             FieldOperation::Sub | FieldOperation::Div => unreachable!(),
         }
 
-        // Here we have special logic for p_modulus because to_limbs_field only works for numbers in
-        // the field, but modulus can == the field modulus so it can have 1 extra limb (ex.
-        // uint256).
         let p_modulus_limbs =
             modulus.to_bytes_le().iter().map(|x| F::from_u8(*x)).collect::<Vec<F>>();
         let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
         let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
 
-        // Compute the vanishing polynomial.
         let p_op = match op {
             FieldOperation::Add => &p_a + &p_b,
             FieldOperation::Mul => &p_a * &p_b,
@@ -161,27 +156,17 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         op: FieldOperation,
     ) -> BigUint {
         if b == &BigUint::ZERO && op == FieldOperation::Div {
-            // Division by 0 is allowed only when dividing 0 so that padded rows can be all 0.
             assert_eq!(*a, BigUint::ZERO, "division by zero is allowed only when dividing zero");
         }
 
         let result = match op {
-            // If doing the subtraction operation, a - b = result, equivalent to a = result + b.
             FieldOperation::Sub => {
                 let result = (modulus.clone() + a - b) % modulus;
-                // We populate the carry and witness as if we were doing an addition
-                // with result + b. But we populate `result` with the actual result
-                // of the subtraction because those columns are expected to contain
-                // the result by the user. Note that this reversal means we have to
-                // flip result, a correspondingly in the `eval` function.
                 self.populate_carry_and_witness(&result, b, FieldOperation::Add, modulus);
                 self.result = P::to_limbs_field::<F, _>(&result);
                 result
             }
-            // a / b = result is equivalent to a = result * b.
             FieldOperation::Div => {
-                // As modulus is prime, we can use Fermat's little theorem to compute the
-                // inverse.
                 cfg_if::cfg_if! {
                     if #[cfg(feature = "bigint-rug")] {
                         use zkm_curves::utils::{biguint_to_rug, rug_to_biguint};
@@ -197,12 +182,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
                             (a * b.modpow(&(modulus.clone() - 2u32), &modulus.clone())) % modulus.clone();
                     }
                 }
-                // We populate the carry and witness as if we were doing a
-                // multiplication with result * b. But we populate `result` with the
-                // actual result of the multiplication because those columns are
-                // expected to contain the result by the user. Note that this
-                // reversal means we have to flip result, a correspondingly in the `eval`
-                // function.
                 self.populate_carry_and_witness(&result, b, FieldOperation::Mul, modulus);
                 self.result = P::to_limbs_field::<F, _>(&result);
                 result
@@ -210,7 +189,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             _ => self.populate_carry_and_witness(a, b, op, modulus),
         };
 
-        // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
         record.add_u16_range_checks_field(&self.witness.0);
@@ -306,7 +284,6 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let is_sub: AB::Expr = is_sub.into();
         let is_mul: AB::Expr = is_mul.into();
 
-        // `eval_variable` with is_div = 0, term for term.
         let p_result = p_res_param.clone() * (is_add.clone() + is_mul.clone())
             + p_a_param.clone() * is_sub.clone();
         let p_add = p_a_param.clone() + p_b.clone();
@@ -356,9 +333,6 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let is_add: AB::Expr = is_add.into();
         let is_sub: AB::Expr = is_sub.into();
 
-        // Mirrors `eval_variable` with the mul/div selectors set to zero:
-        //   add:  witness the result, constrain  a + b       == result (mod M)
-        //   sub:  witness `a`,        constrain  result + b  == a      (mod M)
         let p_result = p_res_param.clone() * is_add.clone() + p_a_param.clone() * is_sub.clone();
         let p_add = p_a_param + p_b.clone();
         let p_sub = p_res_param + p_b;
@@ -438,7 +412,6 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_witness = self.witness.0.iter().into();
         eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness);
 
-        // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
         builder.slice_range_check_u16(&self.witness.0, is_real);
@@ -539,8 +512,6 @@ mod tests {
                 })
                 .collect();
 
-            // Hardcoded edge cases. We purposely include 0 / 0. While mathematically, that is not
-            // allowed, we allow it in our implementation so padded rows can be all 0.
             operands.extend(vec![
                 (BigUint::from(0u32), BigUint::from(0u32)),
                 (BigUint::from(0u32), BigUint::from(1u32)),
@@ -562,11 +533,9 @@ mod tests {
                     row
                 })
                 .collect::<Vec<_>>();
-            // Convert the trace to a row major matrix.
             let mut trace =
                 RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_TEST_COLS);
 
-            // Pad the trace to a power of two.
             pad_to_power_of_two::<NUM_TEST_COLS, F>(&mut trace.values);
 
             Ok(trace)
@@ -604,7 +573,6 @@ mod tests {
             let shard = ExecutionRecord::default();
             let _: RowMajorMatrix<KoalaBear> =
                 chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
-            // println!("{:?}", trace.values)
         }
     }
 

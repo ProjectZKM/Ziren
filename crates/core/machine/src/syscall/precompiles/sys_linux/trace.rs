@@ -122,7 +122,6 @@ impl SysLinuxChip {
         cols.result = event.v0.into();
         cols.output.populate_write(event.write_records[0], blu);
 
-        // Canonical syscall decoder
         let sid = F::from_u32(event.syscall_code);
         cols.decode_mmap
             .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_MMAP as u32));
@@ -144,7 +143,6 @@ impl SysLinuxChip {
             || event.syscall_code == SyscallCode::SYS_MMAP2 as u32;
         cols.is_mmap = F::from_bool(is_mmap);
 
-        // Canonical a0 / a1 decoder
         let a0_val = F::from_u32(event.a0);
         cols.decode_a0_0.populate_from_field_element(a0_val);
         cols.decode_a0_1.populate_from_field_element(a0_val - F::ONE);
@@ -154,24 +152,19 @@ impl SysLinuxChip {
         cols.decode_a1_1.populate_from_field_element(a1_val - F::ONE);
         cols.decode_a1_3.populate_from_field_element(a1_val - F::from_u32(3));
 
-        // Composite flags
         cols.is_mmap_a0_0 = F::from_bool(is_mmap && event.a0 == 0);
         cols.is_fnctl_a1_1 =
             F::from_bool(event.syscall_code == SyscallCode::SYS_FCNTL as u32 && event.a1 == 1);
         cols.is_fnctl_a1_3 =
             F::from_bool(event.syscall_code == SyscallCode::SYS_FCNTL as u32 && event.a1 == 3);
 
-        // Branch-specific trace
         match event.syscall_code {
             4045 => {
-                // brk: read BRK register.
                 assert!(event.write_records.len() == 1 && event.read_records.len() == 1);
                 cols.is_a0_gt_brk.populate(event.a0, event.read_records[0].value, blu);
                 cols.inorout.populate_read(event.read_records[0], blu);
             }
             4210 | 4090 => {
-                // mmap / mmap2
-                // byte-range-check a0 and a1 so decompositions are canonical.
                 blu.add_u8_range_checks(&event.a0.to_le_bytes());
                 blu.add_u8_range_checks(&event.a1.to_le_bytes());
 
@@ -196,13 +189,10 @@ impl SysLinuxChip {
                     cols.mmap_size = Word::from(size);
                     blu.add_u8_range_checks(&size.to_le_bytes());
 
-                    // Populate carry bits for byte-level mmap_size constraint.
                     if page_off != 0 {
                         let hi_nibble = (a1_bytes[1] >> 4) & 0x0F;
-                        // carry[0]: (hi_nibble + 1) * 16 >= 256, i.e. hi_nibble == 15
                         if hi_nibble == 15 {
                             cols.mmap_size_carry[0] = F::ONE;
-                            // carry[1]: a1[2] + 1 >= 256, i.e. a1[2] == 255
                             if a1_bytes[2] == 255 {
                                 cols.mmap_size_carry[1] = F::ONE;
                             }
@@ -214,16 +204,11 @@ impl SysLinuxChip {
                 }
             }
             4004 => {
-                // write: read A2 register.
                 assert!(event.read_records.len() == 1);
                 cols.inorout.populate_read(event.read_records[0], blu);
             }
-            4120 | 4246 | 4055 | 4003 => {
-                // clone, exit_group, fnctl, read: no extra memory access needed.
-            }
-            _ => {
-                // nop: unrecognized linux syscall.
-            }
+            4120 | 4246 | 4055 | 4003 => {}
+            _ => {}
         }
     }
 }

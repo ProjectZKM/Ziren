@@ -12,9 +12,6 @@ use zkm_core_jit::risc::{MipsOperand, MipsRegister};
 
 #[test]
 fn add_immediate_smoke() {
-    // Build: t0 = 5 + 7 (via two ADDI-style operations)
-    // We use ADD with two immediate operands.  The lowering supports
-    // `MipsOperand::Imm` directly.
     let mut t = <TranspilerBackend as MipsTranspiler>::new(64, 1024, 1024, 0, 0, 4)
         .expect("transpiler init");
 
@@ -22,11 +19,6 @@ fn add_immediate_smoke() {
     t.add(MipsRegister::T0, MipsOperand::Imm(5), MipsOperand::Imm(7));
     t.end_instr();
 
-    // Add a `ret` so control returns to the caller.  dynasm doesn't
-    // expose `ret` through the transpiler — call_extern_fn would do
-    // it but P1's call_extern_fn is a stub.  Use the assembler
-    // directly via `finalize` then patch.  For v1 smoke we just
-    // build the instr and assert the buffer is non-empty.
     let func = t.finalize(0).expect("finalize");
     assert!(!func.code.is_empty(), "code buffer should be non-empty");
     assert!(!func.jump_table.is_empty(), "jump table should track the start");
@@ -37,17 +29,14 @@ fn alu_chain_compiles_and_finalizes() {
     let mut t = <TranspilerBackend as MipsTranspiler>::new(64, 1024, 1024, 0, 0, 4)
         .expect("transpiler init");
 
-    // t0 = a0 + a1
     t.start_instr();
     t.add(MipsRegister::T0, MipsOperand::Reg(MipsRegister::A0), MipsOperand::Reg(MipsRegister::A1));
     t.end_instr();
 
-    // t1 = t0 - a2
     t.start_instr();
     t.sub(MipsRegister::T1, MipsOperand::Reg(MipsRegister::T0), MipsOperand::Reg(MipsRegister::A2));
     t.end_instr();
 
-    // t2 = t1 ^ a3
     t.start_instr();
     t.xor(MipsRegister::T2, MipsOperand::Reg(MipsRegister::T1), MipsOperand::Reg(MipsRegister::A3));
     t.end_instr();
@@ -98,7 +87,6 @@ fn end_to_end_alu_to_at() {
         .expect("transpiler init");
     t.emit_prologue();
     t.start_instr();
-    // $at is the first XMM-pinned register: Location::Xmm(0, 0).
     t.add(MipsRegister::At, MipsOperand::Imm(5), MipsOperand::Imm(7));
     t.end_instr();
     t.emit_epilogue();
@@ -151,11 +139,9 @@ fn end_to_end_chain_a0_a1_a2() {
     t.emit_prologue();
     t.emit_load_all_registers();
 
-    // t0 = a0 + a1
     t.start_instr();
     t.add(MipsRegister::T0, MipsOperand::Reg(MipsRegister::A0), MipsOperand::Reg(MipsRegister::A1));
     t.end_instr();
-    // t0 = t0 - a2
     t.start_instr();
     t.sub(MipsRegister::T0, MipsOperand::Reg(MipsRegister::T0), MipsOperand::Reg(MipsRegister::A2));
     t.end_instr();

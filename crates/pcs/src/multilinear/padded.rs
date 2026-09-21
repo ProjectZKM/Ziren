@@ -25,8 +25,8 @@
 //!
 //! This is the single `PaddedMle` in the crate: the
 //! *analytic* multilinear (`eval_at` / `fix_last_variable` over an
-//! arbitrary point) used to build the shared trace-MLE once at
-//! trace-gen and thread it to the shard prover.  (The LogUp-GKR layers
+//! arbitrary point) from which the shared trace-MLE is built once at
+//! trace-gen and threaded to the shard prover.  (The LogUp-GKR layers
 //! use `RowMajorTable`, not a `PaddedMle`.)
 //!
 //! ## Integration
@@ -252,7 +252,6 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
     {
         assert!(self.num_variables > 0, "fix_last_variable on a 0-variable PaddedMle");
 
-        // Padding value(s) lift base -> EF unchanged (constant under fold).
         let new_padding: Padding<EF> = match &self.padding {
             Padding::Constant(c, n) => Padding::Constant(EF::from(*c), *n),
             Padding::Generic(v) => {
@@ -263,7 +262,6 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
         let new_inner = self.inner.as_ref().map(|mle| {
             let width = mle.num_polynomials();
             let height = mle.hypercube_size();
-            // Obtain the flat row-major slice ONCE (zero-copy borrow).
             let g = mle.guts().as_slice();
             let out_height = height.div_ceil(2);
             let mut out: Vec<EF> = vec![EF::ZERO; out_height * width];
@@ -273,10 +271,8 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
                     let hi: EF = if 2 * i + 1 < height {
                         EF::from(g[(2 * i + 1) * width + j])
                     } else {
-                        // Missing odd tail folds against the padding value.
                         EF::from(self.padding.value_at(j))
                     };
-                    // (1-alpha)·lo + alpha·hi == lo + alpha·(hi - lo).
                     out[i * width + j] = lo + alpha * (hi - lo);
                 }
             }
@@ -287,9 +283,6 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
             inner: new_inner,
             padding: new_padding,
             num_variables: self.num_variables - 1,
-            // A baked dummy height tracks the real-row fold (`out_height ==
-            // height.div_ceil(2)`); `None` (plain dummy / inner-carrying)
-            // stays `None`.
             baked_height: self.baked_height.map(|h| h.div_ceil(2)),
         }
     }
@@ -322,27 +315,6 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
         }
         let num_real = self.num_real_entries();
 
-        // Equality table over the point, indexed the SAME way the trace rows
-        // are indexed — this makes the real-cells sum below byte-identical to
-        // `evaluate_trace_columns_at_point`.
-        //
-        // TRUNCATED eq-table build (the same lever already landed in
-        // `evaluate_trace_columns_at_point`, whose SIBLING call two lines
-        // below this one in `row_gkr::top_level` has had it since the
-        // GPU-idle work; this main-trace path was left behind).  Only rows
-        // `[0, num_real)` are ever read out of `eq` — the padding branch is
-        // analytic via `full_geq` and touches no table entry — yet the table
-        // was built over the whole `2^num_variables` cube, which on the
-        // LogUp-GKR output-extract full-point opening is the FULL
-        // `max_log_row_count` trace cube per chip per shard.
-        //
-        // `eq_mle_table` maps index bit `i` to `point[i]`, so every
-        // `row < 2^k` has all bits `>= k` zero and therefore
-        //     eq[row] == (prod_{i>=k} (1 - r_i)) * eq_k[row],
-        // with `eq_k = eq_mle_table(&point[..k])`.  Field multiplication is
-        // associative and distributes over the sum, so folding the constant
-        // tail into the per-column accumulator is EXACT:
-        //     tail * sum(eq_k[row] * x_row) == sum(eq[row] * x_row).
         let k = if num_real <= 1 { 0 } else { (num_real - 1).ilog2() as usize + 1 };
         let (eq, tail) = if k < point.len() {
             let tail = point[k..].iter().fold(EF::ONE, |acc, &r| acc * (EF::ONE - r));
@@ -352,15 +324,10 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
         };
         debug_assert!(eq.len() >= num_real);
 
-        // real-cells contribution
-        // Per column: sequential dot product over the real rows (matching
-        // `evaluate_trace_columns_at_point`'s accumulation order exactly),
-        // parallelized across columns.
         use p3_maybe_rayon::prelude::*;
         let mut evals: Vec<EF> = if let Some(inner) = self.inner.as_ref() {
             let width = inner.num_polynomials();
             debug_assert_eq!(width, np);
-            // Obtain the flat row-major slice ONCE (zero-copy borrow).
             let cells = inner.guts().as_slice();
             (0..width)
                 .into_par_iter()
@@ -376,16 +343,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
             vec![EF::ZERO; np]
         };
 
-        // padding contribution
-        // Rows [num_real, 2^num_variables) carry the (per-column) padding
-        // value; their MLE contribution is `pad · Σ_{row ≥ num_real} eq[row]`
-        // where the geq-sum is computed analytically in O(num_variables) via
-        // `full_geq`.  Skipped when all-zero (the trace-MLE case).
         if !self.padding.is_all_zero() && num_real < (1usize << self.num_variables) {
-            // `full_geq` (the `full_geq_host` convention) consumes MSB-first
-            // threshold + point; our `point` is LSB-first, so reverse it and
-            // build the threshold MSB-first from `num_real`.  The result then
-            // equals `Σ_{row ≥ num_real} eq_mle_table(point)[row]` exactly.
             let threshold_msb = from_usize_msb::<EF>(num_real, self.num_variables as usize);
             let point_msb: Vec<EF> = point.iter().rev().copied().collect();
             let geq = full_geq(&threshold_msb, &point_msb);
@@ -454,11 +412,10 @@ mod tests {
     #[test]
     fn eval_at_matches_evaluate_trace_columns() {
         let mut rng = StdRng::seed_from_u64(101);
-        // (real_log_height, width) cases; each padded up to L = real_log + pad.
         for &(real_log, width) in &[(0usize, 1usize), (2, 1), (3, 5), (4, 3), (5, 7)] {
             let height = 1usize << real_log;
             for pad in 0..=3usize {
-                let l = real_log + pad; // num_variables >= real_log
+                let l = real_log + pad;
                 let trace = rand_trace(&mut rng, height, width);
                 let point = rand_point(&mut rng, l);
 
@@ -517,7 +474,6 @@ mod tests {
                 let point = rand_point(&mut rng, l);
                 let pad_val = rand_f(&mut rng);
 
-                // Brute-force materialized full table (2^l rows).
                 let mut full_tbl = vec![F::ZERO; (1usize << l) * width];
                 for row in 0..(1usize << l) {
                     for col in 0..width {
@@ -553,14 +509,12 @@ mod tests {
             let raw_values = trace.values.clone();
             let raw_width = trace.width;
 
-            // Mle::as_trace_ref: same cells / width / height as the raw matrix.
             let mle = Mle::from_row_major(trace);
             let tr = mle.as_trace_ref();
             assert_eq!(tr.values, raw_values.as_slice(), "as_trace_ref values");
             assert_eq!(tr.width, raw_width, "as_trace_ref width");
             assert_eq!(tr.height(), height, "as_trace_ref height");
 
-            // PaddedMle::real_trace_ref: same, for a zero-padded trace MLE.
             let padded = PaddedMle::padded_with_zeros(Arc::new(mle), (real_log + 2) as u32);
             let ptr = padded.real_trace_ref().expect("width>0 => Some");
             assert_eq!(ptr.values, raw_values.as_slice(), "real_trace_ref values");
@@ -570,7 +524,6 @@ mod tests {
             assert_eq!(padded.num_real_entries(), height);
         }
 
-        // A dummy (width-0) padded MLE has no real cells → None.
         let dummy: PaddedMle<F> = PaddedMle::dummy(3, Padding::Constant(F::ZERO, 0));
         assert!(dummy.real_trace_ref().is_none(), "dummy => None");
         assert_eq!(dummy.num_polynomials(), 0);
@@ -603,13 +556,9 @@ mod tests {
                 let l = real_log + pad;
                 let trace = rand_trace(&mut rng, height, width);
 
-                // Raw-trace path (the legacy `prove_shard_zerocheck` source):
-                // lift the row-major trace cells to EF, then bitrev the rows.
                 let raw_lift: Vec<EF> = trace.values.iter().map(|v| EF::from(*v)).collect();
                 let raw_cells = bitrev_rows(&raw_lift, width, height);
 
-                // Shared-MLE path: lift the PaddedMle inner cells, then
-                // the SAME bitrev.
                 let padded = PaddedMle::padded_with_zeros(
                     Arc::new(Mle::from_row_major(trace.clone())),
                     l as u32,

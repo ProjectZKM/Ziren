@@ -53,10 +53,8 @@ pub fn generate_interaction_vals<F: Field, EF: ExtensionField<F>>(
     (mult, denominator)
 }
 
-/// Build a chip's per-row interaction tables.
-///
-/// Returns `(numer, denom)` row-major matrices of shape
-/// `height × num_interactions`.  `height` is derived from
+/// Build a chip's per-row interaction tables: `(numer, denom)` row-major
+/// matrices of shape `height × num_interactions`.  `height` is derived from
 /// `main_values.len() / main_width` (the chip's main-trace rows sourced
 /// from the shared trace-MLE inner).  When `preprocessed_trace` is
 /// `None`, the per-row preprocessed slice is treated as empty.
@@ -74,17 +72,10 @@ pub fn build_chip_interaction_tables<
     let height = main_values.len().checked_div(main_width).unwrap_or(0);
     let num_interactions = interactions.len();
 
-    // FLAKE FIX: see round.rs::flatten_layer note about KoalaBear
-    // serde rejecting out-of-range u32s leaked from set_len uninit.
     let total = height * num_interactions;
     let mut numer_evals: Vec<F> = vec![F::ZERO; total];
     let mut denom_evals: Vec<EF> = vec![EF::ZERO; total];
 
-    // Performance optimization: parallelize per-row interaction
-    // computation (`par_chunks_exact_mut(num_interactions)`).
-    // For chips with hundreds of thousands of rows (e.g. Program
-    // at 524K), per-row parallelism is the right granularity — chip-level
-    // alone leaves a single core doing the work for the largest chip.
     if height > 0 && num_interactions > 0 {
         use p3_maybe_rayon::prelude::*;
         let main_w = main_width;
@@ -187,13 +178,6 @@ fn split_real_parity<F: Clone>(
 /// (the row MSB has been fixed).  `num_interaction_variables` is
 /// `log₂` of the sum of the per-chip raw interaction counts, rounded up
 /// to a power of two.
-// D3c (Option-C divergence): the device interaction-eval seam (the `dev`
-// `ShardDeviceOps` param + the `device_traces` provider it consumed) was
-// REMOVED from this HOST generator — it is now the CpuProver-only host build.
-// The GPU prover routes through its own device-native `generate_first_layer_native`
-// copy (in `zkm-gpu-basefold`) whose interaction-eval arm calls the ziren-gpu
-// kernel `prove_shard_interaction_eval_gpu` DIRECTLY (what
-// `CudaShardDeviceOps::interaction_eval` forwarded to VERBATIM).
 pub fn generate_first_layer<F, EF, A>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<F>],
@@ -215,24 +199,11 @@ where
     let mut denominator_0: Vec<RowMajorTable<EF>> = Vec::with_capacity(chips.len());
     let mut numerator_1: Vec<RowMajorTable<F>> = Vec::with_capacity(chips.len());
     let mut denominator_1: Vec<RowMajorTable<EF>> = Vec::with_capacity(chips.len());
-    // The global interaction axis must be wide enough to hold every chip's
-    // block, and the blocks are laid out RAW-CONTIGUOUSLY: `flatten_layer`,
-    // `extract_outputs` and the verifier's reconstruction all advance the
-    // running offset by a chip's `num_interactions`, never by a rounded-up
-    // width, and all padding lands in one run at the global trailing end.
-    // So the axis only has to cover the sum of the RAW counts; rounding each
-    // chip up to a power of two first buys no alignment anything relies on,
-    // it only inflates `2^num_interaction_variables` — and every cell of that
-    // axis is materialised on every GKR layer.
     let mut total_chip_interactions: usize = 0;
 
     for ((chip, pm), prep_trace) in
         chips.iter().zip(shared_trace_mles.iter()).zip(preprocessed_traces.iter())
     {
-        // Host main-trace cells come from the shared MLE inner
-        // (`guts == the raw trace`, byte-for-byte); a device-resident /
-        // unexercised chip is a `dummy` → empty cells, width 0 (its real
-        // cells are served by the GPU hook / provider below).
         let (mt_values, mt_width): (&[F], usize) = match pm.inner().as_ref() {
             Some(mle) => (mle.guts().as_slice(), pm.num_polynomials()),
             None => (&[], 0),
@@ -254,16 +225,8 @@ where
             betas,
         );
 
-        // PaddedMle row optimisation:  do NOT materialise
-        // the row padding here.  Compute the per-chip real row count,
-        // then split the real prefix into the upper/lower halves
-        // without expanding to `2^num_row_variables`.  Virtual rows
-        // beyond `num_real_rows` are resolved at access time inside
-        // `ChipLayerState` using each quadrant's identity-fraction
-        // pad value (n* → 0, d* → 1).
         let chip_height: usize = numer_mat.values.len().checked_div(num_interactions).unwrap_or(0);
         debug_assert!(chip_height <= 1usize << num_row_variables);
-        // Parity split: quadrant 0 = even rows, quadrant 1 = odd rows.
         let real_upper = chip_height.div_ceil(2);
         let real_lower = chip_height / 2;
         let (n_upper, n_lower) =
@@ -271,12 +234,6 @@ where
         let (d_upper, d_lower) =
             split_real_parity(&denom_mat.values, num_interactions, chip_height);
 
-        // Encode each half as a `RowMajorTable` with raw per-chip
-        // `num_interactions` storage (no per-chip column padding —
-        // the `PaddedMle` pattern; padding is virtual via
-        // `num_interaction_variables` metadata).  Layer-wide global
-        // `num_interaction_variables` is computed below from
-        // `total_chip_interactions` (sum of per-chip raw counts).
         total_chip_interactions += num_interactions;
         let make_table = |cells: Vec<F>, real_rows: usize| -> RowMajorTable<F> {
             RowMajorTable::from_padded_cells(
@@ -327,18 +284,14 @@ mod tests {
 
     #[test]
     fn split_real_parity_deinterleaves_rows() {
-        // 3 real rows × 2 cols: quadrant 0 gets rows 0 and 2, quadrant 1
-        // gets row 1.
         let values: Vec<u32> = vec![10, 11, 20, 21, 30, 31];
         let (even, odd) = split_real_parity(&values, 2, 3);
         assert_eq!(even, vec![10, 11, 30, 31]);
         assert_eq!(odd, vec![20, 21]);
-        // A single real row has no odd partner.
         let values: Vec<u32> = vec![1, 2];
         let (even, odd) = split_real_parity(&values, 2, 1);
         assert_eq!(even, vec![1, 2]);
         assert!(odd.is_empty());
-        // Nothing real → nothing materialised.
         let (even, odd) = split_real_parity::<u32>(&[], 2, 0);
         assert!(even.is_empty() && odd.is_empty());
     }
@@ -358,7 +311,6 @@ mod tests {
         };
         let main_row = vec![KoalaBear::from_u32(7)];
 
-        // Single-element betas vec: only the argument_index slot is active.
         let alpha = EF::from_u32(11);
         let beta_0 = EF::from_u32(13);
         let betas = vec![beta_0];
@@ -387,7 +339,6 @@ mod tests {
     fn generate_interaction_vals_denominator_includes_argument_index() {
         use p3_air::{PairCol, VirtualPairCol};
 
-        // Two interactions: kind=Byte (argument_index=4) and kind=Range (=5).
         let interaction_byte = Lookup {
             values: vec![],
             multiplicity: VirtualPairCol::new(
@@ -427,7 +378,6 @@ mod tests {
             alpha,
             &betas,
         );
-        // d = alpha + beta_0 * argument_index = 0 + 2 * argi
         assert_eq!(d_byte, EF::from_u32(2 * 4));
         assert_eq!(d_range, EF::from_u32(2 * 5));
     }

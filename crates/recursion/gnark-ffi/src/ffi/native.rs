@@ -161,10 +161,7 @@ fn verify(
     if err_ptr.is_null() {
         Ok(())
     } else {
-        unsafe {
-            // Safety: The error message is returned from the go code and is guaranteed to be valid.
-            Err(ptr_to_string_freed(err_ptr))
-        }
+        unsafe { Err(ptr_to_string_freed(err_ptr)) }
     }
 }
 
@@ -177,7 +174,6 @@ fn test(system: ProofSystem, witness_json: &str, constraints_json: &str) {
             constraints_json.as_ptr() as *mut c_char,
         );
         if !err_ptr.is_null() {
-            // Safety: The error message is returned from the go code and is guaranteed to be valid.
             panic!("Test failed: {:?}", ptr_to_string_freed(err_ptr));
         }
     }
@@ -254,7 +250,6 @@ pub fn test_koalabear_poseidon2() {
     unsafe {
         let err_ptr = bind::TestPoseidonKoalaBear2();
         if !err_ptr.is_null() {
-            // Safety: The error message is returned from the go code and is guaranteed to be valid.
             panic!("TestPoseidonKoalaBear2 failed: {}", ptr_to_string_freed(err_ptr));
         }
     }

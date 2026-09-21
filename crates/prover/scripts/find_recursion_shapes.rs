@@ -28,7 +28,7 @@ struct Args {
     start: Option<usize>,
     #[clap(short, long)]
     end: Option<usize>,
-    /// Height-agnostic FIX-off discovery: instead of the slow chip-by-chip
+    /// Height-agnostic raw-height discovery: instead of the chip-by-chip
     /// reduction, measure the per-chip MAXIMAL *natural* (pre-`fix_shape`)
     /// recursion heights across all enumerated shapes in ONE pass and print the
     /// resulting maximal band.
@@ -37,59 +37,30 @@ struct Args {
 }
 
 fn main() {
-    // Setup the logger.
     setup_logger();
 
-    // Parse the arguments.
     let args = Args::parse();
 
-    // Initialize the prover.
     let mut prover = ZKMProver::<DefaultProverComponents>::new();
 
-    // Set whether to verify verification keys.
     prover.vk_verification = !args.dummy;
 
-    // Get the default compress shape configuration.
     let compress_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
 
-    // Create the maximal shape from all of the shapes in recursion_shape_config, then add 2 to
-    // all the log-heights of that shape. This is the starting candidate for the "minimal large
-    // shape".
     let candidate = compress_shape_config.union_config_with_extra_room().first().unwrap().clone();
 
-    // --measure: one-pass measurement of the per-chip MAXIMAL *natural*
-    // (pre-`fix_shape`) recursion heights across all enumerated shapes.
-    //
-    // The slow chip-by-chip reduction below recompiles the huge recursion
-    // programs many times (~weeks).  For the height-agnostic FIX-off regen we
-    // only need the maximal band = per-chip max of the NATURAL heights each
-    // shape's recursion program reaches.  We get that in a SINGLE pass:
-    //   * build with `compress_shape_config = None` so `program_from_shape`
-    //     does NOT apply `fix_shape` -> the program keeps its natural heights;
-    //   * for each enumerated shape, `CompressAir::heights(&program)` reports
-    //     the per-chip row counts; we log2-ceil them and accumulate per-chip max.
-    // Enumeration uses the (bumped) candidate as the recursion config so all
-    // shapes enumerate, but that config is ONLY used for `ZKMProofShape::generate`
-    // -- the program is built with the None-config prover (natural heights).
     if args.measure {
-        // Enumeration config: the bumped FIX-off candidate so every core shape
-        // enumerates.  Borrow it from a temporary prover-config; the actual
-        // program build uses `prover` (compress_shape_config = None) below.
         let enum_cfg =
             RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::from_hash_map(&candidate);
 
-        // Build with NO compress_shape_config -> natural (pre-fix_shape) heights.
         prover.compress_shape_config = None;
 
-        // Core-derived enumeration (like build_compress_vks), NOT the
-        // band-shaped generate_maximal_shapes.
         let all_shapes =
             ZKMProofShape::generate(&enum_cfg, args.recursion_batch_size).collect::<Vec<_>>();
         let num_shapes = all_shapes.len();
         tracing::info!("measure: number of enumerated shapes: {}", num_shapes);
 
-        // Fixed merkle-tree height ceiling (see check_shapes shapes.rs:~98).
         let height = zkm_prover::VK_MERKLE_TREE_HEIGHT;
 
         let maxima: Arc<Mutex<HashMap<String, usize>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -113,43 +84,33 @@ fn main() {
                 let prover = &prover;
                 let maxima = Arc::clone(&maxima);
                 let skipped = Arc::clone(&skipped);
-                s.spawn(move || {
-                    loop {
-                        // Hold the channel lock ONLY for the recv, then release it
-                        // before the (long) program build — otherwise the guard from
-                        // `while let Ok(_) = shape_rx.lock().recv()` lives for the whole
-                        // loop body, serializing all workers onto one core.
-                        let recvd = {
-                            let rx = shape_rx.lock().unwrap();
-                            rx.recv()
-                        };
-                        let shape = match recvd {
-                            Ok(s) => s,
-                            Err(_) => break,
-                        };
-                        let compress_shape =
-                            ZKMCompressProgramShape::from_proof_shape(shape.clone(), height);
-                        let measured = catch_unwind(AssertUnwindSafe(|| {
-                            let program = prover.program_from_shape(compress_shape, None);
-                            CompressAir::<KoalaBear>::heights(&program)
-                        }));
-                        match measured {
-                            Ok(per_chip) => {
-                                let mut guard = maxima.lock().unwrap();
-                                for (chip, rows) in per_chip {
-                                    let log = ceil_log2(rows);
-                                    let e = guard.entry(chip).or_insert(0);
-                                    *e = (*e).max(log);
-                                }
+                s.spawn(move || loop {
+                    let recvd = {
+                        let rx = shape_rx.lock().unwrap();
+                        rx.recv()
+                    };
+                    let shape = match recvd {
+                        Ok(s) => s,
+                        Err(_) => break,
+                    };
+                    let compress_shape =
+                        ZKMCompressProgramShape::from_proof_shape(shape.clone(), height);
+                    let measured = catch_unwind(AssertUnwindSafe(|| {
+                        let program = prover.program_from_shape(compress_shape, None);
+                        CompressAir::<KoalaBear>::heights(&program)
+                    }));
+                    match measured {
+                        Ok(per_chip) => {
+                            let mut guard = maxima.lock().unwrap();
+                            for (chip, rows) in per_chip {
+                                let log = ceil_log2(rows);
+                                let e = guard.entry(chip).or_insert(0);
+                                *e = (*e).max(log);
                             }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "measure: skipping shape {:?} (panic: {:?})",
-                                    shape,
-                                    e
-                                );
-                                *skipped.lock().unwrap() += 1;
-                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("measure: skipping shape {:?} (panic: {:?})", shape, e);
+                            *skipped.lock().unwrap() += 1;
                         }
                     }
                 });
@@ -173,19 +134,10 @@ fn main() {
 
     prover.compress_shape_config = Some(RecursionShapeConfig::from_hash_map(&candidate));
 
-    // Check that this candidate is big enough for all core shapes, including those with
-    // precompiles.
     assert!(check_shapes(args.recursion_batch_size, false, args.num_compiler_workers, &prover,));
 
     let mut answer = candidate.clone();
 
-    // Chip-by-chip in the candidate, halve the row count corresponding to that chip until the
-    // shape is no longer big enough to support all the core shapes. Then, record the row count for
-    // that chip into answer.
-    //
-    // The map holds ROW COUNTS now, not log2 heights, so the old `-= 1` step
-    // (one log2 level) is a halving here — otherwise the search would walk one
-    // row at a time through a million of them.
     for (key, value) in candidate.iter() {
         if key != "PublicValues" {
             let mut done = false;
@@ -207,7 +159,6 @@ fn main() {
 
     let mut no_precompile_answer = answer.clone();
 
-    // Repeat the process but only for core shapes that don't have a precompile in them.
     for (key, value) in answer.iter() {
         if key != "PublicValues" {
             let mut done = false;
@@ -228,13 +179,8 @@ fn main() {
         }
     }
 
-    // Repeat this process to tune the shrink shape.
     let mut shrink_shape = ShrinkAir::<KoalaBear>::shrink_shape().clone_into_hash_map();
 
-    // First, check that the current shrink shape is compatible with the compress shape choice
-    // arising from the tuning process above.
-
-    // TODO: set the join program map to empty.
     assert!({
         prover.compress_shape_config = Some(RecursionShapeConfig::from_hash_map(&answer));
         catch_unwind(AssertUnwindSafe(|| {
@@ -251,7 +197,6 @@ fn main() {
         .is_ok()
     });
 
-    // Next, tune the shrink shape in the same manner as for the compress shapes.
     for (key, value) in shrink_shape.clone().iter() {
         if key != "PublicValues" {
             let mut done = false;

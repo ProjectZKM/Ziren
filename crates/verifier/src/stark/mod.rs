@@ -107,9 +107,6 @@ impl StarkVerifier {
     /// Compared to `verify_proof()`, it performs a consistency check between
     /// user-supplied public values and those committed in the proof.
     pub fn verify(proof: &[u8], zkm_public_inputs: &[u8], zkm_vk: &[u8]) -> Result<(), StarkError> {
-        // Both inputs are caller-supplied bytes and this function returns a
-        // Result, so a bad decode or a non-compressed variant is an error, not
-        // a panic that takes a verification service down with it.
         let proof: ZKMProof =
             bincode::deserialize(proof).map_err(|_| StarkError::MalformedProof)?;
         let ZKMProof::Compressed(proof) = proof else {
@@ -119,27 +116,18 @@ impl StarkVerifier {
         let vk: ZKMVerifyingKey =
             bincode::deserialize(zkm_vk).map_err(|_| StarkError::MalformedVerifyingKey)?;
 
-        // `Borrow` here is an infallible reinterpret of a fixed layout over a
-        // proof-controlled vector; check the length first.
-        //
-        // EXACT, not `<`: a longer vector also passes `align_to`, so the cast
-        // would silently reinterpret its first `size_of::<PublicValues<..>>()`
-        // elements and ignore the rest.  Honest proofs are PADDED to exactly
-        // `PROOF_MAX_NUM_PVS`, so this rejects nothing valid.
         if proof.proof.public_values.len() != zkm_pcs::PROOF_MAX_NUM_PVS {
             return Err(StarkError::MalformedProof);
         }
         let proof_public_values: &PublicValues<Word<_>, _> =
             proof.proof.public_values.as_slice().borrow();
 
-        // Get the committed value digest bytes.
         let committed_value_digest_bytes = proof_public_values
             .committed_value_digest
             .iter()
             .flat_map(|w| w.0.iter().map(|x| x.as_canonical_u32() as u8))
             .collect_vec();
 
-        // Make sure the committed value digest matches the public values hash.
         for (a, b) in committed_value_digest_bytes.iter().zip_eq(public_inputs.hash()) {
             if *a != b {
                 return Err(StarkError::InvalidPublicValues);
@@ -173,12 +161,6 @@ impl StarkVerifier {
 
 impl HashableKey for StarkVerifyingKey<KoalaBearPoseidon2> {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        // The inputs, in order: the preprocessed commitment, pc_start, and the
-        // initial cumulative sum.  Nothing about the
-        // chips: the preprocessed commitment is hash-bound to its geometry, and
-        // the chip set is a property of the machine.  MUST stay byte-identical
-        // to the prover (prover/src/types.rs) and in-circuit
-        // (recursion/circuit/src/types.rs) folds.
         let commit_elems: Vec<KoalaBear> =
             self.commit.roots().iter().flat_map(|d| d.iter().copied()).collect();
         let mut inputs: Vec<KoalaBear> = Vec::with_capacity(commit_elems.len() + 1 + 14);

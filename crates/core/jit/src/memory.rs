@@ -28,7 +28,7 @@ pub trait JitMemory: Sized + Deref<Target = [u8]> + DerefMut {
     fn new(memory_size: usize) -> Self;
 }
 
-/// Memory backings that support a `reset()` operation, used to clear
+/// Memory backings that support a `reset()` operation, which clears
 /// state between JIT invocations of the same program (e.g. test
 /// suites running many programs sequentially).
 pub trait JitResetableMemory: JitMemory {
@@ -73,8 +73,6 @@ impl JitMemory for OwnedMemory {
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 impl JitResetableMemory for OwnedMemory {
     fn reset(&mut self) {
-        // Use madvise(MADV_DONTNEED) for a fast page-table reset;
-        // touched pages return zero on next access.
         unsafe {
             libc::madvise(self.map.as_mut_ptr().cast(), self.map.len(), libc::MADV_DONTNEED);
         }
@@ -99,9 +97,6 @@ impl DerefMut for OwnedMemory {
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 impl AsRawFd for OwnedMemory {
     fn as_raw_fd(&self) -> RawFd {
-        // Anon mmap has no fd; return -1 to indicate "no shared
-        // descriptor".  Code paths that actually need an fd (P6 fork
-        // isolation) must use `crate::shm::ShmMemory` instead.
         -1
     }
 }

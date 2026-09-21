@@ -25,14 +25,12 @@ impl<T> Default for TracedVec<T> {
     }
 }
 
-/// Operations reserved up front by a TOP-LEVEL program builder.  Only the
-/// program's own vector gets this: at 680 bytes per `DslIr` it is a 6.8 GB
+/// Operations reserved up front by a top-level program builder. Only the
+/// program's own vector gets this: at 680 B per `DslIr` it is a 6.8 GB
 /// address-space reservation, and a compile creates thousands of
-/// sub-builders (`if`/`else`/loop bodies) whose vectors used to reserve the
-/// same, i.e. tens of TB of address space churned per compile.  jemalloc
-/// retained that (its retained extents grow geometrically) until the 128 TiB
-/// address space ran out and an allocation failed with hundreds of GB of RAM
-/// free.
+/// sub-builders (`if`/`else`/loop bodies); reserving it in each would churn
+/// tens of TB of address space per compile, which jemalloc retains until the
+/// 128 TiB address space runs out.
 pub const TOP_LEVEL_OPS_RESERVE: usize = 10_000_000;
 
 impl<T> From<Vec<T>> for TracedVec<T> {
@@ -146,7 +144,6 @@ impl<C: Config> Builder<C> {
         program_type: RecursionProgramType,
         operations: TracedVec<DslIr<C>>,
     ) -> Self {
-        // We need to create a temporary placeholder for the p2_hash_num variable.
         let placeholder_p2_hash_num = Var::new(0, ptr::null_mut());
 
         let mut inner = Box::new(UnsafeCell::new(InnerBuilder { variable_count: 0, operations }));
@@ -592,10 +589,8 @@ enum IfCondition<N> {
 
 impl<C: Config> IfBuilder<'_, C> {
     pub fn then(mut self, mut f: impl FnMut(&mut Builder<C>)) {
-        // Get the condition reduced from the expressions for lhs and rhs.
         let condition = self.condition();
 
-        // Execute the `then` block and collect the instructions.
         let mut f_builder = Builder::<C>::new_sub_builder(
             self.builder.variable_count(),
             self.builder.nb_public_values,
@@ -608,7 +603,6 @@ impl<C: Config> IfBuilder<'_, C> {
 
         let then_instructions = f_builder.into_operations();
 
-        // Dispatch instructions to the correct conditional block.
         match condition {
             IfCondition::EqConst(lhs, rhs) => {
                 if lhs == rhs {
@@ -644,7 +638,6 @@ impl<C: Config> IfBuilder<'_, C> {
         mut then_f: impl FnMut(&mut Builder<C>),
         mut else_f: impl FnMut(&mut Builder<C>),
     ) {
-        // Get the condition reduced from the expressions for lhs and rhs.
         let condition = self.condition();
         let mut then_builder = Builder::<C>::new_sub_builder(
             self.builder.variable_count(),
@@ -654,7 +647,6 @@ impl<C: Config> IfBuilder<'_, C> {
             self.builder.program_type,
         );
 
-        // Execute the `then` and `else_then` blocks and collect the instructions.
         then_f(&mut then_builder);
         self.builder.p2_hash_num = then_builder.p2_hash_num;
 
@@ -672,7 +664,6 @@ impl<C: Config> IfBuilder<'_, C> {
 
         let else_instructions = else_builder.into_operations();
 
-        // Dispatch instructions to the correct conditional block.
         match condition {
             IfCondition::EqConst(lhs, rhs) => {
                 if lhs == rhs {
@@ -709,74 +700,6 @@ impl<C: Config> IfBuilder<'_, C> {
 
     fn condition(&mut self) -> IfCondition<C::N> {
         unimplemented!("Deprecated")
-        // match (self.lhs.clone(), self.rhs.clone(), self.is_eq) {
-        //     (SymbolicVar::Const(lhs, _), SymbolicVar::Const(rhs, _), true) => {
-        //         IfCondition::EqConst(lhs, rhs)
-        //     }
-        //     (SymbolicVar::Const(lhs, _), SymbolicVar::Const(rhs, _), false) => {
-        //         IfCondition::NeConst(lhs, rhs)
-        //     }
-        //     (SymbolicVar::Const(lhs, _), SymbolicVar::Val(rhs, _), true) => {
-        //         IfCondition::EqI(rhs, lhs)
-        //     }
-        //     (SymbolicVar::Const(lhs, _), SymbolicVar::Val(rhs, _), false) => {
-        //         IfCondition::NeI(rhs, lhs)
-        //     }
-        //     (SymbolicVar::Const(lhs, _), rhs, true) => {
-        //         let rhs: Var<C::N> = self.builder.eval(rhs);
-        //         IfCondition::EqI(rhs, lhs)
-        //     }
-        //     (SymbolicVar::Const(lhs, _), rhs, false) => {
-        //         let rhs: Var<C::N> = self.builder.eval(rhs);
-        //         IfCondition::NeI(rhs, lhs)
-        //     }
-        //     (SymbolicVar::Val(lhs, _), SymbolicVar::Const(rhs, _), true) => {
-        //         let lhs: Var<C::N> = self.builder.eval(lhs);
-        //         IfCondition::EqI(lhs, rhs)
-        //     }
-        //     (SymbolicVar::Val(lhs, _), SymbolicVar::Const(rhs, _), false) => {
-        //         let lhs: Var<C::N> = self.builder.eval(lhs);
-        //         IfCondition::NeI(lhs, rhs)
-        //     }
-        //     (lhs, SymbolicVar::Const(rhs, _), true) => {
-        //         let lhs: Var<C::N> = self.builder.eval(lhs);
-        //         IfCondition::EqI(lhs, rhs)
-        //     }
-        //     (lhs, SymbolicVar::Const(rhs, _), false) => {
-        //         let lhs: Var<C::N> = self.builder.eval(lhs);
-        //         IfCondition::NeI(lhs, rhs)
-        //     }
-        //     (SymbolicVar::Val(lhs, _), SymbolicVar::Val(rhs, _), true) => IfCondition::Eq(lhs, rhs),
-        //     (SymbolicVar::Val(lhs, _), SymbolicVar::Val(rhs, _), false) => {
-        //         IfCondition::Ne(lhs, rhs)
-        //     }
-        //     (SymbolicVar::Val(lhs, _), rhs, true) => {
-        //         let rhs: Var<C::N> = self.builder.eval(rhs);
-        //         IfCondition::Eq(lhs, rhs)
-        //     }
-        //     (SymbolicVar::Val(lhs, _), rhs, false) => {
-        //         let rhs: Var<C::N> = self.builder.eval(rhs);
-        //         IfCondition::Ne(lhs, rhs)
-        //     }
-        //     (lhs, SymbolicVar::Val(rhs, _), true) => {
-        //         let lhs: Var<C::N> = self.builder.eval(lhs);
-        //         IfCondition::Eq(lhs, rhs)
-        //     }
-        //     (lhs, SymbolicVar::Val(rhs, _), false) => {
-        //         let lhs: Var<C::N> = self.builder.eval(lhs);
-        //         IfCondition::Ne(lhs, rhs)
-        //     }
-        //     (lhs, rhs, true) => {
-        //         let lhs: Var<C::N> = self.builder.eval(lhs);
-        //         let rhs: Var<C::N> = self.builder.eval(rhs);
-        //         IfCondition::Eq(lhs, rhs)
-        //     }
-        //     (lhs, rhs, false) => {
-        //         let lhs: Var<C::N> = self.builder.eval(lhs);
-        //         let rhs: Var<C::N> = self.builder.eval(rhs);
-        //         IfCondition::Ne(lhs, rhs)
-        //     }
-        // }
     }
 }
 

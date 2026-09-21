@@ -63,10 +63,6 @@ impl core::fmt::Display for JaggedShardVerifyError {
             Self::Zerocheck(msg) => write!(f, "zerocheck: {msg}"),
             Self::JaggedPcs(msg) => write!(f, "jagged-PCS: {msg}"),
             Self::Unimplemented(phase) => {
-                // The trailing "" is the grep-able staged-verifier-port
-                // tracking hint (`unimplemented_error_displays_phase_hint`
-                // asserts on it) so users who hit an unimplemented sub-flow
-                // can find the umbrella tracking issue.
                 write!(f, "host-side JaggedShardVerifier: {phase} not yet implemented")
             }
         }
@@ -90,8 +86,8 @@ pub struct JaggedShardVerifier {
 }
 
 impl JaggedShardVerifier {
-    /// The production shard cube (22), fixed: every stage proves and verifies
-    /// at exactly this constant and it is never floated per proof.
+    /// The production shard cube `n = 22`: every stage proves and verifies at
+    /// exactly this constant; no proof chooses its own.
     ///
     /// Two facts make a fixed cube safe.
     ///
@@ -125,6 +121,9 @@ impl JaggedShardVerifier {
     /// (`StarkMachine::recursion_pins`): on a pinned machine the preprocessed
     /// round's area and padding split are those of the proof's pin class, read
     /// off its padding layout and checked against the rows.
+    ///
+    /// The `unsafe` reinterprets are sound because `[InnerVal; 8] = [Val<SC>; 8]`
+    /// under the inner-config gate.
     #[allow(clippy::too_many_arguments)]
     pub fn verify_shard<SC, A>(
         &self,
@@ -142,9 +141,6 @@ impl JaggedShardVerifier {
             + for<'b> Air<ShardConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
         Val<SC>: PrimeField,
         Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
-        // Threaded to `verify_jagged_pcs_host`'s static OUTER
-        // generic BaseFold verify (see its where-clause). Verify-only, both
-        // rings satisfy it.
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
@@ -154,14 +150,12 @@ impl JaggedShardVerifier {
                 >>::Commitment,
             >,
     {
-        // Shape check: public_values length.
         if proof.public_values.len() != num_pv_elts {
             return Err(JaggedShardVerifyError::PublicValuesLengthMismatch {
                 expected: num_pv_elts,
                 got: proof.public_values.len(),
             });
         }
-        // Shape check: chip count vs. LogUp-GKR openings.
         let opening_count = proof.logup_gkr_proof.logup_evaluations.chip_openings.len();
         if opening_count != chips.len() {
             return Err(JaggedShardVerifyError::ChipCountMismatch {
@@ -170,18 +164,6 @@ impl JaggedShardVerifier {
             });
         }
 
-        // Shape check: every opened row is as wide as its AIR.
-        //
-        // These rows go to the constraint folder, which hands them to the AIR,
-        // which `Borrow`s them into its column struct -- and `AlignedBorrow`
-        // only length-checks under `debug_assert`. In release a short row
-        // reaches `&shorts[0]` on an empty slice and PANICS, so a malformed
-        // proof could abort this `Result`-returning verifier. The jagged
-        // geometry takes its widths from the machine, so nothing downstream
-        // catches a proof-supplied row of the wrong length either.
-        //
-        // The recursive verifier makes the same check per chip on both rounds
-        // (`verify_opening_shape_basefold`), so honest proofs satisfy it.
         for (chip, opening) in chips.iter().zip(proof.opened_values.chips.iter()) {
             let expected_main = <A as p3_air::BaseAir<Val<SC>>>::width(&chip.air);
             if opening.main.local.len() != expected_main {
@@ -203,25 +185,6 @@ impl JaggedShardVerifier {
             }
         }
 
-        // Transcript prologue
-        //
-        // Observe public values, main commitment, and per-chip
-        // metadata.  Order MUST match the prover's ordering at
-        // `shard_level::prover::prove_shard_with_data` (transcript
-        // prologue):
-        //   1. public_values (each felt)
-        //   2. main_commitment (8 felts)
-        //   3. num_chips (1 felt)
-        //   4. for each chip:
-        //        a. RAW height (1 felt)
-        //        b. name_length_felt
-        //        c. per-byte felts
-        //
-        // The per-chip height observe sources from
-        // `proof.chip_heights` keyed by chip name — the value
-        // already carried in the proof and observed in the recursion
-        // verifier via the `chip_height_bits` Horner recompose.
-
         for &pv in proof.public_values.iter() {
             challenger.observe(pv);
         }
@@ -233,12 +196,9 @@ impl JaggedShardVerifier {
         for chip in chips.iter() {
             let name = chip.name();
 
-            // h_i, the raw row count (0 allowed), as the prover observed it;
-            // 0 for a chip the map does not name.
             let h = proof.chip_heights.get(name.as_str()).copied().unwrap_or(0);
             challenger.observe(Val::<SC>::from_u64(h as u64));
 
-            // Name length + name bytes (unchanged).
             let len_felt = Val::<SC>::from_u64(name.len() as u64);
             challenger.observe(len_felt);
             for byte in name.bytes() {
@@ -246,22 +206,6 @@ impl JaggedShardVerifier {
             }
         }
 
-        // LogUp-GKR sumcheck verification
-        //
-        // Ported from
-        //   crates/recursion/circuit/src/logup_gkr.rs::verify_logup_gkr
-        // with in-circuit Builder<C>/Ext<> ops replaced by direct
-        // Challenge<SC> arithmetic.
-        //
-        // Note: the public-values constraint evaluation piece
-        // (verify_public_values closure) is *not* ported here —
-        // shard-level proofs carry public values in a separate
-        // logup_evaluations path and the check is deferred to the
-        // final reduction.  For structural verification this
-        // simplifies to sumcheck consistency + GKR identity.
-        // Compute beta_seed_dim the same way the prover does:
-        // log2(max_arity.next_power_of_two()) where max_arity =
-        // max(interaction.values.len() + 1) across all chips.
         let max_arity = chips
             .iter()
             .flat_map(|chip| chip.sends().iter().chain(chip.receives().iter()))
@@ -270,16 +214,6 @@ impl JaggedShardVerifier {
             .unwrap_or(1);
         let beta_seed_dim = max_arity.next_power_of_two().trailing_zeros() as usize;
 
-        // Which closure the LogUp sum has to satisfy depends on the machine's
-        // buses, so detect them rather than being told:
-        //
-        // * CORE carries boundary buses (State, GlobalAccumulation, the
-        //   MemoryGlobal init/finalize controls), so its closure is the PV-AIR's
-        //   `eval_public_values`.
-        // * RECURSION carries only self-cancelling `Local` buses, so its closure
-        //   is simply `gkr_sum == 0`. Running the core PV-AIR for it would be
-        //   wrong twice over: it reads a different PV schema and emits arity-16
-        //   GlobalAccumulation messages that machine never sends.
         let machine_has_pv_buses = chips.iter().any(|chip| {
             chip.sends().iter().chain(chip.receives().iter()).any(|lk| {
                 matches!(
@@ -292,11 +226,6 @@ impl JaggedShardVerifier {
             })
         });
 
-        // The cube comes from the config, never from the proof: the GKR
-        // round-count check (`round_proofs.len() + 1 == max_log_row_count`) and
-        // the zerocheck point dimension both bind the proof to it, so a proof
-        // built at another cube is rejected. Why every honest proof is at this
-        // one is on `production_default`.
         let max_log_row_count = self.max_log_row_count;
 
         verify_logup_gkr_host::<SC, A>(
@@ -311,14 +240,6 @@ impl JaggedShardVerifier {
             challenger,
         )?;
 
-        // Zerocheck sumcheck verification
-        //
-        // Samples the same phase challenges as the in-circuit verifier,
-        // checks the direct `Σ_b C(b) == 0` sumcheck, and observes the
-        // per-chip openings that feed the following jagged-PCS phase.
-        //
-        // The openings at z* are passed so the host can recompute the batched
-        // constraint value from them, as the recursive verifier does.
         verify_zerocheck_host::<SC, A>(
             chips,
             &proof.zerocheck_proof,
@@ -329,18 +250,6 @@ impl JaggedShardVerifier {
             &proof.opened_values,
         )?;
 
-        // Jagged HASH-BIND re-check
-        //
-        // Recompute
-        //   modified' = compress([raw_root, hash(once(len) ++ rc ++ cc)])
-        // from the bundle's RAW BaseFold root + per-chip geometry, and assert
-        // it equals the FS-observed `main_commitment`.  This ties the
-        // per-chip (row_count, column_count) geometry to the commitment so a
-        // height-agnostic prover cannot witness a geometry different from what
-        // was committed.  Only the inner KoalaBear ring (the one that emits a
-        // `Bundle`); the outer ring re-binds inside its registered hook.
-        // Skipped when the hash-bind is off (then `main_commitment` IS the raw
-        // root — the bundle re-check would trivially fail, so gate on it).
         {
             use crate::shard_level::shard_proof::EvaluationProof;
             use crate::{InnerChallenge, InnerVal};
@@ -351,32 +260,11 @@ impl JaggedShardVerifier {
                     == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
             if inner_ring {
                 if let EvaluationProof::Bundle(bundle) = &proof.evaluation_proof {
-                    // The raw root must be the MAIN round's, to match
-                    // `proof.main_commitment`: the preprocessed round occupies
-                    // group 0, so main is group 1.  The batched proof carries
-                    // the MAIN round's commit (the preprocessed one is the
-                    // verifying key's).
                     let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
 
-                    // Guard the counts (BaseFieldOverflow + AreaOutOfBounds).
-                    // Counts feed `from_canonical_usize` (wraps mod the field
-                    // order ~2^31), so a count >= ORDER could alias to a
-                    // different felt — reject it.  And the total area must be
-                    // 0 < area < 2^30 (field-arith overflow bound).  These are
-                    // host-side usize checks on the SAME per-chip (row, col)
-                    // counts the hash is taken over.
-                    // The hash-bind ties the MAIN round's geometry to the MAIN
-                    // commitment (`proof.main_commitment`), and the prover
-                    // computed it over that round's OWN counts.  Read them from
-                    // the per-round list rather than recovering them from the
-                    // flattened packing — the flattened column space also
-                    // carries the stacking padding between rounds, so a round's
-                    // geometry is not a positional slice of it.
                     let (rc_g, cc_g): (Vec<usize>, Vec<usize>) =
                         match bundle.packing.round_counts.last() {
                             Some(main_round) => main_round.iter().copied().unzip(),
-                            // A single-round bundle: the whole packing is the
-                            // main round.
                             None => crate::jagged_pcs::jagged_counts_from_packing(&bundle.packing),
                         };
                     let order = <InnerVal as p3_field::PrimeField32>::ORDER_U32 as usize;
@@ -398,14 +286,8 @@ impl JaggedShardVerifier {
                         ));
                     }
 
-                    // The bundle carries `packing: PackingMeta` (offsets +
-                    // column_counts) — use the PackingMeta overload so the
-                    // hashed felt sequence is byte-identical to the host emit
-                    // (which used the full JaggedPacking; both derive the same
-                    // per-chip (row, col) counts).
                     let recomputed =
                         crate::jagged_pcs::jagged_hash_bind_modified(raw_inner, &rc_g, &cc_g);
-                    // SAFETY: [InnerVal;8] == [Val<SC>;8] under the inner gate.
                     let observed_inner: [InnerVal; 8] = unsafe {
                         core::mem::transmute_copy::<[Val<SC>; 8], [InnerVal; 8]>(
                             &proof.main_commitment,
@@ -423,9 +305,6 @@ impl JaggedShardVerifier {
             }
         }
 
-        // The jagged opening at z*. The openings are passed for the
-        // cross-bind, and the heights the prologue absorbed so the geometry is
-        // pinned to them rather than to itself.
         verify_jagged_pcs_host::<SC, A>(
             _vk,
             chips,
@@ -449,8 +328,8 @@ impl JaggedShardVerifier {
 /// Deserialises the bundle bytes and delegates to the host-side verifier at
 /// [`crate::jagged_pcs::jagged::verify_jagged_no_observe`].
 ///
-/// The TypeId gate mirrors prove_trusted_evaluations — returns `Ok(())`
-/// for non-KoalaBear configs (nothing to verify in that path).
+/// The `TypeId` gate mirrors `prove_trusted_evaluations`: it returns `Ok(())`
+/// for non-KoalaBear configs.
 ///
 /// The arguments mirror the prover's one for one:
 ///
@@ -472,6 +351,11 @@ impl JaggedShardVerifier {
 /// * `claimed_prep_pad_columns` — `Some(n)` on a pinned machine, where the
 ///   number of preprocessed padding columns names the proof's pin class;
 ///   `None` for natural rounds.
+///
+/// The `unsafe` reinterprets are sound under the `TypeId` gate, which forces
+/// `Val<SC> = JaggedVal = KoalaBear`, `Challenge<SC> = InnerChallenge` and
+/// `Com<SC> = JaggedMmcs::Commitment`; the commitment owns a heap `MerkleCap`,
+/// so it is relabelled via a forgotten clone, never a bitwise copy.
 #[allow(clippy::too_many_arguments)]
 fn verify_jagged_pcs_host<SC, A>(
     vk: &StarkVerifyingKey<SC>,
@@ -491,10 +375,6 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy + 'static,
-    // `SC::Challenger` drives the generic jagged BaseFold VERIFIER
-    // directly on the OUTER (wrap) branch. The prover threads the same
-    // capability bounds; both rings satisfy them (inner `JaggedChallenger`,
-    // wrap `OuterChallenger`). Verify-only: no VK / committed-byte impact.
     SC::Challenger:
         'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
@@ -511,42 +391,18 @@ where
     use crate::{InnerChallenge, InnerVal};
     use core::any::{Any, TypeId};
 
-    // Type gate (same as prover-side prove_trusted_evaluations): a TypeId
-    // transmute-safety guard for the unsafe `InnerChallenge` reinterpretation
-    // below — the TypeId check is exactly the identity that makes the
-    // transmute sound.  The `BasefoldRing` bound lets the OUTER (wrap) branch
-    // call the generic BaseFold verify statically; the field/challenger
-    // TypeId gates remain as transmute + static-vs-dynamic dispatch guards.
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
         || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
     {
-        // Non-KoalaBear field — skip (prover emitted Empty too).
         return Ok(());
     }
 
-    // OUTER (wrap) ring dispatch. Val/Challenge are KoalaBear / KoalaBear^4
-    // here, but the challenger is OuterChallenger (not JaggedChallenger):
-    // deserialize + `build_jagged_verify_inputs` +
-    // `verify_jagged_inner_generic` over the `BasefoldRing`
-    // associated types (on this branch `SC::Challenger == OuterChallenger`,
-    // `SC::BfMmcs == OuterValMmcs`).  Verify-only: no VK / committed-byte
-    // impact.
     if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
             build_jagged_verify_inputs, verify_jagged_inner_generic, JaggedPcsProofGeneric,
         };
         use p3_air::BaseAir;
         let bytes = match evaluation_proof {
-            // NOT a compatibility case here.  `Empty` means "this
-            // configuration has no jagged PCS", and the TypeId gate above has
-            // already established that this one does -- it is a
-            // KoalaBear/BaseFold shard on the outer ring.  `evaluation_proof`
-            // is a public, deserializable field whose default is `Empty`, so
-            // returning `Ok(())` for it let anyone strip the PCS opening off
-            // an otherwise valid shard proof and keep every algebraic check:
-            // the transcript prologue has already absorbed `main_commitment`,
-            // zerocheck and LogUp go on consuming the supplied opened values,
-            // and nothing is left to bind those values to that commitment.
             EvaluationProof::Empty => {
                 return Err(JaggedShardVerifyError::JaggedPcs(
                     "outer KoalaBear shard carries EvaluationProof::Empty: the PCS opening is \
@@ -571,25 +427,9 @@ where
                     )));
                 }
             };
-        // OUTER-RING COMMITMENT RE-BIND.
-        //
-        // The wrap prover sets `main_commitment` to
-        // `digest_felts(commit.original_commitment)` and leaves the binding to
-        // "its registered hook" (`shard_level/prover.rs`).  That hook was never
-        // written, so the eight felts that seeded Fiat-Shamir and the
-        // commitment this bundle's Merkle/FRI proof actually opens were two
-        // unrelated objects: a prover could build the AIR/zerocheck half around
-        // chosen openings and a perfectly valid BaseFold bundle for a DIFFERENT
-        // polynomial, and nothing here required the halves to describe one
-        // trace.  Project the bundle's own commitment and require it to be the
-        // observed one.  Done HERE, on the already-decoded bundle -- decoding a
-        // second copy of a ~1.2 MB bundle earlier in the call chain overflowed
-        // the stack.
         {
             let projected =
                 <SC as crate::BasefoldRing>::digest_felts(&bundle.commit.original_commitment);
-            // SAFETY: [JaggedVal; 8] == [Val<SC>; 8] (JaggedVal == KoalaBear ==
-            // Val<SC>), the identity the prover uses to write `main_commitment`.
             let projected_val: [Val<SC>; 8] = unsafe {
                 core::mem::transmute_copy::<[crate::jagged_pcs::JaggedVal; 8], [Val<SC>; 8]>(
                     &projected,
@@ -606,7 +446,6 @@ where
         }
         let chip_widths: Vec<usize> =
             chips.iter().map(|c| <_ as BaseAir<Val<SC>>>::width(*c)).collect();
-        // SAFETY: Challenge<SC> == InnerChallenge under the field gate above.
         let eval_point_inner: &[InnerChallenge] = unsafe {
             core::slice::from_raw_parts(
                 shared_eval_point.as_ptr() as *const InnerChallenge,
@@ -616,30 +455,6 @@ where
         let (chip_infos, r_row_per_chip, z_row) =
             build_jagged_verify_inputs(&bundle.packing, &chip_widths, eval_point_inner);
 
-        // The opening cross-bind: the openings the AIR phases consumed, index-aligned
-        // with `chip_infos`, so `cross_bind_openings` can require
-        //   Σ_k eq(z_col,k)·open_k = Σ_k eq(z_col,k)·y_k
-        // on this ring too.  Without it the outer zerocheck (which consumes
-        // `opened_values`) and the outer jagged phase (which consumes
-        // `bundle.y_per_chip`) are two independent checks over two unrelated
-        // sets of column claims — the inner ring has bound them since the
-        // cross-bind landed there; this branch never has.
-        //
-        // `build_jagged_verify_inputs` names its groups `chip{i}` positionally,
-        // so the alignment is reconstructed from the packing's round structure
-        // rather than by name.  Each round contributes
-        //   `round_counts[r].len()` real chips, then `padding_heights[r].len()`
-        //   single-column padding groups,
-        // rounds in commit order with MAIN last — the same
-        // `[prep real | prep pad | main real | main pad]` layout the inner
-        // branch builds by name below.  Padding is one column of committed
-        // zeros, so its claim is ZERO.
-        //
-        // The preprocessed round is ordered by the verifying key, so its i-th
-        // chip is `prep_chip_dims[i]` and its opening is that chip's
-        // `preprocessed.local`; the main round follows the shard's chip order.
-        // SAFETY (as elsewhere in this function): Challenge<SC> ==
-        // InnerChallenge under the TypeId gate above.
         let relabel = |cloned: Vec<Challenge<SC>>| -> Vec<InnerChallenge> {
             let (ptr, len, cap) = {
                 let mut v = core::mem::ManuallyDrop::new(cloned);
@@ -659,7 +474,6 @@ where
             let mut om: Vec<Vec<InnerChallenge>> = Vec::with_capacity(chip_infos.len());
             for (r, round) in rounds.iter().enumerate() {
                 if r + 1 == rounds.len() {
-                    // MAIN: the shard's chips, in the shard's order.
                     if round.len() != opened_values.chips.len() {
                         return Err(JaggedShardVerifyError::JaggedPcs(format!(
                             "outer main round: the proof claims {} chips, the shard opened {}",
@@ -667,27 +481,6 @@ where
                             opened_values.chips.len(),
                         )));
                     }
-                    // Widths come from the MACHINE on this round too.
-                    // `chip_widths` above is `BaseAir::width` of each chip, and
-                    // `build_jagged_verify_inputs` PREFERS the proof's
-                    // `column_counts` over it, so an unchecked claim silently
-                    // redefines the column layout this branch goes on to weigh.
-                    // The preprocessed round is pinned the same way below; this
-                    // is the main round's half of it.
-                    // Widths come from the MACHINE, row counts from the heights
-                    // the prologue OBSERVED.
-                    //
-                    // `build_jagged_verify_inputs` PREFERS the proof's
-                    // `column_counts` over `BaseAir::width`, so an unchecked
-                    // width silently redefines the column layout this branch
-                    // goes on to weigh; the row counts were claimed and tied to
-                    // nothing at all on this ring (the inner ring folds them
-                    // into `main_commitment` through the hash-bind, whereas this
-                    // ring observes the raw root). The heights need no new
-                    // binding of their own: the prologue absorbed one height
-                    // felt per chip before this phase began, so the canonical
-                    // row count is a value the transcript has already fixed;
-                    // what was missing is that nothing compared the two.
                     let expected: Vec<(String, usize, usize)> = chips
                         .iter()
                         .enumerate()
@@ -701,23 +494,6 @@ where
                         .map_err(JaggedShardVerifyError::JaggedPcs)?;
                     om.extend(opened_values.chips.iter().map(|c| relabel(c.main.local.clone())));
                 } else {
-                    // PREPROCESSED: the key's chips, in the key's order.
-                    //
-                    // The preprocessed half: the round's geometry is pinned
-                    // BY THE VERIFYING KEY.
-                    //
-                    // The key's `chip_information` records `(width, height)` per
-                    // preprocessed chip, name-ordered — the same set and order
-                    // `setup` commits — so the dimensions of what the key
-                    // committed are known, not claimed. The inner ring reaches
-                    // the same conclusion through its hash-bound key digest;
-                    // this ring's key stores the raw root, so the dimensions the
-                    // key already carries are what the round is held to.
-                    //
-                    // A key with no `chip_information` (the mock prover writes
-                    // an empty one) has nothing to pin against, and the round
-                    // falls back to the machine's widths with its root pin
-                    // intact.
                     let expected: Vec<(String, usize, usize)> =
                         if vk.chip_information.len() == prep_chip_dims.len() {
                             vk.chip_information
@@ -727,8 +503,6 @@ where
                         } else {
                             prep_chip_dims.iter().map(|(name, w)| (name.clone(), *w, 0)).collect()
                         };
-                    // The machine and the key must agree on the round before
-                    // either can pin it: they are two records of one `setup`.
                     for ((kn, kw, _), (mn, mw)) in expected.iter().zip(prep_chip_dims.iter()) {
                         if kn != mn || kw != mw {
                             return Err(JaggedShardVerifyError::JaggedPcs(format!(
@@ -757,9 +531,6 @@ where
                 let pads = bundle.packing.padding_heights.get(r).map_or(0, |p| p.len());
                 om.extend(core::iter::repeat_with(|| alloc::vec![InnerChallenge::ZERO]).take(pads));
             }
-            // A reconstruction that does not cover the groups the verifier is
-            // about to weigh would silently bind the wrong columns, so it is a
-            // rejection rather than a fallback to the unbound path.
             if om.len() != chip_infos.len() {
                 return Err(JaggedShardVerifyError::JaggedPcs(format!(
                     "outer cross-bind: rebuilt {} column groups from the packing's rounds, but \
@@ -771,26 +542,6 @@ where
             om
         };
 
-        // The preceding-root bind, host side: the preceding (preprocessed) round's root
-        // comes off the PROOF, and nothing above required it to be the root the
-        // VERIFYING KEY committed — so a prover could open a preprocessed round
-        // of its own choosing and every check so far would still pass.
-        //
-        // This ring's key stores that root unmixed, so the bind is the equality
-        // (`vk_commit_is_preceding_root`).  It pins the round's ROOT, not its
-        // GEOMETRY: the inner ring gets geometry for free because its key digest
-        // has the counts hashed in, whereas this key has no counts in it.  The
-        // per-chip width pin above and the `round.len()` check cover the part of
-        // that geometry the machine already knows; the row counts stay
-        // proof-claimed until the outer key format carries them.
-        // Coverage.  Comparing every SUPPLIED preceding root is not a
-        // coverage check: with `preceding_commits == []` the loop below is
-        // vacuous, the single supplied round is treated as MAIN, the
-        // preprocessed width/root branches are skipped, and BaseFold is handed
-        // only the main commitment -- while the zerocheck still consumes
-        // `opened_values.chips[*].preprocessed.local`, which is then
-        // authenticated to nothing.  The machine decides how many rounds there
-        // are, so require exactly that many.
         let expected_preceding = usize::from(!prep_chip_dims.is_empty());
         if bundle.preceding_commits.len() != expected_preceding {
             return Err(JaggedShardVerifyError::JaggedPcs(format!(
@@ -825,16 +576,12 @@ where
                             .into(),
                     ))
                 }
-                // A ring whose key stores a mixed digest re-derives it instead;
-                // that is the inner branch below, which never reaches here.
                 None => {}
             }
         }
 
         let mmcs = <SC as crate::BasefoldRing>::bf_mmcs();
         let fri = <SC as crate::BasefoldRing>::fri_config();
-        // The preceding round is the preprocessed one; its area is its real cells
-        // plus the stacking padding that closes it, both carried by the packing.
         let ok = verify_jagged_inner_generic::<SC::Challenger, <SC as crate::BasefoldRing>::BfMmcs>(
             &chip_infos,
             &r_row_per_chip,
@@ -842,7 +589,7 @@ where
             &bundle,
             challenger,
             mmcs,
-            /* skip_commit_observe = */ true,
+            true,
             fri,
             &bundle
                 .preceding_commits
@@ -869,13 +616,7 @@ where
         };
     }
 
-    // Resolve to a bundle.  `Bundle` is the host-emitted structured form and
-    // `Bytes` a device hook's pre-serialized form we deserialize here; `Empty`
-    // is rejected (see below).
     let bundle = match evaluation_proof {
-        // Same reasoning as the outer branch above: past the type gate this is
-        // an active KoalaBear PCS, so a missing opening is a malformed proof,
-        // never a configuration that has none.
         EvaluationProof::Empty => {
             return Err(JaggedShardVerifyError::JaggedPcs(
                 "inner KoalaBear shard carries EvaluationProof::Empty: the PCS opening is \
@@ -893,18 +634,6 @@ where
             })?,
     };
 
-    // Two rounds, [preprocessed, main], as one jagged instance whose columns
-    // run
-    //   [round 0 real | round 0 pad | round 1 real | round 1 pad].
-    // The pad is the space the stacked commitment adds to reach a stripe
-    // boundary; it is not chip geometry, so the layout is rebuilt from the
-    // per-round counts rather than read positionally.
-    //
-    // The preprocessed round's chips and widths come from the machine (name
-    // order, the set `setup` commits); its heights are claimed by the proof
-    // and pinned by the hash-bind to the key's commitment. Its chip count is
-    // the machine's too: taken from the proof, it would let a prover drop the
-    // round and its binding.
     let n_prep = chips
         .iter()
         .filter(|c| <_ as crate::air::MachineAir<Val<SC>>>::preprocessed_width(**c) > 0)
@@ -914,12 +643,8 @@ where
     let cube = 1usize << shared_eval_point.len();
 
     let mut chip_infos: Vec<JaggedChipInfo> = Vec::new();
-    // How many leading entries belong to the preprocessed round (its real chips
-    // plus its padding) — the cross-bind and `n_prep` bookkeeping key off this.
     let mut n_prep_infos = 0usize;
 
-    // ALWAYS at least one padding column per round, even on a round that lands
-    // exactly on a stripe boundary.  Mirrors the prover.
     let push_padding = |infos: &mut Vec<JaggedChipInfo>, pad: usize| {
         let mut done = 0usize;
         loop {
@@ -936,20 +661,9 @@ where
         }
     };
 
-    // The pin class the proof claims (pinned machines), checked below against
-    // the rows: a proof may commit a node under a class larger than the rows
-    // need (the root does), never smaller.
     let mut pin_class: Option<usize> = None;
     let mut prep_total_all = 0usize;
     if n_prep > 0 {
-        // Round 0's geometry is CLAIMED by the proof and PINNED by the
-        // hash-bind below: the key's commitment is
-        // `compress([raw_root, hash(these counts)])`, so a proof that claims
-        // different counts cannot re-derive it — the key carries no chip
-        // metadata; the commitment already says what shape was committed.
-        // NAMES and WIDTHS come from the MACHINE (its preprocessed chips, name
-        // ordered -- the same set and order `setup` commits); HEIGHTS are
-        // claimed by the proof and pinned by the hash-bind below.
         let Some(prep_round) = combined_packing.round_counts.first() else {
             return Err(JaggedShardVerifyError::JaggedPcs(
                 "preprocessed round: the proof carries no geometry for it".into(),
@@ -978,15 +692,6 @@ where
             prep_total += width.saturating_mul(*height);
         }
         prep_total_all = prep_total;
-        // The area the preprocessed commitment actually covers: the real cells
-        // rounded out to whole stacking blocks, exactly as the prover's commit
-        // does (`zkm_pcs::jagged::committed_dense_len`).  Derived, not read from
-        // the proof: this is what pins round 0's padding, and with it the column
-        // space the jagged evaluation runs over.
-        // The round's committed area and its padding split: the natural
-        // stacking-block rounding into cube-tall columns, or — on a pinned
-        // machine — the pin's area split into exactly `pad_columns` columns
-        // (`AreaPin::split_padding`), the layout the prover used.
         let prep_natural = crate::jagged::committed_dense_len(prep_total, log_stack);
         match claimed_prep_pad_columns {
             Some(claimed) => {
@@ -1025,22 +730,8 @@ where
         n_prep_infos = chip_infos.len();
     }
 
-    // Round 1: the shard's main chips, widths from the packing.
     use p3_air::BaseAir;
 
-    // Hold the main round to the geometry the verifier knows
-    // without the proof — the machine's widths and the heights the prologue
-    // observed — the same rule the outer branch applies above.
-    //
-    // The hash-bind ties the round's geometry to C_main, a statement about
-    // the commitment; this pin is a statement about the machine and the
-    // transcript, and holds even where the hash-bind would be vacuous.
-    //
-    // The round count is the machine's — one per preprocessed round, plus
-    // main — and is required, not consulted: a count the proof chose could be
-    // empty or surplus and skip the pin. The canonical-packing check does not
-    // cover it; it only shows the proof's two representations agree with each
-    // other. The outer branch requires the same count.
     let expected_rounds = usize::from(n_prep > 0) + 1;
     if combined_packing.round_counts.len() != expected_rounds {
         return Err(JaggedShardVerifyError::JaggedPcs(format!(
@@ -1072,23 +763,11 @@ where
             .get(i)
             .copied()
             .unwrap_or_else(|| <_ as BaseAir<Val<SC>>>::width(*chip));
-        JaggedChipInfo {
-            name: chip.name().to_string(),
-            row_count: 0, // filled from the packing offsets below
-            column_count,
-        }
+        JaggedChipInfo { name: chip.name().to_string(), row_count: 0, column_count }
     }));
     let n_main_infos = chip_infos.len() - n_prep_infos;
 
-    // Row counts from bundle.packing.offsets: one offset per column and a
-    // final sentinel `offsets[total_cols] = total_values`. Within a chip's
-    // run of columns consecutive offsets differ by its row count, so
-    //   h(column k) = offsets[k + 1] - offsets[k],
-    // the sentinel keeping `k + 1` in bounds for the last column.
     {
-        // Only the MAIN region's heights come from the packing; the
-        // preprocessed region's are already pinned by the verifying key above,
-        // which is the whole point of opening it against `vk.commit`.
         let mut col_idx = 0usize;
         for (i, info) in chip_infos.iter_mut().enumerate() {
             if info.column_count == 0 {
@@ -1103,11 +782,6 @@ where
                 0
             };
             if i < n_prep_infos {
-                // Round 0 (preprocessed, including its padding) is already
-                // pinned — by the verifying key for the real chips, and by the
-                // key-derived area for the padding.  The packing must AGREE.
-                // This is the bind that makes the preprocessed round mean
-                // anything.
                 if info.row_count != h {
                     return Err(JaggedShardVerifyError::JaggedPcs(format!(
                         "preprocessed round: {} is {} rows in the packing but {} as \
@@ -1115,25 +789,12 @@ where
                         info.name, h, info.row_count,
                     )));
                 }
-            } else if i < n_prep_infos + n_main_infos {
-                info.row_count = h;
             } else {
-                // Round 1's padding: heights are whatever the packing says, but
-                // they must still be covered by the accounting below.
                 info.row_count = h;
             }
             col_idx += info.column_count;
         }
 
-        // COLUMN-ACCOUNTING CHECK.  The walk above assumes the verifier's chip
-        // list accounts for EVERY column in the main packing: it advances
-        // `col_idx` by each chip's width and reads heights from
-        // `offsets[col_idx]`.  If the packing carried more column groups than
-        // this list covers, the walk would stop partway and silently read one
-        // region's heights as the other's.  Reject instead.
-        // The MAIN round's stacking padding closes out the column space; append
-        // however many columns the packing still has left, so the accounting is
-        // exact rather than approximate.
         let total_cols = combined_packing.offsets.len().saturating_sub(1);
         if col_idx < total_cols {
             let mut pad_idx = col_idx;
@@ -1160,9 +821,6 @@ where
             )));
         }
         if let Some(class) = pin_class {
-            // The main round's padding must be the class's fixed column count,
-            // and the class must hold the rows: the smallest class both rounds
-            // fit is a floor for the claimed one.
             let pins = crate::jagged::RecursionPins::class(class);
             let main_pads = chip_infos.len() - n_prep_infos - n_main_infos;
             if main_pads != pins.main.pad_columns {
@@ -1190,8 +848,6 @@ where
         }
     }
 
-    // Build r_row_per_chip from the shared eval_point's trailing
-    // log_row_count coords for each chip.
     let r_row_per_chip: Vec<Vec<InnerChallenge>> = chip_infos
         .iter()
         .map(|info| {
@@ -1201,7 +857,6 @@ where
             } else {
                 shared_eval_point
             };
-            // SAFETY: Challenge<SC> == InnerChallenge under the TypeId gate.
             let cloned: Vec<Challenge<SC>> = slice.to_vec();
             let (ptr, len, cap) = {
                 let mut v = core::mem::ManuallyDrop::new(cloned);
@@ -1211,8 +866,6 @@ where
         })
         .collect();
 
-    // The full z* point as InnerChallenge for the jagged embedding factor.
-    // SAFETY: Challenge<SC> == InnerChallenge under the TypeId gate.
     let z_row_inner: Vec<InnerChallenge> = {
         let cloned: Vec<Challenge<SC>> = shared_eval_point.to_vec();
         let (ptr, len, cap) = {
@@ -1222,18 +875,11 @@ where
         unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
     };
 
-    // Downcast SC::Challenger to &mut JaggedChallenger.
     let challenger_any: &mut dyn Any = challenger;
     let lb_challenger = challenger_any
         .downcast_mut::<crate::jagged_pcs::JaggedChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == JaggedChallenger");
 
-    // Cross-bind: each chip's `main.local` opening, relabelled as
-    // `InnerChallenge` and index-aligned with `chip_infos` and
-    // `bundle.y_per_chip`, goes to the jagged verifier, which requires it to
-    // generate the claimed sum (see `cross_bind_openings`).
-    // SAFETY (used twice below): Challenge<SC> == InnerChallenge under the
-    // TypeId gate.
     let relabel = |cloned: Vec<Challenge<SC>>| -> Vec<InnerChallenge> {
         let (ptr, len, cap) = {
             let mut v = core::mem::ManuallyDrop::new(cloned);
@@ -1241,14 +887,6 @@ where
         };
         unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
     };
-    // The cross-bind runs over BOTH rounds, index-aligned with `chip_infos`:
-    // the preprocessed round binds each committed chip's `preprocessed.local`
-    // (looked up BY NAME, because that round is ordered by the verifying key,
-    // not by the shard's chip order), the main round binds `main.local`.
-    // Index-aligned with `chip_infos`, which now runs
-    // `[prep real | prep pad | main real | main pad]`.  A padding entry is one
-    // column of committed zeros, so its claim is ZERO — the prover emits the
-    // same zero claims per round.
     let zero_claim = || alloc::vec![InnerChallenge::ZERO];
     let mut opened_main: Vec<Vec<InnerChallenge>> = Vec::with_capacity(chip_infos.len());
     for info in chip_infos.iter().take(n_prep_infos) {
@@ -1265,14 +903,10 @@ where
         opened_main.push(relabel(opened_values.chips[idx].preprocessed.local.clone()));
     }
     opened_main.extend(opened_values.chips.iter().map(|c| relabel(c.main.local.clone())));
-    // The main round's trailing padding.
     for _ in opened_main.len()..chip_infos.len() {
         opened_main.push(zero_claim());
     }
 
-    // The preprocessed round, as the batched open sees it: the vk's commitment
-    // plus the committed area implied by the vk's geometry (stripes rounded up
-    // to the stacking height, as `StackedPcsVerifier` requires).
     let prep_rounds: Vec<(
         <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
         usize,
@@ -1288,20 +922,11 @@ where
         let stripes = prep_cells.div_ceil(1usize << log_stack);
         let area = stripes << log_stack;
 
-        // The BaseFold open Merkle-verifies against the round's RAW root, which
-        // only the proof has; the KEY holds the HASH-BOUND digest
-        // `compress([raw, hash(geometry)])`.  So re-derive the bound form from
-        // the claimed raw root and the geometry this verifier is about to open
-        // against, and require it to equal the key's.  That single check is
-        // what pins BOTH the root and the preprocessed row/column counts.
         let Some(raw) = bundle.preceding_commits.first() else {
             return Err(JaggedShardVerifyError::JaggedPcs(
                 "preprocessed round: the proof carries no raw commitment for it".into(),
             ));
         };
-        // Only the REAL preprocessed chips: the stacking-pad columns appended
-        // above belong to the BATCHED layout, not to what `setup` committed, so
-        // the commit-time hash never saw them.
         let (prep_rows, prep_cols): (Vec<usize>, Vec<usize>) = chip_infos
             .iter()
             .take(n_prep)
@@ -1312,11 +937,6 @@ where
             &prep_rows,
             &prep_cols,
         );
-        // SAFETY: `Com<SC> == JaggedMmcs::Commitment` under the inner TypeId
-        // gate.  The commitment OWNS a heap allocation (`MerkleCap` is a Vec of
-        // digests), so this must relabel a CLONE that is then forgotten — a
-        // bitwise `transmute_copy` of the borrowed original duplicates the
-        // ownership and double-frees.
         let key_commitment = unsafe {
             core::mem::transmute_copy::<
                 crate::Com<SC>,
@@ -1335,17 +955,6 @@ where
         alloc::vec![(raw.clone(), area)]
     };
 
-    // Delegate to the existing host-side verifier.
-    //
-    // Single-main-commit: the prover's transcript prologue
-    // already observed the BaseFold commit's 8-felt digest as
-    // `main_commitment` (mirrored in the transcript prologue above).
-    // Use the `_no_observe` variant so the verifier doesn't observe
-    // the same digest a second time (which would desync the
-    // transcript vs the prover).
-    //
-    // The preprocessed round's commitment is the key's, and its area follows
-    // from the geometry the key pins, so the proof carries neither.
     if !verify_jagged_no_observe(
         &chip_infos,
         &r_row_per_chip,
@@ -1438,25 +1047,10 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
-    // (1) Sample the per-phase challenges (transcript-sync with the prover).
-    // `gkr_batch_open` + `lambda` drive the claimed_sum binding (G2-b) below;
-    // `alpha` drives the constraint-RLC half (G2-a), deferred to the re-point.
     let _alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let gkr_batch_open: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
-    // constraint-RLC BINDING (HARD CHECK)
-    // Recompute the in-circuit `rlc_eval` ON THE HOST from the SAME inputs
-    // the circuit uses — the trace@z* openings carried in `opened_values`,
-    // the transcript-sampled (alpha, gkr_batch_open, lambda), the GKR point
-    // and the zerocheck-reduced point — and BIND it to the proof's claimed
-    // `point_and_eval.1`.
-    //
-    // SOUNDNESS: the structural sumcheck alone only ties `point_and_eval.1`
-    // back to `claimed_sum` (telescoping) and the GKR openings — nothing
-    // else forces it to equal the constraint-RLC of the commitment-bound
-    // openings@z*.  Verifier-only, transcript-neutral (only already-sampled
-    // challenges + opened values).
     let rlc_eval = recompute_zerocheck_rlc_eval_host::<SC, A>(
         chips,
         zerocheck_proof,
@@ -1473,7 +1067,6 @@ where
         ));
     }
 
-    // (2) Point dimension == max_log_row_count.
     let point_dim = zerocheck_proof.point_and_eval.0.len();
     if point_dim != max_log_row_count {
         return Err(JaggedShardVerifyError::Zerocheck(format!(
@@ -1481,7 +1074,6 @@ where
         )));
     }
 
-    // (3) gkr_point dim must match zerocheck point dim.
     if gkr_evaluations.point.len() != point_dim {
         return Err(JaggedShardVerifyError::Zerocheck(format!(
             "gkr_evaluations.point dim {} != zerocheck point dim {}",
@@ -1490,17 +1082,6 @@ where
         )));
     }
 
-    // (G2-b) Bind the zerocheck `claimed_sum` to the lambda-RLC of the
-    // (commitment-bound) GKR openings.  Closes the "arbitrary claimed_sum"
-    // forgery: the structural sumcheck only checks p_0(0)+p_0(1)==claimed_sum,
-    // never that claimed_sum equals the GKR-derived modification.  Pure
-    // arithmetic over already-sampled challenges → transcript-neutral,
-    // verifier-only.
-    //
-    // The cross-chip constraint-RLC half (== point_and_eval.1) needs the
-    // trace opened at the zerocheck REDUCED point z* — exactly where the
-    // prover opens the jagged PCS — and is discharged by the
-    // `recompute_zerocheck_rlc_eval_host` hard check above.
     let _ = public_values;
     {
         use p3_air::BaseAir;
@@ -1518,34 +1099,20 @@ where
             acc_pow *= gkr_batch_open;
             gkr_batch_open_powers.push(acc_pow);
         }
-        // SHARD-UNIFORM convention decision (mirror prover)
         let zerocheck_sum_mod: Challenge<SC> = gkr_evaluations
             .chip_openings
             .values()
             .map(|chip_evaluation| {
-                // SINGLE-FIELD CLAIM COLLAPSE
-                // When the SHARD uses the collapsed convention, seed the
-                // per-chip claimed_sum term DIRECTLY from the FULL-POINT
-                // openings (`*_full`) with NO embed_factor — mirroring the
-                // prover (zerocheck_prover.rs).  The full-point
-                // opening already carries the mixed-height padding factor
-                //   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @
-                //               zeta[0..log_h])
-                // so the old `raw(trailing) · embed_LEAD` correction is dropped.
-                {
-                    let main_full =
-                        chip_evaluation.main_trace_evaluations_full.as_deref().unwrap_or(&[]);
-                    let prep_full = chip_evaluation
-                        .preprocessed_trace_evaluations_full
-                        .as_deref()
-                        .unwrap_or(&[]);
-                    main_full
-                        .iter()
-                        .copied()
-                        .chain(prep_full.iter().copied())
-                        .zip(gkr_batch_open_powers.iter().copied())
-                        .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p)
-                }
+                let main_full =
+                    chip_evaluation.main_trace_evaluations_full.as_deref().unwrap_or(&[]);
+                let prep_full =
+                    chip_evaluation.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]);
+                main_full
+                    .iter()
+                    .copied()
+                    .chain(prep_full.iter().copied())
+                    .zip(gkr_batch_open_powers.iter().copied())
+                    .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p)
             })
             .fold(Challenge::<SC>::ZERO, |acc, m| acc * lambda + m);
         if zerocheck_proof.claimed_sum != zerocheck_sum_mod {
@@ -1556,13 +1123,6 @@ where
         }
     }
 
-    // (4) Inner sumcheck: degree 4, max_log_row_count rounds.  The round
-    // poly is `elf(X)·[eq-weighted constraint sum]` — the eq term's last
-    // factor `elf` is degree 1 and the max AIR constraint degree is 3, so the
-    // honest round poly is degree 4 (5 coefficients), matching the prover's
-    // `UnivariatePolynomial::zero(4)` dummy and the recursion dummy
-    // `dummy_partial_sumcheck_proof(.., 4)`.  (The recursion `verify_sumcheck`
-    // fixes the degree via the witness shape rather than an explicit check.)
     verify_sumcheck_host::<Val<SC>, Challenge<SC>, SC::Challenger>(
         zerocheck_proof,
         challenger,
@@ -1574,16 +1134,6 @@ where
         other => other,
     })?;
 
-    // (5) Observe the zerocheck openings (trace@z*), after the zerocheck
-    // sumcheck and before the jagged phase — mirror of the prover's
-    // `observe_zerocheck_openings_from_residual`.  The GKR openings are
-    // observed earlier, at the end of `verify_logup_gkr_host`, before the
-    // α/γ/λ samples above.
-    //
-    // `opened_values.chips` is a Vec emitted in NAME order by the prover's
-    // `build_opened_values`, already split into preprocessed/main at each
-    // chip's `preprocessed_width` — the same pairs, in the same order, the
-    // prover feeds from its `trace_at_z` residual.
     crate::shard_level::prover::observe_zerocheck_openings::<
         Val<SC>,
         Challenge<SC>,
@@ -1642,14 +1192,10 @@ where
     let z_star = &zerocheck_proof.point_and_eval.0;
     let z_gkr = &gkr_evaluations.point;
 
-    // The prover anchors every chip's zerocheck polynomial at rev(z_gkr), so
-    // the batched reduced value carries eq(rev(z_gkr), z*).
     let z_gkr_anchor: Vec<Challenge<SC>> = z_gkr.iter().rev().copied().collect();
 
-    // (2) eq(anchor, z*).
     let zerocheck_eq_val = eq_eval_host::<Challenge<SC>>(&z_gkr_anchor, z_star);
 
-    // (3) gkr_batch_open powers [β¹ .. β^max_width], circuit :491-505.
     let max_elements = chips
         .iter()
         .map(|chip| {
@@ -1667,7 +1213,6 @@ where
         }
     }
 
-    // z* extended by one front ZERO coord (circuit :537-538 insert(0,0)).
     let mut z_extended: Vec<Challenge<SC>> = Vec::with_capacity(z_star.len() + 1);
     z_extended.push(Challenge::<SC>::ZERO);
     z_extended.extend_from_slice(z_star);
@@ -1675,18 +1220,12 @@ where
     let mut rlc_eval = Challenge::<SC>::ZERO;
 
     for (chip, opening) in chips.iter().zip(opened_values.chips.iter()) {
-        // degree = quotient[0] (circuit opening.degree), real-height bits.
         let degree: &[Challenge<SC>] =
             opening.quotient.first().map(|v| v.as_slice()).unwrap_or(&[]);
 
-        // (4e) geq + padded-row adjustment.  full_geq over (degree, z_ext);
-        // when degree.len() != z_extended.len() (e.g. placeholder lift) the
-        // circuit would still pair them — here we guard so the probe never
-        // panics and report the dimension so a mismatch is visible.
         let geq_val = if degree.len() == z_extended.len() {
             full_geq_host::<Challenge<SC>>(degree, &z_extended)
         } else {
-            // dimension mismatch: report it (degree placeholder/zero path).
             Challenge::<SC>::ONE
         };
         let pra = compute_padded_row_adjustment_shard_host::<Val<SC>, Challenge<SC>, A>(
@@ -1696,7 +1235,6 @@ where
             public_values,
         );
 
-        // (4f) constraint_eval = C(trace@z*, alpha) - pra·geq, circuit :566-577.
         let ce = eval_constraints_shard_host::<Val<SC>, Challenge<SC>, A>(
             chip,
             opening,
@@ -1705,7 +1243,6 @@ where
         );
         let constraint_eval = ce - pra * geq_val;
 
-        // (4g) openings_batch = Σ (main ++ prep) · β^(1..), circuit :579-600.
         let openings_batch: Challenge<SC> = opening
             .main
             .local
@@ -1715,7 +1252,6 @@ where
             .zip(beta_powers.iter().copied())
             .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + o * p);
 
-        // (4h) fold: rlc = rlc·λ + eq·(constraint_eval + openings_batch).
         rlc_eval = rlc_eval * lambda + zerocheck_eq_val * (constraint_eval + openings_batch);
     }
 
@@ -1748,9 +1284,6 @@ fn evaluate_mle_host<EF: Field + Copy>(mle_evals: &[EF], point: &[EF]) -> EF {
         dim,
         1usize << dim,
     );
-    // Build the partial-lagrange table in-place.  Index convention
-    // matches the in-circuit `evaluate_mle_ext`: variable 0 is the
-    // LSB, later-processed coords occupy higher bits.
     let mut weights: Vec<EF> = vec![EF::ONE];
     for &r in point {
         let old_len = weights.len();
@@ -1816,7 +1349,6 @@ where
         ));
     }
 
-    // First round: p_0(0) + p_0(1) == claimed_sum.
     let p0 = &proof.univariate_polys[0];
     if p0.coefficients.len() != expected_degree + 1 {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
@@ -1833,19 +1365,12 @@ where
         ));
     }
 
-    // Observe round 0 coefficients into the challenger.
     for c in &p0.coefficients {
         for basis in c.as_basis_coefficients_slice() {
             challenger.observe(*basis);
         }
     }
 
-    // Walk rounds 1..n.
-    //
-    // Sumcheck convention: the prover runs an MSB fold
-    // and `insert(0, α)`s each freshly-sampled challenge at the front
-    // of `reduced_point`.  We mirror the prover's construction here so
-    // the equality check below sees the same Vec.
     let mut alphas: Vec<EF> = Vec::with_capacity(n);
     let mut prev_poly = p0;
     for i in 1..n {
@@ -1875,18 +1400,15 @@ where
         prev_poly = curr;
     }
 
-    // Sample the terminal challenge.  Same insert-at-front rule.
     let alpha_last: EF = challenger.sample_algebra_element::<EF>();
     alphas.insert(0, alpha_last);
 
-    // Point must match the sampled challenges.
     if alphas != proof.point_and_eval.0 {
         return Err(JaggedShardVerifyError::LogupGkr(
             "sumcheck reduced point doesn't match sampled challenges".into(),
         ));
     }
 
-    // Final: p_{n-1}(alpha_last) == claimed final eval.
     let final_recomputed = eval_coeffs_host(&prev_poly.coefficients, alpha_last);
     if final_recomputed != proof.point_and_eval.1 {
         return Err(JaggedShardVerifyError::LogupGkr(
@@ -1930,9 +1452,6 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
-    // Note: we derive log_num_interactions from the output MLE length
-    // rather than taking chip_metadata as an extra parameter, since
-    // the proof itself encodes the dimension.
     let numerator = &proof.circuit_output.numerator;
     let denominator = &proof.circuit_output.denominator;
     if numerator.len() != denominator.len() {
@@ -1948,20 +1467,8 @@ where
             numerator.len()
         )));
     }
-    // initial_num_variables = log_num_interactions + 1 = log2(output.len)
     let initial_num_variables = numerator.len().trailing_zeros() as usize;
 
-    // (0) Re-observe + check the GKR proof-of-work grinding witness BEFORE
-    // sampling alpha/beta — exactly matching the prover's grind, which observes
-    // the witness into the challenger.  Without the observe the verifier's
-    // alpha/beta diverge from the prover's and the G1 PV-balance below fails;
-    // without the bit check the grind is transcript consistency only and earns
-    // no soundness.
-    //
-    // Checked on EVERY ring now: this was a config-aware no-op on the
-    // outer/wrap ring while `ziren.soundcalc.toml` credited wrap with
-    // `grinding_bits_lookup = 16`, so the report described a transcript the
-    // protocol did not execute.
     if !crate::logup_gkr::gkr_check_witness(
         challenger,
         crate::logup_gkr::GKR_GRINDING_BITS,
@@ -1970,38 +1477,20 @@ where
         return Err(JaggedShardVerifyError::LogupGkr("GKR grinding witness check failed".into()));
     }
 
-    // (1) Sample the LogUp challenges (alpha, beta_seed), as the prover does.
     let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let beta_seed: Vec<Challenge<SC>> =
         (0..beta_seed_dim).map(|_| challenger.sample_algebra_element::<Challenge<SC>>()).collect();
-    // betas[0] = argument_index (kind) weight, betas[1..] = per-value weights —
-    // the partial-lagrange table over {0,1}^beta_seed_dim (eq_mle_table),
-    // identical to the prover's leaf-denominator construction.
     let beta_powers: Vec<Challenge<SC>> = if beta_seed.is_empty() {
         vec![Challenge::<SC>::ONE]
     } else {
         crate::zerocheck_prover::eq_mle_table::<Challenge<SC>>(&beta_seed)
     };
 
-    // Public-values balance. The cumulative sum over the chip interactions
-    // must be −PV_digest, where PV_digest folds the record-level public-values
-    // interactions (the State, GlobalAccumulation and MemoryGlobal bus
-    // boundaries) under the same (alpha, beta powers):
-    //   Σ_chips Σ n/d  =  −PV_digest.
-    // The local-only buses are closed by this balance alone. Pure arithmetic
-    // over challenges already drawn; the recursive verifier checks the same.
     {
         let gkr_sum: Challenge<SC> = numerator
             .iter()
             .zip(denominator.iter())
             .fold(Challenge::<SC>::ZERO, |acc, (n, d)| acc + *n / *d);
-        // Machine-aware local-only closure.  The core MIPS machine carries
-        // the State/GlobalAccumulation/MemoryGlobal boundary buses, closed by
-        // the public-values AIR (`gkr_sum == -PV_digest`).  The recursion
-        // machine carries only self-cancelling `Local` buses, so its closure
-        // is `gkr_sum == 0`; the core State-bus PV-AIR does not apply (it
-        // reads a different PV schema and its arity-16 GlobalAccumulation
-        // message would overflow the recursion `beta_powers`).
         let pv_digest = if machine_has_pv_buses {
             crate::air::eval_public_values_digest_host::<Val<SC>, Challenge<SC>>(
                 &alpha,
@@ -2010,9 +1499,6 @@ where
                 public_values,
             )
         } else {
-            // Recursion machine: all buses are self-cancelling `Local`
-            // (Memory/Program/Range/Syscall), so the local-only closure is
-            // `gkr_sum == 0` (empirically confirmed for the compress shard).
             Challenge::<SC>::ZERO
         };
         if gkr_sum != -pv_digest {
@@ -2022,8 +1508,6 @@ where
         }
     }
 
-    // (2) Observe circuit_output into the transcript.  Each EF
-    // element contributes its base-field basis coefficients.
     for &n in numerator.iter() {
         for basis in n.as_basis_coefficients_slice() {
             challenger.observe(*basis);
@@ -2035,22 +1519,13 @@ where
         }
     }
 
-    // (3) Sample the initial eval_point.
     let mut eval_point: Vec<Challenge<SC>> = (0..initial_num_variables)
         .map(|_| challenger.sample_algebra_element::<Challenge<SC>>())
         .collect();
 
-    // Initial numerator/denominator evals at the sampled point.  These are
-    // reduced through the round walk below and then consumed by the
-    // degree-masked last-layer reconstruction.
     let mut numerator_eval: Challenge<SC> = evaluate_mle_host(numerator, &eval_point);
     let mut denominator_eval: Challenge<SC> = evaluate_mle_host(denominator, &eval_point);
 
-    // The prover pads GKR to a FIXED round count
-    // (`round_proofs.len() + 1 == max_log_row_count`).  Enforce it here so a
-    // malicious prover cannot shorten the reduction (each missing round is an
-    // unverified MLE halving) — the round count must be checked, not derived
-    // from the proof.
     if proof.round_proofs.len() + 1 != max_log_row_count {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
             "GKR round count {} + 1 != max_log_row_count {} (proof must be \
@@ -2060,17 +1535,9 @@ where
         )));
     }
 
-    // (4) Walk round_proofs.  For each round:
-    //   - sample lambda
-    //   - check claimed_sum == λ·n_eval + d_eval
-    //   - verify inner sumcheck
-    //   - check final_eval identity
-    //   - observe (n0, n1, d0, d1)
-    //   - sample line challenge, extend eval_point, update n/d
     for (i, round_proof) in proof.round_proofs.iter().enumerate() {
         let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
-        // Expected claimed sum.
         let expected_claim = lambda * numerator_eval + denominator_eval;
         if round_proof.sumcheck_proof.claimed_sum != expected_claim {
             return Err(JaggedShardVerifyError::LogupGkr(format!(
@@ -2078,11 +1545,6 @@ where
             )));
         }
 
-        // Inner sumcheck over i + initial_num_variables rounds.
-        // The per-round sumcheck runs over whatever dim the layer
-        // has — for the first round that's initial_num_variables,
-        // growing by 1 each subsequent round via the line challenge.
-        // Degree is 3 (LogUp-GKR's quadratic + eq contribution).
         let expected_sumcheck_vars = i + initial_num_variables;
         verify_sumcheck_host::<Val<SC>, Challenge<SC>, SC::Challenger>(
             &round_proof.sumcheck_proof,
@@ -2091,10 +1553,6 @@ where
             3,
         )?;
 
-        // Final-eval identity.
-        //
-        // The eq pairing follows the fold orientation the proof records: the
-        // MSB fold pairs `eval_point` as is, the LSB fold pairs it reversed.
         let sumcheck_point = &round_proof.sumcheck_proof.point_and_eval.0;
         let final_eval = round_proof.sumcheck_proof.point_and_eval.1;
         let eq_val = match fold_orientation {
@@ -2116,59 +1574,22 @@ where
             )));
         }
 
-        // Observe (n0, n1, d0, d1) into the transcript.
         for e in [n0, n1, d0, d1] {
             for basis in e.as_basis_coefficients_slice() {
                 challenger.observe(*basis);
             }
         }
 
-        // Update eval_point: sumcheck-reduced point + line challenge.  The
-        // prover's layer transition pairs ADJACENT rows (peels the row LSB =
-        // variable `log_num_interactions` of the LSB-first flat index), so
-        // the line challenge is INSERTED there — mirrors
-        // `row_gkr/top_level.rs` and the recursion circuit.
         eval_point = sumcheck_point.clone();
         let line: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
         eval_point.insert(initial_num_variables - 1, line);
 
-        // Update n/d evals via linear interpolation at `line`.
         numerator_eval = n0 + (n1 - n0) * line;
         denominator_eval = d0 + (d1 - d0) * line;
     }
 
-    // DEGREE-MASKED LAST-LAYER RECONSTRUCTION (height anchor)
-    //
-    // The round walk above reduces the GKR `circuit_output` num/den MLEs to
-    // their evaluation `(numerator_eval, denominator_eval)` at the fully
-    // reduced `eval_point` (dim = log_num_interactions + max_log_row_count).
-    // This block re-derives those evals from the chips' trace openings masked
-    // by `full_geq(degree, ·)` and asserts equality — the bind that ties the
-    // GKR output back to per-chip heights.  Without it, an area-preserving
-    // per-chip height forgery (chip A 2^h→2^(h+1), chip B 2^g→2^(g-1)) leaves
-    // the GKR `circuit_output` / round walk / public-values balance intact
-    // while moving each chip's `full_geq` padding boundary.
-    //
-    // This is a PURE ARITHMETIC ASSERT over already-sampled challenges and
-    // already-observed openings: it samples nothing and observes nothing
-    // (the len + per-chip openings observe stays in zerocheck), so it is
-    // transcript-neutral and proof-byte-neutral.  The GKR `circuit_output`
-    // is built from RAW trace cells with NO embed_factor (extract.rs ←
-    // generate_first_layer ← generate_interaction_vals); the
-    // `embed_factor = Π_high(1−zeta[k])` lives ONLY in the zerocheck claim
-    // path, NOT here — so the reconstruction uses raw openings with no
-    // factor (the padding mask is carried by `full_geq`).
-    //
-    // SOUNDNESS: this runs UNCONDITIONALLY — a degree-only lie (transcript
-    // honest, `degree` bits forged) is caught here and only here on the
-    // host path, so it must not be skippable.
     let log_num_interactions = initial_num_variables - 1;
 
-    // (1) Split the reduced eval_point into (interaction, trace) axes.
-    // The GKR flat index is `row · cols + col` with the interaction `col` in
-    // the low bits, and the MSB-fold walk leaves `eval_point` LSB-first, so
-    // the first `log_num_interactions` coordinates are the interaction axis
-    // and the rest the row axis.
     if eval_point.len() != log_num_interactions + max_log_row_count {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
             "reconstruction: reduced eval_point dim {} != log_num_interactions {} + \
@@ -2180,8 +1601,6 @@ where
     }
     let (interaction_point, trace_point) = eval_point.split_at(log_num_interactions);
 
-    // (2) The trace point must equal the claimed opening point, and its
-    // dimension must equal the FIXED cube threaded in from `verify_shard`.
     let logup_evaluations = &proof.logup_evaluations;
     if trace_point.len() != max_log_row_count {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
@@ -2196,36 +1615,10 @@ where
         ));
     }
 
-    // (3) `point_extended` for the per-chip `full_geq` padding mask.
-    //
-    // The GKR leaf is LSB-first natural-row: the chip's real rows are
-    // `[0, height)` matched LSB-first with `trace_point` (verified by the
-    // prover-side direct-leaf ground truth, top_level.rs).  So the padding
-    // mask the reconstruction needs is
-    //     geq_B = Σ_{row ≥ height} eq_mle_table(trace_point)[row]
-    // i.e. `full_geq(degree, ·)` paired so degree-bit k aligns with
-    // `trace_point[k]`.  `full_geq_host` pairs
-    // `threshold.rev()` with `point.rev()`, i.e. degree-bit i with
-    // point[len-1-i]; feeding the REVERSED trace_point (plus a zero high
-    // coord) makes degree-bit k align with
-    // `trace_point[k]`, reproducing the LSB-first leaf mask.  (The
-    // `[0, ...trace_point]` ordering is the zerocheck's bit-REVERSED
-    // convention — correct for the zerocheck's `bitrev_rows` poly but the
-    // OPPOSITE of the GKR leaf, so it would make honest reconstruction fail.)
     let mut point_extended: Vec<Challenge<SC>> = Vec::with_capacity(max_log_row_count + 1);
     point_extended.push(Challenge::<SC>::ZERO);
     point_extended.extend(trace_point.iter().rev().copied());
 
-    // (4) Per-chip reconstruction in Ziren's interaction layout.
-    //
-    // `circuit_output` packs each chip's raw interactions contiguously
-    // (`offset += num_interactions`), with all padding at the end of the
-    // `col` axis, whose width is ⌈log2 Σ raw⌉. So the chips are packed
-    // contiguously here and the vector is resized to 2^interaction_dim with
-    // the identity fraction, as `extract_outputs` does.
-    // Iterate `chips` in slice order — the SAME order `generate_first_layer`
-    // builds the layer, so the global `col` axis here matches
-    // `circuit_output`'s.
     if opened_values.chips.len() != chips.len() {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
             "reconstruction: opened_values chip count {} != chips {}",
@@ -2239,7 +1632,6 @@ where
     for (chip, opening) in chips.iter().zip(opened_values.chips.iter()) {
         let name = <A as MachineAir<Val<SC>>>::name(&chip.air);
 
-        // degree = quotient[0] = real-height big-endian bits.
         let degree: &[Challenge<SC>] =
             opening.quotient.first().map(|v| v.as_slice()).unwrap_or(&[]);
         if degree.len() != point_extended.len() {
@@ -2250,44 +1642,14 @@ where
                 point_extended.len()
             )));
         }
-        // A genuine height-0 missing chip has all-zero degree bits
-        // => full_geq == 1 => identity fraction (0,1) => excluded from the
-        // reconstruction.
         let geq_eval = full_geq_host::<Challenge<SC>>(degree, &point_extended);
 
-        // Trace openings at the GKR point, looked up by chip NAME (the
-        // chip_openings BTreeMap is name-ordered, `chips` is def-ordered).
         let chip_eval = logup_evaluations.chip_openings.get(name.as_str()).ok_or_else(|| {
             JaggedShardVerifyError::LogupGkr(format!(
                 "reconstruction: no chip_opening for chip '{}'",
                 name
             ))
         })?;
-        // FULL-POINT OPENING
-        //
-        // Each chip's trace is opened at the FULL `max_log_row_count` point
-        // (the trace is a padded MLE, real on the low rows and ZERO on the
-        // padding rows) and the identity-fraction-padded leaf is recovered
-        // via
-        //   numerator   = real − padding·geq
-        //   denominator = real + (1 − padding)·geq
-        // on those FULL-point openings.
-        //
-        // The GKR leaf is LSB-first natural-row (real rows `[0,height)`
-        // matched LSB-first with `trace_point`), so the FULL-point opening
-        //   main_full[col] = Σ_{row<height} eq(row, trace_point)·trace[row]
-        // is EXACTLY the value `interaction.eval(full_opening)` needs
-        // — no per-chip embed lift.  The prover emits this opening in
-        // `main_trace_evaluations_full` (top_level.rs), and it is the ONLY
-        // opening a chip carries.  `geq` (over the REVERSED
-        // `point_extended`, see (3)) is the LSB-first padding mask
-        //   geq = Σ_{row ≥ height} eq(row, trace_point).
-        //
-        // SOUNDNESS: `geq = full_geq(degree, point_extended)` reads the
-        // per-chip `degree` BITS, so a height forgery (tampered `degree`)
-        // perturbs the `padding·geq` mask → the reconstructed num/den
-        // diverge from the round walk → reject.
-        //
         let (main, prep, geq_for_mask): (
             Vec<Challenge<SC>>,
             Option<Vec<Challenge<SC>>>,
@@ -2299,8 +1661,6 @@ where
         );
         let geq_eval = geq_for_mask;
 
-        // The trace on a padding row is all zero; its openings correct the
-        // padding region.
         let padding_main: Vec<Challenge<SC>> = vec![Challenge::<SC>::ZERO; main.len()];
         let padding_prep: Option<Vec<Challenge<SC>>> =
             prep.as_ref().map(|p| vec![Challenge::<SC>::ZERO; p.len()]);
@@ -2318,7 +1678,6 @@ where
                     &beta_powers,
                 );
 
-            // Degree-masked num/den, then sign flip for receives.
             let numerator_eval_i = real_numerator - padding_numerator * geq_eval;
             let denominator_eval_i =
                 real_denominator + (Challenge::<SC>::ONE - padding_denominator) * geq_eval;
@@ -2326,19 +1685,8 @@ where
             numerator_values.push(numerator_eval_i);
             denominator_values.push(denominator_eval_i);
         }
-        // No padding between chips: they pack contiguously by raw count. The
-        // global pad follows.
     }
 
-    // (5) Pad to the full interaction-axis size and evaluate at the
-    // interaction point. The numerator pads with 0 and the denominator with 1
-    // (the identity fraction 0/1).
-    //
-    // The axis width comes from the PROOF (`log_num_interactions` is read off
-    // the circuit-output MLE length), so it must be checked before it is used
-    // as a resize target: an axis narrower than the chips' raw interaction
-    // total would TRUNCATE real interactions out of the reconstruction, and a
-    // prover could use that to drop lookups it does not want counted.
     let axis_width = 1usize << interaction_point.len();
     if numerator_values.len() > axis_width {
         return Err(JaggedShardVerifyError::LogupGkr(format!(
@@ -2354,12 +1702,6 @@ where
     let reconstructed_numerator = evaluate_mle_host(&numerator_values, interaction_point);
     let reconstructed_denominator = evaluate_mle_host(&denominator_values, interaction_point);
 
-    // (6) The GKR round walk's reduced final evals MUST equal the
-    // reconstruction from the chips' trace openings.  This is the assert
-    // that catches the area-preserving height forgery: tampering a chip's
-    // `degree` moves `geq_eval`, perturbing reconstructed num/den while the
-    // walk's `numerator_eval`/`denominator_eval` (which never sees the
-    // degree) stays fixed.
     if numerator_eval != reconstructed_numerator {
         return Err(JaggedShardVerifyError::LogupGkr(
             "last-layer reconstruction: numerator mismatch (degree-masked \
@@ -2377,12 +1719,6 @@ where
 
     let _ = max_log_row_count;
 
-    // Observe the GKR trace openings (trace@ζ) — mirror of the prover's
-    // observe at the end of
-    // `row_gkr::top_level::prove_shard_logup_gkr_rows`.  It MUST land
-    // here, at the end of the LogUp-GKR stage, because `verify_zerocheck_host`
-    // opens by sampling α / γ / λ — the challenges the opening vector has to be
-    // bound before.
     crate::shard_level::prover::observe_logup_gkr_openings::<Val<SC>, Challenge<SC>, SC::Challenger>(
         challenger,
         chips.len(),
@@ -2469,7 +1805,6 @@ mod tests {
         use p3_koala_bear::KoalaBear;
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
 
-        // Boolean point.
         let point = vec![EF::ONE, EF::ZERO, EF::ONE];
         let result = full_geq_host(&point, &point);
         assert_eq!(result, EF::ONE);
@@ -2488,8 +1823,6 @@ mod tests {
         let threshold = vec![EF::ZERO, EF::ZERO];
         let eval_point = vec![EF::ONE, EF::ZERO];
         let result = full_geq_host(&threshold, &eval_point);
-        // At MSB bit: eq_factor=(1-0)(1-1)+0·1=0, step=1·(1-0)=1. acc=1·0+1=1.
-        // At LSB bit: eq_factor=(1-0)(1-0)+0·0=1, step=0·1=0.  acc=1·1+0=1.
         assert_eq!(result, EF::ONE);
     }
 
@@ -2518,13 +1851,9 @@ mod tests {
 
         let a = vec![EF::from_u32(3), EF::from_u32(5)];
         let b = vec![EF::from_u32(3), EF::from_u32(5)];
-        // eq(a, b) where a == b: Π ((1-x)(1-x) + x·x) = Π (1 - 2x + 2x²)
-        // evaluated element-wise.  Not necessarily 1 unless both are boolean.
-        // Just confirm it's deterministic & computes:
         let v = eq_eval_host(&a, &b);
         let _ = v;
 
-        // Different points produce different eq values.
         let c = vec![EF::from_u32(3), EF::from_u32(7)];
         let u = eq_eval_host(&a, &c);
         assert_ne!(v, u, "eq_eval differs when points differ");
@@ -2538,22 +1867,17 @@ mod tests {
         use p3_koala_bear::KoalaBear;
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
 
-        // 4-element MLE (2 variables).  Values: [a, b, c, d].
         let evals: Vec<EF> = (10..14).map(EF::from_u32).collect();
 
-        // At (0, 0) → entry 0.
         let at_origin = evaluate_mle_host(&evals, &[EF::ZERO, EF::ZERO]);
         assert_eq!(at_origin, EF::from_u32(10));
 
-        // At (1, 1) → entry 3 (all-ones index).
         let at_all_ones = evaluate_mle_host(&evals, &[EF::ONE, EF::ONE]);
         assert_eq!(at_all_ones, EF::from_u32(13));
 
-        // At (1, 0) → entry 1.
         let at_10 = evaluate_mle_host(&evals, &[EF::ONE, EF::ZERO]);
         assert_eq!(at_10, EF::from_u32(11));
 
-        // At (0, 1) → entry 2.
         let at_01 = evaluate_mle_host(&evals, &[EF::ZERO, EF::ONE]);
         assert_eq!(at_01, EF::from_u32(12));
     }
@@ -2565,14 +1889,10 @@ mod tests {
         use p3_koala_bear::KoalaBear;
         type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
 
-        // p(X) = 3 + 5X + 7X² = [3, 5, 7] (low-degree-first).
         let coeffs: Vec<EF> = vec![EF::from_u32(3), EF::from_u32(5), EF::from_u32(7)];
 
-        // p(0) = 3
         assert_eq!(eval_coeffs_host(&coeffs, EF::ZERO), EF::from_u32(3));
-        // p(1) = 3 + 5 + 7 = 15
         assert_eq!(eval_coeffs_host(&coeffs, EF::ONE), EF::from_u32(15));
-        // p(2) = 3 + 10 + 28 = 41
         assert_eq!(eval_coeffs_host(&coeffs, EF::from_u32(2)), EF::from_u32(41));
     }
 }

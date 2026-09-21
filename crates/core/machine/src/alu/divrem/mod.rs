@@ -121,17 +121,17 @@ pub struct DivRemCols<T> {
     /// Remainder when dividing `b` by `c`.
     pub remainder: Word<T>,
 
-    /// `abs(remainder)`, used to check `abs(remainder) < abs(c)`.
+    /// `|remainder|`, for the check `|remainder| < |c|`.
     pub abs_remainder: Word<T>,
 
-    /// `abs(c)`, used to check `abs(remainder) < abs(c)`.
+    /// `|c|`, for the check `|remainder| < |c|`.
     pub abs_c: Word<T>,
 
-    /// `max(abs(c), 1)`, used to check `abs(remainder) < abs(c)`.
+    /// `max(|c|, 1)`, for the check `|remainder| < |c|`.
     pub max_abs_c_or_1: Word<T>,
 
-    /// The inlined multiplication proving `c * quotient` — its 64-bit
-    /// `product` is what the MULT/MULTU request row used to certify.
+    /// The inlined multiplication proving `c · quotient` as a 64-bit
+    /// `product`.
     pub mul: MulOperation<T>,
 
     /// The inlined addition proving `c + abs_c = 0` when `c` is negative.
@@ -241,7 +241,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows for each event.
         let mut rows: Vec<[F; NUM_DIVREM_COLS]> = vec![];
         let divrem_events = input.divrem_events.clone();
         for event in divrem_events.iter() {
@@ -254,7 +253,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             let mut row = [F::ZERO; NUM_DIVREM_COLS];
             let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
 
-            // Initialize cols with basic operands and flags derived from the current event.
             {
                 cols.pc = F::from_u32(event.pc);
                 cols.next_pc = F::from_u32(event.next_pc);
@@ -264,8 +262,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.is_mod = F::from_bool(event.opcode == Opcode::MOD);
                 cols.is_c_0.populate(event.c);
 
-                // Every DivRem row is a real instruction (no chip outsources
-                // to DivRem, and DivRem's own sub-operations are inlined).
                 cols.frame.populate_from_comp_alu(
                     event,
                     &input.program,
@@ -274,7 +270,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 );
 
                 if event.opcode == Opcode::DIVU || event.opcode == Opcode::DIV {
-                    // DivRem Chip is only used for DIV and DIVU instruction currently.
                     let mut blu_events: Vec<ByteLookupEvent> = vec![];
                     cols.op_hi_access
                         .populate(MemoryRecordEnum::Write(event.hi_record), &mut blu_events);
@@ -286,7 +281,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             cols.quotient = Word::from(quotient);
             cols.remainder = Word::from(remainder);
 
-            // Calculate flags for sign detection.
             {
                 cols.rem_msb = F::from_u8(get_msb(remainder));
                 cols.b_msb = F::from_u8(get_msb(event.b));
@@ -310,9 +304,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.abs_c = Word::from(abs_c);
                 cols.max_abs_c_or_1 = Word::from(max_abs_c_or_1);
 
-                // The inlined negation checks: `c + abs_c = 0` when `c < 0`,
-                // `remainder + abs_remainder = 0` when `remainder < 0` (the
-                // two ADD request rows the chip used to push onto AddSub).
                 if cols.c_neg == F::ONE {
                     cols.neg_c_add.populate(output, event.c, abs_c);
                 }
@@ -320,12 +311,8 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                     cols.neg_rem_add.populate(output, remainder, abs_remainder);
                 }
 
-                // The inlined `abs(remainder) < max(abs(c), 1)` (the SLTU
-                // request row).  Division by zero traps in the executor, so
-                // the multiplicity is 1 on every real row.
                 cols.remainder_check.populate(output, abs_remainder, max_abs_c_or_1, false);
 
-                // Insert the MSB lookup events.
                 {
                     let words = [event.b, event.c, remainder];
                     let mut blu_events: Vec<ByteLookupEvent> = vec![];
@@ -343,12 +330,10 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 }
             }
 
-            // Calculate the modified multiplicity
             {
                 cols.remainder_check_multiplicity = F::ONE - cols.is_c_0.result;
             }
 
-            // Calculate c * quotient + remainder.
             {
                 let c_times_quotient = {
                     if is_signed_operation(event.opcode) {
@@ -357,8 +342,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                         ((quotient as u64) * (event.c as u64)).to_le_bytes()
                     }
                 };
-                // The inlined multiplication (the MULT/MULTU request row):
-                // its 64-bit product equals `c_times_quotient` byte for byte.
                 cols.mul.populate(output, quotient, event.c, is_signed_operation(event.opcode));
 
                 let remainder_bytes = {
@@ -369,7 +352,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                     }
                 };
 
-                // Add remainder to product.
                 let mut carry = [0u32; 8];
                 let base = 1 << BYTE_SIZE;
                 for i in 0..LONG_WORD_SIZE {
@@ -381,8 +363,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                     cols.carry[i] = F::from_u32(carry[i]);
                 }
 
-                // Range check (the product bytes are range-checked inside the
-                // mul gadget).
                 {
                     output.add_u8_range_checks(&quotient.to_le_bytes());
                     output.add_u8_range_checks(&remainder.to_le_bytes());
@@ -392,21 +372,16 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             rows.push(row);
         }
 
-        // Pad the trace to a power of two depending on the proof shape in `input`.
         pad_rows_mult32(
             &mut rows,
             || {
                 let mut row = [F::ZERO; NUM_DIVREM_COLS];
                 let _cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
-                // A padding row's frame needs no neutralising: the
-                // typed R-type frame's register-access multiplicities
-                // are `is_real`.
                 row
             },
             input.fixed_log2_rows::<F, _>(self),
             <DivRemChip as MachineAir<F>>::name(self).as_str(),
         );
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_DIVREM_COLS))
     }
 
@@ -433,7 +408,6 @@ where
         let main = builder.main();
         let local = main.current_slice();
         let local: &DivRemCols<AB::Var> = (*local).borrow();
-        // The inputs are the frame's register reads, not columns of this chip.
         let op_b = local.frame.op_b_val();
         let op_c = local.frame.op_c_val();
         let base = AB::F::from_u32(1 << 8);
@@ -441,9 +415,7 @@ where
         let zero: AB::Expr = AB::F::ZERO.into();
 
         let is_real = local.is_div + local.is_divu + local.is_mod + local.is_modu;
-        // Calculate whether b, remainder, and c are negative.
         {
-            // Negative if and only if op code is signed & MSB = 1.
             let msb_sign_pairs = [
                 (local.b_msb, local.b_neg),
                 (local.rem_msb, local.rem_neg),
@@ -457,10 +429,6 @@ where
             }
         }
 
-        // Prove c * quotient IN-ROW (the MULT/MULTU request row is gone): the
-        // gadget's 64-bit product is `c_times_quotient`.  DIV/MOD are the
-        // signed multiplies, DIVU/MODU the unsigned ones — exactly the opcode
-        // the chip used to request.
         MulOperation::<AB::F>::eval(
             builder,
             local.quotient,
@@ -470,7 +438,6 @@ where
             local.is_divu + local.is_modu,
         );
 
-        // Calculate is_overflow. is_overflow = is_equal(b, -2^{31}) * is_equal(c, -1) * is_signed
         {
             IsEqualWordOperation::<AB::F>::eval(
                 builder,
@@ -496,27 +463,22 @@ where
             );
         }
 
-        // Add remainder to product c * quotient, and compare it to b.
         {
             let sign_extension = local.rem_neg * AB::F::from_u8(u8::MAX);
             let mut c_times_quotient_plus_remainder: Vec<AB::Expr> =
                 vec![AB::F::ZERO.into(); LONG_WORD_SIZE];
 
-            // Add remainder to c_times_quotient and propagate carry.
             for i in 0..LONG_WORD_SIZE {
                 c_times_quotient_plus_remainder[i] = local.mul.product[i].into();
 
-                // Add remainder.
                 if i < WORD_SIZE {
                     c_times_quotient_plus_remainder[i] =
                         c_times_quotient_plus_remainder[i].clone() + local.remainder[i].into();
                 } else {
-                    // If rem is negative, add 0xff to the upper 4 bytes.
                     c_times_quotient_plus_remainder[i] =
                         c_times_quotient_plus_remainder[i].clone() + sign_extension.clone();
                 }
 
-                // Propagate carry.
                 c_times_quotient_plus_remainder[i] =
                     c_times_quotient_plus_remainder[i].clone() - local.carry[i] * base;
                 if i > 0 {
@@ -525,15 +487,10 @@ where
                 }
             }
 
-            // Compare c_times_quotient_plus_remainder to b by checking each limb.
             for i in 0..LONG_WORD_SIZE {
                 if i < WORD_SIZE {
-                    // The lower 4 bytes of the result must match the corresponding bytes in b.
                     builder.assert_eq(op_b[i], c_times_quotient_plus_remainder[i].clone());
                 } else {
-                    // The upper 4 bytes must reflect the sign of b in two's complement:
-                    // - All 1s (0xff) for negative b.
-                    // - All 0s for non-negative b.
                     let not_overflow = one.clone() - local.is_overflow;
                     builder.when(not_overflow.clone()).when(local.b_neg).assert_eq(
                         c_times_quotient_plus_remainder[i].clone(),
@@ -544,7 +501,6 @@ where
                         .when_ne(one.clone(), local.b_neg)
                         .assert_zero(c_times_quotient_plus_remainder[i].clone());
 
-                    // The only exception to the upper-4-byte check is the overflow case.
                     builder
                         .when(local.is_overflow)
                         .assert_zero(c_times_quotient_plus_remainder[i].clone());
@@ -552,13 +508,7 @@ where
             }
         }
 
-        // remainder and b must have the same sign. Due to the intricate nature of sign logic in ZK,
-        // we will check a slightly stronger condition:
-        //
-        // 1. If remainder < 0, then b < 0.
-        // 2. If remainder > 0, then b >= 0.
         {
-            // A number is 0 if and only if the sum of the 4 limbs equals to 0.
             let mut rem_byte_sum = zero.clone();
             let mut b_byte_sum = zero.clone();
             for i in 0..WORD_SIZE {
@@ -566,21 +516,15 @@ where
                 b_byte_sum = b_byte_sum + op_b[i].into();
             }
 
-            // 1. If remainder < 0, then b < 0.
-            builder
-                .when(local.rem_neg) // rem is negative.
-                .assert_one(local.b_neg); // b is negative.
+            builder.when(local.rem_neg).assert_one(local.b_neg);
 
-            // 2. If remainder > 0, then b >= 0.
             builder
-                .when(rem_byte_sum.clone()) // remainder is nonzero.
-                .when(one.clone() - local.rem_neg) // rem is not negative.
-                .assert_zero(local.b_neg); // b is not negative.
+                .when(rem_byte_sum.clone())
+                .when(one.clone() - local.rem_neg)
+                .assert_zero(local.b_neg);
         }
 
-        // When division by 0, quotient is UNPREDICTABLE per MIPS spec. We restrict the quotient = 0xffffffff
         {
-            // Calculate whether c is 0.
             IsZeroWordOperation::<AB::F>::eval(
                 builder,
                 op_c.map(|x| x.into()),
@@ -588,29 +532,16 @@ where
                 is_real.clone(),
             );
 
-            // Division by zero is architecturally undefined: the executor traps on it
-            // (`ExecutionError::ExceptionOrTrap`, `executor.rs` `execute_alu`, which returns
-            // early when `c == 0` for DIV/DIVU/MOD/MODU), so an honest trace never contains a
-            // divrem event with c == 0. Enforce the same here so the AIR REJECTS div-by-zero
-            // rows rather than accepting them with a forced quotient. This keeps the executor
-            // and the AIR in agreement and removes a path for injecting controlled
-            // quotient/remainder values into the trace.
             builder.when(is_real.clone()).assert_zero(local.is_c_0.result);
         }
 
-        // Range check remainder. (i.e., |remainder| < |c| when not is_c_0)
         {
-            // For each of `c` and `rem`, assert that the absolute value is equal to the original
-            // value, if the original value is non-negative or the minimum i32.
             for i in 0..WORD_SIZE {
                 builder.when_not(local.c_neg).assert_eq(op_c[i], local.abs_c[i]);
                 builder
                     .when_not(local.rem_neg)
                     .assert_eq(local.remainder[i], local.abs_remainder[i]);
             }
-            // In the case that `c` or `rem` is negative, instead check that
-            // their sum is zero, proven IN-ROW (the ADD request rows are
-            // gone).
             AddOperation::<AB::F>::eval(
                 builder,
                 op_c,
@@ -628,15 +559,12 @@ where
             );
             builder.when(local.rem_neg).assert_word_zero(local.neg_rem_add.value);
 
-            // max(abs(c), 1) = abs(c) * (1 - is_c_0) + 1 * is_c_0
             let max_abs_c_or_1: Word<AB::Expr> = {
                 let mut v = vec![zero.clone(); WORD_SIZE];
 
-                // Set the least significant byte to 1 if is_c_0 is true.
                 v[0] = local.is_c_0.result * one.clone()
                     + (one.clone() - local.is_c_0.result) * local.abs_c[0];
 
-                // Set the remaining bytes to 0 if is_c_0 is true.
                 for i in 1..WORD_SIZE {
                     v[i] = (one.clone() - local.is_c_0.result) * local.abs_c[i];
                 }
@@ -648,18 +576,11 @@ where
                     .assert_eq(local.max_abs_c_or_1[i], max_abs_c_or_1[i].clone());
             }
 
-            // Handle cases:
-            // - If is_real == 0 then remainder_check_multiplicity == 0 is forced.
-            // - If is_real == 1 then is_c_0_result must be the expected one, so
-            //   remainder_check_multiplicity = (1 - is_c_0_result) * is_real.
             builder.assert_eq(
                 (AB::Expr::ONE - local.is_c_0.result) * is_real.clone(),
                 local.remainder_check_multiplicity,
             );
 
-            // Check abs(remainder) < max(abs(c), 1) IN-ROW (the SLTU request
-            // row is gone); this is equivalent to abs(remainder) < abs(c)
-            // when not division by 0.
             LtOperation::<AB::F>::eval(
                 builder,
                 local.abs_remainder,
@@ -671,7 +592,6 @@ where
             builder.when(local.remainder_check_multiplicity).assert_one(local.remainder_check.lt);
         }
 
-        // Check that the MSBs are correct.
         {
             let msb_pairs = [
                 (local.b_msb, op_b[WORD_SIZE - 1]),
@@ -686,7 +606,6 @@ where
             }
         }
 
-        // Range check all the bytes.
         {
             builder.slice_range_check_u8(&local.quotient.0, is_real.clone());
             builder.slice_range_check_u8(&local.remainder.0, is_real.clone());
@@ -696,7 +615,6 @@ where
             });
         }
 
-        // Check that the flags are boolean.
         {
             let bool_flags = [
                 local.is_div,
@@ -717,19 +635,12 @@ where
             }
         }
 
-        // Instruction plumbing (the Instruction-bus receives are gone: every
-        // row is a real instruction serving itself via the frame).
         {
-            // Exactly one of the opcode flags must be on.
             builder.when(is_real.clone()).assert_eq(
                 one.clone(),
                 local.is_divu + local.is_div + local.is_mod + local.is_modu,
             );
 
-            // Bind this chip's operand columns to the frame's register-file
-            // view: the chip must compute on exactly the values the register
-            // accesses commit.  DIV/DIVU write the quotient to op_a, MOD/MODU
-            // the remainder.
             builder
                 .when(local.is_div + local.is_divu)
                 .when_not(local.frame.op_a_0)
@@ -739,8 +650,6 @@ where
                 .when_not(local.frame.op_a_0)
                 .assert_word_eq(local.remainder, *local.frame.op_a_access.value());
 
-            // A real instruction carries its own program fetch, register access
-            // and `(clk, pc)` chaining.  DIV/MOD are sequential, never halt.
             eval_r_type_frame(
                 builder,
                 &local.frame,
@@ -755,10 +664,6 @@ where
                 AB::Expr::ZERO,
                 is_real.clone(),
             );
-            // The HI write rides the frame's shard/clk (same coupling as Mul).
-            // The access is gated to DIV/DIVU rows, so the private copies this
-            // chip used to carry were only ever read where they equalled the
-            // frame anyway.
             builder.eval_memory_access(
                 local.frame.shard,
                 crate::frame::clk_from_r_type_frame::<AB>(&local.frame)
@@ -785,9 +690,6 @@ mod tests {
 
     #[test]
     fn generate_trace() {
-        // Real DivRem rows carry an instruction frame (program fetch +
-        // register records), so the test executes a small program instead of
-        // hand-writing events.
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 17, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 3, false, true),

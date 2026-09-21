@@ -48,7 +48,7 @@ fn spec_vectors_prove_and_verify() {
         }
         *n += 1;
         if v["expect_trap"].as_bool().unwrap() {
-            continue; // trapping executions are rejected by the executor, nothing to prove
+            continue;
         }
         let name = v["name"].as_str().unwrap();
         let words: Vec<u32> =
@@ -113,8 +113,6 @@ fn cannon_programs_prove_and_verify() {
     let mut proved = 0usize;
     for path in &files {
         let name = path.file_stem().unwrap().to_string_lossy().to_string();
-        // Cannon-ABI programs and the big-endian-only byte/half/partial-word programs do not
-        // complete successfully on a little-endian machine; they are not valid executions to prove.
         if name.starts_with("oracle")
             || matches!(
                 name.as_str(),

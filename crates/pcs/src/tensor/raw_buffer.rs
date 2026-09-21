@@ -75,10 +75,9 @@ impl<T, A: Allocator> RawBuffer<T, A> {
     /// The `capacity` cannot exceed `isize::MAX` for sized types. (only a concern on 32-bit
     /// systems). For ZSTs capacity is ignored.
     /// If the `ptr` and `capacity` come from a `RawBuffer` created via `alloc`, then this is
-    /// guaranteed.
+    /// guaranteed. The inner `from_raw_parts_in` call inherits these preconditions.
     #[inline]
     pub unsafe fn from_raw_parts_in(ptr: *mut T, capacity: usize, alloc: A) -> Self {
-        // SAFETY: Precondition passed to the caller
         unsafe {
             let ptr = ptr.cast();
             Self {
@@ -130,7 +129,6 @@ impl<A: Allocator> RawBufferInner<A> {
     #[inline]
     const fn new_in(alloc: A, align: usize) -> Self {
         let ptr = unsafe { core::mem::transmute::<usize, NonNull<u8>>(align) };
-        // `cap: 0` means "unallocated". zero-sized types are ignored.
         Self { ptr, cap: 0, alloc }
     }
 
@@ -143,11 +141,8 @@ impl<A: Allocator> RawBufferInner<A> {
     }
 
     fn try_allocate_in<T>(capacity: usize, alloc: A) -> Result<Self, TryReserveError> {
-        // We avoid `unwrap_or_else` here because it bloats the amount of
-        // LLVM IR generated.
         let layout = Layout::array::<T>(capacity).map_err(|_| TryReserveError::CapacityOverflow)?;
 
-        // Don't allocate here because `Drop` will not deallocate when `capacity` is 0.
         if layout.size() == 0 {
             return Ok(Self::new_in(alloc, layout.align()));
         }
@@ -161,9 +156,6 @@ impl<A: Allocator> RawBufferInner<A> {
             Err(_) => return Err(TryReserveError::AllocError { layout }),
         };
 
-        // Allocators currently return a `NonNull<[u8]>` whose length
-        // matches the size requested. If that ever changes, the capacity
-        // here should change to `ptr.len() / mem::size_of::<T>()`.
         Ok(Self { ptr: ptr.cast(), cap: capacity, alloc })
     }
 
@@ -201,11 +193,6 @@ impl<A: Allocator> RawBufferInner<A> {
         if elem_layout.size() == 0 || self.cap == 0 {
             None
         } else {
-            // We could use Layout::array here which ensures the absence of isize and usize
-            // overflows and could hypothetically handle differences between stride and
-            // size, but this memory has already been allocated so we know it can't
-            // overflow and currently Rust does not support such types. So we can do
-            // better by skipping some checks and avoid an unwrap.
             unsafe {
                 let alloc_size = elem_layout.size().unchecked_mul(self.cap);
                 let layout = Layout::from_size_align_unchecked(alloc_size, elem_layout.align());
@@ -237,8 +224,8 @@ impl<A: Allocator> RawBufferInner<A> {
 
 impl<T, A: Allocator> Drop for RawBuffer<T, A> {
     /// Frees the memory owned by the `RawVec` *without* trying to drop its contents.
+    /// Deallocating is sound because `self.inner` is never used after `drop`.
     fn drop(&mut self) {
-        // SAFETY: We are in a Drop impl, self.inner will not be used again.
         unsafe {
             let layout =
                 Layout::from_size_align_unchecked(mem::size_of::<T>(), mem::align_of::<T>());
@@ -247,7 +234,6 @@ impl<T, A: Allocator> Drop for RawBuffer<T, A> {
     }
 }
 
-// Central function for reserve error handling.
 #[cold]
 fn handle_error(e: TryReserveError) -> ! {
     match e {
@@ -256,9 +242,6 @@ fn handle_error(e: TryReserveError) -> ! {
     }
 }
 
-// One central function responsible for reporting capacity overflows. This'll
-// ensure that the code generation related to these panics is minimal as there's
-// only one location which panics rather than a bunch throughout the module.
 #[inline(never)]
 fn capacity_overflow() -> ! {
     panic!("capacity overflow");
@@ -273,14 +256,6 @@ pub const fn handle_alloc_error(layout: Layout) -> ! {
     ct_error(layout)
 }
 
-// We need to guarantee the following:
-// * We don't ever allocate `> isize::MAX` byte-size objects.
-// * We don't overflow `usize::MAX` and actually allocate too little.
-//
-// On 64-bit we just need to check for overflow since trying to allocate
-// `> isize::MAX` bytes will surely fail. On 32-bit and 16-bit we need to add
-// an extra guard for this in case we're running on a platform which can use
-// all 4GB in user-space, e.g., PAE or x32.
 #[inline]
 fn alloc_guard(alloc_size: usize) -> Result<(), TryReserveError> {
     if usize::BITS < 64 && alloc_size > isize::MAX as usize {

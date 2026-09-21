@@ -110,7 +110,6 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows & corresponding records for each chunk of events concurrently.
         let rows_and_records = input
             .get_precompile_events(SyscallCode::UINT256_MUL)
             .chunks(1)
@@ -129,20 +128,17 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
                         let mut row: [F; NUM_COLS] = [F::ZERO; NUM_COLS];
                         let cols: &mut Uint256MulCols<F> = row.as_mut_slice().borrow_mut();
 
-                        // Decode uint256 points
                         let x = BigUint::from_bytes_le(&words_to_bytes_le::<32>(&event.x));
                         let y = BigUint::from_bytes_le(&words_to_bytes_le::<32>(&event.y));
                         let modulus =
                             BigUint::from_bytes_le(&words_to_bytes_le::<32>(&event.modulus));
 
-                        // Assign basic values to the columns.
                         cols.is_real = F::ONE;
                         cols.shard = F::from_u32(event.shard);
                         cols.clk = F::from_u32(event.clk);
                         cols.x_ptr = F::from_u32(event.x_ptr);
                         cols.y_ptr = F::from_u32(event.y_ptr);
 
-                        // Populate memory columns.
                         for i in 0..WORDS_FIELD_ELEMENT {
                             cols.x_memory[i]
                                 .populate(event.x_memory_records[i], &mut new_byte_lookup_events);
@@ -158,7 +154,6 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
                         let modulus_byte_sum = modulus_bytes.iter().map(|b| *b as u32).sum::<u32>();
                         IsZeroOperation::populate(&mut cols.modulus_is_zero, modulus_byte_sum);
 
-                        // Populate the output column.
                         let effective_modulus =
                             if modulus.is_zero() { BigUint::one() << 256 } else { modulus.clone() };
                         let result = cols.output.populate_with_modulus(
@@ -166,7 +161,6 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
                             &x,
                             &y,
                             &effective_modulus,
-                            // &modulus,
                             FieldOperation::Mul,
                         );
 
@@ -187,7 +181,6 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
             })
             .collect::<Vec<_>>();
 
-        //  Generate the trace rows for each event.
         let mut rows = Vec::new();
         for (row, mut record) in rows_and_records {
             rows.extend(row);
@@ -210,7 +203,6 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
             <Uint256MulChip as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))
     }
 
@@ -239,15 +231,10 @@ where
         let local = main.current_slice();
         let local: &Uint256MulCols<AB::Var> = (*local).borrow();
 
-        // We are computing (x * y) % modulus. The value of x is stored in the "prev_value" of
-        // the x_memory, since we write to it later.
         let x_limbs = limbs_from_prev_access(&local.x_memory);
         let y_limbs = limbs_from_access(&local.y_memory);
         let modulus_limbs = limbs_from_access(&local.modulus_memory);
 
-        // If the modulus is zero, then we don't perform the modulus operation.
-        // Evaluate the modulus_is_zero operation by summing each byte of the modulus. The sum will
-        // not overflow because we are summing 32 bytes.
         let modulus_byte_sum = modulus_limbs.0.iter().fold(AB::Expr::ZERO, |acc, &limb| acc + limb);
         IsZeroOperation::<AB::F>::eval(
             builder,
@@ -256,8 +243,6 @@ where
             local.is_real.into(),
         );
 
-        // If the modulus is zero, we'll actually use 2^256 as the modulus, so nothing happens.
-        // Otherwise, we use the modulus passed in.
         let modulus_is_zero = local.modulus_is_zero.result;
         let mut coeff_2_256 = Vec::new();
         coeff_2_256.resize(32, AB::Expr::ZERO);
@@ -267,7 +252,6 @@ where
             * (AB::Expr::ONE - modulus_is_zero.into())
             + Polynomial::from_coefficients(&coeff_2_256) * modulus_is_zero.into();
 
-        // Evaluate the uint256 multiplication
         local.output.eval_with_modulus(
             builder,
             &x_limbs,
@@ -277,8 +261,6 @@ where
             local.is_real,
         );
 
-        // Verify the range of the output if the modulus is not zero.  Also, check the value of
-        // modulus_is_not_zero.
         local.output_range_check.eval(
             builder,
             &local.output.result,
@@ -290,12 +272,10 @@ where
             local.is_real * (AB::Expr::ONE - modulus_is_zero.into()),
         );
 
-        // Assert that the correct result is being written to x_memory.
         builder
             .when(local.is_real)
             .assert_all_eq(local.output.result, value_as_limbs(&local.x_memory));
 
-        // Read and write x.
         builder.eval_memory_access_slice(
             local.shard,
             local.clk.into() + AB::Expr::ONE,
@@ -304,8 +284,6 @@ where
             local.is_real,
         );
 
-        // Evaluate the y_ptr memory access. We concatenate y and modulus into a single array since
-        // we read it contiguously from the y_ptr memory location.
         builder.eval_memory_access_slice(
             local.shard,
             local.clk.into(),
@@ -314,7 +292,6 @@ where
             local.is_real,
         );
 
-        // Receive the arguments.
         builder.receive_syscall(
             local.shard,
             local.clk,
@@ -325,7 +302,6 @@ where
             LookupScope::Local,
         );
 
-        // Assert that is_real is a boolean.
         builder.assert_bool(local.is_real);
     }
 }

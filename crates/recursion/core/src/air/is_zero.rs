@@ -42,21 +42,8 @@ impl<F: Field> IsZeroOperation<F> {
         cols: IsZeroOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
-        // Assert that the `is_real` is a boolean.
         builder.assert_bool(is_real.clone());
-        // Assert that the result is boolean.
         builder.when(is_real.clone()).assert_bool(cols.result);
-
-        // 1. Input == 0 => is_zero = 1 regardless of the inverse.
-        // 2. Input != 0
-        //   2.1. inverse is correctly set => is_zero = 0.
-        //   2.2. inverse is incorrect
-        //     2.2.1 inverse is nonzero => is_zero isn't bool, it fails.
-        //     2.2.2 inverse is 0 => is_zero is 1. But then we would assert that a = 0. And that
-        //                           assert fails.
-
-        // If the input is 0, then any product involving it is 0. If it is nonzero and its inverse
-        // is correctly set, then the product is 1.
 
         let one = AB::Expr::ONE;
         let inverse = cols.inverse;
@@ -67,7 +54,6 @@ impl<F: Field> IsZeroOperation<F> {
 
         builder.when(is_real.clone()).assert_bool(cols.result);
 
-        // If the result is 1, then the input is 0.
         builder.when(is_real.clone()).when(cols.result).assert_zero(a.clone());
     }
 }

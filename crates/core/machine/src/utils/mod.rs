@@ -50,11 +50,6 @@ pub fn limbs_from_access<T: Copy, N: ArrayLength, M: MemoryCols<T>>(cols: &[M]) 
 }
 
 /// Pad to a power of two, with an option to specify the power.
-//
-// The `rows` argument represents the rows of a matrix stored in row-major order. The function will
-// pad the rows using `row_fn` to create the padded rows. The padding will be to the next power of
-// of two of `size_log_2` is `None`, or to the specified `size_log_2` if it is not `None`. The
-// function will panic of the number of rows is larger than the specified `size_log2`
 pub fn pad_rows_fixed_with_err<R: Clone>(
     rows: &mut Vec<R>,
     row_fn: impl Fn() -> Result<R, CoreChipError>,
@@ -74,11 +69,6 @@ pub fn pad_rows_fixed_with_err<R: Clone>(
 }
 
 /// Pad to a power of two, with an option to specify the power.
-//
-// The `rows` argument represents the rows of a matrix stored in row-major order. The function will
-// pad the rows using `row_fn` to create the padded rows. The padding will be to the next power of
-// of two of `size_log_2` is `None`, or to the specified `size_log_2` if it is not `None`. The
-// function will panic of the number of rows is larger than the specified `size_log2`
 pub fn pad_rows_fixed<R: Clone>(
     rows: &mut Vec<R>,
     row_fn: impl Fn() -> R,
@@ -139,26 +129,17 @@ pub fn next_multiple_of_32(n: usize, fixed_power: Option<usize>, chip: &str) -> 
 /// log2 one: the next multiple of 32 that is `>= n` and `>= 32`, or the pinned
 /// count itself when the shape supplies one.
 ///
-/// This is the recursion side of [`next_multiple_of_32`].  A recursion shape
-/// used to carry per-chip LOG heights, so a shaped chip padded to `1 << log`
-/// and a single shape covering every program would have charged up to 2x on
-/// every chip.  Pinning the row count directly is what lets ONE shape be tight
-/// enough for all of them, which in turn is what makes a compose program a
-/// function of its arity alone.
+/// The recursion side of [`next_multiple_of_32`].  Pinning the row count
+/// (rather than `2^log`) lets one shape fit every program tightly, so a
+/// compose program is a function of its arity alone.
 ///
-/// Panics if the pinned count cannot hold `n` — a shape that does not fit is a
-/// programming error, not something to silently grow past.
+/// # Panics
 ///
-/// The UNSHAPED branch still rounds to a power of two, unlike the core-side
-/// [`next_multiple_of_32`]. That is measured, not conservative: the recursion
-/// prove path calls `log2_strict_usize` on trace heights
-/// (`recursion/circuit/src/merkle_tree.rs:49`, `pcs/src/basefold/fri.rs:192`),
-/// and padding an unshaped recursion trace to a multiple of 32 fails four
-/// `zkm-recursion-core` unit tests with "Not a power of two"
-/// (`alu_base::four_ops`, `alu_ext::four_ops`, `select::prove_select`,
-/// `machine::field_norm`). Production recursion is always shaped, so the
-/// exact-row branch is the one the port needs; freeing the unshaped branch
-/// means clearing those call sites first.
+/// If the pinned count is `< n`.
+///
+/// The unshaped branch rounds to a power of two, unlike the core-side
+/// [`next_multiple_of_32`]: the recursion merkle-tree and FRI paths call
+/// `log2_strict_usize` on trace heights, which requires `h = 2^k`.
 pub fn next_multiple_of_32_rows(n: usize, fixed_rows: Option<usize>, chip: &str) -> usize {
     match fixed_rows {
         Some(rows) => {

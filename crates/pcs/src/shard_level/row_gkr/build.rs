@@ -63,17 +63,10 @@ where
         num_row_variables,
     );
 
-    // `generate_first_layer` reduced num_row_variables by 1.  Two
-    // shapes remain: N=2 input uses the F→EF-promoted FirstLayer as the
-    // terminal; N>=3 finds the terminal at layers[len-2].
     let mut layers: Vec<LayerState<F, EF>> = Vec::with_capacity(first.num_row_variables + 1);
 
-    // Special case: num_row_variables=2 input → first.num=1 → use
-    // first as the terminal directly via F→EF promotion.
     let terminal_owned: Option<super::layer::LogUpGkrCpuLayer<EF, EF>> =
         if first.num_row_variables == 1 {
-            // FirstLayer at num_row_variables=1 IS the terminal.
-            // Promote numerator F → EF; denominator already EF.
             Some(promote_first_layer_numerator_to_ef::<F, EF>(&first))
         } else {
             None
@@ -81,37 +74,22 @@ where
 
     let mut last_ef_layer: Option<super::layer::LogUpGkrCpuLayer<EF, EF>> = None;
 
-    // First transition: NumF = F → EF (numerator type promotion).
-    // Only run when first.num_row_variables >= 1; the transition
-    // reduces by 1, so for first.num=1 the result has num=0 (the
-    // null terminal), and for first.num >= 2 the result has the
-    // intermediate num >= 1 (used for the next transition).
     if first.num_row_variables >= 1 {
         let next = layer_transition::<F, EF>(&first);
         last_ef_layer = Some(next);
     }
     layers.push(LayerState::Host(GkrCircuitLayer::FirstLayer(first)));
 
-    // Every subsequent transition stays in EF on host.
     while let Some(curr) = last_ef_layer.take() {
         if curr.num_row_variables >= 1 {
             let next = layer_transition::<EF, EF>(&curr);
             last_ef_layer = Some(next);
             layers.push(LayerState::Host(GkrCircuitLayer::Layer(curr)));
         } else {
-            // curr is the null terminal layer (num_row_variables == 0).
-            // Add to layer stack but stop transitioning.
             layers.push(LayerState::Host(GkrCircuitLayer::Layer(curr)));
         }
     }
 
-    // Pick the terminal layer (num_row_variables == 1) for output
-    // extraction. Two paths:
-    //
-    //   * num_row_variables=2 input → terminal_owned is Some
-    //     (F→EF-promoted FirstLayer)
-    //   * num_row_variables>=3 input, host path → layers[len-2] is the
-    //     EF Layer with num_row_variables==1
     let output = if let Some(t) = terminal_owned.as_ref() {
         extract_outputs(t)
     } else {
@@ -190,9 +168,7 @@ mod tests {
             LookupScope::Local,
         );
         let height = 1usize << log_height;
-        // Main trace: 1 column, height rows, all = 1 (so multiplicity = 1).
         let main = RowMajorMatrix::new(vec![KoalaBear::ONE; height], 1);
-        // Empty preprocessed.
         let prep = RowMajorMatrix::new(vec![], 0);
         (vec![send], vec![], main, prep)
     }
@@ -203,10 +179,6 @@ mod tests {
     #[test]
     #[ignore = "requires plumbing chips through Chip<F, A> — defer to step 6 wiring"]
     fn build_gkr_circuit_shape_smoke() {
-        // The Chip<F, A> wrapper requires an A: MachineAir<F> instance.
-        // Constructing one in unit tests requires a real chip type, which
-        // pulls in zkm_core_machine.  The top-level wiring is the
-        // appropriate place to exercise this end-to-end via real chips.
         let _ = one_chip_shard(2);
     }
 
@@ -214,7 +186,5 @@ mod tests {
     /// validated by inspection — the assertion at the function head
     /// is its own test.  An end-to-end runtime panic test requires a
     /// real `Chip<F, A>` instance, deferred to the top-level wiring.
-    fn _zero_row_variables_panic_guard_is_visible_in_signature() {
-        // assertion at build.rs:36: "build_gkr_circuit requires num_row_variables >= 1"
-    }
+    fn _zero_row_variables_panic_guard_is_visible_in_signature() {}
 }

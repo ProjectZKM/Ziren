@@ -76,7 +76,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![F::ZERO; padded_nb_rows * SELECT_PREPROCESSED_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * SELECT_PREPROCESSED_COLS;
         values[..populate_len].par_chunks_mut(SELECT_PREPROCESSED_COLS).zip_eq(instrs).for_each(
             |(row, instr)| {
@@ -91,7 +90,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(values, SELECT_PREPROCESSED_COLS))
     }
 
@@ -118,7 +116,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * SELECT_PREPROCESSED_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * SELECT_PREPROCESSED_COLS;
         values[..populate_len].par_chunks_mut(SELECT_PREPROCESSED_COLS).zip_eq(instrs).for_each(
             |(row, instr)| {
@@ -129,7 +126,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
             SELECT_PREPROCESSED_COLS,
@@ -141,7 +137,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         _: &Self::Record,
         _: &mut Self::Record,
     ) -> Result<(), Self::Error> {
-        // This is a no-op.
         Ok(())
     }
 
@@ -165,7 +160,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
 
         let mut values = vec![F::ZERO; padded_nb_rows * SELECT_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * SELECT_COLS;
         values[..populate_len].par_chunks_mut(SELECT_COLS).zip_eq(events).for_each(
             |(row, &vals)| {
@@ -174,7 +168,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, SELECT_COLS))
     }
 
@@ -199,7 +192,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         };
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * SELECT_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * SELECT_COLS;
         values[..populate_len].par_chunks_mut(SELECT_COLS).zip_eq(events).for_each(
             |(row, &vals)| {
@@ -210,7 +202,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<_>>(values) },
             SELECT_COLS,

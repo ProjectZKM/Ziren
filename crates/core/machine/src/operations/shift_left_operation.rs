@@ -105,14 +105,11 @@ impl<F: Field> ShiftLeftOperation<F> {
         let one: AB::Expr = AB::Expr::ONE;
         let base: AB::Expr = AB::F::from_u32(1 << BYTE_SIZE).into();
 
-        // Step 1: the fine-grained bit shift (by `c % 8`).
         let mut c_byte_sum = zero.clone();
         for i in 0..BYTE_SIZE {
             let val: AB::Expr = AB::F::from_u32(1 << i).into();
             c_byte_sum = c_byte_sum.clone() + val * cols.c_least_sig_byte[i];
         }
-        // Gated: the caller's `c` expression is only meaningful on live rows
-        // (it may be nonzero while the gadget is off).
         builder.when(is_real.clone()).assert_eq(c_byte_sum, c[0].clone());
 
         let mut num_bits_to_shift = zero.clone();
@@ -144,7 +141,6 @@ impl<F: Field> ShiftLeftOperation<F> {
             builder.assert_eq(cols.bit_shift_result[i], v);
         }
 
-        // Step 2: the coarser byte shift (by `(c % 32) / 8`).
         let num_bytes_to_shift =
             cols.c_least_sig_byte[3] + cols.c_least_sig_byte[4] * AB::F::from_u32(2);
         for i in 0..WORD_SIZE {
@@ -157,8 +153,6 @@ impl<F: Field> ShiftLeftOperation<F> {
             one.clone(),
         );
 
-        // The bytes of `a` must match those of `bit_shift_result`, taking the
-        // byte shift into account.
         for num_bytes_to_shift in 0..WORD_SIZE {
             let mut shifting = builder.when(cols.shift_by_n_bytes[num_bytes_to_shift]);
             for i in 0..WORD_SIZE {
@@ -170,7 +164,6 @@ impl<F: Field> ShiftLeftOperation<F> {
             }
         }
 
-        // Step 3: booleans and range checks.
         for bit in cols.c_least_sig_byte.iter() {
             builder.assert_bool(*bit);
         }

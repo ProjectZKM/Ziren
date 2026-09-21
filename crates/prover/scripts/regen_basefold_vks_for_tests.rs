@@ -40,23 +40,12 @@ fn main() {
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let opts = ZKMProverOpts::default();
 
-    // The e2e test set used by `crates/prover/src/lib.rs::tests::*`.
-    // Each entry: (label, ELF path, stdin).
-    //
-    // We include at least TWO workloads so the resulting vk_map has
-    // ≥ 2 entries.  `MerkleTree::commit` in
-    // `crates/recursion/circuit/src/merkle_tree.rs` uses
-    // `for _ in 0..height - 1`, which underflows when `height == 0`
-    // (single-entry leaf), causing the prover constructor to hang
-    // indefinitely.  Two entries → `height == 1` → loop runs zero
-    // times correctly.
     let fib_elf = std::fs::read(FIBONACCI_ELF_PATH).unwrap_or_else(|e| {
         panic!("read {}: {}\n  build with: cd crates/test-artifacts/guests && cargo build --release --target mipsel-zkm-zkvm-elf -p fibonacci", FIBONACCI_ELF_PATH, e)
     });
     let hello_elf = std::fs::read(HELLO_WORLD_ELF_PATH).unwrap_or_else(|e| {
         panic!("read {}: {}\n  build with: cd crates/test-artifacts/guests && cargo build --release --target mipsel-zkm-zkvm-elf -p hello-world", HELLO_WORLD_ELF_PATH, e)
     });
-    // The fibonacci guest reads its `n` from stdin, so it has to be supplied.
     let mut fib_stdin = ZKMStdin::new();
     fib_stdin.write(&10u32);
     let workloads: Vec<(&str, Vec<u8>, ZKMStdin)> =
@@ -87,11 +76,6 @@ fn main() {
         hashes.entry(h).or_insert(new_idx);
         tracing::info!("[regen] {} compress_vk hash = {:?} (new={})", label, h, was_new);
 
-        // Also drive shrink so we capture the shrink program's VK
-        // hash — needed by `verify_shrink` under VERIFY_VK=true.  The
-        // wrap_bn254 VK isn't checked against `recursion_vk_map`
-        // (verify_wrap_bn254 uses `self.wrap_vk` directly), so we don't
-        // need to capture it.
         tracing::info!("[regen] shrink start");
         let shrunk = prover
             .shrink(compressed, opts)

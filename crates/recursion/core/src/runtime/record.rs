@@ -65,7 +65,6 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
     }
 
     fn append(&mut self, other: &mut Self) {
-        // Exhaustive destructuring for refactoring purposes.
         let Self {
             program: _,
             index: _,
@@ -159,11 +158,11 @@ impl<F> UnsafeRecord<F> {
     where
         F: Field,
     {
+        /// A `Vec` of `len` uninitialized slots. `set_len(len)` is sound because the
+        /// capacity is `len` and `MaybeUninit<T>` needs no initialization.
         #[inline]
         fn create_uninit_vec<T>(len: usize) -> Vec<MaybeUninit<T>> {
             let mut vec: Vec<MaybeUninit<T>> = Vec::with_capacity(len);
-            // SAFETY: capacity is `len`, and `MaybeUninit<T>` is the
-            // canonical type for uninitialized memory.
             unsafe { vec.set_len(len) };
             vec
         }
@@ -181,8 +180,6 @@ impl<F> UnsafeRecord<F> {
             ),
             fri_fold_events: create_uninit_vec(event_counts.fri_fold_events),
             batch_fri_events: create_uninit_vec(event_counts.batch_fri_events),
-            // Pre-size from the counters added to RecursionAirEventCount
-            // so all 11 event vecs are ready for offset-based writes.
             commit_pv_hash_events: create_uninit_vec(event_counts.commit_pv_hash_events),
         }
     }
@@ -204,7 +201,6 @@ impl<F> UnsafeRecord<F> {
         ExecutionRecord {
             program,
             index,
-            // SAFETY: layout-equivalence of T / MaybeUninit<UnsafeCell<T>>.
             base_alu_events: std::mem::transmute::<
                 Vec<MaybeUninit<UnsafeCell<BaseAluEvent<F>>>>,
                 Vec<BaseAluEvent<F>>,
@@ -277,6 +273,8 @@ mod unsafe_record_tests {
         assert_eq!(rec.select_events.len(), 0);
     }
 
+    /// Slots written as `MaybeUninit::new(UnsafeCell::new(ev))` survive `into_record`;
+    /// the call is sound because every event slot and `public_values` is initialized.
     #[test]
     fn into_record_round_trip_after_offset_writes() {
         let counts = RecursionAirEventCount { base_alu_events: 3, ..Default::default() };
@@ -286,22 +284,16 @@ mod unsafe_record_tests {
             BaseAluEvent { out: k(8), in1: k(3), in2: k(4) },
             BaseAluEvent { out: k(9), in1: k(5), in2: k(6) },
         ];
-        // Initialize each MaybeUninit slot with an UnsafeCell::new wrapping the event.
-        // This is the canonical way to populate UnsafeRecord in tests; the runtime
-        // walker will use
-        // `UnsafeCell::raw_get(slot.as_ptr() as *const UnsafeCell<T>).write(ev)`
-        // to write through `&UnsafeRecord` from parallel threads.
         for (i, e) in evs.iter().enumerate() {
             rec.base_alu_events[i] = MaybeUninit::new(UnsafeCell::new(*e));
         }
         rec.public_values = MaybeUninit::new(UnsafeCell::new(RecursionPublicValues::default()));
-        // SAFETY: all event slots and public_values initialized.
         let exec = unsafe { rec.into_record(Arc::new(RecursionProgram::default()), 0) };
         assert_eq!(exec.base_alu_events.len(), 3);
         assert_eq!(exec.base_alu_events[0].out, k(7));
         assert_eq!(exec.base_alu_events[2].in2, k(6));
         assert_eq!(exec.ext_alu_events.len(), 0);
         assert_eq!(exec.poseidon2_events.len(), 0);
-        let _ = Block([k(0); 4]); // suppress unused import warning
+        let _ = Block([k(0); 4]);
     }
 }

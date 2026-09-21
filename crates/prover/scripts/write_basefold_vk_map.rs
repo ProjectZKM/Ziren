@@ -26,11 +26,9 @@ struct Args {
 /// `test_e2e_compress_fibonacci` and `collect_basefold_vks`. Each entry
 /// is the canonical-form `[u32; 8]` printed by
 /// `tracing::info!("{:?}", vk.hash_koalabear())`.
-// STALE as of the Sep 2026 batch: the Poseidon2 round-count change moves every
-// verifying key, the terminal-stage and deferred completeness changes move the
-// recursion programs, and the fibonacci guest now reads its input so its ELF and
-// program key moved too.  Re-capture all of these when the key map is
-// regenerated; see docs/soundness/poseidon2_round_change.md.
+// TODO: these hashes do not match the current Poseidon2 round count, recursion
+// programs, or fibonacci guest (which reads its input); re-capture all of them
+// when the key map is regenerated (docs/soundness/poseidon2_round_change.md).
 const HASHES: &[[u32; DIGEST_SIZE]] = &[
     // FIBONACCI_ELF (test_artifacts): the compress recursion program uses
     // inline exp_reverse_bits (BatchFRI / ExpReverseBitsLen are not in
@@ -61,10 +59,6 @@ trait FromCanonicalU32 {
 }
 impl FromCanonicalU32 for KoalaBear {
     fn from_canonical_u32(x: u32) -> Self {
-        // KoalaBear::from_int wraps the canonical input via the field's
-        // own conversion (which goes through Montgomery internally). Use
-        // p3_field's PrimeField::from_canonical_u32 if available;
-        // otherwise from_int via PrimeCharacteristicRing.
         use p3_field::PrimeCharacteristicRing;
         <KoalaBear as PrimeCharacteristicRing>::from_u32(x)
     }

@@ -37,7 +37,6 @@ impl<F: Field> IsEqualWordOperation<F> {
     ) {
         builder.assert_bool(is_real.clone());
 
-        // Calculate differences in limbs.
         let diff = Word([
             a[0].clone() - b[0].clone(),
             a[1].clone() - b[1].clone(),
@@ -45,7 +44,6 @@ impl<F: Field> IsEqualWordOperation<F> {
             a[3].clone() - b[3].clone(),
         ]);
 
-        // Check if the difference is 0.
         IsZeroWordOperation::<AB::F>::eval(builder, diff, cols.is_diff_zero, is_real.clone());
     }
 }

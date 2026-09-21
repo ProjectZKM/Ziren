@@ -95,7 +95,6 @@ impl<C: Config> Builder<C> {
             builder.if_eq(break_flag, C::N::ONE).then(|builder| {
                 builder.break_loop();
             });
-            // Insert elements of the chunk.
             builder.range(0, HASH_RATE).for_each(|j, builder| {
                 let index: Var<_> = builder.eval(i + j);
                 let element = builder.get(array, index);

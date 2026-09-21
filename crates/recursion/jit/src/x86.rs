@@ -58,22 +58,18 @@ pub fn emit_sub(ops: &mut dynasmrt::x64::Assembler) {
 pub fn emit_mul(ops: &mut dynasmrt::x64::Assembler) {
     dynasm!(ops
         ; .arch x64
-        // rax = x = a * b  (32x32 -> 64, zero-extended operands)
         ; mov eax, eax
         ; mov ecx, ecx
         ; imul rax, rcx
-        // ecx = t = low32(x) * MU   (the mask is implicit in the 32-bit op)
         ; mov ecx, eax
         ; imul ecx, ecx, DWORD MONTY_MU as i32
-        // rcx = u = t * P
         ; mov ecx, ecx
         ; mov edx, DWORD PRIME as i32
         ; imul rcx, rdx
-        // rax = x - u, CF set on borrow
         ; sub rax, rcx
-        ; sbb edx, edx            // edx = 0xffffffff on borrow, else 0
-        ; shr rax, 32             // high word
-        ; and edx, DWORD PRIME as i32  // corr = borrow ? P : 0
+        ; sbb edx, edx
+        ; shr rax, 32
+        ; and edx, DWORD PRIME as i32
         ; add eax, edx
     );
 }
@@ -100,7 +96,6 @@ pub enum BinOp {
 pub fn assemble_binop(op: BinOp) -> BinOpFn {
     let mut ops = dynasmrt::x64::Assembler::new().expect("dynasm assembler");
     let start = ops.offset();
-    // SysV: first arg in edi, second in esi.
     dynasm!(ops
         ; .arch x64
         ; mov eax, edi
@@ -139,10 +134,10 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
 
-    /// Montgomery-form words, i.e. what the runtime actually stores.
+    /// Montgomery-form words, i.e. what the runtime actually stores. The
+    /// transmute is sound because `MontyField31` is `#[repr(transparent)]`
+    /// over `u32` (size asserted in `lib.rs`).
     fn raw(x: KoalaBear) -> u32 {
-        // SAFETY: `MontyField31` is `#[repr(transparent)]` over `u32`; the
-        // layout contract in `lib.rs` asserts the size.
         unsafe { std::mem::transmute::<KoalaBear, u32>(x) }
     }
     fn unraw(x: u32) -> KoalaBear {
@@ -162,8 +157,6 @@ mod tests {
             unraw(PRIME / 2),
             unraw(PRIME / 2 + 1),
         ];
-        // Deterministic pseudo-random spread — no rand dependency needed and
-        // a failure is reproducible from the seed alone.
         let mut s: u64 = 0x243f_6a88_85a3_08d3;
         for _ in 0..2000 {
             s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -216,7 +209,6 @@ mod tests {
 
     #[test]
     fn the_extension_constant_is_the_one_the_field_uses() {
-        // X^4 - 3: guard against the emitter and the field drifting apart.
         assert_eq!(W, 3);
     }
 }

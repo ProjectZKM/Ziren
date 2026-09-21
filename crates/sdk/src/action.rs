@@ -128,7 +128,6 @@ impl<'a> Prove<'a> {
         let proof_opts = ProofOpts { zkm_prover_opts: opts, timeout };
         let context = context_builder.build();
 
-        // Dump the program and stdin to files for debugging if `ZKM_DUMP` is set.
         crate::utils::zkm_dump(&pk.elf, &stdin);
 
         Ok(prover.prove_impl(pk, stdin, proof_opts, context, kind, None)?.0)

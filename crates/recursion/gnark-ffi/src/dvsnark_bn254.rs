@@ -26,19 +26,16 @@ impl DvSnarkBn254Prover {
     ) {
         let serialized = serde_json::to_string(&constraints).unwrap();
 
-        // Write constraints.
         let constraints_path = build_dir.join("constraints.json");
         let mut file = File::create(constraints_path).unwrap();
         file.write_all(serialized.as_bytes()).unwrap();
 
-        // Write witness.
         let witness_path = build_dir.join("dvsnark_witness.json");
         let gnark_witness = GnarkWitness::new(witness);
         let mut file = File::create(witness_path).unwrap();
         let serialized = serde_json::to_string(&gnark_witness).unwrap();
         file.write_all(serialized.as_bytes()).unwrap();
 
-        // Build the circuit.
         build_dvsnark_bn254(build_dir.to_str().unwrap(), store_dir.to_str().unwrap());
     }
 
@@ -49,7 +46,6 @@ impl DvSnarkBn254Prover {
         build_dir: PathBuf,
         store_dir: PathBuf,
     ) -> DvSnarkBn254Proof {
-        // Write witness.
         let mut witness_file = tempfile::NamedTempFile::new().unwrap();
         let gnark_witness = GnarkWitness::new(witness);
         let serialized = serde_json::to_string(&gnark_witness).unwrap();

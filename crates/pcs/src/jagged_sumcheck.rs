@@ -31,32 +31,22 @@ pub struct JaggedReductionProof<EF> {
 /// z_col)` (recursive_jagged_pcs.rs).  `z_col_lagrange` must have at
 /// least `num_global_columns` entries (the partial-Lagrange table over
 /// `z_col`); padding columns beyond the real count are never indexed.
+///
+/// * `z_row`: the full zerocheck-reduced point (`max_log_row_count` dims).
+///   Row `r < h_c` of chip `c` gets weight `eq(z_row, r)`; bits of `r` at or
+///   above `log h_c` are 0, so no separate height factor is needed.
 fn build_weight_table(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
     z_col_lagrange: &[InnerChallenge],
-    // The FULL zerocheck-reduced z* (max_log_row_count
-    // dims).  The per-chip row weight is the full row_eq over z_row indexed by
-    // the natural row (0..h_c) — NO trailing slice, NO Pi_high embedding (the
-    // full row_eq subsumes the height factor since high bits of any row <
-    // 2^log_h_c are 0).
     z_row: &[InnerChallenge],
 ) -> Vec<InnerChallenge> {
     let n = 1usize << packing.log_dense_size();
     let mut w = vec![InnerChallenge::ZERO; n];
 
-    // Row weight: the full max-log-row eq table
-    // over z_row, indexed by the LITERAL row index (0..h_c).  No trailing
-    // slice, no stride, no explicit Pi_high embedding — the full row_eq
-    // bakes the height factor in for any row < 2^log_h_c because the high
-    // bits of such a row are 0.
-    // `r_row_per_chip` is subsumed: for row < 2^{log h_c} the high coordinates of
-    // `row` vanish, so eq(rev(z*), row) already carries the per-chip height factor.
     let _ = r_row_per_chip;
-    // w[offsets[k] + row] = eq(z_col, k) · eq(rev(z*), row),  row < h_c
     let row_eq_full: Vec<InnerChallenge> =
         crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
-    // One table for every chip: the factor above is chip-independent.
     let eq_c: &[InnerChallenge] = &row_eq_full;
 
     let mut k: usize = 0;
@@ -64,15 +54,6 @@ fn build_weight_table(
         let h_c = info.row_count;
         for _j in 0..info.column_count {
             let off = packing.offsets[k];
-            // Bounds guard: catches the case
-            // where a chip's column_count (from verifier-side
-            // chip.width()) exceeds the per-chip column_count the
-            // prover committed (from main_trace.width), surfacing it
-            // here with chip name + offsets context instead of an
-            // opaque 'index out of bounds'.  The
-            // prove_trusted_evaluations width-pad keeps this from
-            // firing in production.
-            // Kept as a release-mode bounds guard to avoid silent OOBs.
             assert!(
                 off.saturating_add(h_c) <= n,
                 "build_weight_table OOB: chip #{c_idx} '{}' col_k={k} off={off} \
@@ -178,7 +159,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     r_row_per_chip: &[Vec<InnerChallenge>],
     y_per_chip: &[Vec<InnerChallenge>],
     z_col: &[InnerChallenge],
-    z_row: &[InnerChallenge], // ITEM-12: full z* for the embedding factor
+    z_row: &[InnerChallenge],
     challenger: &mut C,
 ) -> Option<(Vec<InnerChallenge>, InnerChallenge, InnerChallenge)> {
     if proof.rounds.len() != packing.log_dense_size()
@@ -194,16 +175,6 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         return None;
     }
 
-    // Coverage.  The chip COUNT agreeing is not coverage: the claim below
-    // sums only the values the proof supplies, so a per-chip vector that is a
-    // strict PREFIX of the chip's columns silently drops the suffix from the
-    // reduction -- and `cross_bind_openings` only rejects an opening vector
-    // SHORTER than the claims, so the matching opening suffix is dropped too.
-    // The AIR still consumes those openings, leaving them tied to no committed
-    // column.  Require the claims to cover every column the packing declares:
-    //
-    //   y_per_chip[i].len() == chip_infos[i].column_count   for every i, and
-    //   Σ_i y_per_chip[i].len() == offsets.len() - 1        (the column space).
     for (i, (yc, info)) in y_per_chip.iter().zip(packing.chip_infos.iter()).enumerate() {
         if yc.len() != info.column_count {
             tracing::debug!(
@@ -225,9 +196,6 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         return None;
     }
 
-    // `z_col` is sampled by the caller at the matching
-    // transcript position; form the claimed sum as the z_col-weighted
-    // column mix.  Column claims are already in the transcript.
     let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
 
     let mut t = InnerChallenge::ZERO;
@@ -244,8 +212,6 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     let mut sampled: Vec<InnerChallenge> = Vec::with_capacity(n);
     for (round_idx, round) in proof.rounds.iter().enumerate() {
         let [p0, p1, p2] = round.evals;
-        // Observe coefficients (not evals) so the transcript matches
-        // the recursion `verify_sumcheck` and the host prover.
         observe_round_poly_evals(challenger, [p0, p1, p2]);
         if p0 + p1 != current_claim {
             tracing::debug!("jagged sumcheck round {} identity failed", round_idx);
@@ -256,8 +222,6 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         current_claim = jagged_eval_round_poly([p0, p1, p2], r_i);
     }
 
-    // The recorded point is in SAMPLE order: the reduction binds the stride-1
-    // (LSB) variable per round and pushes each challenge.
     for (i, &s) in sampled.iter().enumerate() {
         if s != proof.eval_point[i] {
             tracing::debug!("jagged sumcheck round {} eval-point mismatch", i);
@@ -266,33 +230,8 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     }
     let z_star = proof.eval_point.clone();
 
-    // CLOSING WEIGHT `w_at_z` — CLOSED FORM
-    //
-    // `w_at_z` is the dense weight-MLE `w[off_k + row] = eq(z_col,k)·eq(z_row,row)`
-    // evaluated at `z_star`.  It is a function of the VERIFIER's own trusted
-    // packing geometry `(offsets, row_counts)` and the transcript points
-    // `(z_row, z_col, z_star)` — no prover-supplied field element enters it —
-    // so any way of computing it is equally sound; only the cost differs.
-    //
-    // It is computed by the branching-program evaluation of the jagged
-    // polynomial (`full_jagged_evaluation`): `O(num_columns · log(area))` —
-    // **38 ms**, size-independent, no transient.  (Materializing the
-    // `2^log_dense_size` table instead costs 4.0 GiB allocated + 4.0 GiB
-    // cloned and 14.7 s single-threaded on a `log_dense_size == 28` core reth
-    // shard.)  The acceptance gate
-    // `phase1_acceptance_gate::gate_weight_table_matches_branching_program`
-    // asserts the closed form agrees with the table form on equal AND mixed
-    // heights.
-    //
-    // A table form would implicitly bounds-check the packing: each column's
-    // run is written at `offsets[k]..offsets[k]+row_count`, so `offsets`
-    // disagreeing with the `chip_infos` row/column counts, or running past
-    // the dense size, would trip an assert.  The closed form
-    // reads `offsets` alone, so those consistency conditions are CHECKED
-    // EXPLICITLY below (and as a graceful reject rather than a panic).
     {
         let n_dense = 1usize << packing.log_dense_size();
-        // (a) One offset per global column plus the sentinel.
         let num_cols_total: usize = packing.chip_infos.iter().map(|c| c.column_count).sum();
         if packing.offsets.len() != num_cols_total + 1 {
             tracing::debug!(
@@ -302,8 +241,6 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
             );
             return None;
         }
-        // (b) The sentinel is the committed total, and the whole packing fits
-        //     inside the dense hypercube it claims.
         if packing.offsets[num_cols_total] != packing.total_values || packing.total_values > n_dense
         {
             tracing::debug!(
@@ -314,12 +251,6 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
             );
             return None;
         }
-        // (c) Every column's run is exactly its chip's row_count, laid out
-        //     contiguously and monotonically.  This is precisely the layout
-        //     `build_weight_table`'s `w[offsets[k] + row]` writes assumed.
-        //     Also bound `row_count` by the cube — rejected explicitly here
-        //     rather than surfacing as an out-of-bounds panic on the row-eq
-        //     table (a DoS on a malformed proof).
         let max_rows = 1usize << z_row.len();
         let mut k = 0usize;
         for info in packing.chip_infos.iter() {
@@ -350,9 +281,6 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         }
     }
 
-    // `full_jagged_evaluation` consumes `z_index` in the branching program's
-    // big-endian order, which is `rev(z_star)` — the same pairing the
-    // acceptance gate asserts against the dense weight MLE at `z_star`.
     let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
     let w_at_z = crate::jagged_branching_program::full_jagged_evaluation(
         &packing.offsets,
@@ -425,8 +353,6 @@ mod phase1_acceptance_gate {
     fn run_case(chips: &[(usize, usize)], seed: u64) -> (InnerChallenge, InnerChallenge) {
         let mut rng = StdRng::seed_from_u64(seed);
         let traces = build_traces(chips, &mut rng);
-        // The metadata/dense helpers now take borrowed
-        // views; build them over the owned `traces` (kept alive in this scope).
         let trace_views: Vec<(String, crate::multilinear::PaddedMle<InnerVal>)> = traces
             .iter()
             .map(|(n, m)| {
@@ -443,24 +369,20 @@ mod phase1_acceptance_gate {
             })
             .collect();
 
-        // Metadata packing (column-by-column prefix-sum layout).
         let packing = crate::jagged::compute_jagged_metadata(&trace_views);
 
-        // Dense q (column-by-column, natural row order) padded to 2^n.
         let dense_q = {
             let mut d = crate::jagged::materialize_dense_jagged(&trace_views, packing.dense_len);
             d.resize(1usize << packing.log_dense_size(), InnerVal::ZERO);
             d
         };
 
-        // z_row: full max_log_row_count point (the shared zerocheck point).
         let max_log_row = chips.iter().map(|c| c.0).max().unwrap();
         let z_row: Vec<InnerChallenge> = {
             let mut c = challenger();
             (0..max_log_row).map(|_| c.sample_algebra_element()).collect()
         };
 
-        // r_row_per_chip = trailing log_h slice of z_row (prover convention).
         let r_row_per_chip: Vec<Vec<InnerChallenge>> = packing
             .chip_infos
             .iter()
@@ -470,14 +392,6 @@ mod phase1_acceptance_gate {
             })
             .collect();
 
-        // y_per_chip = host column claims.  MUST mirror the PRODUCTION
-        // column-claim formula (the claims fed to `prove_jagged_rounds`): the full row_eq over z_row indexed by
-        // the trace row in the SAME order `materialize_dense_jagged` writes the
-        // dense column in, which `build_weight_table` then weights with
-        // `eq_c[row]`.  Reading rows in a different order here makes the
-        // verifier's claimed sum `t = Σ z_col_lagrange·y` diverge from the true
-        // sumcheck sum `Σ_b q·w`, so `verify_jagged_reduction`'s round-0 identity
-        // fails even for equal heights.
         let y_per_chip: Vec<Vec<InnerChallenge>> = traces
             .iter()
             .zip(r_row_per_chip.iter())
@@ -488,8 +402,6 @@ mod phase1_acceptance_gate {
                 (0..w)
                     .map(|col| {
                         let mut acc = InnerChallenge::ZERO;
-                        // `row * w + col` walks one COLUMN of a row-major
-                        // trace; the stride is the point.
                         #[allow(clippy::needless_range_loop)]
                         for row in 0..h {
                             acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
@@ -500,8 +412,6 @@ mod phase1_acceptance_gate {
             })
             .collect();
 
-        // z_col: sampled after the (skipped) commit observe — here just
-        // a fresh deterministic challenger so prover/verifier agree.
         let num_cols = packing.offsets.len().saturating_sub(1);
         let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
 
@@ -537,25 +447,18 @@ mod phase1_acceptance_gate {
         )
         .expect("reduction must self-verify (internal identity)");
 
-        // Closing identity: w_at_z must equal the BP jagged polynomial
-        // evaluated at the same (z_row, z_col, z_star).
         let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
         let bp = full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star_rev);
         (w_at_z, bp)
     }
 
-    // PHASE-1 acceptance gate (PASSING): under the full-row_eq host jagged
-    // convention (build_weight_table + y_per_chip; no strided
-    // eq_mle@trailing / Pi_high embedding), the closing identity
-    // w_at_z == branching-program jagged eval
-    // holds for mixed AND equal heights.  test_e2e_wrap_fibonacci stays green.
     #[test]
     fn gate_weight_table_matches_branching_program() {
         let cases: &[&[(usize, usize)]] = &[
-            &[(4, 2), (4, 2)],         // equal heights
-            &[(4, 1), (3, 1), (2, 1)], // mixed
-            &[(5, 2), (4, 3), (2, 1)], // mixed, multi-col
-            &[(6, 1), (5, 1), (4, 1)], // mixed
+            &[(4, 2), (4, 2)],
+            &[(4, 1), (3, 1), (2, 1)],
+            &[(5, 2), (4, 3), (2, 1)],
+            &[(6, 1), (5, 1), (4, 1)],
         ];
         let mut all_ok = true;
         for (ci, chips) in cases.iter().enumerate() {
@@ -577,7 +480,7 @@ mod phase1_acceptance_gate {
 
     // Host-math proxy for the in-circuit step-4 assert
     //
-    // The in-circuit recursion step-4 assert (recursive_jagged_pcs.rs:234) is
+    // The in-circuit recursion step-4 assert (`recursive_jagged_pcs`) is
     //   assert_ext_eq( evaluate_mle_ext(column_claims, z_col), claimed_sum )
     // where `evaluate_mle_ext` is a pure field dot-product Σ lagrange(z_col)·claim,
     // and `claimed_sum` is the host sumcheck's claimed_sum = Σ lagrange(z_col)·band_y.
@@ -590,7 +493,7 @@ mod phase1_acceptance_gate {
     // y for a chip stored at `log_h_store` rows (raw zero-padded), production formula:
     //   eq_c = eq_mle_table(rev(z_row)); src = bitrev_{log_h_store}(row); Σ eq_c[row]·trace.
     fn s4b_y_for_height(
-        trace_cols: &[Vec<InnerVal>], // [col][raw_row]
+        trace_cols: &[Vec<InnerVal>],
         log_h_store: usize,
         z_row: &[InnerChallenge],
     ) -> Vec<InnerChallenge> {
@@ -603,9 +506,6 @@ mod phase1_acceptance_gate {
         (0..w)
             .map(|col| {
                 let mut acc = InnerChallenge::ZERO;
-                // `row` indexes `eq_c` in natural order; `src` is its
-                // bit-reversal into the stored column.  The two orders differ,
-                // so there is nothing to zip.
                 #[allow(clippy::needless_range_loop)]
                 for row in 0..h_store {
                     let src = if log_h2 == 0 {
@@ -644,15 +544,11 @@ mod phase1_acceptance_gate {
         use p3_field::PrimeCharacteristicRing;
         let mut rng = StdRng::seed_from_u64(4242);
         let max_log_row = 6usize;
-        // shared eval point z_row (the zerocheck-reduced point).
         let z_row: Vec<InnerChallenge> = {
             let mut c = challenger();
             (0..max_log_row).map(|_| c.sample_algebra_element()).collect()
         };
-        // mixed-height shape: (log_raw, log_band, width). At least one chip with
-        // band > raw (the FIX-off scenario). Total columns power-of-two for clean z_col.
         let chips: &[(usize, usize, usize)] = &[(2, 5, 2), (4, 6, 1), (5, 5, 1)];
-        // Build raw traces + raw_y (= opened_values main.local) and band_y (= host claim).
         let mut raw_claims_flat: Vec<InnerChallenge> = Vec::new();
         let mut band_claims_flat: Vec<InnerChallenge> = Vec::new();
         let mut per_chip: Vec<(usize, usize, Vec<InnerChallenge>, Vec<InnerChallenge>)> =
@@ -667,7 +563,6 @@ mod phase1_acceptance_gate {
             band_claims_flat.extend_from_slice(&y_band);
             per_chip.push((lr, lb, y_raw, y_band));
         }
-        // pad column claims to power of two (matches recursive_jagged_pcs step 3).
         let padded = raw_claims_flat.len().next_power_of_two();
         raw_claims_flat.resize(padded, InnerChallenge::ZERO);
         band_claims_flat.resize(padded, InnerChallenge::ZERO);
@@ -676,10 +571,8 @@ mod phase1_acceptance_gate {
             let mut c = challenger();
             (0..num_col_vars).map(|_| c.sample_algebra_element()).collect()
         };
-        // claimed_sum = host sumcheck claimed_sum = Σ lagrange(z_col)·band_y.
         let claimed_sum = s4b_evaluate_mle(&band_claims_flat, &z_col);
 
-        // (A) BASELINE — raw claims with NO embed factor: must MISMATCH.
         let raw_eval = s4b_evaluate_mle(&raw_claims_flat, &z_col);
         let baseline_fail = raw_eval != claimed_sum;
         tracing::info!(
@@ -688,10 +581,6 @@ mod phase1_acceptance_gate {
             raw_eval == claimed_sum
         );
 
-        // (B) Apply candidate per-chip SCALAR embed_factors to the raw claims.
-        // candA = Π leading coords [max-log_band, max-log_raw) of (1 - z_row[k]).
-        // candB = Π coords [log_raw, log_band) of (1 - z_row[k]).
-        // candC = inverse of candA (the leading-shrink direction band/raw).
         for cand in ["A", "B", "C"] {
             let mut lifted: Vec<InnerChallenge> = Vec::new();
             for (lr, lb, y_raw, _yb) in per_chip.iter() {
@@ -729,7 +618,6 @@ mod phase1_acceptance_gate {
             );
         }
 
-        // (C) PROVE the band claims (the genuine value) DO satisfy the assert.
         let band_eval = s4b_evaluate_mle(&band_claims_flat, &z_col);
         tracing::info!(
             "[S4b] CONTROL (band claims direct): assert {} (band_eval==claimed_sum? {})",
@@ -737,8 +625,6 @@ mod phase1_acceptance_gate {
             band_eval == claimed_sum
         );
 
-        // (D) Per-chip per-column ratio band_y/raw_y — show it is NOT column-uniform
-        // (so no per-chip scalar exists), only for chips with band>raw and w>1.
         for (lr, lb, y_raw, y_band) in per_chip.iter() {
             if lb > lr && y_raw.len() > 1 {
                 let ratios: Vec<InnerChallenge> = y_raw
@@ -758,8 +644,6 @@ mod phase1_acceptance_gate {
             }
         }
 
-        // The GATE assertion: this test documents the finding. The baseline MUST fail,
-        // the control (band) MUST pass, and (the finding) NO scalar candidate passes.
         assert!(baseline_fail, "baseline (raw, no embed) must mismatch claimed_sum");
         assert!(band_eval == claimed_sum, "band claims must satisfy the step-4 assert");
     }
@@ -775,10 +659,10 @@ mod phase1_acceptance_gate {
     // accepts the RAW column_claims with NO embed_factor, while the offsets/total
     // stay band-length (chip-set-keyed VK).  This gate proves that algebraically.
     fn s5_y_lowplace(
-        trace_cols: &[Vec<InnerVal>], // [col][raw_row]
-        lr: usize,                    // raw log height (real data)
-        lb: usize,                    // band log height (committed slot length)
-        z_row: &[InnerChallenge],     // zerocheck-reduced point (max_log_row dims)
+        trace_cols: &[Vec<InnerVal>],
+        lr: usize,
+        lb: usize,
+        z_row: &[InnerChallenge],
     ) -> Vec<InnerChallenge> {
         use p3_field::PrimeCharacteristicRing;
         let w = trace_cols.len();
@@ -787,10 +671,7 @@ mod phase1_acceptance_gate {
         let eq_c = crate::zerocheck_prover::eq_mle_table_rev::<InnerChallenge>(z_row);
         (0..w)
             .map(|col| {
-                // Materialize the band-length dense column: raw data bitrev'd over
-                // the RAW width placed in the LOW rows, zeros in the high rows.
                 let mut dense = vec![InnerVal::ZERO; h_band];
-                // Scatter into `dense` at the BIT-REVERSED position of `r`.
                 #[allow(clippy::needless_range_loop)]
                 for r in 0..h_raw {
                     let pos = if lr == 0 {
@@ -800,8 +681,6 @@ mod phase1_acceptance_gate {
                     };
                     dense[pos] = trace_cols[col][r];
                 }
-                // Weight ALL band rows with eq_c[row] (the high zero rows add 0):
-                // proves the slot length is immaterial to the value.
                 let mut acc = InnerChallenge::ZERO;
                 for row in 0..h_band {
                     acc += eq_c[row] * InnerChallenge::from(dense[row]);
@@ -820,7 +699,6 @@ mod phase1_acceptance_gate {
             let mut c = challenger();
             (0..max_log_row).map(|_| c.sample_algebra_element()).collect()
         };
-        // mixed-height shape incl. band>raw, band==raw, and a log_raw=0 chip.
         let chips: &[(usize, usize, usize)] = &[(2, 5, 2), (4, 6, 1), (5, 5, 1), (0, 3, 2)];
         let mut raw_flat: Vec<InnerChallenge> = Vec::new();
         let mut band_old_flat: Vec<InnerChallenge> = Vec::new();
@@ -829,23 +707,19 @@ mod phase1_acceptance_gate {
             let raw_h = 1usize << lr;
             let trace: Vec<Vec<InnerVal>> =
                 (0..w).map(|_| (0..raw_h).map(|_| rand_kb(&mut rng)).collect()).collect();
-            let y_raw = s4b_y_for_height(&trace, lr, &z_row); // opened_values (zerocheck open)
-            let y_band_old = s4b_y_for_height(&trace, lb, &z_row); // current FIX-off commit (bitrev_lb) — the bug
-            let y_band_new = s5_y_lowplace(&trace, lr, lb, &z_row); // proposed low-placement commit
+            let y_raw = s4b_y_for_height(&trace, lr, &z_row);
+            let y_band_old = s4b_y_for_height(&trace, lb, &z_row);
+            let y_band_new = s5_y_lowplace(&trace, lr, lb, &z_row);
             raw_flat.extend_from_slice(&y_raw);
             band_old_flat.extend_from_slice(&y_band_old);
             band_new_flat.extend_from_slice(&y_band_new);
         }
-        // (1) per-column: low-placement band_y == raw_y EXACTLY.
         assert_eq!(raw_flat, band_new_flat, "low-placement band_y must equal raw_y per column");
-        // (2) the current bitrev_lb commit genuinely differs (the bug being fixed).
         assert_ne!(
             raw_flat, band_old_flat,
             "current bitrev_lb band_y must differ from raw_y (the 4b bug)"
         );
 
-        // (3) recursion-level: claimed_sum(new) == evaluate_mle_ext(raw_claims, z_col),
-        // i.e. the in-circuit step-4 assert holds with RAW column_claims and NO embed_factor.
         let padded = raw_flat.len().next_power_of_two();
         let mut raw_p = raw_flat.clone();
         raw_p.resize(padded, InnerChallenge::ZERO);
@@ -938,10 +812,6 @@ mod closed_form_weight_equivalence {
         let r_row_per_chip: Vec<Vec<InnerChallenge>> =
             packing.chip_infos.iter().map(|_| z_row.clone()).collect();
 
-        // Old path: materialize the dense weight MLE and evaluate it at
-        // `z_star` as `Σ_b w[b]·eq(z_star, b)`.  `eq_mle_table` maps index
-        // bit `i` to `z_star[i]`, so this is the LSB-first variable order
-        // the dense table is indexed in.
         let w_table = build_weight_table_from_z_col(&packing, &r_row_per_chip, &z_col, &z_row);
         assert_eq!(
             w_table.len(),
@@ -952,7 +822,6 @@ mod closed_form_weight_equivalence {
         let table_form: InnerChallenge =
             w_table.iter().zip(eq_star.iter()).map(|(&w, &e)| w * e).sum();
 
-        // New path: branching-program closed form.
         let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
         let closed_form = full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star_rev);
 
@@ -968,21 +837,18 @@ mod closed_form_weight_equivalence {
     #[test]
     fn closed_form_matches_weight_table_fixed_shapes() {
         let cases: &[&[(usize, usize)]] = &[
-            &[(1, 1)],                                 // single cell
-            &[(1, 5)],                                 // one row, many columns
-            &[(64, 1)],                                // one column
-            &[(16, 4), (16, 4)],                       // equal heights
-            &[(16, 3), (8, 5), (4, 1)],                // mixed heights, multi-col
-            &[(31, 2), (17, 3), (5, 7)],               // non-power-of-two heights
-            &[(64, 2), (0, 3), (32, 1)],               // zero-height chip in the middle
-            &[(64, 2), (16, 0), (32, 1)],              // zero-COLUMN chip in the middle
-            &[(1024, 1), (1, 1023)],                   // extreme aspect ratios
-            &[(4, 1), (4, 1), (4, 1), (4, 1), (4, 1)], // many tiny chips
+            &[(1, 1)],
+            &[(1, 5)],
+            &[(64, 1)],
+            &[(16, 4), (16, 4)],
+            &[(16, 3), (8, 5), (4, 1)],
+            &[(31, 2), (17, 3), (5, 7)],
+            &[(64, 2), (0, 3), (32, 1)],
+            &[(64, 2), (16, 0), (32, 1)],
+            &[(1024, 1), (1, 1023)],
+            &[(4, 1), (4, 1), (4, 1), (4, 1), (4, 1)],
         ];
         for (i, chips) in cases.iter().enumerate() {
-            // The materialized form indexes a `2^z_row_dim` row-eq table by the
-            // literal row, so the reference path is only defined for
-            // `z_row_dim >= log2(max row_count)`; sweep from there upwards.
             let max_h = chips.iter().map(|(h, _)| *h).max().unwrap_or(1).max(1);
             let min_dim = max_h.next_power_of_two().trailing_zeros() as usize;
             for z_row_dim in [min_dim, min_dim + 1, min_dim + 4, 22] {
@@ -1006,13 +872,11 @@ mod closed_form_weight_equivalence {
         }
     }
 
-    /// The layout guards added alongside the substitution must REJECT a
-    /// packing whose `offsets` disagree with its `chip_infos` — the condition
-    /// the materialized table used to catch via its bounds assert.
+    /// The layout guards reject a packing whose `offsets` disagree with its
+    /// `chip_infos`.
     #[test]
     fn inconsistent_offsets_are_rejected() {
         let mut packing = packing_of(&[(16, 2), (8, 2)]);
-        // Corrupt one column's run so offsets no longer match row_count.
         packing.offsets[1] += 3;
         let mut rng = StdRng::seed_from_u64(7);
         let z_row: Vec<InnerChallenge> = (0..12).map(|_| rand_ef(&mut rng)).collect();
@@ -1026,8 +890,6 @@ mod closed_form_weight_equivalence {
             .iter()
             .map(|c| (0..c.column_count).map(|_| rand_ef(&mut rng)).collect())
             .collect();
-        // A well-shaped but arbitrary reduction proof: the layout guards run
-        // before the closing identity, so this must be rejected on layout.
         let proof = JaggedReductionProof::<InnerChallenge> {
             rounds: (0..packing.log_dense_size())
                 .map(|_| JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] })

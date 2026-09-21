@@ -343,7 +343,6 @@ mod parity_tests {
             }};
         }
 
-        // The universal pad: zero row + neutralised frame.
         macro_rules! dep_pad {
             ($ColsTy:ty) => {
                 |row: &mut [F]| {
@@ -359,8 +358,6 @@ mod parity_tests {
             AddSubCols<F>,
             NUM_ADD_SUB_COLS,
             add_sub_event_to_row_koalabear,
-            // The typed R-type frame needs no neutralising: a padding row is
-            // simply zero.
             |_row: &mut [F]| {}
         );
         check!(
@@ -369,7 +366,6 @@ mod parity_tests {
             AddSubImmCols<F>,
             NUM_ADD_SUB_IMM_COLS,
             add_sub_imm_event_to_row_koalabear,
-            // Typed I-type frame — zero padding, as above.
             |_row: &mut [F]| {}
         );
         check!(
@@ -378,7 +374,6 @@ mod parity_tests {
             BitwiseCols<F>,
             NUM_BITWISE_COLS,
             bitwise_event_to_row_koalabear,
-            // Typed R-type frame — zero padding.
             |_row: &mut [F]| {}
         );
         check!(
@@ -387,7 +382,6 @@ mod parity_tests {
             BitwiseImmCols<F>,
             NUM_BITWISE_IMM_COLS,
             bitwise_imm_event_to_row_koalabear,
-            // Typed I-type frame — zero padding.
             |_row: &mut [F]| {}
         );
         check!(
@@ -396,7 +390,6 @@ mod parity_tests {
             LtCols<F>,
             NUM_LT_COLS,
             lt_event_to_row_koalabear,
-            // Typed R-type frame — zero padding.
             |_row: &mut [F]| {}
         );
         check!(
@@ -405,7 +398,6 @@ mod parity_tests {
             LtImmCols<F>,
             NUM_LT_IMM_COLS,
             lt_imm_event_to_row_koalabear,
-            // Typed I-type frame — zero padding.
             |_row: &mut [F]| {}
         );
         check!(
@@ -414,7 +406,6 @@ mod parity_tests {
             CloClzCols<F>,
             NUM_CLOCLZ_COLS,
             clo_clz_event_to_row_koalabear,
-            // Typed R-type frame — zero padding.
             |_row: &mut [F]| {}
         );
         check!(
@@ -425,7 +416,6 @@ mod parity_tests {
             shift_left_event_to_row_koalabear,
             |row: &mut [F]| {
                 let cols: &mut ShiftLeftCols<F> = row.borrow_mut();
-                // Mirrors shift_left's padded_row_template.
                 use p3_field::PrimeCharacteristicRing;
                 cols.shift_by_n_bits[0] = F::ONE;
                 cols.shift_by_n_bytes[0] = F::ONE;
@@ -439,8 +429,6 @@ mod parity_tests {
             NUM_SHIFT_LEFT_IMM_COLS,
             shift_left_imm_event_to_row_koalabear,
             |row: &mut [F]| {
-                // Mirrors the chip's padded_row_template; the typed frame
-                // itself needs no neutralising.
                 let cols: &mut ShiftLeftImmCols<F> = row.borrow_mut();
                 cols.shift_by_n_bits[0] = F::ONE;
                 cols.shift_by_n_bytes[0] = F::ONE;
@@ -455,7 +443,6 @@ mod parity_tests {
             shift_right_event_to_row_koalabear,
             |row: &mut [F]| {
                 let cols: &mut ShiftRightCols<F> = row.borrow_mut();
-                // Mirrors shift_right's padding branch.
                 use p3_field::PrimeCharacteristicRing;
                 cols.shift_by_n_bits[0] = F::ONE;
                 cols.shift_by_n_bytes[0] = F::ONE;
@@ -468,8 +455,6 @@ mod parity_tests {
             NUM_SHIFT_RIGHT_IMM_COLS,
             shift_right_imm_event_to_row_koalabear,
             |row: &mut [F]| {
-                // Mirrors the chip's padding branch; the typed frame itself
-                // needs no neutralising.
                 let cols: &mut ShiftRightImmCols<F> = row.borrow_mut();
                 cols.shift_by_n_bits[0] = F::ONE;
                 cols.shift_by_n_bytes[0] = F::ONE;
@@ -481,7 +466,6 @@ mod parity_tests {
             MulCols<F>,
             NUM_MUL_COLS,
             mul_event_to_row_koalabear,
-            // Typed R-type frame — zero padding.
             |_row: &mut [F]| {}
         );
         check!(
@@ -490,7 +474,6 @@ mod parity_tests {
             DivRemCols<F>,
             NUM_DIVREM_COLS,
             div_rem_event_to_row_koalabear,
-            // Typed R-type frame — zero padding.
             |_row: &mut [F]| {}
         );
         check!(
@@ -499,7 +482,6 @@ mod parity_tests {
             BranchColumns<F>,
             NUM_BRANCH_COLS,
             branch_event_to_row_koalabear,
-            // Typed I-type frame — zero padding.
             |_row: &mut [F]| {}
         );
         check!(
@@ -532,11 +514,9 @@ mod parity_tests {
             SyscallInstrColumns<F>,
             NUM_SYSCALL_INSTR_COLS,
             syscall_instrs_event_to_row_koalabear,
-            // Typed R-type frame — zero padding.
             |_row: &mut [F]| {}
         );
 
-        // The five memory chips: the FFI takes no shard (the event carries it).
         macro_rules! check_mem {
             ($chip:expr, $events:expr, $ColsTy:ty, $num_cols:expr, $ffi:ident) => {{
                 let chip = $chip;
@@ -556,9 +536,6 @@ mod parity_tests {
                             crate::sys::$ffi(e, cols, instr);
                         }
                     },
-                    // The memory chips carry a typed I-type frame, whose
-                    // register-access multiplicities are `is_real`: a padding
-                    // row is simply zero and needs no neutralising.
                     |_row: &mut [F]| {},
                 );
                 assert_traces_eq(
@@ -610,8 +587,6 @@ mod parity_tests {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         for (i, record) in runtime.records.iter().enumerate() {
-            // Coverage note: a chip with zero events still validates its
-            // padding shape, but not the live instruction frame.
             tracing::info!(
                 "{label}[shard {i}] events: add_sub={} add_sub_imm={} bitwise={} bitwise_imm={} lt={} lt_imm={} cloclz={} sll={} sll_imm={} sr={} sr_imm={} \
                  mul={} divrem={} branch={} jump={} movcond={} misc={} syscall={} \
@@ -651,8 +626,6 @@ mod parity_tests {
 
     #[test]
     fn test_all_instruction_chips_ffi_eq_rust_u256_mul() {
-        // The long-multiplication guest exercises the Misc chip
-        // (MADDU/MSUBU) that fibonacci and keccak never touch.
         run_and_check(Program::from(test_artifacts::U256XU2048_MUL_ELF).unwrap(), "u256x2048-mul");
     }
 

@@ -60,7 +60,6 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         _: &Self::Record,
         _: &mut Self::Record,
     ) -> Result<(), Self::Error> {
-        // This is a no-op.
         Ok(())
     }
 
@@ -105,7 +104,6 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, num_columns))
     }
 
@@ -160,7 +158,6 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
             num_columns,
@@ -185,9 +182,8 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
     #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        // Allocating an intermediate `Vec` is faster.
         let instrs = program
-            .iter_instructions() // Faster than using `rayon` for some reason. Maybe vectorization?
+            .iter_instructions()
             .filter_map(|instruction| match instruction {
                 Poseidon2(instr) => Some(instr.as_ref()),
                 _ => None,
@@ -202,9 +198,6 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             .par_chunks_mut(PREPROCESSED_POSEIDON2_WIDTH)
             .zip_eq(instrs)
             .for_each(|(row, instr)| {
-                // Set the memory columns. We read once, at the first iteration,
-                // and write once, at the last iteration.
-
                 *row.borrow_mut() = Poseidon2PreprocessedColsWide {
                     input: instr.addrs.input,
                     output: std::array::from_fn(|j| MemoryAccessColsChips {
@@ -225,10 +218,9 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             "generate_trace only supports KoalaBear field"
         );
 
-        // Allocating an intermediate `Vec` is faster.
         let instrs: Vec<&Poseidon2SkinnyInstr<KoalaBear>> =
             program
-                .iter_instructions() // Faster than using `rayon` for some reason. Maybe vectorization?
+                .iter_instructions()
                 .filter_map(|instruction| match instruction {
                     Poseidon2(instr) => Some(unsafe {
                         std::mem::transmute::<
@@ -248,8 +240,6 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             .par_chunks_mut(PREPROCESSED_POSEIDON2_WIDTH)
             .zip_eq(instrs)
             .for_each(|(row, instr)| {
-                // Set the memory columns. We read once, at the first iteration,
-                // and write once, at the last iteration.
                 let cols: &mut Poseidon2PreprocessedColsWide<_> = row.borrow_mut();
                 unsafe {
                     crate::sys::poseidon2_wide_instr_to_row_koalabear(instr, cols);
@@ -284,7 +274,6 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
 
         external_rounds_state[0] = input;
 
-        // Apply the first half of external rounds.
         for r in 0..NUM_EXTERNAL_ROUNDS / 2 {
             let next_state =
                 self.populate_external_round(external_rounds_state, &mut external_sbox, r);
@@ -295,14 +284,12 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             }
         }
 
-        // Apply the internal rounds.
         external_rounds_state[NUM_EXTERNAL_ROUNDS / 2] = self.populate_internal_rounds(
             internal_rounds_state,
             internal_rounds_s0,
             &mut internal_sbox,
         );
 
-        // Apply the second half of external rounds.
         for r in NUM_EXTERNAL_ROUNDS / 2..NUM_EXTERNAL_ROUNDS {
             let next_state =
                 self.populate_external_round(external_rounds_state, &mut external_sbox, r);
@@ -326,33 +313,21 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         r: usize,
     ) -> [F; WIDTH] {
         let mut state = {
-            // For the first round, apply the linear layer.
             let round_state: &[F; WIDTH] = if r == 0 {
                 &external_linear_layer_immut(&external_rounds_state[r])
             } else {
                 &external_rounds_state[r]
             };
 
-            // Add round constants.
-            //
-            // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
-            // columns for it, and instead include it in the constraint for the x^3 part of the
-            // sbox.
             let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
             let mut add_rc = *round_state;
             for i in 0..WIDTH {
                 add_rc[i] += F::from_u32(RC_16_30_U32[round][i]);
             }
 
-            // Apply the sboxes.
-            // Optimization: since the linear layer that comes after the sbox is degree 1, we can
-            // avoid adding columns for the result of the sbox, and instead include the x^3 -> x^7
-            // part of the sbox in the constraint for the linear layer
-            // let mut sbox_deg_7: [F; 16] = [F::ZERO; WIDTH];
             let mut sbox_deg_3: [F; 16] = [F::ZERO; WIDTH];
             for i in 0..WIDTH {
                 sbox_deg_3[i] = add_rc[i] * add_rc[i] * add_rc[i];
-                // sbox_deg_7[i] = sbox_deg_3[i] * sbox_deg_3[i] * add_rc[i];
             }
 
             if let Some(sbox) = sbox.as_deref_mut() {
@@ -362,7 +337,6 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             sbox_deg_3
         };
 
-        // Apply the linear layer.
         external_linear_layer(&mut state);
         state
     }
@@ -376,28 +350,15 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         let mut state: [F; WIDTH] = *internal_rounds_state;
         let mut sbox_deg_3: [F; NUM_INTERNAL_ROUNDS] = [F::ZERO; NUM_INTERNAL_ROUNDS];
         for r in 0..NUM_INTERNAL_ROUNDS {
-            // Add the round constant to the 0th state element.
-            // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
-            // columns for it, just like for external rounds.
             let round = r + NUM_EXTERNAL_ROUNDS / 2;
             let add_rc = state[0] + F::from_u32(RC_16_30_U32[round][0]);
 
-            // Apply the sboxes.
-            // Optimization: since the linear layer that comes after the sbox is degree 1, we can
-            // avoid adding columns for the result of the sbox, just like for external rounds.
             sbox_deg_3[r] = add_rc * add_rc * add_rc;
-            // let sbox_deg_7 = sbox_deg_3[r] * sbox_deg_3[r] * add_rc;
 
-            // Apply the linear layer.
             state[0] = sbox_deg_3[r];
 
             internal_linear_layer(&mut state);
 
-            // Optimization: since we're only applying the sbox to the 0th state element, we only
-            // need to have columns for the 0th state element at every step. This is because the
-            // linear layer is degree 1, so all state elements at the end can be expressed as a
-            // degree-3 polynomial of the state at the beginning of the internal rounds and the 0th
-            // state element at rounds prior to the current round
             if r < NUM_INTERNAL_ROUNDS - 1 {
                 internal_rounds_s0[r] = state[0];
             }
@@ -514,7 +475,6 @@ mod tests {
             },
         );
 
-        // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, num_columns)
     }
 }

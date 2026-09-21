@@ -51,11 +51,6 @@ impl AddAssign for ExecutionReport {
         counts_add_assign(&mut self.opcode_counts, *rhs.opcode_counts);
         counts_add_assign(&mut self.syscall_counts, *rhs.syscall_counts);
         self.touched_memory_addresses += rhs.touched_memory_addresses;
-        // The proving pipeline aggregates per-shard reports with this operator,
-        // so omitting `cycle_tracker` silently discarded every
-        // `cycle-tracker-report-*` measurement the guest emitted. A scope's
-        // cycles are additive across the shards it spans, which is the same rule
-        // the single-report accumulation in `handle_cycle_tracker_command` uses.
         for (name, cycles) in rhs.cycle_tracker {
             *self.cycle_tracker.entry(name).or_insert(0) += cycles;
         }
@@ -90,10 +85,9 @@ impl Display for ExecutionReport {
 mod tests {
     use super::ExecutionReport;
 
-    /// The proving pipeline aggregates per-shard reports with `+=`, and this
-    /// operator used to omit `cycle_tracker` entirely, so every
-    /// `cycle-tracker-report-*` measurement was silently discarded on the way
-    /// out. A scope's cycles are additive across the shards it spans.
+    /// The proving pipeline aggregates per-shard reports with `+=`, which must
+    /// carry `cycle_tracker`: a scope's cycles are additive across the shards
+    /// it spans.
     #[test]
     fn aggregation_keeps_scope_measurements() {
         let mut a = ExecutionReport::default();

@@ -8,9 +8,8 @@ use zkm_derive::AlignedBorrow;
 /// Worker column layout for the keccak permutation.  Each row is **one** of the
 /// 24 keccak-f rounds.  The round-to-round state hand-off and the multi-block
 /// sponge are carried on the `PrecompileChain` buses (see `air` + the
-/// `control` chip), replacing the legacy multi-row `p3_keccak` SubAir window and
-/// the sponge row-selector machinery the single-row BaseFold folder cannot
-/// evaluate.
+/// `control` chip), so no multi-row window or row selector is needed (the
+/// single-row zerocheck folder has neither).
 ///
 /// `keccak` MUST stay the first field (offset 0): trace generation copies the
 /// `p3_keccak` per-round columns into `row[..NUM_KECCAK_COLS]`.

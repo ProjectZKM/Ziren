@@ -100,7 +100,6 @@ pub trait ByteRecord {
             index += 2;
         }
         if index < bytes.len() {
-            // If the input slice's length is odd, we need to add a check for the last byte.
             self.add_u8_range_check(bytes[index], 0);
         }
     }

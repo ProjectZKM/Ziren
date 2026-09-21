@@ -66,7 +66,6 @@ impl<F: Field> Add4Operation<F> {
             debug_assert_eq!(self.value[i], F::from_u32(res % base));
         }
 
-        // Range check.
         {
             record.add_u8_range_checks(&a);
             record.add_u8_range_checks(&b);
@@ -87,7 +86,6 @@ impl<F: Field> Add4Operation<F> {
         is_real: AB::Var,
         cols: Add4Operation<AB::Var>,
     ) {
-        // Range check each byte.
         {
             builder.slice_range_check_u8(&a.0, is_real);
             builder.slice_range_check_u8(&b.0, is_real);
@@ -99,7 +97,6 @@ impl<F: Field> Add4Operation<F> {
         builder.assert_bool(is_real);
         let mut builder_is_real = builder.when(is_real);
 
-        // Each value in is_carry_{0,1,2,3} is 0 or 1, and exactly one of them is 1 per digit.
         {
             for i in 0..WORD_SIZE {
                 builder_is_real.assert_bool(cols.is_carry_0[i]);
@@ -116,7 +113,6 @@ impl<F: Field> Add4Operation<F> {
             }
         }
 
-        // Calculates carry from is_carry_{0,1,2,3}.
         {
             let one = AB::Expr::ONE;
             let two = AB::F::from_u32(2);
@@ -132,11 +128,8 @@ impl<F: Field> Add4Operation<F> {
             }
         }
 
-        // Compare the sum and summands by looking at carry.
         {
             let base = AB::F::from_u32(256);
-            // For each limb, assert that difference between the carried result and the non-carried
-            // result is the product of carry and base.
             for i in 0..WORD_SIZE {
                 let mut overflow = a[i] + b[i] + c[i] + d[i] - cols.value[i];
                 if i > 0 {

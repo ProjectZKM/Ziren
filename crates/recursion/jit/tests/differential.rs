@@ -34,9 +34,6 @@ fn addr(a: u32) -> Address<F> {
 fn build_program(n: usize) -> (RecursionProgram<F>, u32) {
     let mut instrs: Vec<Instruction<F>> = Vec::new();
 
-    // Seed 8 constants; `Mem` is not JIT-able yet, so the seeds go in as
-    // memory-constant instructions the JIT will reject -- which is exactly
-    // why the test compiles the ALU-only tail separately (see below).
     let seeds: [u32; 8] = [1, 2, 3, 5, 7, 11, 13, 0];
     for (i, s) in seeds.iter().enumerate() {
         instrs.push(instr::mem(MemAccessKind::Write, 1, i as u32, *s));
@@ -48,10 +45,6 @@ fn build_program(n: usize) -> (RecursionProgram<F>, u32) {
         s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         let a = ((s >> 33) as u32) % next;
         let mut b = ((s >> 13) as u32) % next;
-        // Div included deliberately: it is 16.8% of BaseAlu on a real leaf
-        // program, so a test without it would exercise a path no real
-        // program takes.  `in2` is drawn from the live addresses, so zero
-        // divisors do occur — seed 7 is zero and every result feeds back in.
         let opcode = match (s >> 3) % 4 {
             0 => BaseAluOpcode::AddF,
             1 => BaseAluOpcode::SubF,
@@ -59,10 +52,6 @@ fn build_program(n: usize) -> (RecursionProgram<F>, u32) {
             _ => BaseAluOpcode::DivF,
         };
         if opcode == BaseAluOpcode::DivF {
-            // Divide by one of the non-zero seeds.  A random live address
-            // can hold zero, and the INTERPRETER rejects that program, so a
-            // comparison test cannot use one; the zero-divisor outcomes get
-            // their own test below.
             b = ((s >> 45) as u32) % 6;
         }
         instrs.push(Instruction::BaseAlu(BaseAluInstr {
@@ -89,17 +78,12 @@ fn the_jit_reproduces_the_interpreter_word_for_word() {
     let (program, total) = build_program(N);
     let program = Arc::new(program);
 
-    // the interpreter
     let mut runtime =
         Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(program.clone(), SC::new().perm);
     runtime.run().expect("interpreter");
     let want_events = runtime.record.base_alu_events.clone();
     assert_eq!(want_events.len(), N, "every ALU instruction should emit one event");
 
-    // the JIT
-    // Compile only the ALU tail: the seeding `Mem` writes are not emitted
-    // by this phase, so the test performs them directly into the same flat
-    // memory the emitted code addresses.
     let analyzed = &program.seq_blocks;
     let alu_only = zkm_recursion_core::runtime::RawProgram {
         seq_blocks: vec![zkm_recursion_core::runtime::SeqBlock::Basic(
@@ -115,10 +99,8 @@ fn the_jit_reproduces_the_interpreter_word_for_word() {
     let compiled = zkm_recursion_jit::compile::compile(&alu_only).expect("compile");
     assert_eq!(compiled.emitted, N);
 
-    // Flat memory, seeded the way the `Mem` instructions would have.
     let mut mem = vec![0u32; (total as usize + 1) * 4];
     for (i, s) in [1u32, 2, 3, 5, 7, 11, 13, 0].iter().enumerate() {
-        // Montgomery form, as the runtime stores it.
         let v: u32 = unsafe { std::mem::transmute::<KoalaBear, u32>(F::from_u32(*s)) };
         mem[i * 4] = v;
     }
@@ -131,7 +113,6 @@ fn the_jit_reproduces_the_interpreter_word_for_word() {
         "the interpreter accepted this program, so the JIT must too"
     );
 
-    // compare
     for (i, want) in want_events.iter().enumerate() {
         let got = &events[i * 3..i * 3 + 3];
         let w: [u32; 3] = unsafe {
@@ -144,8 +125,6 @@ fn the_jit_reproduces_the_interpreter_word_for_word() {
         assert_eq!(got, w, "event {i} diverged (out, in1, in2)");
     }
 
-    // And the memory the interpreter left behind, cell for cell -- this is
-    // what catches a missed zero lane, which no event comparison would see.
     for a in 0..total as usize {
         let want = runtime.memory.mr(addr(a as u32)).val;
         for lane in 0..4 {
@@ -162,7 +141,6 @@ fn the_jit_reproduces_the_interpreter_word_for_word() {
 /// refuses.
 #[test]
 fn the_zero_divisor_outcomes_match() {
-    // (in1, mult, is_assert) -> expected
     struct Case {
         in1: u32,
         mult: u32,
@@ -170,18 +148,15 @@ fn the_zero_divisor_outcomes_match() {
         want_out: Option<u32>,
     }
     let cases = [
-        // 0 / 0 == 1, and the interpreter accepts it.
         Case { in1: 0, mult: 1, want_status: 0, want_out: Some(1) },
-        // Dead DivF (mult == 0, not an assert): result never read, so zero.
         Case { in1: 13, mult: 0, want_status: 0, want_out: Some(0) },
-        // Live DivF by zero: must trip.
         Case { in1: 13, mult: 1, want_status: 1, want_out: None },
     ];
 
     for (i, c) in cases.iter().enumerate() {
         let mut instrs: Vec<Instruction<F>> = vec![
             instr::mem(MemAccessKind::Write, 1, 0, c.in1),
-            instr::mem(MemAccessKind::Write, 1, 1, 0), // the zero divisor
+            instr::mem(MemAccessKind::Write, 1, 1, 0),
         ];
         instrs.push(Instruction::BaseAlu(BaseAluInstr {
             opcode: BaseAluOpcode::DivF,
@@ -198,7 +173,6 @@ fn the_zero_divisor_outcomes_match() {
         program.total_memory = program.computed_total_memory();
         let program = Arc::new(program);
 
-        // What the interpreter does with it.
         let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
             SC::new().perm,
@@ -210,7 +184,6 @@ fn the_zero_divisor_outcomes_match() {
             "case {i}: interpreter and expectation disagree ({interp:?})"
         );
 
-        // What the JIT does with it.
         let analyzed = &program.seq_blocks;
         let alu_only = zkm_recursion_core::runtime::RawProgram {
             seq_blocks: vec![zkm_recursion_core::runtime::SeqBlock::Basic(

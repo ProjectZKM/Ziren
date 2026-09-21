@@ -66,7 +66,6 @@ impl<F: Field> Sum for SepticDigest<F> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         let start = SepticDigest::<F>::starting_digest().0;
 
-        // Computation order is start + (digest1 - offset) + (digest2 - offset) + ... + (digestN - offset) + offset - start.
         let mut ret = iter.fold(start, |acc, x| {
             let sum_offset = acc.add_incomplete(x.0);
             sum_offset.sub_incomplete(SepticDigest::<F>::zero().0)

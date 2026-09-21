@@ -1,37 +1,18 @@
-//! Deferred recursion-side basefold verifier program (May 19 2026).
+//! Deferred recursion-side basefold verifier program.
 //!
 //! Counterpart to [`super::deferred_basefold`] that targets the
 //! [`zkm_recursion_core::machine::RecursionAir`] chip set rather than
-//! [`zkm_core_machine::mips::MipsAir`].  Used when
-//! Forcing BaseFold for recursion widens the host prover's
-//! basefold gate to recursion shards.
+//! [`zkm_core_machine::mips::MipsAir`]. It mirrors the MIPS-path builder
+//! [`super::basefold_programs::build_deferred_basefold_program`] and reuses
+//! [`super::deferred_basefold::verify_deferred_basefold`] as its verifier
+//! body; see [`super::compress_basefold_recursion`] for the parallel compress
+//! program.
 //!
-//! See the parallel scaffold at [`super::compress_basefold_recursion`]
-//! for the structural-skeleton design and what's wired vs stubbed.
-//! Mirrors the MIPS-path program builder
-//! [`super::basefold_programs::build_deferred_basefold_program`]
-//! (`basefold_programs.rs:129`), specialised by call-site intent for
-//! recursion-AIR consumers.
-//!
-//! # What's wired
-//!
-//! * Program builder — accepts a `StarkMachine<KoalaBearPoseidon2,
-//!   RecursionAir<KoalaBear, DEGREE>>` and a
-//!   [`ZKMDeferredBasefoldWitnessValues`] whose embedded
-//!   `JaggedShardProof` was produced over recursion-AIR traces.
-//! * Trait bound propagation — `RecursionAir<F, DEGREE>` satisfies
-//!   `Air<ShardConstraintFolder>` via the standard `MachineAir`
-//!   derive (see notes in
-//!   [`super::compress_basefold_recursion`]).
-//!
-//! # What's stubbed
-//!
-//! * No new in-circuit verifier function — reuses
-//!   [`super::deferred_basefold::verify_deferred_basefold`] verbatim.
-//! * Selector-soundness of per-chip basefold reduction is deferred
-//!   to a follow-up that handles vk_map regen + smoke tests.
-//! * Wrap stays FRI in the HYBRID configuration. No
-//!   `wrap_basefold_recursion` companion landed in this sub-sprint.
+//! The builder accepts a `StarkMachine<KoalaBearPoseidon2,
+//! RecursionAir<KoalaBear, DEGREE>>` and a [`ZKMDeferredBasefoldWitnessValues`]
+//! whose embedded `JaggedShardProof` was produced over recursion-AIR traces;
+//! `RecursionAir<F, DEGREE>` satisfies `Air<ShardConstraintFolder>` via the
+//! standard `MachineAir` derive.
 
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::air::MachineAir;

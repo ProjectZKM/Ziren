@@ -69,8 +69,6 @@ fn run_words_mode(
     let hi = runtime.register(Register::HI);
     let lo = runtime.register(Register::LO);
     let mem = mem_addrs.iter().map(|a| (*a, runtime.word(*a))).collect();
-    // Trace-level fingerprint: the serialized execution records (every event the prover will
-    // see), so determinism is checked on the trace, not only on the architectural state.
     let records_digest = if fast {
         0
     } else {
@@ -131,8 +129,6 @@ fn spec_vectors_match_the_oracle() {
                     .iter()
                     .map(|x| x.as_u64().unwrap() as u32)
                     .collect();
-                // `zip` below would silently stop at the shorter side, where
-                // the indexed loop this replaced panicked; keep it loud.
                 assert_eq!(regs.len(), 32, "oracle vector must carry all 32 registers");
                 for (i, (got, want)) in fin.regs.iter().zip(&regs).enumerate().skip(1) {
                     if got != want {
@@ -152,21 +148,16 @@ fn spec_vectors_match_the_oracle() {
                             .push(format!("mem[{a:#x}]: ziren {got:#010x} oracle {want:#010x}"));
                     }
                 }
-                // Determinism: a second run must reproduce the state exactly.
                 let again = run_words(&words, code, &image, &mem_addrs).expect("second run");
                 if again.regs != fin.regs
                     || again.hi != fin.hi
                     || again.lo != fin.lo
                     || again.mem != fin.mem
                     || again.clk != fin.clk
-                    // The trace fingerprint, which is the whole point of
-                    // computing it: determinism on the events the prover
-                    // sees, not only on the architectural state.
                     || again.records_digest != fin.records_digest
                 {
                     problems.push("second run differs from the first".into());
                 }
-                // The untraced / JIT path must agree with the traced interpreter.
                 match run_words_mode(&words, code, &image, &mem_addrs, true) {
                     Ok(fast) => {
                         if fast.regs != fin.regs
@@ -193,9 +184,6 @@ fn spec_vectors_match_the_oracle() {
             failures.insert(name, [vec![format!("asm: {}", asm.join(" ; "))], problems].concat());
         }
     }
-    // Optional: dump the executor's own decoding of every vector word (opcode id and operands),
-    // so the Lean ISA model can be checked against `Instruction::decode_from` as well as against
-    // the oracle's results (see `spec_vectors/gen_lean.py`).
     if let Ok(path) = std::env::var("SPEC_DUMP_DECODED") {
         let mut decoded: BTreeMap<String, Value> = BTreeMap::new();
         for v in vectors {
@@ -256,39 +244,23 @@ fn cannon_open_mips_tests() {
     for path in &files {
         let name = path.file_stem().unwrap().to_string_lossy().to_string();
         if name.starts_with("oracle") || name == "brk" {
-            // Cannon ABI, not ISA: the pre-image oracle syscalls, and `brk` returning Cannon's
-            // fixed heap start 0x40000000 (Ziren's heap lives elsewhere).
             skipped.push(name);
             continue;
         }
         let bytes = std::fs::read(path).unwrap();
-        // Cannon targets big-endian MIPS: instruction words are stored big-endian.  Instruction
-        // semantics are endianness-neutral except for the byte / half-word / partial-word memory
-        // ops, whose expected results assume a big-endian data layout; Ziren is little-endian
-        // (mipsel), so those programs are reported separately, not counted as failures.
         let words: Vec<u32> =
             bytes.chunks(4).map(|c| u32::from_be_bytes([c[0], c[1], c[2], c[3]])).collect();
         let byte_order_sensitive = matches!(
             name.as_str(),
             "lb" | "lbu" | "lh" | "lhu" | "lwl" | "lwr" | "sb" | "sh" | "swl" | "swr"
         );
-        // The programs address their done / result words and data areas through
-        // `lui rX, 0xbfXX ; ori ...` pairs (0xbffffff0 for the result, 0xbfc00000 for data).
-        // Ziren's guest address space ends at 0x7f010000 (stack top), so relocate the whole
-        // 0xbfXX0000 region to 0x7eXX0000 by patching every such `lui`; address arithmetic
-        // inside the programs is relative to those bases, so the semantics are unchanged.
         let mut words = words;
         for w in words.iter_mut() {
             if *w >> 26 == 0x0f && (*w & 0xff00) == 0xbf00 {
                 *w = (*w & 0xffff_0000) | 0x7e00 | (*w & 0xff);
             }
         }
-        // They end with `jr $ra` back to the harness; `$ra` is zero here and a jump to address 0
-        // is a null-pointer error in Ziren.  Replace the last `jr $ra` by an absolute jump past
-        // the end of the program, which is the executor's termination condition.
         let end = (4 * words.len()) as u32;
-        // The harness return is the `jr $ra` right after `sw $s1, 4($s0)` (the done flag);
-        // programs with subroutines place further `jr $ra`s after it.
         let harness_ret = (1..words.len())
             .find(|i| words[*i] == 0x03e0_0008 && words[i - 1] == 0xae11_0004)
             .or_else(|| words.iter().rposition(|w| *w == 0x03e0_0008));
@@ -299,7 +271,6 @@ fn cannon_open_mips_tests() {
             continue;
         }
         let base = 0x7eff_fff0u32;
-        // The programs end with `jr $ra`; $ra is zero, and pc == 0 terminates the executor.
         let done_addr = base + 4;
         let result_addr = base + 8;
         tracing::info!("cannon {name}");

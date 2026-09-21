@@ -60,18 +60,14 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
             <ShaCompressChip as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Set the octet_num and octet columns for the padded rows.
         let mut octet_num = 0;
         let mut octet = 0;
         for row in rows[num_real_rows..].iter_mut() {
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
             cols.octet_num[octet_num] = F::ONE;
             cols.octet[octet] = F::ONE;
-            // Pin index = 8*octet_num + octet on padding rows too (the per-row
-            // `index` constraint is not gated by is_real).
             cols.index = F::from_u32((8 * octet_num + octet) as u32);
 
-            // If in the compression phase, set the k value.
             if octet_num != 0 && octet_num != 9 {
                 let compression_idx = octet_num - 1;
                 let k_idx = compression_idx * 8 + octet;
@@ -84,7 +80,6 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
             }
         }
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             NUM_SHA_COMPRESS_COLS,
@@ -139,7 +134,6 @@ impl ShaCompressChip {
 
         let mut octet_num_idx = 0;
 
-        // Load a, b, c, d, e, f, g, h.
         for j in 0..8usize {
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
@@ -166,14 +160,12 @@ impl ShaCompressChip {
             cols.h = Word::from(event.h_read_records[7].value);
 
             cols.is_real = F::ONE;
-            // index = j (octet_num 0, octet j) for the 8 init rows.
             cols.index = F::from_u32(j as u32);
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);
             }
         }
 
-        // Performs the compress operation.
         let mut h_array = event.h;
         for j in 0..64 {
             if (j as u32).is_multiple_of(8) {
@@ -251,7 +243,6 @@ impl ShaCompressChip {
             h_array[0] = temp1_add_temp2;
 
             cols.is_real = F::ONE;
-            // index = 8*octet_num_idx + (j % 8) for the 64 compression rows.
             cols.index = F::from_u32((8 * octet_num_idx + j % 8) as u32);
 
             if rows.as_ref().is_some() {
@@ -262,7 +253,6 @@ impl ShaCompressChip {
         let mut v: [u32; 8] = (0..8).map(|i| h_array[i]).collect::<Vec<_>>().try_into().unwrap();
 
         octet_num_idx += 1;
-        // Store a, b, c, d, e, f, g, h.
         for j in 0..8usize {
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
@@ -303,7 +293,6 @@ impl ShaCompressChip {
             };
 
             cols.is_real = F::ONE;
-            // index = 72 + j (octet_num 9) for the 8 finalize rows.
             cols.index = F::from_u32((8 * octet_num_idx + j) as u32);
 
             if rows.as_ref().is_some() {

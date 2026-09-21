@@ -11,12 +11,12 @@ use crate::instruction::InstructionCols;
 /// A trait which contains methods related to program lookups in an AIR.
 pub trait ProgramAirBuilder: BaseAirBuilder {
     /// Sends an instruction.
+    ///
+    /// * `instruction`: not `Copy`; a typed frame (`ITypeFrameCols`) builds
+    ///   it from `Expr`s, since the slots its shape fixes are constants.
     fn send_program(
         &mut self,
         pc: impl Into<Self::Expr>,
-        // NOT `+ Copy`: a typed frame (`ITypeFrameCols`) rebuilds this tuple
-        // out of `Expr`s, since the slots its shape makes constant are no
-        // longer columns.  The tuple is consumed once, so `Copy` bought nothing.
         instruction: InstructionCols<impl Into<Self::Expr>>,
         multiplicity: impl Into<Self::Expr>,
     ) {

@@ -2,9 +2,9 @@
 //!
 //! Loads a `BTreeMap<[KoalaBear; 8], usize>` (the vk_map wire format)
 //! and checks that a set of known captured recursion VK digests are
-//! present as keys.  Used to validate that a regenerated vk_map covers
-//! every reachable inner-compose / normalize VK WITHOUT running a full
-//! (multi-GPU, OOM-prone) prove.
+//! present as keys, which validates that a regenerated vk_map covers
+//! every reachable inner-compose / normalize VK without running a full
+//! (multi-GPU) prove.
 //!
 //! Each `--digest` is 8 comma-separated u32 values (the canonical
 //! KoalaBear repr, exactly as printed by the `vk not allowed: [...]`

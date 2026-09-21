@@ -273,9 +273,7 @@ where
     AB: ZKMAirBuilder<F = F> + MultiTableAirBuilder<'a> + 'a,
 {
     fn eval(&self, builder: &mut AB) {
-        // Evaluate the execution trace constraints.
         self.air.eval(builder);
-        // Evaluate permutation constraints.
         let batch_size = self.logup_batch_size();
         eval_permutation_constraints(
             &self.sends,

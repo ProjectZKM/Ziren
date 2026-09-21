@@ -82,9 +82,6 @@ where
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        // Horner accumulation in `EF`, crossing `K → EF` on the add:
-        // `EF·EF + K`.  For `K = F` this embeds `x` into the constant
-        // coefficient (ring-hom), identical to the `K = EF` fold.
         let x: K = x.into();
         self.accumulator = self.accumulator * self.alpha + x;
     }
@@ -108,11 +105,6 @@ where
     where
         I: Into<Self::ExprEF>,
     {
-        // Extension-field constraints (permutation / cumulative-sum terms)
-        // enter the SAME Horner chain as the base constraints, but their
-        // value is already `EF` — `EF·EF + EF`.  Kept a separate method
-        // (NOT delegated to `assert_zero`) because `Self::Expr = K` may be
-        // the base field.
         let x: EF = x.into();
         self.accumulator = self.accumulator * self.alpha + x;
     }
@@ -321,7 +313,6 @@ mod tests {
         folder.assert_zero(EF::from_u64(2));
         folder.assert_zero(EF::from_u64(3));
         folder.assert_zero(EF::from_u64(5));
-        // Expected: ((0*7+2)*7+3)*7+5 = (2*7+3)*7+5 = 17*7+5 = 124
         assert_eq!(folder.accumulator, EF::from_u64(124));
     }
 }

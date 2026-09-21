@@ -64,34 +64,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: &ZKMCoreProofData,
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
-        // The proof should not be empty.
         if proof.0.is_empty() {
             return Err(MachineVerificationError::EmptyProof);
         }
-        // First shard has a "CPU" constraint.
-        //
-        // There is no Cpu chip any more — every instruction chip
-        // carries its own frame, so the old "first shard has a CPU" and
-        // per-shard CPU log-degree checks are gone.  Multiplicity overflow is
-        // bounded by the shard size cap.
 
-        // Shard constraints.
-        //
-        // Initialization:
-        // - Shard should start at one.
-        //
-        // Transition:
-        // - Shard should increment by one for each shard.
-        // Same guard as `StarkMachine::verify`: the `Borrow` below slices to
-        // the typed size behind a `debug_assert!`, so on a deserialized proof
-        // with a short `public_values` this panicked instead of returning the
-        // typed error.  `ZKMCoreProofData` arrives from the wire, so it is
-        // untrusted input to a `Result`-returning function.
-        //
-        // The guard reports the error `verify_shard` would have reported for
-        // the same proof, carrying `expected`/`got`, so moving the check
-        // earlier changes WHEN the length is rejected and nothing about the
-        // verdict or the error a caller matches on.
         let num_pv_elts = self.core_prover.machine().num_pv_elts();
         if let Some(p) = proof.0.iter().find(|p| p.public_values.len() < num_pv_elts) {
             return Err(MachineVerificationError::InvalidShardProof(
@@ -117,15 +93,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
         }
 
-        // Execution shard constraints.
-        //
-        // Initialization:
-        // - Execution shard should start at one.
-        //
-        // Transition:
-        // - Execution shard should increment by one for each shard with "CPU".
-        // - Execution shard should stay the same for non-CPU shards.
-        // - For the other shards, execution shard does not matter.
         let mut current_execution_shard = KoalaBear::ZERO;
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
@@ -140,22 +107,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
         }
 
-        // Program counter constraints.
-        //
-        // Initialization:
-        // - `start_pc` should start as `vk.start_pc`.
-        //
-        // Transition:
-        // - `next_pc` of the previous shard should equal `start_pc`.
-        // - If it's not a shard with "CPU", then `start_pc` equals `next_pc`.
-        // - If it's a shard with "CPU", then `start_pc` should never equal zero.
-        // - The delay-slot lookahead: `start_next_pc = start_pc + 4` and
-        //   `next_next_pc = next_pc + 4` on execution shards (no shard boundary
-        //   falls inside a delay slot); on the others the two endpoints cancel,
-        //   `start_next_pc = next_next_pc`, and the value is inert.
-        //
-        // Finalization:
-        // - `next_pc` should equal zero.
         let mut prev_next_pc = KoalaBear::ZERO;
         for (i, shard_proof) in proof.0.iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
@@ -183,8 +134,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 && (public_values.start_next_pc != public_values.start_pc + KoalaBear::from_u32(4)
                     || public_values.next_next_pc != public_values.next_pc + KoalaBear::from_u32(4))
             {
-                // The 2-pc state: no shard boundary falls inside a delay slot,
-                // so both lookaheads are sequential (the halting row's too).
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_next_pc != start_pc + 4 or next_next_pc != next_pc + 4: \
                      an execution shard enters and exits outside a delay slot",
@@ -204,9 +153,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             prev_next_pc = public_values.next_pc;
         }
 
-        // Exit code constraints.
-        //
-        // - In every shard, the exit code should be zero.
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
@@ -217,21 +163,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
         }
 
-        // Memory initialization & finalization constraints.
-        //
-        // Initialization:
-        // - `previous_init_addr_bits` should be zero.
-        // - `previous_finalize_addr_bits` should be zero.
-        //
-        // Transition:
-        // - For all shards, `previous_init_addr_bits` should equal `last_init_addr_bits` of the
-        //   previous shard.
-        // - For all shards, `previous_finalize_addr_bits` should equal `last_finalize_addr_bits` of
-        //   the previous shard.
-        // - For shards without "MemoryInit", `previous_init_addr_bits` should equal
-        //   `last_init_addr_bits`.
-        // - For shards without "MemoryFinalize", `previous_finalize_addr_bits` should equal
-        //   `last_finalize_addr_bits`.
         let mut last_init_addr_bits_prev = [KoalaBear::ZERO; 32];
         let mut last_finalize_addr_bits_prev = [KoalaBear::ZERO; 32];
         for shard_proof in proof.0.iter() {
@@ -263,23 +194,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             last_finalize_addr_bits_prev = public_values.last_finalize_addr_bits;
         }
 
-        // Digest constraints.
-        //
-        // Initialization:
-        // - `committed_value_digest` should be zero.
-        // - `deferred_proofs_digest` should be zero.
-        //
-        // Transition:
-        // - If `committed_value_digest_prev` is not zero, then `committed_value_digest` should equal
-        //  `committed_value_digest_prev`. Otherwise, `committed_value_digest` should equal zero.
-        // - If `deferred_proofs_digest_prev` is not zero, then `deferred_proofs_digest` should
-        //   equal
-        //  `deferred_proofs_digest_prev`. Otherwise, `deferred_proofs_digest` should equal zero.
-        // - If it's not a shard with "CPU", then `committed_value_digest` should not change from the
-        //  previous shard.
-        // - If it's not a shard with "CPU", then `deferred_proofs_digest` should not change from
-        //   the
-        //  previous shard.
         let zero_committed_value_digest = [Word([KoalaBear::ZERO; WORD_SIZE]); PV_DIGEST_NUM_WORDS];
         let zero_deferred_proofs_digest = [KoalaBear::ZERO; POSEIDON_NUM_WORDS];
         let mut committed_value_digest_prev = zero_committed_value_digest;
@@ -316,17 +230,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             deferred_proofs_digest_prev = public_values.deferred_proofs_digest;
         }
 
-        // Verify that the number of shards is not too large.
         if proof.0.len() > 1 << 16 {
             return Err(MachineVerificationError::TooManyShards);
         }
 
-        // Close the cross-shard memory argument.  `StarkMachine::verify` below
-        // is per-shard and is shared with the recursion machines, so the
-        // cross-shard identity lives beside the core public values it is about.
         zkm_core_machine::utils::global_sum::verify_global_cumulative_sum(&vk.vk, &proof.0)?;
 
-        // Verify the shard proof.
         let mut challenger = self.core_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: proof.0.to_vec() };
         self.core_prover.machine().verify(&vk.vk, &machine_proof, &mut challenger)?;
@@ -345,7 +254,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
         self.compress_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
 
-        // Validate public values
         let public_values: &RecursionPublicValues<_> = proof.public_values.as_slice().borrow();
         if !is_recursion_public_values_valid(self.compress_prover.machine().config(), public_values)
         {
@@ -365,13 +273,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
-        // `is_complete` should be 1. In the reduce program, this ensures that the proof is fully
-        // reduced.
         if public_values.is_complete != KoalaBear::ONE {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        // Verify that the proof is for the Ziren vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if public_values.zkm_vk_digest != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
@@ -390,7 +295,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
         self.shrink_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
 
-        // Validate public values
         let public_values: &RecursionPublicValues<_> =
             proof.proof.public_values.as_slice().borrow();
         if !is_recursion_public_values_valid(self.compress_prover.machine().config(), public_values)
@@ -409,15 +313,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
-        // `is_complete` should be 1: the shrink stage consumes a fully reduced
-        // compress proof, and every completeness predicate of that proof is
-        // gated on this flag.  The circuit asserts it too (wrap_basefold.rs);
-        // this is the host mirror.
         if public_values.is_complete != KoalaBear::ONE {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        // Verify that the proof is for the Ziren vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if public_values.zkm_vk_digest != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
@@ -438,21 +337,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let wrap_vk = self.wrap_vk.get().expect("Wrap verifier key not set");
         self.wrap_prover.machine().verify(wrap_vk, &machine_proof, &mut challenger)?;
 
-        // Validate public values
         let public_values: &RootPublicValues<_> = proof.proof.public_values.as_slice().borrow();
         if !is_root_public_values_valid(self.shrink_prover.machine().config(), public_values) {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "root public values are invalid",
             ));
         }
-        // `is_complete` should be 1: the wrap stage is terminal, so the proof
-        // it consumes must be the root of a fully reduced tree.  The circuit
-        // asserts it too (wrap_basefold.rs); this is the host mirror.
         if *public_values.is_complete() != KoalaBear::ONE {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        // Verify that the proof is for the Ziren vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if *public_values.zkm_vk_digest() != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
@@ -475,16 +369,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let committed_values_digest = BigUint::from_str(&proof.public_inputs[1])?;
         let vk_root = BigUint::from_str(&proof.public_inputs[2])?;
 
-        // The recursion key allowlist root is a public input of the wrap circuit
-        // precisely so it can be pinned here.  Inside the tree it is a witness,
-        // so without this check a proof built around a substituted compose or
-        // leaf program is indistinguishable from an honest one.
         let expected_vk_root = koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
         if vk_root != expected_vk_root {
             return Err(PlonkVerificationError::InvalidVerificationKey.into());
         }
 
-        // Verify the proof with the corresponding public inputs.
         prover.verify(proof, &vkey_hash, &committed_values_digest, &vk_root, build_dir)?;
 
         verify_plonk_bn254_public_inputs(vk, public_values, &proof.public_inputs)?;
@@ -506,16 +395,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let committed_values_digest = BigUint::from_str(&proof.public_inputs[1])?;
         let vk_root = BigUint::from_str(&proof.public_inputs[2])?;
 
-        // The recursion key allowlist root is a public input of the wrap circuit
-        // precisely so it can be pinned here.  Inside the tree it is a witness,
-        // so without this check a proof built around a substituted compose or
-        // leaf program is indistinguishable from an honest one.
         let expected_vk_root = koalabears_to_bn254(&self.recursion_vk_root).as_canonical_biguint();
         if vk_root != expected_vk_root {
             return Err(Groth16VerificationError::InvalidVerificationKey.into());
         }
 
-        // Verify the proof with the corresponding public inputs.
         prover.verify(proof, &vkey_hash, &committed_values_digest, &vk_root, build_dir)?;
 
         verify_groth16_bn254_public_inputs(vk, public_values, &proof.public_inputs)?;
@@ -593,18 +477,15 @@ impl<C: ZKMProverComponents> SubproofVerifier for ZKMProver<C> {
         vk_hash: [u32; 8],
         committed_value_digest: [u32; 8],
     ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>> {
-        // Check that the vk hash matches the vk hash from the input.
         if vk.hash_u32() != vk_hash {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "vk hash from syscall does not match vkey from input",
             ));
         }
-        // Check that proof is valid.
         self.verify_compressed(
             &ZKMReduceProof { vk: proof.vk.clone(), proof: proof.proof.clone() },
             &ZKMVerifyingKey { vk: vk.clone() },
         )?;
-        // Check that the committed value digest matches the one from syscall
         let public_values: &RecursionPublicValues<_> =
             proof.proof.public_values.as_slice().borrow();
         if public_values.vk_root != self.recursion_vk_root {

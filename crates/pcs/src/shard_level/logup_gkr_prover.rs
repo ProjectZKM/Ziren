@@ -37,8 +37,6 @@ where
     if width == 0 {
         return Vec::new();
     }
-    // Row-major contract: `trace.len() = height · width`.  Checked, not assumed --
-    // integer division would otherwise drop a partial row silently.
     assert_eq!(
         trace.len() % width,
         0,
@@ -47,20 +45,7 @@ where
     );
     let height = trace.len() / width;
     let domain = 1usize << eval_point.len();
-    // `assert`, not `debug_assert`: at height > domain the `else` branch below
-    // sizes the eq table at `domain` and the row loop indexes past it, so release
-    // would panic out of bounds inside a rayon closure rather than say this.
     assert!(height <= domain, "trace height ({height}) must be <= 2^|eval_point| ({domain})");
-    // Truncated eq table.  Only rows < height are summed, and for row < 2^k every
-    // bit i ≥ k of `row` is zero, hence with k = ⌈log2 height⌉
-    //
-    //     eq(r, row) = ( Π_{i≥k} (1 - r_i) ) · eq(r[..k], row)
-    //
-    // so build the 2^k table and fold the constant tail into each column
-    // accumulator: exact by associativity and distributivity, and O(height)
-    // instead of O(2^|eval_point|).  The gap is large -- `eval_point` is the full
-    // max_log_row_count point while the preprocessed traces opened at it are
-    // thousands of rows, ~90 ms/shard of otherwise-pointless table build.
     let k = if height <= 1 { 0 } else { (height - 1).ilog2() as usize + 1 };
     let (eq, tail) = if k < eval_point.len() {
         let tail = eval_point[k..].iter().fold(EF::ONE, |acc, &r| acc * (EF::ONE - r));
@@ -70,28 +55,10 @@ where
     };
     assert!(eq.len() >= height, "eq table ({}) shorter than height ({height})", eq.len());
 
-    // Rows [height, domain) contribute zero, so sum over row < height only.
-    //
-    // Inner sum, two exact forms:
-    //
-    //     EF::from(c) * e    full D×D extension product        (D = 4)
-    //     e * c              Mul<Base> = D base multiplies
-    //
-    // identical termwise: embedding gives c = [c,0,0,0], so every j>0 term of the
-    // double loop is zero and i+0 < D always.
-    //
-    // Row-blocked rather than column-parallel: a column pass strides by `width`
-    // and re-streams the matrix `width` times; blocking reads it once with `width`
-    // live accumulators, parallel over height/ROW_BLOCK.  Bit-identical because
-    // field addition is exact, associative AND commutative -- any summation order
-    // gives the same element (`reduce` folds an arbitrary work-stealing tree, not
-    // chunk order).
     use p3_maybe_rayon::prelude::*;
     if height == 0 {
         return vec![EF::ZERO; width];
     }
-    // Rows per block: parallelism is height/ROW_BLOCK, so a trace shorter than
-    // this runs on one worker.
     const ROW_BLOCK: usize = 512;
     let mut evals = trace[..height * width]
         .par_chunks(ROW_BLOCK * width)
@@ -155,7 +122,7 @@ mod tests {
     }
 
     /// 4-row, 1-column trace evaluated at a 2-d point.
-    /// `eq_mle_table([r0, r1])` (zerocheck_prover.rs:63) builds the table
+    /// `eq_mle_table([r0, r1])` builds the table
     /// in `r`-iteration order so that for index `i` the LSB (bit0) is r0
     /// and bit1 is r1 — i.e. `i = x1·2 + x0` with x0 the LSB ↔ r0.  The
     /// trace is indexed the SAME way (`trace[i]` is row `i`), so:
@@ -181,7 +148,6 @@ mod tests {
         let r = vec![EF::from(F::from_u64(2)), EF::from(F::from_u64(3))];
         let evals = evaluate_trace_columns_at_point::<F, EF>(&trace, 1, &r);
         assert_eq!(evals.len(), 1);
-        // 20 + (-80) + (-90) + 240 = 90.
         assert_eq!(evals[0], EF::from(F::from_u64(90)));
     }
 
@@ -192,7 +158,7 @@ mod tests {
     fn evaluate_trace_columns_single_row() {
         use p3_field::PrimeCharacteristicRing;
         let trace = vec![F::from_u64(7), F::from_u64(8), F::from_u64(9)];
-        let r: Vec<EF> = vec![]; // empty point — height=1 → log_height=0
+        let r: Vec<EF> = vec![];
         let evals = evaluate_trace_columns_at_point::<F, EF>(&trace, 3, &r);
         assert_eq!(evals.len(), 3);
         assert_eq!(evals[0], EF::from(F::from_u64(7)));
@@ -208,11 +174,8 @@ mod tests {
     #[should_panic(expected = "must be <= 2^|eval_point|")]
     fn evaluate_trace_columns_panics_on_too_small_point() {
         use p3_field::PrimeCharacteristicRing;
-        // 4-row trace at width 1 with a 1-d point (domain=2 < height=4):
-        // a too-small cube would silently drop rows, so the height-agnostic
-        // guard `height <= domain` must trip.
         let trace = vec![F::from_u64(1), F::from_u64(2), F::from_u64(3), F::from_u64(4)];
-        let r = vec![EF::from(F::from_u64(5))]; // domain = 2 < height = 4
+        let r = vec![EF::from(F::from_u64(5))];
         let _evals = evaluate_trace_columns_at_point::<F, EF>(&trace, 1, &r);
     }
 
@@ -222,11 +185,8 @@ mod tests {
     #[test]
     fn evaluate_trace_columns_height_agnostic_padding_parity() {
         use p3_field::PrimeCharacteristicRing;
-        // Real height-2, width-1 trace.
         let real = vec![F::from_u64(10), F::from_u64(20)];
-        // Same data explicitly zero-padded to height 4.
         let padded = vec![F::from_u64(10), F::from_u64(20), F::ZERO, F::ZERO];
-        // A 2-d point => domain = 4 (taller cube than the real height).
         let r = vec![EF::from(F::from_u64(2)), EF::from(F::from_u64(3))];
 
         let evals_real = evaluate_trace_columns_at_point::<F, EF>(&real, 1, &r);
@@ -299,7 +259,6 @@ mod eval_trace_columns_reference_tests {
                 .map(|i| F::from_u64((i as u64 * 2_654_435_761) % 1_000_003))
                 .collect();
             let log_h = height.max(1).next_power_of_two().trailing_zeros() as usize;
-            // Exercise both `k == eval_point.len()` and `k < eval_point.len()`.
             for extra in [0usize, 3] {
                 let pt: Vec<EF> = (0..log_h + extra)
                     .map(|i| {

@@ -354,7 +354,6 @@ where
     }
 
     fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
-        // No unchecked conversion possible for compressed points.
         Self::from_bytes(bytes)
     }
 
@@ -407,10 +406,8 @@ fn be_bytes_to_le_words<T: AsMut<[u8]>>(mut bytes: T) -> [u32; 8] {
 #[inline]
 fn be_bytes_to_le_bits(be_bytes: &[u8]) -> [bool; 256] {
     let mut bits = [false; 256];
-    // Reverse the byte order to little-endian.
     for (i, &byte) in be_bytes.iter().rev().enumerate() {
         for j in 0..8 {
-            // Flip the bit order so the least significant bit is now the first bit of the chunk.
             bits[i * 8 + j] = ((byte >> j) & 1) == 1;
         }
     }

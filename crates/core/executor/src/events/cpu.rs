@@ -20,15 +20,12 @@ pub struct CpuEvent {
     pub exit_code: u32,
 }
 
-/// A REGISTER read as the frame consumes it: the tag plus the three values
-/// `RegisterAccessCols::populate_access` actually witnesses.
+/// A register read as the frame consumes it: the tag plus the three values
+/// `RegisterAccessCols::populate_access` witnesses.
 ///
-/// A register access never crosses a shard boundary — `populate_access` records
-/// that `prev_shard` "is not witnessed, because it is guaranteed to equal
-/// `shard`" — so the `shard` / `prev_shard` pair of the wrapped
-/// `MemoryReadRecord` was 8 B per operand per cycle that reached no column.
-/// The equality they existed to assert is now checked once, here, at the
-/// conversion, where both are still in hand.
+/// A register access never crosses a shard boundary, so `prev_shard = shard`
+/// and neither is stored; the equality is checked once, at the conversion from
+/// `MemoryReadRecord`.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[repr(C)]
 pub struct OptionMemoryReadRecord {
@@ -73,12 +70,12 @@ impl From<Option<MemoryRecordEnum>> for OptionMemoryReadRecord {
     }
 }
 
-/// A REGISTER read-and-write as the frame consumes it.  The read and write
-/// arms differ in exactly one witnessed column — `prev_value`, which a read
-/// leaves equal to its own `value` — so they collapse into one record and the
-/// consumer no longer branches on the tag except to skip an absent access.
+/// A register read-and-write as the frame consumes it. The read and write
+/// arms differ in exactly one witnessed column, `prev_value` (a read has
+/// `prev_value = value`), so they collapse into one record and the consumer
+/// branches on the tag only to skip an absent access.
 ///
-/// See [`OptionMemoryReadRecord`] for why `shard` / `prev_shard` are gone.
+/// See [`OptionMemoryReadRecord`] for why there is no `shard` / `prev_shard`.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[repr(C)]
 pub struct OptionMemoryRecordEnum {

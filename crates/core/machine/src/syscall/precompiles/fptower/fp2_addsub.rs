@@ -101,10 +101,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
         input: &Self::Record,
         output: &mut Self::Record,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // All the fp2 sub and add events for a given curve are coalesce to the curve's Add operation.  Only retrieve
-        // precompile events for that operation.
-        // TODO:  Fix this.
-
         let events = match P::FIELD_TYPE {
             FieldType::Bn254 => input.get_precompile_events(SyscallCode::BN254_FP2_ADD).iter(),
             FieldType::Bls12381 => {
@@ -149,7 +145,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
                 event.op,
             );
 
-            // Populate the memory access columns.
             for i in 0..cols.y_access.len() {
                 cols.y_access[i].populate(event.y_memory_records[i], &mut new_byte_lookup_events);
             }
@@ -183,7 +178,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
             <Fp2AddSubAssignChip<P> as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             num_fp2_addsub_cols::<P>(),
@@ -191,10 +185,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        // All the fp2 sub and add events for a given curve are coalesce to the curve's Add operation.  Only retrieve
-        // precompile events for that operation.
-        // TODO:  Fix this.
-
         assert!(
             shard.get_precompile_events(SyscallCode::BN254_FP_SUB).is_empty()
                 && shard.get_precompile_events(SyscallCode::BLS12381_FP_SUB).is_empty()
@@ -231,7 +221,6 @@ where
         let local = main.current_slice();
         let local: &Fp2AddSubAssignCols<AB::Var, P> = (*local).borrow();
 
-        // Constrain the `is_add` flag to be boolean.
         builder.assert_bool(local.is_add);
 
         let num_words_field_element = <P as NumLimbs>::Limbs::USIZE / 4;
@@ -246,10 +235,6 @@ where
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
         {
-            // `eval_addsub`, not `eval_variable`: this chip can only add or
-            // subtract, and the zeros it used to pass for `is_mul`/`is_div` did
-            // NOT stop `eval_variable` from building the limb convolutions —
-            // measured tape 18,353 = 2 x the fused Fp chip's 9,215.
             local.c0.eval_addsub(
                 builder,
                 &p_x,
@@ -288,8 +273,7 @@ where
         );
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
-                                             * same. */
+            local.clk + AB::F::from_u32(1),
             local.x_ptr,
             &local.x_access,
             local.is_real,

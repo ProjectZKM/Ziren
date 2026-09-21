@@ -59,19 +59,13 @@ impl Syscall for HintReadSyscall {
             return Err(ExecutionError::InvalidSyscallArgs());
         }
 
-        // Iterate through the vec in 4-byte chunks
         for i in (0..len).step_by(4) {
-            // Get each byte in the chunk
             let b1 = vec[i as usize];
-            // In case the vec is not a multiple of 4, right-pad with 0s. This is fine because we
-            // are assuming the word is uninitialized, so filling it with 0s makes sense.
             let b2 = vec.get(i as usize + 1).copied().unwrap_or(0);
             let b3 = vec.get(i as usize + 2).copied().unwrap_or(0);
             let b4 = vec.get(i as usize + 3).copied().unwrap_or(0);
             let word = u32::from_le_bytes([b1, b2, b3, b4]);
 
-            // Save the data into runtime state so the runtime will use the desired data instead of
-            // 0 when first reading/writing from this address.
             ctx.rt.uninitialized_memory_checkpoint.entry(ptr + i).or_insert_with(|| false);
             match ctx.rt.state.uninitialized_memory.entry(ptr + i) {
                 Entry::Occupied(_entry) => {
@@ -82,10 +76,6 @@ impl Syscall for HintReadSyscall {
                     entry.insert(word);
                 }
             }
-            // Flat producer: the hint is the word's value until its first
-            // access, which the paged `mr`/`mw` read from
-            // `uninitialized_memory` at that moment; the flat entry carries
-            // it directly (a no-op on an already-accessed word, as there).
             if let Some(flat) = ctx.rt.flat_mem.as_deref_mut() {
                 flat.seed_uninit(ptr + i, word);
             }

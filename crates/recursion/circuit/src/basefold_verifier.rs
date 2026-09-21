@@ -109,10 +109,6 @@ impl BasefoldVerifierParams {
             pow_bits: 22,
             batch_grinding_bits: 16,
             num_variables,
-            // The wrap prover commits at `wrap_fri_config()`'s arity (1 — one
-            // commitment per variable), NOT `INNER_LOG_FOLDING_ARITY`; the
-            // outer witness conversion (`host_basefold_proof_to_recursive_outer`)
-            // reads the same constant.
             log_folding_arity: zkm_pcs::basefold::config::FriConfig::<
                 zkm_pcs::jagged_pcs::JaggedVal,
             >::wrap_fri_config()
@@ -162,11 +158,9 @@ impl BasefoldVerifierParams {
     /// Recursion-constraint estimate for one BaseFold proof.  Sized
     /// to inform the recursion AIR builder.
     pub fn estimated_recursion_constraints(&self) -> usize {
-        let sumcheck = self.total_sumcheck_rounds() * 30; // ~30 per univariate round
-        let merkle = self.num_queries
-            * (self.num_variables + 1) // one Merkle path per round
-            * 200; // ~200 per Poseidon2 hash
-        let fri_fold = self.num_queries * self.num_variables * 25; // FriFold per round per query
+        let sumcheck = self.total_sumcheck_rounds() * 30;
+        let merkle = self.num_queries * (self.num_variables + 1) * 200;
+        let fri_fold = self.num_queries * self.num_variables * 25;
         let final_check = 100;
         sumcheck + merkle + fri_fold + final_check
     }
@@ -327,7 +321,6 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
     {
         let target = 1usize << point.len();
         let mut current: Vec<EF> = coeffs.to_vec();
-        // Zero-pad to the next power of two if the supplied vec is short.
         current.resize(target, EF::default());
         for &r in point {
             let half = current.len() / 2;
@@ -378,25 +371,16 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
         let mut claim = initial_claim;
         let mut betas: Vec<EF> = Vec::with_capacity(rounds.len());
         for (r, (round, &x_r)) in rounds.iter().zip(eval_point.iter()).enumerate() {
-            // Sumcheck consistency: claim must equal Lagrange-interp of
-            // [g(0), g(1)] at x_r.
             let lhs = (one - x_r) * round.uni_poly[0] + x_r * round.uni_poly[1];
             if lhs != claim {
                 return None;
             }
-            // Observe the round's transcript contribution: 2 ext + 1 commit.
-            // Scaffold challenger only takes usize, so we hash via tag-mix.
             challenger.observe_usize(0xB45E_F01D ^ r);
             for digest in round.commitment.iter() {
                 challenger.observe_usize((*digest).into());
             }
-            // Sample beta (scaffold: derived deterministically from
-            // challenger state; production uses a real EF challenge).
             let beta = EF::from(0xBE7Au64).mul(EF::from(1u64));
             betas.push(beta);
-            // Update claim: c_{r+1} = uni[0] + beta * uni[1] (basefold
-            // monomial-basis fold convention — see stark-side
-            // `Mle::fold` documentation).
             claim = round.uni_poly[0] + beta * round.uni_poly[1];
         }
         Some((betas, claim))
@@ -451,8 +435,8 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
         initial_eval: EF,
         query_idx: usize,
         log_max_height: usize,
-        sibling_pairs: &[[EF; 2]], // per round, length = log_max_height - log_blowup
-        betas: &[EF],              // per round
+        sibling_pairs: &[[EF; 2]],
+        betas: &[EF],
         x_initial: EF,
         final_poly: EF,
     ) -> bool
@@ -479,23 +463,16 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
         for ((evals, &beta), _round) in
             sibling_pairs.iter().zip(betas.iter()).zip(0..sibling_pairs.len())
         {
-            // Convention from `crate::basefold::verifier::BasefoldVerifier::verify_queries`:
-            //   evals[0] is at +x; evals[1] is at -x (the sibling).
-            //   Check evals[idx % 2] == folded (idx 0 => check evals[0]).
             if evals[idx % 2] != folded {
                 return false;
             }
-            // Lagrange interp through (x, evals[0]) and (-x, evals[1]):
-            //   f(beta) = (evals[0] + evals[1])/2 + (evals[0] - evals[1])*beta/(2x)
-            // (Equivalent re-derivation in the BaseFold prover's
-            // `fold_even_odd_ext` function.)
             let avg = (evals[0] + evals[1]) / two;
             let diff = evals[0] - evals[1];
             folded = avg + diff * beta / (two * x);
 
             idx >>= 1;
-            x = x * x; // square for next-round subgroup
-            let _ = log_max_height; // silence unused (used by caller for x_initial)
+            x = x * x;
+            let _ = log_max_height;
             let _ = one;
         }
 
@@ -523,7 +500,6 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
         F: Copy + Into<usize>,
         Ch: ScaffoldChallenger,
     {
-        // (1) Number of rounds must match params.
         if proof.rounds.len() != self.params.num_variables {
             return false;
         }
@@ -531,7 +507,6 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
             return false;
         }
 
-        // (2-4) Replay sumcheck.
         let Some((betas, _final_claim)) = Self::replay_sumcheck_rounds_host_shape::<EF, F, Ch>(
             &proof.rounds,
             initial_claim,
@@ -541,10 +516,8 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
             return false;
         };
 
-        // (5-6) Final poly + PoW check (scaffold: just absorb).
         challenger.observe_usize(0xF1A1_F01Du64 as usize);
 
-        // (10) Final consistency.
         let Some(&last_beta) = betas.last() else { return false };
         Self::check_final_consistency_host_shape::<EF, F>(proof, last_beta)
     }
@@ -582,7 +555,6 @@ pub fn fold_block_host_shape<EF: p3_field::Field>(evals: &[EF], xs: &[EF], betas
         for i in 0..half {
             let (lo, hi) = (cur[2 * i], cur[2 * i + 1]);
             let x = cur_xs[2 * i];
-            // Interpolate through (x, lo) and (-x, hi), evaluate at beta.
             next.push((lo + hi) / two + (lo - hi) * beta / (two * x));
             next_xs.push(x * x);
         }
@@ -652,9 +624,9 @@ pub fn fold_block_host_shape<EF: p3_field::Field>(evals: &[EF], xs: &[EF], betas
 /// # Soundness
 ///
 /// Soundness rests entirely on `num2bits_v2_f` enforcing both per-bit
-/// booleanity and the sum-recomposition `Σ b_i 2^i == input`
-/// (compiler/src/circuit/builder.rs:73-117).  No floating ceiling: the
-/// only accepted values are `[0, max_num_vars]`.
+/// booleanity and the sum-recomposition `Σ b_i 2^i == input` (the
+/// compiler's circuit `Builder`).  The accepted values are exactly
+/// `[0, max_num_vars]`.
 ///
 /// Config-generic: operates on `Felt<C::F>`, so it works for both the
 /// inner (KoalaBear) and outer (BN254) recursion configs.
@@ -667,37 +639,19 @@ pub fn assert_num_vars_le_max<C>(
 {
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_compiler::prelude::Felt;
-    // nbits = number of bits to represent `max_num_vars` (so 2^nbits >
-    // max_num_vars).  `(max+1).next_power_of_two().trailing_zeros()`
-    // == ceil(log2(max+1)).  Guard the degenerate max==0 case (nbits=0
-    // would let no value through; max==0 means "only 0 allowed").
     let nbits = if max_num_vars == 0 {
         1
     } else {
         (max_num_vars + 1).next_power_of_two().trailing_zeros() as usize
     };
-    // Tightness depends on the wrapped negative `diff` (≈ p - small) being
-    // OUTSIDE [0, 2^nbits): requires 2^{nbits+1} <= field modulus.  Over
-    // KoalaBear (p ≈ 2^31) this holds for nbits <= 29; production
-    // max_num_vars <= 21 -> nbits <= 5 (huge margin).  Guard so a future
-    // caller with an oversized max fails loudly rather than silently
-    // admitting a non-tight (potentially unsound) bound.
     debug_assert!(
         nbits + 1 < 31,
         "assert_num_vars_le_max: nbits ({nbits}) too large for a tight \
          field-wrap `<=` over KoalaBear (need 2^(nbits+1) <= p)"
     );
-    // (1) Sound-bind actual_num_vars ∈ [0, 2^nbits).
     let _actual_bits = C::num2bits(builder, actual_num_vars, nbits);
-    // (2) diff = max_num_vars - actual_num_vars (felt subtraction; wraps
-    //     to ≈ p if actual > max).
     let max_felt: Felt<C::F> = builder.constant(C::F::from_usize(max_num_vars));
     let diff: Felt<C::F> = builder.eval(max_felt - actual_num_vars);
-    // (3) Sound-bind diff ∈ [0, 2^nbits).  If actual_num_vars > max_num_vars
-    //     the wrapped diff is ≈ p >> 2^nbits and this num2bits' internal
-    //     recomposition assert (assert_felt_eq(Σ b_i 2^i, diff)) FAILS,
-    //     rejecting the proof.  Together (1)+(3) ⟹ actual_num_vars ≤
-    //     max_num_vars (tight integer ≤, no power-of-two slack).
     let _diff_bits = C::num2bits(builder, diff, nbits);
 }
 
@@ -741,7 +695,6 @@ where
         return (block[0], x);
     }
 
-    // zeta = primitive 2^k-th root; bitrev_k over the block positions.
     let bitrev = |mut v: usize, bits: usize| {
         let mut r = 0usize;
         for _ in 0..bits {
@@ -753,7 +706,6 @@ where
     let zeta = <C::F as TwoAdicField>::two_adic_generator(k);
     let neg_two = -(C::F::ONE + C::F::ONE);
 
-    // x_base = x * prod_j (zeta^-2^(k-1-j))^{bit_j}
     let mut x_base = x;
     for (j, bit) in index_bits.iter().take(k).enumerate() {
         let step = zeta.exp_u64(1u64 << (k - 1 - j)).inverse();
@@ -763,19 +715,9 @@ where
         x_base = next;
     }
 
-    // Only the EVEN half of the coset is ever a value.
-    //
-    // The coset is `xs[p] = x_base * zeta^bitrev_k(p)`, and reversing `k` bits
-    // sends the pair `(2i, 2i+1)` to `(r, r + 2^(k-1))` for
-    // `r = bitrev_{k-1}(i)`.  `zeta^(2^(k-1)) = -1`, so the odd member of every
-    // pair is exactly the negation of the even one — at this level and, since
-    // the next level's elements are these squared, at every level below.  So
-    // `e[i]` below carries the pair's element and the partner is never
-    // materialised: the interpolation denominator `xhi - xlo` collapses to
-    // `-2*xlo`, one multiply by an immediate.
     let half0 = 1usize << (k - 1);
     let mut e: Vec<Felt<C>> = Vec::with_capacity(half0);
-    e.push(x_base); // bitrev_{k-1}(0) == 0
+    e.push(x_base);
     for i in 1..half0 {
         let c = zeta.exp_u64(bitrev(i, k - 1) as u64);
         let v: Felt<C> = builder.uninit();
@@ -783,8 +725,6 @@ where
         e.push(v);
     }
 
-    // Fold k levels; adjacent entries are (+x, -x) so this is the same
-    // interpolation the pair path uses.
     let mut cur: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = block.to_vec();
     for beta in betas.iter() {
         let half = cur.len() / 2;
@@ -808,9 +748,6 @@ where
             builder.push_op(DslIr::AddE(folded, lo, ratio));
             next.push(folded);
         }
-        // `next[i]` sits at `e[i]^2`, so the next level's pair `(2j, 2j+1)`
-        // takes `e[2j]^2` — only the even entries need squaring.  The last
-        // level keeps one, which is the element handed back to the caller.
         let n_next = if half > 1 { half / 2 } else { 1 };
         let mut next_e = Vec::with_capacity(n_next);
         for j in 0..n_next {
@@ -884,75 +821,23 @@ where
         use crate::logup_gkr::observe_ext_element;
         use p3_field::PrimeCharacteristicRing;
 
-        // The in-circuit transcript is a byte-for-byte mirror of the HOST
-        // basefold open verifier `verify_mle_evaluations` (crates/pcs/src/
-        // basefold/verifier.rs:91+).  The original per-round commitments are
-        // observed by the JAGGED layer BEFORE z_col is sampled (mirror of
-        // host verify_jagged_inner_generic's leading
-        // `challenger.observe(commit)`), so they are NOT re-observed here,
-        // `commitments` + `batch_evaluations` are consumed by the per-query
-        // component binding below, and `batch_evaluations` is now also
-        // ABSORBED first — see step (0), which closes the adaptivity that
-        // made the batching point predictable before the claims were fixed.
-
-        // (0) Bind the claims: the claimed evaluations are absorbed BEFORE any randomness that
-        // weighs them.
-        //
-        // These values are prover-supplied and were trusted for transcript
-        // purposes: grinding and the batching point were derived without them.
-        // That makes the batching vector `lambda` predictable to a prover who
-        // has not yet chosen `y`.  The stacked layer checks `sum_i a_i y_i = q`
-        // for the outer claim `q`, and BaseFold proves only
-        // `sum_i lambda_i y_i = sum_i lambda_i v_i` -- two linear equations in
-        // `y`.  With two or more stripe claims and independent `a`, `lambda`,
-        // they can be solved for ANY target `q`: the prover opens the honest
-        // random combination while the stacked equation reports a value that is
-        // not the committed polynomial's.  A correct sumcheck, FRI chain and
-        // Merkle path do not help, because the choice happens before them.
-        //
-        // Absorbing first removes the adaptivity.  The order below -- claims,
-        // then batch grinding, then the batching point -- is the contract, and
-        // the host prover, the native verifier, the recursive verifier and the
-        // CUDA prover all have to keep it or the transcript forks.
-        //
-        // This is the observation the comment above used to say did NOT happen
-        // ("the untrusted batch_evaluations are never observed into the
-        // transcript").  It does now, in the host's order.
         for round in batch_evaluations.iter() {
             for &claim in round.iter() {
                 observe_ext_element::<C, FC>(builder, challenger, claim);
             }
         }
 
-        // (1) Verify batch grinding (host step 1):
-        //   check_witness(BATCH_GRINDING_BITS, batch_grinding_witness).
         {
-            // Already a Felt variable (const-built in the lift's read).
             let batch_witness = proof.batch_grinding_witness;
             challenger.check_witness(builder, self.params.batch_grinding_bits, batch_witness);
         }
 
-        // (2) Sample the batching point (host step 2):
-        //   num_batching_vars = log2_ceil(total_polys), one EF challenge
-        //   per var.  total_polys = Σ_round batch_evaluations[round].len().
-        //   The batched claim itself is a deterministic recombination the
-        //   host does NOT bind into the transcript (host step 3), so we
-        //   only need to consume the same number of challenges here to
-        //   keep the FS state aligned.
-        // KEEP the sampled batching point — the per-query batched
-        // initial_eval below recombines the component-opening leaf values
-        // with partial_lagrange(batching_point) coefficients, mirroring the
-        // host (crates/pcs/src/basefold/verifier.rs:110-125, 208-246).
         let batching_coefficients: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = {
             let total_polys: usize = batch_evaluations.iter().map(|r| r.len()).sum();
             let num_batching_vars =
                 total_polys.max(1).next_power_of_two().trailing_zeros() as usize;
             let batching_point: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> =
                 (0..num_batching_vars).map(|_| challenger.sample_ext(builder)).collect();
-            // In-circuit partial_lagrange — EXACT mirror of the host
-            // (verifier.rs:72-83): per accumulated element push v*(1-r)
-            // then v*r ADJACENT (interleaved; each new variable becomes
-            // the low bit), NOT block-appended.
             let one: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
                 builder.constant(C::EF::ONE);
             let mut coeffs: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = vec![one];
@@ -971,7 +856,6 @@ where
             coeffs
         };
 
-        // (3) Structural sanity.
         assert_eq!(
             proof.rounds.len(),
             self.params.num_variables,
@@ -987,37 +871,11 @@ where
             self.params.num_variables,
         );
 
-        // (3a) Round-count soundness binding, TIGHT integer `<=` (NO-OP on
-        // the fixed-height path).
-        //
-        // On the fixed path the BaseFold FRI round count is baked into the
-        // program as the compile-time `self.params.num_variables` (= the
-        // prover's clamped `log_stacking_height`), so the felt below is a
-        // CONSTANT equal to that value and `diff == 0`, so both `num2bits`
-        // recompositions inside `assert_num_vars_le_max` trivially bind.
-        // This is therefore BYTE-IDENTICAL: it only emits inert
-        // constraints over a constant.  When the round count becomes
-        // genuinely WITNESSED (height-agnostic path: a witnessed
-        // `actual_num_vars` against the compile-time loop ceiling
-        // `MAX_NUM_VARS = DEFAULT_LOG_STACKING_HEIGHT`), this binding is
-        // what PREVENTS a prover from claiming a round count OUTSIDE
-        // `[0, MAX_NUM_VARS]` — a TIGHT integer `<=` (no power-of-two
-        // slack; see `assert_num_vars_le_max`).
         #[cfg(not(ha_measure_base))]
         {
             use p3_field::PrimeCharacteristicRing;
             let actual_num_vars: zkm_recursion_compiler::prelude::Felt<C::F> =
                 builder.constant(C::F::from_usize(self.params.num_variables));
-            // Bind against the GLOBAL ceiling
-            // `DEFAULT_LOG_STACKING_HEIGHT` (= 21) rather than the per-proof
-            // `self.params.num_variables`, so the round-count bound is
-            // height-AGNOSTIC.  Verdict-neutral on every path: the fixed
-            // stacking height clamps DOWN only (never above 21), so
-            // `actual_num_vars <= 21` always ⇒ `diff = ceiling - actual >= 0`
-            // and both `num2bits` recompositions still bind inertly (no honest
-            // proof's verdict changes; it only widens the accepted interval
-            // from `{num_variables}` to `[0, 21]`, which is the height-agnostic
-            // invariant relied on once `actual_num_vars` is witnessed).
             assert_num_vars_le_max::<C>(
                 builder,
                 actual_num_vars,
@@ -1025,26 +883,11 @@ where
             );
         }
 
-        // (4) Commit-phase transcript replay — byte-for-byte the
-        // BaseFold PROVER cadence (crates/pcs/src/basefold/prover.rs
-        // open_jagged_pcs step 4/5):
-        //   observe(num_variables);
-        //   per round: observe(uni_poly[0]); observe(uni_poly[1]);
-        //              observe(commitment); sample beta.
-        // Observing only the commitment (omitting the univariate message)
-        // would diverge the sampled betas from the prover's, surfacing as an
-        // AssertEqE failure on the fold-chain in the gnark OUTER wrap.
         {
             let nvar_felt: zkm_recursion_compiler::prelude::Felt<C::F> =
                 builder.constant(C::F::from_usize(self.params.num_variables));
             challenger.observe(builder, nvar_felt);
         }
-        // One commitment per COMMIT-PHASE ROUND, which covers
-        // `log_folding_arity` variables.  `proof.rounds` stays one entry per
-        // VARIABLE — the members of a group repeat their group's commitment —
-        // and only the group LEADER observes it, mirroring the prover's
-        // message / commitment / beta / message / beta ... order.  At arity 1
-        // every round leads its own group and this is the classic loop.
         let group_leader: Vec<bool> = {
             let arities = self.params.round_arities();
             let mut flags = vec![false; proof.rounds.len()];
@@ -1062,46 +905,17 @@ where
             .iter()
             .enumerate()
             .map(|(i, round)| {
-                // observe the round's univariate message (2 EF coeffs)
-                // BEFORE the Merkle commitment, mirroring the prover's
-                // observe_algebra_element(uni_poly) + observe(commitment).
                 let p0 = round.uni_poly[0];
                 let p1 = round.uni_poly[1];
                 observe_ext_element::<C, FC>(builder, challenger, p0);
                 observe_ext_element::<C, FC>(builder, challenger, p1);
                 if group_leader[i] {
-                    // round.commitment is a witnessed DigestVariable.
                     challenger.observe(builder, round.commitment);
                 }
                 challenger.sample_ext(builder)
             })
             .collect();
 
-        // (4b) SUMCHECK CHAIN — the constraints that tie the commitment to the
-        // claimed evaluations.
-        //
-        // The query phase below binds the committed codeword to `final_poly`,
-        // and the stacked layer binds `batch_evaluations` to the jagged claim
-        // (`recursive_stacked_pcs.rs` `assert_ext_eq(claim_adj, ...)`), but
-        // until this block NOTHING connected the two ends: the univariate
-        // messages were observed into the transcript and never constrained, so
-        // a prover could pair a genuine commitment and a genuine query chain
-        // with evaluations it had never opened.  On the inner rings the WHIR
-        // circuit enforces its own sumcheck, but the WRAP layer is BaseFold
-        // (`KoalaBearPoseidon2Outer::WHIR_INNER_PCS = false`) and reaches this
-        // verifier, so the gap sat under the published Groth16 proof.
-        //
-        // Exact mirror of the host verifier's steps (5) and (11)
-        // (crates/pcs/src/basefold/verifier.rs:169-184, 290-294):
-        //
-        //   eval_claim  == (1 - x_0) * p_0[0] + x_0 * p_0[1]
-        //   expected_i  == (1 - x_i) * p_i[0] + x_i * p_i[1]       (i >= 1)
-        //   expected_i+1 = p_i[0] + beta_i * p_i[1]
-        //   final_poly  == p_last[0] + beta_last * p_last[1]
-        //
-        // `eval_claim` is the batched claim: the same Lagrange recombination of
-        // `batch_evaluations` the host performs in its step (3), over the same
-        // coefficients the per-query `initial_eval` below already uses.
         {
             use zkm_recursion_compiler::ir::SymbolicExt;
             use zkm_recursion_compiler::prelude::Ext;
@@ -1126,28 +940,19 @@ where
                 builder.assert_ext_eq(got, expected);
                 expected = builder.eval(p0 + betas[i] * p1);
             }
-            // (11) Terminal identity: the value the sumcheck folds down to is
-            // the same constant the query chain folds to.
             builder.assert_ext_eq(expected, proof.final_poly);
         }
 
-        // (5) Observe the final poly constant + PoW witnesses.
         {
             let final_poly_ext = proof.final_poly;
             let final_felts = C::ext2felt(builder, final_poly_ext);
             for felt in final_felts.iter() {
                 challenger.observe(builder, *felt);
             }
-            // (host step 7) PoW check on the query-phase grind witness:
-            //   check_witness(pow_bits, pow_witness) — observes the
-            //   witness and samples `pow_bits` zero-bits, advancing the
-            //   transcript exactly as the host does BEFORE query-index
-            //   sampling. Omitting it desync'd the query indices.
             let pow_witness = proof.pow_witness;
             challenger.check_witness(builder, self.params.pow_bits, pow_witness);
         }
 
-        // (6) FRI query-phase verification.
         let log_codeword_size = self.params.log_codeword_size();
         let query_indices: Vec<Vec<C::Bit>> = (0..self.params.num_queries)
             .map(|_| challenger.sample_bits(builder, log_codeword_size))
@@ -1156,15 +961,6 @@ where
         {
             use zkm_recursion_compiler::prelude::Ext;
             let final_poly_ext: Ext<C::F, C::EF> = proof.final_poly;
-            // The number of queries is the verifier's PARAMETER, never
-            // anything the proof carries: taking `.min(openings.len())` here
-            // let a proof with an empty (or short) `query_phase_openings`
-            // decide how many queries were checked -- zero of them, in the
-            // limit.  Assert the shape instead, exactly as the WHIR circuit
-            // does (`whir_circuit.rs` "whir query openings"). The lift builds
-            // these vectors at program-build time, so a short vector is a
-            // different PROGRAM, and this assert stops such a program from
-            // being built at all.
             let num_queries = self.params.num_queries;
             for (round_idx, round_openings) in proof.query_phase_openings.iter().enumerate() {
                 assert_eq!(
@@ -1176,9 +972,6 @@ where
                 );
             }
             for query_idx in 0..num_queries {
-                // One opened BLOCK per commit-phase round: `2^arity` values,
-                // the contiguous bit-reversed rows this query descends from.
-                // At arity 1 the block is the classic sibling pair.
                 let blocks: Vec<Vec<Ext<C::F, C::EF>>> = proof
                     .query_phase_openings
                     .iter()
@@ -1186,37 +979,10 @@ where
                     .collect();
                 let round_arities = self.params.round_arities();
 
-                // BOUND initial_eval.  When the proof carries
-                // component openings (the inner production path), the query
-                // chain's start value is RECOMPUTED from the component-
-                // opening leaf values batched with the Lagrange coefficients
-                // (host verifier.rs:208-246, step 8), and each leaf is
-                // Merkle-verified against the round's ORIGINAL commitment
-                // (host step 9); a bare `sibling_pairs[0][0]` read would be
-                // prover-supplied and unbound.  Empty component openings
-                // (outer placeholder paths) use the fallback below —
-                // structurally decided at program build.
                 let initial_eval: Ext<C::F, C::EF> = if !proof.component_openings.is_empty() {
-                    // Accumulate the step-8 inner product SYMBOLICALLY across the
-                    // whole leaf loop and materialize it ONCE per query
-                    // (`acc += coeff*value`,
-                    // then a single `builder.eval` per query).  Keeping `acc` a
-                    // SymbolicExt and letting the DSL CSE the single downstream
-                    // eval avoids an O(queries x rounds x widths) blowup of
-                    // materialized adds and is value-identical (pure deferred
-                    // materialization).
                     let mut acc: zkm_recursion_compiler::ir::SymbolicExt<C::F, C::EF> =
                         zkm_recursion_compiler::ir::SymbolicExt::<C::F, C::EF>::ZERO;
                     let mut batch_idx = 0usize;
-                    // One round of component openings per committed round, and
-                    // `commitments[round_idx]` is what each round's leaf is
-                    // authenticated against.  Openings SHORTER than the
-                    // commitment vector would leave the trailing rounds' start
-                    // values unauthenticated while every other check still
-                    // passed, so the two lengths are required equal rather than
-                    // zipped.  Program-build time, like the `num_queries` shape
-                    // assert above: a short vector is a different PROGRAM, and
-                    // this stops such a program from being built.
                     assert_eq!(
                         proof.component_openings.len(),
                         commitments.len(),
@@ -1228,8 +994,6 @@ where
                         let round_polys =
                             batch_evaluations.get(round_idx).map(|r| r.len()).unwrap_or(0);
                         let op = &round_openings[query_idx];
-                        // (8) inner product: acc += coeff[batch_idx + k] * leaf[k]
-                        // over the flat per-matrix leaf values (host :229-237).
                         let mut poly_offset = 0usize;
                         for mat_values in op.leaf_values.iter() {
                             for &v in mat_values.iter() {
@@ -1243,21 +1007,6 @@ where
                             "component leaf width != round poly count (round {round_idx})"
                         );
                         batch_idx += round_polys;
-                        // (9) Merkle-verify the leaf against the ORIGINAL
-                        // round commitment (host :249-278): leaf =
-                        // HV::hash(concat of all matrix rows) — p3
-                        // MerkleTreeMmcs multi-matrix same-height leaf —
-                        // path dir bit at level k = query index bit k
-                        // (LSB-first, full-height tree).
-                        // EXACT path shape, not `if !is_empty()`.  An empty
-                        // witnessed path skipped the `assert_digest_eq` below
-                        // outright, so the leaf that seeds the query chain was
-                        // read from the witness and bound to nothing — the leaf
-                        // values still fed `acc` above.  The component leaf sits
-                        // in a FULL-height tree over the codeword domain, so the
-                        // honest path is exactly `log_codeword_size` levels and
-                        // consumes every query-index bit; requiring that makes
-                        // the residual-bit loop below provably empty.
                         assert_eq!(
                             op.merkle_path_digests.len(),
                             log_codeword_size,
@@ -1282,33 +1031,12 @@ where
                                 leaf_digest = HV::compress(builder, pair);
                             }
                             HV::assert_digest_eq(builder, leaf_digest, commitments[round_idx]);
-                            // Round-count binding (2) —
-                            // the `index == 0` RESIDUAL
-                            // assert: after walking
-                            // `path_len` Merkle levels, EVERY remaining (higher)
-                            // query-index bit must be ZERO, i.e. the consumed
-                            // index `index >> path_len == 0`.  Without it a
-                            // malicious prover could WITNESS a shorter
-                            // `merkle_path_digests` (under-claimed tree height)
-                            // and silently leave the high query-index bits
-                            // unconsumed — a wrong/short path that the
-                            // raw-root compare alone would not catch (the
-                            // commit is a bare Merkle root with no
-                            // height binding, so the path
-                            // length is otherwise unbound to the commitment).
-                            // The component leaf is a FULL-height tree leaf, so
-                            // the honest path consumes ALL `log_codeword_size`
-                            // index bits and the residual slice below is EMPTY
-                            // — BYTE-IDENTICAL on honest proofs (no constraint
-                            // emitted), load-bearing only on an under-claimed
-                            // path.
                             for residual_bit in query_indices[query_idx][path_len..].iter().cloned()
                             {
                                 C::assert_bit_zero(builder, residual_bit);
                             }
                         }
                     }
-                    // Materialize the accumulated inner product ONCE per query.
                     builder.eval(acc)
                 } else {
                     blocks.first().map(|b| b[0]).unwrap_or_else(|| {
@@ -1324,58 +1052,14 @@ where
                 let initial_x: zkm_recursion_compiler::prelude::Felt<C::F> =
                     C::exp_reverse_bits(builder, two_adic_generator, bits_for_exp);
 
-                // Pass the per-round query index bits so the fold
-                // reorders (+x, -x) per round (which sibling is current).  Same
-                // bits used for `initial_x` above (index[round]).
-                // Fold each round's block down with that round's betas.  A
-                // round consumes `arity` index bits and `arity` betas, and
-                // hands the next round the squared domain element — which at
-                // arity 1 is exactly the per-round step this replaces.
-
                 let mut folded = initial_eval;
                 let mut x_cur = initial_x;
                 let mut bit_at = 0usize;
                 let mut beta_at = 0usize;
                 for (round, block) in blocks.iter().enumerate() {
                     let arity = round_arities.get(round).copied().unwrap_or(1);
-                    // QUERY-CHAIN BINDING.  Each round's block carries the
-                    // codeword values around this query, and exactly one of
-                    // them IS the query's own value: `emit_basefold_block_fold`
-                    // divides the index bits out of `x` to get `x_base`, so the
-                    // query sits at `xs[p] = x_base * zeta^bitrev_k(p)` with
-                    // `bitrev_k(p) = Sigma b_j 2^(k-1-j)`, i.e. `p = Sigma b_j 2^j`
-                    // -- the plain little-endian value of this round's bits.
-                    //
-                    // Without this assert the chain was open at BOTH ends of
-                    // the first round: `folded` was seeded with `initial_eval`
-                    // and then immediately overwritten by the fold of `block`,
-                    // so `initial_eval` -- the ONLY quantity tied to the
-                    // component commitments, via its Merkle-verified leaves --
-                    // fed nothing at all.  The chain then proved that SOME
-                    // codeword folds to `final_poly`, never that it was the
-                    // committed one, and a prover could commit an unrelated
-                    // round-0 codeword and still pass every Merkle path.  For
-                    // rounds >= 1 the same equality is the ordinary FRI
-                    // round-to-round consistency check, so it is asserted on
-                    // every round.
-                    //
-                    // Skipped when the proof carries no component openings,
-                    // where `initial_eval` falls back to `block[0]` itself and
-                    // there is nothing to bind to.
-                    //
-                    // This was INERT on the one ring the verifier is known to
-                    // run: the outer witness reader set `component_openings:
-                    // Vec::new()` on purpose, so the skip was always taken and
-                    // perturbing the assert changed nothing.
-                    //
-                    // On this branch the outer witness carries the openings, so
-                    // the branch is live there and the binding does something.
-                    // The remaining skip is structural, not a production path:
-                    // the `Empty`/placeholder shapes have no openings and
-                    // nothing to bind, and they are built rather than proved.
                     if !proof.component_openings.is_empty() {
                         let mut cur: Vec<Ext<C::F, C::EF>> = block.to_vec();
-                        // Halve on the most significant bit of `p` first.
                         for j in (0..arity).rev() {
                             let half = cur.len() / 2;
                             if half == 0 {
@@ -1384,8 +1068,6 @@ where
                             let bit = query_indices[query_idx][bit_at + j];
                             let lo = cur[..half].to_vec();
                             let hi = cur[half..].to_vec();
-                            // `select_chain_ef` swaps on a set bit, so the
-                            // leading `half` is `lo` at 0 and `hi` at 1.
                             let sel = C::select_chain_ef(builder, bit, lo, hi);
                             cur = sel[..half].to_vec();
                         }
@@ -1406,91 +1088,30 @@ where
                 }
                 builder.assert_ext_eq(folded, final_poly_ext);
 
-                // Per-round Merkle binding — digest-generic via HV.
-                // Recompute each round's leaf digest from the sibling
-                // pair, walk the inclusion path with HV::select_chain_digest
-                // + HV::compress, then HV::assert_digest_eq against the
-                // round's committed root.  Only runs when the proof
-                // carries the structured digest path.
-                //
-                // Mirrors the HOST commit-phase Merkle verify (p3
-                // MerkleTreeMmcs::verify_batch, crates/pcs/src/basefold/
-                // verifier.rs:389-404):
-                //   * leaf = H(full row = [eval0(4 KB), eval1(4 KB)] = 8 felts)
-                //     — NOT just eval0; the codeword leaf is the whole
-                //     sibling pair.
-                //   * path direction at level `k` = bit `k` of the pair
-                //     index `index_pair = orig_query >> (round_idx+1)`,
-                //     i.e. `query_indices[query_idx][round_idx + 1 + k]`
-                //     (LSB-first).  Hard-coding the direction bit to 0
-                //     (always-left) would compress every right-child step in
-                //     the wrong order and yield the wrong root.
-                //   * p3 MerkleTreeMmcs compares the reconstructed root
-                //     DIRECTLY to the commitment (no dims-compress step).
                 for (round_idx, round_openings) in proof.query_phase_openings.iter().enumerate() {
                     let op = &round_openings[query_idx];
                     if op.merkle_path_digests.is_empty() {
                         continue;
                     }
-                    // Leaf = hash of the FULL committed row: every value in
-                    // the block, `ext2felt`'d in committed order.  At arity 1
-                    // that is the 8 limbs of the sibling pair; at arity `k` it
-                    // is `2^k * 4`.
                     let leaf_felts: Vec<zkm_recursion_compiler::prelude::Felt<C::F>> =
                         blocks[round_idx].iter().flat_map(|v| C::ext2felt(builder, *v)).collect();
                     let mut leaf_digest: HV::DigestVariable = HV::hash(builder, &leaf_felts);
-                    // Path direction bits: bits of (orig_query >> (round_idx+1)),
-                    // LSB-first.  `query_indices[query_idx]` is LSB-first over
-                    // log_codeword_size bits, so slice from `round_idx + 1`.
-                    // The index has been shifted by every earlier round's
-                    // arity plus this one's, not by `round_idx + 1`.
                     let bits_consumed: usize = round_arities.iter().take(round_idx + 1).sum();
                     let path_bits = &query_indices[query_idx][bits_consumed..];
                     let path_len = op.merkle_path_digests.len();
                     for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate() {
-                        // Witnessed DigestVariable, no const promotion.
                         let sibling_variable: HV::DigestVariable = *sibling_digest;
                         let bit = path_bits[level];
                         let pair =
                             HV::select_chain_digest(builder, bit, [leaf_digest, sibling_variable]);
                         leaf_digest = HV::compress(builder, pair);
                     }
-                    // Round-count binding (2) —
-                    // the `index == 0` RESIDUAL assert,
-                    // applied to the commit-phase
-                    // codeword walk.  After walking `path_len` levels every
-                    // remaining (higher) bit of `path_bits` (= the pair index
-                    // `orig_query >> (round_idx+1)` past the consumed levels)
-                    // must be ZERO.  The honest round-r codeword has height
-                    // `2^(num_variables + log_blowup - 1 - r)`, so
-                    // `path_len(r) == num_variables + log_blowup - 1 - r` and
-                    // `(round_idx + 1) + path_len == log_codeword_size`:
-                    // `path_bits[path_len..]` is EMPTY on honest proofs ⇒
-                    // BYTE-IDENTICAL (no constraint emitted).  Load-bearing
-                    // only if a prover WITNESSES a shorter `merkle_path_digests`
-                    // (under-claimed codeword height): the bare-root compare
-                    // alone would accept it (the bare Merkle-root commitment
-                    // carries no height binding), but the
-                    // unconsumed high index bits would be free — this assert
-                    // forbids that.
                     for residual_bit in path_bits[path_len..].iter().cloned() {
                         C::assert_bit_zero(builder, residual_bit);
                     }
-                    // Bind the reconstructed root to the FRI COMMIT-PHASE round
-                    // commitment `proof.rounds[round_idx].commitment` (=
-                    // host `fri_commitments[round_idx]`), NOT the jagged
-                    // `original_commitments` passed in `commitments` (those bind
-                    // the *component* openings, a different opening set).  The
-                    // host `verify_queries` checks each commit-phase leaf against
-                    // `&proof.fri_commitments` (crates/pcs/src/basefold/
-                    // verifier.rs:280, 394).
-                    // `round_idx` counts COMMIT rounds; `proof.rounds` is
-                    // indexed per VARIABLE, and a group's members all carry
-                    // their group's commitment, so take the group LEADER.  At
-                    // arity 1 the two indices coincide.
+
                     let leader: usize = round_arities.iter().take(round_idx).sum();
                     if leader < proof.rounds.len() {
-                        // commitment is a witnessed DigestVariable.
                         let round_commit: HV::DigestVariable = proof.rounds[leader].commitment;
                         HV::assert_digest_eq(builder, leaf_digest, round_commit);
                     }
@@ -1522,13 +1143,10 @@ mod tests {
         type EF = InnerChallenge;
 
         let two = EF::from_u32(2);
-        // One pair fold, the arity-2 relation the protocol already uses.
         let pair = |lo: EF, hi: EF, x: EF, beta: EF| (lo + hi) / two + (lo - hi) * beta / (two * x);
 
         for k in 1usize..=4 {
             let n = 1usize << k;
-            // A block of `2^k` values, and a coset of domain elements where
-            // adjacent entries are {+x, -x} at every level.
             let log_h = k + 3;
             let g = <InnerVal as TwoAdicField>::two_adic_generator(log_h);
             let x_base = EF::from(g);
@@ -1542,7 +1160,6 @@ mod tests {
                 r
             };
             let xs: Vec<EF> = (0..n).map(|p| x_base * zeta.exp_u64(bitrev(p, k) as u64)).collect();
-            // Adjacent positions must be sign-flips of each other.
             for i in 0..n / 2 {
                 assert_eq!(xs[2 * i + 1], -xs[2 * i], "k={k}: block pair must be (+x, -x)");
             }
@@ -1550,7 +1167,6 @@ mod tests {
             let evals: Vec<EF> = (0..n).map(|i| EF::from_u32(7 + 13 * i as u32)).collect();
             let betas: Vec<EF> = (0..k).map(|j| EF::from_u32(101 + 37 * j as u32)).collect();
 
-            // Reference: fold the whole block by hand, one level at a time.
             let mut cur = evals.clone();
             let mut cur_xs = xs.clone();
             for &beta in &betas {
@@ -1574,39 +1190,19 @@ mod tests {
     fn params_default_consistency() {
         let p = BasefoldVerifierParams::production_default(20);
         assert_eq!(p.total_sumcheck_rounds(), 20);
-        // Merkle commits follow the FOLDING ARITY, not the variable count: a
-        // commit-phase round covers `log_folding_arity` variables, so there are
-        // `ceil(num_variables / arity)` of them plus the final one.  Asserted
-        // against the arity rather than a literal, because a literal here went
-        // stale the moment the arity moved off 1 (it still read 21).
         let arity = zkm_pcs::basefold::config::INNER_LOG_FOLDING_ARITY;
         assert_eq!(p.num_commit_rounds(), 20usize.div_ceil(arity));
         assert_eq!(p.total_merkle_commits(), 20usize.div_ceil(arity) + 1);
-        // log_codeword_size = num_variables + log_blowup = 20 + 2 = 22.
-        // `production_default` uses log_blowup = 2 (rate 1/4) for the
-        // provable-100-bit inner query-phase soundness posture (see
-        // `BasefoldVerifierParams::production_default`).
         assert_eq!(p.log_codeword_size(), 22);
         assert!(p.estimated_recursion_constraints() > 0);
     }
 
     #[test]
     fn evaluate_multilinear_padded_basic() {
-        // f(x_0, x_1) defined on {0,1}^2 by [v_0=1, v_1=2, v_2=3, v_3=4]
-        // f(0,0) = 1, f(1,0) = 2, f(0,1) = 3, f(1,1) = 4
-        // Multilinear: f(x0, x1) = (1-x0)(1-x1)*1 + x0(1-x1)*2 + (1-x0)x1*3 + x0 x1 *4
-        // f(0.5, 0.5) = 0.25*1 + 0.25*2 + 0.25*3 + 0.25*4 = 2.5
-        // Use rationals via (numerator, denominator=4) — test with integers scaled to avoid floats.
         type EF = i64;
         type F = i64;
-        let coeffs: Vec<EF> = vec![4, 8, 12, 16]; // = original * 4
-        let point: Vec<EF> = vec![2, 2]; // = 0.5 * 4
-                                         // Expected result: 2.5 * 4 * 4 / (4*4) = 10 in scaled units
-                                         // Compute: (4 - 2) * (... at x1) ; first iter folds bit 0 with r=2
-                                         // Iter 0: r=2, pairs (4,8), (12,16) → [4 + 2*(8-4), 12 + 2*(16-12)] = [12, 20]
-                                         // Iter 1: r=2, pairs (12,20) → [12 + 2*(20-12)] = [28]
-                                         // So the test result = 28.
-                                         // (This is testing the algorithm, not arithmetic semantics — Mle::eval_at uses the same.)
+        let coeffs: Vec<EF> = vec![4, 8, 12, 16];
+        let point: Vec<EF> = vec![2, 2];
         let result = RecursiveBasefoldVerifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>::evaluate_multilinear_padded_host_shape::<EF, F>(
             &coeffs, &point,
         );
@@ -1649,12 +1245,10 @@ mod tests {
     /// (including the clamped-tiny case and the un-clamped default 21).
     #[test]
     fn numvars_bind_accepts_fixed_path_equal_value() {
-        // Fixed path: the witnessed value equals max_num_vars exactly
-        // (diff == 0, both num2bits trivially bind).
         run_numvars_bind(1, 1);
         run_numvars_bind(10, 10);
-        run_numvars_bind(15, 15); // clamped-tiny commit example
-        run_numvars_bind(21, 21); // DEFAULT_LOG_STACKING_HEIGHT (un-clamped)
+        run_numvars_bind(15, 15);
+        run_numvars_bind(21, 21);
     }
 
     /// POSITIVE (tight `<=`): every honest value in `[0, max]` verifies —
@@ -1665,13 +1259,13 @@ mod tests {
     /// fixed-MAX binding.
     #[test]
     fn numvars_bind_accepts_clamped_below_max() {
-        let max = 21; // DEFAULT_LOG_STACKING_HEIGHT
-        run_numvars_bind(0, max); // empty commit (inclusive low)
+        let max = 21;
+        run_numvars_bind(0, max);
         run_numvars_bind(1, max);
-        run_numvars_bind(14, max); // typical clamp (pick_log_stacking_height cap)
-        run_numvars_bind(15, max); // clamped-tiny
+        run_numvars_bind(14, max);
+        run_numvars_bind(15, max);
         run_numvars_bind(20, max);
-        run_numvars_bind(21, max); // == max (inclusive high, fixed path)
+        run_numvars_bind(21, max);
     }
 
     /// NEGATIVE (tightness): a value in `(max, 2^nbits)` that a power-of-two
@@ -1681,7 +1275,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn numvars_bind_rejects_value_in_old_floor_slack_22() {
-        run_numvars_bind(22, 21); // 22 > 21: was accepted by the floor, now rejected
+        run_numvars_bind(22, 21);
     }
 
     /// NEGATIVE (tightness): top of the power-of-two slack
@@ -1697,7 +1291,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn numvars_bind_rejects_max_plus_one() {
-        run_numvars_bind(5, 4); // 5 > 4
+        run_numvars_bind(5, 4);
     }
 
     /// NEGATIVE: a value just past a power-of-two bound (`2^max + 1 = 17
@@ -1780,7 +1374,6 @@ mod tests {
         const BLOCK_WIDTH: usize = 3;
         let index: usize = 0b1011;
 
-        // --- native mirror, with the primitives the Merkle MMCS commits under
         let perm: InnerPerm = zkm_primitives::poseidon2_init();
         let hasher = InnerHash::new(perm.clone());
         let compressor = InnerCompress::new(perm);
@@ -1793,9 +1386,6 @@ mod tests {
 
         let mut acc: [InnerVal; 8] = hasher.hash_iter(block.iter().copied());
         for (level, sib) in siblings.iter().enumerate() {
-            // `should_swap = bit` swaps `[leaf, sibling]`, so an odd position
-            // puts the sibling on the left — the convention `merkle_tree::verify`
-            // documents and this chain shares.
             acc = if (index >> level) & 1 == 1 {
                 compressor.compress([*sib, acc])
             } else {
@@ -1804,7 +1394,6 @@ mod tests {
         }
         let root = acc;
 
-        // --- the same chain in-circuit, with one component moved
         let mut builder = Builder::<InnerConfig>::default();
         let block_vars: Vec<Felt<InnerVal>> = block
             .iter()
@@ -1833,8 +1422,6 @@ mod tests {
                 if corrupt == Corrupt::Root && i == 0 { root[i] + InnerVal::ONE } else { root[i] };
             builder.constant(v)
         });
-        // The position bits come from `num2bits`, as production derives them
-        // from the sampled query index.
         let claimed_index = if corrupt == Corrupt::Position { index ^ 1 } else { index };
         let index_felt: Felt<InnerVal> = builder.constant(InnerVal::from_u64(claimed_index as u64));
         let index_bits = <InnerConfig as CircuitConfig>::num2bits(&mut builder, index_felt, LOG_CW);
@@ -1869,9 +1456,6 @@ mod tests {
     /// query chain's inner product consumes, so an unbound leaf would let a
     /// prover answer a query with values the commitment never covered.
     #[test]
-    // A failed `assert_felt_eq` reaches the runtime as a division by zero
-    // (`DivFAssert`), so pinning it keeps the test from passing on an
-    // unrelated panic.
     #[should_panic(expected = "DivFOutOfDomain")]
     fn component_binding_rejects_a_corrupted_leaf() {
         run_component_binding(Corrupt::Leaf);
@@ -1879,9 +1463,6 @@ mod tests {
 
     /// NEGATIVE — one sibling digest of the inclusion path.
     #[test]
-    // A failed `assert_felt_eq` reaches the runtime as a division by zero
-    // (`DivFAssert`), so pinning it keeps the test from passing on an
-    // unrelated panic.
     #[should_panic(expected = "DivFOutOfDomain")]
     fn component_binding_rejects_a_corrupted_path() {
         run_component_binding(Corrupt::Sibling);
@@ -1890,9 +1471,6 @@ mod tests {
     /// NEGATIVE — the round commitment itself.  This is the compare that ties
     /// the whole walk to the observed root, so it must be reachable.
     #[test]
-    // A failed `assert_felt_eq` reaches the runtime as a division by zero
-    // (`DivFAssert`), so pinning it keeps the test from passing on an
-    // unrelated panic.
     #[should_panic(expected = "DivFOutOfDomain")]
     fn component_binding_rejects_a_corrupted_root() {
         run_component_binding(Corrupt::Root);
@@ -1903,9 +1481,6 @@ mod tests {
     /// authenticated opening from being replayed at another point of the
     /// codeword domain.
     #[test]
-    // A failed `assert_felt_eq` reaches the runtime as a division by zero
-    // (`DivFAssert`), so pinning it keeps the test from passing on an
-    // unrelated panic.
     #[should_panic(expected = "DivFOutOfDomain")]
     fn component_binding_rejects_a_corrupted_position() {
         run_component_binding(Corrupt::Position);
@@ -1919,8 +1494,6 @@ mod tests {
         use crate::utils::tests::run_test_recursion;
         let mut builder = Builder::<InnerConfig>::default();
         let idx_felt: Felt<InnerVal> = builder.constant(InnerVal::from_u64(index));
-        // index_bits = LSB-first decomposition over the full codeword span
-        // (mirrors `query_indices[..]` = sample_bits(log_codeword_size)).
         let index_bits =
             <InnerConfig as crate::CircuitConfig>::num2bits(&mut builder, idx_felt, log_codeword);
         for residual_bit in index_bits[path_len..].iter().cloned() {
@@ -1934,7 +1507,6 @@ mod tests {
     /// constraint, trivially accepts (the byte-identical honest case).
     #[test]
     fn merkle_residual_accepts_full_length_path() {
-        // path_len == log_codeword: residual slice empty.
         run_merkle_residual(0b10110, 5, 5);
         run_merkle_residual(0, 5, 5);
         run_merkle_residual(0b1111111111, 10, 10);
@@ -1945,10 +1517,7 @@ mod tests {
     /// `path_len < log_codeword` — the residual is zero by construction.
     #[test]
     fn merkle_residual_accepts_when_high_bits_zero() {
-        // index = 5 = 0b00101 in a 5-bit span; consumed path_len=3 leaves
-        // bits[3..5] = {0,0} -> accepted.
         run_merkle_residual(0b00101, 5, 3);
-        // index = 0 trivially accepted for any path_len.
         run_merkle_residual(0, 8, 2);
     }
 
@@ -1960,8 +1529,6 @@ mod tests {
     #[test]
     #[should_panic]
     fn merkle_residual_rejects_unconsumed_high_bit() {
-        // index = 0b10000 (bit 4 set); consumed path_len=3 leaves bit 4 in
-        // the residual slice [3..5] -> assert_bit_zero on a 1 -> reject.
         run_merkle_residual(0b10000, 5, 3);
     }
 
@@ -1970,8 +1537,6 @@ mod tests {
     #[test]
     #[should_panic]
     fn merkle_residual_rejects_multiple_unconsumed_bits() {
-        // index = 0b11000000 (bits 6,7 set) in an 8-bit span; path_len=4
-        // leaves bits[4..8] = {0,0,1,1} -> reject.
         run_merkle_residual(0b11000000, 8, 4);
     }
 }
@@ -2004,7 +1569,6 @@ mod block_fold_tests {
             let x_base = InnerVal::from_u32(0x1234_5677);
             let mut xs: Vec<InnerVal> =
                 (0..(1usize << k)).map(|q| x_base * zeta.exp_u64(bitrev(q, k) as u64)).collect();
-            // The emitter's reduced representation: the even half only.
             let mut e: Vec<InnerVal> = (0..(1usize << (k - 1)))
                 .map(|i| x_base * zeta.exp_u64(bitrev(i, k - 1) as u64))
                 .collect();

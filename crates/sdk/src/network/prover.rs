@@ -57,10 +57,8 @@ impl NetworkProver {
     /// Build from explicit credentials/endpoint, falling back to the
     /// environment for whatever is not supplied.
     ///
-    /// `ProverClientBuilder::private_key` / `rpc_url` used to be accepted and
-    /// then dropped, because network mode always called `from_env()`: a caller
-    /// could believe it had selected one key and endpoint while the SDK
-    /// connected with unrelated environment credentials.
+    /// `ProverClientBuilder::private_key` / `rpc_url` route here, so an explicit
+    /// key and endpoint always win over the environment.
     pub fn with_overrides(
         private_key: Option<String>,
         rpc_url: Option<String>,
@@ -75,17 +73,6 @@ impl NetworkProver {
             None => env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()),
         };
         let domain_name = env::var("DOMAIN_NAME").unwrap_or("stage".to_string());
-        // The CA used to verify the proving network's certificate.
-        //
-        // This used to fall back SILENTLY to the repository's bundled
-        // `tool/ca.pem`, whose private key (`tool/ca.key`) is committed and
-        // therefore public: anyone can mint a certificate under it, so trusting
-        // it means any endpoint can impersonate the proving network -- and
-        // network proving sends the guest ELF and the private input stream
-        // there. The fixture is fine for tests; making it the default was not.
-        //
-        // `CA_CERT_PATH` is now required, with the bundled fixture reachable
-        // only by opting in explicitly.
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let allow_test_ca = env::var("ZKM_ALLOW_INSECURE_TEST_CA")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -93,11 +80,6 @@ impl NetworkProver {
         let ca_cert_path = match env::var("CA_CERT_PATH") {
             Ok(p) => Some(p),
             Err(_) if allow_test_ca => {
-                // `tool/` is excluded from the published package (see the SDK
-                // manifest), so this path exists in a repository checkout and
-                // not in a crates.io copy. Say which of the two is missing
-                // rather than letting it surface as a file-not-found from
-                // inside the TLS setup.
                 let fixture = manifest_dir.join("tool/ca.pem");
                 if !fixture.exists() {
                     return Err(anyhow::anyhow!(
@@ -135,9 +117,6 @@ impl NetworkProver {
             _ => None,
         };
 
-        // Each of these was wrapped in `Some(..)` at construction and then
-        // `expect`ed back out, so the "must be set" panics could not fire; the
-        // Option was plumbing, not a failure mode. Bound directly now.
         let endpoint_para = endpoint;
         let endpoint = match ssl_config {
             Some(config) => {
@@ -187,8 +166,6 @@ impl NetworkProver {
 
     pub async fn download_file(url: &str) -> Result<Vec<u8>> {
         let response = reqwest::get(url).await?;
-        // Without this an error page is returned as if it were proof bytes, and
-        // the failure surfaces later as an unintelligible decode error.
         let response = response
             .error_for_status()
             .map_err(|e| anyhow::anyhow!("downloading {url} failed: {e}"))?;
@@ -211,13 +188,9 @@ impl NetworkProver {
         let seg_size =
             env::var("SHARD_SIZE").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or_default();
 
-        // set the maximum number of prover nodes needed for the proof generation
         let max_prover_num =
             env::var("MAX_PROVER_NUM").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
 
-        // Single-node mode
-        // When enabled, the proving process runs entirely on one node,
-        // without splitting into multiple tasks.
         let single_node =
             env::var("SINGLE_NODE").ok().and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
 
@@ -276,9 +249,6 @@ impl NetworkProver {
 
             match Status::from_i32(get_status_response.status) {
                 Some(Status::Computing) => {
-                    // An unrecognised step means the server is newer than this
-                    // client, which is normal skew -- it is not grounds for
-                    // aborting a proof that is still progressing.
                     match Step::from_i32(get_status_response.step) {
                         Some(step) => log::info!("proof_id: {proof_id}, step: {step}"),
                         None => log::info!(
@@ -298,10 +268,6 @@ impl NetworkProver {
                         ZKMPublicValues::from(&public_values_bytes)
                     };
 
-                    // proof
-                    // `proof_with_public_inputs` is SERVER-controlled, so a
-                    // malformed or truncated response must be an error, not a
-                    // panic in the caller's process.
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
                             .map_err(|e| {
@@ -332,13 +298,15 @@ impl NetworkProver {
         }
     }
 
+    /// Proves `elf` on the network; returns the proof and its cycle count.
+    ///
+    /// * `elf_id`: hex SHA-256 of the ELF without `0x`; when set, the network
+    ///   prover indexes its cached ELF by it.
     pub async fn prove_with_cycles(
         &self,
         elf: &[u8],
         stdin: ZKMStdin,
         kind: ZKMProofKind,
-        // The SHA-256 hash of the ELF, without the 0x prefix.
-        // If this field is not none, the network prover will use it to index the cached ELF.
         elf_id: Option<String>,
         timeout: Option<Duration>,
     ) -> Result<(ZKMProofWithPublicValues, u64)> {
@@ -348,7 +316,6 @@ impl NetworkProver {
 
         let mut receipts = Vec::new();
         let proofs = stdin.proofs.clone();
-        // todo: adapt to proof network after its updating
         for proof in proofs {
             let mut receipt = Vec::new();
             bincode::serialize_into(&mut receipt, &proof)?;
@@ -366,8 +333,6 @@ impl NetworkProver {
         let (proof, mut public_values, cycles) = self.wait_proof(&proof_id, kind, timeout).await?;
 
         if kind == ZKMProofKind::CompressToGroth16 {
-            // Caller-supplied shape: an `assert_eq!` + `.unwrap()` here panicked
-            // this `Result`-returning API on a bad input length.
             let [only] = private_input.as_slice() else {
                 anyhow::bail!(
                     "CompressToGroth16 takes exactly one private input, got {}",
@@ -412,8 +377,6 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         kind: ZKMProofKind,
         elf_id: Option<String>,
     ) -> Result<(ZKMProofWithPublicValues, u64)> {
-        // `Prove::timeout` reaches `ProofOpts`; passing `None` here meant a
-        // stalled remote request polled forever despite an explicit timeout.
         block_on(self.prove_with_cycles(&pk.elf, stdin, kind, elf_id, opts.timeout))
     }
 }

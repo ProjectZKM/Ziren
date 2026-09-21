@@ -13,78 +13,56 @@ pub fn estimate_mips_lde_size(
     num_events_per_air: EnumMap<MipsAirId, u64>,
     costs_per_air: &HashMap<MipsAirId, u64>,
 ) -> u64 {
-    // Compute the byte chip contribution.
     let mut cells = BYTE_NUM_ROWS * costs_per_air[&MipsAirId::Byte];
 
-    // Compute the program chip contribution.
     cells += MAX_PROGRAM_SIZE * costs_per_air[&MipsAirId::Program];
 
-    // There is no Cpu chip any more (every instruction chip carries its own
-    // frame); `MipsAirId::Cpu` survives only as the VIRTUAL cycles axis for
-    // shard splitting and shape banding, and contributes no area.
-
-    // Compute the addsub chip contribution.
     cells += (num_events_per_air[MipsAirId::AddSub]).next_power_of_two()
         * costs_per_air[&MipsAirId::AddSub];
 
-    // Compute the immediate-form addsub chip contribution.
     cells += (num_events_per_air[MipsAirId::AddSubImm]).next_power_of_two()
         * costs_per_air[&MipsAirId::AddSubImm];
 
-    // Compute the immediate-form bitwise chip contribution.
     cells += (num_events_per_air[MipsAirId::BitwiseImm]).next_power_of_two()
         * costs_per_air[&MipsAirId::BitwiseImm];
 
-    // Compute the immediate-form shift and compare chip contributions.
     for air in [MipsAirId::ShiftLeftImm, MipsAirId::ShiftRightImm, MipsAirId::LtImm] {
         cells += (num_events_per_air[air]).next_power_of_two() * costs_per_air[&air];
     }
 
-    // Compute the mul chip contribution.
     cells +=
         (num_events_per_air[MipsAirId::Mul]).next_power_of_two() * costs_per_air[&MipsAirId::Mul];
 
-    // Compute the bitwise chip contribution.
     cells += (num_events_per_air[MipsAirId::Bitwise]).next_power_of_two()
         * costs_per_air[&MipsAirId::Bitwise];
 
-    // Compute the shift left chip contribution.
     cells += (num_events_per_air[MipsAirId::ShiftLeft]).next_power_of_two()
         * costs_per_air[&MipsAirId::ShiftLeft];
 
-    // Compute the shift right chip contribution.
     cells += (num_events_per_air[MipsAirId::ShiftRight]).next_power_of_two()
         * costs_per_air[&MipsAirId::ShiftRight];
 
-    // Compute the divrem chip contribution.
     cells += (num_events_per_air[MipsAirId::DivRem]).next_power_of_two()
         * costs_per_air[&MipsAirId::DivRem];
 
-    // Compute the lt chip contribution.
     cells +=
         (num_events_per_air[MipsAirId::Lt]).next_power_of_two() * costs_per_air[&MipsAirId::Lt];
 
-    // Compute the memory local chip contribution.
     cells += (num_events_per_air[MipsAirId::MemoryLocal]).next_power_of_two()
         * costs_per_air[&MipsAirId::MemoryLocal];
 
-    // Compute the memory bump chip contribution.
     cells += (num_events_per_air[MipsAirId::MemoryBump]).next_power_of_two()
         * costs_per_air[&MipsAirId::MemoryBump];
 
-    // Compute the branch chip contribution.
     cells += (num_events_per_air[MipsAirId::Branch]).next_power_of_two()
         * costs_per_air[&MipsAirId::Branch];
 
-    // Compute the jump chip contribution.
     cells +=
         (num_events_per_air[MipsAirId::Jump]).next_power_of_two() * costs_per_air[&MipsAirId::Jump];
 
-    // Compute the SyscallInstruction chip contribution.
     cells += (num_events_per_air[MipsAirId::SyscallInstrs]).next_power_of_two()
         * costs_per_air[&MipsAirId::SyscallInstrs];
 
-    // Compute the memory-instruction chip contributions.
     for air in [
         MipsAirId::LoadNarrow,
         MipsAirId::LoadWord,
@@ -95,19 +73,15 @@ pub fn estimate_mips_lde_size(
         cells += (num_events_per_air[air]).next_power_of_two() * costs_per_air[&air];
     }
 
-    // Compute the MiscInstruction chip contribution.
     cells += (num_events_per_air[MipsAirId::MiscInstrs]).next_power_of_two()
         * costs_per_air[&MipsAirId::MiscInstrs];
 
-    // Compute the cloclz chip contribution.
     cells += (num_events_per_air[MipsAirId::CloClz]).next_power_of_two()
         * costs_per_air[&MipsAirId::CloClz];
 
-    // Compute the syscall core chip contribution.
     cells += (num_events_per_air[MipsAirId::SyscallCore]).next_power_of_two()
         * costs_per_air[&MipsAirId::SyscallCore];
 
-    // Compute the global chip contribution.
     cells += (num_events_per_air[MipsAirId::Global]).next_power_of_two()
         * costs_per_air[&MipsAirId::Global];
 
@@ -124,49 +98,32 @@ pub fn estimate_mips_event_counts(
     opcode_counts: EnumMap<Opcode, u64>,
 ) -> EnumMap<MipsAirId, u64> {
     let mut events_counts: EnumMap<MipsAirId, u64> = EnumMap::default();
-    // Compute the number of events in the cpu chip.
     events_counts[MipsAirId::Cpu] = cpu_cycles;
 
-    // Compute the number of events in the add sub chip.  Opcode counts cannot
-    // see the operand FORM, so the immediate-form rows (which really land on
-    // the narrower `AddSubImm`) are billed to the wider register-form air —
-    // a conservative over-estimate.  The live accumulator routes them exactly
-    // (see the executor's bookkeeping block); this pure function survives only
-    // for its equivalence test and the offline shape tooling.
     events_counts[MipsAirId::AddSub] = opcode_counts[Opcode::ADD] + opcode_counts[Opcode::SUB];
 
-    // Compute the number of events in the mul chip.
     events_counts[MipsAirId::Mul] =
         opcode_counts[Opcode::MUL] + opcode_counts[Opcode::MULT] + opcode_counts[Opcode::MULTU];
 
-    // Compute the number of events in the bitwise chip.
     events_counts[MipsAirId::Bitwise] = opcode_counts[Opcode::XOR]
         + opcode_counts[Opcode::OR]
         + opcode_counts[Opcode::AND]
         + opcode_counts[Opcode::NOR];
 
-    // Compute the number of events in the shift left chip.
     events_counts[MipsAirId::ShiftLeft] = opcode_counts[Opcode::SLL];
 
-    // Compute the number of events in the shift right chip.
     events_counts[MipsAirId::ShiftRight] =
         opcode_counts[Opcode::SRL] + opcode_counts[Opcode::SRA] + opcode_counts[Opcode::ROR];
 
-    // Compute the number of events in the divrem chip.
     events_counts[MipsAirId::DivRem] = opcode_counts[Opcode::DIV] + opcode_counts[Opcode::DIVU];
 
-    // Compute the number of events in the lt chip.
     events_counts[MipsAirId::Lt] = opcode_counts[Opcode::SLT] + opcode_counts[Opcode::SLTU];
 
-    // Compute the number of events in the memory local chip.
     events_counts[MipsAirId::MemoryLocal] =
         touched_addresses.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC as u64);
 
-    // Compute the number of events in the memory bump chip: at most one shadow read per
-    // register per shard.
     events_counts[MipsAirId::MemoryBump] = NUM_REGISTERS as u64;
 
-    // Compute the number of events in the branch chip.
     events_counts[MipsAirId::Branch] = opcode_counts[Opcode::BEQ]
         + opcode_counts[Opcode::BNE]
         + opcode_counts[Opcode::BGTZ]
@@ -174,12 +131,10 @@ pub fn estimate_mips_event_counts(
         + opcode_counts[Opcode::BLTZ]
         + opcode_counts[Opcode::BLEZ];
 
-    // Compute the number of events in the jump chip.
     events_counts[MipsAirId::Jump] = opcode_counts[Opcode::Jump]
         + opcode_counts[Opcode::Jumpi]
         + opcode_counts[Opcode::JumpDirect];
 
-    // Compute the number of events in the memory-instruction chips.
     events_counts[MipsAirId::LoadNarrow] = opcode_counts[Opcode::LB]
         + opcode_counts[Opcode::LBU]
         + opcode_counts[Opcode::LH]
@@ -192,7 +147,6 @@ pub fn estimate_mips_event_counts(
         + opcode_counts[Opcode::SWL]
         + opcode_counts[Opcode::SWR];
 
-    // Compute the number of events in the MiscInstrs chip.
     events_counts[MipsAirId::MiscInstrs] = opcode_counts[Opcode::INS]
         + opcode_counts[Opcode::EXT]
         + opcode_counts[Opcode::SEXT]
@@ -205,17 +159,11 @@ pub fn estimate_mips_event_counts(
     events_counts[MipsAirId::MovCond] =
         opcode_counts[Opcode::WSBH] + opcode_counts[Opcode::MNE] + opcode_counts[Opcode::MEQ];
 
-    // Compute the number of events in the auipc chip.
     events_counts[MipsAirId::CloClz] = opcode_counts[Opcode::CLO] + opcode_counts[Opcode::CLZ];
 
-    // Compute the number of events in the syscall core chip.
     events_counts[MipsAirId::SyscallCore] = syscalls_sent;
 
-    // Compute the number of events in the global chip.
     events_counts[MipsAirId::Global] = 2 * touched_addresses + syscalls_sent;
-
-    // No dependency rows: every instruction chip proves its own
-    // sub-operations in-row (the Instruction bus is gone).
 
     events_counts
 }
@@ -284,20 +232,14 @@ pub const fn mips_imm_air_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
 /// the shard-split test at [`Self::check_shard_limit`] is a pair of comparisons against live
 /// state rather than a periodic O(chips) re-estimate.
 ///
-/// It replaces the `SHAPE_CHECK_FREQUENCY`-gated block that called
-/// [`estimate_mips_event_counts`] + [`pad_mips_event_counts`], and is *exactly* equal to that
-/// estimator's output on every cycle — not an approximation of it. `estimate_mips_event_counts`
-/// was already a pure function of `(clk / 5, local_mem, syscalls_sent, opcode counts)`, all of
-/// which the executor already maintains incrementally, so the periodic recompute was
-/// rebuilding a value it could have carried. Because the state is exact at *every* cycle
-/// rather than only at multiples of a check frequency, the worst-case `pad_mips_event_counts`
-/// inflation that covered the blind window between two checks is no longer needed.
+/// The state equals [`estimate_mips_event_counts`] exactly at every cycle, since that
+/// estimator is a pure function of `(clk / 5, local_mem, syscalls_sent, opcode counts)`, all
+/// maintained incrementally by the executor; no padding for a check window is needed.
 ///
-/// The `Cpu` chip is deliberately *not* accumulated here: its row count is `clk / 5` by
-/// definition and `clk` is already exact executor state, so it is folded in as a single
-/// multiply-add inside [`Self::check_shard_limit`]. That keeps the accumulator's write set to
-/// the few sites that already maintain `LocalCounts`, instead of also having to hook every
-/// `clk` bump (including the variable-width precompile bumps, which are the easiest to miss).
+/// The `Cpu` term is not accumulated: its row count is `clk / 5` and `clk` is exact executor
+/// state, so it is a single multiply-add inside [`Self::check_shard_limit`].  The
+/// accumulator's write set stays at the sites that maintain `LocalCounts`, rather than every
+/// `clk` bump (including the variable-width precompile bumps).
 #[derive(Debug, Clone)]
 pub struct ShardSplitAccumulator {
     /// Running `Σ_chip height[chip] × width[chip]` over every chip except `Cpu`.
@@ -306,8 +248,7 @@ pub struct ShardSplitAccumulator {
     max_height: u64,
     /// Per-chip row counts.
     heights: EnumMap<MipsAirId, u64>,
-    /// Main-trace width per chip, as an array rather than the `HashMap` the periodic path
-    /// hashed into once per chip per check.
+    /// Main-trace width per chip, as an array (no hashing per check).
     costs: EnumMap<MipsAirId, u64>,
     /// Distinct addresses touched in this shard, i.e. `LocalCounts::local_mem`. Kept here so
     /// the `MemoryLocal` `div_ceil` and the `Global` row count stay O(1).
@@ -349,9 +290,6 @@ impl ShardSplitAccumulator {
         self.trace_area = 0;
         self.max_height = 0;
         self.touched_addresses = 0;
-        // The memory-bump chip charges one shadow read per register per shard unconditionally,
-        // so it is seeded rather than accumulated (cf. `estimate_mips_event_counts`, which sets
-        // `MemoryBump` to `NUM_REGISTERS` regardless of the event counts).
         self.bump(MipsAirId::MemoryBump, NUM_REGISTERS as u64);
     }
 
@@ -380,8 +318,6 @@ impl ShardSplitAccumulator {
             return;
         };
         self.bump(air, count);
-        // No dependency rows: every instruction chip proves its own
-        // sub-operations in-row (the Instruction bus is gone).
     }
 
     /// Charge `count` rows directly to `air`, for the rows the opcode->air map
@@ -395,9 +331,6 @@ impl ShardSplitAccumulator {
     /// Record one newly-touched address, charging the `MemoryLocal` and `Global` chips.
     #[inline]
     pub fn add_touched_address(&mut self) {
-        // `MemoryLocal` packs `NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC` addresses per row, so a
-        // new address opens a row only when the previous ones exactly filled the last one —
-        // the incremental form of the estimator's `div_ceil`.
         if self.touched_addresses.is_multiple_of(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC as u64) {
             self.bump(MipsAirId::MemoryLocal, 1);
         }
@@ -409,17 +342,12 @@ impl ShardSplitAccumulator {
     ///
     /// `cpu_cycles` is the executed-cycle count (`clk / 5`); see the type-level note on why
     /// it is passed in rather than accumulated.
-    /// With the Cpu chip gone its width is absent from `costs` (EnumMap defaults it
-    /// to 0), so the `cpu_cycles` term contributes NO area.  It no longer participates
-    /// in the HEIGHT cap either: the cap's job is keeping every REAL chip under the
-    /// recursion row cube, and the Cpu pseudo-term only bounded clk — which the
-    /// executor's `clk_exit` fence (`CORE_SHARD_CLK_LIMIT`, the width the frame's
-    /// 26-bit clk decomposition range-checks) bounds independently and terminally.
-    /// Measured Aug24 (block 21M): the pseudo-term closed 43 of 48 shards while the
-    /// tallest REAL chip sat at 25% of the cap.  Removing it moves shards to the
-    /// AREA fence — see `ELEMENT_THRESHOLD` for the budget that keeps the biggest
-    /// shard's LogUp-GKR slab on a 32 GiB card.  Measured on reth (Aug26): 164
-    /// shards -> 132, combined 158.7 -> 142.0 s.
+    /// There is no Cpu chip, so its width is absent from `costs` (EnumMap defaults it to
+    /// 0) and the `cpu_cycles` term contributes no area.  It is not part of the height cap
+    /// either: the cap keeps every real chip under the recursion row cube, while `clk` is
+    /// bounded separately by the executor's `clk_exit` fence (`CORE_SHARD_CLK_LIMIT`, the
+    /// width the frame's clk decomposition range-checks).  See `ELEMENT_THRESHOLD` for the
+    /// area budget.
     #[inline]
     #[must_use]
     pub fn check_shard_limit(&self, cpu_cycles: u64) -> (bool, bool) {
@@ -516,9 +444,6 @@ pub fn pad_mips_event_counts(
     event_counts.iter_mut().for_each(|(k, v)| match k {
         MipsAirId::Cpu => *v += num_cycles,
         MipsAirId::AddSub => *v += 5 * num_cycles,
-        // Only real immediate-form ADD/SUB instructions land here (the
-        // synthetic charges all bill the register-form air), so the growth is
-        // bounded by one row per cycle.
         MipsAirId::AddSubImm => *v += num_cycles,
         MipsAirId::BitwiseImm => *v += num_cycles,
         MipsAirId::ShiftLeftImm => *v += num_cycles,
@@ -531,7 +456,6 @@ pub fn pad_mips_event_counts(
         MipsAirId::DivRem => *v += 4 * num_cycles,
         MipsAirId::Lt => *v += 2 * num_cycles,
         MipsAirId::MemoryLocal => *v += 64 * num_cycles,
-        // Bounded by the register count, not by the cycle count.
         MipsAirId::MemoryBump => *v += NUM_REGISTERS as u64,
         MipsAirId::Branch => *v += 8 * num_cycles,
         MipsAirId::Jump => *v += 2 * num_cycles,
@@ -541,8 +465,8 @@ pub fn pad_mips_event_counts(
         MipsAirId::StoreNarrow => *v += 8 * num_cycles,
         MipsAirId::StoreWord => *v += 8 * num_cycles,
         MipsAirId::MemoryUnaligned => *v += 8 * num_cycles,
-        MipsAirId::MiscInstrs => *v += 8 * num_cycles, // TODO: Check this value.
-        MipsAirId::CloClz => *v += 3 * num_cycles,     // TODO: Check this value.
+        MipsAirId::MiscInstrs => *v += 8 * num_cycles,
+        MipsAirId::CloClz => *v += 3 * num_cycles,
         MipsAirId::SyscallCore => *v += 2 * num_cycles,
         MipsAirId::Global => *v += 64 * num_cycles,
         _ => (),
@@ -580,9 +504,6 @@ mod tests {
         let mut reference: EnumMap<Opcode, u64> = EnumMap::default();
         let mut touched: u64 = 0;
 
-        // A deterministic, badly-behaved stream: opcode choice and address-touch decisions are
-        // driven by a cheap LCG so the counts land on every `div_ceil` boundary of the
-        // `MemoryLocal` packing rather than only on multiples of it.
         let mut rng: u64 = 0x243f_6a88_85a3_08d3;
         for step in 0..20_000u64 {
             rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -597,7 +518,6 @@ mod tests {
                 touched += 1;
             }
 
-            // `Cpu` is derived rather than accumulated, so sweep it too.
             let cpu_cycles = step * 5 / 5;
             let expected = estimate_mips_event_counts(cpu_cycles, touched, 0, reference);
             assert_eq!(
@@ -642,20 +562,14 @@ mod tests {
     fn check_shard_limit_fires_on_either_budget() {
         let costs = costs();
         let add_sub_width = costs[&MipsAirId::AddSub];
-        // A fresh shard is not empty: it already carries the unconditional `MemoryBump` seed.
         let seed_area = ShardSplitAccumulator::new(&costs, u64::MAX, u64::MAX).trace_area(0);
 
-        // Area budget sized so the second AddSub row is exactly what crosses it
-        // (the Cpu chip is gone: cycles contribute no area, only height).
         let mut acc = ShardSplitAccumulator::new(&costs, seed_area + add_sub_width * 2, u64::MAX);
         acc.add_opcode(Opcode::ADD, 1);
         assert_eq!(acc.check_shard_limit(1), (false, false));
         acc.add_opcode(Opcode::ADD, 1);
         assert_eq!(acc.check_shard_limit(2), (true, false));
 
-        // Height budget, independent of area — and of CYCLES: the Cpu pseudo-term
-        // is gone (clk is bounded by the executor's terminal `clk_exit` fence),
-        // so only a REAL chip's rows can trip the height half.
         let mut acc = ShardSplitAccumulator::new(&costs, u64::MAX, 100);
         assert_eq!(acc.check_shard_limit(1_000_000), (false, false));
         for _ in 0..100 {

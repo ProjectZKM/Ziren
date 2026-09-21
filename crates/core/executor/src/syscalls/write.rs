@@ -21,7 +21,6 @@ impl Syscall for WriteSyscall {
         let fd = arg1;
         let write_buf = arg2;
         let nbytes = rt.register(a2);
-        // Read nbytes from memory starting at write_buf.
         let bytes = (0..nbytes).map(|i| rt.byte(write_buf + i)).collect::<Vec<u8>>();
         let slice = bytes.as_slice();
         write_fd(ctx, fd, slice)?;
@@ -38,14 +37,6 @@ pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) -> Result<(), E
                 None => {
                     let flush_s = update_io_buf(ctx, fd, s);
                     if !flush_s.is_empty() {
-                        // NOT `println!`: a multi-GPU core worker speaks its
-                        // IPC frames on stdout, so one guest `print!` puts
-                        // "stdout: ..." in the middle of a frame and the parent
-                        // reads the text as a length prefix. That is a real
-                        // reth block (23694455 emits guest stdout) aborting the
-                        // parent with `memory allocation of 2322296605591762035
-                        // bytes failed` -- 0x203a74756f647473, the eight bytes
-                        // of "stdout: ".
                         flush_s.into_iter().for_each(|line| tracing::info!("stdout: {line}"));
                     }
                 }
@@ -57,7 +48,6 @@ pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) -> Result<(), E
         if let Ok(s) = core::str::from_utf8(slice) {
             let flush_s = update_io_buf(ctx, fd, s);
             if !flush_s.is_empty() {
-                // See the `FD_STDOUT` note above: never stdout from here.
                 flush_s.into_iter().for_each(|line| tracing::info!("stderr: {line}"));
             }
         } else {
@@ -66,17 +56,12 @@ pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) -> Result<(), E
     } else if fd == FD_PUBLIC_VALUES {
         rt.state.public_values_stream.extend_from_slice(slice);
     } else if fd == FD_HINT {
-        // On a replay seeded with the recorded stream this entry is already
-        // there; pushing it again would double it and desync the cursor.
         if !rt.hint_stream_prerecorded {
             rt.state.input_stream.push(slice.to_vec());
         }
     } else if let Some(mut hook) = rt.hook_registry.get(fd) {
-        // Likewise for hook results — and re-invoking the hook would repeat
-        // its side effects once per parallel replay worker.
         if !rt.hint_stream_prerecorded {
             let res = hook.invoke_hook(rt.hook_env(), slice)?;
-            // Add result vectors to the beginning of the stream.
             let ptr = rt.state.input_stream_ptr;
             rt.state.input_stream.splice(ptr..ptr, res);
         }
@@ -120,8 +105,6 @@ fn handle_cycle_tracker_command(rt: &mut Executor, command: CycleTrackerCommand)
             end_cycle_tracker(rt, &name);
         }
         CycleTrackerCommand::ReportEnd(name) => {
-            // Attempt to end the cycle tracker and accumulate the total cycles in the fn_name's
-            // entry in the ExecutionReport.
             if let Some(total_cycles) = end_cycle_tracker(rt, &name) {
                 rt.report
                     .cycle_tracker
@@ -187,7 +170,6 @@ fn update_io_buf(ctx: &mut SyscallContext, fd: u32, s: &str) -> Vec<String> {
     let entry = rt.io_buf.entry(fd).or_default();
     entry.push_str(s);
     if entry.contains('\n') {
-        // Return lines except for the last from buf.
         let prev_buf = std::mem::take(entry);
         let mut lines = prev_buf.split('\n').collect::<Vec<&str>>();
         let last = lines.pop().unwrap_or("");
@@ -237,14 +219,12 @@ mod tests {
         start_cycle_tracker(&mut rt, "dup");
         assert_eq!(rt.cycle_tracker.len(), 2, "both opens are tracked");
         rt.state.global_clk = 150;
-        // Innermost first: 150 - 100.
         assert_eq!(end_cycle_tracker(&mut rt, "dup"), Some(50));
-        // ...and the FIRST open still has its own start clock.
         assert_eq!(end_cycle_tracker(&mut rt, "dup"), Some(150));
     }
 
-    /// Closing an outer scope while an inner one is open used to succeed and
-    /// leave the inner scope open forever.
+    /// Closing an outer scope while an inner one is open unwinds the inner
+    /// scope too; it must not stay open forever.
     #[test]
     fn a_non_lifo_close_unwinds_rather_than_leaking() {
         let mut rt = executor();

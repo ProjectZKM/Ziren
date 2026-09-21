@@ -96,7 +96,6 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the rows for the trace.
         let chunk_size = std::cmp::max(input.add_sub_events.len() / num_cpus::get(), 1);
         let padded_nb_rows = <AddSubChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_ADD_SUB_COLS);
@@ -118,14 +117,10 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
                             input.public_values.execution_shard,
                         );
                     }
-                    // A PADDING row needs no neutralising: the R-type frame's
-                    // register-access multiplicities are `is_real`, which an
-                    // all-zero row leaves at zero.
                 });
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_ADD_SUB_COLS))
     }
 
@@ -183,8 +178,6 @@ impl AddSubChip {
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
 
-        // Every AddSub row is a real instruction owning its frame — program
-        // fetch, register access, `(clk, pc)` chaining.
         cols.frame.populate_from_alu(event, program, shard, blu);
 
         cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
@@ -217,19 +210,12 @@ where
         builder.assert_bool(local.is_sub);
         builder.assert_bool(is_real.clone());
 
-        // The addition runs DIRECTLY on the frame's register accesses — no
-        // operand or result mirror columns, and no byte range checks (see the
-        // column doc).  A discarded register-0 result ungates the equation.
         builder.assert_eq(local.add_gate, local.is_add * (AB::Expr::ONE - local.frame.op_a_0));
         builder.assert_eq(local.sub_gate, local.is_sub * (AB::Expr::ONE - local.frame.op_a_0));
         let av = *local.frame.op_a_access.value();
         let bv = local.frame.op_b_val();
         let cv = local.frame.op_c_val();
-        // The carries are RECOVERED linear expressions, boolean-asserted under
-        // the case gate (no carry columns): `256*c_out = x_i + y_i - z_i + c_in`
-        // with all words byte-shaped has a unique boolean solution.
         let base_inv = AB::F::from_u32(256).inverse();
-        // ADD: `a = b + c`.
         let mut carry = AB::Expr::ZERO;
         for i in 0..4 {
             carry = (bv[i] + cv[i] - av[i] + carry) * base_inv;
@@ -237,7 +223,6 @@ where
                 .when(local.add_gate)
                 .assert_zero(carry.clone() * (carry.clone() - AB::Expr::ONE));
         }
-        // SUB: `a = b - c`, verified as `b = a + c`.
         let mut carry = AB::Expr::ZERO;
         for i in 0..4 {
             carry = (av[i] + cv[i] - bv[i] + carry) * base_inv;
@@ -246,10 +231,6 @@ where
                 .assert_zero(carry.clone() * (carry.clone() - AB::Expr::ONE));
         }
 
-        // Every real row is an instruction carrying its own program fetch,
-        // register access and `(clk, pc)` chaining (the Instruction bus and
-        // its dependency rows are gone).  ADD/SUB are sequential, so
-        // `next_next_pc` is `next_pc + 4`.
         eval_r_type_frame(
             builder,
             &local.frame,
@@ -258,7 +239,6 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            // ADD/SUB can never halt: the received continuation is `next_pc`.
             local.next_pc.into(),
             AB::Expr::ZERO,
             is_real,
@@ -302,8 +282,6 @@ mod tests {
     #[test]
     fn measure_addsub_degree() {
         let chip = zkm_pcs::Chip::<KoalaBear, _>::new(AddSubChip::default());
-        // log_quotient_degree = log2_ceil(max_constraint_degree - 1):
-        //   1 => degree 3 ; 2 => degree 4 or 5.
         println!("ADDSUB_LOG_QUOTIENT_DEGREE={}", chip.log_quotient_degree());
     }
 
@@ -312,11 +290,6 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        // `p3_uni_stark::prove` needs a power-of-two height and
-        // `generate_trace` pads to next_multiple_of_32 only, so make the
-        // REGISTER-form event count exactly 1024: 511 + 511 alu_op triples
-        // (one register-form event each — the two immediate loads land on
-        // `AddSubImm`) plus two bare register-register ADDs.
         let mut instructions = Vec::new();
         for _ in 0..511 {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
@@ -402,9 +375,6 @@ mod tests {
                     .map(|event| {
                         let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                         let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
-                        // Every event is a real instruction, fetched from the
-                        // program by pc exactly as the Rust `event_to_row`
-                        // does.
                         let instruction: zkm_core_executor::InstructionFfi =
                             input.program.fetch(event.pc).into();
                         unsafe {
@@ -427,16 +397,8 @@ mod tests {
             rows.extend(row_batch);
         }
 
-        pad_rows_mult32(
-            &mut rows,
-            // Mirror `generate_trace`'s padding: the R-type frame needs no
-            // neutralising, so a padding row is simply zero.
-            || [F::ZERO; NUM_ADD_SUB_COLS],
-            None,
-            "AddSub",
-        );
+        pad_rows_mult32(&mut rows, || [F::ZERO; NUM_ADD_SUB_COLS], None, "AddSub");
 
-        // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ADD_SUB_COLS)
     }
 }
@@ -449,8 +411,8 @@ mod opened_width_tests {
 
     /// What happens when a verifier hands an AIR a row of the WRONG width.
     ///
-    /// `AlignedBorrow`'s only length check is a `debug_assert`, so in release it
-    /// is gone and `align_to` yields an EMPTY `shorts` for a short slice, making
+    /// `AlignedBorrow`'s only length check is a `debug_assert`, so in release
+    /// `align_to` yields an EMPTY `shorts` for a short slice, making
     /// `&shorts[0]` an out-of-bounds index. Either way the result is a PANIC, not
     /// an error -- and the shard verifier reaches this with `opened_values.chips
     /// [i].main.local` taken straight from the proof, whose length nothing checks
@@ -465,7 +427,6 @@ mod opened_width_tests {
         let short = vec![KoalaBear::default(); width - 1];
         let r = std::panic::catch_unwind(|| {
             let cols: &AddSubCols<KoalaBear> = short.as_slice().borrow();
-            // Touch a field so nothing is optimised away.
             let _ = core::hint::black_box(cols.pc);
         });
         assert!(r.is_err(), "a short row must not be silently accepted as a valid AIR row");

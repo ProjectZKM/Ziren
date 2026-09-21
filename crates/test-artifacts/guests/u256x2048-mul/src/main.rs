@@ -29,10 +29,8 @@ pub fn main() {
 
     let mut lo_max: [u32; 64] = [0; 64];
     let mut hi_max: [u32; 8] = [0; 8];
-    
+
     syscall_u256x2048_mul(
-        //a_max.as_ptr() as *const [u32; 8],
-        //b_max.as_ptr() as *const [u32; 64],
         a_max.as_ptr() as *const [u32; 8],
         b_max.as_ptr() as *const [u32; 64],
         lo_max.as_mut_ptr() as *mut [u32; 64],
@@ -49,14 +47,11 @@ pub fn main() {
     let result_max = a_max_big * b_max_big;
     assert_eq!(result_max, result_max_syscall);
 
-    // Test 10 random pairs of a and b.
-    //let mut rng = rand::thread_rng();
     for j in 0..10 {
-        let mut a: [u8; 32] = [0u8;32]; // rng.gen();
+        let mut a: [u8; 32] = [0u8; 32];
         let mut b = [0u8; 256];
-        a[2+ 2 * j] = 1;
-        b[3 + 2*j] = 1;
-        //rng.fill(&mut b);
+        a[2 + 2 * j] = 1;
+        b[3 + 2 * j] = 1;
 
         let a_big = BigUint::from_bytes_le(&a);
         let b_big = BigUint::from_bytes_le(&b);
@@ -85,5 +80,4 @@ pub fn main() {
         assert_eq!(result, result_syscall);
     }
 
-    // println!("All tests passed successfully!");
 }

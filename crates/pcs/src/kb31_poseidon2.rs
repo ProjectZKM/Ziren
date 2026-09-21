@@ -65,8 +65,6 @@ pub mod koala_bear_poseidon2 {
     #[must_use]
     pub fn my_perm() -> Perm {
         const ROUNDS_F: usize = 8;
-        // See `zkm_primitives::poseidon2_init`: 20 is the KoalaBear width-16
-        // partial-round count; 13 was the BabyBear parameter.
         const ROUNDS_P: usize = 20;
         let mut round_constants = RC_16_30.to_vec();
         let internal_start = ROUNDS_F / 2;
@@ -316,18 +314,11 @@ pub mod koala_bear_poseidon2 {
     /// observed.  See `StarkGenericConfig::PrepPrecomputed`.
     pub fn inner_prep_precompute(
         chip_traces: &[(String, p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
-        // The preprocessed round's AREA PIN on a recursion machine
-        // (`StarkMachine::recursion_pins`), `None` on core.
         pin: Option<crate::jagged::AreaPin>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
-        // The commit consumes BORROWED views over the
-        // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
         let chip_trace_views = crate::jagged_pcs::jagged::views_over_owned(chip_traces);
         <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
             &chip_trace_views,
-            // The MACHINE's orientation: the preprocessed round is opened at
-            // the same shard point as main, so both rounds must agree on row
-            // order.
             pin,
         )
     }
@@ -379,8 +370,6 @@ pub mod koala_bear_poseidon2 {
             rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
             challenger: &mut Self::Challenger,
         ) -> crate::shard_level::shard_proof::EvaluationProof {
-            // ONE jagged proof spanning every round.  A
-            // per-round proof would cost a reduction, an eval and an open each.
             let bundle = crate::jagged_pcs::jagged::prove_jagged_rounds(&rounds, z_row, challenger);
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
         }

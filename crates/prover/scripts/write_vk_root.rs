@@ -26,14 +26,6 @@ fn main() {
         bincode::deserialize(&bytes).expect("deserialize vk_map.bin");
     println!("vk_map.bin: {} keys", allowed.len());
 
-    // Pad to the FIXED capacity before committing.  The prover commits the key
-    // set padded with the all-zero digest to `2^VK_MERKLE_TREE_HEIGHT` -- the
-    // height the enumerated recursion programs bake in -- so the root carried in
-    // a proof's public values is the root of the PADDED tree.  Committing the
-    // bare key list here yields a different root whenever the map is not exactly
-    // a power of two (210 is not), and every proof then fails `vk_root mismatch`.
-    // Same fix as 48629f0e made on the verifier side; `VK_MERKLE_TREE_HEIGHT`
-    // only ever changes together with a vk_map regeneration.
     let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> = allowed.keys().copied().collect();
     assert!(
         leaves.len() <= (1 << zkm_prover::VK_MERKLE_TREE_HEIGHT),

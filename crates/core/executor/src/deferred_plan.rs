@@ -45,7 +45,6 @@ pub fn precompile_split_threshold(code: SyscallCode, opts: &SplitOpts) -> usize 
 pub fn precompile_split_weight(code: SyscallCode, event: &PrecompileEvent) -> Option<usize> {
     match code {
         SyscallCode::KECCAK_SPONGE => Some(match event {
-            // input_len_u32s is a multiple of GENERAL_BLOCK_SIZE_U32S.
             PrecompileEvent::KeccakSponge(e) => e.input_len_u32s as usize / GENERAL_BLOCK_SIZE_U32S,
             _ => 0,
         }),
@@ -172,7 +171,6 @@ impl DeferredPlanner {
             let threshold = precompile_split_threshold(code, &opts);
             let by_weight = matches!(code, SyscallCode::KECCAK_SPONGE);
             loop {
-                // Find the end of the next full shard.
                 let mut n = 0usize;
                 let mut acc = 0usize;
                 let mut full = false;
@@ -193,7 +191,6 @@ impl DeferredPlanner {
                     }
                 }
                 if !full {
-                    // The remainder: a shard only on the last call.
                     if last && n > 0 {
                         shards.push(Self::cut(&self.artifacts, code, q, n));
                     }
@@ -318,8 +315,6 @@ mod tests {
 
     #[test]
     fn count_cut_matches_chunks_exact_across_pushes() {
-        // deferred threshold 8: 5 + 7 + 4 = 16 events => two full shards,
-        // the second spanning all three artifacts; nothing left.
         let mut p = DeferredPlanner::new(opts());
         p.push_precompile(SyscallCode::SECP256K1_ADD, "a", vec![1; 5]);
         assert!(p.split(false).is_empty());
@@ -352,9 +347,6 @@ mod tests {
 
     #[test]
     fn weight_cut_is_greedy_like_split() {
-        // keccak threshold = 8*8/24 = 2 blocks. Weights 1,1,1,2,2 =>
-        // [1,1] [1] [2] [2]: a shard closes when the next event would
-        // overflow, and an oversized single event still forms a shard.
         let mut p = DeferredPlanner::new(opts());
         p.push_precompile(SyscallCode::KECCAK_SPONGE, "k", vec![1, 1, 1, 2, 2]);
         let s = p.split(false);
@@ -366,15 +358,12 @@ mod tests {
             })
             .collect();
         assert_eq!(ranges, vec![(0, 2), (2, 3), (3, 4)]);
-        // The last event (weight 2) is the remainder; ships on the last call.
         let s = p.split(true);
         assert_eq!(s.len(), 1);
     }
 
     #[test]
     fn memory_shards_carry_split_addr_bits() {
-        // memory threshold = 64*8 = 512; 1000 init, 600 finalize => 2 shards
-        // (zip_longest), bits from the boundary addresses.
         let mut p = DeferredPlanner::new(opts());
         let init = MemoryEventsDesc {
             artifact: "i".into(),

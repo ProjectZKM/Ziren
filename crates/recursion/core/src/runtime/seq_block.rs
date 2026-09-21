@@ -12,10 +12,8 @@
 //!
 //! Disjointness is CHECKED where the block is formed, in the compiler's
 //! lowering of `DslIr::Parallel`, against the `addrs_written` range each
-//! sub-block carries. Being disjoint "by construction" is a property of one
-//! emitter, and the ranges used to be discarded at lowering without being
-//! looked at, which left the invariant and the code depending on it
-//! unconnected.
+//! sub-block carries, so the invariant does not rest on one emitter's
+//! construction.
 //!
 //! `Parallel` is live, not scaffolding: a compose program with `n` inputs
 //! carries at least one `Parallel` block, one sub-program per input.
@@ -104,8 +102,6 @@ impl<T> RawProgram<T> {
             n_par_instrs: &mut usize,
         ) {
             match block {
-                // Counted only where it actually sits inside a parallel
-                // region, and only by the one walk that reaches it.
                 SeqBlock::Basic(b) => {
                     if inside_parallel {
                         *n_par_instrs += b.instrs.len();
@@ -261,16 +257,12 @@ mod tests {
     use super::*;
 
     /// A parallel region's instruction count is a PROPORTION of the program,
-    /// so it can never exceed the program's own instruction count. Nested
-    /// blocks used to be re-counted once per nesting level, which put the
-    /// ratio above 100%.
+    /// so it can never exceed the program's own instruction count: a nested
+    /// block is counted once, not once per nesting level.
     #[test]
     fn nested_parallel_instructions_are_counted_once() {
         let basic = |n: usize| SeqBlock::Basic(BasicBlock { instrs: vec![0u8; n] });
 
-        // One outer Parallel with two children; the first child holds a
-        // Basic(2) and an inner Parallel whose two children hold Basic(3)
-        // each. Instructions inside a parallel region: 2 + 3 + 3 + 4 = 12.
         let inner = SeqBlock::Parallel(vec![
             RawProgram { seq_blocks: vec![basic(3)] },
             RawProgram { seq_blocks: vec![basic(3)] },
@@ -287,7 +279,6 @@ mod tests {
         assert_eq!(n_subs, 4, "two children each");
         assert_eq!(n_par_instrs, 12, "2 + 3 + 3 + 4, each instruction once");
 
-        // The invariant that makes the ratio meaningful.
         let total: usize = program.seq_blocks.iter().map(count_all).sum();
         assert_eq!(total, 12, "every instruction here is inside the outer Parallel");
         assert!(
@@ -340,8 +331,6 @@ mod tests {
             ],
         };
         let collected: Vec<_> = p.iter().copied().collect();
-        // Iteration order: linear pre, then per-subprogram in vec order, then linear post.
-        // Determinism is the contract; runtime parallelism is orthogonal.
         assert_eq!(collected, vec![1, 2, 10, 11, 20, 21, 3]);
     }
 

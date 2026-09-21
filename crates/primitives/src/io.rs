@@ -86,13 +86,10 @@ impl ZKMPublicValues {
     /// sha256(publicValues) & bytes32(uint256((1 << 253) - 1));
     /// ```
     pub fn hash_bn254(&self) -> BigUint {
-        // Hash the public values.
         let mut hash = self.hash();
 
-        // Mask the top 3 bits.
         hash[0] &= 0b00011111;
 
-        // Return the masked hash as a BigUint.
         BigUint::from_bytes_be(&hash)
     }
 }

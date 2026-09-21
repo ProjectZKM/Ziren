@@ -83,15 +83,10 @@ pub struct ChipEvaluation<EF> {
     /// natural-row, the convention the LogUp last-layer reconstruction
     /// needs (see `verify_logup_gkr_host`).
     ///
-    /// Every chip opens at this ONE point.  Each also used to carry a second
-    /// opening at its own trailing-`log_h` coords, which the legacy claim
-    /// rescaled by `embed_LEAD = Π_{k<lead}(1 − zeta[k])`.  The shared-point
-    /// opening already carries that factor —
-    ///   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @ zeta[0..log_h])
-    /// — so the two were redundant, and carrying both cost every chip a second
-    /// eq-table, a second eval-at and a second length-prefixed transcript
-    /// observation, in the prover AND in the recursion circuit that witnesses
-    /// them.
+    /// Every chip opens at this one point; no per-chip trailing-`log_h`
+    /// opening is needed, since
+    ///   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @ zeta[0..log_h]).
+    ///
     /// `default = "none_opt_vec"` (not bare `default`) so serde does NOT
     /// add an `EF: Default` bound to the derive (`Option::None` needs no
     /// `EF: Default`).
@@ -243,7 +238,7 @@ mod tests {
     #[test]
     fn univariate_zero_has_correct_length() {
         let p: UnivariatePolynomial<EF> = UnivariatePolynomial::zero(3);
-        assert_eq!(p.coefficients.len(), 4); // degree+1
+        assert_eq!(p.coefficients.len(), 4);
     }
 
     #[test]

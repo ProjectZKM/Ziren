@@ -161,14 +161,10 @@ impl Plan {
 /// Which variants the current phase can emit.
 fn coverage_of<F>(instr: &Instruction<F>) -> (usize, Coverage) {
     match instr {
-        // P2/P3 targets: pure address-to-address arithmetic, every operand a
-        // compile-time constant.
         Instruction::BaseAlu(_) => (0, Coverage::Fallback),
         Instruction::ExtAlu(_) => (1, Coverage::Fallback),
         Instruction::Mem(_) => (2, Coverage::Fallback),
         Instruction::Select(_) => (4, Coverage::Fallback),
-        // P4: too much work per instruction to inline, but rare enough that a
-        // call is free relative to the permutation itself.
         Instruction::Poseidon2(_) => (3, Coverage::Fallback),
         Instruction::HintBits(_) => (5, Coverage::Fallback),
         Instruction::HintAddCurve(_) => (6, Coverage::Fallback),
@@ -218,9 +214,6 @@ pub fn plan<F>(program: &RawProgram<AnalyzedInstruction<F>>) -> Plan {
                     }
                 }
                 SeqBlock::Parallel(subs) => {
-                    // Counted, not skipped: the walker's `nb_*` counters drop
-                    // these because a sub-walk runs on a fresh state, which is
-                    // exactly how they came to be undercounted before.
                     for sub in subs {
                         walk(&sub.seq_blocks, p);
                     }

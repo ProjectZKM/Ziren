@@ -61,7 +61,6 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
             <Poseidon2PermuteChip as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))
     }
 
@@ -122,7 +121,6 @@ impl Poseidon2PermuteChip {
         let output = event.post_state.map(F::from_u32);
         cols.poseidon2 = populate_perm_deg3(input, Some(output));
 
-        // Populate memory columns.
         for i in 0..WIDTH {
             cols.state_mem[i].populate(event.state_records[i], blu);
             cols.pre_state_range_check_cols[i].populate(blu, event.pre_state[i]);

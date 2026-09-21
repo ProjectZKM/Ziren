@@ -317,18 +317,14 @@ impl<'a> Emitter<'a> {
                     range(self, e, 65535);
                 }
             }
-            x if x == ByteOpcode::Range as u64 => {
-                // `Range`: a1 < 2^b  (a2 = c = 0).
-                match b {
-                    PicusExpr::Const(bits) => {
-                        assert!(*bits < 32);
-                        range(self, a1, (1u64 << bits) - 1);
-                    }
-                    _ => self.abstract_call("byte_range", &[a1.clone(), b.clone()], &[]),
+            x if x == ByteOpcode::Range as u64 => match b {
+                PicusExpr::Const(bits) => {
+                    assert!(*bits < 32);
+                    range(self, a1, (1u64 << bits) - 1);
                 }
-            }
+                _ => self.abstract_call("byte_range", &[a1.clone(), b.clone()], &[]),
+            },
             x if x == ByteOpcode::MSB as u64 => {
-                // a1 = msb(b): b = 128 * a1 + lo, lo <= 127, a1 bit.
                 if !matches!(b, PicusExpr::Const(_)) {
                     let lo = fresh_picus_expr();
                     self.push_constraint(PicusConstraint::new_leq(
@@ -345,7 +341,6 @@ impl<'a> Emitter<'a> {
                 }
             }
             x if x == ByteOpcode::LTU as u64 => {
-                // a1 = (b < c).
                 let lt = PicusConstraint::new_lt(b.clone(), c.clone());
                 match a1 {
                     PicusExpr::Const(1) => self.push_constraint(lt),
@@ -379,7 +374,6 @@ impl<'a> Emitter<'a> {
     }
 
     fn bitwise_call(&mut self, name: &str, a1: &PicusExpr, b: &PicusExpr, c: &PicusExpr) {
-        // `x & 127` is the one bitwise op that shows up as a range trick: keep it precise.
         if name == "byte_and" && matches!(c, PicusExpr::Const(127)) {
             let hi = fresh_picus_expr();
             self.push_constraint(PicusConstraint::new_lt(a1.clone(), 128.into()));
@@ -449,7 +443,6 @@ impl<'a> Emitter<'a> {
         for (i, limb) in values[3..].iter().enumerate() {
             self.bind_port(port, limb, &multiplicity, &format!("{tag}[{k}].val[{i}]"));
             if is_send && !matches!(limb, PicusExpr::Const(_)) {
-                // Values entering the row from the memory argument are bytes.
                 self.push_constraint(PicusConstraint::new_leq(
                     limb.clone() * multiplicity.clone(),
                     PicusExpr::Const(255),
@@ -512,10 +505,6 @@ impl<'a> Emitter<'a> {
             values.len() == 5 || values.len() == 8,
             "syscall lookup must carry 5 values (reduced args) or 8 (half-word args + is_linux)"
         );
-        // `[shard, clk, syscall_id, arg1, arg2]` (or the args as half-words): all identify the
-        // syscall.  The receiving
-        // chip gets shard/clk from the sender (they feed its global send), so they are ports
-        // like the rest.
         let port = if is_send { Port::Output } else { Port::Input };
         let dir = if is_send { "send" } else { "recv" };
         self.bind_ports(port, values, &multiplicity, &format!("syscall_{dir}"));
@@ -577,7 +566,6 @@ impl<'a> Emitter<'a> {
                 )
             }
             LookupKind::Range => self.handle_chain("range", m, v, is_send),
-            // Global, State, GlobalAccumulation, MemoryGlobal*Control, PrecompileChain, …
             other => {
                 let kind = format!("{other:?}").to_lowercase();
                 self.handle_chain(&kind, m, v, is_send)
@@ -640,8 +628,6 @@ where
     let sends: Vec<_> = builder.sends.iter().map(|l| lower_lookup(&mut lowerer, l)).collect();
     let receives: Vec<_> = builder.receives.iter().map(|l| lower_lookup(&mut lowerer, l)).collect();
     let bindings = std::mem::take(&mut lowerer.bindings);
-    // Symbolic trees are no longer needed; drop them after the lowering (the memo keyed on their
-    // addresses is dropped with the lowerer).
     drop(lowerer);
     drop(builder.constraints);
     drop(builder.sends);
@@ -690,7 +676,6 @@ where
         em.handle_lookup(&l, false);
     }
 
-    // Explicitly annotated interface columns (local row).
     let info = chip.picus_info();
     let width = builder.layout.main_width;
     let annotated = |ranges: &[(usize, usize, String)]| -> Vec<usize> {

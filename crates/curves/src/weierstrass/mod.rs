@@ -407,14 +407,12 @@ mod ring_inverse_tests {
             );
             pairs.push((a, b));
         }
-        // Genuine curve points: G, 2G, 3G, ... via the production path.
         let g = SwCurve::<E>::generator();
         let mut q = g.sw_double();
         for _ in 0..16 {
             pairs.push((g.clone(), q.clone()));
             q = q.sw_add(&g);
         }
-        // Degenerate: same x, different y (P + (-P)) and y = 0 (2-torsion).
         let x = rng.gen_biguint_below(&p);
         let y = rng.gen_biguint_below(&p);
         pairs.push((AffinePoint::new(x.clone(), y.clone()), AffinePoint::new(x.clone(), &p - &y)));

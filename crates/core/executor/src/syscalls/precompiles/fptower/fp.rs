@@ -76,11 +76,6 @@ impl<P: FpOpField> Syscall for FpOpSyscall<P> {
             local_mem_access: rt.postprocess(),
         };
 
-        // Since all the Fp events are on the same table, we need to preserve the ordering of the
-        // events b/c of the nonce.  In this table's trace_gen, the nonce is simply the row number.
-        // Group all of the events for a specific curve into the same syscall code key.
-        // TODO:  FIX THIS.
-
         match P::FIELD_TYPE {
             FieldType::Bn254 => {
                 let syscall_code_key = match syscall_code {

@@ -40,7 +40,6 @@ fn bench_flat_vs_hierarchical() {
     println!("Total columns: {}", total_cols);
     println!("Total cells:   {}\n", total_cells);
 
-    // Flat
     let t0 = Instant::now();
     for _ in 0..10 {
         let _ = pack_traces_jagged(&traces);
@@ -59,7 +58,6 @@ fn bench_flat_vs_hierarchical() {
     );
     println!("  PCS fan-in: {}\n", fs.total_columns);
 
-    // Hierarchical
     let alpha = F::from_u32(12345);
     let t1 = Instant::now();
     for _ in 0..10 {
@@ -100,7 +98,6 @@ fn bench_flat_vs_hierarchical() {
     );
     println!("  Pack time: {}µs → {}µs", flat_us, hier_us);
 
-    // Per-table breakdown
     println!("\n--- Per-Table Fold Results ---");
     for i in 0..chip_specs.len() {
         let (name, h, w) = chip_specs[i];

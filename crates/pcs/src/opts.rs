@@ -13,27 +13,15 @@ use sysinfo::System;
 const MAX_SHARD_SIZE: usize = 1 << 21;
 const RECURSION_MAX_SHARD_SIZE: usize = 1 << 21;
 const MAX_SHARD_BATCH_SIZE: usize = 8;
-/// MEASURED INERT on reth core (Aug12): a `TRACE_GEN_WORKERS` sweep at
-/// `RECORDS_AND_TRACES_CHANNEL_CAPACITY=8` gave 2211/2242 kHz at ONE worker and
-/// 2198-2304 kHz at EIGHT — flat inside run-to-run spread, with the core proof
-/// byte-identical throughout.  Raising this default is therefore NOT a
-/// throughput change on that workload and is left alone.
+/// Trace-generation workers and channel depths.
 ///
-/// MEASURED Aug12: the one-deep record/trace channel WAS costing throughput.
-/// Isolating the capacity at a FIXED one worker, paired concurrent reth core:
-/// capacity 1 = 1866 kHz / 225.058 s, capacity 8 = 1991 kHz / 210.978 s
-/// (**+6.7%**), core proof `7a2135bb7205ca8d` on both arms.  The mechanism is
-/// visible in the spans: `dispatch_recv_records` falls from 14.90 s to nil while
-/// `open_s4_jagged_pcs` is unchanged (94.45 s vs 94.50 s) — no work is removed,
-/// device trace generation simply gets to run AHEAD of the prover instead of
-/// blocking it.  14.9 s of 225 s is 6.6%, which is the whole measured delta.
-/// Hence the channel is deepened here and `TRACE_GEN_WORKERS` is NOT: one
-/// worker already saturates the deeper channel.
+/// One worker saturates an 8-deep record/trace channel: a deeper channel lets
+/// device trace generation run ahead of the prover instead of blocking it,
+/// while extra workers do not change throughput.
 ///
-/// ⚠ `DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY` looks overridden by the harnesses
-/// (`DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY=512`) but is NOT: the parse arm below
-/// reads `CHECKPOINTS_CHANNEL_CAPACITY`, so that export has never taken effect
-/// and every measured run used this 128.
+/// `DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY` is overridden only by
+/// `CHECKPOINTS_CHANNEL_CAPACITY` (see the parse arm below), not by an env var
+/// named after the constant.
 const DEFAULT_TRACE_GEN_WORKERS: usize = 1;
 const DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY: usize = 128;
 const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 8;
@@ -41,135 +29,44 @@ const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 8;
 /// The threshold for splitting deferred events.
 pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 
-/// The default per-shard trace-AREA cap (raw main-trace cells). A shard closes as
-/// soon as its accumulated un-padded main-trace cell count
-/// `Σ_chip event_counts[chip] × costs[chip]` reaches this. Env-overridable via
-/// `ELEMENT_THRESHOLD`. It closes the large majority of core shards on reth,
-/// tendermint and goat — but NOT all of them any more; see the fences below.
+/// The default per-shard trace-area cap `T` (raw main-trace cells).
 ///
-/// ## The three fences on a core shard, and which one now binds
+/// A shard closes once `Σ_chip event_counts[chip] × costs[chip] ≥ T`.
+/// Env-overridable via `ELEMENT_THRESHOLD`; the override also feeds
+/// [`ZKMCoreOpts::max`] (hence the recursion prover), so a change must be gated
+/// on the full core → compress → shrink → wrap chain.
 ///
-/// 1. **This threshold** (trace area).
-/// 2. **Per-chip height**, `CORE_SHARD_HEIGHT_THRESHOLD` = 4,128,768 rows.
-/// 3. **`clk < CORE_SHARD_CLK_LIMIT`**, the width the memory argument range-checks
-///    timestamp differences to. At `clk += 5` per instruction this caps ANY shard
-///    at `CORE_SHARD_CLK_LIMIT / 5` cycles — a TERMINAL fence that no value of this
-///    constant can get past. It was 24 bits (3.355 M cycles, a floor of 126 shards
-///    on reth's 419,960,677 cycles); it is now 25 (6.71 M cycles), which is what
-///    handed the binding role back to fence 1.
+/// ## The three fences on a core shard
 ///
-/// Fence 3 is live, not theoretical. MEASURED (Aug 15, reth core) at every
-/// threshold from 260,000,000 to 720,000,000: **15 shards are clk-capped**, with
-/// `max(total_values)` pinned at **553,648,128 = 2^22 × 132** — identical to the
-/// byte across a 2.77x range of this constant. The tallest chip pads to `2^22`
-/// rows at the clk cap; 132 is the committed column count.
+/// 1. This threshold (trace area).
+/// 2. Per-chip height, `CORE_SHARD_HEIGHT_THRESHOLD` = 4,128,768 rows.
+/// 3. `clk < CORE_SHARD_CLK_LIMIT`, the width the memory argument range-checks
+///    timestamp differences to. With `clk += 5` per instruction this caps any
+///    shard at `CORE_SHARD_CLK_LIMIT / 5` cycles regardless of `T`.
 ///
-/// ⚠ **THOSE 15 SHARDS ARE IN `log_dense = 30`, NOT 29 — INCLUDING AT THE OLD
-/// DEFAULT.** `2^29 = 2^22 × 128`, so the committed width crossed the class
-/// boundary at 128 columns and now sits **3.1% past it**. An earlier revision of
-/// this comment predicted exactly this ("the committed width can grow only
-/// ~1.26% before that shard crosses into `log_dense = 30`") against a then-peak
-/// of 20.43 GiB; the frame architecture has since taken the committed set past
-/// that fence. The claim this comment used to make — that this threshold keeps
-/// dense shards at `log_dense ≤ 29` — is therefore FALSE and has been removed.
-/// Peak is now ~29.7 GiB at the OLD 260,000,000 default, i.e. **this workload
-/// already had little headroom before any of this sweep's changes**. Getting
-/// those 15 shards back to class 29 is a COMMITTED-WIDTH problem (drop 4
-/// columns), not something this threshold can reach.
+/// Clk-capped shards pad their tallest chip to `2^22` rows; at 132 committed
+/// columns `2^22 × 132 > 2^29 = 2^22 × 128`, so they sit in `log_dense = 30`.
+/// Moving them to class 29 needs a committed width ≤ 128, not a smaller `T`.
 ///
-/// ⚠ WHAT DRIVES VRAM IS THE **DISTRIBUTION** OF SHARDS ACROSS jagged-eval SIZE
-/// CLASSES — not this value directly, and not the largest shard, which is
-/// invariant here. `log_dense = ceil(log2(total_values))` sizes the
-/// jagged-evaluation sumcheck buffers per shard, and **class 29 costs ~2x class
-/// 28**. `total_values` counts committed `width x PADDED height`, a different
-/// quantity from this threshold.
+/// ## Memory
 ///
-/// ⚠ **PEAK VRAM IS NOT MONOTONE IN THIS CONSTANT.** Measured peaks:
-/// 420M → 31,525 MiB, 460M → 31,397, 500M → **31,045**, 560M → 32,005. 500M is
-/// both FASTER and LIGHTER than 420M and 460M. Do not interpolate a
-/// "higher threshold ⇒ more memory" rule, and do not pick a value by
-/// extrapolating from its neighbours — measure the class histogram at the exact
-/// value you intend to ship.
+/// VRAM is driven by the distribution of shards across jagged-eval size
+/// classes `log_dense = ⌈log2(total_values)⌉`, where `total_values` counts
+/// committed `width × padded height` (not `T`), and class `k+1` costs ~2× class
+/// `k`. Peak VRAM is therefore not monotone in `T`: measure the class histogram
+/// at the exact value to ship rather than interpolating. Past the point where
+/// fence 3 binds, raising `T` removes no shards and only adds memory pressure.
+/// This knob fails by OOM on a fraction of runs, not smoothly, so a run that
+/// needs an allocator rescue counts as a failure.
 ///
-/// ## The measured ladder (reth core, Aug 15, one binary, solo, GPU-confined)
+/// 460M: shards close on this budget and the largest shard's LogUp-GKR round-0
+/// slab scales with `T`; on a 32 GiB card 500M (slab ~10.7 GiB) OOMs
+/// intermittently while 460M (~9.9 GiB) is deterministic at the same wall
+/// time. Raising it needs a bigger card or a smaller per-shard GKR working set.
 ///
-/// Control interleaved between points (A/B/A/C/A/D order) so drift is visible;
-/// the 260M control held 3746/3704/3702/3661 kHz across the session. Shard
-/// geometry is deterministic in this constant — every replicate at a given value
-/// reproduced its class histogram exactly.
-///
-/// | T | shards | cyc/shard | runs | mean kHz | peak MiB | rescues |
-/// |---|--------|-----------|------|----------|----------|---------|
-/// | 260M | 275 | 1.527M | 4 | 3703 | 29,797 | 0 |
-/// | 300M | 246 | 1.707M | 1 | 3805 | 30,885 | 0 |
-/// | 340M | 225 | 1.866M | 2 | 3966 | 30,789 | 0 |
-/// | 380M | 209 | 2.009M | 5 | 4068 | 31,045 | 0 |
-/// | 420M | 198 | 2.121M | 3 | 4121 | 31,525 | 0 |
-/// | 460M | 192 | 2.187M | 1 | 4156 | 31,397 | 0 |
-/// | **500M** | **189** | **2.222M** | **4** | **4202** | **31,141** | **0** |
-/// | 560M | 187 | 2.246M | 3 | 4185 | 32,005 | **1 of 3** |
-/// | 640M | 187 | 2.246M | 1 | 2150 | 32,099 | **3 + 214 OOM** |
-/// | 720M | 187 | 2.246M | 1 | 1646 | 32,099 | **3 + 348 OOM** |
-///
-/// Class histograms at the ends: 260M = `c28 221 / c29 18 / c30 15`;
-/// 500M = `c28 8 / c29 145 / c30 15`. The c28 mass migrates into c29 while c30
-/// stays pinned at 15 — which is why peak barely moves across that whole range.
-///
-/// **Shard count SATURATES at 187** from 560M upward: that is fence 3 taking
-/// over. Past ~500M this constant buys no further structural reduction, only
-/// memory pressure — 640M and 720M return the same 187 shards while collapsing
-/// throughput by 49% and 61% respectively, thrashing the allocator rescue path.
-///
-/// ## Why 500,000,000 and not the fastest point
-///
-/// 560M produced this sweep's single fastest run (4245 kHz) and is still
-/// REJECTED: across 3 runs it averages 4185 — *slower* than 500M's 4202 — and
-/// one of the three needed a `#CUDA-ALLOC-RESCUE` (a 2,112 MiB
-/// `jagged_sumcheck.rs` allocation recovered only by device-sync + pool trim)
-/// after two hard `out of memory` returns. A default that completes only via the
-/// rescue path is not a default. This knob has always failed probabilistically
-/// rather than smoothly, so a rescued allocation is counted as a FAILED run.
-/// 500M kept a 96 MiB run-to-run peak excursion (31,045-31,141) over 4 runs.
-///
-/// ⚠ Peak figures here are a 100 ms `nvidia-smi` sampler reading the
-/// `cudaMallocAsync` pool's retained footprint, which the release threshold
-/// keeps monotone — NOT an instantaneous sample of live bytes, and NOT the
-/// in-process allocation ledger the earlier revisions of this comment used
-/// (a 2 s sampler once read 28,509 MiB against a ledger's 30,855 MiB). Treat the
-/// absolute MiB as approximate; the rescue/OOM counts above are process-emitted
-/// and are the load-bearing reliability evidence.
-///
-/// Changing this moves shard boundaries ⇒ moves core proof bytes and goldens, so
-/// md5 equality is NOT a valid gate across a change to this value; verification
-/// passing is.
-///
-/// Written as a plain decimal on purpose: earlier revisions spelled it
-/// `2^28 - 2^24` and built a "just under a power of two" rule on it, which
-/// measurement refuted twice. The value has no demonstrated power-of-two
+/// Changing `T` moves shard boundaries and hence core proof bytes and goldens:
+/// the gate is verification, not md5 equality. The value has no power-of-two
 /// structure.
-///
-/// History. 251,658,240 → 290,000,000 after the Instruction-bus deletion +
-/// pinned-upload staging (Aug 13), then back to 260,000,000 after the frame
-/// slimming (the threshold is a CELL budget, so cutting ~10% of the cells per
-/// cycle packs ~10% more cycles per shard at fixed T). Raised 260,000,000 →
-/// 500,000,000 (Aug 15) once ~8.7 GB of device residency was freed: that removed
-/// the VRAM wall this constant had been pinned against, and re-sweeping found
-/// **+13.5%** on reth core (3703 → 4202 kHz, 275 → 189 shards) with 0 rescues in
-/// 4 runs. The 1.55x revert recorded below was measured against the OLD residency
-/// and per-shard cost and no longer describes this regime; its lasting lesson —
-/// that this knob fails by OOM-ing a fraction of runs — is why 560M is rejected
-/// above. If per-cycle area changes again, rescale T with it. The env override
-/// remains, and NOTE it also feeds [`ZKMCoreOpts::max`] (hence the recursion
-/// prover), so a change here must be gated on the full core→compress→shrink→wrap
-/// chain, not core alone.
-///
-/// 460M, not the historical 500M: with the `Cpu` pseudo-height fence gone,
-/// shards genuinely close on THIS budget, and the biggest shard's LogUp-GKR
-/// round-0 slab scales with it.  Measured on a 32 GiB card (reth, Aug26):
-/// at 500M the ~10.7 GiB slab intermittently OOMs even after the pool
-/// rescues; at 460M (slab ~9.9 GiB) the run is deterministic and the wall is
-/// within noise of 500M's best (142.0 vs 140.9 s).  Raising this needs
-/// either a bigger card or a smaller per-shard GKR working set.
 pub const ELEMENT_THRESHOLD: usize = 460_000_000;
 
 /// Options to configure the Ziren prover for core and recursive proofs.
@@ -262,25 +159,9 @@ impl ZKMProverOpts {
     pub fn gpu(_cpu_ram_gb: usize, gpu_ram_gb: usize) -> Self {
         let mut opts = ZKMProverOpts::default();
 
-        // Set the core options.
         if 24 <= gpu_ram_gb {
             opts.core_opts.shard_batch_size = 1;
 
-            // Small-card adaptation: on cards <= 30 GB, halve the
-            // default shard cycle budget — reduce work per shard so
-            // multi-shard concurrency fits in mempool headroom.
-            //
-            // Override with SHARD_SIZE env to force a specific value
-            // (default ZKMCoreOpts already honours the env).
-            // The `ceil() + 4` sizing maps 24 GB 4090s to 28 and
-            // 32 GB RTX 5090s to 36 (32 + 4).  The production 5090 box
-            // OOMs under V3 + LT default-on when small-card mode doesn't
-            // fire; catching at ≤36 enabled the shard-size halving + the
-            // matching mempool/recompute companions on ziren-gpu.
-            // User directive: 32 GB prod boxes get the full 2^24 default
-            // (validated single-GPU), so the halving threshold is ≤30 —
-            // 24 GB cards (28) still protected, 32 GB (36)
-            // and up run large-card (un-halved).
             if gpu_ram_gb <= 30 {
                 let shard_size_overridden = std::env::var("SHARD_SIZE").is_ok();
                 if !shard_size_overridden {
@@ -300,42 +181,11 @@ impl ZKMProverOpts {
             unreachable!("not enough gpu memory");
         }
 
-        // Set the recursion options.
-        // shard_batch_size controls the number of concurrent prover-submit
-        // threads in compress_multi_gpu (one shard per thread at a time).
-        // With shard_batch_size = 1 only one shard is in flight to the GPU
-        // pool, so additional GPUs go idle. Default scales as
-        // `(gpu_count * 2).clamp(4, 8)` from ZKM_GPU_DEVICES:
-        // - 1-2 GPU -> 4: oversubscribing 1 GPU 8x OOMs on reth shards,
-        //   4 keeps the single GPU's memory budget safe.
-        // - 4 GPU -> 8: 2x oversubscribe lets per-shard CPU prep
-        //   (recursion-program build, setup, generate_dependencies)
-        //   overlap with the next shard's GPU work. Compress 42s -> 32s,
-        //   total 101.9s -> 97.1s on reth.
-        // - 8 GPU -> 8: 1:1 mapping fully saturates the pool. Compress
-        //   42s -> 33s, total 99.9s -> 94.4s on reth. SBS=12 plateaus
-        //   then regresses (Core 56.4s -> 62.8s from contention).
-        // Override via RECURSION_SHARD_BATCH_SIZE for >8-GPU boxes,
-        // memory-constrained machines, or experimentation.
         let gpu_count = env::var("ZKM_GPU_DEVICES")
             .ok()
             .map(|s| s.split(',').filter(|x| !x.trim().is_empty()).count())
             .filter(|&n| n > 0)
             .unwrap_or(1);
-        // Small-card concurrency bound: the default lower clamp of 4
-        // forces FOUR concurrent recursion-compress workers even with a
-        // SINGLE GPU (`(1*2).clamp(4,8) == 4`).  Under default-on device
-        // residency each worker pins a recursion device tracegen buffer
-        // (recursion.cuh:429 poseidon2_wide) AND a full BaseFold commit
-        // codeword stack (commit_dispatch.rs, ~4 GiB at log_dense≈29);
-        // four of those on one 32 GB card overruns VRAM (observed TM
-        // compress-from-dump OOM at recursion.cuh:429 / encode_batch).
-        // On small cards (`gpu_ram_gb <= 36`, the 32 GB 5090 with the
-        // `ceil()+4` pad) cap the *lower* clamp at 2 so a single GPU runs
-        // 2 workers (the safe profile) instead of 4 — per-GPU
-        // concurrency stays ≤ 2 at every device count
-        // (1 GPU → 2, 2 GPU → 4, 4 GPU → 8: unchanged for ≥2 GPUs).
-        // RECURSION_SHARD_BATCH_SIZE always overrides.
         let sbs_lo = if gpu_ram_gb <= 36 { 2 } else { 4 };
         opts.recursion_opts.shard_batch_size = env::var("RECURSION_SHARD_BATCH_SIZE")
             .ok()
@@ -384,35 +234,8 @@ impl Default for ZKMCoreOpts {
             ZKMProverOpts::get_memory_opts(cpu_ram_gb as usize);
 
         let mut opts = Self {
-            // Default core shard_size = 2^24 (was the memory-derived
-            // `1 << default_log2_shard_size`, ~2^22). The SHARD_SIZE env still
-            // OVERRIDES it (parse arm below); only the no-env / unparseable
-            // default is pinned to 2^24. The memory heuristic still governs
-            // shard_batch_size + the split divisor below.
-            //
-            // WHICH FENCE ACTUALLY CLOSES A SHARD has changed twice, so
-            // MEASURE it (`ZIREN_SHARD_CLOSE_CENSUS=1` prints one
-            // `SHARD_CLOSE reason=` line per shard) before reasoning about it:
-            //
-            //  * While the memory argument range-checked timestamps to 24 bits,
-            //    the TIMESTAMP fence fired first and this budget was inert —
-            //    over a 60-shard reth block the reasons were clk 52 / area 7 /
-            //    final 1.
-            //  * With that fence widened to 25 bits (`CORE_SHARD_CLK_LIMIT`,
-            //    6.71 M cycles) this budget is what binds again. MEASURED
-            //    Sep 2026, reth at `SHARD_SIZE=4194305`: **227 of 227 shards
-            //    close on `reason=cpu`**, at 3,355,435 cycles, with the trace
-            //    area at 432 M of its 460 M cap and the tallest chip at
-            //    3,355,436 of 4,128,768 rows.
-            //
-            // So the shard-size lever is this value, and lifting it hands the
-            // shard to `element_threshold` (~3.57 M cycles) and then to the
-            // per-chip height cap (~4.13 M cycles, one row per cycle).
             shard_size: env::var("SHARD_SIZE")
                 .map_or_else(|_| 1 << 24, |s| s.parse::<usize>().unwrap_or(1 << 24)),
-            // Per-shard trace-AREA cap (raw main-trace cells). The
-            // ELEMENT_THRESHOLD env OVERRIDES it (mirrors the SHARD_SIZE pattern above);
-            // only the no-env / unparseable default is pinned to ELEMENT_THRESHOLD.
             element_threshold: env::var("ELEMENT_THRESHOLD").map_or_else(
                 |_| ELEMENT_THRESHOLD,
                 |s| s.parse::<usize>().unwrap_or(ELEMENT_THRESHOLD),
@@ -421,10 +244,6 @@ impl Default for ZKMCoreOpts {
                 |_| default_shard_batch_size,
                 |s| s.parse::<usize>().unwrap_or(default_shard_batch_size),
             ),
-            // Deferred / memory / precompile shard packing.  The
-            // SPLIT_THRESHOLD env OVERRIDES the default (mirrors `max()` and
-            // the ELEMENT_THRESHOLD pattern above), clamped so it can only
-            // PACK MORE per shard, never less.
             split_opts: SplitOpts::new(
                 env::var("SPLIT_THRESHOLD")
                     .map(|s| s.parse::<usize>().unwrap_or(MAX_DEFERRED_SPLIT_THRESHOLD))
@@ -543,11 +362,6 @@ impl SplitOpts {
             sha_extend: 32 * deferred_split_threshold / 48,
             sha_compress: 32 * deferred_split_threshold / 80,
             memory: 64 * deferred_split_threshold,
-            // s4 diagnostic knob: ZIREN_COMBINE_MEM_THRESHOLD overrides the
-            // packed-memory combine threshold (set =0 to force the split
-            // memory-shard structure even for tiny programs — used to test
-            // the recursion circuit against split shards from the CPU
-            // prover).  Default unchanged (1 << 17).
             combine_memory_threshold: std::env::var("ZIREN_COMBINE_MEM_THRESHOLD")
                 .ok()
                 .and_then(|v| v.parse().ok())

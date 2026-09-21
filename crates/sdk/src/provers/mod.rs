@@ -156,8 +156,6 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         }
         match &bundle.proof {
             ZKMProof::Core(proof) => {
-                // An empty `Core` vector deserializes fine, so `last()` is a
-                // real `None` and used to panic a caller.
                 let last = proof.last().ok_or(ZKMVerificationError::MalformedProof)?;
                 if last.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
                     return Err(ZKMVerificationError::MalformedProof);
@@ -165,14 +163,12 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                 let public_values: &PublicValues<Word<_>, _> =
                     last.public_values.as_slice().borrow();
 
-                // Get the committed value digest bytes.
                 let committed_value_digest_bytes = public_values
                     .committed_value_digest
                     .iter()
                     .flat_map(|w| w.0.iter().map(|x| x.as_canonical_u32() as u8))
                     .collect_vec();
 
-                // Make sure the committed value digest matches the public values hash.
                 for (a, b) in
                     committed_value_digest_bytes.iter().zip_eq(bundle.public_values.hash())
                 {
@@ -181,7 +177,6 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     }
                 }
 
-                // Verify the core proof.
                 self.zkm_prover()
                     .verify(&ZKMCoreProofData(proof.clone()), vkey)
                     .map_err(ZKMVerificationError::Core)
@@ -193,14 +188,12 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                 let public_values: &PublicValues<Word<_>, _> =
                     proof.proof.public_values.as_slice().borrow();
 
-                // Get the committed value digest bytes.
                 let committed_value_digest_bytes = public_values
                     .committed_value_digest
                     .iter()
                     .flat_map(|w| w.0.iter().map(|x| x.as_canonical_u32() as u8))
                     .collect_vec();
 
-                // Make sure the committed value digest matches the public values hash.
                 for (a, b) in
                     committed_value_digest_bytes.iter().zip_eq(bundle.public_values.hash())
                 {
@@ -239,7 +232,6 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     },
                 )
                 .map_err(ZKMVerificationError::Groth16),
-            // Reachable: these variants deserialize like any other.
             _ => Err(ZKMVerificationError::UnsupportedProofKind),
         }
     }
@@ -247,8 +239,6 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
 
 impl Prover<DefaultProverComponents> for ProverClient {
     fn id(&self) -> ProverType {
-        // Every wrapped prover (CPU, CUDA, mock, network) implements this; the
-        // `todo!()` that used to be here panicked on a public trait method.
         self.prover.id()
     }
 

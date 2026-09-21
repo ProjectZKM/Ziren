@@ -170,7 +170,6 @@ impl<V: Copy> EdDecompressCols<V> {
             self.is_real,
         );
 
-        // Constrain that the correct result is written into x.
         let x_limbs: Limbs<V, U32> = limbs_from_access(&self.x_access);
         builder.when(self.is_real).when(self.sign).assert_all_eq(self.neg_x.result, x_limbs);
         builder

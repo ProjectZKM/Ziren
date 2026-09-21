@@ -26,7 +26,6 @@ impl<AB: ZKMAirBuilder<F: Field>> Air<AB> for ByteChip<AB::F> {
         let prep = prep.current_slice();
         let local: &BytePreprocessedCols<AB::Var> = (*prep).borrow();
 
-        // Send all the lookups for each operation.
         for opcode in ByteOpcode::all() {
             let field_op = opcode.as_field::<AB::F>();
             let mult = local_mult.multiplicities[opcode as usize];
@@ -41,7 +40,6 @@ impl<AB: ZKMAirBuilder<F: Field>> Air<AB> for ByteChip<AB::F> {
                 ByteOpcode::NOR => {
                     builder.receive_byte(field_op, local.nor, local.b, local.c, mult)
                 }
-                // Served by the dedicated `RangeChip`, never by the byte table.
                 ByteOpcode::Range => unreachable!("Range is not a byte-table op"),
                 ByteOpcode::SLL => {
                     builder.receive_byte(field_op, local.sll, local.b, local.c, mult)

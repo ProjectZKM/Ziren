@@ -95,7 +95,6 @@ impl<F: PrimeField32> MachineAir<F> for AddSubImmChip {
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the rows for the trace.
         let chunk_size = std::cmp::max(input.add_sub_imm_events.len() / num_cpus::get(), 1);
         let padded_nb_rows = <AddSubImmChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_ADD_SUB_IMM_COLS);
@@ -117,14 +116,10 @@ impl<F: PrimeField32> MachineAir<F> for AddSubImmChip {
                             input.public_values.execution_shard,
                         );
                     }
-                    // A PADDING row needs no neutralising: the I-type frame's
-                    // register-access multiplicities are `is_real`, which an
-                    // all-zero row leaves at zero.
                 });
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_ADD_SUB_IMM_COLS))
     }
 
@@ -182,8 +177,6 @@ impl AddSubImmChip {
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
 
-        // Every AddSubImm row is a real instruction owning its frame — program
-        // fetch, register access, `(clk, pc)` chaining.
         cols.frame.populate_from_alu(event, program, shard, blu);
 
         cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
@@ -216,19 +209,12 @@ where
         builder.assert_bool(local.is_sub);
         builder.assert_bool(is_real.clone());
 
-        // The addition runs DIRECTLY on the frame's words — the second
-        // operand is the frame's IMMEDIATE rather than a register read; see
-        // the register-form chip for the byte-shape argument.
         builder.assert_eq(local.add_gate, local.is_add * (AB::Expr::ONE - local.frame.op_a_0));
         builder.assert_eq(local.sub_gate, local.is_sub * (AB::Expr::ONE - local.frame.op_a_0));
         let av = *local.frame.op_a_access.value();
         let bv = local.frame.op_b_val();
         let cv = local.frame.op_c_val();
-        // The carries are RECOVERED linear expressions, boolean-asserted under
-        // the case gate (no carry columns): `256*c_out = x_i + y_i - z_i + c_in`
-        // with all words byte-shaped has a unique boolean solution.
         let base_inv = AB::F::from_u32(256).inverse();
-        // ADD: `a = b + c`.
         let mut carry = AB::Expr::ZERO;
         for i in 0..4 {
             carry = (bv[i] + cv[i] - av[i] + carry) * base_inv;
@@ -236,7 +222,6 @@ where
                 .when(local.add_gate)
                 .assert_zero(carry.clone() * (carry.clone() - AB::Expr::ONE));
         }
-        // SUB: `a = b - c`, verified as `b = a + c`.
         let mut carry = AB::Expr::ZERO;
         for i in 0..4 {
             carry = (av[i] + cv[i] - bv[i] + carry) * base_inv;
@@ -245,9 +230,6 @@ where
                 .assert_zero(carry.clone() * (carry.clone() - AB::Expr::ONE));
         }
 
-        // Every real row is an instruction carrying its own program fetch,
-        // register access and `(clk, pc)` chaining.  ADD/SUB are sequential,
-        // so `next_next_pc` is `next_pc + 4`.
         eval_i_type_frame(
             builder,
             &local.frame,
@@ -256,7 +238,6 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            // ADD/SUB can never halt: the received continuation is `next_pc`.
             local.next_pc.into(),
             AB::Expr::ZERO,
             is_real,
@@ -290,7 +271,6 @@ mod tests {
     #[test]
     fn generate_trace() {
         let shard = run_instructions(alu_op(Opcode::ADD, 8, 6));
-        // The two immediate loads of every `alu_op` triple land here.
         assert!(!shard.add_sub_imm_events.is_empty());
         let chip = AddSubImmChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
@@ -301,8 +281,6 @@ mod tests {
     #[test]
     fn measure_addsubimm_degree() {
         let chip = zkm_pcs::Chip::<KoalaBear, _>::new(AddSubImmChip::default());
-        // log_quotient_degree = log2_ceil(max_constraint_degree - 1):
-        //   1 => degree 3 ; 2 => degree 4 or 5.
         println!("ADDSUBIMM_LOG_QUOTIENT_DEGREE={}", chip.log_quotient_degree());
     }
 
@@ -311,10 +289,6 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        // `p3_uni_stark::prove` needs a power-of-two height and
-        // `generate_trace` pads to next_multiple_of_32 only, so make the
-        // IMMEDIATE-form event count exactly 1024: 511 alu_op triples (two
-        // immediate loads each) plus two bare immediate ADDs.
         let mut instructions = Vec::new();
         for _ in 0..511 {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
@@ -381,9 +355,6 @@ mod tests {
                     .map(|event| {
                         let mut row = [F::ZERO; NUM_ADD_SUB_IMM_COLS];
                         let cols: &mut AddSubImmCols<F> = row.as_mut_slice().borrow_mut();
-                        // Every event is a real instruction, fetched from the
-                        // program by pc exactly as the Rust `event_to_row`
-                        // does.
                         let instruction: zkm_core_executor::InstructionFfi =
                             input.program.fetch(event.pc).into();
                         unsafe {
@@ -406,16 +377,8 @@ mod tests {
             rows.extend(row_batch);
         }
 
-        pad_rows_mult32(
-            &mut rows,
-            // Mirror `generate_trace`'s padding: the I-type frame needs no
-            // neutralising, so a padding row is simply zero.
-            || [F::ZERO; NUM_ADD_SUB_IMM_COLS],
-            None,
-            "AddSubImm",
-        );
+        pad_rows_mult32(&mut rows, || [F::ZERO; NUM_ADD_SUB_IMM_COLS], None, "AddSubImm");
 
-        // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ADD_SUB_IMM_COLS)
     }
 }

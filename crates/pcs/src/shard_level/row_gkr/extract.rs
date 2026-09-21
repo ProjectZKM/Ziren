@@ -52,21 +52,6 @@ where
         "extract_outputs requires terminal layer (num_row_variables == 1)"
     );
 
-    // Output MLE layout MUST match the bit-ordering `flatten_layer`
-    // uses for the round 0 sumcheck: variable 0 (LSB of index) = col
-    // LSB, remaining cols-variables are higher-order bits, and the
-    // single row-bit is the highest-order bit (MSB).  Layout:
-    //
-    //   output_idx = row_bit * cols + offset + col
-    //              = row_bit * 2^num_int_vars + chip_offset + chip_col
-    //
-    // where the col dimension (2^num_int_vars) is the global aggregate.
-    //
-    // Per chip: row 0's cols go in the first half of the global axis at
-    // the chip's running `offset`; row 1's cols go in the second half at
-    // the same `offset`.  Padded cells (chip contribution ends before
-    // next chip's offset, and cells beyond sum-of-raw) get ZERO
-    // (numerator) / ONE (denominator).
     let cols = 1usize << layer.num_interaction_variables;
     let total_len = 2 * cols;
 
@@ -90,12 +75,7 @@ where
         debug_assert_eq!(n0_chip.num_row_variables, 1);
         debug_assert!(offset + chip_cols <= cols);
 
-        // Terminal layer has num_row_vars=1 → 2 logical rows.  PaddedMle
-        //: each quadrant's `num_real_rows` is independently
-        // 0/1/2; rows beyond it carry the per-quadrant pad value
-        // (n* → 0, d* → 1).
         for c in 0..chip_cols {
-            // Row 0 (low half).
             n0_flat[offset + c] =
                 if n0_chip.num_real_rows >= 1 { *n0_chip.get(0, c) } else { EF::ZERO };
             d0_flat[offset + c] =
@@ -105,7 +85,6 @@ where
             d1_flat[offset + c] =
                 if d1_chip.num_real_rows >= 1 { *d1_chip.get(0, c) } else { EF::ONE };
 
-            // Row 1 (high half).
             n0_flat[cols + offset + c] =
                 if n0_chip.num_real_rows >= 2 { *n0_chip.get(1, c) } else { EF::ZERO };
             d0_flat[cols + offset + c] =
@@ -152,12 +131,9 @@ mod tests {
 
     #[test]
     fn interleave_chip_alternates_row0_row1() {
-        // 2 rows × 4 cols = 8 cells.
         let cells: Vec<EF> = (0..8).map(EF::from_u32).collect();
         let table = make_table_ef(2, cells);
         let out = interleave_chip(&table);
-        // row_0 = [0,1,2,3], row_1 = [4,5,6,7]
-        // expected = [0,4,1,5,2,6,3,7]
         let expected: Vec<EF> =
             vec![0, 4, 1, 5, 2, 6, 3, 7].into_iter().map(EF::from_u32).collect();
         assert_eq!(out, expected);
@@ -165,10 +141,6 @@ mod tests {
 
     #[test]
     fn extract_outputs_one_chip_one_interaction() {
-        // num_interaction_variables = 0 → 1 col → 2 cells per chip.
-        // total_len = 2^(0+1) = 2.
-        // n0 = [(2)], n1 = [(3)], d0 = [(5)], d1 = [(7)] each row 0
-        //  with row 1 = [(11)], [(13)], [(17)], [(19)]
         let n0 = make_table_ef(0, vec![EF::from_u32(2), EF::from_u32(11)]);
         let n1 = make_table_ef(0, vec![EF::from_u32(3), EF::from_u32(13)]);
         let d0 = make_table_ef(0, vec![EF::from_u32(5), EF::from_u32(17)]);
@@ -186,10 +158,6 @@ mod tests {
         assert_eq!(output.numerator.len(), 2);
         assert_eq!(output.denominator.len(), 2);
 
-        // After interleave: n0_int = [2, 11], n1_int = [3, 13],
-        //                   d0_int = [5, 17], d1_int = [7, 19].
-        // pos 0: numerator = 2*7 + 3*5 = 14 + 15 = 29; denom = 5*7 = 35
-        // pos 1: numerator = 11*19 + 13*17 = 209 + 221 = 430; denom = 17*19 = 323
         assert_eq!(output.numerator[0], EF::from_u32(29));
         assert_eq!(output.denominator[0], EF::from_u32(35));
         assert_eq!(output.numerator[1], EF::from_u32(430));
@@ -198,11 +166,6 @@ mod tests {
 
     #[test]
     fn extract_outputs_pads_with_identity_to_global_size() {
-        // 1 chip with num_int_vars_chip = 0 (1 col), but global
-        // num_interaction_variables = 2.  Per-chip contribution = 2
-        // entries; global total = 2^(2+1) = 8.  Padding fills with
-        // (0, 1) = identity fraction → numerator entries past 2 must
-        // be 0, denominator entries past 2 must be 1.
         let n0 = make_table_ef(0, vec![EF::from_u32(2), EF::from_u32(3)]);
         let n1 = make_table_ef(0, vec![EF::from_u32(5), EF::from_u32(7)]);
         let d0 = make_table_ef(0, vec![EF::from_u32(11), EF::from_u32(13)]);
@@ -220,11 +183,6 @@ mod tests {
         assert_eq!(output.numerator.len(), 8);
         assert_eq!(output.denominator.len(), 8);
 
-        // New row-major layout (matches flatten_layer):
-        //   row 0 at index 0..1, row 1 at index 4..5
-        //   padding: indices 1, 2, 3 (row 0 padding) and 5, 6, 7 (row 1).
-        // Padded entries get n_0=n_1=0, d_0=d_1=1
-        // → numerator = 0*1 + 0*1 = 0; denominator = 1*1 = 1.
         for i in [1usize, 2, 3, 5, 6, 7] {
             assert_eq!(output.numerator[i], EF::ZERO, "numerator at idx {i}");
             assert_eq!(output.denominator[i], EF::ONE, "denominator at idx {i}");
@@ -233,7 +191,6 @@ mod tests {
 
     #[test]
     fn extract_outputs_yields_correct_global_length() {
-        // Multiple values of num_interaction_variables sweep.
         for k in 0..4 {
             let n0 = make_table_ef(k, vec![EF::ZERO; 2 << k]);
             let n1 = make_table_ef(k, vec![EF::ZERO; 2 << k]);

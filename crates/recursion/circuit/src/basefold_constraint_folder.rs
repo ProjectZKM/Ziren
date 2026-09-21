@@ -4,23 +4,17 @@
 //! circuit shard verifier's zerocheck phase to evaluate per-chip
 //! constraint polynomials at a single hypercube point.
 //!
-//! Differs from the legacy [`crate::constraints::RecursiveVerifierConstraintFolder`]
-//! in two important ways:
+//! Compared with [`crate::constraints::RecursiveVerifierConstraintFolder`]:
 //!
-//!   - **Single row, not pair** — only the local row is exposed
-//!     (as a 1-row `RowMajorMatrixView`), not a (top, bottom) pair.
-//!     The BaseFold pipeline reduces every chip's polynomial to a
-//!     single hypercube point; there is no "next row" concept.
-//!   - **No permutation matrix** — the BaseFold pipeline replaced
-//!     the permutation-phase opening with a sumcheck-based binding
-//!     (zerocheck + LogUp-GKR), so the folder doesn't carry any
-//!     permutation columns or challenges.
+//!   - Single row: only the local row is exposed (as a 1-row
+//!     `RowMajorMatrixView`).  Every chip polynomial is reduced to one
+//!     point `z`, so there is no next row.
+//!   - No permutation columns or challenges: the interaction argument is
+//!     the zerocheck + LogUp-GKR sumchecks.
 //!
-//! Per-chip selectors (`is_first_row`, `is_last_row`,
-//! `is_transition_window`) panic if accessed — chip constraints
-//! evaluated through this folder must already have folded those
-//! selectors into their constraint expressions before reaching the
-//! zerocheck verifier.
+//! The selectors `is_first_row`, `is_last_row`, `is_transition_window`
+//! evaluate to `0`, so any constraint multiplied by one of them vanishes;
+//! chips checked through this folder must not rely on them.
 
 use std::marker::PhantomData;
 
@@ -113,13 +107,6 @@ where
     }
 
     fn is_first_row(&self) -> Self::Expr {
-        // BaseFold has no first-row selector; return zero so any chip
-        // constraint multiplied by `is_first_row` evaluates to zero
-        // (effectively disabling that constraint at the zerocheck
-        // reduction point). Cryptographic soundness requires the
-        // chips to fold these selectors into their constraint
-        // expressions — this stub lets fibonacci make progress until
-        // the chip-side refactor lands.
         use p3_field::PrimeCharacteristicRing;
         SymbolicExt::<C::F, C::EF>::ZERO
     }
@@ -136,18 +123,6 @@ where
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
         let x: SymbolicExt<C::F, C::EF> = x.into();
-        // `acc = acc*alpha + x`, with the two steps skipped when they are
-        // provably identities at BUILD time.  The symbolic layer is eager —
-        // every operator pushes an instruction the moment it is applied — so
-        // `0*alpha` and `acc+0` are not free unless they are elided here.
-        //
-        // That matters for the padded-row adjustment, which folds a whole
-        // chip's constraint polynomial over a row that is all zeros at build
-        // time: nearly every term is the compile-time zero, and without this
-        // the Horner chain still emits a multiply and an add for each one.
-        // On a real opening the accumulator turns into a value at the first
-        // constraint and both guards stop firing, so the emitted fold is the
-        // same one as before minus that first constraint's two identities.
         let acc_is_zero = symbolic_ext_is_zero::<C>(&self.accumulator);
         if !acc_is_zero {
             self.accumulator *= self.alpha;
@@ -200,16 +175,10 @@ where
     type PermutationVar = Ext<C::F, C::EF>;
 
     fn permutation(&self) -> Self::MP {
-        // The BaseFold pipeline has no permutation matrix on the
-        // wire — return an empty pair window.  Any chip that reads
-        // permutation columns through this folder is misusing the
-        // BaseFold-pipeline contract.
         PairWindow { local: &[], next: &[] }
     }
 
     fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        // No permutation challenges in the BaseFold pipeline; the
-        // per-chip permutation soundness moved to LogUp-GKR.
         &[]
     }
 
@@ -261,11 +230,6 @@ mod tests {
         let public_values: Vec<Felt<F>> = (0..4).map(|_| builder.constant(F::ZERO)).collect();
 
         let local_sum = builder.constant(EF::ZERO);
-        // Construct a placeholder SepticDigest by re-using the
-        // zero-Felt for every coordinate.  The folder doesn't read
-        // back from the SepticDigest in any code path the BaseFold
-        // pipeline exercises, so the placeholder values are
-        // structurally inert.
         let zero_felt: Felt<F> = builder.constant(F::ZERO);
         use zkm_pcs::septic_curve::SepticCurve;
         use zkm_pcs::septic_extension::SepticExtension;
@@ -303,18 +267,18 @@ mod tests {
 /// The in-circuit `ShardConstraintFolder<'a, C: Config>` (above)
 /// is `AirBuilder + EmptyMessageBuilder + ExtensionBuilder +
 /// PermutationAirBuilder + MultiTableAirBuilder`, which through the
-/// blanket impls in `crates/pcs/src/air/builder.rs:581-586`
-/// automatically becomes a `BaseAirBuilder + ExtensionAirBuilder +
+/// blanket impls in `zkm_pcs::air::builder`
+/// becomes a `BaseAirBuilder + ExtensionAirBuilder +
 /// SepticExtensionAirBuilder` → `MachineAirBuilder`, and via
-/// `crates/recursion/core/src/builder.rs:14-15` becomes a
+/// the blanket impl in `zkm_recursion_core::builder` becomes a
 /// `ZKMRecursionAirBuilder`.  The existing generic
 /// `impl<AB: ZKMRecursionAirBuilder> Air<AB>` blanket on every
 /// recursion chip therefore covers it — no new per-chip code needed.
 ///
 /// `ShardConstraintFolder::Var = Ext<C::F, C::EF>` is `Copy +
 /// 'static`, so the `AB::Var: 'static` predicate emitted by the
-/// `#[derive(MachineAir)]` macro for `RecursionAir<F, DEGREE>`
-/// (`crates/derive/src/lib.rs:315-318`) is satisfied.
+/// `#[derive(MachineAir)]` macro for `RecursionAir<F, DEGREE>` is
+/// satisfied.
 #[cfg(test)]
 mod basefold_air_assertions_circuit {
     use super::*;

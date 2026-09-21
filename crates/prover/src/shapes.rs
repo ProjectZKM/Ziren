@@ -93,8 +93,6 @@ pub fn check_shapes<C: ZKMProverComponents>(
     let (panic_tx, panic_rx) = std::sync::mpsc::channel();
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
-    // `generate_maximal_shapes` DOES consult the core shapes -- unlike
-    // `generate`, which is why only the latter lost the parameter.
     let core_shape_config = &CoreShapeConfig::default();
 
     let all_maximal_shapes = ZKMProofShape::generate_maximal_shapes(
@@ -107,13 +105,11 @@ pub fn check_shapes<C: ZKMProverComponents>(
     let num_shapes = all_maximal_shapes.len();
     tracing::info!("number of shapes: {}", num_shapes);
 
-    // The Merkle tree height (fixed ceiling — see crate::VK_MERKLE_TREE_HEIGHT).
     let height = crate::VK_MERKLE_TREE_HEIGHT;
     assert!(num_shapes <= (1 << height));
 
     let shape_rx = Mutex::new(shape_rx);
     let compress_ok = std::thread::scope(|s| {
-        // Initialize compiler workers.
         for _ in 0..num_compiler_workers {
             let shape_rx = &shape_rx;
             let prover = &prover;
@@ -122,7 +118,6 @@ pub fn check_shapes<C: ZKMProverComponents>(
                 while let Ok(shape) = shape_rx.lock().unwrap().recv() {
                     tracing::info!("shape is {:?}", shape);
                     let program = catch_unwind(AssertUnwindSafe(|| {
-                        // Try to build the recursion program from the given shape.
                         prover.program_from_shape(shape.clone(), None)
                     }));
                     match program {
@@ -140,7 +135,6 @@ pub fn check_shapes<C: ZKMProverComponents>(
             });
         }
 
-        // Generate shapes and send them to the compiler workers.
         all_maximal_shapes.into_iter().for_each(|program_shape| {
             shape_tx
                 .send(ZKMCompressProgramShape::from_proof_shape(program_shape, height))
@@ -150,7 +144,6 @@ pub fn check_shapes<C: ZKMProverComponents>(
         drop(shape_tx);
         drop(panic_tx);
 
-        // If the panic receiver has no panics, then the shape is correct.
         panic_rx.iter().next().is_none()
     });
 
@@ -197,9 +190,6 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         let num_shapes = all_shapes.len();
         tracing::info!("number of shapes: {}", num_shapes);
 
-        // Fixed-height ceiling (see crate::VK_MERKLE_TREE_HEIGHT): the
-        // enumeration and the runtime tree must agree on the height
-        // regardless of how many shapes/vks survive dedup.
         let height = crate::VK_MERKLE_TREE_HEIGHT;
         assert!(num_shapes <= (1 << height), "shape count {num_shapes} exceeds 2^{height}");
         let chunk_size = indices_set.as_ref().map(|indices| indices.len()).unwrap_or(num_shapes);
@@ -207,7 +197,6 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         let shape_rx = Mutex::new(shape_rx);
         let program_rx = Mutex::new(program_rx);
         std::thread::scope(|s| {
-            // Initialize compiler workers.
             for _ in 0..num_compiler_workers {
                 let program_tx = program_tx.clone();
                 let shape_rx = &shape_rx;
@@ -242,7 +231,6 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                 });
             }
 
-            // Initialize setup workers.
             for _ in 0..num_setup_workers {
                 let vk_tx = vk_tx.clone();
                 let program_rx = &program_rx;
@@ -275,7 +263,6 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                 });
             }
 
-            // Generate shapes and send them to the compiler workers.
             let subset_shapes = all_shapes
                 .into_iter()
                 .enumerate()
@@ -342,8 +329,6 @@ pub fn build_vk_map_to_file<C: ZKMProverComponents>(
 
     tracing::info!("Building vk set");
 
-    // `--indices` (sparse, arbitrary shape set) supersedes `--start/--end`
-    // (contiguous range) when provided — mirrors ziren-gpu's build_compress_vks.
     let selected = indices
         .or_else(|| range_start.and_then(|start| range_end.map(|end| (start..end).collect())));
 
@@ -378,49 +363,6 @@ impl ZKMProofShape {
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
-        // NORMALIZE (leaf) SHAPES ARE NOT ENUMERATED.  They are COLLECTED
-        // from real proofs; see `vk_collect_record` / `ZIREN_VK_COLLECT`.
-        //
-        // The normalize program is selected by the core shard's chip NAME SET:
-        // `verify_core_basefold` filters the machine's chips by those names and
-        // derives `column_counts_by_round` from the survivors, so the set is a
-        // compile-time input (`ZKMCoreBasefoldWitnessValues::shape_key`, whose
-        // documentation also records that the height VALUES are not baked).
-        //
-        // Which chips a shard carries is a property of the BLOCK it executed --
-        // a shard that touched no BLS precompile has no BLS chips -- so the
-        // reachable sets are data, not a function of the machine, and no
-        // enumeration over the machine's chips can predict them.
-        //
-        // Enumerating them anyway was not merely incomplete, it was nearly
-        // disjoint.  MEASURED on block 26017940 at SHARD_SIZE=8388608: the
-        // enumeration emitted 7,834 normalize keys from full 38-chip shapes;
-        // the block produced 57 from 30-chip shards; NINE were common.  The
-        // programs differ by about 4x in size (`BaseAlu` at 498,048 rows
-        // enumerated against 119,872 in production), which is the chip-set
-        // difference showing up as program size.
-        //
-        // So the sweep that produced them is gone, not merely unread: it cost
-        // ~49 s per call and every caller paid it for shapes nothing consumed.
-        // What remains is the union of what CAN be enumerated -- the
-        // compress/deferred/shrink tail below, keyed on pin classes rather than
-        // on block data -- with what must be collected.
-
-        // Compress / Deferred / Shrink key on f(recursion chip set, arity,
-        // the children's PIN CLASSES in order).
-        //
-        // A compose/deferred/shrink program verifies a BATCH of CHILD proofs,
-        // each a recursion proof over the fixed 7-chip machine committing
-        // under a pin class (`zkm_pcs::jagged::RECURSION_PIN_CLASSES`): the
-        // class fixes the committed area, the padding column count and with
-        // them the stripe count, the reduction and the jagged-eval sub-sumcheck
-        // sizes — the whole geometry the verifier program bakes.  Rows do not
-        // enter (measured: children at 32 / 4,096 / 65,536 rows build one
-        // program), classes do (a 2^26 child builds another).  So one dummy
-        // child per class (`RecursionShapeConfig::all_shapes`, in class order)
-        // is exact, and the enumeration is every ORDERED class tuple at every
-        // arity — a sibling group mixes classes whenever one member is large.
-        // Shrink folds the root, which always commits under the largest class.
         let compress_child_classes: Vec<OrderedShape> = {
             let mut classes: Vec<OrderedShape> = recursion_shape_config
                 .get_all_shape_combinations(1)
@@ -432,9 +374,6 @@ impl ZKMProofShape {
             classes
         };
 
-        // Every ORDERED tuple of child classes at every arity: a sibling group
-        // mixes classes whenever one member is large, and the compose program
-        // is a function of the tuple in order.
         let tuples = |arity: usize| -> Vec<Vec<OrderedShape>> {
             recursion_shape_config
                 .get_all_shape_combinations(arity)
@@ -456,8 +395,6 @@ impl ZKMProofShape {
             }
             out
         };
-        // Deferred batches up to `reduce_batch_size` proofs per node, so it
-        // needs the same per-arity sweep Compress gets.
         let deferred_shapes: Vec<Self> = {
             let mut out = Vec::new();
             for arity in 1..=reduce_batch_size {
@@ -467,7 +404,6 @@ impl ZKMProofShape {
             }
             out
         };
-        // Shrink folds the ROOT, which always commits under the largest class.
         let shrink_shapes: Vec<Self> =
             compress_child_classes.last().map(|os| Self::Shrink(os.clone())).into_iter().collect();
 
@@ -485,9 +421,6 @@ impl ZKMProofShape {
         } else {
             core_shape_config.maximal_core_plus_precompile_shapes(21).into_iter()
         };
-        // single-shard normalize: emit ONLY arity-1 normalize shapes per
-        // maximal core shape (matches `generate`; production normalize is
-        // single-shard, and arity>=2 normalize programs assert len==1).
         core_shape_iter
             .map(move |core_shape| {
                 let os = OrderedShape {
@@ -523,8 +456,6 @@ impl ZKMCompressProgramShape {
     pub fn from_proof_shape(shape: ZKMProofShape, height: usize) -> Self {
         match shape {
             ZKMProofShape::Recursion(proof_shapes) => {
-                // Arity = proof_shapes.len(); the per-shard shapes become
-                // the batch verified by build_normalize_basefold_program.
                 Self::Recursion(ZKMRecursionShape { proof_shapes, is_complete: false })
             }
             ZKMProofShape::Deferred(proof_shapes) => {
@@ -554,7 +485,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shape: ZKMCompressProgramShape,
         shrink_shape: Option<RecursionShape>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        // Always dispatch to the basefold program builders.
         let _ = shrink_shape;
         self.program_from_shape_basefold(shape)
     }
@@ -581,16 +511,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 self.deferred_program_basefold(&input)
             }
             ZKMCompressProgramShape::Compress(shape) => {
-                // dummy now consumes the full ZKMCompressWithVkeyShape so
-                // its embedded merkle_tree_height sizes the vk-merkle witness.
                 let input =
                     ZKMCompressBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 self.compose_program_basefold(&input).0
             }
             ZKMCompressProgramShape::Shrink(shape) => {
-                // The dummy consumes the full
-                // ZKMCompressWithVkeyShape so its embedded merkle_tree_height
-                // sizes the vk-merkle witness for the wrap stage too.
                 let input =
                     ZKMWrapBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 self.shrink_program_basefold(&input)
@@ -649,8 +574,6 @@ mod tests {
             "one dummy shape per pin class, got {}",
             shapes.len()
         );
-        // The largest class's dummy shape is the one whose caps the compose
-        // and deferred programs must fit.
         let top = shapes.last().expect("a shape per class");
         let os = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::as_ordered_shape(top);
         let caps: std::collections::BTreeMap<String, usize> =
@@ -797,7 +720,7 @@ mod tests {
         }
     }
 
-    /// TEMP analysis: measure the per-shard normalize band structure
+    /// Analysis: measure the per-shard normalize band structure
     /// (distinct OrderedShapes per cluster) to size the arity
     /// enumeration against the 2^11 budget.
     #[test]
@@ -863,7 +786,7 @@ mod tests {
         tracing::info!("[BAND] nonempty clusters = {}", per_cluster_shape_counts.len());
     }
 
-    /// TEMP analysis: dedup the per-shard OrderedShapes by their
+    /// Analysis: dedup the per-shard OrderedShapes by their
     /// normalize equivalence class — (chip-set, log_dense) — by building
     /// the dummy bundle for each shape and reading packing.log_dense_size.
     /// Tells us the true distinct per-shard normalize class count, which
@@ -885,7 +808,6 @@ mod tests {
             machine.chips().iter().map(|c| (<_ as MachineAir<KoalaBear>>::name(c), c)).collect();
         let machine_shape = build_mips_machine_shape();
 
-        // (cluster_chip_set, log_dense) classes across all per-shard shapes.
         let mut classes: BTreeSet<(Vec<String>, usize)> = BTreeSet::new();
         let mut total_built = 0usize;
         let mut total_failed = 0usize;
@@ -982,8 +904,6 @@ mod tests {
              emitting {normalize} of them is weight without coverage",
         );
 
-        // Non-vacuity: the tail it DOES emit is still there, so a `generate`
-        // that simply returned nothing would not pass this test.
         let compress = all.iter().filter(|s| matches!(s, ZKMProofShape::Compress(_))).count();
         let deferred = all.iter().filter(|s| matches!(s, ZKMProofShape::Deferred(_))).count();
         let shrink = all.iter().filter(|s| matches!(s, ZKMProofShape::Shrink(_))).count();
@@ -1037,11 +957,6 @@ mod tests {
             }
         };
 
-        // Pick the main_exec cluster (core chips + Global, NO precompiles,
-        // NO MemoryGlobalInit/Finalize) — the realistic multishard sha2/fib
-        // cluster.  Identified by: contains Cpu + Global, NOT a precompile
-        // family chip, NOT MemoryGlobalInit.  Falls back to the cluster with
-        // Cpu and the most core chips.
         let precompile_marker = |n: &str| -> bool {
             n.contains("Keccak")
                 || n.contains("Sha")
@@ -1102,7 +1017,6 @@ mod tests {
         let bands: Vec<usize> = band_reps.keys().cloned().collect();
         tracing::info!("[HETERO] cluster chips={} bands={:?}", names.len(), bands);
 
-        // Build the UNIFORM enumerated VK set for this cluster (arity 2).
         let setup_vk = |shape: &ZKMRecursionShape| -> Option<[KoalaBear; DIGEST_SIZE]> {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let d = ZKMCoreBasefoldWitnessValues::dummy(machine, shape);
@@ -1114,7 +1028,7 @@ mod tests {
         let mut uniform_vks: BTreeSet<[KoalaBear; DIGEST_SIZE]> = BTreeSet::new();
         for (b, os) in band_reps.iter() {
             if *b > 30 {
-                continue; // log_dense>30 over-emit (caught by build_compress_vks)
+                continue;
             }
             if let Some(vk) = setup_vk(&ZKMRecursionShape {
                 proof_shapes: vec![os.clone(); 2],
@@ -1125,8 +1039,6 @@ mod tests {
         }
         tracing::info!("[HETERO] uniform arity-2 VKs (this cluster) = {}", uniform_vks.len());
 
-        // Now build HETEROGENEOUS arity-2 batches: [band_i, band_j] for i<j
-        // (full + partial tail). Check how many are NOT in the uniform set.
         let buildable: Vec<usize> = bands.iter().cloned().filter(|b| *b <= 30).collect();
         let mut hetero_total = 0usize;
         let mut hetero_missed = 0usize;

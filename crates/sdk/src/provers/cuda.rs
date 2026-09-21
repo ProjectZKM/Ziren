@@ -33,9 +33,8 @@ impl CudaProver {
         }
     }
 
-    /// Proves the given program on the given input in the given proof mode.
-    ///
-    /// Returns the cycle count in addition to the proof.
+    /// Proves the given program on the given input in the given proof mode,
+    /// together with its cycle count.
     pub fn prove_with_cycles(
         &self,
         pk: &ZKMProvingKey,
@@ -46,9 +45,6 @@ impl CudaProver {
             return Ok((self.compress_to_groth16(stdin.clone())?, 0));
         }
 
-        // Generate the core proof.
-        // Anything past Core sends the core proof straight back for
-        // compress, so let the server keep it rather than round-trip it.
         let proof = self.cuda_prover.prove_core_stateless_retaining(
             pk,
             stdin,
@@ -64,7 +60,6 @@ impl CudaProver {
             return Ok((proof_with_pv, cycles));
         }
 
-        // Generate the compressed proof.
         let deferred_proofs =
             stdin.proofs.iter().map(|(reduce_proof, _)| reduce_proof.clone()).collect();
         let public_values = proof.public_values.clone();
@@ -78,16 +73,10 @@ impl CudaProver {
             return Ok((proof_with_pv, cycles));
         }
 
-        // Generate the shrink proof.
         let compress_proof = self.cuda_prover.shrink(reduce_proof)?;
 
-        // Generate the wrap proof.
         let outer_proof = self.cuda_prover.wrap_bn254(compress_proof)?;
 
-        // Check that the guest's committed-values digest was hashed with whichever algorithm this
-        // process currently expects (see `zkm_imm_wrap_vk_mode`), before spending time on the
-        // (potentially expensive) Plonk/Groth16/DvSnark proving below. A mismatch here means the
-        // guest ELF was built in a different mode than this prover currently believes.
         let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
             .as_canonical_biguint();
         let expected_digest = public_values.hash_bn254();
@@ -134,7 +123,6 @@ impl CudaProver {
             };
             return Ok((proof_with_pv, cycles));
         } else if kind == ZKMProofKind::DvSnark {
-            // Get the store dvsnark assets dir via the environment variable.
             let store_dir: PathBuf = std::env::var("DVSNARK_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::new())
@@ -169,13 +157,10 @@ impl CudaProver {
         assert_eq!(stdin.proofs.len(), 1);
         let (proof, _) = stdin.proofs.pop().unwrap();
 
-        // Generate the shrink proof.
         let shrink_proof = self.cuda_prover.shrink(proof)?;
 
-        // Generate the wrap proof.
         let outer_proof = self.cuda_prover.wrap_bn254(shrink_proof)?;
 
-        // See the equivalent check in `prove_with_cycles` for why this is here.
         let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
             .as_canonical_biguint();
         let expected_digest = public_values.hash_bn254();

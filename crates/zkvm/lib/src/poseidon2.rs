@@ -15,14 +15,12 @@ pub fn poseidon2_permute(state: &mut [u32; WIDTH]) {
 /// Perform the Poseidon2 hash on the given input
 /// The default poseidon2 implementation uses a fixed output length of 32 bytes.
 pub fn poseidon2(input: &[u8]) -> [u8; 32] {
-    // The output length is fixed to 32 bytes
     let result = poseidon2_impl(input, DEFAULT_OUT_FIELD_LEN * 4);
 
     result.try_into().unwrap()
 }
 
 pub fn poseidon2_128(input: &[u8]) -> [u8; 16] {
-    // The output length is fixed to 16 bytes
     let result = poseidon2_impl(input, 16);
 
     result.try_into().unwrap()
@@ -35,8 +33,6 @@ pub fn poseidon2_impl(input: &[u8], out_byte_len: usize) -> Vec<u8> {
     let new_size = (l + FIELD_SIZE) / FIELD_SIZE * FIELD_SIZE;
     padded_input.resize(new_size, 0);
 
-    // Pad the input to a multiple of 3 bytes
-    // Pad 1*01
     if l % FIELD_SIZE == FIELD_SIZE - 1 {
         padded_input[l] = 0b10000001;
     } else {
@@ -68,7 +64,6 @@ pub fn poseidon2_impl(input: &[u8], out_byte_len: usize) -> Vec<u8> {
     result[..out_byte_len].to_vec()
 }
 
-// each 3 bytes of input can be safely converted to a field element
 #[inline]
 fn bytes_to_field_elements(bytes: &[u8]) -> Vec<u32> {
     bytes

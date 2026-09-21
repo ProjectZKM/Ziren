@@ -81,11 +81,6 @@ pub fn install_circuit_artifacts(
     artifacts_type: &str,
     zkm_circuit_version: &str,
 ) {
-    // `build_dir` is deliberately NOT created here: its existence is the
-    // "already installed" marker, so it comes into being only at the rename
-    // below, once there is something complete to name.
-    //
-    // Download the artifacts.
     let download_url = if zkm_prover::build::zkm_imm_wrap_vk_mode() {
         format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{artifacts_type}-imm-wrap-vk.tar.gz")
     } else {
@@ -97,9 +92,6 @@ pub fn install_circuit_artifacts(
     block_on(download_file(&client, &download_url, &mut artifacts_tar_gz_file))
         .expect("failed to download file");
 
-    // Stage into a sibling directory and rename only once extraction succeeded.
-    // `build_dir`'s existence is the installation marker every later call keys
-    // on, so it must never name a partial extraction.
     let staging = build_dir.with_extension(format!("staging-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging).expect("failed to create staging directory");
@@ -131,12 +123,9 @@ fn extract_contained(archive: &std::path::Path, dest: &std::path::Path) -> std::
     use std::io::{Error, ErrorKind};
     use std::path::{Component, Path};
 
-    // `dest` is freshly created, so it canonicalizes without following anything
-    // an archive could have planted.
     let dest_root = dest.canonicalize()?;
     let bad = |msg: String| Error::new(ErrorKind::InvalidData, msg);
 
-    // Reject the path shapes that escape by construction, before any I/O.
     let contained = |p: &Path| -> std::io::Result<()> {
         for c in p.components() {
             match c {
@@ -157,8 +146,6 @@ fn extract_contained(archive: &std::path::Path, dest: &std::path::Path) -> std::
 
     let file = std::fs::File::open(archive)?;
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
-    // Ownership from the archive is never honoured; these artifacts belong to
-    // whoever is installing them.
     tar.set_preserve_permissions(false);
     tar.set_unpack_xattrs(false);
 
@@ -167,12 +154,8 @@ fn extract_contained(archive: &std::path::Path, dest: &std::path::Path) -> std::
         let path = entry.path()?.into_owned();
         contained(&path)?;
 
-        // A link is the second way out: the path is innocent but the target is
-        // not, and a later entry can then be written through it.
         if let Some(link) = entry.link_name()? {
             contained(&link)?;
-            // Hard links resolve against `dest`, symlinks against the entry's
-            // own directory; requiring both to stay inside covers each case.
             let base = if entry.header().entry_type().is_hard_link() {
                 dest_root.clone()
             } else {
@@ -186,8 +169,6 @@ fn extract_contained(archive: &std::path::Path, dest: &std::path::Path) -> std::
             }
         }
 
-        // Only ordinary files, directories and links belong in an artifact
-        // bundle; device nodes and fifos never do.
         let kind = entry.header().entry_type();
         if !(kind.is_file() || kind.is_dir() || kind.is_symlink() || kind.is_hard_link()) {
             return Err(bad(format!("unsupported archive entry type for {}", path.display())));
@@ -206,7 +187,6 @@ pub async fn download_file(
     file: &mut impl std::io::Write,
 ) -> std::result::Result<(), String> {
     let res = client.get(url).send().await.or(Err(format!("Failed to GET from '{}'", url)))?;
-    // Without this a 404 body is happily written out as if it were the archive.
     let res = res.error_for_status().map_err(|e| format!("Request for '{}' failed: {}", url, e))?;
 
     let total_size =
@@ -292,7 +272,6 @@ mod tests {
 
     #[test]
     fn absolute_path_is_rejected() {
-        // The shape `tar -P` used to honour, and the reported arbitrary-write.
         let a = archive_with(file_header(), "/tmp/zkm-absolute-escape.bin", b"pwn");
         let err = extract_to_fresh_dir(&a).unwrap_err();
         assert!(

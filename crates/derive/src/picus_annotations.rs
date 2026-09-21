@@ -63,11 +63,9 @@ impl Parse for Arg {
 }
 
 fn parse_picus_attr(attr: &syn::Attribute) -> syn::Result<Option<PicusArgs>> {
-    // check that the attribute is a picus attribute
     if !attr.path.is_ident("picus") {
         return Ok(None);
     }
-    // parse the attributes
     let items = attr.parse_args_with(Punctuated::<Arg, Token![,]>::parse_terminated)?;
     let mut out = PicusArgs::default();
     for it in items {
@@ -272,12 +270,10 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
     let self_conc = quote!(#ident #self_args);
     let where_clause = &gens.where_clause;
 
-    // Per-field code
     let mut steps = Vec::new();
     for field in fields.iter() {
         let f_ident = field.ident.as_ref().unwrap();
         let f_name = f_ident.to_string();
-        // Collect flags
         let mut flags = PicusArgs::default();
         for attr in &field.attrs {
             if attr.path.is_ident("picus") {
@@ -295,10 +291,8 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
             }
         }
 
-        // Field type with all *type* params → u8
         let conc_ty: Type = ty_sub_u8(field.ty.clone(), &first_type_param);
 
-        // Add name to id map
         let push_name = {
             quote! {
                 if width > 0 {
@@ -353,7 +347,6 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
         } else {
             quote!()
         };
-        // If the field name is "is_real" then add that mark it in PicusInfo
         let push_is_real = if f_name == "is_real" {
             quote! {
                 if width > 0 {
@@ -378,11 +371,10 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
     }
 
     let expanded = quote! {
-        // Implement on the concrete instantiation where *type* params are `u8`
         impl #impl_gens #self_conc #where_clause {
             pub fn picus_info() -> PicusInfo {
                 let mut info = PicusInfo::default();
-                let mut cur: usize = 0; // 1 column == 1 byte
+                let mut cur: usize = 0;
                 #(#steps)*
                 info
             }

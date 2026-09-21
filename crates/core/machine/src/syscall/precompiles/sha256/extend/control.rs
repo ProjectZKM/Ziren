@@ -1,12 +1,10 @@
-//! SHA-256 extend **control chip** — the two endpoints of the
+//! SHA-256 extend control chip: the two endpoints of the
 //! [`LookupKind::PrecompileChain`] state-chaining bus for SHA-256 extend.
 //!
-//! The single-row BaseFold zerocheck folder cannot evaluate the worker's
-//! legacy `cycle_16`/`cycle_48` row-selector flag machinery, so the per-row
-//! loop-index sequencing is carried on a LogUp bus instead.  This control chip
-//! emits exactly one row per `SHA_EXTEND` syscall: it receives the syscall,
-//! **sends** the initial index `i = 16`, and **receives** the final index
-//! `i = 64`.  Each `ShaExtendChip` worker row receives `i` and sends `i + 1`,
+//! The single-row BaseFold zerocheck folder sees no neighbouring row, so the
+//! per-row loop index is sequenced on a LogUp bus. This control chip emits
+//! exactly one row per `SHA_EXTEND` syscall: it receives the syscall, sends
+//! the initial index `i = 16`, and receives the final index `i = 64`.  Each `ShaExtendChip` worker row receives `i` and sends `i + 1`,
 //! so the LogUp multiset only balances when the per-syscall chain telescopes
 //! `16 → 64` across exactly 48 worker rows, pinning each row's `i`.
 //!
@@ -122,7 +120,6 @@ where
 
         builder.assert_bool(local.is_real);
 
-        // Receive the SHA_EXTEND syscall once per real invocation.
         builder.receive_syscall(
             local.shard,
             local.clk,
@@ -133,15 +130,12 @@ where
             LookupScope::Local,
         );
 
-        // Leading precompile-ID field isolates this chain from other
-        // precompiles sharing `LookupKind::PrecompileChain`.
         let pid = AB::Expr::from_u32(SyscallCode::SHA_EXTEND.syscall_id());
 
         let tuple = |index: AB::Expr| -> Vec<AB::Expr> {
             vec![pid.clone(), local.shard.into(), local.clk.into(), local.w_ptr.into(), index]
         };
 
-        // Send the initial index `i = 16`.
         builder.send(
             AirLookup::new(
                 tuple(AB::Expr::from_u32(16)),
@@ -151,7 +145,6 @@ where
             LookupScope::Local,
         );
 
-        // Receive the final index `i = 64`.
         builder.receive(
             AirLookup::new(
                 tuple(AB::Expr::from_u32(64)),

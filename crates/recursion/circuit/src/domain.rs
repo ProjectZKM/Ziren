@@ -40,7 +40,6 @@ where
         point: Ext<<C as Config>::F, <C as Config>::EF>,
     ) -> Ext<<C as Config>::F, <C as Config>::EF> {
         let g = C::F::two_adic_generator(self.log_size());
-        // let g: Felt<_> = builder.eval(g);
         builder.eval(point * g)
     }
 

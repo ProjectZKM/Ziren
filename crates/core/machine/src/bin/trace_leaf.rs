@@ -26,7 +26,6 @@ fn main() {
     let mut reader = BufReader::with_capacity(1 << 24, File::open(&args[1]).unwrap());
     let mut buf = vec![0u8; 1 << 24];
     let mut prev: u32 = 0;
-    // (leaf index, call site) while inside a leaf
     let mut inside: Option<(usize, u32)> = None;
     let mut counts: HashMap<(usize, u32), u64> = HashMap::new();
     let mut leaf_total = vec![0u64; leaves.len()];

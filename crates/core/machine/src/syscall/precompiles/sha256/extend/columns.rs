@@ -25,9 +25,8 @@ pub struct ShaExtendCols<T> {
     /// pinned by the `PrecompileChain` state bus (see `eval_state_bus`): the
     /// `ShaExtendControlChip` seeds `i = 16` and drains `i = 64`, and each worker
     /// row receives `i` and sends `i + 1`, so the multiset only balances when the
-    /// per-syscall chain telescopes `16 → 64`.  This replaces the legacy
-    /// `cycle_16`/`cycle_48` row-selector flag machinery the single-row BaseFold
-    /// zerocheck folder cannot evaluate.
+    /// per-syscall chain telescopes `16 → 64`.  No row selector is needed
+    /// (the single-row zerocheck folder has none).
     pub i: T,
 
     /// Inputs to `s0`.

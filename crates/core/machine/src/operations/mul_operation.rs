@@ -135,7 +135,6 @@ impl<F: Field> MulOperation<F> {
         let base = AB::F::from_u32(1 << 8);
         let byte_mask = AB::F::from_u8(BYTE_MASK);
 
-        // The MSBs of `b` and `c` via lookup.
         {
             let opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
             builder.send_byte(
@@ -154,14 +153,11 @@ impl<F: Field> MulOperation<F> {
             );
         }
 
-        // Sign extension happens exactly for signed multiplies of negative
-        // operands.
         builder.assert_eq(cols.b_sign_extend, is_signed.clone() * cols.b_msb);
         builder.assert_eq(cols.c_sign_extend, is_signed * cols.c_msb);
         builder.when(cols.b_sign_extend).assert_one(cols.b_msb);
         builder.when(cols.c_sign_extend).assert_one(cols.c_msb);
 
-        // Extend the operands to 64 bits.
         let mut b_ext: Vec<AB::Expr> = vec![AB::Expr::ZERO; PRODUCT_SIZE];
         let mut c_ext: Vec<AB::Expr> = vec![AB::Expr::ZERO; PRODUCT_SIZE];
         for i in 0..PRODUCT_SIZE {
@@ -174,7 +170,6 @@ impl<F: Field> MulOperation<F> {
             }
         }
 
-        // The uncarried product.
         let mut m: Vec<AB::Expr> = vec![AB::Expr::ZERO; PRODUCT_SIZE];
         for i in 0..PRODUCT_SIZE {
             for j in 0..PRODUCT_SIZE {
@@ -184,9 +179,6 @@ impl<F: Field> MulOperation<F> {
             }
         }
 
-        // Propagate the carry.  Gated: the caller's `b`/`c` words are only
-        // meaningful on live rows (they may be nonzero while the gadget is
-        // off, e.g. shared operand columns of a multi-opcode chip).
         for i in 0..PRODUCT_SIZE {
             if i == 0 {
                 builder
@@ -200,13 +192,10 @@ impl<F: Field> MulOperation<F> {
             }
         }
 
-        // Booleans.
         for flag in [cols.b_msb, cols.c_msb, cols.b_sign_extend, cols.c_sign_extend] {
             builder.assert_bool(flag);
         }
 
-        // Range checks: carries at most 2^16 so the carry-propagation relation
-        // has a unique solution; product bytes in range.
         builder.slice_range_check_u16(&cols.carry, is_real.clone());
         builder.slice_range_check_u8(&cols.product, is_real);
     }

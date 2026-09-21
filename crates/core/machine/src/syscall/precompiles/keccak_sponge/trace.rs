@@ -79,8 +79,6 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
 
             let block_num = event.num_blocks();
             for i in 0..block_num {
-                // The per-round columns are computed by `p3_keccak` from this
-                // block's *absorbed* state (the permutation input).
                 let p3_keccak_trace = generate_trace_rows::<F>(vec![event.xored_state_list[i]], 0);
                 for round in 0..NUM_ROUNDS {
                     let mut row = [F::ZERO; NUM_KECCAK_SPONGE_COLS];
@@ -99,9 +97,6 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
 
         let num_real_rows = rows.len();
 
-        // Padding rows are valid keccak rounds of the zero state (so the
-        // unconditional round constraints hold) with `is_real = 0` (so they
-        // contribute nothing to the bus).
         let dummy_keccak_rows = generate_trace_rows::<F>(vec![[0u64; 25]], 0);
         let mut dummy_chunk: Vec<[F; NUM_KECCAK_SPONGE_COLS]> = Vec::new();
         for round in 0..NUM_ROUNDS {

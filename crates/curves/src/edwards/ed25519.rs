@@ -74,7 +74,6 @@ impl EdwardsParameters for Ed25519Parameters {
 /// significant bit of the result is always 0.
 pub fn ed25519_sqrt(a: &BigUint) -> Result<BigUint, CurveError> {
     let modulus = Ed25519BaseField::modulus();
-    // The exponent is (modulus+3)/8;
     let mut beta = a.modpow(
         &BigUint::from_str(
             "7237005577332262213973186563042994240829374041602535252466099000494570602494",
@@ -83,7 +82,6 @@ pub fn ed25519_sqrt(a: &BigUint) -> Result<BigUint, CurveError> {
         &modulus,
     );
 
-    // The square root of -1 in the field.
     let sqrt_m1 = BigUint::from_str(
         "19681161376707505956807079304988542015446066515923890162744021073123829784752",
     )
@@ -117,22 +115,19 @@ pub fn decompress(
 ) -> Result<AffinePoint<Ed25519>, CurveError> {
     let mut point_bytes = *compressed_point.as_bytes();
     let sign = point_bytes[31] >> 7 == 1;
-    // mask out the sign bit
     point_bytes[31] &= 0b0111_1111;
     let modulus = &Ed25519BaseField::modulus();
 
     let y = &BigUint::from_bytes_le(&point_bytes);
     let yy = &((y * y) % modulus);
-    let u = (yy - BigUint::one()) % modulus; // u = y²-1
-    let v = &((yy * &Ed25519Parameters::d_biguint()) + &BigUint::one()) % modulus; // v = dy²+1
+    let u = (yy - BigUint::one()) % modulus;
+    let v = &((yy * &Ed25519Parameters::d_biguint()) + &BigUint::one()) % modulus;
 
     let v_inv = v.modpow(&(modulus - BigUint::from(2u64)), modulus);
     let u_div_v = (u * &v_inv) % modulus;
 
     let mut x = ed25519_sqrt(&u_div_v)?;
 
-    // sqrt always returns the nonnegative square root,
-    // so we negate according to the supplied sign bit.
     if sign {
         x = modulus - &x;
     }
@@ -150,32 +145,24 @@ mod tests {
 
     #[test]
     fn test_ed25519_decompress() {
-        // This test checks that decompression of generator, 2x generator, 4x generator, etc. works.
-
-        // Get the generator point.
         let mut point = {
             let (x, y) = Ed25519Parameters::generator();
             AffinePoint::<EdwardsCurve<Ed25519Parameters>>::new(x, y)
         };
         for _ in 0..NUM_TEST_CASES {
-            // Compress the point. The first 255 bits of a compressed point is the y-coordinate. The
-            // high bit of the 32nd byte gives the "sign" of x, which is the parity.
             let compressed_point = {
                 let x = point.x.to_le_bytes();
                 let y = point.y.to_le_bytes();
                 let mut compressed = [0u8; 32];
 
-                // Copy y into compressed.
                 compressed[..y.len()].copy_from_slice(&y);
 
-                // Set the sign bit.
                 compressed[31] |= (x[0] & 1) << 7;
 
                 CompressedEdwardsY(compressed)
             };
             assert_eq!(point, decompress(&compressed_point).unwrap());
 
-            // Double the point to create a "random" point for the next iteration.
             point = point.clone() + point.clone();
         }
     }

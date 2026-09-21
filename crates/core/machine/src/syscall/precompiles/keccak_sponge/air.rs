@@ -51,8 +51,6 @@ where
         let xor = |a: AB::Expr, b: AB::Expr| a.clone() + b.clone() - a * b.double();
         let xor3 = |a: AB::Expr, b: AB::Expr, c: AB::Expr| xor(a, xor(b, c));
 
-        // Flag constraints: each `step_flags` bit is boolean, exactly one is set,
-        // and `index = Σ i·step_flags[i]` is the round number.
         let mut sum_flags = AB::Expr::ZERO;
         let mut computed_index = AB::Expr::ZERO;
         for i in 0..NUM_ROUNDS {
@@ -64,7 +62,6 @@ where
         builder.assert_one(sum_flags);
         builder.when(local.is_real).assert_eq(computed_index, local.index);
 
-        // C'[x, z] = xor(C[x, z], C[x - 1, z], C[x + 1, z - 1]).
         for x in 0..5 {
             for z in 0..64 {
                 builder.assert_bool(local.keccak.c[x][z]);
@@ -78,7 +75,6 @@ where
             }
         }
 
-        // A[x, y, z] = xor(A'[x, y, z], C[x, z], C'[x, z]).
         for y in 0..5 {
             for x in 0..5 {
                 let get_bit = |z: usize| {
@@ -101,7 +97,6 @@ where
             }
         }
 
-        // sum_{i=0}^4 A'[x, i, z] = C'[x, z], so diff*(diff-2)*(diff-4) = 0.
         for x in 0..5 {
             for z in 0..64 {
                 let sum: AB::Expr = (0..5).map(|y| local.keccak.a_prime[y][x][z].into()).sum();
@@ -113,7 +108,6 @@ where
             }
         }
 
-        // A''[x, y] = xor(B[x, y], andn(B[x + 1, y], B[x + 2, y])).
         for y in 0..5 {
             for x in 0..5 {
                 let get_bit = |z: usize| {
@@ -133,7 +127,6 @@ where
             }
         }
 
-        // A'''[0, 0] = A''[0, 0] XOR RC.
         for limb in 0..U64_LIMBS {
             let computed_a_prime_prime_0_0_limb = (limb * BITS_PER_LIMB
                 ..(limb + 1) * BITS_PER_LIMB)
@@ -166,7 +159,6 @@ where
             builder.assert_eq(computed_a_prime_prime_prime_0_0_limb, a_prime_prime_prime_0_0_limb);
         }
 
-        // Round-chain bus: receive `a` @ (block, index), send `a'''` @ (block, index+1).
         self.eval_state_bus(builder, local);
     }
 }
@@ -188,7 +180,6 @@ impl KeccakSpongeChip {
             ]
         };
 
-        // Receive the round input `a` @ index (state in (y, x, limb) order).
         let mut recv = header(local.index.into());
         for y in 0..5 {
             for x in 0..5 {
@@ -202,7 +193,6 @@ impl KeccakSpongeChip {
             LookupScope::Local,
         );
 
-        // Send the round output `a'''` @ index + 1.
         let mut send = header(local.index.into() + AB::Expr::ONE);
         for y in 0..5 {
             for x in 0..5 {

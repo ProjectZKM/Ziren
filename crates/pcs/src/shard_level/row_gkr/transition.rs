@@ -73,15 +73,6 @@ where
 
     let next_num_row_variables = layer.num_row_variables - 1;
 
-    // Performance optimization: NESTED parallelism. The
-    // outer chip loop is parallel (each chip is independent), AND
-    // within each chip, the per-row work is parallel (rows are
-    // independent).
-    //
-    // For single-large-chip workloads (e.g. Program at 2^19 rows),
-    // chip-level parallelism alone leaves one core doing all the
-    // work — per-row parallelism inside the chip is the right
-    // granularity.
     use p3_maybe_rayon::prelude::*;
     let per_chip: Vec<(
         RowMajorTable<EF>,
@@ -107,15 +98,6 @@ where
 
             let next_rows = 1usize << next_num_row_variables;
             let int_count = chip_num_interactions;
-            // PaddedMle row optimisation: only materialise
-            // rows that pull from at least one real input cell.
-            // Fused row k reads index k from ALL FOUR source quadrants (see
-            // the combine loop below), so it is real iff k is below the MAX
-            // of the four real-row counts.  For a parity split quadrant 0
-            // has `ceil(h/2)` real rows and quadrant 1 `floor(h/2)`, so the
-            // max is quadrant 0's, but take it explicitly.
-            //   next_n0/d0[j] = fused row 2j   → real iff 2j < src_real
-            //   next_n1/d1[j] = fused row 2j+1 → real iff 2j+1 < src_real
             let src_real =
                 n0.num_real_rows.max(d0.num_real_rows).max(n1.num_real_rows).max(d1.num_real_rows);
             debug_assert!(src_real <= next_rows * 2);
@@ -124,15 +106,12 @@ where
             let next_n1_real = src_real / 2;
             let next_d1_real = next_n1_real;
 
-            // Allocate ZEROed buffers sized to the real-only prefix of
-            // each output quadrant.  Pad rows are not materialised.
             let mut next_n0_cells: Vec<EF> = vec![EF::ZERO; next_n0_real * int_count];
             let mut next_d0_cells: Vec<EF> = vec![EF::ZERO; next_d0_real * int_count];
             let mut next_n1_cells: Vec<EF> = vec![EF::ZERO; next_n1_real * int_count];
             let mut next_d1_cells: Vec<EF> = vec![EF::ZERO; next_d1_real * int_count];
 
             if int_count > 0 {
-                // Even outputs (next_n0, next_d0): fused row 2k.
                 if next_n0_real > 0 {
                     next_n0_cells
                         .par_chunks_exact_mut(int_count)
@@ -140,9 +119,6 @@ where
                         .enumerate()
                         .for_each(|(k, (n0_row, d0_row))| {
                             let row_upper = 2 * k;
-                            // Each source quadrant has its own
-                            // num_real_rows; substitute the identity-
-                            // fraction in the padding region.
                             let n0_real = row_upper < n0.num_real_rows;
                             let d0_real = row_upper < d0.num_real_rows;
                             let n1_real = row_upper < n1.num_real_rows;
@@ -162,7 +138,6 @@ where
                         });
                 }
 
-                // Odd outputs (next_n1, next_d1): fused row 2k + 1.
                 if next_n1_real > 0 {
                     next_n1_cells
                         .par_chunks_exact_mut(int_count)
@@ -170,7 +145,6 @@ where
                         .enumerate()
                         .for_each(|(k, (n1_row, d1_row))| {
                             let row_lower = 2 * k + 1;
-                            // Per-quadrant real-rows check, same as the even block.
                             let n0_real = row_lower < n0.num_real_rows;
                             let d0_real = row_lower < d0.num_real_rows;
                             let n1_real = row_lower < n1.num_real_rows;
@@ -237,9 +211,6 @@ where
         numerator_1,
         denominator_1,
         num_row_variables: next_num_row_variables,
-        // Layer-wide num_interaction_variables is metadata; carry it
-        // through unchanged from the source layer (per-chip num_interactions
-        // varies per chip but the global aggregate is invariant).
         num_interaction_variables: layer.num_interaction_variables,
     }
 }
@@ -257,17 +228,11 @@ mod tests {
     /// Build a one-chip layer with handcrafted numerator/denominator
     /// values so the post-transition values are easy to predict.
     fn handcrafted_layer() -> LogUpGkrCpuLayer<EF, EF> {
-        // num_row_variables = 1 → 2 rows per table.
-        // num_interaction_variables = 0 → 1 column per table.
-        // After transition: num_row_variables = 0 → 1 row per table.
         let mut n0 = RowMajorTable::<EF>::filled(1, 0, EF::ZERO);
         let mut d0 = RowMajorTable::<EF>::filled(1, 0, EF::ONE);
         let mut n1 = RowMajorTable::<EF>::filled(1, 0, EF::ZERO);
         let mut d1 = RowMajorTable::<EF>::filled(1, 0, EF::ONE);
 
-        // Pick concrete values:
-        //  n0 = [[2], [3]]    d0 = [[5], [7]]
-        //  n1 = [[11], [13]]  d1 = [[17], [19]]
         n0.set(0, 0, EF::from_u32(2));
         n0.set(1, 0, EF::from_u32(3));
         d0.set(0, 0, EF::from_u32(5));
@@ -303,12 +268,6 @@ mod tests {
         let layer = handcrafted_layer();
         let next = layer_transition(&layer);
 
-        // next_n0[0, 0] = d1[0, 0] * n0[0, 0] + d0[0, 0] * n1[0, 0]
-        //              = 17 * 2 + 5 * 11 = 34 + 55 = 89
-        // next_d0[0, 0] = d0[0, 0] * d1[0, 0] = 5 * 17 = 85
-        // next_n1[0, 0] = d1[1, 0] * n0[1, 0] + d0[1, 0] * n1[1, 0]
-        //              = 19 * 3 + 7 * 13 = 57 + 91 = 148
-        // next_d1[0, 0] = d0[1, 0] * d1[1, 0] = 7 * 19 = 133
         assert_eq!(*next.numerator_0[0].get(0, 0), EF::from_u32(89));
         assert_eq!(*next.denominator_0[0].get(0, 0), EF::from_u32(85));
         assert_eq!(*next.numerator_1[0].get(0, 0), EF::from_u32(148));
@@ -317,7 +276,6 @@ mod tests {
 
     #[test]
     fn transition_preserves_interaction_dimension() {
-        // 2 rows × 4 interactions → 1 row × 4 interactions.
         let zero_table = RowMajorTable::<EF>::filled(1, 2, EF::ZERO);
         let one_table = RowMajorTable::<EF>::filled(1, 2, EF::ONE);
         let layer = LogUpGkrCpuLayer {
@@ -356,8 +314,6 @@ mod tests {
 
     #[test]
     fn transition_with_identity_input_yields_identity_output() {
-        // n0 = n1 = 0, d0 = d1 = 1 → all-identity layer.
-        // next_n = 1*0 + 1*0 = 0; next_d = 1*1 = 1.  Stays identity.
         let zero_table = RowMajorTable::<EF>::filled(1, 1, EF::ZERO);
         let one_table = RowMajorTable::<EF>::filled(1, 1, EF::ONE);
         let layer = LogUpGkrCpuLayer {

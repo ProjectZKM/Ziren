@@ -1,6 +1,6 @@
 //! In-circuit BaseFold-pipeline shard verifier — the orchestrator
 //! that ties together the per-phase verifiers (LogUp-GKR,
-//! zerocheck, jagged-PCS opening) and replaces the legacy
+//! zerocheck, jagged-PCS opening); the BaseFold counterpart of
 //! [`crate::stark::StarkVerifier::verify_shard`].
 //!
 //! # Architecture
@@ -116,7 +116,7 @@ pub struct JaggedShardProof<F, EF> {
 }
 
 /// In-circuit shard proof variable — the BaseFold-pipeline 5-field
-/// shape (replaces the legacy
+/// shape (the counterpart of
 /// [`crate::stark::ShardProofVariable`]'s 5-field "commitment +
 /// opened_values + opening_proof + chip_ordering + public_values"
 /// shape, which is hard-wired to the 4-batch FRI opening).
@@ -149,7 +149,7 @@ pub struct JaggedShardProofVariable<
     /// committed with the INNER KoalaBear MMCS on EVERY ring (only the
     /// jagged BaseFold round commitments go BN254 on the OUTER ring),
     /// so this stays `[Felt;8]` and is observed felt-by-felt to match
-    /// the host transcript (verifier.rs:168).
+    /// the host shard verifier's transcript.
     pub main_commitment: [Felt<C::F>; 8],
     /// Per-chip log-degree bits (variable-width, max bound by
     /// `pcs_verifier.max_log_row_count + 1`).
@@ -243,14 +243,6 @@ impl<P> JaggedShardVerifier<P> {
             .map(|interaction| interaction.values.len() + 1)
             .max()
             .unwrap_or(1);
-        // The host's `first_layer::generate_first_layer` sizes the global
-        // interaction axis as `log2_ceil(Σ chip raw interaction count)` —
-        // chips pack raw-contiguously and all padding lands in one run at the
-        // trailing end.  This MUST mirror that sum exactly: any disagreement
-        // shows up as `circuit_output.numerator.len()` disagreeing with the
-        // dimension the in-circuit verifier expects, i.e. an
-        // `evaluate_mle_ext: left=… right=…` failure rather than a soundness
-        // error.
         let total_chip_interactions: usize =
             chips.iter().map(|chip| chip.sends().len() + chip.receives().len()).sum();
         let log2_ceil = |x: usize| -> usize {
@@ -347,10 +339,6 @@ impl<P> JaggedShardVerifier<P> {
         FC: FieldChallengerVariable<C, C::Bit>
             + crate::challenger::CanObserveVariable<C, HV::DigestVariable>,
         SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
-        // The digest hasher (inner KoalaBearPoseidon2 / outer
-        // KoalaBearPoseidon2Outer). The PCS verifier P opens commitments
-        // of type HV::DigestVariable and a BaseFold proof whose raw
-        // digests are HV::Digest.
         HV: crate::hash::FieldHasherVariable<C>
             + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
         HV::DigestVariable: Copy,
@@ -366,7 +354,7 @@ impl<P> JaggedShardVerifier<P> {
             &mut FC,
         ) -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>),
     {
-        let _ = vk; // used by the transcript prologue and phase 4
+        let _ = vk;
         let JaggedShardProofVariable {
             main_commitment,
             chip_height_bits,
@@ -376,30 +364,18 @@ impl<P> JaggedShardVerifier<P> {
             evaluation_proof,
         } = proof;
 
-        // Phase 1: Transcript prologue
-
-        // Observe public values; non-machine-PV slots must be
-        // zero-padded (caller's responsibility).
         for value in public_values.iter() {
             challenger.observe(builder, *value);
         }
 
-        // Observe the main trace commitment felt-by-felt — the main
-        // trace is committed with the inner KoalaBear MMCS on every
-        // ring, so this matches the host transcript (verifier.rs:168)
-        // which absorbs 8 KoalaBear felts.
         for limb in main_commitment.iter() {
             challenger.observe(builder, *limb);
         }
 
-        // Observe per-chip count as a felt.
         let num_chips: Felt<C::F> = builder
             .eval(<C::F as p3_field::PrimeCharacteristicRing>::from_usize(chip_height_bits.len()));
         challenger.observe(builder, num_chips);
 
-        // Observe per-chip (height_felt, name_bytes_as_felts).
-        // The height_bits Vec<Felt> is bit-decomposed; recompose
-        // into a single felt by the standard Horner accumulation.
         let two = <C::F as p3_field::PrimeCharacteristicRing>::TWO;
         for (name, height_bits) in chip_height_bits.iter() {
             assert_eq!(
@@ -407,8 +383,6 @@ impl<P> JaggedShardVerifier<P> {
                 self.max_log_row_count + 1,
                 "chip height bits must equal max_log_row_count + 1",
             );
-            // Horner-recompose the height bits into a single felt
-            // and observe it (matches the upstream prologue).
             let mut acc: Felt<C::F> =
                 builder.eval(<C::F as p3_field::PrimeCharacteristicRing>::ZERO);
             for bit in height_bits.iter() {
@@ -417,8 +391,6 @@ impl<P> JaggedShardVerifier<P> {
             }
             challenger.observe(builder, acc);
 
-            // Observe the chip name as a length-prefixed byte
-            // sequence (length felt + per-byte felts).
             let name_bytes = name.as_bytes();
             let len_felt: Felt<C::F> = builder
                 .eval(<C::F as p3_field::PrimeCharacteristicRing>::from_usize(name_bytes.len()));
@@ -430,15 +402,8 @@ impl<P> JaggedShardVerifier<P> {
             }
         }
 
-        let _ = num_pv_elts; // reserved for public-value length check
+        let _ = num_pv_elts;
 
-        // Phase 2: LogUp-GKR sumcheck verification
-        //
-        // Reduces the per-chip LogUp cumulative-sum identity to a
-        // single point/eval claim per chip.  The verifier samples
-        // (alpha, beta_seed, pv_challenge), observes the GKR
-        // circuit output, and replays each layer's sumcheck via
-        // the transcript-bound challenger.
         builder.cycle_tracker_v2_enter("verify_logup_gkr".to_string());
         verify_logup_gkr::<C, SC, A, FC, EVPV>(
             builder,
@@ -452,13 +417,6 @@ impl<P> JaggedShardVerifier<P> {
             eval_public_values_fn,
         );
 
-        // Phase 3: Zerocheck sumcheck verification
-        //
-        // Verifies the transition-constraint zerocheck IOP.
-        // Consumes the LogUp-GKR-emitted per-chip evaluations and
-        // reduces the combined-chip constraint identity to a
-        // single (point, evaluation) claim, leaving the claimed
-        // evaluation for the jagged-PCS opening phase to verify.
         builder.cycle_tracker_v2_exit();
         builder.cycle_tracker_v2_enter("verify_zerocheck".to_string());
         ShardZerocheckVerifier::<C, SC, A>::verify_zerocheck::<FC>(
@@ -472,92 +430,17 @@ impl<P> JaggedShardVerifier<P> {
             challenger,
         );
 
-        // Phase 4: Jagged-PCS opening verification
-        //
-        // The prover's claimed main-trace evaluation at the
-        // zerocheck-reduced point must be consistent with the
-        // committed digest.  Uses the jagged reduction on top of
-        // the stacked BaseFold PCS.
-        //
-        // Constructs a local jagged verifier wrapping a shallow
-        // clone of self's stacked-PCS verifier (two-field clone of
-        // a Clone-derived struct — the inner PCS verifier is by
-        // convention a zero-sized type or carries only parameter
-        // structs that are cheap to duplicate).
         let jagged_verifier = RecursiveJaggedPcsVerifier::<P> {
             stacked_pcs_verifier: self.stacked_pcs_verifier.clone(),
             max_log_row_count: self.max_log_row_count,
         };
 
-        // The jagged-PCS phase expects the sumcheck-reduced point
-        // from phase 3 as its `point` argument.  Evaluation claims
-        // are flattened from the GKR emission: one row per chip,
-        // consisting of (main_trace_evaluations ++ preprocessed_trace_evaluations).
-        // Source the jagged evaluation claims from the trace@z
-        // openings (opened_values, name-order, MAIN-ONLY) that Phase-3
-        // zerocheck consumed and reduced to point z -- NOT the GKR openings
-        // @z_gkr.  The host commits main-only, so the jagged opening binds
-        // the COMMITTED main trace at the zerocheck-reduced point z.
-        // This site sources each chip's RAW residual claim
-        // (`chip.main.local` = raw-bitrev MLE @ z_row, opened over the
-        // un-padded `main_traces`) directly, rather than lifting it to the
-        // BAND-embedded claim a band-padded host reduction would expect
-        // (= band-bitrev MLE @ z_row over the cluster-band-padded
-        // `commit_traces`) via a per-chip scalar
-        // `embed_factor = Π_{log_raw <= k < log_band}(1 - z[k])`.
-        //
-        // No per-chip scalar can perform that lift.  The production jagged y
-        // formula bit-reverses the trace row index over the STORED height's
-        // `log_h = trailing_zeros(height)` (jagged_pcs.rs:2251,
-        // materialize_dense_jagged jagged.rs:279).  Raw-y uses
-        // `bitrev_log_raw`; band-y uses `bitrev_log_band`.  Because
-        // bit-reversal at different widths is a DATA PERMUTATION (the same
-        // trace cell lands on a different boolean-cube vertex when the cube
-        // grows), band-y is NOT raw-y times any scalar — the per-column
-        // band/raw ratio VARIES across the columns of a single chip.
-        //
-        // Two further structural blockers (independent of the scalar question):
-        //   1. `log_band` is NOT in `verify_shard` scope — `chip_height_bits` and
-        //      `opened_values.chips[].degree` both decode the RAW height (the
-        //      value-independent `chip_height_bits_from_opened_degrees` lift,
-        //      shard_proof_variable_lift.rs:634); the band height lives only inside
-        //      `evaluation_proof.params` / `row_counts` (the commit packing).
-        //   2. ANY embed op emitted here changes the recursion program bytes ⇒ the
-        //      normalize/wrap VK ⇒ breaks FIX-on byte-identity (the ops do NOT
-        //      constant-fold to nothing for log_raw==log_band; the masked
-        //      per-coordinate product over max_log_row is emitted unconditionally).
-        //
-        // The faithful alternative is the deep height-agnostic
-        // (hypercube/jagged-native) port — make commit AND zerocheck open at
-        // the SAME (variable) height so the recursion never has to reconcile
-        // two bitrev layouts.
-        // Sourcing the raw residual keeps FIX-on byte-identical; FIX-off
-        // recursion-verify is gated behind that port plus the chip-set
-        // vk_map regen.
-        // The column claims, in the batched layout's column order:
-        //   [prep chips | prep pad | main chips | main pad]
-        // A padding column is committed zeros, so its claim is ZERO; those
-        // claims are spliced in by the jagged verifier from `insertion_points`
-        // (`crates/recursion/circuit/src/recursive_jagged_pcs.rs`)
-        // -- what this builds is the REAL per-chip claims only.  The
-        // preprocessed round's claims are each chip's `preprocessed.local`,
-        // taken in the MACHINE's chip-name order, which is the order `setup`
-        // committed them.
-        //
-        // `opened_values.chips` is POSITIONAL, aligned with `shard_chips`, which
-        // the caller name-sorts -- so the chips with preprocessed columns, taken
-        // in that order, ARE the preprocessed round in the order `setup`
-        // committed it.
         let prep_positions: Vec<usize> = shard_chips
             .iter()
             .enumerate()
             .filter(|(_, c)| c.preprocessed_width() > 0)
             .map(|(i, _)| i)
             .collect();
-        // `insertion_points` carries one entry per opening ROUND (the caller
-        // derives it from the same per-round column-count table the lift gets),
-        // so it is the one signal that cannot drift from the lift's layout.  A
-        // machine still on the single-round lift takes the old path exactly.
         let two_round = insertion_points.len() >= 2;
         let mut evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = Vec::new();
         if two_round && !prep_positions.is_empty() {
@@ -567,42 +450,8 @@ impl<P> JaggedShardVerifier<P> {
         }
         evaluation_claims.extend(opened_values.chips.iter().map(|chip| chip.main.local.clone()));
 
-        // jagged HASH-BIND re-check (in-circuit)
-        //
-        // For each
-        // round recompute
-        //   hash = SC::hash([col_counts.len()] ++ row_counts ++ col_counts)
-        //   expected = SC::compress([original_commitment, hash])
-        //   assert_digest_eq(expected, modified_commitment)
-        // tying the per-chip (row_count, column_count) geometry to the
-        // FS-observed (modified) commitment.  `row_counts` are the WITNESSED
-        // per-chip height felts (from the opened degree); `column_counts` are
-        // the per-chip widths.  `len = column_counts.len()` (== row_counts.len)
-        // — IDENTICAL to the host emit convention (jagged_hash_bind_modified).
-        //
-        // GUARDS are enforced inside the host
-        // counts (counts < F::ORDER is structural — host felts wrap, and the
-        // recompute-equality already rejects any inconsistent geometry; the
-        // 0 < area < 2^30 bound is enforced by the existing
-        // assert_row_count_le_cube + final-area chain inside
-        // verify_trusted_evaluations).
-        //
-        // Skipped when modified == original byte-for-byte per round (the
-        // hash-bind-off path: then this would assert
-        // compress([orig,hash]) == orig which is false; the lift sets
-        // modified == original ONLY on the outer ring whose re-bind runs in its
-        // own hook — guard by env so the inner default path always runs it).
         {
             use p3_field::PrimeCharacteristicRing;
-            // Only run the re-bind on rings that actually carry the
-            // hash-bind (the INNER KoalaBear rings, where `modified` is the real
-            // FS-observed digest distinct from the RAW root).  The OUTER BN254
-            // (gnark wrap) ring's commitment IS the raw wrap root — its lift sets
-            // `modified == original`, so running the rebind there would assert
-            // `compress([original, hash(counts)]) == original` (always false for
-            // a Poseidon2-BN254 digest) — the gnark AssertEqV failure.
-            // `HV::jagged_hash_bind_in_circuit()` is the value-independent,
-            // build-time ring discriminator (true inner / false outer).
             if HV::jagged_hash_bind_in_circuit()
                 && evaluation_proof.modified_commitments.len()
                     == evaluation_proof.original_commitments.len()
@@ -613,9 +462,6 @@ impl<P> JaggedShardVerifier<P> {
                     .zip(evaluation_proof.modified_commitments.iter())
                     .enumerate()
                 {
-                    // Gather this round's row_counts (witnessed felts) and
-                    // column_counts (usize). Round-0 carries the real geometry;
-                    // padding rounds (zeros) carry empty/zero, matching host.
                     let round_row_counts: &[Felt<C::F>] = evaluation_proof
                         .row_counts
                         .get(round_idx)
@@ -626,11 +472,6 @@ impl<P> JaggedShardVerifier<P> {
                         .get(round_idx)
                         .map(|v| v.as_slice())
                         .unwrap_or(&[]);
-                    // Skip empty (padding) rounds where there is no geometry to
-                    // bind (host carries zero digests there; the open ignores
-                    // them).  An empty round on the inner ring only occurs for
-                    // num_rounds>1 padding, which the single-main-commit flow
-                    // does not produce, so this is defensive.
                     if round_col_counts.is_empty() {
                         continue;
                     }
@@ -651,13 +492,6 @@ impl<P> JaggedShardVerifier<P> {
             }
         }
 
-        // The jagged-PCS commitments are the per-round digests the
-        // BaseFold opener binds; on the OUTER ring these are BN254
-        // (`HV::DigestVariable`).  The binding ones are
-        // `proof.original_commitments` (the RAW BaseFold roots — the BaseFold
-        // open at recursive_jagged_pcs.rs binds against THESE, NOT the
-        // hash-bound modified digest).  The main-trace KoalaBear commit is
-        // observed separately in phase 1 (= the modified digest).
         let commitments = evaluation_proof.original_commitments.clone();
 
         builder.cycle_tracker_v2_exit();
@@ -673,11 +507,6 @@ impl<P> JaggedShardVerifier<P> {
             jagged_evaluator_fn,
         );
         builder.cycle_tracker_v2_exit();
-
-        // The returned prefix_sum_felts are consumed by callers
-        // that need the per-column row-count prefix witness; the
-        // shard-verify path itself doesn't need them after the
-        // assertion chain inside verify_trusted_evaluations.
     }
 }
 
@@ -754,9 +583,6 @@ pub fn dummy_jagged_shard_proof_variable<C>(
     shape: &BasefoldProofShape,
 ) -> JaggedShardProofVariable<C>
 where
-    // The dummy uses the default inner digest hasher
-    // (KoalaBearPoseidon2 / `[Felt;8]`); it's only constructed in
-    // inner recursion shape-fixture contexts (Bit = Felt<KoalaBear>).
     C: CircuitConfig<F = p3_koala_bear::KoalaBear, Bit = Felt<p3_koala_bear::KoalaBear>>,
 {
     use p3_field::PrimeCharacteristicRing;
@@ -776,8 +602,6 @@ where
 
     let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
-    // Helper to build a UnivariatePolynomial of given degree filled
-    // with builder-zero Ext coefficients.
     let zero_uni_poly =
         |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
             UnivariatePolynomial { coefficients: (0..=degree).map(|_| zero_ext(b)).collect() }
@@ -785,9 +609,6 @@ where
 
     let main_commitment: [Felt<C::F>; 8] = std::array::from_fn(|_| zero_felt(builder));
 
-    // Per-chip height bits: one Vec<Felt> of length max_log_row_count + 1
-    // per chip, where the bits represent the chip's height in big-
-    // endian boolean coordinates (the BaseFold convention).
     let chip_height_bits: Vec<(String, Vec<Felt<C::F>>)> = shape
         .chips
         .iter()
@@ -800,14 +621,8 @@ where
     let public_values: Vec<Felt<C::F>> =
         (0..shape.num_public_values).map(|_| zero_felt(builder)).collect();
 
-    // LogUp-GKR proof — round_proofs of length `logup_gkr_rounds`.
     let logup_gkr_proof = {
         let dummy_chip_evaluation = ChipEvaluation::<Ext<C::F, C::EF>> {
-            // This coarse IR-side shape fixture (construction smoke test
-            // only — NOT the witness-stream VK-regen dummy, which is
-            // `dummy::jagged_shard_proof`) carries None; the production
-            // reconstruction reads the `*_full` threaded through the witness
-            // path.
             main_trace_evaluations_full: None,
             preprocessed_trace_evaluations_full: None,
         };
@@ -844,7 +659,6 @@ where
         }
     };
 
-    // Zerocheck proof — univariate_polys of length `zerocheck_rounds`.
     let zerocheck_proof = PartialSumcheckProof::<Ext<C::F, C::EF>> {
         univariate_polys: (0..shape.zerocheck_rounds).map(|_| zero_uni_poly(builder, 2)).collect(),
         claimed_sum: zero_ext(builder),
@@ -854,11 +668,7 @@ where
         ),
     };
 
-    // Jagged PCS proof — has the most nested structure.
     let evaluation_proof = {
-        // Inner BaseFold proof.
-        // Variable-typed proof (Ext/Felt const-built); digests are
-        // now circuit variables ([Felt;8] = inner DigestVariable).
         let basefold_proof = RecursiveBasefoldProof::<
             Felt<C::F>,
             Ext<C::F, C::EF>,
@@ -991,9 +801,8 @@ mod tests {
 
     /// Reference pattern for machine-wiring call sites.  Shows the
     /// full sequence of setup the compress / deferred / wrap
-    /// machines will use when they switch from the legacy
-    /// `StarkVerifier::verify_shard` to
-    /// `JaggedShardVerifier::verify_shard`.  Exists as a
+    /// machines use with `JaggedShardVerifier::verify_shard` in place
+    /// of `StarkVerifier::verify_shard`.  Exists as a
     /// compile-time documentation fixture; the actual
     /// `verify_shard` call is elided here because the integration
     /// test would require constructing a full MachineChip set,
@@ -1020,10 +829,6 @@ mod tests {
     fn _machine_wiring_reference_pattern<C: CircuitConfig>() {
         use crate::jagged_eval::RecursiveJaggedEvalSumcheckConfig;
         use crate::jagged_eval_primitives::{emit_branching_program_eval, emit_prefix_sum_check};
-        // Construct the jagged evaluator from the in-tree
-        // primitives.  The closures are `fn`-pointer-coercible
-        // because `emit_branching_program_eval` /
-        // `emit_prefix_sum_check` take references + plain types.
         let _evaluator: RecursiveJaggedEvalSumcheckConfig<
             (),
             fn(
@@ -1042,9 +847,6 @@ mod tests {
             emit_branching_program_eval::<C>,
             emit_prefix_sum_check::<C>,
         );
-        // The machine call site would invoke
-        // `_evaluator.jagged_evaluation(...)` via the closure the
-        // shard verifier's `jagged_evaluator_fn` parameter takes.
         let _ = &_evaluator;
     }
 

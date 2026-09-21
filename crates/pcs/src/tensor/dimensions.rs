@@ -18,8 +18,6 @@ impl Dimensions {
     /// Build a contiguous row-major `[rows, cols]` shape.
     #[inline]
     pub const fn new(rows: usize, cols: usize) -> Self {
-        // Row-major: advancing one row skips `cols` elements; advancing
-        // one column skips 1.
         Self { sizes: [rows, cols], strides: [cols, 1] }
     }
 

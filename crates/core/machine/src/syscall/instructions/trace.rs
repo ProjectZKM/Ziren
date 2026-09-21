@@ -68,10 +68,6 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
                     if idx < input.syscall_events.len() {
                         let event = &input.syscall_events[idx];
                         self.event_to_row(event, cols, &mut blu, &input.program);
-                    } else {
-                        // A padding row's frame needs no neutralising: the
-                        // typed R-type frame's register-access multiplicities
-                        // are `is_real`.
                     }
                 });
                 blu
@@ -80,7 +76,6 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
 
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_SYSCALL_INSTR_COLS))
     }
 
@@ -101,7 +96,6 @@ impl SyscallInstrsChip {
         _blu: &mut impl ByteRecord,
         program: &zkm_core_executor::Program,
     ) {
-        // Every Syscall row is a real instruction owning its frame.
         cols.frame.populate_from_syscall(event, program, _blu);
 
         cols.is_real = F::ONE;
@@ -125,40 +119,31 @@ impl SyscallInstrsChip {
         let prev_a_bytes = event.a_record.prev_value.to_le_bytes();
         let is_halt_val = cols.is_halt == F::ONE;
 
-        // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
         cols.is_prev_a1_zero.populate_from_field_element(F::from_u8(prev_a_bytes[1]));
 
-        // Populate `is_enter_unconstrained`.
         cols.is_enter_unconstrained.populate_from_field_element(
             syscall_id - F::from_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
         );
 
-        // Populate `is_hint_len`.
         cols.is_hint_len.populate_from_field_element(
             syscall_id - F::from_u32(SyscallCode::SYSHINTLEN.syscall_id()),
         );
 
-        // Populate `is_halt`.
         cols.is_halt_check
             .populate_from_field_element(syscall_id - F::from_u32(SyscallCode::HALT.syscall_id()));
 
-        // Populate `is_exit_group`.
         cols.is_exit_group_check.populate_from_field_element(
             syscall_id - F::from_u32(SyscallCode::SYS_EXT_GROUP.syscall_id()),
         );
 
-        // Populate `is_commit`.
         cols.is_commit.populate_from_field_element(
             syscall_id - F::from_u32(SyscallCode::COMMIT.syscall_id()),
         );
 
-        // Populate `is_commit_deferred_proofs`.
         cols.is_commit_deferred_proofs.populate_from_field_element(
             syscall_id - F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id()),
         );
 
-        // If the syscall is `COMMIT` or `COMMIT_DEFERRED_PROOFS`, set the index bitmap and
-        // digest word.
         if syscall_id == F::from_u32(SyscallCode::COMMIT.syscall_id())
             || syscall_id == F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
         {
@@ -166,15 +151,8 @@ impl SyscallInstrsChip {
             cols.index_bitmap[digest_idx] = F::ONE;
         }
 
-        // Populate unified KoalaBear range check flags and columns.
         let is_commit_deferred =
             syscall_id == F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id());
-        // Activate the KoalaBear range check only when the value travels as a single
-        // reduced field element: the precompile bridge (`prev_a_bytes[2] == 1`),
-        // `is_halt` (exit code), and `is_commit_deferred_proofs` (digest).  Linux
-        // syscall args travel via U16-range-checked half-word columns in `SyscallChip`,
-        // so the check is unnecessary there and would reject legal u32 args such as
-        // AT_FDCWD = 0xFFFFFF9C.  Must match `air.rs`'s activation exactly.
         let send_to_precompile = prev_a_bytes[2] == 1;
         let op_b_needs_check = send_to_precompile || is_halt_val;
         let op_c_needs_check = send_to_precompile || is_commit_deferred;

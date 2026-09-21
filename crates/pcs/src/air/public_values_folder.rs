@@ -11,7 +11,7 @@
 //!   - `send` / `receive` accumulate each interaction's LogUp fraction
 //!     `multiplicity / (alpha + beta_0*kind + sum beta_i*value_i)` into
 //!     `local_interaction_digest` (send `+=`, receive `-=`), using the
-//!     exact denominator of [`crate::permutation`] (`permutation.rs:50`).
+//!     exact denominator of [`crate::permutation`].
 //!
 //! Driving [`crate::air::eval_public_values`] through this folder yields
 //! the public-values portion of the per-shard LogUp balance, which the
@@ -95,7 +95,7 @@ impl<F: Field, EF: ExtensionField<F>> ExtensionBuilder for PublicValuesConstrain
 
 impl<F: Field, EF: ExtensionField<F>> PublicValuesConstraintFolder<'_, F, EF> {
     /// LogUp denominator `alpha + beta_0*kind + sum beta_i*value_i`
-    /// (identical to `permutation.rs:50-57`).
+    /// (identical to [`crate::permutation`]'s).
     fn interaction_denominator(&self, message: &AirLookup<EF>) -> EF {
         let mut denominator = *self.perm_challenges.0;
         let mut betas = self.perm_challenges.1.iter();

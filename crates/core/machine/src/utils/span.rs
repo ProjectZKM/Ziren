@@ -45,12 +45,9 @@ where
         T: Clone + Hash + Eq,
     {
         let mut parent_span = self.parents.pop().ok_or(SpanBuilderExitError::RootSpanExit)?;
-        // Add spanned instructions to parent.
         for (instr_name, &ct) in self.current_span.cts.iter() {
-            // Always clones. Could be avoided with `raw_entry`, but it's not a big deal.
             parent_span.cts.entry(instr_name.clone()).and_modify(|x| *x += ct).or_insert(ct);
         }
-        // Move to the parent span.
         let child_span = core::mem::replace(&mut self.current_span, parent_span);
         self.current_span.children.push(child_span);
         Ok(self)
@@ -109,7 +106,6 @@ where
 
     /// Calculate the total number of items counted by this span and its children.
     pub fn total(&self) -> usize {
-        // Counts are already added from children.
         self.cts.values().cloned().sum()
     }
 

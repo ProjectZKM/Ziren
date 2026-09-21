@@ -52,12 +52,9 @@ fn main() {
         tracing::info!("[merge] {:?}: {} entries", input, map.len());
         total_input += map.len();
         for k in map.into_keys() {
-            // Re-number sequentially after merge — discard the per-file index.
-            // Insertion order on BTreeMap doesn't matter; we re-enumerate below.
             union.entry(k).or_insert(0);
         }
     }
-    // Inject raw --add-hash entries.
     use p3_field::PrimeCharacteristicRing;
     for raw in &args.add_hashes {
         let parts: Vec<u32> = raw
@@ -78,8 +75,6 @@ fn main() {
         total_input - union.len(),
     );
 
-    // Re-number sequentially in BTreeMap key order so the result is
-    // deterministic across re-runs.
     let renumbered: BTreeMap<[KB; DIGEST_SIZE], usize> =
         union.into_keys().enumerate().map(|(i, k)| (k, i)).collect();
 

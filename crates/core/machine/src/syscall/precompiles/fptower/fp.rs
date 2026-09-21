@@ -100,10 +100,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
         input: &Self::Record,
         output: &mut Self::Record,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // All the fp events for a given curve are coalesce to the curve's Add operation.  Only retrieve
-        // precompile events for that operation.
-        // TODO:  Fix this.
-
         let events = match P::FIELD_TYPE {
             FieldType::Bn254 => input.get_precompile_events(SyscallCode::BN254_FP_ADD).iter(),
             FieldType::Bls12381 => input.get_precompile_events(SyscallCode::BLS12381_FP_ADD).iter(),
@@ -137,7 +133,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
 
             Self::populate_field_ops(&mut new_byte_lookup_events, cols, p, q, event.op);
 
-            // Populate the memory access columns.
             for i in 0..cols.y_access.len() {
                 cols.y_access[i].populate(event.y_memory_records[i], &mut new_byte_lookup_events);
             }
@@ -169,14 +164,10 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
             <FpOpChip<P> as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), num_fp_cols::<P>()))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
-        // All the fp events for a given curve are coalesce to the curve's Add operation. Only
-        // check for that operation.
-
         assert!(
             shard.get_precompile_events(SyscallCode::BN254_FP_SUB).is_empty()
                 && shard.get_precompile_events(SyscallCode::BN254_FP_MUL).is_empty()
@@ -215,12 +206,10 @@ where
         let local = main.current_slice();
         let local: &FpOpCols<AB::Var, P> = (*local).borrow();
 
-        // Check that operations flags are boolean.
         builder.assert_bool(local.is_add);
         builder.assert_bool(local.is_sub);
         builder.assert_bool(local.is_mul);
 
-        // Check that only one of them is set.
         builder.assert_eq(local.is_add + local.is_sub + local.is_mul, AB::Expr::ONE);
 
         let p = limbs_from_prev_access(&local.x_access);
@@ -229,9 +218,6 @@ where
         let modulus_coeffs = P::MODULUS.iter().map(|&limbs| AB::Expr::from_u8(limbs)).collect_vec();
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
-        // `eval_addsubmul`, not `eval_variable`: this chip never divides, and the
-        // `AB::F::ZERO` it used to pass for `is_div` did not stop `eval_variable`
-        // building `p_div = p_res * p_b` on every one of its rows.
         local.output.eval_addsubmul(
             builder,
             &p,
@@ -256,16 +242,12 @@ where
         );
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
-                                             * same. */
+            local.clk + AB::F::from_u32(1),
             local.x_ptr,
             &local.x_access,
             local.is_real,
         );
 
-        // Select the correct syscall id based on the operation flags.
-        //
-        // *Remark*: If support for division is added, we will need to add the division syscall id.
         let (add_syscall_id, sub_syscall_id, mul_syscall_id) = match P::FIELD_TYPE {
             FieldType::Bn254 => (
                 AB::F::from_u32(SyscallCode::BN254_FP_ADD.syscall_id()),

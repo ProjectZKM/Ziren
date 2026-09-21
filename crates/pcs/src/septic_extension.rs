@@ -109,7 +109,6 @@ impl<F: PrimeCharacteristicRing + Copy> Algebra<F> for SepticExtension<F> {}
 
 impl<F: Field<Packing = F>> PackedFieldExtension<F, SepticExtension<F>> for SepticExtension<F> {
     fn from_ext_slice(ext_slice: &[SepticExtension<F>]) -> Self {
-        // Since SepticExtension is its own packing (WIDTH=1), just take the first element.
         ext_slice[0]
     }
 
@@ -367,7 +366,6 @@ impl<F: PrimeCharacteristicRing> SepticExtension<F> {
 impl<F: Field> SepticExtension<F> {
     /// Returns the value of z^{index * p} in the [`SepticExtension`] field.
     fn z_pow_p(index: u32) -> Self {
-        // The constants written below are specifically for the KoalaBear field.
         debug_assert_eq!(F::order(), BigUint::from(2130706433u32));
         if index == 0 {
             return Self::ONE;
@@ -443,7 +441,6 @@ impl<F: Field> SepticExtension<F> {
 
     /// Returns the value of z^{index * p^2} in the [`SepticExtension`] field.
     fn z_pow_p2(index: u32) -> Self {
-        // The constants written below are specifically for the KoalaBear field.
         debug_assert_eq!(F::order(), BigUint::from(2130706433u32));
         if index == 0 {
             return Self::ONE;
@@ -567,8 +564,8 @@ impl<F: Field> SepticExtension<F> {
         (pow_r.0[0], pow_r.0[0].exp_u64(exp) == F::ONE)
     }
 
-    /// Computes the square root of the septic field extension element.
-    /// Returns None if the element is not a square, and Some(result) if it is a square.
+    /// The square root of this septic extension element: `Some(r)` with
+    /// `r² = self` if `self` is a square, `None` otherwise.
     pub fn sqrt(&self) -> Option<Self> {
         let n = *self;
 

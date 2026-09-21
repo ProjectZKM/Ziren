@@ -11,7 +11,6 @@ fn main() {
     cfg_if! {
         if #[cfg(feature = "native")] {
             println!("cargo:rerun-if-changed=go");
-            // Define the output directory
             let out_dir = env::var("OUT_DIR")
                 .expect("OUT_DIR not set by cargo");
             let dest_path = PathBuf::from(&out_dir);
@@ -20,7 +19,6 @@ fn main() {
 
             println!("Building Go library at {}", dest.display());
 
-            // Run the go build command
             let status = Command::new("go")
                 .current_dir("go")
                 .env("CGO_ENABLED", "1")
@@ -38,12 +36,10 @@ fn main() {
                 panic!("Go build failed");
             }
 
-            // Copy go/koalabear.h to OUT_DIR/koalabear.h
             let header_src = PathBuf::from("go/koalabear.h");
             let header_dest = dest_path.join("koalabear.h");
             std::fs::copy(header_src, header_dest).unwrap();
 
-            // Generate bindings using bindgen
             let header_path = dest_path.join(format!("lib{lib_name}.h"));
 
             let sysroot = Command::new("rustc")
@@ -70,11 +66,9 @@ fn main() {
 
             println!("Go library built");
 
-            // Link the Go library
             println!("cargo:rustc-link-search=native={}", dest_path.display());
             println!("cargo:rustc-link-lib=static={lib_name}");
 
-            // Static linking doesn't really work on macos, so we need to link some system libs
             if cfg!(target_os = "macos") {
                 println!("cargo:rustc-link-lib=framework=CoreFoundation");
                 println!("cargo:rustc-link-lib=framework=Security");

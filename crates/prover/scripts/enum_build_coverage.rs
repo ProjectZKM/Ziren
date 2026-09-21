@@ -22,9 +22,6 @@ use zkm_prover::{ZKMProver, REDUCE_BATCH_SIZE, VK_MERKLE_TREE_HEIGHT};
 
 fn main() {
     zkm_core_machine::utils::setup_cli_logger();
-    // Silence the default hook: across thousands of shapes its backtraces would
-    // bury the output. The panic MESSAGE, captured per shape below, is the
-    // diagnosis — it names the invariant the dummy trips.
     std::panic::set_hook(Box::new(|_| {}));
 
     let stride: usize = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(1);
@@ -88,7 +85,6 @@ fn main() {
                         .cloned()
                         .or_else(|| e.downcast_ref::<&str>().map(|s| (*s).to_string()))
                         .unwrap_or_else(|| "<non-string panic>".to_string());
-                    // Normalize away the varying numbers so distinct CAUSES group.
                     Err(m.lines().next().unwrap_or("").to_string())
                 }
             };
@@ -114,8 +110,6 @@ fn main() {
                 if !marker.is_empty() {
                     *bad_marker.entry(marker).or_default() += 1;
                 }
-                // Strip the trailing digits so "describes 1711 columns" and
-                // "describes 902 columns" count as one cause.
                 let key: String = cause.chars().filter(|c| !c.is_ascii_digit()).collect();
                 *causes.entry(key).or_default() += 1;
             }

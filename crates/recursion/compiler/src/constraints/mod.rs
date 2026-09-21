@@ -419,8 +419,6 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                         vec![a[4].id()],
                     ],
                 }),
-                // Ignore cycle tracker instruction.
-                // It currently serves as a marker for calculation at compile time.
                 DslIr::CycleTracker(_) => (),
                 DslIr::CycleTrackerV2Enter(_) => (),
                 DslIr::CycleTrackerV2Exit => (),
@@ -433,14 +431,7 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                     args: vec![vec![b.id()], vec![a.id()]],
                 }),
 
-                // Version 2 instructions
                 DslIr::CircuitV2CommitPublicValues(_) => {}
-                // `ir_par_map_collect` (the per-chip parallel circuit walks)
-                // wraps independent sub-blocks in a `Parallel` op.  The gnark
-                // constraint list is one linear program, and the sub-blocks
-                // write disjoint address ranges, so emitting them in order is
-                // a valid sequential schedule — exactly what the inner
-                // compiler's `compile_block` does per `SeqBlock::Parallel`.
                 DslIr::Parallel(blocks) => {
                     for block in blocks {
                         constraints.extend(self.emit(block.ops));

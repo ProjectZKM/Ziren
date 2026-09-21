@@ -40,29 +40,18 @@ where
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
     use core::any::TypeId;
 
-    // Both rings have Val = KoalaBear and Challenge = KoalaBear^4, which is
-    // what makes the relabels below sound. Asserted in release too: without
-    // it they would be undefined behaviour on any other configuration.
     assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>(),
         "commit_traces: requires Val==KoalaBear / \
          Challenge==KoalaBear^4 (shared by inner + outer rings)",
     );
-    // Inner ring: Poseidon2 over KoalaBear (core, compress, shrink). Outer
-    // ring: Poseidon2 over BN254 (wrap). Both commit the same way; they differ
-    // only in whether the geometry is bound into C_main.
     let is_inner =
         TypeId::of::<SC::Challenger>() == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
 
-    // The traces as KoalaBear views, in name order: the order the chip set is
-    // committed and observed in, and the order the recursion verifier lays out
-    // its columns in.
     let named_inner: alloc::vec::Vec<crate::jagged_pcs::jagged::ChipTraceView> = main_traces
         .iter()
         .map(|(name, pm)| {
-            // SAFETY: Val<SC> = InnerVal by the assert above, so the two
-            // `PaddedMle` types are one type. The clone is an `Arc` clone.
             let pm_inner: crate::multilinear::PaddedMle<InnerVal> = unsafe {
                 core::mem::transmute_copy::<
                     crate::multilinear::PaddedMle<Val<SC>>,
@@ -87,19 +76,13 @@ where
         let raw_root_inner: [InnerVal; 8] =
             crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
-        // C_main = compress(root, H(n ‖ (h_i)_i ‖ (w_i)_i)) is observed; the
-        // open still proves against `root`, which the proof carries as
-        // `jagged_original_commitment`.
         let digest_inner: [InnerVal; 8] = crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
             raw_root_inner,
             &precomputed.packing,
         );
-        // SAFETY: InnerVal = Val<SC> by the assert above.
         let main_commitment: [Val<SC>; 8] =
             unsafe { core::mem::transmute_copy::<[InnerVal; 8], [Val<SC>; 8]>(&digest_inner) };
 
-        // On the inner ring SC::BfMmcs = JaggedMmcs, so the concrete precompute
-        // is the generic one.
         let precomputed_generic: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as crate::BasefoldRing>::BfMmcs,
         > = {
@@ -114,17 +97,14 @@ where
         (main_commitment, precomputed_generic)
     } else {
         let precomputed_generic = <SC as BasefoldRing>::commit_multilinears(&named_inner, pin);
-        // C_main is the root: the outer ring binds no geometry into it.
         let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
             <SC as BasefoldRing>::digest_felts(&precomputed_generic.commit.original_commitment);
-        // SAFETY: JaggedVal = KoalaBear = Val<SC> by the assert above.
         let main_commitment: [Val<SC>; 8] = unsafe {
             core::mem::transmute_copy::<[crate::jagged_pcs::JaggedVal; 8], [Val<SC>; 8]>(&digest_jv)
         };
         (main_commitment, precomputed_generic)
     };
 
-    // The relabelled views go; the traces stay with the caller for the open.
     drop(named_inner);
 
     (main_commitment, precomputed_generic)
@@ -175,10 +155,7 @@ where
         public_values,
         commit_data,
     } = data;
-    // Recorded on the proof; this prover folds the high variable first. It
-    // does not enter the transcript.
     let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
-    // Every main trace is a padded multilinear on the fixed cube {0,1}^m.
     let max_log_row_count =
         crate::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
     debug_assert!(
@@ -186,9 +163,6 @@ where
         "prove_shard_with_data: main_traces padded to a cube != the fixed \
          max_log_row_count {max_log_row_count}",
     );
-    // The name-keyed traces as a slice parallel to `chips`, which every stage
-    // below zips against. `chips` is in name order, so this is the map's own
-    // order. A `PaddedMle` clone is an `Arc` clone: no trace cell is copied.
     let shared_trace_mles_vec: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
         .iter()
         .map(|chip| {
@@ -207,14 +181,6 @@ where
         "chips and shared_trace_mles must be parallel arrays",
     );
 
-    // Chips commit at their raw heights h_i, so the packing offsets are the
-    // prefix sums of h_i · w_i that the recursion verifier rebuilds. A chip
-    // named by the shard's cluster but absent from the shard is present with
-    // h_i = 0: it is in the chip set, which fixes the normalize key, and
-    // commits no cell.
-    //
-    // Every chip is host-resident, so the residency inputs of the shared
-    // helpers are inert: no chip carries a device-side cumulative-sum tail.
     let trace_views: Vec<crate::multilinear::PaddedMle<Val<SC>>> = shared_trace_mles.to_vec();
     let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips.iter().map(|_| None).collect();
     let n_chips = chips.len();
@@ -227,14 +193,7 @@ where
             None => commit_traces::<SC>(&main_traces, main_pin),
         }
     };
-    // Built by `commit` or here, the commitment is the same value. It is
-    // observed once, in the prologue; the jagged open does not observe it
-    // again, and the verifier replays it the same way.
 
-    // Prologue: pv, C_main, n, then (h_i, |name_i|, name_i) per chip. Every
-    // later challenge is a function of the chip set and of each h_i (h_i = 0
-    // allowed); the recursion verifier recomposes h_i from its bits in the
-    // same slot. Shared with the device prover, which must match it exactly.
     {
         observe_transcript_prologue::<SC, A>(
             challenger,
@@ -244,7 +203,6 @@ where
             shared_trace_mles,
         );
     }
-    // LogUp-GKR.
     let _t_logup_gkr = std::time::Instant::now();
     let logup_gkr_proof = {
         let _span = tracing::info_span!("logup gkr proof").entered();
@@ -263,12 +221,6 @@ where
         "shard phase done"
     );
 
-    // Zerocheck. Its claim chains to the GKR openings at ζ,
-    //
-    //   claim = Σ_i λ^i · Σ_k β^k · g_{i,k}(ζ),
-    //
-    // with α batching each chip's constraints. Drawn in the order α, β here
-    // and λ inside; the verifiers draw them in the same order.
     let _t_zerocheck = std::time::Instant::now();
     let (alpha, gkr_batch_open) =
         crate::shard_level::zerocheck_prover::sample_zerocheck_batching_challenges::<SC>(
@@ -289,10 +241,6 @@ where
             shared_trace_mles,
         );
 
-        // The openings at z*: n, then per chip in name order the
-        // length-prefixed prep_i(z*) and main_i(z*). They are fixed before
-        // the jagged open draws anything, as the openings at ζ were before
-        // the zerocheck.
         observe_zerocheck_openings_from_residual::<SC, A>(challenger, chips, &trace_at_z);
 
         (zerocheck_proof, trace_at_z)
@@ -304,17 +252,11 @@ where
         "shard phase done"
     );
 
-    // A chip whose cells are not on the host carries its height as metadata;
-    // a host chip reads it from its trace. Here every entry is `None`.
     let open_heights: Vec<Option<usize>> = shared_trace_mles
         .iter()
         .map(|pm| if pm.inner().is_none() { pm.metadata_height() } else { None })
         .collect();
 
-    // The preprocessed round, opened first. Its chips, their order (name) and
-    // widths are read off the proving key's commitment, so the round is the
-    // one that was committed. A machine without preprocessed traces opens
-    // the main round alone.
     let prep_chip_infos = &preprocessed_commit_data.packing.chip_infos;
     let mut preprocessed_named: Vec<(String, crate::multilinear::PaddedMle<Val<SC>>)> =
         Vec::with_capacity(prep_chip_infos.len());
@@ -332,8 +274,6 @@ where
                 )
             });
         preprocessed_named.push((info.name.clone(), preprocessed_traces[idx].clone()));
-        // trace_at_z[name] = prep(z*) ‖ main(z*); the claims of this round are
-        // its first w_prep entries, proven against the key's commitment.
         let evals = trace_at_z.get(&info.name).unwrap_or_else(|| {
             panic!("preprocessed round: chip {} has no zerocheck residual", info.name)
         });
@@ -348,9 +288,6 @@ where
         preprocessed_claims.push(evals[..info.column_count].to_vec());
     }
 
-    // The main column claims are main_i(z*), already computed by the
-    // zerocheck. Recomputing them from the traces would give the same values
-    // and draw nothing, so reusing them leaves the proof unchanged.
     let residual_y: Vec<Vec<Challenge<SC>>> = compute_residual_y_openings::<SC, A>(
         chips,
         &trace_views,
@@ -360,9 +297,6 @@ where
         &open_heights,
     );
 
-    // Jagged open of both rounds at z*, over exactly the traces
-    // `precomputed_commit` was built from. Every chip is host-resident, so no
-    // chip needs a metadata height.
     let _t_prove_eval_claims = std::time::Instant::now();
     let evaluation_proof = {
         let _span = tracing::info_span!("prove evaluation claims").entered();
@@ -386,24 +320,14 @@ where
         "shard phase done"
     );
 
-    // Assembly.
-    //
-    // h_i, exactly as the prologue observed them.
     let chip_heights = build_chip_heights::<SC, A>(chips, shared_trace_mles);
 
-    // Per chip, in name order: prep(z*) and main(z*), split at w_prep; the
-    // verifier evaluates the constraints on them and compares with
-    // `point_and_eval.1`. The quotient slot carries the big-endian bits of h_i.
     let opened_values =
         build_opened_values::<SC, A>(chips, trace_at_z, &chip_heights, max_log_row_count);
 
-    // (local, global) per chip: local = 0, there being no permutation trace;
-    // global is read from the chip's cells.
     let chip_cumulative_sums =
         build_chip_cumulative_sums::<SC, A>(chips, shared_trace_mles, &chip_cum_tails);
 
-    // The row and padding-column counts and the raw root are read off the
-    // evaluation proof.
     assemble_jagged_shard_proof::<SC>(
         public_values,
         main_commitment,
@@ -477,27 +401,15 @@ pub fn observe_transcript_prologue<SC, A>(
     }
     let num_chips = Val::<SC>::from_u64(chips.len() as u64);
     challenger.observe(num_chips);
-    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
-    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
-    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
-    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
     assert_eq!(
         chips.len(),
         shared_trace_mles.len(),
         "observe_transcript_prologue: chips/shared_trace_mles must be parallel",
     );
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
-        // Per-chip RAW-height observe (the observed felt is
-        // `num_real_entries` directly, a true 0 for an unexercised chip;
-        // the previous ceil-log2 felt with a `.max(1)` floor is retired).
-        // Source matches the proof's `chip_heights` map
-        // (`build_chip_heights`) + the verifier re-observe + the recursion
-        // circuit's Horner recompose of the witnessed degree bits — the
-        // FOUR mirrors observe this exact value.
         let h = raw_chip_height(pm);
         challenger.observe(Val::<SC>::from_u64(h as u64));
 
-        // Name length + name bytes.
         let name_bytes = chip.name();
         let len_felt = Val::<SC>::from_u64(name_bytes.len() as u64);
         challenger.observe(len_felt);
@@ -625,8 +537,6 @@ pub fn observe_zerocheck_openings_from_residual<SC, A>(
         name_sorted.iter().map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
             let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
-            // The borrow is of `trace_at_z` (a parameter), not of the local
-            // `name`, so it outlives the closure body.
             let evals: &[Challenge<SC>] =
                 trace_at_z.get(&name).map(|v| v.as_slice()).unwrap_or(&[]);
             let split = prep_width.min(evals.len());
@@ -662,9 +572,6 @@ where
         .zip(eager_device_remat.iter())
         .map(|(pm, remat)| {
             if pm.inner().is_none() {
-                // Device-resident / unexercised chip: wrap the rematerialized
-                // side-storage when there is one, else hand back the dummy
-                // (which projects to zero area, as the width-0 view did).
                 if let Some(m) = remat {
                     let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
@@ -675,7 +582,6 @@ where
                 }
                 return pm.clone();
             }
-            // Host chip: an `Arc` refcount bump, no cells touched.
             pm.clone()
         })
         .collect()
@@ -710,8 +616,6 @@ where
         !logup_evaluations.chip_openings.is_empty(),
         "compute_residual_y_openings: LogUp-GKR produced no chip openings",
     );
-    // `zip` truncates, so unequal lengths would pair chip `i` with another
-    // chip's trace.
     assert_eq!(
         chips.len(),
         commit_traces.len(),
@@ -727,8 +631,6 @@ where
         chips.iter().zip(commit_traces.iter()).zip(preprocessed_traces.iter()).enumerate()
     {
         let name = MachineAir::<Val<SC>>::name(*chip);
-        // Empty commit trace (device-resident): `h_i = heights[i]`,
-        // `w_i = |residual_i| − prep_i`.
         let (ctrace_values, ctrace_width) = crate::jagged::real_cells(ctrace);
         let (w, h) = if ctrace_width == 0 {
             let dev_h = heights.get(idx).copied().flatten().unwrap_or(0);
@@ -741,8 +643,6 @@ where
             let w = ctrace_width;
             (w, ctrace_values.len() / w)
         };
-        // The verifier walks every committed column, so `h_i = 0` still
-        // yields `w_i` zero claims; `w_i = 0` yields none.
         if w == 0 {
             out.push(Vec::new());
             continue;
@@ -751,7 +651,6 @@ where
             out.push(vec![Challenge::<SC>::ZERO; w]);
             continue;
         }
-        // residual = (prep ‖ main)(z), so main(z) is its last `w_i` entries.
         let prep_cols = ptrace.num_polynomials();
         let evals = trace_at_z.get(&name).unwrap_or_else(|| {
             panic!(
@@ -785,20 +684,12 @@ where
     A: MachineAir<Val<SC>>,
 {
     let mut chip_heights = std::collections::BTreeMap::new();
-    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
-    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
-    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
-    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
     assert_eq!(
         chips.len(),
         shared_trace_mles.len(),
         "build_chip_heights: chips/shared_trace_mles must be parallel",
     );
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
-        // Device residency: a device chip's REAL height is baked into its
-        // dummy MLE, read back via `metadata_height()` with the `.max(1)`
-        // dummy floor; a MISSING canonical-cluster HOST chip is a genuine
-        // 0-row matrix (raw 0 => all-zero degree bits).
         let h = raw_chip_height(pm);
         let name = MachineAir::<Val<SC>>::name(*chip);
         chip_heights.insert(name, h);
@@ -828,23 +719,14 @@ where
         .map(|chip| {
             let name = MachineAir::<Val<SC>>::name(**chip);
             let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
-            // MOVE the chip's residual out of the map and split it IN
-            // PLACE: `remove` + `split_off` transfer ownership, so neither
-            // the preprocessed nor the main opening copies its cells.
             let mut prep_local: Vec<Challenge<SC>> = trace_at_z.remove(&name).unwrap_or_default();
             let split = prep_width.min(prep_local.len());
             let main_local = prep_local.split_off(split);
-            // big-endian bit decomposition of the REAL height (the
-            // VirtualGeq threshold).  bit_len = max_log_row_count + 1.
-            // `log_degree` is DERIVED geometry (ceil-log2 of the raw
-            // height) — the transcript observes the RAW height, not this.
             let height = *chip_heights.get(&name).unwrap_or(&0);
             let log_degree = ceil_log2(height);
             let bit_len = max_log_row_count + 1;
             let degree_bits: Vec<Challenge<SC>> = (0..bit_len)
                 .map(|i| {
-                    // BIG-ENDIAN (MSB at index 0): the verifier shape
-                    // asserts degree[0] = MSB.
                     let shift = bit_len - 1 - i;
                     let bit = if shift < usize::BITS as usize { (height >> shift) & 1 } else { 0 };
                     if bit == 1 {
@@ -884,10 +766,6 @@ where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
-    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
-    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
-    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
-    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
     assert_eq!(
         chips.len(),
         shared_trace_mles.len(),
@@ -909,8 +787,6 @@ where
                     *chip, tail14,
                 )
             } else {
-                // Host chip: the raw row-major cells (last 14 read); a width-0
-                // dummy yields an empty slice (sz<14 → zero digest).
                 let vals: &[Val<SC>] = pm.real_trace_ref().map(|tr| tr.values).unwrap_or(&[]);
                 crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_values(
                     *chip, vals,
@@ -944,9 +820,6 @@ pub fn assemble_jagged_shard_proof<SC>(
 where
     SC: StarkGenericConfig,
 {
-    // Witnessed per-round per-chip row_counts + per-round padding_column_count,
-    // derived from the host jagged packing (single-stacked main commit = ONE
-    // round).  PURE DATA: nothing branches on these.
     let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) = match &evaluation_proof
     {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
@@ -960,25 +833,14 @@ where
         _ => (Vec::new(), Vec::new()),
     };
 
-    // Jagged hash-bind: carry the RAW BaseFold root (the value the
-    // BaseFold opening binds against) while the FS-observed `main_commitment`
-    // is the MODIFIED digest.  Fall back to `main_commitment` on the
-    // hash-bind-off path / non-bundle proofs.
     let jagged_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
             let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
-            // SAFETY: [InnerVal; 8] == [Val<SC>; 8] under the inner-ring
-            // TypeId identity (the only ring that produces a Bundle).
             unsafe { core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner) }
         }
         _ => main_commitment,
     };
 
-    // The PREPROCESSED round, for a verifier that cannot see the key's chip
-    // metadata: its RAW root (the key holds the hash-bound digest) and its per
-    // chip row counts followed by its single padding column's height.  Heights
-    // are the one part of that round's geometry the machine does not already
-    // give a verifier, and the hash-bind pins them.
     let (preprocessed_original_commitment, preprocessed_row_counts): ([Val<SC>; 8], Vec<Val<SC>>) =
         match &evaluation_proof {
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
@@ -987,8 +849,6 @@ where
             {
                 let raw_inner =
                     crate::jagged_pcs::basefold_commit_digest_felts(&bundle.preceding_commits[0]);
-                // SAFETY: [InnerVal; 8] == [Val<SC>; 8] under the inner-ring TypeId
-                // identity (the only ring that produces a multi-round Bundle).
                 let raw = unsafe {
                     core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
                 };
@@ -1001,15 +861,6 @@ where
             _ => ([Val::<SC>::ZERO; 8], Vec::new()),
         };
 
-    // Each round's single stacking-padding column height — what closes that
-    // round out to its committed area.
-    // Straight from the packing: the height the prover actually gave each
-    // round's padding column.  Re-deriving it as
-    // `real.next_multiple_of(1 << log_stacking_height) - real` is WRONG for a
-    // round whose cells already fill whole stripes — the commitment still
-    // covers one more stripe than that, so the derived height is a full stripe
-    // short and the recursion's reconstructed final offset (and with it the
-    // last column's jagged evaluation) misses by `1 << log_stacking_height`.
     let padding_row_heights: Vec<Vec<Val<SC>>> = match &evaluation_proof {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => bundle
             .packing
@@ -1055,8 +906,11 @@ where
 ///   entry falls back to the provider.
 ///
 /// The ring-specific open is [`crate::BasefoldRing::prove_jagged_open`].
-// The host open takes the chips, traces, claims, points and challenger as the
-// protocol names them; a wrapper struct would hide which ring it is opening.
+///
+/// # Panics
+/// Unless `Val<SC> = KoalaBear` and `Challenge<SC> = KoalaBear⁴`, which makes
+/// every `Val<SC> → InnerVal` reinterpret a layout-identical relabel; and
+/// when `|chips| ≠ |main_traces|`.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -1079,11 +933,6 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    // `SC::Challenger` drives the generic jagged BaseFold prover
-    // directly on the OUTER (wrap) branch — the capability bounds
-    // `prove_jagged_rounds_generic` requires. Both rings satisfy them
-    // (inner `JaggedChallenger`, wrap `OuterChallenger`); NOT expressible as a
-    // `BasefoldRing` implied bound, so threaded down the call chain.
     SC::Challenger:
         'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
@@ -1097,46 +946,23 @@ where
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
     use core::any::TypeId;
 
-    // A REAL assert, not a `debug_assert!`: it is the only thing standing
-    // between a non-KoalaBear config and the transmutes below, and
-    // `debug_assert!` compiles out in release, which is exactly where that
-    // would be UB.  One TypeId compare per shard.
     assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>(),
         "prove_trusted_evaluations requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings) for the trace/point          transmutes below",
     );
 
-    // One reviewed reinterpret for the KoalaBear Val/Challenge `Vec`
-    // transmutes below (per-chip `r_row` and the zerocheck-residual column
-    // claims).  Under the TypeId gate asserted above, `Val<SC> == InnerVal`
-    // and `Challenge<SC> == InnerChallenge`, so each conversion is a
-    // zero-copy relabel with identical layout.
-    //
-    // SAFETY: every caller passes `A`/`B` that are the SAME KoalaBear type
-    // (the TypeId gate). `ManuallyDrop` forbids the source double-free; the
-    // (ptr, len, cap) triple is reused verbatim under an identical layout, so
-    // the produced `Vec<B>` is byte-for-byte the reinterpreted `Vec<A>`.
     unsafe fn reinterpret_vec<A, B>(v: alloc::vec::Vec<A>) -> alloc::vec::Vec<B> {
         let mut v = core::mem::ManuallyDrop::new(v);
         alloc::vec::Vec::from_raw_parts(v.as_mut_ptr() as *mut B, v.len(), v.capacity())
     }
 
-    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
-    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
-    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
-    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
     assert_eq!(
         chips.len(),
         main_traces.len(),
         "prove_trusted_evaluations: chips/main_traces must be parallel",
     );
 
-    // Per-chip `r_row` = trailing log(chip_height) coords of the
-    // shared eval_point.  Width-0 (device-resident, un-materialized) chips
-    // resolve their REAL height via `heights` — the NORMAL device-resident
-    // case: the dense commit packed them D2D and the reduction reads the
-    // device handle.
     let r_row_per_chip: Vec<Vec<InnerChallenge>> = chips
         .iter()
         .zip(main_traces.iter())
@@ -1153,26 +979,15 @@ where
             } else {
                 shared_eval_point
             };
-            // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate above).
             unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(slice.to_vec()) }
         })
         .collect();
 
-    // Send `trace.width` directly; the verifier reads each chip's
-    // `column_count` from `PackingMeta` so padding to `chip.width()`
-    // would just inflate jagged-PCS data on sparse chips.
-    // Each `chip_traces` entry is a BORROWED InnerVal view via a zero-copy
-    // relabel of the borrowed Val<SC> view (Val<SC> == InnerVal under the
-    // TypeId gate).  The views borrow the shard prover's shared `Arc<Mle>`
-    // store for the duration of this open.
     let chip_traces: Vec<crate::jagged_pcs::jagged::ChipTraceView> = chips
         .iter()
         .zip(main_traces.iter())
         .map(|(chip, pm)| {
             let name = chip.name().to_string();
-            // SAFETY: `Val<SC> == InnerVal` under the assert in this module, so
-            // `PaddedMle<Val<SC>>` and `PaddedMle<InnerVal>` are the SAME type
-            // and this is a no-op relabel.  The clone is an `Arc` refcount bump.
             let pm_inner: crate::multilinear::PaddedMle<InnerVal> = unsafe {
                 core::mem::transmute_copy::<
                     crate::multilinear::PaddedMle<Val<SC>>,
@@ -1183,10 +998,6 @@ where
         })
         .collect();
 
-    // z_row for the branching-program jagged-eval is the full shared
-    // zerocheck point (the recursion verifier uses
-    // `zerocheck_proof.point_and_eval.0`).  SAFETY: Challenge<SC> ==
-    // InnerChallenge under the TypeId gate asserted above.
     let z_row: &[InnerChallenge] = unsafe {
         core::slice::from_raw_parts(
             shared_eval_point.as_ptr() as *const InnerChallenge,
@@ -1194,31 +1005,11 @@ where
         )
     };
 
-    // Reinterpret the residual openings to InnerChallenge (Challenge<SC> ==
-    // InnerChallenge under the TypeId gate — the same relabel
-    // `r_row_per_chip` and `chip_traces` already went through).  The wrap
-    // ring's impl ignores these and recomputes the claims itself — identical
-    // values either way.
     let pre_y_inner: Vec<Vec<InnerChallenge>> = pre_y_per_chip
         .into_iter()
-        // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
         .map(|v| unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(v) })
         .collect();
 
-    // Per-ring jagged open.  Each `BasefoldRing` impl supplies its own concrete
-    // `BfMmcs` + `Challenger`, so `precomputed_commit` — typed
-    // `PrecomputedJaggedCommitGeneric<SC::BfMmcs>` all the way down — is handed
-    // over WITHOUT a `Box<dyn Any>` downcast, and the challenger without a
-    // `downcast_mut`.
-    //
-    // The inner rings return `EvaluationProof::Bundle`; the wrap ring returns
-    // `Bytes` (rmp-serialized `JaggedPcsProofGeneric<OuterValMmcs>`) and
-    // passes `pre_y_per_chip = None`.
-    // The PREPROCESSED round's views, mirroring the main round's
-    //
-    // Its heights come from the trace itself; every preprocessed trace is
-    // host-resident (it was committed once at setup), so there is no
-    // device-dummy height to resolve as there is for main.
     let prep_r_row_per_chip: Vec<Vec<InnerChallenge>> = preprocessed_named
         .iter()
         .map(|(_name, pm)| {
@@ -1230,14 +1021,12 @@ where
             } else {
                 shared_eval_point
             };
-            // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate above).
             unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(slice.to_vec()) }
         })
         .collect();
     let prep_chip_traces: Vec<crate::jagged_pcs::jagged::ChipTraceView> = preprocessed_named
         .iter()
         .map(|(name, pm)| {
-            // SAFETY: same no-op relabel as the main round above.
             let pm_inner: crate::multilinear::PaddedMle<InnerVal> = unsafe {
                 core::mem::transmute_copy::<
                     crate::multilinear::PaddedMle<Val<SC>>,
@@ -1249,14 +1038,9 @@ where
         .collect();
     let prep_claims_inner: Vec<Vec<InnerChallenge>> = preprocessed_claims
         .into_iter()
-        // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
         .map(|v| unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(v) })
         .collect();
 
-    // Round order: [preprocessed, main].  The preprocessed round comes FIRST
-    // because the verifier samples each round's z_col from the shared
-    // challenger in round order.  A machine with no preprocessed traces emits
-    // the single main round.
     let mut rounds: Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, _>> = Vec::with_capacity(2);
     if !prep_chip_traces.is_empty() {
         rounds.push(crate::jagged_pcs::jagged::JaggedOpenRound {

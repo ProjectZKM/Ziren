@@ -150,12 +150,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             })
             .collect::<Vec<_>>();
 
-        // Option 2: per-row population for the MemoryGlobal*Control bus.
-        // The genesis row (i==0) receives the prior shard's previous_*_addr
-        // (recomposed from `previous_addr_bits`); every other row receives
-        // the prior sorted row's addr.  `is_comp` is 0 only on the unique
-        // genesis row (i==0 && prev_addr==0); `prev_valid_i == is_comp_{i-1}`
-        // (1 for the genesis row, matching the PV endpoint).
         let prev0_addr: u32 =
             previous_addr_bits.iter().enumerate().map(|(j, bit)| bit * (1 << j)).sum();
         let is_comp_vec: Vec<bool> = (0..memory_events.len())
@@ -165,12 +159,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             })
             .collect();
 
-        // Row `i` reads only precomputed data (`memory_events[i-1].addr`,
-        // `prev0_addr`, `is_comp_vec[i-1]`) and writes only `rows[i]`, so the
-        // population carries no cross-row dependency.  It dominates this chip's
-        // tracegen — two field inversions per row over up to 2^20 rows — and the
-        // chip is one of only three on a memory-global shard, so the serial form
-        // has nothing to overlap with.
         rows.par_iter_mut().enumerate().for_each(|(i, row)| {
             let addr = memory_events[i].addr;
             let prev_addr = if i == 0 { prev0_addr } else { memory_events[i - 1].addr };
@@ -194,10 +182,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             }
         });
 
-        // Flatten into the padded trace buffer.  The padding tail is left zero,
-        // and a shape that pins fewer rows than there are events truncates —
-        // both matching the `resize` this replaces.  Writing into one
-        // preallocated buffer avoids a serial copy of the whole trace.
         let padded_nb_rows = <MemoryGlobalChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec::<F>(padded_nb_rows * NUM_MEMORY_INIT_COLS);
         let kept_rows = rows.len().min(padded_nb_rows);
@@ -284,8 +268,6 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        // Option 2 local-only: the chip no longer reads the next row
-        // (address ordering moved to the MemoryGlobal*Control bus).
         let local = main.current_slice();
         let local: &MemoryInitCols<AB::Var> = (*local).borrow();
 
@@ -307,7 +289,6 @@ where
         let value = [byte1, byte2, byte3, byte4];
 
         if self.kind == MemoryChipType::Initialize {
-            // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
                     vec![
@@ -328,7 +309,6 @@ where
                 LookupScope::Local,
             );
         } else {
-            // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
                     vec![
@@ -350,7 +330,6 @@ where
             );
         }
 
-        // Canonically decompose the address into bits so we can do comparisons.
         KoalaBearBitDecomposition::<AB::F>::range_check(
             builder,
             local.addr,
@@ -358,21 +337,6 @@ where
             local.is_real.into(),
         );
 
-        // Option 2: local-only strictly-increasing address ordering via
-        // the MemoryGlobal{Init,Finalize}Control bus
-        // Each row receives its predecessor's address `prev_addr` (chained
-        // by the bus to the prior row's `addr`; the genesis row receives the
-        // prior shard's `previous_*_addr` from the public-values AIR) and
-        // asserts `prev_addr < addr` LOCALLY (gated by `is_comp`).  The
-        // multiset balance forces `prev_addr_i == addr_{i-1}`, reproducing
-        // the legacy cross-row `addr < next.addr` chain.  Soundness rests on
-        // the five constraints from the verified memory-conversion review:
-        // (1) the bus tuple with a mandatory `index`, (2) the `is_comp`
-        // formula, (3) the is_comp-gated `<`, (4) the range-checked
-        // `prev_addr_bits`, (5) the genesis forcing.
-
-        // (4) Range-check the received `prev_addr` (binds `prev_addr_bits`
-        // to it and enforces canonical `< 2^32`), gated by `is_real`.
         KoalaBearBitDecomposition::<AB::F>::range_check(
             builder,
             local.prev_addr,
@@ -380,11 +344,6 @@ where
             local.is_real.into(),
         );
 
-        // (2) `is_comp = is_real * (1 - is_prev_addr_zero * is_index_zero)`.
-        // `is_prev_addr_zero` over `prev_addr` and `is_index_zero` over
-        // `index`, both gated by `is_real`; `is_comp` asserted boolean.
-        // `is_comp` is 0 only on the unique genesis row (is_real=1,
-        // prev_addr==0 AND index==0); 1 on every other real row.
         IsZeroOperation::<AB::F>::eval(
             builder,
             local.prev_addr.into(),
@@ -404,8 +363,6 @@ where
                 * (AB::Expr::ONE - local.is_prev_addr_zero.result * local.is_index_zero.result),
         );
 
-        // (3) Strict `prev_addr < addr`, gated by `is_comp` (vacuous when 0;
-        // equality is rejected as there is no first-differing bit).
         local.lt_cols.eval(
             builder,
             &local.prev_addr_bits.bits,
@@ -413,23 +370,12 @@ where
             local.is_comp,
         );
 
-        // (5) Genesis row (`is_not_comp = is_real - is_comp`, the unique
-        // `is_comp==0` real row): force `addr == 0` and `value == 0` (the
-        // $zero / address-0 anchor; guarantees a single zero-address
-        // (de)initialization).
         let is_not_comp = local.is_real.into() - local.is_comp.into();
         builder.when(is_not_comp.clone()).assert_zero(local.addr);
         for i in 0..32 {
             builder.when(is_not_comp.clone()).assert_zero(local.value[i]);
         }
 
-        // (1) The MemoryGlobal{Init,Finalize}Control bus: RECEIVE
-        // `(index, prev_addr, prev_valid)`, SEND `(index+1, addr, is_comp)`,
-        // both with multiplicity `is_real`.  Telescopes `prev_addr_i ==
-        // addr_{i-1}` (and `prev_valid_i == is_comp_{i-1}`); the public
-        // -values AIR (`eval_global_memory_init/finalize`) sends the head
-        // `(0, previous_*_addr, 1)` and receives the tail
-        // `(global_*_count, last_*_addr, 1)`.
         let control_kind = match self.kind {
             MemoryChipType::Initialize => LookupKind::MemoryGlobalInitControl,
             MemoryChipType::Finalize => LookupKind::MemoryGlobalFinalizeControl,
@@ -451,7 +397,6 @@ where
             LookupScope::Local,
         );
 
-        // The memory-init timestamp is fixed to 1 (kept; purely local).
         if self.kind == MemoryChipType::Initialize {
             builder.when(local.is_real).assert_eq(local.timestamp, AB::F::ONE);
         }

@@ -107,7 +107,6 @@ pub(crate) fn fold_proof(
         data_transcript,
     )?;
 
-    // Bind gamma to the transcript to challenge U.
     global_transcript.bind(U, &gamma.into_u256().to_bytes_be())?;
 
     let mut gammai = vec![Fr::zero(); nb_digests];

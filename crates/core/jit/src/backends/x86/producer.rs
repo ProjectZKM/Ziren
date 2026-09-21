@@ -234,7 +234,6 @@ pub fn runs_in_interpreter(ins: &DriverInstruction) -> bool {
     let any_imm = ins.imm_b || ins.imm_c;
     match op {
         JitOpcode::Syscall | JitOpcode::Unimpl => true,
-        // `alu_rr` reads `op_b` as a register whenever `op_c` is one.
         JitOpcode::Add
         | JitOpcode::Sub
         | JitOpcode::And
@@ -248,9 +247,7 @@ pub fn runs_in_interpreter(ins: &DriverInstruction) -> bool {
         | JitOpcode::Ror
         | JitOpcode::Clz
         | JitOpcode::Clo => ins.imm_b && !ins.imm_c,
-        // `lower_one` folds a lone immediate against 0 for these.
         JitOpcode::Nor | JitOpcode::Mul => ins.imm_b != ins.imm_c,
-        // Lowered here; register operands only.
         JitOpcode::Mult
         | JitOpcode::Multu
         | JitOpcode::Div
@@ -259,11 +256,9 @@ pub fn runs_in_interpreter(ins: &DriverInstruction) -> bool {
         | JitOpcode::Modu
         | JitOpcode::Meq
         | JitOpcode::Mne => any_imm,
-        // The interpreter writes LO = op_a; the lowering writes LO.
         JitOpcode::Madd | JitOpcode::Maddu | JitOpcode::Msub | JitOpcode::Msubu => {
             any_imm || ins.op_a != MipsRegister::Lo.index()
         }
-        // The interpreter ignores the immediate flags on the misc class.
         JitOpcode::Sext | JitOpcode::Wsbh => any_imm,
         JitOpcode::Ext => any_imm || (ins.op_c >> 5) + (ins.op_c & 0x1f) >= 32,
         JitOpcode::Ins => any_imm || (ins.op_c >> 5) < (ins.op_c & 0x1f),
@@ -303,8 +298,8 @@ struct Shared {
 ///
 /// # Errors
 ///
-/// Returns `Err` when an instruction cannot be lowered or the code
-/// buffer cannot be finalized.
+/// `Err` when an instruction cannot be lowered or the code buffer
+/// cannot be finalized.
 ///
 /// # Panics
 ///
@@ -413,7 +408,6 @@ pub fn build_producer(
         let area = i32::try_from(plan.area).expect("area charge fits i32");
         let heights = &plan.heights[..plan.n_heights as usize];
         if control_flow {
-            // Charged now, checked by the delay slot.
             if area != 0 {
                 dynasm!(t.assembler ; .arch x64 ; sub Rq(AREA_LEFT), DWORD area);
             }
@@ -425,16 +419,6 @@ pub fn build_producer(
             }
         } else {
             let fence = t.assembler.new_dynamic_label();
-            // CHARGE FIRST, THEN CHECK. The interpreter applies the whole of
-            // `charge_instruction` and only then evaluates `inc_shard_if_need`,
-            // so a fence must never pre-empt a charge: a `sub` fused with its
-            // own `jle` drops the rest of this instruction's charges on the
-            // fencing path, and the shard closes one instruction light. (That
-            // was the original shape here, and it cost the shard-closing
-            // instruction its row on all 124 clk-fenced reth shards.)
-            // Heights first, area last, so the area's own `sub` leaves the
-            // flags this checks -- one instruction cheaper than a separate
-            // `test` on the hottest block in the producer.
             for h in heights {
                 let off = HEIGHT_LEFT_OFFSET + i32::from(h.slot) * 8;
                 dynasm!(t.assembler ; .arch x64
@@ -447,9 +431,6 @@ pub fn build_producer(
                     ; jle =>fence
                 );
             } else if memory || plan.delay_slot {
-                // A charge of 0 leaves the budget where the last check found
-                // it, so an uncharged area only needs re-testing when the
-                // touch stub or the predecessor moved it.
                 dynasm!(t.assembler ; .arch x64
                     ; test Rq(AREA_LEFT), Rq(AREA_LEFT)
                     ; jle =>fence
@@ -466,8 +447,6 @@ pub fn build_producer(
             for h in heights {
                 check_slot(&mut t, h.slot);
             }
-            // The touch stub charges `Global` (and every fourth touch
-            // `MemoryLocal`) inside the instruction body.
             if memory {
                 for slot in [cfg.global_slot, cfg.memory_local_slot] {
                     if !charged(slot) {
@@ -510,7 +489,6 @@ pub fn build_producer(
         }
     }
 
-    // Fall-off: the PC after the last instruction.
     let pc_end = cfg.pc_base.wrapping_add((instrs.len() as u32).wrapping_mul(4));
     let exit = shared.exit;
     dynasm!(t.assembler ; .arch x64
@@ -568,7 +546,6 @@ fn emit_memory_op(
         JitOpcode::Lh | JitOpcode::Lhu | JitOpcode::Sh => Some(1),
         _ => None,
     };
-    // TEMP_A = aligned address, eax = byte offset within the word.
     t.emit_register_load(rs, TEMP_A);
     dynasm!(t.assembler ; .arch x64
         ; add Rd(TEMP_A), DWORD imm
@@ -584,13 +561,10 @@ fn emit_memory_op(
             ; jnz =>trap
         );
     }
-    // TEMP_B = host address of the 16-byte entry.
     dynasm!(t.assembler ; .arch x64
         ; mov Rq(TEMP_B), Rq(TEMP_A)
         ; shl Rq(TEMP_B), 2
         ; add Rq(TEMP_B), Rq(MEMORY_PTR)
-        // Oracle push of the entry's `MemValue` (value, timestamp, shard)
-        // for non-register addresses.
         ; cmp Rq(ORACLE_TAIL), QWORD [Rq(CONTEXT) + ORACLE_END_OFFSET]
         ; ja =>full
         ; mov rcx, QWORD [Rq(TEMP_B)]
@@ -601,11 +575,9 @@ fn emit_memory_op(
         ; mov DWORD [Rq(ORACLE_TAIL) + 8], edx
         ; add Rq(ORACLE_TAIL), 12
         ; no_push:
-        // Touched address when the previous access was another shard's.
         ; cmp edx, DWORD [Rq(CONTEXT) + SHARD_OFFSET]
         ; jne =>touch
         ; =>back
-        // Stamp (timestamp = clk, shard).
         ; lea rdx, [Rq(CLK_SHARD) - 3]
         ; mov QWORD [Rq(TEMP_B) + 4], rdx
     );
@@ -631,7 +603,6 @@ fn emit_memory_op(
             t.emit_register_store(rd, TEMP_A);
         }
         JitOpcode::Lwl => {
-            // rt = (rt & !(0xFFFFFFFF << (24 - 8i))) | (mem << (24 - 8i))
             dynasm!(t.assembler ; .arch x64
                 ; mov ecx, eax
                 ; shl ecx, 3
@@ -651,7 +622,6 @@ fn emit_memory_op(
             t.emit_register_store(rd, TEMP_A);
         }
         JitOpcode::Lwr => {
-            // rt = (rt & !(0xFFFFFFFF >> 8i)) | (mem >> 8i)
             dynasm!(t.assembler ; .arch x64
                 ; mov ecx, eax
                 ; shl ecx, 3
@@ -669,7 +639,7 @@ fn emit_memory_op(
             t.emit_register_store(rd, TEMP_A);
         }
         JitOpcode::Sb => {
-            t.emit_register_load(rd, 1); // ecx
+            t.emit_register_load(rd, 1);
             dynasm!(t.assembler ; .arch x64 ; mov BYTE [Rq(TEMP_B) + rax], cl);
         }
         JitOpcode::Sh => {
@@ -689,14 +659,13 @@ fn emit_memory_op(
             t.emit_register_store(rd, TEMP_A);
         }
         JitOpcode::Swl => {
-            // mem = (mem & !(0xFFFFFFFF >> (24 - 8i))) | (rt >> (24 - 8i))
             dynasm!(t.assembler ; .arch x64
                 ; mov ecx, eax
                 ; shl ecx, 3
                 ; neg ecx
                 ; add ecx, 24
             );
-            t.emit_register_load(rd, 2); // edx
+            t.emit_register_load(rd, 2);
             dynasm!(t.assembler ; .arch x64
                 ; shr edx, cl
                 ; mov eax, -1
@@ -708,7 +677,6 @@ fn emit_memory_op(
             );
         }
         JitOpcode::Swr => {
-            // mem = (mem & !(0xFFFFFFFF << 8i)) | (rt << 8i)
             dynasm!(t.assembler ; .arch x64
                 ; mov ecx, eax
                 ; shl ecx, 3
@@ -738,7 +706,7 @@ fn emit_div(
     let rd = MipsRegister::from_u8(ins.op_a);
     let rs = MipsRegister::from_u8(ins.op_b as u8);
     let rt = MipsRegister::from_u8(ins.op_c as u8);
-    t.emit_register_load(rs, 0); // eax
+    t.emit_register_load(rs, 0);
     t.emit_register_load(rt, TEMP_B);
     dynasm!(t.assembler ; .arch x64
         ; test Rd(TEMP_B), Rd(TEMP_B)
@@ -746,8 +714,6 @@ fn emit_div(
     );
     match op {
         JitOpcode::Div | JitOpcode::Mod => {
-            // 64-bit idiv on sign-extended operands: INT_MIN / -1 yields
-            // 0x8000_0000 instead of the interpreter's overflow panic.
             dynasm!(t.assembler ; .arch x64
                 ; movsxd rax, eax
                 ; movsxd Rq(TEMP_B), Rd(TEMP_B)
@@ -787,8 +753,6 @@ fn emit_shared_stubs(t: &mut TranspilerBackend, s: &Shared, cfg: &ProducerConfig
         exit,
     } = *s;
 
-    // Interpreter stub: hand the instruction at ctx.pc to the host,
-    // then resume at whatever PC it left.
     let handler = cfg.syscall_handler as usize;
     dynasm!(t.assembler ; .arch x64 ; =>interp_stub);
     t.emit_spill_all_registers();
@@ -834,8 +798,6 @@ fn emit_shared_stubs(t: &mut TranspilerBackend, s: &Shared, cfg: &ProducerConfig
         ; jmp =>exit
     );
 
-    // Touched address (`ShardSplitAccumulator::add_touched_address`):
-    // every 4th touch is a MemoryLocal row, every touch two Global rows.
     let ml_off = HEIGHT_LEFT_OFFSET + i32::from(cfg.memory_local_slot) * 8;
     let g_off = HEIGHT_LEFT_OFFSET + i32::from(cfg.global_slot) * 8;
     let ml_cost = i32::try_from(cfg.memory_local_cost).expect("MemoryLocal cost fits i32");

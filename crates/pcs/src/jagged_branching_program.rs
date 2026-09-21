@@ -83,10 +83,10 @@ pub enum StateOrFail {
 /// `all_memory_states()[s.get_index()] == s`.
 pub fn all_memory_states() -> [MemoryState; 4] {
     [
-        MemoryState { carry: false, comparison_so_far: false }, // 0b00
-        MemoryState { carry: true, comparison_so_far: false },  // 0b01
-        MemoryState { carry: false, comparison_so_far: true },  // 0b10
-        MemoryState { carry: true, comparison_so_far: true },   // 0b11
+        MemoryState { carry: false, comparison_so_far: false },
+        MemoryState { carry: true, comparison_so_far: false },
+        MemoryState { carry: false, comparison_so_far: true },
+        MemoryState { carry: true, comparison_so_far: true },
     ]
 }
 
@@ -116,17 +116,12 @@ pub fn all_bit_states() -> [BitState; 16] {
 /// LSB→MSB.
 #[must_use]
 pub fn transition_function(bs: BitState, ms: MemoryState) -> StateOrFail {
-    // Comparison logic: if index_bit == next_prefix_sum_bit, defer
-    // to running comparison; else the comparison decides on this
-    // layer's next_prefix_sum_bit (1 means "i < t_{c+1}" so far).
     let new_comparison_so_far = if bs.index_bit == bs.next_col_prefix_sum_bit {
         ms.comparison_so_far
     } else {
         bs.next_col_prefix_sum_bit
     };
 
-    // Carry logic: three-way addition of (row, prev_carry, curr_prefix_sum) — must
-    // produce index_bit at this layer; otherwise fail.
     let row = bs.row_bit as usize;
     let carry_in = ms.carry as usize;
     let curr = bs.curr_col_prefix_sum_bit as usize;
@@ -201,20 +196,15 @@ impl<EF: Field> BranchingProgram<EF> {
     /// hypercube interpretation; returns the multilinear extension's
     /// value otherwise.
     pub fn eval(&self, prefix_sum: &[EF], next_prefix_sum: &[EF]) -> EF {
-        // DP: state_by_state_results[s.get_index()] holds the value
-        // of the rest of the BP starting from state s.
         let mut state_by_state_results: [EF; 4] = [EF::ZERO; 4];
-        // Initialize: success state contributes 1, all others 0.
         state_by_state_results[MemoryState::success().get_index()] = EF::ONE;
 
         let memory_states = all_memory_states();
         let bit_states = all_bit_states();
 
-        // Iterate layers in reverse: from MSB layer (num_vars) down to LSB (0).
         for layer in (0..=self.num_vars).rev() {
             let mut new_results: [EF; 4] = [EF::ZERO; 4];
 
-            // Bits at this layer for the 4 streams.
             let point: [EF; 4] = [
                 Self::get_ith_lsb_ef(&self.z_row, layer),
                 Self::get_ith_lsb_ef(&self.z_index, layer),
@@ -233,7 +223,6 @@ impl<EF: Field> BranchingProgram<EF> {
                     {
                         accum_elems[out_state.get_index()] += elem;
                     }
-                    // Fail states contribute zero; nothing to add.
                 }
 
                 let acc = accum_elems
@@ -254,8 +243,8 @@ impl<EF: Field> BranchingProgram<EF> {
 /// every `b` in `{0,1}^point.len()`, returning a `Vec<EF>` of size
 /// `2^point.len()`.  LSB-first ordering: index `i` = bits of `i`.
 ///
-/// Used to compute `z_col_lagrange[k] = EQ(k_bits, z_col)` in the
-/// closed-form jagged polynomial evaluator.
+/// Supplies `z_col_lagrange[k] = EQ(k_bits, z_col)` to the closed-form
+/// jagged polynomial evaluator.
 pub fn partial_lagrange<EF: Field>(point: &[EF]) -> Vec<EF> {
     let mut out = vec![EF::ZERO; 1 << point.len()];
     out[0] = EF::ONE;
@@ -273,9 +262,8 @@ pub fn partial_lagrange<EF: Field>(point: &[EF]) -> Vec<EF> {
 }
 
 /// Compute the bit-decomposition of `value` as a big-endian
-/// `Vec<EF>` of length `num_bits`.  Used to convert
-/// `prefix_sums[k]` (usize) into the multilinear-evaluation point
-/// the BP consumes.
+/// `Vec<EF>` of length `num_bits`: turns `prefix_sums[k]` (usize) into
+/// the multilinear-evaluation point the BP consumes.
 pub fn bits_big_endian<EF: Field>(value: usize, num_bits: usize) -> Vec<EF> {
     (0..num_bits).rev().map(|i| if (value >> i) & 1 == 1 { EF::ONE } else { EF::ZERO }).collect()
 }
@@ -296,28 +284,11 @@ pub fn full_jagged_evaluation<EF: Field>(
     z_col: &[EF],
     z_index: &[EF],
 ) -> EF {
-    // Prefix-sum bit width: the largest prefix sum is
-    // `prefix_sums.last()` (= total area), which needs `log2_ceil(total)+1`
-    // bits (log_m = log2_ceil(last_prefix_sum)).  Deriving `num_bits` from the
-    // prefix sums (not `z_index.len()`) avoids the off-by-one that truncated
-    // the top prefix-sum bit for single/equal-height packings.
     let last = prefix_sums.last().copied().unwrap_or(0);
     let log_m =
         if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
-    // The `claimed_sum` this closed form returns is INVARIANT to `num_bits` (as long
-    // as `num_bits` is wide enough to hold every prefix sum).  The branching
-    // program reads each prefix-sum bit via `get_ith_lsb`, which indexes from the
-    // LSB end and returns ZERO both for positions beyond the array AND for the
-    // high (zero) positions of a value's `bits_big_endian` encoding — so
-    // `bp.eval(bits_be(v, N1), ..)` == `bp.eval(bits_be(v, N2), ..)` for any
-    // `N1, N2 >= bits(v)`.  Every prefix sum is `<= total < 2^(log_m + 1)`, so the
-    // NATURAL `log_m + 1` width always fits — at EVERY stage, including the pinned
-    // recursion path where the former `z_index.len() + 1` (= pinned L + 1) width
-    // yielded the byte-identical value.  So the recursion-area-pin thread-local
-    // read is no longer needed here: `num_bits` is pin-invariant.
     let num_bits = log_m + 1;
 
-    // z_col_lagrange[k] = EQ(k_bits, z_col)
     let z_col_lagrange = partial_lagrange(z_col);
 
     let bp = BranchingProgram::new(z_row.to_vec(), z_index.to_vec());
@@ -354,7 +325,6 @@ mod tests {
     fn bit_states_enumerated_lsb_first() {
         let bs = all_bit_states();
         assert_eq!(bs.len(), 16);
-        // Index 0 = all-false.
         assert_eq!(
             bs[0],
             BitState {
@@ -364,13 +334,10 @@ mod tests {
                 next_col_prefix_sum_bit: false,
             }
         );
-        // Index 1 = row-bit only set.
         assert!(bs[1].row_bit);
         assert!(!bs[1].index_bit);
-        // Index 2 = index-bit only.
         assert!(!bs[2].row_bit);
         assert!(bs[2].index_bit);
-        // Index 15 = all true.
         assert!(
             bs[15].row_bit
                 && bs[15].index_bit
@@ -399,7 +366,7 @@ mod tests {
     fn transition_addition_violation_fails() {
         let bs = BitState {
             row_bit: true,
-            index_bit: false, // 1 + 0 + 0 = 1, but index says 0 — fail.
+            index_bit: false,
             curr_col_prefix_sum_bit: false,
             next_col_prefix_sum_bit: false,
         };
@@ -455,18 +422,13 @@ mod tests {
     /// This is the defining property of the indicator polynomial.
     #[test]
     fn branching_program_eval_indicator_at_integer_points() {
-        // Set up a tiny example: 1 column with rows 0..3.
-        // t_c = 0, t_{c+1} = 3.  Valid indices are 0, 1, 2.
-        let log_m = 3; // num_bits = log_m + 1 = 4
+        let log_m = 3;
         let num_bits = log_m + 1;
 
         let row_count = 3usize;
         let prefix_sum_curr = bits_be::<InnerChallenge>(0, num_bits);
         let prefix_sum_next = bits_be::<InnerChallenge>(row_count, num_bits);
 
-        // Test all (row, index) pairs in the bit-grid and check the
-        // indicator.  For 1 column, the relation simplifies to
-        // index == row.
         for row in 0..(1 << num_bits) {
             for index in 0..(1 << num_bits) {
                 let z_row = bits_be::<InnerChallenge>(row, num_bits);
@@ -474,7 +436,6 @@ mod tests {
                 let bp = BranchingProgram::new(z_row, z_index);
                 let result = bp.eval(&prefix_sum_curr, &prefix_sum_next);
 
-                // Expected: index == 0 + row (since t_c = 0) AND index < t_{c+1} = 3
                 let expected_one = (index == row) && (index < row_count);
                 if expected_one {
                     assert_eq!(result, InnerChallenge::ONE, "row={row} index={index} expected ONE",);
@@ -489,7 +450,6 @@ mod tests {
         }
     }
 
-    // Helper to suppress unused-import warning for InnerVal.
     #[test]
     fn _inner_val_referenced() {
         let _ = InnerVal::ZERO;
@@ -513,10 +473,10 @@ mod tests {
     #[test]
     fn bits_big_endian_layout() {
         let bits: Vec<InnerVal> = bits_big_endian(5, 4);
-        assert_eq!(bits[0], InnerVal::ZERO); // bit 3
-        assert_eq!(bits[1], InnerVal::ONE); // bit 2
-        assert_eq!(bits[2], InnerVal::ZERO); // bit 1
-        assert_eq!(bits[3], InnerVal::ONE); // bit 0
+        assert_eq!(bits[0], InnerVal::ZERO);
+        assert_eq!(bits[1], InnerVal::ONE);
+        assert_eq!(bits[2], InnerVal::ZERO);
+        assert_eq!(bits[3], InnerVal::ONE);
     }
 
     /// **Closed-form correctness**: at integer points (z_row, z_col,
@@ -525,14 +485,9 @@ mod tests {
     /// triple is consistent with the prefix-sum schedule.
     #[test]
     fn full_jagged_evaluation_indicator_at_integer_points() {
-        // 2 columns: heights [3, 2], prefix sums [0, 3, 5].
         let prefix_sums = vec![0usize, 3, 5];
-        let log_m = 3; // log2_ceil(5) = 3
+        let log_m = 3;
         let num_bits = log_m + 1;
-
-        // For column c with start t_c and height h_c, the indicator
-        // at (row=r, col=c, index=i) is 1 iff i == t_c + r AND i < t_{c+1}.
-        // That is: r ∈ [0, h_c).
 
         for col in 0..2 {
             for row in 0..(1 << num_bits) {
@@ -541,7 +496,7 @@ mod tests {
                     continue;
                 }
                 let z_row: Vec<InnerChallenge> = bits_big_endian(row, num_bits);
-                let z_col: Vec<InnerChallenge> = bits_big_endian(col, 1); // 2 cols → 1 bit
+                let z_col: Vec<InnerChallenge> = bits_big_endian(col, 1);
                 let z_index: Vec<InnerChallenge> = bits_big_endian(index, num_bits);
 
                 let result = full_jagged_evaluation(&prefix_sums, &z_row, &z_col, &z_index);

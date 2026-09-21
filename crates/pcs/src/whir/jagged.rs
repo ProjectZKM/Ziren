@@ -75,7 +75,7 @@ pub fn whir_config_for_fold_schedule(lsh: usize, folds: &[usize], final_log: usi
         "fold schedule must consume lsh exactly"
     );
     let mut config = WhirConfig::default_whir_config();
-    config.starting_ood_samples = 0; // stacked WHIR: OOD rides in round constraints
+    config.starting_ood_samples = 0;
     config.starting_log_inv_rate = 1;
     config.round_parameters = folds
         .iter()
@@ -132,23 +132,6 @@ pub fn core_whir_config(lsh: usize) -> WhirConfig {
 pub const WHIR_BATCH_GRINDING_BITS: usize = 8;
 
 fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
-    // Round-0 folds FEWER variables than the later rounds.  A round-0 query
-    // authenticates one coset row from EVERY stripe of every round — `chunks
-    // x 2^ff0` felts — and re-hashing those rows is the recursion leaf's
-    // dominant cost (measured: at reth areas a uniform ff=7 schedule gives
-    // ~28K felts/query x 84 queries ≈ 2.4M felts ⇒ a ~640M-cell leaf that
-    // cannot fit a 32GB card).  ff0=3 cuts that term 16x; later rounds query
-    // a single folded poly (leaf = 2^6 felts, chunk-independent) so their
-    // factor stays 6.  Query counts, rates, and PoW are round-indexed and
-    // independent of the folds.  lsh=21: folds [3,6,6], final poly 2^6.
-    // Provable (unique-decoding) 100-bit schedule — see docs/soundness/.
-    // Per round: queries x (-log2((1+rho)/2)) + PoW = 124x0.678+16,
-    // 88x0.956+16, 85x0.994+16 ~ 100.  The Johnson regime is capped at 65
-    // bits by the field's fold terms whatever the query count, so 100 is a
-    // UNIQUE-DECODING claim and the list-decoding accounting does not reach
-    // it; `udr_only = true` in the soundcalc config says so.  Round-0
-    // queries drive the compress proof size (79% of its bytes) and the
-    // recursion verifier's work, which is what 100 bits costs.
     const ROUND0_FF: usize = 3;
     const START_LOG_INV_RATE: usize = 2;
     let mut rem =
@@ -159,8 +142,6 @@ fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
         rem -= 6;
     }
     let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
-    // Rate 1/4 at the start, escalating by 3 bits per committed round
-    // (`START + 3(r+1)`): 21 + 2 = 23 <= KoalaBear's two-adicity of 24.
     config.starting_log_inv_rate = START_LOG_INV_RATE;
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
         rp.log_inv_rate = START_LOG_INV_RATE + 3 * (r + 1);
@@ -172,8 +153,6 @@ fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
         rp.queries_pow_bits = 16;
         rp.ood_samples = 2;
     }
-    // The final queries open the LAST committed codeword (committed by
-    // round num_rounds-2); its rate is that round's log_inv_rate.
     config.final_queries = queries[(num_rounds - 1).min(queries.len() - 1)];
     config.final_pow_bits = 16;
     config
@@ -333,7 +312,6 @@ where
     let stack_point = &point[..lsh];
     let batch_point = &point[lsh..];
 
-    // Round stripe counts from the areas (the jagged layer's own metadata).
     let mut stripe_counts = Vec::with_capacity(round_areas.len());
     for &area in round_areas {
         if !area.is_multiple_of(1usize << lsh) {
@@ -342,8 +320,6 @@ where
         stripe_counts.push(area >> lsh);
     }
 
-    // The StackingMismatch bind: the claim must equal the interpolation of the
-    // flat echoed evaluations at the batch coordinates.
     let flat: Vec<JaggedChallenge> = proof.batch_evaluations.iter().flatten().copied().collect();
     let mut current = flat;
     current.resize(1usize << batch_point.len(), JaggedChallenge::ZERO);

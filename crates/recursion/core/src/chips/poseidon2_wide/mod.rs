@@ -62,11 +62,10 @@ where
     let t0123 = t01.clone() + t23.clone();
     let t01123 = t0123.clone() + x[1].clone();
     let t01233 = t0123.clone() + x[3].clone();
-    // The order here is important. Need to overwrite x[0] and x[2] after x[1] and x[3].
-    x[3] = t01233.clone() + x[0].double(); // 3*x[0] + x[1] + x[2] + 2*x[3]
-    x[1] = t01123.clone() + x[2].double(); // x[0] + 2*x[1] + 3*x[2] + x[3]
-    x[0] = t01123 + t01; // 2*x[0] + 3*x[1] + x[2] + x[3]
-    x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
+    x[3] = t01233.clone() + x[0].double();
+    x[1] = t01123.clone() + x[2].double();
+    x[0] = t01123 + t01;
+    x[2] = t01233 + t23;
 }
 
 // eq mds_light_permutation
@@ -114,7 +113,6 @@ pub(crate) fn internal_linear_layer<F: PrimeCharacteristicRing>(state: &mut [F; 
     let matmul_constants: [F; WIDTH] = core::array::from_fn(|i| {
         F::from_u32(POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY[i].as_canonical_u32())
     });
-    // Implement matmul_internal inline: (1 + diag(v))state
     let sum: F = state.iter().cloned().sum();
     for i in 0..WIDTH {
         state[i] *= matmul_constants[i].clone();
@@ -187,10 +185,6 @@ pub(crate) mod tests {
                 }))
                 .collect::<Vec<_>>();
 
-        // This test drives `Runtime` directly rather than going through
-        // `run_recursion_test_machines`, so it has to size memory itself: the
-        // compiler is what normally sets `total_memory`, and `ParMemVec` never
-        // grows.
         let mut program = RecursionProgram::new(
             crate::RawProgram::from_linear(instructions),
             0,

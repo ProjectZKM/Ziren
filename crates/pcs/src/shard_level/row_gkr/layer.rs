@@ -45,8 +45,6 @@ impl<F: Clone> RowMajorTable<F> {
         let total = (1usize << num_row_variables) * num_interactions;
         let num_interaction_variables =
             num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
-        // FLAKE FIX: see round.rs note. Init to ZERO instead of leaking
-        // uninit u32 — KoalaBear serde rejects out-of-range bit patterns.
         let cells: Vec<F> = vec![F::ZERO; total];
         Self {
             cells,
@@ -333,7 +331,6 @@ mod tests {
     #[test]
     fn row_major_table_idx_is_row_major() {
         let mut t: RowMajorTable<KoalaBear> = RowMajorTable::filled(2, 2, KoalaBear::from_u32(0));
-        // 4 rows × 4 interactions = 16 cells; row 1 interaction 2 -> idx 6.
         assert_eq!(t.idx(1, 2), 4 + 2);
         t.set(1, 2, KoalaBear::from_u32(99));
         assert_eq!(*t.get(1, 2), KoalaBear::from_u32(99));

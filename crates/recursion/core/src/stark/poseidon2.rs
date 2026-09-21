@@ -7,7 +7,6 @@ use zkhash::{
 
 fn bn254_from_ark_ff(input: ark_FpBN256) -> Bn254 {
     let bytes = input.into_bigint().to_bytes_le();
-    // Convert little-endian bytes to little-endian u64 limbs
     let mut limbs = [0u64; 4];
     for (i, chunk) in bytes.chunks(8).enumerate() {
         if i >= 4 {

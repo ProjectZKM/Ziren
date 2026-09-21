@@ -98,7 +98,6 @@ impl<F: Field> FriConfig<F> {
             log_blowup,
             num_queries,
             proof_of_work_bits,
-            // Arity 2 -- one variable per round, the classic BaseFold shape.
             log_folding_arity: 1,
             _marker: PhantomData,
         }
@@ -167,11 +166,9 @@ impl<F: Field> FriConfig<F> {
         Self::new(2, 124, 16).with_log_folding_arity(INNER_LOG_FOLDING_ARITY)
     }
 
-    /// Memory-optimised config override via the
-    /// `ZIREN_BASEFOLD_LOG_BLOWUP` env var.  Trades soundness margin
-    /// for RSS headroom.  With `log_blowup = k` the stacked-PCS LDE
-    /// is `2^k · N` EF bytes per stripe, at the cost of the fixed 100
-    /// queries no longer matching the rate's 100-bit target.
+    /// Memory-optimised config override via the `ZIREN_BASEFOLD_LOG_BLOWUP`
+    /// env var: with `log_blowup = k` the stacked-PCS LDE is `2^k · N` EF
+    /// elements per stripe.
     ///
     /// The query count follows the rate, so the 100-bit target holds at every
     /// accepted `k`:
@@ -189,22 +186,15 @@ impl<F: Field> FriConfig<F> {
     /// Accepts integer values in [1, 4].  Any other value (or unset)
     /// falls back to the sound production default.
     ///
-    /// ⚠ ONLY blowup 2 (the default) survives a RECURSION proof.  Measured:
-    /// at 3 and 4 the recursion verifier panics `index out of bounds: the len
-    /// is 23 but the index is 23` (`basefold_verifier.rs`, the query-index bit
-    /// width does not track the Merkle path length), and at 1 the recursion
-    /// program traps on `DivFAssert 1/0`.  The knob is usable for measuring a
-    /// CORE commit and nothing beyond it.
+    /// Only `k = 2` (the default) yields a recursion proof: at `k ∈ {3, 4}` the
+    /// recursion verifier's query-index bit width does not track the Merkle
+    /// path length (index out of bounds), and at `k = 1` the recursion program
+    /// traps on `DivFAssert 1/0`. Other `k` serve core-commit measurements only.
     ///
-    /// ⚠ AND BLOWUP IS NOT A SIZE LEVER FOR THE RECURSION CIRCUIT.  Measured at
-    /// a fixed 100 queries, blowup 1 -> 2 GROWS a leaf program 3,617,952 ->
-    /// 3,654,752 instructions (+1.0%) as the Merkle path goes 22 -> 23, which
-    /// puts the path-dependent share of the circuit near 22%.  Raising blowup
-    /// only helps through the query count it buys at equal soundness --
-    /// 124 -> 102 -> 93 for blowup 2 -> 3 -> 4 at 100 bits -- which projects to
-    /// about -3% and -4% of the circuit, against 2x and 4x the prover's
-    /// codeword.  The recursion circuit's size is set by the PCS it verifies,
-    /// not by this parameter.
+    /// The recursion circuit's size is set by the PCS it verifies, not by `k`:
+    /// raising `k` lengthens every Merkle path by one level and only shrinks
+    /// the circuit through the smaller `q(k)`, a few percent against a `2^Δk`
+    /// larger prover codeword.
     pub fn from_env_or_default() -> Self {
         Self::from_env_value(std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP").ok().as_deref())
     }
@@ -226,23 +216,18 @@ impl<F: Field> FriConfig<F> {
         if !(1..=4).contains(&log_blowup) {
             return Self::default_fri_config();
         }
-        // Sound at every accepted k, so nothing here is gated.  k != 2 is a
-        // core-commit measurement only: it does not survive a recursion proof.
         if log_blowup != Self::default_fri_config().log_blowup {
             tracing::warn!(
                 "ZIREN_BASEFOLD_LOG_BLOWUP={log_blowup}: 100-bit soundness is held by the query \
                  count, but only the default blowup survives a recursion proof."
             );
         }
-        // q(k) = ⌈(100 - 16) / (-log2(0.5 + 2^-k / 2))⌉   -- see the doc above
         let num_queries = match log_blowup {
             1 => 203,
             2 => 124,
             3 => 102,
             _ => 93,
         };
-        // `new` alone gives arity 1: rounds `num_vars/1`, leaves of 2 values,
-        // against a circuit compiled for `INNER_LOG_FOLDING_ARITY`.
         Self::new(log_blowup, num_queries, 16).with_log_folding_arity(INNER_LOG_FOLDING_ARITY)
     }
 
@@ -336,7 +321,7 @@ mod env_override {
     #[test]
     fn the_env_reader_agrees_with_the_default_when_unset() {
         if std::env::var("ZIREN_BASEFOLD_LOG_BLOWUP").is_ok() {
-            return; // the ambient environment sets it; nothing to assert
+            return;
         }
         let c = FriConfig::<F>::from_env_or_default();
         let d = FriConfig::<F>::default_fri_config();

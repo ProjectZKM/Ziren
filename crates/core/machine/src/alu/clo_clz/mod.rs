@@ -63,8 +63,7 @@ pub struct CloClzCols<T> {
     /// whether the `bb` is zero.
     pub is_bb_zero: T,
 
-    /// The inlined shift proving `bb >> (31 - a) == 1` when `bb != 0` (the
-    /// SRL request row the chip used to push onto ShiftRight).
+    /// The inlined shift proving `bb >> (31 - a) == 1` when `bb != 0`.
     pub srl: ShiftRightOperation<T>,
 
     /// Flag to indicate whether the opcode is CLZ.
@@ -108,7 +107,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows for each event.
         let mut rows: Vec<[F; NUM_CLOCLZ_COLS]> = vec![];
         let cloclz_events = input.cloclz_events.clone();
         for event in cloclz_events.iter() {
@@ -121,8 +119,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             cols.next_pc = F::from_u32(event.next_pc);
             cols.is_real = F::ONE;
             cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);
-            // Every CloClz row is a real instruction (no chip outsources to
-            // CloClz, and its SRL sub-operation is inlined).
             cols.frame.populate_from_alu(
                 event,
                 &input.program,
@@ -133,15 +129,12 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             let bb = if event.opcode == Opcode::CLZ { event.b } else { 0xffffffff - event.b };
             cols.bb = Word::from(bb);
 
-            // if bb == 0, then result is 32.
             cols.is_bb_zero = F::from_bool(bb == 0);
 
-            // The inlined shift (the SRL request row): bb >> (31 - a) == 1.
             if bb != 0 {
                 cols.srl.populate(output, Opcode::SRL, bb, 31 - event.a);
             }
 
-            // Range check.
             output.add_u8_range_checks(&bb.to_le_bytes());
             output.add_byte_lookup_event(ByteLookupEvent {
                 opcode: ByteOpcode::LTU,
@@ -154,11 +147,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             rows.push(row);
         }
 
-        // Pad the trace to a power of two depending on the proof shape in `input`.
-        // The inlined shift is gated on `is_real - is_bb_zero`, which is zero
-        // on all-zero padding rows, so no fake-row template is needed — only
-        // the frame must be neutralised (or its register-access
-        // multiplicities break the Memory bus).
         pad_rows_mult32(
             &mut rows,
             || {
@@ -170,7 +158,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             <CloClzChip as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         let trace =
             RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_CLOCLZ_COLS);
 
@@ -203,10 +190,8 @@ where
         let one: AB::Expr = AB::F::ONE.into();
         let zero: AB::Expr = AB::F::ZERO.into();
 
-        // Derive is_clo from is_real and is_clz.
         let is_clo: AB::Expr = local.is_real.into() - local.is_clz.into();
 
-        // if clz, bb == b, else bb = !b
         {
             local.frame.op_b_val().0.iter().zip_eq(local.bb.0.iter()).for_each(|(a, b)| {
                 builder.when(is_clo.clone()).assert_eq(*a + *b, AB::Expr::from_u32(255));
@@ -216,8 +201,6 @@ where
             builder.slice_range_check_u8(&local.bb.0, local.is_real);
         }
 
-        // ensure result < 33
-        // Send the comparison lookup.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::F::ONE,
@@ -230,14 +213,6 @@ where
         builder.when(local.is_real).assert_zero(local.a[2]);
         builder.when(local.is_real).assert_zero(local.a[3]);
 
-        // The Instruction-bus receive is gone: every row is a real
-        // instruction serving itself via the frame.
-
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  CLZ/CLO are sequential and can never halt.
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
         builder
             .when(local.is_real)
             .when_not(local.frame.op_a_0)
@@ -256,7 +231,6 @@ where
             local.is_real.into(),
         );
 
-        // if is_bb_zero == 1, bb == 0, and result is 32
         {
             builder.assert_bool(local.is_bb_zero);
 
@@ -267,9 +241,6 @@ where
         }
 
         {
-            // Verify bb >> (31 - result) == 1 IN-ROW (the SRL request row is
-            // gone).  The shift is gated on `is_real - is_bb_zero`: live
-            // exactly on real rows with bb != 0, zero on padding.
             let is_srl = local.is_real - local.is_bb_zero;
             ShiftRightOperation::<AB::F>::eval(
                 builder,
@@ -292,8 +263,6 @@ where
             builder.when(is_srl).assert_zero(shifted[3]);
         }
 
-        // is_clz and is_real are boolean; is_clo = is_real - is_clz must also be boolean,
-        // which is equivalent to: is_clz = 1 implies is_real = 1.
         builder.assert_bool(local.is_clz);
         builder.assert_bool(local.is_real);
         builder.when(local.is_clz).assert_one(local.is_real);

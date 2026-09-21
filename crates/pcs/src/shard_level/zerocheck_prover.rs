@@ -56,29 +56,25 @@ where
 ///      padded tail is handled analytically by `VirtualGeq`).
 ///   3. Seed per-chip claims from the GKR openings.
 ///   4. Reduce via `reduce_sumcheck_to_evaluation` (λ-RLC across chips).
+///
+/// * `alpha`, `gkr_batch_open`: squeezed by the caller in that order right
+///   before this call; `lambda` is squeezed here, so the transcript order is
+///   `alpha → gkr_batch_open → λ`.
+/// * `shared_trace_mles`: per-chip main-trace MLE (chip-index order) over the
+///   `max_log_row_count` cube, the only host main-trace source.  A host chip's
+///   inner is `Mle::new(raw trace)`, so its cells are `inner().guts()`; a
+///   device-resident or unexercised chip is a `dummy` (inner `None`, width 0)
+///   whose cells come from the device fold / provider fallback.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     public_values: &[Val<SC>],
-    // The per-chip constraint-batching challenge (powers-of-alpha) and the
-    // GKR-opening batching challenge.  Both are squeezed by the CALLER, in
-    // this order, immediately before this call; `lambda` is squeezed below.
-    // The transcript therefore sees alpha -> gkr_batch_open -> lambda either
-    // way — hoisting them only moves WHERE they are drawn, not WHEN.
     alpha: Challenge<SC>,
     gkr_batch_open: Challenge<SC>,
     logup_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    // The shared per-chip analytic main-trace MLE (chip-index order),
-    // built once in the shard dispatch over the `max_log_row_count` cube and
-    // threaded read-only — the SOLE host main-trace source for this stage.
-    // A host chip's `PaddedMle` carries a real inner (`PaddedMle::inner`, `=
-    // Mle::new(raw trace)`), so its `main_cells` come from
-    // `inner().guts()` (byte-for-byte the raw trace).  A device-resident /
-    // unexercised chip is a `dummy` (inner `None`, width 0): its cells come
-    // from the device fold / provider-materialize fallback below.
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
 ) -> (PartialSumcheckProof<Challenge<SC>>, std::collections::BTreeMap<String, Vec<Challenge<SC>>>)
 where
@@ -87,29 +83,8 @@ where
 {
     let n_chips = chips.len();
 
-    // The inter-chip RLC challenge.  `verify_zerocheck_host` squeezes three EF
-    // elements in the order alpha -> gkr_batch_open -> lambda (verifier.rs:544);
-    // the first two arrive as arguments, so this squeeze must be the third or
-    // every subsequent challenge shifts by one and the downstream sumcheck /
-    // jagged-PCS round 0 checks desync.
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
-    // Per-chip ZeroCheckPoly path
-    //
-    // Builds one lazy
-    // `ZeroCheckPoly` per chip — summing only over the chip's real rows
-    // with the padded tail handled analytically by `VirtualGeq` — and a
-    // per-chip claim `Σ (main ++ prep GKR-openings) · β^(1..)`.  The
-    // batched sumcheck's `claimed_sum = λ-RLC(claims)` chains the
-    // zerocheck to the LogUp-GKR openings exactly as the recursion
-    // verifier asserts (`recursion_circuit::zerocheck::verify_zerocheck`,
-    // steps 5-7).
-    //
-    // Conventions are pinned to the verifier: β powers `[β¹, β², …]`,
-    // columns main-then-preprocessed, chips folded in chip-NAME order
-    // (matching the recursion verifier), eq anchored at the
-    // GKR-emitted point.
-    // Per-chip ZeroCheckPoly setup (K-independent)
     let zeta: Vec<Challenge<SC>> = logup_evaluations.point.clone();
     let num_variables = max_log_row_count as u32;
     debug_assert_eq!(
@@ -121,31 +96,9 @@ where
     );
     let _ = n_chips;
 
-    // The cross-chip lambda-RLC folds in chip-NAME order (matching the
-    // recursion verifier's name-sorted chip maps).  The incoming slices are
-    // ALREADY name-ordered: `CpuProver::commit` height-sorts only to pick the
-    // commit's size order, then re-sorts by name before committing
-    // (prover.rs), whose `chip_ordering` therefore enumerates NAME order, and
-    // `shard_chips_ordered(chip_ordering)` replays it into `chips`.  So this
-    // permutation is an identity no-op today; it is kept as a cheap defensive
-    // guard that pins the fold order to name regardless of caller ordering.
     let mut name_order: Vec<usize> = (0..chips.len()).collect();
     name_order.sort_by(|&i, &j| chips[i].name().cmp(&chips[j].name()));
 
-    // SHARD-UNIFORM rev(zeta) convention: rows are committed in one layout.
-    // The GKR opening ALWAYS emits
-    // `main_trace_evaluations_full` for every chip (device-only/height-0 →
-    // zeros, width-0 → empty).
-
-    // The FIRST sumcheck round runs unconditionally in the BASE field
-    // (`K = Val<SC>`) — no up-front whole-trace `EF` lift of the widest
-    // round.  The ring-hom `iota: F -> EF` makes the proof BIT-IDENTICAL
-    // to an all-`EF` run.
-    //
-    // CPU/GPU prover separation: the host zerocheck is entered ONLY by the
-    // CpuProver path
-    // (StarkGpuProver uses the device-native `prove_shard_zerocheck_gpu`, never
-    // this free-fn).
     use p3_field::PrimeCharacteristicRing;
 
     use crate::shard_level::zerocheck_poly::{
@@ -159,10 +112,6 @@ where
 
     for &chip_idx in name_order.iter() {
         let chip = chips[chip_idx];
-        // The shared per-chip main-trace MLE.  Host chips carry a real inner
-        // (`guts == the raw trace`); device-resident / unexercised chips are a
-        // `dummy` (inner `None`, width 0).  `inner().is_none()` is THE
-        // "empty host trace" test.
         let pm = &shared_trace_mles[chip_idx];
         let name = chip.name().to_string();
         let opening = logup_evaluations
@@ -170,20 +119,11 @@ where
             .get(&name)
             .unwrap_or_else(|| panic!("chip {name} missing from logup_evaluations.chip_openings"));
 
-        // The shared host `ZeroCheckPoly` is host-cell only, and this free-fn
-        // never runs with a device provider (StarkGpuProver assembles the
-        // shard stages itself and routes the zerocheck to the device-native
-        // `prove_shard_zerocheck_gpu`).  A
-        // device-resident / unexercised chip is a width-0 `dummy` whose cells
-        // come from the empty-slice fallback below.
         let prep_trace = &preprocessed_traces[chip_idx];
         let prep_width = prep_trace.num_polynomials();
-        // Main-trace dims from the shared MLE (`num_polynomials`/`num_real_entries`;
-        // a `dummy` yields (0, 0), matching an empty raw trace).
         let (main_width, main_height): (usize, usize) =
             (pm.num_polynomials(), pm.num_real_entries());
 
-        // GKR-opening batch powers [β¹ .. β^(main+prep)].
         let combined_width = main_width + prep_width;
         let mut gkr_powers: Vec<Challenge<SC>> = Vec::with_capacity(combined_width);
         {
@@ -194,38 +134,6 @@ where
             }
         }
 
-        // SINGLE-FIELD CLAIM COLLAPSE
-        // Seed the per-chip zerocheck claim from the FULL-POINT openings
-        // (`main_trace_evaluations_full` ++ `preprocessed_trace_evaluations
-        // _full`) with NO embed_factor.  Under the rev(zeta) convention
-        // (the poly is anchored on `rev(zeta)`, natural cells, see the
-        // `zeta_rev` build + dropped bitrev below), the poly's boolean-cube
-        // sum equals exactly the FULL-POINT opening, which already carries
-        // the mixed-height padding factor baked in:
-        //   main_full[col] = Σ_{row<height} eq(row, zeta)·trace[row]
-        //                  = embed_TRAILING · MLE(trace @ zeta[0..log_h])
-        //   embed_TRAILING = Π_{k=log_h}^{N-1}(1 − zeta[k])
-        // (rows ≥ height are zero, so the high coords contribute the
-        // padding factor).  This differs from the `claim_gkr · embed_LEAD`
-        // form (trailing-`log_h` opening lifted by Π over the LEADING zeta
-        // coords) — a bitrev-conjugate that is a GENUINELY different value
-        // (that claim is NOT verifier-form).
-        // Validated by `orientation_sweep_revzeta` (zerocheck_poly tests):
-        // the rev(zeta) poly cube-sum == this collapsed claim across every
-        // mixed-height config, and the reduced value matches the rev(zeta)
-        // eq-bridge.  The verifier seeds the SAME collapsed claim with no
-        // embed (verifier.rs) — kept in lockstep.
-        //
-        // FALLBACK: if the GKR phase did not emit `*_full` (older proof
-        // bytes / non-core stages), fall back to the legacy trailing
-        // opening + embed_LEAD so this path stays additive; in that case
-        // the legacy bitrev anchor is used (see the cells/anchor branch).
-        // CEIL log — must match the verifier's `ChipEvaluation::log_degree`
-        // source (`row_gkr::top_level`: `h.next_power_of_two().trailing_zeros()`)
-        // and `build_chip_heights`'s ceil-log derivation.  `trailing_zeros` agrees only for
-        // power-of-two heights; under a `next_multiple_of_32` core
-        // padding it would silently disagree with the verifier's `embed_LEAD`.
-        // Byte-identical for every power-of-two height.
         let log_h = if main_height == 0 {
             0usize
         } else if main_height.is_power_of_two() {
@@ -243,20 +151,6 @@ where
             opening.main_trace_evaluations_full.as_deref();
         let prep_full_opt: Option<&[Challenge<SC>]> =
             opening.preprocessed_trace_evaluations_full.as_deref();
-        // `use_rev` gates BOTH the claim seed AND the cells/anchor
-        // orientation below, so the two stay consistent per chip.  It is a
-        // SHARD-UNIFORM decision (`shard_use_rev`, computed before the loop)
-        // so every chip in the batched reduction shares the same eq-anchor
-        // orientation — required because the verifier binds the single
-        // reduced value with one global eq-bridge.
-        //
-        // Under rev(zeta) the claim is seeded from the full-point opening
-        // (`main_trace_evaluations_full`), which the (multi-GPU / host) GKR
-        // phase populates.
-        // The claim is seeded from the SHARED-POINT opening, which already
-        // carries the mixed-height padding factor
-        //   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @ zeta[0..log_h])
-        // so there is no separate embed correction to apply.
         let claim: Challenge<SC> = {
             let main_full = main_full_opt.unwrap_or(&[]);
             let prep_full = prep_full_opt.unwrap_or(&[]);
@@ -268,18 +162,9 @@ where
         };
         chip_sumcheck_claims.push(claim);
 
-        // Lift real trace rows to the challenge field.
-        //
-        // The shared trace-MLE is the SOLE host main-trace source: a host
-        // chip's inner Mle is `Mle::new(raw trace)`, so `inner().guts()`
-        // equals the raw trace bit-for-bit (same row-major layout) — the SAME
-        // lift (`Challenge::from`) and the SAME downstream bitrev reproduce
-        // IDENTICAL `main_cells`.
         let main_cells: Vec<Val<SC>> = {
             let cells_src: &[Val<SC>] = match pm.inner().as_ref() {
                 Some(mle) => mle.guts().as_slice(),
-                // Device-resident / unexercised chip (no host MLE
-                // inner): no host cells.
                 None => &[],
             };
             cells_src.iter().map(|v| <Val<SC>>::from(*v)).collect()
@@ -288,18 +173,6 @@ where
             .real_trace_ref()
             .map(|pt| pt.values.iter().map(|v| <Val<SC>>::from(*v)).collect());
 
-        // rev(zeta) CONVENTION CONVERGENCE
-        // use_rev: feed NATURAL trace rows and anchor the poly on
-        // `rev(zeta)` (built at the poly construction below).  The poly's
-        // big-endian fold over rev(zeta) then computes the LSB-first
-        // natural-row value — its boolean-cube sum equals the FULL-POINT
-        // opening (the collapsed claim seeded above).  This DROPS the
-        // bitrev_rows endian adapter: bitrev(trace)@zeta and trace@rev(zeta)
-        // are equal (MLE_MSB(bitrev(T))@zeta == MLE_LSB(T)@zeta is exactly a
-        // reversal of the eq-anchor), so reversing zeta subsumes the row
-        // bit-reversal.  Validated by `orientation_sweep_revzeta`.
-        //
-        // Natural cells, anchored on rev(zeta).
         let zeta_anchor: Vec<Challenge<SC>> = zeta.iter().rev().copied().collect();
 
         let padded_row_adjustment = compute_padded_row_adjustment::<Val<SC>, Challenge<SC>, A>(
@@ -330,7 +203,7 @@ where
             prep_width,
             main_height,
             num_variables,
-            Challenge::<SC>::ONE, // eq_adjustment
+            Challenge::<SC>::ONE,
             initial_geq_value,
             padded_row_adjustment,
             virtual_geq,
@@ -338,8 +211,6 @@ where
         zerocheck_polys.push(poly);
     }
 
-    // `component_poly_evals` are the per-chip trace openings at the reduced
-    // point z (padded-MLE@z, prep-then-main, name order).
     let (sumcheck_proof, component_poly_evals) =
         crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation::<
             Val<SC>,
@@ -476,11 +347,8 @@ mod tests {
         type F = p3_koala_bear::KoalaBear;
         use p3_field::PrimeCharacteristicRing;
         use p3_matrix::dense::RowMajorMatrix;
-        // Trace 1: 4 rows, width 2 → log=2
         let t1 = RowMajorMatrix::new(vec![F::ZERO; 8], 2);
-        // Trace 2: 16 rows, width 1 → log=4
         let t2 = RowMajorMatrix::new(vec![F::ZERO; 16], 1);
-        // Trace 3: 8 rows, width 4 → log=3
         let t3 = RowMajorMatrix::new(vec![F::ZERO; 32], 4);
         let traces = vec![t1, t2, t3];
         assert_eq!(shard_max_log_degree::<F>(&traces), 4);

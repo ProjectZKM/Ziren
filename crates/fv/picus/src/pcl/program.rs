@@ -341,7 +341,6 @@ impl PicusProgram {
 impl Display for PicusProgram {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "(prime-number {})", self.prime)?;
-        // Separate modules with a single blank line, deterministic order via BTreeMap.
         let mut first = true;
         for m in self.modules.values() {
             if !first {

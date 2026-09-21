@@ -94,12 +94,12 @@ pub enum MipsRegister {
 }
 
 impl MipsRegister {
-    /// Convert from the raw register index used by the executor.
+    /// Convert from the raw register index used by the executor; indices
+    /// `> Heap = 35` saturate to `Zero`, so the transmute only sees valid
+    /// discriminants `0..=35`.
     #[inline]
     #[must_use]
     pub const fn from_u8(idx: u8) -> Self {
-        // SAFETY: u8 -> 6-bit enum, callers must keep idx < 36.
-        // For out-of-range values we saturate at Zero to avoid UB.
         if idx > Self::Heap as u8 {
             Self::Zero
         } else {

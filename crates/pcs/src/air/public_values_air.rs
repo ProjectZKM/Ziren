@@ -1,23 +1,18 @@
-//! Public-values AIR for the MIPS core machine (Option 2, local-only).
+//! Public-values AIR for the MIPS core machine (local-only constraints).
 //!
-//! Ziren historically had no core-machine public-values AIR: cross-row
-//! relations were enforced with `when_transition` constraints and the
-//! global cumulative sum was closed by summing each chip's last-row
-//! digest in the verifier (`machine.rs`).  The local-only
-//! model instead pushes every cross-row relation onto a multiset-balanced
-//! control-bus interaction whose two boundary endpoints are emitted here,
-//! from the public values, by [`eval_public_values`].
+//! No chip constrains across rows.  Every cross-row relation is a
+//! multiset-balanced control-bus chain `receive(s_i) → send(s_{i+1})`, and
+//! [`eval_public_values`] emits the two boundary endpoints `(s_0, s_n)` of
+//! each chain from the public values:
+//!   * `GlobalAccumulation`: the global cumulative sum;
+//!   * `State`: initial / final `(shard, clk, pc, next_pc)` (MIPS carries the
+//!     delay-slot lookahead `next_pc`);
+//!   * `MemoryGlobalInit/FinalizeControl`: the address-ordering chains.
 //!
-//! The emitters here are evaluated by both the prover (when accumulating the
-//! global LogUp sum) and the verifier (when checking the balance), so the
-//! interaction kinds they use are exactly those for which
-//! [`crate::lookup::LookupKind::appears_in_eval_public_values`] is true.
-//!
-//! NOTE (incremental): the `GlobalAccumulation` boundary is wired first
-//! (it directly replaces the per-chip last-row digest sum).  The `State`
-//! boundary (initial/final `(shard, clk, pc, next_pc)` — MIPS carries a
-//! delay-slot `next_pc` lookahead) and the
-//! `MemoryGlobalInit/Finalize` boundaries follow.
+//! The prover (accumulating the global LogUp sum) and the verifier (checking
+//! the balance) both evaluate these emitters, so the interaction kinds used
+//! are exactly those with
+//! [`crate::lookup::LookupKind::appears_in_eval_public_values`].
 
 use core::borrow::Borrow;
 use core::iter::once;
@@ -123,50 +118,23 @@ fn eval_global_memory_finalize<AB: ZKMAirBuilder>(
 /// real row) and RECEIVES the final endpoint `(shard, last_timestamp,
 /// next_pc, next_next_pc)` (sent by the halting row).  The multiset
 /// balances iff the prover laid a consistent CPU sequence whose endpoints
-/// equal these public values — the local-only replacement for the legacy
-/// `when_first_row`/`when_last_row` pc/clk boundary constraints.
+/// equal these public values; no `when_first_row` / `when_last_row`
+/// boundary constraint is needed.
 ///
 /// MIPS note: the state is the 2-pc pair `(pc, next_pc)` (delay-slot
 /// lookahead).  At halt the executor sets `next_pc = 0`, so the final
 /// endpoint's `pc = next_pc (public) = 0`-region and its `next_pc =
-/// next_next_pc (public)` come straight from the public values.  Review:
-/// the executor must populate `start_next_pc`/`next_next_pc` to exactly
+/// next_next_pc (public)` come straight from the public values.  The
+/// executor must populate `start_next_pc`/`next_next_pc` to exactly
 /// the first row's `next_pc` and the last row's `next_next_pc`.
 ///
 /// The bus tuple's shard field is `execution_shard`, NOT `shard`: the Cpu
-/// chip's own `shard` COLUMN is filled from
-/// `input.public_values.execution_shard` (`cpu/trace.rs:49,84,329`), and the
-/// chain endpoints the Cpu AIR emits use that column
-/// (`cpu/air/mod.rs:101,108`), so these two boundary endpoints must be
-/// denominated in the same quantity or the `State` multiset cannot close.
-///
-/// `shard` and `execution_shard` agree only until the first shard that
-/// carries no Cpu chip: `shard` increments on every shard while
-/// `execution_shard` increments only on Cpu shards, so from the first
-/// precompile/memory-only shard onwards they differ permanently.  A workload
-/// whose non-Cpu shards all fall at the tail (tendermint, goat) therefore
-/// never exercises the mismatch; one that interleaves them (reth: 61 of 281
-/// shards, the first at index 36) fails the LogUp-GKR public-values balance.
-///
-/// Measured by replaying the SAME saved reth core proof (block 23,467,100,
-/// 281 shards) through both verifiers — `eval_public_values` is read only by
-/// the verifier and the recursion circuit, never by the prover, so the proof
-/// bytes are identical in both columns:
-///
-/// | verifier shard field | reth bad shards | goat | tendermint |
-/// |---|---|---|---|
-/// | `pv.shard`           | 184/281 | 0/9 | 0/33 |
-/// | `pv.execution_shard` |  28/281 | 0/9 | 0/33 |
-///
-/// Before the change the failing set was EXACTLY `{Cpu shard with
-/// pv.shard != pv.execution_shard}` (184 of 184, no false positives), which
-/// is what identified the mismatch.  The change recovers 156 of those 184 and
-/// regresses neither control program.
-///
-/// NOTE: this alone is not sufficient.  28 of the 184 have a SECOND,
-/// independent cause on the same bus — `EXIT_UNCONSTRAINED` leaves a stale
-/// `state_recv_next_pc` on the row it emits, see the companion executor fix —
-/// so reth needs both changes to verify end to end.
+/// chip's own `shard` column is filled from
+/// `input.public_values.execution_shard`, and the chain endpoints the Cpu AIR
+/// emits use that column, so the boundary endpoints must use the same
+/// quantity or the `State` multiset cannot close.  (`shard` counts every
+/// shard, `execution_shard` only Cpu shards; they differ after the first
+/// shard without a Cpu chip.)
 ///
 /// On a non-Cpu shard the two endpoints below are the identical tuple (the
 /// executor leaves `start_pc == next_pc` and the timestamps equal), so send
@@ -175,7 +143,6 @@ fn eval_state<AB: ZKMAirBuilder>(
     builder: &mut AB,
     pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
 ) {
-    // Initial endpoint — sent here, received by the first real Cpu row.
     builder.send_state(
         pv.execution_shard,
         pv.initial_timestamp,
@@ -183,7 +150,6 @@ fn eval_state<AB: ZKMAirBuilder>(
         pv.start_next_pc,
         AB::Expr::ONE,
     );
-    // Final endpoint — received here, sent by the last (halting) Cpu row.
     builder.receive_state(
         pv.execution_shard,
         pv.last_timestamp,

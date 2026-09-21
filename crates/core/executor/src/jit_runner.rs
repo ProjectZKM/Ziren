@@ -188,7 +188,6 @@ mod mem_reads_recorder_tests {
     /// Smoke test: jit_record_mem_read pushes entries; take_ drains them.
     #[test]
     fn record_and_drain() {
-        // Start clean — other tests may have left entries.
         let _ = take_recorded_mem_reads();
         assert_eq!(recorded_mem_reads_len(), 0);
 
@@ -205,7 +204,6 @@ mod mem_reads_recorder_tests {
         assert_eq!(drained[0].value, 0xdead_beef);
         assert_eq!(drained[2].value, 0x1234_5678);
 
-        // Buffer is empty after drain.
         assert_eq!(recorded_mem_reads_len(), 0);
         assert!(take_recorded_mem_reads().is_empty());
     }
@@ -220,7 +218,6 @@ mod mem_reads_recorder_tests {
         assert_eq!(main_len, 1);
 
         let other_len = std::thread::spawn(|| {
-            // This thread's buffer should start empty.
             let pre = recorded_mem_reads_len();
             jit_record_mem_read(2, 0x200, 0xBB);
             let post = recorded_mem_reads_len();
@@ -231,7 +228,6 @@ mod mem_reads_recorder_tests {
 
         assert_eq!(other_len.0, 0, "other thread should start with empty buffer");
         assert_eq!(other_len.1, 1, "other thread should see its own push");
-        // Main thread's buffer is unaffected.
         assert_eq!(recorded_mem_reads_len(), 1);
         let _ = take_recorded_mem_reads();
     }

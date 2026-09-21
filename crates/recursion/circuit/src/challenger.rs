@@ -232,7 +232,6 @@ impl<C: Config<F = KoalaBear>> FieldChallengerVariable<C, Felt<C::F>>
         nb_bits: usize,
         witness: Felt<<C as Config>::F>,
     ) {
-        // Match native GrindingChallenger::check_witness: skip when bits == 0.
         if nb_bits == 0 {
             return;
         }
@@ -286,7 +285,6 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
         }
         self.input_buffer.clear();
 
-        // TODO make this a method for the builder.
         builder.push_op(DslIr::CircuitPoseidon2Permute(self.sponge_state));
 
         self.output_buffer.clear();
@@ -340,24 +338,6 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
     }
 
     pub fn check_witness(&mut self, builder: &mut Builder<C>, bits: usize, witness: Felt<C::F>) {
-        // BaseFold-open grinding (batch-grind + query PoW): the HOST advances
-        // the OUTER/wrap challenger here exactly like any GrindingChallenger —
-        // the default `check_witness` does `observe(witness); sample_bits(bits)`
-        // (p3 grinding_challenger.rs:40-45).  We MUST mirror that observe +
-        // sample so every downstream challenge in the BaseFold open (the
-        // per-round `beta`s and the query indices that derive `initial_x`)
-        // stays in lockstep with the host.  The earlier "complete no-op" body
-        // conflated this grind with the LogUp-GKR one; they are separate events
-        // (`gkr_check_witness`), and both are performed on both rings.
-        // The BaseFold grind must NOT be a no-op — leaving the challenger
-        // un-advanced for the two 16-bit grind draws desync'd the betas /
-        // query indices and produced a wrong final FRI fold (gnark step9).
-        //
-        // PoW soundness: after observing the witness, the low `bits` of the
-        // squeezed challenge must be zero (host `check_witness` returns
-        // `sample_bits(bits) == 0`; a wrap proof that fails this is rejected
-        // host-side).  Assert each sampled bit is 0 so the in-circuit verify
-        // ENFORCES the grind, not just replays its transcript advance.
         if bits == 0 {
             return;
         }
@@ -436,11 +416,9 @@ impl<C: Config> FieldChallengerVariable<C, Var<C::N>> for MultiField32Challenger
 
     // No `gkr_check_witness` override: this ring takes the trait default, which
     // delegates to `check_witness` above — observe the witness, sample
-    // `nb_bits`, assert they are zero.  The override used to make it a no-op on
-    // the premise that the wrap prover's GKR grind was itself a no-op; the
-    // prover now grinds on every ring (`row_gkr/top_level.rs`), so a no-op here
-    // would leave the transcript un-advanced and desync every subsequent
-    // alpha/beta.
+    // `nb_bits`, assert they are zero.  The prover grinds on every ring
+    // (`prove_shard_logup_gkr_rows`), so a no-op here would leave the
+    // transcript un-advanced and desync every subsequent alpha/beta.
 
     fn duplexing(&mut self, builder: &mut Builder<C>) {
         MultiField32ChallengerVariable::duplexing(self, builder);
@@ -579,19 +557,16 @@ pub(crate) mod tests {
 
         let mut builder = Builder::<C>::default();
 
-        // let width: Var<_> = builder.eval(F::from_usize(PERMUTATION_WIDTH));
         let mut challenger = MultiField32ChallengerVariable::<C>::new(&mut builder);
         let one: Felt<_> = builder.eval(F::ONE);
         let two: Felt<_> = builder.eval(F::TWO);
         let two_var: Var<_> = builder.eval(N::TWO);
-        // builder.halt();
         challenger.observe(&mut builder, one);
         challenger.observe(&mut builder, two);
         challenger.observe(&mut builder, two);
         challenger.observe(&mut builder, two);
         challenger.observe_commitment(&mut builder, [two_var]);
 
-        // Check to make sure the copying works.
         challenger = challenger.copy(&mut builder);
         let element = challenger.sample(&mut builder);
         let element_ef = challenger.sample_ext(&mut builder);

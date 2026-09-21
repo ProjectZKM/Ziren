@@ -8,7 +8,6 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
-    // Re-emit on cargo feature flips.
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PROFILING");
 
     println!("cargo::rustc-check-cfg=cfg(zkm_native_executor_available)");

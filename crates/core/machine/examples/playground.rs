@@ -104,10 +104,6 @@ fn main() {
     let cmd = args.next().unwrap_or_else(|| "buses".into());
     let name = args.next().unwrap_or_else(|| "fibonacci".into());
     banner(&cmd, &name);
-    // `all` (optional subset list) and `dump` (output dir) don't take a
-    // fixture/ELF — resolve lazily.
-    // `all` / `dump` don't take a fixture, and `lookups static` reports the
-    // compile-time census only — resolve lazily so none of them needs an ELF.
     let program = if cmd == "all" || cmd == "dump" || (cmd == "lookups" && name == "static") {
         None
     } else {
@@ -161,11 +157,6 @@ fn main() {
             tracing::info!("prove + verify OK");
         }
         "widths" => {
-            // Per-chip main-trace WIDTH census.  "Where does the trace area go"
-            // is the recurring question behind every density comparison, and
-            // answering it otherwise means re-deriving column counts by
-            // hand from the `*Cols` struct definitions.  Width is static, so this
-            // needs no execution; multiply by the per-chip row count for area.
             let machine: StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>> =
                 MipsAir::machine(KoalaBearPoseidon2::new());
             let mut rows: Vec<(String, usize, usize)> = machine
@@ -194,23 +185,6 @@ fn main() {
             tracing::info!("{:<28} {:>7}", "TOTAL main width", total);
         }
         "lookups" => {
-            // Per-chip INTERACTION census, and the GKR cell budget it implies.
-            //
-            // The LogUp-GKR first layer is a dense `2^num_row_variables ×
-            // 2^num_interaction_variables` grid, and every later layer halves
-            // it, so the total folded cell count is ~`2^(nrv + niv + 1)` per
-            // quadrant.  `niv` is NOT log2 of the interaction count: each chip
-            // pads its own interaction count up to a power of two, the padded
-            // counts are summed across the shard's chips, and that sum is
-            // rounded up to a power of two again.  Both roundings are paid in
-            // full — the padded columns are materialised with identity
-            // fractions.  So the census that matters is per-chip
-            // `next_power_of_two(sends + receives)`, and the only way to move
-            // GKR cost is to push the shard-wide sum below a power of two.
-            //
-            // With a program argument the census is weighted by the REAL
-            // per-shard chip sets and heights from an execution, so chips can
-            // be ranked by cells rather than by interaction count.
             let machine: StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>> =
                 MipsAir::machine(KoalaBearPoseidon2::new());
             let kinds = ALL_KINDS;
@@ -264,21 +238,12 @@ fn main() {
                 );
             }
 
-            // Weighted pass: execute and report, per shard, the padded
-            // interaction axis the GKR circuit actually pays for.  Skipped
-            // unless a real program is named, since the static table above
-            // already answers "how wide is each chip".
             if name == "static" {
                 tracing::info!("\n(no program given: static census only)");
                 return;
             }
-            // One shard per `execute_record` batch: a real workload's full
-            // record set does not fit in host memory (`rt.run()` retains
-            // every shard), and the census only ever needs one at a time.
             let opts = ZKMCoreOpts { shard_batch_size: 1, ..Default::default() };
             let mut rt = Executor::new(program(), opts);
-            // A third argument names a bincode-serialised `ZKMStdin`, so the
-            // census can run the same input a perf gate does.
             if let Some(p) = std::env::args().nth(3) {
                 let bytes = std::fs::read(&p).expect("stdin fixture must be readable");
                 let stdin: ZKMStdin =
@@ -288,15 +253,10 @@ fn main() {
                     rt.write_proof(proof.clone(), vk.clone());
                 }
             } else if name == "fibonacci" {
-                // The fibonacci guest reads its `n` from stdin, so it cannot run
-                // on an empty one.  Ten matches what the prover tests use.
                 let mut stdin = ZKMStdin::new();
                 stdin.write(&10u32);
                 rt.write_vecs(&stdin.buffer);
             }
-            // Per-chip accumulators over every shard: real cells (height ×
-            // raw interactions) versus paid cells (height × padded
-            // interactions).
             let mut real_cells: std::collections::BTreeMap<String, u128> = Default::default();
             let mut paid_cells: std::collections::BTreeMap<String, u128> = Default::default();
             let mut chip_rows: std::collections::BTreeMap<String, u128> = Default::default();
@@ -311,11 +271,6 @@ fn main() {
             let mut dense_hist: std::collections::BTreeMap<usize, usize> = Default::default();
             let mut dense_cols: Vec<(usize, u128)> = vec![];
             let mut grid_cells_raw: u128 = 0;
-            // The chip SET a shard proves is not the set of chips with events:
-            // deferred (precompile / global-memory) events move to their own
-            // shards, and the shape config then canonicalises each record to a
-            // whole cluster.  Reproduce that pipeline or the census counts
-            // precompile columns on every core shard.
             let shape_config = zkm_core_machine::shape::CoreShapeConfig::<KoalaBear>::default();
             let mut deferred =
                 zkm_core_executor::ExecutionRecord::new(std::sync::Arc::new(resolve(&name)));
@@ -339,9 +294,6 @@ fn main() {
                     let mut total_values: u128 = 0;
                     let mut max_h = 0usize;
                     let mut per_shard: Vec<(String, usize, usize, usize)> = vec![];
-                    // Real per-chip row counts: what the GKR slab actually
-                    // materialises (the padded tail is analytic, never stored),
-                    // so cells are `height × num_interactions`.
                     let heights: std::collections::HashMap<String, usize> =
                         MipsAir::<KoalaBear>::core_heights(rec)
                             .into_iter()
@@ -373,9 +325,6 @@ fn main() {
                         total_padded += padded;
                         total_raw += tot;
                         max_h = max_h.max(h);
-                        // Committed cells: the jagged commit pads each chip to a
-                        // power-of-two height, and the size CLASS is
-                        // `ceil(log2(Σ width × padded height))`.
                         total_values += (p3_air::BaseAir::<KoalaBear>::width(c).max(1) as u128)
                             * (h.max(1).next_power_of_two() as u128);
                         per_shard.push((name, h, tot, padded));
@@ -387,17 +336,12 @@ fn main() {
                     shard_raw.push(total_raw);
                     let log_dense = 128 - (total_values.max(1) - 1).leading_zeros() as usize;
                     *dense_hist.entry(log_dense).or_default() += 1;
-                    // Aggregate committed "columns": total cells divided by the
-                    // padded row axis, i.e. how many columns wide the shard looks
-                    // once every chip is stacked at the tallest chip's height.
                     let agg_cols = total_values / (1u128 << nrv);
                     dense_cols.push((log_dense, agg_cols));
                     grid_cells_raw += 4u128 << (nrv + niv_raw);
                     *niv_hist.entry(niv).or_default() += 1;
                     *nrv_hist.entry(nrv).or_default() += 1;
                     shard_padded.push(total_padded);
-                    // Four quadrant MLEs (n0/n1/d0/d1) over a grid that halves
-                    // every layer: 4 · 2^(nrv-1) · 2^niv · 2 folded cells.
                     grid_cells += 4u128 << (nrv + niv);
                     for (name, h, tot, padded) in per_shard {
                         *real_cells.entry(name.clone()).or_default() += h as u128 * tot as u128;
@@ -483,9 +427,6 @@ fn main() {
             tracing::info!("{:<28} {:>16}", "TOTAL paid (chip cols)", paid_total);
         }
         "rows" => {
-            // Per-chip ROW census.  Every row is a REAL instruction now: the
-            // Instruction bus and its synthetic dependency rows are gone
-            // (DivRem/CloClz/Misc prove their sub-operations in-row).
             let mut rt = Executor::new(program(), ZKMCoreOpts::default());
             rt.run().expect("execution failed");
             let mut cpu = 0usize;
@@ -520,10 +461,6 @@ fn main() {
             tracing::info!("shards = {}", rt.records.len());
         }
         "dump" => {
-            // Write <out>/<name>/{program.bin,stdin.bin} for every test
-            // artifact, in the format `find_maximal_shapes --list` consumes —
-            // the shape-artifact regeneration sweep runs the SAME corpus the
-            // all-mode proves.
             let out = std::env::args().nth(2).expect("dump needs an output dir");
             let artifacts: &[(&str, &[u8])] = &[
                 ("sha2-rust", test_artifacts::SHA2_RUST_ELF),
@@ -561,10 +498,6 @@ fn main() {
                 ("bn254-fp2-mul", test_artifacts::BN254_FP2_MUL_ELF),
                 ("u256xu2048-mul", test_artifacts::U256XU2048_MUL_ELF),
                 ("unconstrained", test_artifacts::UNCONSTRAINED_ELF),
-                // sha3-chain exercises KeccakSponge at a chained density no
-                // other artifact reaches (test_sha3_chain_prove_simple was
-                // shape-stale before it joined the corpus).  No stdin: the
-                // guest hardcodes its input.
                 ("sha3-chain", test_artifacts::SHA3_CHAIN_ELF),
             ];
             fn hexb2(s: &str) -> Vec<u8> {
@@ -607,11 +540,6 @@ fn main() {
             }
         }
         "all" => {
-            // Prove + verify EVERY test-artifact guest.  This is the gate an
-            // architecture-level change must pass before anything downstream
-            // (goldens, vk generation): the four ad-hoc fixtures cover the
-            // integer core, but only the full set exercises every precompile
-            // chip, every syscall path, and the panic/unconstrained edges.
             let artifacts: &[(&str, &[u8])] = &[
                 ("sha2-rust", test_artifacts::SHA2_RUST_ELF),
                 ("fibonacci", test_artifacts::FIBONACCI_ELF),
@@ -650,8 +578,6 @@ fn main() {
                 ("unconstrained", test_artifacts::UNCONSTRAINED_ELF),
                 ("sha3-chain", test_artifacts::SHA3_CHAIN_ELF),
             ];
-            // Fixtures that READ STDIN get their canonical inputs; an empty
-            // stream hits the executor's "insufficient input data" error.
             fn hexb(s: &str) -> Vec<u8> {
                 (0..s.len())
                     .step_by(2)
@@ -661,7 +587,6 @@ fn main() {
             fn artifact_stdin(name: &str) -> ZKMStdin {
                 match name {
                     "sha2-rust" => {
-                        // The guest reads (expected_hash, input) via io::read.
                         let input = b"hello world".to_vec();
                         let expected =
                             hexb("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
@@ -670,7 +595,6 @@ fn main() {
                         stdin.write(&input);
                         stdin
                     }
-                    // The curve generators, SEC1-compressed.
                     "secp256k1-decompress" => ZKMStdin::from(
                         hexb("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
                             .as_slice(),
@@ -687,7 +611,6 @@ fn main() {
                 }
             }
 
-            // Optional comma-separated subset: `playground all a,b,c`.
             let filter: Option<Vec<String>> =
                 std::env::args().nth(2).map(|f| f.split(',').map(str::to_string).collect());
 

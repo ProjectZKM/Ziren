@@ -29,8 +29,6 @@ where
     let mut widest_chip = String::new();
     for chip in machine.chips() {
         chips += 1;
-        // `SOUNDCALC_CENSUS_CHIPS=1`: one line per chip, for area-by-chip
-        // arithmetic against the executor's `ZIREN_SHARD_CLOSE_CENSUS` rows.
         if std::env::var_os("SOUNDCALC_CENSUS_CHIPS").is_some() {
             let fields: usize =
                 chip.sends().iter().chain(chip.receives().iter()).map(|l| l.values.len()).sum();
@@ -77,7 +75,6 @@ where
         )
         .len();
         constraints += n;
-        // log_quotient_degree = log2(max_constraint_degree - 1)
         let degree = (1usize << chip.log_quotient_degree()) + 1;
         max_degree = max_degree.max(degree);
         for l in chip.sends().iter().chain(chip.receives().iter()) {

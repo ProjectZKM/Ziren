@@ -51,13 +51,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         if padded_nb_rows == 2 || padded_nb_rows == 1 {
             padded_nb_rows = 4;
         }
-        // Padding rows are all-zero: `is_real = 0` makes them contribute nothing
-        // to the `PrecompileChain` bus, so no flag population is needed.
         for _ in nb_rows..padded_nb_rows {
             rows.push([F::ZERO; NUM_SHA_EXTEND_COLS]);
         }
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SHA_EXTEND_COLS))
     }
 
@@ -109,8 +106,6 @@ impl ShaExtendChip {
             let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
             cols.is_real = F::ONE;
-            // Loop index `i` for this row: 16, 17, …, 63.  Its sequencing is
-            // pinned by the `PrecompileChain` bus (see `eval_state_bus`).
             cols.i = F::from_u32((16 + j) as u32);
             cols.shard = F::from_u32(event.shard);
             cols.clk = F::from_u32(event.clk);
@@ -121,8 +116,6 @@ impl ShaExtendChip {
             cols.w_i_minus_16.populate(event.w_i_minus_16_reads[j], blu);
             cols.w_i_minus_7.populate(event.w_i_minus_7_reads[j], blu);
 
-            // `s0 := (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18) xor (w[i-15] rightshift
-            // 3)`.
             let w_i_minus_15 = event.w_i_minus_15_reads[j].value;
             let w_i_minus_15_rr_7 = cols.w_i_minus_15_rr_7.populate(blu, w_i_minus_15, 7);
             let w_i_minus_15_rr_18 = cols.w_i_minus_15_rr_18.populate(blu, w_i_minus_15, 18);
@@ -131,8 +124,6 @@ impl ShaExtendChip {
                 cols.s0_intermediate.populate(blu, w_i_minus_15_rr_7, w_i_minus_15_rr_18);
             let s0 = cols.s0.populate(blu, s0_intermediate, w_i_minus_15_rs_3);
 
-            // `s1 := (w[i-2] rightrotate 17) xor (w[i-2] rightrotate 19) xor (w[i-2] rightshift
-            // 10)`.
             let w_i_minus_2 = event.w_i_minus_2_reads[j].value;
             let w_i_minus_2_rr_17 = cols.w_i_minus_2_rr_17.populate(blu, w_i_minus_2, 17);
             let w_i_minus_2_rr_19 = cols.w_i_minus_2_rr_19.populate(blu, w_i_minus_2, 19);
@@ -141,7 +132,6 @@ impl ShaExtendChip {
                 cols.s1_intermediate.populate(blu, w_i_minus_2_rr_17, w_i_minus_2_rr_19);
             let s1 = cols.s1.populate(blu, s1_intermediate, w_i_minus_2_rs_10);
 
-            // Compute `s2`.
             let w_i_minus_7 = event.w_i_minus_7_reads[j].value;
             let w_i_minus_16 = event.w_i_minus_16_reads[j].value;
             cols.s2.populate(blu, w_i_minus_16, s0, w_i_minus_7, s1);

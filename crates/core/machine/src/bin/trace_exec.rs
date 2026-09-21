@@ -13,8 +13,6 @@ use zkm_core_machine::io::ZKMStdin;
 use zkm_pcs::ZKMCoreOpts;
 
 fn main() {
-    // The executor's diagnostics (e.g. the ZIREN_SHARD_CLOSE_CENSUS lines)
-    // are tracing events; route them to stderr, filtered by RUST_LOG.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

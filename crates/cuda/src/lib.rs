@@ -37,7 +37,7 @@ static GPU_CONTAINERS: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
 
 /// A remote client to [zkm_prover::ZKMProver] that runs inside a container.
 ///
-/// This is currently used to provide experimental support for GPU hardware acceleration.
+/// It provides experimental support for GPU hardware acceleration.
 ///
 /// **WARNING**: This is an experimental feature and may not work as expected.
 pub struct ZKMCudaProver {
@@ -217,7 +217,6 @@ impl ZKMCudaProver {
 
         let prover = match gpu_server {
             ZKMGpuServer::External { endpoint } => {
-                // `CUDA_ENDPOINT` is configuration, so a bad value is an `Err`.
                 let url = Url::parse(&endpoint)
                     .map_err(|e| format!("CUDA_ENDPOINT `{endpoint}` is not a URL: {e}"))?;
                 let client = Client::new(url, reqwest::Client::new(), reqwest_middlewares)
@@ -277,22 +276,10 @@ impl ZKMCudaProver {
         visible_device_index: Option<u64>,
         port: Option<u64>,
     ) -> Result<ZKMCudaProver, Box<dyn StdError>> {
-        // If the gpu endpoint url hasn't been provided, we start the Docker container
         let container_name =
             port.map(|p| format!("ziren-gpu-{p}")).unwrap_or("ziren-gpu".to_string());
-        // This container receives the private witness input and runs on the
-        // proving host with GPU access, so which bytes it is remains a security
-        // decision. A tag is MUTABLE: whoever controls the registry or the tag
-        // controls the code that sees the witness. `ZKM_GPU_IMAGE` accepts a
-        // digest (`repo@sha256:...`), which is what production should set; a
-        // reviewed digest cannot be hard-coded here without someone reviewing
-        // it, so the default stays a tag and says so.
         let image_name = std::env::var("ZKM_GPU_IMAGE")
             .unwrap_or_else(|_| "projectzkm/ziren-gpu:latest".to_string());
-        // Enforced, not merely warned: an unpinned tag is resolved fresh from the
-        // registry each run, and this container receives the private witness.
-        // Same shape as the test-CA gate (`ZKM_ALLOW_INSECURE_TEST_CA`): the
-        // insecure choice stays available, but it has to be made explicitly.
         if !image_name.contains("@sha256:") {
             if std::env::var("ZKM_ALLOW_MUTABLE_GPU_IMAGE").ok().as_deref() != Some("1") {
                 return Err(format!(
@@ -314,17 +301,10 @@ impl ZKMCudaProver {
         let port = port.unwrap_or(3000);
         let gpus = visible_device_index.map(|i| format!("device={i}")).unwrap_or("all".to_string());
 
-        // Check if Docker is available and the user has necessary permissions
         if !Self::check_docker_availability()? {
             return Err("Docker is not available or you don't have the necessary permissions. Please ensure Docker is installed and you are part of the docker group.".into());
         }
 
-        // Pull the image, and require that the pull actually SUCCEEDED.
-        //
-        // `output()` is `Ok` whenever docker could be SPAWNED, whatever docker then
-        // reported, so the exit status must be checked too: otherwise a failed pull
-        // (no network, no credentials, tag withdrawn) runs whatever stale local
-        // image is present.
         let pull = Command::new("docker")
             .args(["pull", &image_name])
             .output()
@@ -339,7 +319,6 @@ impl ZKMCudaProver {
             .into());
         }
 
-        // Start the docker container
         let rust_log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "none".to_string());
         Command::new("docker")
             .args([
@@ -355,7 +334,6 @@ impl ZKMCudaProver {
                 &container_name,
                 &image_name,
             ])
-            // Redirect stdout and stderr to the parent process
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .spawn()
@@ -363,14 +341,9 @@ impl ZKMCudaProver {
 
         GPU_CONTAINERS.lock()?.insert(container_name.clone(), cleaned_up.clone());
 
-        // Kill the container on control-c
-        // The error returned by set_handler is ignored to avoid panic when the handler has already
-        // been set.
         let _ = ctrlc::set_handler(move || {
             tracing::info!("received Ctrl+C, cleaning up...");
 
-            // Poisoned <=> another thread panicked, i.e. exactly when cleanup
-            // matters; recover the guard rather than leak the container.
             let containers = GPU_CONTAINERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             for (container_name, cleanup_flag) in containers.iter() {
                 if !cleanup_flag.load(Ordering::SeqCst) {
@@ -381,7 +354,6 @@ impl ZKMCudaProver {
             std::process::exit(0);
         });
 
-        // Wait a few seconds for the container to start
         std::thread::sleep(Duration::from_secs(2));
 
         let endpoint = format!("http://localhost:{port}/twirp/");
@@ -575,11 +547,9 @@ fn cleanup_container(container_name: &str) {
 /// If we're already in a tokio runtime, we'll block in place. Otherwise, we'll create a new
 /// runtime.
 pub fn block_on<T>(fut: impl Future<Output = T>) -> T {
-    // Handle case if we're already in an tokio runtime.
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         block_in_place(|| handle.block_on(fut))
     } else {
-        // Otherwise create a new runtime.
         let rt = tokio::runtime::Runtime::new().expect("Failed to create a new runtime");
         rt.block_on(fut)
     }
@@ -634,7 +604,6 @@ mod tests {
         let prover =
             ZKMCudaProver::connect_without_waiting(&dead_endpoint()).expect("the client builds");
 
-        // `let ... else` rather than `expect_err`: the Ok types are not Debug.
         let Err(err) = prover.setup(&[]) else { panic!("a refused connection must be an error") };
         assert!(format!("{err}").contains("setup"), "the operation is named: {err}");
 
@@ -650,8 +619,6 @@ mod tests {
     /// is resolved fresh from the registry on every run.
     #[test]
     fn an_unpinned_gpu_image_requires_an_explicit_opt_in() {
-        // Serialised against other env users by construction: this test owns both
-        // variables and restores them.
         let img = std::env::var("ZKM_GPU_IMAGE").ok();
         let allow = std::env::var("ZKM_ALLOW_MUTABLE_GPU_IMAGE").ok();
         std::env::set_var("ZKM_GPU_IMAGE", "projectzkm/ziren-gpu:latest");
@@ -660,8 +627,6 @@ mod tests {
         let Err(e) = refused else { panic!("an unpinned tag must be refused") };
         assert!(format!("{e}").contains("not pinned by digest"), "got: {e}");
 
-        // A digest is accepted at this gate (it fails later, on docker, which is
-        // not what this test is about).
         std::env::set_var("ZKM_GPU_IMAGE", "projectzkm/ziren-gpu@sha256:0000");
         let past_gate = ZKMCudaProver::start_gpu_server(Vec::new(), None, Some(65501));
         if let Err(e) = &past_gate {

@@ -1,14 +1,12 @@
-//! Shape enumeration helpers (the task phase 2 — tactic (b)).
+//! Shape enumeration helpers.
 //!
-//! Produces the concrete list of `CoreProofShape`s used to index the
-//! VK map.  Under tactic (b), shapes are quantized to a small number
-//! of "size-class bands" per chip cluster, giving ~thousands of
-//! representative shapes instead of the ~1.25M per-chip cartesian
-//! currently produced by [`crate::shape::CoreShapeConfig::all_shapes`].
+//! Produces the concrete list of `CoreProofShape`s that index the VK map.
+//! Shapes are quantized to a few size-class bands per chip cluster, giving
+//! ~10^3 representative shapes instead of the ~1.25·10^6 per-chip cartesian
+//! product of [`crate::shape::CoreShapeConfig::all_shapes`].
 //!
-//! This module doesn't take a dependency on `zkm_core_machine` (would
-//! be a circular dep) — chip names are supplied as string literals,
-//! derived from analysis of `crates/core/machine/src/mips/mod.rs`.
+//! Depending on `zkm_core_machine` would be circular, so chip names are
+//! string literals matching the MIPS chip inventory of `zkm_core_machine::mips`.
 //!
 //! ## Cluster list
 //!
@@ -30,9 +28,8 @@
 //! | `cluster_ed25519`    | core + Ed25519 add/decompress                            |
 //! | `cluster_uint256`    | core + Uint256Mul + U256x2048Mul                         |
 //!
-//! ~12 clusters.  At ~10-20 size classes × ~5 padding-col variants
-//! each, the enumeration produces roughly 600-1200 shapes — a
-//! ~1000-2000× reduction from the current 1.25M.
+//! ~12 clusters × ~10-20 size classes × ~5 padding-column variants gives
+//! ~600-1200 shapes, a ~10^3× reduction from 1.25·10^6.
 
 use std::collections::BTreeSet;
 
@@ -126,8 +123,6 @@ fn precompile_families() -> &'static [(&'static str, &'static [&'static str])] {
                 "Bls12381DoubleAssign",
                 "Bls12381Decompress",
                 "Bls12381FpOpAssign",
-                // Note: upstream ID has typo `Bls12831` (should be `Bls12381`).
-                // Carry the typo so chip names match the live machine.
                 "Bls12831Fp2MulAssign",
                 "Bls12831Fp2AddSubAssign",
             ],
@@ -164,26 +159,8 @@ pub fn build_mips_machine_shape() -> MachineShape {
     };
     let memory = extend_cluster(&core_base, memory_cluster_extras());
 
-    // Multi-shard runs partition the work into SHARD-TYPE chip sets that
-    // differ from the single-shard union (observed
-    // on the keccak deferred e2e):
-    //   * main execution shards carry `Global` but NOT the
-    //     MemoryGlobalInit/Finalize pair;
-    //   * memory shards are MINIMAL: preprocessed + Global + the
-    //     MemoryGlobal pair (no core chips);
-    //   * precompile shards are MINIMAL: preprocessed + Global +
-    //     MemoryLocal + SyscallPrecompile + the family chips (incl. the
-    //     sponge Control twins) — not core + family.
     let main_exec = extend_cluster(&core_base, &["Global"]);
     let memory_min = extend_cluster(&preprocessed, memory_cluster_extras());
-    // A memory shard carries ONLY the global-memory chips that actually have
-    // events, and init/finalize are emitted in DIFFERENT shards once the run
-    // needs more than one memory shard.  Under FIX-off there is no cluster
-    // padding, so such a shard commits a chip set that is a strict SUBSET of
-    // `memory_min` — measured on a 9-shard goat chain, which produces a
-    // `{Byte, Global, MemoryGlobalFinalize, Program}` shard with no
-    // `MemoryGlobalInit` and whose normalize vk was therefore absent from the
-    // enumerated map ("vk not allowed" at compress).  Enumerate both halves.
     let memory_finalize_only = extend_cluster(&preprocessed, &["MemoryGlobalFinalize", "Global"]);
     let memory_init_only = extend_cluster(&preprocessed, &["MemoryGlobalInit", "Global"]);
     let precompile_base =
@@ -198,7 +175,6 @@ pub fn build_mips_machine_shape() -> MachineShape {
         memory_init_only,
     ];
     for (_, extras) in precompile_families() {
-        // Single-shard union (legacy) + the minimal precompile shard.
         clusters.push(extend_cluster(&memory, extras));
         clusters.push(extend_cluster(&precompile_base, extras));
     }
@@ -297,16 +273,6 @@ mod tests {
     #[test]
     fn machine_shape_has_expected_cluster_count() {
         let ms = build_mips_machine_shape();
-        // Cluster structure (see `build_mips_machine_shape`):
-        //   6 BASE clusters:
-        //     core_base, main_exec (=core+Global), memory (=core+memory
-        //     extras), memory_min (=preprocessed+memory extras, NO core),
-        //     and the two SPLIT memory shards (finalize-only / init-only)
-        //   2 per precompile family:
-        //     core-union (=memory ∪ family) + minimal precompile shard
-        //     (=precompile_base ∪ family).
-        // Derive the expectation from the live family list so adding a
-        // precompile family updates the bound automatically.
         let expected = 6 + 2 * precompile_families().len();
         assert_eq!(
             ms.chip_clusters.len(),
@@ -314,19 +280,15 @@ mod tests {
             "cluster count drifted from 6 base + 2×{} families",
             precompile_families().len(),
         );
-        // Sanity-pin the current value so an accidental base-cluster
-        // change is caught even if a family is added/removed at the
-        // same time.
         assert_eq!(ms.chip_clusters.len(), 26);
     }
 
-    /// A multi-shard run emits global-memory INIT and FINALIZE events in
-    /// DIFFERENT shards, and under FIX-off a shard commits ONLY the chips that
-    /// actually have rows.  So a memory shard can carry `MemoryGlobalFinalize`
-    /// without `MemoryGlobalInit` (measured on a 9-shard goat chain) — a chip
-    /// set that is a strict SUBSET of `memory_min`.  Both halves must be
-    /// enumerated or the shard's normalize vk can never be in `vk_map.bin`
-    /// ("vk not allowed" at compress under `VERIFY_VK=true`).
+    /// A multi-shard run emits global-memory init and finalize events in
+    /// different shards, and a shard commits only the chips that have rows, so
+    /// a memory shard can carry `MemoryGlobalFinalize` without
+    /// `MemoryGlobalInit`: a strict subset of `memory_min`. Both halves must be
+    /// enumerated, or that shard's normalize vk is absent from `vk_map.bin`
+    /// and compress rejects it under `VERIFY_VK=true`.
     #[test]
     fn machine_shape_covers_split_memory_shards() {
         let ms = build_mips_machine_shape();
@@ -372,8 +334,6 @@ mod tests {
         let cpu_clusters = ms.chip_clusters.iter().filter(|c| c.contains("Cpu")).count();
         let cpu_free = ms.chip_clusters.iter().filter(|c| !c.contains("Cpu")).count();
 
-        // Cpu-free = memory_min + the two SPLIT memory shards (3) + one
-        // minimal precompile shard per family (precompile_base ∪ family).
         let expected_cpu_free = 3 + precompile_families().len();
         assert_eq!(
             cpu_free, expected_cpu_free,
@@ -381,9 +341,6 @@ mod tests {
         );
         assert_eq!(cpu_clusters, ms.chip_clusters.len() - expected_cpu_free);
 
-        // Cpu never appears without its full core ALU plumbing — guards
-        // against a cluster that has Cpu but is missing a core chip the
-        // recursion verifier would expect in that chip-set.
         for cluster in &ms.chip_clusters {
             if cluster.contains("Cpu") {
                 for chip in core_alu {
@@ -400,14 +357,6 @@ mod tests {
     fn shape_enumeration_count_is_tractable() {
         let ms = build_mips_machine_shape();
         let shapes = create_all_input_shapes(&ms);
-        // Consecutive-integer enumeration over the 28-cluster
-        // model: per cluster the inner loops are
-        //   prep_mult(1..=MAX_AREA_MULTIPLE) ×
-        //   main_mult(1..=MAX_AREA_MULTIPLE) ×
-        //   prep_pad(|paddings|) × main_pad(|paddings|).
-        // = 26 × 12 × 12 × 5 × 5 = 93,600 shapes.  Derive the exact
-        // upper bound from the same constants the producer uses so the
-        // bound tracks any tuning of MAX_AREA_MULTIPLE / paddings.
         let per_cluster =
             MAX_AREA_MULTIPLE * MAX_AREA_MULTIPLE * padding_col_variants().len().pow(2);
         let upper = ms.chip_clusters.len() * per_cluster;
@@ -417,8 +366,6 @@ mod tests {
             shapes.len(),
             upper,
         );
-        // Pin the concrete current value so a silent cluster/area regression
-        // (e.g. a cluster dropped, or a max-main cap re-introduced) is caught.
         assert_eq!(shapes.len(), 93_600, "expected 26 clusters × 12 × 12 × 5 × 5");
         assert!(shapes.len() >= 100, "shape count {} too small — missing clusters?", shapes.len());
     }
@@ -426,8 +373,6 @@ mod tests {
     #[test]
     fn size_class_bands_are_monotone_in_main_for_fixed_prep() {
         let bands = size_class_bands();
-        // For any fixed prep multiple, main_mult entries should be non-decreasing.
-        // prep ranges over [1..=MAX_AREA_MULTIPLE].
         for prep in 1..=MAX_AREA_MULTIPLE {
             let mut mains: Vec<usize> =
                 bands.iter().filter(|(p, _)| *p == prep).map(|(_, m)| *m).collect();

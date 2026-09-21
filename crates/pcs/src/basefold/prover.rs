@@ -86,45 +86,20 @@ where
         .map(|a| a.0)
 }
 
-/// Deterministic counterpart to `<C as GrindingChallenger>::grind(bits)`.
+/// Deterministic counterpart to `<C as GrindingChallenger>::grind(bits)`:
+/// returns the smallest `w ∈ [0, p)` that passes `check_witness(bits, w)`.
 ///
-/// plonky3's [`p3_challenger::DuplexChallenger::grind`] is
-/// implemented with `(0..num_batches).into_par_iter().find_map_any(...)`,
-/// which returns the witness from whichever rayon worker finishes first.
-/// On multi-GPU runs the result is therefore non-deterministic across
-/// re-invocations of the same shard, even though the proof is honest.
+/// plonky3's [`p3_challenger::DuplexChallenger::grind`] uses
+/// `find_map_any`, so its witness depends on rayon scheduling. The witness is
+/// msgpack-encoded (variable length) into the `evaluation_proof_bytes` the
+/// next layer reads, so its size moves the witness-read instruction count,
+/// the `RecursionShapeConfig::fix_shape` selection, and hence
+/// `compressed_proof.vk.hash_koalabear()`. The smallest witness is the same
+/// on every run, machine and thread-pool size.
 ///
-/// That non-determinism cascades into the recursion compress program:
-/// the basefold proof's `pow_witness` field is included in the
-/// `evaluation_proof_bytes: Vec<u8>` (msgpack-encoded) carried by the
-/// next layer's witness.  A different `pow_witness` value yields a
-/// different msgpack byte length (msgpack uses variable-length integer
-/// encoding), which shifts the witness-read instruction count, which
-/// can flip the `RecursionShapeConfig::fix_shape` selection, which
-/// changes the compress program's preprocessed traces, which changes
-/// `compressed_proof.vk.hash_koalabear()`.  Concretely measured: 3
-/// distinct vk hashes across runs v8/v9/v10 of `bench_8x5090.sh
-/// tendermint compress`.
-///
-/// This helper provides a deterministic substitute that returns the
-/// *smallest-index* canonical-u64 witness satisfying the PoW
-/// condition.  The output is reproducible across runs, machines, and
-/// thread-pool sizes, eliminating the cascade.
-///
-/// Implementation: parallel rayon `find_first` (NOT `find_any`).  A
-/// sequential walk was tried first — at ~65 ms per grind for 16-bit
-/// PoW it back-pressured the per-shard host-pool worker enough that
-/// shards backed up and the host RAM grew unbounded (Linux OOM-killer
-/// terminated the perf binary at ~850 GB anon-rss).  `find_first`
-/// keeps the CPU work parallel so per-shard wall stays close to
-/// plonky3's parallel grind, while its left-of-match cancellation
-/// rule guarantees the smallest-index witness wins regardless of
-/// thread scheduling.
-///
-/// Validated: 3 back-to-back tendermint compress runs (v1/v2b/v3 of
-/// the May 6 fix session) produce IDENTICAL `compressed_proof.vk
-/// .hash_koalabear()`; baseline (without fix) produced 3 distinct
-/// hashes (v8/v9/v10).
+/// The search is a parallel `find_first`: its left-of-match cancellation
+/// returns the smallest index independent of scheduling. The unchecked
+/// conversion is sound because `i < F::ORDER_U64` is canonical.
 pub(crate) fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::PrimeField64 + p3_field::integers::QuotientMap<u64> + Send + Sync,
@@ -134,32 +109,20 @@ where
     if bits == 0 {
         return F::ZERO;
     }
-    // An accelerator registered for THIS challenger type replaces the search
-    // below.  See `register_grind_accelerator` for the contract and for why the
-    // dispatch is a registration rather than a trait impl.
     if let Some(accelerated) = grind_accelerator_for::<C>() {
         return accelerated(challenger, bits);
     }
     let order = F::ORDER_U64;
-    // Parallel search with `find_first` semantics — returns the
-    // smallest-index witness, NOT the first-thread-wins witness as
-    // plonky3's `find_any` does.  See the docstring for why parallel
-    // is required (sequential OOM'd the host).
     let witness = (0..order)
         .into_par_iter()
-        .map(|i| {
-            // SAFETY: i < F::ORDER_U64 by iterator bound, so this is
-            // a valid canonical field element.
-            unsafe { <F as p3_field::integers::QuotientMap<u64>>::from_canonical_unchecked(i) }
+        .map(|i| unsafe {
+            <F as p3_field::integers::QuotientMap<u64>>::from_canonical_unchecked(i)
         })
         .find_first(|&w| {
             let mut probe = challenger.clone();
             probe.check_witness(bits, w)
         })
         .expect("deterministic_grind: failed to find a PoW witness");
-    // Replay on the real challenger to commit its state update
-    // (observe(witness) + sample_bits(bits)).  Mirrors plonky3's
-    // post-find `assert!(check_fn(self, witness))`.
     let ok = challenger.check_witness(bits, witness);
     debug_assert!(ok);
     let _ = ok;
@@ -251,9 +214,6 @@ where
         F: Send + Sync,
         D: Send + Sync,
     {
-        // For commitment: stack each codeword as one matrix in the
-        // `mmcs.commit` call.  Layout matches what
-        // `query_openings_at_indices` will read back.
         let mats: Vec<RowMajorMatrix<F>> = codewords.iter().map(|c| c.data.clone()).collect();
 
         let (commitment, prover_data) = self.mmcs.commit(mats);
@@ -262,7 +222,6 @@ where
             BasefoldProverData {
                 prover_data,
                 encoded_codewords: codewords,
-                // The host commit keeps its leaves, so its opener uses the MMCS.
                 digest_layers: Vec::new(),
             },
         )
@@ -270,8 +229,7 @@ where
 
     /// Build the partial-Lagrange evaluation vector at `point`.
     ///
-    /// Returns length `2^point.len()` where entry `i` is the
-    /// evaluation of the indicator polynomial `eq(point, i_bits)`.
+    /// Entry `i` of the `2^point.len()` output is `eq(point, bits(i))`.
     /// Used both to sample batching coefficients and to weight the
     /// evaluation claims into a single batched claim.
     fn partial_lagrange(point: &[EF]) -> Vec<EF> {
@@ -303,19 +261,11 @@ where
         let hyp_size = 1usize << num_variables;
         let codeword_height = mle_rounds[0][0].hypercube_size() << self.config().log_blowup();
 
-        // Single linear pass: walk every base-MLE and codeword and
-        // accumulate into the batched buffers.
         let mut batched_mle = vec![EF::ZERO; hyp_size];
         let mut batched_codeword_ef = vec![EF::ZERO; codeword_height];
         let mut batched_eval = EF::ZERO;
         let mut coeff_idx = 0usize;
 
-        // Parallelize the per-row inner products across both the MLE
-        // and codeword loops.  For codeword_height = 2^{N + log_blowup}
-        // (e.g. N=22, log_blowup=4 → 2^26 ≈ 67M sequential row mul-adds
-        // per (mle, codeword) pair) the codeword loop dominates.  Each
-        // row writes into a distinct accumulator slot, so par_iter_mut
-        // is safe.
         use p3_maybe_rayon::prelude::*;
         for ((mles, codewords), evals) in
             mle_rounds.iter().zip(codeword_rounds.iter()).zip(evaluation_claims_rounds.iter())
@@ -357,7 +307,6 @@ where
             }
         }
 
-        // Pack the batched EF codeword back into F-storage (width = EF::DIMENSION).
         let batched_codeword_storage =
             <EF as p3_field::BasedVectorSpace<F>>::flatten_to_base(batched_codeword_ef);
         let batched_codeword =
@@ -374,17 +323,16 @@ where
     /// `eval_point` has dimension equal to the underlying number of
     /// variables of every committed MLE (all MLEs in a single proof
     /// must share the same `num_variables`).
+    ///
+    /// * `prover_data`: borrowed, since opening only reads the committed
+    ///   Merkle trees; a long-lived commit (the preprocessed one, held in the
+    ///   proving key) is opened by every shard without a copy.
     #[allow(clippy::type_complexity)]
     pub fn prove_trusted_mle_evaluations<Challenger>(
         &self,
         eval_point: Vec<EF>,
         mle_rounds: Vec<Vec<Arc<Mle<F>>>>,
         evaluation_claims: Vec<Vec<EF>>,
-        // BORROWED: every use below is a read (`iter()`, and
-        // `mmcs.open_batch(idx, &data.prover_data)`), so the committed Merkle
-        // tree never has to be owned — or deep-copied — to be opened.  That is
-        // what lets a long-lived commit (the preprocessed one, built once at
-        // setup and held in the proving key) be opened by every shard.
         prover_data: &[&BasefoldProverData<F, MT>],
         challenger: &mut Challenger,
     ) -> BasefoldProof<F, EF, MT>
@@ -396,39 +344,14 @@ where
     {
         let num_variables = eval_point.len();
 
-        // (0) Bind the claims: the claimed evaluations are absorbed BEFORE any randomness that
-        // weighs them.
-        //
-        // These values are prover-supplied and were trusted for transcript
-        // purposes: grinding and the batching point were derived without them.
-        // That makes the batching vector `lambda` predictable to a prover who
-        // has not yet chosen `y`.  The stacked layer checks `sum_i a_i y_i = q`
-        // for the outer claim `q`, and BaseFold proves only
-        // `sum_i lambda_i y_i = sum_i lambda_i v_i` -- two linear equations in
-        // `y`.  With two or more stripe claims and independent `a`, `lambda`,
-        // they can be solved for ANY target `q`: the prover opens the honest
-        // random combination while the stacked equation reports a value that is
-        // not the committed polynomial's.  A correct sumcheck, FRI chain and
-        // Merkle path do not help, because the choice happens before them.
-        //
-        // Absorbing first removes the adaptivity.  The order below -- claims,
-        // then batch grinding, then the batching point -- is the contract, and
-        // the host prover, the native verifier, the recursive verifier and the
-        // CUDA prover all have to keep it or the transcript forks.
         for round in evaluation_claims.iter() {
             for &claim in round.iter() {
                 challenger.observe_algebra_element(claim);
             }
         }
 
-        // (1) Batch grinding witness (forces verifier-prover to share
-        // a transcript prefix before sampling batching coefficients).
-        // Use deterministic_grind to keep the witness
-        // value reproducible across runs (plonky3's parallel grind
-        // uses `find_any` which is non-deterministic).
         let batch_grinding_witness = deterministic_grind(challenger, BATCH_GRINDING_BITS);
 
-        // (2) Sample batching coefficients via partial-Lagrange basis.
         let total_polys: usize =
             mle_rounds.iter().flat_map(|r| r.iter()).map(|m| m.num_polynomials()).sum();
         let num_batching_vars = total_polys.next_power_of_two().trailing_zeros() as usize;
@@ -436,49 +359,26 @@ where
             (0..num_batching_vars).map(|_| challenger.sample_algebra_element()).collect();
         let batching_coefficients = Self::partial_lagrange(&batching_point);
 
-        // (3) Build the batched MLE + codeword + claim.
         let codeword_rounds: Vec<Vec<Arc<RsCodeWord<F>>>> =
             prover_data.iter().map(|d| d.encoded_codewords.clone()).collect();
         let (mut current_mle, mut current_codeword, batched_eval) =
             self.batch(&batching_coefficients, &mle_rounds, &codeword_rounds, &evaluation_claims);
 
-        // (4) Observe number of FRI rounds.
         challenger.observe(F::from_usize(num_variables));
 
-        // (5) Commit phase: emit one univariate poly + one Merkle
-        // commitment per round.  Last-coordinate-first folding.
         let mut univariate_messages: Vec<[EF; 2]> = Vec::with_capacity(num_variables);
         let mut fri_commitments: Vec<MT::Commitment> = Vec::with_capacity(num_variables);
         let mut commit_phase_data: Vec<<MT as Mmcs<F>>::ProverData<RowMajorMatrix<F>>> =
             Vec::with_capacity(num_variables);
         let mut current_eval = batched_eval;
-        // One FRI round folds `log_folding_arity` variables: it commits ONCE,
-        // with `2^k` codeword rows per Merkle leaf, then runs `k` sumcheck
-        // rounds and `k` folds against that single commitment.  A query
-        // therefore walks `num_variables / k` Merkle paths instead of
-        // `num_variables`, and each is `k` levels shallower, which is where
-        // the recursion verifier's cost lives.
-        //
-        // At `k == 1` the transcript is byte-identical to the classic shape:
-        // univariate message, then commitment, then beta, then fold.
         let log_folding_arity = self.config().log_folding_arity();
-        // How many variables each FRI round folded, so the query phase knows
-        // how far to shift the index per round.
         let mut round_arities: Vec<usize> = Vec::new();
         let mut var = 0usize;
         while var < num_variables {
-            // A trailing group shorter than the arity folds (and commits) at
-            // its own width, so `num_variables` need not divide the arity.
             let group = core::cmp::min(log_folding_arity, num_variables - var);
 
             let mut codeword_ef: Option<Vec<EF>> = None;
             for j in 0..group {
-                // Sumcheck round on the *first* remaining variable (matches
-                // `Mle::fold`'s even/odd pairing — the same beta is used as
-                // both sumcheck point and FRI fold parameter).
-                //
-                //   claim = (1 - r) * g(0) + r * g(1)
-                //   => g(1) = (claim - g(0)) / r + g(0)
                 let r = eval_point[var + j];
                 let zero_val = {
                     let mut p: Vec<EF> = Vec::with_capacity(num_variables - var - j);
@@ -487,20 +387,6 @@ where
                     current_mle.eval_at(&p)[0]
                 };
                 let one_val = if r == EF::ZERO {
-                    // At `r == 0` the claim fixes only `g(0)`: the rearrangement
-                    // above divides by `r`, so there is nothing to solve for.
-                    // `g(1)` is UNCONSTRAINED by the claim but not unknown --
-                    // it is a property of the current MLE, and the verifier goes
-                    // on to sample a generally nonzero beta and continue with
-                    // `g(beta) = g(0) + beta * g(1)`. Substituting zero here
-                    // therefore made any honest opening at a zero-containing
-                    // point fail a later round, unless `g(1)` happened to be
-                    // zero. Evaluate the endpoint instead of inventing it.
-                    //
-                    // Random extension points miss this with overwhelming
-                    // probability, which is why randomized roundtrips never
-                    // caught it; Boolean points and points handed down by
-                    // higher-level reductions hit it deterministically.
                     let mut p: Vec<EF> = Vec::with_capacity(num_variables - var - j);
                     p.push(EF::ONE);
                     p.extend_from_slice(&eval_point[var + j + 1..]);
@@ -514,9 +400,6 @@ where
                     challenger.observe_algebra_element(elem);
                 }
 
-                // The commitment for the whole group is made after the FIRST
-                // univariate message and before the first beta, exactly as the
-                // one-variable-per-round protocol does.
                 if j == 0 {
                     let (ef, commitment, data) = commit_round_leaves::<F, EF, MT, _>(
                         current_codeword,
@@ -538,38 +421,23 @@ where
                 current_mle = current_mle.fold(beta);
                 current_eval = uni_poly[0] + beta * uni_poly[1];
             }
-            // One flatten per group, not per fold.
             current_codeword =
                 codeword_from_ef::<F, EF>(codeword_ef.expect("group folds at least once"));
             round_arities.push(group);
             var += group;
         }
 
-        // (6) Final poly + grinding witness + observe transcript.
-        // Invariant (BaseFold key identity): `current_eval` (sumcheck
-        // chain), `fp` (codeword K-fold), and `current_mle.guts.values[0]`
-        // (MLE K-fold) are all equal in an honest proof.
         let fp = final_poly::<F, EF>(current_codeword);
         challenger.observe_algebra_element(fp);
 
         let pow_bits = self.config().proof_of_work_bits;
-        // See `deterministic_grind` for why this call must
-        // not delegate to plonky3's parallel `challenger.grind`.
         let pow_witness = deterministic_grind(challenger, pow_bits);
 
-        // (7) Sample query indices.
         let log_codeword_size = num_variables + self.config().log_blowup();
         let num_queries = self.config().num_queries;
         let query_indices: Vec<usize> =
             (0..num_queries).map(|_| challenger.sample_bits(log_codeword_size)).collect();
 
-        // (8) Open the original (per-round) component-poly commitments.
-        // Each query index yields one Merkle path; the leaf at that
-        // index is the row across every encoded codeword for the round.
-        // (Tried par_iter — `MT::Proof: !Send` blocks at the trait
-        // layer; same root cause as the STIR-loop revert in the
-        // now-removed WHIR prototype.  Would need
-        // upstream Send+Sync on `Mmcs::Proof`; deferred.)
         let mut component_polynomials_query_openings_and_proofs =
             Vec::with_capacity(prover_data.len());
         for data in prover_data.iter() {
@@ -584,12 +452,7 @@ where
             component_polynomials_query_openings_and_proofs.push(MerkleOpening { leaves });
         }
 
-        // (9) Open commit-phase round commitments at the (shifted) indices.
         let mut query_phase_openings_and_proofs = Vec::with_capacity(num_variables);
-        // Round r's Merkle tree has one leaf per `2^arity_r` codeword rows, and
-        // each earlier round already shrank the codeword by its own arity, so
-        // the shift ACCUMULATES.  At arity 1 throughout this is the classic
-        // `>>= 1` per round.
         let mut indices = query_indices;
         for (data, &arity) in commit_phase_data.iter().zip(round_arities.iter()) {
             for ix in indices.iter_mut() {

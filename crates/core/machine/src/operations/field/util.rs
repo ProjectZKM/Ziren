@@ -22,8 +22,6 @@ pub fn compute_root_quotient_and_shift<F: PrimeField32>(
     nb_bits_per_limb: u32,
     nb_limbs: usize,
 ) -> Vec<F> {
-    // Evaluate the vanishing polynomial at x = 2^nb_bits_per_limb.
-
     let p_vanishing_eval = p_vanishing
         .coefficients()
         .iter()
@@ -34,24 +32,20 @@ pub fn compute_root_quotient_and_shift<F: PrimeField32>(
         .sum::<F>();
     debug_assert_eq!(p_vanishing_eval, F::ZERO);
 
-    // Compute the witness polynomial by witness(x) = vanishing(x) / (x - 2^nb_bits_per_limb).
     let root_monomial = F::from_u32(2u32.pow(nb_bits_per_limb));
     let p_quotient = p_vanishing.root_quotient(root_monomial);
     debug_assert_eq!(p_quotient.degree(), p_vanishing.degree() - 1);
 
-    // Sanity Check #1: For all i, |w_i| < offset to prevent overflows.
     let offset_u64 = offset as u64;
     for c in p_quotient.coefficients().iter() {
         debug_assert!(c.neg().as_canonical_u64() < offset_u64 || c.as_canonical_u64() < offset_u64);
     }
 
-    // Sanity Check #2: w(x) * (x - 2^nb_bits_per_limb) = vanishing(x).
     let x_minus_root = Polynomial::<F>::from_coefficients(&[-root_monomial, F::ONE]);
     debug_assert_eq!((&p_quotient * &x_minus_root), *p_vanishing);
 
     let mut p_quotient_coefficients = p_quotient.as_coefficients();
     p_quotient_coefficients.resize(nb_limbs, F::ZERO);
 
-    // Shifting the witness polynomial to make it positive
     p_quotient_coefficients.into_iter().map(|x| x + F::from_u64(offset_u64)).collect::<Vec<F>>()
 }

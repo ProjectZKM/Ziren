@@ -145,9 +145,6 @@ impl<'a> Lowerer<'a> {
         match leaf {
             BaseLeaf::Variable(v) => PicusExpr::Var(self.layout.var_id(v)),
             BaseLeaf::Constant(c) => PicusExpr::Const(c.as_canonical_u32() as u64),
-            // Every chip is extracted as a single real row: it is simultaneously the first and
-            // the last row of its (one-row) trace and no transition is available.  No machine
-            // chip uses these predicates any more; the constants keep legacy call sites sound.
             BaseLeaf::IsFirstRow | BaseLeaf::IsLastRow => PicusExpr::Const(1),
             BaseLeaf::IsTransition => PicusExpr::Const(0),
         }

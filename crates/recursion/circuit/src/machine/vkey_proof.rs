@@ -1,16 +1,10 @@
 //! VK-merkle-proof verifier + vkey **data-type carriers**.
 //!
-//! The legacy `ZKMCompressWithVKeyVerifier::verify` body (which performed
-//! the VK merkle check and then re-entered the FRI compose verifier) has
-//! been removed. The vkey check is now inlined at the head of the basefold
-//! compose verifier (see `compress_basefold.rs:212`,
-//! `deferred_basefold.rs:168`, `wrap_basefold.rs:128`), which calls
-//! [`ZKMMerkleProofVerifier::verify`] directly.
+//! The vkey check runs at the head of each basefold compose verifier
+//! (`verify_compress_basefold`, `verify_deferred_basefold`,
+//! `verify_wrap_basefold`), which call [`ZKMMerkleProofVerifier::verify`].
 //!
-//! Retained surface (still on live import paths):
-//!
-//! - [`ZKMMerkleProofVerifier`] — the actual basefold-path vkey verifier,
-//!   live in three call sites.
+//! - [`ZKMMerkleProofVerifier`] — the vkey Merkle-membership verifier.
 //! - [`ZKMMerkleProofWitnessValues`] / [`ZKMMerkleProofWitnessVariable`] —
 //!   the witness carriers for the merkle proof, consumed by
 //!   `compress_basefold::ZKMCompressBasefoldWitnessValues::vk_merkle_data`

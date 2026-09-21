@@ -51,10 +51,6 @@ where
     C: CircuitConfig,
     H: Poseidon2KoalaBearHasherVariable<C>,
 {
-    // The root digest binds: zkm_vk_digest,
-    // committed_value_digest, exit_code, vk_root. Previously only the first
-    // two were bound, leaving `vk_root` / `exit_code` neither bound by the
-    // root commitment nor checked by `verify_wrap_bn254` / the BN254 commit.
     let input = public_values
         .zkm_vk_digest
         .into_iter()

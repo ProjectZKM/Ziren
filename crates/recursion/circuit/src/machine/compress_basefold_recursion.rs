@@ -1,70 +1,23 @@
-//! Compress recursion-side basefold verifier program (May 19 2026).
+//! Compress (Compose) basefold verifier program over the recursion chip set.
 //!
-//! Counterpart to [`super::compress_basefold`] that targets the
-//! [`zkm_recursion_core::machine::RecursionAir`] chip set rather than
-//! [`zkm_core_machine::mips::MipsAir`].  Used when
-//! Forcing BaseFold for recursion widens the host prover's
-//! basefold gate to recursion shards (no `Program` chip), so the
-//! compose recursion program needs to verify a basefold-shaped
-//! shard proof produced over BaseAlu/ExtAlu/Poseidon2/FriFold/etc.
-//! traces instead of MIPS chips.
+//! [`super::compress_basefold::verify_compress_basefold`] is generic over
+//! `A: MachineAir + Air<ShardConstraintFolder>`; this module instantiates it
+//! with `A = RecursionAir<KoalaBear, DEGREE>` (BaseAlu / ExtAlu / Poseidon2 /
+//! FriFold / ... traces) instead of `MipsAir`.
 //!
-//! # Architectural status (scaffold)
+//! `RecursionAir<F, DEGREE>: Air<ShardConstraintFolder>` follows from the
+//! `MachineAir` derive: it emits `Air<AB>` for every
+//! `AB: ZKMRecursionAirBuilder = MachineAirBuilder + RecursionAirBuilder`,
+//! both blanket-implemented for `BaseAirBuilder`, which
+//! `ShardConstraintFolder` implements via its `EmptyMessageBuilder` and
+//! `AirBuilder` impls.  `DEGREE` stays generic.
 //!
-//! The in-circuit verifier body [`super::compress_basefold::verify_compress_basefold`]
-//! is already generic over `A: MachineAir + Air<ShardConstraintFolder>`
-//! — the MIPS-specific behaviour comes from CALL SITES that pass
-//! `MipsAir` as the machine's chip-type parameter.  This module
-//! therefore doesn't need a separate verifier body; it provides a
-//! program builder ([`build_compose_basefold_recursion_program`])
-//! that re-invokes `verify_compress_basefold` with the recursion-AIR
-//! chip set wired in.
+//! The basefold folder evaluates `is_first_row`, `is_last_row` and
+//! `is_transition_window` as `0`, so constraints gated by them are not
+//! enforced for recursion chips on this path.
 //!
-//! # What's wired
-//!
-//! * Program builder — accepts a `StarkMachine<KoalaBearPoseidon2,
-//!   RecursionAir<KoalaBear, DEGREE>>` and a
-//!   `ZKMCompressBasefoldWitnessValues` whose embedded
-//!   `JaggedShardProof` was produced over recursion-AIR traces.
-//! * Trait bound propagation — `RecursionAir<F, DEGREE>` satisfies
-//!   `Air<ShardConstraintFolder>` via the standard `MachineAir`
-//!   derive: the derive emits `Air<AB>` for any AB that satisfies
-//!   `ZKMRecursionAirBuilder = MachineAirBuilder + RecursionAirBuilder`,
-//!   both of which are blanket-implemented for `BaseAirBuilder`, and
-//!   `ShardConstraintFolder` implements `BaseAirBuilder` via its
-//!   `EmptyMessageBuilder` + `AirBuilder` impls
-//!   (`crates/recursion/circuit/src/basefold_constraint_folder.rs:81+152`).
-//!
-//! # What's stubbed
-//!
-//! * No new in-circuit verifier function — reuses
-//!   [`super::compress_basefold::verify_compress_basefold`] verbatim.
-//!   The `A = RecursionAir<KoalaBear, DEGREE>` specialisation gives
-//!   the chip-set-aware behaviour without code duplication.
-//! * Trait bounds intentionally narrow to the trait set that the
-//!   `verify_compress_basefold` body actually needs.  Adding more
-//!   bounds (e.g. requiring a specific `DEGREE`) would couple this
-//!   builder to a particular recursion-AIR machine variant; leaving
-//!   `const DEGREE: usize` generic preserves flexibility.
-//! * Per-chip `Air<ShardConstraintFolder>` impls for the 10
-//!   `RecursionAir` variants are NOT explicit ports — they follow
-//!   from the chip-side `Air<AB: ZKMRecursionAirBuilder>` impls that
-//!   already exist (see chip files under
-//!   `crates/recursion/core/src/chips/`).  If a specific chip's
-//!   constraint expression references selectors (`is_first_row`,
-//!   `is_last_row`, `is_transition_window`) that the basefold folder
-//!   stubs to `ZERO` (see `basefold_constraint_folder.rs:101-121`),
-//!   the cryptographic soundness of *that chip* under the basefold
-//!   pipeline needs separate verification.  This program builder
-//!   produces a syntactically-correct program either way — soundness
-//!   checks are deferred to vk_map regen + smoke tests.
-//!
-//! # Reference
-//!
-//! Mirror of [`super::basefold_programs::build_compose_basefold_program`]
-//! at `basefold_programs.rs:91`, but specialised in its expected
-//! type-parameter usage to the recursion AIR.  Same trait surface;
-//! distinguished only by call-site intent + naming.
+//! Same trait surface as
+//! [`super::basefold_programs::build_compose_basefold_program`].
 
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::air::MachineAir;
@@ -82,19 +35,14 @@ use super::compress_basefold::{verify_compress_basefold, ZKMCompressBasefoldWitn
 
 /// Build the recursion-side compress (Compose) basefold program.
 ///
-/// Direct analog of [`super::basefold_programs::build_compose_basefold_program`]
-/// that's expected to be invoked with `A = RecursionAir<KoalaBear, DEGREE>`
-/// for the retirement of the legacy FRI path on
-/// recursion shards.  The generic `A` bound is identical to the MIPS
-/// program builder — call sites distinguish via the concrete type
-/// they pass for `machine`'s chip parameter.
+/// Analog of [`super::basefold_programs::build_compose_basefold_program`]
+/// for `A = RecursionAir<KoalaBear, DEGREE>`; call sites choose the chip set
+/// through `machine`'s type.
 ///
 /// # Wiring
 ///
-/// 1. Reads the witness via the existing
-///    [`Witnessable`] impl on
-///    [`ZKMCompressBasefoldWitnessValues<KoalaBearPoseidon2>`]
-///    (`crates/recursion/circuit/src/machine/witness.rs:351`).
+/// 1. Reads the witness via the [`Witnessable`] impl on
+///    [`ZKMCompressBasefoldWitnessValues<KoalaBearPoseidon2>`].
 /// 2. Invokes [`verify_compress_basefold`] with the recursion
 ///    machine's chip set — this is the same verifier body used by
 ///    MIPS; the only difference is the `A` type parameter, which

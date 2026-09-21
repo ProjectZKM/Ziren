@@ -34,7 +34,7 @@ pub fn populate_local_permutation_row<F: PrimeField, EF: ExtensionField<F>>(
     batch_size: usize,
 ) {
     let alpha = random_elements[0];
-    let betas = random_elements[1].powers(); // TODO: optimize
+    let betas = random_elements[1].powers();
 
     let lookup_chunks = &sends
         .iter()
@@ -42,7 +42,6 @@ pub fn populate_local_permutation_row<F: PrimeField, EF: ExtensionField<F>>(
         .chain(receives.iter().map(|int| (int, false)))
         .chunks(batch_size);
 
-    // Compute the denominators \prod_{i\in B} row_fingerprint(alpha, beta).
     for (value, chunk) in row.iter_mut().zip(lookup_chunks) {
         *value = chunk
             .into_iter()
@@ -71,7 +70,6 @@ pub fn scoped_lookups<F: Field>(
     sends: &[Lookup<F>],
     receives: &[Lookup<F>],
 ) -> (HashMap<LookupScope, Vec<Lookup<F>>>, HashMap<LookupScope, Vec<Lookup<F>>>) {
-    // Create a hashmap of scope -> vec<send lookups>.
     let mut sends = sends.to_vec();
     sends.sort_by_key(|k| k.scope);
     let grouped_sends: HashMap<_, _> = sends
@@ -81,7 +79,6 @@ pub fn scoped_lookups<F: Field>(
         .map(|(k, values)| (k, values.cloned().collect_vec()))
         .collect();
 
-    // Create a hashmap of scope -> vec<receive lookups>.
     let mut receives = receives.to_vec();
     receives.sort_by_key(|k| k.scope);
     let grouped_receives: HashMap<_, _> = receives
@@ -231,26 +228,16 @@ pub fn eval_permutation_constraints<'a, F, AB>(
     let perm_next = perm.next_slice();
     let perm_width = perm_local.len();
 
-    // BaseFold-pipeline short-circuit: if the folder reports a
-    // zero-width permutation trace, permutation soundness lives in
-    // LogUp-GKR (not in these constraints) and there's nothing to
-    // evaluate here.  Any chip that reads permutation columns will
-    // still panic deeper via empty-slice indexing, which is the
-    // intended signal that the chip is misusing the BaseFold
-    // contract.  Legacy callers retain the shape check via the
-    // `!= permutation_trace_width` branch below.
     if perm_width == 0 && permutation_trace_width > 0 {
         return;
     }
 
-    // Assert that the permutation trace width is correct.
     if perm_width != permutation_trace_width {
         panic!(
             "permutation trace width is incorrect: expected {permutation_trace_width}, got {perm_width}",
         );
     }
 
-    // Get the permutation challenges.
     let permutation_challenges = builder.permutation_randomness();
     let random_elements: Vec<AB::ExprEF> =
         permutation_challenges.iter().map(|x| (*x).into()).collect();
@@ -259,19 +246,13 @@ pub fn eval_permutation_constraints<'a, F, AB>(
     let random_elements = &random_elements[0..2];
     let (alpha, beta) = (&random_elements[0], &random_elements[1]);
     if !local_sends.is_empty() || !local_receives.is_empty() {
-        // Ensure that each batch sum m_i/f_i is computed correctly.
         let lookup_chunks = &local_sends
             .iter()
             .map(|int| (int, true))
             .chain(local_receives.iter().map(|int| (int, false)))
             .chunks(batch_size);
 
-        // Assert that the i-eth entry is equal to the sum_i m_i/rlc_i by constraints:
-        // entry * \prod_i rlc_i = \sum_i m_i * \prod_{j!=i} rlc_j over all columns of the permutation
-        // trace except the last column.
         for (entry, chunk) in perm_local[0..perm_local.len() - 1].iter().zip(lookup_chunks) {
-            // First, we calculate the random linear combinations and multiplicities with the correct
-            // sign depending on whether the lookup is a send or a receive.
             let mut rlcs: Vec<AB::ExprEF> = Vec::with_capacity(batch_size);
             let mut multiplicities: Vec<AB::Expr> = Vec::with_capacity(batch_size);
             for (lookup, is_send) in chunk {
@@ -293,14 +274,11 @@ pub fn eval_permutation_constraints<'a, F, AB>(
                 );
             }
 
-            // Now we can calculate the numerator and denominator of the combined batch.
             let mut product = AB::ExprEF::ONE;
             let mut numerator = AB::ExprEF::ZERO;
             for (i, (m, rlc)) in multiplicities.into_iter().zip(rlcs.iter()).enumerate() {
-                // Calculate the running product of all rlcs.
                 product = product.clone() * rlc.clone();
 
-                // Calculate the product of all but the current rlc.
                 let mut all_but_current = AB::ExprEF::ONE;
                 for other_rlc in
                     rlcs.iter().enumerate().filter(|(j, _)| i != *j).map(|(_, rlc)| rlc)
@@ -310,12 +288,10 @@ pub fn eval_permutation_constraints<'a, F, AB>(
                 numerator = numerator.clone() + AB::ExprEF::from(m) * all_but_current;
             }
 
-            // Finally, assert that the entry is equal to the numerator divided by the product.
             let entry: AB::ExprEF = (*entry).into();
             builder.assert_eq_ext(product.clone() * entry.clone(), numerator);
         }
 
-        // Compute the running local and next permutation sums.
         let sum_local = perm_local[..local_permutation_width - 1]
             .iter()
             .map(|x| (*x).into())
@@ -327,16 +303,12 @@ pub fn eval_permutation_constraints<'a, F, AB>(
         let phi_local: AB::ExprEF = (*perm_local.last().unwrap()).into();
         let phi_next: AB::ExprEF = (*perm_next.last().unwrap()).into();
 
-        // Assert that cumulative sum is initialized to `phi_local` on the first row.
         builder.when_first_row().assert_eq_ext(phi_local.clone(), sum_local);
 
-        // Assert that the cumulative sum is constrained to `phi_next - phi_local` on the transition
-        // rows.
         builder.when_transition().assert_eq_ext(phi_next - phi_local.clone(), sum_next);
         builder.when_last_row().assert_eq_ext(*perm_local.last().unwrap(), *local_cumulative_sum);
     }
 
-    // Handle global permutations.
     let global_cumulative_sum = builder.global_cumulative_sum();
     if commit_scope == LookupScope::Global {
         for i in 0..7 {
@@ -373,18 +345,11 @@ pub fn count_permutation_constraints<F: Field>(
 
     if num_local_lookups > 0 {
         let local_permutation_width = local_permutation_trace_width(num_local_lookups, batch_size);
-        // We loop over (local_permutation_width - 1) lookups with one assert per iteration.
         count += local_permutation_width - 1;
 
-        // One assert that cumulative sum is initialized to `phi_local` on the first row.
-        // One assert that the cumulative sum is constrained to `phi_next - phi_local` on the transition
-        // rows.
-        // One assert that the cumulative sum on the last row matches `local_cumulative_sum`.
         count += 3;
     }
 
-    // If the chip's scope is `LookupScope::Global`, 14 asserts that
-    // the last row's final 14 columns is equal to the global cumulative sum.
     if commit_scope == LookupScope::Global {
         count += 14;
     }

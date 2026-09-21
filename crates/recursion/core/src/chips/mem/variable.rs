@@ -58,28 +58,19 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
     }
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        // collect instructions into a Vec so we can
-        // par_iter — `iter_instructions()` returns a sequential
-        // iterator, but rayon parallelism here is a meaningful speedup
-        // so we materialize first. `.copied()` flattens
-        // `Iter<Item = &&Instruction<F>>` to `&Instruction<F>` so the
-        // closure body matches the original signature.
         let instructions: Vec<&Instruction<F>> = program.iter_instructions().collect();
-        // Allocating an intermediate `Vec` is faster.
         let accesses = instructions
-            .par_iter() // Using `rayon` here provides a big speedup.
+            .par_iter()
             .copied()
             .flat_map_iter(|instruction| match instruction {
                 Instruction::Hint(HintInstr { output_addrs_mults })
-                | Instruction::HintBits(HintBitsInstr {
-                    output_addrs_mults,
-                    input_addr: _, // No receive lookup for the hint operation
-                }) => output_addrs_mults.iter().collect(),
+                | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
+                    output_addrs_mults.iter().collect()
+                }
                 Instruction::HintExt2Felts(HintExt2FeltsInstr {
                     output_addrs_mults,
-                    input_addr: _, // No receive lookup for the hint operation
+                    input_addr: _,
                 }) => output_addrs_mults.iter().collect(),
-                // No receive lookup for the hint operation.
                 Instruction::HintAddCurve(instr) => instr
                     .output_x_addrs_mults
                     .iter()
@@ -97,7 +88,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
         );
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_MEM_PREPROCESSED_INIT_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = accesses.len() * NUM_MEM_ACCESS_COLS;
         values[..populate_len]
             .par_chunks_mut(NUM_MEM_ACCESS_COLS)
@@ -112,7 +102,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
         _: &Self::Record,
         _: &mut Self::Record,
     ) -> Result<(), Self::Error> {
-        // This is a no-op.
         Ok(())
     }
 
@@ -121,7 +110,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
         input: &Self::Record,
         _: &mut Self::Record,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let mut rows = input
             .mem_var_events
             .chunks(NUM_VAR_MEM_ENTRIES_PER_ROW)
@@ -135,7 +123,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             })
             .collect::<Vec<_>>();
 
-        // Pad the rows out to the shape (or the next multiple of 32).
         pad_rows_exact(
             &mut rows,
             || [F::ZERO; NUM_MEM_INIT_COLS],
@@ -143,7 +130,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS))
     }
 

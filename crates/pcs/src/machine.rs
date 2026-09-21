@@ -153,8 +153,6 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             pc_start: self.pc_start,
             initial_global_cumulative_sum: self.initial_global_cumulative_sum,
             traces: self.traces.clone(),
-            // Derived cache: the clone rebuilds it on first use rather than
-            // deep-copying the MLEs.
             preprocessed_mles: std::sync::OnceLock::new(),
             preprocessed_data: std::sync::OnceLock::new(),
             prep_pin: self.prep_pin,
@@ -251,12 +249,6 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     /// original cells byte-for-byte).
     pub fn preprocessed_mles(&self) -> &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>] {
         self.preprocessed_mles.get_or_init(|| {
-            // PARALLEL over chips: each entry deep-copies one preprocessed
-            // trace (`from_row_major` takes ownership, so the clone is
-            // unavoidable while the key also keeps `traces`), and the walk is
-            // pure per-chip memory traffic with no shared state.  Serially
-            // this was the largest un-attributed block of `setup` on a
-            // pk-cache miss — ~5 s across a combined reth's 67 misses.
             use p3_maybe_rayon::prelude::*;
             self.traces
                 .par_iter()
@@ -291,7 +283,6 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
                 .collect();
             let _ = self.preprocessed_mles.set(mles);
         } else {
-            // The MLEs already hold their own copy; drop the original.
             self.traces = Vec::new();
         }
     }
@@ -338,14 +329,13 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
         challenger.observe(self.pc_start);
         challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
         challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
-        // Observe the padding.
         challenger.observe(Val::<SC>::ZERO);
     }
 }
 
 /// Serializable representation of a domain (shift + log_size).
-/// Used in `StarkVerifyingKey` since upstream `TwoAdicMultiplicativeCoset` no longer
-/// implements serde.
+/// Used in `StarkVerifyingKey` because `TwoAdicMultiplicativeCoset` does not
+/// implement serde.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize"))]
 #[serde(bound(deserialize = "F: DeserializeOwned"))]
@@ -408,7 +398,6 @@ impl<SC: StarkGenericConfig> StarkVerifyingKey<SC> {
         challenger.observe(self.pc_start);
         challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
         challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
-        // Observe the padding.
         challenger.observe(Val::<SC>::ZERO);
     }
 
@@ -527,13 +516,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
     {
         tracing::debug!("checking constraints for each shard");
 
-        // Obtain the challenges used for the global permutation argument.
         let mut permutation_challenges: Vec<SC::Challenge> = Vec::new();
         for _ in 0..2 {
             permutation_challenges.push(challenger.sample_algebra_element());
         }
 
-        // Obtain the challenges used for the local permutation argument.
         for _ in 0..2 {
             permutation_challenges.push(challenger.sample_algebra_element());
         }
@@ -542,10 +529,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         global_cumulative_sums.push(pk.initial_global_cumulative_sum);
 
         for shard in records.iter() {
-            // Filter the chips based on what is used.
             let chips = self.shard_chips(shard).collect::<Vec<_>>();
 
-            // Generate the main trace for each chip.
             let pre_traces = chips
                 .iter()
                 .map(|chip| pk.chip_ordering.get(&chip.name()).map(|index| &pk.traces[*index]))
@@ -556,7 +541,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                 .zip(pre_traces)
                 .collect::<Vec<_>>();
 
-            // Generate the permutation traces.
             let mut permutation_traces = Vec::with_capacity(chips.len());
             let mut chip_cumulative_sums = Vec::with_capacity(chips.len());
             tracing::debug_span!("generate permutation traces").in_scope(|| {
@@ -610,7 +594,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                 panic!("Local cumulative sum is not zero");
             }
 
-            // Compute some statistics.
             for i in 0..chips.len() {
                 let trace_width = traces[i].0.width();
                 let pre_width = traces[i].1.map_or(0, p3_matrix::Matrix::width);
@@ -651,7 +634,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         let global_cumulative_sum: SepticDigest<Val<SC>> =
             global_cumulative_sums.iter().copied().sum();
 
-        // If the global cumulative sum is not zero, debug the lookups.
         if !global_cumulative_sum.is_zero() {
             tracing::warn!("Global cumulative sum is not zero");
             tracing::debug_span!("debug global lookups").in_scope(|| {
@@ -699,7 +681,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             chip_name,
                             begin.elapsed()
                         );
-                        // Assert that the chip width data is correct.
                         let expected_width = prep_trace.as_ref().map(|t| t.width()).unwrap_or(0);
                         assert_eq!(
                             expected_width,
@@ -707,7 +688,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             "Incorrect number of preprocessed columns for chip {chip_name}"
                         );
 
-                        // Count the number of constraints.
                         let num_main_constraints = get_symbolic_constraints(
                             &chip.air,
                             AirLayout {
@@ -737,35 +717,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let mut named_preprocessed_traces =
             named_preprocessed_traces.into_iter().flatten().collect::<Vec<_>>();
 
-        // Order the preprocessed chips BY NAME.
-        //
-        // The order is the order the round is committed in, and a verifier has
-        // to know which committed column belongs to which chip.  Under a
-        // height-first order that mapping can only come from the key
-        // (`chip_information`); under NAME order any verifier reproduces it
-        // from the machine's chip set alone, without key-carried chip
-        // metadata.
-        //
-        // Nothing downstream wants the heights descending: the jagged packer
-        // walks the list in the given order and accumulates offsets
-        // (`compute_jagged_metadata_from_dims`), and `chip_ordering` indexes
-        // `traces` by the same list either way.
         named_preprocessed_traces.sort_by(|a, b| a.0.cmp(&b.0));
 
-        // Only the serialisable domain description is kept -- it goes into the
-        // verifying key's `chip_information`.
         let chip_information: Vec<_> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| {
-                // The two-adic domain ENCLOSING the trace.  Recursion chips
-                // are padded to the shape's exact rows (a multiple of 32, not
-                // a power of two), so this cannot go through
-                // `natural_domain_for_degree` (`log2_strict_usize`); the record
-                // is `(natural shift, ceil_log2(height))`, which is the same
-                // domain for the power-of-two heights it used to be built from.
-                // The basefold verifier never reads it (the vk hash absorbs
-                // commitment / pc_start / digest only); the dummy vk in
-                // `recursion/circuit/src/stark.rs` mirrors this exactly.
                 let ser_domain = SerializableDomain::new(
                     Val::<SC>::ONE,
                     crate::shard_level::ceil_log2(trace.height()),
@@ -774,23 +730,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .collect();
 
-        // Commit to the preprocessed traces.  One path, always -- no height
-        // threshold, no opt-in flag, no fallback.
         let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
             .collect();
-        // Setup produces the commitment AND the data needed to open it.
-        // Keep both — the root goes
-        // to the vk, the precompute is seeded into the proving key below, so the
-        // opening round never has to re-derive the committed order.
-        // The pins this program's proofs commit under: its own class when the
-        // program names one, else the machine's default.
         let pins = program.area_pins().or(self.recursion_pins);
         let prep_precomputed = SC::prep_precompute(&named, pins.map(|p| p.prep));
         let commit = prep_precomputed.commit_root();
 
-        // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces
             .iter()
             .enumerate()
@@ -812,9 +759,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 initial_global_cumulative_sum,
                 traces,
                 preprocessed_mles: std::sync::OnceLock::new(),
-                // Seeded from the very precompute whose root became `commit`
-                // above, so the opening round reuses the committed data
-                // directly instead of rebuilding it from `traces`.
                 preprocessed_data: {
                     let cell = std::sync::OnceLock::new();
                     let _ = cell.set(std::sync::Arc::new(prep_precomputed));
@@ -857,7 +801,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             chip_name,
                             begin.elapsed()
                         );
-                        // Assert that the chip width data is correct.
                         let expected_width =
                             prep_trace.as_ref().map_or(0, p3_matrix::Matrix::width);
                         assert_eq!(
@@ -866,7 +809,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                             "Incorrect number of preprocessed columns for chip {chip_name}"
                         );
 
-                        // Count the number of constraints.
                         let num_main_constraints = get_symbolic_constraints(
                             &chip.air,
                             AirLayout {
@@ -896,35 +838,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let mut named_preprocessed_traces =
             named_preprocessed_traces.into_iter().flatten().collect::<Vec<_>>();
 
-        // Order the preprocessed chips BY NAME.
-        //
-        // The order is the order the round is committed in, and a verifier has
-        // to know which committed column belongs to which chip.  Under a
-        // height-first order that mapping can only come from the key
-        // (`chip_information`); under NAME order any verifier reproduces it
-        // from the machine's chip set alone, without key-carried chip
-        // metadata.
-        //
-        // Nothing downstream wants the heights descending: the jagged packer
-        // walks the list in the given order and accumulates offsets
-        // (`compute_jagged_metadata_from_dims`), and `chip_ordering` indexes
-        // `traces` by the same list either way.
         named_preprocessed_traces.sort_by(|a, b| a.0.cmp(&b.0));
 
-        // Only the serialisable domain description is kept -- it goes into the
-        // verifying key's `chip_information`.
         let chip_information: Vec<_> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| {
-                // The two-adic domain ENCLOSING the trace.  Recursion chips
-                // are padded to the shape's exact rows (a multiple of 32, not
-                // a power of two), so this cannot go through
-                // `natural_domain_for_degree` (`log2_strict_usize`); the record
-                // is `(natural shift, ceil_log2(height))`, which is the same
-                // domain for the power-of-two heights it used to be built from.
-                // The basefold verifier never reads it (the vk hash absorbs
-                // commitment / pc_start / digest only); the dummy vk in
-                // `recursion/circuit/src/stark.rs` mirrors this exactly.
                 let ser_domain = SerializableDomain::new(
                     Val::<SC>::ONE,
                     crate::shard_level::ceil_log2(trace.height()),
@@ -933,15 +851,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .collect();
 
-        // Commit to the preprocessed traces.  One path, always -- no height
-        // threshold, no opt-in flag, no fallback.
         let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
             .collect();
         let commit = SC::prep_commit(&named, self.prep_area_pin());
 
-        // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces
             .iter()
             .enumerate()
@@ -1018,27 +933,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .collect::<Vec<_>>();
 
-        // `ZIREN_DEPS_CENSUS=1`: per-chip cost of this pass.  It is the largest
-        // item in a core worker's shard prepare and ~21 chips reach it through
-        // the DEFAULT impl, which runs a full host `generate_trace` and throws
-        // the matrix away -- this says which of them that actually costs.
         let census = std::env::var("ZIREN_DEPS_CENSUS").is_ok_and(|v| v != "0");
         let mut census_rows: Vec<(String, u128)> = Vec::new();
-        // Two phases per record.  Every chip's `generate_dependencies` reads
-        // the RECORD and writes its own output; the only chip that reads what
-        // an earlier chip in this loop appended is `Global` (it consumes the
-        // `global_lookup_events` that the syscall and memory chips emit).  So
-        // the chips ahead of the first `Global` are independent of each other
-        // and run in parallel, each into its own output record; the outputs
-        // are appended in chip order (deterministic, byte-identical proofs);
-        // then `Global` and everything after it run sequentially, appending
-        // as they go, exactly as before.
-        //
-        // Opt-in (`ZIREN_DEPS_PARALLEL=1`): on an 8-card reth run the split
-        // was 1.7% SLOWER end to end -- the host is core-saturated by the
-        // workers' replays, so the pass finishes sooner only by taking cores
-        // from the shards being replayed next to it.  The sequential loop is
-        // the default.
         let serial = !std::env::var("ZIREN_DEPS_PARALLEL").is_ok_and(|v| v != "0");
         let first_consumer = chips.iter().position(|c| c.name() == "Global").unwrap_or(chips.len());
         for record in records.iter_mut() {
@@ -1089,14 +985,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 }
             }
             for chip in seq_chips.iter() {
-                // A chip whose byte lookups the device prover counts off its
-                // own trace has no dependencies left to generate here.
                 if crate::device_byte_lookups::chip_byte_lookups_on_device(&chip.name()) {
                     continue;
                 }
-                // `included` is evaluated against the record as it stands:
-                // `Global` is only included once the syscall and memory chips
-                // ahead of it have appended their `global_lookup_events`.
                 if !chip.included(record) {
                     continue;
                 }
@@ -1157,9 +1048,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             >,
-        // Threaded to the shard verifier's static OUTER generic
-        // BaseFold verify (former `OUTER_JAGGED_VERIFY_HOOK`). Verify-only, no
-        // VK / committed-byte impact; both rings satisfy it.
         SC: crate::BasefoldRing,
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
@@ -1170,29 +1058,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 >>::Commitment,
             >,
     {
-        // Observe the preprocessed commitment.
         vk.observe_into(challenger);
 
-        // Verify the shard proofs.
         if proof.shard_proofs.is_empty() {
             return Err(MachineVerificationError::EmptyProof);
         }
 
-        // Every read of `public_values` below -- the `observe_slice` here, and
-        // the typed `Borrow` in the shard loop -- SLICES it to `num_pv_elts`.
-        // The typed length check lives in `verify_shard`
-        // (`shard_level/verifier.rs`, `PublicValuesLengthMismatch`), which runs
-        // AFTER both, and the `Borrow` impl guards itself with a
-        // `debug_assert!` that is compiled out.  So a deserialized proof whose
-        // first shard carries a short `public_values` panicked with a slice
-        // range error before the typed error could be produced -- a panic
-        // inside a `Result`-returning verifier, on untrusted input.  Check the
-        // shape up front instead.
-        //
-        // The guard reports the error `verify_shard` would have reported for
-        // the same proof, carrying `expected`/`got`, so moving the check
-        // earlier changes WHEN the length is rejected and nothing about the
-        // verdict or the error a caller matches on.
         let num_pv_elts = self.num_pv_elts();
         if let Some(p) = proof.shard_proofs.iter().find(|p| p.public_values.len() < num_pv_elts) {
             return Err(MachineVerificationError::InvalidShardProof(
@@ -1206,20 +1077,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             ));
         }
 
-        // Snapshot the (now observed) base challenger as an immutable, shareable value.
-        // Each shard clones this snapshot independently, exactly as the serial loop did,
-        // so the per-shard challenger state is bit-identical to the serial version.
         let base_challenger = &*challenger;
 
-        // Verify each shard proof in parallel. Each iteration is fully independent: it clones
-        // the base challenger (read-only), observes its own shard public values, and verifies
-        // its own shard. The closure returns only the shard index on failure (a `Send` value),
-        // so we do not require the rich `MachineVerificationError<SC>` to be `Send`. To preserve
-        // the serial verdict exactly, we collect the indices of all failing shards and, if any,
-        // re-verify the lowest-index failure serially to reconstruct the original typed error —
-        // identical to what the serial `for` loop returned (it returned the first failure).
-        // The preprocessed opening round's chip set, derived from the MACHINE
-        // once for the whole proof.
         let prep_chip_dims = self.preprocessed_chip_dims();
         let prep_chip_dims = &prep_chip_dims;
         let failed_shard = tracing::debug_span!("verify shard proofs").in_scope(|| {
@@ -1244,17 +1103,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 })
             };
 
-            // Bound how many shard verifies run concurrently, preserving the
-            // EXACT verdict: shards are independent, and we still collect ALL
-            // failures and re-verify the lowest-index one serially for the
-            // identical typed error.
-            //
-            // The cap is a conservative default, not a memory guard:
-            // per-shard verify materializes no padded-dense-sized transient
-            // (the weight MLE comes from the branching-program closed form
-            // `full_jagged_evaluation`, ~38 ms, size-independent).  Verify is
-            // not a throughput target; raise
-            // `ZIREN_VERIFY_SHARD_CONCURRENCY` if it ever becomes one.
             let cap = std::env::var("ZIREN_VERIFY_SHARD_CONCURRENCY")
                 .ok()
                 .and_then(|v| v.parse::<usize>().ok())
@@ -1280,11 +1128,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         });
 
         if let Some(result) = failed_shard {
-            // The lowest-index shard that failed in parallel; re-run serially for its typed error.
             result?;
         }
 
-        // Verify the cumulative sum is 0.
         tracing::debug_span!("verify global cumulative sum is 0").in_scope(|| {
             let sum = proof
                 .shard_proofs

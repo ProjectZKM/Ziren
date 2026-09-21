@@ -273,7 +273,6 @@ where
         let ff = self.config.round_parameters[0].folding_factor;
         let num_rounds = self.config.round_parameters.len();
 
-        // ---- Starting commitment: interleaved encode + commit + OOD. ----
         let start_rate = self.config.starting_log_inv_rate;
         let start_leaves = encode_interleaved_base(
             mle.guts().as_slice(),
@@ -294,7 +293,6 @@ where
             start_ood_answers.push(ans);
         }
 
-        // ---- Seat the folder (starting claim + OOD batched in). ----
         let batch: EF = challenger.sample_algebra_element();
         let mut claimed_sum = eval;
         let mut coeff = batch;
@@ -319,7 +317,6 @@ where
         let mut folding_pow: Vec<ProofOfWork<F>> = Vec::new();
 
         for (r, round_cfg) in self.config.round_parameters.iter().enumerate() {
-            // (1) Fold this round's variables (sumcheck + PoW).
             let mut this_round_randomness = Vec::new();
             let polys = folder.fold_variables::<F, _>(
                 round_cfg.folding_factor,
@@ -336,9 +333,6 @@ where
                 break;
             }
 
-            // (2) Interleaved-encode the folded polynomial and commit it.
-            // Leaf width follows the NEXT round's folding factor - that
-            // round's stir fold consumes one leaf per query.
             let next_ff = self.config.round_parameters[r + 1].folding_factor;
             let rem = folder.f_vec.len().trailing_zeros() as usize;
             let leaves = encode_interleaved_ef::<F, EF, _>(
@@ -352,7 +346,6 @@ where
             challenger.observe(commitment.clone());
             round_commitments.push(commitment);
 
-            // (3) Fresh OOD on the folded polynomial (Lagrange).
             let folded = Mle::<EF>::from_row_major(RowMajorMatrix::new(folder.f_vec.clone(), 1));
             let mut ood_points = Vec::with_capacity(round_cfg.ood_samples);
             let mut ood_answers = Vec::with_capacity(round_cfg.ood_samples);
@@ -365,15 +358,12 @@ where
             }
             round_ood_answers.push(ood_answers.clone());
 
-            // (4) Query PoW, then sample query indices into the PREVIOUS codeword.
             folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
             let mask = (1usize << prev_domain_log) - 1;
             let indices: Vec<usize> = (0..round_cfg.num_queries)
                 .map(|_| challenger.sample_bits(prev_domain_log) & mask)
                 .collect();
 
-            // (5) Open the previous codeword's ROWS at those indices (the leaf
-            //     index IS the domain index) and fold each to a stir value.
             let g_prev = EF::two_adic_generator(prev_domain_log);
             let mut leaves_open = Vec::with_capacity(indices.len());
             let mut stir_points: Vec<Vec<EF>> = Vec::with_capacity(indices.len());
@@ -395,9 +385,6 @@ where
             }
             round_query_openings.push(MerkleOpening { leaves: leaves_open });
 
-            // (6) Fold OOD (Lagrange) then STIR (monomial) constraints into the
-            //     running claim and weight under ONE round batch, continuing
-            //     powers across the two groups.
             let round_batch: EF = challenger.sample_algebra_element();
             folder.add_ood_constraints(&ood_points, &ood_answers, round_batch);
             let start_coeff = round_batch.exp_u64((ood_points.len() + 1) as u64);
@@ -408,11 +395,7 @@ where
             prev_data = prover_data;
         }
 
-        // ---- Final round: reveal the final poly; final PoW + final queries. ----
         let final_poly = folder.f_vec.clone();
-        // Bound before the final proof-of-work and the final indices, as in
-        // the stacked prover: the revealed polynomial is the last oracle and
-        // its coefficients must not be chosen once the positions are known.
         for c in final_poly.iter() {
             challenger.observe_algebra_element(*c);
         }
@@ -515,7 +498,6 @@ where
             )));
         }
 
-        // ---- Replay the starting commit + OOD. ----
         challenger.observe(self.start_commitment.clone());
         for (k, ans) in self.start_ood_answers.iter().enumerate() {
             let pt: Vec<EF> = (0..n).map(|_| challenger.sample_algebra_element()).collect();
@@ -536,7 +518,6 @@ where
             coeff *= batch;
         }
 
-        // ---- Per-round replay. ----
         let mut prev_domain_log = (n - ff) + self.config.starting_log_inv_rate;
         let mut prev_base = true;
         let mut prev_commitment = self.start_commitment.clone();
@@ -583,7 +564,6 @@ where
                 break;
             }
 
-            // Commitment + OOD replay.
             challenger.observe(proof.round_commitments[r].clone());
             let rem = n - folded_vars;
             let ood_answers = &proof.round_ood_answers[r];
@@ -594,8 +574,6 @@ where
                 ood_points.push(pt);
             }
 
-            // Query PoW + indices, then AUTHENTICATE each opening and re-derive
-            // its stir value.
             let query_pow = &proof.folding_pow[pow_flat];
             pow_flat += 1;
             if !challenger.check_witness(round_cfg.queries_pow_bits, query_pow.0) {
@@ -638,7 +616,6 @@ where
                 stir_points.push(map_to_pow_lsb(g_prev.exp_u64(idx as u64), rem));
             }
 
-            // Batch OOD then STIR under one round batch, continuing powers.
             let round_batch: EF = challenger.sample_algebra_element();
             let mut cc = round_batch;
             for (a, p) in ood_answers.iter().zip(&ood_points) {
@@ -658,13 +635,6 @@ where
             prev_commitment = proof.round_commitments[r].clone();
         }
 
-        // ---- Final PoW + final queries: the last committed codeword must fold
-        //      (by the LAST round's randomness) to the revealed final_poly's
-        //      monomial evaluation. ----
-        // The revealed polynomial is absorbed first, mirroring the prover: its
-        // length was pinned to `2^final_log` above, and binding it here is what
-        // stops its coefficients being chosen after the final positions are
-        // known.
         for c in proof.final_poly.iter() {
             challenger.observe_algebra_element(*c);
         }
@@ -705,7 +675,6 @@ where
             }
         }
 
-        // ---- Terminal identity with per-basis closed forms. ----
         let final_mle = Mle::from_row_major(RowMajorMatrix::new(proof.final_poly.clone(), 1));
         let mut total = EF::ZERO;
         for c in &constraints {

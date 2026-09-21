@@ -78,21 +78,6 @@ where
         std::borrow::Borrow<[[KoalaBear; DIGEST_SIZE]]>,
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        // The inputs, in order: the preprocessed commitment, pc_start, and the
-        // initial cumulative sum.
-        //
-        // Nothing about the chips is folded in, and nothing needs to be: the
-        // preprocessed commitment is the HASH-BOUND digest
-        // `compress([root, hash(row_counts ++ column_counts)])`, so it already
-        // discriminates the committed geometry, and the chip SET and its
-        // widths are a property of the MACHINE that any verifier reconstructs
-        // (`StarkMachine::preprocessed_chip_dims`).  The per-prep-chip
-        // `[name_digest, width]` fold this replaces existed only because the
-        // commitment did not yet say what shape it committed.
-        //
-        // MUST stay byte-identical to the host verifier's fold
-        // (crates/verifier/src/stark/mod.rs) and the in-circuit one
-        // (crates/recursion/circuit/src/types.rs).
         let mut inputs: Vec<KoalaBear> = Vec::with_capacity(DIGEST_SIZE + 1 + 14);
         let cap: &[[KoalaBear; DIGEST_SIZE]] = self.commit.borrow();
         inputs.extend(&cap[0]);

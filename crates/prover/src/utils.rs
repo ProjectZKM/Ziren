@@ -62,9 +62,6 @@ pub fn root_public_values_digest(
     public_values: &RootPublicValues<KoalaBear>,
 ) -> [KoalaBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
-    // Must match the in-circuit `root_public_values_digest`
-    // (recursion/circuit/.../public_values.rs): bind zkm_vk_digest,
-    // committed_value_digest, exit_code, vk_root.
     let input = (*public_values.zkm_vk_digest())
         .into_iter()
         .chain(
@@ -147,8 +144,6 @@ pub fn words_to_bytes<T: Copy>(words: &[Word<T>]) -> Vec<T> {
 pub fn koalabears_to_bn254(digest: &[KoalaBear; 8]) -> Bn254 {
     let mut result = Bn254::ZERO;
     for word in digest.iter() {
-        // Since KoalaBear prime is less than 2^31, we can shift by 31 bits each time and still be
-        // within the Bn254 field, so we don't have to truncate the top 3 bits.
         result *= Bn254::from_u64(1 << 31);
         result += Bn254::from_u32(word.as_canonical_u32());
     }
@@ -162,7 +157,6 @@ pub fn koalabear_bytes_to_bn254(bytes: &[KoalaBear; 32]) -> Bn254 {
     for (i, byte) in bytes.iter().enumerate() {
         debug_assert!(byte < &KoalaBear::from_u32(256));
         if i == 0 {
-            // 32 bytes is more than Bn254 prime, so we need to truncate the top 3 bits.
             result = Bn254::from_u32(byte.as_canonical_u32() & 0x1f);
         } else {
             result *= Bn254::from_u32(256);

@@ -7,21 +7,16 @@ use zkm_sdk::{HashableKey, ProverClient, ZKMStdin, ZKM_CIRCUIT_VERSION};
 
 use crate::{Groth16Verifier, PART_STARK_VK_BYTES};
 
-// RUST_LOG=debug cargo test -r test_verify_groth16 --features ark
 #[test]
 fn test_verify_groth16() {
-    // Set up the pk and vk.
     let client = ProverClient::cpu();
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
 
-    // Generate the Groth16 proof.
     let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
-    // Extract the proof and public inputs.
     let proof = zkm_proof_with_public_values.bytes();
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
-    // Get the vkey hash.
     let vkey_hash = vk.bytes32();
 
     crate::Groth16Verifier::verify(&proof, &public_inputs, &vkey_hash, &crate::GROTH16_VK_BYTES)
@@ -39,24 +34,19 @@ fn test_verify_groth16() {
     }
 }
 
-// cargo test -r --features ark -- --ignored test_verify_groth16_imm_wrap_vk
 #[test]
 #[ignore]
 fn test_verify_groth16_imm_wrap_vk() {
     std::env::set_var("ZKM_IMM_WRAP_VK", "1");
 
-    // Set up the pk and vk.
     let client = ProverClient::cpu();
     let (pk, vk) = client.setup(HELLO_WORLD_IMM_WRAP_VK_ELF);
 
-    // Generate the Groth16 proof.
     let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
-    // Extract the proof and public inputs.
     let proof = zkm_proof_with_public_values.bytes();
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
-    // Get the vkey hash.
     let vkey_hash = vk.bytes32();
     crate::Groth16Verifier::verify_by_imm_groth16_vk(
         &proof,
@@ -88,18 +78,14 @@ fn test_get_part_stark_vk() {
 
 #[test]
 fn test_verify_plonk() {
-    // Set up the pk and vk.
     let client = ProverClient::cpu();
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
 
-    // Generate the Plonk proof.
     let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).plonk().run().unwrap();
 
-    // Extract the proof and public inputs.
     let proof = zkm_proof_with_public_values.bytes();
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
-    // Get the vkey hash.
     let vkey_hash = vk.bytes32();
 
     crate::PlonkVerifier::verify(&proof, &public_inputs, &vkey_hash, &crate::PLONK_VK_BYTES)
@@ -108,15 +94,12 @@ fn test_verify_plonk() {
 
 #[test]
 fn test_verify_stark() {
-    // Set up the pk and vk.
     let client = ProverClient::cpu();
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
 
-    // Generate the compressed proof.
     let zkm_proof_with_public_values =
         client.prove(&pk, ZKMStdin::new()).compressed().run().unwrap();
 
-    // Extract the proof and public inputs.
     let proof = zkm_proof_with_public_values.bytes();
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
@@ -128,26 +111,20 @@ fn test_verify_stark() {
     crate::StarkVerifier::verify_proof(&proof, &vk_bytes).expect("Stark proof is invalid");
 }
 
-// ZKM_DEV=true RUST_LOG=debug cargo test -r test_e2e_verify_groth16 --features ark -- --nocapture
 #[test]
 #[ignore]
 fn test_e2e_verify_groth16() {
-    // Set up the pk and vk.
     let client = ProverClient::cpu();
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
 
-    // Generate the Groth16 proof.
     std::env::set_var("ZKM_DEV", "true");
     let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
     client.verify(&zkm_proof_with_public_values, &vk).unwrap();
-    // zkm_proof_with_public_values.save("test_binaries/hello-world-groth16.bin").expect("saving proof failed");
 
-    // Extract the proof and public inputs.
     let proof = zkm_proof_with_public_values.bytes();
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
-    // Get the vkey hash.
     let vkey_hash = vk.bytes32();
     println!("vk hash: {vkey_hash:?}");
 
@@ -210,17 +187,12 @@ mod malformed_input {
     /// A VK whose parsed counts are zero, so the loader succeeds on a
     /// well-formed prefix and the PROOF loader is actually reached.
     fn plonk_vk_zero_counts() -> Vec<u8> {
-        // 372 bytes of fixed fields (num_qcp = 0 at 368..372), then g1 + two g2
-        // (32 + 64 + 64), then the 33788-byte reserved block, then a zero u64
-        // commitment-index count.
         vec![0u8; 372 + 160 + 33788 + 8]
     }
 
     #[test]
     fn plonk_proof_loader_survives_every_truncation() {
         let vk = plonk_vk_zero_counts();
-        // Past 384: the boundary the first fix stopped at, where `buffer[384..416]`
-        // used to panic.
         for n in 0..900usize {
             let proof = vec![0u8; n];
             let _ = PlonkVerifier::verify_gnark_proof(&proof, &PUB, &vk);
@@ -238,8 +210,6 @@ mod malformed_input {
 
     #[test]
     fn plonk_vk_loader_survives_a_hostile_index_count() {
-        // `num_commitment_constraint_indexes` is a u64 read out of the VK; a
-        // huge value must not drive an allocation or run off the end.
         let mut vk = plonk_vk_zero_counts();
         let at = 372 + 160 + 33788;
         vk[at..at + 8].copy_from_slice(&u64::MAX.to_be_bytes());
@@ -257,7 +227,6 @@ mod malformed_input {
 
     #[test]
     fn groth16_loaders_survive_every_truncation() {
-        // Both directions: a short VK against a long proof, and the reverse.
         for n in 0..400usize {
             let vk = vec![0u8; n];
             let _ = Groth16Verifier::verify_gnark_proof(&vec![0u8; 300], &PUB, &vk);
@@ -278,8 +247,6 @@ mod malformed_input {
 
     #[test]
     fn stark_rejects_arbitrary_bytes() {
-        // Bincode over arbitrary bytes used to `expect`, and a valid but
-        // non-Compressed variant used to `panic!`.
         for n in [0usize, 1, 7, 64, 1024] {
             let bytes = vec![0xABu8; n];
             assert!(StarkVerifier::verify(&bytes, b"public", &bytes).is_err());
@@ -306,7 +273,6 @@ mod malformed_input {
 
     #[test]
     fn bn254_public_values_is_total_over_hashes() {
-        // An arbitrary 32-byte hash can exceed the BN254 scalar modulus.
         for b in [0x00u8, 0x7f, 0xff] {
             let _ = crate::bn254_public_values(&[b; 32], b"public");
         }

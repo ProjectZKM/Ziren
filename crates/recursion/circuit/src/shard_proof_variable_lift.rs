@@ -71,8 +71,6 @@ pub fn lift_logup_gkr_round_proof<K: Clone>(
 /// recursion-circuit's own [`rc::ChipEvaluation`].
 pub fn lift_chip_evaluation<K: Clone>(src: &st::ChipEvaluation<K>) -> rc::ChipEvaluation<K> {
     rc::ChipEvaluation {
-        // Thread the FULL-POINT openings through so the
-        // in-circuit LogUp last-layer reconstruction can read them.
         main_trace_evaluations_full: src.main_trace_evaluations_full.clone(),
         preprocessed_trace_evaluations_full: src.preprocessed_trace_evaluations_full.clone(),
     }
@@ -140,16 +138,14 @@ where
 }
 
 /// Build a [`crate::shard_basefold::ShardVerifyingKeyVariable`]
-/// from a legacy [`crate::VerifyingKeyVariable`].
+/// from a [`crate::VerifyingKeyVariable`].
 ///
-/// - `pc_start`: `[vk.pc_start, ZERO, ZERO]` — KoalaBear is 31-bit so
-///   the program counter fits in a single Felt; the new shape is
-///   3-felt low/mid/high, mid+high stay zero.
+/// - `pc_start`: `[vk.pc_start, 0, 0]`; the pc fits one KoalaBear
+///   felt, so the mid/high limbs are zero.
 /// - `preprocessed_commit`: extracted directly from `vk.commitment`
 ///   via the `DigestVariable = [Felt<KoalaBear>; 8]` trait bound.
-/// - `enable_untrusted_programs`: `ZERO` (legacy verifying keys are
-///   trusted programs by default; the legacy vk doesn't carry this
-///   flag, so trusted-mode is the only correct lift).
+/// - `enable_untrusted_programs`: `0`; the source vk carries no such
+///   flag and describes a trusted program.
 pub fn build_basefold_verifying_key_variable<C, SC>(
     builder: &mut Builder<C>,
     vk: &crate::VerifyingKeyVariable<C, SC>,
@@ -214,7 +210,6 @@ pub fn build_basefold_shard_verifier_with_num_vars<HV>(
 ) -> crate::shard_basefold::JaggedShardVerifier<
     crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
 > {
-    // Inner stages (core/compress/shrink): production default (log_blowup=1).
     build_basefold_shard_verifier_with_params::<HV>(
         max_log_row_count,
         log_stacking_height,
@@ -298,11 +293,6 @@ where
                 opening.main_trace_evaluations_full.as_ref().cloned().unwrap_or_default();
             let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
-            // `degree` is the bit-decomposition of chip height padded
-            // to `max_log_row_count + 1` bits — matches the shape
-            // `verify_zerocheck` expects at zerocheck.rs:503 when
-            // it constructs `degree_symbolic` of the same length as
-            // `proof_point_extended` (= max_log_row_count + 1).
             let degree_bits: Vec<Ext<C::F, C::EF>> =
                 (0..max_log_row_count + 1).map(|_| builder.constant(C::EF::ZERO)).collect();
             crate::basefold_chip_opened_values::JaggedChipOpenedValues {
@@ -330,8 +320,7 @@ where
 /// `local_cumulative_sum` and `global_cumulative_sum` per chip.
 ///
 /// When the map is missing an entry for a given chip name, falls back to
-/// zero placeholders (preserves legacy behavior for chips without
-/// populated sums).  `degree` bits remain zero placeholders.
+/// zero placeholders.  `degree` bits remain zero placeholders.
 pub fn build_opened_values_from_chip_openings_with_cumsums<C>(
     builder: &mut Builder<C>,
     chip_openings: &std::collections::BTreeMap<
@@ -364,8 +353,6 @@ where
             let degree_bits: Vec<Ext<C::F, C::EF>> =
                 (0..max_log_row_count + 1).map(|_| builder.constant(C::EF::ZERO)).collect();
 
-            // Use real cumulative sums when present; fall back to zero
-            // placeholders when chip is missing from the map.
             let (local_cumulative_sum, global_cumulative_sum) =
                 if let Some(sums) = chip_cumulative_sums.get(name) {
                     (sums.local, sums.global)
@@ -401,14 +388,13 @@ where
 /// The host `JaggedShardProof.opened_values` carries each chip's
 /// trace evaluations at the *zerocheck-reduced* point `z` (prep + main
 /// `local`), in chip-NAME order — the values the in-circuit zerocheck
-/// verifier batches/constrains and asserts equal `point_and_eval.1`
-/// (`zerocheck.rs:573`).  But the host carries placeholder `degree`
+/// verifier batches/constrains and asserts equal `point_and_eval.1`.  But the host carries placeholder `degree`
 /// bits and zero cumulative sums, so this helper rebuilds, per chip
 /// (still name-aligned with `chip_names`):
 ///
 ///   - `degree` ← REAL big-endian boolean coordinates of the chip's
 ///     `log_height` (length `max_log_row_count + 1`), so the zerocheck
-///     verifier's `full_geq` padded-row mask (`zerocheck.rs:517`) is
+///     verifier's `full_geq` padded-row mask is
 ///     correct rather than the all-zero stub.
 ///   - `local_cumulative_sum` / `global_cumulative_sum` ← the real
 ///     per-chip sums witnessed in `chip_cumulative_sums` (falling back
@@ -440,15 +426,8 @@ where
         .map(|(idx, mut chip_opening)| {
             let name = chip_names.get(idx);
 
-            // KEEP the carried degree — the REAL big-endian
-            // height bits, carried host-side via the proof's `quotient[0]`
-            // and lifted in
-            // `basefold_opened_values_from_host`.  This is the VirtualGeq
-            // threshold (zerocheck_prover.rs:487 `VirtualGeq::new(main_height)`)
-            // the recursion `full_geq` (zerocheck.rs:517) compares against.
             let _ = (&chip_heights, bit_len);
 
-            // Real per-chip cumulative sums when present.
             if let Some(n) = name {
                 if let Some(sums) = chip_cumulative_sums.get(n) {
                     chip_opening.local_cumulative_sum = sums.local;
@@ -485,14 +464,12 @@ where
 /// Real `chip_height_bits` derivation from a per-chip RAW-height map.
 ///
 /// For each chip in `chip_names`, looks up its RAW height in
-/// `chip_heights` (defaults to `0` when missing — matches the
-/// legacy proof-bytes path).
+/// `chip_heights` (`0` when missing).
 ///
 /// Returns a `Vec<(name, bits)>` where `bits` is the big-endian
 /// bit-decomposition of the RAW height into `max_log_row_count + 1`
-/// slots — exactly the shape the recursion verifier's Horner
-/// accumulation at `shard_basefold.rs:418-422` expects
-/// (`acc = bit + acc * 2`), recomposing to the SAME raw-height felt the
+/// slots — the shape the recursion verifier's Horner accumulation
+/// `acc = bit + 2·acc` expects, recomposing to the SAME raw-height felt the
 /// host prologue observes.
 ///
 /// # Soundness
@@ -514,7 +491,6 @@ where
 {
     use p3_field::PrimeCharacteristicRing;
 
-    // Pair each chip name with its raw height (default 0 when missing).
     let mut entries: Vec<(String, usize)> = chip_names
         .iter()
         .map(|name| {
@@ -522,31 +498,14 @@ where
             (name.clone(), height)
         })
         .collect();
-    // Sort by NAME (ascending). The host prologue iterates
-    // `shard_chips_ordered(chip_ordering)` (machine.rs:704) and the
-    // prover's `chip_ordering` is the BTreeMap/name order: the host
-    // observes per-chip metadata in
-    // [BaseAlu, ExtAlu, MemoryConst, MemoryVar, Poseidon2WideDeg9,
-    //  PublicValues, Select] = alphabetical, NOT height-descending. A
-    // `Reverse(log_h), name` sort would reorder the per-chip observe
-    // (Poseidon2WideDeg9 is tall but 5th alphabetically) → the prologue
-    // sponge would diverge from the prover at the per-chip stage → every
-    // post-prologue GKR/zerocheck/jagged squeeze would be wrong (in the gnark
-    // wrap this surfaces at the GKR round-0 claimed sum). Name order also
-    // aligns the height bits positionally with the name-ordered
-    // `chip_openings`/`opened_values` (both BTreeMap).
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     let bit_len = max_log_row_count + 1;
     entries
         .into_iter()
         .map(|(name, height)| {
-            // Big-endian: MSB at index 0, matches the Horner
-            // recomposition `acc = bit + acc * 2` which produces
-            // the value bit_0 * 2^(n-1) + bit_1 * 2^(n-2) + ...
             let bits: Vec<Felt<C::F>> = (0..bit_len)
                 .map(|i| {
-                    // i=0 is the MSB (slot 0 of Horner accumulation).
                     let shift = bit_len - 1 - i;
                     let bit_val =
                         if shift < usize::BITS as usize { (height >> shift) & 1 } else { 0 };
@@ -567,12 +526,11 @@ where
 /// [`chip_height_bits_from_heights`] BAKES each height bit as a
 /// `builder.constant()` from the COMPILE-TIME `chip_heights`, so the
 /// recursion program's bytes depend on the per-chip heights of the proof
-/// being verified — the normalize/wrap program's vk then differs per
-/// workload and is never in the enumerated `vk_map` (root cause of the
-/// VERIFY_VK=true "Invalid verification key" failure).
+/// being verified; the normalize/wrap program's vk then varies per
+/// workload and is not in the enumerated `vk_map`.
 ///
 /// This variant instead derives the SAME big-endian RAW-height bits the
-/// prologue observes (Horner-recomposed at `shard_basefold.rs:450-456`)
+/// prologue observes (Horner-recomposed by the shard verifier)
 /// from the WITNESSED per-chip `degree` (= host `quotient[0]`, the
 /// big-endian boolean coordinates of the chip's RAW HEIGHT, lifted
 /// in [`crate::shard_level_witness::basefold_opened_values_from_host`]).
@@ -598,40 +556,21 @@ pub fn chip_height_bits_from_opened_degrees<C>(
     max_log_row_count: usize,
 ) -> Vec<(String, Vec<Felt<C::F>>)>
 where
-    // The trait bound avoids `Bit = Felt<InnerVal>` so the
-    // SC-generic compose/deferred/wrap verifiers can call this too —
-    // the body uses `num2bits_v2_f` directly (what both InnerConfig's
-    // and WrapConfig's `C::num2bits` delegate to), so no `C::Bit`.
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
     use p3_field::PrimeCharacteristicRing;
 
     let bit_len = max_log_row_count + 1;
-    // Name order matches the host prologue per-chip observe and the
-    // name-sorted `chip_openings` / `opened_values.chips`.
     let mut sorted_names: Vec<String> = chip_names.to_vec();
     sorted_names.sort();
 
-    // PARALLEL over chips.  Each body Horner-recomposes ONE chip's degree
-    // bits, projects with `ext2felt`, and re-decomposes with `num2bits_v2_f`
-    // (~22 + ~22 ops); the chain inside a chip is real, but nothing crosses
-    // between chips, so the ~100 per-chip stretches need not run single-file.
     sorted_names.into_iter().enumerate().ir_par_map_collect::<Vec<_>, _, _>(
         builder,
         |builder, (idx, name)| {
-            // The witnessed per-chip degree bits (big-endian bits of the
-            // RAW height).  Fall back to a single zero stub when absent
-            // (empty/legacy proofs) → height = 0.
             let degree: &[Ext<C::F, C::EF>] =
                 opened_values.chips.get(idx).map(|c| c.degree.as_slice()).unwrap_or(&[]);
             let dlen = degree.len();
 
-            // RAW height: Horner-recompose the big-endian degree bits in
-            // the extension field (`acc = acc*2 + bit` — the same
-            // recompose `chip_height_felts_from_opened_degrees` uses for
-            // the jagged geometry), then project to the base field.  The
-            // emitted op sequence is value-independent (fixed length
-            // `dlen`), so the program stays chip-set-determined.
             let two: Ext<C::F, C::EF> = builder.constant(C::EF::TWO);
             let mut acc_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             for d in degree.iter() {
@@ -643,13 +582,6 @@ where
                 C::ext2felt(builder, acc_ext)[0]
             };
 
-            // Big-endian bit_len-wide decomposition of the height (MSB
-            // first), matching the Horner consumer's `acc = bit + acc*2`
-            // (heights are ≤ 2^max_log_row_count, so bit_len =
-            // max_log_row_count + 1 bits always fit).
-            // `num2bits_v2_f` == `C::num2bits` for InnerConfig/WrapConfig
-            // (both delegate, lib.rs:293/421) — used directly to avoid the
-            // `C::Bit` bound.
             use zkm_recursion_compiler::circuit::CircuitV2Builder;
             let mut bits: Vec<Felt<C::F>> = builder.num2bits_v2_f(height_felt, bit_len);
             bits.reverse();
@@ -676,16 +608,12 @@ pub fn chip_height_felts_from_opened_degrees<C>(
     opened_values: &crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
 ) -> Vec<Felt<C::F>>
 where
-    // The trait bound omits `C::Bit` (unused in the body) so the
-    // SC-generic compose/deferred/wrap verifiers can call this too.
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
     use p3_field::PrimeCharacteristicRing;
 
     let mut sorted_names: Vec<String> = chip_names.to_vec();
     sorted_names.sort();
-    // PARALLEL over chips — same independence as
-    // `chip_height_bits_from_opened_degrees` above.
     sorted_names.into_iter().enumerate().ir_par_map_collect::<Vec<_>, _, _>(
         builder,
         |builder, (idx, _name)| {
@@ -694,7 +622,6 @@ where
             if degree.is_empty() {
                 return builder.constant(C::F::ZERO);
             }
-            // Horner-recompose the big-endian height bits: acc = acc*2 + bit.
             let two: Ext<C::F, C::EF> = builder.constant(C::EF::TWO);
             let mut acc: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             for d in degree.iter() {
@@ -722,7 +649,7 @@ mod tests {
         let lifted = lift_logup_gkr_proof(&src);
         assert_eq!(lifted.round_proofs.len(), src.round_proofs.len());
         assert_eq!(lifted.witness, src.witness);
-        let _ = InnerVal::ZERO; // anchor PrimeCharacteristicRing import
+        let _ = InnerVal::ZERO;
     }
 
     /// Smoke test: build_opened_values_from_chip_openings
@@ -757,12 +684,10 @@ mod tests {
         let opened =
             build_opened_values_from_chip_openings::<InnerConfig>(&mut builder, &chip_openings, 4);
         assert_eq!(opened.chips.len(), 2);
-        // BTreeMap iteration is sorted: Cpu < Memory.
         assert_eq!(opened.chips[0].main.local.len(), 3);
         assert_eq!(opened.chips[0].preprocessed.local.len(), 1);
         assert_eq!(opened.chips[1].main.local.len(), 2);
         assert_eq!(opened.chips[1].preprocessed.local.len(), 0);
-        // degree has max_log_row_count + 1 = 5 bits per chip.
         assert_eq!(opened.chips[0].degree.len(), 5);
         assert_eq!(opened.chips[1].degree.len(), 5);
     }
@@ -942,8 +867,6 @@ mod tests {
         assert_eq!(v.max_log_row_count, 21);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 21);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 21);
-        // Inner production default is (2, 124, 16) =
-        // provable 100-bit soundness.
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.log_blowup, 2);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_queries, 124);
     }
@@ -979,7 +902,7 @@ mod tests {
         let bits = empty_chip_height_bits::<C>(&mut builder, &names, 21);
         assert_eq!(bits.len(), 2);
         assert_eq!(bits[0].0, "Cpu");
-        assert_eq!(bits[0].1.len(), 22); // max_log_row_count + 1
+        assert_eq!(bits[0].1.len(), 22);
     }
 
     /// Verify chip name ordering is preserved.
@@ -1006,16 +929,14 @@ mod tests {
         let mut map: BTreeMap<String, usize> = BTreeMap::new();
         map.insert("A".to_string(), 8);
         map.insert("B".to_string(), 32);
-        map.insert("C".to_string(), 32); // tie broken by name
-        let max_log_row_count = 5; // bit_len = 6
+        map.insert("C".to_string(), 32);
+        let max_log_row_count = 5;
         let result =
             chip_height_bits_from_heights::<C>(&mut builder, &names, &map, max_log_row_count);
-        // Name-ascending sort order: A, B, C (height is NOT a sort key).
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].0, "A");
         assert_eq!(result[1].0, "B");
         assert_eq!(result[2].0, "C");
-        // Each bit vec has max_log_row_count + 1 = 6 slots.
         assert_eq!(result[0].1.len(), 6);
         assert_eq!(result[1].1.len(), 6);
         assert_eq!(result[2].1.len(), 6);
@@ -1031,7 +952,6 @@ mod tests {
         let result = chip_height_bits_from_heights::<C>(&mut builder, &names, &map, 4);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "X");
-        // 5 slots, all zero (height=0 default).
         assert_eq!(result[0].1.len(), 5);
     }
 }

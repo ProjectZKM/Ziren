@@ -28,8 +28,6 @@ fn main() {
     let all: Vec<ZKMProofShape> = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
     tracing::info!("[JIT-COV] {} shapes enumerated", all.len());
 
-    // One program per category is enough to characterise the mix; the
-    // categories differ in what they verify, not in the instruction set.
     let mut seen: BTreeMap<&'static str, ()> = BTreeMap::new();
     let mut totals = Plan::default();
 
@@ -52,14 +50,9 @@ fn main() {
         };
         seen.insert(cat, ());
 
-        // No preparation needed: a program is analyzed when it is built.
         let analyzed = &program.seq_blocks;
         let plan = zkm_recursion_jit::plan(analyzed);
 
-        // What `run()` used to pay on EVERY call, now paid once at program
-        // construction.  Timed on the real program, because the 25.2 ms
-        // measured earlier came from a 7,040-instruction node and small
-        // programs are dominated by fixed costs rather than by the pass.
         {
             let raw = zkm_recursion_core::runtime::RawProgram {
                 seq_blocks: vec![zkm_recursion_core::runtime::SeqBlock::Basic(
@@ -113,11 +106,6 @@ fn main() {
                 .collect();
             println!("  ExtAlu opcodes:  {}", cols.join("  "));
         }
-        // Block structure: a 1:1 unroll emits ~100 B per instruction, so the
-        // only way a JIT is viable at 4.3 M instructions is if the program is
-        // built from REPEATED sub-programs that can be compiled once and
-        // called.  This counts how many distinct opcode sequences the blocks
-        // have and what share of instructions the repeats cover.
         {
             use std::collections::HashMap;
             let mut shapes: HashMap<Vec<u8>, (usize, usize)> = HashMap::new();
@@ -171,9 +159,6 @@ fn main() {
             let distinct = shapes.len();
             let repeated_instrs: usize =
                 shapes.values().filter(|(c, _)| *c > 1).map(|(c, n)| c * n).sum();
-            // The number that decides whether a template JIT is viable: code
-            // is emitted once per DISTINCT sequence, so this is what actually
-            // gets compiled, against the 4.3 M a 1:1 unroll would emit.
             let distinct_instrs: usize = shapes.values().map(|(_, n)| *n).sum();
             let biggest = shapes.values().map(|(c, n)| (*c, *n)).max_by_key(|(c, _)| *c);
             println!(
@@ -191,17 +176,6 @@ fn main() {
                 ))
             );
         }
-        // Is batch inversion (Montgomery's trick: n inverses -> 1 + 3n muls)
-        // reachable?  It needs the divisors of a block gathered BEFORE the
-        // block runs.  A divisor produced inside the same block cannot be
-        // gathered without executing, so the question is what share of
-        // divisors are already live at block entry.
-        //
-        // The written-set must be EXHAUSTIVE or the answer is a fiction:
-        // `Hint` alone writes ~173 k addresses per program, and a divisor
-        // that a hint produces is not live at block entry no matter how the
-        // ALU instructions are arranged.  `for_each_written_addr` is the
-        // single definition, matched against `execute_one`'s `mw_us` calls.
         {
             use std::collections::HashSet;
             use zkm_recursion_core::runtime::{Instruction, SeqBlock};

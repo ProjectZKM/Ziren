@@ -21,7 +21,6 @@ impl<F: Field> AddOperation<F> {
     #[allow(unused_assignments)]
     pub fn populate(&mut self, record: &mut impl ByteRecord, a_u32: u32, b_u32: u32) -> u32 {
         let expected = self.populate_carries(a_u32, b_u32);
-        // Range check
         {
             record.add_u8_range_checks(&a_u32.to_le_bytes());
             record.add_u8_range_checks(&b_u32.to_le_bytes());
@@ -61,11 +60,6 @@ impl<F: Field> AddOperation<F> {
 
         let mut builder_is_real = builder.when(is_real.clone());
 
-        // Recover each carry as a LINEAR expression and force it boolean:
-        //   256 * carry_out = a_i + b_i - value_i + carry_in
-        // With a, b, value byte-shaped and carry_in boolean, the equation has
-        // a unique boolean solution per limb; the final carry-out is the
-        // discarded bit-32 overflow of the wrapping add.
         let mut carry = AB::Expr::ZERO;
         for i in 0..zkm_primitives::consts::WORD_SIZE {
             carry = (a[i] + b[i] - cols.value[i] + carry) * base_inv;
@@ -73,7 +67,6 @@ impl<F: Field> AddOperation<F> {
         }
         builder_is_real.assert_bool(is_real.clone());
 
-        // Range check each byte.
         {
             builder.slice_range_check_u8(&a.0, is_real.clone());
             builder.slice_range_check_u8(&b.0, is_real.clone());
@@ -101,8 +94,6 @@ impl<F: Field> AddOperation<F> {
 
         let mut builder_is_real = builder.when(is_real.clone());
 
-        // Recovered linear carries, exactly as in [`Self::eval`]; only the
-        // fresh RESULT word is range checked (operands already byte-shaped).
         let mut carry = AB::Expr::ZERO;
         for i in 0..zkm_primitives::consts::WORD_SIZE {
             carry = (a[i] + b[i] - cols.value[i] + carry) * base_inv;

@@ -10,18 +10,12 @@
 zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
-    // Read an input to the program.
-    //
-    // Behind the scenes, this compiles down to a system call which handles reading inputs
-    // from the prover.  The type must match what the host writes: `u32`, as in
-    // `examples/fibonacci`.
     let n = zkm_zkvm::io::read::<u32>();
-    // Compute the n'th fibonacci number, using normal Rust code.
     let mut a = 0;
     let mut b = 1;
     for _ in 0..n {
         let mut c = a + b;
-        c %= 7919; // Modulus to prevent overflow.
+        c %= 7919;
         a = b;
         b = c;
     }

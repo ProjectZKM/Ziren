@@ -86,7 +86,7 @@ pub fn try_build_dvsnark_bn254_artifacts_dev(
 
     if r1cs_cached_content_exist && r1cs_to_dvsnark_content_exist {
         println!("[zkm] build dir contains cached r1cs");
-        return build_dir; // early return if content already exist
+        return build_dir;
     }
 
     println!("[zkm] building dv-snark bn254 artifacts in development mode");
@@ -134,7 +134,6 @@ pub fn build_groth16_bn254_artifacts(
     let (constraints, witness) = build_constraints_and_witness(template_vk, template_proof);
     Groth16Bn254Prover::build(constraints, witness, build_dir.clone());
 
-    // Serialize the part vk to a file
     let serialized = bincode::serialize(&template_vk.part_vk()).unwrap();
     let path = build_dir.join(PART_STARK_VK_PATH);
     let mut file = File::create(path).unwrap();
@@ -181,8 +180,6 @@ pub fn build_constraints_and_witness(
     template_proof: &ShardProof<OuterSC>,
 ) -> (Vec<Constraint>, OuterWitness<OuterConfig>) {
     tracing::info!("building verifier constraints");
-    // The wrap STARK is proved over BaseFold-BN254; the gnark outer circuit
-    // verifies its jagged shard proof.
     let basefold_proof = (*template_proof.jagged_shard_proof).clone();
     let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
     let template_input = ZKMWrapBasefoldWitnessValues {
@@ -245,20 +242,13 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
 
 fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -> Vec<Constraint> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
-    // The outer (gnark/BN254) circuit verifies the WRAP proof at the fixed
-    // cube; the verifier asserts `zerocheck_proof.point.dim ==
-    // pcs_max_log_row_count`, rejecting an input proof at any other cube.
     let max_log_row_count =
         zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();
-    // Gnark-target circuit: the BN254 backend compiles `CircuitExt2Felt`
-    // directly, so the builder must stay on the legacy (non-chip) path.
     let mut builder = Builder::<OuterConfig>::new(RecursionProgramType::Wrap);
 
-    // Template vk for the commit/pc_start binding.
     let template_vk = template_input.vks_and_proofs.first().unwrap().0.clone();
-    // Read the BaseFold wrap witness.
     let input = template_input.read(&mut builder);
     let ZKMWrapBasefoldWitnessVariable {
         vks_and_proofs,
@@ -268,8 +258,6 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
     } = input;
 
     if !zkm_imm_wrap_vk_mode() {
-        // Constrain the witnessed vk to the template (commit + pc_start). This +
-        // the public vkey_hash bind the wrap vk (gnark layer skips the vk-merkle).
         let vk = &vks_and_proofs.first().unwrap().0;
         let cap: &[_] = template_vk.commit.as_ref();
         let expected_commitment = [builder.eval(cap[0][0])];
@@ -277,8 +265,6 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
         builder.assert_felt_eq(vk.pc_start, template_vk.pc_start);
     }
 
-    // #H (BaseFold-over-BN254 wrap port): verify the wrap STARK proof over the
-    // BaseFold jagged-PCS on BN254 via the merkle-free core (plain shard verify).
     let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
     verify_wrap_basefold_core::<OuterConfig, OuterSC, WrapAir<KoalaBear>>(
         &mut builder,

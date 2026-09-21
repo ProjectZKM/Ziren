@@ -116,11 +116,6 @@ pub struct ZKMCoreBasefoldWitnessVariable<
 ///     list from `logup_gkr_proof.logup_evaluations.chip_openings`
 ///   * `opened_values` reconstructed via
 ///     [`crate::shard_proof_variable_lift::build_opened_values_from_chip_openings`]
-// Per-shard chip → log_height map, indexed by the same order as
-// `input.shard_proof_tuples`. Empty slice falls back to all-zero
-// degree bits (placeholder behavior). Real heights flow from the
-// host-side `JaggedShardProof.chip_heights` populated by
-// `prove_shard_with_data`.
 pub fn verify_core_basefold<C, SC, A>(
     builder: &mut Builder<C>,
     input: ZKMCoreBasefoldWitnessVariable<C, SC>,
@@ -155,9 +150,6 @@ pub fn verify_core_basefold<C, SC, A>(
         SC,
     >(builder, &vk_legacy);
 
-    // ---- Shard-chain state ----
-    // Each placeholder is a fresh variable: a zeroed `Felt` is the handle of
-    // variable 0, shared by every placeholder, not an unset value.
     let mut initial_shard: Felt<_> = builder.uninit();
     let mut current_shard: Felt<_> = builder.uninit();
 
@@ -183,15 +175,6 @@ pub fn verify_core_basefold<C, SC, A>(
     let mut global_cumulative_sums = Vec::new();
     let mut cpu_shard_seen = false;
 
-    // Single-shard normalize: the production normalize is arity-1
-    // (one core shard per `ZKMCoreBasefoldWitnessValues`; see
-    // `get_recursion_core_inputs_basefold` / `get_first_layer_inputs`
-    // first_layer_batch_size=1, hard-asserted there).
-    // The aggregate loop below is collapsed to the single lone-shard body
-    // (the first-shard init runs once, the cross-shard `+1`/continuity becomes
-    // `next = start + 1` for the one shard).  Bind the arity here so the
-    // program shape stays single-shard; the enumerator emits no multi-shard
-    // normalize VK.
     assert_eq!(
         shard_proof_tuples.len(),
         1,
@@ -200,13 +183,6 @@ pub fn verify_core_basefold<C, SC, A>(
         shard_proof_tuples.len()
     );
 
-    // Per-shard loop split into a parallel
-    // VERIFY pass (via ir_par_map_collect, mirrors compress_basefold and
-    // deferred_basefold) and a sequential AGGREGATE pass for first-shard
-    // init + cross-shard consistency + state mutations.
-    //
-    // Pre-compute per-shard host data (chip_names, contains_*) so both
-    // passes can read them without needing to consume proof_tuple twice.
     use zkm_recursion_compiler::ir::IrIter;
     let per_shard_chip_names: Vec<Vec<String>> = shard_proof_tuples
         .iter()
@@ -216,12 +192,6 @@ pub fn verify_core_basefold<C, SC, A>(
         .iter()
         .map(|names| {
             let cc = |n: &str| names.iter().any(|s| s.as_str() == n);
-            // The memory chips are "MemoryGlobalInit" / "MemoryGlobalFinalize",
-            // the names `ShardProof::contains_global_memory_init / finalize`
-            // test; a name that never matches would emit the
-            // "no init ⇒ prev_bits = last_bits" constraint on every shard.
-            // A shard executes iff it has an instruction chip, as in
-            // `ShardProof::contains_execution`.
             (
                 zkm_pcs::EXECUTION_CHIP_NAMES.iter().any(|n| cc(n)),
                 cc("MemoryGlobalInit"),
@@ -233,12 +203,7 @@ pub fn verify_core_basefold<C, SC, A>(
     let basefold_vk_ref = &basefold_vk;
     let basefold_shard_verifier_ref = &basefold_shard_verifier;
     let cumsums_per_shard_ref = &chip_cumulative_sums_per_shard;
-    // chip_heights_per_shard, machine, max_log_row_count are already
-    // refs / Copy.
 
-    // ---- VERIFY pass (parallel) ----
-    // Returns per-shard (public_values_raw_clone, global_cumulative_sums)
-    // for the sequential aggregate to consume.
     let verify_outputs: Vec<(
         Vec<Felt<C::F>>,
         Vec<zkm_pcs::septic_digest::SepticDigest<Felt<C::F>>>,
@@ -259,8 +224,6 @@ pub fn verify_core_basefold<C, SC, A>(
             let chip_names: Vec<String> =
                 logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
-            // Build column_counts_by_round before the lift so the
-            // jagged-PCS metadata matches the actual opened_values shape.
             let mut shard_chips_pre: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
                 .chips()
                 .iter()
@@ -274,11 +237,6 @@ pub fn verify_core_basefold<C, SC, A>(
                 .iter()
                 .map(|c| p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
                 .collect();
-            // Two opening rounds: [preprocessed, main].
-            // The preprocessed round is
-            // the MACHINE's preprocessed chips in chip-NAME order -- the order
-            // `setup` commits them, and one a verifier reproduces without
-            // key-carried chip metadata.
             let prep_widths_pre: Vec<usize> = {
                 let mut dims: Vec<(String, usize)> = machine
                     .chips()
@@ -303,16 +261,6 @@ pub fn verify_core_basefold<C, SC, A>(
                 vec![prep_widths_pre.clone(), main_widths_pre]
             };
 
-            // VERIFY_VK=true: per-chip WITNESSED heights (2^log_h),
-            // name-sorted (aligned with column_counts_by_round_pre, both from
-            // name-sorted chips).  Passed into the bundle lift so col_prefix_sums
-            // / row_counts are reconstructed value-independently instead of
-            // baked from the compile-time bundle offsets/chip_dims.
-            // Heights run across BOTH rounds in column order: the preprocessed
-            // round's are WITNESSED (a preprocessed trace's height is a property
-            // of the PROGRAM, which this circuit is deliberately agnostic to,
-            // and the hash-bind below pins them); the main round's come from the
-            // opened degrees as before.
             let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
                 let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
                 hs.extend(
@@ -325,10 +273,6 @@ pub fn verify_core_basefold<C, SC, A>(
                 hs
             });
             let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
-            // The preprocessed round's commitment: the RAW root the BaseFold
-            // open binds against, paired with the digest the KEY holds -- the
-            // hash-bind re-derives one from the other and asserts equality,
-            // which is what pins that round's geometry to the key.
             let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
                 if prep_widths_pre.is_empty() {
                     Vec::new()
@@ -336,14 +280,8 @@ pub fn verify_core_basefold<C, SC, A>(
                     vec![(preprocessed_round.raw_commit, basefold_vk_ref.preprocessed_commit)]
                 };
 
-            // Bundle lift is the production (and only) path.
             use crate::shard_level_witness::LiftedEvalProof;
-            // The jagged-WHIR gate: a WhirBundle lifts to a WHIR-typed
-            // evaluation-proof variable (same jagged metadata, different
-            // inner PCS proof) and takes the WHIR verify branch below.
             let mut whir_evaluation_proof_var = None;
-            // (packing.offsets.len()-1, pad_cols) from the host packing — the
-            // authoritative column count, cross-checked in `jagged_column_count`.
             let mut pack_info: Option<(usize, usize)> = None;
             let evaluation_proof_var = match &evaluation_proof {
                 LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
@@ -409,31 +347,14 @@ pub fn verify_core_basefold<C, SC, A>(
                         &column_counts_by_round_pre,
                     ))
                 }
-                // OuterBundle is only produced for the gnark wrap
-                // (OuterConfig); the core path is inner-only → unreachable.
                 LiftedEvalProof::OuterBundle { .. } => {
                     unreachable!("core path never carries an OUTER (gnark) bundle")
                 }
             };
-            // Real chip_height_bits derivation: pulls per-chip log
-            // heights from `chip_heights_per_shard` (witnessed from
-            // each shard's `JaggedShardProof.chip_heights`) and
-            // sorts by (Reverse(log_h), name) to match the prover
-            // prologue.  Falls back to a zero-filled map when the
-            // input is missing (empty-slice callers).
             let empty_heights_core = std::collections::BTreeMap::<String, usize>::new();
             let chip_heights_for_shard = chip_heights_per_shard
                 .get(i)
                 .unwrap_or(&empty_heights_core);
-            // VERIFY_VK=true: derive chip_height_bits from the
-            // WITNESSED per-chip `degree` (= host quotient[0], carried in
-            // `proof_opened_values`) instead of baking them from the
-            // COMPILE-TIME `chip_heights`.  The observed prologue
-            // value is identical (= log_h) so the host transcript is
-            // unchanged, but the program bytes become chip-set-determined
-            // (value-independent) so the normalize vk lands in the
-            // enumerated vk_map.  See
-            // `chip_height_bits_from_opened_degrees` for the encoding.
             let _ = chip_heights_for_shard;
             let chip_height_bits =
                 crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
@@ -460,11 +381,6 @@ pub fn verify_core_basefold<C, SC, A>(
                 .iter()
                 .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
                 .collect();
-            // The SAME per-round table the lift got: `insertion_points` carries
-            // one entry per opening ROUND, and the shard verifier reads its
-            // length to know whether the proof is two-round.  Deriving it from a
-            // second, single-round table here is what made the two sides
-            // disagree (the columns two-round, the claims one-round).
             let _ = main_widths;
             let column_counts_by_round: Vec<Vec<usize>> = column_counts_by_round_pre.clone();
             let chip_metadata = crate::shard_basefold::JaggedShardVerifier::<
@@ -493,18 +409,10 @@ pub fn verify_core_basefold<C, SC, A>(
                     chip_height_bits,
                 )
             });
-            // chip_heights_per_shard is consumed above; the height bits
-            // derive from the witnessed opened degrees.
             let empty_cumsums = std::collections::BTreeMap::new();
             let cumsums_for_shard = cumsums_per_shard_ref
                 .get(i)
                 .unwrap_or(&empty_cumsums);
-            // The openings at z* carried by the proof, not the LogUp-GKR
-            // openings at ζ: the zerocheck verifier constrains these and
-            // compares them with `point_and_eval.1`. `finalize_…` puts in each
-            // chip's big-endian height bits, which `full_geq` masks padded rows
-            // with, and the per-chip cumulative sums. `chip_names` is in name
-            // order, index-aligned with the proof's openings.
             let opened_values =
                 crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
                     builder,
@@ -514,22 +422,10 @@ pub fn verify_core_basefold<C, SC, A>(
                     cumsums_for_shard,
                     max_log_row_count,
                 );
-            // The MIPS core machine closes its local-only
-            // control buses (State / GlobalAccumulation / MemoryGlobal*)
-            // through the public-values AIR.  Fold those boundary
-            // interactions into the LogUp-GKR balance by emitting
-            // `eval_public_values` through the record folder
-            // (`verify_logup_gkr` negates the resulting digest into the
-            // cumulative sum the GKR root is checked against).
             let eval_public_values_fn =
                 |folder: &mut crate::public_values_folder::RecursivePublicValuesConstraintFolder<C>| {
                     zkm_pcs::air::eval_public_values(folder);
                 };
-            // The evaluator's column count is every column of the packing: each
-            // round's chip columns plus the stacking-pad column that closes it
-            // to its committed area. The host sums over
-            // `packing.offsets.len() - 1` columns, pads included; without them
-            // their terms drop and every later column shifts by one.
             let jagged_evaluator_fn =
                 super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
                     builder,
@@ -538,9 +434,6 @@ pub fn verify_core_basefold<C, SC, A>(
                         let witness_pads: usize =
                             preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
                         match pack_info {
-                            // Both sources are populated on the inner ring, so the
-                            // cross-check is a real invariant here -- this is where it
-                            // earns its keep (see jagged_column_count).
                             Some((total_cols, packing_pads)) => zkm_pcs::jagged_pcs::jagged_column_count(
                                 total_cols, widths, packing_pads, Some(witness_pads), "core",
                             ),
@@ -550,14 +443,6 @@ pub fn verify_core_basefold<C, SC, A>(
                 );
             let mut challenger = machine.config().challenger_variable(builder);
 
-            // Seed as the host machine verifier does before the shard
-            // verifier runs:
-            //   (1) vk.observe_into: commit (8), pc_start (1),
-            //       initial_global_cumulative_sum x (7) and y (7), 0 (1);
-            //   (2) per shard, public_values[..num_pv_elts].
-            // The prover's challenger snapshot contains both, and the prologue
-            // then observes the public values again. Skipping either desyncs
-            // every later draw.
             {
                 use crate::challenger::CanObserveVariable;
                 let num_pv = machine.num_pv_elts();
@@ -567,18 +452,6 @@ pub fn verify_core_basefold<C, SC, A>(
                 }
             }
 
-            // The PCS verifier is chosen per proof shape at build time: a WHIR
-            // bundle is verified with the stacked-WHIR verifier; the prologue,
-            // GKR, zerocheck and jagged metadata are shared.
-            //
-            // The BaseFold loops are unrolled at build time over the witness
-            // lengths (rounds, query openings, Merkle paths, all of length
-            // `num_variables`), so the program, and its key, is a function of
-            // `num_variables`. It is a constant because every commit is at the
-            // fixed stacking height 21 (asserted below); the variable count
-            // cannot be padded up inside the circuit instead, since the sponge
-            // absorbs ~num_variables · (2 ext + 1 commit) elements and no
-            // assignment to padded rounds reproduces a shorter transcript.
             if let Some(whir_pv) = &whir_shard_proof_variable {
                 let lsh = match &evaluation_proof {
                     LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
@@ -617,22 +490,14 @@ pub fn verify_core_basefold<C, SC, A>(
                 jagged_shard_proof_variable.expect("non-whir proof lifts to the BaseFold variable");
             let per_proof_verifier;
             let active_verifier = match &evaluation_proof {
-                // Only `host` is needed here -- this arm sizes the
-                // per-proof verifier; the proof's own fields are read
-                // where the verification actually happens.
                 LiftedEvalProof::Bundle { host, .. } => {
                     let bundle_num_vars =
                         host.basefold_proof.basefold_proof.fri_commitments.len();
-                    // Every recursion bundle commits at stacking height 21, so
-                    // the rebuilt verifier, and the key, do not depend on the
-                    // trace area.
                     crate::shard_level_witness::assert_recursion_stacking_height_fixed(
                         bundle_num_vars,
                         host.commit.log_stacking_height,
                         "core_basefold",
                     );
-                    // Variables, not commit rounds: a round folds
-                    // `log_folding_arity` of them.
                     per_proof_verifier =
                         crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                             max_log_row_count,
@@ -660,9 +525,6 @@ pub fn verify_core_basefold<C, SC, A>(
             );
             }
 
-            // Extract Global-scoped per-chip cumulative sums for the
-            // sequential aggregate. shard_chips is sorted to match
-            // opened_values.chips order (BTreeMap key order).
             let mut shard_globals = Vec::new();
             for (chip, chip_values) in shard_chips.iter().zip(opened_values.chips.iter()) {
                 if chip.commit_scope() == LookupScope::Global {
@@ -672,18 +534,6 @@ pub fn verify_core_basefold<C, SC, A>(
             (public_values_raw, shard_globals)
         });
 
-    // ---- AGGREGATE pass (single-shard) ----
-    // Normalize is arity-1, so the per-shard loop collapses to its
-    // `i == 0` body run ONCE for the lone shard: the first-shard init runs,
-    // then the cross-shard continuity degenerates to `next = start + 1` for the
-    // single shard (`current_shard == public_values.shard` is `initial_shard ==
-    // shard` here, then `current_shard = shard + 1` → `next_shard`).  This is
-    // BYTE-IDENTICAL to the multi-shard loop driven with a single element (the
-    // body is verbatim, `i` is bound to 0).  The 3 chip-set STRUCTURAL checks
-    // (non-CPU shard != 1, CPU start_pc !=
-    // 0, exit_code == 0) and the per-shard anchors (is_first binds, start_pc ==
-    // vk.pc_start, select_global_cumulative_sum, shard range-check) are KEPT —
-    // they have NO compress analog.
     builder.cycle_tracker_v2_enter("leaf_seq_chain".to_string());
     {
         let i = 0usize;
@@ -695,9 +545,8 @@ pub fn verify_core_basefold<C, SC, A>(
             public_values_raw.as_slice().borrow();
         let chip_names = &per_shard_chip_names[i];
         let (contains_cpu, contains_memory_init, contains_memory_finalize) = per_shard_contains[i];
-        let _ = chip_names; // host data already consumed via contains_*
+        let _ = chip_names;
 
-        // ---- First-shard initialization ----
         if i == 0 {
             initial_shard = public_values.shard;
             current_shard = public_values.shard;
@@ -742,12 +591,10 @@ pub fn verify_core_basefold<C, SC, A>(
                 *digest = *first_digest;
             }
 
-            // is_first_shard consistency.
             builder.assert_felt_eq(is_first_shard * (is_first_shard - C::F::ONE), C::F::ZERO);
             builder.assert_felt_eq(is_first_shard * (initial_shard - C::F::ONE), C::F::ZERO);
             builder.assert_felt_ne((SymbolicFelt::ONE - is_first_shard) * initial_shard, C::F::ONE);
 
-            // start_pc = vk.pc_start on the first shard.
             builder.assert_felt_eq(is_first_shard * (start_pc - vk_legacy.pc_start), C::F::ZERO);
 
             global_cumulative_sums.push(builder.select_global_cumulative_sum(
@@ -763,18 +610,13 @@ pub fn verify_core_basefold<C, SC, A>(
             }
         }
 
-        // ---- Shard-chain consistency ----
-
-        // Non-CPU shards can't have shard index 1.
         if !contains_cpu {
             builder.assert_felt_ne(current_shard, C::F::ONE);
         }
 
-        // Shard index monotone increment.
         builder.assert_felt_eq(current_shard, public_values.shard);
         current_shard = builder.eval(current_shard + C::F::ONE);
 
-        // Execution shard increment only when CPU is present.
         if contains_cpu {
             if !cpu_shard_seen {
                 initial_execution_shard = public_values.execution_shard;
@@ -785,7 +627,6 @@ pub fn verify_core_basefold<C, SC, A>(
             current_execution_shard = builder.eval(current_execution_shard + C::F::ONE);
         }
 
-        // Program counter continuity.
         builder.assert_felt_eq(current_pc, public_values.start_pc);
         if !contains_cpu {
             builder.assert_felt_eq(public_values.start_pc, public_values.next_pc);
@@ -794,24 +635,6 @@ pub fn verify_core_basefold<C, SC, A>(
         }
         current_pc = public_values.next_pc;
 
-        // The MIPS 2-pc state `(pc, next_pc)` rides the State bus, whose entry
-        // endpoint is the public-value pair `(start_pc, start_next_pc)` and
-        // whose exit endpoint is `(next_pc, next_next_pc)`.  `start_pc` is
-        // chained above; the second coordinate has to be pinned as well, else
-        // row 0 -- which takes its `next_pc` from that endpoint -- continues at
-        // an address of the prover's choosing.  No shard boundary falls inside
-        // a delay slot (the executor cuts only when the next instruction is
-        // not one), so an execution shard enters and exits with the sequential
-        // lookahead: `start_next_pc = start_pc + 4` and `next_next_pc =
-        // next_pc + 4` -- the latter on the halting row too, whose `next_pc` is
-        // 0 and whose lookahead the frame still sends as `next_pc + 4`.  A
-        // non-execution shard has no row on the bus, so its two endpoints
-        // must cancel against each other: `start_next_pc = next_next_pc`
-        // (the value itself is inert -- the executor carries the previous
-        // shard's `next_pc` on one path and its `next_next_pc` on another --
-        // and the next execution shard re-derives its lookahead from the
-        // chained `start_pc`).  Together with the `start_pc` chain this gives
-        // `start_next_pc = prev.next_next_pc` across execution shards.
         let four = C::F::from_u32(4);
         if contains_cpu {
             builder.assert_felt_eq(public_values.start_next_pc, public_values.start_pc + four);
@@ -820,10 +643,8 @@ pub fn verify_core_basefold<C, SC, A>(
             builder.assert_felt_eq(public_values.start_next_pc, public_values.next_next_pc);
         }
 
-        // Exit code stays zero throughout.
         builder.assert_felt_eq(exit_code, C::F::ZERO);
 
-        // Memory init/finalize address bits.
         for (bit, current_bit) in
             current_init_addr_bits.iter().zip_eq(public_values.previous_init_addr_bits.iter())
         {
@@ -864,7 +685,6 @@ pub fn verify_core_basefold<C, SC, A>(
             *bit = *pub_bit;
         }
 
-        // Committed-value-digest and deferred-proofs-digest constraints.
         {
             let mut is_non_zero_flags = vec![];
             for word in committed_value_digest {
@@ -925,12 +745,8 @@ pub fn verify_core_basefold<C, SC, A>(
             deferred_proofs_digest.copy_from_slice(&public_values.deferred_proofs_digest);
         }
 
-        // Shard index range check (< 2^MAX_LOG_NUMBER_OF_SHARDS).
         C::range_check_felt(builder, public_values.shard, MAX_LOG_NUMBER_OF_SHARDS);
 
-        // Global-scoped per-chip sums are collected by the parallel
-        // verify pass (see verify_outputs.shard_globals); merge them
-        // into the running aggregator here.
         global_cumulative_sums.extend(shard_globals);
     }
 
@@ -939,8 +755,6 @@ pub fn verify_core_basefold<C, SC, A>(
 
     builder.assert_felt_eq(exit_code, C::F::ZERO);
 
-    // ---- Emit the aggregated RecursionPublicValues ----
-    // vk_digest from the witnessed key, which has the hash.
     let vk_digest = vk_legacy.hash(builder);
     let zero: Felt<_> = builder.eval(C::F::ZERO);
     let start_deferred_digest = [zero; POSEIDON_NUM_WORDS];
@@ -996,12 +810,6 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         >,
         shape: &super::core::ZKMRecursionShape,
     ) -> Self {
-        // Single-shard normalize: normalize is arity-1, so the dummy
-        // (which `program_from_shape` builds the normalize program from) must
-        // carry exactly one per-shard shape.  The enumerator emits only
-        // `Recursion(vec![os])` (single element), and the live input
-        // constructor produces one shard per `ZKMCoreBasefoldWitnessValues`.
-        // Bind it here so the dummy program shape matches the runtime exactly.
         assert_eq!(
             shape.proof_shapes.len(),
             1,
@@ -1013,25 +821,11 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             .proof_shapes
             .iter()
             .map(|s| {
-                // NORMALIZE verifies a CORE
-                // child (never a recursion proof), so it is UNPINNED → `None`
-                // (NATURAL own-area, byte-identical to the unpinned dummy).
                 crate::stark::dummy_basefold_vk_and_shard_proof::<
                     zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
                 >(machine, s)
             })
             .unzip();
-        // One program-wide core vk, whose `chip_information` is the one real
-        // inputs carry (`get_recursion_core_inputs_basefold` threads the single
-        // vk `StarkMachine::setup` produces into every batch): the set of
-        // preprocessed chips, in name order.
-        //
-        // The program hashes one entry per preprocessed chip, so its structure
-        // depends on that chip count. Taking any one shard's per-shape vk would
-        // give the wrong count when that shard lacks a preprocessed chip. So
-        // the per-shard sets are united by name, keeping the largest log size
-        // per chip. Names, widths and heights are witnessed, so only the set,
-        // its count and its order must match.
         use std::collections::BTreeMap;
         let mut prep_by_name: BTreeMap<
             String,
@@ -1042,8 +836,6 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
                 prep_by_name
                     .entry(name.clone())
                     .and_modify(|(d, m)| {
-                        // Keep the largest representative height (deterministic);
-                        // width (dims.0) is chip-constant across shards.
                         if ser_domain.log_size > d.log_size {
                             *d = *ser_domain;
                             *m = *dims;
@@ -1057,8 +849,6 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             zkm_pcs::SerializableDomain<p3_koala_bear::KoalaBear>,
             (usize, usize),
         )> = prep_by_name.into_iter().map(|(name, (dom, dims))| (name, dom, dims)).collect();
-        // `setup` commits the preprocessed traces in name order, the order a
-        // verifier can reproduce from the machine's chip set without the key.
         chip_information.sort_by(|a, b| a.0.cmp(&b.0));
         let chip_ordering = chip_information
             .iter()
@@ -1078,11 +868,6 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             vk,
             shard_proofs,
             is_complete: shape.is_complete,
-            // The real first batch (batch_idx == 0) carries is_first_shard=true.
-            // This is a WITNESSED felt (not baked into the program — confirmed:
-            // all batches share one vk regardless of is_first_shard), so it does
-            // not affect the recursion VK; matched to the real batch-0 semantics
-            // for cleanliness / forgery-robustness.
             is_first_shard: true,
             vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
         }
@@ -1118,27 +903,20 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
 
-        // Version tag — bumping it invalidates previously cached programs
-        // instead of letting an old key silently alias a new walk.
         0xC0_FE_BA_12_u32.hash(&mut h);
 
-        // vk write order: preprocessed_commit (fixed digest), pc_start,
-        // chip_information (2 reads per entry), chip_ordering.
         self.vk.chip_information.len().hash(&mut h);
         self.vk.chip_ordering.len().hash(&mut h);
 
         self.shard_proofs.len().hash(&mut h);
         for sp in self.shard_proofs.iter() {
             crate::machine::shape_signature::hash_shard_proof_structure(sp, &mut h);
-            // Compile-time projection: only the key set is consumed.
             sp.chip_heights.len().hash(&mut h);
             for name in sp.chip_heights.keys() {
                 name.hash(&mut h);
             }
         }
 
-        // is_complete / is_first_shard are witnessed felts, not baked;
-        // included so the key can never be coarser than the input.
         self.is_complete.hash(&mut h);
         self.is_first_shard.hash(&mut h);
 

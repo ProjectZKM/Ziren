@@ -13,15 +13,10 @@
 //! must consume the challenger identically or every downstream alpha/beta
 //! diverges.
 //!
-//! Both rings grind.  A `GkrGrind` trait used to live here to make the grind
-//! "config-aware" -- real for the inner challenger, `F::ZERO` and no observe
-//! for the outer/wrap one -- while `docs/soundness/ziren.soundcalc.toml`
-//! credited wrap with `grinding_bits_lookup = 16` regardless, so the published
-//! 100-bit figure described a transcript the protocol did not execute.  The
-//! premise for the split ("the outer challenger is not a `GrindingChallenger`")
-//! was false: the wrap BaseFold open grinds `pow_bits = 22` through that very
-//! trait.  The hook is gone so the split cannot come back by accident; both
-//! sides now call `GrindingChallenger` directly.
+//! Both rings (inner and outer/wrap) grind through `GrindingChallenger`
+//! directly, so the transcript matches the soundness model
+//! (`docs/soundness/ziren.soundcalc.toml`, `grinding_bits_lookup = 16`) on
+//! every ring.
 
 /// Proof-of-work grinding difficulty (in bits) applied at the start of the
 /// LogUp-GKR argument. The prover grinds
@@ -51,10 +46,11 @@ fn as_jagged_val<F: p3_field::Field + 'static>(w: crate::jagged_pcs::JaggedVal) 
         core::any::TypeId::of::<crate::jagged_pcs::JaggedVal>(),
         "LogUp-GKR grinding requires Val<SC> == JaggedVal (every config is KoalaBear-based)",
     );
-    // SAFETY: the assert above establishes `F == JaggedVal`.
     unsafe { core::mem::transmute_copy::<crate::jagged_pcs::JaggedVal, F>(&w) }
 }
 
+/// Inverse of [`as_jagged_val`]; the reinterpret is sound by the same asserted
+/// identity `F = JaggedVal`.
 #[inline]
 fn from_f<F: p3_field::Field + 'static>(w: F) -> crate::jagged_pcs::JaggedVal {
     assert_eq!(
@@ -62,7 +58,6 @@ fn from_f<F: p3_field::Field + 'static>(w: F) -> crate::jagged_pcs::JaggedVal {
         core::any::TypeId::of::<crate::jagged_pcs::JaggedVal>(),
         "LogUp-GKR grinding requires Val<SC> == JaggedVal (every config is KoalaBear-based)",
     );
-    // SAFETY: as above.
     unsafe { core::mem::transmute_copy::<F, crate::jagged_pcs::JaggedVal>(&w) }
 }
 
@@ -116,12 +111,9 @@ mod tests {
     /// them.
     #[test]
     fn gkr_grinding_witness_roundtrips() {
-        // The prover grinds from the seeded state.
         let mut prover = seeded();
         let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
 
-        // The verifier re-checks from the SAME pre-grind state, which is what
-        // "consuming the challenger exactly as gkr_grind did" means.
         let mut verifier = seeded();
         assert!(
             gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness),
@@ -199,8 +191,6 @@ mod tests {
         let wa: JaggedVal = gkr_grind(&mut a, GKR_GRINDING_BITS);
         let wb: JaggedVal = gkr_grind(&mut b, GKR_GRINDING_BITS);
         assert_eq!(wa, wb, "the grind must be reproducible across runs");
-        // And the two challengers must be left in the same state: the next
-        // squeeze is what the rest of the transcript is built on.
         let na: JaggedVal = a.sample();
         let nb: JaggedVal = b.sample();
         assert_eq!(na, nb, "the post-grind challenger state must be reproducible");

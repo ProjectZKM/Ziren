@@ -56,12 +56,10 @@ pub struct PublicValues<W, T> {
     /// The bits of the largest address that is witnessed for finalization in the current shard.
     pub last_finalize_addr_bits: [T; 32],
 
-    // Option 2 (local-only) boundary-anchor fields
-    // These are emitted by the public-values AIR (`eval_public_values`)
-    // as the closing endpoints of the new control-bus interactions
-    // (State / GlobalAccumulation / MemoryGlobalInit/Finalize) that
-    // replace the legacy `when_transition` chaining + the per-chip
-    // last-row cumulative-sum closure.
+    // Boundary-anchor fields, emitted by the public-values AIR
+    // (`eval_public_values`) as the endpoints of the control-bus
+    // interactions (State / GlobalAccumulation / MemoryGlobalInit/Finalize)
+    // that chain rows locally instead of via `when_transition`.
     /// Initial CPU timestamp (clk) for this shard — the `State`-bus
     /// initial endpoint (`send_state`).
     pub initial_timestamp: T,
@@ -135,22 +133,14 @@ impl PublicValues<u32, u32> {
 /// * the slice must hold at least [`ZKM_PROOF_NUM_PV_ELTS`] elements, and
 /// * `align_to` must consume it with no prefix and yield exactly one value.
 ///
-/// Neither was: they were `debug_assert!`, compiled out of the release build
-/// that ships proofs. In release a short slice reached `align_to`, whose
-/// `shorts` may then be EMPTY, and `&shorts[0]` is an out-of-bounds read — a
-/// layout violation became undefined behaviour instead of a verdict.
-///
 /// The public verification entry points reject short public-value vectors
-/// before they get here, so no honest path depends on the difference; this is
-/// the boundary that makes that a property of the code rather than of the
-/// callers.
+/// before they get here; this function makes that a property of the code
+/// rather than of the callers. The `align_to` is sound because
+/// `PublicValues<Word<T>, T>` is `#[repr(C)]` over `T` only, so an aligned run
+/// of `ZKM_PROOF_NUM_PV_ELTS` values of `T` is exactly one of them.
 #[must_use]
 pub fn public_values_from_slice<T: Clone>(slice: &[T]) -> Option<&PublicValues<Word<T>, T>> {
     let head = slice.get(..ZKM_PROOF_NUM_PV_ELTS)?;
-    // SAFETY: `PublicValues<Word<T>, T>` is `#[repr(C)]` over `T` only, so a
-    // run of `ZKM_PROOF_NUM_PV_ELTS` `T`s at a suitably aligned address IS one.
-    // The two conditions below are exactly that aligned-and-complete premise,
-    // and failing them returns `None` rather than indexing `shorts`.
     let (prefix, values, _suffix) = unsafe { head.align_to::<PublicValues<Word<T>, T>>() };
     if !prefix.is_empty() || values.len() != 1 {
         return None;
@@ -158,13 +148,12 @@ pub fn public_values_from_slice<T: Clone>(slice: &[T]) -> Option<&PublicValues<W
     Some(&values[0])
 }
 
-/// Mutable [`public_values_from_slice`].
+/// Mutable [`public_values_from_slice`], sound for the same layout reason.
 #[must_use]
 pub fn public_values_from_slice_mut<T: Clone>(
     slice: &mut [T],
 ) -> Option<&mut PublicValues<Word<T>, T>> {
     let head = slice.get_mut(..ZKM_PROOF_NUM_PV_ELTS)?;
-    // SAFETY: as in `public_values_from_slice`.
     let (prefix, values, _suffix) = unsafe { head.align_to_mut::<PublicValues<Word<T>, T>>() };
     if !prefix.is_empty() || values.len() != 1 {
         return None;
@@ -286,14 +275,9 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
 mod tests {
     use crate::air::public_values;
 
-    /// Check that the [`PV_DIGEST_NUM_WORDS`] number match the zkVM crate's.
-    /// Every length must be answered, not asserted about.
-    ///
-    /// The old impl checked length and alignment with `debug_assert!`, so in
-    /// the release profile a short slice reached `align_to` and indexed an
-    /// empty `shorts`. The check below runs in whatever profile the test is
-    /// built in, and is meaningful in release precisely because the old code
-    /// was not.
+    /// `public_values_from_slice` answers every length: `n < ZKM_PROOF_NUM_PV_ELTS`
+    /// ⇒ `None`, `n ≥ ZKM_PROOF_NUM_PV_ELTS` ⇒ `Some`, in every build profile
+    /// (the length check is not a `debug_assert!`).
     #[test]
     fn a_short_slice_is_not_public_values() {
         use super::{public_values_from_slice, ZKM_PROOF_NUM_PV_ELTS};

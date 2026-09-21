@@ -66,22 +66,10 @@ const fn build_transition_table() -> [[Option<u8>; 16]; 4] {
             let curr_bit = (bs_idx & 4) != 0;
             let next_bit = (bs_idx & 8) != 0;
 
-            // EXACT mirror of the host `transition_function`
-            // (zkm_pcs::jagged_branching_program): the prior hand-rolled
-            // logic computed a DIFFERENT DP (added next_bit into the carry,
-            // compared against row) → the in-circuit BP disagreed with the
-            // host BP, which only surfaced in gnark (AsmCompiler asserts are
-            // vacuous).  Mirror the host precisely.
-            //
-            // comparison: i < t_{c+1} — defer to running comparison when
-            // index_bit == next_bit, else the next-prefix bit decides.
             let new_comparison = if index_bit == next_bit { comparison_in } else { next_bit };
-            // carry: grade-school addition row + carry_in + curr_prefix must
-            // produce index_bit at this layer, else the path FAILs (None).
             let sum = (row_bit as u8) + (carry_in as u8) + (curr_bit as u8);
             if ((sum & 1) == 1) == index_bit {
                 let new_carry = (sum >> 1) != 0;
-                // output index = MemoryState::get_index = carry | comparison<<1.
                 let out_idx = (new_carry as u8) | ((new_comparison as u8) << 1);
                 let mut t = table;
                 t[ms_idx][bs_idx] = Some(out_idx);
@@ -156,11 +144,6 @@ pub fn emit_branching_program_eval<C: CircuitConfig>(
 ) -> SymbolicExt<C::F, C::EF> {
     let num_vars = z_row.len().max(z_trace.len());
 
-    // Terminal boundary: only the `success` memory state has
-    // weight 1; the others are zero.  Memory-state index 2
-    // (`carry=0, comparison_so_far=1`) corresponds to the
-    // success state (matches the host's `MemoryState::success()`
-    // definition).
     let mut state_weights: [SymbolicExt<C::F, C::EF>; 4] =
         [SymbolicExt::ZERO, SymbolicExt::ZERO, SymbolicExt::ONE, SymbolicExt::ZERO];
 
@@ -194,7 +177,6 @@ pub fn emit_branching_program_eval<C: CircuitConfig>(
         state_weights = new_state_weights;
     }
 
-    // Initial state: index 0 (`carry=0, comparison_so_far=0`).
     state_weights[0]
 }
 
@@ -214,7 +196,6 @@ pub fn emit_prefix_sum_check<C: CircuitConfig>(
     merged_prefix_sum: Vec<Felt<C::F>>,
     sumcheck_point: Vec<Ext<C::F, C::EF>>,
 ) -> (SymbolicExt<C::F, C::EF>, Felt<C::F>) {
-    // Horner-recompose the bit vector into a felt (LSB-first).
     let two: Felt<C::F> = builder.eval(SymbolicFelt::ONE + SymbolicFelt::ONE);
     let mut acc: Felt<C::F> = builder.eval(SymbolicFelt::ZERO);
     for bit in merged_prefix_sum.iter().rev() {

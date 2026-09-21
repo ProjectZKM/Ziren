@@ -28,9 +28,6 @@ impl Syscall for EnterUnconstrainedSyscall {
             executor_mode: ctx.rt.executor_mode,
         };
         ctx.rt.executor_mode = ExecutorMode::Simple;
-        // Flat producer: the block runs on a copy-on-write view of the
-        // memory, discarded at EXIT (`mr`/`mw` keep no `memory_diff` for
-        // it). Registers are not flat and stay on the diff.
         if let Some(flat) = ctx.rt.flat_mem.as_deref_mut() {
             flat.enter_unconstrained().expect("flat memory: unconstrained COW view");
         }
@@ -48,7 +45,6 @@ impl Syscall for ExitUnconstrainedSyscall {
         _: u32,
         _: u32,
     ) -> Result<Option<u32>, ExecutionError> {
-        // Reset the state of the runtime.
         if ctx.rt.unconstrained {
             ctx.rt.state.global_clk = ctx.rt.unconstrained_state.global_clk;
             ctx.rt.state.clk = ctx.rt.unconstrained_state.clk;

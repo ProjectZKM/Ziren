@@ -5,14 +5,12 @@ use crate::pcl::{current_modulus, reduce_mod, PicusCall, PicusConstraint, PicusE
 // === Helpers ===
 
 fn mod_reduce_u64(x: u64) -> u64 {
-    // converting to i64 is fine because the prime is 31 bits the input values will not wrap around
     reduce_mod(x as i64)
 }
 
 // performs the inverse of `base` with respect to `current_modulus()`
 // this is only sound if `modulus` is under `64` bits
 fn mod_pow_u64(mut base: u64, mut exp: u64) -> u64 {
-    // Fast pow with optional modulus
     if let Some(p) = current_modulus() {
         base %= p;
         let mut acc: u128 = 1;
@@ -27,7 +25,6 @@ fn mod_pow_u64(mut base: u64, mut exp: u64) -> u64 {
         }
         acc as u64
     } else {
-        // No modulus set: beware overflow
         let mut acc: u128 = 1;
         let mut b: u128 = base as u128;
         while exp > 0 {
@@ -70,12 +67,11 @@ fn subst_expr(e: &PicusExpr, env: &BTreeMap<usize, u64>) -> PicusExpr {
         Sub(a, b) => subst_expr(a, env) - subst_expr(b, env),
         Mul(a, b) => subst_expr(a, env) * subst_expr(b, env),
         Div(a, b) => {
-            // Optional: try to simplify known constants
             let aa = subst_expr(a, env);
             let bb = subst_expr(b, env);
             match (&aa, &bb) {
-                (_, Const(1)) => aa,          // e / 1 => e
-                (Const(0), _) => 0u64.into(), // 0 / e => 0 (assuming e ≠ 0; safe algebraically)
+                (_, Const(1)) => aa,
+                (Const(0), _) => 0u64.into(),
                 _ => Div(Box::new(aa), Box::new(bb)),
             }
         }
@@ -120,10 +116,9 @@ pub fn subst_constraint(
     match c {
         Eq(e) => {
             let ee = subst_expr(e, env);
-            // Drop tautologies Eq(0); keep contradictions as Eq(1)
             match ee {
                 PicusExpr::Const(0) => None,
-                PicusExpr::Const(1) => keep(Eq(Box::new(1u64.into()))), // 1 = 0 (unsat marker)
+                PicusExpr::Const(1) => keep(Eq(Box::new(1u64.into()))),
                 _ => keep(Eq(Box::new(ee))),
             }
         }
@@ -188,27 +183,24 @@ pub fn subst_constraint(
             }
         }
 
-        Not(p) => {
-            // Push inside and simplify:
-            match subst_constraint(p, env) {
-                None => Some(Eq(Box::new(1u64.into()))), // not(true) => false
-                Some(Eq(e)) if matches!(*e, PicusExpr::Const(1)) => None, // not(false) => true
-                Some(pp) => Some(Not(Box::new(pp))),
-            }
-        }
+        Not(p) => match subst_constraint(p, env) {
+            None => Some(Eq(Box::new(1u64.into()))),
+            Some(Eq(e)) if matches!(*e, PicusExpr::Const(1)) => None,
+            Some(pp) => Some(Not(Box::new(pp))),
+        },
 
         And(p, q) => {
             let pp = subst_constraint(p, env);
             let qq = subst_constraint(q, env);
             match (pp, qq) {
-                (None, None) => None, // true && true
+                (None, None) => None,
                 (Some(Eq(e)), _) if matches!(*e, PicusExpr::Const(1)) => {
                     Some(Eq(Box::new(1u64.into())))
-                } // false && _ => false
+                }
                 (_, Some(Eq(e))) if matches!(*e, PicusExpr::Const(1)) => {
                     Some(Eq(Box::new(1u64.into())))
                 }
-                (None, Some(r)) => Some(r), // true && r => r
+                (None, Some(r)) => Some(r),
                 (Some(l), None) => Some(l),
                 (Some(l), Some(r)) => Some(And(Box::new(l), Box::new(r))),
             }
@@ -218,22 +210,20 @@ pub fn subst_constraint(
             let pp = subst_constraint(p, env);
             let qq = subst_constraint(q, env);
             match (pp, qq) {
-                (None, _) => None, // true || _ => true
+                (None, _) => None,
                 (_, None) => None,
-                (Some(Eq(e)), r) if matches!(*e, PicusExpr::Const(1)) => r, // false || r => r
+                (Some(Eq(e)), r) if matches!(*e, PicusExpr::Const(1)) => r,
                 (l, Some(Eq(e))) if matches!(*e, PicusExpr::Const(1)) => l,
                 (Some(l), Some(r)) => Some(Or(Box::new(l), Box::new(r))),
             }
         }
 
         Implies(p, q) => {
-            // p => q  ≡  ¬p ∨ q
             let np_or_q = Or(Box::new(Not(p.clone())), q.clone());
             subst_constraint(&np_or_q, env)
         }
 
         Iff(p, q) => {
-            // p <=> q  ≡  (p => q) ∧ (q => p)
             let p_imp_q = Implies(p.clone(), q.clone());
             let q_imp_p = Implies(q.clone(), p.clone());
             subst_constraint(&And(Box::new(p_imp_q), Box::new(q_imp_p)), env)
@@ -251,7 +241,6 @@ pub fn partial_evaluate(
     let mut out_constraints = Vec::with_capacity(constraints.len());
     for c in constraints {
         if let Some(cc) = subst_constraint(c, env) {
-            // Optional micro-normalization: if we ever produce Eq(Const(0)) here, drop it
             match &cc {
                 PicusConstraint::Eq(e) if matches!(&**e, PicusExpr::Const(0)) => {}
                 _ => out_constraints.push(cc),

@@ -35,26 +35,21 @@ impl<F: Field> ByteChip<F> {
     ///
     /// This function returns a `trace` which is a matrix containing all possible byte operations.
     pub fn trace() -> RowMajorMatrix<F> {
-        // The trace containing all values, with all multiplicities set to zero.
         let mut initial_trace = RowMajorMatrix::new(
             zeroed_f_vec(NUM_ROWS * NUM_BYTE_PREPROCESSED_COLS),
             NUM_BYTE_PREPROCESSED_COLS,
         );
 
-        // Record all the necessary operations for each byte lookup.
         let opcodes = ByteOpcode::all();
 
-        // Iterate over all options for pairs of bytes `b` and `c`.
         for (row_index, (b, c)) in (0..=u8::MAX).cartesian_product(0..=u8::MAX).enumerate() {
             let b = b as u8;
             let c = c as u8;
             let col: &mut BytePreprocessedCols<F> = initial_trace.row_mut(row_index).borrow_mut();
 
-            // Set the values of `b` and `c`.
             col.b = F::from_u8(b);
             col.c = F::from_u8(c);
 
-            // Iterate over all operations for results and updating the table map.
             for opcode in opcodes.iter() {
                 match opcode {
                     ByteOpcode::AND => {

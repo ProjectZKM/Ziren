@@ -123,7 +123,6 @@ pub fn host_stacked_whir_to_recursive(
                     .iter()
                     .map(|l| {
                         if i == 0 {
-                            // Round-0 (or a single-round final): stripe rows.
                             RecursiveWhirLeafOpening {
                                 values: l.values.clone(),
                                 ef_values: Vec::new(),
@@ -417,7 +416,6 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
         let n = lsh;
         let final_log = n - folds.iter().sum::<usize>();
 
-        // Structural shape checks (compile-time).
         assert_eq!(proof.final_poly.len(), 1usize << final_log, "whir final_poly len");
         assert_eq!(batch_evaluations.len(), round_stripe_counts.len(), "whir round count");
         assert_eq!(commitments.len(), round_stripe_counts.len(), "whir commitment count");
@@ -429,7 +427,6 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             "stacked WHIR carries its OOD in round constraints"
         );
 
-        // Replay claim batching: observe echoed evals, check the grind, draw λ.
         for round in batch_evaluations {
             for &e in round {
                 observe_ext_element::<C, FC>(builder, challenger, e);
@@ -452,7 +449,6 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
         }
         let mut claim: Ext<C::F, C::EF> = builder.eval(claim_sym);
 
-        // The (unused) starting-OOD batching draw — transcript sync.
         let _batch = challenger.sample_ext(builder);
 
         let mut constraints: Vec<TerminalConstraint<C>> =
@@ -473,7 +469,6 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             let mut this_round_randomness: Vec<Ext<C::F, C::EF>> = Vec::with_capacity(ff);
             for (var, poly) in msgs.iter().enumerate() {
                 let (c0, c1, c2) = (poly[0], poly[1], poly[2]);
-                // Host: c0 + (c0 + c1 + c2) == claim.
                 builder
                     .assert_ext_eq(SymbolicExt::from(c0) + c0 + c1 + c2, SymbolicExt::from(claim));
                 observe_ext_element::<C, FC>(builder, challenger, c0);
@@ -524,16 +519,6 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                 "whir query openings"
             );
             let g_prev = C::F::two_adic_generator(prev_domain_log);
-            // PARALLEL per-query verification.  The body is pure compute —
-            // the query indices were sampled above and the round batch is
-            // drawn after the loop, so no challenger op is emitted inside —
-            // and the Merkle path binds here are the Poseidon2 bulk of a
-            // normalize program.  Each query becomes its own
-            // `SeqBlock::Parallel` sub-program, which the recursion VM
-            // walks with rayon.  The collected (stir value, stir point) order is
-            // the
-            // query order, so the transcript-facing consumption below is
-            // byte-identical to the sequential walk.
             let stir_pairs: Vec<(Ext<C::F, C::EF>, Vec<Ext<C::F, C::EF>>)> = index_bit_vecs
                 .iter()
                 .enumerate()
@@ -583,7 +568,6 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                         leaf.ef_values.clone()
                     };
                     let stir = evaluate_mle_ext::<C>(builder, &virt_leaf, &this_round_randomness);
-                    // stir point = map_to_pow_lsb(g_prev^idx, rem) = [x, x², x⁴, …].
                     let x_felt = exp_bits_lsb::<C>(builder, g_prev, bits);
                     let mut pt = Vec::with_capacity(rem);
                     let mut cur: Ext<C::F, C::EF> = builder.eval(SymbolicExt::from(x_felt));
@@ -614,17 +598,10 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             prev_round0 = false;
         }
 
-        // Final PoW + final queries, with the revealed polynomial absorbed
-        // first.  The host prover and the native verifier bind it in the same
-        // place; a ring that skipped it here would draw a different final
-        // proof-of-work challenge and every index after it.
         for c in proof.final_poly.iter() {
             observe_ext_element::<C, FC>(builder, challenger, *c);
         }
         challenger.check_witness(builder, self.config.final_pow_bits, proof.final_pow);
-        // The final round's openings sit at its own canonical index; the shape
-        // is fixed when the program is built, so this is the same entry, named
-        // rather than taken off the end.
         let final_openings = proof
             .round_query_openings
             .get(self.config.round_parameters.len() - 1)
@@ -638,11 +615,6 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
         let g_final = C::F::two_adic_generator(prev_domain_log);
         let last_ff = *folds.last().unwrap();
         let last_randomness = all_fr[all_fr.len() - last_ff..].to_vec();
-        // Index sampling hoisted out of the loop: the body emits no
-        // challenger ops, so drawing all the final indices first leaves the
-        // transcript sequence byte-identical while making the per-query
-        // bodies pure compute — each becomes a parallel sub-program exactly
-        // like the round queries above.
         let final_index_bits: Vec<Vec<C::Bit>> = (0..self.config.final_queries)
             .map(|_| challenger.sample_bits(builder, prev_domain_log))
             .collect();
@@ -680,15 +652,11 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
                         &leaf_felts,
                         &leaf.path,
                         bits,
-                        // The last round that committed, at its own index —
-                        // the same entry the transcript absorbed, named rather
-                        // than taken off the end of the vector.
                         &proof.round_commitments[self.config.round_parameters.len() - 2],
                     );
                     leaf.ef_values.clone()
                 };
                 let folded = evaluate_mle_ext::<C>(builder, &virt_leaf, &last_randomness);
-                // expected = mono_eval_lsb(final_poly, map_to_pow_lsb(g_final^idx)).
                 let x_felt = exp_bits_lsb::<C>(builder, g_final, bits);
                 let mut pt = Vec::with_capacity(final_log);
                 let mut cur: Ext<C::F, C::EF> = builder.eval(SymbolicExt::from(x_felt));
@@ -701,7 +669,6 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             },
         );
 
-        // Terminal identity.
         let mut total = SymbolicExt::<C::F, C::EF>::ZERO;
         for c in &constraints {
             match c {
@@ -880,7 +847,6 @@ mod tests {
             &mut p_chal,
         );
 
-        // Sanity: the HOST verifier accepts (the circuit must mirror it).
         let host_verifier =
             StackedWhirVerifier::<F, EF, _>::new(build_mmcs(), cfg.clone(), lsh as u32);
         let commitments = vec![round_a.commitment.clone(), round_b.commitment.clone()];
@@ -889,7 +855,6 @@ mod tests {
             .verify_trusted_evaluation(&commitments, &[3, 2], &stack_point, &proof, &mut v_chal)
             .expect("host verify must accept before the circuit test means anything");
 
-        // Host mirror (+ optional tamper for the negative tests).
         let mut host_mirror = host_stacked_whir_to_recursive(&proof);
         tamper(&mut host_mirror);
         let commitment_roots: Vec<[F; 8]> = commitments
@@ -901,7 +866,6 @@ mod tests {
             })
             .collect();
 
-        // Build the circuit.
         let mut builder = Builder::<InnerConfig>::default();
         let commit_vars: Vec<[zkm_recursion_compiler::ir::Felt<F>; 8]> = commitment_roots
             .iter()
@@ -927,7 +891,6 @@ mod tests {
             &mut challenger,
         );
 
-        // Witness stream, same order as the reads above.
         let mut witness_stream: Vec<WitnessBlock<InnerConfig>> = Vec::new();
         for d in &commitment_roots {
             for f in d {
@@ -945,9 +908,6 @@ mod tests {
     /// POSITIVE: an honest stacked-WHIR proof verifies in-circuit.
     #[test]
     fn whir_circuit_roundtrip_mixed_fold_schedule() {
-        // Per-round fold factors differ (round-0 leaves 2^2, later 2^3) and
-        // the final polynomial has 2^4 coefficients — the shape of the
-        // production core config's [4,7,7]+final schedule at test scale.
         run_whir_circuit_roundtrip_with(
             9,
             zkm_pcs::whir::jagged::whir_config_for_fold_schedule(9, &[2, 3], 4),
@@ -960,8 +920,8 @@ mod tests {
         run_whir_circuit_roundtrip(|_| {});
     }
 
-    /// NEGATIVE: tampering an echoed batch evaluation is rejected (the
-    /// λ-batched claim no longer matches the sumcheck).
+    /// Tampering an echoed batch evaluation is rejected: the λ-batched claim
+    /// then differs from the sumcheck claim.
     #[test]
     #[should_panic]
     fn whir_circuit_rejects_tampered_batch_evaluation() {

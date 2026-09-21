@@ -35,7 +35,6 @@ pub fn aligned_borrow_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
     let name = &ast.ident;
 
-    // Get first generic which must be type (ex. `T`) for input <T, N: NumLimbs, const M: usize>
     let type_generic = ast
         .generics
         .params
@@ -47,8 +46,6 @@ pub fn aligned_borrow_derive(input: TokenStream) -> TokenStream {
         .next()
         .expect("Expected at least one generic");
 
-    // Get generics after the first (ex. `N: NumLimbs, const M: usize`)
-    // We need this because when we assert the size, we want to substitute u8 for T.
     let non_first_generics = ast
         .generics
         .params
@@ -61,8 +58,6 @@ pub fn aligned_borrow_derive(input: TokenStream) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
-    // Get impl generics (`<T, N: NumLimbs, const M: usize>`), type generics (`<T, N>`), where
-    // clause (`where T: Clone`)
     let (impl_generics, type_generics, where_clause) = ast.generics.split_for_impl();
 
     let methods = quote! {
@@ -199,7 +194,6 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 }
             });
 
-            // Calls the underlying chip's `picus_info()` method
             let picus_info_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
@@ -309,11 +303,8 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 }
             });
 
-            // Attach an extra generic AB : crate::air::ZKMAirBuilder to the generics of the enum
             let generics = &ast.generics;
             let mut new_generics = generics.clone();
-            // If builder_path starts with `crate::`, don't prefix with `p3_air::`.
-            // Otherwise, prefix with `p3_air::` (e.g. for `AirBuilder<F = F>`).
             let first_segment = builder_path.segments.first().map(|s| s.ident.to_string());
             if first_segment.as_deref() == Some("crate") {
                 new_generics.params.push(syn::parse_quote! { AB: #builder_path });

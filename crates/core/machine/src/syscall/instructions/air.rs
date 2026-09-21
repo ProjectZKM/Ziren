@@ -25,6 +25,11 @@ where
     AB: ZKMAirBuilder,
     AB::Var: Sized,
 {
+    /// Constrains a `SYSCALL` row. It is sound because only the `SYSCALL`
+    /// opcode is received (`is_real ∈ {0,1}`), `op_a_immutable = 0`,
+    /// `is_syscall = 1`, `next_pc = is_halt ? 0 : pc + 4` (the halt row sends
+    /// `(0, 4)` to the final endpoint), and `num_extra_cycles`, `op_a_val`,
+    /// `is_halt` are fixed here, in `eval_syscall` and `eval_is_halt_syscall`.
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
@@ -36,27 +41,10 @@ where
         let public_values: &PublicValues<Word<AB::PublicVar>, AB::PublicVar> =
             public_values_slice.as_slice().borrow();
 
-        // SAFETY: Only `SYSCALL` opcode can be received in this chip.
-        // `is_real` is checked to be boolean, and the `opcode` matches the corresponding opcode.
         builder.assert_bool(local.is_real);
 
-        // Verify that local.is_halt is correct.
         self.eval_is_halt_syscall(builder, local);
 
-        // SAFETY: This checks the following.
-        // - `shard`, `clk` are correctly received from the CpuChip
-        // - `op_a_immutable = 0`
-        // - `is_syscall = 1`
-        // `next_pc`, `num_extra_cycles`, `op_a_val`, `is_halt` need to be constrained. We outline the checks below.
-        // `next_pc` is constrained for the case where `is_halt` is true to be `0` in `eval_is_halt_unimpl`.
-        // `next_pc` is constrained for the case where `is_halt` is false to be `pc + 4` in `eval`.
-        // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`, in `eval`.
-        // `op_a_val` is constrained in `eval_syscall`.
-        // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  On the halt row `next_pc` is the exit signal 0
-        // and the sent lookahead 0 + 4 = 4, exactly the tuple the legacy Cpu row
-        // sent — the PV final endpoint receives it.
         crate::frame::eval_r_type_frame(
             builder,
             &local.frame,
@@ -64,39 +52,27 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            // THE HALT EXEMPTION (the column is constrained below).
             local.state_recv_next_pc.into(),
             local.num_extra_cycles.into(),
             local.is_real.into(),
         );
-        // THE HALT EXEMPTION: the received continuation equals `next_pc` on
-        // every row except the halt, where the predecessor sent `pc + 4` (its
-        // lookahead) while this row's own `next_pc` is overridden to 0.
         builder.when(local.is_real).assert_zero(
             local.state_recv_next_pc
                 - local.next_pc
                 - local.is_halt * (local.pc + AB::Expr::from_u32(4) - local.next_pc),
         );
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit.  The result write is gated by op_a_0 (a discarded write);
-        // the syscall id and extra-cycle count come from the access's
-        // PREVIOUS value.
         builder
             .when(local.is_real)
             .when_not(local.frame.op_a_0)
             .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
 
-        // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`
         builder.assert_eq::<AB::Var, AB::Expr>(
             local.num_extra_cycles,
             self.get_num_extra_syscall_cycles::<AB>(local),
         );
 
-        // SYSCALL instruction.
         self.eval_syscall(builder, local);
 
-        // COMMIT/COMMIT_DEFERRED_PROOFS syscall instruction.
         self.eval_commit(
             builder,
             local,
@@ -104,7 +80,6 @@ where
             public_values.deferred_proofs_digest,
         );
 
-        // HALT syscall and UNIMPL instruction.
         self.eval_halt_unimpl(builder, local, public_values);
     }
 }
@@ -114,28 +89,24 @@ where
 
 #[inline(always)]
 fn get_syscall_id<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Expr {
-    // syscall id is stored in byte 0, 1.
     let syscall_code = local.frame.op_a_access.prev_value;
     syscall_code[0] + syscall_code[1] * AB::Expr::from_u32(256)
 }
 
 #[inline(always)]
 fn get_send_table<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Var {
-    // send_to_table is stored in byte 2
     let syscall_code = local.frame.op_a_access.prev_value;
     syscall_code[2]
 }
 
 #[inline(always)]
 fn get_num_extra_cycles<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Var {
-    // num_extra_cycles is stored in byte 3.
     let syscall_code = local.frame.op_a_access.prev_value;
     syscall_code[3]
 }
 
 #[inline(always)]
 fn is_send_table<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Expr {
-    // We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
     local.is_sys_linux + get_send_table::<AB>(local)
 }
 
@@ -145,6 +116,10 @@ impl SyscallInstrsChip {
     /// This method will do the following:
     /// 1. Send the syscall to the precompile table, if needed.
     /// 2. Check for valid op_a values.
+    ///
+    /// It is sound because `is_real = 0 ⇒ send_to_table = 0`, so padding rows
+    /// send nothing, and on `HINT_LEN` the unconstrained `op_a_val` is still a
+    /// valid word via the register lookup.
     pub(crate) fn eval_syscall<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
@@ -157,10 +132,6 @@ impl SyscallInstrsChip {
         builder.assert_bool(local.is_sys_linux);
         builder.assert_bool(send_to_table.clone());
 
-        // Constrain is_sys_linux bidirectionally to prevent misrouting between
-        // linux and precompile syscall paths.
-        // is_prev_a1_zero.result = 1 iff prev_a_value[1] == 0.
-        // is_sys_linux must be the inverse: 1 iff prev_a_value[1] != 0.
         IsZeroOperation::<AB::F>::eval(
             builder,
             local.frame.op_a_access.prev_value[1].into(),
@@ -171,18 +142,8 @@ impl SyscallInstrsChip {
             .when(local.is_real)
             .assert_eq(local.is_sys_linux, AB::Expr::one() - local.is_prev_a1_zero.result);
 
-        // SAFETY: Assert that for non real row, the send_to_table value is 0 so that the `send_syscall`
-        // interaction is not activated.
         builder.when(AB::Expr::ONE - local.is_real).assert_zero(send_to_table.clone());
 
-        // KoalaBear range checks on op_b and op_c, activated by stored flags.
-        // Only required where the value travels as a single reduced field element: the
-        // precompile bridge (`get_send_table`), `is_halt` (exit code is reduced), and
-        // `is_commit_deferred_proofs` (digest element is reduced).  Linux syscalls travel
-        // via half-word packed columns in `SyscallChip`, which are U16-range-checked
-        // there, so a reduce() collision is impossible and the KoalaBear check is not
-        // needed -- and must NOT be applied, because it would reject legal u32 args such
-        // as AT_FDCWD = 0xFFFFFF9C, which exceeds the KoalaBear modulus.
         let send_to_precompile = get_send_table::<AB>(local);
         builder.assert_bool(local.op_b_check);
         builder.assert_bool(local.op_c_check);
@@ -206,8 +167,6 @@ impl SyscallInstrsChip {
             local.op_c_check.into(),
         );
 
-        // The arguments travel as exact 16-bit half-words: the reduced word would not
-        // determine the syscall chip's half-word columns (`2^32 > p`).
         builder.send_syscall_halves(
             local.frame.shard,
             clk_from_r_type_frame::<AB>(&local.frame),
@@ -219,8 +178,6 @@ impl SyscallInstrsChip {
             LookupScope::Local,
         );
 
-        // Send full Word bytes for linux syscalls to link op_a (result), op_b (a0), op_c (a1)
-        // with SysLinuxChip via SyscallChip bridge.
         builder.send_syscall_result(
             local.frame.shard,
             clk_from_r_type_frame::<AB>(&local.frame),
@@ -231,7 +188,6 @@ impl SyscallInstrsChip {
             LookupScope::Local,
         );
 
-        // Compute whether this syscall is ENTER_UNCONSTRAINED.
         let is_enter_unconstrained = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -248,13 +204,11 @@ impl SyscallInstrsChip {
             .when_not(is_enter_unconstrained)
             .assert_eq(local.syscall_id, syscall_id.clone());
 
-        // The syscall_id should be EXIT_UNCONSTRAINED when is_enter_unconstrained is true.
         builder.when(local.is_real).when(is_enter_unconstrained).assert_eq(
             local.syscall_id,
             AB::Expr::from_u32(SyscallCode::EXIT_UNCONSTRAINED.syscall_id()),
         );
 
-        // Compute whether this syscall is HINT_LEN.
         let is_hint_len = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -265,31 +219,16 @@ impl SyscallInstrsChip {
             local.is_hint_len.result
         };
 
-        // `op_a_val` is constrained.
-
-        // When syscall_id is ENTER_UNCONSTRAINED, the new value of op_a should be 0.
         let zero_word = Word::<AB::F>::from(0);
         builder
             .when(local.is_real)
             .when(is_enter_unconstrained)
             .assert_word_eq(local.op_a_value, zero_word);
 
-        // When the syscall is not one of ENTER_UNCONSTRAINED or HINT_LEN, op_a shouldn't change.
         builder
             .when(local.is_real)
             .when_not(is_enter_unconstrained + is_hint_len + local.is_sys_linux)
             .assert_word_eq(local.op_a_value, local.frame.op_a_access.prev_value);
-
-        // is_sys_linux is now bidirectionally constrained via is_prev_a1_zero above.
-        // When is_sys_linux = 0, prev_a[1] = 0 follows from the IsZero constraint.
-        // SAFETY: This leaves the case where syscall is `HINT_LEN`.
-        // In this case, `op_a`'s value can be arbitrary, but it still must be a valid word if `is_real = 1`.
-        // This is due to `op_a_val` being connected to the CpuChip.
-        // In the CpuChip, `op_a_val` is constrained to be a valid word via `eval_registers`.
-        // As this is a syscall for HINT, the value itself being arbitrary is fine, as long as it is a valid word.
-
-        // The old operand_range_check is now subsumed by op_b_range_check (for halt)
-        // and op_c_range_check (for commit_deferred_proofs).
     }
 
     /// Constraints related to the COMMIT and COMMIT_DEFERRED_PROOFS instructions.
@@ -303,32 +242,26 @@ impl SyscallInstrsChip {
         let (is_commit, is_commit_deferred_proofs) =
             self.get_is_commit_related_syscall(builder, local);
 
-        // Verify the index bitmap.
         let mut bitmap_sum = AB::Expr::ZERO;
-        // They should all be bools.
         for bit in local.index_bitmap.iter() {
             builder.when(local.is_real).assert_bool(*bit);
             bitmap_sum = bitmap_sum.clone() + (*bit).into();
         }
-        // When the syscall is COMMIT or COMMIT_DEFERRED_PROOFS, there should be one set bit.
         builder
             .when(local.is_real)
             .when(is_commit.clone() + is_commit_deferred_proofs.clone())
             .assert_one(bitmap_sum.clone());
-        // When it's some other syscall, there should be no set bits.
         builder
             .when(local.is_real)
             .when(AB::Expr::ONE - (is_commit.clone() + is_commit_deferred_proofs.clone()))
             .assert_zero(bitmap_sum);
 
-        // Verify that word_idx corresponds to the set bit in index bitmap.
         for (i, bit) in local.index_bitmap.iter().enumerate() {
             builder
                 .when(local.is_real)
                 .when(*bit)
                 .assert_eq(local.frame.op_b_val()[0], AB::Expr::from_u32(i as u32));
         }
-        // Verify that the 3 upper bytes of the word_idx are 0.
         for i in 0..3 {
             builder
                 .when(local.is_real)
@@ -336,16 +269,10 @@ impl SyscallInstrsChip {
                 .assert_zero(local.frame.op_b_val()[i + 1]);
         }
 
-        // Retrieve the expected public values digest word to check against the one passed into the
-        // commit syscall. Note that for the interaction builder, it will not have any digest words,
-        // since it's used during AIR compilation time to parse for all send/receives. Since
-        // that interaction builder will ignore the other constraints of the air, it is safe
-        // to not include the verification check of the expected public values digest word.
         let expected_pv_digest_word = builder.index_word_array(&commit_digest, &local.index_bitmap);
 
         let digest_word = local.frame.op_c_val();
 
-        // Verify the public_values_digest_word.
         builder
             .when(local.is_real)
             .when(is_commit.clone())
@@ -354,7 +281,6 @@ impl SyscallInstrsChip {
         let expected_deferred_proofs_digest_element =
             builder.index_array(&deferred_proofs_digest, &local.index_bitmap);
 
-        // op_c_value is KoalaBear range-checked via op_c_check (activated by is_commit_deferred_proofs).
         builder
             .when(local.is_real)
             .when(is_commit_deferred_proofs.clone())
@@ -368,11 +294,8 @@ impl SyscallInstrsChip {
         local: &SyscallInstrColumns<AB::Var>,
         public_values: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
     ) {
-        // `next_pc` is constrained for the case where `is_halt` is true to be `0`
         builder.when(local.is_halt).assert_zero(local.next_pc);
 
-        // op_b_value is KoalaBear range-checked via op_b_check (activated by is_halt).
-        // Check that the `op_b_value` reduced is the `public_values.exit_code`.
         builder
             .when(local.is_halt)
             .assert_eq(local.frame.op_b_val().reduce::<AB>(), public_values.exit_code);
@@ -384,10 +307,8 @@ impl SyscallInstrsChip {
         builder: &mut AB,
         local: &SyscallInstrColumns<AB::Var>,
     ) {
-        // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
         let syscall_id = get_syscall_id::<AB>(local);
 
-        // Compute whether this syscall is HALT.
         let is_halt = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -398,7 +319,6 @@ impl SyscallInstrsChip {
             local.is_halt_check.result
         };
 
-        // Compute whether this syscall is SYS_EXIT_GROUP.
         let is_exit_group = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -411,9 +331,6 @@ impl SyscallInstrsChip {
 
         let is_halt_or_exit_group = is_halt + is_exit_group;
 
-        // Verify that the is_halt flag is correct.
-        // If `is_real = 0`, then `local.is_halt = 0`.
-        // If `is_real = 1`, then `is_halt_check.result or is_exit_group_check.result` will be correct, so `local.is_halt` is correct.
         builder.assert_eq(local.is_halt, is_halt_or_exit_group * local.is_real);
     }
 
@@ -426,7 +343,6 @@ impl SyscallInstrsChip {
     ) -> (AB::Expr, AB::Expr) {
         let syscall_id = get_syscall_id::<AB>(local);
 
-        // Compute whether this syscall is COMMIT.
         let is_commit = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -437,7 +353,6 @@ impl SyscallInstrsChip {
             local.is_commit.result
         };
 
-        // Compute whether this syscall is COMMIT_DEFERRED_PROOFS.
         let is_commit_deferred_proofs = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -458,8 +373,6 @@ impl SyscallInstrsChip {
     ) -> AB::Expr {
         let num_extra_cycles = get_num_extra_cycles::<AB>(local);
 
-        // If `is_real = 0`, then the return value is `0` regardless of `num_extra_cycles`.
-        // If `is_real = 1`, then `num_extra_cycles` will be correct.
         num_extra_cycles * local.is_real
     }
 }

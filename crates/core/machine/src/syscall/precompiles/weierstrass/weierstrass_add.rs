@@ -84,10 +84,6 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
         q_x: BigUint,
         q_y: BigUint,
     ) {
-        // This populates necessary field operations to calculate the addition of two points on a
-        // Weierstrass curve.
-
-        // slope = (q.y - p.y) / (q.x - p.x).
         let slope = {
             let slope_numerator =
                 cols.slope_numerator.populate(blu_events, &q_y, &p_y, FieldOperation::Sub);
@@ -103,7 +99,6 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
             )
         };
 
-        // x = slope * slope - (p.x + q.x).
         let x = {
             let slope_squared =
                 cols.slope_squared.populate(blu_events, &slope, &slope, FieldOperation::Mul);
@@ -112,7 +107,6 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
             cols.x3_ins.populate(blu_events, &slope_squared, &p_x_plus_q_x, FieldOperation::Sub)
         };
 
-        // y = slope * (p.x - x_3n) - p.y.
         {
             let p_x_minus_x = cols.p_x_minus_x.populate(blu_events, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
@@ -166,7 +160,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         let blu_events: Vec<Vec<ByteLookupEvent>> = events
             .par_chunks(chunk_size)
             .map(|ops: &[(SyscallEvent, PrecompileEvent)]| {
-                // The blu map stores shard -> map(byte lookup event -> multiplicity).
                 let mut blu = Vec::new();
                 ops.iter().for_each(|(_, op)| match op {
                     PrecompileEvent::Secp256k1Add(event)
@@ -242,7 +235,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
             });
         });
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, num_weierstrass_add_cols::<E::BaseField>()))
     }
 
@@ -291,7 +283,6 @@ where
         let q_x = limbs_from_prev_access(&local.q_access[0..num_words_field_element]);
         let q_y = limbs_from_prev_access(&local.q_access[num_words_field_element..]);
 
-        // slope = (q.y - p.y) / (q.x - p.x).
         let slope = {
             local.slope_numerator.eval(builder, &q_y, &p_y, FieldOperation::Sub, local.is_real);
 
@@ -308,7 +299,6 @@ where
             &local.slope.result
         };
 
-        // x = slope * slope - self.x - other.x.
         let x = {
             local.slope_squared.eval(builder, slope, slope, FieldOperation::Mul, local.is_real);
 
@@ -325,7 +315,6 @@ where
             &local.x3_ins.result
         };
 
-        // y = slope * (p.x - x_3n) - q.y.
         {
             local.p_x_minus_x.eval(builder, &p_x, x, FieldOperation::Sub, local.is_real);
 
@@ -346,8 +335,6 @@ where
             );
         }
 
-        // Constraint self.p_access.value = [self.x3_ins.result, self.y3_ins.result]. This is to
-        // ensure that p_access is updated with the new value.
         for i in 0..E::BaseField::NB_LIMBS {
             builder
                 .when(local.is_real)
@@ -367,14 +354,12 @@ where
         );
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
-                                             * same. */
+            local.clk + AB::F::from_u32(1),
             local.p_ptr,
             &local.p_access,
             local.is_real,
         );
 
-        // Fetch the syscall id for the curve type.
         let syscall_id_felt = match E::CURVE_TYPE {
             CurveType::Secp256k1 => AB::F::from_u32(SyscallCode::SECP256K1_ADD.syscall_id()),
             CurveType::Secp256r1 => AB::F::from_u32(SyscallCode::SECP256R1_ADD.syscall_id()),
@@ -401,7 +386,6 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
         cols: &mut WeierstrassAddAssignCols<F, E::BaseField>,
         new_byte_lookup_events: &mut Vec<ByteLookupEvent>,
     ) {
-        // Decode affine points.
         let p = &event.p;
         let q = &event.q;
         let p = AffinePoint::<E>::from_words_le(p);
@@ -409,7 +393,6 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
         let q = AffinePoint::<E>::from_words_le(q);
         let (q_x, q_y) = (q.x, q.y);
 
-        // Populate basic columns.
         cols.is_real = F::ONE;
         cols.shard = F::from_u32(event.shard);
         cols.clk = F::from_u32(event.clk);
@@ -418,7 +401,6 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
 
         Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
 
-        // Populate the memory access columns.
         for i in 0..cols.q_access.len() {
             cols.q_access[i].populate(event.q_memory_records[i], new_byte_lookup_events);
         }

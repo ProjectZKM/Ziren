@@ -163,7 +163,6 @@ pub fn validator_proof(_block_root: Node, _index: u64) -> (Validator, Vec<Node>)
 ///
 /// The target slot must be at most (source_slot - 8192).
 pub fn historical_far_slot_proof(_block_root: Node, _target_slot: u64) -> (Node, Vec<Node>) {
-    // Block root -> historical summary root
     let leaf =
         node_from_bytes(hex!("1d52ab18adbab483661ee3dd7ebc62691abe30c1ac619a120a4d3050ec0f7c4b"));
     let branch = branch_from_bytes(

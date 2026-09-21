@@ -230,7 +230,6 @@ mod tests {
 
     #[test]
     fn context_is_repr_c_and_alignment_friendly() {
-        // Sanity: registers field aligned at >= 4-byte boundary.
         let ctx = JitContext::default();
         let ptr = std::ptr::addr_of!(ctx.registers) as usize;
         assert_eq!(ptr % 4, 0);

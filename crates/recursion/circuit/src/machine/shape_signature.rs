@@ -40,45 +40,24 @@ pub fn hash_shard_proof_structure<H: Hasher>(
     sp: &JaggedShardProof<InnerVal, InnerChallenge>,
     h: &mut H,
 ) {
-    // Write order:
-    //   main_commitment (fixed [F; 8])
-    //   public_values   (Vec<F>)
-    //   logup_gkr_proof (LogupGkrProof)
-    //   zerocheck_proof (PartialSumcheckProof)
-    //   evaluation_proof (inline-witnessed bundle)
-    //   opened_values
     sp.public_values.len().hash(h);
 
-    // LogupGkrProof::write order:
-    //   circuit_output  (LogUpGkrOutput { numerator, denominator })
-    //   round_proofs    (Vec<LogupGkrRoundProof>)
-    //   logup_evaluations (LogUpEvaluations { point, chip_openings })
-    //   witness         (single F — fixed)
     let lgkr = &sp.logup_gkr_proof;
     lgkr.circuit_output.numerator.len().hash(h);
     lgkr.circuit_output.denominator.len().hash(h);
     lgkr.round_proofs.len().hash(h);
     for round in lgkr.round_proofs.iter() {
-        // Each round writes 4 fixed EFs + a sumcheck proof.
         round.sumcheck_proof.univariate_polys.len().hash(h);
         for poly in round.sumcheck_proof.univariate_polys.iter() {
             poly.coefficients.len().hash(h);
         }
-        // point_and_eval.0 (point: Vec<EF>) is also variable.
         round.sumcheck_proof.point_and_eval.0.len().hash(h);
     }
-    // logup_evaluations
     lgkr.logup_evaluations.point.len().hash(h);
     lgkr.logup_evaluations.chip_openings.len().hash(h);
     for (name, eval) in lgkr.logup_evaluations.chip_openings.iter() {
-        // chip_openings is a BTreeMap — iteration order is sorted, matching
-        // the `Witnessable::write` traversal.  The KEY SET is itself a
-        // compile-time input: the verifier filters the machine's chips by
-        // these names and derives `column_counts_by_round` from the survivors,
-        // so chip-set drift changes the emitted ops.
         name.hash(h);
         eval.main_trace_evaluations_full.as_ref().map_or(0, |v| v.len()).hash(h);
-        // Option<Vec<EF>> — discriminant + len.
         match &eval.preprocessed_trace_evaluations_full {
             Some(v) => {
                 1u8.hash(h);
@@ -88,37 +67,24 @@ pub fn hash_shard_proof_structure<H: Hasher>(
         }
     }
 
-    // zerocheck_proof (PartialSumcheckProof)
     sp.zerocheck_proof.univariate_polys.len().hash(h);
     for poly in sp.zerocheck_proof.univariate_polys.iter() {
         poly.coefficients.len().hash(h);
     }
     sp.zerocheck_proof.point_and_eval.0.len().hash(h);
 
-    // evaluation_proof — the jagged-BaseFold bundle, inline-witnessed by
-    // `read_basefold_proof_from_stream` + the two sumchecks + `q_at_z`, so
-    // every length below lands in the witness stream and in the emitted
-    // instruction count.
     hash_evaluation_proof(&sp.evaluation_proof, h);
 
-    // opened_values — written last, via `basefold_opened_values_from_host`.
     sp.opened_values.chips.len().hash(h);
     for chip in sp.opened_values.chips.iter() {
         chip.preprocessed.local.len().hash(h);
         chip.main.local.len().hash(h);
-        // `degree` is carried host-side in `quotient[0]`; the Horner
-        // recomposition in `chip_height_bits_from_opened_degrees` emits one
-        // op per entry, so its length is structural.
         chip.quotient.first().map(|q| q.len()).unwrap_or(0).hash(h);
     }
 
-    // chip_cumulative_sums (BTreeMap) — witnessed after the proofs, in the
-    // same per-input loop, by both stages' `Witnessable::write`.
     sp.chip_cumulative_sums.len().hash(h);
     for name in sp.chip_cumulative_sums.keys() {
         name.hash(h);
-        // Each ChipCumulativeSums has fixed shape (Ext + SepticDigest of
-        // [F; 7] × 2) — no varlen.
     }
 }
 
@@ -144,9 +110,6 @@ pub fn describe_shard_proof_structure(
         ("opened_chips".into(), sp.opened_values.chips.len()),
         ("chip_cumulative_sums".into(), sp.chip_cumulative_sums.len()),
     ];
-    // Every remaining dimension `hash_shard_proof_structure` folds, so a key
-    // split is attributable: per-chip opened widths and quotient (height-bit)
-    // lengths, and the jagged-BaseFold bundle.
     {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         let mut qsum = 0usize;
@@ -179,8 +142,6 @@ pub fn describe_shard_proof_structure(
             let mut h = std::collections::hash_map::DefaultHasher::new();
             bundle.packing.column_counts.hash(&mut h);
             v.push(("column_counts_hash".into(), (h.finish() & 0xffff_ffff) as usize));
-            // Readable: the per-round column counts and the chip set with
-            // heights, so a split on either is attributable to a chip.
             for (r, cc) in bundle.packing.column_counts.iter().enumerate() {
                 v.push((format!("cc{r}"), (*cc)));
             }
@@ -279,44 +240,18 @@ pub fn describe_shard_proof_structure(
 fn hash_evaluation_proof<H: Hasher>(proof: &EvaluationProof, h: &mut H) {
     match proof {
         EvaluationProof::Empty => 0u8.hash(h),
-        // The `Bytes` arm is CONST-LIFTED (baked), not witnessed, so the
-        // byte length is itself structural.
         EvaluationProof::Bytes(b) => {
             1u8.hash(h);
             b.len().hash(h);
         }
         EvaluationProof::Bundle(bundle) => {
             2u8.hash(h);
-            // Group-0 packing.  `log_dense_size` (= L) drives every length
-            // below; hash it explicitly so the key NAMES the dimension even
-            // if a derived length is ever refactored away.
-            //
-            // `offsets` contributes its LENGTH only.  Its VALUES are the
-            // cumulative per-column cell offsets, i.e. a running sum of the
-            // shard's per-chip HEIGHTS — and the inner lift reconstructs
-            // `col_prefix_sums` / `row_counts` in-circuit from the WITNESSED
-            // height felts rather than baking these (the baked path is the
-            // Bn254 outer wrap circuit, which does not go through this key).
-            // Hashing the values would therefore split the key on a dimension
-            // the program does not see: MEASURED over 189 reth leaves, the
-            // values took 162 distinct settings across only 52 distinct
-            // programs, while the remaining components partition those leaves
-            // into exactly 52 classes.
-            //
-            // `column_counts` keeps its VALUES: they are a function of the
-            // chip set, constant within a program class, so covering them is
-            // free.
             bundle.packing.log_dense_size.hash(h);
             bundle.packing.offsets.len().hash(h);
             bundle.packing.column_counts.hash(h);
 
             hash_stacked_basefold(&bundle.basefold_proof, h);
 
-            // Jagged-WHIR gate: a whir bundle takes a DIFFERENT leaf branch
-            // (WhirBundle lift + stacked-WHIR verify) with its own witness
-            // layout, so its full structural shape must split the key.  On
-            // the default BaseFold path this hashes a single 0u8 — cached
-            // keys change once (version-tag-equivalent), never alias.
             match &bundle.whir_proof {
                 None => 0u8.hash(h),
                 Some(wp) => {
@@ -325,11 +260,9 @@ fn hash_evaluation_proof<H: Hasher>(proof: &EvaluationProof, h: &mut H) {
                 }
             }
 
-            // reduction (JaggedReductionProof) — L rounds, L-long point.
             bundle.reduction.rounds.len().hash(h);
             bundle.reduction.eval_point.len().hash(h);
 
-            // jagged-eval sub-sumcheck — 2*(L+1) rounds.
             let je = &bundle.jagged_eval.partial_sumcheck_proof;
             je.univariate_polys.len().hash(h);
             for poly in je.univariate_polys.iter() {
@@ -337,14 +270,11 @@ fn hash_evaluation_proof<H: Hasher>(proof: &EvaluationProof, h: &mut H) {
             }
             je.point_and_eval.0.len().hash(h);
 
-            // y_per_chip — per-chip per-column row-MLE values.
             bundle.y_per_chip.len().hash(h);
             for y in bundle.y_per_chip.iter() {
                 y.len().hash(h);
             }
 
-            // Per-round split (G >= 2) extra groups.  Empty on the default
-            // G == 1 path, so the key is unchanged there.
             bundle.extra_reduction.len().hash(h);
             for r in bundle.extra_reduction.iter() {
                 r.rounds.len().hash(h);
@@ -389,13 +319,10 @@ fn hash_stacked_basefold<H: Hasher>(
                 for v in leaf.values.iter() {
                     v.len().hash(h);
                 }
-                // Merkle path length tracks the codeword height.
                 leaf.proof.len().hash(h);
             }
         }
     }
-    // batch_evaluations: outer = commit rounds, inner = num_stripes
-    // = 2^(log_dense_size - log_stacking_height).
     stacked.batch_evaluations.len().hash(h);
     for row in stacked.batch_evaluations.iter() {
         row.len().hash(h);

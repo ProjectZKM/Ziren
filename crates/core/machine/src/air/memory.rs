@@ -74,15 +74,8 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
 
         self.assert_bool(do_check.clone());
 
-        // Verify that the current memory access time is greater than the previous's.
         self.eval_memory_access_timestamp(mem_access, do_check.clone(), shard.clone(), clk.clone());
 
-        // Defense-in-depth: memory words entering the subsystem must remain byte-shaped even
-        // if an upstream chip forgot to range check them.
-        //
-        // A read-only access aliases `value` and `prev_value` onto the same columns;
-        // checking them twice was two identical byte lookups per row (2 of the 29
-        // interactions of every `LoadWord` row), so the aliased form checks once.
         if check_bytes {
             if !memory_access.value_aliases_prev() {
                 self.slice_range_check_u8(&memory_access.prev_value().0, do_check.clone());
@@ -90,7 +83,6 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
             self.slice_range_check_u8(&memory_access.value().0, do_check.clone());
         }
 
-        // Add to the memory argument.
         let addr = addr.into();
         let prev_shard = mem_access.prev_shard.clone().into();
         let prev_clk = mem_access.prev_clk.clone().into();
@@ -105,13 +97,11 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
             .chain(memory_access.value().clone().map(Into::into))
             .collect();
 
-        // The previous values get sent with multiplicity = 1, for "read".
         self.send(
             AirLookup::new(prev_values, do_check.clone(), LookupKind::Memory),
             LookupScope::Local,
         );
 
-        // The current values get "received", i.e. multiplicity = -1
         self.receive(
             AirLookup::new(current_values, do_check.clone(), LookupKind::Memory),
             LookupScope::Local,
@@ -147,14 +137,6 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
 
         let prev_clk: Self::Expr = access.prev_clk.clone().into();
 
-        // Verify that the current access time is greater than the previous's.  Because
-        // `prev_shard == shard`, this is always a clk comparison:
-        //
-        //   assert `0 <= clk - prev_clk - 1 < 2^TIMESTAMP_BITS`
-        //
-        // decomposed as `diff_16bit_limb + diff_high * 2^16`.  Only the 16-bit
-        // limb is a column; the high limb is recovered as the linear
-        // expression below and checked against the parametric range table.
         let diff_minus_one = clk.clone() - prev_clk.clone() - Self::Expr::ONE;
         let diff_16bit_limb: Self::Expr = access.diff_16bit_limb.clone().into();
 
@@ -176,7 +158,6 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
             do_check.clone(),
         );
 
-        // Add to the memory argument, with `prev_shard` substituted by `shard`.
         let addr = addr.into();
         let prev_values = once(shard.clone())
             .chain(once(prev_clk))
@@ -189,13 +170,11 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
             .chain(register_access.value().clone().map(Into::into))
             .collect();
 
-        // The previous values get sent with multiplicity = 1, for "read".
         self.send(
             AirLookup::new(prev_values, do_check.clone(), LookupKind::Memory),
             LookupScope::Local,
         );
 
-        // The current values get "received", i.e. multiplicity = -1
         self.receive(
             AirLookup::new(current_values, do_check, LookupKind::Memory),
             LookupScope::Local,
@@ -240,11 +219,9 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         let shard: Self::Expr = shard.clone().into();
         let prev_shard: Self::Expr = mem_access.prev_shard.clone().into();
 
-        // First verify that compare_clk's value is correct.
         self.when(do_check.clone()).assert_bool(compare_clk.clone());
         self.when(do_check.clone()).when(compare_clk.clone()).assert_eq(shard.clone(), prev_shard);
 
-        // Get the comparison timestamp values for the current and previous memory access.
         let prev_comp_value = self.if_else(
             mem_access.compare_clk.clone(),
             mem_access.prev_clk.clone(),
@@ -253,33 +230,10 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
 
         let current_comp_val = self.if_else(compare_clk.clone(), clk.into(), shard.clone());
 
-        // Assert `current_comp_val > prev_comp_val`, by asserting
-        // `0 <= current_comp_val - prev_comp_val - 1 < 2^TIMESTAMP_BITS` (2^26).
-        //
-        // Why that is equivalent.  Both comparands are separately bounded to `[0, 2^26)` — the
-        // clk branch by the frame's `send_timestamp_range_checks` on the caller's `clk`, the
-        // shard branch by the `U16Range` check on the shard index.  Write `d = a - b - 1` over
-        // the integers, so `d` lies in `[-2^26, 2^26)`, and let `L` in `[0, 2^26)` be the value
-        // the limbs below reconstruct; the constraint proves `d = L (mod p)`.
-        //  * if `d >= 0`, then `d` and `L` are both in `[0, p)`, so `d = L >= 0`, i.e. `a > b`;
-        //  * if `d < 0`, then `L = d + p >= p - 2^26`, which contradicts `L < 2^26` exactly when
-        //    `p >= 2^27`.
-        // KoalaBear has `p = 2^31 - 2^24 + 1`, so the argument holds for any width `<= 29 bits`
-        // (`2^30 <= p < 2^31`); at 26 bits it carries a factor of ~16 of margin.  The width and
-        // the executor's per-shard `clk` fence (`CORE_SHARD_CLK_LIMIT`) are the same number and
-        // must be changed together.
-        //
-        // The two limbs are witnessed columns, NOT residuals of the equality: the comparands
-        // come out of an `if_else` on `compare_clk` and are already degree 2, so the guarded
-        // reconstruction equality stays at degree 2 and both range checks are plain lookups.
-        // This is the bound the ordering proof assumes of both comparands AND the width it
-        // range-checks their difference to; widening one without the other makes the argument
-        // INCOMPLETE (a legal gap stops fitting the limbs) or UNSOUND.
         let diff_minus_one = current_comp_val - prev_comp_value - Self::Expr::ONE;
         let diff_16bit_limb: Self::Expr = mem_access.diff_16bit_limb.clone().into();
         let diff_high_limb: Self::Expr = mem_access.diff_high_limb.clone().into();
 
-        // Verify that diff_minus_one = diff_16bit_limb + diff_high_limb * 2^16.
         self.when(do_check.clone()).assert_eq(
             diff_minus_one,
             diff_16bit_limb.clone() + diff_high_limb.clone() * Self::Expr::from_u32(1 << 16),

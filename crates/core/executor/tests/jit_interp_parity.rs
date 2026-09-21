@@ -87,15 +87,8 @@ fn real_keccak_elf_jit_matches_interpreter() {
 fn divu_mfhi_mflo_jit_matches_interpreter() {
     use zkm_core_executor::Opcode;
     let mut instrs = Vec::with_capacity(700);
-    // T0 = 12345
     instrs.push(Instruction::new(Opcode::ADD, Register::T0 as u8, 0, 12345, false, true));
-    // T1 = 10
     instrs.push(Instruction::new(Opcode::ADD, Register::T1 as u8, 0, 10, false, true));
-    // For each iter: DIVU T0 / T1 → Lo (quotient), Hi (remainder)
-    //                MFLO T2; MFHI T3
-    //                T0 = T2  (continue dividing the quotient)
-    // After ceil(log10(12345)) ≈ 5 iters, T0 == 0, T2 == 0, T3 == leftmost digit
-    // Pad with ADD ops to clear JIT_MIN_INSTR_COUNT (500).
     for _ in 0..5 {
         instrs.push(Instruction::new(
             Opcode::DIVU,
@@ -105,7 +98,6 @@ fn divu_mfhi_mflo_jit_matches_interpreter() {
             false,
             false,
         ));
-        // MFLO  T2 ← Lo  (encoded as ADD T2, $LO, $0)
         instrs.push(Instruction::new(
             Opcode::ADD,
             Register::T2 as u8,
@@ -114,7 +106,6 @@ fn divu_mfhi_mflo_jit_matches_interpreter() {
             false,
             false,
         ));
-        // MFHI  T3 ← Hi  (encoded as ADD T3, $HI, $0)
         instrs.push(Instruction::new(
             Opcode::ADD,
             Register::T3 as u8,
@@ -123,7 +114,6 @@ fn divu_mfhi_mflo_jit_matches_interpreter() {
             false,
             false,
         ));
-        // T0 = T2 (continue)
         instrs.push(Instruction::new(
             Opcode::ADD,
             Register::T0 as u8,
@@ -133,7 +123,6 @@ fn divu_mfhi_mflo_jit_matches_interpreter() {
             false,
         ));
     }
-    // Pad with no-ops (ADD T4, T4, 0) to exceed the JIT threshold.
     while instrs.len() < 600 {
         instrs.push(Instruction::new(
             Opcode::ADD,
@@ -146,7 +135,6 @@ fn divu_mfhi_mflo_jit_matches_interpreter() {
     }
     let program = Program::new(instrs, 0, 0);
 
-    // Interpreter
     std::env::set_var("ZIREN_DISABLE_JIT", "1");
     let mut interp = Executor::new(program.clone(), ZKMCoreOpts::default());
     let _ = interp.run_fast();
@@ -155,7 +143,6 @@ fn divu_mfhi_mflo_jit_matches_interpreter() {
     let interp_t3 = interp.register(Register::T3);
     std::env::remove_var("ZIREN_DISABLE_JIT");
 
-    // JIT
     let mut jit = Executor::new(program.clone(), ZKMCoreOpts::default());
     let _ = jit.run_fast();
     let jit_t0 = jit.register(Register::T0);
@@ -170,33 +157,23 @@ fn divu_mfhi_mflo_jit_matches_interpreter() {
     assert_eq!(interp_t3, jit_t3, "DIVU final remainder (MFHI) mismatch");
 }
 
-/// Parity for MULTU + MFLO + MFHI.
-/// `JumpDirect`'s `op_b` is a byte offset RELATIVE to `next_pc`
-/// (`execute_jump_direct`: `target_pc = op_b.wrapping_add(next_pc)`), unlike
-/// `Jumpi`'s, which is already absolute.  The JIT driver used to hand the raw
-/// offset to a lowering that takes an ABSOLUTE target, so every `JumpDirect`
-/// jumped to the offset itself.  On a real ELF based well above zero that
-/// address is outside the program, the dispatch index wrapped, and the
-/// indirect jump left the jump table — taking the host process down with a
-/// SIGSEGV rather than failing as a guest error.
+/// `JumpDirect`'s `op_b` is a byte offset relative to `next_pc`
+/// (`execute_jump_direct`: `target_pc = op_b + next_pc`), unlike `Jumpi`'s,
+/// which is absolute; the JIT lowering takes an absolute target, so the driver
+/// must add `next_pc`. An unadjusted offset lands outside a real ELF, where the
+/// dispatch index wraps and the indirect jump leaves the jump table.
 ///
-/// The jump below skips exactly one instruction.  Land in the wrong place and
-/// `$t0` keeps the value that instruction writes.
+/// The jump below skips exactly one instruction; landing elsewhere leaves `$t0`
+/// holding the value that instruction writes.
 #[test]
 fn jump_direct_target_is_relative_to_next_pc() {
     use zkm_core_executor::Opcode;
     let mut instrs = Vec::with_capacity(700);
-    // 0: t0 = 111
     instrs.push(Instruction::new(Opcode::ADD, Register::T0 as u8, 0, 111, false, true));
-    // 1: JumpDirect, link=$zero, offset=+8 -> target = next_pc + 8 = instr 4.
     instrs.push(Instruction::new(Opcode::JumpDirect, 0, 8, 0, true, true));
-    // 2: delay slot — RUNS.
     instrs.push(Instruction::new(Opcode::ADD, Register::T1 as u8, 0, 1, false, true));
-    // 3: SKIPPED by the jump.  If the target is wrong this runs.
     instrs.push(Instruction::new(Opcode::ADD, Register::T0 as u8, 0, 999, false, true));
-    // 4: landing pad.
     instrs.push(Instruction::new(Opcode::ADD, Register::T2 as u8, 0, 222, false, true));
-    // Pad past JIT_MIN_INSTR_COUNT so the JIT actually engages.
     while instrs.len() < 600 {
         instrs.push(Instruction::new(Opcode::ADD, Register::T3 as u8, 0, 0, false, true));
     }
@@ -223,6 +200,7 @@ fn jump_direct_target_is_relative_to_next_pc() {
     assert_eq!((i0, i1, i2), (j0, j1, j2), "JumpDirect: JIT diverges from the interpreter");
 }
 
+/// Parity for MULTU + MFLO + MFHI.
 #[test]
 fn multu_mfhi_mflo_jit_matches_interpreter() {
     use zkm_core_executor::Opcode;
@@ -338,7 +316,6 @@ fn real_elf_parity(elf_path: &str, input_bytes: Option<Vec<u8>>) {
 /// syscalls — both runtimes should agree on the final register file.
 fn build_alu_chain(num_ops: usize) -> Program {
     let mut instrs = Vec::with_capacity(num_ops + 8);
-    // Seed: t0 = 1, t1 = 2, t2 = 3, ... t7 = 8 via ADDi from $zero.
     for k in 0u8..8 {
         instrs.push(Instruction::new(
             Opcode::ADD,
@@ -349,7 +326,6 @@ fn build_alu_chain(num_ops: usize) -> Program {
             true,
         ));
     }
-    // Body: rotate through a small repertoire of ALU ops.
     for i in 0..num_ops {
         let dst = (Register::T0 as u8) + (i % 8) as u8;
         let src_a = (Register::T0 as u32) + ((i + 1) % 8) as u32;
@@ -392,7 +368,6 @@ fn snapshot_interp_regs(rt: &mut Executor) -> [u32; 32] {
 /// epilogue indirect-jumps via `ctx.jump_table` back to the loop top).
 fn build_bne_loop(iterations: u32) -> Program {
     let mut instrs = Vec::with_capacity(8);
-    // pc=0: t0 = $zero + iterations  (ADDi, op_c immediate)
     instrs.push(Instruction::new(
         Opcode::ADD,
         Register::T0 as u8,
@@ -401,7 +376,6 @@ fn build_bne_loop(iterations: u32) -> Program {
         false,
         true,
     ));
-    // pc=4: t1 = $zero + 0
     instrs.push(Instruction::new(
         Opcode::ADD,
         Register::T1 as u8,
@@ -410,7 +384,6 @@ fn build_bne_loop(iterations: u32) -> Program {
         false,
         true,
     ));
-    // pc=8: loop_top:  t1 += 1
     let loop_top: u32 = 8;
     instrs.push(Instruction::new(
         Opcode::ADD,
@@ -420,7 +393,6 @@ fn build_bne_loop(iterations: u32) -> Program {
         false,
         true,
     ));
-    // pc=12: t0 -= 1   (encoded as t0 = t0 + (-1))
     instrs.push(Instruction::new(
         Opcode::ADD,
         Register::T0 as u8,
@@ -429,8 +401,6 @@ fn build_bne_loop(iterations: u32) -> Program {
         false,
         true,
     ));
-    // pc=16: bne t0, $zero, loop_top   (op_c = byte offset relative to
-    //         next_pc per the executor's encoding; offset = target - next_pc)
     let bne_pc: u32 = 16;
     let bne_offset: u32 = loop_top.wrapping_sub(bne_pc.wrapping_add(4));
     instrs.push(Instruction::new(
@@ -441,8 +411,6 @@ fn build_bne_loop(iterations: u32) -> Program {
         false,
         false,
     ));
-    // pc=20: delay slot — must execute even when branch is taken.
-    //         `add t2, t2, 0` (no-op-equivalent, but observably writes t2).
     instrs.push(Instruction::new(
         Opcode::ADD,
         Register::T2 as u8,
@@ -459,7 +427,6 @@ fn bne_loop_jit_matches_interpreter() {
     const N: u32 = 17;
     let program = build_bne_loop(N);
 
-    // Interpreter (forced via env)
     std::env::set_var("ZIREN_DISABLE_JIT", "1");
     let mut interp = Executor::new(program.clone(), ZKMCoreOpts::default());
     match interp.run_fast() {
@@ -468,12 +435,6 @@ fn bne_loop_jit_matches_interpreter() {
     }
     let interp_regs = snapshot_interp_regs(&mut interp);
     std::env::remove_var("ZIREN_DISABLE_JIT");
-
-    // JIT
-    // Note: this currently reaches the JIT path via Executor::run_fast
-    // only if the program clears the `JIT_MIN_INSTR_COUNT` gate.  This
-    // 6-instr fixture does not, so we exercise the JIT path directly to
-    // validate the codegen rather than gate it.
 
     use zkm_core_executor::jit_runner::{build_context, build_jit_function, run_jit, BuildParams};
     let params = BuildParams {
@@ -497,20 +458,8 @@ fn bne_loop_jit_matches_interpreter() {
         trace_buf.as_mut_ptr(),
         [0u32; 36],
     );
-    // Set `delayed_jump_target` to the post-loop sentinel before
-    // entering: when the loop exits via the branch falling through,
-    // the delay-slot epilogue jumps to ctx.jump_table[exit_idx].  For
-    // straight-line termination we let it run off the end into the
-    // shared exit label (auto-bound by finalize) — the assembled tail
-    // spills regs and returns.  Set ctx.exit_code so the per-instr
-    // gate after the delay slot fires.
-    //
-    // Concrete plan: post-loop, the instruction after the delay slot
-    // (pc=24) is past the program.  The JIT's natural fall-through is
-    // through the spill+epilogue tail so we don't need any sentinel.
     unsafe { run_jit(&jit_fn, &mut ctx) };
 
-    // Compare regs.
     let mut mismatches = Vec::new();
     for (i, (interp, jit)) in interp_regs.iter().zip(ctx.registers[..32].iter()).enumerate() {
         if interp != jit {
@@ -521,8 +470,6 @@ fn bne_loop_jit_matches_interpreter() {
         mismatches.is_empty(),
         "register-file divergence (interp vs JIT) after BNE loop iter={N}: {mismatches:#?}",
     );
-    // Also confirm the loop actually executed N iterations (not just
-    // straight-lined through).
     assert_eq!(ctx.registers[Register::T1 as usize], N, "t1 should equal N after N loop iters");
     assert_eq!(ctx.registers[Register::T0 as usize], 0, "t0 should hit 0 to exit the loop");
 }
@@ -535,15 +482,8 @@ fn bne_loop_jit_matches_interpreter() {
 /// sequences against the executor's reference semantics.
 #[test]
 fn unaligned_lwl_lwr_jit_matches_interpreter() {
-    // Pick a stack address that's safely inside MAX_MEMORY (~2 GB).
-    // 0x7000_0000 works: it's well-aligned and below the real stack
-    // top so the host buffer's MAP_NORESERVE pages get committed
-    // lazily.
     const BASE: u32 = 0x7000_0000;
-    // Two 4-byte words: 0xAABBCCDD at BASE, 0x11223344 at BASE+4.
-    // Stored via SW so both interp and JIT see the same memory state.
     let mut instrs = Vec::with_capacity(16);
-    // S0 = BASE   (load via two ADDs since immediates are 16-bit-ish)
     instrs.push(Instruction::new(
         Opcode::ADD,
         Register::S0 as u8,
@@ -552,7 +492,6 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
         false,
         true,
     ));
-    // T0 = 0xAABBCCDD
     instrs.push(Instruction::new(
         Opcode::ADD,
         Register::T0 as u8,
@@ -561,7 +500,6 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
         false,
         true,
     ));
-    // T1 = 0x11223344
     instrs.push(Instruction::new(
         Opcode::ADD,
         Register::T1 as u8,
@@ -570,7 +508,6 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
         false,
         true,
     ));
-    // SW t0, 0(s0)
     instrs.push(Instruction::new(
         Opcode::SW,
         Register::T0 as u8,
@@ -579,7 +516,6 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
         false,
         true,
     ));
-    // SW t1, 4(s0)
     instrs.push(Instruction::new(
         Opcode::SW,
         Register::T1 as u8,
@@ -588,12 +524,9 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
         false,
         true,
     ));
-    // For each i in 0..4: LWL t2, i(s0) with t2 pre-seeded to 0xFFFFFFFF
-    //   then save the result to a unique register.
     let dest_lwl = [Register::T2, Register::T3, Register::T4, Register::T5];
     let dest_lwr = [Register::T6, Register::T7, Register::S1, Register::S2];
     for (i, dst) in dest_lwl.iter().enumerate() {
-        // Pre-seed dst = 0xF0F0F0F0 so the merge has observable bits.
         instrs.push(Instruction::new(
             Opcode::ADD,
             *dst as u8,
@@ -602,7 +535,6 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
             false,
             true,
         ));
-        // LWL dst, i(s0)
         instrs.push(Instruction::new(
             Opcode::LWL,
             *dst as u8,
@@ -632,14 +564,12 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
     }
     let program = Program::new(instrs, 0, 0);
 
-    // Interp run.
     std::env::set_var("ZIREN_DISABLE_JIT", "1");
     let mut interp = Executor::new(program.clone(), ZKMCoreOpts::default());
     let _ = interp.run_fast();
     let interp_regs = snapshot_interp_regs(&mut interp);
     std::env::remove_var("ZIREN_DISABLE_JIT");
 
-    // JIT run.
     let mut jit = Executor::new(program.clone(), ZKMCoreOpts::default());
     let _ = jit.run_fast();
     let jit_regs = snapshot_interp_regs(&mut jit);
@@ -665,11 +595,6 @@ fn unaligned_lwl_lwr_jit_matches_interpreter() {
 /// loop exits via the per-instruction exit-code gate.
 #[test]
 fn halt_syscall_jit_matches_interpreter() {
-    // pc=0: V0 = 0  (HALT id)
-    // pc=4: A0 = 0  (exit code)
-    // pc=8: SYSCALL
-    // pc=12: ADD t0, t0, 1  (would-be no-op tail; must NOT execute
-    //         after HALT; the gate fires at start of K+1)
     let instrs = vec![
         Instruction::new(Opcode::ADD, Register::V0 as u8, Register::ZERO as u32, 0, false, true),
         Instruction::new(Opcode::ADD, Register::A0 as u8, Register::ZERO as u32, 0, false, true),
@@ -681,7 +606,6 @@ fn halt_syscall_jit_matches_interpreter() {
             false,
             true,
         ),
-        // Sentinel that should NOT execute on either path.
         Instruction::new(
             Opcode::ADD,
             Register::T0 as u8,
@@ -693,7 +617,6 @@ fn halt_syscall_jit_matches_interpreter() {
     ];
     let program = Program::new(instrs, 0, 0);
 
-    // Interp run.
     std::env::set_var("ZIREN_DISABLE_JIT", "1");
     let mut interp = Executor::new(program.clone(), ZKMCoreOpts::default());
     let _ = interp.run_fast();
@@ -701,10 +624,6 @@ fn halt_syscall_jit_matches_interpreter() {
     let interp_t0 = interp.register(Register::T0);
     std::env::remove_var("ZIREN_DISABLE_JIT");
 
-    // JIT path via the lower-level API (lifts the SYSCALL-skip gate
-    // that try_run_fast_jit still applies until the memory bridge
-    // lands).  This validates the syscall trampoline + HALT exit-code
-    // gate end-to-end.
     use zkm_core_executor::jit_runner::{
         build_context, build_jit_function, jit_syscall_handler, run_jit, BuildParams,
         JitBridgeState, JitMemoryBridge,
@@ -749,8 +668,6 @@ fn halt_syscall_jit_matches_interpreter() {
     ctx.user_data = &mut bridge_state as *mut _ as *mut std::ffi::c_void;
     unsafe { run_jit(&jit_fn, &mut ctx) };
     ctx.user_data = std::ptr::null_mut();
-    // Clear the high-bit halt sentinel (0x8000_0000 = "halted with
-    // exit_code 0") for the comparison.
     let raw_exit = ctx.exit_code;
     let jit_exit = if raw_exit == 0x8000_0000 { 0 } else { raw_exit };
     let jit_t0 = ctx.registers[Register::T0 as usize];
@@ -767,17 +684,13 @@ fn halt_syscall_jit_matches_interpreter() {
 
 #[test]
 fn alu_chain_jit_matches_interpreter_for_register_file() {
-    // Build a small enough chain to keep both paths fast in CI but
-    // long enough to exercise register-allocator hot paths in the JIT.
     let program = build_alu_chain(2_000);
 
-    // Pre-screen: ALU-only chain must be JIT-eligible.
     assert!(
         first_unsupported_opcode(&program).is_none(),
         "ALU-only program should not contain SYSCALL/LWL/LWR/SWL/SWR"
     );
 
-    // Interpreter
     let mut rt = Executor::new(program.clone(), ZKMCoreOpts::default());
     match rt.run_fast() {
         Ok(()) | Err(ExecutionError::ExceptionOrTrap()) => {}
@@ -785,7 +698,6 @@ fn alu_chain_jit_matches_interpreter_for_register_file() {
     }
     let interp_regs = snapshot_interp_regs(&mut rt);
 
-    // JIT
     let params = BuildParams {
         program_size: program.instructions.len(),
         memory_size: 4096,
@@ -810,8 +722,6 @@ fn alu_chain_jit_matches_interpreter_for_register_file() {
     );
     unsafe { run_jit(&jit_fn, &mut ctx) };
 
-    // Compare lower-32 register files.  HI/LO and reserved aren't
-    // touched by this workload.
     let mut mismatches = Vec::new();
     for (i, (interp, jit)) in interp_regs.iter().zip(ctx.registers[..32].iter()).enumerate() {
         if interp != jit {

@@ -40,35 +40,20 @@ impl MipsTranspiler for TranspilerBackend {
     }
 
     fn start_instr(&mut self) {
-        // Record the byte offset for the host-visible jump table.
         self.jump_table.push(self.assembler.offset().0);
         self.may_early_exit = false;
 
-        // Bind a per-PC dynamic label so direct branches/jumps in
-        // this program can target it.  Indexing matches jump_table:
-        // index N == MIPS PC == pc_base + N * 4.
         let lbl = self.assembler.new_dynamic_label();
         self.instr_labels.push(lbl);
         let exit_lbl = self.exit_label.expect("exit label set in `new`");
         dynasm!(self.assembler ; .arch x64
             ; =>lbl
-            // Per-instruction early-exit gate: if a previous syscall
-            // handler set ctx.exit_code != 0, fall through to the
-            // shared exit label (which spills regs and returns).
             ; cmp DWORD [Rq(super::CONTEXT) + super::EXIT_CODE_OFFSET], 0
             ; jne =>exit_lbl
-            // Roll the delay-slot pipeline: snapshot delayed_jump_target
-            // (set by a branch/jump emitted in a previous block) into
-            // pending_jump_at_start, then clear delayed_jump_target so
-            // the current instruction's branch (if any) can re-arm it
-            // for the NEXT cycle.  end_instr() consumes
-            // pending_jump_at_start.
             ; mov eax, DWORD [Rq(super::CONTEXT) + super::DELAYED_JUMP_TARGET_OFFSET]
             ; mov DWORD [Rq(super::CONTEXT) + super::PENDING_JUMP_AT_START_OFFSET], eax
             ; mov DWORD [Rq(super::CONTEXT) + super::DELAYED_JUMP_TARGET_OFFSET], 0
         );
-        // Optional: bump ctx.global_clk by clk_bump for cycle
-        // accounting.  Skipped when clk_bump == 0 (smoke tests).
         if self.clk_bump != 0 {
             let bump = self.clk_bump;
             dynasm!(self.assembler ; .arch x64
@@ -78,31 +63,16 @@ impl MipsTranspiler for TranspilerBackend {
     }
 
     fn end_instr(&mut self) {
-        // Delay-slot consumer: if a branch/jump fired one instruction
-        // ago, pending_jump_at_start now holds its target.  Compute the
-        // table index `(target - pc_base) / 4` and indirect-jump via
-        // the runtime jump table (loaded into `JUMP_TABLE` by the
-        // prologue).  If pending_jump_at_start == 0 we fall through
-        // to the next instruction's block, which is the common case.
         let pc_base = self.pc_base;
         let exit_lbl = self.exit_label.expect("exit label set in `new`");
         dynasm!(self.assembler ; .arch x64
             ; mov eax, DWORD [Rq(super::CONTEXT) + super::PENDING_JUMP_AT_START_OFFSET]
             ; test eax, eax
             ; jz >no_delayed_jump
-            // Translate guest PC into a jump-table index.
-            //   eax = (pc - pc_base) / 4
             ; sub eax, DWORD pc_base as i32
             ; shr eax, 2
-            // A guest's computed jump target is not constrained to the
-            // program.  Below `pc_base` the 32-bit subtract above wraps to
-            // a huge index, and an unchecked `jmp [table + idx*8]` then
-            // reads far past the table and lands on garbage — killing the
-            // HOST process on guest input.  Bound it, and record the
-            // target so the host can name it.
             ; cmp eax, DWORD [Rq(super::CONTEXT) + super::JUMP_TABLE_LEN_OFFSET]
             ; jae >bad_dispatch
-            // jmp QWORD [JUMP_TABLE + rax * 8]
             ; jmp QWORD [Rq(super::JUMP_TABLE) + rax * 8]
             ; bad_dispatch:
             ; mov eax, DWORD [Rq(super::CONTEXT) + super::PENDING_JUMP_AT_START_OFFSET]
@@ -144,22 +114,7 @@ impl TranspilerBackend {
             ; push r14
             ; push r15
             ; mov  Rq(super::CONTEXT), rdi
-            // Load the runtime jump-table base from the context into
-            // the pinned JUMP_TABLE GPR.  Indirect jumps (jr/jalr) and
-            // the per-instruction delay-slot dispatch use this to
-            // translate MIPS PC -> native code address.  The host
-            // populates ctx.jump_table from `JitFunction::jump_table`
-            // before calling the entry.
             ; mov  Rq(super::JUMP_TABLE), [Rq(super::CONTEXT) + super::JUMP_TABLE_OFFSET]
-            // Load the host-side guest memory base into the pinned
-            // MEMORY_PTR GPR.  Every load/store instruction in the
-            // JIT (lb/lh/lw/lwl/lwr/sb/sh/sw/swl/swr/ll/sc) computes
-            // `MEMORY_PTR + translated_host_offset` to resolve the
-            // backing host address; without this load MEMORY_PTR
-            // holds whatever R10 the caller had (caller-saved
-            // scratch in SysV) and every memory op SEGVs at a wild
-            // pointer.  Bug found via the PC-trace probe on
-            // fibonacci's first SW.
             ; mov  Rq(super::MEMORY_PTR), [Rq(super::CONTEXT) + super::MEMORY_OFFSET]
         );
     }

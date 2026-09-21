@@ -189,7 +189,6 @@ pub mod sys_linux_tests {
     fn sys_linux_large_arg_program() -> Program {
         let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 5, false, true)];
         instructions.extend(vec![
-            // clone ignores its arguments, so this isolates the range check.
             Instruction::new(Opcode::ADD, 2, 0, SyscallCode::SYS_CLONE as u32, false, true),
             Instruction::new(Opcode::ADD, 4, 0, 0xFFFF_FF9C_u32, false, true),
             Instruction::new(Opcode::ADD, 5, 0, 0xFFFF_FF9C_u32, false, true),

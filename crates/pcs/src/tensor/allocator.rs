@@ -83,9 +83,13 @@ where
         (**self).allocate(layout)
     }
 
+    /// Forwards to the inner allocator.
+    ///
+    /// # Safety
+    ///
+    /// The caller upholds [`Allocator::deallocate`]'s contract for `ptr` and `layout`.
     #[inline]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        // SAFETY: the safety contract must be upheld by the caller
         unsafe { (**self).deallocate(ptr, layout) }
     }
 }
@@ -99,9 +103,13 @@ where
         (**self).allocate(layout)
     }
 
+    /// Forwards to the inner allocator.
+    ///
+    /// # Safety
+    ///
+    /// The caller upholds [`Allocator::deallocate`]'s contract for `ptr` and `layout`.
     #[inline]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        // SAFETY: the safety contract must be upheld by the caller
         unsafe { (**self).deallocate(ptr, layout) }
     }
 }
@@ -115,9 +123,13 @@ where
         (**self).allocate(layout)
     }
 
+    /// Forwards to the inner allocator.
+    ///
+    /// # Safety
+    ///
+    /// The caller upholds [`Allocator::deallocate`]'s contract for `ptr` and `layout`.
     #[inline]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        // SAFETY: the safety contract must be upheld by the caller
         unsafe { (**self).deallocate(ptr, layout) }
     }
 }

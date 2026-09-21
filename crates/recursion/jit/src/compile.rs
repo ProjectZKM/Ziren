@@ -87,13 +87,6 @@ pub fn compile<F: PrimeField64>(
     let mut ops = dynasmrt::x64::Assembler::new().map_err(|_| JitError::Unavailable)?;
     let entry = ops.offset();
 
-    // Callee-saved, because the emitted body uses them across the whole
-    // program and the SysV caller expects them preserved.
-    // rbx and r12 hold the two bases for the whole program, r13/r14 carry
-    // operands across a call-out.  All four are callee-saved, so a call-out
-    // preserves them for free.  SysV wants rsp 16-byte aligned AT the call:
-    // entry leaves rsp = 8 (mod 16), four pushes bring it back to 8, so one
-    // more 8 makes it 0.
     dynasm!(ops
         ; .arch x64
         ; push rbx
@@ -101,8 +94,8 @@ pub fn compile<F: PrimeField64>(
         ; push r13
         ; push r14
         ; sub rsp, 8
-        ; mov r12, rsi          // r12 = base_alu event array
-        ; mov rbx, rdi          // rbx = memory
+        ; mov r12, rsi
+        ; mov rbx, rdi
     );
 
     let mut emitted = 0usize;
@@ -112,7 +105,6 @@ pub fn compile<F: PrimeField64>(
         ; .arch x64
         ; mov eax, DWORD STATUS_OK as i32
         ; jmp ->epilogue
-        // A trapped instruction lands here with its status already in eax.
         ; ->fail:
         ; ->epilogue:
         ; add rsp, 8
@@ -144,10 +136,6 @@ fn emit_blocks<F: PrimeField64>(
                     emit_one(ops, ai, emitted)?;
                 }
             }
-            // A parallel group is emitted as its sequential concatenation.
-            // The runtime's own parallelism is an optimisation over
-            // disjoint address ranges, so running them in order is
-            // semantically identical — just not yet parallel.
             SeqBlock::Parallel(subs) => {
                 for sub in subs {
                     emit_blocks(ops, &sub.seq_blocks, emitted)?;
@@ -177,12 +165,6 @@ fn emit_one<F: PrimeField64>(
                 BaseAluOpcode::AddF => Op::Add,
                 BaseAluOpcode::SubF => Op::Sub,
                 BaseAluOpcode::MulF => Op::Mul,
-                // Division is a call-out, not an emitted fragment: it needs a
-                // field inverse and its zero-divisor case has three outcomes,
-                // one of which must trap.  It is NOT rare -- 16.8% of BaseAlu
-                // on a leaf program -- so without this the JIT compiles
-                // nothing at all, because one unsupported instruction rejects
-                // the whole program.
                 BaseAluOpcode::DivF => Op::Div { is_assert: false },
                 BaseAluOpcode::DivFAssert => Op::Div { is_assert: true },
             };
@@ -203,9 +185,6 @@ fn emit_one<F: PrimeField64>(
                 Op::Sub => emit_sub(ops),
                 Op::Mul => emit_mul(ops),
                 Op::Div { is_assert } => {
-                    // `mult` is a compile-time constant, so the two flags the
-                    // helper needs are folded into one immediate here rather
-                    // than being read at run time.
                     let mut flags = 0u32;
                     if instr.mult.is_zero() {
                         flags |= FLAG_MULT_IS_ZERO;
@@ -215,17 +194,15 @@ fn emit_one<F: PrimeField64>(
                     }
                     dynasm!(ops
                         ; .arch x64
-                        ; mov r13d, r8d          // keep the operands across
-                        ; mov r14d, r9d          // the call (callee-saved)
+                        ; mov r13d, r8d
+                        ; mov r14d, r9d
                         ; mov edi, r8d
                         ; mov esi, r9d
                         ; mov edx, DWORD flags as i32
                         ; mov rax, QWORD div_f as *const () as usize as i64
                         ; call rax
                         ; mov rcx, rax
-                        ; shr rcx, 32            // status in the high word;
-                                                 // shr sets ZF, so ZF=1 means
-                                                 // status 0, i.e. SUCCESS
+                        ; shr rcx, 32
                         ; jz >ok
                         ; mov eax, ecx
                         ; jmp ->fail
@@ -237,13 +214,10 @@ fn emit_one<F: PrimeField64>(
             }
             dynasm!(ops
                 ; .arch x64
-                // Block::from(out) writes the value and zeroes the three
-                // remaining lanes; the interpreter's `mw_us` does the same.
                 ; mov [rbx + out], eax
                 ; mov DWORD [rbx + out + 4], 0
                 ; mov DWORD [rbx + out + 8], 0
                 ; mov DWORD [rbx + out + 12], 0
-                // BaseAluEvent { out, in1, in2 }, in declaration order.
                 ; mov [r12 + ev], eax
                 ; mov [r12 + ev + 4], r8d
                 ; mov [r12 + ev + 8], r9d
@@ -297,11 +271,11 @@ const FLAG_IS_ASSERT: u32 = 2;
 /// * otherwise — out of domain, which must trip.
 ///
 /// Returns the value in the low word and the status in the high word, so the
-/// emitted code needs no stack slot for the error channel.
+/// emitted code needs no stack slot for the error channel. The `u32 ↔ KoalaBear`
+/// transmutes are sound because `MontyField31` is `#[repr(transparent)]` over
+/// `u32` (asserted in `lib.rs`).
 extern "C" fn div_f(in1: u32, in2: u32, flags: u32) -> u64 {
     use p3_field::{Field, PrimeCharacteristicRing};
-    // SAFETY: `MontyField31` is `#[repr(transparent)]` over `u32`, asserted
-    // by the layout contract in `lib.rs`.
     let a: KoalaBear = unsafe { core::mem::transmute::<u32, KoalaBear>(in1) };
     let b: KoalaBear = unsafe { core::mem::transmute::<u32, KoalaBear>(in2) };
     let out = match b.try_inverse().map(|x| x * a) {

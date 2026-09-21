@@ -18,7 +18,6 @@ pub(crate) fn deserialize_with_flags(buf: &[u8]) -> Result<(Fq, CompressedPointF
 
     let m_data = buf[0] & MASK;
     if m_data == u8::from(CompressedPointFlag::Infinity) {
-        // Checks if the first byte is zero after masking AND the rest of the bytes are zero.
         if buf[0] & !MASK == 0 && buf[1..].iter().all(|&b| b == 0) {
             return Err(Error::InvalidPoint);
         }

@@ -121,13 +121,9 @@ impl<F: Field> LongMle<F> {
         let split = point.len() - self.log_stacking_height as usize;
         let (batch_point, stack_point) = point.split_at(split);
 
-        // One evaluation per polynomial per component, in component order.
         let component_evaluations: Vec<EF> =
             self.components.iter().flat_map(|mle| mle.eval_at(stack_point)).collect();
 
-        // Small MLE over the component/polynomial index.  No padding: the
-        // exact-stacking invariant asserted by `num_variables` means this is
-        // already a power of two.
         Mle::from_values(component_evaluations).eval_at(batch_point)[0]
     }
 
@@ -207,7 +203,6 @@ mod tests {
     #[test]
     fn eval_at_matches_the_flat_table() {
         let mut rng = StdRng::seed_from_u64(0xA11CE);
-        // Totals must be powers of two (the exact-stacking invariant): 1, 4, 8, 8, 16.
         for widths in [vec![1usize], vec![2, 2], vec![3, 1, 4], vec![5, 3], vec![6, 6, 4]] {
             for lsh in [3u32, 4] {
                 let comps = build(&mut rng, &widths, lsh);
@@ -247,12 +242,9 @@ mod tests {
                     .map(|_| InnerChallenge::from_u32(rng.gen::<u32>() % 1000))
                     .collect();
 
-                // Folded polynomial evaluated at `rest`.
                 let folded = long.fix_last_variable(alpha);
                 let got = folded.eval_at(&rest);
 
-                // Same point with `alpha` re-inserted at the component's
-                // stride-1 slot.
                 let mut full = rest.clone();
                 full.insert(split, alpha);
                 let want = long.eval_at(&full);
@@ -284,20 +276,17 @@ mod tests {
             let ext = LongMle::from_components(vec![Mle::from_values(evals.clone())], nv);
             let hp = HadamardProduct { base, ext };
 
-            // Total sum of the pointwise product.
             let claim: InnerChallenge = evals
                 .iter()
                 .zip(bvals.iter())
                 .map(|(e, b)| *e * *b)
                 .fold(InnerChallenge::ZERO, |a, x| a + x);
 
-            // p(0) + p(1) == claim  (computed WITHOUT the claim shortcut).
             let p = hp.sum_as_poly_in_last_t_variables(None, 1);
             let p0 = p.eval_at_point(InnerChallenge::ZERO);
             let p1 = p.eval_at_point(InnerChallenge::ONE);
             assert_eq!(p0 + p1, claim, "nv={nv}: p(0)+p(1) != claim");
 
-            // Bind and check the folded total equals p(alpha).
             let alpha = InnerChallenge::from_u32(rng.gen::<u32>() % 1000 + 1);
             let folded = hp.fix_t_variables(alpha, 1);
             let folded_sum = folded
@@ -311,7 +300,6 @@ mod tests {
                 .fold(InnerChallenge::ZERO, |a, x| a + x);
             assert_eq!(folded_sum, p.eval_at_point(alpha), "nv={nv}: folded sum != p(alpha)");
 
-            // And the next round is the ext x ext case.
             let _ = SumcheckPoly::sum_as_poly_in_last_variable(&folded, Some(folded_sum));
         }
     }
@@ -358,8 +346,8 @@ mod tests {
     ///     recorded `eval_point`.
     ///
     /// The second is the one that pins the binding order: with `push` vs
-    /// `insert(0, ..)` reversed, the point no longer addresses the variable the
-    /// fold actually bound and this fails.
+    /// `insert(0, ..)` swapped, the point would address a different variable
+    /// than the one the fold bound, and this would fail.
     #[test]
     fn hadamard_reduction_satisfies_the_sumcheck_contract() {
         use crate::kb31_poseidon2::{InnerChallenger, InnerPerm};
@@ -377,7 +365,6 @@ mod tests {
             let msg: Vec<std::sync::Arc<Mle<InnerVal, CpuBackend>>> =
                 comps.into_iter().map(std::sync::Arc::new).collect();
 
-            // Claim = sum over the restacked layout of base*ext.
             let hp = jagged_hadamard_poly(msg.clone(), lsh, weights.clone());
             let claim: InnerChallenge = hp
                 .ext
@@ -393,11 +380,9 @@ mod tests {
             let mut ch = InnerChallenger::new(perm);
             let proof = prove_jagged_reduction_hadamard(msg, lsh, weights, &mut ch);
 
-            // Round 0 opens on the claim.
             let [p0, p1, _] = proof.rounds[0].evals;
             assert_eq!(p0 + p1, claim, "widths={widths:?}: round 0 does not open on the claim");
 
-            // Final base value == trace poly at the recorded point.
             let base_full = LongMle::from_components(
                 vec![Mle::from_values(hp.base.first_component().guts().as_slice().to_vec())],
                 hp.base.num_variables(),
@@ -458,7 +443,6 @@ mod tests {
             assert_eq!(p0 + p1, current, "round {i}: sumcheck identity failed");
             let r: InnerChallenge = vch.sample_algebra_element();
             sampled.push(r);
-            // p(r) via Lagrange on {0,1,2}, the same closed form the verifier uses.
             let two_inv = InnerChallenge::from_u8(2).inverse();
             let l0 = (r - InnerChallenge::ONE) * (r - InnerChallenge::from_u8(2)) * two_inv;
             let l1 = r * (r - InnerChallenge::from_u8(2)) * (-InnerChallenge::ONE);
@@ -466,10 +450,8 @@ mod tests {
             current = p0 * l0 + p1 * l1 + p2 * l2;
         }
 
-        // SAMPLE order, not reversed — this is the Option-B delta.
         assert_eq!(sampled, proof.eval_point, "recorded point is not in sample order");
 
-        // Closing identity: q_at_z * w_at_z == final claim.
         let w_full = LongMle::from_components(
             vec![Mle::from_values(hp.ext.first_component().guts().as_slice().to_vec())],
             hp.ext.num_variables(),
@@ -482,13 +464,12 @@ mod tests {
         );
     }
 
-    /// ★ THE RECONCILIATION, pinned.
+    /// Restacking and dense materialization agree in natural row order.
     ///
     /// `interleave_multilinears_with_fixed_rate` (the restacking) and
-    /// `materialize_dense_jagged` produce the IDENTICAL layout — provided the
-    /// dense is built in NATURAL row order (`use_rev = true`).  The only thing
-    /// that ever separated them is Ziren's LEGACY BIT-REVERSED row order, which
-    /// `use_rev = false` applies:
+    /// `materialize_dense_jagged` produce the identical layout when the dense
+    /// is built in natural row order (`use_rev = true`); `use_rev = false`
+    /// applies a bit-reversed row order and differs:
     ///
     ///     dense(rev=false) = [594,  74, 102, 552, 710, 606,  84, 68, ..]
     ///     dense(rev=true)  = [594, 710, 102,  84,  74, 606, 552, 68, ..]
@@ -499,9 +480,8 @@ mod tests {
     /// jagged packing geometry.  Under natural order the interleaved base
     /// addresses exactly the cells that closed form assumes, so
     /// `HadamardProduct` can be wired into the reduction with no layout work at
-    /// all.  (This used to hold only on the CORE path, the recursion / shrink /
-    /// wrap stages committing under a legacy bitrev layout; that second layout is
-    /// gone and every stage commits natural.)
+    /// all.  Every stage (core, recursion, shrink, wrap) commits in natural
+    /// order.
     #[test]
     fn interleaved_layout_equals_natural_order_dense_layout() {
         use crate::multilinear::PaddedMle;
@@ -530,11 +510,6 @@ mod tests {
             let hp = jagged_hadamard_poly(msg, lsh, vec![InnerChallenge::ZERO; natural.len()]);
             let inter = hp.base.first_component().guts().as_slice();
 
-            // `dense_len` is now a whole number of 2^21 stacking blocks
-            // (`committed_dense_len`), so the materialized dense runs far past
-            // the real cells while the Hadamard side stays at the toy's own
-            // 2^lsh stacking.  The layout identity lives on the REAL prefix;
-            // the committed tail must be all zeros.
             assert_eq!(
                 &natural[..inter.len()],
                 inter,
@@ -554,7 +529,6 @@ mod tests {
     #[should_panic(expected = "stack exactly into a power of two")]
     fn non_power_of_two_total_is_rejected() {
         let mut rng = StdRng::seed_from_u64(7);
-        // 3 + 2 = 5 columns over 2^3 rows => 40 values, not a power of two.
         let comps = build(&mut rng, &[3, 2], 3);
         let _ = LongMle::from_components(comps, 3).num_variables();
     }
@@ -632,7 +606,6 @@ where
     let eval_0: EF =
         e.par_iter().step_by(2).zip(b.par_iter().step_by(2)).map(|(x, y)| *x * *y).sum();
 
-    // `claim = p(0) + p(1)` lets the odd half be skipped entirely.
     let eval_1: EF = claim.map(|c| c - eval_0).unwrap_or_else(|| {
         e.par_iter()
             .skip(1)
@@ -801,7 +774,6 @@ where
     let mut eval_point: alloc::vec::Vec<crate::InnerChallenge> =
         alloc::vec::Vec::with_capacity(n as usize);
 
-    // Round 0 lifts the trace side F -> EF.
     let poly = hp.sum_as_poly_in_last_t_variables(None, 1);
     let evals = round_evals_at_012(&poly);
     crate::jagged_sumcheck::observe_round_poly_evals(challenger, evals);

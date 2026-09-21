@@ -38,8 +38,6 @@ fn main() {
     let elf = fs::read(&args.program)
         .unwrap_or_else(|e| panic!("failed to read {:?}: {}", args.program, e));
 
-    // Construct stdin matching the zkvm-benchmarks sha2 host's
-    // format: a single Vec<u8> of `num_bytes` filled with 0x05.
     let mut stdin = ZKMStdin::new();
     let input: Vec<u8> = vec![0x05u8; args.num_bytes];
     stdin.write(&input);

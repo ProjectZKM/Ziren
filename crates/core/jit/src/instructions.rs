@@ -291,7 +291,7 @@ pub trait MipsTranspiler:
     ///
     /// # Errors
     ///
-    /// Returns `Err` if memfd allocation or mmap fails.
+    /// `Err` if memfd allocation or mmap fails.
     fn new(
         program_size: usize,
         memory_size: usize,

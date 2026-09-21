@@ -13,7 +13,6 @@ pub fn main() {
         let mut decompressed = [0_u8; 64];
         decompressed[32..].copy_from_slice(&pub_bytes);
 
-        // println!("before: {:?}", decompressed);
 
         syscall_ed_decompress(&mut decompressed);
 
@@ -25,8 +24,6 @@ pub fn main() {
         ];
 
         assert_eq!(decompressed, expected);
-        // println!("after: {:?}", decompressed);
     }
 
-    // println!("done");
 }

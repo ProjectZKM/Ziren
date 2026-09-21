@@ -70,9 +70,6 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
                             input.public_values.execution_shard,
                         );
                     } else {
-                        // Padding rows carry no instruction: neutralise the
-                        // frame or its register-access multiplicities break the
-                        // Memory bus.
                         cols.frame.populate_dependency();
                     }
                 });
@@ -82,7 +79,6 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
 
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_JUMP_COLS))
     }
 
@@ -105,7 +101,6 @@ impl JumpChip {
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {
-        // Every Jump row is a real instruction owning its frame.
         cols.frame.populate_from_jump(event, program, shard, blu);
 
         cols.pc = F::from_u32(event.pc);
@@ -118,7 +113,6 @@ impl JumpChip {
         cols.next_pc_range_checker.populate(blu, event.next_pc);
         cols.next_next_pc = Word::from(event.next_next_pc);
         cols.next_next_pc_range_checker.populate(blu, event.next_next_pc);
-        // The inlined BAL target addition and its byte events.
         if matches!(event.opcode, Opcode::JumpDirect) {
             cols.target_add.populate(blu, event.next_pc, event.b);
         }

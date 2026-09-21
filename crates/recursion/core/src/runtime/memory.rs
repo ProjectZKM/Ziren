@@ -120,25 +120,18 @@ unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
 /// caller must invoke under the address-disjointness discipline of
 /// `RawProgram::SeqBlock::Parallel`.
 ///
-/// Additive type, not yet wired into the runtime.
-///
-/// `MemoryEntry` is the VALUE alone — 16 bytes.  The `mult` field it used to
-/// carry was never
-/// read at runtime (chips read multiplicities from the instruction-side
-/// preprocessed columns), so storing it cost a fifth of every entry's
-/// memory traffic in a VM measured bandwidth-bound; the `mw` APIs keep an
-/// ignored `_mult` parameter so the fifteen instruction-arm call sites
-/// stay untouched.  With no shared counter to alias, parallel reads of
-/// disjoint addresses are race-free without atomics.
+/// Each cell stores only the value (16 bytes): multiplicities come from the
+/// instruction-side preprocessed columns, so the `_mult` argument of the `mw`
+/// methods is ignored. With no shared counter, parallel accesses to disjoint
+/// addresses are race-free without atomics.
 #[derive(Debug, Default)]
 pub struct ParMemVec<F>(Vec<SyncUnsafeCell<MaybeUninit<MemoryEntry<F>>>>);
 
 impl<F: PrimeField64> ParMemVec<F> {
+    /// Allocates `capacity` uninitialized cells. The `transmute` is sound because
+    /// `SyncUnsafeCell` and `UnsafeCell` are `repr(transparent)`, so
+    /// `Vec<SyncUnsafeCell<MaybeUninit<E>>>` and `Vec<MaybeUninit<E>>` share a layout.
     pub fn with_capacity(capacity: usize) -> Self {
-        // SAFETY: SyncUnsafeCell is `repr(transparent)` over UnsafeCell
-        // which is `repr(transparent)` over its inner type. This makes
-        // the layout of `Vec<SyncUnsafeCell<MaybeUninit<E>>>` identical
-        // to `Vec<MaybeUninit<E>>`.
         Self(unsafe {
             mem::transmute::<
                 Vec<MaybeUninit<MemoryEntry<F>>>,
@@ -147,9 +140,9 @@ impl<F: PrimeField64> ParMemVec<F> {
         })
     }
 
-    /// Read from a cell. Caller-asserted exclusive access via `&mut self`.
+    /// Read from a cell. The `unsafe` call is sound because `&mut self` excludes
+    /// every concurrent access.
     pub fn mr(&mut self, addr: Address<F>) -> &MemoryEntry<F> {
-        // SAFETY: exclusive access via `&mut self` precludes any data race.
         unsafe { self.mr_unchecked(addr) }
     }
 
@@ -157,16 +150,12 @@ impl<F: PrimeField64> ParMemVec<F> {
     /// Caller must ensure that no other thread is writing to the same
     /// address concurrently. Writes happen-before all reads under the
     /// `RawProgram` disjoint-address invariant. The address must have
-    /// been written via `mw_unchecked` or `mw` before being read.
+    /// been written via `mw_unchecked` or `mw` before being read, so the
+    /// returned `&MemoryEntry`, living as long as `&self`, is initialized and unaliased.
     pub unsafe fn mr_unchecked(&self, addr: Address<F>) -> &MemoryEntry<F> {
         match self.0.get(addr.as_usize()) {
             Some(cell) => {
-                // SAFETY: per the RawProgram disjoint-address invariant,
-                // no other thread aliases this cell mutably. The borrow
-                // returned shares the lifetime of `&self`.
                 let init: &MaybeUninit<MemoryEntry<F>> = unsafe { &*cell.0.get() };
-                // SAFETY: mw_unchecked must have initialized this cell
-                // before any read (RawProgram happens-before invariant).
                 unsafe { init.assume_init_ref() }
             }
             None => panic!(
@@ -177,9 +166,9 @@ impl<F: PrimeField64> ParMemVec<F> {
         }
     }
 
-    /// Write to a cell. Caller-asserted exclusive access via `&mut self`.
+    /// Write to a cell. The `unsafe` call is sound because `&mut self` excludes
+    /// every concurrent access.
     pub fn mw(&mut self, addr: Address<F>, val: Block<F>, _mult: F) {
-        // SAFETY: exclusive access via `&mut self` precludes any data race.
         unsafe { self.mw_unchecked(addr, val, _mult) }
     }
 
@@ -190,8 +179,6 @@ impl<F: PrimeField64> ParMemVec<F> {
     pub unsafe fn mw_unchecked(&self, addr: Address<F>, val: Block<F>, _mult: F) {
         match self.0.get(addr.as_usize()) {
             Some(cell) => {
-                // SAFETY: per the RawProgram disjoint-address invariant,
-                // no other thread aliases this cell.
                 let slot: &mut MaybeUninit<MemoryEntry<F>> = unsafe { &mut *cell.0.get() };
                 slot.write(MemoryEntry { val });
             }
@@ -214,12 +201,13 @@ mod par_mem_vec_tests {
         KoalaBear::from_u32(v)
     }
 
+    /// A write then a read of one cell round-trips; the `unsafe` calls are sound
+    /// because the test is single-threaded.
     #[test]
     fn write_then_read_roundtrip() {
         let mem = ParMemVec::<KoalaBear>::with_capacity(4);
         let addr = Address(k(0));
         let val = Block([k(7); 4]);
-        // SAFETY: single-thread test, exclusive access trivially true.
         unsafe {
             mem.mw_unchecked(addr, val, k(2));
             let entry = mem.mr_unchecked(addr);
@@ -227,11 +215,11 @@ mod par_mem_vec_tests {
         }
     }
 
+    /// Four scoped threads write the disjoint ranges `[16t, 16t + 16)` through
+    /// `&ParMemVec` (compiles only because it is `Sync`); the main thread reads
+    /// every cell back after all writers joined, so no access aliases.
     #[test]
     fn parallel_disjoint_writes() {
-        // Verifies the type-system contract: `&self` with disjoint
-        // addresses across threads. `std::thread::scope` borrows self
-        // by shared ref — only compiles because ParMemVec is Sync.
         let mem = ParMemVec::<KoalaBear>::with_capacity(64);
         std::thread::scope(|s| {
             for tid in 0..4 {
@@ -241,16 +229,12 @@ mod par_mem_vec_tests {
                         let addr_idx = (tid * 16 + i) as u32;
                         let addr = Address(k(addr_idx));
                         let val = Block([k(addr_idx); 4]);
-                        // SAFETY: per-thread address ranges are disjoint
-                        // (tid * 16 .. (tid+1) * 16); no aliasing.
                         unsafe { m.mw_unchecked(addr, val, KoalaBear::ONE) };
                     }
                 });
             }
         });
-        // Read back from main thread.
         for i in 0..64 {
-            // SAFETY: all writers joined; sole reader.
             let entry = unsafe { mem.mr_unchecked(Address(k(i))) };
             assert_eq!(entry.val.0[0], k(i));
         }

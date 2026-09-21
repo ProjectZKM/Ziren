@@ -73,6 +73,8 @@ where
     AB: ZKMCoreAirBuilder,
     AB::Var: Sized,
 {
+    /// Constrains a narrow-store row. It is sound because both selectors are
+    /// boolean and so is their sum, and the stores keep `op_a` immutable.
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
@@ -80,7 +82,6 @@ where
         let local: &StoreNarrowColumns<AB::Var> = (*local).borrow();
         let common = &local.common;
 
-        // SAFETY: both selectors are boolean and so is their sum.
         let is_real = local.is_sb + local.is_sh;
         builder.assert_bool(local.is_sb);
         builder.assert_bool(local.is_sh);
@@ -97,13 +98,10 @@ where
         );
 
         let one = AB::Expr::ONE;
-        // The store data is the frame's committed `op_a` read; register 0
-        // reads as zero by the frame's own pin.
         let a_val = common.a_val();
         let mem_val = *local.memory_access.value();
         let prev_mem_val = *local.memory_access.prev_value();
 
-        // `SB`: the stored byte replaces the byte at the offset, the rest is unchanged.
         let sb_expected_stored_value = Word([
             a_val[0] * offset_is_zero.clone()
                 + (one.clone() - offset_is_zero.clone()) * prev_mem_val[0],
@@ -118,7 +116,6 @@ where
             .when(local.is_sb)
             .assert_word_eq(mem_val.map(|x| x.into()), sb_expected_stored_value);
 
-        // `SH` requires the offset to be zero or two.
         builder.when(local.is_sh).assert_zero(local.ls_bits_is_one + local.ls_bits_is_three);
 
         let a_is_lower_half = offset_is_zero;
@@ -137,7 +134,6 @@ where
         let opcode = local.is_sb * Opcode::SB.as_field::<AB::F>()
             + local.is_sh * Opcode::SH.as_field::<AB::F>();
 
-        // SAFETY: these stores keep `op_a` immutable.
         receive_memory_instruction(builder, common, opcode, is_real.clone(), is_real);
     }
 }
@@ -199,8 +195,6 @@ impl<F: PrimeField32> MachineAir<F> for StoreNarrowChip {
                 let cols: &mut StoreNarrowColumns<F> = row.borrow_mut();
                 self.event_to_row(event, cols, blu, &input.program);
             },
-            // A padding row needs no neutralising: the typed frame's register-access
-            // multiplicities are `is_real`, which is zero here already.
             |_row| {},
         );
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());

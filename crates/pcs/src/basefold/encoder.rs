@@ -70,11 +70,6 @@ where
                 let mut padded = mle.guts().as_slice().to_vec();
                 padded.resize(padded.len() << log_blowup, F::ZERO);
                 let mat = RowMajorMatrix::new(padded, width);
-                // We need the codeword in BIT-REVERSED row order
-                // (that's what `fold_even_odd_ext` consumes).  The
-                // generic `Evaluations` associated type is opaque,
-                // so go through `to_row_major_matrix()` (natural
-                // order) and explicitly bit-reverse afterwards.
                 let evals = self.dft.dft_batch(mat);
                 let mut br = evals.to_row_major_matrix();
                 reverse_matrix_index_bits(&mut br);

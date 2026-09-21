@@ -70,10 +70,6 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
                             &input.program,
                             input.public_values.execution_shard,
                         );
-                    } else {
-                        // A padding row's frame needs no neutralising: the
-                        // typed I-type frame's register-access multiplicities
-                        // are `is_real`.
                     }
                 });
                 blu
@@ -82,7 +78,6 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
 
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_BRANCH_COLS))
     }
 
@@ -105,7 +100,6 @@ impl BranchChip {
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {
-        // Every Branch row is a real instruction owning its frame.
         cols.frame.populate_from_branch(event, program, shard, blu);
 
         cols.pc = F::from_u32(event.pc);
@@ -121,7 +115,6 @@ impl BranchChip {
         let a_lt_b = (event.a as i32) < (event.b as i32);
         let a_gt_b = (event.a as i32) > (event.b as i32);
 
-        // Equality gadget: IsZero of the two 16-bit limb differences.
         let ab = event.a.to_le_bytes();
         let bb = event.b.to_le_bytes();
         let limb_diff = |lo: usize| {
@@ -143,7 +136,6 @@ impl BranchChip {
         cols.a_eq_b = cols.eq_lo * cols.eq_hi;
         debug_assert_eq!(cols.a_eq_b == F::ONE, a_eq_b);
 
-        // Sign bit + a>0, bound (and looked up) only on the zero-compare rows.
         if matches!(event.opcode, Opcode::BLTZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BGEZ) {
             let msb = (event.a >> 31) & 1;
             cols.msb_a = F::from_u32(msb);
@@ -172,7 +164,6 @@ impl BranchChip {
         cols.next_pc_range_checker.populate(blu, event.next_pc);
         cols.next_next_pc_range_checker.populate(blu, event.next_next_pc);
         cols.is_branching = F::from_bool(branching);
-        // The (when taken) target addition, with its byte events.
         if branching {
             cols.target_add.populate(blu, event.next_pc, event.c);
         } else {

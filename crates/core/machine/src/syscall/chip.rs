@@ -158,26 +158,22 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 .collect(),
         };
 
-        // Emit all global events and byte lookups in a single pass.
         for &(event, rlo, rhi) in &event_triples {
             let (a1_lo, a1_hi) = Self::pack_result_halves(event.arg1);
             let (a2_lo, a2_hi) = Self::pack_result_halves(event.arg2);
 
-            // Cross-shard argument linkage using collision-resistant half-word packing.
             output.global_lookup_events.push(GlobalLookupEvent {
                 message: [event.shard, event.clk, event.syscall_id, a1_lo, a1_hi, a2_lo, a2_hi],
                 is_receive,
                 kind: LookupKind::Syscall as u8,
             });
 
-            // Cross-shard result linkage to ensure both shards agree on the return value.
             output.global_lookup_events.push(GlobalLookupEvent {
                 message: [event.shard, event.clk, event.syscall_id, rlo, rhi, 0, 0],
                 is_receive,
                 kind: LookupKind::SyscallResult as u8,
             });
 
-            // U16Range checks for half-word columns (gated by is_real in the AIR).
             output.add_u16_range_check(a1_lo as u16);
             output.add_u16_range_check(a1_hi as u16);
             output.add_u16_range_check(a2_lo as u16);
@@ -225,9 +221,6 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             cols.arg2_lo = F::from_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
             cols.arg2_hi = F::from_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
 
-            // For Core shard, a_record has real prev_value with linux_sys byte.
-            // For Precompile shard, a_record is default (prev_value=0), so detect
-            // linux from the PrecompileEvent variant instead.
             let is_linux = match precompile_event {
                 Some(PrecompileEvent::Linux(_)) => true,
                 Some(_) => false,
@@ -258,13 +251,6 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 })
                 .map(|event| row_fn(event, None))
                 .collect::<Vec<_>>(),
-            // `all_events()` iterates the deterministic-ordered event map; collect
-            // the rows in that source order.  A previous `.par_bridge()` here was
-            // UNORDERED, so under RAYON_NUM_THREADS>1 the SyscallPrecompile trace
-            // rows came out in a nondeterministic order -> nondeterministic proof
-            // -> `zerocheck rlc_eval != point_and_eval` verify-fail.  Sequential is
-            // byte-identical to the RAYON=1 golden (par_bridge was already
-            // sequential there) at negligible cost for this small chip.
             SyscallShardKind::Precompile => input
                 .precompile_events
                 .all_events()
@@ -272,7 +258,6 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 .collect::<Vec<_>>(),
         };
 
-        // Pad the trace to a power of two depending on the proof shape in `input`.
         rows.resize(
             <SyscallChip as MachineAir<F>>::num_rows(self, input).unwrap(),
             [F::zero(); NUM_SYSCALL_COLS],
@@ -324,22 +309,15 @@ where
 
         builder.assert_bool(local.is_real);
         builder.assert_bool(local.is_linux);
-        // is_linux can only be 1 when is_real is 1.
         builder.when(AB::Expr::one() - local.is_real).assert_zero(local.is_linux);
-        // result_lo/result_hi must be zero when is_linux is 0, so they
-        // can be used directly (degree 1) in the global lookup.
         builder.when_not(local.is_linux).assert_zero(local.result_lo);
         builder.when_not(local.is_linux).assert_zero(local.result_hi);
 
-        // Derive reduced arg1/arg2 inline from half-word columns.
-        // These are NOT stored as columns — saves 2 columns per row.
         let arg1: AB::Expr = local.arg1_lo.into()
             + Into::<AB::Expr>::into(local.arg1_hi) * AB::Expr::from_u32(65536);
         let arg2: AB::Expr = local.arg2_lo.into()
             + Into::<AB::Expr>::into(local.arg2_hi) * AB::Expr::from_u32(65536);
 
-        // U16Range checks for ALL syscalls (not just linux), gated by is_real.
-        // This ensures the global lookup's half-word args are always canonical.
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg1_lo,
@@ -371,9 +349,6 @@ where
 
         match self.shard_kind {
             SyscallShardKind::Core => {
-                // Received as half-words from the instruction chip, so the four argument
-                // columns are inputs of this row rather than a prover-chosen decomposition of
-                // the reduced word.
                 builder.receive_syscall_halves(
                     local.shard,
                     local.clk,
@@ -398,8 +373,6 @@ where
                     LookupScope::Local,
                 );
 
-                // Cross-shard argument linkage using half-word packed args to prevent
-                // reduce() collisions across shards.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -420,8 +393,6 @@ where
                     LookupScope::Local,
                 );
 
-                // Cross-shard result linkage ensuring both Core and Precompile shards
-                // agree on the syscall return value.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -466,8 +437,6 @@ where
                     LookupScope::Local,
                 );
 
-                // Cross-shard argument linkage using half-word packed args to prevent
-                // reduce() collisions across shards.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -488,7 +457,6 @@ where
                     LookupScope::Local,
                 );
 
-                // Cross-shard result linkage ensuring both shards agree on the return value.
                 builder.send(
                     AirLookup::new(
                         vec![

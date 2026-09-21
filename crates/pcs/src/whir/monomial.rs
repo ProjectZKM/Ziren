@@ -98,7 +98,6 @@ mod test {
         let coeffs: Vec<F> = (0..(1usize << m)).map(|_| clamp(&mut rng)).collect();
         for _ in 0..8 {
             let x = rand_ef(&mut rng);
-            // Direct univariate Σ coeff_i x^i.
             let mut uni = EF::ZERO;
             let mut xp = EF::ONE;
             for &c in &coeffs {
@@ -120,7 +119,6 @@ mod test {
         let coeffs: Vec<F> = (0..(1usize << m)).map(|_| clamp(&mut rng)).collect();
 
         let dft = Radix2DitParallel::<F>::default();
-        // dft_batch on coefficients (padded) gives evals in natural order.
         let mut padded = coeffs.clone();
         padded.resize(padded.len() << log_blowup, F::ZERO);
         let evals = dft.dft_batch(RowMajorMatrix::new(padded, 1)).to_row_major_matrix();
@@ -144,15 +142,10 @@ mod test {
         let mut rng = StdRng::seed_from_u64(0x3);
         let a: Vec<EF> = (0..m).map(|_| rand_ef(&mut rng)).collect();
         let b: Vec<EF> = (0..m).map(|_| rand_ef(&mut rng)).collect();
-        // full_monomial_basis_eq(a,b) = Σ_i monomial_partial_eq(a)[i] · lagrange?
-        // Direct check: the closed form Π(a_j b_j + 1 - b_j) equals evaluating
-        // the monomial partial-eq table of `a` in the Lagrange basis at `b`.
         let wa = monomial_partial_eq(&a);
-        // Σ_i wa[i] · eq_lagrange(b)[i]  where eq_lagrange(b)[i] = Π (bit? b_j : 1-b_j)
         let mut lag = alloc::vec![EF::ONE; 1usize << m];
         for (i, slot) in lag.iter_mut().enumerate() {
             let mut p = EF::ONE;
-            // big-endian bits to match monomial_partial_eq
             for (j, &bj) in b.iter().enumerate() {
                 let bit = (i >> (m - 1 - j)) & 1;
                 p *= if bit == 1 { bj } else { EF::ONE - bj };

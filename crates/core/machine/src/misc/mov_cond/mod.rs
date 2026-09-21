@@ -123,9 +123,6 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
                             input.public_values.execution_shard,
                         );
                     } else {
-                        // Padding rows carry no instruction: neutralise the
-                        // frame or its register-access multiplicities break the
-                        // Memory bus.
                         cols.frame.populate_dependency();
                     }
                 });
@@ -135,7 +132,6 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
 
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_MOV_COND_COLS))
     }
 
@@ -158,7 +154,6 @@ impl MovCondChip {
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {
-        // Every MovCond row is a real instruction owning its frame.
         cols.frame.populate_from_movcond(event, program, shard, _blu);
 
         cols.pc = F::from_u32(event.pc);
@@ -209,8 +204,6 @@ where
         let local: &MovCondCols<AB::Var> = (*local).borrow();
         let is_real = local.is_mne + local.is_meq + local.is_wsbh;
 
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  MNE/MEQ/WSBH are sequential and never halt.
         crate::frame::eval_instruction_frame(
             builder,
             &local.frame,
@@ -224,8 +217,6 @@ where
             AB::Expr::ZERO,
             is_real.clone(),
         );
-        // `op_c == 0` via the two 16-bit limb IsZeros, live on the
-        // conditional-move rows only (WSBH ignores `op_c`).
         let mov = local.is_mne + local.is_meq;
         let cv = local.frame.op_c_val();
         let two_pow_8 = AB::Expr::from_u32(1 << 8);
@@ -241,18 +232,11 @@ where
             .assert_eq(local.c_eq_hi, AB::Expr::ONE - c_hi * local.c_eq_hi_inv);
         builder.when(mov.clone()).assert_eq(local.c_eq_0, local.c_eq_lo * local.c_eq_hi);
 
-        // Whether the conditional move fires.  Unguarded: every term carries
-        // a selector, so the padding row's zeros satisfy it.
         builder.assert_eq(
             local.sel_moved,
             local.is_meq * local.c_eq_0 + local.is_mne * (AB::Expr::ONE - local.c_eq_0),
         );
 
-        // Conditional-move semantics, straight against the frame's committed
-        // register access.  A fired move copies `op_b` (unless the write is a
-        // discarded register-0 write, which the frame pins to zero); a failed
-        // one carries the previous value through unchanged — register 0's
-        // previous value IS zero, so that case needs no gate.
         {
             let av = *local.frame.op_a_access.value();
             builder
@@ -278,9 +262,6 @@ impl MovCondChip {
         builder: &mut AB,
         local: &MovCondCols<AB::Var>,
     ) {
-        // The swapped bytes, bound to the committed register write through a
-        // `(1 - op_a_0)` factor (a register-0 destination is discarded and
-        // pinned to zero by the frame) — same degree as the old plain bind.
         let av = *local.frame.op_a_access.value();
         let bv = local.frame.op_b_val();
         let not_a0 = AB::Expr::ONE - local.frame.instruction.op_a_0;

@@ -48,33 +48,20 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let new_len = leaves.len().next_power_of_two();
         let height = log2_strict_usize(new_len);
 
-        // Single-leaf edge case: pad up to 2 leaves so the height-≥1
-        // invariants below (the `0..height-1` loop, the `[last_layer[0],
-        // last_layer[1]]` final compress, and the `2 * new_len - 2`
-        // digest-layer capacity calculation) all hold.  Without this
-        // pad the `0..height-1` range underflows usize when `height == 0`,
-        // hanging the prover constructor in an effectively-infinite loop.
-        // Smallest-possible map (e.g. when `regen_basefold_vks_for_tests`
-        // produces only one unique compress VK hash) hits this.
         let (new_len, height) = if new_len < 2 { (2, 1) } else { (new_len, height) };
 
-        // Pre-allocate the vector.
         let mut digest_layers = Vec::with_capacity(2 * new_len - 2);
 
-        // If `leaves.len()` is not a power of 2 (or fewer than 2), pad
-        // with default digests.
         let mut last_layer = leaves;
         let old_len = last_layer.len();
         for _ in old_len..new_len {
             last_layer.push(HV::Digest::default());
         }
 
-        // Store the leaves in bit-reversed order.
         reverse_slice_index_bits(&mut last_layer);
 
         digest_layers.extend(last_layer.iter());
 
-        // Compute the rest of the layers.
         for _ in 0..height - 1 {
             let mut next_layer = Vec::with_capacity(last_layer.len() / 2);
             last_layer
@@ -100,7 +87,6 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let mut bit_rev_index = reverse_bits_len(index, self.height);
         let value = self.digest_layers[bit_rev_index];
 
-        // Variable to keep track index of the first element in the current layer.
         let mut offset = 0;
         for i in 0..self.height {
             let sibling = if bit_rev_index.is_multiple_of(2) {
@@ -111,7 +97,6 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
             path.push(sibling);
             bit_rev_index >>= 1;
 
-            // The current layer has 1 << (height - i) elements, so we shift offset by that amount.
             offset += 1 << (self.height - i);
         }
         debug_assert_eq!(path.len(), self.height);
@@ -130,7 +115,6 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let mut index = reverse_bits_len(index, path.len());
 
         for sibling in path {
-            // If the index is odd, swap the order of [value, sibling].
             let new_pair =
                 if index.is_multiple_of(2) { [value, sibling] } else { [sibling, value] };
             value = HV::constant_compress(new_pair);
@@ -154,7 +138,6 @@ pub fn verify<C: CircuitConfig, HV: FieldHasherVariable<C>>(
     for (sibling, bit) in proof.path.iter().zip(proof.index.iter().rev()) {
         let sibling = *sibling;
 
-        // If the index is odd, swap the order of [value, sibling].
         let new_pair = HV::select_chain_digest(builder, *bit, [value, sibling]);
         value = HV::compress(builder, new_pair);
     }
@@ -190,9 +173,7 @@ mod tests {
     fn test_merkle_tree_inner() {
         let mut rng = StdRng::seed_from_u64(0xDEAD_BEEF);
         let mut builder = Builder::<InnerConfig>::default();
-        // Run five times with different randomness.
         for _ in 0..5 {
-            // Test with different number of leaves.
             for j in 2..20 {
                 let leaves: Vec<[F; DIGEST_SIZE]> = (0..j)
                     .map(|_| std::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))

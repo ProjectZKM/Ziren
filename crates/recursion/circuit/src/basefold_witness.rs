@@ -140,9 +140,6 @@ where
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         ChipEvaluation {
-            // Thread the FULL-POINT openings (same read/write order as the
-            // host `st::ChipEvaluation` impl in shard_level_witness.rs —
-            // main, prep, main_full, prep_full).
             main_trace_evaluations_full: self
                 .main_trace_evaluations_full
                 .as_ref()
@@ -234,18 +231,6 @@ where
     type WitnessVariable = JaggedChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        // SepticDigest<F> → SepticDigest<Felt<F>> — field-by-field
-        // read of the 7-element septic extension coordinates.
-        //
-        // CRITICAL: the felt-stream consumption order here MUST match
-        // `write` below (the `Vec<_>` Witnessable carries no length
-        // prefix — witness/mod.rs:119 — so read/write order, not just
-        // length, must agree).  `write` emits in struct-declaration
-        // order: preprocessed, main, degree, local_cumulative_sum,
-        // THEN the 7+7 septic global-cumsum felts.  Reading x/y FIRST would
-        // shift every chip's openings by 14 felts (`main.local[0]` reading
-        // what `write` placed at `main.local[14]`), breaking
-        // `rlc_eval == point_and_eval.1` (zerocheck.rs:585).
         use zkm_pcs::septic_curve::SepticCurve;
         use zkm_pcs::septic_extension::SepticExtension;
         let preprocessed = self.preprocessed.read(builder);
@@ -364,9 +349,7 @@ where
         }
     }
 
-    fn write(&self, _witness: &mut impl WitnessWriter<C>) {
-        // Const-constructed in `read`; no stream writes.
-    }
+    fn write(&self, _witness: &mut impl WitnessWriter<C>) {}
 }
 
 impl<C, Dig: Clone> Witnessable<C> for RecursiveBasefoldOpening<InnerVal, InnerChallenge, Dig>
@@ -403,9 +386,6 @@ where
                 .map(|row| row.iter().map(|v| builder.constant(*v)).collect())
                 .collect(),
             merkle_path_bytes: self.merkle_path_bytes.clone(),
-            // Raw digests pass through (promotion happens at the
-            // binding site / stream pair, mirroring merkle_path_digests
-            // handling on the query openings).
             merkle_path_digests: self.merkle_path_digests.clone(),
             _phantom: core::marker::PhantomData,
         }
@@ -464,11 +444,6 @@ where
             final_poly: builder.constant(self.final_poly),
             pow_witness: builder.constant(self.pow_witness),
             batch_grinding_witness: builder.constant(self.batch_grinding_witness),
-            // On this const-built path the verifier's component-opening
-            // branch is not taken, and promoting the (large) `leaf_values`
-            // here would add ~25MB of dead consts to the program.  Emit
-            // empty so they stay out of the circuit entirely (also keeps
-            // them value-independent — nothing to witness).
             component_openings: Vec::new(),
             query_phase_openings: self.query_phase_openings.read(builder),
             batch_evaluations: self
@@ -479,9 +454,7 @@ where
         }
     }
 
-    fn write(&self, _witness: &mut impl WitnessWriter<C>) {
-        // Const-constructed in `read`; no witness-stream writes.
-    }
+    fn write(&self, _witness: &mut impl WitnessWriter<C>) {}
 }
 
 // Value-independent (witness-stream) basefold proof.
@@ -506,7 +479,6 @@ where
         .iter()
         .map(|r| RecursiveBasefoldRound {
             uni_poly: [r.uni_poly[0].read(builder), r.uni_poly[1].read(builder)],
-            // Witness the round commitment (8 felts = inner DigestVariable).
             commitment: core::array::from_fn(|i| r.commitment[i].read(builder)),
             _phantom_f: core::marker::PhantomData,
         })
@@ -514,11 +486,6 @@ where
     let final_poly = host.final_poly.read(builder);
     let pow_witness = host.pow_witness.read(builder);
     let batch_grinding_witness = host.batch_grinding_witness.read(builder);
-    // Component openings are CONSUMED by the verifier
-    // (batched initial_eval + Merkle binding vs the original
-    // commitments) — witness the leaf values and path digests.
-    // Element counts are shape-determined (stripe widths x queries x
-    // path depth), so the program stays value-independent.
     let component_openings = host
         .component_openings
         .iter()
@@ -552,7 +519,6 @@ where
                     position: op.position,
                     block: op.block.iter().map(|v| v.read(builder)).collect(),
                     merkle_path_bytes: op.merkle_path_bytes.clone(),
-                    // Witness each path sibling digest (8 felts).
                     merkle_path_digests: op
                         .merkle_path_digests
                         .iter()
@@ -588,7 +554,6 @@ pub fn write_basefold_proof_to_stream<C>(
     for r in host.rounds.iter() {
         r.uni_poly[0].write(witness);
         r.uni_poly[1].write(witness);
-        // Write the round commitment (8 felts), same order as read.
         for f in r.commitment.iter() {
             f.write(witness);
         }
@@ -596,7 +561,6 @@ pub fn write_basefold_proof_to_stream<C>(
     host.final_poly.write(witness);
     host.pow_witness.write(witness);
     host.batch_grinding_witness.write(witness);
-    // Component openings — SAME order as the read pair.
     for round in host.component_openings.iter() {
         for c in round.iter() {
             for row in c.leaf_values.iter() {
@@ -613,12 +577,9 @@ pub fn write_basefold_proof_to_stream<C>(
     }
     for round in host.query_phase_openings.iter() {
         for op in round.iter() {
-            // In order, no length prefix — a two-element block writes the
-            // same stream the old fixed pair did.
             for v in op.block.iter() {
                 v.write(witness);
             }
-            // Write each path sibling digest (8 felts).
             for d in op.merkle_path_digests.iter() {
                 for f in d.iter() {
                     f.write(witness);
@@ -688,15 +649,6 @@ where
                 .collect()
         })
         .collect();
-    // The component openings are what tie the query chain back to the
-    // polynomials that were actually committed: their leaf values rebuild the
-    // batched `initial_eval`, and each leaf is Merkle-verified against the
-    // round's ORIGINAL commitment.  This path used to drop them
-    // (`component_openings: Vec::new()`, "verifier discards component_openings
-    // on this path"), which was true only because the verifier's `initial_eval`
-    // fed nothing -- it was overwritten by the first fold before it was ever
-    // compared.  With that equality now asserted, dropping them here is what
-    // made the assert inert on the one ring that reaches this reader.
     let component_openings = host
         .component_openings
         .iter()
@@ -764,9 +716,6 @@ pub fn write_basefold_proof_outer_to_stream<C>(
             }
         }
     }
-    // Mirror the reader exactly: component openings between the query-phase
-    // openings and the batch evaluations.  A stream that disagrees with the
-    // reader by one element desynchronizes everything after it.
     for round in host.component_openings.iter() {
         for c in round.iter() {
             for row in c.leaf_values.iter() {

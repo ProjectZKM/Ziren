@@ -47,11 +47,6 @@ impl OrderedShape {
 
 impl FromIterator<(String, usize)> for OrderedShape {
     fn from_iter<T: IntoIterator<Item = (String, usize)>>(iter: T) -> Self {
-        // The canonical chip order is by NAME, matching the
-        // recursion verifier's name-sorted shard_chips / opened_values
-        // BTreeMap.  Previously this sorted by
-        // Reverse(log_degree) (height-descending), which desynced the compile-time
-        // name-order recursion geometry from the committed column order.
         let set = iter.into_iter().collect::<BTreeSet<(String, usize)>>();
         Self { inner: set.into_iter().collect() }
     }

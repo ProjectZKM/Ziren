@@ -170,8 +170,6 @@ impl backends::TranspilerBackend {
     ///
     /// Returns `Err` if dynasm-rt fails to commit the buffer.
     pub fn finalize(mut self, pc_start: u32) -> JitResult<JitFunction> {
-        // Auto-bind the shared exit label if the caller didn't (smoke
-        // tests that drive the assembler directly).  Idempotent.
         self.bind_exit_label();
         let buf_offsets = self.jump_table.clone();
         let assembler = self.assembler;
@@ -188,7 +186,6 @@ mod tests {
 
     #[test]
     fn skeleton_loads() {
-        // Smoke: types + module hierarchy compile.  No execution yet.
         let _ = std::mem::size_of::<JitContext>();
     }
 }

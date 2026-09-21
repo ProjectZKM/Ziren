@@ -211,7 +211,7 @@ impl ProverClient {
     ///
     /// To prove, call [action::Prove::run], which returns a proof of the program's execution.
     /// By default the proof generated will not be compressed to constant size.
-    /// To create a more succinct proof, use the [action::Prove::compressed],
+    /// For a constant-size proof, use the [action::Prove::compressed],
     /// [action::Prove::plonk], or [action::Prove::groth16] methods.
     ///
     /// ### Examples
@@ -401,7 +401,6 @@ mod tests {
         let mut stdin = ZKMStdin::new();
         stdin.write(&10u32);
         let (_, _report) = client.execute(elf, &stdin).run().unwrap();
-        // tracing::info!("gas = {}", report.estimate_gas());
     }
 
     #[test]
@@ -435,11 +434,9 @@ mod tests {
         let mut stdin = ZKMStdin::new();
         stdin.write(&10u32);
 
-        // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
-        // Test invalid public values.
         proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
         if client.verify(&proof, &vk).is_ok() {
             panic!("verified proof with invalid public values")
@@ -455,11 +452,9 @@ mod tests {
         let mut stdin = ZKMStdin::new();
         stdin.write(&10u32);
 
-        // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).compressed().run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
-        // Test invalid public values.
         proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
         if client.verify(&proof, &vk).is_ok() {
             panic!("verified proof with invalid public values")
@@ -475,11 +470,9 @@ mod tests {
         let mut stdin = ZKMStdin::new();
         stdin.write(&10u32);
 
-        // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).plonk().run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
-        // Test invalid public values.
         proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
         if client.verify(&proof, &vk).is_ok() {
             panic!("verified proof with invalid public values")
@@ -494,7 +487,6 @@ mod tests {
         let (pk, vk) = client.setup(elf);
         let stdin = ZKMStdin::new();
 
-        // Generate proof & verify.
         let proof = client.prove(&pk, stdin).groth16().run().unwrap();
         client.verify(&proof, &vk).unwrap();
     }
@@ -508,7 +500,6 @@ mod tests {
         let mut stdin = ZKMStdin::new();
         stdin.write(&10u32);
 
-        // Generate proof.
         let proof = client.prove(&pk, stdin).dvsnark().run().unwrap();
         tracing::info!("proof public values {:?}", proof.public_values);
     }
@@ -532,7 +523,6 @@ mod tests {
         let (pk, vk) = client.setup(elf);
         let stdin = ZKMStdin::new();
 
-        // Generate proof & verify.
         let proof = client.prove(&pk, stdin).groth16().run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
@@ -572,7 +562,6 @@ mod tests {
         let (pk, vk) = client.setup(elf);
         let stdin = ZKMStdin::new();
 
-        // Generate proof & verify.
         let proof = client.prove(&pk, stdin).groth16().run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
@@ -585,9 +574,6 @@ mod tests {
             _ => panic!("expected a compressed proof"),
         };
 
-        // In `imm-wrap-vk` mode, `vkey_hash` is combined with `vk_commitment`/`pc_start`
-        // (see `hash_vkey_with_part_vk`), so it isn't just `vk.hash_bn254()` like in normal mode
-        // -- reuse the same mode-aware computation `client.verify()` already uses internally.
         let vk_hash = zkm_prover::verify::groth16_vk_hash(&vk).unwrap().to_string();
         assert_eq!(vk_hash, inner_proof.public_inputs[0], "vk hash does not match");
 
@@ -634,11 +620,9 @@ mod tests {
         let (pk, vk) = client.setup(elf);
         let stdin = ZKMStdin::new();
 
-        // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
-        // Test invalid public values.
         proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
         if client.verify(&proof, &vk).is_ok() {
             panic!("verified proof with invalid public values")
@@ -657,11 +641,9 @@ mod tests {
         let (pk, vk) = client.setup(elf);
         let stdin = ZKMStdin::new();
 
-        // Generate proof & verify.
         let mut proof = client.prove(&pk, stdin).compressed().run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
-        // Test invalid public values.
         proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
         if client.verify(&proof, &vk).is_ok() {
             panic!("verified proof with invalid public values")
@@ -676,11 +658,8 @@ mod tests {
         let (pk, vk) = client.setup(elf);
         let stdin = ZKMStdin::new();
 
-        // Generate proof & verify.
         let proof = client.prove(&pk, stdin.clone()).compressed().run().unwrap();
         client.verify(&proof, &vk).unwrap();
-
-        //--------------------------------------------
 
         let client = ProverClient::new();
 

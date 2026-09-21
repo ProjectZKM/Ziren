@@ -61,10 +61,9 @@ pub struct BranchColumns<T> {
 
     /// A branch only ever needs EQUALITY of `op_a`/`op_b` (BEQ/BNE) and the
     /// SIGN of `op_a` (the zero-compares read register 0 as `op_b`, so
-    /// `a_eq_b` doubles as `a == 0` there).  The general 17-column signed
-    /// `LtOperation` this chip used to carry — plus its two AND and one LTU
-    /// byte lookups per row — is replaced by the 7 columns below and a single
-    /// MSB lookup on the zero-compare rows.
+    /// `a_eq_b` doubles as `a == 0` there).  So 7 columns and one MSB
+    /// lookup on the zero-compare rows suffice, instead of a signed
+    /// `LtOperation` (17 columns, three byte lookups per row).
     ///
     /// Equality is two `IsZero`s over the 16-bit limb differences
     /// `(a0-b0) + 256*(a1-b1)` and `(a2-b2) + 256*(a3-b3)`: with byte-shaped

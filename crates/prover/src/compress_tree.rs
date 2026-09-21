@@ -1,29 +1,22 @@
 //! The compress stage's reduction tree, keyed by SHARD RANGE.
 //!
-//! The reduction used to be driven in LAYERS: bucket finished proofs by tree
-//! height, wait for a bucket to reach `batch_size` or for its source layer to
-//! be exhausted, emit, repeat. That shape has a barrier in it — a node at
-//! height `h+1` cannot start until its whole source layer has drained — and the
-//! tail of every layer leaves the prove pool idle. It also gets worse the wider
-//! the machine is: the upper layers have fewer nodes than there are workers
-//! (129 -> 33 -> 9 -> 3 -> 1), so the last few reductions run nearly serially.
-//!
-//! Here a proof is indexed by the shard boundary it STARTS at. When one lands,
+//! A proof is indexed by the shard boundary it STARTS at. When one lands,
 //! the tree looks for an adjacent sibling — a range ending where this one
 //! begins, or beginning where it ends — and merges. A merged range that reaches
 //! `batch_size` is dispatched as one reduction; anything shorter goes back in to
 //! wait. Nothing is keyed by depth, so a range reduces the moment its neighbour
-//! is ready and levels overlap freely.
+//! is ready and levels overlap freely: no node at height `h+1` waits for its
+//! whole source layer at height `h` to drain.
 //!
 //! Contiguity is not just an optimisation here: the compose program asserts
-//! shard-chain continuity across its inputs (`compress_basefold.rs`:
-//! `input_{k+1}.start_shard == input_k.next_shard`), so a batch MUST be a
+//! shard-chain continuity across its inputs
+//! (`input_{k+1}.start_shard == input_k.next_shard`), so a batch MUST be a
 //! contiguous, in-order run. Keying on the range is what makes that structural
 //! rather than something a reorder buffer has to maintain.
 //!
 //! This is only sound once a compose program is a function of its ARITY: two
 //! ranges at different depths can only share a program if every recursion proof
-//! has the same shape. That is what the single recursion shape buys.
+//! has the same shape, which the single recursion shape guarantees.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -249,7 +242,7 @@ impl<P> RangeProofs<P> {
     }
 
     /// Split everything from index `at` onward into a new run, or `None` when
-    /// the run is no longer than `at`.
+    /// `len ≤ at`.
     fn split_off(&mut self, at: usize) -> Option<Self> {
         if at >= self.proofs.len() {
             return None;
@@ -309,11 +302,6 @@ impl<P> CompressTree<P> {
             .filter(|(_, run)| run.range.end == range.start)
             .map(|(start, _)| *start);
 
-        // Take the left sibling out FIRST, then look for a right one. Order
-        // matters for a DEGENERATE range (`start == end`, which is what every
-        // precompile proof has): a single waiting run can satisfy both lookups,
-        // and testing for the right sibling before removing the left would
-        // count that one run twice.
         match left_start.map(|start| self.map.remove(&start).unwrap()) {
             Some(left) => match self.map.remove(&range.end) {
                 Some(right) => Some(Sibling::Both(left, right)),
@@ -353,8 +341,6 @@ impl<P> CompressTree<P> {
             None => RangeProofs::single(range, proof),
         };
 
-        // A merge can overshoot the arity; the remainder goes back to wait for
-        // its own neighbour rather than being carried into an oversized batch.
         if let Some(rest) = run.split_off(self.batch_size) {
             self.map.insert(rest.range.start, rest);
         }
@@ -404,11 +390,7 @@ mod tests {
     /// the batches that were emitted (as shard ranges) in emission order.
     fn drive(n: u64, batch_size: usize, order: &[u64]) -> Vec<(ShardRange, bool)> {
         let mut tree = CompressTree::<u64>::new(batch_size);
-        // Shards are numbered from 1 (`ShardBoundary::initial`), so `n` leaves
-        // span 1..n+1.
         let full = r(1, n + 1);
-        // Every leaf is in flight until it lands; a dispatched batch is in
-        // flight until its output lands.
         let mut in_flight = order.len();
         let mut queue: VecDeque<(ShardRange, u64)> =
             order.iter().map(|&i| (r(i, i + 1), i)).collect();
@@ -423,7 +405,6 @@ mod tests {
                         assert!(queue.is_empty(), "root emitted with work outstanding");
                         return emitted;
                     }
-                    // The reduction's output re-enters the tree.
                     in_flight += 1;
                     queue.push_back((range, range.start.shard));
                 }
@@ -438,18 +419,14 @@ mod tests {
         let emitted = drive(8, 2, &(1..9).collect::<Vec<_>>());
         assert!(emitted.last().unwrap().1, "last emission must be the root");
         assert_eq!(emitted.last().unwrap().0, r(1, 9));
-        // 8 leaves at arity 2 = 4 + 2 + 1 reductions.
         assert_eq!(emitted.len(), 7);
     }
 
     #[test]
     fn reduces_out_of_order_arrivals() {
-        // Arrival order is prove-pool completion order, not chain order.
         let emitted = drive(8, 2, &[4, 1, 8, 2, 6, 3, 7, 5]);
         assert!(emitted.last().unwrap().1);
         assert_eq!(emitted.last().unwrap().0, r(1, 9));
-        // Every emitted batch is contiguous, which is what the compose
-        // program's chain-continuity assert requires.
         for (range, _) in &emitted {
             assert!(range.start <= range.end);
         }
@@ -457,9 +434,6 @@ mod tests {
 
     #[test]
     fn levels_overlap_rather_than_waiting_for_a_layer() {
-        // With 4 leaves at arity 2, landing shards 1 and 2 emits [1,3)
-        // immediately — before shards 3 and 4 have landed at all. A layered
-        // driver could not emit until the whole first layer had drained.
         let mut tree = CompressTree::<u64>::new(2);
         let full = r(1, 5);
         assert!(matches!(tree.insert(r(1, 2), 1, 3, Some(full)), Reduction::Wait));
@@ -474,8 +448,6 @@ mod tests {
 
     #[test]
     fn a_short_final_run_still_reaches_the_root() {
-        // 5 leaves at arity 4: the last run is shorter than the batch size and
-        // only `in_flight == 0` plus the full range tells the tree to emit it.
         let emitted = drive(5, 4, &(1..6).collect::<Vec<_>>());
         assert!(emitted.last().unwrap().1);
         assert_eq!(emitted.last().unwrap().0, r(1, 6));
@@ -483,8 +455,6 @@ mod tests {
 
     #[test]
     fn a_chain_of_mixed_kinds_reduces_as_one_run() {
-        // precompile | deferred | core | memory, all in one tree.  The tree
-        // never learns which is which.
         let mut chain = ShardChain::new();
         let ranges = [
             chain.precompile(),
@@ -496,8 +466,6 @@ mod tests {
         ];
         let full = chain.full_range();
 
-        // Every range starts where the previous one ended: that is the whole
-        // invariant the tree rests on.
         for pair in ranges.windows(2) {
             assert_eq!(pair[0].end, pair[1].start, "chain broken at {:?}", pair[0]);
         }
@@ -524,8 +492,6 @@ mod tests {
 
     #[test]
     fn precompiles_are_mutually_adjacent() {
-        // Their range is degenerate, so any two of them merge. Without that, a
-        // run of precompile proofs has no neighbour and never starts reducing.
         let mut chain = ShardChain::new();
         let a = chain.precompile();
         let b = chain.precompile();
@@ -553,15 +519,12 @@ mod tests {
     fn an_oversized_merge_splits_and_keeps_the_remainder() {
         let mut tree = CompressTree::<u64>::new(2);
         let full = r(1, 5);
-        // Land 0 and 2, leaving a gap; neither has a sibling.
         assert!(matches!(tree.insert(r(1, 2), 1, 3, Some(full)), Reduction::Wait));
         assert!(matches!(tree.insert(r(3, 4), 3, 2, Some(full)), Reduction::Wait));
-        // 1 closes the gap: [0,1)+[1,2)+[2,3) is three, one over the arity.
         match tree.insert(r(2, 3), 2, 1, Some(full)) {
             Reduction::Emit { proofs, .. } => {
                 assert_eq!(proofs.len(), 2);
                 assert_eq!(proofs.range(), r(1, 3));
-                // The overshoot went back to wait for its own neighbour.
                 assert_eq!(tree.pending_runs(), 1);
             }
             Reduction::Wait => panic!("a closed gap should reduce"),
@@ -573,11 +536,9 @@ mod tests {
     #[test]
     fn settle_releases_a_run_that_completed_before_the_range_was_known() {
         let mut tree = CompressTree::<u64>::new(4);
-        // Two leaves land with no full range yet: they merge and wait.
         assert!(matches!(tree.insert(r(1, 2), 1, 1, None), Reduction::Wait));
         assert!(matches!(tree.insert(r(2, 3), 2, 0, None), Reduction::Wait));
         assert_eq!(tree.pending_runs(), 1);
-        // Nothing else will land; the driver now knows the range was 1..3.
         match tree.settle(0, Some(r(1, 3))) {
             Reduction::Emit { proofs, is_complete } => {
                 assert!(is_complete);

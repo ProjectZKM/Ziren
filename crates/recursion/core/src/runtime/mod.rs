@@ -345,43 +345,19 @@ where
 
     /// Compare to [zkm_recursion_core::runtime::Runtime::run].
     pub fn run(&mut self) -> Result<(), RuntimeError<F, EF>> {
-        // Replace push-based ExecutionRecord writes
-        // with offset-based UnsafeRecord writes. Analyze the program
-        // once at run() entry to assign per-instruction offsets, then
-        // walk the analyzed seq_blocks. After the walk, finalize via
-        // `into_record()` which transmutes the layout-equivalent
-        // `MaybeUninit<UnsafeCell<T>>` Vec into `Vec<T>`. The
-        // SeqBlock::Parallel arm currently walks sequentially; once it
-        // dispatches via par_iter, UnsafeRecord's Sync impl
-        // and the disjoint-offset invariant from analyze make the
-        // swap a one-liner.
-        // ZIREN_REC_EXEC_TIMING=1 splits a recursion program's execution into
-        // its two host phases.  The walk is the interpreter a JIT would replace
-        // (`crates/core/jit` does it for the guest); this is the measurement
-        // that says what a recursion JIT would be worth.
         let timing = std::env::var("ZIREN_REC_EXEC_TIMING").is_ok_and(|v| v != "0");
         let t_analyze = std::time::Instant::now();
         let program_arc = self.program.clone();
-        // Nothing to derive: the program was analyzed once when it was built.
-        // `analyze_secs` stays in the instrument
-        // so the timing line keeps its shape and shows the phase at ~0.
         let analyzed_program = &program_arc.seq_blocks;
         let event_counts = program_arc.event_counts;
         let analyze_secs = t_analyze.elapsed().as_secs_f64();
         let t_walk = std::time::Instant::now();
         let unsafe_record = UnsafeRecord::<F>::new(event_counts);
-        // Pre-init public_values cell with default via the raw_get
-        // pattern — works through `&UnsafeRecord` so it's compatible
-        // with the new `&self` walker. CommitPublicValues overwrites.
         unsafe {
             UnsafeCell::raw_get(unsafe_record.public_values.as_ptr())
                 .write(crate::air::RecursionPublicValues::default());
         }
 
-        // Hoist mutable per-walker state into a
-        // stack-allocated `WalkerState` so the recursive walker can take
-        // `&self` and dispatch `SeqBlock::Parallel` sub-walks via rayon
-        // par_iter without aliasing on shared mutable Runtime fields.
         let mut state = WalkerState::<F> {
             pc: self.pc,
             clk: self.clk,
@@ -400,8 +376,6 @@ where
             nb_print_f: self.nb_print_f,
             nb_print_e: self.nb_print_e,
         };
-        // Take witness/debug_stdout out so we can pass them as `&mut`
-        // through the recursive `&self` walker without aliasing self.
         let mut witness = std::mem::take(&mut self.witness_stream);
         let mut debug_stdout: Box<dyn Write + 'a> =
             std::mem::replace(&mut self.debug_stdout, Box::new(stdout()));
@@ -415,14 +389,7 @@ where
         );
         if timing {
             let walk_secs = t_walk.elapsed().as_secs_f64();
-            // Counted off the PROGRAM, not off `state`: a `SeqBlock::Parallel`
-            // sub-walk runs on a fresh `WalkerState` whose counters are
-            // dropped when it returns, so the `nb_*` totals miss every
-            // instruction executed in parallel.
             let instrs = analyzed_program.iter().count();
-            // Opcode mix, because a JIT is built one arm at a time: this says
-            // what fraction of the walk a first cut covering only the
-            // straight-line arithmetic/memory arms would actually replace.
             let mut mix = [0usize; 12];
             for ai in analyzed_program.iter() {
                 let k = match ai.inner() {
@@ -469,8 +436,6 @@ where
             );
         }
 
-        // Restore taken-out fields and sync state regardless of result
-        // (so error reporting downstream sees the updated pc/clk).
         self.witness_stream = witness;
         self.debug_stdout = debug_stdout;
         self.pc = state.pc;
@@ -491,10 +456,6 @@ where
         self.nb_print_e = state.nb_print_e;
         walker_result?;
 
-        // Finalize: transmute layout-equivalent `MaybeUninit<UnsafeCell<T>>`
-        // Vec into `Vec<T>`. Sound because every event slot is initialized
-        // exactly once by execute_one (analyze pass guarantees one offset
-        // per emit) and public_values has at least the default written.
         self.record = unsafe { unsafe_record.into_record(self.program.clone(), self.record.index) };
         Ok(())
     }
@@ -536,8 +497,6 @@ where
                                 clk: state.clk,
                                 ..Default::default()
                             };
-                            // Sub-walks: no witness / debug_stdout — verified
-                            // pure-compute (hint_in_par=0).
                             self.execute_blocks(
                                 &sub.seq_blocks,
                                 &mut substate,
@@ -574,12 +533,6 @@ where
         let next_clk = state.clk + F::from_u32(4);
         let next_pc = state.pc + F::ONE;
         let _offset = ai.offset();
-        // Matched by REFERENCE.  This used to run on a clone of the
-        // instruction, copying the full width of the enum -- and heap-
-        // allocating the `Vec` variants -- once per executed instruction,
-        // millions of times per node.  Every arm reads `Copy` fields or
-        // borrows; only the two ALU out-of-domain errors need an owned copy,
-        // and they take one where the error is built.
         match ai.inner() {
             Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
                 state.nb_base_ops += 1;
@@ -596,9 +549,6 @@ where
                                 if in1.is_zero() {
                                     PrimeCharacteristicRing::ONE
                                 } else if mult.is_zero() && !opcode.is_div_assert() {
-                                    // Dead regular DivF (mult=0): result never read; safe to skip.
-                                    // DivFAssert ALWAYS errors out on out-of-domain since it
-                                    // represents a soundness check that must trip.
                                     F::ZERO
                                 } else {
                                     return Err(RuntimeError::DivFOutOfDomain {
@@ -681,9 +631,6 @@ where
                         self.mw_us(*addr, *val, *mult);
                     }
                 }
-                // mem_const_count is pre-sized by `UnsafeRecord::new`
-                // from the analyzed Mem-instruction count.
-                // No per-instruction increment needed.
             }
             Instruction::Poseidon2(instr) => {
                 let Poseidon2Instr { addrs: Poseidon2Io { input, output }, mults } = &**instr;
@@ -724,11 +671,9 @@ where
             Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr }) => {
                 state.nb_bit_decompositions += 1;
                 let num = self.mr_us(*input_addr).val[0].as_canonical_u32();
-                // Decompose the num into LE bits.
                 let bits = (0..output_addrs_mults.len())
                     .map(|i| Block::from(F::from_u32((num >> i) & 1)))
                     .collect::<Vec<_>>();
-                // Write the bits to the array at dst.
                 for (i, (bit, (addr, mult))) in
                     bits.into_iter().zip(output_addrs_mults.iter().copied()).enumerate()
                 {
@@ -793,7 +738,6 @@ where
                     array::from_fn(|i| self.mr_us(pv_addrs[i]).val[0]);
                 let public_values: crate::air::RecursionPublicValues<F> =
                     *pv_values.as_slice().borrow();
-                // Overwrite the default-init public_values cell.
                 unsafe {
                     Self::raw_write_ev(&rec.public_values, public_values);
                 }
@@ -828,7 +772,6 @@ where
             Instruction::HintExt2Felts(HintExt2FeltsInstr { output_addrs_mults, input_addr }) => {
                 state.nb_bit_decompositions += 1;
                 let fs = self.mr_us(*input_addr).val;
-                // Write the bits to the array at dst.
                 for (i, (f, (addr, mult))) in
                     fs.into_iter().zip(output_addrs_mults.iter().copied()).enumerate()
                 {
@@ -848,14 +791,11 @@ where
                 for (f, (addr, mult)) in fs.into_iter().zip(output_addrs_mults.iter().copied()) {
                     self.mw_us(addr, Block::from(f), mult);
                 }
-                // One event carrying the whole input block; the Ext2Felt
-                // chip receives it and sends the limbs from the same cells.
                 unsafe {
                     Self::raw_write_ev(&rec.ext2felt_events[_offset], MemEvent { inner: fs });
                 }
             }
             Instruction::Hint(HintInstr { output_addrs_mults }) => {
-                // Check that enough Blocks can be read, so `drain` does not panic.
                 if witness.as_mut().expect("witness must be Some at root walker").len()
                     < output_addrs_mults.len()
                 {
@@ -868,7 +808,6 @@ where
                 for (i, ((addr, mult), val)) in
                     zip(output_addrs_mults.iter().copied(), witness).enumerate()
                 {
-                    // Inline [`Self::mw`] to mutably borrow multiple fields of `self`.
                     self.mw_us(addr, val, mult);
                     unsafe {
                         Self::raw_write_ev(

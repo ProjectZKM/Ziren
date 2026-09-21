@@ -71,8 +71,6 @@ impl Prover<DefaultProverComponents> for MockProver {
             ZKMProofKind::Compressed => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
 
-                // A shell with the shape of a compressed proof and none of
-                // its content: the mock prover executes but does not prove.
                 let shard_proof = ShardProof {
                     public_values: vec![],
                     jagged_shard_proof: Box::new(JaggedShardProof::empty([KoalaBear::ZERO; 8], 0)),
@@ -108,9 +106,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                             public_inputs: [
                                 pk.vk.hash_bn254().as_canonical_biguint().to_string(),
                                 public_values.hash_bn254().to_string(),
-                                // vk_root: the mock prover produces no real
-                                // recursion tree, so there is no allowlist root
-                                // to report.
                                 "0".to_string(),
                             ],
                             encoded_proof: "".to_string(),
@@ -131,9 +126,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                             public_inputs: [
                                 pk.vk.hash_bn254().as_canonical_biguint().to_string(),
                                 public_values.hash_bn254().to_string(),
-                                // vk_root: the mock prover produces no real
-                                // recursion tree, so there is no allowlist root
-                                // to report.
                                 "0".to_string(),
                             ],
                             encoded_proof: "".to_string(),

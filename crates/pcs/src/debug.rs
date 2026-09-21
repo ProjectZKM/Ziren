@@ -41,7 +41,6 @@ pub fn debug_constraints<SC, A>(
         return;
     }
 
-    // Check that constraints are satisfied.
     (0..height).par_bridge().for_each(|i| {
         let i_next = (i + 1) % height;
 

@@ -51,7 +51,7 @@ pub struct CoreProofShape {
 }
 
 impl CoreProofShape {
-    /// Project this CoreProofShape onto the legacy per-chip
+    /// Project this CoreProofShape onto the per-chip
     /// [`crate::shape::OrderedShape`] representation.
     ///
     /// The stacked_shapes representation is an area/padding abstract
@@ -69,17 +69,13 @@ impl CoreProofShape {
     pub fn to_ordered_shape(&self) -> crate::shape::OrderedShape {
         let num_chips = self.shard_chip_names.len().max(1);
         let main_area = self.main_area.max(1);
-        // area is measured in stacking-height multiples; convert to cells.
         let total_cells: u128 = (main_area as u128) * (1u128 << consts::LOG_STACKING_HEIGHT);
         let per_chip_cells = (total_cells / num_chips as u128).max(1);
-        // ceil(log2(per_chip_cells))
         let log_height: usize = if per_chip_cells.is_power_of_two() {
             per_chip_cells.trailing_zeros() as usize
         } else {
             per_chip_cells.next_power_of_two().trailing_zeros() as usize
         };
-        // Cap at CORE_MAX_LOG_ROW_COUNT so we don't emit shapes the
-        // recursion verifier won't accept.
         let log_height = log_height.min(consts::CORE_MAX_LOG_ROW_COUNT);
 
         crate::shape::OrderedShape::from_log2_heights(
@@ -96,7 +92,7 @@ impl CoreProofShape {
 /// of chip-name strings known to co-occur in practice.  Shape
 /// enumeration iterates over cluster × area × padding tuples instead of
 /// the full cartesian product of per-chip heights (~1.25M) that
-/// Ziren's legacy [`crate::shape::CoreShapeConfig`] uses.
+/// [`crate::shape::CoreShapeConfig`] uses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MachineShape {
     /// The chip clusters — curated combinations of chip names that
@@ -224,13 +220,11 @@ mod tests {
         let shape = CoreProofShape {
             shard_chip_names: ["Cpu", "AddSub"].iter().map(|s| s.to_string()).collect(),
             preprocessed_area: 1,
-            main_area: 4, // 4 stacking-height multiples = 4 * 2^21 cells total
+            main_area: 4,
             preprocessed_padding_cols: 0,
             main_padding_cols: 0,
         };
         let ordered = shape.to_ordered_shape();
-        // 2 chips, main_area=4 → per-chip total = 2 * 2^21 = 2^22 cells.
-        // log₂(2^22) = 22 (capped at CORE_MAX_LOG_ROW_COUNT = 22).
         assert_eq!(ordered.inner.len(), 2);
         for (_, log_h) in &ordered.inner {
             assert_eq!(*log_h, 22);
@@ -239,12 +233,10 @@ mod tests {
 
     #[test]
     fn to_ordered_shape_caps_at_max_log_row_count() {
-        // Huge area that would overflow CORE_MAX_LOG_ROW_COUNT if
-        // uncapped.
         let shape = CoreProofShape {
             shard_chip_names: ["Cpu"].iter().map(|s| s.to_string()).collect(),
             preprocessed_area: 1,
-            main_area: 1024, // 1024 * 2^21 = 2^31 cells per chip
+            main_area: 1024,
             preprocessed_padding_cols: 0,
             main_padding_cols: 0,
         };
@@ -268,8 +260,6 @@ mod tests {
         let s = ZKMRecursionProgramShape::Shrink;
         let mut v = vec![s.clone(), c4.clone(), d.clone(), c2.clone(), n.clone()];
         v.sort();
-        // Normalize < Compose < Deferred < Shrink by enum discriminant
-        // ordering; Compose{2} < Compose{4} within Compose.
         assert_eq!(v, vec![n, c2, c4, d, s]);
     }
 }

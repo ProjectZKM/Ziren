@@ -129,9 +129,6 @@ pub fn transcript_profile_digest() -> [JaggedVal; 8] {
         push_u64(&mut felts, *value);
     }
 
-    // The production PCS configurations, field by field.  Read from the
-    // constructors the provers call, so a parameter cannot be in the protocol
-    // and absent from its digest.
     absorb_whir_config(
         &mut felts,
         &crate::whir::jagged::core_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
@@ -174,12 +171,6 @@ fn push_usizes(felts: &mut Vec<JaggedVal>, values: &[usize]) {
 /// starting domain and rate, the OOD counts, the fold schedule, the per-round
 /// query and proof-of-work counts, and the final round.
 fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::WhirConfig) {
-    // Destructured EXHAUSTIVELY, with no `..` rest pattern. This is the whole
-    // mechanism behind the coverage claim: reading `cfg.field` one at a time
-    // compiles no matter how many fields the struct grows, so a new
-    // transcript parameter would be silently absent from its own profile. A
-    // binding for every field means adding one is a COMPILE ERROR here, and
-    // whoever adds it has to decide whether it belongs in the digest.
     let crate::whir::config::WhirConfig {
         starting_ood_samples,
         starting_log_inv_rate,
@@ -201,7 +192,6 @@ fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::Whi
     push_usizes(felts, starting_folding_pow_bits);
     felts.push(JaggedVal::from_canonical_usize(round_parameters.len()));
     for r in round_parameters.iter() {
-        // Exhaustive for the same reason.
         let crate::whir::config::RoundConfig {
             folding_factor,
             evaluation_domain_log_size,
@@ -228,9 +218,6 @@ fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::Whi
 
 /// Every field of a BaseFold/FRI configuration that the transcript depends on.
 fn absorb_fri_config(felts: &mut Vec<JaggedVal>, cfg: &crate::basefold::FriConfig<JaggedVal>) {
-    // The order and the values are unchanged; what changed is that the field
-    // LIST now lives behind an exhaustive destructure, so it cannot fall
-    // behind the struct it claims to describe.
     for value in cfg.transcript_parameters() {
         push_u64(felts, value as u64);
     }
@@ -325,9 +312,6 @@ mod tests {
             for (name, value) in entries {
                 felts.push(JaggedVal::from_canonical_usize(name.len()));
                 felts.extend(name.bytes().map(JaggedVal::from_u8));
-                // The real encoder, not a copy of it: a second copy drifts the
-                // moment the encoding changes, and then this test is checking
-                // an encoding the digest no longer uses.
                 push_u64(&mut felts, *value);
             }
             hasher.hash_iter(felts)
@@ -367,17 +351,10 @@ mod tests {
             }
         }
 
-        // A limb at or above `|F|` is reduced, so any limb width `w` with
-        // `2^w > |F|` collides `l` with `l - |F|`.  At the old 31-bit width
-        // `|F|` itself was such a limb, which made `v = |F|` and `v = 0`
-        // indistinguishable -- a collision entirely inside the low limb, not
-        // just in the dropped high bits.
-        const P: u64 = 2130706433; // 2^31 - 2^24 + 1
+        const P: u64 = 2130706433;
         assert_ne!(enc(0), enc(P), "v=0 and v=|F| must not share an encoding");
         assert_ne!(enc(1), enc(P + 1), "the collision is not special to zero");
 
-        // And the limbs really do reconstruct the value, over a domain that
-        // exercises every limb including the top one.
         for v in [0u64, 1, P, u64::MAX, 1 << 24, 1 << 48, 0x8000_0000_0000_0000] {
             let f = enc(v);
             assert_eq!(f.len(), 3, "three limbs");
@@ -403,7 +380,6 @@ mod tests {
         let err = check_peer_profile(&theirs).expect_err("a foreign digest must be refused");
         assert_eq!(err.ours, ours);
         assert_eq!(err.theirs, theirs);
-        // Truncation is not agreement.
         assert!(check_peer_profile(&ours[..63]).is_err(), "a prefix is not the digest");
         assert!(check_peer_profile("").is_err(), "an absent digest is not agreement");
     }

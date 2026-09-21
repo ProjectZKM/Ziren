@@ -186,8 +186,8 @@ pub trait ByteAirBuilder: BaseAirBuilder {
 /// A trait which contains methods related to ALU lookups in an AIR.
 pub trait InstructionAirBuilder: BaseAirBuilder {
     /// Sends the next CPU state `(shard, clk, pc, next_pc)` on the
-    /// [`LookupKind::State`] bus.  Local-only replacement for the legacy
-    /// `when_transition` pc/clk/shard chaining: each instruction row
+    /// [`LookupKind::State`] bus, which chains pc/clk/shard without
+    /// `when_transition`: each instruction row
     /// `receive_state`s its current state and `send_state`s the next
     /// (`clk + 5 + extra`, `pc := next_pc`, `next_pc := next_next_pc`);
     /// the LogUp multiset balance forces consecutive rows to chain.  The
@@ -428,8 +428,6 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
         scope: LookupScope,
     ) {
-        // Note: U16Range checks for arg half-words are in SyscallChip::eval(),
-        // gated by is_real (covers all syscalls, not just linux).
         let values: Vec<Self::Expr> = vec![
             shard.into(),
             clk.into(),
@@ -458,8 +456,6 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
         scope: LookupScope,
     ) {
-        // No U16Range checks here — the send side handles them, and the lookup
-        // argument guarantees both sides have identical values.
         let values: Vec<Self::Expr> = vec![
             shard.into(),
             clk.into(),
@@ -591,7 +587,7 @@ impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder
 }
 // `p3_uni_stark::prove`/`verify` run `debug_constraints` (under `debug_assertions`)
 // with the upstream `p3_air::DebugConstraintBuilder`, so the per-chip unit tests
-// (`uni_stark_prove`, prove.rs:929) need it to satisfy `ZKMAirBuilder` too.  The
+// (`uni_stark_prove`) need it to satisfy `ZKMAirBuilder` too.  The
 // debug pass only checks the algebraic constraints, so interactions are ignored.
 impl<F: Field, EF: p3_field::ExtensionField<F>> EmptyMessageBuilder
     for p3_air::DebugConstraintBuilder<'_, F, EF>

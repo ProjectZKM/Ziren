@@ -17,23 +17,18 @@ struct Args {
 }
 
 fn main() {
-    // Setup logger.
     setup_logger();
 
-    // Parse arguments.
     let args = Args::parse();
 
-    // Load the costs.
     let costs = mips_costs();
 
     if let Some(maximal_shapes_json) = args.maximal_shapes_json {
-        // Load the maximal shapes, indexed by log shard size.
         let maximal_shapes: BTreeMap<usize, Vec<Shape<MipsAirId>>> = serde_json::from_slice(
             &std::fs::read(&maximal_shapes_json).expect("failed to read maximal shapes"),
         )
         .expect("failed to deserialize maximal shapes");
 
-        // For each maximal shape, check if it is OOM.
         for shapes in maximal_shapes.values() {
             for shape in shapes.iter() {
                 let lde_size = shape.estimate_lde_size(&costs);
@@ -45,13 +40,11 @@ fn main() {
     }
 
     if let Some(small_shapes_json) = args.small_shapes_json {
-        // Load the small shapes.
         let small_shapes: Vec<Shape<MipsAirId>> = serde_json::from_slice(
             &std::fs::read(&small_shapes_json).expect("failed to read small shapes"),
         )
         .expect("failed to deserialize small shapes");
 
-        // For each small shape, check if it is OOM.
         for shape in small_shapes.iter() {
             let lde_size = shape.estimate_lde_size(&costs);
             if lde_size > args.lde_threshold_bytes {

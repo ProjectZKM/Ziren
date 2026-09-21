@@ -74,7 +74,6 @@ impl<F: Field> Add5Operation<F> {
             debug_assert_eq!(self.value[i], F::from_u32(res % base));
         }
 
-        // Range check.
         {
             record.add_u8_range_checks(&a);
             record.add_u8_range_checks(&b);
@@ -94,14 +93,12 @@ impl<F: Field> Add5Operation<F> {
         cols: Add5Operation<AB::Var>,
     ) {
         builder.assert_bool(is_real);
-        // Range check each byte.
         {
             words.iter().for_each(|word| builder.slice_range_check_u8(&word.0, is_real));
             builder.slice_range_check_u8(&cols.value.0, is_real);
         }
         let mut builder_is_real = builder.when(is_real);
 
-        // Each value in is_carry_{0,1,2,3,4} is 0 or 1, and exactly one of them is 1 per digit.
         {
             for i in 0..WORD_SIZE {
                 builder_is_real.assert_bool(cols.is_carry_0[i]);
@@ -120,7 +117,6 @@ impl<F: Field> Add5Operation<F> {
             }
         }
 
-        // Calculates carry from is_carry_{0,1,2,3,4}.
         {
             let one = AB::Expr::ONE;
             let two = AB::F::from_u32(2);
@@ -138,11 +134,8 @@ impl<F: Field> Add5Operation<F> {
             }
         }
 
-        // Compare the sum and summands by looking at carry.
         {
             let base = AB::F::from_u32(256);
-            // For each limb, assert that difference between the carried result and the non-carried
-            // result is the product of carry and base.
             for i in 0..WORD_SIZE {
                 let mut overflow: AB::Expr = AB::F::ZERO.into();
                 for word in words {

@@ -42,8 +42,6 @@ where
         F: FnMut(&mut Builder<C>, I::Item) -> S,
         B: Default + Extend<S>,
     {
-        // Save the parent's op buffer, install an empty one so the
-        // closure's emissions accumulate in isolation per iteration.
         let prev_ops = mem::take(builder.get_mut_operations());
         let (blocks, coll): (Vec<_>, B) = self
             .map(|r| {
@@ -56,8 +54,6 @@ where
                 (block, s)
             })
             .unzip();
-        // Restore the parent's op buffer and push the Parallel op
-        // containing the per-iteration sub-blocks.
         *builder.get_mut_operations() = prev_ops;
         builder.push_op(DslIr::Parallel(blocks));
         coll
@@ -77,26 +73,18 @@ mod tests {
 
     #[test]
     fn ir_par_map_collect_emits_parallel_block() {
-        // Build a tiny program: outer scope emits ImmF, then
-        // ir_par_map_collect over 3 items each emitting an ImmF.
-        // Verify that the parent's operations end with a single
-        // DslIr::Parallel(3 blocks).
         let mut builder: Builder<AsmConfig<F, EF>> = Builder::default();
-        // Pre-Parallel op: one ImmF in the parent.
         let _outer: crate::ir::Felt<F> = builder.eval(F::from_u32(1));
         let parent_ops_before = builder.get_mut_operations().vec.len();
 
-        // Map 3 items, each emits 1 ImmF.
         let _vals: Vec<crate::ir::Felt<F>> = (0..3u32)
             .ir_par_map_collect(&mut builder, |b, i| -> crate::ir::Felt<F> {
                 b.eval(F::from_u32(100 + i))
             });
 
         let parent_ops_after = builder.get_mut_operations().vec.len();
-        // Exactly one new op (the Parallel) was pushed to the parent.
         assert_eq!(parent_ops_after, parent_ops_before + 1);
 
-        // Inspect the last op — must be Parallel with 3 sub-blocks.
         let last_op = builder.get_mut_operations().vec.last().unwrap();
         match last_op {
             DslIr::Parallel(blocks) => {

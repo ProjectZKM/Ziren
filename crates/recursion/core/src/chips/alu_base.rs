@@ -101,9 +101,8 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
 
     #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        // Allocating an intermediate `Vec` is faster.
         let instrs = program
-            .iter_instructions() // Faster than using `rayon` for some reason. Maybe vectorization?
+            .iter_instructions()
             .filter_map(|instruction| match instruction {
                 Instruction::BaseAlu(x) => Some(x),
                 _ => None,
@@ -113,7 +112,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
         let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_BASE_ALU_PREPROCESSED_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * NUM_BASE_ALU_ACCESS_COLS;
         values[..populate_len].par_chunks_mut(NUM_BASE_ALU_ACCESS_COLS).zip_eq(instrs).for_each(
             |(row, instr)| {
@@ -141,7 +139,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(values, NUM_BASE_ALU_PREPROCESSED_COLS))
     }
 
@@ -153,7 +150,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
             "generate_preprocessed_trace only supports KoalaBear field"
         );
 
-        // Allocating an intermediate `Vec` is faster.
         let instrs = unsafe {
             std::mem::transmute::<Vec<&BaseAluInstr<F>>, Vec<&BaseAluInstr<KoalaBear>>>(
                 program
@@ -169,7 +165,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
         let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * NUM_BASE_ALU_PREPROCESSED_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * NUM_BASE_ALU_ACCESS_COLS;
         values[..populate_len].par_chunks_mut(NUM_BASE_ALU_ACCESS_COLS).zip_eq(instrs).for_each(
             |(row, instr)| {
@@ -180,7 +175,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
             NUM_BASE_ALU_PREPROCESSED_COLS,
@@ -192,7 +186,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
         _: &Self::Record,
         _: &mut Self::Record,
     ) -> Result<(), Self::Error> {
-        // This is a no-op.
         Ok(())
     }
 
@@ -216,7 +209,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
 
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_BASE_ALU_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * NUM_BASE_ALU_VALUE_COLS;
         values[..populate_len].par_chunks_mut(NUM_BASE_ALU_VALUE_COLS).zip_eq(events).for_each(
             |(row, &vals)| {
@@ -225,7 +217,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_BASE_ALU_COLS))
     }
 
@@ -250,7 +241,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
         };
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * NUM_BASE_ALU_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * NUM_BASE_ALU_VALUE_COLS;
         values[..populate_len].par_chunks_mut(NUM_BASE_ALU_VALUE_COLS).zip_eq(events).for_each(
             |(row, &vals)| {
@@ -261,7 +251,6 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
             NUM_BASE_ALU_COLS,
@@ -299,23 +288,12 @@ where
             },
         ) in zip(local.values, prep_local.accesses)
         {
-            // Check exactly one flag is enabled.
             let is_real = is_add + is_sub + is_mul + is_div;
             builder.assert_bool(is_real.clone());
 
             builder.when(is_add).assert_eq(in1 + in2, out);
             builder.when(is_sub).assert_eq(in1, in2 + out);
             builder.when(is_mul).assert_eq(out, in1 * in2);
-            // Enforce DivF constraint when EITHER:
-            //   - is_div_active (regular DivF with mult>0), OR
-            //   - is_div_soundness (assertion DivF emitted by
-            //     base_assert_eq/base_assert_ne; mult is typically 0
-            //     since the `out` cell is never read, but soundness
-            //     requires the constraint to fire regardless).
-            //
-            // is_div_active and is_div_soundness are mutually exclusive
-            // by construction (one is set for regular DivF, the other
-            // for DivFAssert), so OR-summing them is safe (no double-count).
             builder.when(is_div_active + is_div_soundness).assert_eq(in2 * out, in1);
 
             builder.receive_single(addrs.in1, in1, is_real.clone());

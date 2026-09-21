@@ -50,7 +50,6 @@ pub fn run_isolated<F>(crash_shm: &mut ShmMemory, f: F) -> JitResult<IsolatedRun
 where
     F: FnOnce() + Send,
 {
-    // Zero the shared crash struct before forking.
     {
         let ptr = crash_shm.as_mut_ptr().cast::<CrashDetails>();
         unsafe {
@@ -67,16 +66,10 @@ where
     }
 
     if pid == 0 {
-        // Child: install signal handler that records crash info into
-        // shm and exits.  Real impl uses sigaction(SA_SIGINFO) +
-        // SA_NODEFER; v1 keeps it minimal — let the default handler
-        // run, parent observes WIFSIGNALED.
         f();
-        // Normal return: exit zero.
         unsafe { libc::_exit(0) };
     }
 
-    // Parent: wait for the child.
     let mut status: libc::c_int = 0;
     let waited = unsafe { libc::waitpid(pid, &mut status, 0) };
     if waited < 0 {
@@ -89,7 +82,6 @@ where
 
     if libc::WIFSIGNALED(status) {
         let sig = libc::WTERMSIG(status);
-        // Read the crash details written by the (hypothetical) signal handler.
         let details = unsafe {
             let ptr = crash_shm.as_mut_ptr().cast::<CrashDetails>();
             std::ptr::read(ptr)
@@ -120,19 +112,12 @@ mod tests {
     #[test]
     fn isolated_run_segfault_reported() -> JitResult<()> {
         let mut shm = ShmMemory::new(std::mem::size_of::<CrashDetails>())?;
-        let result = run_isolated(&mut shm, || {
-            // Force SIGSEGV by writing to a non-null but obviously
-            // unmapped address.  (Compile-time null-pointer-write is
-            // rejected by the `invalid_null_arguments` lint.)
-            unsafe {
-                let p = 0xdead_beef_usize as *mut u32;
-                std::ptr::write_volatile(p, 0);
-            }
+        let result = run_isolated(&mut shm, || unsafe {
+            let p = 0xdead_beef_usize as *mut u32;
+            std::ptr::write_volatile(p, 0);
         })?;
         match result {
             IsolatedRunResult::Crashed { signal, .. } => {
-                // Any of SIGSEGV / SIGBUS / SIGABRT counts — Rust may
-                // call abort() on a panic in a child without a runtime.
                 assert!(
                     matches!(signal, libc::SIGSEGV | libc::SIGBUS | libc::SIGABRT),
                     "got signal {signal}"

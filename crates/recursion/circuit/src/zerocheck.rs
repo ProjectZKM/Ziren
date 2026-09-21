@@ -4,12 +4,12 @@
 //! pipeline shard verifier's zerocheck phase:
 //!
 //!   - [`full_geq`]: in-circuit "≥" indicator for one boolean point
-//!     versus an extension-field point.  Used to compute the padded-
-//!     row mask that gates the zerocheck constraint outside the
-//!     real-data window of each chip.
-//!   - [`eq_eval`]: full Lagrange equality evaluation for two
-//!     extension-field points of the same dimension.  Used to check
-//!     the GKR-evaluation point matches the sumcheck-reduced point.
+//!     versus an extension-field point; it gives the padded-row mask
+//!     that gates the zerocheck constraint outside the real-data
+//!     window of each chip.
+//!   - [`eq_eval`]: `eq(x, y) = Π_i (x_i y_i + (1−x_i)(1−y_i))` for two
+//!     extension-field points of the same dimension; it ties the
+//!     GKR-evaluation point to the sumcheck-reduced point.
 //!
 //! The full `verify_zerocheck` orchestrator composes these helpers
 //! with [`crate::sumcheck::verify_sumcheck`], constraint folding, and
@@ -60,11 +60,6 @@ pub fn full_geq<C: CircuitConfig>(
         "full_geq: threshold and eval_point must have equal dimension"
     );
     threshold.iter().rev().zip(eval_point.iter().rev()).fold(SymbolicExt::ONE, |acc, (x, y)| {
-        // Lifted from the upstream:
-        //   ((1-y)(1-x) + y*x) * acc + y*(1-x)
-        // → the eq term carries forward when the bits agree,
-        //   then a "step-up" term fires whenever y is 1 and x
-        //   is 0 (i.e., eval_point > threshold at this bit).
         let one = SymbolicExt::ONE;
         ((one - *y) * (one - *x) + *y * *x) * acc + *y * (one - *x)
     })
@@ -149,10 +144,9 @@ where
 /// Methods are gathered on this zero-sized struct so the
 /// `where SymbolicExt: Algebra<EF>` + `for<'a> Air<...>` bounds
 /// can be declared once at impl level rather than repeated at every
-/// function signature — the same pattern Ziren's existing
-/// [`crate::stark::StarkVerifier`] uses for the legacy verifier.
+/// function signature, as in [`crate::stark::StarkVerifier`].
 ///
-/// `SC` is generic for the same reason the legacy verifier is:
+/// `SC` is generic for the same reason as in `StarkVerifier`:
 /// keeping `MachineChip<SC, A>` opaque lets the compiler elaborate
 /// `MachineChip<SC, A>::F = SC::Val = C::F` (via the
 /// `C: CircuitConfig<F = SC::Val>` bound) so the `Chip::eval` impl's
@@ -198,15 +192,6 @@ where
             opening.main.local.iter().map(|e| (*e).into()).collect();
         let preprocessed = PairWindow { local: &preprocessed_row, next: &preprocessed_row };
         let main = PairWindow { local: &main_row, next: &main_row };
-        // The Ziren host zeroes the cumulative sums in the zerocheck
-        // constraint eval (`eval_air_constraints_at_row`, zerocheck_poly.rs:661
-        // — "lookup soundness rides on LogUp-GKR, not this zerocheck"). Feed
-        // the same zeros here instead of the witnessed per-chip sums: any AIR
-        // term that references the cumulative sum must contribute exactly what
-        // the host reduced into `evals[i]`, else the per-chip zerocheck term
-        // diverges (the all-zero-row padded-row adjustment otherwise picks up
-        // `-local_cumulative_sum`, so the in-circuit `pra` came out 0 while
-        // the host's was non-zero — dropping the `-pra*geq` correction).
         let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
         let mut folder = ShardConstraintFolder::<C> {
             preprocessed,
@@ -253,16 +238,8 @@ where
     ) -> Ext<C::F, C::EF> {
         let main_width = chip.width();
         let preproc_width = chip.preprocessed_width();
-        // COMPILE-TIME zeros, not a materialised `Ext` holding zero.  The whole
-        // point of this function is that the row is known to be all zeros while
-        // the program is being built, so every constraint subexpression over it
-        // folds in the symbolic layer and emits nothing; only the terms that
-        // reach `alpha` or a public value survive.  A row of `Ext` handles
-        // emitted the chip's ENTIRE constraint polynomial a second time.
         let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
         let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
-        // Zero cumulative sums — match the host pra (`compute_padded_row_
-        // adjustment` → `eval_air_constraints_at_row`, zero sums).
         let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
         let mut folder = ShardConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
@@ -327,12 +304,6 @@ where
     ) -> Ext<C::F, C::EF> {
         let main_width = chip.width();
         let preproc_width = chip.preprocessed_width();
-        // COMPILE-TIME zeros, not a materialised `Ext` holding zero.  The whole
-        // point of this function is that the row is known to be all zeros while
-        // the program is being built, so every constraint subexpression over it
-        // folds in the symbolic layer and emits nothing; only the terms that
-        // reach `alpha` or a public value survive.  A row of `Ext` handles
-        // emitted the chip's ENTIRE constraint polynomial a second time.
         let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
         let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
         let mut folder = ShardConstraintFolder::<C> {
@@ -370,13 +341,9 @@ where
     ///     at the sumcheck-reduced point.
     ///   * `chip_degrees` — per-chip "degree point" (big-endian
     ///     boolean coordinates of the chip's height); used by
-    ///     [`full_geq`] to compute the padded-row mask.  Passed
-    ///     separately until a `JaggedChipOpenedValues` type is
-    ///     introduced.
+    ///     [`full_geq`] to compute the padded-row mask.
     ///   * `cumulative_sums` — per-chip local cumulative-sum value
-    ///     from the LogUp-GKR sumcheck output (the BaseFold
-    ///     pipeline replaced the legacy permutation-column opening
-    ///     with this).
+    ///     from the LogUp-GKR sumcheck output.
     ///   * `global_cumulative_sums` — per-chip global
     ///     cumulative-sum digest references; same source as
     ///     `cumulative_sums`.
@@ -416,40 +383,17 @@ where
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         let one_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ONE);
 
-        // Every program takes the collapsed rev(zeta) claim. This was gated on a
-        // `core_layer_rev` parameter documented as `true` ONLY for NORMALIZE and
-        // `false` for COMPRESS / SHRINK / WRAP -- but all eight call sites passed
-        // `true`, so the discriminator had not existed for some time (their own
-        // comments already said "one row orientation for every machine"). Dropping
-        // a parameter that was a compile-time `true` folded into this `&&` leaves
-        // the emitted circuit identical, so no VK moves.
-        //
-        // What remains is a genuine condition: the openings must actually carry
-        // `main_trace_evaluations_full`.
         let verifier_use_rev = !gkr_evaluations.chip_openings.is_empty()
             && gkr_evaluations
                 .chip_openings
                 .values()
                 .all(|ce| ce.main_trace_evaluations_full.is_some());
 
-        // (1) Sample per-phase challenges from the transcript.
         let alpha = challenger.sample_ext(builder);
         let gkr_batch_open_ext = challenger.sample_ext(builder);
         let gkr_batch_open_challenge: SymbolicExt<C::F, C::EF> = gkr_batch_open_ext.into();
         let lambda = challenger.sample_ext(builder);
 
-        // (2) eq(zerocheck reduced point, GKR-emitted point).
-        //
-        // rev(zeta) eq-bridge anchor
-        // Under the collapsed convention the prover anchors every chip's
-        // zerocheck poly on `rev(z_gkr)` (natural cells, dropped bitrev), so the
-        // batched reduced value carries `eq(rev(z_gkr), z*)`.  Mirror the host
-        // (verifier.rs:1034-1041): feed the eq-bridge the REVERSED GKR point
-        // under `verifier_use_rev`.  `zerocheck_eq_val` multiplies into the
-        // per-chip RLC fold (section (4h)) whose accumulator is asserted ==
-        // `zerocheck_proof.point_and_eval.1` (section (5)) — the OTHER half of
-        // the binding — so the anchor MUST match the prover or that assert
-        // fails.  Legacy shards keep `eq(z_gkr, z*)`.
         let point_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
             zerocheck_proof.point_and_eval.0.iter().map(|x| (*x).into()).collect();
         let gkr_point_symbolic: Vec<SymbolicExt<C::F, C::EF>> = if verifier_use_rev {
@@ -457,15 +401,9 @@ where
         } else {
             gkr_evaluations.point.iter().map(|x| (*x).into()).collect()
         };
-        // Materialized ONCE: this factor multiplies every chip's
-        // contribution, so leaving it symbolic inlined the whole
-        // `eq_eval` product into all N per-chip expressions.
         let zerocheck_eq_val: Ext<C::F, C::EF> =
             builder.eval(eq_eval::<C>(&gkr_point_symbolic, &point_symbolic));
 
-        // (3) Pre-compute the GKR-batch-open challenge powers,
-        // sized for the widest chip's combined preprocessed+main
-        // width — those powers index across both opening vectors.
         let max_elements = shard_chips
             .iter()
             .map(|chip| chip.width() + chip.preprocessed_width())
@@ -479,31 +417,17 @@ where
             .take(max_elements)
             .collect();
 
-        // (4) Per-chip RLC accumulator.  After the loop this
-        // equals zerocheck_proof.point_and_eval.1 (the prover's
-        // claimed evaluation at the sumcheck-reduced point).
         let mut rlc_eval: Ext<C::F, C::EF> = zero_ext;
 
-        // PARALLEL per-chip contributions.  Everything here is pure
-        // compute — `alpha`, `lambda` and `zerocheck_eq_val` are drawn
-        // above and the body emits no challenger op — and the bulk of it
-        // is `eval_constraints_basefold`, the single largest instruction
-        // block of a recursion program.  Each chip becomes its own
-        // `SeqBlock::Parallel` sub-program, which the recursion VM walks
-        // with rayon; the cross-chip Horner fold stays serial below and
-        // consumes the contributions in chip order, so the accumulated
-        // RLC is unchanged.
         let chip_contributions: Vec<Ext<C::F, C::EF>> = shard_chips
             .iter()
             .zip(opened_values.chips.iter())
             .ir_par_map_collect(builder, |builder, (chip, opening)| {
                 let degree = &opening.degree;
 
-                // (4a) Shape sanity check on the chip's openings.
                 verify_opening_shape_basefold::<C, SC, A>(chip, opening)
                     .expect("verify_zerocheck: chip opening shape mismatch");
 
-                // (4b) Sumcheck point dimension == PCS max_log_row_count.
                 let dimension = zerocheck_proof.point_and_eval.0.len();
                 assert_eq!(
                     dimension, pcs_max_log_row_count,
@@ -511,21 +435,9 @@ where
                     dimension, pcs_max_log_row_count,
                 );
 
-                // (4c) Build the extended sumcheck point (one extra
-                // zero coordinate) for the geq comparison.  FRONT-insert
-                // (`values.insert(0, ..)`),
-                // NOT back-append: `full_geq` iterates MSB-first and
-                // `degree` is big-endian (MSB at index 0), so the extra
-                // high coordinate must pair with `degree`'s extra high bit.
-                // A back-append shifted every degree bit one slot vs `z`,
-                // giving the wrong padded-row mask on every padded chip.
                 let mut proof_point_extended = point_symbolic.clone();
                 proof_point_extended.insert(0, SymbolicExt::ZERO);
 
-                // (4d) Assert each degree coordinate is boolean and
-                // that all-but-the-first coordinates are zero unless
-                // the first is also zero (the BaseFold-pipeline
-                // big-endian-degree convention).
                 let degree_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
                     degree.iter().map(|x| (*x).into()).collect();
                 for (i, x) in degree_symbolic.iter().enumerate() {
@@ -538,7 +450,6 @@ where
                     }
                 }
 
-                // (4e) Padded-row mask + adjustment.
                 let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
                 let padded_row_adjustment = Self::compute_padded_row_adjustment_basefold(
                     builder,
@@ -548,16 +459,12 @@ where
                     public_values,
                 );
 
-                // (4f) Constraint accumulator at the sumcheck point
-                // minus the padded-row contribution.
                 let constraint_eval_ext =
                     Self::eval_constraints_basefold(builder, chip, opening, alpha, public_values);
                 let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
                 let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
                 let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val;
 
-                // (4g) Batch the chip's openings (main first, then
-                // preprocessed) by the pre-computed challenge powers.
                 let openings_batch: SymbolicExt<C::F, C::EF> = opening
                     .main
                     .local
@@ -576,56 +483,25 @@ where
                     })
                     .sum();
 
-                // (4h) This chip's contribution to the cross-chip RLC.
                 let eq_sym: SymbolicExt<C::F, C::EF> = zerocheck_eq_val.into();
                 let contribution: Ext<C::F, C::EF> =
                     builder.eval(eq_sym * (constraint_eval + openings_batch));
                 contribution
             });
 
-        // (4i) Cross-chip Horner fold, in chip order.
         for contribution in chip_contributions {
             let rlc_sym: SymbolicExt<C::F, C::EF> = rlc_eval.into();
             let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
             rlc_eval = builder.eval(rlc_sym * lambda_sym + contribution);
         }
 
-        // (5) Assert the cross-chip RLC matches the prover's
-        // claimed evaluation at the sumcheck-reduced point.
         builder.assert_ext_eq(rlc_eval, zerocheck_proof.point_and_eval.1);
 
-        // (6) Reduce the GKR-side openings into the zerocheck
-        // claimed_sum modifier (lambda-RLC across chips).  Each chip's
-        // batch is scaled by the MIXED-HEIGHT EMBEDDING FACTOR
-        // Π_high(1 − zeta[k]) over the zeta coords ABOVE the chip's own
-        // height — the prover's claim carries it (zerocheck_prover.rs) but
-        // the trailing-log_h GKR opening does not.  zeta = gkr_evaluations
-        // .point; the "high" coords are those before the chip's degree
-        // one-hot, selected via the running prefix of `opening.degree`
-        // (big-endian one-hot at index `dim − log_h`): is_high[k] =
-        // 1 − Σ_{j≤k} degree[j], so factor = Π_k (1 − is_high[k]·zeta[k]).
-        // (Mirrors the host verifier verifier.rs step (G2-b).)
         let zerocheck_sum_modifications_from_gkr: Vec<SymbolicExt<C::F, C::EF>> = gkr_evaluations
             .chip_openings
             .values()
             .zip(opened_values.chips.iter())
             .map(|(chip_evaluation, _opening)| {
-                // SINGLE-FIELD CLAIM COLLAPSE
-                // When the SHARD uses the collapsed convention, seed the
-                // per-chip claimed_sum term DIRECTLY from the FULL-POINT
-                // openings (`*_full`) with NO embed_factor — mirroring the host
-                // (verifier.rs:877-892) and the prover (zerocheck_prover.rs
-                // collapse path).  The full-point opening already carries the
-                // mixed-height padding factor
-                //   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @
-                //               zeta[0..log_h])
-                // intrinsically, so the legacy `raw(trailing) · embed_LEAD`
-                // correction is DROPPED.  This makes `*_full` an input to the
-                // in-circuit claim-binding assert (section (7), `assert_ext_eq`
-                // at the bottom), so forging `*_full` trips that INDEPENDENT
-                // assert — the recursion analog of host verifier.rs:921 'GKR
-                // sum-modification identity failed' — not just the
-                // reconstruction (logup_gkr.rs check (i)).
                 let main_full = chip_evaluation.main_trace_evaluations_full.as_deref().expect(
                     "rev claim-collapse requires main_trace_evaluations_full \
                              (FIX-off core proof)",
@@ -652,36 +528,12 @@ where
                 .iter()
                 .fold(zero_sym, |acc, modification| lambda_sym * acc + *modification);
 
-        // (7) Assert the prover's zerocheck claimed_sum equals
-        // the GKR-derived modification.
         builder.assert_ext_eq(zerocheck_proof.claimed_sum, zerocheck_sum_modification);
 
-        // Silence the `one_ext` unused-binding lint.
         let _ = one_ext;
 
-        // (8) Verify the zerocheck sumcheck proof itself.
         verify_sumcheck::<C, FC>(builder, challenger, zerocheck_proof);
 
-        // (9) Observe slot 2 — the ZEROCHECK openings (trace@z*), observed
-        // after the zerocheck sumcheck and before the jagged-PCS phase.
-        //
-        // In-circuit mirror of the host verifier's step (5).  The payload is
-        // the reduction's residual at
-        // z*, which is exactly `opened_values.chips[].{preprocessed,
-        // main}.local` (the prover's `trace_at_z`, split at each chip's
-        // preprocessed width by `build_opened_values`).
-        //
-        // This slot USED to carry `gkr_evaluations.chip_openings` — the slot-1
-        // payload in slot 2's position, i.e. observed after the α/γ/λ samples in
-        // section (1) above.  The GKR openings now land in
-        // `logup_gkr::verify_logup_gkr`, before those samples; this slot carries
-        // its own payload.  Both sides moved together — host prover, host
-        // verifier, ziren-gpu driver and this circuit — so the challenger stays
-        // in lock-step; a one-sided move surfaces as a jagged-PCS z_col
-        // round-0 identity failure, not as a zerocheck assert.
-        //
-        // `opened_values.chips` is in NAME order (the prover's
-        // `build_opened_values` name-sorts), matching the host.
         let len_felt: Felt<C::F> = builder.constant(C::F::from_canonical_usize(shard_chips.len()));
         challenger.observe(builder, len_felt);
         for opening in opened_values.chips.iter() {
@@ -762,10 +614,9 @@ mod tests {
     // the cross-chip fold `acc = λ·acc + modification`, and the binding assert
     //   builder.assert_ext_eq(claimed_sum, zerocheck_sum_modification)   [§(7)]
     // — and assert it against a supplied `claimed_sum`.  This is the in-circuit
-    // analog of host verifier.rs:921 'GKR sum-modification identity failed'.
+    // analog of the host's "GKR sum-modification identity" check.
     //
-    // CRITICAL: there is NO LogUp reconstruction (logup_gkr.rs check (i)) in
-    // this harness.  The reconstruction lives in `verify_logup_gkr`, a SEPARATE
+    // There is no LogUp reconstruction check in this harness.  The reconstruction lives in `verify_logup_gkr`, a SEPARATE
     // phase; here we exercise ONLY the zerocheck claim-binding.  So a forged
     // `*_full` that trips `run_full_claim_binding` proves the binding rejects
     // INDEPENDENTLY of the reconstruction — exactly the property this
@@ -777,8 +628,6 @@ mod tests {
     /// in-circuit section (6) rev branch + the section-(3) β-power convention
     /// (β powers start at β¹ — `successors(ONE).skip(1)`).
     fn host_full_claim_single_chip(main_full: &[EF], prep_full: &[EF], beta: EF) -> EF {
-        // β powers β¹, β², … (skip the β⁰=1 term — matches
-        // `gkr_batch_open_challenge_powers` at zerocheck.rs:499-505).
         let n = main_full.len() + prep_full.len();
         let mut powers: Vec<EF> = Vec::with_capacity(n);
         let mut acc = EF::ONE;
@@ -792,8 +641,6 @@ mod tests {
             .chain(prep_full.iter().copied())
             .zip(powers.iter().copied())
             .fold(EF::ZERO, |a, (o, p)| a + o * p)
-        // Single chip ⇒ the cross-chip fold `λ·acc + m` reduces to `m`
-        // (acc starts at 0), so this IS the whole `zerocheck_sum_modification`.
     }
 
     /// Build + EXECUTE the in-circuit rev-path claim-binding for ONE chip:
@@ -818,7 +665,6 @@ mod tests {
         let beta_ext: Ext<F, EF> = builder.constant(beta_val);
         let claimed_sum: Ext<F, EF> = builder.constant(claimed_sum_val);
 
-        // β-power vector β¹.. — EXACT mirror of zerocheck.rs:499-505.
         let beta_sym: SymbolicExt<F, EF> = beta_ext.into();
         let n = main_full.len() + prep_full.len();
         let powers: Vec<SymbolicExt<F, EF>> =
@@ -827,7 +673,6 @@ mod tests {
                 .take(n)
                 .collect();
 
-        // section (6) rev branch: Σ (main_full ++ prep_full) · β^(1..).
         let modification: SymbolicExt<F, EF> = main_full
             .iter()
             .chain(prep_full.iter())
@@ -839,8 +684,6 @@ mod tests {
             })
             .sum();
 
-        // section (6)/(7): single-chip fold `λ·0 + modification == modification`,
-        // then the binding assert `claimed_sum == zerocheck_sum_modification`.
         let zerocheck_sum_modification: Ext<F, EF> = builder.eval(modification);
         builder.assert_ext_eq(claimed_sum, zerocheck_sum_modification);
 
@@ -870,8 +713,8 @@ mod tests {
     /// This harness contains NO reconstruction (that is a separate phase,
     /// `verify_logup_gkr`), so the trip is purely the claim-binding — proving a
     /// forged `*_full` is rejected by the zerocheck binding ON ITS OWN.  This is
-    /// the recursion analog of host verifier.rs:921; combined with the
-    /// reconstruction (logup_gkr.rs check (i), which a forged DEGREE trips and
+    /// the recursion analog of the host's sum-modification identity; combined
+    /// with the reconstruction (`verify_logup_gkr`, which a forged degree trips and
     /// which forces a compensating `*_full` change), NO `*_full` satisfies both
     /// → the joint adaptive forgery is impossible.
     #[test]
@@ -881,10 +724,7 @@ mod tests {
             vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
         let prep_full = vec![EF::from(F::from_u32(3))];
         let beta = EF::from(F::from_u32(11));
-        // HONEST claimed_sum (the value bound to the commitment @z*).
         let claimed_sum = host_full_claim_single_chip(&honest_main_full, &prep_full, beta);
-        // FORGED *_full (one entry 5→6); the claimed_sum is still the honest
-        // one above → mismatch → the binding assert trips.
         let forged_main_full =
             vec![EF::from(F::from_u32(6)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
         run_full_claim_binding(&forged_main_full, &prep_full, beta, claimed_sum);
@@ -902,7 +742,6 @@ mod tests {
         let honest_prep_full = vec![EF::from(F::from_u32(3))];
         let beta = EF::from(F::from_u32(11));
         let claimed_sum = host_full_claim_single_chip(&main_full, &honest_prep_full, beta);
-        // FORGED preprocessed *_full (3→4).
         let forged_prep_full = vec![EF::from(F::from_u32(4))];
         run_full_claim_binding(&main_full, &forged_prep_full, beta, claimed_sum);
     }
@@ -987,8 +826,6 @@ mod padded_row_tests {
             y: SepticExtension(core::array::from_fn(|_| zero_felt)),
         });
 
-        // The compose ring verifies recursion proofs; the leaf ring verifies a
-        // CORE shard proof, whose chip set is where the cost actually lives.
         let recursion = RecursionAir::<F, 3>::compress_machine(KoalaBearPoseidon2::default());
         let (mut rec_runtime, mut rec_const) = (0usize, 0usize);
         for chip in recursion.chips().iter() {

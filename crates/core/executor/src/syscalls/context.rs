@@ -126,9 +126,6 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
         let mut syscall_local_mem_events = Vec::new();
 
         if !self.rt.unconstrained && self.rt.executor_mode == ExecutorMode::Trace {
-            // Will need to transfer the existing memory local events in the executor to it's record,
-            // and return all the syscall memory local events.  This is similar to what
-            // `bump_record` does.
             for (addr, event) in self.local_memory_access.drain() {
                 let local_mem_access = self.rt.local_memory_access.remove(&addr);
 
@@ -136,12 +133,6 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
                     self.rt.record.cpu_local_memory_access.push(local_mem_access);
                 }
 
-                // also flush the register-slot
-                // fast-path mirror for register addresses. Without this, the
-                // reg_slots[addr] event keeps its pre-syscall `initial_mem_access`
-                // and gets extended by post-syscall accesses, double-covering the
-                // pre-syscall→syscall interval that should belong to the syscall
-                // event. This produces non-zero global cumulative sum on verify.
                 if (addr as usize) < 36 {
                     if let Some(reg_event) = self.rt.local_reg_access[addr as usize].take() {
                         self.rt.record.cpu_local_memory_access.push(reg_event);

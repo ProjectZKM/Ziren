@@ -404,7 +404,6 @@ pub struct VacantEntry<'a, V: Copy> {
 impl<'a, V: Copy> VacantEntry<'a, V> {
     /// Insert a value into the `VacantEntry`, returning a mutable reference to it.
     pub fn insert(self, value: V) -> &'a mut V {
-        // By construction, the slot in the page is `None`.
         *self.entry = Some(value);
         self.entry.as_mut().unwrap()
     }

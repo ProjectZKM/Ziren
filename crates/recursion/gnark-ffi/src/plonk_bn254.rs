@@ -44,11 +44,9 @@ impl PlonkBn254Prover {
     pub fn test<C: Config>(constraints: Vec<Constraint>, witness: Witness<C>) {
         let serialized = serde_json::to_string(&constraints).unwrap();
 
-        // Write constraints.
         let mut constraints_file = tempfile::NamedTempFile::new().unwrap();
         constraints_file.write_all(serialized.as_bytes()).unwrap();
 
-        // Write witness.
         let mut witness_file = tempfile::NamedTempFile::new().unwrap();
         let gnark_witness = GnarkWitness::new(witness);
         let serialized = serde_json::to_string(&gnark_witness).unwrap();
@@ -64,12 +62,10 @@ impl PlonkBn254Prover {
     pub fn build<C: Config>(constraints: Vec<Constraint>, witness: Witness<C>, build_dir: PathBuf) {
         let serialized = serde_json::to_string(&constraints).unwrap();
 
-        // Write constraints.
         let constraints_path = build_dir.join("constraints.json");
         let mut file = File::create(constraints_path).unwrap();
         file.write_all(serialized.as_bytes()).unwrap();
 
-        // Write witness.
         let witness_path = build_dir.join("plonk_witness.json");
         let gnark_witness = GnarkWitness::new(witness);
         let mut file = File::create(witness_path).unwrap();
@@ -78,7 +74,6 @@ impl PlonkBn254Prover {
 
         build_plonk_bn254(build_dir.to_str().unwrap());
 
-        // Write the corresponding asset files to the build dir.
         let zkm_verifier_path = build_dir.join("ZKMVerifierPlonk.sol");
         let vkey_hash = Self::get_vkey_hash(&build_dir);
         let zkm_verifier_str = include_str!("../assets/ZKMVerifierPlonk.txt")
@@ -95,7 +90,6 @@ impl PlonkBn254Prover {
 
     /// Generates a PLONK proof given a witness.
     pub fn prove<C: Config>(&self, witness: Witness<C>, build_dir: PathBuf) -> PlonkBn254Proof {
-        // Write witness.
         let mut witness_file = tempfile::NamedTempFile::new().unwrap();
         let gnark_witness = GnarkWitness::new(witness);
         let serialized = serde_json::to_string(&gnark_witness).unwrap();

@@ -48,15 +48,7 @@ fn main() {
     println!("proof   : {proof_path}");
     println!("chips   : {}", chips.len());
 
-    // The verdict is only as good as the verifying key: the challenger is
-    // SEEDED from it, so a key belonging to another program resamples
-    // `alpha`/`beta` and makes even an honest proof look unbalanced.  A single
-    // REJECT therefore proves nothing on its own.  Try every candidate key and
-    // report each verdict, so a rejection under the right key is
-    // distinguishable from a rejection caused by the wrong one.
     let verdict = |label: &str, key: &ZKMVerifyingKey| {
-        // Exactly `StarkMachine::verify`'s per-shard setup: the verifying key
-        // observed into a fresh challenger, then this shard's public values.
         let mut challenger = machine.config().challenger();
         key.vk.observe_into(&mut challenger);
         challenger.observe_slice(&proof.public_values[0..machine.num_pv_elts()]);
@@ -76,10 +68,6 @@ fn main() {
         }
     };
 
-    // The failing check is a balance between the LogUp-GKR sums and the
-    // public-values digest, so print the public values themselves: a shard
-    // whose PV slots do not describe its own trace is the shape a filling race
-    // would leave behind.
     {
         use zkm_pcs::air::PublicValues;
         use zkm_pcs::Word;
@@ -104,9 +92,6 @@ fn main() {
 
     verdict("file", &vk);
 
-    // The key the running client actually ships is the one `setup` derives from
-    // the guest ELF it loads, so derive it here rather than trusting a `vk.bin`
-    // that any later run overwrites.
     if let Some(elf_path) = args.next() {
         let elf = std::fs::read(&elf_path).unwrap_or_else(|e| panic!("read {elf_path}: {e}"));
         let (_, _, _, derived) = prover.setup(&elf);

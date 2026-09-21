@@ -136,19 +136,19 @@ impl FlatMem {
         idx
     }
 
-    /// The entry of the word containing `addr`.
+    /// The entry of the word containing `addr`. The deref is sound because
+    /// `index(addr) < NUM_ENTRIES` lies inside the mapping, which lives as long
+    /// as `self`.
     #[inline]
     #[must_use]
     pub fn get(&self, addr: u32) -> &FlatEntry {
-        // SAFETY: `index` bounds the offset inside the mapping, which lives
-        // as long as `self`.
         unsafe { &*self.cur.add(Self::index(addr)) }
     }
 
-    /// The entry of the word containing `addr`, mutably.
+    /// The entry of the word containing `addr`, mutably. Sound as in
+    /// [`Self::get`]; `&mut self` makes the reference unique.
     #[inline]
     pub fn get_mut(&mut self, addr: u32) -> &mut FlatEntry {
-        // SAFETY: as in `get`; `&mut self` makes the reference unique.
         unsafe { &mut *self.cur.add(Self::index(addr)) }
     }
 
@@ -219,7 +219,8 @@ impl FlatMem {
     /// pages are holes and hold nothing. Must not be called inside an
     /// unconstrained block (its pages are private to the COW view).
     ///
-    /// Yields `(addr, entry)` for entries with `f(entry)`.
+    /// Yields `(addr, entry)` for entries with `f(entry)`. The raw reads are
+    /// sound because `hole ≤ BYTE_LEN ⇒ idx < NUM_ENTRIES`.
     pub fn for_each_committed(&self, mut f: impl FnMut(u32, &FlatEntry)) {
         assert!(!self.in_unconstrained(), "for_each_committed inside an unconstrained block");
         let entry_len = std::mem::size_of::<FlatEntry>() as libc::off_t;
@@ -228,7 +229,6 @@ impl FlatMem {
         while off < end {
             let data = unsafe { libc::lseek(self.fd, off, libc::SEEK_DATA) };
             if data < 0 {
-                // ENXIO: no more data past `off`.
                 break;
             }
             let hole = unsafe { libc::lseek(self.fd, data, libc::SEEK_HOLE) };
@@ -236,7 +236,6 @@ impl FlatMem {
             let first = (data / entry_len) as usize;
             let last = (hole / entry_len) as usize;
             for idx in first..last {
-                // SAFETY: `idx < NUM_ENTRIES` since `hole <= BYTE_LEN`.
                 let e = unsafe { &*self.primary.add(idx) };
                 f((idx as u32) << 2, e);
             }
@@ -334,7 +333,6 @@ mod tests {
             }
         });
         assert_eq!(seen, vec![(a, 7, 1), (b, 9, 0)]);
-        // Seeding an accessed word is a no-op.
         m.seed_uninit(a, 100);
         assert_eq!(m.get(a).value, 7);
     }
