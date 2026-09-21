@@ -164,10 +164,6 @@ pub enum MipsAirId {
     SysLinux = 47,
     /// The MovCondChip.
     MovCond = 49,
-    // The BooleanCircuitGarble chip.
-    BooleanCircuitGarble = 50,
-    /// The BooleanCircuitGarble control chip (bookends the `PrecompileChain` state bus).
-    BooleanCircuitGarbleControl = 52,
 }
 
 impl MipsAirId {
@@ -272,8 +268,6 @@ impl MipsAirId {
             Self::Range => "Range",
             Self::SysLinux => "SysLinux",
             Self::MovCond => "MovCond",
-            Self::BooleanCircuitGarble => "BooleanCircuitGarble",
-            Self::BooleanCircuitGarbleControl => "BooleanCircuitGarbleControl",
         }
     }
 }

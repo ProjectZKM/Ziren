@@ -416,27 +416,6 @@ impl ExecutionRecord {
                     }
                     current_shard
                 }
-                SyscallCode::BOOLEAN_CIRCUIT_GARBLE => {
-                    let mut current_shard = Vec::new();
-                    let mut current_len = 0;
-
-                    for (syscall_event, event) in events {
-                        if let Some(input_len) =
-                            crate::deferred_plan::precompile_split_weight(syscall_code, &event)
-                        {
-                            if current_len + input_len > threshold && !current_shard.is_empty() {
-                                let mut record = ExecutionRecord::new(self.program.clone());
-                                record.precompile_events.insert(syscall_code, current_shard);
-                                shards_input.push(record);
-                                current_shard = Vec::new();
-                                current_len = 0;
-                            }
-                            current_len += input_len;
-                        }
-                        current_shard.push((syscall_event, event));
-                    }
-                    current_shard
-                }
                 _ => {
                     let chunks = events.chunks_exact(threshold);
                     let remainder = chunks.remainder().to_vec();

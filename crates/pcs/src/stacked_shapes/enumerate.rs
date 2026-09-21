@@ -134,7 +134,6 @@ fn precompile_families() -> &'static [(&'static str, &'static [&'static str])] {
         ),
         ("ed25519", &["EdAddAssign", "EdDecompress"]),
         ("uint256", &["Uint256MulMod", "U256XU2048Mul"]),
-        ("boolean_circuit_garble", &["BooleanCircuitGarble", "BooleanCircuitGarbleControl"]),
         ("syslinux", &["SysLinux"]),
     ]
 }

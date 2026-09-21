@@ -33,25 +33,20 @@ pub fn precompile_split_threshold(code: SyscallCode, opts: &SplitOpts) -> usize 
         SyscallCode::KECCAK_SPONGE => opts.keccak,
         SyscallCode::SHA_EXTEND => opts.sha_extend,
         SyscallCode::SHA_COMPRESS => opts.sha_compress,
-        SyscallCode::BOOLEAN_CIRCUIT_GARBLE => opts.boolean_circuit_garble,
         _ => opts.deferred,
     }
 }
 
 /// The weight one precompile event contributes towards its code's threshold.
 ///
-/// Keccak and garble shards are cut by WORK (blocks absorbed, gates), every
-/// other code by count. `None` means the code is cut by count.
+/// Keccak shards are cut by WORK (blocks absorbed), every other code by
+/// count. `None` means the code is cut by count.
 #[must_use]
 pub fn precompile_split_weight(code: SyscallCode, event: &PrecompileEvent) -> Option<usize> {
     match code {
         SyscallCode::KECCAK_SPONGE => Some(match event {
             // input_len_u32s is a multiple of GENERAL_BLOCK_SIZE_U32S.
             PrecompileEvent::KeccakSponge(e) => e.input_len_u32s as usize / GENERAL_BLOCK_SIZE_U32S,
-            _ => 0,
-        }),
-        SyscallCode::BOOLEAN_CIRCUIT_GARBLE => Some(match event {
-            PrecompileEvent::BooleanCircuitGarble(e) => e.num_gates() + 1,
             _ => 0,
         }),
         _ => None,
@@ -175,8 +170,7 @@ impl DeferredPlanner {
         let opts = self.opts;
         for (&code, q) in self.pending.iter_mut() {
             let threshold = precompile_split_threshold(code, &opts);
-            let by_weight =
-                matches!(code, SyscallCode::KECCAK_SPONGE | SyscallCode::BOOLEAN_CIRCUIT_GARBLE);
+            let by_weight = matches!(code, SyscallCode::KECCAK_SPONGE);
             loop {
                 // Find the end of the next full shard.
                 let mut n = 0usize;

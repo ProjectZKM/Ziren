@@ -1,6 +1,3 @@
-use crate::syscall::precompiles::boolean_circuit_garble::{
-    BooleanCircuitGarbleChip, BooleanCircuitGarbleControlChip,
-};
 use crate::{
     global::GlobalChip,
     memory::{MemoryBumpChip, MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
@@ -175,10 +172,6 @@ pub enum MipsAir<F: PrimeField32> {
     Secp256r1Double(WeierstrassDoubleAssignChip<SwCurve<Secp256r1Parameters>>),
     /// A precompile for the Poseidon2 permutation
     Poseidon2Permute(Poseidon2PermuteChip),
-    /// A precompile for the Boolean Circuit Garble
-    BooleanCircuitGarble(BooleanCircuitGarbleChip),
-    /// The control chip bookending the boolean-circuit-garble `PrecompileChain` state bus.
-    BooleanCircuitGarbleControl(BooleanCircuitGarbleControlChip),
     /// A precompile for the Keccak Sponge
     KeccakSponge(KeccakSpongeChip),
     /// The control chip bookending the keccak-sponge `PrecompileChain` state buses.
@@ -528,17 +521,6 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(movcond_instrs.name(), movcond_instrs.cost());
         chips.push(movcond_instrs);
 
-        let boolean_circuit_garble =
-            Chip::new(MipsAir::<F>::BooleanCircuitGarble(BooleanCircuitGarbleChip::default()));
-        costs.insert(boolean_circuit_garble.name(), boolean_circuit_garble.cost());
-        chips.push(boolean_circuit_garble);
-
-        let boolean_circuit_garble_control = Chip::new(MipsAir::<F>::BooleanCircuitGarbleControl(
-            BooleanCircuitGarbleControlChip::default(),
-        ));
-        costs.insert(boolean_circuit_garble_control.name(), boolean_circuit_garble_control.cost());
-        chips.push(boolean_circuit_garble_control);
-
         (chips, costs)
     }
 
@@ -609,7 +591,6 @@ impl<F: PrimeField32> MipsAir<F> {
             .map(|events| {
                 let events_len = match self {
                     Self::KeccakSponge(_) => self.keccak_permutation_in_record(record),
-                    Self::BooleanCircuitGarble(_) => self.boolean_circuit_garble_in_record(record),
                     _ => events.len(),
                 };
                 let num_rows = events_len * self.rows_per_event();
@@ -702,7 +683,6 @@ impl<F: PrimeField32> MipsAir<F> {
         // events).
         airs.remove(&Self::Sha256CompressControl(ShaCompressControlChip::default()));
         airs.remove(&Self::Sha256ExtendControl(ShaExtendControlChip::default()));
-        airs.remove(&Self::BooleanCircuitGarbleControl(BooleanCircuitGarbleControlChip::default()));
         airs.remove(&Self::KeccakSpongeControl(KeccakSpongeControlChip::default()));
 
         airs.into_iter()
@@ -758,9 +738,6 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Sha256Extend(_) => {
                 Some(Self::Sha256ExtendControl(ShaExtendControlChip::default()))
             }
-            Self::BooleanCircuitGarble(_) => {
-                Some(Self::BooleanCircuitGarbleControl(BooleanCircuitGarbleControlChip::default()))
-            }
             Self::KeccakSponge(_) => {
                 Some(Self::KeccakSpongeControl(KeccakSpongeControlChip::default()))
             }
@@ -787,28 +764,6 @@ impl<F: PrimeField32> MipsAir<F> {
                     .map(|(_, pre_e)| {
                         if let PrecompileEvent::KeccakSponge(event) = pre_e {
                             event.num_blocks()
-                        } else {
-                            unreachable!()
-                        }
-                    })
-                    .sum::<usize>()
-            })
-            .unwrap_or(0)
-    }
-
-    fn boolean_circuit_garble_in_record(&self, record: &ExecutionRecord) -> usize {
-        record
-            .precompile_events
-            .get_events(SyscallCode::BOOLEAN_CIRCUIT_GARBLE)
-            .map(|events| {
-                events
-                    .iter()
-                    .map(|(_, pre_e)| {
-                        if let PrecompileEvent::BooleanCircuitGarble(event) = pre_e {
-                            // The worker now emits exactly one row per gate; the
-                            // former header row moved to the control chip, so no
-                            // `+ 1` here.
-                            event.num_gates()
                         } else {
                             unreachable!()
                         }
@@ -846,8 +801,6 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Bls12381Fp2Mul(_) => SyscallCode::BLS12381_FP2_MUL,
             Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
             Self::Poseidon2Permute(_) => SyscallCode::POSEIDON2_PERMUTE,
-            Self::BooleanCircuitGarble(_) => SyscallCode::BOOLEAN_CIRCUIT_GARBLE,
-            Self::BooleanCircuitGarbleControl(_) => SyscallCode::BOOLEAN_CIRCUIT_GARBLE,
             Self::KeccakSponge(_) => SyscallCode::KECCAK_SPONGE,
             Self::KeccakSpongeControl(_) => SyscallCode::KECCAK_SPONGE,
             Self::SysLinux(_) => SyscallCode::SYS_LINUX,

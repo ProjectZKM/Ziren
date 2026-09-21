@@ -998,7 +998,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                             .max(4),
                     ),
                 ];
-                // Bus-ported precompiles (sha256-compress/extend, garble) pair the
+                // Bus-ported precompiles (sha256-compress/extend, keccak) pair the
                 // worker with a control chip that bookends the PrecompileChain
                 // state bus.  It emits 1 row per syscall and MUST be present in the
                 // shard's shape, otherwise `Shape::included` drops it and the

@@ -14,8 +14,6 @@ import ZirenDet.Chips.Bn254DoubleAssign
 import ZirenDet.Chips.Bn254Fp2AddSubAssign
 import ZirenDet.Chips.Bn254Fp2MulAssign
 import ZirenDet.Chips.Bn254FpOpAssign
-import ZirenDet.Chips.BooleanCircuitGarble
-import ZirenDet.Chips.BooleanCircuitGarbleControl
 import ZirenDet.Chips.Branch
 import ZirenDet.Chips.Byte
 import ZirenDet.Chips.CloClz
