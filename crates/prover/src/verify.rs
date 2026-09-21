@@ -150,8 +150,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // - If it's not a shard with "CPU", then `start_pc` equals `next_pc`.
         // - If it's a shard with "CPU", then `start_pc` should never equal zero.
         // - The delay-slot lookahead: `start_next_pc = start_pc + 4` and
-        //   `next_next_pc = next_pc + 4` on execution shards, equal to their pc
-        //   on the others (no shard boundary falls inside a delay slot).
+        //   `next_next_pc = next_pc + 4` on execution shards (no shard boundary
+        //   falls inside a delay slot); on the others the two endpoints cancel,
+        //   `start_next_pc = next_next_pc`, and the value is inert.
         //
         // Finalization:
         // - `next_pc` should equal zero.
@@ -189,12 +190,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                      an execution shard enters and exits outside a delay slot",
                 ));
             } else if !shard_proof.contains_execution()
-                && (public_values.start_next_pc != public_values.start_pc
-                    || public_values.next_next_pc != public_values.next_pc)
+                && public_values.start_next_pc != public_values.next_next_pc
             {
                 return Err(MachineVerificationError::InvalidPublicValues(
-                    "start_next_pc != start_pc or next_next_pc != next_pc: \
-                     a non-execution shard carries equal State-bus endpoints",
+                    "start_next_pc != next_next_pc: a non-execution shard's State-bus \
+                     endpoints must cancel",
                 ));
             } else if i == proof.0.len() - 1 && public_values.next_pc != KoalaBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(

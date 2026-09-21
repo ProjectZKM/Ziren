@@ -876,16 +876,19 @@ pub fn verify_core_basefold<C, SC, A>(
         // lookahead: `start_next_pc = start_pc + 4` and `next_next_pc =
         // next_pc + 4` -- the latter on the halting row too, whose `next_pc` is
         // 0 and whose lookahead the frame still sends as `next_pc + 4`.  A
-        // non-execution shard carries the two endpoints equal (they cancel on
-        // the bus), so each lookahead equals its pc.  Together with the
-        // `start_pc` chain this gives `start_next_pc = prev.next_next_pc`.
+        // non-execution shard has no row on the bus, so its two endpoints
+        // must cancel against each other: `start_next_pc = next_next_pc`
+        // (the value itself is inert -- the executor carries the previous
+        // shard's `next_pc` on one path and its `next_next_pc` on another --
+        // and the next execution shard re-derives its lookahead from the
+        // chained `start_pc`).  Together with the `start_pc` chain this gives
+        // `start_next_pc = prev.next_next_pc` across execution shards.
         let four = C::F::from_u32(4);
         if contains_cpu {
             builder.assert_felt_eq(public_values.start_next_pc, public_values.start_pc + four);
             builder.assert_felt_eq(public_values.next_next_pc, public_values.next_pc + four);
         } else {
-            builder.assert_felt_eq(public_values.start_next_pc, public_values.start_pc);
-            builder.assert_felt_eq(public_values.next_next_pc, public_values.next_pc);
+            builder.assert_felt_eq(public_values.start_next_pc, public_values.next_next_pc);
         }
 
         // Exit code stays zero throughout.
