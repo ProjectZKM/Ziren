@@ -37,7 +37,7 @@
   "KeccakSponge": 63288,
   "AddSubImm": 33,
   "ShiftLeft": 62,
-  "MemoryLocal": 56,
+  "MemoryLocal": 80,
   "LoadNarrow": 59,
   "Global": 65,
   "Secp256k1AddAssign": 1491,
