@@ -72,22 +72,12 @@ where
     EF: ExtensionField<F> + Copy + PrimeCharacteristicRing,
     A: MachineAir<F>,
 {
-    // Ziren's per-chip "interaction count" = sends + receives, exposed
-    // as `Chip::num_lookups()` (see `crates/pcs/src/chip.rs:99`).
-    //
-    // **Sizing convention** (matches host prover + in-circuit verifier):
-    //
-    // Both the host prover (`first_layer::generate_first_layer`) and the
-    // recursion verifier (`shard_basefold.rs::chip_metadata_from_chips`) size
-    // the global interaction axis as
-    //   `log2_ceil(Σ chip.num_lookups())`
-    // — chips pack raw-contiguously into it, with all padding in one run at
-    // the trailing end.
-    //
-    // This dummy MUST mirror the verifier's expectation, otherwise the
-    // recursion-circuit `evaluate_mle_ext` assertion at
-    // `logup_gkr.rs:105` panics with `mle_evals.len() != 1 << dim`
-    // during VK regen / VERIFY_VK=true.
+    // A chip's interaction count is sends + receives (`Chip::num_lookups`).
+    // The prover (`generate_first_layer`) and the recursive verifier
+    // (`chip_metadata_from_chips`) size the interaction axis as
+    //   ⌈log2 Σ_chips num_lookups⌉,
+    // the chips packed contiguously and all padding at the end. The dummy
+    // must size it the same, or `evaluate_mle_ext` sees 2^dim ≠ |evals|.
     let total_chip_interactions: usize = chips.iter().map(|chip| chip.num_lookups()).sum();
     let log_interactions = log2_ceil_usize(total_chip_interactions);
     let output_size = 1usize << (log_interactions + 1);
@@ -132,14 +122,11 @@ where
                         // `JaggedShardProof.chip_heights`
                         // (see [`dummy_jagged_shard_proof`]).
                         log_degree: 0,
-                        // FULL-POINT openings.  The
-                        // VK-enumeration dummy MUST carry these with the SAME
-                        // shape the real prover emits (top_level.rs:517-538) so
-                        // the recursion AIR / witness layout (and thus the
-                        // regenerated VK) matches real proofs.  The real prover
-                        // emits `main_trace_evaluations_full = Some(width)` for
-                        // every host/device chip and `preprocessed_*_full =
-                        // Some(preprocessed_width)` only when prep_width > 0.
+                        // Full-point openings, shaped as the prover emits them —
+                        // `main_trace_evaluations_full = Some(width)` for every
+                        // chip, `preprocessed_*_full = Some(preprocessed_width)`
+                        // when the chip has preprocessed columns — so the
+                        // witness layout, and the key, match real proofs.
                         main_trace_evaluations_full: Some(vec![EF::ZERO; main_width]),
                         preprocessed_trace_evaluations_full: if preprocessed_width > 0 {
                             Some(vec![EF::ZERO; preprocessed_width])
@@ -155,23 +142,23 @@ where
     LogupGkrProof { circuit_output, round_proofs, logup_evaluations, witness: F::ZERO }
 }
 
-/// Allocator for [`JaggedShardProof`] — zero-filled, no real
-/// prove call.  Top-level entry used by
-/// [`crate::stark::dummy_basefold_vk_and_shard_proof`] in place of
-/// the slow `prove_shard_with_data` path.
+/// A zero-filled [`JaggedShardProof`] with the shape a real proof of `chips`
+/// has, for [`crate::stark::dummy_basefold_vk_and_shard_proof`]: a program
+/// build reads only the shape.
 ///
 /// # Inputs
 ///
-/// * `chips` — per-chip references resolved from the input shape
-///   (caller does the shape → machine.chips() join).
-/// * `chip_heights_pairs` — per-chip (name, rows) pairs, exact row counts
-///   matching the shape order (shapes stay LOG-keyed).  Used to
-///   populate both `chip_heights` (raw `2^log` heights) and
-///   `chip_cumulative_sums` maps with one entry per chip (the
-///   shape-stability invariant the parity test guards).
-/// * `max_log_row_count` — shard-level upper bound on per-chip
-///   log-row-count.  Drives `logup_gkr_proof.round_proofs.len()` and
-///   `zerocheck_proof.univariate_polys.len()`.
+/// * `chips` — the chips of the input shape (the caller joins the shape to
+///   `machine.chips()`).
+/// * `chip_heights_pairs` — per chip, (name, rows): exact row counts as the
+///   prover pads them (`next_multiple_of_32_rows` of the shape's rows), not
+///   log2 heights. They fill `chip_heights` and `chip_cumulative_sums`, one
+///   entry per chip.
+/// * `max_log_row_count` — m, the cube: it sets the number of LogUp-GKR
+///   rounds and of zerocheck polynomials.
+/// * `pins` — the child's area pins (`StarkMachine::recursion_pins`):
+///   `Some` for a compress-machine child, both rounds at a fixed area and
+///   padding-column count; `None` for a core child, at natural areas.
 ///
 /// # Field summary
 ///
@@ -181,20 +168,14 @@ where
 /// | `main_commitment`      | `[ZERO; 8]`                            |
 /// | `logup_gkr_proof`      | [`dummy_logup_gkr_proof`]              |
 /// | `zerocheck_proof`      | `dummy_partial_sumcheck_proof(max_log_row_count, 4)` |
-/// | `opened_values`        | `ShardOpenedValues { chips: Vec::new() }` (matches real prover at `prover.rs:365`) |
+/// | `opened_values`        | one zero entry per chip, shaped as the prover's |
 /// | `chip_heights`         | one entry per chip from input shape (raw `2^log`) |
 /// | `chip_cumulative_sums` | one entry per chip (local=ZERO, global=ZERO) |
 /// | `evaluation_proof`     | `EvaluationProof::Empty` — lift adapter handles the Empty arm |
 pub fn dummy_jagged_shard_proof<F, EF, A>(
     chips: &[&Chip<F, A>],
-    // Per-chip ROW counts (exact, as the real prover pads them —
-    // `next_multiple_of_32_rows` to the shape's rows), not log2 heights.
     chip_heights_pairs: &[(String, usize)],
     max_log_row_count: usize,
-    // The AREA PINS the child's machine commits under
-    // (`StarkMachine::recursion_pins`): `Some` for a COMPRESS-machine child
-    // (both rounds at a fixed area with a fixed padding-column count), `None`
-    // for a CORE child (natural, byte-identical).
     pins: Option<zkm_pcs::jagged::RecursionPins>,
 ) -> JaggedShardProof<F, EF>
 where
@@ -211,17 +192,11 @@ where
     // rounds total).
     let zerocheck_proof = dummy_partial_sumcheck_proof::<EF>(max_log_row_count, 4);
 
-    // The real prover (`shard_level/prover.rs:438-498`)
-    // now populates one `ChipOpenedValues` per chip (name-sorted) with
-    // the per-chip trace@z openings — `main.local` of `width` Exts,
-    // `preprocessed.local` of `preprocessed_width` Exts, and `quotient`
-    // = the `max_log_row_count + 1` big-endian height-bit `degree`.  The
-    // VK-regen shape-compiled program (`program_from_shape_basefold`)
-    // allocates witness slots from THIS dummy, so its `opened_values`
-    // shape MUST match the real proof's per-chip column counts — an
-    // empty `chips` Vec here would allocate zero opened_values slots
-    // against N written felts and desync the witness stream during
-    // vk_map regeneration.  The values are zero (shape-only fixture).
+    // One `ChipOpenedValues` per chip in name order, as the prover emits:
+    // `main.local` (width), `preprocessed.local` (preprocessed width) and
+    // `quotient` = the m + 1 big-endian height bits. A program built from
+    // this dummy allocates its witness slots from these lengths, so they must
+    // be the real proof's. The values are zero.
     let opened_values = {
         let bit_len = max_log_row_count + 1;
         let heights_map: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
@@ -237,12 +212,9 @@ where
                 // `log_degree` is derived geometry, ceil-log2 of the raw row
                 // count, exactly as `build_opened_values` derives it.
                 let log_h = zkm_pcs::shard_level::ceil_log2(rows);
-                // quotient[0] carries the big-endian bits
-                // of the chip HEIGHT (the raw row count, the VirtualGeq
-                // threshold), MSB at index 0 — the SAME encoding the real
-                // prover emits (shard_level/prover.rs:486-507).  Zeroing it
-                // would make the recursion program's full_geq emit fewer ops
-                // than the real-input program.
+                // quotient[0] is the big-endian bits of the chip height, the
+                // `full_geq` threshold, as the prover encodes it; zero bits
+                // would give `full_geq` fewer ops than a real input does.
                 let height: u64 = rows as u64;
                 let degree_bits: Vec<EF> = (0..bit_len)
                     .map(|i| {
@@ -279,17 +251,9 @@ where
     let chip_heights: BTreeMap<String, usize> =
         chip_heights_pairs.iter().map(|(name, rows)| (name.clone(), *rows)).collect();
 
-    // Per-chip cumulative-sums map: one entry per chip with
-    // both `local` and `global` zeroed.  Real prover at
-    // `shard_level/prover.rs:401-428` derives `global` from the
-    // last 14 elements of the main trace when scope != Local; for
-    // zero-trace dummies that derivation produces a zero digest
-    // too, so zero-fill is byte-identical to the real-prove output
-    // on zero traces (the path this dummy replaces).
-    //
-    // The local-scope chips also emit `SepticDigest::zero()` in
-    // the real prover (line 410), so the unconditional zero here
-    // is exact.
+    // Cumulative sums: one entry per chip, local and global zero. The prover
+    // reads `global` from the last 14 elements of the main trace, which are
+    // zero on a zero trace, and emits zero for local-scope chips.
     let chip_cumulative_sums: BTreeMap<String, ChipCumulativeSums<F, EF>> = chips
         .iter()
         .map(|chip| {
@@ -466,22 +430,19 @@ where
 /// * reduction: L rounds (`evals=[EF;3]`), eval_point len L.
 /// * jagged_eval: `n = 2*(log_m+1)` rounds (`log_m =
 ///   trailing_zeros(np2(total_values-1))`), each poly 3 coeffs (degree-2).
+///
+/// `prep_dims` are the preprocessed round's per-chip (preprocessed width,
+/// rows), in name order — the order `setup` commits them; empty for a machine
+/// without preprocessed chips, the single-round shape. A real proof opens the
+/// preprocessed round ahead of main, so a one-round dummy would differ in the
+/// round count, the per-round stripe multiples, the column space and the
+/// reduction dimension, every one a witness length and so a different
+/// program. `pins` are the child's machine pins (`None` = natural areas): the
+/// preprocessed round takes `pins.prep`, the main round `pins.main`.
 pub fn dummy_jagged_basefold_bundle(
-    // The PREPROCESSED opening round's per-chip `(preprocessed_width,
-    // rows)`, name-sorted — the order `setup` commits them in.  Empty for
-    // a machine with no preprocessed chips, which is the single-round shape.
-    //
-    // A real proof opens preprocessed as its own round ahead of main,
-    // so a dummy that models
-    // one round disagrees with it on the round count, the per-round stripe
-    // multiples, the concatenated column space and the reduction dimension —
-    // every one of them a witness-stream LENGTH, and so a different program.
     prep_dims: &[(usize, usize)],
     chip_dims: &[(usize, usize)],
     max_log_row_count: usize,
-    // The child's machine pins (`None` = natural areas, as many padding
-    // columns as the gap needs).  The preprocessed round (first, when
-    // present) takes `pins.prep`, the main round `pins.main`.
     pins: Option<zkm_pcs::jagged::RecursionPins>,
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProof {
     use p3_matrix::dense::RowMajorMatrix;
@@ -698,27 +659,14 @@ pub fn dummy_jagged_basefold_bundle(
     // query_phase_openings_and_proofs: log_stacking rounds, each Q leaves; round
     // r leaf has its Merkle path against the commit-phase round-r codeword.
     //
-    // FAITHFUL PATH LENGTH (validated against the real prover by digest match —
-    // `zkm_prover::tests::multishard_normalize_arity_faithful`): the real
-    // BaseFold prover (crates/pcs/src/basefold/prover.rs:455-470) folds the
-    // codeword once per round; commit-phase round `r` (0-indexed) opens at a
-    // codeword of height 2^(num_variables + log_blowup - 1 - r), so its Merkle
-    // path length is `num_variables + log_blowup - 1 - r` where
-    // `num_variables == log_stacking`.  A `log_stacking - r` length would
-    // assume `log_blowup == 1`; the inner default is
-    // `log_blowup == 2`, so such a path would be ONE level too short.
-    // In-circuit the path Select-loop count = `leaf.proof.len()`
-    // (basefold_verifier.rs:555-561 via the lift's
-    // `merkle_path_digests = leaf.proof.clone()`), so an under-count would
-    // emit `log_stacking * (log_blowup-1) * num_queries` fewer Merkle
-    // Select+Poseidon2 ops than the real program, diverging the normalize VK
-    // from the real proof's VK.  Tracking `inner_log_blowup` keeps the dummy
-    // faithful.
-    // With arity `k_r`, round r's leaf covers `2^k_r` codeword rows, so its
-    // tree is `k_r` levels shallower AND the codeword has already shrunk by
-    // every earlier round's arity: the path length is
-    // `log_stacking + blowup - sum(k_i for i <= r)`.  At arity 1 throughout
-    // that is the classic `log_stacking + blowup - 1 - r`.
+    // Path length. The prover folds the codeword once per round, by arity
+    // k_r; round r's leaf covers 2^{k_r} rows of a codeword already shrunk by
+    // every earlier round, so its Merkle path has
+    //   log_stacking + log_blowup − Σ_{i ≤ r} k_i
+    // levels (log_stacking + log_blowup − 1 − r at arity 1). The circuit walks
+    // `leaf.proof.len()` levels, so a shorter dummy path would give a program,
+    // and a key, with fewer Merkle ops than a real proof's. Checked against
+    // real proofs by `multishard_normalize_arity_faithful`.
     let query_phase_openings_and_proofs: Vec<MerkleOpening<F, JaggedMmcs>> = {
         let mut consumed = 0usize;
         round_arities
@@ -861,9 +809,10 @@ pub fn dummy_jagged_basefold_bundle(
 /// `round_stripes` stripes each, under the production
 /// [`zkm_pcs::whir::jagged::core_whir_config`] schedule.
 ///
-/// Every length mirrors `StackedWhirProver::prove_trusted_evaluation_with_engine`
-/// (crates/pcs/src/whir/stacked.rs); the lift + `hash_stacked_whir` read all
-/// of them.  With `R = round_parameters.len()` and `ff_r` round r's fold:
+/// Every length is the one
+/// `StackedWhirProver::prove_trusted_evaluation_with_engine` emits; the lift
+/// and `hash_stacked_whir` read all of them. With `R = round_parameters.len()`
+/// and `ff_r` round r's fold:
 /// * `round_sumcheck_polys[r]`, `r < R-1`: `ff_r` degree-2 polys (3 coeffs);
 ///   the LAST round's polys are popped into `final_sumcheck_polys`.
 /// * `round_ood_answers[r]` / `round_commitments[r]`, `r < R-1`: the folded
@@ -881,12 +830,8 @@ pub fn dummy_jagged_basefold_bundle(
 /// * `final_poly`: `2^(log_stacking - sum ff)` coefficients.
 /// * `folding_pow`: one per folded variable plus one query grind per
 ///   committed round, `sum ff + (R - 1)`.
-/// * `batch_evaluations[r]`: `round_stripes[r]` claims.
-///
-/// Validated against a real reth compose child at `log_stacking = 21`
-/// (folds `[4, 7, 7]`, 40 + 56 stripes): `rsp=[[3;4],[3;7]] ood=[2,2] rc=2
-/// rq=[(168 x [16;40|56] / 18), (21 x [512] / 14), (12 x [512] / 10)] fp=8
-/// fsp=[3;7] pow=20 be=[40,56]`.
+/// * `batch_evaluations[r]`: `round_stripes[r]` claims, then one batching
+///   grind witness.
 fn dummy_stacked_whir_proof(
     log_stacking: usize,
     round_stripes: &[usize],
