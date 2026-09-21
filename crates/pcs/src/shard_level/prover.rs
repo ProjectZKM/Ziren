@@ -528,42 +528,29 @@ where
     }
 }
 
-/// Observe slot **1** — the LogUp-GKR trace openings (trace@ζ).
+/// Observe the LogUp-GKR trace openings `O_{i,k} = T̃_{i,k}(anchor)`.
 ///
-/// Observed INSIDE the GKR phase, immediately after the round walk produces
-/// the terminal evaluation point and before the shard driver samples any
-/// zerocheck challenge (α/γ/λ): the `chips.len()` felt, then per chip the
-/// length-prefixed preprocessed and main openings.
+/// Called after the GKR walk fixes `anchor` and before any zerocheck
+/// challenge `α, γ, λ` is sampled.  Absorbs `|chips|`, then per chip (name
+/// order) the length-prefixed preprocessed openings, the openings at the
+/// trailing `log h` coordinates, and the openings at the full point.
 ///
-/// # Why the position is load-bearing
+/// # Why before `α, γ, λ`
 ///
-/// The zerocheck identity the verifier enforces is
+/// The verifier checks
 ///
 /// ```text
 ///   Σ_i λ^i Σ_k γ^k O_{i,k}  =  Σ_i λ^i [ C̃_{α,i}(anchor) + Σ_k γ^k T̃_{i,k}(anchor) ]
 /// ```
 ///
-/// (left side: `claimed_sum` re-derived from these openings, host
-/// `verifier.rs` step G2-b; right side: what the zerocheck sumcheck forces).
-/// With `O` fixed BEFORE α/γ/λ this is a Schwartz–Zippel test of a nonzero
-/// polynomial in those challenges, so it forces both `O = T̃(anchor)` and a
-/// vanishing constraint sum.  With α/γ/λ sampled first it collapses to ONE
-/// linear equation in `|O|` unknowns, which a prover can solve for `O` —
-/// absorbing a constraint violation `Σ_i λ^i C̃_{α,i}` into the opening vector.
-/// The only other binding on `O` is the LogUp last-layer reconstruction, which
-/// is two scalar equations (`verifier.rs`, the numerator/denominator
-/// mismatch returns) and touches only the columns that appear in an
-/// interaction expression.
+/// With `O` fixed first, both sides are polynomials in `α, γ, λ` and
+/// Schwartz–Zippel forces `O = T̃(anchor)` and `Σ_i λ^i C̃_{α,i} = 0`.  With
+/// the challenges known first, it is one linear equation in `|O|` unknowns,
+/// solvable for an `O` that absorbs a nonzero constraint sum; the LogUp
+/// last-layer check adds only two scalar equations on the interaction columns.
 ///
-/// # What is observed
-///
-/// TWO opening sets per chip: the legacy trailing-`log_h`
-/// `main_trace_evaluations` (which drives the claim on the recursion /
-/// shrink / wrap stages) and the full-point `main_trace_evaluations_full`
-/// (which drives it on the core stage).  Both are observed unconditionally so
-/// the binding does not depend on which stage's convention is in force; each
-/// is length-prefixed, so the four slices stay unambiguous.  Chip order is
-/// NAME order (`chip_openings` is a `BTreeMap`).
+/// Both opening sets are absorbed, each length-prefixed, so the binding holds
+/// whichever one the stage's claim uses.
 pub fn observe_logup_gkr_openings<F, EF, Challenger>(
     challenger: &mut Challenger,
     num_chips: usize,
@@ -694,50 +681,37 @@ where
         .collect()
 }
 
-/// Residual-y reuse: the zerocheck reduction residual (`trace_at_z` main
-/// slice) IS the jagged `y_per_chip`, so the host triple-nested recompute is
-/// skipped.  Computing those claims is transcript-silent, so the proof bytes
-/// are unchanged.  Panics when any chip's residual is missing or
-/// shape-mismatched, or on a non-pow2 height under the LEGACY (`!use_rev`)
-/// bitrev convention.
+/// The jagged column claims `y_i = T̃_i(z)`, read from the zerocheck residual.
+///
+/// The residual `trace_at_z[chip] = (prep ‖ main)(z)` already holds `T̃_i(z)`
+/// as its last `w_i` entries, so no multilinear evaluation is recomputed; the
+/// result is transcript-silent.
+///
+/// `heights[i]` is chip `i`'s row count when its commit trace is empty
+/// (device-resident); a missing entry means `h_i = 0`.  Output `i` is empty
+/// when `w_i = 0` and `[0; w_i]` when `h_i = 0`.
+///
+/// # Panics
+/// When the chip slices are not parallel, a chip has no residual, or a
+/// residual's width is not `prep_i + w_i`.
 pub fn compute_residual_y_openings<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     commit_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
-    // Per-chip metadata heights, parallel to `chips` (device dummies carry a
-    // baked height; host chips `None`).  The sole empty-commit-trace height
-    // source.  An empty / short slice (host callers that don't precompute it)
-    // tolerates `.get` → falls back to 0 (unexercised).
     heights: &[Option<usize>],
 ) -> Vec<Vec<Challenge<SC>>>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
-    // The zerocheck residual IS the jagged round's column claims; there is no
-    // silent recompute fallback.  Each failure mode is a named panic, because
-    // each would be a REAL bug:
-    //
-    //   * missing full openings — structurally impossible: both producers
-    //     (`row_gkr::top_level` and ziren-gpu's `device_logup_gkr`) return
-    //     `Some` on every branch, zero-filling a device-only or width-0 chip;
-    //   * a non-power-of-two height under the LEGACY (`!use_rev`) bitrev
-    //     convention, where the residual's row order would not match the
-    //     jagged one;
-    //   * a residual whose width does not match the chip — a desync between
-    //     the zerocheck and the commit.
     assert!(
         !logup_evaluations.chip_openings.is_empty(),
         "compute_residual_y_openings: LogUp-GKR produced no chip openings",
     );
-    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
-    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
-    // mismatch would silently pair a chip with a DIFFERENT chip's trace (a 2N
-    // [prep | main] commit set would pair chip[i] with its PREPROCESSED trace
-    // where its MAIN trace is expected).
-    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
+    // `zip` truncates, so unequal lengths would pair chip `i` with another
+    // chip's trace.
     assert_eq!(
         chips.len(),
         commit_traces.len(),
@@ -753,10 +727,8 @@ where
         chips.iter().zip(commit_traces.iter()).zip(preprocessed_traces.iter()).enumerate()
     {
         let name = MachineAir::<Val<SC>>::name(*chip);
-        // A device-resident chip carries an EMPTY commit trace; resolve its
-        // REAL dims so the residual openings still cover it: height from the
-        // dummy's baked metadata (else the provider), width from the residual
-        // itself.
+        // Empty commit trace (device-resident): `h_i = heights[i]`,
+        // `w_i = |residual_i| − prep_i`.
         let (ctrace_values, ctrace_width) = crate::jagged::real_cells(ctrace);
         let (w, h) = if ctrace_width == 0 {
             let dev_h = heights.get(idx).copied().flatten().unwrap_or(0);
@@ -769,10 +741,8 @@ where
             let w = ctrace_width;
             (w, ctrace_values.len() / w)
         };
-        // Mirror the `y_per_chip` guard in jagged_pcs.rs.  A genuine
-        // HEIGHT-0 but FULL-WIDTH missing chip must still emit ONE zero column
-        // claim PER COLUMN (the verifier k-walk advances through every
-        // committed column); a truly width-0 chip skips.
+        // The verifier walks every committed column, so `h_i = 0` still
+        // yields `w_i` zero claims; `w_i = 0` yields none.
         if w == 0 {
             out.push(Vec::new());
             continue;
@@ -781,12 +751,7 @@ where
             out.push(vec![Challenge::<SC>::ZERO; w]);
             continue;
         }
-        // Both the zerocheck residual and the jagged `y_per_chip` read NATURAL
-        // rows, so the reuse is valid at ANY height. (This guarded the LEGACY
-        // bitrev convention, which needed a power-of-two height; that layout is
-        // gone.)
-        // Strict shape check: prep-then-main, main slice is the last `w` values
-        // (zerocheck num_main_cols == trace width).
+        // residual = (prep ‖ main)(z), so main(z) is its last `w_i` entries.
         let prep_cols = ptrace.num_polynomials();
         let evals = trace_at_z.get(&name).unwrap_or_else(|| {
             panic!(
@@ -1074,61 +1039,39 @@ where
     }
 }
 
-/// Prove the shard's **trusted evaluations**: that the per-chip main-column
-/// openings at `z_row` (`pre_y_per_chip` — these ARE the
-/// `opened_values.chips[].main.local` values that zerocheck + LogUp-GKR
-/// constrain) are the committed columns' values at `z_row`.
+/// Prove the trusted evaluations `y_{i,k} = T̃_{i,k}(z)` for every chip `i`
+/// and main column `k`, the values zerocheck and LogUp-GKR constrain.
 ///
-/// The emitted proof is the FULL chain — not just the F(r) opening: the real
-/// jagged-eval sumcheck reducing the trusted-eval claims to
-/// `sumcheck_final = F(r)·J(r)` (`prove_jagged_reduction_owned` +
-/// `prove_jagged_evaluation`), PLUS the jagged-PCS opening proving `F(r)` is
-/// the committed polynomial at the reduced point. The recursion verifier
-/// binds this exact chain over the SAME `opened_values` Vec zerocheck
-/// constrains, so the trusted evals cannot diverge from the committed trace.
+/// The proof is the whole chain: the jagged sumcheck reduces
+/// `Σ_{i,k} β^{(i,k)} y_{i,k}` to `F(r)·J(r)`, and the PCS opening proves
+/// `F(r)` against the committed dense polynomial `F`.  The preprocessed round
+/// opens `preprocessed_claims` first, against `preprocessed_commit`.
 ///
-/// The BaseFold commit arrives precomputed (`precomputed_commit`), so the
-/// jagged-PCS pipeline skips its own commit step and the in-band commit
-/// observe — the commit's 8-felt digest was already observed in the
-/// transcript prologue as `main_commitment`.
+/// * `main_traces`: borrowed views of the committed traces, never copied.
+/// * `precomputed_commit`: the main commit, whose digest the transcript
+///   already observed, so it is not observed again.
+/// * `pre_y_per_chip[i]`: the `y_{i,·}` above, empty for an empty chip.
+/// * `heights[i]`: row count of a chip whose commit trace is empty; a missing
+///   entry falls back to the provider.
 ///
-/// The per-ring jagged open is dispatched through
-/// [`crate::BasefoldRing::prove_jagged_open`], so the concrete `BfMmcs` /
-/// `Challenger` are supplied by the impl rather than recovered at runtime.
-///
-/// `pub` so the host shard body reaches it directly.  A device driver has its
-/// own body reading its own provider; this stays the host one.
+/// The ring-specific open is [`crate::BasefoldRing::prove_jagged_open`].
 // The host open takes the chips, traces, claims, points and challenger as the
 // protocol names them; a wrapper struct would hide which ring it is opening.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    // The FIRST opening round — see the trait method.
     preprocessed_named: &[(String, crate::multilinear::PaddedMle<Val<SC>>)],
     preprocessed_claims: Vec<Vec<Challenge<SC>>>,
     preprocessed_commit: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
         <SC as crate::BasefoldRing>::BfMmcs,
     >,
-    // BORROWED views over the shard prover's shared
-    // `Arc<Mle>` store; `chip_traces` is built by a zero-copy slice relabel of
-    // these views (no clone / move).
     main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
     precomputed_commit: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
         <SC as crate::BasefoldRing>::BfMmcs,
     >,
-    // Per-chip main-column openings at z from the zerocheck residual
-    // (`trace_at_z` main slice), parallel to `chips`; empty Vec per empty
-    // chip.  UNCONDITIONAL column claims: the jagged layer still accepts
-    // `Option` for synthetic callers that genuinely have no claims, but the
-    // production path always supplies them.
     pre_y_per_chip: Vec<Vec<Challenge<SC>>>,
-    // Per-chip metadata heights, parallel to `chips` (device dummies carry a
-    // baked height; host chips `None`).  Consulted before `_device_traces` for
-    // an empty (width-0) commit trace's REAL height in `r_row_per_chip` below.
-    // An empty / short slice tolerates `.get` → provider fallback (the
-    // CpuProver trait-method path passes `&[]`).
     heights: &[Option<usize>],
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
