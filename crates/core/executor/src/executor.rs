@@ -3193,8 +3193,10 @@ impl<'a> Executor<'a> {
     /// Attempt to run the program through the JIT (`run_fast` semantics
     /// only — no event emission).  Returns `Ok(true)` on success,
     /// `Ok(false)` if the JIT skipped the program (unsupported opcode,
-    /// disabled by env, or non-x86_64-Linux build) so the caller falls
-    /// back to the interpreter loop. The trampoline's `*mut` accesses are sound
+    /// a cycle limit set, disabled by env, or non-x86_64-Linux build) so the
+    /// caller falls back to the interpreter loop, which enforces the limit per
+    /// cycle.  A guest HALT with exit code `c ≠ 0` is
+    /// `HaltWithNonZeroExitCode(c)`, as in the interpreter. The trampoline's `*mut` accesses are sound
     /// because `self`, `mem_bridge` and `bridge_state` outlive the JIT call.
     fn try_run_fast_jit(&mut self) -> Result<bool, ExecutionError> {
         #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
@@ -3203,6 +3205,9 @@ impl<'a> Executor<'a> {
                 return Ok(false);
             }
             if crate::jit_runner::first_unsupported_opcode(&self.program).is_some() {
+                return Ok(false);
+            }
+            if self.max_cycles.is_some() {
                 return Ok(false);
             }
             if self.state.global_clk == 0 {
@@ -3324,6 +3329,9 @@ impl<'a> Executor<'a> {
             if self.print_report && self.report.opcode_counts.values().all(|&v| v == 0) {
                 let cycles = (ctx.global_clk / 5).max(1);
                 self.report.opcode_counts[crate::Opcode::ADD] = cycles;
+            }
+            if raw_exit != 0 && raw_exit & 0xC000_0000 == 0 {
+                return Err(ExecutionError::HaltWithNonZeroExitCode(raw_exit));
             }
             Ok(true)
         }
