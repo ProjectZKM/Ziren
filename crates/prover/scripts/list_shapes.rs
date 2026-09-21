@@ -14,6 +14,7 @@ fn main() {
         let (variant, children) = match s {
             ZKMProofShape::Recursion(v) => ("Recursion", v.as_slice()),
             ZKMProofShape::Compress(v) => ("Compress", v.as_slice()),
+            ZKMProofShape::CompressRoot(v) => ("CompressRoot", v.as_slice()),
             ZKMProofShape::Deferred(v) => ("Deferred", v.as_slice()),
             ZKMProofShape::Shrink(v) => ("Shrink", std::slice::from_ref(v)),
         };

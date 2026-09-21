@@ -36,6 +36,8 @@ pub enum WhirVerifierError {
     SumcheckMismatch { round: usize, var: usize },
     /// A per-fold proof-of-work witness did not pass `check_witness`.
     PowMismatch { round: usize, var: usize },
+    /// The batching proof-of-work witness did not pass `check_witness`.
+    BatchPowMismatch,
     /// A re-sampled OOD point disagreed with the one in the proof.
     OodPointMismatch { round: usize, sample: usize },
     /// The terminal identity did not hold.

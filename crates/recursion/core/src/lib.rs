@@ -18,6 +18,13 @@ pub mod stark;
 pub mod sys;
 
 pub use runtime::*;
+
+/// Height of the recursion verifying-key Merkle tree: the allowlist is
+/// committed padded to `2^VK_MERKLE_TREE_HEIGHT` leaves, and every recursion
+/// program bakes that height into its membership paths.  The prover, the
+/// standalone verifier and the wasm verifier all read this one value; a root
+/// computed over a tree of another height matches no proof.
+pub const VK_MERKLE_TREE_HEIGHT: usize = 14;
 pub use stark::hash_vkey_with_part_vk;
 
 // Re-export the stark stuff from `zkm_recursion_core` for now, until we will migrate it here.

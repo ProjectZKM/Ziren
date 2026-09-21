@@ -984,6 +984,7 @@ fn dummy_stacked_whir_proof(
             final_pow: ProofOfWork(F::ZERO),
         },
         batch_evaluations: round_stripes.iter().map(|s| vec![EF::ZERO; *s]).collect(),
+        batch_grinding_witness: F::ZERO,
     }
 }
 

@@ -561,6 +561,7 @@ fn stacked_roundtrip_verifies() {
         r.num_queries = 4;
     }
     cfg.final_queries = 4;
+    cfg.batch_pow_bits = 4;
 
     let dft = Arc::new(Radix2DitParallel::<F>::default());
     let ef_dft = Arc::new(Radix2DitParallel::<EF>::default());
@@ -622,6 +623,15 @@ fn stacked_roundtrip_verifies() {
     assert!(verifier
         .verify_trusted_evaluation(&commitments, &[3, 2], &stack_point, &bad, &mut v_chal)
         .is_err());
+
+    // The batching grind is checked: a wrong witness is rejected before λ.
+    let mut bad = proof.clone();
+    bad.batch_grinding_witness += F::ONE;
+    let mut v_chal = build_challenger();
+    assert_eq!(
+        verifier.verify_trusted_evaluation(&commitments, &[3, 2], &stack_point, &bad, &mut v_chal),
+        Err(crate::whir::verifier::WhirVerifierError::BatchPowMismatch)
+    );
 
     // A SURPLUS tail entry must be rejected.
     //

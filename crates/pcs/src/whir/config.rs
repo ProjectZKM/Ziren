@@ -57,6 +57,11 @@ pub struct WhirConfig {
     pub final_pow_bits: usize,
     /// PoW bits per final folding step.
     pub final_folding_pow_bits: Vec<usize>,
+    /// PoW bits ground after the stripe claims are absorbed and before the
+    /// batching challenge is drawn.  With `t` stripes combined by the powers
+    /// of one challenge the batching error is `(t - 1) · L / |F|` for list
+    /// size `L`; the grind divides it by `2^bits`.
+    pub batch_pow_bits: usize,
 }
 
 impl WhirConfig {
@@ -95,6 +100,7 @@ impl WhirConfig {
             final_queries: 10,
             final_pow_bits: 10,
             final_folding_pow_bits: vec![10; 8],
+            batch_pow_bits: 0,
         }
     }
 }

@@ -137,7 +137,7 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 ///
 /// `tests::enumeration_size_probe` asserts the enumerated tail fits; it cannot
 /// bound the collected half, which is why the headroom is deliberate.
-pub const VK_MERKLE_TREE_HEIGHT: usize = 14;
+pub use zkm_recursion_core::VK_MERKLE_TREE_HEIGHT;
 
 /// Digest sink for `ZIREN_VK_COLLECT=<path>`.
 ///
@@ -2904,6 +2904,64 @@ pub mod tests {
         );
     }
 
+    /// The wrap proves ONE program — the verifier of the shrink proof at the
+    /// frozen shrink shape — so the stripes its two rounds commit are a
+    /// constant of the tree, and the soundness model's wrap batch
+    /// cardinality (the batching over both rounds) is pinned rather than
+    /// bounded.  Rows are what the prover pads to without a shape,
+    /// `next_multiple_of_32_rows`, and cells stack at `2^21` per stripe:
+    /// preprocessed 15,764,640 cells -> 8 stripes, main 20,611,344 -> 16
+    /// (a count above 4 rounds up to a multiple of 8), batch 24.
+    #[test]
+    #[serial]
+    fn wrap_committed_stripes_are_pinned() {
+        use p3_air::BaseAir;
+        use zkm_core_machine::utils::next_multiple_of_32_rows;
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shape::OrderedShape;
+        use zkm_recursion_circuit::machine::{
+            ZKMCompressShape, ZKMCompressWithVkeyShape, ZKMWrapBasefoldWitnessValues,
+        };
+
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let shrink_rows: Vec<(String, usize)> =
+            ZKMProver::<DefaultProverComponents>::shrink_shape()
+                .clone_into_hash_map()
+                .into_iter()
+                .collect();
+        let compress_shape = ZKMCompressShape::from(vec![OrderedShape::from_rows(&shrink_rows)]);
+        let shape =
+            ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height: VK_MERKLE_TREE_HEIGHT };
+        let input =
+            ZKMWrapBasefoldWitnessValues::<InnerSC>::dummy(prover.shrink_prover.machine(), &shape);
+        let program = prover.wrap_bn254_program_basefold(&input);
+
+        let wrap_machine = prover.wrap_prover.machine();
+        let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let (mut main, mut prep) = (0usize, 0usize);
+        for (name, rows) in WrapAir::<KoalaBear>::heights(&program) {
+            let Some(chip) = wrap_machine.chips().iter().find(|c| c.name() == name) else {
+                continue;
+            };
+            let rows = next_multiple_of_32_rows(rows, None, &name);
+            main += rows * <_ as BaseAir<KoalaBear>>::width(chip);
+            prep += rows * <_ as MachineAir<KoalaBear>>::preprocessed_width(chip);
+        }
+        let stripes =
+            |cells: usize| zkm_pcs::jagged::committed_dense_len(cells, log_stack) >> log_stack;
+        let (prep_stripes, main_stripes) = (stripes(prep), stripes(main));
+        eprintln!(
+            "[STRIPES] wrap prep {prep} cells -> {prep_stripes}, main {main} cells -> {main_stripes}, batch {}",
+            prep_stripes + main_stripes
+        );
+        assert_eq!(
+            (prep_stripes, main_stripes),
+            (8, 16),
+            "the wrap geometry moved; update the soundness model's wrap batch cardinality to {}",
+            prep_stripes + main_stripes
+        );
+    }
+
     #[test]
     #[serial]
     fn compose_basefold_program_emits_seqblock_parallel() {
@@ -5279,7 +5337,7 @@ pub mod tests {
                         norm_shapes.insert(os.clone());
                     }
                 }
-                ZKMProofShape::Compress(b) => {
+                ZKMProofShape::Compress(b) | ZKMProofShape::CompressRoot(b) => {
                     *compose_by_arity.entry(b.len()).or_default() += 1;
                 }
                 ZKMProofShape::Deferred(_) => deferred += 1,

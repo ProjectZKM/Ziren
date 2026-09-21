@@ -80,6 +80,7 @@ pub const TRANSCRIPT_PROFILE: &[ProfileEntry] = &[
     // Parameters.
     ("jagged.log_stacking_height", DEFAULT_LOG_STACKING_HEIGHT as u64),
     ("basefold.batch_grinding_bits", crate::basefold::config::BATCH_GRINDING_BITS as u64),
+    ("whir.batch_grinding_bits", crate::whir::jagged::WHIR_BATCH_GRINDING_BITS as u64),
     ("logup_gkr.grinding_bits", crate::logup_gkr::GKR_GRINDING_BITS as u64),
     // Event orders.
     //
@@ -190,6 +191,7 @@ fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::Whi
         final_queries,
         final_pow_bits,
         final_folding_pow_bits,
+        batch_pow_bits,
     } = cfg;
 
     push_u64(felts, *starting_ood_samples as u64);
@@ -221,6 +223,7 @@ fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::Whi
     push_u64(felts, *final_queries as u64);
     push_u64(felts, *final_pow_bits as u64);
     push_usizes(felts, final_folding_pow_bits);
+    push_u64(felts, *batch_pow_bits as u64);
 }
 
 /// Every field of a BaseFold/FRI configuration that the transcript depends on.
@@ -305,7 +308,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "5f0c3cd40898194906e28b051315082a68dfd7d93dc983564d000dc0266f206b",
+            "58751d5e36e24bc864d5c9530a16702758ae8f910c4d89653121b0356a0e887f",
             "the transcript profile changed -- see this test's documentation",
         );
     }

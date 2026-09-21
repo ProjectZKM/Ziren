@@ -79,6 +79,9 @@ pub struct RecursiveStackedWhirProof<F, EF, Dig> {
     pub final_pow: F,
     /// Echoed per-round per-stripe evaluations at the stack point.
     pub batch_evaluations: Vec<Vec<EF>>,
+    /// Batching grinding witness, checked between the absorbed evaluations
+    /// and λ.
+    pub batch_grinding_witness: F,
 }
 
 /// Extract the host-value mirror from a host stacked-WHIR proof.
@@ -155,6 +158,7 @@ pub fn host_stacked_whir_to_recursive(
         folding_pow: whir.folding_pow.iter().map(|p| p.0).collect(),
         final_pow: whir.final_pow.0,
         batch_evaluations: proof.batch_evaluations.clone(),
+        batch_grinding_witness: proof.batch_grinding_witness,
     }
 }
 
@@ -219,6 +223,7 @@ where
             .iter()
             .map(|r| r.iter().map(|e| e.read(builder)).collect())
             .collect(),
+        batch_grinding_witness: host.batch_grinding_witness.read(builder),
     }
 }
 
@@ -281,6 +286,7 @@ pub fn write_stacked_whir_to_stream<C>(
             e.write(witness);
         }
     }
+    host.batch_grinding_witness.write(witness);
 }
 
 /// In-circuit verifier for a stacked-WHIR batched opening.  Generic over
@@ -423,12 +429,13 @@ impl<HVOuter> RecursiveStackedWhirVerifier<HVOuter> {
             "stacked WHIR carries its OOD in round constraints"
         );
 
-        // Replay claim batching: observe echoed evals, draw λ.
+        // Replay claim batching: observe echoed evals, check the grind, draw λ.
         for round in batch_evaluations {
             for &e in round {
                 observe_ext_element::<C, FC>(builder, challenger, e);
             }
         }
+        challenger.check_witness(builder, self.config.batch_pow_bits, proof.batch_grinding_witness);
         let lambda = challenger.sample_ext(builder);
         let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
         let mut lam = one;

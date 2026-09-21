@@ -46,6 +46,7 @@ fn main() {
                 ZKMProofShape::Compress(_) => "Compress",
                 ZKMProofShape::Deferred(_) => "Deferred",
                 ZKMProofShape::Shrink(_) => "Shrink",
+                ZKMProofShape::CompressRoot(_) => "CompressRoot",
             };
             let marker: String = if let ZKMProofShape::Recursion(batch) = &shape {
                 let names: std::collections::BTreeSet<&str> = batch

@@ -118,6 +118,20 @@ pub fn whir_config_for_fold_schedule(lsh: usize, folds: &[usize], final_log: usi
 /// 4 -> 3 so a query leaf (`stripes x 2^ff0`) halves.  OOD samples 2 per
 /// committed round; folding PoW 0 (soundness rides on the query PoW).
 pub fn core_whir_config(lsh: usize) -> WhirConfig {
+    let mut config = core_whir_config_without_batch_grind(lsh);
+    config.batch_pow_bits = WHIR_BATCH_GRINDING_BITS;
+    config
+}
+
+/// Grinding bits on the stripe batching.  The batch combines every stripe of
+/// both committed rounds with the powers of one challenge, `t <= 256` on a
+/// core shard, and its error is `(t - 1) · L / |F|`: 94 bits at `t = 256`
+/// with no grind, which was the binding term of the schedule.  Eight bits
+/// put it at 102, above the 100-bit query rounds, for `2^8` hashes per
+/// opening.
+pub const WHIR_BATCH_GRINDING_BITS: usize = 8;
+
+fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
     // Round-0 folds FEWER variables than the later rounds.  A round-0 query
     // authenticates one coset row from EVERY stripe of every round — `chunks
     // x 2^ff0` felts — and re-hashing those rows is the recursion leaf's

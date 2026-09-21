@@ -52,6 +52,15 @@ pub enum ZKMProofShape {
     /// in `test_e2e_with_deferred_proofs`).
     Deferred(Vec<OrderedShape>),
     Shrink(OrderedShape),
+    /// The compose that closes the tree: the same children as `Compress`
+    /// with `is_complete = 1`.  The flag is a witness, so the instructions
+    /// are those of the open compose; what moves is the snapping
+    /// (`compose-root`), and with it the rows and the key.  At arity
+    /// `REDUCE_BATCH_SIZE` both snap to the same rows and the two keys
+    /// coincide (measured: all 8 arity-3 tuples); below it they differ, so
+    /// the enumeration carries both and the distinct-key count is smaller
+    /// than the shape count.
+    CompressRoot(Vec<OrderedShape>),
 }
 
 #[derive(Debug, Clone, Hash)]
@@ -60,6 +69,7 @@ pub enum ZKMCompressProgramShape {
     Compress(ZKMCompressWithVkeyShape),
     Deferred(ZKMDeferredShape),
     Shrink(ZKMCompressWithVkeyShape),
+    CompressRoot(ZKMCompressWithVkeyShape),
 }
 
 impl ZKMCompressProgramShape {}
@@ -440,7 +450,8 @@ impl ZKMProofShape {
             let mut out = Vec::new();
             for arity in 1..=reduce_batch_size {
                 for t in tuples(arity) {
-                    out.push(Self::Compress(t));
+                    out.push(Self::Compress(t.clone()));
+                    out.push(Self::CompressRoot(t));
                 }
             }
             out
@@ -527,6 +538,12 @@ impl ZKMCompressProgramShape {
                 compress_shape: vec![proof_shape].into(),
                 merkle_tree_height: height,
             }),
+            ZKMProofShape::CompressRoot(proof_shapes) => {
+                Self::CompressRoot(ZKMCompressWithVkeyShape {
+                    compress_shape: proof_shapes.into(),
+                    merkle_tree_height: height,
+                })
+            }
         }
     }
 }
@@ -577,6 +594,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 let input =
                     ZKMWrapBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 self.shrink_program_basefold(&input)
+            }
+            ZKMCompressProgramShape::CompressRoot(shape) => {
+                let mut input =
+                    ZKMCompressBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
+                input.is_complete = true;
+                self.compose_program_basefold(&input).0
             }
         }
     }
@@ -964,9 +987,11 @@ mod tests {
         let compress = all.iter().filter(|s| matches!(s, ZKMProofShape::Compress(_))).count();
         let deferred = all.iter().filter(|s| matches!(s, ZKMProofShape::Deferred(_))).count();
         let shrink = all.iter().filter(|s| matches!(s, ZKMProofShape::Shrink(_))).count();
+        let root = all.iter().filter(|s| matches!(s, ZKMProofShape::CompressRoot(_))).count();
         assert!(compress > 0 && deferred > 0 && shrink > 0, "the enumerable tail must remain");
-        assert_eq!(all.len(), compress + deferred + shrink, "no other variant is emitted");
-        eprintln!("[ENUM] compress={compress} deferred={deferred} shrink={shrink}");
+        assert_eq!(root, compress, "every compose tuple has its closing variant");
+        assert_eq!(all.len(), compress + root + deferred + shrink, "no other variant is emitted");
+        eprintln!("[ENUM] compress={compress} root={root} deferred={deferred} shrink={shrink}");
     }
 
     /// ARITY-ENUM GAP PROBE: does a HETEROGENEOUS batch (two shards of the

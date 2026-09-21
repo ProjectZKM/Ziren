@@ -29,10 +29,10 @@ use super::{HashableKey, InnerSC, ZKMVerifyingKey};
 const COMPRESS_DEGREE: usize = 3;
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 
-/// Height of the recursion vk merkle tree.  Must equal `zkm_prover::VK_MERKLE_TREE_HEIGHT`
-/// (the verifier does not depend on the prover crate); the enumerated recursion programs
-/// bake this height in, so it only changes together with a vk_map regeneration.
-pub const VK_MERKLE_TREE_HEIGHT: usize = 12;
+/// The allowlist tree height the recursion programs bake in; one definition,
+/// shared with the prover, so the root recomputed here is the root the proof
+/// carries.
+pub use zkm_recursion_core::VK_MERKLE_TREE_HEIGHT;
 
 pub static VK_MAP: Lazy<&'static [u8]> = Lazy::new(|| {
     #[cfg(feature = "dummy-vk-map")]

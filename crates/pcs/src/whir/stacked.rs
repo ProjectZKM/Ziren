@@ -53,6 +53,9 @@ pub struct StackedWhirProverData<F: p3_field::Field, MT: Mmcs<F>> {
 pub struct StackedWhirProof<F: p3_field::Field, EF: ExtensionField<F>, MT: Mmcs<F>> {
     pub whir_proof: WhirProof<F, EF, MT>,
     pub batch_evaluations: Vec<Vec<EF>>,
+    /// Ground after `batch_evaluations` are absorbed, before λ is drawn
+    /// (`WhirConfig::batch_pow_bits`).
+    pub batch_grinding_witness: F,
 }
 
 /// Device backend for the folding rounds of the stacked-WHIR open.
@@ -358,6 +361,7 @@ where
         // materialized `virt` vector is host-mode only (the engine holds it).
         drop(_t_pevals);
         let _t_pinit = open_timing::Timer::new(&open_timing::PINIT);
+        let batch_grinding_witness = challenger.grind(self.config.batch_pow_bits);
         let lambda: EF = challenger.sample_algebra_element();
         let mut claim = EF::ZERO;
         let mut lam = EF::ONE;
@@ -842,6 +846,7 @@ where
                 final_pow,
             },
             batch_evaluations,
+            batch_grinding_witness,
         }
     }
 }
@@ -950,11 +955,15 @@ where
             }
         }
 
-        // Replay claim batching.
+        // Replay claim batching: the grind sits between the absorbed claims
+        // and the challenge they are combined with.
         for round in &proof.batch_evaluations {
             for &e in round {
                 challenger.observe_algebra_element(e);
             }
+        }
+        if !challenger.check_witness(self.config.batch_pow_bits, proof.batch_grinding_witness) {
+            return Err(WhirVerifierError::BatchPowMismatch);
         }
         let lambda: EF = challenger.sample_algebra_element();
         let mut claim = EF::ZERO;

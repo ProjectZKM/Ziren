@@ -36,6 +36,7 @@ fn main() {
         let cat = match &shape {
             ZKMProofShape::Recursion(_) => "Recursion",
             ZKMProofShape::Compress(_) => "Compress",
+            ZKMProofShape::CompressRoot(_) => "CompressRoot",
             ZKMProofShape::Deferred(_) => "Deferred",
             ZKMProofShape::Shrink(_) => "Shrink",
         };
