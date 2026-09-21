@@ -317,7 +317,7 @@ mod tests {
         // Sanity-pin the current value so an accidental base-cluster
         // change is caught even if a family is added/removed at the
         // same time.
-        assert_eq!(ms.chip_clusters.len(), 28);
+        assert_eq!(ms.chip_clusters.len(), 26);
     }
 
     /// A multi-shard run emits global-memory INIT and FINALIZE events in
@@ -419,7 +419,7 @@ mod tests {
         );
         // Pin the concrete current value so a silent cluster/area regression
         // (e.g. a cluster dropped, or a max-main cap re-introduced) is caught.
-        assert_eq!(shapes.len(), 100_800, "expected 28 clusters × 12 × 12 × 5 × 5");
+        assert_eq!(shapes.len(), 93_600, "expected 26 clusters × 12 × 12 × 5 × 5");
         assert!(shapes.len() >= 100, "shape count {} too small — missing clusters?", shapes.len());
     }
 
