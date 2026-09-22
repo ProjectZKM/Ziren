@@ -278,7 +278,7 @@ impl JaggedShardVerifier {
                         .zip(cc_g.iter())
                         .map(|(r, c)| r.saturating_mul(*c))
                         .fold(0usize, |a, b| a.saturating_add(b));
-                    if area == 0 || area >= (1usize << 30) {
+                    if area == 0 || area >= (1usize << crate::jagged::MAX_ROUND_LOG_AREA) {
                         return Err(JaggedShardVerifyError::JaggedPcs(
                             "jagged hash-bind: area out of bounds (0 < area < 2^30) \
                              (AreaOutOfBounds)"

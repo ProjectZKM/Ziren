@@ -894,17 +894,18 @@ pub mod tests {
         serde_json::to_writer_pretty(file, &costs).unwrap();
     }
 
-    /// The two-round committed stripe count a core shard can reach, derived
-    /// from the machine instead of asserted in prose.
+    /// The two-round committed stripe count a core shard can reach against the
+    /// verifier, derived from the machine and the verifier's own bound.
     ///
     /// A shard commits TWO rounds, preprocessed then main, and the jagged
     /// lambda batch spans both: `committed_dense_len` rounds each round's raw
     /// cell count up to whole `2^DEFAULT_LOG_STACKING_HEIGHT` stripes, and
     /// above four stripes up to a multiple of eight.  The preprocessed round is
-    /// bounded by the LARGEST admitted Program band, the main round by the
-    /// executor's `ELEMENT_THRESHOLD` area fence -- and neither the fence nor
-    /// any enumeration guard constrains their SUM, so the sum is what a
-    /// soundness model of the batch has to use.
+    /// the verifying key's, bounded by the LARGEST admitted Program band.  The
+    /// main round is proof-controlled: the verifier admits any area strictly
+    /// below `2^MAX_ROUND_LOG_AREA`, so a soundness model of the batch has to
+    /// use that bound, not the honest executor's `ELEMENT_THRESHOLD` fence,
+    /// which only has to lie inside it.
     #[test]
     fn committed_stripe_bound_over_both_rounds() {
         use zkm_pcs::air::MachineAir;
@@ -933,13 +934,13 @@ pub mod tests {
             + range_rows * width_of("Range");
 
         let prep_stripes = committed_dense_len(prep_cells, log_stack) / stripe;
-        let main_stripes = committed_dense_len(zkm_pcs::ELEMENT_THRESHOLD, log_stack) / stripe;
+        let verifier_area = (1usize << zkm_pcs::jagged::MAX_ROUND_LOG_AREA) - 1;
+        let main_stripes = committed_dense_len(verifier_area, log_stack) / stripe;
 
         let batch = prep_stripes + main_stripes;
         tracing::info!(
             "[STRIPES] prep {prep_cells} cells -> {prep_stripes}; \
-             main {} cells -> {main_stripes}; batch {batch}",
-            zkm_pcs::ELEMENT_THRESHOLD,
+             main {verifier_area} cells -> {main_stripes}; batch {batch}",
         );
         tracing::info!(
             "[STRIPES] widths Program={} Byte={} Range={}; rows Program=2^22 Byte=2^16 Range={}",
@@ -951,14 +952,13 @@ pub mod tests {
 
         assert_eq!(
             (prep_stripes, main_stripes, batch),
-            (32, 224, 256),
+            (32, 512, 544),
             "the committed stripe bound moved; update the soundness model's \
              batch cardinality to {batch} before relying on it",
         );
         assert!(
-            batch > (zkm_pcs::ELEMENT_THRESHOLD >> log_stack) + 8,
-            "the batch must exceed the main-round-only guard, else the model \
-             could legitimately use that guard in its place",
+            zkm_pcs::ELEMENT_THRESHOLD <= verifier_area,
+            "the honest area fence must lie inside the verifier's bound",
         );
 
         let largest =
