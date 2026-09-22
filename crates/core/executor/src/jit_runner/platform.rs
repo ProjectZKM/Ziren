@@ -14,36 +14,23 @@ use zkm_core_jit::backends::TranspilerBackend;
 use zkm_core_jit::driver::{drive_instructions_at, DriverError};
 use zkm_core_jit::{JitContext, JitFunction, MipsTranspiler, SyscallHandler};
 
-/// Caller-owned memory bridge handed to the JIT'd program.
-///
-/// MIPS guests address up to `MAX_MEMORY` (~2 GB) and the JIT's
-/// flat layout doubles each guest 8-byte word into a 16-byte host
-/// region (8-byte header + 8-byte data — see
-/// `cuda/jit/src/backends/x86/mod.rs:emit_address_translate`),
-/// so the worst-case host buffer size is ~4 GB.  We reserve the
-/// virtual address range with `MAP_NORESERVE` so unused pages
-/// are never committed; touched pages get ~4 KB of physical RAM
-/// each.
-/// Cheap canonical fingerprint of a `Program` for the JIT cache.
-/// Combines `pc_base`, instruction count, and a sample of the
-/// instruction stream — enough to distinguish any two programs
-/// you'd realistically try to JIT in the same process.
+/// Fingerprint of a `Program`'s code for the JIT cache: a hash of `pc_base`
+/// and every instruction, so two programs share a compiled function only if
+/// they have the same instruction stream.
 fn program_fingerprint(program: &Program) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut h = DefaultHasher::new();
     program.pc_base.hash(&mut h);
     program.instructions.len().hash(&mut h);
-    let n = program.instructions.len();
-    let head = program.instructions.iter().take(16);
-    let tail = program.instructions.iter().rev().take(16);
-    for ins in head.chain(tail) {
+    for ins in &program.instructions {
         (ins.opcode as u8).hash(&mut h);
         ins.op_a.hash(&mut h);
         ins.op_b.hash(&mut h);
         ins.op_c.hash(&mut h);
+        ins.imm_b.hash(&mut h);
+        ins.imm_c.hash(&mut h);
     }
-    n.hash(&mut h);
     h.finish()
 }
 
@@ -74,6 +61,16 @@ pub fn cached_jit_function(
     Ok(jit_fn)
 }
 
+/// Caller-owned memory bridge handed to the JIT'd program.
+///
+/// MIPS guests address up to `MAX_MEMORY` (~2 GB) and the JIT's
+/// flat layout doubles each guest 8-byte word into a 16-byte host
+/// region (8-byte header + 8-byte data — see
+/// `cuda/jit/src/backends/x86/mod.rs:emit_address_translate`),
+/// so the worst-case host buffer size is ~4 GB.  We reserve the
+/// virtual address range with `MAP_NORESERVE` so unused pages
+/// are never committed; touched pages get ~4 KB of physical RAM
+/// each.
 pub struct JitMemoryBridge {
     /// Active host-side guest memory pointer.  Normally points at
     /// [`Self::primary_ptr`]; during an unconstrained block it is

@@ -94,6 +94,24 @@ mod tests {
     use crate::instruction::Instruction;
     use crate::opcode::Opcode;
 
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    #[test]
+    fn fingerprint_covers_every_instruction() {
+        let body = |imm: u32| -> Vec<Instruction> {
+            (0..64u32)
+                .map(|i| {
+                    let c = if i == 32 { imm } else { i };
+                    Instruction::new(Opcode::ADD, 2, 0, c, false, true)
+                })
+                .collect()
+        };
+        let a = crate::Program::new(body(7), 0x1000, 0x1000);
+        let b = crate::Program::new(body(9), 0x1000, 0x1000);
+        let a_again = crate::Program::new(body(7), 0x1000, 0x1000);
+        assert_ne!(program_fingerprint_of(&a), program_fingerprint_of(&b));
+        assert_eq!(program_fingerprint_of(&a), program_fingerprint_of(&a_again));
+    }
+
     /// Smoke test: the conversion is portable and works on every
     /// platform (even where the JIT backend itself is unavailable).
     #[test]
