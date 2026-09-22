@@ -54,6 +54,7 @@ pub use groth16::Groth16Verifier;
 mod groth16;
 
 pub use stark::error::StarkError;
+pub use stark::published::{decode_published, encode_published, MULTIPROOF_MAGIC};
 pub use stark::StarkVerifier;
 mod stark;
 

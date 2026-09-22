@@ -109,6 +109,26 @@ fn test_verify_stark() {
         .expect("Stark proof is invalid");
 
     crate::StarkVerifier::verify_proof(&proof, &vk_bytes).expect("Stark proof is invalid");
+
+    let published = crate::encode_published(&proof).expect("a valid proof encodes");
+    assert!(published.len() < proof.len());
+    crate::StarkVerifier::verify(&published, &public_inputs, &vk_bytes)
+        .expect("published proof is invalid");
+    crate::StarkVerifier::verify_proof(&published, &vk_bytes).expect("published proof is invalid");
+    let tail = published.len() - 1;
+    for at in [tail, tail - 40, published.len() / 2, crate::MULTIPROOF_MAGIC.len() + 64] {
+        let mut tampered = published.clone();
+        tampered[at] ^= 1;
+        assert!(crate::StarkVerifier::verify_proof(&tampered, &vk_bytes).is_err());
+    }
+    let mut surplus = published.clone();
+    surplus.push(0);
+    assert!(crate::StarkVerifier::verify_proof(&surplus, &vk_bytes).is_err());
+    assert!(crate::StarkVerifier::verify_proof(&published[..tail], &vk_bytes).is_err());
+    let mut other_proof: Vec<u8> = proof.clone();
+    other_proof[proof.len() / 2] ^= 1;
+    assert!(crate::StarkVerifier::verify_proof(&other_proof, &vk_bytes).is_err());
+    assert!(crate::encode_published(&other_proof).is_err());
 }
 
 #[test]
@@ -251,6 +271,9 @@ mod malformed_input {
             let bytes = vec![0xABu8; n];
             assert!(StarkVerifier::verify(&bytes, b"public", &bytes).is_err());
             assert!(StarkVerifier::verify_proof(&bytes, &bytes).is_err());
+            let mut framed = crate::MULTIPROOF_MAGIC.to_vec();
+            framed.extend_from_slice(&bytes);
+            assert!(StarkVerifier::verify_proof(&framed, &bytes).is_err());
         }
     }
 
