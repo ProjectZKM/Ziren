@@ -27,7 +27,7 @@ use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBu
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
-    operations::field::field_op::FieldOpCols,
+    operations::field::{field_op::FieldOpCols, range::FieldLtCols},
     utils::{limbs_from_prev_access, pad_rows_fixed, words_to_bytes_le_vec},
 };
 
@@ -56,6 +56,7 @@ pub struct FpOpCols<T, P: FpOpField> {
     pub x_access: GenericArray<MemoryWriteCols<T>, P::WordsFieldElement>,
     pub y_access: GenericArray<MemoryReadCols<T>, P::WordsFieldElement>,
     pub(crate) output: FieldOpCols<T, P>,
+    pub(crate) output_range: FieldLtCols<T, P>,
 }
 
 impl<P: FpOpField> FpOpChip<P> {
@@ -73,7 +74,8 @@ impl<P: FpOpField> FpOpChip<P> {
     ) {
         let modulus_bytes = P::MODULUS;
         let modulus = BigUint::from_bytes_le(modulus_bytes);
-        cols.output.populate_with_modulus(blu_events, &p, &q, &modulus, op);
+        let output = cols.output.populate_with_modulus(blu_events, &p, &q, &modulus, op);
+        cols.output_range.populate(blu_events, &output, &modulus);
     }
 }
 
@@ -229,6 +231,7 @@ where
             local.is_real,
         );
 
+        local.output_range.eval(builder, &local.output.result, &p_modulus, local.is_real);
         builder
             .when(local.is_real)
             .assert_all_eq(local.output.result, value_as_limbs(&local.x_access));

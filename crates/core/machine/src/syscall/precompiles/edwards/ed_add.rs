@@ -21,7 +21,7 @@ use zkm_core_executor::{
 };
 use zkm_curves::{
     edwards::{ed25519::Ed25519BaseField, EdwardsParameters, NUM_LIMBS, WORDS_CURVE_POINT},
-    params::{FieldParameters, Limbs, NumLimbs},
+    params::{limbs_from_vec, FieldParameters, Limbs, NumLimbs},
     AffinePoint, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
@@ -31,6 +31,7 @@ use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
     operations::field::{
         field_den::FieldDenCols, field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
+        range::FieldLtCols,
     },
     utils::{limbs_from_prev_access, pad_rows_fixed},
 };
@@ -58,6 +59,8 @@ pub struct EdAddAssignCols<T> {
     pub(crate) d_mul_f: FieldOpCols<T, Ed25519BaseField>,
     pub(crate) x3_ins: FieldDenCols<T, Ed25519BaseField>,
     pub(crate) y3_ins: FieldDenCols<T, Ed25519BaseField>,
+    pub(crate) x3_range: FieldLtCols<T, Ed25519BaseField>,
+    pub(crate) y3_range: FieldLtCols<T, Ed25519BaseField>,
 }
 
 #[derive(Default)]
@@ -96,8 +99,10 @@ impl<E: EllipticCurve + EdwardsParameters> EdAddAssignChip<E> {
         let d = E::d_biguint();
         let d_mul_f = cols.d_mul_f.populate(record, &f, &d, FieldOperation::Mul);
 
-        cols.x3_ins.populate(record, &x3_numerator, &d_mul_f, true);
-        cols.y3_ins.populate(record, &y3_numerator, &d_mul_f, false);
+        let x3 = cols.x3_ins.populate(record, &x3_numerator, &d_mul_f, true);
+        let y3 = cols.y3_ins.populate(record, &y3_numerator, &d_mul_f, false);
+        cols.x3_range.populate(record, &x3, &Ed25519BaseField::modulus());
+        cols.y3_range.populate(record, &y3, &Ed25519BaseField::modulus());
     }
 }
 
@@ -281,6 +286,12 @@ where
 
         local.y3_ins.eval(builder, &local.y3_numerator.result, &d_mul_f, false, local.is_real);
 
+        let modulus = limbs_from_vec::<AB::Expr, <Ed25519BaseField as NumLimbs>::Limbs, AB::F>(
+            Ed25519BaseField::to_limbs_field_vec(&Ed25519BaseField::modulus()),
+        );
+        local.x3_range.eval(builder, &local.x3_ins.result, &modulus, local.is_real);
+        local.y3_range.eval(builder, &local.y3_ins.result, &modulus, local.is_real);
+
         let p_access_vec = value_as_limbs(&local.p_access);
         builder
             .when(local.is_real)
@@ -319,11 +330,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::utils;
+    use p3_field::extension::BinomialExtensionField;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
     use test_artifacts::{ED25519_ELF, ED_ADD_ELF};
-    use zkm_core_executor::Executor;
-    use zkm_core_executor::Program;
-    use zkm_pcs::{CpuProver, ZKMCoreOpts};
+    use zkm_core_executor::{ExecutionRecord, Executor, Program};
+    use zkm_curves::edwards::{ed25519::Ed25519Parameters, EdwardsCurve};
+    use zkm_pcs::{constraints_hold_on_row, CpuProver, ZKMCoreOpts};
 
     #[test]
     pub fn test_ed_add_program_execute() {
@@ -338,6 +353,86 @@ mod tests {
         utils::setup_logger();
         let program = Program::from(ED_ADD_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    fn limbs_to_biguint<F: PrimeField32>(limbs: &[F]) -> BigUint {
+        BigUint::from_bytes_le(&limbs.iter().map(|x| x.as_canonical_u32() as u8).collect_vec())
+    }
+
+    /// The division gadget and the binding to memory alone accept a coordinate `c + p`.
+    struct DivisionAndBindingOnly;
+
+    impl<F> BaseAir<F> for DivisionAndBindingOnly {
+        fn width(&self) -> usize {
+            NUM_ED_ADD_COLS
+        }
+    }
+
+    impl<AB: ZKMAirBuilder> Air<AB> for DivisionAndBindingOnly {
+        fn eval(&self, builder: &mut AB) {
+            let main = builder.main();
+            let local = main.current_slice();
+            let local: &EdAddAssignCols<AB::Var> = (*local).borrow();
+            let d_mul_f = local.d_mul_f.result;
+            local.x3_ins.eval(builder, &local.x3_numerator.result, &d_mul_f, true, local.is_real);
+            local.y3_ins.eval(builder, &local.y3_numerator.result, &d_mul_f, false, local.is_real);
+            let p_access_vec = value_as_limbs(&local.p_access);
+            builder
+                .when(local.is_real)
+                .assert_all_eq(local.x3_ins.result, p_access_vec[0..NUM_LIMBS].to_vec());
+            builder.when(local.is_real).assert_all_eq(
+                local.y3_ins.result,
+                p_access_vec[NUM_LIMBS..NUM_LIMBS * 2].to_vec(),
+            );
+        }
+    }
+
+    #[test]
+    fn non_canonical_sum_is_rejected() {
+        type F = KoalaBear;
+        type EF = BinomialExtensionField<KoalaBear, 4>;
+        utils::setup_logger();
+        let program = Program::from(ED_ADD_ELF).unwrap();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        let record = runtime
+            .records
+            .iter()
+            .find(|r| !r.get_precompile_events(SyscallCode::ED_ADD).is_empty())
+            .expect("an ED_ADD event");
+        let chip = EdAddAssignChip::<EdwardsCurve<Ed25519Parameters>>::new();
+        let trace: RowMajorMatrix<F> =
+            chip.generate_trace(record, &mut ExecutionRecord::default()).unwrap();
+        let honest: Vec<F> = trace.row_slice(0).unwrap().to_vec();
+        assert!(constraints_hold_on_row::<F, EF, _>(&chip, &honest, &honest, &[]));
+
+        let p = Ed25519BaseField::modulus();
+        for coordinate in 0..2 {
+            let mut row = honest.clone();
+            let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
+            let b = limbs_to_biguint(&cols.d_mul_f.result.0);
+            let sign = coordinate == 0;
+            let (a, ins) = if sign {
+                (limbs_to_biguint(&cols.x3_numerator.result.0), &mut cols.x3_ins)
+            } else {
+                (limbs_to_biguint(&cols.y3_numerator.result.0), &mut cols.y3_ins)
+            };
+            let forged = limbs_to_biguint(&ins.result.0) + &p;
+            assert!(forged.bits() <= 256);
+            ins.populate_with_result(&mut Vec::new(), &a, &b, sign, &forged);
+            let limbs = Ed25519BaseField::to_limbs_field::<F, _>(&forged);
+            for (i, limb) in limbs.0.iter().enumerate() {
+                cols.p_access[coordinate * 8 + i / 4].access.value.0[i % 4] = *limb;
+            }
+            assert!(
+                constraints_hold_on_row::<F, EF, _>(&DivisionAndBindingOnly, &row, &row, &[]),
+                "coordinate {coordinate}: the forged row must pass the division and binding"
+            );
+            assert!(
+                !constraints_hold_on_row::<F, EF, _>(&chip, &row, &row, &[]),
+                "coordinate {coordinate}: the chip must reject a coordinate of p or more"
+            );
+        }
     }
 
     #[test]

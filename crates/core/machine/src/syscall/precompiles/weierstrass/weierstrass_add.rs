@@ -23,7 +23,7 @@ use zkm_core_executor::{
     ExecutionRecord, Program,
 };
 use zkm_curves::{
-    params::{FieldParameters, Limbs, NumLimbs, NumWords},
+    params::{limbs_from_vec, FieldParameters, Limbs, NumLimbs, NumWords},
     weierstrass::WeierstrassParameters,
     AffinePoint, CurveError, CurveType, EllipticCurve,
 };
@@ -32,7 +32,7 @@ use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryCols, MemoryReadCols, MemoryWriteCols},
-    operations::field::field_op::FieldOpCols,
+    operations::field::{field_op::FieldOpCols, range::FieldLtCols},
     utils::limbs_from_prev_access,
 };
 
@@ -63,6 +63,8 @@ pub struct WeierstrassAddAssignCols<T, P: FieldParameters + NumWords> {
     pub(crate) p_x_minus_x: FieldOpCols<T, P>,
     pub(crate) y3_ins: FieldOpCols<T, P>,
     pub(crate) slope_times_p_x_minus_x: FieldOpCols<T, P>,
+    pub(crate) x3_range: FieldLtCols<T, P>,
+    pub(crate) y3_range: FieldLtCols<T, P>,
 }
 
 #[derive(Default)]
@@ -107,7 +109,7 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
             cols.x3_ins.populate(blu_events, &slope_squared, &p_x_plus_q_x, FieldOperation::Sub)
         };
 
-        {
+        let y = {
             let p_x_minus_x = cols.p_x_minus_x.populate(blu_events, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
                 blu_events,
@@ -115,8 +117,12 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
-            cols.y3_ins.populate(blu_events, &slope_times_p_x_minus_x, &p_y, FieldOperation::Sub);
-        }
+            cols.y3_ins.populate(blu_events, &slope_times_p_x_minus_x, &p_y, FieldOperation::Sub)
+        };
+
+        let modulus = E::BaseField::modulus();
+        cols.x3_range.populate(blu_events, &x, &modulus);
+        cols.y3_range.populate(blu_events, &y, &modulus);
     }
 }
 
@@ -334,6 +340,12 @@ where
                 local.is_real,
             );
         }
+
+        let modulus = limbs_from_vec::<AB::Expr, <E::BaseField as NumLimbs>::Limbs, AB::F>(
+            E::BaseField::to_limbs_field_vec(&E::BaseField::modulus()),
+        );
+        local.x3_range.eval(builder, &local.x3_ins.result, &modulus, local.is_real);
+        local.y3_range.eval(builder, &local.y3_ins.result, &modulus, local.is_real);
 
         for i in 0..E::BaseField::NB_LIMBS {
             builder

@@ -46,16 +46,30 @@ impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
         debug_assert_eq!(&den_inv * &denominator % &p, BigUint::from(1u32));
         debug_assert!(result < p);
 
-        let equation_lhs = if sign { b * &result + &result } else { b * &result + a };
+        self.populate_with_result(record, a, b, sign, &result);
+        result
+    }
+
+    /// Fills the columns for `result`, which need not be reduced: `carry` is the exact quotient
+    /// of `lhs - rhs` by `p` for that `result`.
+    pub(crate) fn populate_with_result(
+        &mut self,
+        record: &mut impl ByteRecord,
+        a: &BigUint,
+        b: &BigUint,
+        sign: bool,
+        result: &BigUint,
+    ) {
+        let p = P::modulus();
+        let equation_lhs = if sign { b * result + result } else { b * result + a };
         let equation_rhs = if sign { a.clone() } else { result.clone() };
         let carry = (&equation_lhs - &equation_rhs) / &p;
-        debug_assert!(carry < p);
         debug_assert_eq!(&carry * &p, &equation_lhs - &equation_rhs);
 
         let p_a: Polynomial<F> = P::to_limbs_field::<F, _>(a).into();
         let p_b: Polynomial<F> = P::to_limbs_field::<F, _>(b).into();
         let p_p: Polynomial<F> = P::to_limbs_field::<F, _>(&p).into();
-        let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
+        let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(result).into();
         let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
 
         let vanishing_poly = if sign {
@@ -79,8 +93,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
         record.add_u16_range_checks_field(&self.witness.0);
-
-        result
     }
 }
 

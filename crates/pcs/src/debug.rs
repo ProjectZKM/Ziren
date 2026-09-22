@@ -98,6 +98,36 @@ pub fn debug_constraints<SC, A>(
     });
 }
 
+/// Whether every constraint of `air` holds on the row pair `(local, next)`, with an
+/// empty permutation trace, taken as a first-and-last row.  Lookups are not checked.
+pub fn constraints_hold_on_row<F, EF, A>(
+    air: &A,
+    local: &[F],
+    next: &[F],
+    public_values: &[F],
+) -> bool
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: for<'a> Air<DebugConstraintBuilder<'a, F, EF>>,
+{
+    let local_cumulative_sum = EF::ZERO;
+    let global_cumulative_sum = SepticDigest::<F>::zero();
+    let mut builder = DebugConstraintBuilder {
+        preprocessed: PairWindow { local: &[], next: &[] },
+        main: PairWindow { local, next },
+        perm: PairWindow { local: &[], next: &[] },
+        perm_challenges: &[],
+        local_cumulative_sum: &local_cumulative_sum,
+        global_cumulative_sum: &global_cumulative_sum,
+        is_first_row: F::ONE,
+        is_last_row: F::ONE,
+        is_transition: F::ZERO,
+        public_values,
+    };
+    catch_unwind_silent(AssertUnwindSafe(|| air.eval(&mut builder))).is_ok()
+}
+
 fn catch_unwind_silent<F: FnOnce() -> R + panic::UnwindSafe, R>(f: F) -> std::thread::Result<R> {
     let prev_hook = panic::take_hook();
     panic::set_hook(Box::new(|_| {}));
