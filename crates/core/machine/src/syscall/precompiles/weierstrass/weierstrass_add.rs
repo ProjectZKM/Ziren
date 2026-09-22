@@ -8,7 +8,7 @@ use zkm_pcs::PicusInfo;
 
 use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
-use num::BigUint;
+use num::{BigUint, One};
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -28,7 +28,7 @@ use zkm_curves::{
     AffinePoint, CurveError, CurveType, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryCols, MemoryReadCols, MemoryWriteCols},
@@ -65,6 +65,7 @@ pub struct WeierstrassAddAssignCols<T, P: FieldParameters + NumWords> {
     pub(crate) slope_times_p_x_minus_x: FieldOpCols<T, P>,
     pub(crate) x3_range: FieldLtCols<T, P>,
     pub(crate) y3_range: FieldLtCols<T, P>,
+    pub(crate) inverse_check: FieldOpCols<T, P>,
 }
 
 #[derive(Default)]
@@ -92,6 +93,14 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
 
             let slope_denominator =
                 cols.slope_denominator.populate(blu_events, &q_x, &p_x, FieldOperation::Sub);
+            let numerator =
+                if slope_denominator == BigUint::ZERO { BigUint::ZERO } else { BigUint::one() };
+            cols.inverse_check.populate(
+                blu_events,
+                &numerator,
+                &slope_denominator,
+                FieldOperation::Div,
+            );
 
             cols.slope.populate(
                 blu_events,
@@ -293,6 +302,15 @@ where
             local.slope_numerator.eval(builder, &q_y, &p_y, FieldOperation::Sub, local.is_real);
 
             local.slope_denominator.eval(builder, &q_x, &p_x, FieldOperation::Sub, local.is_real);
+            let mut one = vec![AB::Expr::ZERO; <E::BaseField as NumLimbs>::Limbs::USIZE];
+            one[0] = local.is_real.into();
+            local.inverse_check.eval(
+                builder,
+                &Polynomial::from_coefficients(&one),
+                &local.slope_denominator.result,
+                FieldOperation::Div,
+                local.is_real,
+            );
 
             local.slope.eval(
                 builder,
@@ -432,7 +450,105 @@ mod tests {
     use zkm_core_executor::Program;
     use zkm_pcs::CpuProver;
 
+    use super::*;
     use crate::utils::{run_test, setup_logger};
+    use p3_field::extension::BinomialExtensionField;
+    use p3_koala_bear::KoalaBear;
+    use zkm_curves::weierstrass::secp256k1::{Secp256k1, Secp256k1BaseField, Secp256k1Parameters};
+    use zkm_curves::weierstrass::WeierstrassParameters;
+    use zkm_pcs::constraints_hold_on_row;
+
+    type Cols<F> = WeierstrassAddAssignCols<F, Secp256k1BaseField>;
+
+    /// The slope division alone, which accepts any slope when P = Q.
+    struct DivisionOnly;
+
+    impl<F> BaseAir<F> for DivisionOnly {
+        fn width(&self) -> usize {
+            num_weierstrass_add_cols::<Secp256k1BaseField>()
+        }
+    }
+
+    impl<AB: ZKMAirBuilder> Air<AB> for DivisionOnly {
+        fn eval(&self, builder: &mut AB) {
+            let main = builder.main();
+            let local = main.current_slice();
+            let local: &Cols<AB::Var> = (*local).borrow();
+            let p_x: Limbs<AB::Var, <Secp256k1BaseField as NumLimbs>::Limbs> =
+                limbs_from_prev_access(&local.p_access[0..8]);
+            let p_y: Limbs<AB::Var, <Secp256k1BaseField as NumLimbs>::Limbs> =
+                limbs_from_prev_access(&local.p_access[8..16]);
+            let q_x: Limbs<AB::Var, <Secp256k1BaseField as NumLimbs>::Limbs> =
+                limbs_from_prev_access(&local.q_access[0..8]);
+            let q_y: Limbs<AB::Var, <Secp256k1BaseField as NumLimbs>::Limbs> =
+                limbs_from_prev_access(&local.q_access[8..16]);
+            local.slope_numerator.eval(builder, &q_y, &p_y, FieldOperation::Sub, local.is_real);
+            local.slope_denominator.eval(builder, &q_x, &p_x, FieldOperation::Sub, local.is_real);
+            local.slope.eval(
+                builder,
+                &local.slope_numerator.result,
+                &local.slope_denominator.result,
+                FieldOperation::Div,
+                local.is_real,
+            );
+        }
+    }
+
+    #[test]
+    fn adding_a_point_to_itself_is_rejected() {
+        type F = KoalaBear;
+        type EF = BinomialExtensionField<KoalaBear, 4>;
+        let width = num_weierstrass_add_cols::<Secp256k1BaseField>();
+        let mut row = vec![F::ZERO; width];
+        let cols: &mut Cols<F> = row.as_mut_slice().borrow_mut();
+        let (g_x, g_y) = Secp256k1Parameters::generator();
+        let p = Secp256k1BaseField::modulus();
+        let mut blu = Vec::new();
+        cols.is_real = F::ONE;
+        for (i, limb) in Secp256k1BaseField::to_limbs_field::<F, _>(&g_x).0.iter().enumerate() {
+            cols.p_access[i / 4].prev_value.0[i % 4] = *limb;
+            cols.q_access[i / 4].access.value.0[i % 4] = *limb;
+        }
+        for (i, limb) in Secp256k1BaseField::to_limbs_field::<F, _>(&g_y).0.iter().enumerate() {
+            cols.p_access[8 + i / 4].prev_value.0[i % 4] = *limb;
+            cols.q_access[8 + i / 4].access.value.0[i % 4] = *limb;
+        }
+        WeierstrassAddAssignChip::<Secp256k1>::populate_field_ops(
+            &mut blu,
+            cols,
+            g_x.clone(),
+            g_y.clone(),
+            g_x.clone(),
+            g_y.clone(),
+        );
+        let slope = BigUint::from(7u32);
+        cols.slope.populate_carry_and_witness(&slope, &BigUint::ZERO, FieldOperation::Mul, &p);
+        cols.slope.result = Secp256k1BaseField::to_limbs_field::<F, _>(&slope);
+        let ssq = cols.slope_squared.populate(&mut blu, &slope, &slope, FieldOperation::Mul);
+        let pxpqx = cols.p_x_plus_q_x.populate(&mut blu, &g_x, &g_x, FieldOperation::Add);
+        let x3 = cols.x3_ins.populate(&mut blu, &ssq, &pxpqx, FieldOperation::Sub);
+        let pxmx = cols.p_x_minus_x.populate(&mut blu, &g_x, &x3, FieldOperation::Sub);
+        let st =
+            cols.slope_times_p_x_minus_x.populate(&mut blu, &slope, &pxmx, FieldOperation::Mul);
+        let y3 = cols.y3_ins.populate(&mut blu, &st, &g_y, FieldOperation::Sub);
+        cols.x3_range.populate(&mut blu, &x3, &p);
+        cols.y3_range.populate(&mut blu, &y3, &p);
+        for (i, limb) in Secp256k1BaseField::to_limbs_field::<F, _>(&x3).0.iter().enumerate() {
+            cols.p_access[i / 4].access.value.0[i % 4] = *limb;
+        }
+        for (i, limb) in Secp256k1BaseField::to_limbs_field::<F, _>(&y3).0.iter().enumerate() {
+            cols.p_access[8 + i / 4].access.value.0[i % 4] = *limb;
+        }
+        assert!(
+            constraints_hold_on_row::<F, EF, _>(&DivisionOnly, &row, &row, &[]),
+            "the division alone must accept an arbitrary slope when P = Q"
+        );
+        let chip = WeierstrassAddAssignChip::<Secp256k1>::new();
+        assert!(
+            !constraints_hold_on_row::<F, EF, _>(&chip, &row, &row, &[]),
+            "the chip must reject P = Q"
+        );
+    }
 
     #[test]
     fn test_secp256k1_add_simple() {
