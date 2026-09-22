@@ -29,7 +29,8 @@ jobs:
           for pkg in zkm-sdk zkm-verifier; do
             RUSTFLAGS="-C target-cpu=native" cargo test -r -p $pkg
           done
-          RUSTFLAGS="-C target-cpu=native" cargo test -r --features ark -- --ignored test_verify_groth16_imm_wrap_vk
+          # test_verify_groth16_imm_wrap_vk runs once the imm-wrap-vk Groth16
+          # artifacts for v2.0.0 are published.
           # The end-to-end recursion gates.  All three are `#[ignore]`d because
           # they are slow (~110s, ~335s, ~640s), which is exactly why nothing
           # ran them -- and all three turned out to be load-bearing.  The
