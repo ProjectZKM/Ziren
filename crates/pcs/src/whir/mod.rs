@@ -58,7 +58,6 @@ pub mod full_prover;
 pub mod interleaved;
 pub mod jagged;
 pub mod monomial;
-pub mod multiproof;
 pub mod proof;
 pub mod prover;
 pub mod round_prover;

@@ -969,7 +969,6 @@ where
             let indices: Vec<usize> = (0..round_cfg.num_queries)
                 .map(|_| challenger.sample_bits(prev_domain_log) & mask)
                 .collect();
-            super::multiproof::log_queries(prev_domain_log, &indices);
 
             let openings =
                 whir.round_query_openings.get(r).ok_or_else(|| shape("round query openings"))?;
@@ -1076,11 +1075,8 @@ where
         let g_final = EF::two_adic_generator(prev_domain_log);
         let last_ff = *folds.last().unwrap();
         let last_randomness = &all_fr[all_fr.len() - last_ff..];
-        let final_indices: Vec<usize> = (0..self.config.final_queries)
-            .map(|_| challenger.sample_bits(prev_domain_log) & final_mask)
-            .collect();
-        super::multiproof::log_queries(prev_domain_log, &final_indices);
-        for (q, &idx) in final_indices.iter().enumerate() {
+        for q in 0..self.config.final_queries {
+            let idx = challenger.sample_bits(prev_domain_log) & final_mask;
             let virt_leaf: Vec<EF> = if prev_round0 {
                 let mut virt_leaf = alloc::vec![EF::ZERO; 1usize << last_ff];
                 for (ri, commitment) in commitments.iter().enumerate() {

@@ -19,7 +19,6 @@ use error::StarkError;
 use verify::verify_stark_compressed_proof;
 
 pub mod error;
-pub mod published;
 mod verify;
 
 /// A proof generated with Ziren of a particular proof mode.
@@ -108,7 +107,8 @@ impl StarkVerifier {
     /// Compared to `verify_proof()`, it performs a consistency check between
     /// user-supplied public values and those committed in the proof.
     pub fn verify(proof: &[u8], zkm_public_inputs: &[u8], zkm_vk: &[u8]) -> Result<(), StarkError> {
-        let proof = deserialize_proof(proof)?;
+        let proof: ZKMProof =
+            bincode::deserialize(proof).map_err(|_| StarkError::MalformedProof)?;
         let ZKMProof::Compressed(proof) = proof else {
             return Err(StarkError::UnexpectedProofVariant);
         };
@@ -147,7 +147,8 @@ impl StarkVerifier {
     /// Compared to `verify()`, it does not perform a consistency check between
     /// user-supplied public values and those committed in the proof.
     pub fn verify_proof(proof: &[u8], zkm_vk: &[u8]) -> Result<(), StarkError> {
-        let proof = deserialize_proof(proof)?;
+        let proof: ZKMProof =
+            bincode::deserialize(proof).map_err(|_| StarkError::MalformedProof)?;
         let ZKMProof::Compressed(proof) = proof else {
             return Err(StarkError::UnexpectedProofVariant);
         };
@@ -155,14 +156,6 @@ impl StarkVerifier {
             bincode::deserialize(zkm_vk).map_err(|_| StarkError::MalformedVerifyingKey)?;
 
         verify_stark_compressed_proof(&vk, &proof).map_err(StarkError::Recursion)
-    }
-}
-
-/// A proof in either the published multiproof form or the plain bincode form.
-fn deserialize_proof(bytes: &[u8]) -> Result<ZKMProof, StarkError> {
-    match published::decode_published(bytes) {
-        Some(proof) => proof,
-        None => bincode::deserialize(bytes).map_err(|_| StarkError::MalformedProof),
     }
 }
 
