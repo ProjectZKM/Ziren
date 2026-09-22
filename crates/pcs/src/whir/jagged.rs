@@ -96,27 +96,24 @@ pub fn whir_config_for_fold_schedule(lsh: usize, folds: &[usize], final_log: usi
     config
 }
 
-/// The PRODUCTION jagged-WHIR budget for a core-shard stack of height
-/// `2^lsh`: **100 bits PROVABLE in the unique-decoding regime**, per round
-/// (ethereum/soundcalc, `docs/soundness/ziren.soundcalc.toml`).  Under the
-/// unique-decoding bound a query is worth `-log2((1+rho)/2)` bits — at most
-/// ~1 bit at ANY rate — so every round must clear ~84 bits of queries on its
-/// own plus the 16-bit query PoW:
+/// The production jagged-WHIR budget for a core-shard stack of height `2^lsh`:
+/// 100 bits per round in the unique-decoding regime.
 ///
-///   round 0: 124 queries into the rate-2^-2 stripe trees  (124·0.678 + 16 = 100)
-///   round 1:  88 queries into the rate-2^-5 codeword      ( 88·0.978 + 16 = 102)
-///   final  :  85 queries into the rate-2^-8 codeword      ( 85·0.997 + 16 = 100)
+/// A query into a code of rate `ρ` is worth `-log2((1 + ρ)/2) < 1` bit, so a
+/// round with `q` queries and a 16-bit query grind gives
+/// `q·(-log2((1 + ρ)/2)) + 16` bits.  Round `r` queries the codeword committed
+/// by round `r - 1` (round 0: the stripe trees at `ρ = 2^-2`), and each round
+/// commits at `ρ` three halvings below the last:
 ///
-/// The previous schedule (rate 1/2, 84/21/12 queries, folds [4,7,7]) counted
-/// log-inv-rate bits per query — the capacity accounting — and was 27 bits
-/// provable (final round 12·0.99 + 16), 53 under the Johnson bound.
+/// ```text
+///   ρ = 2^-2 : 124 · 0.678072 + 16 = 100.08
+///   ρ = 2^-5 :  88 · 0.955606 + 16 = 100.09
+///   ρ = 2^-8 :  85 · 0.994375 + 16 = 100.52   (and every later round)
+/// ```
 ///
-/// Later rounds fold 6 (not 7) so the recursion leaf's Merkle-leaf hashing
-/// (queries x opened felts) stays near the old budget:
-/// `124·40·2^3 + 88·4·2^6 + 85·4·2^6 ≈ 84 K` felts vs 71 K before.  Wider
-/// queries at rate 1/4 double the round-0 codeword; the round-0 fold drops
-/// 4 -> 3 so a query leaf (`stripes x 2^ff0`) halves.  OOD samples 2 per
-/// committed round; folding PoW 0 (soundness rides on the query PoW).
+/// Each count is the least integer reaching 100, so one query fewer in any
+/// round is below 100 bits.  Folds are `[3, 6, 6, …]`; OOD samples 2 per
+/// committed round; folding grind 0.
 pub fn core_whir_config(lsh: usize) -> WhirConfig {
     let mut config = core_whir_config_without_batch_grind(lsh);
     config.batch_pow_bits = WHIR_BATCH_GRINDING_BITS;
@@ -342,4 +339,47 @@ where
         log_stacking_height,
     );
     verifier.verify_trusted_evaluation(commitments, &stripe_counts, stack_point, proof, challenger)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::core_whir_config;
+
+    /// `-log2((1 + ρ)/2)` for `ρ = 2^-log_inv_rate`.
+    fn bits_per_query(log_inv_rate: usize) -> f64 {
+        -((1.0 + 2f64.powi(-(log_inv_rate as i32))) / 2.0).log2()
+    }
+
+    /// The least `q` with `q·bits + pow >= 100`.
+    fn min_queries(log_inv_rate: usize, pow_bits: usize) -> usize {
+        ((100.0 - pow_bits as f64) / bits_per_query(log_inv_rate)).ceil() as usize
+    }
+
+    /// Every round's query count is exactly the least integer that reaches
+    /// 100 bits under the unique-decoding bound, at the rate of the codeword
+    /// it queries: round 0 the starting rate, round `r` the rate round `r - 1`
+    /// committed, the final queries the last round's rate.
+    #[test]
+    fn query_counts_are_the_unique_decoding_minimum() {
+        for lsh in [20usize, 21, 22, 24] {
+            let config = core_whir_config(lsh);
+            let mut queried_rate = config.starting_log_inv_rate;
+            for (r, rp) in config.round_parameters.iter().enumerate() {
+                let bits = rp.num_queries as f64 * bits_per_query(queried_rate)
+                    + rp.queries_pow_bits as f64;
+                assert!(bits >= 100.0, "lsh {lsh} round {r}: {bits} bits");
+                assert_eq!(
+                    rp.num_queries,
+                    min_queries(queried_rate, rp.queries_pow_bits),
+                    "lsh {lsh} round {r} at rate 2^-{queried_rate}",
+                );
+                queried_rate = rp.log_inv_rate;
+            }
+            assert_eq!(
+                config.final_queries,
+                min_queries(queried_rate, config.final_pow_bits),
+                "lsh {lsh} final queries at rate 2^-{queried_rate}",
+            );
+        }
+    }
 }
