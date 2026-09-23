@@ -24,7 +24,11 @@ pub const CIRCUIT_ARTIFACTS_URL_BASE: &str = "https://zkm-toolchain.s3.us-west-2
 #[must_use]
 pub fn groth16_circuit_artifacts_dir(zkm_circuit_version: &str) -> PathBuf {
     if zkm_imm_wrap_vk_mode() {
-        dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16/imm-wrap-vk")
+        dirs::home_dir()
+            .unwrap()
+            .join(".zkm")
+            .join("circuits/groth16/imm-wrap-vk")
+            .join(zkm_circuit_version)
     } else {
         dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16").join(zkm_circuit_version)
     }
@@ -101,7 +105,7 @@ pub fn install_circuit_artifacts(
     zkm_circuit_version: &str,
 ) {
     let download_url = if zkm_prover::build::zkm_imm_wrap_vk_mode() {
-        format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{artifacts_type}-imm-wrap-vk.tar.gz")
+        format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{zkm_circuit_version}-{artifacts_type}-imm-wrap-vk.tar.gz")
     } else {
         format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{zkm_circuit_version}-{artifacts_type}.tar.gz")
     };

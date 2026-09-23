@@ -1588,6 +1588,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Emits `ZKMCircuitWitness::CoreBasefold` witnesses that dispatch to the
     /// cluster-parametrized basefold Normalize program; deferred proofs follow
     /// the same dispatch.
+    ///
+    /// A leaf is never the root of the compress tree: an execution of one
+    /// shard closes through a compose of arity one, whose key the allowlist
+    /// enumerates with every other arity.  The leaf keys are therefore
+    /// exactly the open normalize classes, one per `(cluster, preprocessed
+    /// bucket, main bucket)`, and no leaf is snapped to the root geometry.
     #[allow(clippy::type_complexity)]
     pub fn get_first_layer_inputs<'a>(
         &'a self,
@@ -1596,12 +1602,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         deferred_proofs: &[ZKMReduceProof<InnerSC>],
         batch_size: usize,
     ) -> Result<Vec<ZKMCircuitWitness>, VkNotAllowed> {
-        let is_complete = shard_proofs.len() == 1 && deferred_proofs.is_empty();
-
         let mut inputs = Vec::new();
 
         let bf_inputs =
-            self.get_recursion_core_inputs_basefold(&vk.vk, shard_proofs, batch_size, is_complete);
+            self.get_recursion_core_inputs_basefold(&vk.vk, shard_proofs, batch_size, false);
         tracing::debug!("emitting {} CoreBasefold witness(es)", bf_inputs.len());
         inputs.extend(bf_inputs.into_iter().map(ZKMCircuitWitness::CoreBasefold));
 
@@ -1651,7 +1655,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 })
                 .collect();
         let full_range = chain.full_range();
-        let passthrough = num_first_layer_inputs == 1;
 
         let span = tracing::Span::current().clone();
         let (vk, proof) = thread::scope(|s| -> Result<_, VkNotAllowed> {
@@ -1869,9 +1872,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     let mut tree = crate::compress_tree::CompressTree::<Item>::new(batch_size);
                     let mut in_flight = num_first_layer_inputs;
                     loop {
-                        if passthrough {
-                            break;
-                        }
                         let received = { proofs_rx.lock().unwrap().recv() };
                         let (range, vk, proof) = match received {
                             Ok(v) => v,
