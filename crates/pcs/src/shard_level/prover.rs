@@ -998,7 +998,7 @@ where
         .iter()
         .zip(main_traces.iter())
         .map(|(chip, pm)| {
-            let name = chip.name().to_string();
+            let name = chip.name();
             let pm_inner: crate::multilinear::PaddedMle<InnerVal> = unsafe {
                 core::mem::transmute_copy::<
                     crate::multilinear::PaddedMle<Val<SC>>,

@@ -689,7 +689,7 @@ where
     );
     let preprocessed_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
         .iter()
-        .map(|chip| match pk_chip_ordering.get(&chip.name().to_string()) {
+        .map(|chip| match pk_chip_ordering.get(chip.name().as_str()) {
             Some(&idx) => crate::multilinear::PaddedMle::padded_with_zeros(
                 pk_preprocessed_mles[idx].clone(),
                 max_log_row_count as u32,
