@@ -306,48 +306,93 @@ impl ExecutionRecord {
         Self { program, ..Default::default() }
     }
 
-    /// Create a new [`ExecutionRecord`] with every hot event `Vec` pre-reserved to
-    /// `reservation_size`.
+    /// Create a new [`ExecutionRecord`] with the hot event containers reserved
+    /// for a shard of `8 * reservation_size` cycles.
     ///
-    /// `reservation_size` should be a rough upper bound on the count of any *single*
-    /// event kind a shard will produce. A good default is `shard_size / 8`: no single
-    /// event kind tends to hit more than ~1/8 of a shard's cycles.
+    /// Every cycle records one `CpuEvent` and exactly one instruction event —
+    /// an ALU, memory, branch, jump, conditional-move or misc event — so the
+    /// instruction families share the shard's cycle budget and cannot all be
+    /// full at once.  Each family is reserved a fixed fraction of the shard
+    /// ([`Self::FAMILY_SHARES`], generous shares of a MIPS instruction mix,
+    /// not bounds); the fractions sum to about one shard, where one uniform
+    /// per-family reservation cost close to three.  A family that outgrows its
+    /// share regrows amortized like any `Vec`.
     ///
-    /// This avoids the Vec-growth realloc storm seen on the per-shard interpreter hot
-    /// loop. When `reservation_size == 0` this degrades cleanly to `new`.
+    /// `byte_lookups` is a multiplicity map keyed by [`ByteLookupEvent`], so
+    /// its capacity counts DISTINCT lookups — at most `2^16` operand pairs per
+    /// byte opcode — and is reserved `min(reservation_size, 2^18)`.
+    ///
+    /// When `reservation_size == 0` this degrades cleanly to `new`.
     #[must_use]
     pub fn new_preallocated(program: Arc<Program>, reservation_size: usize) -> Self {
         let mut result = Self { program, ..Default::default() };
         if reservation_size == 0 {
             return result;
         }
+        let shard = reservation_size.saturating_mul(8);
+        let share = |per: usize| shard / per;
 
         result.cpu_events.reserve(reservation_size);
-        result.add_sub_events.reserve(reservation_size);
-        result.add_sub_imm_events.reserve(reservation_size);
-        result.bitwise_events.reserve(reservation_size);
-        result.bitwise_imm_events.reserve(reservation_size);
-        result.shift_left_events.reserve(reservation_size);
-        result.shift_left_imm_events.reserve(reservation_size);
-        result.shift_right_events.reserve(reservation_size);
-        result.shift_right_imm_events.reserve(reservation_size);
-        result.lt_events.reserve(reservation_size);
-        result.lt_imm_events.reserve(reservation_size);
-        result.mul_events.reserve(reservation_size);
-        result.divrem_events.reserve(reservation_size);
-        result.cloclz_events.reserve(reservation_size);
-        result.memory_load_word_events.reserve(reservation_size);
-        result.memory_store_word_events.reserve(reservation_size);
-        result.memory_load_narrow_events.reserve(reservation_size / 4);
-        result.memory_store_narrow_events.reserve(reservation_size / 4);
-        result.branch_events.reserve(reservation_size);
-        result.jump_events.reserve(reservation_size);
-        result.movcond_events.reserve(reservation_size);
-        result.misc_events.reserve(reservation_size);
-        result.byte_lookups.reserve(reservation_size);
+        result.add_sub_imm_events.reserve(share(Self::FAMILY_SHARES[0].1));
+        result.add_sub_events.reserve(share(Self::FAMILY_SHARES[1].1));
+        result.memory_load_word_events.reserve(share(Self::FAMILY_SHARES[2].1));
+        result.memory_store_word_events.reserve(share(Self::FAMILY_SHARES[3].1));
+        result.branch_events.reserve(share(Self::FAMILY_SHARES[4].1));
+        result.shift_left_imm_events.reserve(share(Self::FAMILY_SHARES[5].1));
+        result.bitwise_events.reserve(share(Self::FAMILY_SHARES[6].1));
+        result.bitwise_imm_events.reserve(share(Self::FAMILY_SHARES[7].1));
+        result.shift_right_imm_events.reserve(share(Self::FAMILY_SHARES[8].1));
+        result.lt_imm_events.reserve(share(Self::FAMILY_SHARES[9].1));
+        result.memory_load_narrow_events.reserve(share(Self::FAMILY_SHARES[10].1));
+        result.memory_store_narrow_events.reserve(share(Self::FAMILY_SHARES[11].1));
+        result.jump_events.reserve(share(Self::FAMILY_SHARES[12].1));
+        result.memory_unaligned_events.reserve(share(Self::FAMILY_SHARES[13].1));
+        result.shift_left_events.reserve(share(Self::FAMILY_SHARES[14].1));
+        result.shift_right_events.reserve(share(Self::FAMILY_SHARES[15].1));
+        result.lt_events.reserve(share(Self::FAMILY_SHARES[16].1));
+        result.mul_events.reserve(share(Self::FAMILY_SHARES[17].1));
+        result.movcond_events.reserve(share(Self::FAMILY_SHARES[18].1));
+        result.divrem_events.reserve(share(Self::FAMILY_SHARES[19].1));
+        result.cloclz_events.reserve(share(Self::FAMILY_SHARES[20].1));
+        result.misc_events.reserve(share(Self::FAMILY_SHARES[21].1));
+        result.byte_lookups.reserve(reservation_size.min(Self::BYTE_LOOKUP_RESERVATION_CAP));
 
         result
     }
+
+    /// The share of a shard's cycles reserved for each instruction family, as
+    /// `(family, divisor)`: the family gets `cycles / divisor` entries.  The
+    /// divisors are powers of two so the shares nest, and their reciprocals sum
+    /// to `1 + 3/32`.
+    pub const FAMILY_SHARES: [(&'static str, usize); 22] = [
+        ("add_sub_imm", 4),
+        ("add_sub", 8),
+        ("memory_load_word", 8),
+        ("memory_store_word", 8),
+        ("branch", 16),
+        ("shift_left_imm", 16),
+        ("bitwise", 32),
+        ("bitwise_imm", 32),
+        ("shift_right_imm", 32),
+        ("lt_imm", 32),
+        ("memory_load_narrow", 32),
+        ("memory_store_narrow", 32),
+        ("jump", 32),
+        ("memory_unaligned", 64),
+        ("shift_left", 64),
+        ("shift_right", 64),
+        ("lt", 64),
+        ("mul", 64),
+        ("movcond", 64),
+        ("divrem", 256),
+        ("cloclz", 256),
+        ("misc", 256),
+    ];
+
+    /// Cap on the `byte_lookups` reservation: a shard rarely touches more
+    /// distinct byte lookups than this, and the whole key space is `2^16`
+    /// operand pairs per opcode.
+    pub const BYTE_LOOKUP_RESERVATION_CAP: usize = 1 << 18;
 
     /// Add a mul event to the execution record.
     pub fn add_mul_event(&mut self, mul_event: CompAluEvent) {
@@ -751,5 +796,54 @@ impl ByteRecord for ExecutionRecord {
                 *self.byte_lookups.entry(*blu_event).or_insert(0) += count;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The family reservations share one shard's cycle budget: their sum stays
+    /// within `1 + 3/32` shards, and the byte map is capped by its key space.
+    #[test]
+    fn preallocation_is_bounded_by_the_shard() {
+        let reservation = 1usize << 18;
+        let shard = 8 * reservation;
+        let r =
+            ExecutionRecord::new_preallocated(Arc::new(Program::new(vec![], 0, 0)), reservation);
+        let families = r.add_sub_imm_events.capacity()
+            + r.add_sub_events.capacity()
+            + r.memory_load_word_events.capacity()
+            + r.memory_store_word_events.capacity()
+            + r.branch_events.capacity()
+            + r.shift_left_imm_events.capacity()
+            + r.bitwise_events.capacity()
+            + r.bitwise_imm_events.capacity()
+            + r.shift_right_imm_events.capacity()
+            + r.lt_imm_events.capacity()
+            + r.memory_load_narrow_events.capacity()
+            + r.memory_store_narrow_events.capacity()
+            + r.jump_events.capacity()
+            + r.memory_unaligned_events.capacity()
+            + r.shift_left_events.capacity()
+            + r.shift_right_events.capacity()
+            + r.lt_events.capacity()
+            + r.mul_events.capacity()
+            + r.movcond_events.capacity()
+            + r.divrem_events.capacity()
+            + r.cloclz_events.capacity()
+            + r.misc_events.capacity();
+        let budget: usize = ExecutionRecord::FAMILY_SHARES.iter().map(|(_, d)| shard / d).sum();
+        assert_eq!(families, budget);
+        assert!(families <= shard + 3 * shard / 32);
+        assert!(r.cpu_events.capacity() >= reservation);
+        assert!(
+            r.byte_lookups.capacity()
+                >= reservation.min(ExecutionRecord::BYTE_LOOKUP_RESERVATION_CAP)
+        );
+        let big = ExecutionRecord::new_preallocated(Arc::new(Program::new(vec![], 0, 0)), 1 << 24);
+        assert!(big.byte_lookups.capacity() < 2 * ExecutionRecord::BYTE_LOOKUP_RESERVATION_CAP);
+        let none = ExecutionRecord::new_preallocated(Arc::new(Program::new(vec![], 0, 0)), 0);
+        assert_eq!(none.add_sub_events.capacity(), 0);
     }
 }

@@ -2,7 +2,7 @@
 
 use challenger::{
     CanCopyChallenger, CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable,
-    MultiField32ChallengerVariable, SpongeChallengerShape,
+    MultiField32ChallengerVariable,
 };
 use hash::{FieldHasherVariable, Poseidon2KoalaBearHasherVariable};
 use itertools::izip;
@@ -100,8 +100,6 @@ pub trait KoalaBearFriParameters:
         + CanSample<EF>
         + GrindingChallenger<Witness = KoalaBear>
         + FieldChallenger<KoalaBear>;
-
-    fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape;
 }
 
 pub trait KoalaBearFriParametersVariable<C: CircuitConfig<F = KoalaBear>>:
@@ -709,13 +707,6 @@ impl KoalaBearFriParameters for KoalaBearPoseidon2 {
     type ValMmcs = ValMmcs;
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
     type RowMajorProverData = <ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
-
-    fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape {
-        SpongeChallengerShape {
-            input_buffer_len: challenger.input_buffer.len(),
-            output_buffer_len: challenger.output_buffer.len(),
-        }
-    }
 }
 
 impl KoalaBearFriParameters for KoalaBearPoseidon2Outer {
@@ -724,10 +715,6 @@ impl KoalaBearFriParameters for KoalaBearPoseidon2Outer {
 
     type RowMajorProverData =
         <OuterValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
-
-    fn challenger_shape(_challenger: &Self::FriChallenger) -> SpongeChallengerShape {
-        unimplemented!("Shape not supported for outer fri challenger");
-    }
 }
 
 impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriParametersVariable<C>

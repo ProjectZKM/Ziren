@@ -63,9 +63,9 @@ cp build-imm-wrap-vk/groth16/part_stark_vk.bin ../verifier/bn254-vk/part_stark_v
 echo "--------Post Trusted Setup--------"
 cargo run --bin post_trusted_setup --release -- --build-dir build-imm-wrap-vk/groth16
 
-echo "--------[TODO] Release--------"
-# make release-circuits-imm-wrap-vk
-
-echo "--------[TODO] Clear--------"
-# rm -rf build-imm-wrap-vk powersOfTau28_hez_final.ptau semaphore-gnark-11 \
-    # semaphore-mtb-setup trusted-setup-imm-wrap-vk pk vk Groth16Verifier.sol
+# Manual steps after this script: the artifacts are released with
+# `make release-circuits-imm-wrap-vk`, and the working set (build-imm-wrap-vk,
+# the ptau, the semaphore-gnark-11 and semaphore-mtb-setup checkouts,
+# trusted-setup-imm-wrap-vk, pk, vk, Groth16Verifier.sol) is removed only once
+# the release is verified, so a failed release can be retried from the
+# generated files.

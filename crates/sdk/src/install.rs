@@ -36,16 +36,35 @@ pub fn plonk_circuit_artifacts_dir() -> PathBuf {
     dirs::home_dir().unwrap().join(".zkm").join("circuits/plonk").join(ZKM_CIRCUIT_VERSION)
 }
 
-/// Tries to install the groth16 circuit artifacts if they are not already installed.
+/// The kinds of circuit artifacts that can be installed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CircuitArtifacts {
+    Groth16,
+    Plonk,
+}
+
+impl CircuitArtifacts {
+    /// The name the artifact bucket and the install directory use.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Groth16 => "groth16",
+            Self::Plonk => "plonk",
+        }
+    }
+}
+
+/// Tries to install the circuit artifacts if they are not already installed.
 /// zkm_circuit_version: The version of the circuit, e.g. "v1.0.0".
 #[must_use]
-pub fn try_install_circuit_artifacts(artifacts_type: &str, zkm_circuit_version: &str) -> PathBuf {
-    let build_dir = if artifacts_type == "groth16" {
-        groth16_circuit_artifacts_dir(zkm_circuit_version)
-    } else if artifacts_type == "plonk" {
-        plonk_circuit_artifacts_dir()
-    } else {
-        unimplemented!("unsupported artifacts type: {}", artifacts_type);
+pub fn try_install_circuit_artifacts(
+    artifacts: CircuitArtifacts,
+    zkm_circuit_version: &str,
+) -> PathBuf {
+    let artifacts_type = artifacts.as_str();
+    let build_dir = match artifacts {
+        CircuitArtifacts::Groth16 => groth16_circuit_artifacts_dir(zkm_circuit_version),
+        CircuitArtifacts::Plonk => plonk_circuit_artifacts_dir(),
     };
 
     if build_dir.exists() {

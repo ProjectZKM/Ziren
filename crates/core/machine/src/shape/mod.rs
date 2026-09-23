@@ -1355,6 +1355,17 @@ pub mod tests {
         program
     }
 
+    /// Every core chip's name parses back into its `MipsAirId`, the invariant
+    /// `Shape::included` relies on.
+    #[test]
+    fn every_chip_name_is_a_shape_key() {
+        use p3_koala_bear::KoalaBear;
+        for chip in MipsAir::<KoalaBear>::chips() {
+            let name = chip.name();
+            assert!(MipsAirId::from_str(&name).is_ok(), "chip `{name}` has no MipsAirId");
+        }
+    }
+
     fn create_dummy_record(shape: &Shape<MipsAirId>) -> ExecutionRecord {
         let program = Arc::new(create_dummy_program(shape));
         let mut record = ExecutionRecord::new(program);

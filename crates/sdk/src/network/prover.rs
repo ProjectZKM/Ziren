@@ -202,7 +202,7 @@ impl NetworkProver {
         } else if kind == ZKMProofKind::Groth16 || kind == ZKMProofKind::CompressToGroth16 {
             Step::InSnark
         } else {
-            unimplemented!("unsupported ZKMProofKind")
+            return Err(anyhow::anyhow!("the proving network does not produce {kind:?} proofs"));
         };
 
         let mut request = GenerateProofRequest {

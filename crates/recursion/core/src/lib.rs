@@ -458,3 +458,42 @@ pub struct CommitPublicValuesInstr<F> {
 pub struct CommitPublicValuesEvent<F> {
     pub public_values: RecursionPublicValues<F>,
 }
+
+#[cfg(test)]
+mod poseidon2_diffusion_tests {
+    use p3_field::{PrimeCharacteristicRing, PrimeField32};
+    use p3_koala_bear::{KoalaBear, KoalaBearInternalLayerParameters, KoalaBearParameters};
+    use p3_monty_31::InternalLayerBaseParameters;
+
+    /// The internal-layer diagonal the Groth16/PLONK circuit carries
+    /// (`crates/recursion/gnark-ffi/go/zkm/poseidon2/diagonal/diagonal.go`,
+    /// `KoalaBearInternalDiagM1`), as canonical KoalaBear residues.
+    const CIRCUIT_DIAGONAL: [u32; 16] = [
+        2130706431, 1, 2, 1065353217, 3, 4, 1065353216, 2130706430, 2130706429, 2122383361,
+        1864368129, 2130706306, 8323072, 266338304, 133169152, 127,
+    ];
+
+    /// The host's internal linear layer is `s -> (J + Diag(V)) s` with `J` the
+    /// all-ones matrix, so on the unit vector `e_i` it returns `1` everywhere
+    /// and `1 + V_i` at `i`.  Probing every `e_i` recovers `V`, which must be
+    /// the diagonal the circuit multiplies by.
+    #[test]
+    fn go_internal_diagonal_matches_the_rust_permutation() {
+        for (i, want) in CIRCUIT_DIAGONAL.iter().enumerate() {
+            let mut state = [KoalaBear::ZERO; 16];
+            state[i] = KoalaBear::ONE;
+            <KoalaBearInternalLayerParameters as InternalLayerBaseParameters<
+                KoalaBearParameters,
+                16,
+            >>::generic_internal_linear_layer(&mut state);
+            for (j, s) in state.iter().enumerate() {
+                let expect = if j == i {
+                    KoalaBear::ONE + KoalaBear::from_u32(*want)
+                } else {
+                    KoalaBear::ONE
+                };
+                assert_eq!(s.as_canonical_u32(), expect.as_canonical_u32(), "row {i} column {j}");
+            }
+        }
+    }
+}

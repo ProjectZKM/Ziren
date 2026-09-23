@@ -147,10 +147,6 @@ pub(crate) fn batch_verify_multi_points(
         return Err(PlonkError::InvalidNumberOfDigests);
     }
 
-    if nb_digests == 1 {
-        unimplemented!();
-    }
-
     let mut random_numbers = Vec::with_capacity(nb_digests);
     random_numbers.push(Fr::one());
     for i in 1..nb_digests {
@@ -189,4 +185,45 @@ pub(crate) fn batch_verify_multi_points(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use substrate_bn::{Group, G2};
+
+    /// A toy SRS at a known secret `tau`, and the opening of `p(x) = 3 + 5x`
+    /// at `z = 2`: the commitment is `p(tau)·G1` and the quotient witness
+    /// `((p(tau) - p(z)) / (tau - z))·G1`.  Verifying one digest is the
+    /// batched check at cardinality one, so it must accept the honest opening
+    /// and reject a wrong claimed value.
+    #[test]
+    fn single_digest_batch_verifies() {
+        let fr = |s: &str| Fr::from_str(s).unwrap();
+        let tau = fr("7");
+        let g1 = G1::one();
+        let g2 = G2::one();
+        let zero_line = LineEvaluationAff {
+            r0: E2 { a0: Fr::zero(), a1: Fr::zero() },
+            r1: E2 { a0: Fr::zero(), a1: Fr::zero() },
+        };
+        let vk = KZGVerifyingKey { g2: [g2, g2 * tau], g1, lines: [[[zero_line; 66]; 2]; 2] };
+
+        let p_tau = fr("38");
+        let z = fr("2");
+        let p_z = fr("13");
+        let quotient = (p_tau - p_z) * (tau - z).inverse().unwrap();
+        let digest = AffineG1::from_jacobian(g1 * p_tau).unwrap();
+        let h = AffineG1::from_jacobian(g1 * quotient).unwrap();
+        let u = fr("11");
+
+        let honest = OpeningProof { h, claimed_value: p_z };
+        assert!(batch_verify_multi_points(vec![digest], vec![honest], vec![z], u, &vk).is_ok());
+
+        let wrong = OpeningProof { h, claimed_value: fr("14") };
+        assert!(matches!(
+            batch_verify_multi_points(vec![digest], vec![wrong], vec![z], u, &vk),
+            Err(PlonkError::PairingCheckFailed)
+        ));
+    }
 }

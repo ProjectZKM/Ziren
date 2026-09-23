@@ -55,7 +55,9 @@ pub fn convert_ark(
     vkey_hash: &str,
     groth16_vk: &[u8],
 ) -> Result<ArkProof, ArkGroth16Error> {
-    let proof = proof_with_pub_values.bytes();
+    let proof = proof_with_pub_values
+        .bytes()
+        .map_err(|_| ArkGroth16Error::GeneralError(Error::InvalidData))?;
     let public_inputs = proof_with_pub_values.public_values.to_vec();
 
     check_groth16_vk_prefix(&proof, groth16_vk).map_err(|e| match e {
@@ -83,7 +85,9 @@ pub fn convert_ark_imm_wrap_vk(
     imm_groth16_vk: &[u8],
     part_start_vk: &[u8],
 ) -> Result<ArkProof, ArkGroth16Error> {
-    let proof = proof_with_pub_values.bytes();
+    let proof = proof_with_pub_values
+        .bytes()
+        .map_err(|_| ArkGroth16Error::GeneralError(Error::InvalidData))?;
     let public_inputs = proof_with_pub_values.public_values.to_vec();
 
     check_groth16_vk_prefix(&proof, imm_groth16_vk).map_err(|e| match e {

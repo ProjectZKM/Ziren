@@ -22,7 +22,11 @@ pub trait WitnessWriter<C: CircuitConfig>: Sized {
     fn write_ext(&mut self, value: C::EF);
 }
 
-/// TODO change the name. For now, the name is unique to prevent confusion.
+/// A host value with a circuit counterpart: `read` allocates the counterpart's
+/// variables from the witness stream in the builder, and `write` emits the
+/// same values into a stream in the same order, so the two sides agree on the
+/// layout by construction.  The name is deliberately distinct from the
+/// compiler's `Witness` types, which are the streams themselves.
 pub trait Witnessable<C: CircuitConfig> {
     type WitnessVariable;
 

@@ -85,12 +85,19 @@ impl<K: Clone + Eq + Hash + FromStr> Shape<K> {
 
     /// Whether the shape includes a given AIR.
     ///
-    /// TODO: Deprecate by adding `air.id()`.
+    /// The shape's keys are the machine's AIR identifiers and an AIR is
+    /// identified by its name, so `air.name()` must parse back into `K`: every
+    /// AIR of a machine keyed by `K` carries a name `K` recognises (the core
+    /// machine's test `every_chip_name_is_a_shape_key` pins this), and a name
+    /// that does not is a programming error, not a shape that excludes the AIR.
     pub fn included<F: PrimeField, A: MachineAir<F>>(&self, air: &A) -> bool
     where
         <K as FromStr>::Err: std::fmt::Debug,
     {
-        self.inner.contains_key(&K::from_str(&air.name()).unwrap())
+        let name = air.name();
+        let key =
+            K::from_str(&name).unwrap_or_else(|e| panic!("AIR `{name}` is not a shape key: {e:?}"));
+        self.inner.contains_key(&key)
     }
 
     /// Get an iterator over the shape.

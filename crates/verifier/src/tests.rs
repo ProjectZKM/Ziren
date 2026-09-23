@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Read;
 use test_artifacts::{HELLO_WORLD_ELF, HELLO_WORLD_IMM_WRAP_VK_ELF};
 use zkm_prover::build::groth16_bn254_artifacts_dev_dir;
-use zkm_sdk::install::try_install_circuit_artifacts;
+use zkm_sdk::install::{try_install_circuit_artifacts, CircuitArtifacts};
 use zkm_sdk::{HashableKey, ProverClient, ZKMStdin, ZKM_CIRCUIT_VERSION};
 
 use crate::{Groth16Verifier, PART_STARK_VK_BYTES};
@@ -14,7 +14,7 @@ fn test_verify_groth16() {
 
     let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
-    let proof = zkm_proof_with_public_values.bytes();
+    let proof = zkm_proof_with_public_values.bytes().expect("the proof has a byte encoding");
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
     let vkey_hash = vk.bytes32();
@@ -44,7 +44,7 @@ fn test_verify_groth16_imm_wrap_vk() {
 
     let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
-    let proof = zkm_proof_with_public_values.bytes();
+    let proof = zkm_proof_with_public_values.bytes().expect("the proof has a byte encoding");
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
     let vkey_hash = vk.bytes32();
@@ -83,7 +83,7 @@ fn test_verify_plonk() {
 
     let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).plonk().run().unwrap();
 
-    let proof = zkm_proof_with_public_values.bytes();
+    let proof = zkm_proof_with_public_values.bytes().expect("the proof has a byte encoding");
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
     let vkey_hash = vk.bytes32();
@@ -100,7 +100,7 @@ fn test_verify_stark() {
     let zkm_proof_with_public_values =
         client.prove(&pk, ZKMStdin::new()).compressed().run().unwrap();
 
-    let proof = zkm_proof_with_public_values.bytes();
+    let proof = zkm_proof_with_public_values.bytes().expect("the proof has a byte encoding");
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
     let vk_bytes = bincode::serialize(&vk).unwrap();
@@ -122,7 +122,7 @@ fn test_e2e_verify_groth16() {
 
     client.verify(&zkm_proof_with_public_values, &vk).unwrap();
 
-    let proof = zkm_proof_with_public_values.bytes();
+    let proof = zkm_proof_with_public_values.bytes().expect("the proof has a byte encoding");
     let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
     let vkey_hash = vk.bytes32();
@@ -151,12 +151,13 @@ fn test_e2e_verify_groth16() {
 #[test]
 #[ignore]
 fn test_vkeys() {
-    let groth16_path = try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION);
+    let groth16_path =
+        try_install_circuit_artifacts(CircuitArtifacts::Groth16, ZKM_CIRCUIT_VERSION);
     let s3_vkey_path = groth16_path.join("groth16_vk.bin");
     let s3_vkey_bytes = std::fs::read(s3_vkey_path).unwrap();
     assert_eq!(s3_vkey_bytes, *crate::GROTH16_VK_BYTES);
 
-    let plonk_path = try_install_circuit_artifacts("plonk", ZKM_CIRCUIT_VERSION);
+    let plonk_path = try_install_circuit_artifacts(CircuitArtifacts::Plonk, ZKM_CIRCUIT_VERSION);
     let s3_vkey_path = plonk_path.join("plonk_vk.bin");
     let s3_vkey_bytes = std::fs::read(s3_vkey_path).unwrap();
     assert_eq!(s3_vkey_bytes, *crate::PLONK_VK_BYTES);

@@ -275,6 +275,9 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// Insertion order is recorded alongside so the oldest entry is the one
     /// dropped.
     pub recursion_pks_basefold_cache: Mutex<RecursionPkCache>,
+    /// Signalled when a key under construction lands in
+    /// `recursion_pks_basefold_cache` (see [`Self::recursion_pk_cached`]).
+    pub recursion_pk_cache_ready: std::sync::Condvar,
 
     /// Per-shape cache for the basefold Normalize recursion program — the
     /// leaf stage, one node per core shard.
@@ -334,8 +337,15 @@ pub struct RecursionPkCache {
     /// every block; pinning them means their setup is paid once per PROCESS
     /// whatever the cap does to the normalize keys.
     pinned: std::collections::BTreeSet<[u8; 32]>,
+    /// Keys some thread is building right now: a second thread that misses on
+    /// one of these waits for the build instead of repeating it.
+    in_flight: std::collections::BTreeSet<[u8; 32]>,
     pub hits: u64,
     pub misses: u64,
+    /// Keys built by [`ZKMProver::recursion_pk_cached`].
+    pub builds: u64,
+    /// Lookups that waited for another thread's build of the same key.
+    pub waits: u64,
 }
 
 impl RecursionPkCache {
@@ -411,6 +421,20 @@ impl RecursionPkCache {
             examined = 0;
         }
         value
+    }
+}
+
+/// Clears a key's in-flight mark and wakes the waiters, on the success path
+/// and on unwind alike, so a failed build never leaves waiters asleep.
+struct InFlightGuard<'a, C: ZKMProverComponents> {
+    prover: &'a ZKMProver<C>,
+    key: [u8; 32],
+}
+
+impl<C: ZKMProverComponents> Drop for InFlightGuard<'_, C> {
+    fn drop(&mut self) {
+        self.prover.recursion_pks_basefold_cache.lock().unwrap().in_flight.remove(&self.key);
+        self.prover.recursion_pk_cache_ready.notify_all();
     }
 }
 
@@ -632,6 +656,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compose_programs_unsnapped_cache: Mutex::new(UnsnappedProgramCache::default()),
             compose_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
             recursion_pks_basefold_cache: Mutex::new(RecursionPkCache::default()),
+            recursion_pk_cache_ready: std::sync::Condvar::new(),
         };
 
         prover.prewarm_compose_programs();
@@ -811,6 +836,50 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     pub fn recursion_pk_cache_counts(&self) -> (u64, u64) {
         let g = self.recursion_pks_basefold_cache.lock().unwrap();
         (g.hits, g.misses)
+    }
+
+    /// The `(pk, vk)` of `program` through the recursion pk cache, built by
+    /// `build` on a miss.
+    ///
+    /// Concurrent misses on one key build it once: the first thread marks the
+    /// key in flight and builds outside the lock, later threads wait on
+    /// [`Self::recursion_pk_cache_ready`] and take the published `Arc`.  The
+    /// key is the program's setup digest, so a cached pair is the pair `setup`
+    /// would rebuild for the same program.
+    pub fn recursion_pk_cached(
+        &self,
+        program: &RecursionProgram<KoalaBear>,
+        build: impl FnOnce() -> (StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>),
+    ) -> Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)> {
+        let key = Self::recursion_pk_cache_key(program);
+        let mut g = self.recursion_pks_basefold_cache.lock().unwrap();
+        if let Some(v) = g.get(&key) {
+            return v;
+        }
+        while g.in_flight.contains(&key) {
+            g.waits += 1;
+            g = self.recursion_pk_cache_ready.wait(g).unwrap();
+            if let Some(v) = g.entries.get(&key) {
+                return Arc::clone(v);
+            }
+        }
+        g.in_flight.insert(key);
+        drop(g);
+        let guard = InFlightGuard { prover: self, key };
+        let (pk, vk) = build();
+        let mut g = self.recursion_pks_basefold_cache.lock().unwrap();
+        g.builds += 1;
+        let value = g.insert(key, pk, vk);
+        tracing::debug!(
+            hits = g.hits,
+            misses = g.misses,
+            builds = g.builds,
+            waits = g.waits,
+            "recursion pk cache"
+        );
+        drop(g);
+        drop(guard);
+        value
     }
 
     /// Creates a proving key and a verifying key for a given MIPS ELF.
@@ -1706,8 +1775,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
                         if let Ok((range, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
-                                let (pk, vk) = tracing::debug_span!("Setup compress program")
-                                    .in_scope(|| self.compress_prover.setup(&program));
+                                let keys =
+                                    tracing::debug_span!("Setup compress program").in_scope(|| {
+                                        self.recursion_pk_cached(&program, || {
+                                            let (pk, vk) = self.compress_prover.setup(&program);
+                                            (self.compress_prover.pk_to_host(&pk), vk)
+                                        })
+                                    });
+                                let pk = self.compress_prover.pk_to_device(&keys.0);
+                                let vk = keys.1.clone();
 
                                 let mut challenger =
                                     self.compress_prover.machine().config().challenger();
@@ -2173,6 +2249,31 @@ pub mod tests {
 
     use crate::build::try_build_plonk_bn254_artifacts_dev;
     use anyhow::Result;
+
+    /// A cached key is the key `setup` would rebuild for the program: the same
+    /// verifying-key hash, one build, then hits on the same `Arc`.
+    #[test]
+    fn recursion_pk_cache_matches_a_fresh_setup() {
+        use crate::components::DefaultProverComponents;
+        use crate::shapes::{ZKMCompressProgramShape, ZKMProofShape};
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let rec = prover.compress_shape_config.as_ref().expect("recursion shape config");
+        let shape = ZKMProofShape::generate(rec, REDUCE_BATCH_SIZE).next().expect("a shape");
+        let program = prover.program_from_shape(
+            ZKMCompressProgramShape::from_proof_shape(shape, VK_MERKLE_TREE_HEIGHT),
+            None,
+        );
+        let fresh = prover.compress_prover.setup(&program).1.hash_koalabear();
+        let first = prover.recursion_pk_cached(&program, || {
+            let (pk, vk) = prover.compress_prover.setup(&program);
+            (prover.compress_prover.pk_to_host(&pk), vk)
+        });
+        let second = prover.recursion_pk_cached(&program, || panic!("the second lookup must hit"));
+        assert_eq!(first.1.hash_koalabear(), fresh);
+        assert!(Arc::ptr_eq(&first, &second));
+        let g = prover.recursion_pks_basefold_cache.lock().unwrap();
+        assert_eq!((g.hits, g.misses, g.builds, g.waits), (1, 1, 1, 0));
+    }
     use build::{build_constraints_and_witness, try_build_groth16_bn254_artifacts_dev};
     use p3_field::PrimeField32;
 

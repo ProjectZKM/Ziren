@@ -24,7 +24,7 @@ fn generate_fibonacci_proof() -> (Vec<u8>, Vec<u8>, String) {
     let (pk, vk) = client.setup(FIBONACCI_ELF);
     println!("vk: {:?}", vk.bytes32());
     let proof = client.prove(&pk, stdin).groth16().run().unwrap();
-    (proof.bytes(), proof.public_values.to_vec(), vk.bytes32())
+    (proof.bytes().expect("the proof has a byte encoding"), proof.public_values.to_vec(), vk.bytes32())
 }
 
 fn main() {

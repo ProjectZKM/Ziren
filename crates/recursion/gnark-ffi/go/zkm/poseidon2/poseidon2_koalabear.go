@@ -4,6 +4,7 @@ import (
 	"math/big"
 
 	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/poseidon2/diagonal"
 	"github.com/consensys/gnark/frontend"
 )
 
@@ -118,27 +119,10 @@ func (p *Poseidon2KoalaBearChip) externalLinearLayer(state *[KOALABEAR_WIDTH]koa
 	}
 }
 
-// todo: update
 func (p *Poseidon2KoalaBearChip) diffusionPermuteMut(state *[KOALABEAR_WIDTH]koalabear.Variable) {
-	// Reference: https://github.com/ProjectZKM/Plonky3/blob/main/koala-bear/src/poseidon2.rs#L10
-	// V = [-2, 1, 2, 1/2, 3, 4, -1/2, -3, -4, 1/2^8, 1/8, 1/2^24, -1/2^8, -1/8, -1/16, -1/2^24]
-	matInternalDiagM1 := [KOALABEAR_WIDTH]koalabear.Variable{
-		koalabear.NewFConst("2130706431"),
-		koalabear.NewFConst("1"),
-		koalabear.NewFConst("2"),
-		koalabear.NewFConst("1065353217"),
-		koalabear.NewFConst("3"),
-		koalabear.NewFConst("4"),
-		koalabear.NewFConst("1065353216"),
-		koalabear.NewFConst("2130706430"),
-		koalabear.NewFConst("2130706429"),
-		koalabear.NewFConst("2122383361"),
-		koalabear.NewFConst("1864368129"),
-		koalabear.NewFConst("2130706306"),
-		koalabear.NewFConst("8323072"),
-		koalabear.NewFConst("266338304"),
-		koalabear.NewFConst("133169152"),
-		koalabear.NewFConst("127"),
+	matInternalDiagM1 := [KOALABEAR_WIDTH]koalabear.Variable{}
+	for i, v := range diagonal.KoalaBearInternalDiagM1 {
+		matInternalDiagM1[i] = koalabear.NewFConst(v)
 	}
 	p.matmulInternal(state, &matInternalDiagM1)
 }

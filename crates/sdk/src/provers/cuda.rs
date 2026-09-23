@@ -9,7 +9,7 @@ use zkm_cuda::{ZKMCudaProver, ZKMGpuServer};
 use zkm_prover::ZKM_CIRCUIT_VERSION;
 use zkm_prover::{components::DefaultProverComponents, ZKMProver};
 
-use crate::install::try_install_circuit_artifacts;
+use crate::install::{try_install_circuit_artifacts, CircuitArtifacts};
 use crate::{
     provers::ProofOpts, Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey,
     ZKMVerifyingKey,
@@ -96,7 +96,7 @@ impl CudaProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("plonk", ZKM_CIRCUIT_VERSION)
+                try_install_circuit_artifacts(CircuitArtifacts::Plonk, ZKM_CIRCUIT_VERSION)
             };
             let proof = self.cpu_prover.wrap_plonk_bn254(outer_proof, &plonk_bn254_artifacts);
             let proof_with_pv = ZKMProofWithPublicValues {
@@ -112,7 +112,7 @@ impl CudaProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
+                try_install_circuit_artifacts(CircuitArtifacts::Groth16, ZKM_CIRCUIT_VERSION)
             };
 
             let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
@@ -179,7 +179,7 @@ impl CudaProver {
                 &outer_proof.proof,
             )
         } else {
-            try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
+            try_install_circuit_artifacts(CircuitArtifacts::Groth16, ZKM_CIRCUIT_VERSION)
         };
 
         let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
