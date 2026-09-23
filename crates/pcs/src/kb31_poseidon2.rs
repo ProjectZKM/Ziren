@@ -316,16 +316,7 @@ pub mod koala_bear_poseidon2 {
         chip_traces: &[(String, p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
         pin: Option<crate::jagged::AreaPin>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
-        inner_prep_precompute_owned(chip_traces.to_vec(), pin)
-    }
-
-    /// [`inner_prep_precompute`] consuming the traces, for a caller done with
-    /// them: the cells move into the commit's views with no copy.
-    pub fn inner_prep_precompute_owned(
-        chip_traces: Vec<(String, p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>)>,
-        pin: Option<crate::jagged::AreaPin>,
-    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
-        let chip_trace_views = crate::jagged_pcs::jagged::views_over_traces(chip_traces);
+        let chip_trace_views = crate::jagged_pcs::jagged::views_over_owned(chip_traces);
         <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
             &chip_trace_views,
             pin,
@@ -366,17 +357,6 @@ pub mod koala_bear_poseidon2 {
             commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
         ) -> [crate::jagged_pcs::JaggedVal; 8] {
             crate::jagged_pcs::basefold_commit_digest_felts(commit)
-        }
-
-        fn whir_committed_bf_prover_data(
-            commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
-        ) -> Option<
-            <Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
-                p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
-            >,
-        > {
-            let root = crate::jagged_pcs::basefold_commit_digest_felts(commit);
-            Some(p3_merkle_tree::MerkleTree::from_parts(Vec::new(), vec![vec![root]], Vec::new()))
         }
 
         // `commit_multilinears` — the ring commit — is the trait DEFAULT

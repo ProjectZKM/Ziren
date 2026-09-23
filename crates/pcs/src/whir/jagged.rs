@@ -34,10 +34,10 @@ use crate::jagged_pcs::{
     DEFAULT_BATCH_SIZE,
 };
 use crate::whir::config::{RoundConfig, WhirConfig};
-use crate::whir::error::WhirVerifierError;
 use crate::whir::stacked::{
     StackedWhirProof, StackedWhirProver, StackedWhirProverData, StackedWhirVerifier,
 };
+use crate::whir::error::WhirVerifierError;
 
 /// Prover-side state kept after a jagged-WHIR commit.
 pub struct JaggedWhirProverDataGeneric<MT: Mmcs<JaggedVal>> {
@@ -158,26 +158,20 @@ fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
 /// Split the stacking interleave's width-`batch` stripes into width-1
 /// polynomials, in the SAME flat order BaseFold's `round_batch_evaluations`
 /// reports (stripe-major, then column: `eval_at` returns per-column evals).
-///
-/// One gather per column, the columns of an interleave in parallel: the
-/// width-1 form is the one the round-0 engine and the device upload read
-/// (one stripe per `Arc<Mle>`, each `2^log_stacking_height` values), so it
-/// is kept as the committed representation.
-fn split_stripes_to_polys(stripes: &[Arc<Mle<JaggedVal>>]) -> Vec<Arc<Mle<JaggedVal>>> {
-    use p3_maybe_rayon::prelude::*;
+fn split_stripes_to_polys(stripes: Vec<Arc<Mle<JaggedVal>>>) -> Vec<Arc<Mle<JaggedVal>>> {
     let mut polys = Vec::new();
     for stripe in stripes {
         let width = stripe.num_polynomials();
         let vals = stripe.guts().as_slice();
         if width <= 1 {
-            polys.push(Arc::clone(stripe));
+            polys.push(stripe.clone());
             continue;
         }
         let height = vals.len() / width;
-        polys.par_extend((0..width).into_par_iter().map(|col| {
+        for col in 0..width {
             let column: Vec<JaggedVal> = (0..height).map(|r| vals[r * width + col]).collect();
-            Arc::new(Mle::from_row_major(RowMajorMatrix::new(column, 1)))
-        }));
+            polys.push(Arc::new(Mle::from_row_major(RowMajorMatrix::new(column, 1))));
+        }
     }
     polys
 }
@@ -202,39 +196,6 @@ where
 
     let stripes =
         interleave_multilinears_with_fixed_rate(DEFAULT_BATCH_SIZE, mles, log_stacking_height);
-    commit_jagged_whir_from_stripes(
-        &stripes,
-        chip_dims,
-        area,
-        log_stacking_height,
-        mmcs,
-        dft,
-        config,
-    )
-}
-
-/// Commit an already stacked dense polynomial under jagged-WHIR: `stripes`
-/// are its width-`DEFAULT_BATCH_SIZE` interleaves (column `c` of interleave
-/// `i` is stripe `i · DEFAULT_BATCH_SIZE + c`), exactly what
-/// `interleave_multilinears_with_fixed_rate` produces and what a BaseFold
-/// stacking of the same dense keeps as its `interleaved_mles`.  A caller that
-/// keeps the interleaves for the jagged reduction therefore stacks once and
-/// commits once; the commitment and prover data are those of
-/// [`commit_jagged_whir_generic`] over the same cells.
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
-pub fn commit_jagged_whir_from_stripes<MT, D>(
-    stripes: &[Arc<Mle<JaggedVal>>],
-    chip_dims: Vec<(usize, u32)>,
-    area: usize,
-    log_stacking_height: u32,
-    mmcs: MT,
-    dft: Arc<D>,
-    config: WhirConfig,
-) -> (JaggedCommitGeneric<MT>, JaggedWhirProverDataGeneric<MT>)
-where
-    MT: Mmcs<JaggedVal, Commitment: Clone, ProverData<RowMajorMatrix<JaggedVal>>: 'static> + Clone,
-    D: TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
-{
     let polys = split_stripes_to_polys(stripes);
     debug_assert_eq!(polys.len(), area >> log_stacking_height);
 
