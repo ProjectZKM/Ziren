@@ -114,9 +114,18 @@ impl<T, A: Allocator> RawBuffer<T, A> {
         self.inner.allocator()
     }
 
+    /// Returns a mutable reference to the allocator backing this buffer.
+    ///
     /// # Safety
     ///
-    /// TODO
+    /// The buffer's block (`ptr`, `cap`) was allocated by this allocator and
+    /// will be deallocated through it, so a mutation must leave the allocator
+    /// one that still owns that block under the same layout: it must not
+    /// change the memory space the block lives in, invalidate its address or
+    /// provenance, release it, or make a later `deallocate` of it run under a
+    /// different allocator identity. Replacing the allocator value wholesale
+    /// is sound only when the replacement is clone-equivalent to the current
+    /// one in the sense of [`crate::tensor::backend::Backend`].
     #[inline]
     pub unsafe fn allocator_mut(&mut self) -> &mut A {
         &mut self.inner.alloc
