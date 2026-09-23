@@ -444,7 +444,10 @@ TEXT runtime·clone(SB),NOSPLIT|NOFRAME,$0-24
 	MOVW	R16, g_m(R17)
 	MOVW	R17, g
 
-// TODO(mips32): doesn't have runtime·stackcheck(SB)
+// The MIPS overlay has no runtime·stackcheck(SB): the new goroutine's stack
+// is not verified against g0 here, so a clone that lands on a wrong stack
+// pointer is caught later by the guest's own memory checks, not at this
+// return.
 
 nog:
 	// Call fn
