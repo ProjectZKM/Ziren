@@ -47,7 +47,7 @@ pub enum ArkGroth16Error {
 pub struct ArkProof {
     pub groth16_vk: PreparedVerifyingKey<Bn<Config>>,
     pub proof: Proof<Bn<Config>>,
-    pub public_inputs: [Fp<MontBackend<FrConfig, 4>, 4>; 2],
+    pub public_inputs: [Fp<MontBackend<FrConfig, 4>, 4>; 3],
 }
 
 pub fn convert_ark(
@@ -70,6 +70,7 @@ pub fn convert_ark(
     let ark_public_inputs = load_ark_public_inputs_from_bytes(
         &decode_zkm_vkey_hash(vkey_hash)?,
         &hash_public_inputs(&public_inputs),
+        &crate::VK_ROOT_BYTES,
     );
 
     Ok(ArkProof {
@@ -101,8 +102,11 @@ pub fn convert_ark_imm_wrap_vk(
 
     let ark_proof = load_ark_proof_from_bytes(&proof[4..])?;
     let ark_groth16_vk = load_ark_groth16_verifying_key_from_bytes(imm_groth16_vk)?;
-    let ark_public_inputs =
-        load_ark_public_inputs_from_bytes(&vk_hash, &hash_public_inputs(&public_inputs));
+    let ark_public_inputs = load_ark_public_inputs_from_bytes(
+        &vk_hash,
+        &hash_public_inputs(&public_inputs),
+        &crate::VK_ROOT_BYTES,
+    );
 
     Ok(ArkProof {
         groth16_vk: ark_groth16_vk.into(),
@@ -285,12 +289,18 @@ pub fn load_ark_groth16_verifying_key_from_bytes(
 
 /// Load the public inputs from the bytes in the arkworks format.
 ///
-/// This reads the vkey hash and the committed values digest as big endian Fr elements.
+/// The outer circuit takes three: the vkey hash, the committed values digest
+/// and the recursion vk root, each a big endian Fr element.
 pub fn load_ark_public_inputs_from_bytes(
     vkey_hash: &[u8; 32],
     committed_values_digest: &[u8; 32],
-) -> [Fr; 2] {
-    [Fr::from_be_bytes_mod_order(vkey_hash), Fr::from_be_bytes_mod_order(committed_values_digest)]
+    vk_root: &[u8; 32],
+) -> [Fr; 3] {
+    [
+        Fr::from_be_bytes_mod_order(vkey_hash),
+        Fr::from_be_bytes_mod_order(committed_values_digest),
+        Fr::from_be_bytes_mod_order(vk_root),
+    ]
 }
 
 #[cfg(test)]
