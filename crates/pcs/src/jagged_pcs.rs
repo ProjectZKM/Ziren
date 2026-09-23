@@ -1140,24 +1140,31 @@ pub mod jagged {
     }
 
     /// `ChipTraceView`s over a re-materialized trace set
-    /// (`rematerialize_chip_traces_via_provider`).
-    ///
-    /// The views OWN their cells: each chip's storage is copied into a fresh
-    /// `Arc<Mle>` padded to `ceil_log2(h_c)` variables, so `owned` may be dropped
-    /// immediately.  TODO: a consuming variant would move instead — every caller
-    /// passes a local used once — but the callers live in `ziren-gpu`.
+    /// (`rematerialize_chip_traces_via_provider`), borrowed: each chip's
+    /// cells are copied once into their `Arc<Mle>`, so `owned` stays usable.
+    /// A caller done with its traces takes [`views_over_traces`] instead and
+    /// pays no copy; the in-tree callers are the preprocessed-round commits of
+    /// both rings (`inner_prep_precompute`, `outer_prep_precompute`), which
+    /// borrow because the configuration trait hands them a slice.
     pub fn views_over_owned(
         owned: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
     ) -> alloc::vec::Vec<ChipTraceView> {
+        views_over_traces(owned.to_vec())
+    }
+
+    /// [`views_over_owned`] consuming its traces: each chip's name and cells
+    /// move into their `Arc<Mle>`, padded to `ceil_log2(h_c)` variables, with
+    /// no copy of the trace.
+    pub fn views_over_traces(
+        owned: alloc::vec::Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)>,
+    ) -> alloc::vec::Vec<ChipTraceView> {
         owned
-            .iter()
+            .into_iter()
             .map(|(name, m)| {
                 let h = m.values.len().checked_div(m.width).unwrap_or(0);
                 let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
-                let mle = alloc::sync::Arc::new(crate::basefold::Mle::from_row_major(
-                    RowMajorMatrix::new(m.values.clone(), m.width),
-                ));
-                (name.clone(), crate::multilinear::PaddedMle::padded_with_zeros(mle, log_h))
+                let mle = alloc::sync::Arc::new(crate::basefold::Mle::from_row_major(m));
+                (name, crate::multilinear::PaddedMle::padded_with_zeros(mle, log_h))
             })
             .collect()
     }

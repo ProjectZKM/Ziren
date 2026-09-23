@@ -27,9 +27,39 @@ use crate::tensor::{
     Allocator,
 };
 
+/// A memory space with its own allocator and copy primitives.
+///
 /// # Safety
 ///
-/// TODO
+/// The safe containers (`Buffer`, `Tensor`) turn this trait's guarantees into
+/// references and slices, so an implementation must uphold all of the
+/// following; each one is a soundness condition on a safe caller.
+///
+/// * **Allocation ownership.** Every block returned by the [`Allocator`]
+///   methods belongs to the container that received it until that container
+///   deallocates it through the same backend; the block stays valid (same
+///   address, same size, same memory space) for that whole time, across
+///   clones of the backend value and across threads.
+/// * **Clone equivalence.** A clone of a backend value addresses the same
+///   memory space and the same allocator state: a block allocated through one
+///   clone may be read, written, copied and deallocated through any other,
+///   with identical results.
+/// * **Memory operations.** [`DeviceMemory::copy_nonoverlapping`] and
+///   [`DeviceMemory::write_bytes`] act on the memory space this backend
+///   names for each direction and are COMPLETE when they return (the
+///   completion condition documented on [`DeviceMemory`]); an asynchronous
+///   backend synchronizes before returning, because the safe callers free
+///   the source and read the destination on the next line.
+/// * **Deallocation.** `deallocate` is called exactly once per block, with
+///   the layout it was allocated under, and must not run while any copy into
+///   or out of the block is outstanding.
+/// * **Thread safety.** The `Send + Sync` bound is a promise that all of the
+///   above hold when the backend value is shared between threads: allocation,
+///   copy and deallocation of DISTINCT blocks may proceed concurrently, and
+///   operations on one block are ordered by the container that owns it.
+///
+/// Only a backend whose pointers are host-dereferenceable may additionally
+/// implement [`HostAddressable`]; the bound above says nothing about that.
 pub unsafe trait Backend:
     Sized + Allocator + DeviceMemory + Clone + Debug + Send + Sync + 'static
 {

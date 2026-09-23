@@ -1,68 +1,45 @@
-//! WHIR multilinear PCS — a port of the upstream `slop_whir` onto Ziren's field
-//! and Merkle types.
+//! WHIR multilinear PCS on Ziren's field and Merkle types.
 //!
-//! The upstream core shard PCS is jagged-WHIR (`hypercube::verifier::shard.rs` builds
-//! `slop_whir::Verifier`); Ziren's is jagged-BaseFold.  This module ports WHIR so the two can be matched.  `slop_whir` itself is not vendorable — it pulls
-//! in ~18 sibling `slop` crates — so this is a from-scratch reimplementation on
-//! `zkm-pcs` primitives (the same [`crate::basefold::encoder::DftEncoder`] and
-//! `Mmcs` BaseFold uses).
+//! The production path is the **stacked** prover/verifier pair
+//! ([`stacked::StackedWhirProver`] / [`stacked::StackedWhirVerifier`]) driven by
+//! the jagged layer in [`jagged`]: the stacking-height stripes of a jagged
+//! commitment are the round-0 codewords, one λ-combined virtual polynomial is
+//! folded through the round tower, and every round's STIR queries are
+//! Merkle-opened against the previous codeword and folded into the running
+//! claim.  [`jagged::core_whir_config`] fixes the production geometry — folds
+//! `[3, 6, 6, …]`, two OOD samples per committed round, per-round query
+//! counts chosen for 100 bits in the unique-decoding regime, a 16-bit query
+//! grind and the batching grind — and `whir_circuit.rs` in the recursion
+//! circuit verifies the same transcript in-circuit.
 //!
-//! ## Phase map
+//! The building blocks are shared with the production path: [`config`] holds
+//! the round parameters, [`proof`] the wire types, [`sumcheck::prove_fold`]
+//! the eq-weighted, OOD-batched degree-2 folding sumcheck whose invariant
+//! `claim = Σ_x weight[x]·f[x]` threads every round, and [`monomial`] the
+//! coset point-map that turns an opened coset into a STIR constraint.
 //!
-//! * **Phase 1 (here): config + proof types + OOD commit, validated
-//!   standalone.**  [`config`] mirrors `WhirProofShape`/`RoundConfig`,
-//!   [`proof`] mirrors `WhirProof`/`ParsedCommitment`, and
-//!   [`prover::WhirProver::commit_with_ood`] performs the RS-encode +
-//!   Merkle-commit + OOD sampling that is WHIR's commitment.  The
-//!   `commit_ood_answers_are_correct` test checks the OOD answers equal the
-//!   committed polynomial's evaluations at the drawn points.
-//! * **Phase 2a (here): the folding sumcheck** — [`sumcheck::prove_fold`]
-//!   runs the eq-weighted, OOD-batched degree-2 sumcheck that folds the
-//!   committed polynomial to a point, with per-round PoW grinding.  The
-//!   `folds_reduce_the_claim` test checks its soundness identity
-//!   (`reduced claim == weight(r)·f(r)`) and that the fold equals partial
-//!   evaluation.  This is the cryptographic core of the WHIR prover.
-//! * **Phase 2b (here): the folding tower** —
-//!   [`round_prover::WhirProver::prove_rounds`] chains phase 1 and phase 2a into
-//!   WHIR's multi-round structure: fold `folding_factor` variables, re-encode
-//!   the folded polynomial at the round's rate, Merkle-commit it, draw fresh
-//!   OOD, and fold those constraints into the running claim; repeat, then reveal
-//!   the final small polynomial.  The claim threads through every round by the
-//!   invariant `claim = Σ_x weight[x]·f[x]`; the `tower_*` tests check that
-//!   master identity end to end, per-round OOD correctness, and that the tower
-//!   folds the original polynomial.
-//! * **Phase 2c (here): the full prover + query openings** —
-//!   [`full_prover::WhirProver::prove`] runs the complete prover and assembles
-//!   a [`proof::WhirProof`]: the tower, plus per round it commits each folded
-//!   codeword with `2^folding_factor` interleaved rows per Merkle leaf, samples
-//!   `num_queries` indices into the previous codeword's domain, opens those
-//!   cosets, and folds each to a `stir_value`, grinding the real PoW.  This is
-//!   the prover whose work the WHIR-vs-BaseFold benchmark (`bench_whir_vs_
-//!   basefold`) times.
-//! * **Phase 3 (here): the verifier** — [`verifier::WhirVerifier::verify_
-//!   rounds`] replays the transcript, checks every sumcheck message and PoW,
-//!   re-samples the OOD points, and checks the terminal identity
-//!   `claim == Σ_constraints c·eq(p[..k],cfr)·final_poly(p[k..])` — the
-//!   verifier-side reconstruction of `Σ_x weight[x]·final_poly[x]`.  The
-//!   `tower_roundtrip_verifies` test proves→verifies and rejects tampering.
-//!   REMAINING: the STIR query authentication (Merkle-open each codeword at the
-//!   sampled indices + fold the coset into a constraint via the monomial
-//!   point-map) — the interleaved-encode / point-map is the deep piece; the
-//!   full prover already emits the openings.
-//! * Phase 4: wrap in the jagged layer (`JaggedPcsVerifier<WhirVerifier>`),
-//!   replacing BaseFold in the shard-level PCS.
-//! * Phase 5: the recursion-circuit WHIR verifier (upstream's is `#![cfg(test)]`).
+//! `prover`, `round_prover`, `full_prover`, `interleaved` and `verifier` are
+//! the earlier single-polynomial (non-stacked) prover and verifier variants.
+//! They share the transcript rules above but are exercised only by this
+//! module's tests, so they compile only with them; the verdict type they
+//! share with the production verifier lives in [`error`].
 
 pub mod config;
+pub mod error;
+#[cfg(test)]
 pub mod full_prover;
+#[cfg(test)]
 pub mod interleaved;
 pub mod jagged;
 pub mod monomial;
 pub mod proof;
+#[cfg(test)]
 pub mod prover;
+#[cfg(test)]
 pub mod round_prover;
 pub mod stacked;
 pub mod sumcheck;
+#[cfg(test)]
 pub mod verifier;
 
 #[cfg(test)]

@@ -132,7 +132,7 @@ where
             return Err(BasefoldVerifierError::SumcheckFriLengthMismatch);
         }
 
-        let point_rev = eval_point.clone();
+        let point_rev = eval_point;
 
         challenger.observe(F::from_usize(num_variables));
 

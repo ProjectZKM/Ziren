@@ -151,6 +151,37 @@ pub struct BasefoldProverData<F: Field, MT: Mmcs<F>> {
     pub digest_layers: Vec<Vec<[F; 8]>>,
 }
 
+/// Rows per parallel tile of [`batch_rows`]: `2^12` rows keeps a worker's
+/// output slice in cache while the tile count stays far above the thread
+/// count for every production height.
+const BATCH_ROW_TILE: usize = 1 << 12;
+
+/// `out[row] = Σ_i Σ_k coeffs_i[k] · table_i[row · n_i + k]` over every
+/// `(table_i, coeffs_i)` — the random linear combination of `n_i`-wide
+/// row-major tables into one column — with each output row written once by
+/// the tile that owns it, every table read once per tile.  Field arithmetic
+/// is exact, so the per-row sum is the one the input-by-input accumulation
+/// forms.
+fn batch_rows<F: Field, EF: ExtensionField<F>>(inputs: &[(&[F], &[EF])], rows: usize) -> Vec<EF> {
+    use p3_maybe_rayon::prelude::*;
+    let mut out = vec![EF::ZERO; rows];
+    out.par_chunks_mut(BATCH_ROW_TILE).enumerate().for_each(|(tile, chunk)| {
+        let base = tile * BATCH_ROW_TILE;
+        for (table, coeffs) in inputs {
+            let n = coeffs.len();
+            for (r, acc) in chunk.iter_mut().enumerate() {
+                let row_start = (base + r) * n;
+                let mut row_sum = EF::ZERO;
+                for k in 0..n {
+                    row_sum += coeffs[k] * table[row_start + k];
+                }
+                *acc += row_sum;
+            }
+        }
+    });
+    out
+}
+
 pub struct BasefoldProver<F: Field, EF: ExtensionField<F>, MT: Mmcs<F>, D> {
     pub encoder: DftEncoder<F, D>,
     pub mmcs: MT,
@@ -261,12 +292,9 @@ where
         let hyp_size = 1usize << num_variables;
         let codeword_height = mle_rounds[0][0].hypercube_size() << self.config().log_blowup();
 
-        let mut batched_mle = vec![EF::ZERO; hyp_size];
-        let mut batched_codeword_ef = vec![EF::ZERO; codeword_height];
+        let mut inputs: Vec<(&[F], &[F], &[EF])> = Vec::new();
         let mut batched_eval = EF::ZERO;
         let mut coeff_idx = 0usize;
-
-        use p3_maybe_rayon::prelude::*;
         for ((mles, codewords), evals) in
             mle_rounds.iter().zip(codeword_rounds.iter()).zip(evaluation_claims_rounds.iter())
         {
@@ -274,31 +302,10 @@ where
             for (mle, codeword) in mles.iter().zip(codewords.iter()) {
                 let n_polys = mle.num_polynomials();
                 let coeffs = &batching_coefficients[coeff_idx..coeff_idx + n_polys];
-
                 debug_assert_eq!(mle.hypercube_size(), hyp_size);
-                let mle_vals = mle.guts().as_slice();
-                batched_mle.par_iter_mut().enumerate().for_each(|(row, acc)| {
-                    let row_start = row * n_polys;
-                    let mut row_sum = EF::ZERO;
-                    for k in 0..n_polys {
-                        row_sum += coeffs[k] * mle_vals[row_start + k];
-                    }
-                    *acc += row_sum;
-                });
-
-                let cw_row_width = codeword.data.width();
-                let cw_vals = &codeword.data.values;
-                debug_assert_eq!(cw_row_width, n_polys);
+                debug_assert_eq!(codeword.data.width(), n_polys);
                 debug_assert_eq!(codeword.data.height(), codeword_height);
-                batched_codeword_ef.par_iter_mut().enumerate().for_each(|(row, acc)| {
-                    let row_start = row * cw_row_width;
-                    let mut row_sum = EF::ZERO;
-                    for k in 0..n_polys {
-                        row_sum += coeffs[k] * cw_vals[row_start + k];
-                    }
-                    *acc += row_sum;
-                });
-
+                inputs.push((mle.guts().as_slice(), &codeword.data.values, coeffs));
                 for k in 0..n_polys {
                     batched_eval += coeffs[k] * evals[eval_in_round + k];
                 }
@@ -306,6 +313,12 @@ where
                 coeff_idx += n_polys;
             }
         }
+        let batched_mle =
+            batch_rows(&inputs.iter().map(|(m, _, c)| (*m, *c)).collect::<Vec<_>>(), hyp_size);
+        let batched_codeword_ef = batch_rows(
+            &inputs.iter().map(|(_, cw, c)| (*cw, *c)).collect::<Vec<_>>(),
+            codeword_height,
+        );
 
         let batched_codeword_storage =
             <EF as p3_field::BasedVectorSpace<F>>::flatten_to_base(batched_codeword_ef);
@@ -478,5 +491,52 @@ where
             pow_witness,
             batch_grinding_witness,
         }
+    }
+}
+
+#[cfg(test)]
+mod batch_rows_tests {
+    use super::batch_rows;
+    use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
+    use p3_field::PrimeCharacteristicRing;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+
+    /// The tiled combination equals the input-by-input, row-by-row reference
+    /// on random tables of mixed widths spanning several tiles.
+    #[test]
+    fn tiled_batch_equals_reference() {
+        let mut rng = StdRng::seed_from_u64(0xBA7C);
+        let rows = 3 * super::BATCH_ROW_TILE + 17;
+        let widths = [1usize, 4, 32, 7];
+        let tables: Vec<Vec<InnerVal>> = widths
+            .iter()
+            .map(|w| (0..rows * w).map(|_| InnerVal::from_u32(rng.gen::<u32>() >> 1)).collect())
+            .collect();
+        let coeffs: Vec<Vec<InnerChallenge>> = widths
+            .iter()
+            .map(|w| {
+                (0..*w)
+                    .map(|_| {
+                        InnerChallenge::from_u32(rng.gen::<u32>() >> 1)
+                            * InnerChallenge::from_u32(7)
+                    })
+                    .collect()
+            })
+            .collect();
+        let inputs: Vec<(&[InnerVal], &[InnerChallenge])> =
+            tables.iter().zip(coeffs.iter()).map(|(t, c)| (t.as_slice(), c.as_slice())).collect();
+        let mut reference = vec![InnerChallenge::ZERO; rows];
+        for (table, cs) in inputs.iter() {
+            let n = cs.len();
+            for (row, acc) in reference.iter_mut().enumerate() {
+                let mut row_sum = InnerChallenge::ZERO;
+                for k in 0..n {
+                    row_sum += cs[k] * table[row * n + k];
+                }
+                *acc += row_sum;
+            }
+        }
+        assert_eq!(batch_rows(&inputs, rows), reference);
     }
 }

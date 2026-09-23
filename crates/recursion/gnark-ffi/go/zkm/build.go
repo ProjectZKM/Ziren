@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"path/filepath"
     "io"
 	"github.com/consensys/gnark-crypto/ecc"
@@ -24,12 +25,45 @@ import (
     fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
 )
 
+// buildMutex serializes the build entry points: the circuit configuration is
+// read from process-global environment variables, so two builds in one process
+// would otherwise race on each other's constraints file and Groth16 flag.
+var buildMutex sync.Mutex
+
+// withBuildConfig runs `body` with CONSTRAINTS_JSON and GROTH16 set for this
+// build, under buildMutex, and restores both variables afterwards so a later
+// build or prove in the same process starts from the state it found.
+func withBuildConfig(constraintsJson string, groth16 bool, body func()) {
+	buildMutex.Lock()
+	defer buildMutex.Unlock()
+	prevConstraints, hadConstraints := os.LookupEnv("CONSTRAINTS_JSON")
+	prevGroth16, hadGroth16 := os.LookupEnv("GROTH16")
+	defer func() {
+		restoreEnv("CONSTRAINTS_JSON", prevConstraints, hadConstraints)
+		restoreEnv("GROTH16", prevGroth16, hadGroth16)
+	}()
+	os.Setenv("CONSTRAINTS_JSON", constraintsJson)
+	if groth16 {
+		os.Setenv("GROTH16", "1")
+	} else {
+		os.Unsetenv("GROTH16")
+	}
+	body()
+}
+
+func restoreEnv(key string, value string, present bool) {
+	if present {
+		os.Setenv(key, value)
+	} else {
+		os.Unsetenv(key)
+	}
+}
+
 func BuildPlonk(dataDir string) {
-	// Set the environment variable for the constraints file.
-	//
-	// TODO: There might be some non-determinism if a single process is running this command
-	// multiple times.
-	os.Setenv("CONSTRAINTS_JSON", dataDir+"/"+constraintsJsonFile)
+	withBuildConfig(dataDir+"/"+constraintsJsonFile, false, func() { buildPlonk(dataDir) })
+}
+
+func buildPlonk(dataDir string) {
 
 	// Read the file.
 	witnessInputPath := dataDir + "/" + plonkWitnessPath
@@ -202,12 +236,10 @@ func BuildPlonk(dataDir string) {
 }
 
 func BuildGroth16(dataDir string) {
-	// Set the environment variable for the constraints file.
-	//
-	// TODO: There might be some non-determinism if a single process is running this command
-	// multiple times.
-	os.Setenv("CONSTRAINTS_JSON", dataDir+"/"+constraintsJsonFile)
-	os.Setenv("GROTH16", "1")
+	withBuildConfig(dataDir+"/"+constraintsJsonFile, true, func() { buildGroth16(dataDir) })
+}
+
+func buildGroth16(dataDir string) {
 
 	// Read the file.
 	witnessInputPath := dataDir + "/" + groth16WitnessPath
@@ -420,18 +452,15 @@ func DumpR1CSIfItExists(storeDir string) bool {
 }
 
 func BuildDvSnark(dataDir string, storeDir string) {
+	withBuildConfig(dataDir+"/"+constraintsJsonFile, true, func() { buildDvSnark(dataDir, storeDir) })
+}
+
+func buildDvSnark(dataDir string, storeDir string) {
     r1cs_dumped := DumpR1CSIfItExists(storeDir)
 	if r1cs_dumped {
 		fmt.Println("r1cs_cache already exists, converted to format r1cs_to_dvsnark")
 		return
 	}
-
-	// Set the environment variable for the constraints file.
-	//
-	// TODO: There might be some non-determinism if a single process is running this command
-	// multiple times.
-	os.Setenv("CONSTRAINTS_JSON", dataDir+"/"+constraintsJsonFile)
-	os.Setenv("GROTH16", "1")
 
 	// Read the file.
 	witnessInputPath := dataDir + "/" + dvsnarkWitnessPath

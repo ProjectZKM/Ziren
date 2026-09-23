@@ -37,12 +37,14 @@
 //!   the resulting [`ExecutionRecord`]s back into shard order without a
 //!   side channel.
 //!
-//! TODO:
-//! - Populate `mem_reads` from JIT memory-read instrumentation. Today this
-//!   field is left empty by the JIT emit path; the TracingVM will fall
-//!   back to re-reading guest memory directly. The oracle becomes load-
-//!   bearing only when we move to a process-per-shard model where
-//!   the JIT and TracingVM live in different address spaces.
+//! - `mem_reads` is the load-bearing replay oracle: the recording executor
+//!   pushes the pre-access value of every user memory access
+//!   (`Executor::recording_chunk_mem_reads`) and seals the run into the
+//!   chunk, and the replay consumes it as a positional cursor — the Nth
+//!   user access of the chunk reads the Nth entry. A chunk that starts
+//!   mid-program therefore reconstructs memory it never executed up to
+//!   without a per-address image, so the oracle must be complete and in
+//!   access order; `TracingVM::execute_from_chunk` documents the cursor.
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

@@ -180,7 +180,6 @@ impl Clone for GlobalCumulativeSumCell {
 /// A record of the execution of a program.
 ///
 /// The trace of the execution is represented as a list of "events" that occur every cycle.
-// todo: add logic opcode here, use bitwise_events
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct ExecutionRecord {
     /// The program.

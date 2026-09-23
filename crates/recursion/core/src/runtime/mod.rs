@@ -49,7 +49,6 @@ use zkm_pcs::septic_extension::SepticExtension;
 
 use crate::air::{Block, RECURSIVE_PROOF_NUM_PV_ELTS};
 
-/// TODO expand glob import once things are organized enough
 use crate::*;
 
 pub const STACK_SIZE: usize = 1 << 24;

@@ -41,37 +41,11 @@ use p3_matrix::Matrix;
 
 use crate::basefold::mle::Mle;
 use crate::basefold::proof::{LeafOpening, MerkleOpening};
-use crate::whir::monomial::monomial_partial_eq;
+use crate::whir::monomial::{map_to_pow_lsb, mono_eval_lsb};
 use crate::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
 use crate::whir::prover::WhirProver;
 use crate::whir::sumcheck::{batched_eq_weight, WhirFolder};
 use crate::whir::verifier::WhirVerifierError;
-
-/// `[x, x², x⁴, …, x^{2^{len-1}}]` — LSB-first: element `j` is variable `j`'s
-/// coordinate, so the table below aligns with the tower's hypercube indexing.
-pub fn map_to_pow_lsb<EF: p3_field::Field>(x: EF, len: usize) -> Vec<EF> {
-    let mut res = Vec::with_capacity(len);
-    let mut e = x;
-    for _ in 0..len {
-        res.push(e);
-        e = e.square();
-    }
-    res
-}
-
-/// The monomial weight table for an LSB-first point: `t[i] = Π_j pt_j^{bit_j(i)}`
-/// with bit 0 the LSB — for `pt = map_to_pow_lsb(x)` this is `t[i] = x^i`.
-pub fn mono_table_lsb<EF: p3_field::Field>(point_lsb: &[EF]) -> Vec<EF> {
-    let rev: Vec<EF> = point_lsb.iter().rev().copied().collect();
-    monomial_partial_eq(&rev)
-}
-
-/// Monomial evaluation of a value vector at an LSB-first point.
-pub fn mono_eval_lsb<EF: p3_field::Field>(values: &[EF], point_lsb: &[EF]) -> EF {
-    let t = mono_table_lsb(point_lsb);
-    debug_assert_eq!(t.len(), values.len());
-    values.iter().zip(&t).map(|(&v, &w)| v * w).sum()
-}
 
 /// Interleaved RS-encode of a BASE-field value vector: reshape to
 /// `[2^{v-ff}, 2^ff]` (row-major — the low `ff` bits are the column), zero-pad
@@ -144,66 +118,6 @@ where
 {
     let vals = leaf_to_ef::<F, EF>(leaf, ff, base);
     Mle::from_row_major(RowMajorMatrix::new(vals, 1)).eval_at::<EF>(folding_randomness)[0]
-}
-
-impl<EF: p3_field::Field> WhirFolder<EF> {
-    /// Fold a round's STIR constraints into the running weight and claim, with
-    /// batching powers CONTINUING from `start_coeff` (the OOD constraints of
-    /// the same round consume the earlier powers of the same batch element).
-    ///
-    /// Each constraint is a MONOMIAL evaluation: `value = Σ_i t[i]·f[i]` with
-    /// `t = mono_table_lsb(point)`, so adding `coeff·t` to the weight and
-    /// `coeff·value` to the claim preserves `claim = Σ weight·f`.
-    pub fn add_monomial_constraints(
-        &mut self,
-        points_lsb: &[Vec<EF>],
-        values: &[EF],
-        batch: EF,
-        start_coeff: EF,
-    ) -> EF {
-        let (coeffs, next) = self.monomial_coeffs(values, batch, start_coeff);
-        self.absorb_monomial_tables(points_lsb, &coeffs);
-        next
-    }
-
-    /// The transcript half of [`Self::add_monomial_constraints`]: fold the
-    /// constraint VALUES into the claimed sum and return the per-constraint
-    /// batching coefficients (plus the next coefficient) — tiny, serial.
-    /// Split out so a device backend can take over the weight absorption.
-    pub fn monomial_coeffs(&mut self, values: &[EF], batch: EF, start_coeff: EF) -> (Vec<EF>, EF) {
-        let mut coeffs = Vec::with_capacity(values.len());
-        let mut coeff = start_coeff;
-        for &val in values {
-            coeffs.push(coeff);
-            self.claimed_sum += coeff * val;
-            coeff *= batch;
-        }
-        (coeffs, coeff)
-    }
-
-    /// The weight half of [`Self::add_monomial_constraints`]: absorb the
-    /// batched monomial tables into the weight.
-    ///
-    /// This was the whir open's measured host hot spot: 84 round-0 STIR
-    /// constraints x a 2^17 monomial table build + FMA each (~22M serial EF
-    /// ops per shard, ~0.3-0.5 s x 304 shards on a combined reth).  Build
-    /// the tables in parallel over constraints, then absorb in one parallel
-    /// pass over the weight index.  Bitwise identical: EF addition is
-    /// associative-exact (no floats), so any grouping gives the same value.
-    pub fn absorb_monomial_tables(&mut self, points_lsb: &[Vec<EF>], coeffs: &[EF]) {
-        use p3_maybe_rayon::prelude::*;
-        let tables: Vec<Vec<EF>> = points_lsb.par_iter().map(|pt| mono_table_lsb(pt)).collect();
-        for t in &tables {
-            debug_assert_eq!(t.len(), self.weight.len());
-        }
-        self.weight.par_iter_mut().enumerate().for_each(|(i, w)| {
-            let mut acc = EF::ZERO;
-            for (c, t) in coeffs.iter().zip(&tables) {
-                acc += *c * t[i];
-            }
-            *w += acc;
-        });
-    }
 }
 
 /// One accumulated terminal constraint on the verifier side.
