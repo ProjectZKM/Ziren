@@ -248,4 +248,51 @@ mod test {
         let proof = client.prove(&pk, stdin).run().unwrap();
         client.verify(&proof, &vk).unwrap();
     }
+
+    /// Deferred proofs through the GPU server: two compressed keccak proofs
+    /// are absorbed by the verify program, whose reduce tree takes them as
+    /// first-layer inputs after its core leaves.
+    #[ignore]
+    #[test]
+    fn test_deferred_proofs_cuda() {
+        use crate::{ZKMProof, ZKMProofWithPublicValues};
+        use zkm_prover::types::HashableKey;
+        utils::setup_logger();
+
+        let client = ProverClient::cuda();
+        let (keccak_pk, keccak_vk) = client.setup(test_artifacts::KECCAK_SPONGE_ELF);
+        let (verify_pk, verify_vk) = client.setup(test_artifacts::VERIFY_PROOF_ELF);
+
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&1usize);
+        stdin.write(&vec![0u8, 0, 0]);
+        let proof_1 = client.prove(&keccak_pk, stdin).compressed().run().unwrap();
+        client.verify(&proof_1, &keccak_vk).unwrap();
+
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&3usize);
+        stdin.write(&vec![0u8, 1, 2]);
+        stdin.write(&vec![2, 3, 4]);
+        stdin.write(&vec![5, 6, 7]);
+        let proof_2 = client.prove(&keccak_pk, stdin).compressed().run().unwrap();
+        client.verify(&proof_2, &keccak_vk).unwrap();
+
+        let reduced = |p: &ZKMProofWithPublicValues| match &p.proof {
+            ZKMProof::Compressed(r) => (**r).clone(),
+            _ => panic!("a compressed proof"),
+        };
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&keccak_vk.hash_u32());
+        stdin.write(&vec![
+            proof_1.public_values.as_slice().to_vec(),
+            proof_2.public_values.as_slice().to_vec(),
+            proof_2.public_values.as_slice().to_vec(),
+        ]);
+        stdin.write_proof(reduced(&proof_1), keccak_vk.vk.clone());
+        stdin.write_proof(reduced(&proof_2), keccak_vk.vk.clone());
+        stdin.write_proof(reduced(&proof_2), keccak_vk.vk.clone());
+
+        let proof = client.prove(&verify_pk, stdin).compressed().run().unwrap();
+        client.verify(&proof, &verify_vk).unwrap();
+    }
 }
