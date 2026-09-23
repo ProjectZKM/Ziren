@@ -1519,8 +1519,8 @@ mod shape_program_dump {
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect();
-        for index in lo..hi {
-            let shape = all[index].clone();
+        for (index, shape) in all.iter().enumerate().skip(lo).take(hi - lo) {
+            let shape = shape.clone();
             let program_shape =
                 ZKMCompressProgramShape::from_proof_shape(shape, crate::VK_MERKLE_TREE_HEIGHT);
             let program = prover.program_from_shape(program_shape, None);
