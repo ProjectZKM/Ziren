@@ -1,4 +1,4 @@
-package poseidon2
+package diagonal
 
 import (
 	"math/big"
@@ -29,11 +29,11 @@ func TestKoalaBearInternalDiagonal(t *testing.T) {
 		neg(inv(16)),
 		neg(inv(1 << 24)),
 	}
-	if len(closedForm) != KOALABEAR_WIDTH {
-		t.Fatalf("closed form has %d entries, width is %d", len(closedForm), KOALABEAR_WIDTH)
+	if len(closedForm) != Width {
+		t.Fatalf("closed form has %d entries, width is %d", len(closedForm), Width)
 	}
 	for i, want := range closedForm {
-		if got := koalaBearInternalDiagM1[i]; got != want.String() {
+		if got := KoalaBearInternalDiagM1[i]; got != want.String() {
 			t.Fatalf("diagonal[%d] = %s, closed form gives %s", i, got, want.String())
 		}
 	}

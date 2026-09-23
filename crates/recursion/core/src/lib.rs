@@ -466,8 +466,8 @@ mod poseidon2_diffusion_tests {
     use p3_monty_31::InternalLayerBaseParameters;
 
     /// The internal-layer diagonal the Groth16/PLONK circuit carries
-    /// (`crates/recursion/gnark-ffi/go/zkm/poseidon2/poseidon2_koalabear.go`,
-    /// `koalaBearInternalDiagM1`), as canonical KoalaBear residues.
+    /// (`crates/recursion/gnark-ffi/go/zkm/poseidon2/diagonal/diagonal.go`,
+    /// `KoalaBearInternalDiagM1`), as canonical KoalaBear residues.
     const CIRCUIT_DIAGONAL: [u32; 16] = [
         2130706431, 1, 2, 1065353217, 3, 4, 1065353216, 2130706430, 2130706429, 2122383361,
         1864368129, 2130706306, 8323072, 266338304, 133169152, 127,
