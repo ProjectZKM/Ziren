@@ -575,8 +575,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Self::uninitialized()
     }
 
+    /// [`Self::new`] with the child-vk membership check fixed by the caller
+    /// (`Some`) instead of read from `VERIFY_VK`.  The setting must be final
+    /// before construction: every compose program is pre-warmed here, and a
+    /// program built under one setting is a different program from the same
+    /// shape built under the other.
+    pub fn new_with_vk_verification(vk_verification: Option<bool>) -> Self {
+        Self::uninitialized_with(vk_verification)
+    }
+
     /// Creates a new [ZKMProver] with lazily initialized components.
     pub fn uninitialized() -> Self {
+        Self::uninitialized_with(None)
+    }
+
+    /// [`Self::uninitialized`] with the child-vk membership check fixed by
+    /// the caller (`Some`) instead of read from `VERIFY_VK`.
+    pub fn uninitialized_with(vk_verification: Option<bool>) -> Self {
         let core_machine = MipsAir::machine(CoreSC::default());
         let core_prover = C::CoreProver::new(core_machine);
 
@@ -602,8 +617,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .unwrap_or(true)
             .then_some(RecursionShapeConfig::default());
 
-        let vk_verification =
-            env::var("VERIFY_VK").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(true);
+        let vk_verification = vk_verification.unwrap_or_else(|| {
+            env::var("VERIFY_VK").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(true)
+        });
 
         tracing::debug!("vk verification: {}", vk_verification);
 
@@ -766,7 +782,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 let own = self.compose_band_for(&witness);
                 let last = self.compress_shape_config.as_ref().map_or(0, |c| c.all_shapes().len() - 1);
                 let keys: Vec<String> = (own.unwrap_or(0)..=last)
-                    .map(|b| format!("{b}:{:016x}", Self::band_keyed(witness.shape_key(), Some(b))))
+                    .map(|b| format!("{b}:{:016x}", self.band_keyed(witness.shape_key(), Some(b))))
                     .collect();
                 tracing::info!(
                     "SHAPEDIAG prewarm band={band_index} arity={arity} own={own:?} shape_key={:016x} keys=[{}] {}",
@@ -1095,7 +1111,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
         self.cached_program(
             &self.normalize_programs_basefold_cache,
-            Self::band_keyed(input.shape_key(), band),
+            self.band_keyed(input.shape_key(), band),
             "normalize",
             || {
                 let program = self.normalize_program_unsnapped(input);
@@ -1140,13 +1156,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// A cache key that separates the same program snapped onto different
-    /// bands, since they are different programs downstream.
-    fn band_keyed(shape_key: u64, band: Option<usize>) -> u64 {
+    /// bands, since they are different programs downstream, and built with
+    /// the child-vk membership check on or off: `vk_verification` selects the
+    /// instructions the program emits (`value_assertions`), so a program built
+    /// under one setting is a different program — and a different verifying
+    /// key — from the same shape built under the other.
+    fn band_keyed(&self, shape_key: u64, band: Option<usize>) -> u64 {
+        let shape_key = self.verification_keyed(shape_key);
         match band {
             None => shape_key,
             Some(b) => {
                 shape_key.rotate_left(17) ^ (0x9E37_79B9_7F4A_7C15_u64.wrapping_mul(b as u64 + 1))
             }
+        }
+    }
+
+    /// `shape_key` with the prover's `vk_verification` folded in, the key
+    /// every program cache (snapped, unsnapped and on disk) is addressed by.
+    fn verification_keyed(&self, shape_key: u64) -> u64 {
+        if self.vk_verification {
+            shape_key ^ 0x5851_F42D_4C95_7F2D
+        } else {
+            shape_key
         }
     }
 
@@ -1167,7 +1198,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let key = input.shape_key();
+        let key = self.verification_keyed(input.shape_key());
         if let Some(p) = self.normalize_programs_unsnapped_cache.lock().unwrap().get(key) {
             return p;
         }
@@ -1184,7 +1215,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let key = input.shape_key();
+        let key = self.verification_keyed(input.shape_key());
         if let Some(p) = self.compose_programs_unsnapped_cache.lock().unwrap().get(key) {
             return p;
         }
@@ -1312,13 +1343,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             tracing::info!(
                 "SHAPEDIAG runtime band={band:?} shape_key={:016x} key={:016x} {}",
                 input.shape_key(),
-                Self::band_keyed(input.shape_key(), band),
+                self.band_keyed(input.shape_key(), band),
                 input.shape_diag()
             );
         }
         self.cached_program(
             &self.compose_programs_basefold_cache,
-            Self::band_keyed(input.shape_key(), band),
+            self.band_keyed(input.shape_key(), band),
             "compose",
             || {
                 let program = self.compose_program_unsnapped(input);

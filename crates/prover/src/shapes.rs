@@ -168,8 +168,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
     num_setup_workers: usize,
     indices: Option<Vec<usize>>,
 ) -> (BTreeSet<[KoalaBear; DIGEST_SIZE]>, Vec<usize>, usize) {
-    let mut prover = ZKMProver::<C>::new();
-    prover.vk_verification = !dummy;
+    let prover = ZKMProver::<C>::new_with_vk_verification(Some(!dummy));
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
 
@@ -1490,5 +1489,108 @@ mod normalize_enumeration_tests {
             first_moved
         );
         assert!(missing.is_empty() && mismatched == 0 && first_moved == 0);
+    }
+}
+
+#[cfg(test)]
+mod shape_program_dump {
+    use super::*;
+    use crate::components::DefaultProverComponents;
+    use crate::REDUCE_BATCH_SIZE;
+
+    /// Build the programs of a range of enumerated shapes in one process and
+    /// record what each verifying key is a function of — program bytes
+    /// (digested), organic heights, vk digest — so two processes, or two
+    /// build orders, can be compared shape by shape.  `ZIREN_SHAPE_RANGE`
+    /// (`start..end`) selects the shapes, `ZIREN_DUMP_DIR` receives the
+    /// serialized programs.
+    #[test]
+    #[ignore]
+    fn dump_shape_program() {
+        zkm_core_machine::utils::setup_logger();
+        let range = std::env::var("ZIREN_SHAPE_RANGE").expect("ZIREN_SHAPE_RANGE");
+        let (lo, hi) = range.split_once("..").expect("start..end");
+        let (lo, hi): (usize, usize) = (lo.parse().unwrap(), hi.parse().unwrap());
+        let dir = std::env::var("ZIREN_DUMP_DIR").expect("ZIREN_DUMP_DIR");
+        let prover = ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(true));
+        let rec = prover.compress_shape_config.as_ref().expect("recursion shape config");
+        let all: Vec<ZKMProofShape> =
+            ZKMProofShape::generate_all(rec, REDUCE_BATCH_SIZE, prover.core_prover.machine())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+        for index in lo..hi {
+            let shape = all[index].clone();
+            let program_shape =
+                ZKMCompressProgramShape::from_proof_shape(shape, crate::VK_MERKLE_TREE_HEIGHT);
+            let program = prover.program_from_shape(program_shape, None);
+            let heights =
+                RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::program_heights(
+                    &program,
+                );
+            let bytes = bincode::serialize(&*program).expect("serialize program");
+            let program_digest = {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                bytes.hash(&mut h);
+                h.finish()
+            };
+            std::fs::write(format!("{dir}/p{index}.bin"), &bytes).expect("write dump");
+            let (_, vk) = prover.compress_prover.setup(&program);
+            let digest = vk.hash_koalabear();
+            tracing::info!(
+                "DUMP shape={index} program={program_digest:016x} bytes={} vk={digest:?} heights={heights:?}",
+                bytes.len()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod dumped_program_diff {
+    /// Compare two serialized recursion programs (`ZIREN_DUMP_A`,
+    /// `ZIREN_DUMP_B`) block by block and report the first instruction that
+    /// differs, so a program that is not reproducible across processes can be
+    /// traced to the construction step that varies.
+    #[test]
+    #[ignore]
+    fn diff_dumped_programs() {
+        use p3_koala_bear::KoalaBear;
+        use zkm_recursion_core::RecursionProgram;
+        zkm_core_machine::utils::setup_logger();
+        let load = |k: &str| -> RecursionProgram<KoalaBear> {
+            let bytes = std::fs::read(std::env::var(k).expect(k)).expect("read dump");
+            bincode::deserialize(&bytes).expect("program")
+        };
+        let (a, b) = (load("ZIREN_DUMP_A"), load("ZIREN_DUMP_B"));
+        tracing::info!(
+            "memory {} vs {}; blocks {} vs {}",
+            a.total_memory,
+            b.total_memory,
+            a.seq_blocks.seq_blocks.len(),
+            b.seq_blocks.seq_blocks.len()
+        );
+        let (da, db) = (format!("{:?}", a.seq_blocks), format!("{:?}", b.seq_blocks));
+        let first =
+            da.bytes().zip(db.bytes()).position(|(x, y)| x != y).unwrap_or(da.len().min(db.len()));
+        let lo = first.saturating_sub(600);
+        tracing::info!(
+            "debug lengths {} vs {}; first difference at byte {first}",
+            da.len(),
+            db.len()
+        );
+        tracing::info!("A: …{}…", &da[lo..(first + 400).min(da.len())]);
+        tracing::info!("B: …{}…", &db[lo..(first + 400).min(db.len())]);
+        if let Ok(addr) = std::env::var("ZIREN_DIFF_ADDR") {
+            let needle = format!("Address({addr})");
+            for (tag, d) in [("A", &da), ("B", &db)] {
+                let hits: Vec<usize> = d.match_indices(&needle).map(|(i, _)| i).collect();
+                tracing::info!("{tag}: {} occurrences of {needle}", hits.len());
+                for i in hits {
+                    let lo = i.saturating_sub(260);
+                    tracing::info!("{tag}@{i}: …{}…", &d[lo..(i + 120).min(d.len())]);
+                }
+            }
+        }
     }
 }

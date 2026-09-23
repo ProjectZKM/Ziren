@@ -41,9 +41,8 @@ fn main() {
 
     let args = Args::parse();
 
-    let mut prover = ZKMProver::<DefaultProverComponents>::new();
-
-    prover.vk_verification = !args.dummy;
+    let mut prover =
+        ZKMProver::<DefaultProverComponents>::new_with_vk_verification(Some(!args.dummy));
 
     let compress_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
