@@ -31,10 +31,63 @@ use p3_matrix::Matrix;
 use crate::basefold::mle::Mle;
 use crate::basefold::proof::{LeafOpening, MerkleOpening};
 use crate::whir::config::WhirConfig;
+use crate::whir::error::WhirVerifierError;
 use crate::whir::monomial::{map_to_pow_lsb, mono_eval_lsb};
 use crate::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
 use crate::whir::sumcheck::{eq_table, WhirFolder};
-use crate::whir::error::WhirVerifierError;
+
+/// Rows per parallel tile of the stripe-sized passes below: `2^14` values
+/// keeps every worker's slice in cache while the tile count stays far above
+/// the thread count at the production `2^21` stacking height.
+const STRIPE_TILE: usize = 1 << 14;
+
+/// `Σ_x eq[x] · stripe[x]` — the stripe's multilinear evaluation at the point
+/// `eq` tabulates (`eq_table`, LSB-first, the same variable order
+/// `Mle::eval_at` folds).  Field arithmetic is exact, so the tiled partial
+/// sums add up to the value the fold computes.  One `eq` table serves every
+/// stripe of every round; nothing stripe-sized is allocated per stripe.
+pub(crate) fn eq_weighted_sum<F, EF>(eq: &[EF], stripe: &[F]) -> EF
+where
+    F: p3_field::Field,
+    EF: ExtensionField<F>,
+{
+    use p3_maybe_rayon::prelude::*;
+    debug_assert_eq!(eq.len(), stripe.len());
+    stripe
+        .par_chunks(STRIPE_TILE)
+        .zip(eq.par_chunks(STRIPE_TILE))
+        .map(|(vals, weights)| {
+            let mut acc = EF::ZERO;
+            for (&v, &w) in vals.iter().zip(weights) {
+                acc += w * v;
+            }
+            acc
+        })
+        .sum()
+}
+
+/// `Σ_i λ_i · stripe_i`, row-tiled: every output row is the same
+/// stripe-ordered sum the serial accumulation forms, and each tile works on
+/// a bounded slice of every stripe, so the only stripe-sized buffer is the
+/// result.
+pub(crate) fn lambda_combination<F, EF>(weighted: &[(&[F], EF)], len: usize) -> Vec<EF>
+where
+    F: p3_field::Field,
+    EF: ExtensionField<F>,
+{
+    use p3_maybe_rayon::prelude::*;
+    let mut virt: Vec<EF> = alloc::vec![EF::ZERO; len];
+    virt.par_chunks_mut(STRIPE_TILE).enumerate().for_each(|(tile, out)| {
+        let base = tile * STRIPE_TILE;
+        let end = base + out.len();
+        for (stripe, lam) in weighted {
+            for (v, &st) in out.iter_mut().zip(&stripe[base..end]) {
+                *v += *lam * st;
+            }
+        }
+    });
+    virt
+}
 
 /// Prover-side data for one committed round of stacked WHIR.
 pub struct StackedWhirProverData<F: p3_field::Field, MT: Mmcs<F>> {
@@ -281,8 +334,10 @@ where
     fn encode_stripe(&self, stripe: &Mle<F>) -> RowMajorMatrix<F> {
         let ff = self.ff();
         let width = 1usize << ff;
-        let mut padded = stripe.guts().as_slice().to_vec();
-        padded.resize(padded.len() << self.config.starting_log_inv_rate, F::ZERO);
+        let vals = stripe.guts().as_slice();
+        let mut padded = Vec::with_capacity(vals.len() << self.config.starting_log_inv_rate);
+        padded.extend_from_slice(vals);
+        padded.resize(vals.len() << self.config.starting_log_inv_rate, F::ZERO);
         self.dft.dft_batch(RowMajorMatrix::new(padded, width)).to_row_major_matrix()
     }
 
@@ -349,9 +404,12 @@ where
         let batch_evaluations: Vec<Vec<EF>> = if let Some(e) = engine.as_deref_mut() {
             e.stripe_evals(&stack_point)
         } else {
+            let eq = eq_table(lsh, &stack_point);
             prover_data
                 .iter()
-                .map(|d| d.stripes.iter().map(|s| s.eval_at::<EF>(&stack_point)[0]).collect())
+                .map(|d| {
+                    d.stripes.iter().map(|s| eq_weighted_sum(&eq, s.guts().as_slice())).collect()
+                })
                 .collect()
         };
         for round in &batch_evaluations {
@@ -373,17 +431,15 @@ where
             }
         }
         let virt: Vec<EF> = if engine.is_none() {
-            let mut virt: Vec<EF> = alloc::vec![EF::ZERO; 1usize << lsh];
             let mut lam = EF::ONE;
+            let mut weighted: Vec<(&[F], EF)> = Vec::new();
             for d in prover_data.iter() {
                 for stripe in d.stripes.iter() {
-                    for (v, &st) in virt.iter_mut().zip(stripe.guts().as_slice()) {
-                        *v += lam * st;
-                    }
+                    weighted.push((stripe.guts().as_slice(), lam));
                     lam *= lambda;
                 }
             }
-            virt
+            lambda_combination(&weighted, 1usize << lsh)
         } else {
             Vec::new()
         };
