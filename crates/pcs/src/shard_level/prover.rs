@@ -567,17 +567,27 @@ pub fn splice_device_remat_traces<SC>(
 where
     SC: StarkGenericConfig,
 {
+    splice_device_remat_traces_owned::<SC>(shared_trace_mles, eager_device_remat.to_vec())
+}
+
+/// [`splice_device_remat_traces`] consuming the rematerialized matrices: a
+/// present matrix moves into its `PaddedMle` with no copy of its cells.
+pub fn splice_device_remat_traces_owned<SC>(
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    eager_device_remat: Vec<Option<RowMajorMatrix<Val<SC>>>>,
+) -> Vec<crate::multilinear::PaddedMle<Val<SC>>>
+where
+    SC: StarkGenericConfig,
+{
     shared_trace_mles
         .iter()
-        .zip(eager_device_remat.iter())
+        .zip(eager_device_remat)
         .map(|(pm, remat)| {
             if pm.inner().is_none() {
                 if let Some(m) = remat {
                     let h = m.values.len().checked_div(m.width).unwrap_or(0);
                     let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
-                    let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(
-                        RowMajorMatrix::new(m.values.clone(), m.width),
-                    ));
+                    let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(m));
                     return crate::multilinear::PaddedMle::padded_with_zeros(mle, log_h);
                 }
                 return pm.clone();

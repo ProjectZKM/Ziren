@@ -427,7 +427,16 @@ pub mod outer_jagged_hooks {
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
         pin: Option<zkm_pcs::jagged::AreaPin>,
     ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs> {
-        let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_owned(chip_traces);
+        outer_prep_precompute_owned(chip_traces.to_vec(), pin)
+    }
+
+    /// [`outer_prep_precompute`] consuming the traces, for a caller done with
+    /// them: the cells move into the commit's views with no copy.
+    pub fn outer_prep_precompute_owned(
+        chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+        pin: Option<zkm_pcs::jagged::AreaPin>,
+    ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs> {
+        let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_traces(chip_traces);
         <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::commit_multilinears(
             &chip_trace_views,
             pin,
