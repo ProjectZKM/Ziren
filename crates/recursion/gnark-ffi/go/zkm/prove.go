@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
+	fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/backend/plonk"
 	"github.com/consensys/gnark/constraint"
-	"github.com/consensys/gnark/frontend"
 	bcs "github.com/consensys/gnark/constraint/bn254"
-    fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/frontend"
 )
 
 var globalMutex sync.RWMutex
@@ -25,12 +25,23 @@ var globalR1csInitialized = false
 var globalPk groth16.ProvingKey = groth16.NewProvingKey(ecc.BN254)
 var globalPkInitialized = false
 
+// ProvePlonk runs provePlonk under the build configuration of dataDir: the
+// circuit definition reads CONSTRAINTS_JSON and GROTH16 from the process
+// environment, so two provers in one process must not interleave their
+// settings (see withBuildConfig).
 func ProvePlonk(dataDir string, witnessPath string) Proof {
+	var proof Proof
+	withBuildConfig(dataDir+"/"+constraintsJsonFile, false, func() {
+		proof = provePlonk(dataDir, witnessPath)
+	})
+	return proof
+}
+
+func provePlonk(dataDir string, witnessPath string) Proof {
 	// Sanity check the required arguments have been provided.
 	if dataDir == "" {
 		panic("dataDirStr is required")
 	}
-	os.Setenv("CONSTRAINTS_JSON", dataDir+"/"+constraintsJsonFile)
 
 	// Read the R1CS.
 	scsFile, err := os.Open(dataDir + "/" + plonkCircuitPath)
@@ -99,16 +110,23 @@ func ProvePlonk(dataDir string, witnessPath string) Proof {
 	return NewZKMPlonkBn254Proof(&proof, witnessInput)
 }
 
+// ProveGroth16 runs proveGroth16 under the build configuration of dataDir
+// (see ProvePlonk).
 func ProveGroth16(dataDir string, witnessPath string) Proof {
+	var proof Proof
+	withBuildConfig(dataDir+"/"+constraintsJsonFile, true, func() {
+		proof = proveGroth16(dataDir, witnessPath)
+	})
+	return proof
+}
+
+func proveGroth16(dataDir string, witnessPath string) Proof {
 	// Sanity check the required arguments have been provided.
 	if dataDir == "" {
 		panic("dataDirStr is required")
 	}
 
 	start := time.Now()
-	os.Setenv("CONSTRAINTS_JSON", dataDir+"/"+constraintsJsonFile)
-	os.Setenv("GROTH16", "1")
-	fmt.Printf("Setting environment variables took %s\n", time.Since(start))
 
 	// Read the R1CS.
 	globalMutex.Lock()
@@ -181,8 +199,8 @@ func ProveGroth16(dataDir string, witnessPath string) Proof {
 }
 
 func SaveWitnessToFile(witnessPath string, storedDir string) {
-    fmt.Printf("witnessPATH: %s\n", witnessPath)
-    r1csFilePath := filepath.Join(storedDir, "r1cs_cached")
+	fmt.Printf("witnessPATH: %s\n", witnessPath)
+	r1csFilePath := filepath.Join(storedDir, "r1cs_cached")
 	file, err := os.Open(r1csFilePath)
 	if err != nil {
 		log.Fatalf("Failed to open file: %v", err)
