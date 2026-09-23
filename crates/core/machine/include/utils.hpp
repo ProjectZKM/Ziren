@@ -156,9 +156,11 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ size_t nb_bits_to_shift(uint32_t shift_amount) {
     return n % BYTE_SIZE;
 }
 
-/// Returns `true` if the given opcode is a signed operation.
+/// Returns `true` if the given division opcode is signed: `DIV` and `MOD`
+/// are the two signed division opcodes, `DIVU` and `MODU` their unsigned
+/// counterparts, so this is the complete signedness classification for the
+/// quotient/remainder computation below.
 __ZKM_HOSTDEV__ __ZKM_INLINE__ bool is_signed_operation(Opcode opcode) {
-    // todo: add more signed operations
     return (opcode == Opcode::DIV || opcode == Opcode::MOD);
 }
 

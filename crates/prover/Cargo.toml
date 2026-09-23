@@ -98,10 +98,6 @@ name = "time_prover_new"
 path = "scripts/time_prover_new.rs"
 
 [[bin]]
-name = "write_basefold_vk_map"
-path = "scripts/write_basefold_vk_map.rs"
-
-[[bin]]
 name = "post_trusted_setup"
 path = "scripts/post_trusted_setup.rs"
 

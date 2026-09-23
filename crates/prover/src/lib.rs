@@ -218,14 +218,6 @@ const CORE_CACHE_SIZE: usize = 5;
 /// (Merkle binding, witness assembly, program build).
 pub const REDUCE_BATCH_SIZE: usize = 3;
 
-// TODO: FIX
-//
-// const SHAPES_URL_PREFIX: &str = "https://zkm-circuits.s3.us-east-2.amazonaws.com/shapes";
-// const SHAPES_VERSION: &str = "146079e0e";
-// lazy_static! {
-//     static ref SHAPES_INIT: Once = Once::new();
-// }
-
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
 pub type WrapAir<F> = RecursionAir<F, WRAP_DEGREE>;
@@ -820,10 +812,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let g = self.recursion_pks_basefold_cache.lock().unwrap();
         (g.hits, g.misses)
     }
-
-    /// Fully initializes the programs, proving keys, and verifying keys that are normally
-    /// lazily initialized. TODO: remove this.
-    pub fn initialize(&mut self) {}
 
     /// Creates a proving key and a verifying key for a given MIPS ELF.
     #[instrument(name = "setup", level = "debug", skip_all)]
