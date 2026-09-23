@@ -118,27 +118,40 @@ func (p *Poseidon2KoalaBearChip) externalLinearLayer(state *[KOALABEAR_WIDTH]koa
 	}
 }
 
-// todo: update
+// koalaBearInternalDiagM1 is the diagonal V of the internal (partial-round)
+// linear layer s -> (1 + Diag(V)) s, as KoalaBear residues:
+//
+//	V = [-2, 1, 2, 1/2, 3, 4, -1/2, -3, -4, 1/2^8, 1/8, 1/2^24, -1/2^8, -1/8, -1/16, -1/2^24]
+//
+// Source: INTERNAL_DIAG_MONTY_16 in koala-bear/src/poseidon2.rs of p3-koala-bear
+// (ProjectZKM/Plonky3, branch zkm/whir-pcs, the revision pinned by Cargo.lock).
+// TestKoalaBearInternalDiagonal checks these values against the closed form,
+// and the Rust test go_internal_diagonal_matches_the_rust_permutation in
+// crates/recursion/core carries the same values and checks them against the
+// constant the host permutation uses.
+var koalaBearInternalDiagM1 = [KOALABEAR_WIDTH]string{
+	"2130706431",
+	"1",
+	"2",
+	"1065353217",
+	"3",
+	"4",
+	"1065353216",
+	"2130706430",
+	"2130706429",
+	"2122383361",
+	"1864368129",
+	"2130706306",
+	"8323072",
+	"266338304",
+	"133169152",
+	"127",
+}
+
 func (p *Poseidon2KoalaBearChip) diffusionPermuteMut(state *[KOALABEAR_WIDTH]koalabear.Variable) {
-	// Reference: https://github.com/ProjectZKM/Plonky3/blob/main/koala-bear/src/poseidon2.rs#L10
-	// V = [-2, 1, 2, 1/2, 3, 4, -1/2, -3, -4, 1/2^8, 1/8, 1/2^24, -1/2^8, -1/8, -1/16, -1/2^24]
-	matInternalDiagM1 := [KOALABEAR_WIDTH]koalabear.Variable{
-		koalabear.NewFConst("2130706431"),
-		koalabear.NewFConst("1"),
-		koalabear.NewFConst("2"),
-		koalabear.NewFConst("1065353217"),
-		koalabear.NewFConst("3"),
-		koalabear.NewFConst("4"),
-		koalabear.NewFConst("1065353216"),
-		koalabear.NewFConst("2130706430"),
-		koalabear.NewFConst("2130706429"),
-		koalabear.NewFConst("2122383361"),
-		koalabear.NewFConst("1864368129"),
-		koalabear.NewFConst("2130706306"),
-		koalabear.NewFConst("8323072"),
-		koalabear.NewFConst("266338304"),
-		koalabear.NewFConst("133169152"),
-		koalabear.NewFConst("127"),
+	matInternalDiagM1 := [KOALABEAR_WIDTH]koalabear.Variable{}
+	for i, v := range koalaBearInternalDiagM1 {
+		matInternalDiagM1[i] = koalabear.NewFConst(v)
 	}
 	p.matmulInternal(state, &matInternalDiagM1)
 }
