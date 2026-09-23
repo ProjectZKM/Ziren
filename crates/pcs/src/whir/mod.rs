@@ -18,22 +18,28 @@
 //! `claim = Σ_x weight[x]·f[x]` threads every round, and [`monomial`] the
 //! coset point-map that turns an opened coset into a STIR constraint.
 //!
-//! [`prover`], [`round_prover`], [`full_prover`], [`interleaved`] and
-//! [`verifier`] are the earlier single-polynomial (non-stacked) prover and
-//! verifier variants.  They share the transcript rules above but are exercised
-//! only by this module's tests; nothing in the production commit, open or
-//! verify path calls them.
+//! `prover`, `round_prover`, `full_prover`, `interleaved` and `verifier` are
+//! the earlier single-polynomial (non-stacked) prover and verifier variants.
+//! They share the transcript rules above but are exercised only by this
+//! module's tests, so they compile only with them; the verdict type they
+//! share with the production verifier lives in [`error`].
 
 pub mod config;
+pub mod error;
+#[cfg(test)]
 pub mod full_prover;
+#[cfg(test)]
 pub mod interleaved;
 pub mod jagged;
 pub mod monomial;
 pub mod proof;
+#[cfg(test)]
 pub mod prover;
+#[cfg(test)]
 pub mod round_prover;
 pub mod stacked;
 pub mod sumcheck;
+#[cfg(test)]
 pub mod verifier;
 
 #[cfg(test)]

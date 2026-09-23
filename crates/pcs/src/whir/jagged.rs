@@ -37,7 +37,7 @@ use crate::whir::config::{RoundConfig, WhirConfig};
 use crate::whir::stacked::{
     StackedWhirProof, StackedWhirProver, StackedWhirProverData, StackedWhirVerifier,
 };
-use crate::whir::verifier::WhirVerifierError;
+use crate::whir::error::WhirVerifierError;
 
 /// Prover-side state kept after a jagged-WHIR commit.
 pub struct JaggedWhirProverDataGeneric<MT: Mmcs<JaggedVal>> {

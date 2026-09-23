@@ -63,6 +63,32 @@ pub fn full_monomial_basis_eq<EF: Field>(a: &[EF], b: &[EF]) -> EF {
     a.iter().zip(b).map(|(&x, &y)| x * y + EF::ONE - y).product()
 }
 
+/// `[x, x², x⁴, …, x^{2^{len-1}}]` — LSB-first: element `j` is variable `j`'s
+/// coordinate, so the table below aligns with the tower's hypercube indexing.
+pub fn map_to_pow_lsb<EF: p3_field::Field>(x: EF, len: usize) -> Vec<EF> {
+    let mut res = Vec::with_capacity(len);
+    let mut e = x;
+    for _ in 0..len {
+        res.push(e);
+        e = e.square();
+    }
+    res
+}
+
+/// The monomial weight table for an LSB-first point: `t[i] = Π_j pt_j^{bit_j(i)}`
+/// with bit 0 the LSB — for `pt = map_to_pow_lsb(x)` this is `t[i] = x^i`.
+pub fn mono_table_lsb<EF: p3_field::Field>(point_lsb: &[EF]) -> Vec<EF> {
+    let rev: Vec<EF> = point_lsb.iter().rev().copied().collect();
+    monomial_partial_eq(&rev)
+}
+
+/// Monomial evaluation of a value vector at an LSB-first point.
+pub fn mono_eval_lsb<EF: p3_field::Field>(values: &[EF], point_lsb: &[EF]) -> EF {
+    let t = mono_table_lsb(point_lsb);
+    debug_assert_eq!(t.len(), values.len());
+    values.iter().zip(&t).map(|(&v, &w)| v * w).sum()
+}
+
 #[cfg(test)]
 mod test {
     use alloc::vec::Vec;

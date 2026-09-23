@@ -31,10 +31,10 @@ use p3_matrix::Matrix;
 use crate::basefold::mle::Mle;
 use crate::basefold::proof::{LeafOpening, MerkleOpening};
 use crate::whir::config::WhirConfig;
-use crate::whir::interleaved::{map_to_pow_lsb, mono_eval_lsb};
+use crate::whir::monomial::{map_to_pow_lsb, mono_eval_lsb};
 use crate::whir::proof::{ProofOfWork, SumcheckPoly, WhirProof};
 use crate::whir::sumcheck::{eq_table, WhirFolder};
-use crate::whir::verifier::WhirVerifierError;
+use crate::whir::error::WhirVerifierError;
 
 /// Prover-side data for one committed round of stacked WHIR.
 pub struct StackedWhirProverData<F: p3_field::Field, MT: Mmcs<F>> {
@@ -156,7 +156,7 @@ pub trait WhirRound0Engine<F: p3_field::Field, EF, MT: Mmcs<F>> {
     }
     /// Absorb batched MONOMIAL constraints into `weight` on the backend:
     /// `weight[i] += Σ_c coeffs[c] · Π_{k: bit k of i} points_lsb[c][n-1-k]`
-    /// (the [`crate::whir::interleaved::mono_table_lsb`] convention).  Field
+    /// (the [`crate::whir::monomial::mono_table_lsb`] convention).  Field
     /// ops are exact, so any evaluation order is value-identical to the host
     /// tables.  `false` declines to the host absorption.  While the engine
     /// keeps the vectors resident `weight` is the host's EMPTY placeholder:
