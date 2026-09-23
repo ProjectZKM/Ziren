@@ -841,12 +841,15 @@ pub mod jagged {
         ///   gives exactly `k` columns whatever the gap is, which is what keeps the
         ///   column COUNT — and so the program verifying the round — independent of
         ///   the node's row counts;
-        /// * unpinned → as many cube-tall columns as the gap needs, and at least
-        ///   one even when the gap is zero.
+        /// * unpinned (the core machine) → `jagged::unpinned_pad_columns` gives
+        ///   the count the widest gap of the round's committed-block bucket
+        ///   needs, at least one, so the count is a function of the bucket and
+        ///   the normalize program verifying the round is one per
+        ///   `(chip set, bucket)`.
         ///
-        /// So the area of a round is `next_multiple_of(total_values, 2^h)` —
-        /// a round that fills whole stripes gets one zero-height column — but the
-        /// column COUNT cannot be recovered from `round_counts`.
+        /// So the area of a round is `committed_dense_len(total_values)` — a
+        /// round that fills its bucket exactly gets zero-height columns — but
+        /// the column COUNT cannot be recovered from `round_counts`.
         ///
         /// The recursion lift closes its column space from this, so it has to be
         /// the prover's own value. The circuit calls the same data
@@ -1725,21 +1728,15 @@ pub mod jagged {
             });
             {
                 let cube = 1usize << z_row.len();
-                let pad_heights: Vec<usize> = match r.precomputed.fixed_pad_columns {
-                    Some(k) => crate::jagged::AreaPin::split_padding(pad, k, cube),
-                    None => {
-                        let mut v = Vec::new();
-                        let mut done = 0usize;
-                        loop {
-                            let h = core::cmp::min(cube, pad - done);
-                            v.push(h);
-                            done += h;
-                            if done >= pad {
-                                break;
-                            }
-                        }
-                        v
-                    }
+                let pad_heights: Vec<usize> = {
+                    let k = r.precomputed.fixed_pad_columns.unwrap_or_else(|| {
+                        crate::jagged::unpinned_pad_columns(
+                            pk.total_values,
+                            crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+                            cube,
+                        )
+                    });
+                    crate::jagged::AreaPin::split_padding(pad, k, cube)
                 };
                 let mut pad_off = base + pk.total_values;
                 let mut this_round_pads: Vec<usize> = Vec::new();

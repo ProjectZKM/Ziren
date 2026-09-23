@@ -277,11 +277,7 @@ where
         if let Some(pin) = pin {
             return pin.pad_columns;
         }
-        if real == 0 {
-            return 1;
-        }
-        let area = zkm_pcs::jagged::committed_dense_len(real, log_stack);
-        area.saturating_sub(real).div_ceil(cube).max(1)
+        zkm_pcs::jagged::unpinned_pad_columns(real, log_stack, cube)
     };
     let heights_by_name: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
     let round_real = |preprocessed: bool| -> usize {
@@ -430,21 +426,12 @@ pub fn dummy_jagged_basefold_bundle(
         round_counts.push(pk.chip_infos.iter().map(|ci| (ci.row_count, ci.column_count)).collect());
 
         let pad = area.saturating_sub(pk.total_values);
-        let pad_heights: Vec<usize> = match round_pin(r, packings.len()) {
-            Some(pin) => zkm_pcs::jagged::AreaPin::split_padding(pad, pin.pad_columns, cube),
-            None => {
-                let mut v = Vec::new();
-                let mut done = 0usize;
-                loop {
-                    let h = core::cmp::min(cube, pad - done);
-                    v.push(h);
-                    done += h;
-                    if done >= pad {
-                        break;
-                    }
-                }
-                v
-            }
+        let pad_heights: Vec<usize> = {
+            let k = round_pin(r, packings.len()).map_or_else(
+                || zkm_pcs::jagged::unpinned_pad_columns(pk.total_values, log_stacking, cube),
+                |pin| pin.pad_columns,
+            );
+            zkm_pcs::jagged::AreaPin::split_padding(pad, k, cube)
         };
         let mut this_round_pads: Vec<usize> = Vec::new();
         let mut pad_off = base + pk.total_values;
@@ -847,17 +834,12 @@ mod tests {
         let mut real_offsets: Vec<usize> =
             real_packing.offsets.iter().take(real_packing.offsets.len() - 1).copied().collect();
         let pad = area.saturating_sub(real_packing.total_values);
-        let mut done = 0usize;
+        let k = zkm_pcs::jagged::unpinned_pad_columns(real_packing.total_values, log_stack, cube);
         let mut pad_off = real_packing.total_values;
-        loop {
-            let h = core::cmp::min(cube, pad - done);
+        for h in zkm_pcs::jagged::AreaPin::split_padding(pad, k, cube) {
             real_offsets.push(pad_off);
             real_column_counts.push(1);
-            done += h;
             pad_off += h;
-            if done >= pad {
-                break;
-            }
         }
         real_offsets.push(area);
         let (real_rc, real_pcc) =

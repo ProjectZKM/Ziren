@@ -1008,9 +1008,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     _ => "nobundle".to_string(),
                 })
                 .collect();
+            let dims: Vec<String> = input
+                .shard_proofs
+                .iter()
+                .map(|sp| {
+                    zkm_recursion_circuit::machine::shape_signature::describe_shard_proof_structure(
+                        sp,
+                    )
+                    .into_iter()
+                    .filter(|(n, _)| !n.starts_with("cc") && !n.starts_with("h."))
+                    .map(|(n, v)| format!("{n}={v}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                })
+                .collect();
             tracing::warn!(
                 "NORMALIZE_KEY shape_key={:016x} band={:?} first={} nchips={} chips={} \
-                 PACK[{}] STRIPES[{}] heights={}",
+                 PACK[{}] STRIPES[{}] DIMS[{}] heights={}",
                 input.shape_key(),
                 band,
                 input.is_first_shard,
@@ -1018,6 +1032,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 names.join(","),
                 packing.join(" | "),
                 rounds.join(" | "),
+                dims.join(" | "),
                 heights.join(","),
             );
         }
@@ -4789,6 +4804,7 @@ pub mod tests {
                 }
                 ZKMProofShape::Deferred(_) => deferred += 1,
                 ZKMProofShape::Shrink(_) => shrink += 1,
+                ZKMProofShape::Normalize(_) => {}
             }
         }
         tracing::info!(

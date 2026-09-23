@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use zkm_pcs::MachineProver;
 
 use rayon::prelude::*;
 use zkm_prover::components::DefaultProverComponents;
@@ -29,7 +30,9 @@ fn main() {
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
     let height = VK_MERKLE_TREE_HEIGHT;
 
-    let all: Vec<ZKMProofShape> = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
+    let all: Vec<ZKMProofShape> =
+        ZKMProofShape::generate_all(rec_cfg, REDUCE_BATCH_SIZE, prover.core_prover.machine())
+            .collect();
     let sampled: Vec<(usize, ZKMProofShape)> =
         all.into_iter().enumerate().filter(|(i, _)| i % stride == 0).collect();
     tracing::info!("[ENUM-COV] shapes to try = {} (stride {})", sampled.len(), stride);
@@ -44,6 +47,7 @@ fn main() {
                 ZKMProofShape::Compress(_) => "Compress",
                 ZKMProofShape::Deferred(_) => "Deferred",
                 ZKMProofShape::Shrink(_) => "Shrink",
+                ZKMProofShape::Normalize(_) => "Normalize",
                 ZKMProofShape::CompressRoot(_) => "CompressRoot",
             };
             let marker: String = if let ZKMProofShape::Recursion(batch) = &shape {

@@ -645,19 +645,14 @@ where
     let mut chip_infos: Vec<JaggedChipInfo> = Vec::new();
     let mut n_prep_infos = 0usize;
 
-    let push_padding = |infos: &mut Vec<JaggedChipInfo>, pad: usize| {
-        let mut done = 0usize;
-        loop {
-            let h = core::cmp::min(cube, pad - done);
+    let push_padding = |infos: &mut Vec<JaggedChipInfo>, total: usize, pad: usize| {
+        let k = crate::jagged::unpinned_pad_columns(total, log_stack, cube);
+        for h in crate::jagged::AreaPin::split_padding(pad, k, cube) {
             infos.push(JaggedChipInfo {
                 name: alloc::format!("<stacking-pad:{}>", infos.len()),
                 row_count: h,
                 column_count: 1,
             });
-            done += h;
-            if done >= pad {
-                break;
-            }
         }
     };
 
@@ -725,7 +720,9 @@ where
                     });
                 }
             }
-            None => push_padding(&mut chip_infos, prep_natural.saturating_sub(prep_total)),
+            None => {
+                push_padding(&mut chip_infos, prep_total, prep_natural.saturating_sub(prep_total))
+            }
         }
         n_prep_infos = chip_infos.len();
     }

@@ -12,6 +12,7 @@
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
+use zkm_pcs::MachineProver;
 
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::shapes::{ZKMCompressProgramShape, ZKMProofShape};
@@ -25,7 +26,9 @@ fn main() {
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
 
-    let all: Vec<ZKMProofShape> = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE).collect();
+    let all: Vec<ZKMProofShape> =
+        ZKMProofShape::generate_all(rec_cfg, REDUCE_BATCH_SIZE, prover.core_prover.machine())
+            .collect();
     tracing::info!("[JIT-COV] {} shapes enumerated", all.len());
 
     let mut seen: BTreeMap<&'static str, ()> = BTreeMap::new();
@@ -38,6 +41,7 @@ fn main() {
             ZKMProofShape::CompressRoot(_) => "CompressRoot",
             ZKMProofShape::Deferred(_) => "Deferred",
             ZKMProofShape::Shrink(_) => "Shrink",
+            ZKMProofShape::Normalize(_) => "Normalize",
         };
         if seen.contains_key(cat) {
             continue;

@@ -817,15 +817,31 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
              expects exactly one proof shape, got {}",
             shape.proof_shapes.len()
         );
-        let (vks, shard_proofs): (Vec<_>, Vec<_>) = shape
-            .proof_shapes
+        let rows: Vec<(String, usize)> = shape.proof_shapes[0]
+            .inner
             .iter()
-            .map(|s| {
-                crate::stark::dummy_basefold_vk_and_shard_proof::<
-                    zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
-                >(machine, s)
-            })
-            .unzip();
+            .map(|(name, log_h)| (name.clone(), 1usize << *log_h))
+            .collect();
+        Self::dummy_rows(machine, &rows, shape.is_complete)
+    }
+
+    /// [`Self::dummy`] for a shard whose chips sit at exactly `rows`
+    /// (name, row count) — any row count, not only a power of two, so a real
+    /// shard's heights can be replayed through the dummy path and its
+    /// normalize program compared with an enumerated representative's.
+    pub fn dummy_rows(
+        machine: &zkm_pcs::StarkMachine<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+            zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
+        >,
+        rows: &[(String, usize)],
+        is_complete: bool,
+    ) -> Self {
+        let (vk0, proof0) = crate::stark::dummy_basefold_vk_and_shard_proof_rows::<
+            zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
+        >(machine, rows);
+        let vks = vec![vk0];
+        let shard_proofs = vec![proof0];
         use std::collections::BTreeMap;
         let mut prep_by_name: BTreeMap<
             String,
@@ -867,7 +883,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         Self {
             vk,
             shard_proofs,
-            is_complete: shape.is_complete,
+            is_complete,
             is_first_shard: true,
             vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
         }

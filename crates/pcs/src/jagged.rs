@@ -225,6 +225,41 @@ pub fn committed_dense_len(total_values: usize, log_stacking_height: usize) -> u
     blocks * block
 }
 
+/// The stacking blocks a round could have committed at and still landed on the
+/// bucket just below `blocks` (the largest bucket strictly smaller).
+///
+/// The buckets of [`committed_dense_len`] are `1, 2, 3, 4, 8, 16, 24, …`, so
+/// the widest gap between a round's real cells and its committed area is the
+/// width of its bucket step: one block up to four blocks, four blocks at
+/// eight, eight blocks above.
+pub fn previous_bucket_blocks(blocks: usize) -> usize {
+    match blocks {
+        0 | 1 => 0,
+        2..=4 => blocks - 1,
+        8 => 4,
+        _ => blocks - 8,
+    }
+}
+
+/// The number of stacking-padding columns an UNPINNED round splits its gap
+/// into: `⌈step · 2^h / cube⌉`, where `step` is the round's bucket step in
+/// blocks (`previous_bucket_blocks`), `2^h` the stacking block and `cube` the
+/// row cube — the column count the widest gap of that bucket would need, and
+/// at least one.
+///
+/// Making the count a function of the bucket alone (not of the gap) is what
+/// makes a core shard's proof geometry — hence the normalize program verifying
+/// it, hence its verifying key — a function of `(chip set, committed blocks)`:
+/// the whole key space is then enumerable offline.  A gap narrower than the
+/// widest simply leaves trailing columns short or empty
+/// (`AreaPin::split_padding`), which the verifier already accepts.
+pub fn unpinned_pad_columns(total_values: usize, log_stacking_height: usize, cube: usize) -> usize {
+    let block = 1usize << log_stacking_height;
+    let blocks = committed_dense_len(total_values, log_stacking_height) / block;
+    let step = blocks - previous_bucket_blocks(blocks);
+    (step * block).div_ceil(cube).max(1)
+}
+
 impl<F> JaggedPacking<F> {
     /// `log2` of the hypercube the jagged sumcheck runs over: the dense length
     /// rounded up to a power of two.  The gap is an IMPLICIT zero tail — it is

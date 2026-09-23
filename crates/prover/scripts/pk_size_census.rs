@@ -24,15 +24,16 @@ fn main() {
     let want = std::env::args().nth(1).unwrap_or_else(|| "compress".to_string());
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
-    let shape = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE)
-        .find(|s| {
-            matches!(
-                (want.as_str(), s),
-                ("compress", ZKMProofShape::Compress(_))
-                    | ("recursion", ZKMProofShape::Recursion(_))
-            )
-        })
-        .expect("shape");
+    let shape =
+        ZKMProofShape::generate_all(rec_cfg, REDUCE_BATCH_SIZE, prover.core_prover.machine())
+            .find(|s| {
+                matches!(
+                    (want.as_str(), s),
+                    ("compress", ZKMProofShape::Compress(_))
+                        | ("recursion", ZKMProofShape::Recursion(_))
+                )
+            })
+            .expect("shape");
     let r0 = rss_mib();
     let shape = ZKMCompressProgramShape::from_proof_shape(shape, VK_MERKLE_TREE_HEIGHT);
     let program = prover.program_from_shape(shape, None);
