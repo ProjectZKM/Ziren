@@ -840,7 +840,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         let (vk0, proof0) = crate::stark::dummy_basefold_vk_and_shard_proof_rows::<
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >(machine, rows);
-        let vks = vec![vk0];
+        let vks = [vk0];
         let shard_proofs = vec![proof0];
         use std::collections::BTreeMap;
         let mut prep_by_name: BTreeMap<
