@@ -70,8 +70,9 @@ pub struct StackedWhirProof<F: p3_field::Field, EF: ExtensionField<F>, MT: Mmcs<
 /// pure-host path).
 ///
 /// The rounds AFTER the first fold batch are not host-trivial either: at the
-/// production stack (`lsh = 21`, folds `[4, 7, 7]`) the post-round-0 vectors
-/// hold `2^17` EF values, and the host round-1 fold, the host encode + Merkle
+/// production stack (`lsh = 21`, folds `[3, 6, 6, …]` from
+/// [`crate::whir::jagged::core_whir_config`]) the post-round-0 vectors hold
+/// `2^18` EF values, and the host round-1 fold, the host encode + Merkle
 /// commit of its codeword, the OOD `eval_at` on the folded vector and the
 /// host↔device copies of the weight for the constraint absorption measured
 /// ~25 ms per open on a multi-GPU worker lane (`ZIREN_WHIR_OPEN_TIMING`:
