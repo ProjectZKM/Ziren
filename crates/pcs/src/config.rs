@@ -216,6 +216,23 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// Construct the BaseFold MMCS for this config (perm + hash + compress).
     fn bf_mmcs() -> Self::BfMmcs;
 
+    /// The BaseFold prover data standing in for a round committed under WHIR:
+    /// a leafless tree carrying the WHIR root alone.  Of that data only the
+    /// interleaved MLEs beside it are ever read (the jagged reduction rebuilds
+    /// the dense polynomial from them); no BaseFold opening walks the tree,
+    /// exactly as for a device-committed round.  `None` for a ring that never
+    /// commits under WHIR.
+    fn whir_committed_bf_prover_data(
+        commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> Option<
+        <Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
+            p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
+        >,
+    > {
+        let _ = commit;
+        None
+    }
+
     /// Per-stage BaseFold FRI config (rate / query count / grinding).
     ///
     /// The default returns the
@@ -297,60 +314,71 @@ pub trait BasefoldRing: StarkGenericConfig {
         if packing.dense_len == 0 {
             packing.dense_len = 1;
         }
-        let (commit, prover_data) =
-            {
-                let dense_q = crate::jagged::materialize_dense_jagged::<crate::InnerVal>(
-                    chip_traces,
-                    packing.dense_len,
-                );
-                assert_eq!(
-                    dense_q.len(),
-                    packing.dense_len,
-                    "materialize_dense_jagged produced {} cells for a dense_len of {}",
-                    dense_q.len(),
-                    packing.dense_len,
-                );
-                let dense_traces = alloc::vec![(
-                    alloc::string::String::from("<jagged-dense>"),
-                    RowMajorMatrix::new(dense_q, 1),
-                )];
+        let dense_q = crate::jagged::materialize_dense_jagged::<crate::InnerVal>(
+            chip_traces,
+            packing.dense_len,
+        );
+        assert_eq!(
+            dense_q.len(),
+            packing.dense_len,
+            "materialize_dense_jagged produced {} cells for a dense_len of {}",
+            dense_q.len(),
+            packing.dense_len,
+        );
+        let dense_traces = alloc::vec![(
+            alloc::string::String::from("<jagged-dense>"),
+            RowMajorMatrix::new(dense_q, 1),
+        )];
+        let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
 
-                let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+        let (commit, prover_data, whir_data) = if Self::WHIR_INNER_PCS {
+            let (mles, chip_dims) = crate::jagged_pcs::chips_to_mles_owned(dense_traces);
+            let total_entries: usize = mles.iter().map(|m| m.guts().total_len()).sum();
+            let log_stacking_height = crate::jagged_pcs::pick_log_stacking_height(total_entries);
+            let area = total_entries.next_multiple_of(1usize << log_stacking_height);
+            let interleaved_mles =
+                crate::basefold::stacked::interleave_multilinears_with_fixed_rate(
+                    crate::jagged_pcs::DEFAULT_BATCH_SIZE,
+                    mles,
+                    log_stacking_height,
+                );
+            let cfg = crate::whir::jagged::core_whir_config(log_stacking_height as usize);
+            let (wcommit, wdata) = crate::whir::jagged::commit_jagged_whir_from_stripes::<
+                Self::BfMmcs,
+                crate::jagged_pcs::JaggedDft,
+            >(
+                &interleaved_mles,
+                chip_dims.clone(),
+                area,
+                log_stacking_height,
+                Self::bf_mmcs(),
+                dft,
+                cfg,
+            );
+            let tree = Self::whir_committed_bf_prover_data(&wcommit.original_commitment)
+                .expect("a ring committing under WHIR supplies its leafless BaseFold prover data");
+            let pcs_batch_data = crate::basefold::BasefoldProverData {
+                prover_data: tree,
+                encoded_codewords: Vec::new(),
+                digest_layers: Vec::new(),
+            };
+            let prover_data = crate::jagged_pcs::JaggedProverDataGeneric::<Self::BfMmcs> {
+                stacked_data: crate::basefold::stacked::StackedBasefoldProverData {
+                    pcs_batch_data,
+                    interleaved_mles,
+                },
+                chip_dims,
+                area,
+                log_stacking_height,
+            };
+            (wcommit, prover_data, Some(wdata))
+        } else {
+            let (commit, prover_data) =
                 crate::jagged_pcs::commit_jagged_pcs_generic::<
                     Self::BfMmcs,
                     crate::jagged_pcs::JaggedDft,
-                >(dense_traces, Self::bf_mmcs(), dft, Self::fri_config())
-            };
-        let whir_data = if Self::WHIR_INNER_PCS {
-            let dense_traces = alloc::vec![(
-                alloc::string::String::from("<jagged-dense>"),
-                RowMajorMatrix::new(
-                    crate::basefold::stacked::dense_from_interleaved_mles::<crate::InnerVal>(
-                        &prover_data.stacked_data.interleaved_mles,
-                        prover_data.area,
-                    ),
-                    1,
-                ),
-            )];
-            let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-            let cfg =
-                crate::whir::jagged::core_whir_config(prover_data.log_stacking_height as usize);
-            let (wcommit, wdata) = crate::whir::jagged::commit_jagged_whir_generic::<
-                Self::BfMmcs,
-                crate::jagged_pcs::JaggedDft,
-            >(dense_traces, Self::bf_mmcs(), dft, cfg);
-            assert_eq!(
-                wcommit.area, prover_data.area,
-                "WHIR commit area {} != BaseFold prover_data area {}",
-                wcommit.area, prover_data.area,
-            );
-            Some((wcommit, wdata))
-        } else {
-            None
-        };
-        let (commit, whir_data) = match whir_data {
-            Some((wcommit, wdata)) => (wcommit, Some(wdata)),
-            None => (commit, None),
+                >(dense_traces, Self::bf_mmcs(), dft, Self::fri_config());
+            (commit, prover_data, None)
         };
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric {
             packing,
