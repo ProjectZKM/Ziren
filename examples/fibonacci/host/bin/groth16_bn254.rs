@@ -21,7 +21,7 @@ fn main() {
     let public_values = proof.public_values.as_slice();
     println!("public values: 0x{}", hex::encode(public_values));
 
-    let solidity_proof = proof.bytes();
+    let solidity_proof = proof.bytes().expect("the proof has a byte encoding");
     println!("proof: 0x{}", hex::encode(solidity_proof));
 
     client.verify(&proof, &vk).expect("verification failed");

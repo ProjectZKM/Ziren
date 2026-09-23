@@ -1,5 +1,4 @@
 use alloc::vec::Vec;
-use core::hash::Hasher;
 use sha2::Digest;
 
 use crate::PlonkError;
@@ -94,12 +93,9 @@ impl WrappedHashToField {
     }
 }
 
-impl Hasher for WrappedHashToField {
-    fn finish(&self) -> u64 {
-        unimplemented!();
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
+impl WrappedHashToField {
+    /// Appends `bytes` to the message that [`Self::sum`] hashes.
+    pub(crate) fn write(&mut self, bytes: &[u8]) {
         self.to_hash.extend_from_slice(bytes);
     }
 }

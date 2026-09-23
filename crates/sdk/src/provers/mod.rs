@@ -24,7 +24,7 @@ use zkm_prover::{
     CoreSC, InnerSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey, ZKMVerifyingKey,
 };
 
-use crate::install::try_install_circuit_artifacts;
+use crate::install::{try_install_circuit_artifacts, CircuitArtifacts};
 use crate::ProverClient;
 use crate::{ZKMProof, ZKMProofKind, ZKMProofWithPublicValues};
 
@@ -215,7 +215,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     &if zkm_prover::build::zkm_dev_mode() {
                         zkm_prover::build::plonk_bn254_artifacts_dev_dir()
                     } else {
-                        try_install_circuit_artifacts("plonk", ZKM_CIRCUIT_VERSION)
+                        try_install_circuit_artifacts(CircuitArtifacts::Plonk, ZKM_CIRCUIT_VERSION)
                     },
                 )
                 .map_err(ZKMVerificationError::Plonk),
@@ -228,7 +228,10 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     &if zkm_prover::build::zkm_dev_mode() {
                         zkm_prover::build::groth16_bn254_artifacts_dev_dir()
                     } else {
-                        try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
+                        try_install_circuit_artifacts(
+                            CircuitArtifacts::Groth16,
+                            ZKM_CIRCUIT_VERSION,
+                        )
                     },
                 )
                 .map_err(ZKMVerificationError::Groth16),
