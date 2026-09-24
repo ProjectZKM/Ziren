@@ -66,10 +66,6 @@ name = "build_compress_vks"
 path = "scripts/build_compress_vks.rs"
 
 [[bin]]
-name = "soundcalc_census"
-path = "scripts/soundcalc_census.rs"
-
-[[bin]]
 name = "verify_dumped_shard"
 path = "scripts/verify_dumped_shard.rs"
 
@@ -106,14 +102,6 @@ name = "check_vk_coverage"
 path = "scripts/check_vk_coverage.rs"
 
 [[bin]]
-name = "enum_build_coverage"
-path = "scripts/enum_build_coverage.rs"
-
-[[bin]]
-name = "pk_size_census"
-path = "scripts/pk_size_census.rs"
-
-[[bin]]
 name = "jit_coverage"
 path = "scripts/jit_coverage.rs"
 
@@ -126,24 +114,8 @@ name = "find_small_shapes"
 path = "scripts/find_small_shapes.rs"
 
 [[bin]]
-name = "find_oom_shapes"
-path = "scripts/find_oom_shapes.rs"
-
-[[bin]]
 name = "find_recursion_shapes"
 path = "scripts/find_recursion_shapes.rs"
-
-[[bin]]
-name = "test_shape_fixing"
-path = "scripts/test_shape_fixing.rs"
-
-[[bin]]
-name = "tendermint_perf"
-path = "scripts/tendermint_perf.rs"
-
-[[bin]]
-name = "sha2_perf"
-path = "scripts/sha2_perf.rs"
 
 [features]
 default = ["native-gnark"]
