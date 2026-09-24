@@ -36,9 +36,13 @@ jobs:
       - run: |
           source ~/.zkm-toolchain/env
           cargo test -r -p zkm-core-machine
-          for pkg in zkm-sdk zkm-verifier; do
-            cargo test -r -p $pkg
-          done
+          # The sdk suite runs single-threaded. Its Groth16 and Plonk cases each
+          # hold a multi-gigabyte R1CS and proving key in one process, and the
+          # regenerated v2.0.0 circuit is 31.9M constraints, so a single prover
+          # peaked at 73 GB here. With two of them overlapping, earlyoom sent the
+          # test binary SIGTERM and the job failed with no failing test.
+          cargo test -r -p zkm-sdk -- --test-threads=1
+          cargo test -r -p zkm-verifier
           # test_verify_groth16_imm_wrap_vk runs once the imm-wrap-vk Groth16
           # artifacts for v2.0.0 are published.
           # The end-to-end recursion gates.  All three are `#[ignore]`d because
