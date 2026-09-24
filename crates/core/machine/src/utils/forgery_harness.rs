@@ -58,6 +58,14 @@ type SC = KoalaBearPoseidon2;
 type Val = KoalaBear;
 type Challenge = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
 
+/// The fibonacci guest reads one `u32` from the input stream, so an empty
+/// stream fails its first syscall before any trace exists.
+fn fib_stdin() -> ZKMStdin {
+    let mut stdin = ZKMStdin::new();
+    stdin.write(&10u32);
+    stdin
+}
+
 /// Prove `program` on `stdin` unshaped (`shape_config = None`, raw
 /// heights).  Returns the `MachineProof` and a
 /// freshly-built machine+vk so the caller can verify (and re-verify
@@ -172,7 +180,7 @@ fn degree_bits_to_height(degree: &[Challenge]) -> Option<usize> {
 #[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
 fn stage0_control_fixoff_honest_verifies() {
     setup_logger();
-    let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
+    let (proof, machine, vk) = prove_fixoff(fibonacci_program(), fib_stdin());
     let res = verify(&machine, &vk, &proof);
     tracing::info!("[STAGE0][CONTROL][fibonacci FIX-off] honest verify = {}", reject_tag(&res));
     assert!(res.is_ok(), "honest FIX-off proof must verify (control)");
@@ -187,12 +195,10 @@ fn stage0_control_fixon_honest_verifies() {
     let shape_config = crate::shape::CoreShapeConfig::<Val>::default();
     shape_config.fix_preprocessed_shape(&mut program).unwrap();
     let mut runtime = Executor::new(program.clone(), ZKMCoreOpts::default());
+    runtime.write_vecs(&fib_stdin().buffer);
     runtime.run().unwrap();
-    let res = crate::utils::run_test_core::<CpuProver<_, _>>(
-        runtime,
-        ZKMStdin::new(),
-        Some(&shape_config),
-    );
+    let res =
+        crate::utils::run_test_core::<CpuProver<_, _>>(runtime, fib_stdin(), Some(&shape_config));
     tracing::info!(
         "[STAGE0][CONTROL][fibonacci FIX-on] honest verify = {}",
         if res.is_ok() { "ACCEPTED" } else { "REJECTED" }
@@ -403,8 +409,7 @@ fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
 #[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
 fn stage0_forge_overclaim_fibonacci() {
     setup_logger();
-    let tag =
-        run_forgery("fibonacci/overclaim", fibonacci_program(), ZKMStdin::new(), true, overclaim);
+    let tag = run_forgery("fibonacci/overclaim", fibonacci_program(), fib_stdin(), true, overclaim);
     tracing::info!("[STAGE0][VERDICT] fibonacci OVER-claim (transcript+degree) => {tag}");
 }
 
@@ -413,7 +418,7 @@ fn stage0_forge_overclaim_fibonacci() {
 fn stage0_forge_underclaim_fibonacci() {
     setup_logger();
     let tag =
-        run_forgery("fibonacci/underclaim", fibonacci_program(), ZKMStdin::new(), true, underclaim);
+        run_forgery("fibonacci/underclaim", fibonacci_program(), fib_stdin(), true, underclaim);
     tracing::info!("[STAGE0][VERDICT] fibonacci UNDER-claim (transcript+degree) => {tag}");
 }
 
@@ -424,7 +429,7 @@ fn stage0_forge_transcript_only_fibonacci() {
     let tag = run_forgery(
         "fibonacci/transcript-only",
         fibonacci_program(),
-        ZKMStdin::new(),
+        fib_stdin(),
         true,
         forge_transcript_only,
     );
@@ -442,7 +447,7 @@ fn stage0_forge_degree_only_overclaim_fibonacci_recon_on() {
     let tag = run_forgery(
         "fibonacci/degree-only-overclaim",
         fibonacci_program(),
-        ZKMStdin::new(),
+        fib_stdin(),
         true,
         forge_degree_only_overclaim,
     );
@@ -456,36 +461,35 @@ fn stage0_forge_degree_only_underclaim_fibonacci_recon_on() {
     let tag = run_forgery(
         "fibonacci/degree-only-underclaim",
         fibonacci_program(),
-        ZKMStdin::new(),
+        fib_stdin(),
         true,
         forge_degree_only_underclaim,
     );
     tracing::info!("[STAGE0][VERDICT] fibonacci DEGREE-only UNDER-claim => {tag}");
 }
 
-// (B') DEGREE-ONLY forgery with the reconstruction EXPLICITLY DISABLED
-//      with the reconstruction disabled — DOCUMENTS that
-//      a degree-only lie SURVIVES only when the degree anchor is turned OFF
-//      on purpose.  The reconstruction is ON
-//      by default, so this case requires the explicit `=0` override (which
-//      `run_forgery(recon=false)` sets).  It pins the cause (the gate)
-//      and proves the escape hatch still disables the check.
+// (B') DEGREE-ONLY forgery against the anchor that once had an escape hatch.
+//      This case used to expect SURVIVAL, because the degree-masked
+//      reconstruction could be turned off by an environment override
+//      (`ZIREN_LOGUP_RECONSTRUCTION=0`).  That override no longer exists
+//      anywhere in the tree, so the anchor is unconditional and the same
+//      forgery is now rejected on the default path with no way to disable
+//      the check.
 
 #[test]
 #[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
-fn stage0_degree_only_overclaim_fibonacci_survives_when_recon_off() {
+fn stage0_degree_only_overclaim_fibonacci_rejected_with_no_escape_hatch() {
     setup_logger();
     let tag = run_forgery(
-        "fibonacci/degree-only-overclaim-EXPLICITLY-OFF",
+        "fibonacci/degree-only-overclaim-NO-ESCAPE-HATCH",
         fibonacci_program(),
-        ZKMStdin::new(),
-        false,
+        fib_stdin(),
+        true,
         forge_degree_only_overclaim,
     );
     tracing::info!(
-        "[STAGE0][CAVEAT] fibonacci DEGREE-only OVER-claim SURVIVES with \
-         ZIREN_LOGUP_RECONSTRUCTION=0 (escape hatch disables the host degree \
-         anchor) => {tag}"
+        "[STAGE0][VERDICT] fibonacci DEGREE-only OVER-claim is rejected with \
+         the reconstruction anchor unconditional => {tag}"
     );
 }
 
@@ -493,7 +497,7 @@ fn stage0_degree_only_overclaim_fibonacci_survives_when_recon_off() {
 #[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
 fn stage1_degree_only_overclaim_fibonacci_rejected_on_default() {
     setup_logger();
-    let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
+    let (proof, machine, vk) = prove_fixoff(fibonacci_program(), fib_stdin());
     let honest = verify(&machine, &vk, &proof);
     assert!(
         honest.is_ok(),
@@ -624,7 +628,7 @@ fn stage0_forge_count_tamper_column_fibonacci() {
     let tag = run_forgery(
         "fibonacci/count-tamper-column",
         fibonacci_program(),
-        ZKMStdin::new(),
+        fib_stdin(),
         true,
         forge_count_tamper_column,
     );
@@ -638,7 +642,7 @@ fn stage0_forge_count_tamper_row_fibonacci() {
     let tag = run_forgery(
         "fibonacci/count-tamper-row",
         fibonacci_program(),
-        ZKMStdin::new(),
+        fib_stdin(),
         true,
         forge_count_tamper_row,
     );
@@ -738,7 +742,7 @@ fn forge_present_claim_missing(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 #[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
 fn stage1_forge_height0_missing_claims_active_rejected() {
     setup_logger();
-    let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
+    let (proof, machine, vk) = prove_fixoff(fibonacci_program(), fib_stdin());
     let honest = verify(&machine, &vk, &proof);
     assert!(
         honest.is_ok(),
@@ -774,7 +778,7 @@ fn stage1_forge_present_active_claims_missing_rejected() {
     let tag = run_forgery(
         "present-claims-missing",
         fibonacci_program(),
-        ZKMStdin::new(),
+        fib_stdin(),
         true,
         forge_present_claim_missing,
     );
