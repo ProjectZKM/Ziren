@@ -3,10 +3,11 @@
 //! `perf` is unavailable on both the dev host and the box
 //! (`perf_event_paranoid=4` disallows even user-space profiling), so instead
 //! of sampling, this times programs made of ONE opcode at a time.  That
-//! attributes cost per opcode directly, and combined with the measured mix
-//! from `jit_coverage` it says which arm the walk actually spends its time
-//! in — which is what decides whether removing dispatch is worth anything,
-//! or whether the cost is in the memory traffic no dispatch change touches.
+//! attributes cost per opcode directly, and combined with an opcode mix
+//! counted over a real program it says which arm the walk actually spends
+//! its time in — which is what decides whether removing dispatch is worth
+//! anything, or whether the cost is in the memory traffic no dispatch
+//! change touches.
 //!
 //! Run with: `cargo test --release -p zkm-recursion-jit --test interpreter_cost -- --ignored --nocapture`
 

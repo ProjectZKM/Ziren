@@ -70,10 +70,6 @@ name = "verify_dumped_shard"
 path = "scripts/verify_dumped_shard.rs"
 
 [[bin]]
-name = "proof_size_census"
-path = "scripts/proof_size_census.rs"
-
-[[bin]]
 name = "collect_basefold_vks"
 path = "scripts/collect_basefold_vks.rs"
 
@@ -100,10 +96,6 @@ path = "scripts/post_trusted_setup.rs"
 [[bin]]
 name = "check_vk_coverage"
 path = "scripts/check_vk_coverage.rs"
-
-[[bin]]
-name = "jit_coverage"
-path = "scripts/jit_coverage.rs"
 
 [[bin]]
 name = "find_maximal_shapes"
