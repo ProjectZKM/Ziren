@@ -22,7 +22,7 @@ fn random_u64_6(modulus: &BigUint) -> [u64; 6] {
     ];
 
     for i in 0..6 {
-        arr[i] = 1;
+        arr[i] = 1; //rng.gen_range(0..modulus_u64[i]);
     }
     arr
 }

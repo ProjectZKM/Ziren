@@ -21,7 +21,7 @@ fn random_u64_4(modulus: &BigUint) -> [u64; 4] {
     ];
 
     for i in 0..4 {
-        arr[i] = 1;
+        arr[i] = 1; // rng.gen_range(0..modulus_u64[i]);
     }
     arr
 }
@@ -109,6 +109,7 @@ pub fn main() {
         assert_eq!(b_c0, _b_c0);
         assert_eq!(b_c1, _b_c1);
 
+        // Fp2 Addition test
         let c0 = (a_c0_bigint + b_c0_bigint) % &modulus;
         let c1 = (a_c1_bigint + b_c1_bigint) % &modulus;
 
@@ -117,6 +118,7 @@ pub fn main() {
         assert_eq!(c0, u64_4_to_biguint(&res_c0) % &modulus);
         assert_eq!(c1, u64_4_to_biguint(&res_c1) % &modulus);
 
+        // Fp2 Subtraction test
         let c0 = (a_c0_bigint + &modulus - b_c0_bigint) % &modulus;
         let c1 = (a_c1_bigint + &modulus - b_c1_bigint) % &modulus;
 

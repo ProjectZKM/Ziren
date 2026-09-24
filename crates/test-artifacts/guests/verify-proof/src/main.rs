@@ -22,6 +22,7 @@ pub fn main() {
     let vkey = zkm_zkvm::io::read::<[u32; 8]>();
     let inputs = zkm_zkvm::io::read::<Vec<Vec<u8>>>();
     inputs.iter().for_each(|input| {
+        // Get expected pv_digest hash: sha256(input)
         let pv_digest = Sha256::digest(input);
         verify_zkm_proof(&vkey, &pv_digest.into());
 

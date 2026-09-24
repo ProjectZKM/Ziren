@@ -21,7 +21,7 @@ fn random_u64_4(modulus: &BigUint) -> [u64; 4] {
     ];
 
     for i in 0..4 {
-        arr[i] = 1;
+        arr[i] = 1; //rng.gen_range(0..modulus_u64[i]);
     }
     arr
 }

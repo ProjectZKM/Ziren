@@ -47,6 +47,7 @@ pub fn main() {
     let result_max = a_max_big * b_max_big;
     assert_eq!(result_max, result_max_syscall);
 
+    // Test 10 pairs of a and b, each with a single bit set at a different position.
     for j in 0..10 {
         let mut a: [u8; 32] = [0u8; 32];
         let mut b = [0u8; 256];

@@ -38,7 +38,7 @@ fn mul(lhs: &[u32; 12], rhs: &[u32; 12]) -> [u32; 12] {
 fn random_u32_12() -> [u32; 12] {
     let mut arr = [0u32; 12];
     for item in arr.iter_mut() {
-        *item = 1;
+        *item = 1; // rng.gen();
     }
     arr
 }
@@ -83,16 +83,19 @@ pub fn main() {
         let a_bigint = u32_12_to_biguint(&a_reduced);
         let b_bigint = u32_12_to_biguint(&b_reduced);
 
+        // Test addition
         assert_eq!(
             (a_bigint.clone() + b_bigint.clone()) % &modulus,
             u32_12_to_biguint(&add(&a_reduced, &b_reduced)) % &modulus
         );
 
+        // Test addition with zero
         assert_eq!(
             (&a_bigint + &zero_bigint) % &modulus,
             u32_12_to_biguint(&add(&a_reduced, &zero)) % &modulus
         );
 
+        // Test subtraction
         let expected_sub = if a_bigint < b_bigint {
             ((a_bigint.clone() + &modulus) - b_bigint.clone()) % &modulus
         } else {
@@ -100,21 +103,25 @@ pub fn main() {
         };
         assert_eq!(expected_sub, u32_12_to_biguint(&sub(&a_reduced, &b_reduced)) % &modulus);
 
+        // Test subtraction with zero
         assert_eq!(
             (&a_bigint + &modulus - &zero_bigint) % &modulus,
             u32_12_to_biguint(&sub(&a_reduced, &zero)) % &modulus
         );
 
+        // Test multiplication
         assert_eq!(
             (a_bigint.clone() * b_bigint.clone()) % &modulus,
             u32_12_to_biguint(&mul(&a_reduced, &b_reduced)) % &modulus
         );
 
+        // Test multiplication with one
         assert_eq!(
             (&a_bigint * &one_bigint) % &modulus,
             u32_12_to_biguint(&mul(&a_reduced, &one)) % &modulus
         );
 
+        // Test multiplication with zero
         assert_eq!(
             (&a_bigint * &zero_bigint) % &modulus,
             u32_12_to_biguint(&mul(&a_reduced, &zero)) % &modulus

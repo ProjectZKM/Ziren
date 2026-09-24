@@ -26,14 +26,16 @@ fn biguint_to_bytes_le(x: BigUint) -> [u8; 32] {
 
 pub fn main() {
     for j in 0..50 {
-        let mut x: [u8; 32] = [0u8;32];
+        // Test with random numbers.
+        let mut x: [u8; 32] = [0u8;32];//rng.gen();
         x[j/2] = 1;
-        let mut y: [u8; 32] = [0u8;32];
+        let mut y: [u8; 32] = [0u8;32];//rng.gen();
         y[j/2 + 2] = 3;
-        let mut modulus: [u8; 32] = [0u8;32];
+        let mut modulus: [u8; 32] = [0u8;32];//rng.gen();
         modulus[0] = 1;
         modulus[j/2 + 5] = 5;;
 
+        // Convert byte arrays to BigUint
         let modulus_big = BigUint::from_bytes_le(&modulus);
         let x_big = BigUint::from_bytes_le(&x);
         x = biguint_to_bytes_le(&x_big % &modulus_big);
@@ -48,13 +50,16 @@ pub fn main() {
         assert_eq!(result, result_syscall);
     }
 
+    // Modulus zero tests
     let modulus = [0u8; 32];
     let modulus_big: BigUint = BigUint::one() << 256;
     for j in 0..50 {
-        let mut x: [u8; 32] = [0u8;32];
+        // Test with random numbers.
+        let mut x: [u8; 32] = [0u8;32];//rng.gen();
         x[j/2] = 1;
-        let mut y: [u8; 32] = [0u8;32];
+        let mut y: [u8; 32] = [0u8;32];//rng.gen();
         y[j/2 + 2] = 3;
+        // Convert byte arrays to BigUint
         let x_big = BigUint::from_bytes_le(&x);
         x = biguint_to_bytes_le(&x_big % &modulus_big);
         let y_big = BigUint::from_bytes_le(&y);
@@ -68,17 +73,20 @@ pub fn main() {
         assert_eq!(result, result_syscall, "x: {:?}, y: {:?}", x, y);
     }
 
-    let x: [u8; 32] = [0u8; 32];
+    // Test with random numbers.
+    let x: [u8; 32] = [0u8; 32]; //rng.gen();
 
+    // Hardcoded edge case: Multiplying by 1
     let modulus = [0u8; 32];
 
     let mut one: [u8; 32] = [0; 32];
-    one[0] = 1;
-    let original_x = x;
+    one[0] = 1; // Least significant byte set to 1, represents the number 1
+    let original_x = x; // Copy original x value before multiplication by 1
     let result_one = uint256_mul(&x, &one, &modulus);
     assert_eq!(result_one, original_x, "Multiplying by 1 should yield the same number.");
 
-    let zero: [u8; 32] = [0; 32];
+    // Hardcoded edge case: Multiplying by 0
+    let zero: [u8; 32] = [0; 32]; // Represents the number 0
     let result_zero = uint256_mul(&x, &zero, &modulus);
     assert_eq!(result_zero, zero, "Multiplying by 0 should yield 0.");
 
