@@ -34,7 +34,7 @@ struct Args {
     /// Add a raw hash literal as an extra entry. Format: "v0,v1,...,v7"
     /// (8 comma-separated u32 values, the canonical KoalaBear repr).
     /// Used when capturing a specific compress/shrink VK from a test
-    /// run via diagnostic eprintln rather than via collect_basefold_vks.
+    /// run, which prints the digest the run refused.
     #[clap(long = "add-hash")]
     add_hashes: Vec<String>,
 }
