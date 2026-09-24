@@ -74,6 +74,14 @@ jobs:
     env:
       RUST_TEST_THREADS: "2"
       ELEMENT_THRESHOLD: "115000000"
+      # `actions/checkout` cleans the workspace, and `git clean -ffdx` deletes
+      # `target/` with it, so every run used to be a cold build of the whole
+      # workspace. Keeping the cache outside the checkout makes runs
+      # incremental. Both self-hosted jobs point at this one directory and use
+      # one RUSTFLAGS, because a second value invalidates every artifact the
+      # first one produced.
+      CARGO_TARGET_DIR: /data/actions-runner/cache/ziren-target
+      RUSTFLAGS: "-C target-cpu=native"
     # This job runs `cargo test` — contributor `build.rs` and test code as
     # NATIVE code — on a persistent self-hosted runner that also holds the
     # zkm toolchain, a warm cargo registry and its own runner credentials.

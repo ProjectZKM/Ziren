@@ -9,6 +9,12 @@ on:
     branches: ["main", "feat/upgrade-plonky3"]
   workflow_dispatch:
 
+# One run per branch. Without this a superseded push queues behind the run it
+# replaces, on a runner that has one slot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -20,6 +26,10 @@ jobs:
     env:
       RUST_TEST_THREADS: "2"
       ELEMENT_THRESHOLD: "115000000"
+      # The same cache and the same flags as ci.yml's self-hosted job, so the
+      # two share artifacts instead of rebuilding the workspace for each other.
+      CARGO_TARGET_DIR: /data/actions-runner/cache/ziren-target
+      RUSTFLAGS: "-C target-cpu=native"
     steps:
       - uses: actions/checkout@v5
       - run: export PATH=~/.cargo/bin:$PATH
@@ -27,7 +37,7 @@ jobs:
           source ~/.zkm-toolchain/env
           cargo test -r -p zkm-core-machine
           for pkg in zkm-sdk zkm-verifier; do
-            RUSTFLAGS="-C target-cpu=native" cargo test -r -p $pkg
+            cargo test -r -p $pkg
           done
           # test_verify_groth16_imm_wrap_vk runs once the imm-wrap-vk Groth16
           # artifacts for v2.0.0 are published.
@@ -39,7 +49,7 @@ jobs:
           # the only thing that exercises the jagged-eval closing identity, and
           # is where the column-accounting defect fixed in ff3488dc lived.
           # NOTE: the circuit gate needs the Go toolchain on the runner.
-          VERIFY_VK=false RUSTFLAGS="-C target-cpu=native" cargo test -r -p zkm-prover -- --ignored --test-threads=1 \
+          VERIFY_VK=false cargo test -r -p zkm-prover -- --ignored --test-threads=1 \
             tests::test_e2e_compress_fibonacci \
             tests::test_e2e_wrap_fibonacci \
             tests::test_e2e_circuit_fibonacci
