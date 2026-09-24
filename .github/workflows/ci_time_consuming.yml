@@ -42,8 +42,19 @@ jobs:
           # (measured) and earlyoom kills it on this 126 GB runner, which is what
           # took down two runs with no failing test. Thread count does not help,
           # because the growth is cumulative rather than concurrent. Giving each
-          # of these cases its own process caps the peak at one case's footprint,
-          # measured at 52 GiB, and keeps every case running.
+          # of these cases its own process caps the peak at one case's footprint
+          # and keeps every case running.
+          #
+          # That footprint is large and is NOT reducible by tuning the Go
+          # runtime: test_e2e_prove_plonk alone peaks at 83.4 GiB (measured
+          # 2026-09-24), and it peaks there with GOMEMLIMIT=40GiB and GOGC=50
+          # set, because the PLONK constraint system has 43.2M constraints and
+          # the solver's witness is live data rather than collectable garbage.
+          # A soft heap limit cannot bound a live set. What keeps this job alive
+          # on this runner is swap headroom: earlyoom sends SIGTERM only when
+          # memory AND swap are both under 10%, so the box carries a second
+          # 64 GiB swapfile (/data/swapfile2) for this reason. If these cases
+          # are moved to a machine with more RAM, that is the real fix.
           for t in test_compress_to_groth16 test_e2e_prove_groth16 \
                    test_e2e_prove_plonk test_generate_dvsnark_r1cs_witness \
                    test_groth16_public_values; do
