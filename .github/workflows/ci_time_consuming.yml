@@ -36,12 +36,25 @@ jobs:
       - run: |
           source ~/.zkm-toolchain/env
           cargo test -r -p zkm-core-machine
-          # The sdk suite runs single-threaded. Its Groth16 and Plonk cases each
-          # hold a multi-gigabyte R1CS and proving key in one process, and the
-          # regenerated v2.0.0 circuit is 31.9M constraints, so a single prover
-          # peaked at 73 GB here. With two of them overlapping, earlyoom sent the
-          # test binary SIGTERM and the job failed with no failing test.
-          cargo test -r -p zkm-sdk -- --test-threads=1
+          # Every sdk case that drives gnark loads a multi-gigabyte R1CS and
+          # proving key, and the process does not return that memory when the
+          # case ends. Run in one process the suite therefore climbs to 102 GiB
+          # (measured) and earlyoom kills it on this 126 GB runner, which is what
+          # took down two runs with no failing test. Thread count does not help,
+          # because the growth is cumulative rather than concurrent. Giving each
+          # of these cases its own process caps the peak at one case's footprint,
+          # measured at 52 GiB, and keeps every case running.
+          for t in test_compress_to_groth16 test_e2e_prove_groth16 \
+                   test_e2e_prove_plonk test_generate_dvsnark_r1cs_witness \
+                   test_groth16_public_values; do
+            cargo test -r -p zkm-sdk -- --exact "tests::$t" --test-threads=1
+          done
+          cargo test -r -p zkm-sdk -- --test-threads=1 \
+            --skip tests::test_compress_to_groth16 \
+            --skip tests::test_e2e_prove_groth16 \
+            --skip tests::test_e2e_prove_plonk \
+            --skip tests::test_generate_dvsnark_r1cs_witness \
+            --skip tests::test_groth16_public_values
           cargo test -r -p zkm-verifier
           # test_verify_groth16_imm_wrap_vk runs once the imm-wrap-vk Groth16
           # artifacts for v2.0.0 are published.
