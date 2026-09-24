@@ -47,9 +47,9 @@ jobs:
           for t in test_compress_to_groth16 test_e2e_prove_groth16 \
                    test_e2e_prove_plonk test_generate_dvsnark_r1cs_witness \
                    test_groth16_public_values; do
-            cargo test -r -p zkm-sdk -- --exact "tests::$t" --test-threads=1
+            cargo test -r -p zkm-sdk -- --exact "tests::$t"
           done
-          cargo test -r -p zkm-sdk -- --test-threads=1 \
+          cargo test -r -p zkm-sdk -- \
             --skip tests::test_compress_to_groth16 \
             --skip tests::test_e2e_prove_groth16 \
             --skip tests::test_e2e_prove_plonk \
