@@ -29,7 +29,7 @@ zkm-core-machine = { workspace = true }
 zkm-primitives = { workspace = true }
 
 [dev-dependencies]
-zkm-test-fixtures = { workspace = true }
+zkm-pcs = { workspace = true, features = ["test-harness"] }
 p3-challenger = { workspace = true }
 p3-dft = { workspace = true }
 p3-merkle-tree = { workspace = true }

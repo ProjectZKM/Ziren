@@ -59,6 +59,13 @@ sysinfo = "0.30.13"
 # downstream crates can plumb "--features gpu" without a cascading
 # Cargo.toml change.
 gpu = []
+# The prove-and-verify harness the recursion crates' tests share
+# (`test_harness`).  Off by default: only their `[dev-dependencies]` turn it
+# on, so no shipped build compiles it.  `-debug` additionally runs the host
+# constraint checker over the records before proving them, mirroring
+# `zkm-core-machine/debug`.
+test-harness = []
+test-harness-debug = ["test-harness"]
 
 [dev-dependencies]
 

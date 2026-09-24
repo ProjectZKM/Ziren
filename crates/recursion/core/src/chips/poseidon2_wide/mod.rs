@@ -135,8 +135,8 @@ pub(crate) mod tests {
     use rand::Rng;
 
     use zkm_core_machine::utils::setup_logger;
+    use zkm_pcs::test_harness::run_test_machine;
     use zkm_pcs::{inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
-    use zkm_test_fixtures::run_test_machine;
 
     use super::WIDTH;
 

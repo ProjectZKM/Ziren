@@ -8171,7 +8171,6 @@ dependencies = [
  "zkm-recursion-compiler",
  "zkm-recursion-core",
  "zkm-recursion-gnark-ffi",
- "zkm-test-fixtures",
 ]
 
 [[package]]
@@ -8196,7 +8195,6 @@ dependencies = [
  "zkm-primitives",
  "zkm-recursion-core",
  "zkm-recursion-derive",
- "zkm-test-fixtures",
 ]
 
 [[package]]
@@ -8241,7 +8239,6 @@ dependencies = [
  "zkm-derive",
  "zkm-pcs",
  "zkm-primitives",
- "zkm-test-fixtures",
 ]
 
 [[package]]
@@ -8334,20 +8331,6 @@ dependencies = [
  "zkm-pcs",
  "zkm-primitives",
  "zkm-prover",
-]
-
-[[package]]
-name = "zkm-test-fixtures"
-version = "2.0.0"
-dependencies = [
- "bincode",
- "p3-air",
- "p3-challenger",
- "p3-field",
- "p3-uni-stark",
- "serde",
- "tracing",
- "zkm-pcs",
 ]
 
 [[package]]

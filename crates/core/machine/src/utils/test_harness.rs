@@ -4,18 +4,16 @@
 //! (`prove`, `prove_with_context`, `trace_checkpoint` — what the CPU and CUDA
 //! provers actually drive) so the split is visible at the module level.
 //!
-//! `run_test`, `run_test_io` and `run_test_core` stay `pub` rather than moving
-//! to the dev-dependency-only `zkm-test-fixtures` crate, for two reasons that
-//! both have to hold:
+//! `run_test`, `run_test_io` and `run_test_core` stay `pub` here rather than
+//! joining the recursion crates' harness in `zkm_pcs::test_harness`, for two
+//! reasons that both have to hold:
 //!
 //!  * this crate's own `examples/playground.rs` and
 //!    `tests/mipstest_instruction_suites.rs` are separate compilation units,
 //!    so they cannot see `#[cfg(test)]` items; and
 //!  * their signatures carry this crate's own concrete types (`ZKMStdin`,
-//!    `CoreShapeConfig`).  A fixture crate that depends on this one would be a
-//!    dev-dependency cycle — cargo resolves those, but the unit-test build then
-//!    holds TWO compilations of this crate and every such argument fails to
-//!    unify (`E0308`, "multiple different versions of crate `zkm_core_machine`").
+//!    `CoreShapeConfig`), which `zkm-pcs` cannot name without depending on
+//!    this crate, and that dependency runs the wrong way.
 //!
 //! Everything below the `run_test*` group is `#[cfg(test)]`: only this crate's
 //! own unit tests reach it, so it never enters a shipped build.

@@ -56,7 +56,7 @@ rayon = "1.10.0"
 
 [dev-dependencies]
 zkm-core-executor = { workspace = true }
-zkm-test-fixtures = { workspace = true }
+zkm-pcs = { workspace = true, features = ["test-harness"] }
 ff = { version = "0.13", features = ["derive", "derive_bits"] }
 p3-challenger = { workspace = true }
 p3-symmetric = { workspace = true }
@@ -70,4 +70,4 @@ test-artifacts = { workspace = true }
 [features]
 default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
-debug = ["zkm-core-machine/debug", "zkm-test-fixtures/debug"]
+debug = ["zkm-core-machine/debug", "zkm-pcs/test-harness-debug"]

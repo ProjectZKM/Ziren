@@ -37,6 +37,8 @@ pub mod stacked_shapes;
 #[cfg(test)]
 mod stark_testing;
 pub mod tensor;
+#[cfg(feature = "test-harness")]
+pub mod test_harness;
 mod traces;
 mod types;
 mod verifier;
