@@ -1468,7 +1468,7 @@ where
 
     if !crate::logup_gkr::gkr_check_witness(
         challenger,
-        crate::logup_gkr::GKR_GRINDING_BITS,
+        crate::logup_gkr::gkr_grinding_bits(),
         proof.witness,
     ) {
         return Err(JaggedShardVerifyError::LogupGkr("GKR grinding witness check failed".into()));

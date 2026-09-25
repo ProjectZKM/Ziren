@@ -1,0 +1,194 @@
+\documentclass[10pt,letterpaper]{article}
+
+% ---------- Encoding & fonts ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+% ---------- Page geometry ----------
+\usepackage[margin=1in]{geometry}
+
+% ---------- Math ----------
+\usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{bm}
+
+% ---------- Tables & figures ----------
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{longtable}
+\usepackage{caption}
+\captionsetup{font=small}
+\usepackage{subcaption}
+\usepackage{graphicx}
+
+% ---------- Algorithms ----------
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+
+% ---------- Code listings ----------
+\usepackage{listings}
+\usepackage{xcolor}
+\definecolor{codegray}{rgb}{0.96,0.96,0.96}
+% A restrained, colour-blind-safe figure palette.  Every distinction also
+% carries a shape, line-style, or luminance cue so the paper remains legible
+% when printed in grayscale.
+% Greyscale only.  The figures were drawn so that every distinction also
+% carries a shape, line-style or luminance cue, so the palette is a luminance
+% ramp: the names are kept so that no figure source has to change, and the
+% levels are spaced far enough apart to survive printing and photocopying.
+\definecolor{zirenorange}{HTML}{1A1A1A}
+\definecolor{zirenblue}{HTML}{4D4D4D}
+\definecolor{zirenteal}{HTML}{737373}
+\definecolor{zirenslate}{HTML}{999999}
+\definecolor{zirengold}{HTML}{B3B3B3}
+\definecolor{zirenlight}{HTML}{F2F2F2}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codegray},
+  frame=single,
+  framerule=0pt,
+  breaklines=true,
+  numbers=none,
+  showstringspaces=false,
+  keywordstyle=\color{black}\bfseries,
+}
+
+% ---------- TikZ ----------
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usetikzlibrary{patterns}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{arrows.meta,positioning,fit,shapes,backgrounds,calc,decorations.pathreplacing}
+
+% ---------- Authors ----------
+% `\affil` is authblk's, not the article class's.
+\usepackage{authblk}
+\renewcommand\Authfont{\normalsize}
+\renewcommand\Affilfont{\small}
+\setlength{\affilsep}{0.6em}
+
+% ---------- References & hyperlinks ----------
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue,
+  pdftitle={Ziren: Succinct Arguments for MIPS32 Execution on GPUs},
+  pdfauthor={ZKM Team},
+}
+\usepackage{url}
+
+% ---------- Theorem environments ----------
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+\newtheorem{protocol}[theorem]{Protocol}
+\theoremstyle{plain}
+
+% ---------- Macros ----------
+\newcommand{\F}{\ensuremath{\mathbb{F}}}
+\newcommand{\EF}{\ensuremath{\mathbb{F}_{p^4}}}
+\newcommand{\KB}{\ensuremath{\mathsf{KoalaBear}}}
+\newcommand{\Mle}{\ensuremath{\mathsf{MLE}}}
+\newcommand{\LogUp}{\ensuremath{\mathsf{LogUp\text{-}GKR}}}
+\newcommand{\BaseFold}{\ensuremath{\mathsf{BaseFold}}}
+\newcommand{\WHIR}{\ensuremath{\mathsf{WHIR}}}
+\newcommand{\Jagged}{\ensuremath{\mathsf{Jagged}}}
+\newcommand{\Stacked}{\ensuremath{\mathsf{Stacked}}}
+\newcommand{\Poseidon}{\ensuremath{\mathsf{Poseidon2}}}
+\newcommand{\zkVM}{zkVM}
+\newcommand{\Ziren}{\textsc{Ziren}}
+\newcommand{\Zirenver}{\textsc{Ziren}}
+\newcommand{\eqf}{\ensuremath{\mathsf{eq}}}
+\newcommand{\RS}{\ensuremath{\mathsf{RS}}}
+\newcommand{\CRS}{\ensuremath{\mathsf{CRS}}}
+\newcommand{\Fold}{\ensuremath{\mathsf{Fold}}}
+\newcommand{\Lean}{Lean~4}
+\newcommand{\ndetproved}{17}
+\newcommand{\ndettotal}{106}
+\newcommand{\ndetopen}{22}
+\newcommand{\ndetskipped}{41}
+\newcommand{\ndetskipacc}{24}
+\newcommand{\ndetskipcase}{17}
+\newcommand{\ndetpending}{26}
+
+\title{\Zirenver{}: Succinct Arguments for MIPS32 Execution on
+GPUs\thanks{Source and artifacts: \url{https://github.com/ProjectZKM/Ziren}, v2.0.0.}}
+
+\author[1, 2]{Stephen Duan\thanks{Corresponding author: \texttt{stephen.d@zkm.io}}}
+\author[1]{Jingping Yin}
+\author[1]{Blake Hou}
+\author[1]{Vangher Pham}
+\author[2]{Ethan Zhu}
+\author[1]{Ming Guo}
+\affil[1]{ZKM Team}
+\affil[2]{GOAT Network}
+
+\date{September 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\Ziren{} is a zero-knowledge virtual machine for MIPS32 (Release~2) execution and the second generation of zkMIPS~\citep{zkmips}, which was the first zkVM for the MIPS32 instruction set itself rather than for a MIPS-like model. It proves the execution of arbitrary MIPS32 programs, and the architecture rewards that choice: Release~2 is finished, so an arithmetisation pinned to it never chases a moving instruction set and the verifying keys derived from it stay valid; its fixed-width encodings in a handful of formats let one row of one unit carry an instruction's whole frame, with no central control table; and every compiler that already targets MIPS32 reaches the guest without a bespoke backend, so Rust, Go and C programs become the same ELF. Its delayed branches make a row's successor data rather than the following address, which shapes everything above.
+
+Four layers carry an execution to a proof: an instruction frame per row, whose state bus balances only if the rows form one chain; one offline-memory-checking argument for registers and memory, carried across shards by an elliptic-curve digest, with one lookup argument and one zerocheck per shard; a jagged reduction of tens of thousands of columns of widely differing heights to one dense-polynomial evaluation that a single batched \WHIR{} proof opens in the unique-decoding regime; and a recursion layer whose verifying keys are enumerated from the machine's declared shapes rather than collected from runs.
+
+Soundness is composed by a union bound over each profile's two dozen transcript components rather than quoted as the smallest of them: $100.70$ bits for a core shard proof, $100.76$ for a recursion node, $100.83$ for the outer wrap, $99.18$ across the three, and $93.50$ once every node of a measured block's tree is charged. All of these bound the \emph{interactive} protocol: Fiat--Shamir subtracts $\log_2 Q$ against an adversary making $Q$ oracle queries, and the cross-shard digest is an assumption rather than an error term. An executable Lean~4 ISA model and extracted determinism theorems close \ndetproved{} of \ndettotal{} cases and identify a genuine under-determination at the syscall bus. One NVIDIA RTX~5090 proves a 288-million-cycle Ethereum block at $5.9$\,MHz and four reach $20$\,MHz on 420 million cycles, with each engineering change measured against the configuration it replaced; those timings precede a correction to the $\Poseidon{}$ round schedule, and \S\ref{sec:ipcore} states which claim attaches to which revision.
+\end{abstract}
+
+\noindent\textbf{Index terms:} arithmetic circuits, formal verification, GPU acceleration, MIPS32, polynomial commitment schemes, round-by-round soundness, verifiable computation, zero-knowledge virtual machines.
+
+\input{sections/01_introduction}
+\input{sections/02_preliminaries}
+\input{sections/03_isa}
+\input{sections/035_ipcore}
+\input{sections/037_argument}
+\input{sections/04_air}
+\input{sections/05_pcs}
+\input{sections/06_iopp}
+\input{sections/07_recursion}
+\input{sections/075_verification}
+\input{sections/08_performance}
+\input{sections/09_conclusion}
+
+\section*{Acknowledgements}
+
+This system is built on work done by others, and two debts are large enough to
+name here rather than only in citations. The Plonky3~\citep{plonky3} toolkit
+supplies the field, the $\Poseidon{}$ permutation~\citep{poseidon2}, the
+constraint interfaces and the transforms this implementation is written
+against. SP1~\citep{sp1,sp1-hypercube} is the system this design learned the
+most from: the decomposition into one unit per opcode with a shared lookup
+argument, the elliptic-curve digest that carries interactions across shards,
+the shadow read that makes register accesses cheaper than memory accesses, and
+the shape of the recursion layer all follow it, and its just-in-time executor
+is the model for ours. Where this paper departs from either, the section that
+does so says why.
+
+\appendix
+\input{sections/033_executor}
+\input{sections/appendix_isa}
+\input{sections/appendix_units}
+\input{sections/appendix_levers}
+\input{sections/appendix_ipcore}
+
+% Clear the appendix's pending floats before the references, so a large
+% appendix table cannot be deferred past the bibliography heading and then
+% interrupt the entry list.
+\clearpage
+
+\bibliographystyle{alpha}
+\bibliography{references}
+
+\end{document}

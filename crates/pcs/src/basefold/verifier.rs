@@ -25,7 +25,7 @@ use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;
 use p3_util::reverse_bits_len;
 
-use super::config::{FriConfig, BATCH_GRINDING_BITS};
+use super::config::{batch_grinding_bits, FriConfig};
 use super::proof::BasefoldProof;
 
 #[derive(Debug, Clone)]
@@ -96,7 +96,7 @@ where
             }
         }
 
-        if !challenger.check_witness(BATCH_GRINDING_BITS, proof.batch_grinding_witness) {
+        if !challenger.check_witness(batch_grinding_bits(), proof.batch_grinding_witness) {
             return Err(BasefoldVerifierError::BatchPow);
         }
 

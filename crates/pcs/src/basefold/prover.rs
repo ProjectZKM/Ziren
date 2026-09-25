@@ -23,7 +23,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
 use super::code::RsCodeWord;
-use super::config::{FriConfig, BATCH_GRINDING_BITS};
+use super::config::{batch_grinding_bits, FriConfig};
 use super::encoder::DftEncoder;
 use super::fri::{codeword_from_ef, commit_round_leaves, final_poly, fold_codeword_once};
 use super::mle::Mle;
@@ -73,6 +73,29 @@ where
     registered.push(alloc::boxed::Box::new(GrindAccelerator::<C>(accelerator)));
 }
 
+/// Proof of work for challenger `C`, through the registered accelerator when
+/// there is one.
+///
+/// The WHIR query, folding and stripe-batching grinds cannot call
+/// [`deterministic_grind`]: their challenger is generic over a field that is
+/// only `Field`, while the deterministic search needs to enumerate the prime
+/// field's elements.  They can still reach an accelerator, which is what this
+/// is for -- without it a registered device grind is used by the LogUp-GKR
+/// grind alone and every WHIR grind stays on the host, where one grinding bit
+/// doubles a search that runs inside an already-saturated thread pool.
+///
+/// With no accelerator this is exactly `challenger.grind(bits)`, so the CPU
+/// prover is unchanged.
+pub(crate) fn accelerated_grind<C>(challenger: &mut C, bits: usize) -> C::Witness
+where
+    C: GrindingChallenger + 'static,
+{
+    if let Some(accelerated) = grind_accelerator_for::<C>() {
+        return accelerated(challenger, bits);
+    }
+    challenger.grind(bits)
+}
+
 /// The registered accelerator for `C`, if one was registered for exactly `C`.
 fn grind_accelerator_for<C>() -> Option<fn(&mut C, usize) -> C::Witness>
 where
@@ -100,6 +123,15 @@ where
 /// The search is a parallel `find_first`: its left-of-match cancellation
 /// returns the smallest index independent of scheduling. The unchecked
 /// conversion is sound because `i < F::ORDER_U64` is canonical.
+///
+/// It runs over GROWING WINDOWS, `2^bits` wide and then doubling, rather than
+/// over `[0, p)` at once. The smallest witness inside the first non-empty
+/// window is the smallest witness overall, so the result is identical, but a
+/// `find_first` handed the whole prime field builds its task tree over two
+/// billion indices and cancels only at chunk boundaries — with one witness
+/// expected every `2^bits` indices that cost the prover far more than the
+/// search it was asked for. The first window is the expected distance to a
+/// witness, so it usually ends there.
 pub(crate) fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::PrimeField64 + p3_field::integers::QuotientMap<u64> + Send + Sync,
@@ -113,16 +145,26 @@ where
         return accelerated(challenger, bits);
     }
     let order = F::ORDER_U64;
-    let witness = (0..order)
-        .into_par_iter()
-        .map(|i| unsafe {
-            <F as p3_field::integers::QuotientMap<u64>>::from_canonical_unchecked(i)
-        })
-        .find_first(|&w| {
-            let mut probe = challenger.clone();
-            probe.check_witness(bits, w)
-        })
-        .expect("deterministic_grind: failed to find a PoW witness");
+    let mut lo = 0u64;
+    let mut span = 1u64 << bits.min(63);
+    let witness = loop {
+        let hi = core::cmp::min(order, lo.saturating_add(span));
+        let found = (lo..hi)
+            .into_par_iter()
+            .map(|i| unsafe {
+                <F as p3_field::integers::QuotientMap<u64>>::from_canonical_unchecked(i)
+            })
+            .find_first(|&w| {
+                let mut probe = challenger.clone();
+                probe.check_witness(bits, w)
+            });
+        if let Some(w) = found {
+            break w;
+        }
+        assert!(hi < order, "deterministic_grind: failed to find a PoW witness");
+        lo = hi;
+        span = span.saturating_mul(2);
+    };
     let ok = challenger.check_witness(bits, witness);
     debug_assert!(ok);
     let _ = ok;
@@ -363,7 +405,7 @@ where
             }
         }
 
-        let batch_grinding_witness = deterministic_grind(challenger, BATCH_GRINDING_BITS);
+        let batch_grinding_witness = deterministic_grind(challenger, batch_grinding_bits());
 
         let total_polys: usize =
             mle_rounds.iter().flat_map(|r| r.iter()).map(|m| m.num_polynomials()).sum();

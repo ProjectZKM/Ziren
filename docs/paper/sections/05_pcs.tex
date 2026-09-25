@@ -1,0 +1,194 @@
+\section{The jagged commitment}
+\label{sec:pcs}
+
+After the lookup argument and zerocheck, the verifier holds evaluation claims on individual unit columns. A shard of the \texttt{reth} workload has about $3.6 \cdot 10^4$ columns whose heights range from 32 rows to millions. Committing each column or unit separately would cost one Merkle root and query phase per commitment, and recursion would depend on the unit set of each shard. \Zirenver{} instead reduces all claims to one evaluation of a \emph{logical} dense polynomial and opens it once. The data may reside under several ordered input commitments, with the preprocessed round first and main round last, but one jagged reduction, one branching-program assist and one batched PCS opening cover all roots.
+
+The property this buys is modularity in the sense of Section~\ref{sec:ipcore}: because the verifier of the reduction depends only on the logarithm of the committed area and on a fixed description of the column geometry, a unit can be widened, narrowed, added or removed without redesigning the layer above it. The block's internals can be revised, as they were four times in Section~\ref{sec:perf-changes}, while the reduction protocol remains the same.
+
+\subsection{Input commitments, dense packing and stacking}
+\label{sec:pcs-stacking}
+
+Figure~\ref{fig:jagged} shows the two views this section connects: the ordered input rounds, each keeping its own root, and the single logical dense table that the reduction opens.
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/jagged_system}}
+\caption{The multi-round jagged opening. Physical input rounds retain separate ordered roots (a), while the reduction aligns the logical dense table $Q$ with its public-boundary-derived weight table $W$ (b). The Hadamard sumcheck closes with $v_Q=\widetilde Q(\bm z^*)$ and $v_W=\widetilde W(\bm z^*)$; the jagged assist derives $v_W$, and one batched \WHIR{}/\BaseFold{} opening authenticates $v_Q$ against every ordered root (c).}
+\label{fig:jagged}
+\end{figure}
+
+Call a preprocessed or main commitment an \emph{input-commitment round}, to distinguish it from a folding round of \WHIR{}. Let there be $R$ such rounds, in transcript order. Round $r$ contains columns $\mathbf c_{r,0},\ldots,\mathbf c_{r,K_r-1}$ of heights $h_{r,0},\ldots,h_{r,K_r-1}$. Its real area is
+\[
+  a_r = \sum_{k=0}^{K_r-1} h_{r,k},
+\]
+and its commitment covers an area $A_r \ge a_r$ that is a multiple of the stacking height $H=2^\ell$. The committed dense vector for the round is
+\[
+  \mathbf q_r = \mathbf c_{r,0}\Vert\cdots\Vert\mathbf c_{r,K_r-1}
+                 \Vert \mathbf 0^{A_r-a_r}.
+\]
+The padding is part of what the root commits to; it is not the final power-of-two padding of a multilinear polynomial.
+
+The reduction sees the rounds as the one ordered logical vector
+\[
+  \mathbf Q = \mathbf q_0\Vert\mathbf q_1\Vert\cdots\Vert\mathbf q_{R-1},
+  \qquad A=\sum_{r=0}^{R-1}A_r.
+\]
+It pads $\mathbf Q$ with a final zero suffix to $M=2^m$, where $m=\lceil\log_2 A\rceil$, and writes $\widetilde Q$ for the resulting multilinear polynomial. The roots $C_0,\ldots,C_{R-1}$ remain separate: logical concatenation does not replace them by a new root, and their order is load-bearing.
+
+To make the column prefix sums describe every committed cell, the gap $A_r-a_r$ is represented by explicit synthetic zero columns. Each such column has zero claim and height at most the common row cube $2^n$. Under a recursion area pin the gap is split into a fixed number of columns, allowing zero-height columns, so the recursion program's column count does not depend on the actual row counts of a child. Let the resulting global columns, including these padding columns, have heights $h_0,\ldots,h_{K-1}$ and prefix sums
+\[
+  t_0=0, \qquad t_{k+1}=t_k+h_k, \qquad t_K=A.
+\]
+Thus a round's stacking padding appears at its true location in the middle of $\mathbf Q$; only the suffix from $A$ to $M$ is implicit.
+
+Each round is cut independently into $S_r=A_r/H$ stripes of $H$ consecutive entries and committed under its own root. Across all rounds there are
+\[
+  S=\sum_r S_r, \qquad b=\lceil\log_2\max(S,1)\rceil
+\]
+stripe positions in the batched opening, zero-padded to $2^b$. Consequently the opening domain has $\ell+b$ variables and effective area $H2^b$. For a nonempty ordinary instance this is the same $M$ used by the reduction. We write its point as $(\bm z_{\mathrm{stack}},\bm z_{\mathrm{batch}})$, with the first $\ell$ coordinates selecting a position inside a stripe and the remaining $b$ coordinates interpolating the ordered list of stripes across all input commitments.
+
+\subsection{The jagged reduction}
+\label{sec:pcs-jagged}
+
+Let $\bm z_{\mathrm{row}}\in\EF^n$ be the common row point left by the zerocheck, and let $y_k$ be the claimed evaluation of global column $k$ at that point, including the high-zero embedding needed when the column is shorter than the common row cube:
+\[
+  y_k = \sum_{j=0}^{h_k-1} Q[t_k+j]\,\eqf(j,\bm z_{\mathrm{row}}).
+\]
+The verifier samples a column point $\bm z_c\in\EF^\kappa$, $\kappa=\lceil\log_2 K\rceil$, and uses the multilinear Lagrange weights
+\[
+  w_k=\eqf(k,\bm z_c),
+  \qquad
+  T=\sum_{k=0}^{K-1}w_k y_k.
+\]
+This is the batching used by the implementation: the weights are $\eqf(k,\bm z_c)$, not powers $\gamma^k$ of a scalar challenge.
+
+Define a length-$M$ weight table $W$ by
+\[
+  W[t_k+j]=w_k\,\eqf(j,\bm z_{\mathrm{row}})\quad(0\le j<h_k),
+  \qquad W[i]=0\quad\text{elsewhere}.
+\]
+The definition and the column claims give the central identity
+\begin{equation}
+\label{eq:jagged-global-claim}
+  T
+  =\sum_kw_k\sum_{j<h_k}Q[t_k+j]\eqf(j,\bm z_{\mathrm{row}})
+  =\sum_{i\in\{0,1\}^m}\widetilde Q(i)\widetilde W(i).
+\end{equation}
+The prover runs sumcheck on the Hadamard product $\widetilde Q\widetilde W$. Because both factors are multilinear, each round polynomial has degree at most two and is represented by its values at $0,1,2$. If the sumcheck challenges in sampling order are
+\[
+  \bm z^*=(r_0,\ldots,r_{m-1}),
+\]
+then the closing claim is
+\begin{equation}
+\label{eq:jagged-closing}
+  T_{\mathrm{final}}=\widetilde Q(\bm z^*)\widetilde W(\bm z^*).
+\end{equation}
+The proof carries $v_Q=\widetilde Q(\bm z^*)$; the verifier derives $\widetilde W(\bm z^*)$ from the public prefix sums and the transcript challenges. The implementation binds the stride-one, least-significant-bit variable first and stores $\bm z^*$ in sampling order. The branching program below reads an integer index most-significant bit first, so its trace point is $\operatorname{rev}(\bm z^*)$.
+
+\subsection{The branching-program assist}
+\label{sec:pcs-jagged-assist}
+
+Materialising $W$ would cost $\Theta(M)$ extension-field elements. Instead, the jagged indicator is evaluated from the interval boundaries $(t_k,t_{k+1})$. Proposition~3.2 of~\citep{jagged-pcs} expresses one interval's contribution through a width-four read-once branching program~\citep{barrington1989bounded}, whose multilinear extension is evaluated by the dynamic program of Holmgren--Rothblum~\citep{hr18}. Let
+\[
+  u_k=\operatorname{bits}_{\mathrm{BE}}(t_k)\Vert
+      \operatorname{bits}_{\mathrm{BE}}(t_{k+1}),
+\]
+using $m+1$ bits per boundary. The assist proves the claim
+\begin{equation}
+\label{eq:jagged-assist}
+  \widetilde W(\bm z^*)
+  =\sum_{x,y\in\{0,1\}^{m+1}}
+    \sum_{k=0}^{K-1}
+      w_k\,
+      \eqf((x,y),u_k)\,
+      \mathsf{BP}(\bm z_{\mathrm{row}},\operatorname{rev}(\bm z^*),x,y)
+\end{equation}
+with one degree-two sumcheck over $2(m+1)$ variables. At its closing point the recursion verifier evaluates one branching-program instance and the equality factors for the public prefix sums. Thus Equation~\eqref{eq:jagged-closing} is tied to the same irregular layout that Equation~\eqref{eq:jagged-global-claim} used, without allocating the dense weight table. The native verifier computes the same value by the closed form and replays the assist transcript; the recursion circuit verifies the assist's closing identity explicitly.
+Equation~\eqref{eq:jagged-assist} is the value claimed by that transcript and checked at its closing point.
+
+\subsection{One batched opening across all roots}
+\label{sec:pcs-multiround-open}
+
+The evaluation point for the PCS must span the full stacking domain. If the reduction point is shorter, the prover appends Fiat--Shamir coordinates after the assist until it has $\ell+b$ coordinates. Coordinates that extend a sub-stripe polynomial through a zero high half contribute the usual factor $\prod_j(1-r_j)$ to the evaluation claim. In the ordinary multi-round layout all round padding is already explicit and $m=\ell+b$, so this extension is a no-op.
+
+For round $r$ and stripe $s$, let
+\[
+  e_{r,s}=\widetilde{\mathbf q_{r,s}}(\bm z_{\mathrm{stack}})
+\]
+be the stripe evaluation. The prover reports these evaluations in round-major, stripe-major order. The verifier zero-pads their flat list to $2^b$ and checks
+\begin{equation}
+\label{eq:stacking-bind}
+  v_Q
+  =\widetilde{(e_{0,0},\ldots,e_{0,S_0-1},e_{1,0},\ldots,e_{R-1,S_{R-1}-1})}
+     (\bm z_{\mathrm{batch}}).
+\end{equation}
+One stacked \WHIR{} or \BaseFold{} proof then authenticates every $e_{r,s}$ against the ordered roots $C_0,\ldots,C_{R-1}$ at the common stack point. Commitments therefore remain per input round, while the expensive reduction, assist and PCS opening are each performed once. All input rounds must use the same stacking height and the same PCS mode; mixing \WHIR{} data and \BaseFold{} data would give the verifier a different transcript and is rejected.
+
+The Fiat--Shamir order is part of the protocol. After the commitments and the column claims have been absorbed by the surrounding shard protocol, the prover and verifier perform, in order:
+\begin{enumerate}
+  \item sample $\bm z_c$ and form the column-claim mixture $T$;
+  \item run the $m$-round Hadamard-product sumcheck, obtaining $\bm z^*$ and $v_Q$;
+  \item run the $2(m+1)$-round branching-program assist at $\operatorname{rev}(\bm z^*)$;
+  \item sample any point-extension coordinates; and
+  \item run one batched stacked \WHIR{} or \BaseFold{} opening against all input roots.
+\end{enumerate}
+Changing this order, the round order, or the reversal convention changes the challenges and is therefore a protocol change.
+
+\paragraph{Soundness.} The column-point batching, the $m$-variable product sumcheck and the $2(m+1)$-variable assist are separate algebraic error terms. They are included, together with the PCS terms, in the round-by-round accounting of Section~\ref{sec:iopp-soundness}. For the checked-in schedule, each algebraic term is negligible over $|\EF|\approx2^{124}$; the separate lookup-grinding mismatch and digest assumption are stated there.
+
+\subsection{The committed geometry, and why it is quantised}
+\label{sec:pcs-geometry}
+
+Two constants fix the layout. The stacking height is $H=2^{21}$, so a round is
+committed as a whole number of $2^{21}$-cell blocks; and a column's height is at
+most the row cube $2^{22}$, which bounds how much of a gap one synthetic column
+can absorb.
+
+A round's committed area is not its real area rounded up to the next block. It
+is placed in a \emph{bucket}: with $B=\lceil a_r/H\rceil$ blocks of real
+data, the commitment covers $\hat B$ blocks, where $\hat B=B$ while
+$B\le4$ and otherwise $\hat B$ is the next multiple of eight, giving the
+bucket sequence
+\[
+  1,\;2,\;3,\;4,\;8,\;16,\;24,\;\ldots\ \text{blocks}.
+\]
+The padding columns that represent the resulting gap are counted from the
+bucket $\hat B$, not from the real count $B$, which is what makes their
+number a function of the bucket alone.
+For a round whose area is not pinned, which is every core round, the gap is split
+into
+\[
+  \Bigl\lceil \frac{(\hat B-\hat B_{\mathrm{prev}})\,H}{2^{22}} \Bigr\rceil
+  \ \text{columns},\qquad \hat B_{\mathrm{prev}}=\text{the bucket below }\hat B,
+\]
+at least one, which is the number the \emph{widest} gap of that bucket would
+need. A narrower gap simply leaves the trailing columns short or empty, which
+the verifier already accepts. For a round whose area is pinned, as the compress
+machine's is, the split is a fixed column count whatever the gap.
+
+Both rules exist for the same reason, and it is not a proving cost. They make a
+shard's committed geometry, and therefore the recursion program that verifies
+the shard and that program's verifying key, a function of the shard's chip set
+and its two committed-block buckets rather than of its exact row counts. Round
+the area up to the next block instead, or let the padding-column count follow
+the gap, and each distinct row profile becomes a distinct verifier program with
+a distinct key. Under the quantised rule the key space is finite and small
+enough to enumerate offline, one representative per (chip set, preprocessed
+bucket, main bucket) class, which is what lets a verifier hold a fixed
+allowlist of recursion keys that covers every shard shape the machine's declared clusters admit
+(Section~\ref{sec:recursion}). The price is the padding inside a bucket, which
+the prover commits to and opens like any other cell.
+
+Three things are never materialised, which is what keeps the reduction's memory
+cost proportional to the real data rather than to $M$. The weight table $W$ is
+evaluated from the interval boundaries by the assist of
+\S\ref{sec:pcs-jagged-assist}. The zero suffix from $A$ to $M$ is implicit: the
+sumcheck treats the tail as zero rather than allocating it, which is why the
+inter-round padding has to be explicit while this suffix need not be. And the
+stripe evaluations of Equation~\eqref{eq:stacking-bind} are read off the same
+interleaved layout the round was committed from, so a round is traversed once
+for its commitment and once for its opening.
+
+\subsection{Instantiation on the inner and outer rings}
+
+The same jagged layer is instantiated twice. On the inner ring, core and compress shards use the stacked \WHIR{} opening of Section~\ref{sec:iopp}; on the outer \emph{wrap} ring, the final recursion shard uses the FRI-based \BaseFold{}-style instantiation described in Section~\ref{sec:recursion}. Dense packing, explicit inter-round padding, the Hadamard-product reduction, the branching-program assist and the transcript order are shared; only the proof that authenticates the stripe evaluations in Equation~\eqref{eq:stacking-bind} differs.

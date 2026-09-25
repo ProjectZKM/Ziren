@@ -144,8 +144,10 @@ where
         mle: Arc<Mle<F>>,
     ) -> (MT::Commitment, Vec<Vec<EF>>, Vec<EF>)
     where
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>
+            + 'static,
     {
         let n = mle.num_variables() as usize;
         let ff = self.config.round_parameters[0].folding_factor;
@@ -180,8 +182,10 @@ where
     ) -> WhirProof<F, EF, MT>
     where
         EFDft: TwoAdicSubgroupDft<EF>,
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>
+            + 'static,
     {
         let n = mle.num_variables() as usize;
         let ff = self.config.round_parameters[0].folding_factor;
@@ -272,7 +276,10 @@ where
             }
             round_ood_answers.push(ood_answers.clone());
 
-            folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
+            folding_pow.push(ProofOfWork(crate::basefold::prover::accelerated_grind(
+                challenger,
+                round_cfg.queries_pow_bits,
+            )));
             let mask = (1usize << prev_domain_log) - 1;
             let indices: Vec<usize> = (0..round_cfg.num_queries)
                 .map(|_| challenger.sample_bits(prev_domain_log) & mask)
@@ -313,7 +320,10 @@ where
         for c in final_poly.iter() {
             challenger.observe_algebra_element(*c);
         }
-        let final_pow = ProofOfWork(challenger.grind(self.config.final_pow_bits));
+        let final_pow = ProofOfWork(crate::basefold::prover::accelerated_grind(
+            challenger,
+            self.config.final_pow_bits,
+        ));
         let final_mask = (1usize << prev_domain_log) - 1;
         let mut final_leaves = Vec::with_capacity(self.config.final_queries);
         for _ in 0..self.config.final_queries {
@@ -396,8 +406,10 @@ where
         proof: &WhirProof<F, EF, MT>,
     ) -> Result<(), WhirVerifierError>
     where
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>
+            + 'static,
     {
         let n = point.len();
         let ff = self.config.round_parameters[0].folding_factor;

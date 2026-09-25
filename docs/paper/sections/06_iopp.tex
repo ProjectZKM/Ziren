@@ -1,0 +1,164 @@
+\section{The opening, and what it costs in soundness}
+\label{sec:iopp}
+
+\WHIR{}~\citep{whir} is the polynomial commitment of \S\ref{sec:argument-components}. The evaluation claim $v_Q = \widetilde Q(\bm z^{*})$ that the jagged reduction of Section~\ref{sec:pcs} leaves is authenticated with it, an interactive oracle proof of proximity (IOPP) for \emph{constrained} Reed--Solomon codes, that is, for codewords whose multilinear also satisfies a stated weighted sum. We recall the protocol in the form it is implemented, then give the commitment layout and the soundness accounting. This layer holds the block's principal configuration knob (\S\ref{sec:ipcore-config}): at a fixed soundness regime the schedule trades proof size against prover time, and an integrator who wants a smaller proof pays for it here. The accounting below, and the report it generates for a given configuration, are part of the collateral of \S\ref{sec:ipcore-collateral}.
+
+\subsection{The protocol}
+
+\WHIR{} tests membership of a function $f : L \to \F$ in $\CRS[\F, L, m, \widehat w, \sigma]$ (Section~\ref{sec:prelim}). One iteration with folding factor $k$ runs $k$ sumcheck rounds, sends a folded oracle re-encoded at the round's rate, answers out-of-domain samples, answers $t$ shift queries by opening $2^k$ symbols each, and recurses on a new constrained code with $k$ fewer variables; after the last iteration the final polynomial is sent in the clear. The out-of-domain samples are what distinguish \WHIR{} from BaseFold: they pin the folded oracle to a unique nearby codeword before the shift queries are drawn, so the per-query soundness contribution is governed by the proximity parameter of the regime, which at a given rate is what the out-of-domain step pins down. The first prover of this generation used BaseFold at a fixed rate with a full query set in every round; \WHIR{} at the same provable level uses fewer queries in its later rounds and a handful of committed oracle rounds rather than one per variable, and shares the prover-side skeleton (encode, Merkle-commit, fold), so the switch required no new kernels beyond the out-of-domain evaluation and the monomial-basis weights.
+
+\subsection{Commitment layout}
+\label{sec:iopp-commit}
+
+\Zirenver{} uses the \emph{interleaved} commitment: a polynomial in $\nu$ variables is reshaped into a $2^{\nu-k_0} \times 2^{k_0}$ matrix whose column $c$ is the stride-$2^{k_0}$ slice $f[h \cdot 2^{k_0} + c]$, each column is Reed--Solomon encoded independently (coefficients zero-padded, one DFT per column), and, for a single stacked stripe, Merkle leaf $j$ holds the $2^{k_0}$ column values at domain point $x_j$. Folding a leaf by the round's challenge $\bm r$ gives the monomial evaluation of the folded polynomial at $x_j$, so a query answer enters the next sumcheck as an ordinary constraint whose weight folds in closed form.
+
+This layout is applied separately to every input-commitment round of Section~\ref{sec:pcs-stacking}; those roots are not merged. The batched opening evaluates every stripe at the common stack point, flattens the results in input-round order, and checks their interpolation at the batch point against $v_Q$ before authenticating them against all roots. Within an input root the stripes are grouped 32 to a leaf, so a leaf of the first \WHIR{} oracle authenticates one coset row from each stripe, $32 \times 2^{k_0}$ field elements. The folding factor $k_0$ of the first \WHIR{} round is therefore chosen small, because the leaf width multiplies every query of that round and re-hashing those leaves is the recursion verifier's dominant cost; later \WHIR{} rounds query a single folded polynomial and fold more variables at a time.
+
+Each committed \WHIR{} round re-encodes the folded polynomial with one DFT per column at the new rate, and the opening of a shard of the \texttt{reth} workload costs about 39\,ms of host-visible time per shard on the GPU with device-resident rounds; the round-0 re-encoding of the stripes is the largest single term. No proof-of-work is spent on the folding challenges; all grinding sits on the query phases, where a bit of work buys a bit of security against the query-sampling adversary.
+
+Table~\ref{tab:whir-schedule} gives the concrete schedule used by the checked-in core and compress profiles. The first oracle has rate $2^{-2}$; each recommitment lowers the rate by three further powers of two. At log stacking height 21, the three folds consume 15 variables and the remaining six-variable polynomial is sent in the clear after its final query phase.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Checked-in Jagged--\WHIR{} schedule. OOD entries count samples after committed folds; no folding challenge is ground. The stripe bound covers both ordered input-commitment rounds.}
+\label{tab:whir-schedule}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccc}
+\toprule
+Profile & folds & queries & OOD & query grind & batch grind & \LogUp{} grind & stripe bound & final variables \\
+\midrule
+core & $[3,6,6]$ & $[124,88,85]$ & $[2,2]$ & 22 bits & 14 bits & 22 bits & 256 & 6 \\
+compress & $[3,6,6]$ & $[124,88,85]$ & $[2,2]$ & 22 bits & 14 bits & 22 bits & 64 & 6 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{The outer ring: a \BaseFold{} instantiation and what its verifier owes}
+\label{sec:iopp-outer}
+
+The wrap proof of Section~\ref{sec:recursion} does not use \WHIR{}. It commits
+its dense polynomial with a FRI-style \BaseFold{} instantiation over the same
+field but with a 254-bit hash, folding one variable per round: each round emits
+one univariate sumcheck message for the current variable, samples a challenge
+that is shared between the sumcheck and the fold, and opens the query chain at
+the folded oracle, until a short final polynomial is sent in the clear. The
+shared challenge is what ties the two structures together: the sumcheck
+certifies the claimed value while the query chain certifies that the folded
+oracles are consistent with the committed one.
+
+Because the two are separate structures, a verifier that checks only one of
+them is not checking the protocol, and this is where the outer ring differs from
+the inner one in how much its verifier had to be repaired. The recursive
+\BaseFold{} verifier is the last one in the chain, the artefact a Groth16
+circuit consumes, and it originally asserted only the query chain: it folded
+the openings, compared them round by round, and never evaluated the sumcheck's
+terminal identity, so nothing forced the claimed evaluation to be the value the
+committed polynomial takes at the point. It also took the number of queries from
+the proof, as the smaller of the scheduled count and the length of the list the
+prover supplied, which lets a prover shorten its own query phase. Both are
+fixed: the terminal identity is asserted in-circuit, and the query count comes
+from the schedule with a truncated list rejected. Two rules generalise from
+them, and they apply to any recursive verifier of a folding argument: every
+algebraic identity the native verifier checks must appear in the circuit,
+because the circuit is the only verifier an on-chain consumer runs; and no
+quantity that a soundness bound depends on may be read from the proof.
+
+The wrap circuit's public interface is equally load-bearing. It takes three
+public inputs: the guest program's verifying-key hash, the digest of the
+guest's committed values, and the root of the recursion-key allowlist. Its
+verifying key is fixed in-circuit, so a proof cannot be transplanted onto a
+different recursion stack. Section~\ref{sec:recursion} describes why the
+allowlist root has to leave the tree as a public input rather than remain a
+witness, and Table~\ref{tab:defects} records the release in which it did not.
+
+\subsection{Soundness accounting}
+\label{sec:iopp-soundness}
+
+Round-by-round soundness of the \emph{interactive} protocol is bounded by the sum of the errors of its rounds. The Fiat--Shamir compilation then costs the oracle-query factor of Theorem~\ref{thm:composition}, so every figure in this section is a bound on the interactive protocol and not a security level for the compiled one. The grinding bits of Table~\ref{tab:whir-schedule} are counted inside the per-round terms below, not as a separate discount against that factor. Each term is expressed as bits $= -\log_2$ of its error, computed with the \texttt{soundcalc} tool~\citep{soundcalc} on the configuration file kept with the source, and then the union bound over the terms; the level of a proof is the latter, not the smallest term. Other projects publish calculators of their own, RISC Zero's being executable for its own parameters~\citep{risc0-soundness}; the numbers below are not comparable to theirs unless the same components are charged.
+
+\paragraph{Regimes.} In the \emph{unique-decoding} regime (UDR) the proximity parameter is $\delta = (1-\rho)/2$ and a shift query contributes $-\log_2 (1 - \delta) = -\log_2\frac{1+\rho}{2}$ bits: at a rate of $1/4$ this is $0.678$ bits and it approaches one bit as the rate falls; no conjecture is needed. In the \emph{Johnson} regime $\delta = 1 - \sqrt{\rho} - \eta$ and a query is worth up to $\log_2(1/\sqrt\rho)$ bits, which the correlated-agreement results of~\citep{proximity-gaps,whir} give up to the Johnson bound without conjecture; only the further reach towards capacity, $\delta \to 1 - \rho$, is conjectural, but folding terms $\approx (2^m 2^{k}/\rho)/|\EF|$ that do not improve with more queries cap what that regime can add over a degree-four extension of a 31-bit field. \Ziren{} therefore sets its query counts in the unique-decoding regime so that every committed \WHIR{} round clears the same per-round target; with $t$ queries and $b$ bits of query grinding a round is worth $t \cdot (-\log_2\frac{1+\rho}{2}) + b$ bits.
+
+\paragraph{Components and their composition.} The transcript's components are the out-of-domain samples and shift queries of each round, batching of the column claims, the final polynomial, each folding step, the reduction to the dense polynomial (Section~\ref{sec:pcs}), the zerocheck, the \LogUp{} argument and the hash. \texttt{soundcalc} evaluates each component as a function of trace length, column count, schedule and field. The shard proof's error is the sum of the component errors, so its level in bits is $-\log_2$ of that sum. One further term sits outside \texttt{soundcalc}'s model: the structured cross-shard digest assumption of Section~\ref{sec:air-global}. Modelling the $\Poseidon{}$ transcript as a random oracle is the setting in which the compiled statement holds rather than an additive error term.
+
+Table~\ref{tab:components} is that accounting: every component the tool
+reports, grouped, for each of the three profiles.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Component errors of the checked-in configuration, in bits ($-\log_2$ of the error), grouped from the 24, 24 and 26 components the calculator reports for the three profiles~\citep{soundcalc}. A group of $n$ components is the union over them, which is why a group can be worth less than its smallest member: the fifteen folding steps of a core proof are each at least 103 bits and together 100.93. The last row is the union over all components of that profile, and it is what \S\ref{sec:iopp-soundness} reports; it charges one component the calculator does not carry, the final query phase, which the tool folds into the last committed round and which is worth $85 \cdot 0.9993 + 22 = 106.9$ bits at the rate that round commits ($2^{-11}$), costing the core union $0.04$ bits; it is a bound on the interactive protocol, before the oracle-query factor of Theorem~\ref{thm:composition} and before the digest term of Assumption~\ref{ass:digest}. The wrap profile folds one variable per committed round and draws no out-of-domain sample, so two rows do not apply to it.}
+\label{tab:components}
+\begin{tabular}{lrrr}
+\toprule
+Component group & core & compress & wrap \\
+\midrule
+Query phases & 105.00 & 105.00 & 104.00 \\
+Folding steps & 100.93 & 100.93 & --- \\
+Committed rounds & --- & --- & 101.00 \\
+Final polynomial & 106.00 & 106.00 & --- \\
+\LogUp{} & 106.00 & 118.00 & 118.00 \\
+Batching & 107.00 & 110.00 & 122.00 \\
+Zerocheck & 109.00 & 114.00 & 115.00 \\
+Reduction to the dense polynomial & 116.00 & 116.00 & 116.00 \\
+Out-of-domain samples & 213.00 & 213.00 & --- \\
+\midrule
+\textbf{Union over the profile} & \textbf{100.70} & \textbf{100.76} & \textbf{100.83} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The schedule is solved rather than listed. Each committed round's query count is the least one that reaches a per-component target of 106 bits at that round's rate net of its grind, which is what puts the query phases of Table~\ref{tab:components} at 105 bits for a pair of rounds and leaves the union over a profile above 100. The generated report labels core and compress at 103 bits and wrap at 102 because that report's \texttt{total} field is the \emph{minimum component level}, not the union bound across components. What binds is no longer a term grinding can move: for core and compress it is the fifteen folding steps, whose error $\approx 2^{m}2^{k}/\rho |\EF|$ is set by the field and the schedule and does not improve with queries, and for the wrap profile, which folds one variable per round with no committed \WHIR{} round (\S\ref{sec:iopp-outer}), its twenty-one committed rounds. Summing each profile's own components gives 100.70 bits for core, 100.76 for compress and 100.83 for wrap, and 99.18 bits for the union over the three. That last figure counts each profile once. A block proof contains many nodes of each kind, and Theorem~\ref{thm:composition} charges every one of them: at the shard and node counts of the block measured in Section~\ref{sec:performance}, roughly sixty core proofs, the sixty leaf proofs above them and thirty compose proofs under one wrap, the same components give 93.50 bits. Even that is a within-tree subtotal, before the adversary's $Q$ random-oracle queries and the separate digest term.
+
+\paragraph{From the interactive bound to a compiled level.} The step the
+accounting owes is the one the previous paragraph stops at. By
+Theorem~\ref{thm:composition} the compiled argument's error is at most
+$Q \cdot \sum_i \varepsilon_i + \varepsilon_{\mathrm{digest}}$ against an
+adversary making $Q$ queries to the oracle, so the level in bits is the
+interactive figure minus $\log_2 Q$, with the digest term still outstanding:
+\[
+  \lambda(Q) \;=\; 93.50 - \log_2 Q \quad\text{(node-weighted)},
+  \qquad
+  99.18 - \log_2 Q \quad\text{(per profile)} .
+\]
+The grinding is already inside those figures and does not discount $Q$ a
+second time: $b$ bits of query grinding cost an adversary $2^{b}$ oracle calls
+per attempt, which is exactly the factor by which the per-round error was
+reduced. At $Q = 2^{40}$ the node-weighted bound is $53.5$ bits, at $Q=2^{60}$
+it is $33.5$, and at $Q = 2^{80}$ it is $13.5$.
+
+We state this rather than leave it implicit because it is the honest reading of
+our own theorem, and it is not a three-digit number. Reaching a level
+$\lambda$ against a budget $Q$ needs an interactive bound of
+$\lambda + \log_2 Q$, which this schedule does not provide and which grinding
+cannot buy at the rate required: a bit of security bought this way costs the
+honest prover a factor of two as well. What the configuration does establish is
+the interactive bound of Table~\ref{tab:components}, and what it does not
+establish is a compiled level against an unbounded-query adversary. Closing
+that gap needs either a tighter compilation analysis for this protocol class,
+where the factor $Q$ is a worst case rather than a tight bound, or a schedule
+solved for the compiled target rather than the interactive one. Neither is
+work this paper has done. The performance baseline in Section~\ref{sec:perf-changes} used zero lookup grinding. The checked-in report therefore does not assign a numerical level to that measured baseline, and this paper does not transfer the corrected schedule's values to the zero-grinding measurements. A release claim requires regenerating the report from the exact runtime configuration and instantiating the remaining terms.
+
+\begin{theorem}[Conditional composition]
+\label{thm:composition}
+Work in the random-oracle model, and let an adversary make at most $Q$ oracle queries. Let every proof in the tree, including each shard, leaf and compose proof, be the Fiat--Shamir compilation~\citep{bcs16} of an interactive protocol that is round-by-round knowledge sound with error $\varepsilon_i = \sum_c \varepsilon_{i,c}$. Let a block proof contain $N$ such proofs, each verified once by its parent, with the root checked by the external verifier and every node's verifying key bound by the allowlist of Section~\ref{sec:recursion}. Assume further that each node extractor succeeds on transcripts produced by its parent extractor, not only on transcripts drawn from an honest interaction. Then the block proof has knowledge error at most
+\[
+  Q \sum_{i=1}^{N} \varepsilon_i \;+\; \varepsilon_{\mathrm{digest}},
+\]
+where $\varepsilon_{\mathrm{digest}}$ is the error of Assumption~\ref{ass:digest}.
+\end{theorem}
+\begin{proof}[Proof sketch]
+Compiling a round-by-round knowledge sound protocol with Fiat--Shamir costs a factor in the number of oracle queries: an adversary may rewind and retry, and the standard analysis charges $Q$ attempts against the per-round error~\citep{bcs16,chiesa-yogev}. That accounts for the factor $Q$ and for the fact that the random-oracle model is where the statement lives rather than an additive term in it. Within the tree, the extractor of the compiled argument runs the extractor of each verified proof in turn: the extractor for a compose node yields the transcripts of its children, and so on down to the shard proofs, whose extractor yields the witness rows. The allowlist hypothesis is what makes each step an extraction from the intended verifier; without it a node could verify a program other than the compose or leaf program. The hypothesis about parent-produced transcripts is the step this sketch does not discharge, and it is not free: a child's extractor is invoked on a transcript that the parent's extractor constructed, which is not the distribution against which its guarantee is stated. Given it, the failure events combine by the union bound.
+\end{proof}
+
+For the block of Section~\ref{sec:performance}, $N$ is its core shards plus the leaf and compose nodes above them, of the order of two hundred proofs. We state the bound because it is what the union bound gives; published levels for other systems are per proof and do not compose over the tree.
+
+\paragraph{Proof size.} The shard proofs of the measured block total on the order of $10^{8}$ bytes before recursion (\S\ref{sec:perf-changes}); the published object is the compressed proof at the root. An instrumented pre-correction run recorded 617\,618 bytes (603\,KiB), of which 79\% was the first \WHIR{} oracle's openings, 9.5\% the later \WHIR{} rounds and 6\% the \LogUp{} layer proofs. To first order, the size is $t_0 \cdot (\text{stripes}) \cdot 2^{k_0}$. The retained repository census is for an earlier configuration and does not reconstruct this exact serialized proof, so the value is a reported measurement rather than a result independently reproducible from the current artifact. Figure~\ref{fig:proofsize} records its instrumented breakdown.
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/proofsize}}
+\caption{In the instrumented pre-correction proof (617\,618 bytes), openings of the first \WHIR{} oracle account for 79\% because each query authenticates one coset row of every stripe. The retained census describes an earlier configuration and does not reproduce this exact file.}
+\label{fig:proofsize}
+\end{figure}

@@ -1,0 +1,75 @@
+\section{System interfaces and integration}
+\label{sec:app-ipcore}
+
+This appendix collects the outward-facing description of the implemented system: what a deployer connects, what may be varied, how the prover and verifier are embedded, and which verification artifacts accompany a release. Section~\ref{sec:ipcore} fixes the corresponding system boundary.
+
+\subsection{Ports}
+\label{sec:ipcore-ports}
+
+Table~\ref{tab:ports} lists the system interfaces. Five are fixed by the statement of Section~\ref{sec:statement}: a program image, an input stream and a hint stream go in, and a proof and its public values come out. The remaining three are supplied by a deployment: a verifying key derived once per program, a verifier that carries the key allowlist binding a recursion proof to the advertised machine, on an ordinary host or, after the wrap of Section~\ref{sec:recursion}, on chain, and an extension interface for guest accelerators.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Interfaces of the proving and verification system. ``Setup'' interfaces are used once per program; ``run'' interfaces once per execution.}
+\label{tab:ports}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.10\textwidth} >{\raggedright\arraybackslash}p{0.58\textwidth}}
+\toprule
+Port & When & Contents \\
+\midrule
+Program image & setup & a little-endian MIPS32 ELF produced by the guest toolchain (GCC, LLVM or the Rust target); its text and initial data become the program ROM and the initial memory \\
+Verifying key & setup & the Merkle commitment to the program ROM and the preprocessed tables (Section~\ref{sec:air}); 304 bytes, derived deterministically from the image; identifies the program in the statement \\
+Input stream & run & the bytes the guest reads as its standard input; a witness \\
+Hint stream & run & host-supplied data the guest reads through the hint syscall (for example the block witness); a witness, written into untouched memory and thereby bound by the memory argument \\
+Public values & out & the digest of the committed output, the exit code, the entry and exit machine state, the address cursors of the global memory tables and the septic digest (Section~\ref{sec:isa}) \\
+Compressed proof & out & the root of the recursion tree, 603\,KiB for the block of Section~\ref{sec:performance}; optionally wrapped to a Groth16 proof over BN254 for on-chain verification (Section~\ref{sec:recursion}) \\
+Verifier & deliverable & a verifier that checks a compressed proof on an ordinary host, small enough to embed in the consuming application; it carries the recursion-key allowlist \\
+Accelerator interface & extension & a syscall number, an emulator hook that reads and writes guest memory at the invoking cycle, and a unit that receives the syscall tuple (arguments as 16-bit half-words plus the Linux flag) on the syscall bus and performs its memory accesses on the memory bus (Section~\ref{sec:isa}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Configuration space}
+\label{sec:ipcore-config}
+
+The proving system is parameterised, and Section~\ref{sec:performance} walks through part of its configuration space. Parameters include shard size, commitment stacking height, the \WHIR{} schedule, lookup-challenge grinding, recursion arity and guest-accelerator set. The \WHIR{} schedule fixes committed rounds, folding factors, code rates, queries, out-of-domain samples and query grinding, thereby setting proof size and soundness accounting (Section~\ref{sec:iopp}). The guest-accelerator set determines precompile units and their verifying keys. Release values belong in one configuration file. A constraint-system parameter changes the affected unit keys and the recursion-key allowlist; a schedule-only parameter changes recursion-program keys but not unit keys.
+
+\subsection{Integration paths}
+\label{sec:ipcore-integration}
+
+The integrations below share the same interfaces. The common shape is a guest that hashes: it recomputes a Merkle root over data the verifier does not hold, checks an inclusion or update proof, verifies a chain of signatures or certificates, or attests a firmware image or a log. The guest is compiled by an ordinary MIPS toolchain, calls the hash accelerators of Section~\ref{sec:isa} where the volume justifies it, and the verifier checks one proof whose cost does not grow with the amount hashed.
+
+Three specialisations are worth naming. In \emph{block proving}, the deployed case, a coordinating process cuts a native execution into shards and ships a descriptor per shard to one worker process per GPU, which re-execute and prove their shards and the recursion nodes above them; \S\ref{sec:perf-host} describes the host budget this pipeline was engineered against. In \emph{hybrid fault and validity proving}, one program image is adjudicated by a fault proof and certified by a validity proof without a second toolchain, because \Ziren{} executes the instruction set Cannon and Kona already execute~\citep{cannon,kona}. In \emph{embedded and IoT workloads}, a program compiled by a device's own MIPS toolchain is executed by a remote prover and a gateway checks the proof, so the statement is the execution of the device's software rather than a property of the device (\S\ref{sec:related}). We report no measurement of the wrapped on-chain path, and Section~\ref{sec:verification-findings} records two omissions found in the terminal circuits it depends on.
+
+\subsection{Verification artifacts}
+\label{sec:ipcore-collateral}
+
+A release includes the verification artifacts of Section~\ref{sec:verification}: the specification-derived conformance suite and Cannon reference results; the executable \Lean{} ISA model and its checks against the emulator; one extracted determinism statement per unit and opcode selector, together with the tactic and list of open statements; the soundness configuration and generated accounting report; and the defects register of Table~\ref{tab:defects}. The checked-in accounting configuration uses 16 bits of lookup grinding and therefore differs from the measured zero-grinding baseline. A deployer must verify that the toolchain, runtime configuration, verifier binary, key allowlist and accounting report identify the same release. The current artifacts test ISA correspondence and close \ndetproved{} of \ndettotal{} determinism statements; they do not replace the open unit proofs, the trace-exhaustiveness premise or the unverified recursion machine.
+
+
+\section{Defects surfaced by the verification flow}
+\label{sec:app-defects}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Defects surfaced by the verification flow. ``Theorem'' means the extracted determinism theorem of the unit; ``proving'' means an end-to-end proof of a real block or of the test programs; ``review'' means a line-by-line comparison of this design against the RISC-V system it descends from, reading both implementations side by side.}
+\label{tab:defects}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.34\textwidth} >{\raggedright\arraybackslash}p{0.09\textwidth} >{\raggedright\arraybackslash}p{0.24\textwidth}}
+\toprule
+Component & Defect & Found by & Resolution \\
+\midrule
+Syscall unit & argument half-words not determined by the reduced argument ($2^{32} > p$) & theorem & half-words carried on the syscall bus; theorem closes \\
+Syscall unit & result columns gated by a selector that no input pins & theorem & selector carried on the syscall bus; theorem closes \\
+Extractor & shard and clock fields of syscall interactions dropped, leaving outputs without inputs & theorem & extractor fixed \\
+Shape configuration & range table absent from the preprocessed heights; every shape-fixed proving test failed & proving & height registered \\
+Standalone verifier & recursion-key Merkle root computed from the bare key list while the prover pads to the tree height & proving & verifier pads the leaves \\
+Proving service & configured to skip the in-circuit key check, producing proofs the standalone verifier rejects & proving & service configuration \\
+Recursion, terminal stages & the completeness flag gates every completeness predicate, including the one forcing the cross-shard sum to zero, but neither terminal circuit pinned it; an execution-prefix proof could therefore be wrapped & review & both terminal circuits assert it; the deferred program can no longer emit it set \\
+Core, cross-shard state & the entry and exit state of a delayed-branch machine is the pair (pc, next pc), but only the first component was pinned across shards: the second was unreferenced in the recursion circuit, the prover and the verifier, so a prover could choose each shard's continuation address & review & both components asserted in the leaf circuit and the host verifier; a forgery test rejects a shifted pair \\
+Wrap circuit, opening & the recursive \BaseFold{} verifier asserted only the query chain, with no sumcheck message or terminal identity, and read its query count as the smaller of the schedule's and the list the prover supplied & review & both identities asserted in-circuit and the count taken from the schedule, a short list rejected (\S\ref{sec:iopp-outer}) \\
+Wrap circuit & the recursion-key allowlist root was not a public input, so no external verifier could require the published one & review & exposed as a public input and checked by the standalone and on-chain verifiers \\
+Hash parameters & partial-round count taken from the tabulation for S-box degree seven rather than three, giving less algebraic-attack margin than intended & review & schedule corrected; the measurements of Section~\ref{sec:performance} predate the change \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -365,8 +365,10 @@ where
     ) -> StackedWhirProof<F, EF, MT>
     where
         EFDft: TwoAdicSubgroupDft<EF>,
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>
+            + 'static,
     {
         self.prove_trusted_evaluation_with_engine(
             ef_dft,
@@ -392,8 +394,10 @@ where
     ) -> StackedWhirProof<F, EF, MT>
     where
         EFDft: TwoAdicSubgroupDft<EF>,
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>
+            + 'static,
     {
         let lsh = self.log_stacking_height as usize;
         let ff = self.ff();
@@ -420,7 +424,8 @@ where
 
         drop(_t_pevals);
         let _t_pinit = open_timing::Timer::new(&open_timing::PINIT);
-        let batch_grinding_witness = challenger.grind(self.config.batch_pow_bits);
+        let batch_grinding_witness =
+            crate::basefold::prover::accelerated_grind(challenger, self.config.batch_pow_bits);
         let lambda: EF = challenger.sample_algebra_element();
         let mut claim = EF::ZERO;
         let mut lam = EF::ONE;
@@ -518,7 +523,10 @@ where
                     challenger.observe_algebra_element(c0);
                     challenger.observe_algebra_element(c1);
                     challenger.observe_algebra_element(c2);
-                    let pow = challenger.grind(round_cfg.pow_bits.get(var).copied().unwrap_or(0));
+                    let pow = crate::basefold::prover::accelerated_grind(
+                        challenger,
+                        round_cfg.pow_bits.get(var).copied().unwrap_or(0),
+                    );
                     let rc: EF = challenger.sample_algebra_element();
                     folder.claimed_sum = c0 + c1 * rc + c2 * rc * rc;
                     e.apply_rc(rc);
@@ -615,7 +623,10 @@ where
             let _t_q = open_timing::Timer::new(&open_timing::QUERIES);
             {
                 let _t_g = open_timing::Timer::new(&open_timing::GRINDQ);
-                folding_pow.push(ProofOfWork(challenger.grind(round_cfg.queries_pow_bits)));
+                folding_pow.push(ProofOfWork(crate::basefold::prover::accelerated_grind(
+                    challenger,
+                    round_cfg.queries_pow_bits,
+                )));
             }
             let mask = (1usize << prev_domain_log) - 1;
             let indices: Vec<usize> = (0..round_cfg.num_queries)
@@ -767,7 +778,10 @@ where
         }
         let final_pow = {
             let _t_g = open_timing::Timer::new(&open_timing::FGRIND);
-            ProofOfWork(challenger.grind(self.config.final_pow_bits))
+            ProofOfWork(crate::basefold::prover::accelerated_grind(
+                challenger,
+                self.config.final_pow_bits,
+            ))
         };
         let final_mask = (1usize << prev_domain_log) - 1;
         let _t_fopen = open_timing::Timer::new(&open_timing::FOPEN);
@@ -875,8 +889,10 @@ where
         challenger: &mut Challenger,
     ) -> Result<(), WhirVerifierError>
     where
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>
+            + 'static,
     {
         let lsh = self.log_stacking_height as usize;
         let ff = self.config.round_parameters[0].folding_factor;

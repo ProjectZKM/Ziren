@@ -1,0 +1,50 @@
+\section{What is implemented, and what is measured}
+\label{sec:ipcore}
+
+The sections that follow describe the proof system from the inside. This section identifies the implemented system boundary, because that boundary determines what can be measured and what those measurements mean. The processor is represented by arithmetic constraints rather than by synthesisable RTL, and what is evaluated here is the proving and verification software stack running on CPUs and GPUs.
+
+\paragraph{Four configurations, and which claim attaches to which.} One
+warning belongs here rather than distributed through the sections that make
+the claims. No single revision of this system exhibits every property reported
+in this paper, and the paper does not pretend otherwise. The commit named on
+the title page is the one the construction is described from, and it carries
+the corrected $\Poseidon{}$ round schedule. The timings and proof sizes of
+Section~\ref{sec:performance} were taken on earlier revisions of the same
+branch, before that correction and with the lookup grinding set to zero. The
+soundness figures of \S\ref{sec:iopp-soundness} are for the checked-in
+configuration, which spends 16 bits on that grinding and which
+Section~\ref{sec:performance} therefore does not measure. And the determinism
+count of \S\ref{sec:verification-det} is for the constraint system with the
+syscall-bus change of \S\ref{sec:verification-findings} applied, which two
+units separate from the system that was timed. Each section states its own
+configuration where it reports; the reason to say it once here is that a
+reader who takes a number from one section and a number from another is
+comparing revisions, not configurations of one revision.
+
+\Ziren{} has three implementation layers. The execution layer runs a MIPS32 program and emits the witness record. The proof layer constrains, commits and recursively compresses that record. The deployment layer schedules the work on host processors and GPUs and exposes standalone and wrapped verifiers. Table~\ref{tab:design-correspondence} maps these layers to the quantities evaluated in this paper and prevents proof-system metrics from being conflated with silicon metrics.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Implemented verifiable-system components and their evaluated quantities. None of the reported quantities is a silicon PPA metric.}
+\label{tab:design-correspondence}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.23\textwidth} >{\raggedright\arraybackslash}p{0.42\textwidth} >{\raggedright\arraybackslash}p{0.25\textwidth}}
+\toprule
+System component & Implementation & Reported quantity \\
+\midrule
+Guest execution & interpreter or JIT executor for MIPS32 & guest cycles and execution rate \\
+Execution relation & opcode-specific trace tables, identities and multiset buses & rows, columns, interactions and trace cells \\
+Proof generation & lookup, zerocheck, Jagged--\WHIR{} opening and recursion & proof bytes and soundness terms \\
+Verification & standalone compressed-proof verifier or optional outer wrapper & acceptance result and verified public values \\
+Deployment runtime & coordinator plus one or more GPU proving workers & wall-clock time and proved guest cycles/s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Trace area belongs to the proof relation.}\label{sec:ipcore-platform} The trace area of a unit is its column count times its row count, and both are fixed by the constraint system and the execution rather than by the machine that runs the prover. Trace area determines how many field elements the prover must commit and open, and therefore contributes to proof cost. It is not measured in square millimetres and does not convert into die area. An arithmetisation change can nevertheless be stated once, in cells, and evaluated on different accelerators, which is why the per-unit census of Section~\ref{sec:performance} is given in cells before it is given in seconds.
+
+\paragraph{Throughput belongs to the implementation--accelerator pair.} Proved guest cycles per second is not a property of the execution relation alone. It is what one implementation achieves on a specified accelerator, and a different device, or more of them, changes the figure without altering a constraint. Three things follow. Scaling has to be reported across device counts rather than as a single number. Figures measured on other projects' hardware are context, not comparison. And the transferable part of the performance analysis is the cost model, which predicts prover work from area and interaction count while the implementation and accelerator determine the constants.
+
+\paragraph{Realisation boundary.} This paper evaluates a software proof system deployed on a host processor with one to four GPUs. It reports no RTL synthesis, place-and-route, process node, timing closure, silicon area or energy measurement; every frequency figure is proved guest cycles per second and is not a hardware clock. Section~\ref{sec:verification} reports how the executor, constraint system and recursive verifier are checked, together with the coverage that remains incomplete. Consequently, the results support claims about an implemented verifiable-computation system, its proof cost and heterogeneous-system throughput, but not claims about a fabricated processor or FPGA implementation.
+
+Appendix~\ref{sec:app-ipcore} collects the reference material a deployer needs: interfaces, variable parameters, integration modes and delivered verification artifacts.

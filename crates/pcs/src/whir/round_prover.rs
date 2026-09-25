@@ -88,8 +88,10 @@ where
     ) -> RoundedProof<F, EF, MT>
     where
         EFDft: TwoAdicSubgroupDft<EF>,
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanObserve<MT::Commitment>
+            + 'static,
     {
         let n = mle.num_variables() as usize;
         debug_assert_eq!(point.len(), n);

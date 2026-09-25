@@ -1,0 +1,63 @@
+% Panel (a) of the instruction frame: the state chain and the two shared buses
+% across three consecutive cycles.  Deliberately carries NO inner datapath
+% equations and NO sub-cycle detail -- those are panel (b) -- so that this
+% canvas stays narrow enough for its labels to survive scaling to \textwidth.
+\begin{tikzpicture}[
+  font=\large,
+  unit/.style={rectangle, rounded corners=2pt, draw=zirenblue!85, line width=0.6pt,
+               minimum width=3.0cm, minimum height=1.5cm, fill=zirenblue!5, align=center},
+  reg/.style={rectangle, rounded corners=1pt, draw=zirenteal!85, line width=0.6pt,
+              minimum width=1.5cm, minimum height=1.0cm, fill=zirenteal!8, align=center,
+              font=\normalsize},
+  pub/.style={rectangle, rounded corners=1pt, draw=zirenslate!80, dashed,
+              minimum width=1.5cm, minimum height=1.0cm, fill=zirenlight, align=center,
+              font=\normalsize},
+  pbus/.style={line width=1.4pt, zirenblue!90},
+  mbus/.style={line width=1.4pt, zirenorange!90!black},
+  sig/.style={-{Latex[length=1.8mm]}, line width=0.6pt, zirenteal!90!black},
+  tap/.style={-{Latex[length=1.6mm]}, line width=0.6pt, black!65},
+  lbl/.style={font=\normalsize, black!70},
+  hdr/.style={font=\normalsize\bfseries},
+]
+% ---------- the two shared buses
+\draw[pbus] (-2.4,2.0) -- (12.4,2.0)
+  node[right, font=\normalsize, text=zirenblue!80!black] {program bus};
+\draw[mbus] (-2.4,-1.7) -- (12.4,-1.7)
+  node[right, font=\normalsize, text=zirenorange!80!black] {memory bus};
+
+% ---------- three opcode rows
+\node[unit] (u1) at (0,0)    {};
+\node[unit] (u2) at (5,0)    {};
+\node[unit] (u3) at (10,0)   {};
+\node[hdr] at ($(u1.north)+(0,-0.42)$) {\texttt{AddSubImm}};
+\node[hdr] at ($(u2.north)+(0,-0.42)$) {\texttt{Branch}};
+\node[hdr] at ($(u3.north)+(0,-0.42)$) {\texttt{LoadWord}};
+\node[lbl] at ($(u1.south)+(0,0.40)$) {\texttt{addiu}};
+\node[lbl] at ($(u2.south)+(0,0.40)$) {\texttt{bne}};
+\node[lbl] at ($(u3.south)+(0,0.40)$) {\texttt{lw} (delay slot)};
+
+% ---------- each row fetches from the program ROM and touches the memory bus
+\foreach \u in {u1,u2,u3} {
+  \draw[tap] (\u.north) -- (\u.north |- 0,2.0);
+  \draw[tap] (\u.south) -- (\u.south |- 0,-1.7);
+}
+\node[lbl, anchor=south west] at (-2.4,2.06) {fetch: one receive per row};
+\node[lbl, anchor=north west] at (-2.4,-1.76) {register and memory accesses (panel (b))};
+
+% ---------- the state chain
+\node[pub] (s0) at (-3.4,0) {entry\\state};
+\node[reg] (s1) at (2.5,0)  {state};
+\node[reg] (s2) at (7.5,0)  {state};
+\node[reg] (s3) at (12.5,0) {state};
+\draw[sig] (s0) -- (u1.west);
+\draw[sig] (u1.east) -- (s1);
+\draw[sig] (s1) -- (u2.west);
+\draw[sig] (u2.east) -- (s2);
+\draw[sig] (s2) -- (u3.west);
+\draw[sig] (u3.east) -- (s3);
+\node[lbl, anchor=north, align=center] at ($(s1.south)+(0,-0.12)$) {$\mathsf{clk}{+}5$};
+\node[lbl, anchor=north, align=center] at ($(s2.south)+(0,-0.12)$) {$\mathsf{clk}{+}10$};
+\node[lbl, anchor=north, align=center] at ($(s3.south)+(0,-0.12)$) {$\mathsf{clk}{+}15$};
+\node[lbl, anchor=north, align=center] at ($(s0.south)+(0,-0.12)$) {$\mathsf{clk}$};
+\node[lbl, anchor=west, align=left] at ($(s3.east)+(0.15,0)$) {to the row\\at $\mathsf{target}$};
+\end{tikzpicture}

@@ -953,7 +953,7 @@ mod wrap_gkr_grind {
     use p3_challenger::{CanObserve, CanSample};
     use p3_field::PrimeCharacteristicRing;
     use zkm_pcs::jagged_pcs::JaggedVal;
-    use zkm_pcs::logup_gkr::{gkr_check_witness, gkr_grind, GKR_GRINDING_BITS};
+    use zkm_pcs::logup_gkr::{gkr_check_witness, gkr_grind, gkr_grinding_bits};
 
     /// Seeded so the grind starts from a non-trivial state, and reproducible so
     /// prover and verifier can be handed the SAME state.
@@ -976,7 +976,7 @@ mod wrap_gkr_grind {
         let before: JaggedVal = ungrinded.sample();
 
         let mut prover = seeded();
-        let _witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+        let _witness: JaggedVal = gkr_grind(&mut prover, gkr_grinding_bits());
         let after: JaggedVal = prover.sample();
 
         assert_ne!(
@@ -993,11 +993,11 @@ mod wrap_gkr_grind {
     #[test]
     fn wrap_gkr_grinding_witness_roundtrips() {
         let mut prover = seeded();
-        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+        let witness: JaggedVal = gkr_grind(&mut prover, gkr_grinding_bits());
 
         let mut verifier = seeded();
         assert!(
-            gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness),
+            gkr_check_witness(&mut verifier, gkr_grinding_bits(), witness),
             "the honest wrap grinding witness must be accepted, or the negative case proves \
              nothing",
         );
@@ -1008,17 +1008,17 @@ mod wrap_gkr_grind {
     }
 
     /// NEGATIVE: one off-by-one witness. The check observes the witness and
-    /// requires the squeezed challenge's low `GKR_GRINDING_BITS` to be zero, so a
+    /// requires the squeezed challenge's low `gkr_grinding_bits` to be zero, so a
     /// different witness re-seeds the sponge and fails except with probability
     /// `2^-16`.
     #[test]
     fn wrap_gkr_grinding_rejects_a_tampered_witness() {
         let mut prover = seeded();
-        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+        let witness: JaggedVal = gkr_grind(&mut prover, gkr_grinding_bits());
 
         let mut verifier = seeded();
         assert!(
-            !gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness + JaggedVal::ONE),
+            !gkr_check_witness(&mut verifier, gkr_grinding_bits(), witness + JaggedVal::ONE),
             "a tampered wrap grinding witness must be rejected",
         );
     }

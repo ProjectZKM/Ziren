@@ -1,0 +1,125 @@
+\section{The guest instruction set}
+\label{sec:app-isa}
+
+This appendix lists the MIPS32 instructions a guest may execute, which is the
+set the relation of \S\ref{sec:statement} quantifies over. It is also the
+table from which the conformance corpus of \S\ref{sec:verification} is
+generated: each row produces ten programs with pseudo-random operands,
+boundary values and the delay-slot placements the instruction admits, giving
+the 770 vectors compared against an independent emulator. The last column
+names the unit that arithmetises the instruction, so the table fixes which
+rows of Appendix~\ref{sec:app-units} a program can occupy, and with it the
+chip set that Section~\ref{sec:recursion} enumerates over.
+
+Three conventions are worth noting. \texttt{HI} and \texttt{LO} occupy the
+register file as registers 32 and 33, so the four moves between them and the
+general registers are additions of an immediate zero rather than a unit of
+their own. \texttt{SYNC}, \texttt{SYNCI} and \texttt{PREF} are accepted and
+retire as no-ops, for which the same unit suffices. \texttt{SYSCALL} is absent
+from the table because it is the boundary of the machine rather than a
+computation within it; it is arithmetised by \texttt{SyscallInstrs} and its
+interface is Section~\ref{sec:ipcore}.
+
+\footnotesize
+\begin{longtable}{@{}llll>{\raggedright\arraybackslash}p{0.27\textwidth}l@{}}
+\caption{The 77 guest instructions, their primary encoding fields and the unit that proves each. \emph{Op} is bits 31--26 and \emph{func} bits 5--0; a dash marks a field the format does not use, and the immediate forms are distinguished from the register forms by \emph{Op} alone. Semantics are as transcribed from the architecture manual into the specification table that generates the conformance corpus.}\label{tab:isa}\\
+\toprule
+Mnemonic & Op & func & Family & Semantics & Unit \\
+\midrule
+\endfirsthead
+\multicolumn{6}{@{}l}{\itshape Table~\ref{tab:isa}, continued from the previous page}\\
+\toprule
+Mnemonic & Op & func & Family & Semantics & Unit \\
+\midrule
+\endhead
+\midrule
+\multicolumn{6}{r@{}}{\itshape continued on the next page}\\
+\endfoot
+\bottomrule
+\endlastfoot
+\texttt{add} & \texttt{000000} & \texttt{100000} & Integer arithmetic & \texttt{rd = rs + rt} & \texttt{AddSub} \\
+\texttt{addu} & \texttt{000000} & \texttt{100001} &  & \texttt{rd = rs + rt} & \texttt{AddSub} \\
+\texttt{addi} & \texttt{001000} & \texttt{---} &  & \texttt{rt = rs + sext(imm)} & \texttt{AddSubImm} \\
+\texttt{addiu} & \texttt{001001} & \texttt{---} &  & \texttt{rt = rs + sext(imm)} & \texttt{AddSubImm} \\
+\texttt{sub} & \texttt{000000} & \texttt{100010} &  & \texttt{rd = rs - rt} & \texttt{AddSub} \\
+\texttt{subu} & \texttt{000000} & \texttt{100011} &  & \texttt{rd = rs - rt} & \texttt{AddSub} \\
+\texttt{mul} & \texttt{011100} & \texttt{000010} &  & \texttt{rd = rs * rt} & \texttt{Mul} \\
+\texttt{mult} & \texttt{000000} & \texttt{011000} &  & \texttt{(hi, lo) = rs * rt} & \texttt{Mul} \\
+\texttt{multu} & \texttt{000000} & \texttt{011001} &  & \texttt{(hi, lo) = rs * rt} & \texttt{Mul} \\
+\texttt{div} & \texttt{000000} & \texttt{011010} &  & \texttt{(hi, lo) = (rs\%rt, rs/ rt), signed} & \texttt{DivRem} \\
+\texttt{divu} & \texttt{000000} & \texttt{011011} &  & \texttt{(hi, lo) = (rs\%rt, rs/rt), unsigned} & \texttt{DivRem} \\
+\texttt{madd} & \texttt{011100} & \texttt{000000} &  & \texttt{(hi, lo) = (hi,lo) + rs * rt (signed)} & \texttt{MiscInstrs} \\
+\texttt{maddu} & \texttt{011100} & \texttt{000001} &  & \texttt{(hi, lo) = rs * rt + (hi,lo)} & \texttt{MiscInstrs} \\
+\texttt{msub} & \texttt{011100} & \texttt{000100} &  & \texttt{(hi, lo) = (hi,lo) - rs * rt (signed)} & \texttt{MiscInstrs} \\
+\texttt{msubu} & \texttt{011100} & \texttt{000101} &  & \texttt{(hi, lo) = (hi,lo) - rs * rt} & \texttt{MiscInstrs} \\
+\texttt{clo} & \texttt{011100} & \texttt{100001} &  & \texttt{rd = count\_leading\_ones(rs)} & \texttt{CloClz} \\
+\texttt{clz} & \texttt{011100} & \texttt{100000} &  & \texttt{rd = count\_leading\_zeros(rs)} & \texttt{CloClz} \\
+\addlinespace
+\texttt{slt} & \texttt{000000} & \texttt{101010} & Comparison and logic & \texttt{rd = rs < rt} & \texttt{Lt} \\
+\texttt{sltu} & \texttt{000000} & \texttt{101011} &  & \texttt{rd = rs < rt} & \texttt{Lt} \\
+\texttt{slti} & \texttt{001010} & \texttt{---} &  & \texttt{rt = rs < sext(imm)} & \texttt{LtImm} \\
+\texttt{sltiu} & \texttt{001011} & \texttt{---} &  & \texttt{rt = rs < sext(imm)} & \texttt{LtImm} \\
+\texttt{and} & \texttt{000000} & \texttt{100100} &  & \texttt{rd = rs \& rt} & \texttt{Bitwise} \\
+\texttt{andi} & \texttt{001100} & \texttt{---} &  & \texttt{rt = rs \& zext(imm)} & \texttt{BitwiseImm} \\
+\texttt{or} & \texttt{000000} & \texttt{100101} &  & \texttt{rd = rs | rt} & \texttt{Bitwise} \\
+\texttt{ori} & \texttt{001101} & \texttt{---} &  & \texttt{rd = rs | zext(imm)} & \texttt{BitwiseImm} \\
+\texttt{xor} & \texttt{000000} & \texttt{100110} &  & \texttt{rd = rs \textasciicircum{} rt} & \texttt{Bitwise} \\
+\texttt{xori} & \texttt{001110} & \texttt{---} &  & \texttt{rd = rs \textasciicircum{} zext(imm)} & \texttt{BitwiseImm} \\
+\texttt{nor} & \texttt{000000} & \texttt{100111} &  & \texttt{rd = !rs | rt} & \texttt{Bitwise} \\
+\texttt{lui} & \texttt{001111} & \texttt{---} &  & \texttt{rt = imm<{}<16} & \texttt{AddSubImm} \\
+\addlinespace
+\texttt{sll} & \texttt{000000} & \texttt{000000} & Shifts and bit fields & \texttt{rd = rt<{}<sa} & \texttt{ShiftLeftImm} \\
+\texttt{sllv} & \texttt{000000} & \texttt{000100} &  & \texttt{rd = rt <{}< rs[4:0]} & \texttt{ShiftLeft} \\
+\texttt{srl} & \texttt{000000} & \texttt{000010} &  & \texttt{rd = rt >{}> sa} & \texttt{ShiftRightImm} \\
+\texttt{srlv} & \texttt{000000} & \texttt{000110} &  & \texttt{rd = rt >{}> rs[4:0]} & \texttt{ShiftRight} \\
+\texttt{sra} & \texttt{000000} & \texttt{000011} &  & \texttt{rd = rt >{}> sa} & \texttt{ShiftRightImm} \\
+\texttt{srav} & \texttt{000000} & \texttt{000111} &  & \texttt{rd = rt >{}> rs[4:0]} & \texttt{ShiftRight} \\
+\texttt{rotr} & \texttt{000000} & \texttt{000010} &  & \texttt{rd = rotate\_right(rt, sa)} & \texttt{ShiftRightImm} \\
+\texttt{rotrv} & \texttt{000000} & \texttt{000110} &  & \texttt{rd = rotate\_right(rt, rs[4:0])} & \texttt{ShiftRight} \\
+\texttt{ext} & \texttt{011111} & \texttt{000000} &  & \texttt{rt = rs[msbd+lsb..lsb]} & \texttt{MiscInstrs} \\
+\texttt{ins} & \texttt{011111} & \texttt{000100} &  & \texttt{rt = rt[32:msb+1] || rs[msb+1-lsb : 0] || rt[lsb-1:0]} & \texttt{MiscInstrs} \\
+\texttt{wsbh} & \texttt{011111} & \texttt{100000} &  & \texttt{rd = swaphalf(rt)} & \texttt{MovCond} \\
+\texttt{seb} & \texttt{011111} & \texttt{100000} &  & \texttt{rd = signExtend(rt[7..0])} & \texttt{MiscInstrs} \\
+\texttt{seh} & \texttt{011111} & \texttt{100000} &  & \texttt{rd = signExtend(rt[15..0])} & \texttt{MiscInstrs} \\
+\addlinespace
+\texttt{beq} & \texttt{000100} & \texttt{---} & Control transfer & \texttt{PC = PC + sext(offset<{}<2), if rs == rt} & \texttt{Branch} \\
+\texttt{bne} & \texttt{000101} & \texttt{---} &  & \texttt{PC = PC + sext(offset<{}<2), if rs != rt} & \texttt{Branch} \\
+\texttt{bgez} & \texttt{000001} & \texttt{---} &  & \texttt{PC = PC + sext(offset<{}<2), if rs >= 0} & \texttt{Branch} \\
+\texttt{bgtz} & \texttt{000111} & \texttt{---} &  & \texttt{PC = PC + sext(offset<{}<2), if rs > 0} & \texttt{Branch} \\
+\texttt{blez} & \texttt{000110} & \texttt{---} &  & \texttt{PC = PC + sext(offset<{}<2), if rs <= 0} & \texttt{Branch} \\
+\texttt{bltz} & \texttt{000001} & \texttt{---} &  & \texttt{PC = PC + sext(offset<{}<2), if rs < 0} & \texttt{Branch} \\
+\texttt{j} & \texttt{000010} & \texttt{---} &  & \texttt{PC = PC[GPRLEN-1..28] || instr\_index || 00} & \texttt{Jump} \\
+\texttt{jal} & \texttt{000011} & \texttt{---} &  & \texttt{r31 = PC + 8, PC = PC[GPRLEN-1..28] || instr\_index || 00} & \texttt{Jump} \\
+\texttt{jr} & \texttt{000000} & \texttt{001000} &  & \texttt{PC = rs} & \texttt{Jump} \\
+\texttt{jalr} & \texttt{000000} & \texttt{001001} &  & \texttt{rd = PC + 8, PC = rs} & \texttt{Jump} \\
+\texttt{bal} & \texttt{000001} & \texttt{---} &  & \texttt{RA = PC + 8, PC = PC + sign\_extend(offset || 00)} & \texttt{Jump} \\
+\texttt{teq} & \texttt{000000} & \texttt{110100} &  & \texttt{trap, if rs == rt} & \texttt{MiscInstrs} \\
+\addlinespace
+\texttt{lb} & \texttt{100000} & \texttt{---} & Aligned memory & \texttt{rt = sext(mem\_byte(base + offset))} & \texttt{LoadNarrow} \\
+\texttt{lbu} & \texttt{100100} & \texttt{---} &  & \texttt{rt = zext(mem\_byte(base + offset))} & \texttt{LoadNarrow} \\
+\texttt{lh} & \texttt{100001} & \texttt{---} &  & \texttt{rt = sext(mem\_halfword(base + offset))} & \texttt{LoadNarrow} \\
+\texttt{lhu} & \texttt{100101} & \texttt{---} &  & \texttt{rt = zext(mem\_halfword(base + offset))} & \texttt{LoadNarrow} \\
+\texttt{lw} & \texttt{100011} & \texttt{---} &  & \texttt{rt = mem\_word(base + offset)} & \texttt{LoadWord} \\
+\texttt{ll} & \texttt{110000} & \texttt{---} &  & \texttt{rt = mem\_word(base + offset)} & \texttt{LoadWord} \\
+\texttt{sb} & \texttt{101000} & \texttt{---} &  & \texttt{mem\_byte(base + offset) = rt} & \texttt{StoreNarrow} \\
+\texttt{sh} & \texttt{101001} & \texttt{---} &  & \texttt{mem\_halfword(base + offset) = rt} & \texttt{StoreNarrow} \\
+\texttt{sw} & \texttt{101011} & \texttt{---} &  & \texttt{mem\_word(base + offset) = rt} & \texttt{StoreWord} \\
+\texttt{sc} & \texttt{111000} & \texttt{---} &  & \texttt{mem\_word(base + offset) = rt, rt = 1, if atomic update, else rt = 0} & \texttt{StoreWord} \\
+\addlinespace
+\texttt{lwl} & \texttt{100010} & \texttt{---} & Unaligned memory & \texttt{rt = rt merge most significant part of mem(base+offset)} & \texttt{MemoryUnaligned} \\
+\texttt{lwr} & \texttt{100110} & \texttt{---} &  & \texttt{rt = rt merge least significant part of mem(base+offset)} & \texttt{MemoryUnaligned} \\
+\texttt{swl} & \texttt{101010} & \texttt{---} &  & \texttt{store most significant part of rt} & \texttt{MemoryUnaligned} \\
+\texttt{swr} & \texttt{101110} & \texttt{---} &  & \texttt{store least significant part of rt} & \texttt{MemoryUnaligned} \\
+\addlinespace
+\texttt{mfhi} & \texttt{000000} & \texttt{010000} & Moves and no-ops & \texttt{rd = hi} & \texttt{AddSubImm} \\
+\texttt{mflo} & \texttt{000000} & \texttt{010010} &  & \texttt{rd = lo} & \texttt{AddSubImm} \\
+\texttt{mthi} & \texttt{000000} & \texttt{010001} &  & \texttt{hi = rs} & \texttt{AddSubImm} \\
+\texttt{mtlo} & \texttt{000000} & \texttt{010011} &  & \texttt{lo = rs} & \texttt{AddSubImm} \\
+\texttt{movn} & \texttt{000000} & \texttt{001011} &  & \texttt{rd = rs, if rt != 0} & \texttt{MovCond} \\
+\texttt{movz} & \texttt{000000} & \texttt{001010} &  & \texttt{rd = rs, if rt == 0} & \texttt{MovCond} \\
+\texttt{sync} & \texttt{000000} & \texttt{001111} &  & \texttt{sync (nop)} & \texttt{AddSubImm} \\
+\texttt{synci} & \texttt{000001} & \texttt{---} &  & \texttt{sync (nop)} & \texttt{AddSubImm} \\
+\texttt{pref} & \texttt{110011} & \texttt{---} &  & \texttt{prefetch(nop)} & \texttt{AddSubImm} \\
+\addlinespace
+\end{longtable}
+\normalsize

@@ -8,15 +8,41 @@ use core::marker::PhantomData;
 
 use p3_field::Field;
 
-/// Number of bits of grinding required before the verifier samples the
-/// random batching coefficients.
+/// Query-phase grinding for the outer (wrap) ring, in bits.
 ///
-/// Set to 16 to match WHIR's `pow_bits` and defeat re-randomization
-/// attacks on the batching point — without grinding here, an
-/// adversary can re-roll the batch coefficients freely until they
-/// land on a favorable transcript.  16 bits gives a 65k-attempt
-/// barrier per re-roll attempt, matching the per-query PoW.
-pub const BATCH_GRINDING_BITS: usize = 16;
+/// The wrap ring opens at `log_blowup = 3` with 94 queries, which is
+/// `94 · -log2(0.5 + 2^-3/2) = 78.03` bits from the queries themselves; the
+/// grind supplies the rest.  Both ends of the range bind:
+///
+/// * ABOVE 100 BITS.  At 22 the wrap's union over its components is 99.41
+///   bits, below the 100-bit floor and below the inner rings (core 100.74,
+///   compress 100.80), so the wrap would be the binding component of the
+///   whole system.  26 lifts the wrap union to 100.83, above both, and the
+///   system level becomes the core's 100.74.
+/// * WITNESS SPACE.  The proof-of-work witness is a single `KoalaBear`
+///   element, so only `ORDER ≈ 2^31` indices exist and the expected number of
+///   valid witnesses is `2^(31 - bits)`.  At 30 that expectation is 2 and a
+///   grind finds nothing with probability `e^-2 ≈ 13.5%`, which aborts the
+///   wrap open; 26 leaves 32 expected witnesses.
+///
+/// Above 26 the wrap union gains almost nothing — 30 is worth 100.99, and the
+/// system level is capped by the core either way — while the device scan
+/// covers `min(ORDER, 64 · 2^bits)` indices, so the cost keeps climbing.
+pub fn wrap_query_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_WRAP_QUERY_GRINDING_BITS", 26)
+}
+
+/// Number of bits of grinding required before the verifier samples the random
+/// batching coefficients.
+///
+/// Without grinding here an adversary can re-roll the batch coefficients
+/// freely until they land on a favourable transcript, so this barrier is set
+/// per re-roll attempt.  24 bits keeps the batching round clear of the query
+/// rounds it is batched into: the wrap's batching component stands at 114
+/// bits, well above its query phase.
+pub fn batch_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_BASEFOLD_BATCH_GRINDING_BITS", 24)
+}
 
 /// log2 of the FRI folding arity for the INNER (KoalaBear) stages — core,
 /// compress and shrink.
@@ -149,7 +175,8 @@ impl<F: Field> FriConfig<F> {
     /// at this SAME `(2, 124, 16)` config: still provably 100-bit (100.08),
     /// in fact MORE conservative on query count (124 ≥ 94), at the cost of
     /// a slightly larger shrink proof.  The on-chain WRAP proof (BN254
-    /// OuterSC) keeps `(3, 94, 22)` via `wrap_fri_config`.
+    /// OuterSC) keeps `(3, 94, wrap_query_grinding_bits())` via
+    /// `wrap_fri_config`.
     ///
     /// **Two-adicity.** Codeword domain = `num_variables + log_blowup`
     /// where `num_variables = log_stacking_height ≤ DEFAULT_LOG_STACKING_HEIGHT
@@ -232,13 +259,17 @@ impl<F: Field> FriConfig<F> {
     }
 
     /// **WRAP / SHRINK-grade parameters:
-    /// `(log_blowup=3, num_queries=94, pow_bits=22)`.**
+    /// `(log_blowup=3, num_queries=94, pow_bits=wrap_query_grinding_bits())`.**
     ///
     /// **Soundness.** The query-phase / Johnson-bound soundness of the
     /// BaseFold FRI is `num_queries · (-log2(0.5 + rate/2)) + pow_bits`.
-    /// At rate `1/2^3 = 1/8` (`half_rate_plus_half = 0.5625`):
-    /// `94 · (-log2(0.5625)) + 22 = 94 · 0.8301 + 22 ≈ 100.03` bits.
-    /// This is the 100-bit target.
+    /// At rate `1/2^3 = 1/8` (`half_rate_plus_half = 0.5625`) the queries
+    /// carry `94 · (-log2(0.5625)) = 94 · 0.8301 ≈ 78.03` bits and the grind
+    /// carries the rest: at the default 26 the query phase is `104.03` bits
+    /// and the wrap's union over all its components is `100.83`, so the wrap
+    /// is not the binding component of the chain.  See
+    /// [`wrap_query_grinding_bits`] for why the grind is neither smaller nor
+    /// larger than that.
     ///
     /// **Why the inner default (`(1, 94, 16)`) is NOT used for the wrap.**
     /// At rate `1/2` (`half_rate_plus_half = 0.75`), 94 queries with
@@ -252,8 +283,8 @@ impl<F: Field> FriConfig<F> {
     /// `num_variables = log_stacking_height ≤ DEFAULT_LOG_STACKING_HEIGHT
     /// = 21`.  At `log_blowup = 3` this is `≤ 21 + 3 = 24 = KoalaBear
     /// TWO_ADICITY`, so the LDE domain exists (fits exactly).
-    pub const fn wrap_fri_config() -> Self {
-        Self::new(3, 94, 22)
+    pub fn wrap_fri_config() -> Self {
+        Self::new(3, 94, wrap_query_grinding_bits())
     }
 
     /// Test-grade parameters with reduced query counts.  Use only in

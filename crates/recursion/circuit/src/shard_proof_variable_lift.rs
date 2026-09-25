@@ -218,7 +218,8 @@ pub fn build_basefold_shard_verifier_with_num_vars<HV>(
 }
 
 /// WRAP-stage in-circuit verifier: `wrap_default`
-/// (log_blowup=3, num_queries=94, pow_bits=22) so the gnark OUTER circuit
+/// (log_blowup=3, num_queries=94, pow_bits=wrap_query_grinding_bits()) so the
+/// gnark OUTER circuit
 /// reads the wrap codeword at the same rate the wrap prover committed
 /// (100-bit query-phase soundness; the inner default would be ~55-bit).
 /// See `BasefoldVerifierParams::wrap_default`.

@@ -1,0 +1,44 @@
+\section{The unit set of the core machine}
+\label{sec:app-units}
+
+Section~\ref{sec:air} describes the arithmetisation as a set of units, a frame
+and two shared arguments, without depending on which units exist. This appendix
+is the catalogue of the units themselves. The widths matter only to the area
+accounting: the protocol of Section~\ref{sec:argument} sees the whole shard as
+one dense vector, so a unit may be added, widened or removed without changing
+anything above the jagged reduction.
+
+Every width in Table~\ref{tab:chips} was read from the machine at the commit
+this paper describes (\S\ref{sec:perf-setup}) rather than from a census, and
+the table lists all 62 units rather than the ones that dominate the area. That
+pins it to one revision, which the evaluation's tables are not: the
+measurements of \S\ref{sec:perf-changes} were taken on earlier revisions, so a
+few units differ between them and this table. The \texttt{Global} unit is the
+clearest case. It carries 65 columns here, against the 100 of the census in
+\S\ref{sec:perf-profile} and the 58 that the change of \S\ref{sec:perf-changes}
+reduced it to; work landed between that measurement and this commit. Where the
+two disagree, the evaluation's numbers belong to the revision each table names
+and this one belongs to the commit.
+
+\begin{table}[t]
+\centering
+\small
+\caption{The 62 units of the core machine with their main-trace widths (columns over $\F$), read from the machine of the release named in \S\ref{sec:perf-setup}; a second figure is a preprocessed width. The immediate (\texttt{Imm}) variants take the second operand from the instruction word. \texttt{MovCond} proves \texttt{movn}, \texttt{movz} and \texttt{wsbh}, and \texttt{SysLinux} the Linux-ABI syscalls of Section~\ref{sec:ipcore}; Appendix~\ref{sec:app-isa} gives the instruction-to-unit map.}
+\label{tab:chips}
+\begin{tabular}{p{0.2\textwidth} p{0.74\textwidth}}
+\toprule
+Family & Units (width) \\
+\midrule
+Integer ALU & \texttt{AddSub} (36), \texttt{AddSubImm} (33), \texttt{Bitwise} (37), \texttt{BitwiseImm} (33), \texttt{Mul} (74), \texttt{DivRem} (163), \texttt{Lt} (50), \texttt{LtImm} (47), \texttt{CloClz} (93) \\
+Shifts & \texttt{ShiftLeft} (62), \texttt{ShiftLeftImm} (45), \texttt{ShiftRight} (89), \texttt{ShiftRightImm} (83) \\
+Control flow & \texttt{Branch} (56), \texttt{Jump} (57) \\
+Memory instructions & \texttt{LoadWord} (48), \texttt{LoadNarrow} (59), \texttt{StoreWord} (52), \texttt{StoreNarrow} (55), \texttt{MemoryUnaligned} (59) \\
+Misc.\ / syscall & \texttt{MiscInstrs} (432), \texttt{MovCond} (49), \texttt{SyscallInstrs} (68), \texttt{SyscallCore} (11), \texttt{SyscallPrecompile} (11), \texttt{SysLinux} (100) \\
+Memory argument & \texttt{MemoryLocal} (80), \texttt{MemoryBump} (12), \texttt{MemoryGlobalInit} (152), \texttt{MemoryGlobalFinalize} (152), \texttt{Global} (65) \\
+Tables & \texttt{Program} (1, +14), \texttt{Byte} (10, +12), \texttt{Range} (1, +2) \\
+Hash precompiles & \texttt{ShaExtend} (166) and control (4), \texttt{ShaCompress} (249) and control (69), \texttt{KeccakSponge} (2637) and control (1095), \texttt{Poseidon2Permute} (571) \\
+Curve precompiles & add (1685) and double (1666) for \texttt{Secp256k1}, \texttt{Secp256r1} and \texttt{Bn254}, decompress (1040) for the first two; \texttt{Bls12381} add (2533), double (2506), decompress (1613); \texttt{Ed25519} add (1433), decompress (1166) \\
+Field precompiles & \texttt{Bls12381Fp} (512), \texttt{Bls12381Fp2AddSub} (1014), \texttt{Bls12381Fp2Mul} (1773), \texttt{Bn254Fp} (344), \texttt{Bn254Fp2AddSub} (678), \texttt{Bn254Fp2Mul} (1181), \texttt{Uint256MulMod} (417), \texttt{U256XU2048Mul} (2627) \\
+\bottomrule
+\end{tabular}
+\end{table}

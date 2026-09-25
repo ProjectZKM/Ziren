@@ -15,18 +15,20 @@
 //!
 //! Both rings (inner and outer/wrap) grind through `GrindingChallenger`
 //! directly, so the transcript matches the soundness model
-//! (`docs/soundness/ziren.soundcalc.toml`, `grinding_bits_lookup = 16`) on
-//! every ring.
+//! (soundcalc's `ziren.toml`, `grinding_bits_lookup`) on every ring.
 
 /// Proof-of-work grinding difficulty (in bits) applied at the start of the
 /// LogUp-GKR argument. The prover grinds
 /// for a witness that, once absorbed, makes the challenger emit
-/// `GKR_GRINDING_BITS` leading zero bits; the verifier re-checks the witness
-/// before sampling any GKR challenge.  16 is what the 100-bit provable
-/// schedule needs (docs/soundness/): at 0 the LogUp-GKR term scores 84, and
-/// the total is the minimum over terms.  It costs ~43 ms/shard in the
-/// deterministic search.
-pub const GKR_GRINDING_BITS: usize = 16;
+/// `gkr_grinding_bits()` leading zero bits; the verifier re-checks the witness
+/// before sampling any GKR challenge.  The LogUp-GKR term scores 84 bits with
+/// no grind and the grind is the only lever on it -- queries cannot buy it --
+/// so it carries the whole distance to the per-component target: 16 bits put
+/// the term at 100, which is the minimum-component convention, and 22 put it at
+/// 106, which is what a union above 100 needs.
+pub fn gkr_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_LOGUP_GRINDING_BITS", 22)
+}
 
 use p3_challenger::GrindingChallenger;
 
@@ -112,11 +114,11 @@ mod tests {
     #[test]
     fn gkr_grinding_witness_roundtrips() {
         let mut prover = seeded();
-        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+        let witness: JaggedVal = gkr_grind(&mut prover, gkr_grinding_bits());
 
         let mut verifier = seeded();
         assert!(
-            gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness),
+            gkr_check_witness(&mut verifier, gkr_grinding_bits(), witness),
             "the honest grinding witness must be accepted, or the negative case below \
              proves nothing"
         );
@@ -137,7 +139,7 @@ mod tests {
         let before: JaggedVal = ungrinded.sample();
 
         let mut prover = seeded();
-        let _witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+        let _witness: JaggedVal = gkr_grind(&mut prover, gkr_grinding_bits());
         let after: JaggedVal = prover.sample();
 
         assert_ne!(
@@ -154,10 +156,10 @@ mod tests {
     #[test]
     fn gkr_grind_and_check_leave_the_same_state() {
         let mut prover = seeded();
-        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+        let witness: JaggedVal = gkr_grind(&mut prover, gkr_grinding_bits());
 
         let mut verifier = seeded();
-        assert!(gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness));
+        assert!(gkr_check_witness(&mut verifier, gkr_grinding_bits(), witness));
 
         let p: JaggedVal = prover.sample();
         let v: JaggedVal = verifier.sample();
@@ -165,17 +167,17 @@ mod tests {
     }
 
     /// NEGATIVE: one off-by-one witness.  `check_witness` observes the witness
-    /// and requires the squeezed challenge's low `GKR_GRINDING_BITS` to be zero,
+    /// and requires the squeezed challenge's low `gkr_grinding_bits()` to be zero,
     /// so a different witness re-seeds the sponge and (except with probability
     /// 2^-16) fails.
     #[test]
     fn gkr_grinding_rejects_a_tampered_witness() {
         let mut prover = seeded();
-        let witness: JaggedVal = gkr_grind(&mut prover, GKR_GRINDING_BITS);
+        let witness: JaggedVal = gkr_grind(&mut prover, gkr_grinding_bits());
 
         let mut verifier = seeded();
         assert!(
-            !gkr_check_witness(&mut verifier, GKR_GRINDING_BITS, witness + JaggedVal::ONE),
+            !gkr_check_witness(&mut verifier, gkr_grinding_bits(), witness + JaggedVal::ONE),
             "a tampered grinding witness must be rejected",
         );
     }
@@ -184,12 +186,39 @@ mod tests {
     /// the witness is observed into the challenger, so a nondeterministic one
     /// would make every downstream alpha/beta — and the whole LogUp-GKR proof —
     /// vary run to run.
+    /// The search returns the SMALLEST valid witness, which is what makes the
+    /// transcript independent of how the search was scheduled or split.
+    ///
+    /// It matters because the search runs over growing windows rather than over
+    /// the whole prime field: a window that returned any valid witness instead
+    /// of its least one would still verify, and the proof bytes would then vary
+    /// with the window size.  The check is exhaustive below the witness, so it
+    /// fails on exactly that.
+    #[test]
+    fn the_grind_returns_the_smallest_witness() {
+        use p3_field::{integers::QuotientMap, PrimeField64};
+        for bits in [6usize, 11] {
+            let mut ground = seeded();
+            let witness: JaggedVal = gkr_grind(&mut ground, bits);
+            let found = witness.as_canonical_u64();
+            for i in 0..found {
+                let candidate =
+                    unsafe { <JaggedVal as QuotientMap<u64>>::from_canonical_unchecked(i) };
+                let mut probe = seeded();
+                assert!(
+                    !probe.check_witness(bits, candidate),
+                    "index {i} also passes at bits={bits}, so {found} is not the smallest",
+                );
+            }
+        }
+    }
+
     #[test]
     fn gkr_grinding_is_deterministic() {
         let mut a = seeded();
         let mut b = seeded();
-        let wa: JaggedVal = gkr_grind(&mut a, GKR_GRINDING_BITS);
-        let wb: JaggedVal = gkr_grind(&mut b, GKR_GRINDING_BITS);
+        let wa: JaggedVal = gkr_grind(&mut a, gkr_grinding_bits());
+        let wb: JaggedVal = gkr_grind(&mut b, gkr_grinding_bits());
         assert_eq!(wa, wb, "the grind must be reproducible across runs");
         let na: JaggedVal = a.sample();
         let nb: JaggedVal = b.sample();

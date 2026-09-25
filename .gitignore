@@ -37,8 +37,22 @@ docs/*.md
 !docs/README.md
 .chainstack
 
-# The paper is drafted in this worktree but not carried by the repo.
-docs/paper/
+# The paper is carried by the repo: sources, figures and the built PDF.  Only
+# LaTeX's own by-products and the figure preview renders are ignored.
+docs/paper/*.aux
+docs/paper/*.log
+docs/paper/*.out
+docs/paper/*.bbl
+docs/paper/*.blg
+docs/paper/*.toc
+docs/paper/*.synctex.gz
+docs/paper/sections/*.aux
+docs/paper/figures/*.aux
+docs/paper/figures/out/
+docs/paper/figures/unused/
+docs/paper/page-04-review.png
+# Superseded section drafts from the pre-restructure outline; kept locally only.
+docs/paper/sections/old/
 
 # Soundness working notes stay local; they are not release material.
 docs/soundness/

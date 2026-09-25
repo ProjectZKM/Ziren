@@ -23,6 +23,7 @@ mod lookup;
 mod machine;
 pub mod multilinear;
 mod opts;
+pub mod params;
 mod permutation;
 pub mod profile;
 mod proof;

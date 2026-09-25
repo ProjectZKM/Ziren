@@ -32,7 +32,7 @@
 //!
 //! Two kinds of thing, absorbed in this order:
 //!
-//! 1. [`TRANSCRIPT_PROFILE`] — named scalars and event ORDERS. An order has no
+//! 1. [`transcript_profile`] — named scalars and event ORDERS. An order has no
 //!    natural value, so it carries a revision counter bumped by hand when the
 //!    order moves.
 //! 2. The production PCS configurations themselves, field by field, read from
@@ -76,42 +76,53 @@ pub type ProfileEntry = (&'static str, u64);
 /// The first group has natural values. The second has none — an event order is
 /// not a number — so each carries a revision that is incremented when that
 /// order changes, with the finding or change that moved it named beside it.
-pub const TRANSCRIPT_PROFILE: &[ProfileEntry] = &[
-    // Parameters.
-    ("jagged.log_stacking_height", DEFAULT_LOG_STACKING_HEIGHT as u64),
-    ("basefold.batch_grinding_bits", crate::basefold::config::BATCH_GRINDING_BITS as u64),
-    ("whir.batch_grinding_bits", crate::whir::jagged::WHIR_BATCH_GRINDING_BITS as u64),
-    ("logup_gkr.grinding_bits", crate::logup_gkr::GKR_GRINDING_BITS as u64),
-    // Event orders.
-    //
-    // rev 1: BaseFold absorbs the per-stripe claim vector before batch grinding
-    //        and before the batching point. With the point drawn first, the
-    //        batching Lagrange vector is known to a prover that has not yet
-    //        chosen the claims, and the two linear equations are solvable.
-    ("basefold.claims_before_batching_point", 1),
-    // rev 1: the shard prologue absorbs public values, the main commitment, the
-    //        chip count, then each chip's raw height and name.
-    ("shard.prologue_order", 1),
-    // rev 1: a round's commitment is `compress([raw_root, hash(counts)])` over
-    //        the ring's own hasher, so the digest states the geometry.
-    ("jagged.geometry_hash_bind", 1),
-    // rev 1: the final polynomial is observed BEFORE the final grinding
-    //        challenge, so the proof-of-work and every final query index are
-    //        functions of it. Observed after, the map is the other way: the
-    //        prover picks the polynomial already knowing the indices it must
-    //        satisfy, and only has to agree with the honest value on that
-    //        fixed set rather than on the whole domain.
-    ("whir.final_poly_before_final_grind", 1),
-    // rev 1: every per-round vector length is fixed by the configuration and
-    //        checked before any challenge is drawn. With the lengths read from
-    //        the proof, a tail appended past the last round is never observed,
-    //        so the oracle the queries answer against need not be the one the
-    //        transcript fixed.
-    ("whir.round_cardinalities_pinned", 1),
-];
+pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
+    alloc::vec![
+        // Parameters.
+        ("jagged.log_stacking_height", DEFAULT_LOG_STACKING_HEIGHT as u64),
+        ("basefold.batch_grinding_bits", crate::basefold::config::batch_grinding_bits() as u64),
+        ("whir.batch_grinding_bits", crate::whir::jagged::whir_batch_grinding_bits() as u64),
+        ("logup_gkr.grinding_bits", crate::logup_gkr::gkr_grinding_bits() as u64),
+        // Added when these became overridable: a deployment that lowers one of
+        // them must move the digest, or the override would change the transcript
+        // without any consumer noticing.
+        ("whir.query_grinding_bits", crate::whir::jagged::query_grinding_bits() as u64),
+        ("whir.per_component_target_bits", crate::whir::jagged::per_component_target_bits() as u64),
+        (
+            "basefold.wrap_query_grinding_bits",
+            crate::basefold::config::wrap_query_grinding_bits() as u64
+        ),
+        // Event orders.
+        //
+        // rev 1: BaseFold absorbs the per-stripe claim vector before batch grinding
+        //        and before the batching point. With the point drawn first, the
+        //        batching Lagrange vector is known to a prover that has not yet
+        //        chosen the claims, and the two linear equations are solvable.
+        ("basefold.claims_before_batching_point", 1),
+        // rev 1: the shard prologue absorbs public values, the main commitment, the
+        //        chip count, then each chip's raw height and name.
+        ("shard.prologue_order", 1),
+        // rev 1: a round's commitment is `compress([raw_root, hash(counts)])` over
+        //        the ring's own hasher, so the digest states the geometry.
+        ("jagged.geometry_hash_bind", 1),
+        // rev 1: the final polynomial is observed BEFORE the final grinding
+        //        challenge, so the proof-of-work and every final query index are
+        //        functions of it. Observed after, the map is the other way: the
+        //        prover picks the polynomial already knowing the indices it must
+        //        satisfy, and only has to agree with the honest value on that
+        //        fixed set rather than on the whole domain.
+        ("whir.final_poly_before_final_grind", 1),
+        // rev 1: every per-round vector length is fixed by the configuration and
+        //        checked before any challenge is drawn. With the lengths read from
+        //        the proof, a tail appended past the last round is never observed,
+        //        so the oracle the queries answer against need not be the one the
+        //        transcript fixed.
+        ("whir.round_cardinalities_pinned", 1),
+    ]
+}
 
 /// The profile digest: `hash(len ‖ ⟨name bytes, value⟩ …)` over
-/// [`TRANSCRIPT_PROFILE`], with the repository's own Poseidon2-KoalaBear
+/// [`transcript_profile`], with the repository's own Poseidon2-KoalaBear
 /// sponge, so a consumer needs nothing this crate does not already provide.
 ///
 /// Values are absorbed as two 31-bit halves because a `u64` does not fit one
@@ -122,8 +133,9 @@ pub fn transcript_profile_digest() -> [JaggedVal; 8] {
     let hasher = crate::kb31_poseidon2::InnerHash::new(perm);
 
     let mut felts: Vec<JaggedVal> = Vec::new();
-    felts.push(JaggedVal::from_canonical_usize(TRANSCRIPT_PROFILE.len()));
-    for (name, value) in TRANSCRIPT_PROFILE {
+    let profile = transcript_profile();
+    felts.push(JaggedVal::from_canonical_usize(profile.len()));
+    for (name, value) in &profile {
         felts.push(JaggedVal::from_canonical_usize(name.len()));
         felts.extend(name.bytes().map(JaggedVal::from_u8));
         push_u64(&mut felts, *value);
@@ -263,7 +275,7 @@ impl std::error::Error for ProfileMismatch {}
 /// Compare a peer process's profile digest against this build's.
 ///
 /// `peer` is [`transcript_profile_digest_hex`] as reported by the other side.
-/// Equality means the two agree on every entry of [`TRANSCRIPT_PROFILE`] and
+/// Equality means the two agree on every entry of [`transcript_profile`] and
 /// on every absorbed configuration field, up to collision of the hash.
 ///
 /// Call this where two independently built binaries meet, before either does
@@ -286,7 +298,7 @@ mod tests {
     /// The digest is pinned so that a transcript change cannot be an accident.
     ///
     /// A failure here is not a bug in this test: it means an entry in
-    /// [`TRANSCRIPT_PROFILE`] moved, which means the transcript moved, which
+    /// [`transcript_profile`] moved, which means the transcript moved, which
     /// means every recursion verifying key and every artifact derived from one
     /// has to be regenerated and the two repositories have to ship together.
     /// Update the constant below in the same commit that makes the change, and
@@ -295,7 +307,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "58751d5e36e24bc864d5c9530a16702758ae8f910c4d89653121b0356a0e887f",
+            "6a40de2d0355a10a6c28059c2ec0c21865e8112d05b51a892bf94ecd50826ea5",
             "the transcript profile changed -- see this test's documentation",
         );
     }
@@ -466,7 +478,8 @@ mod tests {
     /// parameter a value belongs to.
     #[test]
     fn profile_entry_names_are_unique() {
-        let mut names: Vec<&str> = TRANSCRIPT_PROFILE.iter().map(|(n, _)| *n).collect();
+        let profile = transcript_profile();
+        let mut names: Vec<&str> = profile.iter().map(|(n, _)| *n).collect();
         names.sort_unstable();
         let before = names.len();
         names.dedup();

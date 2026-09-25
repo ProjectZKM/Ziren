@@ -240,12 +240,16 @@ where
     folder.local_interaction_digest
 }
 
-/// Number of grinding bits for the LogUp-GKR challenge — must stay in
-/// lockstep with the host prover's `zkm_pcs::logup_gkr::GKR_GRINDING_BITS`;
-/// the in-circuit verifier re-checks the same witness the host ground, so a
-/// mismatch would reject honest proofs.  16 is what the 100-bit provable
-/// schedule needs (docs/soundness/): at 0 the LogUp-GKR term scores 84.
-pub const GKR_GRINDING_BITS: usize = 16;
+/// Number of grinding bits for the LogUp-GKR challenge.
+///
+/// This is not a second number: it forwards to the host prover's
+/// [`zkm_pcs::logup_gkr::gkr_grinding_bits`], because the in-circuit verifier
+/// re-checks the very witness the host ground and a mismatch would reject
+/// honest proofs.  It was a separate constant, and a separate constant is a
+/// lockstep obligation that nothing enforces.
+pub fn gkr_grinding_bits() -> usize {
+    zkm_pcs::logup_gkr::gkr_grinding_bits()
+}
 
 /// Per-shard chip introspection input to [`verify_logup_gkr`].
 ///
@@ -344,7 +348,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         "LogUp-GKR proof must carry exactly max_log_row_count-1 padded rounds"
     );
 
-    challenger.gkr_check_witness(builder, GKR_GRINDING_BITS, *witness);
+    challenger.gkr_check_witness(builder, gkr_grinding_bits(), *witness);
 
     let alpha = challenger.sample_ext(builder);
     let beta_seed: Vec<Ext<C::F, C::EF>> =

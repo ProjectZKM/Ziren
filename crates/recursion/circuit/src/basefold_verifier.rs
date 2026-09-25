@@ -90,7 +90,8 @@ impl BasefoldVerifierParams {
 
     /// **WRAP-stage in-circuit params** — the in-circuit twin of
     /// `zkm_pcs::basefold::config::FriConfig::wrap_fri_config`:
-    /// `(log_blowup=3, num_queries=94, pow_bits=22)`.  Used by the gnark
+    /// `(log_blowup=3, num_queries=94,
+    /// pow_bits=wrap_query_grinding_bits())`.  Used by the gnark
     /// OUTER circuit that verifies the on-chain WRAP STARK proof, so the
     /// in-circuit verifier reads the codeword at the SAME rate the wrap
     /// prover committed (rate 1/8).  The component-opening Merkle path is
@@ -102,17 +103,23 @@ impl BasefoldVerifierParams {
     ///
     /// Soundness: `94 · (-log2(0.5 + (1/8)/2)) + 22 ≈ 100` bits (vs ~55 bits
     /// at the inner default).  Two-adicity: `num_variables(≤21) + 3 ≤ 24`.
-    pub const fn wrap_default(num_variables: usize) -> Self {
+    /// The grinding parameters are read from the host's accessors rather than
+    /// repeated here.  They were repeated, as `22` and `16`, and a repeated
+    /// parameter is a lockstep obligation that nothing checks: the in-circuit
+    /// verifier re-checks the witness the host ground, so a host that grinds
+    /// harder than the circuit demands claims security the circuit does not
+    /// enforce.
+    pub fn wrap_default(num_variables: usize) -> Self {
+        let cfg =
+            zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config(
+            );
         Self {
             log_blowup: 3,
             num_queries: 94,
-            pow_bits: 22,
-            batch_grinding_bits: 16,
+            pow_bits: zkm_pcs::basefold::config::wrap_query_grinding_bits(),
+            batch_grinding_bits: zkm_pcs::basefold::config::batch_grinding_bits(),
             num_variables,
-            log_folding_arity: zkm_pcs::basefold::config::FriConfig::<
-                zkm_pcs::jagged_pcs::JaggedVal,
-            >::wrap_fri_config()
-            .log_folding_arity(),
+            log_folding_arity: cfg.log_folding_arity(),
         }
     }
 

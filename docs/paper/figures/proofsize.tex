@@ -1,0 +1,18 @@
+% Anatomy of a measured compressed proof (617,618 bytes = 603 KiB).
+\begin{tikzpicture}
+\begin{axis}[
+  xbar stacked, xmin=0, xmax=603, width=0.78\textwidth, height=2.9cm, bar width=16pt,
+  ymin=-0.5, ymax=0.5, ytick={0}, yticklabels={compressed proof},
+  xlabel={KiB}, xtick={0,100,200,300,400,500,603},
+  axis line style={black!55},
+  legend style={font=\scriptsize, at={(0.5,-0.75)}, anchor=north, legend columns=2, cells={anchor=west}, draw=none},
+  tick label style={font=\scriptsize}, label style={font=\scriptsize},
+  nodes near coords, every node near coord/.append style={font=\scriptsize, /pgf/number format/fixed, /pgf/number format/precision=0},
+  point meta=explicit symbolic,
+]
+\addplot[fill=zirenblue!72, draw=zirenblue!95!black] coordinates {(476,0) [476 (79\%)]}; \addlegendentry{first \WHIR{} oracle: queries + paths (79\%)}
+\addplot[fill=zirenteal!68, draw=zirenteal!95!black] coordinates {(57,0) [57]}; \addlegendentry{later \WHIR{} openings (9.5\%)}
+\addplot[fill=zirenorange!65, draw=zirenorange!95!black] coordinates {(36,0) [36]}; \addlegendentry{\LogUp{} layer proofs (6\%)}
+\addplot[fill=zirenslate!18, draw=zirenslate!75] coordinates {(34,0) [34]}; \addlegendentry{sumchecks, public values, final polynomial (5.5\%)}
+\end{axis}
+\end{tikzpicture}

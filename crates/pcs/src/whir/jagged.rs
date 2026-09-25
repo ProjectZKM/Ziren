@@ -96,41 +96,98 @@ pub fn whir_config_for_fold_schedule(lsh: usize, folds: &[usize], final_log: usi
     config
 }
 
-/// The production jagged-WHIR budget for a core-shard stack of height `2^lsh`:
-/// 100 bits per round in the unique-decoding regime.
+/// The jagged-WHIR schedule for a core-shard stack of height `2^lsh`, solved
+/// so that the union over the transcript's components is at least 100 bits in
+/// the unique-decoding regime.
+///
+/// The per-component target is [`per_component_target_bits`], 106 by default,
+/// and 106 is chosen so that the union clears 100: a shard's transcript has
+/// roughly two dozen components, and `100 + log2(24) = 104.6`.  Solving each
+/// round for 100 instead would give a schedule that reads "100 bits" per round
+/// and is worth 97.67 once its components are summed.
 ///
 /// A query into a code of rate `ρ` is worth `-log2((1 + ρ)/2) < 1` bit, so a
-/// round with `q` queries and a 16-bit query grind gives
-/// `q·(-log2((1 + ρ)/2)) + 16` bits.  Round `r` queries the codeword committed
+/// round with `q` queries and `pow` bits of query grind gives
+/// `q·(-log2((1 + ρ)/2)) + pow` bits.  Round `r` queries the codeword committed
 /// by round `r - 1` (round 0: the stripe trees at `ρ = 2^-2`), and each round
-/// commits at `ρ` three halvings below the last:
+/// commits at `ρ` three halvings below the last.  At the default target and
+/// grinding the solver returns:
 ///
 /// ```text
-///   ρ = 2^-2 : 124 · 0.678072 + 16 = 100.08
-///   ρ = 2^-5 :  88 · 0.955606 + 16 = 100.09
-///   ρ = 2^-8 :  85 · 0.994375 + 16 = 100.52   (and every later round)
+///   ρ = 2^-2 : 124 · 0.678072 + 22 = 106.08
+///   ρ = 2^-5 :  88 · 0.955606 + 22 = 106.09
+///   ρ = 2^-8 :  85 · 0.994375 + 22 = 106.52   (and every later round)
 /// ```
 ///
-/// Each count is the least integer reaching 100, so one query fewer in any
-/// round is below 100 bits.  Folds are `[3, 6, 6, …]`; OOD samples 2 per
-/// committed round; folding grind 0.
+/// Each count is the least integer reaching the target, so one query fewer in
+/// any round falls below it.  The counts are solved rather than listed, so
+/// lowering the grinding through the environment raises them instead of
+/// weakening the round.  Folds are `[3, 6, 6, …]`; OOD samples 2 per committed
+/// round; folding grind 0.
+///
+/// These are bounds on the interactive protocol.  The Fiat--Shamir compilation
+/// costs a factor in the adversary's oracle queries, which no schedule here
+/// buys back.
 pub fn core_whir_config(lsh: usize) -> WhirConfig {
     let mut config = core_whir_config_without_batch_grind(lsh);
-    config.batch_pow_bits = WHIR_BATCH_GRINDING_BITS;
+    config.batch_pow_bits = whir_batch_grinding_bits();
     config
 }
 
-/// Grinding bits on the stripe batching.  The batch combines every stripe of
-/// both committed rounds with the powers of one challenge, `t <= 256` on a
-/// core shard, and its error is `(t - 1) · L / |F|`: 94 bits at `t = 256`
-/// with no grind, which was the binding term of the schedule.  Eight bits
-/// put it at 102, above the 100-bit query rounds, for `2^8` hashes per
-/// opening.
-pub const WHIR_BATCH_GRINDING_BITS: usize = 8;
+/// Bits each transcript component is solved for.
+///
+/// The schedule used to target 100 bits per component, which is the
+/// *minimum-component* convention: with roughly two dozen components a union
+/// bound over them lands near 97.7, so a configuration that reads "100 bits"
+/// per round is a sub-100-bit argument once the components are summed.  The
+/// target is therefore the union goal plus the log of the component count,
+/// `100 + log2(24) = 104.6`, rounded up for margin.
+pub fn per_component_target_bits() -> f64 {
+    crate::params::env_f64("ZIREN_SOUNDNESS_TARGET_BITS", 106.0)
+}
 
+/// Query-phase grinding, in bits.
+///
+/// Chosen so that retargeting costs no proof bytes: at `rho = 2^-2` a query is
+/// worth 0.678 bits, so `124 · 0.678 + 22 = 106.1`, which is the same 124
+/// queries the 100-bit target needed at 16 bits of grinding.  Six bits of
+/// grinding buy six bits of soundness for an expected `2^22` permutations per
+/// phase.
+///
+/// That expectation is only what the prover pays if the search is accelerated.
+/// On the host it is a rayon search nested inside the per-shard parallelism
+/// that already owns every core, so it is serial in practice and each bit
+/// doubles it: measured on one reth block over four cards, moving the query,
+/// LogUp and batching grinds to this schedule took 34.2 s to 166.2 s while the
+/// grinds ran on the host, of which 123 s was the LogUp grind alone.  Buying
+/// the same bits with queries instead cost 8.6%, which is the lever to reach
+/// for if a prover has no accelerator registered.
+pub fn query_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_WHIR_QUERY_GRINDING_BITS", 22)
+}
+
+/// Grinding bits on the stripe batching.
+///
+/// The batch combines every stripe of both committed rounds with the powers of
+/// one challenge, `t <= 256` on a core shard, and its error is
+/// `(t - 1) · L / |F|`: 94 bits at `t = 256` with no grind, which was the
+/// binding term of the schedule.  Eight bits put it at 102; fourteen put it at
+/// 108, above the query rounds, for one grind of `2^14` per opening.
+pub fn whir_batch_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_WHIR_BATCH_GRINDING_BITS", 14)
+}
+
+/// The rate of the first committed oracle, `2^-START_LOG_INV_RATE`.
+const START_LOG_INV_RATE: usize = 2;
+
+/// The schedule at stacking height `lsh`, before the batching grind.
+///
+/// The query counts are solved, not listed: a round is worth
+/// `q · bits_per_query(rate) + pow` bits, so listing `q` while `pow` and the
+/// target are overridable would let an override weaken a round silently.  At
+/// the defaults this yields the schedule it replaces, `[124, 88, 85]`.
 fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
     const ROUND0_FF: usize = 3;
-    const START_LOG_INV_RATE: usize = 2;
     let mut rem =
         lsh.checked_sub(ROUND0_FF).expect("stacking height must exceed the round-0 folding factor");
     let mut folds = alloc::vec![ROUND0_FF];
@@ -144,15 +201,34 @@ fn core_whir_config_without_batch_grind(lsh: usize) -> WhirConfig {
         rp.log_inv_rate = START_LOG_INV_RATE + 3 * (r + 1);
     }
     let num_rounds = config.round_parameters.len();
-    let queries = [124usize, 88, 85, 85, 85, 85, 85];
+    let pow = query_grinding_bits();
     for (r, rp) in config.round_parameters.iter_mut().enumerate() {
-        rp.num_queries = queries[r.min(queries.len() - 1)];
-        rp.queries_pow_bits = 16;
+        rp.num_queries = min_queries(queried_log_inv_rate(r), pow);
+        rp.queries_pow_bits = pow;
         rp.ood_samples = 2;
     }
-    config.final_queries = queries[(num_rounds - 1).min(queries.len() - 1)];
-    config.final_pow_bits = 16;
+    config.final_queries = min_queries(queried_log_inv_rate(num_rounds), pow);
+    config.final_pow_bits = pow;
     config
+}
+
+/// `-log2((1 + rho)/2)`: what one shift query is worth at rate `2^-log_inv_rate`
+/// in the unique-decoding regime.
+pub fn bits_per_query(log_inv_rate: usize) -> f64 {
+    -((1.0 + 2f64.powi(-(log_inv_rate as i32))) / 2.0).log2()
+}
+
+/// The rate of the codeword round `r` queries: round 0 queries the starting
+/// rate, round `r` the rate round `r - 1` committed, and the final queries the
+/// last committed round's rate.
+fn queried_log_inv_rate(r: usize) -> usize {
+    START_LOG_INV_RATE + 3 * r
+}
+
+/// The least query count reaching [`per_component_target_bits`] at this rate
+/// with `pow` bits of grinding.
+pub fn min_queries(log_inv_rate: usize, pow: usize) -> usize {
+    ((per_component_target_bits() - pow as f64) / bits_per_query(log_inv_rate)).ceil() as usize
 }
 
 /// Split the stacking interleave's width-`batch` stripes into width-1
@@ -382,22 +458,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::core_whir_config;
-
-    /// `-log2((1 + ρ)/2)` for `ρ = 2^-log_inv_rate`.
-    fn bits_per_query(log_inv_rate: usize) -> f64 {
-        -((1.0 + 2f64.powi(-(log_inv_rate as i32))) / 2.0).log2()
-    }
-
-    /// The least `q` with `q·bits + pow >= 100`.
-    fn min_queries(log_inv_rate: usize, pow_bits: usize) -> usize {
-        ((100.0 - pow_bits as f64) / bits_per_query(log_inv_rate)).ceil() as usize
-    }
+    use super::{bits_per_query, core_whir_config, min_queries, per_component_target_bits};
 
     /// Every round's query count is exactly the least integer that reaches
-    /// 100 bits under the unique-decoding bound, at the rate of the codeword
-    /// it queries: round 0 the starting rate, round `r` the rate round `r - 1`
-    /// committed, the final queries the last round's rate.
+    /// [`per_component_target_bits`] under the unique-decoding bound, at the
+    /// rate of the codeword it queries: round 0 the starting rate, round `r`
+    /// the rate round `r - 1` committed, the final queries the last round's
+    /// rate.
+    ///
+    /// The comparison is self-consistency, not a fixed floor: whatever target
+    /// the deployment configures, the solved schedule must reach it and must
+    /// not overshoot it by a whole extra query.
     #[test]
     fn query_counts_are_the_unique_decoding_minimum() {
         for lsh in [20usize, 21, 22, 24] {
@@ -406,7 +477,8 @@ mod tests {
             for (r, rp) in config.round_parameters.iter().enumerate() {
                 let bits = rp.num_queries as f64 * bits_per_query(queried_rate)
                     + rp.queries_pow_bits as f64;
-                assert!(bits >= 100.0, "lsh {lsh} round {r}: {bits} bits");
+                let target = per_component_target_bits();
+                assert!(bits >= target, "lsh {lsh} round {r}: {bits} bits < {target}");
                 assert_eq!(
                     rp.num_queries,
                     min_queries(queried_rate, rp.queries_pow_bits),

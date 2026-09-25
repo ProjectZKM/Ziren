@@ -1,0 +1,130 @@
+\section{Recursion}
+\label{sec:recursion}
+
+This section describes the block's outward interface: what leaves it is the root of the tree built here, the compressed proof of Table~\ref{tab:ports}, and what binds that proof to the advertised machine is the verifying-key allowlist of the last paragraph. Shard proofs are aggregated by a recursion machine: a small register VM over the same field whose programs are compiled from a description of the verifier, executed to a trace, and proved by the same unit/\LogUp{}/zerocheck/Jagged/\WHIR{} pipeline. Its units are the arithmetic of $\F$ and $\EF$, memory, the $\Poseidon{}$ permutation, a select gate and a batched folding gate for the FRI-style query checks.
+
+\paragraph{Leaves.} A \emph{leaf} program verifies one core shard proof in four phases mirroring the host verifier: the transcript prologue (public values, commitment, unit dimensions), the \LogUp{} layer replay, the zerocheck replay including the constraint evaluation of every unit present, and the jagged opening with its branching-program closing identity followed by the \WHIR{} verifier. Because the jagged verifier depends only on the shard's log-area and the constraint evaluation only on the unit set, the number of distinct leaf programs is small; on the single-GPU deployment consecutive shards of the same class reuse a device-resident proving key. Adjacent shards' leaves are \emph{fused} into one node where the shard shapes allow, and leaves are proved on the same GPU concurrently with core shards, so that the GPU's time is shared between the two stages rather than serialised.
+
+Figure~\ref{fig:recursion} shows the tree, what each node checks on its
+children and what the root closes.
+
+\begin{figure}[t]
+\centering
+\resizebox{0.96\textwidth}{!}{\input{figures/recursion}}
+\caption{Every node of the tree carries the same public-value tuple, so a
+compose node checks its children by comparing tuples: the ranges must be
+adjacent, the cursors must tile and the digests must accumulate, while the
+verifying key, the output digest, the exit code and the allowlist root must
+agree. The root is where the memory argument and the cross-shard digest close,
+and where the exit code is required to be the one the relation admits.}
+\label{fig:recursion}
+\end{figure}
+
+\paragraph{The compose relation.} Write a node's public values as
+\[
+  \mathsf{pv} = (\mathsf{vk}, \mathsf{entry}, \mathsf{exit}, \mathsf{cur}_{\mathrm{in}}, \mathsf{cur}_{\mathrm{out}}, D, h, \mathsf{code}, \mathsf{root}),
+\]
+the verifying key of the guest, the entry and exit machine states, the
+memory-address cursors the node opens and closes with, the accumulated
+cross-shard digest, the digest of committed output, the exit code, and the
+root of the allowlist of admissible recursion keys. For a machine with a delay slot the entry and exit states are
+\emph{pairs} $(\mathsf{pc}, \mathsf{pc}_{\mathrm{next}})$, because a row's successor is
+data; adjacency therefore has to pin both components, and a defect in which only
+the first was pinned across shards is recorded in Table~\ref{tab:defects}.
+A compose node of arity $k$ proves the
+relation $\mathcal R_{\mathrm{comp}}(\mathsf{pv}; \pi_0,\dots,\pi_{k-1})$,
+which holds when each $\pi_i$ verifies against a key that the allowlist at
+$\mathsf{root}$ contains, the children agree on $\mathsf{vk}$, $h$ and $\mathsf{code}$, their
+$\mathsf{root}_i$ all equal the $\mathsf{root}$ that membership is checked
+against and that the node publishes, their ranges are adjacent in the sense that
+$\mathsf{exit}_i = \mathsf{entry}_{i+1}$ and
+$\mathsf{cur}_{\mathrm{out},i} = \mathsf{cur}_{\mathrm{in},i+1}$, and the
+output satisfies $\mathsf{entry} = \mathsf{entry}_0$,
+$\mathsf{exit} = \mathsf{exit}_{k-1}$,
+$\mathsf{cur}_{\mathrm{in}} = \mathsf{cur}_{\mathrm{in},0}$,
+$\mathsf{cur}_{\mathrm{out}} = \mathsf{cur}_{\mathrm{out},k-1}$ and
+$D = \sum_i D_i$. 
+
+\paragraph{Leaves and the root.} A leaf node proves the corresponding relation for a single child, with one
+difference that matters: its child is a core shard proof, which verifies
+against the guest's $\mathsf{vk}$ rather than against a key of the allowlist.
+It is the leaf's own key that the allowlist must contain, and its parent is
+what checks that. The root additionally requires
+$\mathsf{cur}_{\mathrm{in}}$ and $\mathsf{cur}_{\mathrm{out}}$ to be the
+empty cursors, $D$ to be the identity and the exit code to be zero, which is
+what closes the memory argument and the cross-shard digest over the whole
+execution and admits only the halts the relation of
+Section~\ref{sec:statement} accepts.
+Algorithm~\ref{alg:compose} states the same checks as the procedure a compose
+node runs, with the root's extra conditions on the last line.
+
+\begin{algorithm}[t]
+\caption{The compose node of arity $k$, and what the root additionally
+requires. Line~2 is the binding of \S\ref{sec:recursion}: without it the node
+would verify \emph{some} proof rather than a proof of this machine.}
+\label{alg:compose}
+\DontPrintSemicolon
+\KwIn{child proofs $\pi_0,\dots,\pi_{k-1}$ with public values
+      $\mathsf{pv}_0,\dots,\mathsf{pv}_{k-1}$ and membership paths
+      $\mathsf{path}_0,\dots,\mathsf{path}_{k-1}$; a claimed allowlist root $\mathsf{root}$}
+\KwOut{the node's public values $\mathsf{pv}$, or $\bot$}
+\For{$i \gets 0$ \KwTo $k-1$}{
+  \lIf{$\neg\,\mathsf{MerkleVerify}(\mathsf{root}, \mathsf{vk}_i, \mathsf{path}_i)$}{\Return $\bot$
+    \tcp*[f]{the child's key is admissible}}
+  \lIf{$\neg\,\mathsf{Verify}(\mathsf{vk}_i, \mathsf{pv}_i, \pi_i)$}{\Return $\bot$}
+}
+\lIf{$\exists\, i:\ \mathsf{root}_i \neq \mathsf{root}$}{\Return $\bot$
+    \tcp*[f]{children agree with the root they were checked against}}
+\lIf{$\mathsf{vk}_i$, $h_i$, $\mathsf{code}_i$ not all equal over $i$}{\Return $\bot$}
+\For{$i \gets 0$ \KwTo $k-2$}{
+  \lIf{$\mathsf{exit}_i \neq \mathsf{entry}_{i+1}$}{\Return $\bot$
+    \tcp*[f]{ranges adjacent}}
+  \lIf{$\mathsf{cur}_{\mathrm{out},i} \neq \mathsf{cur}_{\mathrm{in},i+1}$}{\Return $\bot$
+    \tcp*[f]{cursors tile}}
+}
+$D \gets \sum_{i} D_i$ \tcp*{digests accumulate}
+$\mathsf{pv} \gets (\mathsf{vk},\ \mathsf{entry}_0,\ \mathsf{exit}_{k-1},\
+  \mathsf{cur}_{\mathrm{in},0},\ \mathsf{cur}_{\mathrm{out},k-1},\ D,\ h,\ \mathsf{root})$\;
+\If{this node is the root}{
+  \lIf{$\mathsf{cur}_{\mathrm{in}}, \mathsf{cur}_{\mathrm{out}}$ non-empty
+       $\lor\ D \neq O \lor \mathsf{code} \neq 0$}{\Return $\bot$}
+}
+\Return $\mathsf{pv}$\;
+\end{algorithm}
+ The tree merges contiguous shard \emph{ranges} as soon as they are complete rather than level by level, which shortens the tail after the last core shard from four serial composes to two; that tail is one of the two components of the gap to linear scaling in \S\ref{sec:perf-after}. Because a range is reduced the moment it is complete, the tree climbs on the workers that are still proving core shards, and on the deployed configuration the root is finished before the last shard's proof is collected. A leaf is never itself the root: an execution of a single shard closes through a compose of arity one, which costs one more node and keeps the leaf programs to the open classes that the enumeration below covers. Arity is capped at three by the recursion units' height budget; arity four was built and measured, and it was neutral (41 nodes replaced by 27, $-0.7\%$ of wall time, an unchanged tail), so it does not pay for the key regeneration it would force.
+
+\paragraph{Shrink and wrap.} The root proof is \emph{shrunk} to a fixed shape and then \emph{wrapped} on the outer ring: a jagged proof whose dense polynomial is committed with a FRI-style BaseFold instantiation over the same field but with a 254-bit hash, folding one variable per round under query grinding down to a small final polynomial. The artifact report estimates 534\,KiB expected and 963\,KiB worst case for the checked-in 16-bit-lookup-grinding schedule; these are configuration estimates rather than measurements of the zero-grinding baseline in Section~\ref{sec:performance}. The wrap proof is what a Groth16 verifier on BN254, generated with \texttt{gnark}~\citep{gnark}, consumes when an on-chain proof is required. For the block-proving service and throughout this paper, the compressed inner-ring proof itself is the published artefact.
+
+\paragraph{Verifying-key binding.} Every recursion program has a verifying key. The statement of Section~\ref{sec:statement} is only about the advertised machine if the verifier can tell that the leaf it is looking at verified a \emph{core} proof of that machine and that every compose node ran the compose program: the compose program therefore checks that its children's keys belong to a Merkle allowlist, and the root of that allowlist is checked against the one compiled into the verifier. Which verifier matters: inside the tree the root is a witness the prover supplies, so the in-circuit checks establish only that every child's key lies in a tree with \emph{that} root. The root is therefore carried out of the tree as a public value of the compressed proof and, for the wrapped proof, as a public input of the wrap circuit, where the on-chain verifier supplies the published root rather than accepting one from its caller. It was not always so, and the gap is recorded in Table~\ref{tab:defects}. The recursion machine is outside the extraction of Section~\ref{sec:verification}, so Theorem~\ref{thm:composition} takes this binding as a hypothesis. It is part of the protocol: a proof produced by a prover configured to skip the in-circuit check has a different compose key and is rejected (Section~\ref{sec:verification} reports finding this configuration in the block-proving service). The allowlist is regenerated whenever the arithmetisation changes, and it is now enumerated for the leaf programs as well as the compose ones, which is what makes it a statement about the machine rather than about one guest.
+
+\paragraph{Enumerating the leaf keys.} A leaf program is determined by the geometry of the shard proof it verifies, and Section~\ref{sec:pcs-geometry} quantises that geometry: the committed area of each round is a bucket rather than an exact cell count, and the padding-column count is a function of the bucket alone. What remains is the shard's chip set, which is one of the machine's fixed clusters, and the two bucket indices. Enumerating those triples and building one program per class gives, without running a single guest, every leaf key a prover can produce for a shard whose chip set is one of those clusters: about $6.4 \cdot 10^3$ keys for the deployed machine. The scope of that statement is the cluster list. A \emph{cluster} is one of the chip-set combinations the machine's shape configuration declares, curated from the combinations that arise in the workloads it is built for, not an exhaustive partition of the chip powerset. So the enumeration is exhaustive given the list, and the allowlist covers an arbitrary guest only to the extent that the list does; \S\ref{sec:scope} says the same thing from the other side. What that buys is bounded on the right axis: a shard whose chip set falls outside the list produces a key the allowlist does not contain, and a verifier that requires membership refuses it. The failure is of completeness, not of soundness, and it is loud. 
+
+\paragraph{Why not sample the keys.} Before this the leaf keys were \emph{sampled}: a corpus of executions was proved and the keys they happened to produce were collected, which covers the workload that was sampled and leaves the next shard shape one uncollected key away from a refusal. A verifier configured to require membership on a sampled allowlist did exactly that in the block-proving service, which is how the omission was found. The enumeration is checked against the sampled corpus, class by class, and against the programs the classes generate.
+Algorithm~\ref{alg:enum} states the procedure; every quantity it ranges over
+is fixed by the machine and the committed geometry, so it terminates without
+consulting any execution.
+
+\begin{algorithm}[t]
+\caption{Enumerating the admissible leaf keys. The loop bounds come from the
+machine's unit clusters and from the bucket rule of \S\ref{sec:pcs-geometry};
+no guest is executed. For the deployed machine it returns about
+$6.4 \cdot 10^{3}$ keys.}
+\label{alg:enum}
+\DontPrintSemicolon
+\KwIn{unit clusters $\mathcal{C}$; bucket sets $\mathcal{B}_{\mathrm{prep}}$,
+      $\mathcal{B}_{\mathrm{main}}$; padding rule $\mathsf{pad}(\cdot)$}
+\KwOut{the allowlist root $\mathsf{root}$}
+$K \gets \emptyset$\;
+\ForEach{cluster $c \in \mathcal{C}$}{
+  \ForEach{$b_{\mathrm{p}} \in \mathcal{B}_{\mathrm{prep}}$,
+           $b_{\mathrm{m}} \in \mathcal{B}_{\mathrm{main}}$}{
+    $n \gets \mathsf{pad}(b_{\mathrm{m}})$ \tcp*{a function of the bucket, not of the real count}
+    \ForEach{$\mathit{first} \in \{\mathsf{true}, \mathsf{false}\}$}{
+      $\sigma \gets (c,\ \mathit{first},\ b_{\mathrm{p}},\ b_{\mathrm{m}},\ n)$
+        \tcp*{the shape a leaf can be asked to verify}
+      $K \gets K \cup \{\,\mathsf{vk}(\mathsf{CompileLeaf}(\sigma))\,\}$\;
+    }
+  }
+}
+\Return $\mathsf{MerkleRoot}(K)$\;
+\end{algorithm}

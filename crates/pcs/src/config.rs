@@ -239,7 +239,8 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// inner / env-overridable config (`FriConfig::from_env_or_default()` =
     /// `(log_blowup=1, num_queries=94, pow_bits=16)`), which is used by
     /// core/compress/shrink.  The **wrap** ring (`KoalaBearPoseidon2Outer`)
-    /// overrides this to `FriConfig::wrap_fri_config()` = `(3, 94, 22)` so the
+    /// overrides this to `FriConfig::wrap_fri_config()` = `(3, 94,
+    /// wrap_query_grinding_bits())` so the
     /// on-chain wrap proof hits the full 100-bit query-phase soundness target
     /// (the inner default at the wrap is only ~55-bit — see
     /// `FriConfig::wrap_fri_config`).  Carried as a single source of truth from

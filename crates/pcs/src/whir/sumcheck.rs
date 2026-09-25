@@ -123,7 +123,7 @@ impl<EF: Field> WhirFolder<EF> {
     where
         F: Field,
         EF: ExtensionField<F>,
-        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + 'static,
     {
         let mut polys = Vec::with_capacity(k);
         for round in 0..k {
@@ -142,7 +142,10 @@ impl<EF: Field> WhirFolder<EF> {
             challenger.observe_algebra_element(c0);
             challenger.observe_algebra_element(c1);
             challenger.observe_algebra_element(c2);
-            let pow = challenger.grind(pow_bits.get(round).copied().unwrap_or(0));
+            let pow = crate::basefold::prover::accelerated_grind(
+                challenger,
+                pow_bits.get(round).copied().unwrap_or(0),
+            );
             let r: EF = challenger.sample_algebra_element();
 
             self.claimed_sum = c0 + c1 * r + c2 * r * r;
@@ -190,7 +193,7 @@ pub fn prove_fold<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + 'static,
 {
     let n = f.num_variables() as usize;
     debug_assert_eq!(query_point.len(), n);

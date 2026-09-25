@@ -15,7 +15,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 use super::build::build_gkr_circuit;
 use super::round::prove_gkr_round;
 use crate::air::MachineAir;
-use crate::logup_gkr::GKR_GRINDING_BITS;
+use crate::logup_gkr::gkr_grinding_bits;
 use crate::multilinear::PaddedMle;
 use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
 use crate::shard_level::types::{ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof};
@@ -47,7 +47,7 @@ where
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
         + 'static,
 {
-    let witness: F = crate::logup_gkr::gkr_grind(challenger, GKR_GRINDING_BITS);
+    let witness: F = crate::logup_gkr::gkr_grind(challenger, gkr_grinding_bits());
 
     let alpha: EF = challenger.sample_algebra_element::<EF>();
     let max_arity = chips
