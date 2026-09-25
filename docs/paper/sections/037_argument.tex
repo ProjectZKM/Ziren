@@ -43,10 +43,10 @@ schedule (\S\ref{sec:prelim}).
   \item For recursion: the arity of a compose node and the height of the tree of
   admissible recursion keys (\S\ref{sec:recursion}).
   \item For the machine: the configured shard size, the clock fence and the
-  per-unit height budgets, whichever of which binds first closing a shard
+  per-chip height budgets, whichever of which binds first closing a shard
   (\S\ref{sec:isa}).
-  \item The guest-accelerator set, which fixes the precompile units a shard may
-  contain and therefore the unit set itself (\S\ref{sec:ipcore-config}).
+  \item The guest-accelerator set, which fixes the precompile chips a shard may
+  contain and therefore the chip set itself (\S\ref{sec:ipcore-config}).
   \item For the cross-shard digest: the curve and its extension, the bound
   $N_{\mathrm{int}}$ on the interactions a block proof may contain, and the
   per-interaction multiplicity bound $B$ (\S\ref{sec:air-digest-security}).
@@ -81,10 +81,10 @@ A \emph{shard argument} is a tuple $\mathsf{SA} = (\mathsf{Setup},
   shard's public values, outputs $b \in \{0,1\}$.
 \end{description}
 
-It is built from four primitives. A \emph{unit} is a table of columns over
+It is built from four primitives. A \emph{chip} is a table of columns over
 $\F$ with a constraint system and a set of bus interactions
-(Definitions~\ref{def:chip} and~\ref{def:bus}), and a shard is a set of units
-with a shared public-value row; units are data rather than algorithms, so they
+(Definitions~\ref{def:chip} and~\ref{def:bus}), and a shard is a set of chips
+with a shared public-value row; chips are data rather than algorithms, so they
 carry no syntax here. The other three do.
 
 A \emph{bus argument} $\mathsf{BA} = (\mathsf{Prove}, \mathsf{Verify})$
@@ -94,13 +94,13 @@ received:
 \begin{description}
   \item[$\mathsf{BA.Prove}(\tau, \{U_i\}) \to (\pi_{\mathrm{bus}}, \bm z, \{v_{i,j}\})$:]
   outputs a proof together with the point $\bm z$ and the claimed evaluations
-  $v_{i,j}$ of column $j$ of unit $i$ at $\bm z$.
+  $v_{i,j}$ of column $j$ of chip $i$ at $\bm z$.
   \item[$\mathsf{BA.Verify}(\tau, \pi_{\mathrm{bus}}) \to (\bm z, \{v_{i,j}\}) \lor \bot$:]
   accepts and outputs the point and the claims it has reduced to, or rejects.
 \end{description}
 
 A \emph{constraint argument} $\mathsf{CA} = (\mathsf{Prove}, \mathsf{Verify})$
-has the same shape and certifies instead that every unit's constraints vanish
+has the same shape and certifies instead that every chip's constraints vanish
 on its real rows, reducing that claim to evaluations at the same point.
 
 A \emph{jagged commitment} $\mathsf{JC} = (\mathsf{Commit}, \mathsf{Reduce},
@@ -119,8 +119,8 @@ A \emph{jagged commitment} $\mathsf{JC} = (\mathsf{Commit}, \mathsf{Reduce},
 \end{description}
 
 Only the last interface constrains the others: because every claim is reduced
-to one evaluation of one polynomial, the number of units, their widths and
-their heights are invisible to the opening, and a unit may be added, widened or
+to one evaluation of one polynomial, the number of chips, their widths and
+their heights are invisible to the opening, and a chip may be added, widened or
 removed without changing the layer above it.
 
 \subsection{The shard argument}
@@ -137,13 +137,13 @@ column.
 preprocessed tables, and the public values of one shard.\\
 \textbf{Witness:} the shard's execution record.
 \begin{enumerate}
-  \item \textbf{Commit.} The prover arranges each unit's events into rows,
+  \item \textbf{Commit.} The prover arranges each chip's events into rows,
   places the columns of each commitment round into one dense vector and
-  commits to it. Round order is fixed and the per-unit dimensions enter the
+  commits to it. Round order is fixed and the per-chip dimensions enter the
   transcript, so the geometry is public before any challenge is drawn
   (Section~\ref{sec:pcs}).
   \item \textbf{Buses.} The verifier draws the bus challenges. The prover runs
-  the bus argument, which reduces every send and receive of every unit to
+  the bus argument, which reduces every send and receive of every chip to
   column evaluations at one point (Section~\ref{sec:air-logup}).
   \item \textbf{Constraints.} The verifier draws the constraint challenges. The
   prover runs the constraint argument on the same point, so each column is
@@ -182,10 +182,10 @@ Theorem~\ref{thm:composition} bounds a cheating prover for the whole tree by
 the number of random-oracle queries times the sum of the per-node errors, plus
 the digest term, under a per-node round-by-round premise and a hypothesis about
 composed extractors. Theorem~\ref{thm:unique} shows that two satisfying traces for the same
-program and public values agree up to permutation, given unit determinism and
+program and public values agree up to permutation, given chip determinism and
 the real-row premises that Section~\ref{sec:verification} reports coverage
 for; identifying that trace with an execution of the machine needs the
 conformance evidence of the same section.
-Neither statement is about a particular unit set, a particular field or a
+Neither statement is about a particular chip set, a particular field or a
 particular proximity test; those are the instantiation, fixed where each
 component is built.

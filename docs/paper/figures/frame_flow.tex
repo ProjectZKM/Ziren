@@ -4,7 +4,7 @@
 % canvas stays narrow enough for its labels to survive scaling to \textwidth.
 \begin{tikzpicture}[
   font=\large,
-  unit/.style={rectangle, rounded corners=2pt, draw=zirenblue!85, line width=0.6pt,
+  chip/.style={rectangle, rounded corners=2pt, draw=zirenblue!85, line width=0.6pt,
                minimum width=3.0cm, minimum height=1.5cm, fill=zirenblue!5, align=center},
   reg/.style={rectangle, rounded corners=1pt, draw=zirenteal!85, line width=0.6pt,
               minimum width=1.5cm, minimum height=1.0cm, fill=zirenteal!8, align=center,
@@ -26,9 +26,9 @@
   node[right, font=\normalsize, text=zirenorange!80!black] {memory bus};
 
 % ---------- three opcode rows
-\node[unit] (u1) at (0,0)    {};
-\node[unit] (u2) at (5,0)    {};
-\node[unit] (u3) at (10,0)   {};
+\node[chip] (u1) at (0,0)    {};
+\node[chip] (u2) at (5,0)    {};
+\node[chip] (u3) at (10,0)   {};
 \node[hdr] at ($(u1.north)+(0,-0.42)$) {\texttt{AddSubImm}};
 \node[hdr] at ($(u2.north)+(0,-0.42)$) {\texttt{Branch}};
 \node[hdr] at ($(u3.north)+(0,-0.42)$) {\texttt{LoadWord}};

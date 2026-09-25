@@ -1,8 +1,8 @@
-% Ziren as a processor block diagram: units (chips) and buses (interactions).
+% Ziren as a processor block diagram: chips (chips) and buses (interactions).
 \begin{tikzpicture}[
   every node/.style={font=\small},
-  unit/.style={rectangle, draw=zirenblue!85, rounded corners=2pt, text width=2.0cm, minimum height=0.7cm, align=center, fill=zirenblue!7, inner sep=2pt},
-  accel/.style={unit, draw=zirenorange!90, fill=zirenorange!10},
+  chip/.style={rectangle, draw=zirenblue!85, rounded corners=2pt, text width=2.0cm, minimum height=0.7cm, align=center, fill=zirenblue!7, inner sep=2pt},
+  accel/.style={chip, draw=zirenorange!90, fill=zirenorange!10},
   mem/.style={rectangle, rounded corners=2pt, draw=zirenteal!85, text width=2.7cm, minimum height=0.7cm, align=center, fill=zirenteal!8, inner sep=2pt},
   rom/.style={rectangle, rounded corners=2pt, draw=zirengold!90!black, text width=2.7cm, minimum height=0.7cm, align=center, fill=zirengold!12, inner sep=2pt},
   bus/.style={line width=1.15pt, zirenslate!85},
@@ -13,13 +13,13 @@
   buslab/.style={font=\small, black!70, right},
   tap/.style={-{Latex[length=1.6mm]}, thin, zirenslate!90},
 ]
-  % instruction units (functional units), pitch 2.3 cm
-  \node[unit] (alu)   at (0,0)    {ALU\\\texttt{AddSub}, \texttt{Bitwise}};
-  \node[unit] (shift) at (2.3,0)  {Shift\\\texttt{ShiftLeft}\\\texttt{(Imm)}};
-  \node[unit] (mul)   at (4.6,0)  {Mul/Div\\\texttt{Mul}, \texttt{DivRem}};
-  \node[unit] (ctl)   at (6.9,0)  {Control\\\texttt{Branch}, \texttt{Jump}};
-  \node[unit] (ld)    at (9.2,0)  {Load/Store\\\texttt{LoadWord}, \ldots};
-  \node[unit] (sys)   at (11.5,0) {Syscall\\\texttt{Syscall}\\\texttt{Instrs}};
+  % instruction chips (functional chips), pitch 2.3 cm
+  \node[chip] (alu)   at (0,0)    {ALU\\\texttt{AddSub}, \texttt{Bitwise}};
+  \node[chip] (shift) at (2.3,0)  {Shift\\\texttt{ShiftLeft}\\\texttt{(Imm)}};
+  \node[chip] (mul)   at (4.6,0)  {Mul/Div\\\texttt{Mul}, \texttt{DivRem}};
+  \node[chip] (ctl)   at (6.9,0)  {Control\\\texttt{Branch}, \texttt{Jump}};
+  \node[chip] (ld)    at (9.2,0)  {Load/Store\\\texttt{LoadWord}, \ldots};
+  \node[chip] (sys)   at (11.5,0) {Syscall\\\texttt{Syscall}\\\texttt{Instrs}};
   \node[accel, text width=2.5cm] (pre) at (14.9,0) {Accelerators\\Keccak, SHA, EC, \ldots};
 
   % buses
@@ -34,7 +34,7 @@
   }
   \draw[tap] (sys.east) -- node[above=1pt, font=\scriptsize, black!70, align=center] {syscall\\bus} (pre.west);
 
-  % tables and memory units
+  % tables and memory chips
   \node[rom] (prog) at (1.2,2.5)  {\texttt{Program} ROM\\(preprocessed, in vk)};
   \node[rom, text width=3.4cm] (pv)   at (5.6,2.5)  {Public values\\entry/exit state, digests};
   \node[mem] (bump) at (0.6,-2.9)  {\texttt{MemoryBump}\\register anchors};

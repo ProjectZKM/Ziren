@@ -5,7 +5,7 @@
 % datapath lines inside the box.
 \begin{tikzpicture}[
   font=\large,
-  unit/.style={rectangle, rounded corners=2pt, draw=zirenblue!85, line width=0.7pt,
+  chip/.style={rectangle, rounded corners=2pt, draw=zirenblue!85, line width=0.7pt,
                minimum width=7.2cm, minimum height=1.9cm, fill=zirenblue!5},
   mbus/.style={line width=1.6pt, zirenorange!90!black},
   pbus/.style={line width=1.6pt, zirenblue!90},
@@ -17,7 +17,7 @@
   hdr/.style={font=\large\bfseries},
 ]
 % ---------- the row itself (spans y = -0.95 .. 0.95)
-\node[unit] (u) at (0,0) {};
+\node[chip] (u) at (0,0) {};
 \node[hdr, anchor=north west] at ($(u.north west)+(0.14,-0.10)$) {\texttt{LoadWord} row};
 \node[lbl, anchor=north east] at ($(u.north east)+(-0.14,-0.12)$) {\texttt{lw \$t3,0(\$t4)}};
 \node[lbl, align=left, anchor=south west] at ($(u.south west)+(0.18,0.12)$)

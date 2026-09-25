@@ -1,7 +1,7 @@
 \section{Evaluation}
 \label{sec:performance}
 
-This section reports two metrics in one deliberately narrow environment. \emph{Emulator efficiency} is the rate at which the software emulator turns a guest program into the prover's input record, together with the associated host memory and processor time (\S\ref{sec:perf-emu}). \emph{Prover efficiency} is the rate at which that record becomes a proof, together with its trace area and proof size (\S\ref{sec:perf-prover}). The environment uses one workload, one GPU model, one host and interleaved repetitions on the same input so that differences between configurations are attributable.
+This section measures the two efficiencies of \S\ref{sec:intro} in one deliberately narrow environment, and separates the front end from the back end within the second. \emph{Instruction efficiency} is the rows and trace cells an executed instruction occupies, which is a property of the arithmetisation and is reported as area (\S\ref{sec:perf-changes}). \emph{Proving efficiency} is the rate at which those cells become a proof, on named hardware (\S\ref{sec:perf-prover}); its front end, the rate at which the software emulator turns a guest program into the prover's input record together with the host memory and processor time that costs, is reported separately (\S\ref{sec:perf-emu}), because on a host driving several devices it is what binds. The environment uses one workload, one GPU model, one host and interleaved repetitions on the same input so that differences between configurations are attributable.
 
 \paragraph{Measurement status.} Every timing and proof-size result in this section was collected before the Poseidon2 schedule was corrected from 8 full plus 13 partial rounds to 8 full plus 20 partial rounds. The correction affects commitments, Fiat--Shamir and recursion. The measurements therefore compare engineering changes within the pre-correction implementation; they do not report the absolute performance or proof artifact of the corrected release. Section~\ref{sec:perf-threats} records this and the workload limitations.
 
@@ -19,7 +19,7 @@ depends on the others.
 
 \paragraph{Hardware.} One NVIDIA RTX~5090 (32\,GB) in a host that holds eight of them, with one AMD EPYC 9355 processor and 925\,GB of memory; the multi-GPU measurements use four of the eight (driver 570.153.02, CUDA 12.8, Ubuntu 22.04). The prover is pinned to one GPU.
 
-\paragraph{Metrics.} \emph{Wall-clock time} is the end-to-end proving-process time from reading the cached input to writing the compressed proof. It includes host verification of every shard proof and the compressed proof, which accounts for 2--3\,s and would be omitted by a production service. \emph{Emulation rate} is guest cycles divided by the emulator's wall-clock time. \emph{Proving throughput} is guest cycles divided by the whole proving process's wall-clock time. The latter includes the former, so the rates are not directly comparable; neither is a clock frequency. \emph{Trace area} is the sum over units of rows $\times$ columns, in cells, from the emulator's shard-close census and the unit widths. Table~\ref{tab:chips}, in Appendix~\ref{sec:app-units}, gives the widths of the release this paper describes, while Table~\ref{tab:census} uses those of the evaluated revision, which precede the changes of \S\ref{sec:perf-changes}; the appendix says where the two differ. \emph{Proof size} is the byte length of the serialised compressed proof. A ten-shard \texttt{nsys} sample attributes GPU kernel time to kernel groups.
+\paragraph{Metrics.} The two efficiencies of \S\ref{sec:intro} are measured by different quantities: \emph{trace area} and the rows behind it are instruction efficiency, while \emph{proving throughput} and the kernel profile are proving efficiency. \emph{Wall-clock time} is the end-to-end proving-process time from reading the cached input to writing the compressed proof. It includes host verification of every shard proof and the compressed proof, which accounts for 2--3\,s and would be omitted by a production service. \emph{Emulation rate} is guest cycles divided by the emulator's wall-clock time. \emph{Proving throughput} is guest cycles divided by the whole proving process's wall-clock time. The latter includes the former, so the rates are not directly comparable; neither is a clock frequency. \emph{Trace area} is the sum over chips of rows $\times$ columns, in cells, from the emulator's shard-close census and the chip widths. Table~\ref{tab:chips}, in Appendix~\ref{sec:app-chips}, gives the widths of the release this paper describes, while Table~\ref{tab:census} uses those of the evaluated revision, which precede the changes of \S\ref{sec:perf-changes}; the appendix says where the two differ. \emph{Proof size} is the byte length of the serialised compressed proof. A ten-shard \texttt{nsys} sample attributes GPU kernel time to kernel groups.
 
 \paragraph{Software revision.} The implementation described throughout the paper is v2.0.0, whose \Poseidon{} permutation uses 8 full and 20 partial rounds. The measurements below were taken on earlier revisions of that branch, before the round correction, each row of Table~\ref{tab:levers}, in Appendix~\ref{sec:app-levers}, adding its change to the row above it. The GPU backend is a separate CUDA implementation of the same protocol. No raw per-run timing bundle is retained (\S\ref{sec:perf-threats}).
 
@@ -38,22 +38,22 @@ It becomes binding when one host feeds several GPUs, because each shard is re-em
 Two changes measured after the tables were taken are not reflected in them: wider clock fences, which reduce the shard count by 7\%, and heavier query grinding with device-side early exit, which reduces the proof by 7\%. Both were measured at a fixed revision and shard size, and neither moves wall-clock time.
 \end{remark}
 
-\subsection{Prover efficiency: where the cost is}
+\subsection{Proving efficiency: where the cost is}
 \label{sec:perf-prover}
 \label{sec:perf-profile}
 
 \begin{table}[t]
 \centering
-\caption{In the evaluated pre-correction baseline, \LogUp{} consumes 42\% of measured kernel time and the \texttt{Global} unit consumes 24.5\% of the 19.6\,G-cell trace area. Kernel shares come from a ten-shard \texttt{nsys} sample; area is rows $\times$ columns at the baseline shard count.}
+\caption{In the evaluated pre-correction baseline, \LogUp{} consumes 42\% of measured kernel time and the \texttt{Global} chip consumes 24.5\% of the 19.6\,G-cell trace area. Kernel shares come from a ten-shard \texttt{nsys} sample; area is rows $\times$ columns at the baseline shard count.}
 \label{tab:census}
 \footnotesize\setlength{\tabcolsep}{4pt}
 \begin{tabular}{p{0.42\textwidth}r@{\quad}p{0.32\textwidth}r}
 \toprule
-Kernel group & share & Unit & area share \\
+Kernel group & share & Chip & area share \\
 \midrule
 \LogUp{} layers (fold-and-sum, transitions, first layer) & 42\% & \texttt{Global} (48\,M rows $\times$ 100) & 24.5\% \\
 Zerocheck, compiled constraint kernels & 16.5\% & \texttt{LoadWord} (51\,M $\times$ 49) & 12.7\% \\
-Zerocheck, interpreted (wide precompile units) & 7.1\% & \texttt{StoreWord} (46\,M $\times$ 53) & 12.6\% \\
+Zerocheck, interpreted (wide precompile chips) & 7.1\% & \texttt{StoreWord} (46\,M $\times$ 53) & 12.6\% \\
 Zerocheck fold & 2.3\% & \texttt{MemoryUnaligned} (30\,M $\times$ 60) & 9.1\% \\
 \WHIR{} commit and open (Merkle absorb, DFT) & 19\% & \texttt{Branch} (22\,M $\times$ 56) & 6.3\% \\
 Jagged reduction & 8\% & \texttt{AddSubImm} (37\,M $\times$ 33) & 6.2\% \\
@@ -62,13 +62,13 @@ Other & 5\% & \texttt{ShiftLeftImm} (20\,M $\times$ 56) & 5.8\% \\
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:census} pairs the kernel-time profile with the area census; Figure~\ref{fig:profile} plots them side by side. Kernels account for approximately 340\,ms of the 500\,ms GPU time per shard, with launch gaps and host synchronisation making up the difference. The lookup argument is the largest kernel consumer, and its cost scales with \emph{(row, interaction)} pairs. This block has 7.8\,G pairs and 19.6\,G trace cells, suggesting that one pair costs approximately two cells. Memory-instruction units carry 29 interactions per row, including 21 byte-table lookups, and account for 48\% of all pairs. In contrast, the \texttt{Global} unit holds one quarter of trace area but only 2.5\% of pairs because every touched word costs two rows. The resulting cost model uses area for commitments and zerocheck, and pairs for lookup, with one pair weighted as two cells.
+Table~\ref{tab:census} pairs the kernel-time profile with the area census; Figure~\ref{fig:profile} plots them side by side. Kernels account for approximately 340\,ms of the 500\,ms GPU time per shard, with launch gaps and host synchronisation making up the difference. The lookup argument is the largest kernel consumer, and its cost scales with \emph{(row, interaction)} pairs. This block has 7.8\,G pairs and 19.6\,G trace cells, suggesting that one pair costs approximately two cells. Memory-instruction chips carry 29 interactions per row, including 21 byte-table lookups, and account for 48\% of all pairs. In contrast, the \texttt{Global} chip holds one quarter of trace area but only 2.5\% of pairs because every touched word costs two rows. The resulting cost model uses area for commitments and zerocheck, and pairs for lookup, with one pair weighted as two cells.
 
 \begin{figure}[t]
 \centering
-\begin{subfigure}[t]{0.49\textwidth}\centering\resizebox{\linewidth}{!}{\input{figures/area_bar}}\caption{Trace area by unit (19.6\,G cells); \texttt{Global} and the three largest memory-instruction units hold 59\%.}\label{fig:area}\end{subfigure}\hfill
+\begin{subfigure}[t]{0.49\textwidth}\centering\resizebox{\linewidth}{!}{\input{figures/area_bar}}\caption{Trace area by chip (19.6\,G cells); \texttt{Global} and the three largest memory-instruction chips hold 59\%.}\label{fig:area}\end{subfigure}\hfill
 \begin{subfigure}[t]{0.49\textwidth}\centering\resizebox{\linewidth}{!}{\input{figures/kernel_bar}}\caption{\LogUp{} is the largest kernel group at 42\%, ahead of \WHIR{} commit and open at 19\% (nsys, ten-shard sample).}\label{fig:kernel}\end{subfigure}
-\caption{The \texttt{Global} and three largest memory-instruction units hold 59\% of trace area, while \LogUp{} is the largest measured kernel group at 42\%. Both panels describe the evaluated pre-correction baseline before the changes of \S\ref{sec:perf-changes}.}
+\caption{The \texttt{Global} and three largest memory-instruction chips hold 59\% of trace area, while \LogUp{} is the largest measured kernel group at 42\%. Both panels describe the evaluated pre-correction baseline before the changes of \S\ref{sec:perf-changes}.}
 \label{fig:profile}
 \end{figure}
 
@@ -95,22 +95,22 @@ search.
 The cost model of \S\ref{sec:perf-profile} says where to cut: area for the
 commitment and the constraint argument, and \emph{(row, interaction)} pairs for
 the bus argument. Four changes follow from it, three that remove columns or
-interactions from the units the census names and one that raises the shard
+interactions from the chips the census names and one that raises the shard
 size, and together they take the same block from 74.1 to 67.1\,s on one GPU,
 a reduction of $9.4\%$. Two of them are worth naming because they are
 mechanisms rather than tuning: replacing a boolean sign decomposition and its
-witness columns in the cross-shard digest unit with three byte lookups, and
-dropping byte checks on memory-instruction accesses that another unit already
+witness columns in the cross-shard digest chip with three byte lookups, and
+dropping byte checks on memory-instruction accesses that another chip already
 enforces. Neither changes what any constraint reads, so the verifying keys and
 the proofs are unchanged. Appendix~\ref{sec:app-levers} gives the four
 measurements one at a time, and the two negative results that came with them:
-a unit narrowed below measurement noise, and a shard size that did not fit in
+a chip narrowed below measurement noise, and a shard size that did not fit in
 device memory.
 
-\subsection{Prover efficiency: memory traffic, and scaling across devices}
+\subsection{Proving efficiency: memory traffic, and scaling across devices}
 \label{sec:perf-after}
 
-The profile identified the \LogUp{} circuit as the largest kernel consumer (42\%). A byte-level profile of its layers showed that the first layer paired adjacent fractions across the most-significant index bit, so that short units were carried through every layer of the tallest unit and the traffic summed over layers was 5.2$\times$ that of the first layer. Pairing on the least-significant bit instead lets each unit fold out after $\log_2$ of its own height. The change also frees enough memory for shards of twice the baseline size, which did not fit before it (\S\ref{sec:perf-changes}). The two are therefore enabled together, and the figure below reports the pair. We do not attribute the result to the layer order alone: separating them needs a 2-by-2 ablation over old/new pairing and baseline/doubled shard size, and the old-pairing/doubled-shard cell is the one that did not fit in memory, so that cell would have to be reported as a failure rather than a time. Until that experiment exists the result stands as one combined configuration change. With both, the same block proves in 48.7\,s on one GPU, against 67.8\,s for the revision without either at the largest shard size it could run ($-28\%$ for the pair; the 67.1\,s of Table~\ref{tab:levers} is a different revision), with the proof unchanged at 617\,618 bytes.
+The profile identified the \LogUp{} circuit as the largest kernel consumer (42\%). A byte-level profile of its layers showed that the first layer paired adjacent fractions across the most-significant index bit, so that short chips were carried through every layer of the tallest chip and the traffic summed over layers was 5.2$\times$ that of the first layer. Pairing on the least-significant bit instead lets each chip fold out after $\log_2$ of its own height. The change also frees enough memory for shards of twice the baseline size, which did not fit before it (\S\ref{sec:perf-changes}). The two are therefore enabled together, and the figure below reports the pair. We do not attribute the result to the layer order alone: separating them needs a 2-by-2 ablation over old/new pairing and baseline/doubled shard size, and the old-pairing/doubled-shard cell is the one that did not fit in memory, so that cell would have to be reported as a failure rather than a time. Until that experiment exists the result stands as one combined configuration change. With both, the same block proves in 48.7\,s on one GPU, against 67.8\,s for the revision without either at the largest shard size it could run ($-28\%$ for the pair; the 67.1\,s of Table~\ref{tab:levers} is a different revision), with the proof unchanged at 617\,618 bytes.
 
 Table~\ref{tab:cards} reports the scaling of that configuration from one to four GPUs on a 420\,M-cycle block against the evaluated baseline of Table~\ref{tab:levers}. The throughput columns give proved guest cycles per second of wall-clock time. Figure~\ref{fig:scaling} plots throughput for three block sizes: 420, 530 and 912\,M cycles. The larger blocks take 84.3/44.7/26.5\,s and 124.3/65.0/38.0\,s on one, two and four GPUs. Throughput varies by less than 20\% across the three blocks. On the 420\,M-cycle block it scales by $1.9\times$ from one GPU to two and by $3.1\times$ to four; the two larger blocks reach $3.2\times$ and $3.3\times$ at four. The change helps least at four GPUs because it shortens core proving, whose share falls as the recursion tail and start-up ramp grow. The remaining gap to linear scaling comes from the serial recursion tail and from the interval before the emulator has produced enough shards to occupy every GPU.
 
@@ -169,4 +169,4 @@ The opening question has three parts. \emph{Is the prover's cost attributable to
 \subsection{Threats to validity}
 \label{sec:perf-threats}
 
-\emph{Internal validity.} All same-hardware comparisons are interleaved and repeated, and the measured spread is small relative to the reported effects; the one effect within the noise is reported as neutral. The host processor was shared with an unrelated process during the single-GPU measurements, so host-side interference was not controlled. \emph{Construct validity.} Every measurement used the pre-correction hash schedule whose partial-round count came from a higher S-box degree (\S\ref{sec:verification-findings}). Correcting it adds seven partial rounds to commitments, transcripts and recursion, invalidates the corresponding keys and proofs, and changes absolute performance by an unmeasured amount. The internal ablations remain evidence about the mechanisms only to the extent that the correction does not change their relative costs. Wall-clock time includes host verification, which a production deployment omits. Trace area is a cost model; the kernel profile is the direct measurement. \emph{External validity.} The primary workload is one Ethereum block. Other guests have different instruction mixes and per-unit area shares. No cross-system comparison is attempted, so nothing here establishes a ranking. No raw per-run timing bundle or exact 617\,618-byte proof is retained in the current artifact.
+\emph{Internal validity.} All same-hardware comparisons are interleaved and repeated, and the measured spread is small relative to the reported effects; the one effect within the noise is reported as neutral. The host processor was shared with an unrelated process during the single-GPU measurements, so host-side interference was not controlled. \emph{Construct validity.} Every measurement used the pre-correction hash schedule whose partial-round count came from a higher S-box degree (\S\ref{sec:verification-findings}). Correcting it adds seven partial rounds to commitments, transcripts and recursion, invalidates the corresponding keys and proofs, and changes absolute performance by an unmeasured amount. The internal ablations remain evidence about the mechanisms only to the extent that the correction does not change their relative costs. Wall-clock time includes host verification, which a production deployment omits. Trace area is a cost model; the kernel profile is the direct measurement. \emph{External validity.} The primary workload is one Ethereum block. Other guests have different instruction mixes and per-chip area shares. No cross-system comparison is attempted, so nothing here establishes a ranking. No raw per-run timing bundle or exact 617\,618-byte proof is retained in the current artifact.

@@ -16,7 +16,7 @@ configuration, which spends 16 bits on that grinding and which
 Section~\ref{sec:performance} therefore does not measure. And the determinism
 count of \S\ref{sec:verification-det} is for the constraint system with the
 syscall-bus change of \S\ref{sec:verification-findings} applied, which two
-units separate from the system that was timed. Each section states its own
+chips separate from the system that was timed. Each section states its own
 configuration where it reports; the reason to say it once here is that a
 reader who takes a number from one section and a number from another is
 comparing revisions, not configurations of one revision.
@@ -41,7 +41,7 @@ Deployment runtime & coordinator plus one or more GPU proving workers & wall-clo
 \end{tabular}
 \end{table}
 
-\paragraph{Trace area belongs to the proof relation.}\label{sec:ipcore-platform} The trace area of a unit is its column count times its row count, and both are fixed by the constraint system and the execution rather than by the machine that runs the prover. Trace area determines how many field elements the prover must commit and open, and therefore contributes to proof cost. It is not measured in square millimetres and does not convert into die area. An arithmetisation change can nevertheless be stated once, in cells, and evaluated on different accelerators, which is why the per-unit census of Section~\ref{sec:performance} is given in cells before it is given in seconds.
+\paragraph{Trace area belongs to the proof relation.}\label{sec:ipcore-platform} The trace area of a chip is its column count times its row count, and both are fixed by the constraint system and the execution rather than by the machine that runs the prover. Trace area determines how many field elements the prover must commit and open, and therefore contributes to proof cost. It is not measured in square millimetres and does not convert into die area. An arithmetisation change can nevertheless be stated once, in cells, and evaluated on different accelerators, which is why the per-chip census of Section~\ref{sec:performance} is given in cells before it is given in seconds.
 
 \paragraph{Throughput belongs to the implementation--accelerator pair.} Proved guest cycles per second is not a property of the execution relation alone. It is what one implementation achieves on a specified accelerator, and a different device, or more of them, changes the figure without altering a constraint. Three things follow. Scaling has to be reported across device counts rather than as a single number. Figures measured on other projects' hardware are context, not comparison. And the transferable part of the performance analysis is the cost model, which predicts prover work from area and interaction count while the implementation and accelerator determine the constants.
 

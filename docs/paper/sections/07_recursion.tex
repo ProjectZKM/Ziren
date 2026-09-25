@@ -1,9 +1,9 @@
 \section{Recursion}
 \label{sec:recursion}
 
-This section describes the block's outward interface: what leaves it is the root of the tree built here, the compressed proof of Table~\ref{tab:ports}, and what binds that proof to the advertised machine is the verifying-key allowlist of the last paragraph. Shard proofs are aggregated by a recursion machine: a small register VM over the same field whose programs are compiled from a description of the verifier, executed to a trace, and proved by the same unit/\LogUp{}/zerocheck/Jagged/\WHIR{} pipeline. Its units are the arithmetic of $\F$ and $\EF$, memory, the $\Poseidon{}$ permutation, a select gate and a batched folding gate for the FRI-style query checks.
+This section describes the block's outward interface: what leaves it is the root of the tree built here, the compressed proof of Table~\ref{tab:ports}, and what binds that proof to the advertised machine is the verifying-key allowlist of the last paragraph. Shard proofs are aggregated by a recursion machine: a small register VM over the same field whose programs are compiled from a description of the verifier, executed to a trace, and proved by the same chip/\LogUp{}/zerocheck/Jagged/\WHIR{} pipeline. Its chips are the arithmetic of $\F$ and $\EF$, memory, the $\Poseidon{}$ permutation, a select gate and a batched folding gate for the FRI-style query checks.
 
-\paragraph{Leaves.} A \emph{leaf} program verifies one core shard proof in four phases mirroring the host verifier: the transcript prologue (public values, commitment, unit dimensions), the \LogUp{} layer replay, the zerocheck replay including the constraint evaluation of every unit present, and the jagged opening with its branching-program closing identity followed by the \WHIR{} verifier. Because the jagged verifier depends only on the shard's log-area and the constraint evaluation only on the unit set, the number of distinct leaf programs is small; on the single-GPU deployment consecutive shards of the same class reuse a device-resident proving key. Adjacent shards' leaves are \emph{fused} into one node where the shard shapes allow, and leaves are proved on the same GPU concurrently with core shards, so that the GPU's time is shared between the two stages rather than serialised.
+\paragraph{Leaves.} A \emph{leaf} program, which the implementation calls a \emph{normalize} program, verifies one core shard proof in four phases mirroring the host verifier: the transcript prologue (public values, commitment, chip dimensions), the \LogUp{} layer replay, the zerocheck replay including the constraint evaluation of every chip present, and the jagged opening with its branching-program closing identity followed by the \WHIR{} verifier. Because the jagged verifier depends only on the shard's log-area and the constraint evaluation only on the chip set, the number of distinct leaf programs is small; on the single-GPU deployment consecutive shards of the same class reuse a device-resident proving key. Adjacent shards' leaves are \emph{fused} into one node where the shard shapes allow, and leaves are proved on the same GPU concurrently with core shards, so that the GPU's time is shared between the two stages rather than serialised.
 
 Figure~\ref{fig:recursion} shows the tree, what each node checks on its
 children and what the root closes.
@@ -91,7 +91,7 @@ $\mathsf{pv} \gets (\mathsf{vk},\ \mathsf{entry}_0,\ \mathsf{exit}_{k-1},\
 }
 \Return $\mathsf{pv}$\;
 \end{algorithm}
- The tree merges contiguous shard \emph{ranges} as soon as they are complete rather than level by level, which shortens the tail after the last core shard from four serial composes to two; that tail is one of the two components of the gap to linear scaling in \S\ref{sec:perf-after}. Because a range is reduced the moment it is complete, the tree climbs on the workers that are still proving core shards, and on the deployed configuration the root is finished before the last shard's proof is collected. A leaf is never itself the root: an execution of a single shard closes through a compose of arity one, which costs one more node and keeps the leaf programs to the open classes that the enumeration below covers. Arity is capped at three by the recursion units' height budget; arity four was built and measured, and it was neutral (41 nodes replaced by 27, $-0.7\%$ of wall time, an unchanged tail), so it does not pay for the key regeneration it would force.
+ The tree merges contiguous shard \emph{ranges} as soon as they are complete rather than level by level, which shortens the tail after the last core shard from four serial composes to two; that tail is one of the two components of the gap to linear scaling in \S\ref{sec:perf-after}. Because a range is reduced the moment it is complete, the tree climbs on the workers that are still proving core shards, and on the deployed configuration the root is finished before the last shard's proof is collected. A leaf is never itself the root: an execution of a single shard closes through a compose of arity one, which costs one more node and keeps the leaf programs to the open classes that the enumeration below covers. Arity is capped at three by the recursion chips' height budget; arity four was built and measured, and it was neutral (41 nodes replaced by 27, $-0.7\%$ of wall time, an unchanged tail), so it does not pay for the key regeneration it would force.
 
 \paragraph{Shrink and wrap.} The root proof is \emph{shrunk} to a fixed shape and then \emph{wrapped} on the outer ring: a jagged proof whose dense polynomial is committed with a FRI-style BaseFold instantiation over the same field but with a 254-bit hash, folding one variable per round under query grinding down to a small final polynomial. The artifact report estimates 534\,KiB expected and 963\,KiB worst case for the checked-in 16-bit-lookup-grinding schedule; these are configuration estimates rather than measurements of the zero-grinding baseline in Section~\ref{sec:performance}. The wrap proof is what a Groth16 verifier on BN254, generated with \texttt{gnark}~\citep{gnark}, consumes when an on-chain proof is required. For the block-proving service and throughout this paper, the compressed inner-ring proof itself is the published artefact.
 
@@ -106,12 +106,12 @@ consulting any execution.
 
 \begin{algorithm}[t]
 \caption{Enumerating the admissible leaf keys. The loop bounds come from the
-machine's unit clusters and from the bucket rule of \S\ref{sec:pcs-geometry};
+machine's chip clusters and from the bucket rule of \S\ref{sec:pcs-geometry};
 no guest is executed. For the deployed machine it returns about
 $6.4 \cdot 10^{3}$ keys.}
 \label{alg:enum}
 \DontPrintSemicolon
-\KwIn{unit clusters $\mathcal{C}$; bucket sets $\mathcal{B}_{\mathrm{prep}}$,
+\KwIn{chip clusters $\mathcal{C}$; bucket sets $\mathcal{B}_{\mathrm{prep}}$,
       $\mathcal{B}_{\mathrm{main}}$; padding rule $\mathsf{pad}(\cdot)$}
 \KwOut{the allowlist root $\mathsf{root}$}
 $K \gets \emptyset$\;

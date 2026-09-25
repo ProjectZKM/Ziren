@@ -45,7 +45,7 @@ dispatches on the opcode to a lowering, and emits the epilogue that advances
 the clock and the program counter. The result is a native code buffer, mapped
 executable from an anonymous file, together with a jump table holding one
 native address per guest program counter. Control transfers inside the compiled
-program are table dispatches, so the compiled unit is the whole program and a
+program are table dispatches, so the compiled chip is the whole program and a
 branch never leaves it.
 
 Two properties of the lowering are worth stating because they are what make it
@@ -117,7 +117,7 @@ performs the bookkeeping of Section~\ref{sec:isa}:
   window copies the entry as it stood before the access to the oracle tail,
   which is the descriptor the replaying worker will answer memory reads from.
   \item \textbf{Shard budgets.} The trace-area budget in its pinned register
-  and the per-unit height budgets in the context are charged the exact amounts
+  and the per-chip height budgets in the context are charged the exact amounts
   the interpreter's accumulator charges, supplied per instruction by the
   compiler. Exhaustion of any one of them is the condition under which the
   interpreter would fence, and the compiled function returns a shard-fence
@@ -183,7 +183,7 @@ Section~\ref{sec:perf-emu} states that on a host feeding several accelerators th
 \toprule
 Change & before & after & effect \\
 \midrule
-Per-cycle event: keep clock, \textsf{pc} pair and exit code only (no CPU table reads the rest) & 184\,B & 20\,B & event stream per shard 1{,}000\,MB $\to$ 462\,MB; replay 700\,ms $\to$ 435\,ms \\
+Per-cycle event: keep clock, \textsf{pc} pair and exit code only (no CPU chip reads the rest) & 184\,B & 20\,B & event stream per shard 1{,}000\,MB $\to$ 462\,MB; replay 700\,ms $\to$ 435\,ms \\
 Memory-instruction event: drop the three fields no column reads & 168\,B & 136\,B & every load/store event \\
 Register-access record: carry only the witnessed values (no shard fields; one arm for read/write) & 48 / 24\,B & 20 / 16\,B & every instruction event \\
 Memory oracle shipped to a worker: pre-access value, stamp and shard as one byte run & 24\,B, 25\,MB & 12\,B, 12\,MB & per access, per shard; serialise 6--7 $\to$ 1\,ms \\

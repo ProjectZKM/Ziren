@@ -7,29 +7,29 @@ table from which the conformance corpus of \S\ref{sec:verification} is
 generated: each row produces ten programs with pseudo-random operands,
 boundary values and the delay-slot placements the instruction admits, giving
 the 770 vectors compared against an independent emulator. The last column
-names the unit that arithmetises the instruction, so the table fixes which
-rows of Appendix~\ref{sec:app-units} a program can occupy, and with it the
+names the chip that arithmetises the instruction, so the table fixes which
+rows of Appendix~\ref{sec:app-chips} a program can occupy, and with it the
 chip set that Section~\ref{sec:recursion} enumerates over.
 
 Three conventions are worth noting. \texttt{HI} and \texttt{LO} occupy the
 register file as registers 32 and 33, so the four moves between them and the
-general registers are additions of an immediate zero rather than a unit of
+general registers are additions of an immediate zero rather than a chip of
 their own. \texttt{SYNC}, \texttt{SYNCI} and \texttt{PREF} are accepted and
-retire as no-ops, for which the same unit suffices. \texttt{SYSCALL} is absent
+retire as no-ops, for which the same chip suffices. \texttt{SYSCALL} is absent
 from the table because it is the boundary of the machine rather than a
 computation within it; it is arithmetised by \texttt{SyscallInstrs} and its
 interface is Section~\ref{sec:ipcore}.
 
 \footnotesize
 \begin{longtable}{@{}llll>{\raggedright\arraybackslash}p{0.27\textwidth}l@{}}
-\caption{The 77 guest instructions, their primary encoding fields and the unit that proves each. \emph{Op} is bits 31--26 and \emph{func} bits 5--0; a dash marks a field the format does not use, and the immediate forms are distinguished from the register forms by \emph{Op} alone. Semantics are as transcribed from the architecture manual into the specification table that generates the conformance corpus.}\label{tab:isa}\\
+\caption{The 77 guest instructions, their primary encoding fields and the chip that proves each. \emph{Op} is bits 31--26 and \emph{func} bits 5--0; a dash marks a field the format does not use, and the immediate forms are distinguished from the register forms by \emph{Op} alone. Semantics are as transcribed from the architecture manual into the specification table that generates the conformance corpus.}\label{tab:isa}\\
 \toprule
-Mnemonic & Op & func & Family & Semantics & Unit \\
+Mnemonic & Op & func & Family & Semantics & Chip \\
 \midrule
 \endfirsthead
 \multicolumn{6}{@{}l}{\itshape Table~\ref{tab:isa}, continued from the previous page}\\
 \toprule
-Mnemonic & Op & func & Family & Semantics & Unit \\
+Mnemonic & Op & func & Family & Semantics & Chip \\
 \midrule
 \endhead
 \midrule
