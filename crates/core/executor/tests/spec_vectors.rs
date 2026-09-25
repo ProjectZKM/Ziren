@@ -88,14 +88,24 @@ fn parse_hex(s: &str) -> u32 {
     u32::from_str_radix(s, 16).expect("hex")
 }
 
-#[test]
-fn spec_vectors_match_the_oracle() {
+/// How many ways the vector list is split across tests.  Eight keeps each shard
+/// near a minute while leaving threads for the rest of the package.
+const SHARDS: usize = 8;
+
+/// Check the vectors whose index is congruent to `shard` modulo [`SHARDS`].
+///
+/// Sharding by index rather than by mnemonic keeps the split independent of what
+/// the file contains: adding vectors redistributes them instead of leaving a new
+/// mnemonic unchecked, which a hand-written list of names would do.
+fn check_shard(shard: usize) {
     let doc: Value = serde_json::from_str(VECTORS).expect("vectors.json");
     let code = doc["code"].as_u64().unwrap() as u32;
-    let vectors = doc["vectors"].as_array().unwrap();
+    let all = doc["vectors"].as_array().unwrap();
+    let vectors: Vec<&Value> =
+        all.iter().enumerate().filter(|(i, _)| i % SHARDS == shard).map(|(_, v)| v).collect();
     let mut failures: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut per_mnemonic: BTreeMap<String, (usize, usize)> = BTreeMap::new();
-    for v in vectors {
+    for v in &vectors {
         let name = v["name"].as_str().unwrap().to_string();
         let mnemonic = v["mnemonic"].as_str().unwrap().to_string();
         let words: Vec<u32> =
@@ -186,7 +196,7 @@ fn spec_vectors_match_the_oracle() {
     }
     if let Ok(path) = std::env::var("SPEC_DUMP_DECODED") {
         let mut decoded: BTreeMap<String, Value> = BTreeMap::new();
-        for v in vectors {
+        for v in &vectors {
             for w in v["words"].as_array().unwrap() {
                 let word = parse_hex(w.as_str().unwrap());
                 let key = format!("{word:08x}");
@@ -218,8 +228,60 @@ fn spec_vectors_match_the_oracle() {
                 tracing::info!("    {p}");
             }
         }
-        panic!("{} of {} spec vectors failed", failures.len(), vectors.len());
+        panic!(
+            "{} of {} spec vectors failed in shard {shard} of {SHARDS}",
+            failures.len(),
+            vectors.len()
+        );
     }
+}
+
+/// Every vector is checked by exactly one shard, and every mnemonic the file
+/// carries is reached by some shard.
+///
+/// A sharded run cannot assert this from inside a shard, and the property is the
+/// one that matters: a vector that no test touches is worse than a failing one.
+#[test]
+fn every_vector_belongs_to_a_shard() {
+    let doc: Value = serde_json::from_str(VECTORS).expect("vectors.json");
+    let vectors = doc["vectors"].as_array().unwrap();
+    let mut seen = vec![0usize; vectors.len()];
+    let mut mnemonics: BTreeMap<String, usize> = BTreeMap::new();
+    for shard in 0..SHARDS {
+        for (i, v) in vectors.iter().enumerate().filter(|(i, _)| i % SHARDS == shard) {
+            seen[i] += 1;
+            *mnemonics.entry(v["mnemonic"].as_str().unwrap().to_string()).or_default() += 1;
+        }
+    }
+    assert!(
+        seen.iter().all(|&n| n == 1),
+        "{} vectors are checked by no shard or by more than one",
+        seen.iter().filter(|&&n| n != 1).count()
+    );
+    assert!(!mnemonics.is_empty(), "no mnemonics in the vector file");
+    tracing::info!("{} vectors across {} mnemonics in {SHARDS} shards", vectors.len(), mnemonics.len());
+}
+
+macro_rules! spec_vector_shards {
+    ($($name:ident => $shard:expr),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                check_shard($shard);
+            }
+        )*
+    };
+}
+
+spec_vector_shards! {
+    spec_vectors_match_the_oracle_shard_0 => 0,
+    spec_vectors_match_the_oracle_shard_1 => 1,
+    spec_vectors_match_the_oracle_shard_2 => 2,
+    spec_vectors_match_the_oracle_shard_3 => 3,
+    spec_vectors_match_the_oracle_shard_4 => 4,
+    spec_vectors_match_the_oracle_shard_5 => 5,
+    spec_vectors_match_the_oracle_shard_6 => 6,
+    spec_vectors_match_the_oracle_shard_7 => 7,
 }
 
 #[test]
