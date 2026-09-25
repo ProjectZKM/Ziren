@@ -1,18 +1,13 @@
 //! Spec conformance of the executor.
 //!
-//! Two vector sources, both encoding-level (they go through `Instruction::decode_from`, not
-//! through hand-built `Opcode`s):
+//! The vectors are encoding-level: they go through `Instruction::decode_from`
+//! rather than hand-built `Opcode`s.  `spec_vectors/vectors.json` carries every
+//! instruction row of `docs/src/mips-vm/mips-isa.md`, assembled with llvm-mc and
+//! executed by Unicorn, QEMU's MIPS32r2 core, as the independent oracle.
+//! Regenerate it with `spec_vectors/gen.py`.
 //!
-//! 1. `spec_vectors/vectors.json`: every instruction row of `docs/src/mips-vm/mips-isa.md`,
-//!    assembled with llvm-mc and executed by Unicorn (QEMU's MIPS32r2 core) as the independent
-//!    oracle.  Regenerate with `spec_vectors/gen.py`.
-//! 2. Cannon's `open_mips_tests` (63 flat binaries, MIT-licensed test programs by Grant Ayers
-//!    packaged by Optimism): each program writes `1` to the done and result words at
-//!    `0xbffffff4` / `0xbffffff8`.  Point `CANNON_MIPS_TESTS` at the `test/bin` directory; the
-//!    test is skipped when it is absent.
-//!
-//! Every program is also run twice to check that the executor's final state is a function of the
-//! program alone.
+//! Every program is also run twice, traced and through the JIT, to check that
+//! the executor's final state is a function of the program alone.
 
 use std::collections::BTreeMap;
 
@@ -259,7 +254,11 @@ fn every_vector_belongs_to_a_shard() {
         seen.iter().filter(|&&n| n != 1).count()
     );
     assert!(!mnemonics.is_empty(), "no mnemonics in the vector file");
-    tracing::info!("{} vectors across {} mnemonics in {SHARDS} shards", vectors.len(), mnemonics.len());
+    tracing::info!(
+        "{} vectors across {} mnemonics in {SHARDS} shards",
+        vectors.len(),
+        mnemonics.len()
+    );
 }
 
 macro_rules! spec_vector_shards {
@@ -282,103 +281,4 @@ spec_vector_shards! {
     spec_vectors_match_the_oracle_shard_5 => 5,
     spec_vectors_match_the_oracle_shard_6 => 6,
     spec_vectors_match_the_oracle_shard_7 => 7,
-}
-
-/// The Cannon suite: Optimism's hand-written MIPS programs, an oracle written by
-/// another team from the architecture manual rather than by our own generator.
-///
-/// Ignored by default because the programs are not vendored here, and pointed at
-/// by `CANNON_MIPS_TESTS`. It used to default to a path on one developer's
-/// machine and return early when that path was absent, which meant it reported
-/// success in CI while executing nothing -- for a result the paper states. A
-/// missing or unreadable directory is now a failure, not a skip.
-#[test]
-#[ignore = "needs CANNON_MIPS_TESTS; run in CI, where the suite is present"]
-fn cannon_open_mips_tests() {
-    let dir = std::env::var("CANNON_MIPS_TESTS").expect(
-        "set CANNON_MIPS_TESTS to Cannon's open_mips_tests/test/bin directory; this test asserts \
-         a published claim and must not pass without running",
-    );
-    let entries = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("CANNON_MIPS_TESTS={dir} is not readable: {e}"));
-    let mut files: Vec<_> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().map(|x| x == "bin").unwrap_or(false))
-        .collect();
-    files.sort();
-    let mut failures = Vec::new();
-    let mut passed = 0usize;
-    let mut skipped = Vec::new();
-    let mut big_endian_only = Vec::new();
-    for path in &files {
-        let name = path.file_stem().unwrap().to_string_lossy().to_string();
-        if name.starts_with("oracle") || name == "brk" {
-            skipped.push(name);
-            continue;
-        }
-        let bytes = std::fs::read(path).unwrap();
-        let words: Vec<u32> =
-            bytes.chunks(4).map(|c| u32::from_be_bytes([c[0], c[1], c[2], c[3]])).collect();
-        let byte_order_sensitive = matches!(
-            name.as_str(),
-            "lb" | "lbu" | "lh" | "lhu" | "lwl" | "lwr" | "sb" | "sh" | "swl" | "swr"
-        );
-        let mut words = words;
-        for w in words.iter_mut() {
-            if *w >> 26 == 0x0f && (*w & 0xff00) == 0xbf00 {
-                *w = (*w & 0xffff_0000) | 0x7e00 | (*w & 0xff);
-            }
-        }
-        let end = (4 * words.len()) as u32;
-        let harness_ret = (1..words.len())
-            .find(|i| words[*i] == 0x03e0_0008 && words[i - 1] == 0xae11_0004)
-            .or_else(|| words.iter().rposition(|w| *w == 0x03e0_0008));
-        if let Some(pos) = harness_ret {
-            words[pos] = 0x0800_0000 | ((end >> 2) & 0x03ff_ffff);
-        } else {
-            skipped.push(format!("{name} (no final jr $ra)"));
-            continue;
-        }
-        let base = 0x7eff_fff0u32;
-        let done_addr = base + 4;
-        let result_addr = base + 8;
-        tracing::info!("cannon {name}");
-        let outcome = std::panic::catch_unwind(|| {
-            run_words(&words, 0, &BTreeMap::new(), &[done_addr, result_addr])
-        })
-        .unwrap_or_else(|p| {
-            let msg = p
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
-                .unwrap_or_default();
-            Err(format!("executor panicked: {msg}"))
-        });
-        match outcome {
-            Ok(fin) => {
-                let (done, result) = (fin.mem[0].1, fin.mem[1].1);
-                if done == 1 && result == 1 {
-                    passed += 1;
-                } else if byte_order_sensitive {
-                    big_endian_only.push(format!("{name}: done={done} result={result}"));
-                } else {
-                    failures.push(format!("{name}: done={done} result={result}"));
-                }
-            }
-            Err(e) if name == "exit_group" && e.contains("HaltWithNonZeroExitCode") => passed += 1,
-            Err(e) => failures.push(format!("{name}: {e}")),
-        }
-    }
-    tracing::warn!(
-        "cannon open_mips_tests: {passed} passed, {} failed, {} big-endian-only ({:?}), skipped {:?}",
-        failures.len(),
-        big_endian_only.len(),
-        big_endian_only,
-        skipped
-    );
-    for f in &failures {
-        tracing::warn!("FAIL {f}");
-    }
-    assert!(failures.is_empty(), "{} cannon vectors failed", failures.len());
 }

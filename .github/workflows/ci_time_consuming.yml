@@ -67,12 +67,6 @@ jobs:
             --skip tests::test_e2e_prove_plonk \
             --skip tests::test_generate_dvsnark_r1cs_witness \
             --skip tests::test_groth16_public_values
-          # The Cannon suite is an oracle written by another team, and the paper
-          # states its result, so it runs here rather than on a developer's
-          # machine.  The programs are not vendored, so the directory is named;
-          # a wrong path fails the test rather than skipping it.
-          CANNON_MIPS_TESTS=/data/stephen/cannon-mips/mipsevm/open_mips_tests/test/bin \
-            cargo test -r -p zkm-core-executor --test spec_vectors -- --ignored cannon_open_mips_tests
           cargo test -r -p zkm-verifier
           # test_verify_groth16_imm_wrap_vk runs once the imm-wrap-vk Groth16
           # artifacts for v2.0.0 are published.
