@@ -7,6 +7,12 @@ on:
     # It did: `test_e2e_circuit_fibonacci` was broken from before 22efae5a
     # until ff3488dc, behind three stacked breakages, and nothing ran it.
     branches: ["main", "feat/upgrade-plonky3"]
+  # The SNARK proofs below run nightly rather than per push: they held the only
+  # self-hosted slot for over three hours at a time, and of the last twenty runs
+  # of this workflow seven were cancelled by the next push and twelve failed, so
+  # one completed.  The end-to-end tests that rotted still run on every push.
+  schedule:
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 # One run per branch. Without this a superseded push queues behind the run it
@@ -55,11 +61,6 @@ jobs:
           # memory AND swap are both under 10%, so the box carries a second
           # 64 GiB swapfile (/data/swapfile2) for this reason. If these cases
           # are moved to a machine with more RAM, that is the real fix.
-          for t in test_compress_to_groth16 test_e2e_prove_groth16 \
-                   test_e2e_prove_plonk test_generate_dvsnark_r1cs_witness \
-                   test_groth16_public_values; do
-            cargo test -r -p zkm-sdk -- --exact "tests::$t"
-          done
           cargo test -r -p zkm-sdk -- \
             --skip tests::test_compress_to_groth16 \
             --skip tests::test_e2e_prove_groth16 \
@@ -81,3 +82,30 @@ jobs:
             tests::test_e2e_compress_fibonacci \
             tests::test_e2e_wrap_fibonacci \
             tests::test_e2e_circuit_fibonacci
+
+  snark:
+    name: SNARK proofs
+    # Nightly, on main, or on request.  Each of these cases loads a
+    # multi-gigabyte R1CS and proving key that the process never returns, so
+    # they keep one process each: that is what caps the peak at one case's
+    # footprint on a 123 GB runner, and it is why they cannot be merged into one
+    # invocation however the thread count is set.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: self-hosted-cpu
+    env:
+      RUST_TEST_THREADS: "2"
+      ELEMENT_THRESHOLD: "115000000"
+      CARGO_TARGET_DIR: /data/actions-runner/cache/ziren-target
+      RUSTFLAGS: "-C target-cpu=native"
+    steps:
+      - uses: actions/checkout@v5
+      - run: export PATH=~/.cargo/bin:$PATH
+      - run: |
+          source ~/.zkm-toolchain/env
+          for t in test_compress_to_groth16 test_e2e_prove_groth16 \
+                   test_e2e_prove_plonk test_generate_dvsnark_r1cs_witness \
+                   test_groth16_public_values; do
+            s=$(date +%s)
+            cargo test -r -p zkm-sdk -- --exact "tests::$t"
+            echo "::notice title=$t::$(( $(date +%s)-s ))s mem_avail=$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo)GB"
+          done
