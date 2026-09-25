@@ -284,15 +284,23 @@ spec_vector_shards! {
     spec_vectors_match_the_oracle_shard_7 => 7,
 }
 
+/// The Cannon suite: Optimism's hand-written MIPS programs, an oracle written by
+/// another team from the architecture manual rather than by our own generator.
+///
+/// Ignored by default because the programs are not vendored here, and pointed at
+/// by `CANNON_MIPS_TESTS`. It used to default to a path on one developer's
+/// machine and return early when that path was absent, which meant it reported
+/// success in CI while executing nothing -- for a result the paper states. A
+/// missing or unreadable directory is now a failure, not a skip.
 #[test]
+#[ignore = "needs CANNON_MIPS_TESTS; run in CI, where the suite is present"]
 fn cannon_open_mips_tests() {
-    let dir = std::env::var("CANNON_MIPS_TESTS").unwrap_or_else(|_| {
-        "/data/stephen/cannon-mips/mipsevm/open_mips_tests/test/bin".to_string()
-    });
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        tracing::info!("CANNON_MIPS_TESTS not found at {dir}; skipping");
-        return;
-    };
+    let dir = std::env::var("CANNON_MIPS_TESTS").expect(
+        "set CANNON_MIPS_TESTS to Cannon's open_mips_tests/test/bin directory; this test asserts \
+         a published claim and must not pass without running",
+    );
+    let entries = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("CANNON_MIPS_TESTS={dir} is not readable: {e}"));
     let mut files: Vec<_> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
