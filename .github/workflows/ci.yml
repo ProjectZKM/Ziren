@@ -84,27 +84,24 @@ jobs:
       - run: export PATH=~/.cargo/bin:$PATH
       - run: |
           source ~/.zkm-toolchain/env
-          # One nextest pass instead of twelve sequential `cargo test`
-          # invocations, which ran binaries strictly in order and idled the box.
-          # Concurrency stays at the job's RUST_TEST_THREADS, not raised:
-          # earlyoom has killed a job here. CARGO_HOME is /data/.cargo on this
-          # runner, not $HOME/.cargo.
-          BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
-          mkdir -p "$BIN"
-          export PATH="$BIN:$PATH"
-          command -v cargo-nextest >/dev/null 2>&1 || \
-            curl -sSL --retry 3 --max-time 120 https://get.nexte.st/latest/linux \
-              | tar zxf - -C "$BIN"
-          cargo-nextest --version
-          PKGS="-p zkm-core-executor -p zkm-curves -p zkm-derive -p zkm-primitives
-                -p zkm-prover -p zkm-recursion-circuit -p zkm-recursion-compiler
-                -p zkm-recursion-core -p zkm-recursion-gnark-ffi -p zkm-pcs
-                -p zkm-zkvm -p zkm-lib"
-          cargo nextest run --release --no-fail-fast \
-            --test-threads "${RUST_TEST_THREADS:-2}" $PKGS
-          # nextest cannot run doctests. All 42 are `ignore` or text today, so
-          # this pass guards one added later from going unrun.
-          cargo test --release --doc $PKGS
+          # A nextest pass replaced this loop and was measured slower: at the
+          # RUST_TEST_THREADS this runner can afford, per-test process spawn costs
+          # more than cross-binary scheduling saves (815s for the loop against
+          # 1053s, same 636 tests). It also skips doctests. Keep the loop.
+          #
+          # The loop does not stop at the first failing package, so one failure
+          # cannot hide the rest: each rc is recorded and the step fails at the
+          # end with every failing package named.
+          FAILED=""
+          for pkg in zkm-core-executor zkm-curves zkm-derive zkm-primitives \
+            zkm-prover zkm-recursion-circuit zkm-recursion-compiler \
+            zkm-recursion-core zkm-recursion-gnark-ffi zkm-pcs zkm-zkvm zkm-lib; do
+              cargo test -r -p $pkg || FAILED="$FAILED $pkg"
+          done
+          if [ -n "$FAILED" ]; then
+            echo "::error title=Failing packages::$FAILED"
+            exit 1
+          fi
         env:
           RUSTFLAGS: "-C target-cpu=native"
       - name: Verifier malformed-input guards, default AND `ark` features
