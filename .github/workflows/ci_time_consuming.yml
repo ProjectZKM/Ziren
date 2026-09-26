@@ -2,15 +2,12 @@ name: Time-consuming test
 
 on:
   push:
-    # Development happens on the feature branch; gating only `main` means an
-    # `#[ignore]`d end-to-end test can rot for weeks without anyone noticing.
-    # It did: `test_e2e_circuit_fibonacci` was broken from before 22efae5a
-    # until ff3488dc, behind three stacked breakages, and nothing ran it.
+    # The feature branch is gated too: with only `main` gated, an `#[ignore]`d
+    # end-to-end test rotted for weeks and nothing ran it.
     branches: ["main", "feat/upgrade-plonky3"]
-  # The SNARK proofs below run nightly rather than per push: they held the only
-  # self-hosted slot for over three hours at a time, and of the last twenty runs
-  # of this workflow seven were cancelled by the next push and twelve failed, so
-  # one completed.  The end-to-end tests that rotted still run on every push.
+  # The SNARK proofs run nightly, not per push: they held the only self-hosted
+  # slot for hours. A schedule runs on the default branch only, so a feature
+  # branch needs `workflow_dispatch`.
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
@@ -42,25 +39,10 @@ jobs:
       - run: |
           source ~/.zkm-toolchain/env
           cargo test -r -p zkm-core-machine
-          # Every sdk case that drives gnark loads a multi-gigabyte R1CS and
-          # proving key, and the process does not return that memory when the
-          # case ends. Run in one process the suite therefore climbs to 102 GiB
-          # (measured) and earlyoom kills it on this 126 GB runner, which is what
-          # took down two runs with no failing test. Thread count does not help,
-          # because the growth is cumulative rather than concurrent. Giving each
-          # of these cases its own process caps the peak at one case's footprint
-          # and keeps every case running.
-          #
-          # That footprint is large and is NOT reducible by tuning the Go
-          # runtime: test_e2e_prove_plonk alone peaks at 83.4 GiB (measured
-          # 2026-09-24), and it peaks there with GOMEMLIMIT=40GiB and GOGC=50
-          # set, because the PLONK constraint system has 43.2M constraints and
-          # the solver's witness is live data rather than collectable garbage.
-          # A soft heap limit cannot bound a live set. What keeps this job alive
-          # on this runner is swap headroom: earlyoom sends SIGTERM only when
-          # memory AND swap are both under 10%, so the box carries a second
-          # 64 GiB swapfile (/data/swapfile2) for this reason. If these cases
-          # are moved to a machine with more RAM, that is the real fix.
+          # The gnark cases never return their R1CS and proving key, so the
+          # growth is cumulative and no thread count bounds it; GOMEMLIMIT cannot
+          # either, because the solver's witness is live. They run in the `snark`
+          # job, one process each, and the swapfile is what keeps this box alive.
           cargo test -r -p zkm-sdk -- \
             --skip tests::test_compress_to_groth16 \
             --skip tests::test_e2e_prove_groth16 \
@@ -68,16 +50,10 @@ jobs:
             --skip tests::test_generate_dvsnark_r1cs_witness \
             --skip tests::test_groth16_public_values
           cargo test -r -p zkm-verifier
-          # test_verify_groth16_imm_wrap_vk runs once the imm-wrap-vk Groth16
-          # artifacts for v2.0.0 are published.
-          # The end-to-end recursion gates.  All three are `#[ignore]`d because
-          # they are slow (~110s, ~335s, ~640s), which is exactly why nothing
-          # ran them -- and all three turned out to be load-bearing.  The
-          # compress and wrap gates cover core->compress->shrink->wrap; the
-          # circuit gate additionally drives the gnark outer circuit, which is
-          # the only thing that exercises the jagged-eval closing identity, and
-          # is where the column-accounting defect fixed in ff3488dc lived.
-          # NOTE: the circuit gate needs the Go toolchain on the runner.
+          # The recursion gates, all `#[ignore]`d for slowness and all
+          # load-bearing: compress and wrap cover core->compress->shrink->wrap,
+          # and the circuit gate is the only thing driving the gnark outer circuit
+          # and its jagged-eval closing identity. It needs Go on the runner.
           VERIFY_VK=false cargo test -r -p zkm-prover -- --ignored --test-threads=1 \
             tests::test_e2e_compress_fibonacci \
             tests::test_e2e_wrap_fibonacci \
@@ -85,11 +61,8 @@ jobs:
 
   snark:
     name: SNARK proofs
-    # Nightly, on main, or on request.  Each of these cases loads a
-    # multi-gigabyte R1CS and proving key that the process never returns, so
-    # they keep one process each: that is what caps the peak at one case's
-    # footprint on a 123 GB runner, and it is why they cannot be merged into one
-    # invocation however the thread count is set.
+    # Nightly, on main, or on request. One process per case, which is what caps
+    # the peak at a single case's footprint on a 123 GB runner.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: self-hosted-cpu
     env:
@@ -108,4 +81,17 @@ jobs:
             s=$(date +%s)
             cargo test -r -p zkm-sdk -- --exact "tests::$t"
             echo "::notice title=$t::$(( $(date +%s)-s ))s mem_avail=$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo)GB"
+          done
+          # The imm-wrap-vk path, in both verifier implementations: the only
+          # check that the committed IMM_GROTH16_VK_BYTES and PART_STARK_VK_BYTES
+          # match the published imm archive, since this mode hashes the vk with
+          # part_stark_vk and the standard suite stays green when they drift.
+          # ZKM_IMM_WRAP_VK is set by the test, never exported: exporting it makes
+          # zkm-build pass --features imm-wrap-vk to the plain `guests`
+          # workspace, which has no such feature, and the guest build fails.
+          for f in "" "--features ark"; do
+            s=$(date +%s)
+            cargo test -r -p zkm-verifier $f -- --ignored --exact \
+              tests::test_verify_groth16_imm_wrap_vk
+            echo "::notice title=imm_wrap_vk ${f:-default}::$(( $(date +%s)-s ))s mem_avail=$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo)GB"
           done

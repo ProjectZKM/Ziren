@@ -44,19 +44,14 @@ jobs:
       - name: Install Dependencies
         run: sudo apt update && sudo apt install protobuf-compiler
       - run: cargo clippy --all-targets -- -D warnings
-      # `ark` is an OPTIONAL feature, so the line above never compiles
-      # `groth16::ark_converter` and cannot lint a line of it.  A
-      # `chunks_exact_to_as_chunks` error sat there unseen until the feature
-      # was built by hand; the same blind spot hides any future lint in the
-      # bounds-checked `ark` proof/VK loaders.
+      # `ark` is optional, so the line above never compiles
+      # `groth16::ark_converter` and cannot lint it.
       - run: cargo clippy -p zkm-verifier --features ark --all-targets -- -D warnings
       - name: The published SDK must not carry the test PKI
-        # `crates/sdk/tool/` holds the insecure test CA *and its private key*.
-        # Without the manifest's `exclude` this listed four files, `ca.key`
-        # among them, so every downloaded copy of the crate would have shipped
-        # a usable signing key for the CA that `ZKM_ALLOW_INSECURE_TEST_CA`
-        # opts into.  Asserted here because nothing in the source can observe
-        # what `cargo package` decides to include.
+        # `crates/sdk/tool/` holds the insecure test CA and its private key.
+        # Without the manifest's `exclude`, a published crate would ship a usable
+        # signing key. Asserted here because no source can see what
+        # `cargo package` includes.
         run: |
           if cargo package -p zkm-sdk --list --allow-dirty | grep -q '^tool/'; then
             echo "zkm-sdk would publish crates/sdk/tool/ -- see the exclude key in its manifest" >&2
@@ -66,30 +61,21 @@ jobs:
   test:
     name: Cargo Test
     runs-on: self-hosted-cpu
-    # The runner has 126 GB shared with other jobs.  A CPU proof of one shard at
-    # the production area fence (460M cells) peaks near 77 GB, and one test per
-    # core stacks several, so earlyoom kills the test binary.  Tests prove at a
-    # quarter of the fence (ed25519: 26 GB) two at a time; production-size
-    # shards are proved by the GPU gates.
+    # A CPU proof at the production fence peaks near 77 GB on a 126 GB runner
+    # shared with other jobs, so tests prove at a quarter of the fence, two at a
+    # time; production-size shards are left to the GPU gates.
     env:
       RUST_TEST_THREADS: "2"
       ELEMENT_THRESHOLD: "115000000"
-      # `actions/checkout` cleans the workspace, and `git clean -ffdx` deletes
-      # `target/` with it, so every run used to be a cold build of the whole
-      # workspace. Keeping the cache outside the checkout makes runs
-      # incremental. Both self-hosted jobs point at this one directory and use
-      # one RUSTFLAGS, because a second value invalidates every artifact the
-      # first one produced.
+      # `actions/checkout` deletes `target/`, so the cache lives outside the
+      # checkout. Both self-hosted jobs share it and one RUSTFLAGS, since a second
+      # value invalidates the first's artifacts.
       CARGO_TARGET_DIR: /data/actions-runner/cache/ziren-target
       RUSTFLAGS: "-C target-cpu=native"
-    # This job runs `cargo test` — contributor `build.rs` and test code as
-    # NATIVE code — on a persistent self-hosted runner that also holds the
-    # zkm toolchain, a warm cargo registry and its own runner credentials.
-    # `pull_request` fires for forks, so without this gate anyone who can open
-    # a PR (after one merged contribution, GitHub stops asking a maintainer to
-    # approve) could run arbitrary code on that host.  Fork PRs still get the
-    # two `ubuntu-latest` jobs; run the full suite on a branch in-repo, or via
-    # workflow_dispatch, once the diff has been read.
+    # This job runs contributor `build.rs` and test code as native code on a
+    # persistent self-hosted runner holding the zkm toolchain and its own runner
+    # credentials, and `pull_request` fires for forks. Fork PRs still get the two
+    # `ubuntu-latest` jobs; run the full suite in-repo once the diff is read.
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -98,20 +84,11 @@ jobs:
       - run: export PATH=~/.cargo/bin:$PATH
       - run: |
           source ~/.zkm-toolchain/env
-          # One pass over every package instead of twelve sequential cargo
-          # invocations.  `cargo test` runs one test binary at a time, so the
-          # loop left most of the machine idle while a single slow test ran;
-          # nextest schedules across binaries.  Measured on the same twelve
-          # packages' four heavy members: 830s sequential against 495s in one
-          # pass, 346 tests, same result.  Installed here rather than assumed,
-          # so a fresh runner does not fail on a missing tool.
-          #
-          # It installs into CARGO_HOME, which on this runner is /data/.cargo,
-          # not $HOME/.cargo: extracting into the latter failed the job outright
-          # with "tar: /home/ubuntu/.cargo/bin: Cannot open", because the
-          # directory does not exist there.  mkdir -p covers the fresh-runner
-          # case, and the PATH line covers a CARGO_HOME whose bin is not already
-          # on it.
+          # One nextest pass instead of twelve sequential `cargo test`
+          # invocations, which ran binaries strictly in order and idled the box.
+          # Concurrency stays at the job's RUST_TEST_THREADS, not raised:
+          # earlyoom has killed a job here. CARGO_HOME is /data/.cargo on this
+          # runner, not $HOME/.cargo.
           BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
           mkdir -p "$BIN"
           export PATH="$BIN:$PATH"
@@ -119,26 +96,23 @@ jobs:
             curl -sSL --retry 3 --max-time 120 https://get.nexte.st/latest/linux \
               | tar zxf - -C "$BIN"
           cargo-nextest --version
-          cargo nextest run --release --no-fail-fast --test-threads 8 \
-            -p zkm-core-executor -p zkm-curves -p zkm-derive -p zkm-primitives \
-            -p zkm-prover -p zkm-recursion-circuit -p zkm-recursion-compiler \
-            -p zkm-recursion-core -p zkm-recursion-gnark-ffi -p zkm-pcs \
-            -p zkm-zkvm -p zkm-lib
+          PKGS="-p zkm-core-executor -p zkm-curves -p zkm-derive -p zkm-primitives
+                -p zkm-prover -p zkm-recursion-circuit -p zkm-recursion-compiler
+                -p zkm-recursion-core -p zkm-recursion-gnark-ffi -p zkm-pcs
+                -p zkm-zkvm -p zkm-lib"
+          cargo nextest run --release --no-fail-fast \
+            --test-threads "${RUST_TEST_THREADS:-2}" $PKGS
+          # nextest cannot run doctests. All 42 are `ignore` or text today, so
+          # this pass guards one added later from going unrun.
+          cargo test --release --doc $PKGS
         env:
           RUSTFLAGS: "-C target-cpu=native"
       - name: Verifier malformed-input guards, default AND `ark` features
-        # `zkm-verifier` is absent from the loop above, so its tests ran nowhere.
-        # That matters most for the `ark` loaders: they sit behind an OPTIONAL
-        # feature, so a default run compiles 9 of the 12 malformed-input tests
-        # and the three `groth16::ark_converter::malformed_input` ones are not
-        # built at all. A regression in the bounds-checked `ark` proof/VK loaders
-        # (ZR-03) would therefore be invisible until someone enabled the feature.
-        # Measured: 9 tests without `--features ark`, 12 with.
-        #
-        # Filtered to `malformed_input` on purpose: the crate's other tests drive
-        # gnark through the FFI and need prover artifacts this job does not
-        # build, so an unfiltered run aborts in `ProvePlonkBn254` for reasons
-        # unrelated to what this step is guarding.
+        # `zkm-verifier` is absent from the pass above. Its `ark` loaders sit
+        # behind an optional feature, so a default run builds 9 of the 12
+        # malformed-input tests and none of the three `ark_converter` ones.
+        # Filtered to `malformed_input` because the crate's other tests need
+        # prover artifacts this job does not build.
         run: |
           source ~/.zkm-toolchain/env
           cargo test -r -p zkm-verifier malformed_input
