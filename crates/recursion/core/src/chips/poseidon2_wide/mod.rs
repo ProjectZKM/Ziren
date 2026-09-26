@@ -19,7 +19,7 @@ pub const WIDTH: usize = 16;
 pub const RATE: usize = WIDTH / 2;
 
 pub const NUM_EXTERNAL_ROUNDS: usize = 8;
-pub const NUM_INTERNAL_ROUNDS: usize = 13;
+pub const NUM_INTERNAL_ROUNDS: usize = 20;
 pub const NUM_ROUNDS: usize = NUM_EXTERNAL_ROUNDS + NUM_INTERNAL_ROUNDS;
 
 /// A chip that implements addition for the opcode Poseidon2Wide.
