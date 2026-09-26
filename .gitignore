@@ -46,6 +46,9 @@ docs/paper/*.bbl
 docs/paper/*.blg
 docs/paper/*.toc
 docs/paper/*.synctex.gz
+# The PDF is a build output, not a source: keeping it in git let it drift from the
+# .tex it was supposed to represent. Build it with `make` in docs/paper.
+docs/paper/*.pdf
 docs/paper/sections/*.aux
 docs/paper/figures/*.aux
 docs/paper/figures/out/

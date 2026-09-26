@@ -70,7 +70,19 @@ jobs:
       - run: export PATH=~/.cargo/bin:$PATH
       - run: |
           source ~/.zkm-toolchain/env
-          cargo test -r -p zkm-core-machine
+          # core-machine at 3 test threads, not the job's 2. Its cases prove at a
+          # quarter of the area fence (~26 GB each), so three fit in ~78 GB of the
+          # runner's 123 GB, while the sdk and e2e cases below peak near 77-102 GB
+          # alone and stay at 2. Worth ~12 min of a 38 min segment.
+          #
+          # Self-checking: a sampler records the lowest MemAvailable seen, so the
+          # run says whether 3 was actually safe instead of leaving it to be
+          # discovered by an earlyoom kill.
+          ( while :; do awk '/MemAvailable/ {print $2}' /proc/meminfo; sleep 5; done > /tmp/memavail.txt ) &
+          SAMPLER=$!
+          RUST_TEST_THREADS=3 cargo test -r -p zkm-core-machine
+          kill $SAMPLER 2>/dev/null || true
+          echo "::notice title=core-machine memory::lowest MemAvailable $(sort -n /tmp/memavail.txt | head -1 | awk '{printf "%.1f", $1/1048576}') GB at 3 test threads"
           # The gnark cases never return their R1CS and proving key, so the
           # growth is cumulative and no thread count bounds it; GOMEMLIMIT cannot
           # either, because the solver's witness is live. They run in the `snark`

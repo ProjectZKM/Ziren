@@ -42,4 +42,14 @@ For a chip $U$, the \emph{inputs} $I_U(r)$ of a row $r$ are the values the row c
 This is the notion of Picus~\citep{picus} adapted to the interaction language: whatever a row consumes from another table is an input, whatever it produces for another table is an output.
 \end{definition}
 
+\paragraph{Guest and host.} The \emph{guest} is the MIPS32 program, together with
+the runtime it is linked against, whose execution is proved; \emph{guest cycles}
+count its executed instructions. The \emph{host} is the machine that runs the
+executor and the prover. The distinction is not only expository: the verifier
+trusts nothing the host computes, so every quantity the host produces, the
+execution record included, is checked by the argument rather than assumed. It also
+separates MIPS32 as a proof target from MIPS32 as silicon, which is why the metrics
+below are trace cells and proved guest cycles per second rather than area or clock
+frequency.
+
 \paragraph{Cost metrics.} Throughout, the \emph{trace area} of a shard or a block is the sum over chips of rows $\times$ columns of the committed main trace, in cells; the \emph{(row, interaction) count} is the number of bus interactions summed over all rows, which is the number of leaves of the lookup circuit; and \emph{throughput} is the number of proved guest cycles per second of wall-clock time. Section~\ref{sec:performance} relates the three to measured prover time.
