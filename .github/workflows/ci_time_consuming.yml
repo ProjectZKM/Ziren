@@ -22,6 +22,38 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changes:
+    # Does this push touch anything that can move the wrap vk? Runs on a hosted
+    # runner so it never costs the one self-hosted slot.
+    name: Wrap-vk-affecting paths
+    runs-on: ubuntu-latest
+    outputs:
+      vk_affecting: ${{ steps.check.outputs.vk_affecting }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          # A push can carry several commits, so diff the whole push and not just
+          # its tip. A new branch or a force-push leaves no usable base, and then
+          # the answer is yes: an extra run costs slot time, a missed wrap-vk move
+          # ships artifacts no released verifier accepts.
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "no usable base ($BEFORE); assuming the wrap vk may have moved"
+            echo "vk_affecting=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILES=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
+          echo "$FILES" | sed 's/^/  /'
+          if echo "$FILES" | grep -qE '^crates/(recursion|pcs)/|^crates/verifier/bn254-vk/'; then
+            echo "vk_affecting=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "vk_affecting=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Cargo Test
     runs-on: self-hosted-cpu
@@ -61,9 +93,18 @@ jobs:
 
   snark:
     name: SNARK proofs
-    # Nightly, on main, or on request. One process per case, which is what caps
-    # the peak at a single case's footprint on a 123 GB runner.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    # Nightly, on main, on request, or on a push that can move the wrap vk --
+    # a schedule runs on the default branch only, so without that last clause a
+    # feature branch gets these proofs by manual dispatch alone, which is what let
+    # a moved wrap vk reach the published artifacts unnoticed.
+    # One process per case, which caps the peak at a single case's footprint.
+    needs: changes
+    if: >-
+      !cancelled() && (
+        github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        || github.ref == 'refs/heads/main'
+        || needs.changes.outputs.vk_affecting == 'true'
+      )
     runs-on: self-hosted-cpu
     env:
       RUST_TEST_THREADS: "2"
