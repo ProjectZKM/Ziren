@@ -1,8 +1,7 @@
 use std::ops::{Add, AddAssign};
 
-use hashbrown::HashMap;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
-use zkm_stark::{
+use zkm_pcs::{
     air::{LookupScope, MachineAir, PicusInfo},
     shape::OrderedShape,
     Chip, StarkGenericConfig, StarkMachine, PROOF_MAX_NUM_PVS,
@@ -12,21 +11,18 @@ use crate::{
     chips::{
         alu_base::{BaseAluChip, NUM_BASE_ALU_ENTRIES_PER_ROW},
         alu_ext::{ExtAluChip, NUM_EXT_ALU_ENTRIES_PER_ROW},
-        batch_fri::BatchFRIChip,
-        exp_reverse_bits::ExpReverseBitsLenChip,
-        fri_fold::FriFoldChip,
+        ext2felt::Ext2FeltChip,
         mem::{
             constant::NUM_CONST_MEM_ENTRIES_PER_ROW, variable::NUM_VAR_MEM_ENTRIES_PER_ROW,
             MemoryConstChip, MemoryVarChip,
         },
-        poseidon2_skinny::Poseidon2SkinnyChip,
         poseidon2_wide::Poseidon2WideChip,
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         select::SelectChip,
     },
-    instruction::{HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr},
+    instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr},
     shape::RecursionShape,
-    ExpReverseBitsInstr, Instruction, RecursionProgram, D,
+    Instruction, RecursionProgram, D,
 };
 
 #[derive(zkm_derive::MachineAir)]
@@ -41,16 +37,15 @@ pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: u
     MemoryVar(MemoryVarChip<F>),
     BaseAlu(BaseAluChip),
     ExtAlu(ExtAluChip),
-    Poseidon2Skinny(Poseidon2SkinnyChip<DEGREE>),
     Poseidon2Wide(Poseidon2WideChip<DEGREE>),
     Select(SelectChip),
-    FriFold(FriFoldChip<DEGREE>),
-    BatchFRI(BatchFRIChip<DEGREE>),
-    ExpReverseBitsLen(ExpReverseBitsLenChip<DEGREE>),
+    Ext2Felt(Ext2FeltChip<F>),
     PublicValues(PublicValuesChip),
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+// Serialized as part of `RecursionProgram`, which now carries the analyzed
+// program and the counts derived with it rather than re-deriving both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RecursionAirEventCount {
     pub mem_const_events: usize,
     pub mem_var_events: usize,
@@ -61,54 +56,18 @@ pub struct RecursionAirEventCount {
     pub batch_fri_events: usize,
     pub select_events: usize,
     pub exp_reverse_bits_len_events: usize,
+    /// One per `Ext2Felts` instruction (the constrained decomposition chip).
+    pub ext2felt_events: usize,
+    /// Counter for commit_pv_hash events (CommitPublicValues match arm
+    /// in `Runtime::run`). Populated by
+    /// `AddAssign<&Instruction>` so `UnsafeRecord::new` can pre-size
+    /// the vec once the runtime walker swaps to offset-based writes.
+    pub commit_pv_hash_events: usize,
 }
 
 impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAir<F, DEGREE> {
-    /// Get a machine with all chips, except the dummy chip.
-    pub fn machine_wide_with_all_chips<SC: StarkGenericConfig<Val = F>>(
-        config: SC,
-    ) -> StarkMachine<SC, Self> {
-        let chips = [
-            RecursionAir::MemoryConst(MemoryConstChip::default()),
-            RecursionAir::MemoryVar(MemoryVarChip::default()),
-            RecursionAir::BaseAlu(BaseAluChip),
-            RecursionAir::ExtAlu(ExtAluChip),
-            RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
-            RecursionAir::FriFold(FriFoldChip::<DEGREE>::default()),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
-            RecursionAir::Select(SelectChip),
-            RecursionAir::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
-            RecursionAir::PublicValues(PublicValuesChip),
-        ]
-        .map(Chip::new)
-        .into_iter()
-        .collect::<Vec<_>>();
-        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
-    }
-
-    /// Get a machine with all chips, except the dummy chip.
-    pub fn machine_skinny_with_all_chips<SC: StarkGenericConfig<Val = F>>(
-        config: SC,
-    ) -> StarkMachine<SC, Self> {
-        let chips = [
-            RecursionAir::MemoryConst(MemoryConstChip::default()),
-            RecursionAir::MemoryVar(MemoryVarChip::default()),
-            RecursionAir::BaseAlu(BaseAluChip),
-            RecursionAir::ExtAlu(ExtAluChip),
-            RecursionAir::Poseidon2Skinny(Poseidon2SkinnyChip::<DEGREE>::default()),
-            RecursionAir::FriFold(FriFoldChip::<DEGREE>::default()),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
-            RecursionAir::Select(SelectChip),
-            RecursionAir::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
-            RecursionAir::PublicValues(PublicValuesChip),
-        ]
-        .map(Chip::new)
-        .into_iter()
-        .collect::<Vec<_>>();
-        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
-    }
-
-    /// A machine with dyunamic chip sizes that includes the wide variant of the Poseidon2 chip.
+    /// A machine with dynamic chip sizes that includes the wide variant of the
+    /// Poseidon2 chip.
     pub fn compress_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = [
             RecursionAir::MemoryConst(MemoryConstChip::default()),
@@ -116,19 +75,31 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
             RecursionAir::Select(SelectChip),
-            RecursionAir::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
+            RecursionAir::Ext2Felt(Ext2FeltChip::default()),
             RecursionAir::PublicValues(PublicValuesChip),
         ]
         .map(Chip::new)
         .into_iter()
         .collect::<Vec<_>>();
         StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
+            .with_recursion_pins(Some(zkm_pcs::jagged::RECURSION_PINS))
     }
 
     pub fn shrink_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
-        Self::compress_machine(config)
+        let chips = [
+            RecursionAir::MemoryConst(MemoryConstChip::default()),
+            RecursionAir::MemoryVar(MemoryVarChip::default()),
+            RecursionAir::BaseAlu(BaseAluChip),
+            RecursionAir::ExtAlu(ExtAluChip),
+            RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
+            RecursionAir::Select(SelectChip),
+            RecursionAir::PublicValues(PublicValuesChip),
+        ]
+        .map(Chip::new)
+        .into_iter()
+        .collect::<Vec<_>>();
+        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
     }
 
     /// A machine with dynamic chip sizes that includes the skinny variant of the Poseidon2 chip.
@@ -141,8 +112,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::MemoryVar(MemoryVarChip::default()),
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
-            RecursionAir::Poseidon2Skinny(Poseidon2SkinnyChip::<DEGREE>::default()),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
+            RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
             RecursionAir::Select(SelectChip),
             RecursionAir::PublicValues(PublicValuesChip),
         ]
@@ -153,27 +123,24 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
     }
 
     pub fn shrink_shape() -> RecursionShape {
-        let shape = HashMap::from(
-            [
-                (Self::MemoryVar(MemoryVarChip::default()), 18),
-                (Self::Select(SelectChip), 18),
-                (Self::MemoryConst(MemoryConstChip::default()), 17),
-                (Self::BatchFRI(BatchFRIChip::<DEGREE>), 17),
-                (Self::BaseAlu(BaseAluChip), 17),
-                (Self::ExtAlu(ExtAluChip), 15),
-                (Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>), 17),
-                (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 16),
-                (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
-            ]
-            .map(|(chip, log_height)| (chip.name(), log_height)),
-        );
-        RecursionShape { inner: shape }
+        let shape: std::collections::BTreeMap<String, usize> = [
+            (Self::MemoryVar(MemoryVarChip::default()), 1 << 18),
+            (Self::Select(SelectChip), 1 << 18),
+            (Self::MemoryConst(MemoryConstChip::default()), 1 << 17),
+            (Self::BaseAlu(BaseAluChip), 1 << 17),
+            (Self::ExtAlu(ExtAluChip), 1 << 15),
+            (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 1 << 16),
+            (Self::PublicValues(PublicValuesChip), 1 << PUB_VALUES_LOG_HEIGHT),
+        ]
+        .into_iter()
+        .map(|(chip, rows)| (chip.name(), rows))
+        .collect();
+        RecursionShape { inner: shape, pins: None }
     }
 
     pub fn heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {
         let heights = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .fold(RecursionAirEventCount::default(), |heights, instruction| heights + instruction);
 
         [
@@ -194,12 +161,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
                 heights.ext_alu_events.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW),
             ),
             (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), heights.poseidon2_wide_events),
-            (Self::BatchFRI(BatchFRIChip::<DEGREE>), heights.batch_fri_events),
             (Self::Select(SelectChip), heights.select_events),
-            (
-                Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
-                heights.exp_reverse_bits_len_events,
-            ),
+            (Self::Ext2Felt(Ext2FeltChip::default()), heights.ext2felt_events),
             (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
         ]
         .map(|(chip, log_height)| (chip.name(), log_height))
@@ -216,31 +179,20 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             Instruction::Mem(_) => self.mem_const_events += 1,
             Instruction::Poseidon2(_) => self.poseidon2_wide_events += 1,
             Instruction::Select(_) => self.select_events += 1,
-            Instruction::ExpReverseBitsLen(ExpReverseBitsInstr { addrs, .. }) => {
-                self.exp_reverse_bits_len_events += addrs.exp.len()
-            }
             Instruction::Hint(HintInstr { output_addrs_mults })
-            | Instruction::HintBits(HintBitsInstr {
-                output_addrs_mults,
-                input_addr: _, // No receive lookup for the hint operation
-            }) => self.mem_var_events += output_addrs_mults.len(),
+            | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {
+                self.mem_var_events += output_addrs_mults.len()
+            }
             Instruction::HintExt2Felts(HintExt2FeltsInstr {
                 output_addrs_mults,
-                input_addr: _, // No receive lookup for the hint operation
+                input_addr: _,
             }) => self.mem_var_events += output_addrs_mults.len(),
-            Instruction::FriFold(_) => self.fri_fold_events += 1,
-            Instruction::BatchFRI(instr) => {
-                self.batch_fri_events += instr.base_vec_addrs.p_at_x.len()
+            Instruction::Ext2Felts(_) => self.ext2felt_events += 1,
+            Instruction::HintAddCurve(instr) => {
+                self.mem_var_events += instr.output_x_addrs_mults.len();
+                self.mem_var_events += instr.output_y_addrs_mults.len();
             }
-            Instruction::HintAddCurve(HintAddCurveInstr {
-                output_x_addrs_mults,
-                output_y_addrs_mults,
-                ..
-            }) => {
-                self.mem_var_events += output_x_addrs_mults.len();
-                self.mem_var_events += output_y_addrs_mults.len();
-            }
-            Instruction::CommitPublicValues(_) => {}
+            Instruction::CommitPublicValues(_) => self.commit_pv_hash_events += 1,
             Instruction::Print(_) => {}
         }
     }
@@ -262,6 +214,82 @@ impl From<RecursionShape> for OrderedShape {
     }
 }
 
+/// Compile-time proof that every
+/// `RecursionAir` chip implements
+/// `Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
+///
+/// The host-side `ShardConstraintFolder` (defined at
+/// `zkm-pcs::shard_level::basefold_constraint_folder`) is
+/// `AirBuilder + EmptyMessageBuilder`, which by way of the blanket impls
+/// `AB: AirBuilder<F: Field> + MessageBuilder<AirLookup<...>> => BaseAirBuilder`
+/// (in `zkm_pcs::air`),
+/// `AB: BaseAirBuilder => RecursionAirBuilder` and
+/// `AB: RecursionAirBuilder => ZKMRecursionAirBuilder` (in `crate::builder`)
+/// automatically becomes a `ZKMRecursionAirBuilder` — so the existing
+/// generic `impl<AB: ZKMRecursionAirBuilder> Air<AB> for ChipName` on
+/// every recursion chip already covers it.  No new per-chip code is
+/// required; these assertions just make the bound resolution explicit
+/// and act as a regression guard if any chip's bounds tighten.
+///
+/// The in-circuit folder
+/// (`zkm-recursion-circuit::basefold_constraint_folder`) lives in a
+/// downstream crate, so its assertion lives in `zkm-recursion-circuit`
+/// (see `crates/recursion/circuit/src/basefold_constraint_folder.rs`).
+#[cfg(test)]
+mod basefold_air_assertions {
+    use super::*;
+    use crate::chips::{
+        alu_base::BaseAluChip,
+        alu_ext::ExtAluChip,
+        mem::{constant::MemoryChip as MemoryConstChip, variable::MemoryChip as MemoryVarChip},
+        poseidon2_wide::Poseidon2WideChip,
+        public_values::PublicValuesChip,
+        select::SelectChip,
+    };
+    use p3_air::Air;
+    use p3_koala_bear::KoalaBear;
+    use zkm_pcs::{shard_level::basefold_constraint_folder::ShardConstraintFolder, InnerChallenge};
+
+    /// Compile-time bound: `T: for<'a> Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
+    fn assert_basefold_air<T>()
+    where
+        T: for<'a> Air<ShardConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>,
+    {
+    }
+
+    /// Const used purely to force monomorphisation of every chip's
+    /// `Air<ShardConstraintFolder>` bound at compile time.  Never called --
+    /// the body is type-checked, which is the whole point, so it needs
+    /// `allow(dead_code)` to keep the helper it references alive.
+    /// Covers the 7 production chips plus the `RecursionAir` enum.
+    #[allow(dead_code)]
+    const _ASSERT_ALL_CHIPS: fn() = || {
+        // 1. MemoryConst
+        assert_basefold_air::<MemoryConstChip<KoalaBear>>();
+        // 2. MemoryVar
+        assert_basefold_air::<MemoryVarChip<KoalaBear>>();
+        // 3. BaseAlu
+        assert_basefold_air::<BaseAluChip>();
+        // 4. ExtAlu
+        assert_basefold_air::<ExtAluChip>();
+        // 5. Poseidon2Wide (DEGREE=9, the production const)
+        assert_basefold_air::<Poseidon2WideChip<9>>();
+        // 6. Select
+        assert_basefold_air::<SelectChip>();
+        // 7. PublicValues
+        assert_basefold_air::<PublicValuesChip>();
+
+        // Enum-level: the `#[derive(MachineAir)]` macro emits a generic
+        // `impl<AB: ZKMRecursionAirBuilder<F = F>, AB::Var: 'static>
+        // Air<AB> for RecursionAir<F, DEGREE>`.
+
+        // For `AB = ShardConstraintFolder<'a, KoalaBear, InnerChallenge>`,
+        // `AB::F = KoalaBear` matches `F = KoalaBear` and `AB::Var =
+        // InnerChallenge: 'static`, so the bound resolves.
+        assert_basefold_air::<RecursionAir<KoalaBear, 9>>();
+    };
+}
+
 #[cfg(test)]
 pub mod tests {
 
@@ -270,12 +298,12 @@ pub mod tests {
     use crate::machine::RecursionAir;
     use p3_field::{
         extension::{BinomialExtensionField, HasFrobenius},
-        Field, FieldAlgebra, FieldExtensionAlgebra,
+        BasedVectorSpace, Field, PrimeCharacteristicRing,
     };
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use rand::prelude::*;
-    use zkm_core_machine::utils::run_test_machine;
-    use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_pcs::test_harness::run_test_machine;
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::{
         runtime::{
@@ -289,10 +317,12 @@ pub mod tests {
     type F = <SC as StarkGenericConfig>::Val;
     type EF = <SC as StarkGenericConfig>::Challenge;
     type A = RecursionAir<F, 3>;
-    type B = RecursionAir<F, 9>;
 
     /// Runs the given program on machines that use the wide and skinny Poseidon2 chips.
-    pub fn run_recursion_test_machines(program: RecursionProgram<F>) {
+    pub fn run_recursion_test_machines(mut program: RecursionProgram<F>) {
+        if program.total_memory == 0 {
+            program.total_memory = program.computed_total_memory();
+        }
         let program = Arc::new(program);
         let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
@@ -300,26 +330,21 @@ pub mod tests {
         );
         runtime.run().unwrap();
 
-        // Run with the poseidon2 wide chip.
-        let machine = A::machine_wide_with_all_chips(KoalaBearPoseidon2::default());
+        let machine = A::compress_machine(KoalaBearPoseidon2::default());
         let (pk, vk) = machine.setup(&program);
-        let result = run_test_machine(vec![runtime.record.clone()], machine, pk, vk);
-        if let Err(e) = result {
-            panic!("Verification failed: {e:?}");
-        }
-
-        // Run with the poseidon2 skinny chip.
-        let skinny_machine =
-            B::machine_skinny_with_all_chips(KoalaBearPoseidon2::ultra_compressed());
-        let (pk, vk) = skinny_machine.setup(&program);
-        let result = run_test_machine(vec![runtime.record], skinny_machine, pk, vk);
+        let result = run_test_machine(vec![runtime.record], machine, pk, vk);
         if let Err(e) = result {
             panic!("Verification failed: {e:?}");
         }
     }
 
     fn test_instructions(instructions: Vec<Instruction<F>>) {
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(instructions),
+            0,
+            Vec::new(),
+            None,
+        );
         run_recursion_test_machines(program);
     }
 
@@ -369,13 +394,12 @@ pub mod tests {
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut addr = 0;
         for _ in 0..100 {
-            let inner: [F; 4] = std::iter::repeat_with(|| {
-                core::array::from_fn(|_| rng.sample(rand::distributions::Standard))
-            })
-            .find(|xs| !xs.iter().all(F::is_zero))
-            .unwrap();
-            let x = BinomialExtensionField::<F, D>::from_base_slice(&inner);
-            let gal = x.galois_group();
+            let inner: [F; 4] =
+                std::iter::repeat_with(|| core::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
+                    .find(|xs| !xs.iter().all(F::is_zero))
+                    .unwrap();
+            let x = BinomialExtensionField::<F, D>::from_basis_coefficients_slice(&inner).unwrap();
+            let gal = x.galois_orbit();
 
             let mut acc = BinomialExtensionField::ONE;
 
@@ -387,7 +411,7 @@ pub mod tests {
                 addr += 2;
                 acc *= conj;
             }
-            let base_cmp: F = acc.as_base_slice()[0];
+            let base_cmp: F = acc.as_basis_coefficients_slice()[0];
             instructions.push(instr::mem_single(MemAccessKind::Read, 1, addr, base_cmp));
             addr += 1;
         }

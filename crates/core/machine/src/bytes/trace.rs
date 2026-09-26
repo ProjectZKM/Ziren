@@ -3,7 +3,7 @@ use std::borrow::BorrowMut;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{ByteOpcode, ExecutionRecord, Program};
-use zkm_stark::air::MachineAir;
+use zkm_pcs::air::MachineAir;
 
 use crate::{utils::zeroed_f_vec, CoreChipError};
 
@@ -39,7 +39,6 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip<F> {
         _input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> Result<(), Self::Error> {
-        // Do nothing since this chip has no dependencies.
         Ok(())
     }
 
@@ -52,6 +51,9 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip<F> {
             RowMajorMatrix::new(zeroed_f_vec(NUM_BYTE_MULT_COLS * NUM_ROWS), NUM_BYTE_MULT_COLS);
 
         for (lookup, mult) in input.byte_lookups.iter() {
+            if lookup.opcode == ByteOpcode::Range {
+                continue;
+            }
             let row = if lookup.opcode != ByteOpcode::U16Range {
                 (((lookup.b as u16) << 8) + lookup.c as u16) as usize
             } else {
@@ -60,7 +62,7 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip<F> {
             let index = lookup.opcode as usize;
 
             let cols: &mut ByteMultCols<F> = trace.row_mut(row).borrow_mut();
-            cols.multiplicities[index] += F::from_canonical_usize(*mult);
+            cols.multiplicities[index] += F::from_usize(*mult);
         }
 
         Ok(trace)

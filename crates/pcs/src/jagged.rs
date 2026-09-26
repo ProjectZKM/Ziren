@@ -1,0 +1,890 @@
+//! Jagged polynomial commitment adapter for the BaseFold PCS.
+//!
+//! Packs variable-height chip traces into a single dense multilinear
+//! polynomial, enabling a single BaseFold commit/open/verify cycle for all
+//! chips in a shard (Jagged Polynomial Commitments, ePrint 2025/917).
+//!
+//! Each chip produces a trace of a different height (T_k: h_k × w_k);
+//! committing each separately would cost one Merkle tree per chip.  Instead
+//! all columns are concatenated sequentially into a dense vector q:
+//!   q = [T_0[:,0] | T_0[:,1] | ... | T_N[:,w_N]]
+//!
+//! with cumulative offsets t_k tracking column boundaries:
+//!   t_0 = 0,  t_k = t_{k-1} + h_{chip(k)}
+//!
+//! The sparse polynomial p(x_row, x_col) relates to q via:
+//!   p(z_r, z_c) = Σ_j q(j) · eq(row(j), z_r) · eq(col(j), z_c)
+//! where:
+//!   col(j) = min_k {t_k > j}
+//!   row(j) = j - t_{col(j)-1}
+//!
+//! A sumcheck argument proves the jagged-to-dense mapping is correct; the
+//! verifier checks that the per-chip evaluations are consistent with the
+//! dense polynomial commitment.
+//!
+//! # Security requirements
+//!
+//! - Chip metadata (row_count, column_count) MUST be hashed into the
+//!   Fiat-Shamir transcript (see `hash_chip_infos`).
+//! - Padding zeros MUST be validated against `total_values`.
+//! - Column identity MUST be preserved between commit and verify.
+
+extern crate alloc;
+use alloc::vec::Vec;
+
+use p3_field::Field;
+use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::Matrix;
+use serde::{Deserialize, Serialize};
+
+use crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
+
+/// A chip's real (unpadded) row-major cells and row width, projected out of the
+/// shared `PaddedMle` store.  A device-resident / unexercised chip has no real
+/// cells and projects to `(&[], 0)` — zero area.
+#[inline]
+pub fn real_cells<F: Field>(pm: &crate::multilinear::PaddedMle<F>) -> (&[F], usize) {
+    match pm.real_trace_ref() {
+        Some(t) => (t.values, t.width),
+        None => (&[], 0),
+    }
+}
+
+/// Metadata for a single chip's trace in the jagged packing.
+///
+/// SECURITY: This metadata MUST be cryptographically bound to the
+/// Fiat-Shamir transcript before any PCS challenges are derived.
+/// Without this binding, a malicious prover could claim different
+/// chip dimensions than what was committed.
+#[derive(Clone, Debug)]
+pub struct JaggedChipInfo {
+    /// Name of the chip (for debugging).
+    pub name: String,
+    /// Number of real rows in this chip's trace (before padding).
+    pub row_count: usize,
+    /// Number of columns in this chip's trace.
+    pub column_count: usize,
+}
+
+/// Jagged packing result: a dense vector plus metadata.
+#[derive(Clone, Debug)]
+pub struct JaggedPacking<F> {
+    /// The dense vector containing all chip trace values, concatenated
+    /// column-by-column: [chip0_col0, chip0_col1, ..., chipN_colM].
+    pub dense_values: Vec<F>,
+    /// Per-chip metadata (row count, column count).
+    pub chip_infos: Vec<JaggedChipInfo>,
+    /// Cumulative offsets: `offsets[k]` is the starting index of the
+    /// k-th column in `dense_values`.  The slice carries `total_cols + 1`
+    /// entries with the final sentinel `offsets[total_cols] = total_values`.
+    /// The recursion lift (`shard_level_witness.rs:lift_jagged_basefold_bundle`)
+    /// emits `col_prefix_sums.len() = num_cols + 1`, and
+    /// `prove_jagged_evaluation` expects `num_chips = prefix_sums.len() - 1`;
+    /// the sentinel keeps the host and recursion lengths in agreement.
+    pub offsets: Vec<usize>,
+    /// Total number of values in the dense vector.
+    pub total_values: usize,
+    /// The length of the dense vector the commitment actually covers.
+    ///
+    /// For one committed ROUND this is the round's area: its real cells
+    /// rounded out to whole stacking blocks (see [`committed_dense_len`]).
+    /// For the combined jagged instance the rounds' areas are already carried
+    /// as explicit padding columns, so it equals `total_values`.
+    pub dense_len: usize,
+}
+
+/// The dense length a round's commitment covers, given its real cell count.
+///
+/// A round's committed area is rounded out to whole stacking blocks
+/// (`.next_multiple_of(1 << log_stacking_height)`) and nothing more.
+/// Rounding up to a power of two instead would waste up to half the area,
+/// and with preprocessed opening in its own round the waste lands in the
+/// middle of the concatenated dense, where no implicit-tail optimization can
+/// reach it.
+///
+/// One extra constraint: ziren-gpu's streaming Merkle first-digest layer
+/// requires every stripe's width to be a multiple of the Poseidon2 rate, and
+/// a stripe is `DEFAULT_BATCH_SIZE` stacking blocks wide, so the commit is
+/// rate-safe exactly when the block count is a multiple of 8.  Commits of
+/// four blocks or fewer take the accumulate-all path, which has no rate
+/// constraint and cannot run out of memory at that size; anything larger has
+/// to stay on the streaming path, so its block count is rounded out to a
+/// multiple of 8.
+/// A PINNED committed area for one opening round: the dense length the round
+/// commits at, and the number of stacking-padding columns the gap
+/// `area - real` is split into.  Both are fixed so that the geometry a
+/// recursion program reads from the proof — `log_dense_size`, the stripe
+/// count, the column count — is a property of the machine, not of how many
+/// rows this particular node has.  That is what lets every recursion node be
+/// proved at its own (multiple-of-32) row count while the program that
+/// verifies it stays one per arity.  Every column is at most the row cube
+/// tall (`2^max_log_row_count`), so `pad_columns >= area / cube`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AreaPin {
+    pub area: usize,
+    pub pad_columns: usize,
+}
+
+/// The pins of a recursion (compress) machine's two committed rounds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecursionPins {
+    /// The preprocessed round (committed by `setup`).
+    pub prep: AreaPin,
+    /// The main round.
+    pub main: AreaPin,
+}
+
+impl AreaPin {
+    /// The dense length a round with `natural` committed cells lands on under
+    /// this pin: the pin itself.  A natural area past the pin is a bug — the
+    /// program built for the pin would not verify it — so it panics rather
+    /// than growing.
+    pub fn apply(&self, natural_dense_len: usize) -> usize {
+        assert!(
+            natural_dense_len <= self.area,
+            "area pin: a round's natural committed area {natural_dense_len} exceeds the pin \
+             {} — raise the pin (zkm_pcs::jagged::RECURSION_PINS) and regenerate the vk map",
+            self.area,
+        );
+        self.area
+    }
+
+    /// Split a padding gap of `pad` cells into exactly `k` columns of at most
+    /// `cube` rows each, as even as possible (the first `pad % k` columns get
+    /// one extra row).  Trailing columns may be empty when `pad < k`.
+    pub fn split_padding(pad: usize, k: usize, cube: usize) -> Vec<usize> {
+        assert!(k >= 1, "split_padding: at least one column");
+        let base = pad / k;
+        let rem = pad % k;
+        let heights: Vec<usize> = (0..k).map(|i| base + usize::from(i < rem)).collect();
+        assert!(
+            heights.iter().all(|h| *h <= cube),
+            "split_padding: {pad} cells over {k} columns exceeds the row cube {cube}",
+        );
+        heights
+    }
+}
+
+/// The largest pin class — the compress machine's DEFAULT pins, what a
+/// program that names no class (and the root) commits under.  32 stacking blocks (`2^26` cells) per round — the area the single
+/// 115.6 M-cell shape already committed at, so the commit costs what it did —
+/// with the gap split into `2^26 / 2^22 = 16` columns of at most one row cube.
+/// Organic maxima observed in production (Sep 11): main 44 M, preprocessed
+/// 44 M cells (the leaf verifying the largest core shard); the arity-4 compose
+/// is 36 M / 21 M.  `AreaPin::apply` panics past the pin.
+pub const RECURSION_PINS: RecursionPins = RecursionPins {
+    prep: AreaPin { area: 1 << 26, pad_columns: 16 },
+    main: AreaPin { area: 1 << 26, pad_columns: 16 },
+};
+
+/// The pin CLASSES a recursion node can commit under, smallest first.  A
+/// node takes the smallest class both of its rounds fit
+/// (`RecursionPins::class_for_committed`), so the common node — a leaf, or a
+/// compose over a few of them (main p50 19 M, p90 25 M cells; compose-3
+/// 27 M) — commits at 2^25 and only the rare large one (a leaf verifying a
+/// chip-dense core shard, ~44 M; the root, by construction) at 2^26.  The
+/// program verifying a node is a function of the class, so a compose program
+/// is keyed by its children's class tuple; every tuple is enumerable.
+pub const RECURSION_PIN_CLASSES: [RecursionPins; 2] = [
+    RecursionPins {
+        prep: AreaPin { area: 1 << 25, pad_columns: 8 },
+        main: AreaPin { area: 1 << 25, pad_columns: 8 },
+    },
+    RECURSION_PINS,
+];
+
+impl RecursionPins {
+    /// The index of the largest class.
+    pub const LAST_CLASS: usize = RECURSION_PIN_CLASSES.len() - 1;
+
+    /// The pins of class `index`.
+    pub fn class(index: usize) -> RecursionPins {
+        RECURSION_PIN_CLASSES[index]
+    }
+
+    /// The smallest class whose pins hold a node whose rounds commit `main`
+    /// and `prep` cells naturally (stacking-rounded, `committed_dense_len`);
+    /// `None` when even the largest does not.
+    pub fn class_for_committed(main: usize, prep: usize) -> Option<usize> {
+        RECURSION_PIN_CLASSES.iter().position(|c| main <= c.main.area && prep <= c.prep.area)
+    }
+
+    /// Which class these pins are, if any.
+    pub fn class_index(&self) -> Option<usize> {
+        RECURSION_PIN_CLASSES.iter().position(|c| c == self)
+    }
+}
+
+pub fn committed_dense_len(total_values: usize, log_stacking_height: usize) -> usize {
+    if total_values == 0 {
+        return 0;
+    }
+    let block = 1usize << log_stacking_height;
+    let blocks = total_values.div_ceil(block).max(1);
+    let blocks = if blocks > 4 { blocks.next_multiple_of(8) } else { blocks };
+    blocks * block
+}
+
+/// The stacking blocks a round could have committed at and still landed on the
+/// bucket just below `blocks` (the largest bucket strictly smaller).
+///
+/// The buckets of [`committed_dense_len`] are `1, 2, 3, 4, 8, 16, 24, …`, so
+/// the widest gap between a round's real cells and its committed area is the
+/// width of its bucket step: one block up to four blocks, four blocks at
+/// eight, eight blocks above.
+pub fn previous_bucket_blocks(blocks: usize) -> usize {
+    match blocks {
+        0 | 1 => 0,
+        2..=4 => blocks - 1,
+        8 => 4,
+        _ => blocks - 8,
+    }
+}
+
+/// The number of stacking-padding columns an UNPINNED round splits its gap
+/// into: `⌈step · 2^h / cube⌉`, where `step` is the round's bucket step in
+/// blocks (`previous_bucket_blocks`), `2^h` the stacking block and `cube` the
+/// row cube — the column count the widest gap of that bucket would need, and
+/// at least one.
+///
+/// Making the count a function of the bucket alone (not of the gap) is what
+/// makes a core shard's proof geometry — hence the normalize program verifying
+/// it, hence its verifying key — a function of `(chip set, committed blocks)`:
+/// the whole key space is then enumerable offline.  A gap narrower than the
+/// widest simply leaves trailing columns short or empty
+/// (`AreaPin::split_padding`), which the verifier already accepts.
+pub fn unpinned_pad_columns(total_values: usize, log_stacking_height: usize, cube: usize) -> usize {
+    let block = 1usize << log_stacking_height;
+    let blocks = committed_dense_len(total_values, log_stacking_height) / block;
+    let step = blocks - previous_bucket_blocks(blocks);
+    (step * block).div_ceil(cube).max(1)
+}
+
+impl<F> JaggedPacking<F> {
+    /// `log2` of the hypercube the jagged sumcheck runs over: the dense length
+    /// rounded up to a power of two.  The gap is an IMPLICIT zero tail — it is
+    /// never materialized (see `jagged_sumcheck`'s `implicit_tail_out_len`).
+    pub fn log_dense_size(&self) -> usize {
+        if self.dense_len == 0 {
+            0
+        } else {
+            self.dense_len.next_power_of_two().trailing_zeros() as usize
+        }
+    }
+}
+
+/// **Metadata-only jagged-pack** (no dense materialization).
+///
+/// Returns a `JaggedPacking` with `dense_values: Vec::new()` —
+/// describes the packing layout (chip dimensions, offsets, padded
+/// log size) without allocating the dense polynomial.  Call
+/// [`materialize_dense_jagged`] when the dense `Vec<F>` is actually
+/// needed (e.g. for the BaseFold commit).
+///
+/// Most downstream code (sumcheck reduction, verifier weight tables)
+/// only needs the metadata, not the dense values.
+pub fn compute_jagged_metadata<F: Field>(
+    traces: &[(String, crate::multilinear::PaddedMle<F>)],
+) -> JaggedPacking<F> {
+    compute_jagged_metadata_pinned::<F>(traces, None)
+}
+
+/// [`compute_jagged_metadata`] with the committed dense raised to an
+/// [`AreaPin`] (a recursion round); `None` is the natural stacking-block
+/// rounding.
+pub fn compute_jagged_metadata_pinned<F: Field>(
+    traces: &[(String, crate::multilinear::PaddedMle<F>)],
+    pin: Option<AreaPin>,
+) -> JaggedPacking<F> {
+    let mut packing = compute_jagged_metadata_natural::<F>(traces);
+    if let Some(pin) = pin {
+        packing.dense_len = pin.apply(packing.dense_len);
+    }
+    packing
+}
+
+fn compute_jagged_metadata_natural<F: Field>(
+    traces: &[(String, crate::multilinear::PaddedMle<F>)],
+) -> JaggedPacking<F> {
+    let dims: Vec<(String, usize, usize)> = traces
+        .iter()
+        .map(|(name, pm)| {
+            let (h, w) = pm
+                .real_trace_ref()
+                .map(|t| (t.values.len().checked_div(t.width).unwrap_or(0), t.width))
+                .unwrap_or((0, 0));
+            (name.clone(), h, w)
+        })
+        .collect();
+    compute_jagged_metadata_from_dims::<F>(&dims)
+}
+
+/// **Dims-only jagged metadata** — identical to [`compute_jagged_metadata`]
+/// but driven by an explicit per-chip `(name, height, width)` list instead
+/// of materialized `RowMajorMatrix` traces.
+///
+/// The device commit hook resolves a
+/// device-resident chip's dims from the per-shard provider (the on-device
+/// `ColMajorMatrixDevice` carries its height/width) and packs its cells
+/// D2D — so it never needs the host trace values that the eager
+/// `commit_traces` D2H would supply purely for these dims.
+pub fn compute_jagged_metadata_from_dims<F: Field>(
+    dims: &[(String, usize, usize)],
+) -> JaggedPacking<F> {
+    let mut chip_infos = Vec::with_capacity(dims.len());
+    let mut offsets = Vec::new();
+    let mut total_values: usize = 0;
+
+    for (name, height, width) in dims {
+        let (height, width) = (*height, *width);
+        chip_infos.push(JaggedChipInfo {
+            name: name.clone(),
+            row_count: height,
+            column_count: width,
+        });
+        for _col in 0..width {
+            offsets.push(total_values);
+            total_values += height;
+        }
+    }
+    offsets.push(total_values);
+
+    JaggedPacking {
+        dense_values: Vec::new(),
+        chip_infos,
+        offsets,
+        total_values,
+        dense_len: committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize),
+    }
+}
+
+/// **Materialize the dense polynomial** from chip traces according
+/// to the jagged layout: columnar concatenation per chip, then
+/// zero-padding out to the round's committed `dense_len`.
+///
+/// Caller is expected to drop the result immediately after handing
+/// it to the consumer (e.g. the BaseFold commit) to avoid holding
+/// the dense vector in memory longer than necessary.
+pub fn materialize_dense_jagged<F: Field>(
+    traces: &[(String, crate::multilinear::PaddedMle<F>)],
+    dense_len: usize,
+) -> Vec<F> {
+    let cells: Vec<(&[F], usize)> = traces.iter().map(|(_, pm)| real_cells(pm)).collect();
+    let chip_cells: &[(&[F], usize)] = &cells;
+    let padded_size = dense_len;
+
+    let mut chip_offsets: Vec<usize> = Vec::with_capacity(chip_cells.len());
+    let mut total: usize = 0;
+    for (vals, w) in chip_cells {
+        let h = vals.len().checked_div(*w).unwrap_or(0);
+        chip_offsets.push(total);
+        total += h * *w;
+    }
+    debug_assert!(total <= padded_size);
+
+    let mut dense_values: Vec<F> = vec![F::ZERO; total];
+
+    if total > 0 {
+        use p3_maybe_rayon::prelude::*;
+        let active: &mut [F] = &mut dense_values[..total];
+        let chip_chunks = chip_cells.iter().zip(chip_offsets.iter()).collect::<Vec<_>>();
+        let mut slot_starts: Vec<usize> = chip_offsets.clone();
+        slot_starts.push(total);
+        let mut remaining: &mut [F] = active;
+        let mut chip_slots: Vec<&mut [F]> = Vec::with_capacity(chip_cells.len());
+        for i in 0..chip_cells.len() {
+            let len = slot_starts[i + 1] - slot_starts[i];
+            let (head, tail) = remaining.split_at_mut(len);
+            chip_slots.push(head);
+            remaining = tail;
+        }
+
+        chip_slots.into_par_iter().zip(chip_chunks.into_par_iter()).for_each(
+            |(slot, ((trace_values, width), _))| {
+                let (trace_values, width) = (*trace_values, *width);
+                let height = trace_values.len().checked_div(width).unwrap_or(0);
+                if width == 0 || height == 0 {
+                    return;
+                }
+                slot.par_chunks_exact_mut(height).enumerate().for_each(|(col, dst)| {
+                    for row in 0..height {
+                        dst[row] = trace_values[row * width + col];
+                    }
+                });
+            },
+        );
+    }
+    dense_values.resize(padded_size, F::ZERO);
+    dense_values
+}
+
+/// Pack multiple chip traces into a single dense vector for Jagged PCS.
+///
+/// Each chip's trace is a `RowMajorMatrix<F>` with `row_count` rows and
+/// `column_count` columns. The traces may have different heights.
+///
+/// The packing concatenates all columns from all chips sequentially:
+/// ```text
+///   chip_0 col_0 (l_0 values) | chip_0 col_1 (l_0 values) | ... |
+///   chip_1 col_0 (l_1 values) | chip_1 col_1 (l_1 values) | ... |
+///   ...
+/// ```
+///
+/// The result is zero-padded out to the committed dense length (whole
+/// stacking blocks — see [`committed_dense_len`]).
+///
+/// Prefer [`compute_jagged_metadata`] + [`materialize_dense_jagged`] for new
+/// code — that pair lets the dense vector exist only for the brief window
+/// when the BaseFold commit needs it.
+pub fn pack_traces_jagged<F: Field>(traces: &[(String, RowMajorMatrix<F>)]) -> JaggedPacking<F> {
+    let mut chip_infos = Vec::with_capacity(traces.len());
+    let mut offsets = Vec::new();
+    let mut dense_values = Vec::new();
+
+    for (name, trace) in traces {
+        let height = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
+        let width = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
+
+        chip_infos.push(JaggedChipInfo {
+            name: name.clone(),
+            row_count: height,
+            column_count: width,
+        });
+
+        for col in 0..width {
+            offsets.push(dense_values.len());
+            for row in 0..height {
+                dense_values.push(trace.values[row * width + col]);
+            }
+        }
+    }
+
+    let total_values = dense_values.len();
+    offsets.push(total_values);
+
+    let dense_len = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
+    dense_values.resize(dense_len, F::ZERO);
+
+    JaggedPacking { dense_values, chip_infos, offsets, total_values, dense_len }
+}
+
+/// Compute the cumulative column offsets `t_k = Σ_{j<k} row_count_j · column_count_j`
+/// for Jagged verification, `k = 0..=n`; the verifier uses them to locate
+/// chip data in the dense vector.
+pub fn cumulative_offsets(chip_infos: &[JaggedChipInfo]) -> Vec<usize> {
+    let mut cumulative = Vec::with_capacity(chip_infos.len() + 1);
+    cumulative.push(0);
+    for info in chip_infos {
+        let prev = *cumulative.last().unwrap();
+        cumulative.push(prev + info.row_count * info.column_count);
+    }
+    cumulative
+}
+
+/// Derive the witnessed per-chip **row counts** (column heights) and the
+/// **padding-column count** from a single round's jagged packing.
+///
+/// The proof witnesses `(row_count, column_count)` pairs plus a
+/// `padding_column_count` per round; the same quantities are derived from
+/// `offsets` / `column_counts` / `total_values` at lift time.  This helper
+/// hoists that derivation into one place so the real prover, the dummy, and
+/// the recursion lift all agree on the numbers (dummy == real by
+/// construction).
+///
+/// * `column_counts[i]` = number of columns chip `i` contributes (on the
+///   wire as `PackingMeta::column_counts`).
+/// * `offsets` = per-column cumulative start offset in the dense vector, with a
+///   final sentinel `offsets.last() == total_values` (see
+///   [`compute_jagged_metadata_from_dims`]).
+/// * returns `row_counts[i]` = chip `i`'s column height (real rows), recovered
+///   by the offsets sentinel-walk (identical to the lift's `packing_row_counts`
+///   in `recursion/circuit/src/shard_level_witness.rs`).
+/// * returns `padding_column_count` = the number of artificial columns the
+///   BaseFold stacking quantization adds to round the real total column count
+///   up to the next power of two (`padded_cols - total_real_cols`).
+///
+/// For a single-stacked main commit there is exactly **one round**, so
+/// callers wrap the row-count result in a one-element outer `Vec` and the
+/// padding count in a one-element `Vec`.
+pub fn derive_row_and_padding_counts(
+    column_counts: &[usize],
+    offsets: &[usize],
+    total_values: usize,
+) -> (Vec<usize>, usize) {
+    let mut row_counts: Vec<usize> = Vec::with_capacity(column_counts.len());
+    let mut col_idx: usize = 0;
+    for &cc in column_counts.iter() {
+        if cc == 0 {
+            row_counts.push(0);
+            continue;
+        }
+        let h = if col_idx + 1 < offsets.len() {
+            offsets[col_idx + 1].saturating_sub(offsets[col_idx])
+        } else if col_idx < offsets.len() {
+            total_values.saturating_sub(offsets[col_idx])
+        } else {
+            0
+        };
+        row_counts.push(h);
+        col_idx += cc;
+    }
+    let total_real_cols: usize = column_counts.iter().sum();
+    let padded_cols = total_real_cols.max(1).next_power_of_two();
+    let padding_column_count = padded_cols.saturating_sub(total_real_cols);
+    (row_counts, padding_column_count)
+}
+
+/// Statistics about the Jagged packing efficiency.
+#[derive(Debug)]
+pub struct JaggedStats {
+    /// Number of chips packed.
+    pub num_chips: usize,
+    /// Total columns across all chips.
+    pub total_columns: usize,
+    /// Total real values (before padding).
+    pub total_real_values: usize,
+    /// Padded dense vector size (power of 2).
+    pub padded_size: usize,
+    /// Padding overhead ratio.
+    pub padding_ratio: f64,
+    /// Compared to per-chip padding (each chip padded to its own 2^k).
+    pub per_chip_padded_total: usize,
+    /// Space savings vs per-chip padding.
+    pub savings_vs_per_chip: f64,
+}
+
+/// Compute statistics about the Jagged packing.
+pub fn jagged_stats(packing: &JaggedPacking<impl Field>) -> JaggedStats {
+    let total_columns: usize = packing.chip_infos.iter().map(|c| c.column_count).sum();
+    let padded_size = packing.dense_len;
+
+    let per_chip_padded_total: usize = packing
+        .chip_infos
+        .iter()
+        .map(|c| {
+            let chip_total = c.row_count * c.column_count;
+            if chip_total == 0 {
+                0
+            } else {
+                chip_total.next_power_of_two()
+            }
+        })
+        .sum();
+
+    JaggedStats {
+        num_chips: packing.chip_infos.len(),
+        total_columns,
+        total_real_values: packing.total_values,
+        padded_size,
+        padding_ratio: padded_size as f64 / packing.total_values.max(1) as f64,
+        per_chip_padded_total,
+        savings_vs_per_chip: 1.0 - (padded_size as f64 / per_chip_padded_total.max(1) as f64),
+    }
+}
+
+//  Hierarchical PCS: Table-Local Column Folding + Global BaseFold
+//
+// The naive approach (pack_traces_jagged above) treats all columns from
+// all tables as a single flat vector. This has O(total_columns) fan-in
+// for the PCS projection, causing register pressure and compute-bound
+// bottlenecks on GPU.
+//
+// The hierarchical approach:
+//   Phase 1: For each table, fold N columns → 1 polynomial via random
+//            linear combination. This is table-local, aligned, SIMD-friendly.
+//   Phase 2: Pack the per-table polynomials (one per table, different heights)
+//            into a jagged vector for the global BaseFold commit. Fan-in = num_tables.
+//
+// This reduces fan-in from O(total_columns) to O(num_tables), preserves
+// data locality, and handles jagged heights naturally.
+
+/// Result of table-local column folding (Phase 1).
+///
+/// Each table's multi-column trace is folded into a single-column polynomial
+/// using random linear combination: f_table(x) = Σ_j α^j · col_j(x)
+#[derive(Clone, Debug)]
+pub struct FoldedTable<F> {
+    /// Name of the chip/table.
+    pub name: String,
+    /// The folded single-column polynomial (height = original row count).
+    pub folded_values: Vec<F>,
+    /// Original row count.
+    pub height: usize,
+    /// Original column count (before folding).
+    pub original_width: usize,
+}
+
+/// Phase 1: Fold each table's columns into a single polynomial.
+///
+/// For each table with columns [c_0, c_1, ..., c_{w-1}], computes:
+///   f(x) = c_0(x) + α · c_1(x) + α² · c_2(x) + ... + α^{w-1} · c_{w-1}(x)
+///
+/// where α is a Fiat-Shamir challenge sampled per table.
+///
+/// # Arguments
+/// - `traces`: Named trace matrices (one per chip/table)
+/// - `alpha`: The batching challenge (must be sampled from Fiat-Shamir transcript
+///   AFTER absorbing table metadata for security)
+///
+/// # Returns
+/// A vector of `FoldedTable` — one folded polynomial per table.
+pub fn fold_tables_local<F: Field>(
+    traces: &[(String, RowMajorMatrix<F>)],
+    alpha: F,
+) -> Vec<FoldedTable<F>> {
+    traces
+        .iter()
+        .map(|(name, trace)| {
+            let height = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
+            let width = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
+
+            let mut folded = vec![F::ZERO; height];
+            let mut alpha_pow = F::ONE;
+            for col in 0..width {
+                #[allow(clippy::needless_range_loop)]
+                for row in 0..height {
+                    folded[row] += alpha_pow * trace.values[row * width + col];
+                }
+                alpha_pow *= alpha;
+            }
+
+            FoldedTable { name: name.clone(), folded_values: folded, height, original_width: width }
+        })
+        .collect()
+}
+
+/// Phase 2: Pack folded per-table polynomials into a jagged dense vector.
+///
+/// Each table is a single-column polynomial of height `table.height`.
+/// These are concatenated into one dense vector (with padding to power of 2)
+/// for a single BaseFold commit.
+///
+/// Fan-in = number of tables (typically ~20), NOT number of columns (~hundreds).
+pub fn pack_folded_tables_jagged<F: Field>(tables: &[FoldedTable<F>]) -> JaggedPacking<F> {
+    let mut chip_infos = Vec::with_capacity(tables.len());
+    let mut offsets = Vec::new();
+    let mut dense_values = Vec::new();
+
+    for table in tables {
+        chip_infos.push(JaggedChipInfo {
+            name: table.name.clone(),
+            row_count: table.height,
+            column_count: 1,
+        });
+
+        offsets.push(dense_values.len());
+        dense_values.extend_from_slice(&table.folded_values);
+    }
+
+    let total_values = dense_values.len();
+    offsets.push(total_values);
+    let dense_len = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
+    dense_values.resize(dense_len, F::ZERO);
+
+    JaggedPacking { dense_values, chip_infos, offsets, total_values, dense_len }
+}
+
+/// Full hierarchical PCS pipeline: fold tables locally, then pack for BaseFold.
+///
+/// ```text
+/// [Table_0: h_0 × w_0] → fold → [f_0: h_0 × 1]  ─┐
+/// [Table_1: h_1 × w_1] → fold → [f_1: h_1 × 1]  ─┤ pack_jagged → dense vector → BaseFold commit
+/// [Table_2: h_2 × w_2] → fold → [f_2: h_2 × 1]  ─┘
+/// ```
+///
+/// Fan-in reduced from Σ(w_i) to N (number of tables).
+pub fn hierarchical_jagged_pack<F: Field>(
+    traces: &[(String, RowMajorMatrix<F>)],
+    alpha: F,
+) -> (Vec<FoldedTable<F>>, JaggedPacking<F>) {
+    let folded = fold_tables_local(traces, alpha);
+    let packing = pack_folded_tables_jagged(&folded);
+    (folded, packing)
+}
+
+// <2^30 jagged round-split — shared integer-only partition.
+//
+// The jagged verifier asserts each round's `area < 1<<30`, `log_m < 30`, and
+// per-count base-field bounds.  A round is ONE stacked-PCS commit and is
+// never sub-split.  With no prep/main split at recursion, the compress dense
+// trace (Σ all chips) can itself exceed 2^30, in which case the in-circuit
+// prefix-sum bit-decomposition (`bits_per_entry = jagged_eval_point_len/2 =
+// log_m+1`) hits the KoalaBear 31-bit num2bits wall.  Splitting the chips
+// into G groups, each with total area < 2^30, keeps every per-round
+// prefix-sum ≤ 31 bits.
+
+/// The `1 << 30` per-round area ceiling (the jagged verifier's
+/// `AreaOutOfBounds` / `log_m < 30` bound).  A round must hold a STRICTLY
+/// smaller dense area so its prefix-sum bit-width (`log_m + 1`) stays ≤ 31.
+pub const MAX_ROUND_LOG_AREA: u32 = 30;
+
+/// Derive the GROUP partition from name-sorted [`JaggedChipInfo`]s (the form
+/// both the prover's packing and the verifier's `chip_infos` carry).
+///
+/// A group is one INDEPENDENT jagged instance — its own reduction, jagged-eval
+/// and BaseFold open.  Even with several committed rounds, every round is
+/// batched into a single proof and only the COMMITMENTS are per round.  So
+/// the cover is always the identity, and a `[preprocessed | main]` column
+/// layout does NOT split it — those regions live in one jagged instance whose
+/// columns run end to end.
+///
+/// Both the prover and the verifier call this, and the verifier compares the
+/// proof's group map against its own run of it, so the two must agree.
+#[must_use]
+pub fn partition_from_chip_infos(chip_infos: &[JaggedChipInfo]) -> Vec<Vec<usize>> {
+    alloc::vec![(0..chip_infos.len()).collect()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+
+    type F = KoalaBear;
+
+    #[test]
+    fn test_pack_traces_jagged() {
+        let cpu_trace = RowMajorMatrix::new(vec![F::ONE; 1024 * 70], 70);
+        let addsub_trace = RowMajorMatrix::new(vec![F::TWO; 256 * 31], 31);
+        let divrem_trace = RowMajorMatrix::new(vec![F::ONE; 16 * 170], 170);
+
+        let traces = vec![
+            ("Cpu".to_string(), cpu_trace),
+            ("AddSub".to_string(), addsub_trace),
+            ("DivRem".to_string(), divrem_trace),
+        ];
+
+        let packing = pack_traces_jagged(&traces);
+        let stats = jagged_stats(&packing);
+
+        println!("Jagged packing stats:");
+        println!("  chips: {}", stats.num_chips);
+        println!("  total columns: {}", stats.total_columns);
+        println!("  real values: {}", stats.total_real_values);
+        println!("  padded size: {}", stats.padded_size);
+        println!("  padding ratio: {:.2}x", stats.padding_ratio);
+        println!("  per-chip padded total: {}", stats.per_chip_padded_total);
+        println!("  savings vs per-chip: {:.1}%", stats.savings_vs_per_chip * 100.0);
+
+        assert_eq!(stats.num_chips, 3);
+        assert_eq!(stats.total_columns, 70 + 31 + 170);
+        assert_eq!(stats.total_real_values, 1024 * 70 + 256 * 31 + 16 * 170);
+        assert!(stats.padded_size >= stats.total_real_values);
+        assert!(stats.padded_size.is_power_of_two());
+    }
+
+    #[test]
+    fn test_hierarchical_jagged_pack() {
+        let cpu_trace = RowMajorMatrix::new(vec![F::ONE; 1024 * 70], 70);
+        let addsub_trace = RowMajorMatrix::new(vec![F::TWO; 256 * 31], 31);
+        let divrem_trace = RowMajorMatrix::new(vec![F::ONE; 16 * 170], 170);
+
+        let traces = vec![
+            ("Cpu".to_string(), cpu_trace),
+            ("AddSub".to_string(), addsub_trace),
+            ("DivRem".to_string(), divrem_trace),
+        ];
+
+        let alpha = F::from_u32(42);
+        let (folded, packing) = hierarchical_jagged_pack(&traces, alpha);
+
+        assert_eq!(folded.len(), 3);
+        assert_eq!(folded[0].height, 1024);
+        assert_eq!(folded[0].original_width, 70);
+        assert_eq!(folded[1].height, 256);
+        assert_eq!(folded[2].height, 16);
+
+        let stats = jagged_stats(&packing);
+        println!("Hierarchical jagged stats:");
+        println!("  tables (fan-in): {}", stats.num_chips);
+        println!("  total columns: {} (should be 3, not {})", stats.total_columns, 70 + 31 + 170);
+        println!("  real values: {}", stats.total_real_values);
+        println!("  padded size: {}", stats.padded_size);
+        println!("  padding ratio: {:.2}x", stats.padding_ratio);
+
+        assert_eq!(stats.total_columns, 3);
+        assert_eq!(stats.total_real_values, 1024 + 256 + 16);
+
+        let flat_packing = pack_traces_jagged(&traces);
+        let flat_stats = jagged_stats(&flat_packing);
+        println!("\nFlat vs Hierarchical:");
+        println!("  Flat real values: {}", flat_stats.total_real_values);
+        println!("  Hierarchical real values: {}", stats.total_real_values);
+        println!(
+            "  Data reduction: {:.1}x",
+            flat_stats.total_real_values as f64 / stats.total_real_values as f64
+        );
+    }
+
+    #[test]
+    fn test_cumulative_offsets() {
+        let infos = vec![
+            JaggedChipInfo { name: "A".into(), row_count: 100, column_count: 3 },
+            JaggedChipInfo { name: "B".into(), row_count: 50, column_count: 2 },
+        ];
+
+        let offsets = cumulative_offsets(&infos);
+        assert_eq!(offsets, vec![0, 300, 400]);
+    }
+
+    #[test]
+    fn pin_classes_are_ordered_and_the_smallest_fitting_one_wins() {
+        for w in RECURSION_PIN_CLASSES.windows(2) {
+            assert!(w[0].main.area < w[1].main.area && w[0].prep.area <= w[1].prep.area);
+        }
+        let small = RECURSION_PIN_CLASSES[0];
+        let large = RECURSION_PIN_CLASSES[RecursionPins::LAST_CLASS];
+        assert_eq!(RecursionPins::class_for_committed(1, 1), Some(0));
+        assert_eq!(RecursionPins::class_for_committed(small.main.area, small.prep.area), Some(0));
+        assert_eq!(RecursionPins::class_for_committed(small.main.area + 1, 1), Some(1));
+        assert_eq!(RecursionPins::class_for_committed(1, small.prep.area + 1), Some(1));
+        assert_eq!(RecursionPins::class_for_committed(large.main.area + 1, 1), None);
+        assert_eq!(RecursionPins::class(1), RECURSION_PINS);
+        assert_eq!(large.class_index(), Some(RecursionPins::LAST_CLASS));
+        let cube = 1usize << 22;
+        for c in RECURSION_PIN_CLASSES {
+            for pin in [c.main, c.prep] {
+                assert!(pin.pad_columns * cube >= pin.area);
+                let split = AreaPin::split_padding(pin.area - 32, pin.pad_columns, cube);
+                assert_eq!(split.len(), pin.pad_columns);
+                assert_eq!(split.iter().sum::<usize>(), pin.area - 32);
+            }
+        }
+    }
+
+    #[test]
+    fn split_padding_is_even_bounded_and_exact() {
+        let cube = 1usize << 22;
+        for pad in [0usize, 1, 15, 16, 17, 1000, (1 << 26) - 32, (1 << 26)] {
+            let v = AreaPin::split_padding(pad, 16, cube);
+            assert_eq!(v.len(), 16);
+            assert_eq!(v.iter().sum::<usize>(), pad);
+            assert!(v.iter().all(|h| *h <= cube));
+            assert!(v.iter().max().unwrap() - v.iter().min().unwrap() <= 1);
+        }
+    }
+
+    #[test]
+    fn pinned_metadata_raises_the_dense_len_to_the_pin() {
+        use crate::multilinear::PaddedMle;
+        use p3_field::PrimeCharacteristicRing;
+        let traces: Vec<(String, PaddedMle<crate::InnerVal>)> = vec![(
+            "a".into(),
+            PaddedMle::padded_with_zeros(
+                std::sync::Arc::new(crate::basefold::Mle::from_row_major(RowMajorMatrix::new(
+                    vec![crate::InnerVal::ONE; 96 * 3],
+                    3,
+                ))),
+                22,
+            ),
+        )];
+        let natural = compute_jagged_metadata::<crate::InnerVal>(&traces);
+        assert_eq!(natural.dense_len, 1 << DEFAULT_LOG_STACKING_HEIGHT);
+        let pin = AreaPin { area: 1 << 26, pad_columns: 16 };
+        let pinned = compute_jagged_metadata_pinned::<crate::InnerVal>(&traces, Some(pin));
+        assert_eq!(pinned.dense_len, 1 << 26);
+        assert_eq!(pinned.total_values, natural.total_values);
+        assert_eq!(pinned.log_dense_size(), 26);
+    }
+}

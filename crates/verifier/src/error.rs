@@ -10,6 +10,8 @@ pub enum Error {
     InvalidXLength,
     #[error("Invalid data")]
     InvalidData,
+    #[error("Input ended before the layout did")]
+    Truncated,
     #[error("Invalid point in subgroup check")]
     InvalidPoint,
 

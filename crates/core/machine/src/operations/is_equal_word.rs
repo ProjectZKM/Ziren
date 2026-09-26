@@ -1,6 +1,6 @@
 use p3_field::Field;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::ZKMAirBuilder, Word};
+use zkm_pcs::{air::ZKMAirBuilder, Word};
 
 use super::IsZeroWordOperation;
 
@@ -19,10 +19,10 @@ impl<F: Field> IsEqualWordOperation<F> {
         let a = a_u32.to_le_bytes();
         let b = b_u32.to_le_bytes();
         let diff = Word([
-            F::from_canonical_u8(a[0]) - F::from_canonical_u8(b[0]),
-            F::from_canonical_u8(a[1]) - F::from_canonical_u8(b[1]),
-            F::from_canonical_u8(a[2]) - F::from_canonical_u8(b[2]),
-            F::from_canonical_u8(a[3]) - F::from_canonical_u8(b[3]),
+            F::from_u8(a[0]) - F::from_u8(b[0]),
+            F::from_u8(a[1]) - F::from_u8(b[1]),
+            F::from_u8(a[2]) - F::from_u8(b[2]),
+            F::from_u8(a[3]) - F::from_u8(b[3]),
         ]);
         self.is_diff_zero.populate_from_field_element(diff);
         (a_u32 == b_u32) as u32
@@ -37,7 +37,6 @@ impl<F: Field> IsEqualWordOperation<F> {
     ) {
         builder.assert_bool(is_real.clone());
 
-        // Calculate differences in limbs.
         let diff = Word([
             a[0].clone() - b[0].clone(),
             a[1].clone() - b[1].clone(),
@@ -45,7 +44,6 @@ impl<F: Field> IsEqualWordOperation<F> {
             a[3].clone() - b[3].clone(),
         ]);
 
-        // Check if the difference is 0.
         IsZeroWordOperation::<AB::F>::eval(builder, diff, cols.is_diff_zero, is_real.clone());
     }
 }

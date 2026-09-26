@@ -16,12 +16,9 @@ where
     V: Ord + Display + 'a,
 {
     let mut entries = table.into_iter().collect::<Vec<_>>();
-    // Sort table by count (descending), then the name order (ascending).
     entries.sort_unstable_by(|a, b| a.1.cmp(b.1).reverse().then_with(|| a.0.cmp(&b.0)));
-    // Convert counts to `String`s to prepare them for printing and to measure their width.
     let mut entries =
         entries.into_iter().map(|(label, ct)| (label.to_string().to_lowercase(), ct)).peekable();
-    // Calculate width for padding the counts.
     let width = entries.peek().map(|(_, b)| b.to_string().len()).unwrap_or_default();
 
     (width, entries)

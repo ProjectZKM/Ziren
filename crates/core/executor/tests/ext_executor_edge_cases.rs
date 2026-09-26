@@ -1,5 +1,5 @@
 use zkm_core_executor::{ExecutionError, Executor};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 /// `EXT` with `lsb + msbd >= 32` is architecturally undefined. The executor must reject it
 /// with a trap instead of underflowing the `31 - lsb - msbd` shift amount (which would panic

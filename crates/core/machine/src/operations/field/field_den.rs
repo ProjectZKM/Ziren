@@ -6,12 +6,9 @@ use p3_field::PrimeField32;
 use zkm_core_executor::events::ByteRecord;
 use zkm_curves::params::{FieldParameters, Limbs};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{Polynomial, ZKMAirBuilder};
 
-use super::{
-    util::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
-    util_air::eval_field_operation,
-};
+use super::{util::compute_root_quotient_and_shift, util_air::eval_field_operation};
 use crate::air::WordAirBuilder;
 
 /// A set of columns to compute `FieldDen(a, b)` where `a`, `b` are field elements.
@@ -27,8 +24,9 @@ pub struct FieldDenCols<T, P: FieldParameters> {
     /// The result of `a den b`, where a, b are field elements
     pub result: Limbs<T, P::Limbs>,
     pub(crate) carry: Limbs<T, P::Limbs>,
-    pub(crate) witness_low: Limbs<T, P::Witness>,
-    pub(crate) witness_high: Limbs<T, P::Witness>,
+    /// The root-quotient witness, offset-shifted into `[0, 2^16)`; u16-checked (see
+    /// `FieldOpCols::witness`).
+    pub(crate) witness: Limbs<T, P::Witness>,
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
@@ -48,19 +46,32 @@ impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
         debug_assert_eq!(&den_inv * &denominator % &p, BigUint::from(1u32));
         debug_assert!(result < p);
 
-        let equation_lhs = if sign { b * &result + &result } else { b * &result + a };
+        self.populate_with_result(record, a, b, sign, &result);
+        result
+    }
+
+    /// Fills the columns for `result`, which need not be reduced: `carry` is the exact quotient
+    /// of `lhs - rhs` by `p` for that `result`.
+    pub(crate) fn populate_with_result(
+        &mut self,
+        record: &mut impl ByteRecord,
+        a: &BigUint,
+        b: &BigUint,
+        sign: bool,
+        result: &BigUint,
+    ) {
+        let p = P::modulus();
+        let equation_lhs = if sign { b * result + result } else { b * result + a };
         let equation_rhs = if sign { a.clone() } else { result.clone() };
         let carry = (&equation_lhs - &equation_rhs) / &p;
-        debug_assert!(carry < p);
         debug_assert_eq!(&carry * &p, &equation_lhs - &equation_rhs);
 
         let p_a: Polynomial<F> = P::to_limbs_field::<F, _>(a).into();
         let p_b: Polynomial<F> = P::to_limbs_field::<F, _>(b).into();
         let p_p: Polynomial<F> = P::to_limbs_field::<F, _>(&p).into();
-        let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
+        let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(result).into();
         let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
 
-        // Compute the vanishing polynomial.
         let vanishing_poly = if sign {
             &p_b * &p_result + &p_result - &p_a - &p_carry * &p_p
         } else {
@@ -74,20 +85,14 @@ impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
             P::NB_BITS_PER_LIMB as u32,
             P::NB_WITNESS_LIMBS,
         );
-        let (p_witness_low, p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
 
         self.result = p_result.into();
         self.carry = p_carry.into();
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        self.witness = Limbs(p_witness.try_into().unwrap());
 
-        // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
-
-        result
+        record.add_u16_range_checks_field(&self.witness.0);
     }
 }
 
@@ -111,10 +116,6 @@ where
         let p_result: Polynomial<<AB as AirBuilder>::Expr> = self.result.into();
         let p_carry: Polynomial<<AB as AirBuilder>::Expr> = self.carry.into();
 
-        // Compute the vanishing polynomial:
-        //      lhs(x) = sign * (b(x) * result(x) + result(x)) + (1 - sign) * (b(x) * result(x) +
-        // a(x))      rhs(x) = sign * a(x) + (1 - sign) * result(x)
-        //      lhs(x) - rhs(x) - carry(x) * p(x)
         let p_equation_lhs =
             if sign { &p_b * &p_result + &p_result } else { &p_b * &p_result + &p_a };
         let p_equation_rhs = if sign { p_a } else { p_result };
@@ -126,16 +127,13 @@ where
         let p_vanishing: Polynomial<<AB as AirBuilder>::Expr> =
             p_lhs_minus_rhs - &p_carry * &p_limbs;
 
-        let p_witness_low = self.witness_low.0.iter().into();
-        let p_witness_high = self.witness_high.0.iter().into();
+        let p_witness = self.witness.0.iter().into();
 
-        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high);
+        eval_field_operation::<AB, P>(builder, &p_vanishing, &p_witness);
 
-        // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_low.0, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_high.0, is_real);
+        builder.slice_range_check_u16(&self.witness.0, is_real);
     }
 }
 
@@ -143,10 +141,11 @@ where
 mod tests {
     use num::BigUint;
     use p3_air::BaseAir;
+    use p3_air::WindowAccess;
     use p3_field::{Field, PrimeField32};
     use zkm_core_executor::{ExecutionRecord, Program};
     use zkm_curves::params::FieldParameters;
-    use zkm_stark::{
+    use zkm_pcs::{
         air::{MachineAir, ZKMAirBuilder},
         koala_bear_poseidon2::KoalaBearPoseidon2,
         StarkGenericConfig,
@@ -162,9 +161,9 @@ mod tests {
     };
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
-    use p3_matrix::{dense::RowMajorMatrix, Matrix};
+    use p3_matrix::dense::RowMajorMatrix;
     use rand::thread_rng;
     use zkm_curves::edwards::ed25519::Ed25519BaseField;
     use zkm_derive::AlignedBorrow;
@@ -214,15 +213,12 @@ mod tests {
                     (a, b)
                 })
                 .collect();
-            // Hardcoded edge cases.
             operands.extend(vec![
                 (BigUint::from(0u32), BigUint::from(0u32)),
                 (BigUint::from(1u32), BigUint::from(2u32)),
                 (BigUint::from(4u32), BigUint::from(5u32)),
                 (BigUint::from(10u32), BigUint::from(19u32)),
             ]);
-            // It is important that the number of rows is an exact power of 2,
-            // otherwise the padding will not work correctly.
             assert_eq!(operands.len(), num_rows);
 
             let rows = operands
@@ -236,9 +232,6 @@ mod tests {
                     row
                 })
                 .collect::<Vec<_>>();
-            // Convert the trace to a row major matrix.
-
-            // Note we do not pad the trace here because we cannot just pad with all 0s.
 
             Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_TEST_COLS))
         }
@@ -261,7 +254,7 @@ mod tests {
     {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
-            let local = main.row_slice(0);
+            let local = main.current_slice();
             let local: &TestCols<AB::Var, P> = (*local).borrow();
             local.a_den_b.eval(builder, &local.a, &local.b, self.sign, AB::F::ZERO);
         }
@@ -286,9 +279,6 @@ mod tests {
         let chip: FieldDenChip<Ed25519BaseField> = FieldDenChip::new(true);
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
-        // This it to test that the proof DOESN'T work if messed up.
-        // let row = trace.row_mut(0);
-        // row[0] = KoalaBear::from_canonical_u8(0);
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();

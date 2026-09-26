@@ -35,58 +35,56 @@ impl<F: Field> ByteChip<F> {
     ///
     /// This function returns a `trace` which is a matrix containing all possible byte operations.
     pub fn trace() -> RowMajorMatrix<F> {
-        // The trace containing all values, with all multiplicities set to zero.
         let mut initial_trace = RowMajorMatrix::new(
             zeroed_f_vec(NUM_ROWS * NUM_BYTE_PREPROCESSED_COLS),
             NUM_BYTE_PREPROCESSED_COLS,
         );
 
-        // Record all the necessary operations for each byte lookup.
         let opcodes = ByteOpcode::all();
 
-        // Iterate over all options for pairs of bytes `b` and `c`.
         for (row_index, (b, c)) in (0..=u8::MAX).cartesian_product(0..=u8::MAX).enumerate() {
             let b = b as u8;
             let c = c as u8;
             let col: &mut BytePreprocessedCols<F> = initial_trace.row_mut(row_index).borrow_mut();
 
-            // Set the values of `b` and `c`.
-            col.b = F::from_canonical_u8(b);
-            col.c = F::from_canonical_u8(c);
+            col.b = F::from_u8(b);
+            col.c = F::from_u8(c);
 
-            // Iterate over all operations for results and updating the table map.
             for opcode in opcodes.iter() {
                 match opcode {
                     ByteOpcode::AND => {
                         let and = b & c;
-                        col.and = F::from_canonical_u8(and);
+                        col.and = F::from_u8(and);
                         ByteLookupEvent::new(*opcode, and as u16, 0, b, c)
                     }
                     ByteOpcode::OR => {
                         let or = b | c;
-                        col.or = F::from_canonical_u8(or);
+                        col.or = F::from_u8(or);
                         ByteLookupEvent::new(*opcode, or as u16, 0, b, c)
                     }
                     ByteOpcode::XOR => {
                         let xor = b ^ c;
-                        col.xor = F::from_canonical_u8(xor);
+                        col.xor = F::from_u8(xor);
                         ByteLookupEvent::new(*opcode, xor as u16, 0, b, c)
                     }
                     ByteOpcode::NOR => {
                         let nor = !(b | c);
-                        col.nor = F::from_canonical_u8(nor);
+                        col.nor = F::from_u8(nor);
                         ByteLookupEvent::new(*opcode, nor as u16, 0, b, c)
+                    }
+                    ByteOpcode::Range => {
+                        unreachable!("Range is not a byte-table op")
                     }
                     ByteOpcode::SLL => {
                         let sll = b << (c & 7);
-                        col.sll = F::from_canonical_u8(sll);
+                        col.sll = F::from_u8(sll);
                         ByteLookupEvent::new(*opcode, sll as u16, 0, b, c)
                     }
                     ByteOpcode::U8Range => ByteLookupEvent::new(*opcode, 0, 0, b, c),
                     ByteOpcode::ShrCarry => {
                         let (res, carry) = shr_carry(b, c);
-                        col.shr = F::from_canonical_u8(res);
-                        col.shr_carry = F::from_canonical_u8(carry);
+                        col.shr = F::from_u8(res);
+                        col.shr_carry = F::from_u8(carry);
                         ByteLookupEvent::new(*opcode, res as u16, carry, b, c)
                     }
                     ByteOpcode::LTU => {
@@ -101,7 +99,7 @@ impl<F: Field> ByteChip<F> {
                     }
                     ByteOpcode::U16Range => {
                         let v = ((b as u32) << 8) + c as u32;
-                        col.value_u16 = F::from_canonical_u32(v);
+                        col.value_u16 = F::from_u32(v);
                         ByteLookupEvent::new(*opcode, v as u16, 0, 0, 0)
                     }
                 };

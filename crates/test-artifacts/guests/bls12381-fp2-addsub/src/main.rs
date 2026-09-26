@@ -10,7 +10,6 @@ use core::{mem::transmute, str::FromStr};
 const MODULUS: &str = "4002409555221667393417789825735904156556882819939007885332058136124031650490837864442687629129015664037894272559787";
 
 fn random_u64_6(modulus: &BigUint) -> [u64; 6] {
-    //let mut rng = rand::thread_rng();
     let mut arr = [0u64; 6];
     let modulus_bytes = modulus.to_bytes_le();
     let modulus_u64: [u64; 6] = [
@@ -130,5 +129,4 @@ pub fn main() {
         assert_eq!(c1, u64_6_to_biguint(&res_c1) % &modulus);
     }
 
-    // println!("All tests passed!");
 }

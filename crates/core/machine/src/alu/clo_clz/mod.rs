@@ -10,28 +10,28 @@
 //! Second, we prove the CLO.
 //! we use clo(b) = clz(0xffffffff - b)
 
+use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
 use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_pcs::air::BaseAirBuilder;
+use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
-    air::ZKMCoreAirBuilder,
-    utils::{next_power_of_two, pad_rows_fixed},
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
+    frame::{eval_i_type_frame, ITypeFrameCols},
+    operations::ShiftRightOperation,
+    utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,
 };
 
@@ -46,8 +46,7 @@ pub struct CloClzChip;
 ///
 /// Optimized: `sr1` removed (hardcoded as 1 in SRL lookup since we always verify sr1 == 1),
 /// `is_clo` removed (derived as `is_real - is_clz`).
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CloClzCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -57,9 +56,6 @@ pub struct CloClzCols<T> {
     /// The result
     pub a: Word<T>,
 
-    /// The input operand.
-    pub b: Word<T>,
-
     /// if clo, bb == 0xffffffff - b
     /// if clz, bb == b
     pub bb: Word<T>,
@@ -67,12 +63,19 @@ pub struct CloClzCols<T> {
     /// whether the `bb` is zero.
     pub is_bb_zero: T,
 
+    /// The inlined shift proving `bb >> (31 - a) == 1` when `bb != 0`.
+    pub srl: ShiftRightOperation<T>,
+
     /// Flag to indicate whether the opcode is CLZ.
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_clz: T,
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every CloClz row is an instruction).
+    pub frame: ITypeFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for CloClzChip {
@@ -86,17 +89,12 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         "CloClz".to_string()
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
-
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         CloClzCols::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.cloclz_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <CloClzChip as MachineAir<F>>::name(self).as_str(),
@@ -109,7 +107,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows for each event.
         let mut rows: Vec<[F; NUM_CLOCLZ_COLS]> = vec![];
         let cloclz_events = input.cloclz_events.clone();
         for event in cloclz_events.iter() {
@@ -118,19 +115,26 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             let cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
 
             cols.a = Word::from(event.a);
-            cols.b = Word::from(event.b);
-            cols.pc = F::from_canonical_u32(event.pc);
-            cols.next_pc = F::from_canonical_u32(event.next_pc);
+            cols.pc = F::from_u32(event.pc);
+            cols.next_pc = F::from_u32(event.next_pc);
             cols.is_real = F::ONE;
             cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);
+            cols.frame.populate_from_alu(
+                event,
+                &input.program,
+                input.public_values.execution_shard,
+                output,
+            );
 
             let bb = if event.opcode == Opcode::CLZ { event.b } else { 0xffffffff - event.b };
             cols.bb = Word::from(bb);
 
-            // if bb == 0, then result is 32.
             cols.is_bb_zero = F::from_bool(bb == 0);
 
-            // Range check.
+            if bb != 0 {
+                cols.srl.populate(output, Opcode::SRL, bb, 31 - event.a);
+            }
+
             output.add_u8_range_checks(&bb.to_le_bytes());
             output.add_byte_lookup_event(ByteLookupEvent {
                 opcode: ByteOpcode::LTU,
@@ -143,34 +147,19 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             rows.push(row);
         }
 
-        // Pad the trace to a power of two depending on the proof shape in `input`.
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
-            || [F::ZERO; NUM_CLOCLZ_COLS],
+            || {
+                let mut row = [F::ZERO; NUM_CLOCLZ_COLS];
+                let _cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
+                row
+            },
             input.fixed_log2_rows::<F, _>(self),
             <CloClzChip as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
-        let mut trace =
+        let trace =
             RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_CLOCLZ_COLS);
-
-        // Create the template for the padded rows. These are fake rows that don't fail on some
-        // sanity checks.
-        let padded_row_template = {
-            let mut row = [F::ZERO; NUM_CLOCLZ_COLS];
-            let cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
-            // Padding rows: is_real=0, is_clz=0, is_bb_zero=1, a=32.
-            // is_bb_zero=1 ensures send_alu for SRL has zero multiplicity.
-            cols.a = Word::from(32);
-            cols.is_bb_zero = F::ONE;
-
-            row
-        };
-        debug_assert!(padded_row_template.len() == NUM_CLOCLZ_COLS);
-        for i in input.cloclz_events.len() * NUM_CLOCLZ_COLS..trace.values.len() {
-            trace.values[i] = padded_row_template[i % NUM_CLOCLZ_COLS];
-        }
 
         Ok(trace)
     }
@@ -196,31 +185,27 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &CloClzCols<AB::Var> = (*local).borrow();
         let one: AB::Expr = AB::F::ONE.into();
         let zero: AB::Expr = AB::F::ZERO.into();
 
-        // Derive is_clo from is_real and is_clz.
         let is_clo: AB::Expr = local.is_real.into() - local.is_clz.into();
 
-        // if clz, bb == b, else bb = !b
         {
-            local.b.0.iter().zip_eq(local.bb.0.iter()).for_each(|(a, b)| {
-                builder.when(is_clo.clone()).assert_eq(*a + *b, AB::Expr::from_canonical_u32(255));
+            local.frame.op_b_val().0.iter().zip_eq(local.bb.0.iter()).for_each(|(a, b)| {
+                builder.when(is_clo.clone()).assert_eq(*a + *b, AB::Expr::from_u32(255));
                 builder.when(local.is_clz).assert_eq(*a, *b);
             });
 
             builder.slice_range_check_u8(&local.bb.0, local.is_real);
         }
 
-        // ensure result < 33
-        // Send the comparison lookup.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::F::ONE,
             local.a[0],
-            AB::Expr::from_canonical_u8(33),
+            AB::Expr::from_u8(33),
             local.is_real,
         );
 
@@ -228,63 +213,56 @@ where
         builder.when(local.is_real).assert_zero(local.a[2]);
         builder.when(local.is_real).assert_zero(local.a[3]);
 
-        // Get the opcode for the operation.
-        // is_clo = is_real - is_clz, so:
-        //   opcode = (is_real - is_clz) * CLO + is_clz * CLZ
-        //          = is_real * CLO + is_clz * (CLZ - CLO)
-        let cpu_opcode = is_clo.clone() * Opcode::CLO.as_field::<AB::F>()
-            + local.is_clz * Opcode::CLZ.as_field::<AB::F>();
+        builder
+            .when(local.is_real)
+            .when_not(local.frame.op_a_0)
+            .assert_word_eq(local.a, *local.frame.op_a_access.value());
 
-        builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
-            cpu_opcode,
-            local.a,
-            local.b,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
-            local.is_real,
+        eval_i_type_frame(
+            builder,
+            &local.frame,
+            local.is_clz * Opcode::CLZ.as_field::<AB::F>()
+                + (local.is_real - local.is_clz) * Opcode::CLO.as_field::<AB::F>(),
+            local.pc.into(),
+            local.next_pc.into(),
+            local.next_pc + AB::Expr::from_u32(4),
+            local.next_pc.into(),
+            AB::Expr::ZERO,
+            local.is_real.into(),
         );
 
-        // if is_bb_zero == 1, bb == 0, and result is 32
         {
             builder.assert_bool(local.is_bb_zero);
 
             builder.when(local.is_bb_zero).assert_zero(local.bb.reduce::<AB>());
             builder.when(local.is_bb_zero).assert_zero(local.bb[3]);
 
-            builder.when(local.is_bb_zero).assert_eq(local.a[0], AB::Expr::from_canonical_u32(32));
+            builder.when(local.is_bb_zero).assert_eq(local.a[0], AB::Expr::from_u32(32));
         }
 
         {
-            // Use the SRL table to verify bb >> (31 - result) == 1.
-            // Since sr1 is always 1 when bb != 0, we hardcode the expected result
-            // as Word([1, 0, 0, 0]) directly, eliminating 4 witness columns.
-            builder.send_alu(
-                Opcode::SRL.as_field::<AB::F>(),
-                Word([one.clone(), zero.clone(), zero.clone(), zero.clone()]),
-                local.bb,
+            let is_srl = local.is_real - local.is_bb_zero;
+            ShiftRightOperation::<AB::F>::eval(
+                builder,
+                local.bb.map(|x| x.into()),
                 Word([
-                    AB::Expr::from_canonical_u32(31) - local.a[0],
+                    AB::Expr::from_u32(31) - local.a[0],
                     zero.clone(),
                     zero.clone(),
                     zero.clone(),
                 ]),
-                one.clone() - local.is_bb_zero,
+                &local.srl,
+                is_srl.clone(),
+                zero.clone(),
+                zero.clone(),
             );
+            let shifted = local.srl.value();
+            builder.when(is_srl.clone()).assert_eq(shifted[0], one.clone());
+            builder.when(is_srl.clone()).assert_zero(shifted[1]);
+            builder.when(is_srl.clone()).assert_zero(shifted[2]);
+            builder.when(is_srl).assert_zero(shifted[3]);
         }
 
-        // is_clz and is_real are boolean; is_clo = is_real - is_clz must also be boolean,
-        // which is equivalent to: is_clz = 1 implies is_real = 1.
         builder.assert_bool(local.is_clz);
         builder.assert_bool(local.is_real);
         builder.when(local.is_clz).assert_one(local.is_real);
@@ -296,24 +274,38 @@ mod tests {
     use crate::utils::{uni_stark_prove, uni_stark_verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm_stark::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
+    use zkm_core_executor::{ExecutionRecord, Executor, Instruction, Opcode, Program};
+    use zkm_pcs::{
+        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig, ZKMCoreOpts,
     };
 
     use super::CloClzChip;
 
+    /// Real CloClz rows carry an instruction frame (program fetch + register
+    /// records), so the tests execute a small program instead of hand-writing
+    /// events.
+    fn cloclz_record() -> ExecutionRecord {
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 0x00800000, false, true),
+            Instruction::new(Opcode::CLZ, 30, 29, 0, false, false),
+            Instruction::new(Opcode::CLO, 31, 29, 0, false, false),
+            Instruction::new(Opcode::ADD, 28, 0, 0, false, true),
+            Instruction::new(Opcode::CLZ, 27, 28, 0, false, false),
+            Instruction::new(Opcode::CLO, 26, 28, 0, false, false),
+            Instruction::new(Opcode::ADD, 25, 0, 0xffffffff, false, true),
+            Instruction::new(Opcode::CLZ, 24, 25, 0, false, false),
+            Instruction::new(Opcode::CLO, 23, 25, 0, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        runtime.records[0].clone()
+    }
+
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.cloclz_events = vec![
-            AluEvent::new(0, Opcode::CLZ, 32, 0, 0),
-            AluEvent::new(0, Opcode::CLZ, 8, 0x00800000, 0),
-            AluEvent::new(0, Opcode::CLZ, 0, 0xffffffff, 0),
-            AluEvent::new(0, Opcode::CLO, 32, 0xffffffff, 0),
-            AluEvent::new(0, Opcode::CLO, 8, 0xff7fffff, 0),
-            AluEvent::new(0, Opcode::CLO, 0, 0, 0),
-        ];
+        let shard = cloclz_record();
+        assert!(!shard.cloclz_events.is_empty());
         let chip = CloClzChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
@@ -325,27 +317,7 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let mut cloclz_events: Vec<AluEvent> = Vec::new();
-
-        let clo_clzs: Vec<(Opcode, u32, u32, u32)> = vec![
-            (Opcode::CLZ, 32, 0, 0),
-            (Opcode::CLZ, 8, 0x00800000, 0),
-            (Opcode::CLZ, 0, 0xffffffff, 0),
-            (Opcode::CLO, 32, 0xffffffff, 0),
-            (Opcode::CLO, 8, 0xff7fffff, 0),
-            (Opcode::CLO, 0, 0, 0),
-        ];
-        for t in clo_clzs.iter() {
-            cloclz_events.push(AluEvent::new(0, t.0, t.1, t.2, t.3));
-        }
-
-        // Append more events until we have 1000 tests.
-        for _ in 0..(1000 - clo_clzs.len()) {
-            cloclz_events.push(AluEvent::new(0, Opcode::CLZ, 32, 0, 0));
-        }
-
-        let mut shard = ExecutionRecord::default();
-        shard.cloclz_events = cloclz_events;
+        let shard = cloclz_record();
         let chip = CloClzChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();

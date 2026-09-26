@@ -22,7 +22,6 @@ fn build_workspace(dir_name: &str) -> Result<()> {
 fn main() -> Result<()> {
     build_workspace("guests")?;
 
-    // `hello-world-imm-wrap-vk` lives in its own workspace.
     build_workspace("guests-imm-wrap-vk")?;
 
     Ok(())

@@ -23,6 +23,11 @@ struct Args {
     start: Option<usize>,
     #[clap(short, long)]
     end: Option<usize>,
+    /// Comma-separated arbitrary shape indices (sparse set). Supersedes
+    /// --start/--end. Lets a targeted regen build only specific shapes
+    /// (e.g. just a program's recursion shapes). Mirrors ziren-gpu.
+    #[clap(short, long)]
+    indices: Option<String>,
 }
 
 fn main() {
@@ -36,6 +41,12 @@ fn main() {
     let num_setup_workers = args.count_setup_workers;
     let range_start = args.start;
     let range_end = args.end;
+    let indices = args.indices.map(|s| {
+        s.split(',')
+            .filter(|t| !t.trim().is_empty())
+            .map(|t| t.trim().parse::<usize>().expect("--indices: comma-separated usize"))
+            .collect::<Vec<usize>>()
+    });
 
     build_vk_map_to_file::<DefaultProverComponents>(
         build_dir,
@@ -45,6 +56,7 @@ fn main() {
         num_setup_workers,
         range_start,
         range_end,
+        indices,
     )
     .unwrap();
 }

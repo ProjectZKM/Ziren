@@ -1,7 +1,7 @@
 use crate::events::{Poseidon2PermuteEvent, PrecompileEvent};
 use crate::syscalls::{Syscall, SyscallCode, SyscallContext};
 use crate::ExecutionError;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::Permutation;
 use zkm_primitives::poseidon2_init;
@@ -27,12 +27,10 @@ impl Syscall for Poseidon2PermuteSyscall {
             panic!("state_ptr must be aligned");
         }
 
-        // First read the words for the state. We can read a slice_unsafe here because we write
-        // the post-state to state_ptr later.
         let pre_state = ctx.slice_unsafe(state_ptr, STATE_SIZE);
         let pre_state: [u32; 16] = pre_state.as_slice().try_into().unwrap();
 
-        let mut state = pre_state.map(KoalaBear::from_canonical_u32);
+        let mut state = pre_state.map(KoalaBear::from_u32);
 
         let hasher = poseidon2_init();
         hasher.permute_mut(&mut state);
@@ -40,7 +38,6 @@ impl Syscall for Poseidon2PermuteSyscall {
         let post_state = state.map(|x| x.as_canonical_u32());
         let state_records = ctx.mw_slice(state_ptr, &post_state);
 
-        // Push the Poseidon2 permute event.
         let shard = ctx.current_shard();
         let event = PrecompileEvent::Poseidon2Permute(Poseidon2PermuteEvent {
             shard,

@@ -30,64 +30,50 @@
 //! - Ideally, we would calculate b * pow(2, c), but pow(2, c) could overflow in F.
 //! - Shifting by a multiple of 8 bits is easy (=num_bytes_to_shift) since we just shift words.
 
+use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
 
-use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
-    events::{AluEvent, ByteLookupEvent, ByteRecord},
+    events::{AluEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_pcs::{air::MachineAir, PicusInfo};
 use zkm_primitives::consts::WORD_SIZE;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::{air::MachineAir, Word};
 
 use crate::{
     air::ZKMCoreAirBuilder,
-    utils::{next_power_of_two, pad_rows_fixed},
+    frame::{eval_r_type_frame, RTypeFrameCols},
+    utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,
 };
 
 /// The number of main trace columns for `ShiftLeft`.
 pub const NUM_SHIFT_LEFT_COLS: usize = size_of::<ShiftLeftCols<u8>>();
 
-/// The number of bits in a byte.
-pub const BYTE_SIZE: usize = 8;
+use super::BYTE_SIZE;
 
 /// A chip that implements bitwise operations for the opcodes SLL and SLLI.
 #[derive(Default)]
 pub struct ShiftLeft;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShiftLeftCols<T> {
     /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
 
-    /// The output operand.
-    pub a: Word<T>,
-
-    /// The first input operand.
-    pub b: Word<T>,
-
-    /// The second input operand.
-    pub c: Word<T>,
-
-    /// The least significant byte of `c`. Used to verify `shift_by_n_bits` and `shift_by_n_bytes`.
+    /// The least significant byte of `c`; checks `shift_by_n_bits` and `shift_by_n_bytes`.
     pub c_least_sig_byte: [T; BYTE_SIZE],
 
     /// A boolean array whose `i`th element indicates whether `num_bits_to_shift = i`.
@@ -106,6 +92,11 @@ pub struct ShiftLeftCols<T> {
     pub shift_by_n_bytes: [T; WORD_SIZE],
 
     pub is_real: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every SLL row is an instruction — the Instruction bus and
+    /// its dependency rows are gone).
+    pub frame: RTypeFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
@@ -119,13 +110,12 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
         "ShiftLeft".to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         ShiftLeftCols::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.shift_left_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <ShiftLeft as MachineAir<F>>::name(self).as_str(),
@@ -138,33 +128,34 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows for each event.
         let mut rows: Vec<[F; NUM_SHIFT_LEFT_COLS]> = vec![];
         let shift_left_events = input.shift_left_events.clone();
         for event in shift_left_events.iter() {
             let mut row = [F::ZERO; NUM_SHIFT_LEFT_COLS];
             let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
             let mut blu = Vec::new();
-            self.event_to_row(event, cols, &mut blu);
+            self.event_to_row(
+                event,
+                cols,
+                &mut blu,
+                &input.program,
+                input.public_values.execution_shard,
+            );
             rows.push(row);
         }
 
-        // Pad the trace to a power of two depending on the proof shape in `input`.
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || [F::ZERO; NUM_SHIFT_LEFT_COLS],
             input.fixed_log2_rows::<F, _>(self),
             <ShiftLeft as MachineAir<F>>::name(self).as_str(),
         );
 
-        // Convert the trace to a row major matrix.
         let mut trace = RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             NUM_SHIFT_LEFT_COLS,
         );
 
-        // Create the template for the padded rows. These are fake rows that don't fail on some
-        // sanity checks.
         let padded_row_template = {
             let mut row = [F::ZERO; NUM_SHIFT_LEFT_COLS];
             let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
@@ -192,11 +183,17 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             .shift_left_events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_SHIFT_LEFT_COLS];
                     let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    self.event_to_row(
+                        event,
+                        cols,
+                        &mut blu,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
                 });
                 blu
             })
@@ -213,41 +210,37 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             !shard.shift_left_events.is_empty()
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl ShiftLeft {
     /// Create a row from an event.
-    fn event_to_row<F: PrimeField>(
+    fn event_to_row<F: PrimeField32>(
         &self,
         event: &AluEvent,
         cols: &mut ShiftLeftCols<F>,
         blu: &mut impl ByteRecord,
+        program: &Program,
+        shard: u32,
     ) {
+        cols.frame.populate_from_alu(event, program, shard, blu);
+
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
-        let c = event.c.to_le_bytes();
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
-        cols.a = Word(a.map(F::from_canonical_u8));
-        cols.b = Word(b.map(F::from_canonical_u8));
-        cols.c = Word(c.map(F::from_canonical_u8));
+        let _c = event.c.to_le_bytes();
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
         cols.is_real = F::ONE;
         for i in 0..BYTE_SIZE {
-            cols.c_least_sig_byte[i] = F::from_canonical_u32((event.c >> i) & 1);
+            cols.c_least_sig_byte[i] = F::from_u32((event.c >> i) & 1);
         }
 
-        // Variables for bit shifting.
         let num_bits_to_shift = event.c as usize % BYTE_SIZE;
         for i in 0..BYTE_SIZE {
             cols.shift_by_n_bits[i] = F::from_bool(num_bits_to_shift == i);
         }
 
         let bit_shift_multiplier = 1u32 << num_bits_to_shift;
-        cols.bit_shift_multiplier = F::from_canonical_u32(bit_shift_multiplier);
+        cols.bit_shift_multiplier = F::from_u32(bit_shift_multiplier);
 
         let mut carry = 0u32;
         let base = 1u32 << BYTE_SIZE;
@@ -259,27 +252,21 @@ impl ShiftLeft {
             bit_shift_result[i] = (v % base) as u8;
             bit_shift_result_carry[i] = carry as u8;
         }
-        cols.bit_shift_result = bit_shift_result.map(F::from_canonical_u8);
-        cols.bit_shift_result_carry = bit_shift_result_carry.map(F::from_canonical_u8);
+        cols.bit_shift_result = bit_shift_result.map(F::from_u8);
+        cols.bit_shift_result_carry = bit_shift_result_carry.map(F::from_u8);
 
-        // Variables for byte shifting.
         let num_bytes_to_shift = (event.c & 0b11111) as usize / BYTE_SIZE;
         for i in 0..WORD_SIZE {
             cols.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
         }
 
-        // Range checks.
         {
             blu.add_u8_range_checks(&bit_shift_result);
             blu.add_u8_range_checks(&bit_shift_result_carry);
         }
 
-        // Sanity check.
         for i in num_bytes_to_shift..WORD_SIZE {
-            debug_assert_eq!(
-                cols.bit_shift_result[i - num_bytes_to_shift],
-                F::from_canonical_u8(a[i])
-            );
+            debug_assert_eq!(cols.bit_shift_result[i - num_bytes_to_shift], F::from_u8(a[i]));
         }
     }
 }
@@ -296,52 +283,42 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ShiftLeftCols<AB::Var> = (*local).borrow();
+        let op_b = local.frame.op_b_val();
+        let op_c = local.frame.op_c_val();
 
         let zero: AB::Expr = AB::F::ZERO.into();
         let one: AB::Expr = AB::F::ONE.into();
-        let base: AB::Expr = AB::F::from_canonical_u32(1 << BYTE_SIZE).into();
+        let base: AB::Expr = AB::F::from_u32(1 << BYTE_SIZE).into();
 
-        // We first "bit shift" and next we "byte shift". Then we compare the results with a.
-        // Finally, we perform some misc checks.
-
-        // Step 1: Perform the fine-grained bit shift (i.e., shifting b by c % 8 bits).
-
-        // Check the sum of c_least_sig_byte[i] * 2^i equals c[0].
         let mut c_byte_sum = zero.clone();
         for i in 0..BYTE_SIZE {
-            let val: AB::Expr = AB::F::from_canonical_u32(1 << i).into();
+            let val: AB::Expr = AB::F::from_u32(1 << i).into();
             c_byte_sum = c_byte_sum.clone() + val * local.c_least_sig_byte[i];
         }
-        builder.assert_eq(c_byte_sum, local.c[0]);
+        builder.assert_eq(c_byte_sum, op_c[0]);
 
-        // Check shift_by_n_bits[i] is 1 iff i = num_bits_to_shift.
         let mut num_bits_to_shift = zero.clone();
 
-        // 3 is the maximum number of bits necessary to represent num_bits_to_shift as
-        // num_bits_to_shift is in [0, 7].
         for i in 0..3 {
-            num_bits_to_shift = num_bits_to_shift.clone()
-                + local.c_least_sig_byte[i] * AB::F::from_canonical_u32(1 << i);
+            num_bits_to_shift =
+                num_bits_to_shift.clone() + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
         }
         for i in 0..BYTE_SIZE {
             builder
                 .when(local.shift_by_n_bits[i])
-                .assert_eq(num_bits_to_shift.clone(), AB::F::from_canonical_usize(i));
+                .assert_eq(num_bits_to_shift.clone(), AB::F::from_usize(i));
         }
 
-        // Check bit_shift_multiplier = 2^num_bits_to_shift by using shift_by_n_bits.
         for i in 0..BYTE_SIZE {
             builder
                 .when(local.shift_by_n_bits[i])
-                .assert_eq(local.bit_shift_multiplier, AB::F::from_canonical_usize(1 << i));
+                .assert_eq(local.bit_shift_multiplier, AB::F::from_usize(1 << i));
         }
 
-        // Check bit_shift_result = b * bit_shift_multiplier by using bit_shift_result_carry to
-        // carry-propagate.
         for i in 0..WORD_SIZE {
-            let mut v = local.b[i] * local.bit_shift_multiplier
+            let mut v = op_b[i] * local.bit_shift_multiplier
                 - local.bit_shift_result_carry[i] * base.clone();
             if i > 0 {
                 v = v.clone() + local.bit_shift_result_carry[i - 1].into();
@@ -349,35 +326,31 @@ where
             builder.assert_eq(local.bit_shift_result[i], v);
         }
 
-        // Step 2: Perform the coarser bit shift (i.e., shifting b by c // 8 bits).
-
-        // The two-bit number represented by the 3rd and 4th least significant bits of c is the
-        // number of bytes to shift.
         let num_bytes_to_shift =
-            local.c_least_sig_byte[3] + local.c_least_sig_byte[4] * AB::F::from_canonical_u32(2);
+            local.c_least_sig_byte[3] + local.c_least_sig_byte[4] * AB::F::from_u32(2);
 
-        // Verify that shift_by_n_bytes[i] = 1 if and only if i = num_bytes_to_shift.
         for i in 0..WORD_SIZE {
             builder
                 .when(local.shift_by_n_bytes[i])
-                .assert_eq(num_bytes_to_shift.clone(), AB::F::from_canonical_usize(i));
+                .assert_eq(num_bytes_to_shift.clone(), AB::F::from_usize(i));
         }
 
-        // The bytes of a must match those of bit_shift_result, taking into account the byte
-        // shifting.
+        let av = *local.frame.op_a_access.value();
+        let not_a0 = AB::Expr::ONE - local.frame.op_a_0;
         for num_bytes_to_shift in 0..WORD_SIZE {
             let mut shifting = builder.when(local.shift_by_n_bytes[num_bytes_to_shift]);
             for i in 0..WORD_SIZE {
                 if i < num_bytes_to_shift {
-                    // The first num_bytes_to_shift bytes must be zero.
-                    shifting.assert_eq(local.a[i], zero.clone());
+                    shifting.assert_eq(av[i], zero.clone());
                 } else {
-                    shifting.assert_eq(local.a[i], local.bit_shift_result[i - num_bytes_to_shift]);
+                    shifting.assert_eq(
+                        av[i],
+                        not_a0.clone() * local.bit_shift_result[i - num_bytes_to_shift],
+                    );
                 }
             }
         }
 
-        // Step 3: Misc checks such as range checks & bool checks.
         for bit in local.c_least_sig_byte.iter() {
             builder.assert_bool(*bit);
         }
@@ -390,7 +363,6 @@ where
             one.clone(),
         );
 
-        // Range check.
         {
             builder.slice_range_check_u8(&local.bit_shift_result, local.is_real);
             builder.slice_range_check_u8(&local.bit_shift_result_carry, local.is_real);
@@ -407,25 +379,16 @@ where
 
         builder.assert_bool(local.is_real);
 
-        // Receive the arguments.
-        builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
-            AB::F::from_canonical_u32(Opcode::SLL as u32),
-            local.a,
-            local.b,
-            local.c,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
-            local.is_real,
+        eval_r_type_frame(
+            builder,
+            &local.frame,
+            local.is_real * Opcode::SLL.as_field::<AB::F>(),
+            local.pc.into(),
+            local.next_pc.into(),
+            local.next_pc + AB::Expr::from_u32(4),
+            local.next_pc.into(),
+            AB::Expr::ZERO,
+            local.is_real.into(),
         );
     }
 }
@@ -436,17 +399,16 @@ mod tests {
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm_stark::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_core_executor::{ExecutionRecord, Opcode};
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::ShiftLeft;
+    use crate::programs::tests::{alu_op, run_instructions};
 
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.shift_left_events = vec![AluEvent::new(0, Opcode::SLL, 16, 8, 1)];
+        let shard = run_instructions(alu_op(Opcode::SLL, 8, 1));
+        assert!(!shard.shift_left_events.is_empty());
         let chip = ShiftLeft::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
@@ -458,39 +420,37 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let mut shift_events: Vec<AluEvent> = Vec::new();
-        let shift_instructions: Vec<(Opcode, u32, u32, u32)> = vec![
-            (Opcode::SLL, 0x00000002, 0x00000001, 1),
-            (Opcode::SLL, 0x00000080, 0x00000001, 7),
-            (Opcode::SLL, 0x00004000, 0x00000001, 14),
-            (Opcode::SLL, 0x80000000, 0x00000001, 31),
-            (Opcode::SLL, 0xffffffff, 0xffffffff, 0),
-            (Opcode::SLL, 0xfffffffe, 0xffffffff, 1),
-            (Opcode::SLL, 0xffffff80, 0xffffffff, 7),
-            (Opcode::SLL, 0xffffc000, 0xffffffff, 14),
-            (Opcode::SLL, 0x80000000, 0xffffffff, 31),
-            (Opcode::SLL, 0x21212121, 0x21212121, 0),
-            (Opcode::SLL, 0x42424242, 0x21212121, 1),
-            (Opcode::SLL, 0x90909080, 0x21212121, 7),
-            (Opcode::SLL, 0x48484000, 0x21212121, 14),
-            (Opcode::SLL, 0x80000000, 0x21212121, 31),
-            (Opcode::SLL, 0x21212121, 0x21212121, 0xffffffe0),
-            (Opcode::SLL, 0x42424242, 0x21212121, 0xffffffe1),
-            (Opcode::SLL, 0x90909080, 0x21212121, 0xffffffe7),
-            (Opcode::SLL, 0x48484000, 0x21212121, 0xffffffee),
-            (Opcode::SLL, 0x00000000, 0x21212120, 0xffffffff),
+        let shift_instructions: Vec<(u32, u32)> = vec![
+            (0x00000001, 1),
+            (0x00000001, 7),
+            (0x00000001, 14),
+            (0x00000001, 31),
+            (0xffffffff, 0),
+            (0xffffffff, 1),
+            (0xffffffff, 7),
+            (0xffffffff, 14),
+            (0xffffffff, 31),
+            (0x21212121, 0),
+            (0x21212121, 1),
+            (0x21212121, 7),
+            (0x21212121, 14),
+            (0x21212121, 31),
+            (0x21212121, 0xffffffe0),
+            (0x21212121, 0xffffffe1),
+            (0x21212121, 0xffffffe7),
+            (0x21212121, 0xffffffee),
+            (0x21212120, 0xffffffff),
         ];
-        for t in shift_instructions.iter() {
-            shift_events.push(AluEvent::new(0, t.0, t.1, t.2, t.3));
+        let mut instructions = Vec::new();
+        for &(b, c) in shift_instructions.iter() {
+            instructions.extend(alu_op(Opcode::SLL, b, c));
         }
-
-        // Append more events until we have 1000 tests.
         for _ in 0..(1000 - shift_instructions.len()) {
-            shift_events.push(AluEvent::new(0, Opcode::SLL, 1, 1, 0));
+            instructions.extend(alu_op(Opcode::SLL, 1, 0));
         }
 
-        let mut shard = ExecutionRecord::default();
-        shard.shift_left_events = shift_events;
+        let shard = run_instructions(instructions);
+        assert!(shard.shift_left_events.len() >= 1000);
         let chip = ShiftLeft::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();

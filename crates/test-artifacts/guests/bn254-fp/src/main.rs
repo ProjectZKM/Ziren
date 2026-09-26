@@ -36,7 +36,6 @@ fn mul(lhs: &[u32; NUM_LIMBS], rhs: &[u32; NUM_LIMBS]) -> [u32; NUM_LIMBS] {
 }
 
 fn random_u32_8() -> [u32; NUM_LIMBS] {
-    //let mut rng = rand::thread_rng();
     let mut arr = [0u32; NUM_LIMBS];
     for item in arr.iter_mut() {
         *item = 1; // rng.gen();
@@ -131,5 +130,4 @@ pub fn main() {
             u32_8_to_biguint(&mul(&a_reduced, &zero)) % &modulus
         );
     }
-    // println!("All tests passed!");
 }

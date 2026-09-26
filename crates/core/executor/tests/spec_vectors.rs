@@ -1,0 +1,284 @@
+//! Spec conformance of the executor.
+//!
+//! The vectors are encoding-level: they go through `Instruction::decode_from`
+//! rather than hand-built `Opcode`s.  `spec_vectors/vectors.json` carries every
+//! instruction row of `docs/src/mips-vm/mips-isa.md`, assembled with llvm-mc and
+//! executed by Unicorn, QEMU's MIPS32r2 core, as the independent oracle.
+//! Regenerate it with `spec_vectors/gen.py`.
+//!
+//! Every program is also run twice, traced and through the JIT, to check that
+//! the executor's final state is a function of the program alone.
+
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+use zkm_core_executor::{Executor, Instruction, Program, Register};
+use zkm_pcs::ZKMCoreOpts;
+
+const VECTORS: &str = include_str!("spec_vectors/vectors.json");
+
+struct Final {
+    regs: [u32; 32],
+    hi: u32,
+    lo: u32,
+    mem: Vec<(u32, u32)>,
+    clk: u32,
+    records_digest: u64,
+}
+
+fn run_words(
+    words: &[u32],
+    code: u32,
+    image: &BTreeMap<u32, u32>,
+    mem_addrs: &[u32],
+) -> Result<Final, String> {
+    run_words_mode(words, code, image, mem_addrs, false)
+}
+
+/// `fast` selects `Executor::run_fast` (the JIT / untraced path) instead of the traced `run`.
+fn run_words_mode(
+    words: &[u32],
+    code: u32,
+    image: &BTreeMap<u32, u32>,
+    mem_addrs: &[u32],
+    fast: bool,
+) -> Result<Final, String> {
+    let mut instructions = Vec::with_capacity(words.len());
+    for (i, w) in words.iter().enumerate() {
+        let insn = Instruction::decode_from(*w)
+            .map_err(|e| format!("decoder rejects word {i} ({w:#010x}): {e}"))?;
+        instructions.push(insn);
+    }
+    let mut program = Program::new(instructions, code, code);
+    program.image = image.clone();
+    let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+    if fast {
+        runtime.run_fast().map_err(|e| format!("execution error: {e:?}"))?;
+    } else {
+        runtime.run().map_err(|e| format!("execution error: {e:?}"))?;
+    }
+    let mut regs = [0u32; 32];
+    for (i, r) in regs.iter_mut().enumerate() {
+        *r = runtime.register(Register::from(i as u8));
+    }
+    let hi = runtime.register(Register::HI);
+    let lo = runtime.register(Register::LO);
+    let mem = mem_addrs.iter().map(|a| (*a, runtime.word(*a))).collect();
+    let records_digest = if fast {
+        0
+    } else {
+        let bytes = bincode::serialize(&runtime.records).expect("serialize records");
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in bytes {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        h
+    };
+    Ok(Final { regs, hi, lo, mem, clk: runtime.state.clk, records_digest })
+}
+
+fn parse_hex(s: &str) -> u32 {
+    let s = s.trim_start_matches("0x");
+    u32::from_str_radix(s, 16).expect("hex")
+}
+
+/// How many ways the vector list is split across tests.  Eight keeps each shard
+/// near a minute while leaving threads for the rest of the package.
+const SHARDS: usize = 8;
+
+/// Check the vectors whose index is congruent to `shard` modulo [`SHARDS`].
+///
+/// Sharding by index rather than by mnemonic keeps the split independent of what
+/// the file contains: adding vectors redistributes them instead of leaving a new
+/// mnemonic unchecked, which a hand-written list of names would do.
+fn check_shard(shard: usize) {
+    let doc: Value = serde_json::from_str(VECTORS).expect("vectors.json");
+    let code = doc["code"].as_u64().unwrap() as u32;
+    let all = doc["vectors"].as_array().unwrap();
+    let vectors: Vec<&Value> =
+        all.iter().enumerate().filter(|(i, _)| i % SHARDS == shard).map(|(_, v)| v).collect();
+    let mut failures: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut per_mnemonic: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    for v in &vectors {
+        let name = v["name"].as_str().unwrap().to_string();
+        let mnemonic = v["mnemonic"].as_str().unwrap().to_string();
+        let words: Vec<u32> =
+            v["words"].as_array().unwrap().iter().map(|w| parse_hex(w.as_str().unwrap())).collect();
+        let image: BTreeMap<u32, u32> = v["image"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, val)| (parse_hex(k), val.as_u64().unwrap() as u32))
+            .collect();
+        let expect_mem: Vec<(u32, u32)> = v["mem"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, val)| (parse_hex(k), val.as_u64().unwrap() as u32))
+            .collect();
+        let mem_addrs: Vec<u32> = expect_mem.iter().map(|(a, _)| *a).collect();
+        let expect_trap = v["expect_trap"].as_bool().unwrap();
+        let entry = per_mnemonic.entry(mnemonic.clone()).or_insert((0, 0));
+        entry.0 += 1;
+
+        let mut problems = Vec::new();
+        match run_words(&words, code, &image, &mem_addrs) {
+            Err(e) if expect_trap && e.starts_with("execution error") => {}
+            Err(e) => problems.push(e),
+            Ok(_) if expect_trap => problems.push("expected a trap, executor completed".into()),
+            Ok(fin) => {
+                let regs: Vec<u32> = v["regs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.as_u64().unwrap() as u32)
+                    .collect();
+                assert_eq!(regs.len(), 32, "oracle vector must carry all 32 registers");
+                for (i, (got, want)) in fin.regs.iter().zip(&regs).enumerate().skip(1) {
+                    if got != want {
+                        problems.push(format!("${i}: ziren {got:#010x} oracle {want:#010x}"));
+                    }
+                }
+                let (hi, lo) = (v["hi"].as_u64().unwrap() as u32, v["lo"].as_u64().unwrap() as u32);
+                if fin.hi != hi {
+                    problems.push(format!("HI: ziren {:#010x} oracle {hi:#010x}", fin.hi));
+                }
+                if fin.lo != lo {
+                    problems.push(format!("LO: ziren {:#010x} oracle {lo:#010x}", fin.lo));
+                }
+                for ((a, got), (_, want)) in fin.mem.iter().zip(&expect_mem) {
+                    if got != want {
+                        problems
+                            .push(format!("mem[{a:#x}]: ziren {got:#010x} oracle {want:#010x}"));
+                    }
+                }
+                let again = run_words(&words, code, &image, &mem_addrs).expect("second run");
+                if again.regs != fin.regs
+                    || again.hi != fin.hi
+                    || again.lo != fin.lo
+                    || again.mem != fin.mem
+                    || again.clk != fin.clk
+                    || again.records_digest != fin.records_digest
+                {
+                    problems.push("second run differs from the first".into());
+                }
+                match run_words_mode(&words, code, &image, &mem_addrs, true) {
+                    Ok(fast) => {
+                        if fast.regs != fin.regs
+                            || fast.hi != fin.hi
+                            || fast.lo != fin.lo
+                            || fast.mem != fin.mem
+                        {
+                            problems.push("run_fast differs from run".into());
+                        }
+                    }
+                    Err(e) => problems.push(format!("run_fast: {e}")),
+                }
+            }
+        }
+        if problems.is_empty() {
+            entry.1 += 1;
+        } else {
+            let asm: Vec<String> = v["asm"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().to_string())
+                .collect();
+            failures.insert(name, [vec![format!("asm: {}", asm.join(" ; "))], problems].concat());
+        }
+    }
+    if let Ok(path) = std::env::var("SPEC_DUMP_DECODED") {
+        let mut decoded: BTreeMap<String, Value> = BTreeMap::new();
+        for v in &vectors {
+            for w in v["words"].as_array().unwrap() {
+                let word = parse_hex(w.as_str().unwrap());
+                let key = format!("{word:08x}");
+                if decoded.contains_key(&key) {
+                    continue;
+                }
+                let entry = match Instruction::decode_from(word) {
+                    Ok(i) => serde_json::json!({
+                        "opcode": i.opcode as u32, "opcode_name": format!("{:?}", i.opcode),
+                        "op_a": i.op_a, "op_b": i.op_b, "op_c": i.op_c, "imm_b": i.imm_b, "imm_c": i.imm_c,
+                    }),
+                    Err(e) => serde_json::json!({ "error": e.to_string() }),
+                };
+                decoded.insert(key, entry);
+            }
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(&decoded).unwrap())
+            .expect("write decoded dump");
+        tracing::info!("wrote {} decoded words to {path}", decoded.len());
+    }
+    tracing::info!("spec vector conformance (passed/total per instruction):");
+    for (mn, (total, ok)) in &per_mnemonic {
+        tracing::info!("  {mn:8} {ok:3}/{total}");
+    }
+    if !failures.is_empty() {
+        for (name, problems) in &failures {
+            tracing::warn!("FAIL {name}");
+            for p in problems {
+                tracing::info!("    {p}");
+            }
+        }
+        panic!(
+            "{} of {} spec vectors failed in shard {shard} of {SHARDS}",
+            failures.len(),
+            vectors.len()
+        );
+    }
+}
+
+/// Every vector is checked by exactly one shard, and every mnemonic the file
+/// carries is reached by some shard.
+///
+/// A sharded run cannot assert this from inside a shard, and the property is the
+/// one that matters: a vector that no test touches is worse than a failing one.
+#[test]
+fn every_vector_belongs_to_a_shard() {
+    let doc: Value = serde_json::from_str(VECTORS).expect("vectors.json");
+    let vectors = doc["vectors"].as_array().unwrap();
+    let mut seen = vec![0usize; vectors.len()];
+    let mut mnemonics: BTreeMap<String, usize> = BTreeMap::new();
+    for shard in 0..SHARDS {
+        for (i, v) in vectors.iter().enumerate().filter(|(i, _)| i % SHARDS == shard) {
+            seen[i] += 1;
+            *mnemonics.entry(v["mnemonic"].as_str().unwrap().to_string()).or_default() += 1;
+        }
+    }
+    assert!(
+        seen.iter().all(|&n| n == 1),
+        "{} vectors are checked by no shard or by more than one",
+        seen.iter().filter(|&&n| n != 1).count()
+    );
+    assert!(!mnemonics.is_empty(), "no mnemonics in the vector file");
+    tracing::info!(
+        "{} vectors across {} mnemonics in {SHARDS} shards",
+        vectors.len(),
+        mnemonics.len()
+    );
+}
+
+macro_rules! spec_vector_shards {
+    ($($name:ident => $shard:expr),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                check_shard($shard);
+            }
+        )*
+    };
+}
+
+spec_vector_shards! {
+    spec_vectors_match_the_oracle_shard_0 => 0,
+    spec_vectors_match_the_oracle_shard_1 => 1,
+    spec_vectors_match_the_oracle_shard_2 => 2,
+    spec_vectors_match_the_oracle_shard_3 => 3,
+    spec_vectors_match_the_oracle_shard_4 => 4,
+    spec_vectors_match_the_oracle_shard_5 => 5,
+    spec_vectors_match_the_oracle_shard_6 => 6,
+    spec_vectors_match_the_oracle_shard_7 => 7,
+}

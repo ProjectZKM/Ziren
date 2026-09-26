@@ -114,7 +114,6 @@ pub fn create_ec_add_event<E: EllipticCurve>(
 
     let (q_memory_records, q) = rt.mr_slice(q_ptr, num_words);
 
-    // When we write to p, we want the clk to be incremented because p and q could be the same.
     rt.clk += 1;
 
     let p_affine = AffinePoint::<E>::from_words_le(&p);
@@ -195,8 +194,7 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
         rt.mr_slice(slice_ptr + (num_limbs as u32), num_words_field_element);
 
     let x_bytes = words_to_bytes_le_vec(&x_vec);
-    let mut x_bytes_be = x_bytes.clone();
-    x_bytes_be.reverse();
+    let x_bytes_be: Vec<u8> = x_bytes.iter().rev().copied().collect();
 
     let decompress_fn = match E::CURVE_TYPE {
         CurveType::Secp256k1 => secp256k1_decompress::<E>,
@@ -218,7 +216,7 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
         clk: start_clk,
         ptr: slice_ptr,
         sign_bit: sign_bit != 0,
-        x_bytes: x_bytes.clone(),
+        x_bytes,
         decompressed_y_bytes,
         x_memory_records,
         y_memory_records,

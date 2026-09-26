@@ -1,7 +1,7 @@
 use itertools::izip;
 
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 
 use crate::air::WordAirBuilder;
 use zkm_core_executor::{
@@ -9,8 +9,8 @@ use zkm_core_executor::{
     ByteOpcode,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::ZKMAirBuilder;
-use zkm_stark::Word;
+use zkm_pcs::air::{BaseAirBuilder, ZKMAirBuilder};
+use zkm_pcs::Word;
 
 /// Operation columns for verifying that an element is within the range `[0, modulus)`.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
@@ -56,9 +56,9 @@ impl<F: Field> GtColsBytes<F> {
             }
         }
 
-        self.result = F::from_canonical_u8(result);
-        self.a_comparison_byte = F::from_canonical_u8(a_comparision_byte);
-        self.b_comparison_byte = F::from_canonical_u8(b_comparision_byte);
+        self.result = F::from_u8(result);
+        self.a_comparison_byte = F::from_u8(a_comparision_byte);
+        self.b_comparison_byte = F::from_u8(b_comparision_byte);
         record.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::LTU,
             a1: result as u16,
@@ -67,8 +67,6 @@ impl<F: Field> GtColsBytes<F> {
             c: a_comparision_byte,
         });
 
-        // Complementary lookup: when a comparison byte is selected, also prove the
-        // reverse direction so that equal bytes are ruled out.
         let has_flag = byte_flags.contains(&1);
         if has_flag {
             record.add_byte_lookup_event(ByteLookupEvent {
@@ -81,7 +79,7 @@ impl<F: Field> GtColsBytes<F> {
         }
 
         for (byte, flag) in izip!(byte_flags.iter(), self.byte_flags.iter_mut()) {
-            *flag = F::from_canonical_u8(*byte);
+            *flag = F::from_u8(*byte);
         }
         self.has_comparison = F::from_bool(has_flag);
 
@@ -99,43 +97,22 @@ impl<F: Field> GtColsBytes<F> {
         builder.slice_range_check_u8(&a.0, is_real);
         builder.slice_range_check_u8(&b.0, is_real);
 
-        // The byte flags give a specification of which byte is `first_eq`, i,e, the first most
-        // significant byte for which the element `a` is larger/smaller than `b`. To verify the
-        // less-than claim we need to check that:
-        // * For all bytes until `first_eq` the element `a` byte is equal to the `b` byte.
-        // * For the `first_eq` byte the `a`` byte is larger/smaller than the `b`byte.
-        // * all byte flags are boolean.
-        // * can only one byte flag is set to one.
-
-        // Check the flags are of valid form.
-
-        // Verify that only one flag is set to one.
-        let mut sum_flags: AB::Expr = AB::Expr::zero();
+        let mut sum_flags: AB::Expr = AB::Expr::ZERO;
         for &flag in cols.byte_flags.iter() {
-            // Assert that the flag is boolean.
             builder.when(is_real).assert_bool(flag);
-            // Add the flag to the sum.
             sum_flags = sum_flags.clone() + flag.into();
         }
         builder.when(is_real).assert_bool(sum_flags.clone());
-        // Constrain has_comparison = sum_flags (when is_real).
         builder.when(is_real).assert_eq(cols.has_comparison, sum_flags);
         builder.when(is_real).assert_bool(cols.has_comparison);
 
-        // Check the less-than condition.
+        let mut is_inequality_visited = AB::Expr::ZERO;
 
-        // A flag to indicate whether an equality check is necessary (this is for all bytes from
-        // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::zero();
-
-        // The bytes of the modulus.
-        let mut first_gt_byte = AB::Expr::zero();
-        let mut b_comparison_byte = AB::Expr::zero();
+        let mut first_gt_byte = AB::Expr::ZERO;
+        let mut b_comparison_byte = AB::Expr::ZERO;
         for (a_byte, b_byte, &flag) in
             izip!(a.into_iter().rev(), b.into_iter().rev(), cols.byte_flags.iter().rev())
         {
-            // Once the byte flag was set to one, we turn off the quality check flag.
-            // We can do this by calculating the sum of the flags since only `1` is set to `1`.
             is_inequality_visited = is_inequality_visited.clone() + flag.into();
 
             first_gt_byte = first_gt_byte.clone() + a_byte * flag;
@@ -147,7 +124,6 @@ impl<F: Field> GtColsBytes<F> {
         builder.when(is_real).assert_eq(cols.a_comparison_byte, first_gt_byte);
         builder.when(is_real).assert_eq(cols.b_comparison_byte, b_comparison_byte);
 
-        // Send the comparison lookup.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             cols.result,
@@ -156,11 +132,6 @@ impl<F: Field> GtColsBytes<F> {
             is_real,
         );
 
-        // Complementary lookup to rule out equal comparison bytes.
-        // When a flag is set, the selected bytes must satisfy either a > b or a < b (not a == b).
-        // LTU(1 - result, a, b) proves the reverse direction.
-        // Use has_comparison (degree-1 column) instead of sum_flags * is_real to keep
-        // the interaction degree low.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::Expr::one() - cols.result,
@@ -192,8 +163,8 @@ impl<F: PrimeField32, const N: usize> AssertLtColsBytes<F, N> {
             assert!(a_byte <= b_byte);
             if a_byte < b_byte {
                 *flag = 1;
-                self.a_comparison_byte = F::from_canonical_u8(*a_byte);
-                self.b_comparison_byte = F::from_canonical_u8(*b_byte);
+                self.a_comparison_byte = F::from_u8(*a_byte);
+                self.b_comparison_byte = F::from_u8(*b_byte);
                 record.add_byte_lookup_event(ByteLookupEvent {
                     opcode: ByteOpcode::LTU,
                     a1: 1,
@@ -206,7 +177,7 @@ impl<F: PrimeField32, const N: usize> AssertLtColsBytes<F, N> {
         }
 
         for (byte, flag) in izip!(byte_flags.iter(), self.byte_flags.iter_mut()) {
-            *flag = F::from_canonical_u8(*byte);
+            *flag = F::from_u8(*byte);
         }
     }
 }
@@ -225,45 +196,23 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
     ) where
         V: Into<AB::Expr>,
     {
-        // The byte flags give a specification of which byte is `first_eq`, i,e, the first most
-        // significant byte for which the element `a` is smaller than `b`. To verify the
-        // less-than claim we need to check that:
-        // * For all bytes until `first_eq` the element `a` byte is equal to the `b` byte.
-        // * For the `first_eq` byte the `a`` byte is smaller than the `b`byte.
-        // * all byte flags are boolean.
-        // * only one byte flag is set to one, and the rest are set to zero.
-
-        // Check the flags are of valid form.
-
-        // Verify that only one flag is set to one.
-        let mut sum_flags: AB::Expr = AB::Expr::zero();
+        let mut sum_flags: AB::Expr = AB::Expr::ZERO;
         for &flag in self.byte_flags.iter() {
-            // Assert that the flag is boolean.
             builder.assert_bool(flag);
-            // Add the flag to the sum.
             sum_flags = sum_flags.clone() + flag.into();
         }
-        // Assert that the sum is equal to one.
         builder.when(is_real.clone()).assert_one(sum_flags);
 
-        // Check the less-than condition.
-
-        // A flag to indicate whether an equality check is necessary (this is for all bytes from
-        // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::zero();
-
-        // The bytes of the modulus.
+        let mut is_inequality_visited = AB::Expr::ZERO;
 
         let a: [AB::Expr; N] = core::array::from_fn(|i| a[i].clone().into());
         let b: [AB::Expr; N] = core::array::from_fn(|i| b[i].clone().into());
 
-        let mut first_lt_byte = AB::Expr::zero();
-        let mut b_comparison_byte = AB::Expr::zero();
+        let mut first_lt_byte = AB::Expr::ZERO;
+        let mut b_comparison_byte = AB::Expr::ZERO;
         for (a_byte, b_byte, &flag) in
             izip!(a.iter().rev(), b.iter().rev(), self.byte_flags.iter().rev())
         {
-            // Once the byte flag was set to one, we turn off the quality check flag.
-            // We can do this by calculating the sum of the flags since only `1` is set to `1`.
             is_inequality_visited = is_inequality_visited.clone() + flag.into();
 
             first_lt_byte = first_lt_byte.clone() + a_byte.clone() * flag;
@@ -278,10 +227,9 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
         builder.when(is_real.clone()).assert_eq(self.a_comparison_byte, first_lt_byte);
         builder.when(is_real.clone()).assert_eq(self.b_comparison_byte, b_comparison_byte);
 
-        // Send the comparison lookup.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::F::one(),
+            AB::F::ONE,
             self.a_comparison_byte,
             self.b_comparison_byte,
             is_real,
@@ -314,13 +262,17 @@ impl<F: PrimeField32, const N: usize> AssertLtColsBits<F, N> {
         }
 
         for (bit, flag) in izip!(bit_flags.iter(), self.bit_flags.iter_mut()) {
-            *flag = F::from_canonical_u8(*bit);
+            *flag = F::from_u8(*bit);
         }
     }
 }
 
 impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
-    pub fn eval<AB: AirBuilder<Var = V>, Ea: Into<AB::Expr> + Clone, Eb: Into<AB::Expr> + Clone>(
+    pub fn eval<
+        AB: ZKMAirBuilder<Var = V>,
+        Ea: Into<AB::Expr> + Clone,
+        Eb: Into<AB::Expr> + Clone,
+    >(
         &self,
         builder: &mut AB,
         a: &[Ea],
@@ -329,56 +281,35 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
     ) where
         V: Into<AB::Expr>,
     {
-        // The bit flags give a specification of which bit is `first_lt`, i,e, the first most
-        // significant bit for which the element `a` is smaller than `b`. To verify the
-        // less-than claim we need to check that:
-        // * For all bytes until `first_lt` the element `a` byte is equal to the `b` byte.
-        // * For the `first_lt` bit the `a`` bit is smaller than the `b` bit.
-        // * all bit flags are boolean.
-        // * only one bit flag is set to one, and the rest are set to zero.
-
-        // Check the flags are of valid form.
-
-        // Verify that only one flag is set to one.
-        let mut sum_flags: AB::Expr = AB::Expr::zero();
+        let mut sum_flags: AB::Expr = AB::Expr::ZERO;
         for &flag in self.bit_flags.iter() {
-            // Assert that the flag is boolean.
             builder.assert_bool(flag);
-            // Add the flag to the sum.
             sum_flags = sum_flags.clone() + flag.into();
         }
-        // Assert that the sum is equal to one.
         builder.when(is_real.clone()).assert_one(sum_flags);
 
-        // Check the less-than condition.
+        let mut is_inequality_visited = AB::Expr::ZERO;
 
-        // A flag to indicate whether an equality check is necessary (this is for all bits from
-        // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::zero();
-
-        // The bits of the elements.
         let a: [AB::Expr; N] = core::array::from_fn(|i| a[i].clone().into());
         let b: [AB::Expr; N] = core::array::from_fn(|i| b[i].clone().into());
 
-        // Calculate the bit which is the first inequality.
-        let mut a_comparison_bit = AB::Expr::zero();
-        let mut b_comparison_bit = AB::Expr::zero();
+        let mut a_comparison_bit = AB::Expr::ZERO;
+        let mut b_comparison_bit = AB::Expr::ZERO;
         for (a_bit, b_bit, &flag) in
             izip!(a.iter().rev(), b.iter().rev(), self.bit_flags.iter().rev())
         {
-            // Once the bit flag was set to one, we turn off the quality check flag.
-            // We can do this by calculating the sum of the flags since only `1` is set to `1`.
             is_inequality_visited = is_inequality_visited.clone() + flag.into();
 
             a_comparison_bit = a_comparison_bit.clone() + a_bit.clone() * flag;
             b_comparison_bit = b_comparison_bit.clone() + b_bit.clone() * flag;
 
-            builder.when(is_real.clone()).assert_zero(
-                (AB::Expr::one() - is_inequality_visited.clone()) * (a_bit.clone() - b_bit.clone()),
-            );
+            builder
+                .when(is_real.clone())
+                .when_not(is_inequality_visited.clone())
+                .assert_eq(a_bit.clone(), b_bit.clone());
         }
 
-        builder.when(is_real.clone()).assert_eq(a_comparison_bit, AB::F::zero());
-        builder.when(is_real.clone()).assert_eq(b_comparison_bit, AB::F::one());
+        builder.when(is_real.clone()).assert_eq(a_comparison_bit, AB::F::ZERO);
+        builder.when(is_real.clone()).assert_eq(b_comparison_bit, AB::F::ONE);
     }
 }

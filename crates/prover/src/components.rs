@@ -1,5 +1,5 @@
 use zkm_core_machine::mips::MipsAir;
-use zkm_stark::{CpuProver, MachineProver, StarkGenericConfig};
+use zkm_pcs::{CpuProver, MachineProver, StarkGenericConfig};
 
 use crate::{CompressAir, CoreSC, InnerSC, OuterSC, ShrinkAir, WrapAir};
 

@@ -15,19 +15,21 @@
 // Memory addresses must be lower than KoalaBear prime.
 pub const MAX_MEMORY: usize = 0x7f000000;
 
+/// Bump-allocates `bytes` bytes aligned to `align` above `_end`.
+///
+/// # Safety
+///
+/// `align` must be a power of two, and calls must not run concurrently: the
+/// heap cursor `HEAP_POS` is unsynchronized (the guest is single-threaded).
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "C" fn sys_alloc_aligned(bytes: usize, align: usize) -> *mut u8 {
     extern "C" {
-        // https://lld.llvm.org/ELF/linker_script.html#sections-command
         static _end: u8;
     }
 
-    // Pointer to next heap address to use, or 0 if the heap has not yet been
-    // initialized.
     static mut HEAP_POS: usize = 0;
 
-    // SAFETY: Single threaded, so nothing else can touch this while we're working.
     let mut heap_pos = unsafe { HEAP_POS };
 
     if heap_pos == 0 {

@@ -1,11 +1,11 @@
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode,
 };
 use zkm_derive::AlignedBorrow;
+use zkm_pcs::{air::ZKMAirBuilder, Word};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use crate::bytes::utils::shr_carry;
 
@@ -40,15 +40,13 @@ impl<F: Field> FixedRotateRightOperation<F> {
     }
 
     pub fn populate(&mut self, record: &mut impl ByteRecord, input: u32, rotation: usize) -> u32 {
-        let input_bytes = input.to_le_bytes().map(F::from_canonical_u8);
+        let input_bytes = input.to_le_bytes().map(F::from_u8);
         let expected = input.rotate_right(rotation as u32);
 
-        // Compute some constants with respect to the rotation needed for the rotation.
         let nb_bytes_to_shift = Self::nb_bytes_to_shift(rotation);
         let nb_bits_to_shift = Self::nb_bits_to_shift(rotation);
-        let carry_multiplier = F::from_canonical_u32(Self::carry_multiplier(rotation));
+        let carry_multiplier = F::from_u32(Self::carry_multiplier(rotation));
 
-        // Perform the byte shift.
         let input_bytes_rotated = Word([
             input_bytes[nb_bytes_to_shift % WORD_SIZE],
             input_bytes[(1 + nb_bytes_to_shift) % WORD_SIZE],
@@ -56,8 +54,6 @@ impl<F: Field> FixedRotateRightOperation<F> {
             input_bytes[(3 + nb_bytes_to_shift) % WORD_SIZE],
         ]);
 
-        // For each byte, calculate the shift and carry. If it's not the first byte, calculate the
-        // new byte value using the current shifted byte and the last carry.
         let mut first_shift = F::ZERO;
         let mut last_carry = F::ZERO;
         for i in (0..WORD_SIZE).rev() {
@@ -70,8 +66,8 @@ impl<F: Field> FixedRotateRightOperation<F> {
                 ByteLookupEvent { opcode: ByteOpcode::ShrCarry, a1: shift as u16, a2: carry, b, c };
             record.add_byte_lookup_event(byte_event);
 
-            self.shift[i] = F::from_canonical_u8(shift);
-            self.carry[i] = F::from_canonical_u8(carry);
+            self.shift[i] = F::from_u8(shift);
+            self.carry[i] = F::from_u8(carry);
 
             if i == WORD_SIZE - 1 {
                 first_shift = self.shift[i];
@@ -82,10 +78,8 @@ impl<F: Field> FixedRotateRightOperation<F> {
             last_carry = self.carry[i];
         }
 
-        // For the first byte, we didn't know the last carry so compute the rotated byte here.
         self.value[WORD_SIZE - 1] = first_shift + last_carry * carry_multiplier;
 
-        // Check that the value is correct.
         assert_eq!(self.value.to_u32(), expected);
 
         expected
@@ -98,12 +92,10 @@ impl<F: Field> FixedRotateRightOperation<F> {
         cols: FixedRotateRightOperation<AB::Var>,
         is_real: AB::Var,
     ) {
-        // Compute some constants with respect to the rotation needed for the rotation.
         let nb_bytes_to_shift = Self::nb_bytes_to_shift(rotation);
         let nb_bits_to_shift = Self::nb_bits_to_shift(rotation);
-        let carry_multiplier = AB::F::from_canonical_u32(Self::carry_multiplier(rotation));
+        let carry_multiplier = AB::F::from_u32(Self::carry_multiplier(rotation));
 
-        // Perform the byte shift.
         let input_bytes_rotated = Word([
             input[nb_bytes_to_shift % WORD_SIZE],
             input[(1 + nb_bytes_to_shift) % WORD_SIZE],
@@ -111,17 +103,15 @@ impl<F: Field> FixedRotateRightOperation<F> {
             input[(3 + nb_bytes_to_shift) % WORD_SIZE],
         ]);
 
-        // For each byte, calculate the shift and carry. If it's not the first byte, calculate the
-        // new byte value using the current shifted byte and the last carry.
-        let mut first_shift = AB::Expr::zero();
-        let mut last_carry = AB::Expr::zero();
+        let mut first_shift = AB::Expr::ZERO;
+        let mut last_carry = AB::Expr::ZERO;
         for i in (0..WORD_SIZE).rev() {
             builder.send_byte_pair(
-                AB::F::from_canonical_u32(ByteOpcode::ShrCarry as u32),
+                AB::F::from_u32(ByteOpcode::ShrCarry as u32),
                 cols.shift[i],
                 cols.carry[i],
                 input_bytes_rotated[i],
-                AB::F::from_canonical_usize(nb_bits_to_shift),
+                AB::F::from_usize(nb_bits_to_shift),
                 is_real,
             );
 
@@ -134,7 +124,6 @@ impl<F: Field> FixedRotateRightOperation<F> {
             last_carry = cols.carry[i].into();
         }
 
-        // For the first byte, we didn't know the last carry so compute the rotated byte here.
         builder.assert_eq(cols.value[WORD_SIZE - 1], first_shift + last_carry * carry_multiplier);
     }
 }

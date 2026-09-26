@@ -2,12 +2,12 @@
 
 use challenger::{
     CanCopyChallenger, CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable,
-    MultiField32ChallengerVariable, SpongeChallengerShape,
+    MultiField32ChallengerVariable,
 };
 use hash::{FieldHasherVariable, Poseidon2KoalaBearHasherVariable};
 use itertools::izip;
-use p3_bn254_fr::Bn254Fr;
-use p3_field::FieldAlgebra;
+use p3_bn254_fr::Bn254;
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use std::iter::{repeat, zip};
 use zkm_recursion_compiler::{
@@ -18,19 +18,42 @@ use zkm_recursion_compiler::{
 
 mod types;
 
+/// BaseFold proof verifier — see [`basefold_verifier`] module doc.
+pub mod basefold_chip_opened_values;
+pub mod basefold_constraint_folder;
+pub mod basefold_verifier;
+pub mod basefold_witness;
 pub mod challenger;
-pub mod constraints;
 pub mod domain;
+pub mod dummy;
 pub mod fri;
 pub mod hash;
+pub mod jagged_circuit;
+pub mod jagged_eval;
+pub mod jagged_eval_primitives;
+pub mod jagged_pcs_lift;
+pub mod logup_gkr;
+pub mod logup_proof;
 pub mod machine;
 pub mod merkle_tree;
+pub mod partial_sumcheck;
+pub mod public_values_folder;
+pub mod recursive_jagged_pcs;
+pub mod recursive_stacked_pcs;
+pub mod shard_basefold;
+pub mod shard_level_witness;
+pub mod shard_proof_variable_lift;
 pub mod stark;
+pub mod sumcheck;
+pub mod symbolic;
+pub mod univariate;
 pub(crate) mod utils;
+pub mod whir_circuit;
 pub mod witness;
+pub mod zerocheck;
 
 pub use types::*;
-use zkm_stark::{
+use zkm_pcs::{
     koala_bear_poseidon2::{KoalaBearPoseidon2, ValMmcs},
     StarkGenericConfig,
 };
@@ -38,7 +61,7 @@ use zkm_stark::{
 use p3_challenger::{CanObserve, CanSample, FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DitParallel;
-use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_fri::TwoAdicFriPcs;
 use zkm_recursion_core::{
     air::RecursionPublicValues,
     stark::{KoalaBearPoseidon2Outer, OuterValMmcs},
@@ -50,19 +73,9 @@ use utils::{felt_bytes_to_bn254_var, felts_to_bn254_var, words_to_bytes};
 
 type EF = <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge;
 
-pub type PcsConfig<C> = FriConfig<
-    ExtensionMmcs<
-        <C as StarkGenericConfig>::Val,
-        <C as StarkGenericConfig>::Challenge,
-        <C as KoalaBearFriConfig>::ValMmcs,
-    >,
->;
-
 pub type Digest<C, SC> = <SC as FieldHasherVariable<C>>::DigestVariable;
 
-pub type FriMmcs<C> = ExtensionMmcs<KoalaBear, EF, <C as KoalaBearFriConfig>::ValMmcs>;
-
-pub trait KoalaBearFriConfig:
+pub trait KoalaBearFriParameters:
     StarkGenericConfig<
     Val = KoalaBear,
     Challenge = EF,
@@ -75,22 +88,22 @@ pub trait KoalaBearFriConfig:
     >,
 >
 {
-    type ValMmcs: Mmcs<KoalaBear, ProverData<RowMajorMatrix<KoalaBear>> = Self::RowMajorProverData>
-        + Send
+    type ValMmcs: Mmcs<
+            KoalaBear,
+            ProverData<RowMajorMatrix<KoalaBear>> = Self::RowMajorProverData,
+            Proof: Send + Sync,
+            Error: Send + Sync,
+        > + Send
         + Sync;
-    type RowMajorProverData: Clone + Send + Sync;
+    type RowMajorProverData: Send + Sync;
     type FriChallenger: CanObserve<<Self::ValMmcs as Mmcs<KoalaBear>>::Commitment>
         + CanSample<EF>
         + GrindingChallenger<Witness = KoalaBear>
         + FieldChallenger<KoalaBear>;
-
-    fn fri_config(&self) -> &FriConfig<FriMmcs<Self>>;
-
-    fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape;
 }
 
-pub trait KoalaBearFriConfigVariable<C: CircuitConfig<F = KoalaBear>>:
-    KoalaBearFriConfig + FieldHasherVariable<C> + Poseidon2KoalaBearHasherVariable<C>
+pub trait KoalaBearFriParametersVariable<C: CircuitConfig<F = KoalaBear>>:
+    KoalaBearFriParameters + FieldHasherVariable<C> + Poseidon2KoalaBearHasherVariable<C>
 {
     type FriChallengerVariable: FieldChallengerVariable<C, <C as CircuitConfig>::Bit>
         + CanObserveVariable<C, <Self as FieldHasherVariable<C>>::DigestVariable>
@@ -110,6 +123,16 @@ pub trait KoalaBearFriConfigVariable<C: CircuitConfig<F = KoalaBear>>:
         vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
         pc_start: Felt<<C as Config>::F>,
     );
+
+    /// #H (BaseFold-over-BN254 wrap port): project this ring's vk preprocessed
+    /// commitment digest to 8 KoalaBear felts — the in-circuit twin of host
+    /// `BasefoldRing::digest_felts`. Inner = identity ([Felt;8]); outer = split_32
+    /// of the BN254 commit. Lets the BaseFold shard verifier's preprocessed_commit
+    /// be uniformly [Felt;8] across rings.
+    fn vk_preprocessed_commit_felts(
+        builder: &mut Builder<C>,
+        commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+    ) -> [Felt<<C as Config>::F>; 8];
 }
 
 pub trait CircuitConfig: Config {
@@ -178,11 +201,75 @@ pub trait CircuitConfig: Config {
         second: impl IntoIterator<Item = Ext<<Self as Config>::F, <Self as Config>::EF>> + Clone,
     ) -> Vec<Ext<<Self as Config>::F, <Self as Config>::EF>>;
 
+    /// Selects between two *compile-time constants* on a bit: returns
+    /// `if_zero` when `should_swap` is 0 and `if_one` when it is 1.
+    ///
+    /// The generic form below routes through [`Self::select_chain_f`], which
+    /// materialises both branches as variables and evaluates the full
+    /// `a*(1-b) + c*b` on each — seven instructions for one output, half of
+    /// them for a second output the caller throws away.  With both branches
+    /// known at build time the same value is the affine
+    /// `if_zero + b*(if_one - if_zero)`, i.e. one multiply-by-immediate and
+    /// one add-immediate, so the configs whose `Bit` is a `Felt` override it.
+    fn select_const_f(
+        builder: &mut Builder<Self>,
+        should_swap: Self::Bit,
+        if_zero: <Self as Config>::F,
+        if_one: <Self as Config>::F,
+    ) -> Felt<<Self as Config>::F> {
+        let zero_f: Felt<_> = builder.constant(if_zero);
+        let one_f: Felt<_> = builder.constant(if_one);
+        Self::select_chain_f(
+            builder,
+            should_swap,
+            core::iter::once(zero_f),
+            core::iter::once(one_f),
+        )[0]
+    }
+
     fn range_check_felt(builder: &mut Builder<Self>, value: Felt<Self::F>, num_bits: usize) {
         let bits = Self::num2bits(builder, value, 31);
         for bit in bits.into_iter().skip(num_bits) {
             Self::assert_bit_zero(builder, bit);
         }
+    }
+
+    /// P2c-for-outer (value-independent gnark wrap): WITNESS the outer
+    /// (BN254) jagged-basefold bundle's proof-specific values from the
+    /// witness stream, returning the witnessed
+    /// [`crate::shard_level_witness::LiftedEvalProof::OuterBundle`].
+    ///
+    /// The default (inner configs) returns `None` — the inner recursion path
+    /// witnesses its bundle via the `Bundle` variant instead, and the OUTER
+    /// bundle never appears there.  Only [`OuterConfig`] overrides this to
+    /// witness the BN254 bundle so the gnark R1CS is value-independent.
+    ///
+    /// Called from `JaggedShardProof::read` at the evaluation-proof stream
+    /// position so the witnessed values land in the same order
+    /// [`Self::write_outer_eval_bundle`] produces them.
+    fn read_outer_eval_bundle(
+        _builder: &mut Builder<Self>,
+        _host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
+    ) -> Option<crate::shard_level_witness::LiftedEvalProof<Self>>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
+    /// Prover-side counterpart of [`Self::read_outer_eval_bundle`]: WRITE the
+    /// outer bundle's proof-specific values to the witness stream in the SAME
+    /// order `read` consumes them.  Returns `true` when it handled the proof
+    /// (outer config + outer bundle bytes), so `JaggedShardProof::write` can
+    /// skip the default Bytes/Bundle write.  Default (inner) = `false`.
+    fn write_outer_eval_bundle<W: crate::witness::WitnessWriter<Self>>(
+        _host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
+        _witness: &mut W,
+    ) -> bool
+    where
+        Self: Sized,
+    {
+        false
     }
 }
 
@@ -221,7 +308,18 @@ impl CircuitConfig for InnerConfig {
         input: Felt<<Self as Config>::F>,
         power_bits: Vec<Felt<<Self as Config>::F>>,
     ) -> Felt<<Self as Config>::F> {
-        builder.exp_reverse_bits_v2(input, power_bits)
+        let mut result = builder.constant(Self::F::ONE);
+        let mut power_f = input;
+        let bit_len = power_bits.len();
+
+        for i in 1..=bit_len {
+            let index = bit_len - i;
+            let bit = power_bits[index];
+            let prod: Felt<_> = builder.eval(result * power_f);
+            result = builder.eval(bit * prod + (SymbolicFelt::ONE - bit) * result);
+            power_f = builder.eval(power_f * power_f);
+        }
+        result
     }
 
     fn batch_fri(
@@ -246,6 +344,19 @@ impl CircuitConfig for InnerConfig {
         bits: impl IntoIterator<Item = Felt<<Self as Config>::F>>,
     ) -> Felt<<Self as Config>::F> {
         builder.bits2num_v2_f(bits)
+    }
+
+    fn select_const_f(
+        builder: &mut Builder<Self>,
+        should_swap: Self::Bit,
+        if_zero: <Self as Config>::F,
+        if_one: <Self as Config>::F,
+    ) -> Felt<<Self as Config>::F> {
+        let scaled: Felt<_> = builder.uninit();
+        builder.push_op(DslIr::MulFI(scaled, should_swap, if_one - if_zero));
+        let out: Felt<_> = builder.uninit();
+        builder.push_op(DslIr::AddFI(out, scaled, if_zero));
+        out
     }
 
     fn select_chain_f(
@@ -337,7 +448,6 @@ impl CircuitConfig for WrapConfig {
         input: Felt<<Self as Config>::F>,
         power_bits: Vec<Felt<<Self as Config>::F>>,
     ) -> Felt<<Self as Config>::F> {
-        // builder.exp_reverse_bits_v2(input, power_bits)
         let mut result = builder.constant(Self::F::ONE);
         let mut power_f = input;
         let bit_len = power_bits.len();
@@ -374,6 +484,19 @@ impl CircuitConfig for WrapConfig {
         bits: impl IntoIterator<Item = Felt<<Self as Config>::F>>,
     ) -> Felt<<Self as Config>::F> {
         builder.bits2num_v2_f(bits)
+    }
+
+    fn select_const_f(
+        builder: &mut Builder<Self>,
+        should_swap: Self::Bit,
+        if_zero: <Self as Config>::F,
+        if_one: <Self as Config>::F,
+    ) -> Felt<<Self as Config>::F> {
+        let scaled: Felt<_> = builder.uninit();
+        builder.push_op(DslIr::MulFI(scaled, should_swap, if_one - if_zero));
+        let out: Felt<_> = builder.uninit();
+        builder.push_op(DslIr::AddFI(out, scaled, if_zero));
+        out
     }
 
     fn select_chain_f(
@@ -507,7 +630,7 @@ impl CircuitConfig for OuterConfig {
         let result = builder.eval(Self::F::ZERO);
         for (i, bit) in bits.into_iter().enumerate() {
             let to_add: Felt<_> = builder.uninit();
-            let pow2 = builder.constant(Self::F::from_canonical_u32(1 << i));
+            let pow2 = builder.constant(Self::F::from_u32(1 << i));
             let zero = builder.constant(Self::F::ZERO);
             builder.push_op(DslIr::CircuitSelectF(bit, pow2, zero, to_add));
             builder.assign(result, result + to_add);
@@ -562,42 +685,39 @@ impl CircuitConfig for OuterConfig {
         }
         result
     }
+
+    // P2c-for-outer: WITNESS the outer (BN254) bundle so the gnark R1CS is
+    // value-independent (delegates to the shard_level_witness helpers).
+    fn read_outer_eval_bundle(
+        builder: &mut Builder<Self>,
+        host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
+    ) -> Option<crate::shard_level_witness::LiftedEvalProof<Self>> {
+        crate::shard_level_witness::read_outer_eval_bundle_impl(builder, host)
+    }
+
+    fn write_outer_eval_bundle<W: crate::witness::WitnessWriter<Self>>(
+        host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
+        witness: &mut W,
+    ) -> bool {
+        crate::shard_level_witness::write_outer_eval_bundle_impl(host, witness)
+    }
 }
 
-impl KoalaBearFriConfig for KoalaBearPoseidon2 {
+impl KoalaBearFriParameters for KoalaBearPoseidon2 {
     type ValMmcs = ValMmcs;
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
     type RowMajorProverData = <ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
-
-    fn fri_config(&self) -> &FriConfig<FriMmcs<Self>> {
-        self.pcs().fri_config()
-    }
-
-    fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape {
-        SpongeChallengerShape {
-            input_buffer_len: challenger.input_buffer.len(),
-            output_buffer_len: challenger.output_buffer.len(),
-        }
-    }
 }
 
-impl KoalaBearFriConfig for KoalaBearPoseidon2Outer {
+impl KoalaBearFriParameters for KoalaBearPoseidon2Outer {
     type ValMmcs = OuterValMmcs;
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
 
     type RowMajorProverData =
         <OuterValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
-
-    fn fri_config(&self) -> &FriConfig<FriMmcs<Self>> {
-        self.pcs().fri_config()
-    }
-
-    fn challenger_shape(_challenger: &Self::FriChallenger) -> SpongeChallengerShape {
-        unimplemented!("Shape not supported for outer fri challenger");
-    }
 }
 
-impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriConfigVariable<C>
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriParametersVariable<C>
     for KoalaBearPoseidon2
 {
     type FriChallengerVariable = DuplexChallengerVariable<C>;
@@ -613,17 +733,27 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriConfigV
         builder.commit_public_values_v2(public_values);
     }
 
+    /// The inner wrap program reflects its public values unchanged: the vk
+    /// commitment and `pc_start` are folded into the vkey hash by the BN254
+    /// outer circuit that verifies the wrap proof, not here.
     fn commit_recursion_public_values_imm_wrap_vk(
-        _builder: &mut Builder<C>,
-        _public_values: RecursionPublicValues<Felt<<C>::F>>,
+        builder: &mut Builder<C>,
+        public_values: RecursionPublicValues<Felt<<C>::F>>,
         _vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
         _pc_start: Felt<<C as Config>::F>,
     ) {
-        unreachable!("commit_recursion_public_values_imm_wrap_vk not implemented");
+        builder.commit_public_values_v2(public_values);
+    }
+
+    fn vk_preprocessed_commit_felts(
+        _builder: &mut Builder<C>,
+        commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+    ) -> [Felt<<C as Config>::F>; 8] {
+        commitment
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBearFriConfigVariable<C>
+impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriParametersVariable<C>
     for KoalaBearPoseidon2Outer
 {
     type FriChallengerVariable = MultiField32ChallengerVariable<C>;
@@ -644,6 +774,9 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBear
 
         let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
         builder.commit_vkey_hash_circuit(vkey_hash);
+
+        let vk_root = felts_to_bn254_var(builder, &public_values.vk_root);
+        builder.commit_vk_root_circuit(vk_root);
     }
 
     fn commit_recursion_public_values_imm_wrap_vk(
@@ -665,5 +798,17 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBear
         builder.push_op(DslIr::CircuitPoseidon2Permute(state));
         let vkey_hash = state[0];
         builder.commit_vkey_hash_circuit(vkey_hash);
+
+        let vk_root = felts_to_bn254_var(builder, &public_values.vk_root);
+        builder.commit_vk_root_circuit(vk_root);
+    }
+
+    fn vk_preprocessed_commit_felts(
+        builder: &mut Builder<C>,
+        commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+    ) -> [Felt<<C as Config>::F>; 8] {
+        let limbs = crate::challenger::split_32(builder, commitment[0], 4);
+        let zero: Felt<<C as Config>::F> = builder.eval(<C as Config>::F::ZERO);
+        [limbs[0], limbs[1], limbs[2], limbs[3], zero, zero, zero, zero]
     }
 }

@@ -3,29 +3,24 @@ use core::{
     mem::size_of,
 };
 use std::array;
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
+use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::events::{GlobalLookupEvent, MemoryInitializeFinalizeEvent};
 use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::PicusInfo;
-use zkm_stark::{
-    air::{
-        AirLookup, BaseAirBuilder, LookupScope, MachineAir, PublicValues, ZKMAirBuilder,
-        ZKM_PROOF_NUM_PV_ELTS,
-    },
-    LookupKind, Word,
+use zkm_pcs::{
+    air::{AirLookup, LookupScope, MachineAir, ZKMAirBuilder},
+    LookupKind,
 };
 
 use crate::{
     operations::{AssertLtColsBits, IsZeroOperation, KoalaBearBitDecomposition},
-    utils::next_power_of_two,
+    utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
@@ -63,8 +58,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         }
     }
 
-    #[cfg(feature = "picus")]
-    fn picus_info(&self) -> zkm_stark::PicusInfo {
+    fn picus_info(&self) -> PicusInfo {
         MemoryInitCols::<u8>::picus_info()
     }
 
@@ -113,7 +107,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         };
         let nb_rows = events.len();
         let size_log2 = input.fixed_log2_rows::<F, Self>(self);
-        let padded_nb_rows = next_power_of_two(
+        let padded_nb_rows = next_multiple_of_32(
             nb_rows,
             size_log2,
             <MemoryGlobalChip as MachineAir<F>>::name(self).as_str(),
@@ -145,59 +139,58 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
 
                 let mut row = [F::ZERO; NUM_MEMORY_INIT_COLS];
                 let cols: &mut MemoryInitCols<F> = row.as_mut_slice().borrow_mut();
-                cols.addr = F::from_canonical_u32(addr);
+                cols.addr = F::from_u32(addr);
                 cols.addr_bits.populate(addr);
-                cols.shard = F::from_canonical_u32(shard);
-                cols.timestamp = F::from_canonical_u32(timestamp);
-                cols.value = array::from_fn(|i| F::from_canonical_u32((value >> i) & 1));
-                cols.is_real = F::one();
+                cols.shard = F::from_u32(shard);
+                cols.timestamp = F::from_u32(timestamp);
+                cols.value = array::from_fn(|i| F::from_u32((value >> i) & 1));
+                cols.is_real = F::ONE;
 
                 row
             })
             .collect::<Vec<_>>();
 
-        for i in 0..memory_events.len() {
+        let prev0_addr: u32 =
+            previous_addr_bits.iter().enumerate().map(|(j, bit)| bit * (1 << j)).sum();
+        let is_comp_vec: Vec<bool> = (0..memory_events.len())
+            .map(|i| {
+                let prev_addr = if i == 0 { prev0_addr } else { memory_events[i - 1].addr };
+                !(i == 0 && prev_addr == 0)
+            })
+            .collect();
+
+        rows.par_iter_mut().enumerate().for_each(|(i, row)| {
             let addr = memory_events[i].addr;
-            let cols: &mut MemoryInitCols<F> = rows[i].as_mut_slice().borrow_mut();
-            if i == 0 {
-                let prev_addr = previous_addr_bits
-                    .iter()
-                    .enumerate()
-                    .map(|(j, bit)| bit * (1 << j))
-                    .sum::<u32>();
-                cols.is_prev_addr_zero.populate(prev_addr);
-                cols.is_first_comp = F::from_bool(prev_addr != 0);
-                if prev_addr != 0 {
-                    debug_assert!(prev_addr < addr, "prev_addr {prev_addr} < addr {addr}");
-                    let addr_bits: [_; 32] = array::from_fn(|i| (addr >> i) & 1);
-                    cols.lt_cols.populate(&previous_addr_bits, &addr_bits);
-                }
+            let prev_addr = if i == 0 { prev0_addr } else { memory_events[i - 1].addr };
+            let is_comp = is_comp_vec[i];
+            let cols: &mut MemoryInitCols<F> = row.as_mut_slice().borrow_mut();
+            cols.index = F::from_u32(i as u32);
+            cols.prev_addr = F::from_u32(prev_addr);
+            cols.prev_addr_bits.populate(prev_addr);
+            cols.is_prev_addr_zero.populate(prev_addr);
+            cols.is_index_zero.populate(i as u32);
+            cols.is_comp = F::from_bool(is_comp);
+            cols.prev_valid = F::from_bool(if i == 0 { true } else { is_comp_vec[i - 1] });
+            if is_comp {
+                debug_assert!(
+                    prev_addr < addr,
+                    "memory ordering: prev_addr {prev_addr} < addr {addr}"
+                );
+                let addr_bits: [_; 32] = array::from_fn(|k| (addr >> k) & 1);
+                let prev_addr_bits_arr: [_; 32] = array::from_fn(|k| (prev_addr >> k) & 1);
+                cols.lt_cols.populate(&prev_addr_bits_arr, &addr_bits);
             }
-            if i != 0 {
-                cols.is_next_comp = F::one();
-                let previous_addr = memory_events[i - 1].addr;
-                assert_ne!(previous_addr, addr);
+        });
 
-                let addr_bits: [_; 32] = array::from_fn(|i| (addr >> i) & 1);
-                let prev_addr_bits: [_; 32] = array::from_fn(|i| (previous_addr >> i) & 1);
-                cols.lt_cols.populate(&prev_addr_bits, &addr_bits);
-            }
+        let padded_nb_rows = <MemoryGlobalChip as MachineAir<F>>::num_rows(self, input).unwrap();
+        let mut values = zeroed_f_vec::<F>(padded_nb_rows * NUM_MEMORY_INIT_COLS);
+        let kept_rows = rows.len().min(padded_nb_rows);
+        values[..kept_rows * NUM_MEMORY_INIT_COLS]
+            .par_chunks_mut(NUM_MEMORY_INIT_COLS)
+            .zip(rows[..kept_rows].par_iter())
+            .for_each(|(dst, src)| dst.copy_from_slice(src));
 
-            if i == memory_events.len() - 1 {
-                cols.is_last_addr = F::ONE;
-            }
-        }
-
-        // Pad the trace to a power of two depending on the proof shape in `input`.
-        rows.resize(
-            <MemoryGlobalChip as MachineAir<F>>::num_rows(self, input).unwrap(),
-            [F::zero(); NUM_MEMORY_INIT_COLS],
-        );
-
-        Ok(RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_MEMORY_INIT_COLS,
-        ))
+        Ok(RowMajorMatrix::new(values, NUM_MEMORY_INIT_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -216,21 +209,33 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
     }
 }
 
-#[derive(AlignedBorrow, Clone, Copy)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, AlignedBorrow, Clone, Copy)]
 #[repr(C)]
 pub struct MemoryInitCols<T: Copy> {
     /// The shard number of the memory access.
-    #[cfg_attr(feature = "picus", picus(input, transition_input))]
     pub shard: T,
 
     /// The timestamp of the memory access.
-    #[cfg_attr(feature = "picus", picus(input, transition_input))]
     pub timestamp: T,
 
     /// The address of the memory access.
-    #[cfg_attr(feature = "picus", picus(input, transition_input))]
     pub addr: T,
+
+    /// Option 2: running chain index for the `MemoryGlobal*Control` bus.
+    pub index: T,
+
+    /// Option 2: previous-row address, received via the bus (chained to
+    /// the prior row's `addr`; the genesis row receives the prior shard's
+    /// `previous_*_addr` from the public-values AIR).
+    pub prev_addr: T,
+
+    /// Bit decomposition of `prev_addr`, range-checked (gated `is_real`)
+    /// so the local `prev_addr < addr` comparison is canonical.
+    pub prev_addr_bits: KoalaBearBitDecomposition<T>,
+
+    /// The bus `valid` flag received alongside `prev_addr` (equals the
+    /// prior row's `is_comp`; `1` from the PV genesis endpoint).
+    pub prev_valid: T,
 
     /// Comparison assertions for address to be strictly increasing.
     pub lt_cols: AssertLtColsBits<T, 32>,
@@ -239,23 +244,20 @@ pub struct MemoryInitCols<T: Copy> {
     pub addr_bits: KoalaBearBitDecomposition<T>,
 
     /// The value of the memory access.
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub value: [T; 32],
 
     /// Whether the memory access is a real access.
     pub is_real: T,
 
-    /// Whether or not we are making the assertion `addr < addr_next`.
-    pub is_next_comp: T,
+    /// Whether this row asserts `prev_addr < addr` (equals `is_real`
+    /// except for the unique genesis row `index==0 && prev_addr==0`).
+    pub is_comp: T,
 
-    /// A witness to assert whether or not we the previous address is zero.
+    /// A witness to assert whether or not the previous address is zero.
     pub is_prev_addr_zero: IsZeroOperation<T>,
 
-    /// Auxiliary column, equal to `(1 - is_prev_addr_zero.result) * is_first_row`.
-    pub is_first_comp: T,
-
-    /// A flag to indicate the last non-padded address. An auxiliary column needed for degree 3.
-    pub is_last_addr: T,
+    /// A witness to assert whether or not `index == 0` (genesis detection).
+    pub is_index_zero: IsZeroOperation<T>,
 }
 
 pub(crate) const NUM_MEMORY_INIT_COLS: usize = size_of::<MemoryInitCols<u8>>();
@@ -266,72 +268,40 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MemoryInitCols<AB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &MemoryInitCols<AB::Var> = (*next).borrow();
 
         builder.assert_bool(local.is_real);
         for i in 0..32 {
             builder.assert_bool(local.value[i]);
         }
-        // Canonicalize padded rows to the default zero trace shape so witness columns cannot
-        // drift in extraction modules.
-        builder.when_not(local.is_real).assert_zero(local.shard);
-        builder.when_not(local.is_real).assert_zero(local.timestamp);
-        builder.when_not(local.is_real).assert_zero(local.addr);
-        builder.when_not(local.is_real).assert_zero(local.is_next_comp);
-        for i in 0..32 {
-            builder.when_not(local.is_real).assert_zero(local.value[i]);
-            builder.when_not(local.is_real).assert_zero(local.addr_bits.bits[i]);
-            builder.when_not(local.is_real).assert_zero(local.lt_cols.bit_flags[i]);
-        }
-        builder
-            .when_not(local.is_real)
-            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_2);
-        builder
-            .when_not(local.is_real)
-            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_3);
-        builder
-            .when_not(local.is_real)
-            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_4);
-        builder
-            .when_not(local.is_real)
-            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_5);
-        builder
-            .when_not(local.is_real)
-            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_6);
-        builder
-            .when_not(local.is_real)
-            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_7);
 
-        let mut byte1 = AB::Expr::zero();
-        let mut byte2 = AB::Expr::zero();
-        let mut byte3 = AB::Expr::zero();
-        let mut byte4 = AB::Expr::zero();
+        let mut byte1 = AB::Expr::ZERO;
+        let mut byte2 = AB::Expr::ZERO;
+        let mut byte3 = AB::Expr::ZERO;
+        let mut byte4 = AB::Expr::ZERO;
         for i in 0..8 {
-            byte1 = byte1.clone() + local.value[i].into() * AB::F::from_canonical_u8(1 << i);
-            byte2 = byte2.clone() + local.value[i + 8].into() * AB::F::from_canonical_u8(1 << i);
-            byte3 = byte3.clone() + local.value[i + 16].into() * AB::F::from_canonical_u8(1 << i);
-            byte4 = byte4.clone() + local.value[i + 24].into() * AB::F::from_canonical_u8(1 << i);
+            byte1 = byte1.clone() + local.value[i].into() * AB::F::from_u8(1 << i);
+            byte2 = byte2.clone() + local.value[i + 8].into() * AB::F::from_u8(1 << i);
+            byte3 = byte3.clone() + local.value[i + 16].into() * AB::F::from_u8(1 << i);
+            byte4 = byte4.clone() + local.value[i + 24].into() * AB::F::from_u8(1 << i);
         }
         let value = [byte1, byte2, byte3, byte4];
 
         if self.kind == MemoryChipType::Initialize {
-            // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
                     vec![
-                        AB::Expr::zero(), // shard
-                        AB::Expr::zero(), // timestamp
+                        AB::Expr::ZERO,
+                        AB::Expr::ZERO,
                         local.addr.into(),
                         value[0].clone(),
                         value[1].clone(),
                         value[2].clone(),
                         value[3].clone(),
-                        local.is_real.into() * AB::Expr::one(),
-                        local.is_real.into() * AB::Expr::zero(),
-                        AB::Expr::from_canonical_u8(LookupKind::Memory as u8),
+                        local.is_real.into() * AB::Expr::ONE,
+                        local.is_real.into() * AB::Expr::ZERO,
+                        AB::Expr::from_u8(LookupKind::Memory as u8),
                     ],
                     local.is_real.into(),
                     LookupKind::Global,
@@ -339,7 +309,6 @@ where
                 LookupScope::Local,
             );
         } else {
-            // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
                     vec![
@@ -350,9 +319,9 @@ where
                         value[1].clone(),
                         value[2].clone(),
                         value[3].clone(),
-                        local.is_real.into() * AB::Expr::zero(),
-                        local.is_real.into() * AB::Expr::one(),
-                        AB::Expr::from_canonical_u8(LookupKind::Memory as u8),
+                        local.is_real.into() * AB::Expr::ZERO,
+                        local.is_real.into() * AB::Expr::ONE,
+                        AB::Expr::from_u8(LookupKind::Memory as u8),
                     ],
                     local.is_real.into(),
                     LookupKind::Global,
@@ -361,7 +330,6 @@ where
             );
         }
 
-        // Canonically decompose the address into bits so we can do comparisons.
         KoalaBearBitDecomposition::<AB::F>::range_check(
             builder,
             local.addr,
@@ -369,175 +337,68 @@ where
             local.is_real.into(),
         );
 
-        // Assertion for increasing address. We need to make two types of less-than assertions,
-        // first we need to assert that the addr < addr' when the next row is real. Then we need to
-        // make assertions with regards to public values.
-        //
-        // If the chip is a `MemoryInit`:
-        // - In the first row, we need to assert that previous_init_addr < addr.
-        // - In the last real row, we need to assert that addr = last_init_addr.
-        //
-        // If the chip is a `MemoryFinalize`:
-        // - In the first row, we need to assert that previous_finalize_addr < addr.
-        // - In the last real row, we need to assert that addr = last_finalize_addr.
+        KoalaBearBitDecomposition::<AB::F>::range_check(
+            builder,
+            local.prev_addr,
+            local.prev_addr_bits,
+            local.is_real.into(),
+        );
 
-        // Assert that addr < addr' when the next row is real.
-        //
-        // Keep these constraints transition-scoped so boundary modules don't introduce unconstrained
-        // `next`-row helper witnesses.
-        {
-            let mut transition = builder.when_transition();
-            transition.assert_eq(next.is_next_comp, next.is_real);
-            next.lt_cols.eval(
-                &mut transition,
-                &local.addr_bits.bits,
-                &next.addr_bits.bits,
-                next.is_next_comp,
-            );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            local.prev_addr.into(),
+            local.is_prev_addr_zero,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            local.index.into(),
+            local.is_index_zero,
+            local.is_real.into(),
+        );
+        builder.assert_bool(local.is_comp);
+        builder.assert_eq(
+            local.is_comp,
+            local.is_real.into()
+                * (AB::Expr::ONE - local.is_prev_addr_zero.result * local.is_index_zero.result),
+        );
+
+        local.lt_cols.eval(
+            builder,
+            &local.prev_addr_bits.bits,
+            &local.addr_bits.bits,
+            local.is_comp,
+        );
+
+        let is_not_comp = local.is_real.into() - local.is_comp.into();
+        builder.when(is_not_comp.clone()).assert_zero(local.addr);
+        for i in 0..32 {
+            builder.when(is_not_comp.clone()).assert_zero(local.value[i]);
         }
 
-        // Assert that the real rows are all padded to the top.
-        builder.when_transition().when_not(local.is_real).assert_zero(next.is_real);
-
-        // Make assertions for the initial comparison.
-
-        // We want to constrain that the `addr` in the first row is larger than the previous
-        // initialized/finalized address, unless the previous address is zero. Since the previous
-        // address is either zero or constrained by a different shard, we know it's an element of
-        // the field, so we can get an element from the bit decomposition with no concern for
-        // overflow.
-
-        let local_addr_bits = local.addr_bits.bits;
-
-        let public_values_array: [AB::Expr; ZKM_PROOF_NUM_PV_ELTS] =
-            array::from_fn(|i| builder.public_values()[i].into());
-        let public_values: &PublicValues<Word<AB::Expr>, AB::Expr> =
-            public_values_array.as_slice().borrow();
-
-        let prev_addr_bits = match self.kind {
-            MemoryChipType::Initialize => &public_values.previous_init_addr_bits,
-            MemoryChipType::Finalize => &public_values.previous_finalize_addr_bits,
+        let control_kind = match self.kind {
+            MemoryChipType::Initialize => LookupKind::MemoryGlobalInitControl,
+            MemoryChipType::Finalize => LookupKind::MemoryGlobalFinalizeControl,
         };
-
-        // Since the previous address is either zero or constrained by a different shard, we know
-        // it's an element of the field, so we can get an element from the bit decomposition with
-        // no concern for overflow.
-        let prev_addr = prev_addr_bits
-            .iter()
-            .enumerate()
-            .map(|(i, bit)| bit.clone() * AB::F::from_wrapped_u32(1 << i))
-            .sum::<AB::Expr>();
-
-        // Constrain the is_prev_addr_zero operation only in the first row.
-        let is_first_row = builder.is_first_row();
-        IsZeroOperation::<AB::F>::eval(builder, prev_addr, local.is_prev_addr_zero, is_first_row);
-
-        // Outside the first row, `is_prev_addr_zero` is a pure witness helper and should stay at
-        // its default trace value. Constrain this through transition `next` columns so the single
-        // row case does not accidentally force first-row helpers to zero in boundary extraction.
-        builder.when_transition().assert_zero(next.is_prev_addr_zero.inverse);
-        builder.when_transition().assert_zero(next.is_prev_addr_zero.result);
-
-        // When prev_addr == 0 in the first row, canonicalize the helper witness to match trace
-        // population (inverse = 0).
-        builder
-            .when_first_row()
-            .when(local.is_prev_addr_zero.result)
-            .assert_zero(local.is_prev_addr_zero.inverse);
-
-        // Constrain the is_first_comp column.
-        builder.assert_bool(local.is_first_comp);
-        builder
-            .when_first_row()
-            .assert_eq(local.is_first_comp, AB::Expr::one() - local.is_prev_addr_zero.result);
-        // In the degenerate single-row case, force the row to be the `%x0` address case.
-        // This removes a Picus-only underconstrained branch where `addr` can drift without inputs.
-        let is_single_row = builder.is_first_row() * builder.is_last_row();
-        builder.when(is_single_row.clone()).assert_zero(local.is_first_comp);
-        // In the degenerate single-row finalize case, the only real finalized
-        // address is `%x0`, whose routing metadata is canonical in the executor
-        // trace population (`shard = 0`, `timestamp = 1`).
-        // Pin these to avoid underconstrained single-row witnesses in extraction.
-        if self.kind == MemoryChipType::Finalize {
-            builder.when(is_single_row.clone()).assert_zero(local.shard);
-            builder.when(is_single_row).assert_eq(local.timestamp, AB::Expr::one());
-        }
-        builder.when_transition().assert_zero(next.is_first_comp);
-        // For all non-first real rows (`is_next_comp = 1` in this trace), first-row-only helper
-        // columns must be zero.
-        builder.when(local.is_next_comp).assert_zero(local.is_prev_addr_zero.inverse);
-        builder.when(local.is_next_comp).assert_zero(local.is_prev_addr_zero.result);
-        builder.when(local.is_next_comp).assert_zero(local.is_first_comp);
-
-        // Canonicalize local less-than helper flags when no local comparison is requested.
-        // This is exactly the case `is_first_comp = 0` and `is_next_comp = 0`.
-        let no_local_lt_check =
-            (AB::Expr::one() - local.is_first_comp) * (AB::Expr::one() - local.is_next_comp);
-        for flag in local.lt_cols.bit_flags.iter() {
-            builder.assert_zero(no_local_lt_check.clone() * (*flag));
-        }
-
-        // Ensure at least one real row.
-        builder.when_first_row().assert_one(local.is_real);
-
-        // Constrain the inequality assertion in the first row.
-        local.lt_cols.eval(builder, prev_addr_bits, &local_addr_bits, local.is_first_comp);
-
-        // Insure that there are no duplicate initializations by assuring there is exactly one
-        // initialization event of the zero address. This is done by assuring that when the previous
-        // address is zero, then the first row address is also zero, and that the second row is also
-        // real, and the less than comparison is being made.
-        builder.when_first_row().when(local.is_prev_addr_zero.result).assert_zero(local.addr);
-        builder.when_first_row().when(local.is_prev_addr_zero.result).assert_one(next.is_real);
-        // Ensure that in the address zero case the comparison is being made so that there is an
-        // address bigger than zero being committed to.
-        builder.when_first_row().when(local.is_prev_addr_zero.result).assert_one(next.is_next_comp);
-
-        // Make assertions for specific types of memory chips.
+        builder.receive(
+            AirLookup::new(
+                vec![local.index.into(), local.prev_addr.into(), local.prev_valid.into()],
+                local.is_real.into(),
+                control_kind,
+            ),
+            LookupScope::Local,
+        );
+        builder.send(
+            AirLookup::new(
+                vec![local.index.into() + AB::Expr::ONE, local.addr.into(), local.is_comp.into()],
+                local.is_real.into(),
+                control_kind,
+            ),
+            LookupScope::Local,
+        );
 
         if self.kind == MemoryChipType::Initialize {
             builder.when(local.is_real).assert_eq(local.timestamp, AB::F::ONE);
-            builder.when(local.is_real).assert_eq(local.shard, AB::F::ONE);
-        }
-
-        // Constraints related to register %x0.
-
-        // Register %x0 should always be 0. See 2.6 Load and Store Instruction on
-        // P.18 of the MIPS spec.  To ensure that, we will constrain that the value is zero
-        // whenever the `is_first_comp` flag is set to zero as well. This guarantees that the
-        // presence of this flag asserts the initialization/finalization of %x0 to zero.
-        //
-        // **Remark**: it is up to the verifier to ensure that this flag is set to zero exactly
-        // once, this can be constrained by the public values setting `previous_init_addr_bits` or
-        // `previous_finalize_addr_bits` to zero.
-        for i in 0..32 {
-            builder.when_first_row().when_not(local.is_first_comp).assert_zero(local.value[i]);
-        }
-
-        // Make assertions for the final value. We need to connect the final valid address to the
-        // corresponding `last_addr` value.
-        let last_addr_bits = match self.kind {
-            MemoryChipType::Initialize => &public_values.last_init_addr_bits,
-            MemoryChipType::Finalize => &public_values.last_finalize_addr_bits,
-        };
-        // The last address is either:
-        // - It's the last row and `is_real` is set to one.
-        // - The flag `is_real` is set to one and the next `is_real` is set to zero.
-
-        // Constrain the `is_last_addr` flag.
-        builder.assert_bool(local.is_last_addr);
-        builder.when_last_row().assert_eq(local.is_last_addr, local.is_real);
-        builder
-            .when_transition()
-            .assert_eq(local.is_last_addr, local.is_real * (AB::Expr::one() - next.is_real));
-
-        // Constrain the last address bits to be equal to the corresponding `last_addr_bits` value.
-        for (local_bit, pub_bit) in local.addr_bits.bits.iter().zip(last_addr_bits.iter()) {
-            builder.when_last_row().when(local.is_real).assert_eq(*local_bit, pub_bit.clone());
-            builder
-                .when_transition()
-                .when(local.is_last_addr)
-                .assert_eq(*local_bit, pub_bit.clone());
         }
     }
 }
@@ -553,7 +414,7 @@ mod tests {
     };
     use p3_koala_bear::KoalaBear;
     use zkm_core_executor::Executor;
-    use zkm_stark::{
+    use zkm_pcs::{
         debug_lookups_with_all_chips, koala_bear_poseidon2::KoalaBearPoseidon2, StarkMachine,
         ZKMCoreOpts,
     };

@@ -6,7 +6,6 @@ use tiny_keccak::keccakf;
 
 pub(crate) const STATE_SIZE_U64S: usize = 25;
 pub(crate) const GENERAL_BLOCK_SIZE_U32S: usize = 36;
-pub(crate) const GENERAL_BLOCK_SIZE_U64S: usize = 18;
 pub(crate) const KECCAK_GENERAL_OUTPUT_U64S: usize = 8;
 
 pub(crate) struct KeccakSpongeSyscall;
@@ -27,59 +26,40 @@ impl Syscall for KeccakSpongeSyscall {
         let input_ptr = arg1;
         let result_ptr = arg2;
 
-        let mut input_read_records = Vec::new();
-        let mut output_write_records = Vec::new();
-
         let mut state = [0_u64; STATE_SIZE_U64S];
 
         let (input_length_record, input_len_u32s) = rt.mr(result_ptr + 16 * 4);
 
-        // General block size = 36 u32s
         assert_eq!(input_len_u32s as usize % GENERAL_BLOCK_SIZE_U32S, 0);
 
-        let (input_records, input_values) = rt.mr_slice(input_ptr, input_len_u32s as usize);
-        input_read_records.extend_from_slice(&input_records);
+        let (input_read_records, input_values) = rt.mr_slice(input_ptr, input_len_u32s as usize);
 
-        let mut input_u64_values = Vec::new();
-        for values in input_values.chunks_exact(2) {
-            let least_sig = values[0];
-            let most_sig = values[1];
-            input_u64_values.push(least_sig as u64 + ((most_sig as u64) << 32));
-        }
+        let mut xored_state_list = Vec::with_capacity(input_values.len() / GENERAL_BLOCK_SIZE_U32S);
 
-        let mut xored_state_list = vec![];
-
-        // Perform
-        for block in input_u64_values.chunks_exact(GENERAL_BLOCK_SIZE_U64S) {
-            for (i, value) in block.iter().enumerate() {
-                state[i] ^= *value;
+        for block in input_values.as_chunks::<GENERAL_BLOCK_SIZE_U32S>().0 {
+            for (lane, words) in block.as_chunks::<2>().0.iter().enumerate() {
+                state[lane] ^= words[0] as u64 + ((words[1] as u64) << 32);
             }
             xored_state_list.push(state);
 
             keccakf(&mut state);
         }
 
-        // Increment the clk by 1 before writing because we read from memory at start_clk.
         rt.clk += 1;
-        let mut values_to_write = Vec::new();
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..KECCAK_GENERAL_OUTPUT_U64S {
-            let most_sig = ((state[i] >> 32) & 0xFFFFFFFF) as u32;
-            let least_sig = (state[i] & 0xFFFFFFFF) as u32;
-            values_to_write.push(least_sig);
-            values_to_write.push(most_sig);
+        let mut output = [0u32; 2 * KECCAK_GENERAL_OUTPUT_U64S];
+        for (lane, words) in output.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+            words[0] = (state[lane] & 0xFFFFFFFF) as u32;
+            words[1] = ((state[lane] >> 32) & 0xFFFFFFFF) as u32;
         }
 
-        let write_records = rt.mw_slice(result_ptr, values_to_write.as_slice());
-        output_write_records.extend_from_slice(&write_records);
+        let output_write_records = rt.mw_slice(result_ptr, &output);
 
-        // Push the Keccak sponge event.
         let shard = rt.current_shard();
         let sponge_event = PrecompileEvent::KeccakSponge(KeccakSpongeEvent {
             shard,
             clk: start_clk,
-            input: input_values.clone(),
-            output: values_to_write.as_slice().try_into().unwrap(),
+            input: input_values,
+            output,
             input_len_u32s,
             input_read_records,
             input_length_record,

@@ -6,11 +6,14 @@ publish = false
 
 [dependencies]
 zkm-sdk = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tendermint-light-client-verifier = { version = "0.40.3", default-features = false, features = [
   "rust-crypto",
 ] }
 serde_cbor = "0.11.2"
+bincode = "1.3.3"
 
 [build-dependencies]
 zkm-build = { workspace = true }

@@ -20,10 +20,8 @@ fn get_light_blocks() -> (LightBlock, LightBlock) {
 }
 
 pub fn main() {
-    // Generate proof.
     utils::setup_logger();
 
-    // Load light blocks from the `files` subdirectory
     let (light_block_1, light_block_2) = get_light_blocks();
 
     let expected_verdict = verify_blocks(light_block_1.clone(), light_block_2.clone());
@@ -36,10 +34,6 @@ pub fn main() {
     stdin.write_vec(encoded_1);
     stdin.write_vec(encoded_2);
 
-    // TODO: normally we could just write the LightBlock, but bincode doesn't work with LightBlock.
-    // The following code will panic.
-    // let encoded: Vec<u8> = bincode::serialize(&light_block_1).unwrap();
-    // let decoded: LightBlock = bincode::deserialize(&encoded[..]).unwrap();
 
     let client = ProverClient::new();
     let (pk, vk) = client.setup(TENDERMINT_ELF);
@@ -49,10 +43,8 @@ pub fn main() {
 
     let proof = client.prove(&pk, stdin).run().expect("proving failed");
 
-    // Verify proof.
     client.verify(&proof, &vk).expect("verification failed");
 
-    // Verify the public values
     let mut expected_public_values: Vec<u8> = Vec::new();
     expected_public_values.extend(light_block_1.signed_header.header.hash().as_bytes());
     expected_public_values.extend(light_block_2.signed_header.header.hash().as_bytes());
@@ -60,12 +52,10 @@ pub fn main() {
 
     assert_eq!(proof.public_values.as_ref(), expected_public_values);
 
-    // Test a round trip of proof serialization and deserialization.
     proof.save("proof-with-pis.bin").expect("saving proof failed");
     let deserialized_proof =
         ZKMProofWithPublicValues::load("proof-with-pis.bin").expect("loading proof failed");
 
-    // Verify the deserialized proof.
     client.verify(&deserialized_proof, &vk).expect("verification failed");
 
     println!("successfully generated and verified proof for the program!")

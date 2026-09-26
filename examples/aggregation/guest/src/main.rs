@@ -6,13 +6,10 @@ zkm_zkvm::entrypoint!(main);
 use sha2::{Digest, Sha256};
 
 pub fn main() {
-    // Read the verification keys.
     let vkeys = zkm_zkvm::io::read::<Vec<[u32; 8]>>();
 
-    // Read the public values.
     let public_values = zkm_zkvm::io::read::<Vec<Vec<u8>>>();
 
-    // Verify the proofs.
     assert_eq!(vkeys.len(), public_values.len());
     for i in 0..vkeys.len() {
         let vkey = &vkeys[i];
@@ -21,10 +18,6 @@ pub fn main() {
         zkm_zkvm::lib::verify::verify_zkm_proof(vkey, &public_values_digest.into());
     }
 
-    // TODO: Do something interesting with the proofs here.
-    //
-    // For example, commit to the verified proofs in a merkle tree. For now, we'll just commit to
-    // all the (vkey, input) pairs.
     let commitment = commit_proof_pairs(&vkeys, &public_values);
     zkm_zkvm::io::commit_slice(&commitment);
 }
@@ -50,7 +43,6 @@ pub fn commit_proof_pairs(vkeys: &[[u32; 8]], committed_values: &[Vec<u8>]) -> V
             + committed_values.iter().map(|vals| vals.len()).sum::<usize>(),
     );
 
-    // Note we use big endian because abi.encodePacked in solidity does also
     res.extend_from_slice(&(vkeys.len() as u32).to_be_bytes());
     for vkey in vkeys.iter() {
         res.extend_from_slice(&words_to_bytes_le(vkey));

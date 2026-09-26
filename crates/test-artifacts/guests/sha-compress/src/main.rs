@@ -12,5 +12,4 @@ pub fn main() {
         syscall_sha256_compress(&mut w, &mut state);
     }
 
-    //println!("{:?}", state);
 }

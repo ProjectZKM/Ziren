@@ -2,14 +2,14 @@ use std::borrow::Borrow;
 
 use p3_challenger::DuplexChallenger;
 use p3_koala_bear::KoalaBear;
-use p3_symmetric::Hash;
+use p3_symmetric::{Hash, MerkleCap};
 
-use p3_field::FieldAlgebra;
-use zkm_recursion_compiler::ir::Builder;
-use zkm_stark::{
+use p3_field::PrimeCharacteristicRing;
+use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
-    OpeningProof, StarkVerifyingKey, Word,
+    StarkVerifyingKey, Word,
 };
+use zkm_recursion_compiler::ir::Builder;
 
 use zkm_recursion_compiler::ir::Felt;
 
@@ -19,14 +19,10 @@ use crate::{
     merkle_tree::MerkleProof,
     stark::MerkleProofVariable,
     witness::{WitnessWriter, Witnessable},
-    CircuitConfig, FriProofVariable, KoalaBearFriConfigVariable, VerifyingKeyVariable,
+    CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
-use super::{
-    ZKMCompressWitnessValues, ZKMCompressWitnessVariable, ZKMDeferredWitnessValues,
-    ZKMDeferredWitnessVariable, ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable,
-    ZKMRecursionWitnessValues, ZKMRecursionWitnessVariable,
-};
+use super::{ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable};
 
 impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for Word<T> {
     type WitnessVariable = Word<T::WitnessVariable>;
@@ -78,11 +74,33 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriConfigVariable<C>>
-    Witnessable<C> for StarkVerifyingKey<SC>
+impl<C, F, W, const DIGEST_ELEMENTS: usize> Witnessable<C> for MerkleCap<F, [W; DIGEST_ELEMENTS]>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    W: Witnessable<C> + Copy,
+    [W; DIGEST_ELEMENTS]: Borrow<[W; DIGEST_ELEMENTS]>,
+{
+    type WitnessVariable = [W::WitnessVariable; DIGEST_ELEMENTS];
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let cap: &[[W; DIGEST_ELEMENTS]] = self.borrow();
+        assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
+        cap[0].read(builder)
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        let cap: &[[W; DIGEST_ELEMENTS]] = self.borrow();
+        assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
+        cap[0].write(witness);
+    }
+}
+
+impl<
+        C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+        SC: KoalaBearFriParametersVariable<C>,
+    > Witnessable<C> for StarkVerifyingKey<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-    OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
 {
     type WitnessVariable = VerifyingKeyVariable<C, SC>;
 
@@ -90,7 +108,26 @@ where
         let commitment = self.commit.read(builder);
         let pc_start = self.pc_start.read(builder);
         let initial_global_cumulative_sum = self.initial_global_cumulative_sum.read(builder);
-        let chip_information = self.chip_information.clone();
+        let chip_information = self
+            .chip_information
+            .iter()
+            .map(|(name, ser_domain, dims)| {
+                (
+                    name.clone(),
+                    ser_domain.to_coset(),
+                    p3_matrix::Dimensions { width: dims.0, height: dims.1 },
+                )
+            })
+            .collect();
+        let prep_name_width_hash_inputs: Vec<[Felt<C::F>; 2]> = self
+            .chip_information
+            .iter()
+            .map(|(name, _ser_domain, dims)| {
+                let name_digest = zkm_primitives::prep_chip_name_digest(name);
+                let width = InnerVal::from_usize(dims.0);
+                [name_digest.read(builder), width.read(builder)]
+            })
+            .collect();
         let chip_ordering = self.chip_ordering.clone();
         VerifyingKeyVariable {
             commitment,
@@ -98,6 +135,7 @@ where
             initial_global_cumulative_sum,
             chip_information,
             chip_ordering,
+            prep_name_width_hash_inputs,
         }
     }
 
@@ -105,104 +143,10 @@ where
         self.commit.write(witness);
         self.pc_start.write(witness);
         self.initial_global_cumulative_sum.write(witness);
-    }
-}
-
-impl<C> Witnessable<C> for ZKMRecursionWitnessValues<KoalaBearPoseidon2>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
-{
-    type WitnessVariable = ZKMRecursionWitnessVariable<C, KoalaBearPoseidon2>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let vk = self.vk.read(builder);
-        let shard_proofs = self.shard_proofs.read(builder);
-        let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-        let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
-        let vk_root = self.vk_root.read(builder);
-        ZKMRecursionWitnessVariable { vk, shard_proofs, is_complete, is_first_shard, vk_root }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vk.write(witness);
-        self.shard_proofs.write(witness);
-        self.is_complete.write(witness);
-        self.is_first_shard.write(witness);
-        self.vk_root.write(witness);
-    }
-}
-
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriConfigVariable<C>>
-    Witnessable<C> for ZKMCompressWitnessValues<SC>
-where
-    Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-    OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
-{
-    type WitnessVariable = ZKMCompressWitnessVariable<C, SC>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let vks_and_proofs = self.vks_and_proofs.read(builder);
-        let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-
-        ZKMCompressWitnessVariable { vks_and_proofs, is_complete }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vks_and_proofs.write(witness);
-        InnerVal::from_bool(self.is_complete).write(witness);
-    }
-}
-
-impl<C> Witnessable<C> for ZKMDeferredWitnessValues<KoalaBearPoseidon2>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
-{
-    type WitnessVariable = ZKMDeferredWitnessVariable<C, KoalaBearPoseidon2>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let vks_and_proofs = self.vks_and_proofs.read(builder);
-        let vk_merkle_data = self.vk_merkle_data.read(builder);
-        let start_reconstruct_deferred_digest =
-            self.start_reconstruct_deferred_digest.read(builder);
-        let zkm_vk_digest = self.zkm_vk_digest.read(builder);
-        let committed_value_digest = self.committed_value_digest.read(builder);
-        let deferred_proofs_digest = self.deferred_proofs_digest.read(builder);
-        let end_pc = self.end_pc.read(builder);
-        let end_shard = self.end_shard.read(builder);
-        let end_execution_shard = self.end_execution_shard.read(builder);
-        let init_addr_bits = self.init_addr_bits.read(builder);
-        let finalize_addr_bits = self.finalize_addr_bits.read(builder);
-        let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-
-        ZKMDeferredWitnessVariable {
-            vks_and_proofs,
-            vk_merkle_data,
-            start_reconstruct_deferred_digest,
-            zkm_vk_digest,
-            committed_value_digest,
-            deferred_proofs_digest,
-            end_pc,
-            end_shard,
-            end_execution_shard,
-            init_addr_bits,
-            finalize_addr_bits,
-            is_complete,
+        for (name, _ser_domain, dims) in self.chip_information.iter() {
+            zkm_primitives::prep_chip_name_digest(name).write(witness);
+            InnerVal::from_usize(dims.0).write(witness);
         }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vks_and_proofs.write(witness);
-        self.vk_merkle_data.write(witness);
-        self.start_reconstruct_deferred_digest.write(witness);
-        self.zkm_vk_digest.write(witness);
-        self.committed_value_digest.write(witness);
-        self.deferred_proofs_digest.write(witness);
-        self.end_pc.write(witness);
-        self.end_shard.write(witness);
-        self.end_execution_shard.write(witness);
-        self.init_addr_bits.write(witness);
-        self.finalize_addr_bits.write(witness);
-        self.is_complete.write(witness);
     }
 }
 
@@ -235,7 +179,7 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear>, SC: KoalaBearFriConfigVariable<C>> Witnessable<C>
+impl<C: CircuitConfig<F = KoalaBear>, SC: KoalaBearFriParametersVariable<C>> Witnessable<C>
     for ZKMMerkleProofWitnessValues<SC>
 where
     // This trait bound is redundant, but Rust-Analyzer is not able to infer it.
@@ -256,5 +200,267 @@ where
         self.vk_merkle_proofs.write(witness);
         self.values.write(witness);
         self.root.write(witness);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Witnessable impls for the shard-level basefold recursion stages: the
+// pattern above with `ShardProof<SC>::read` replaced by
+// `JaggedShardProof::read`, which produces a 5-tuple variable.
+// ---------------------------------------------------------------------------
+
+mod basefold_witness {
+    use super::*;
+    use crate::machine::{
+        compress_basefold::{ZKMCompressBasefoldWitnessValues, ZKMCompressBasefoldWitnessVariable},
+        core_basefold::{ZKMCoreBasefoldWitnessValues, ZKMCoreBasefoldWitnessVariable},
+        deferred_basefold::{ZKMDeferredBasefoldWitnessValues, ZKMDeferredBasefoldWitnessVariable},
+        wrap_basefold::{ZKMWrapBasefoldWitnessValues, ZKMWrapBasefoldWitnessVariable},
+    };
+
+    impl<C> Witnessable<C> for ZKMCoreBasefoldWitnessValues<KoalaBearPoseidon2>
+    where
+        C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+    {
+        type WitnessVariable = ZKMCoreBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
+
+        fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+            let vk = self.vk.read(builder);
+            let shard_proof_tuples = self.shard_proofs.read(builder);
+            let chip_cumulative_sums_per_shard: Vec<_> = self
+                .shard_proofs
+                .iter()
+                .map(|sp| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
+            let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
+            let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
+            let vk_root = self.vk_root.read(builder);
+            ZKMCoreBasefoldWitnessVariable {
+                vk,
+                shard_proof_tuples,
+                chip_cumulative_sums_per_shard,
+                is_complete,
+                is_first_shard,
+                vk_root,
+            }
+        }
+
+        fn write(&self, witness: &mut impl WitnessWriter<C>) {
+            self.vk.write(witness);
+            self.shard_proofs.write(witness);
+            for sp in self.shard_proofs.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
+                    sums.write(witness);
+                }
+            }
+            InnerVal::from_bool(self.is_complete).write(witness);
+            InnerVal::from_bool(self.is_first_shard).write(witness);
+            self.vk_root.write(witness);
+        }
+    }
+
+    impl<C, SC> Witnessable<C> for ZKMCompressBasefoldWitnessValues<SC>
+    where
+        C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+        SC: zkm_pcs::StarkGenericConfig
+            + KoalaBearFriParametersVariable<C>
+            + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+        Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
+        StarkVerifyingKey<SC>: Witnessable<C, WitnessVariable = VerifyingKeyVariable<C, SC>>,
+        crate::machine::ZKMMerkleProofWitnessValues<SC>:
+            Witnessable<C, WitnessVariable = crate::machine::ZKMMerkleProofWitnessVariable<C, SC>>,
+    {
+        type WitnessVariable = ZKMCompressBasefoldWitnessVariable<C, SC>;
+
+        fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+            let vks_and_proofs = self.vks_and_proofs.read(builder);
+            let chip_cumulative_sums_per_input: Vec<_> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
+            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
+            let vk_merkle_data = self.vk_merkle_data.read(builder);
+            let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
+            ZKMCompressBasefoldWitnessVariable {
+                vks_and_proofs,
+                chip_cumulative_sums_per_input,
+                chip_heights_per_input,
+                vk_merkle_data,
+                is_complete,
+            }
+        }
+
+        fn write(&self, witness: &mut impl WitnessWriter<C>) {
+            self.vks_and_proofs.write(witness);
+            for (_, sp) in self.vks_and_proofs.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
+                    sums.write(witness);
+                }
+            }
+            self.vk_merkle_data.write(witness);
+            InnerVal::from_bool(self.is_complete).write(witness);
+        }
+    }
+
+    impl<C> Witnessable<C> for ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2>
+    where
+        C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+    {
+        type WitnessVariable = ZKMDeferredBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
+
+        fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+            let vks_and_proofs = self.vks_and_proofs.read(builder);
+            let chip_cumulative_sums_per_input: Vec<_> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
+            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
+            ZKMDeferredBasefoldWitnessVariable {
+                vks_and_proofs,
+                chip_cumulative_sums_per_input,
+                chip_heights_per_input,
+                vk_merkle_data: self.vk_merkle_data.read(builder),
+                start_reconstruct_deferred_digest: self
+                    .start_reconstruct_deferred_digest
+                    .read(builder),
+                zkm_vk_digest: self.zkm_vk_digest.read(builder),
+                committed_value_digest: self.committed_value_digest.read(builder),
+                deferred_proofs_digest: self.deferred_proofs_digest.read(builder),
+                end_pc: self.end_pc.read(builder),
+                end_shard: self.end_shard.read(builder),
+                end_execution_shard: self.end_execution_shard.read(builder),
+                init_addr_bits: self.init_addr_bits.read(builder),
+                finalize_addr_bits: self.finalize_addr_bits.read(builder),
+                is_complete: InnerVal::from_bool(self.is_complete).read(builder),
+            }
+        }
+
+        fn write(&self, witness: &mut impl WitnessWriter<C>) {
+            self.vks_and_proofs.write(witness);
+            for (_, sp) in self.vks_and_proofs.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
+                    sums.write(witness);
+                }
+            }
+            self.vk_merkle_data.write(witness);
+            self.start_reconstruct_deferred_digest.write(witness);
+            self.zkm_vk_digest.write(witness);
+            self.committed_value_digest.write(witness);
+            self.deferred_proofs_digest.write(witness);
+            self.end_pc.write(witness);
+            self.end_shard.write(witness);
+            self.end_execution_shard.write(witness);
+            self.init_addr_bits.write(witness);
+            self.finalize_addr_bits.write(witness);
+            InnerVal::from_bool(self.is_complete).write(witness);
+        }
+    }
+
+    impl<C> Witnessable<C> for ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2>
+    where
+        C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+    {
+        type WitnessVariable = ZKMWrapBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
+
+        fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+            let vks_and_proofs = self.vks_and_proofs.read(builder);
+            let chip_cumulative_sums_per_input: Vec<_> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
+            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
+            let vk_merkle_data = self.vk_merkle_data.read(builder);
+            ZKMWrapBasefoldWitnessVariable {
+                vks_and_proofs,
+                chip_cumulative_sums_per_input,
+                chip_heights_per_input,
+                vk_merkle_data,
+            }
+        }
+
+        fn write(&self, witness: &mut impl WitnessWriter<C>) {
+            self.vks_and_proofs.write(witness);
+            for (_, sp) in self.vks_and_proofs.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
+                    sums.write(witness);
+                }
+            }
+            self.vk_merkle_data.write(witness);
+        }
+    }
+
+    // Witnessable for the OUTER wrap witness (gnark layer). Mirrors the
+    // inner impl above but for KoalaBearPoseidon2Outer over an
+    // outer-config builder (Bit = Var<N>). vk_merkle_data is read for
+    // witness-shape symmetry; the gnark wrap verifier skips verifying it
+    // (skip_vk_merkle=true) — binding is the build_outer_circuit commit/pc_start
+    // constraint + the public vkey_hash (no merkle).
+    type OuterCfg = zkm_recursion_compiler::config::OuterConfig;
+    impl Witnessable<OuterCfg>
+        for ZKMWrapBasefoldWitnessValues<zkm_recursion_core::stark::KoalaBearPoseidon2Outer>
+    {
+        type WitnessVariable = ZKMWrapBasefoldWitnessVariable<
+            OuterCfg,
+            zkm_recursion_core::stark::KoalaBearPoseidon2Outer,
+        >;
+
+        fn read(&self, builder: &mut Builder<OuterCfg>) -> Self::WitnessVariable {
+            let vks_and_proofs = self.vks_and_proofs.read(builder);
+            let chip_cumulative_sums_per_input: Vec<_> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
+            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
+            let vk_merkle_data = self.vk_merkle_data.read(builder);
+            ZKMWrapBasefoldWitnessVariable {
+                vks_and_proofs,
+                chip_cumulative_sums_per_input,
+                chip_heights_per_input,
+                vk_merkle_data,
+            }
+        }
+
+        fn write(&self, witness: &mut impl WitnessWriter<OuterCfg>) {
+            self.vks_and_proofs.write(witness);
+            for (_, sp) in self.vks_and_proofs.iter() {
+                for sums in sp.chip_cumulative_sums.values() {
+                    sums.write(witness);
+                }
+            }
+            self.vk_merkle_data.write(witness);
+        }
     }
 }

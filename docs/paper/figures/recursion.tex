@@ -1,0 +1,63 @@
+% The compose relation: what each node reads, what it checks, what the root closes.
+\begin{tikzpicture}[
+  font=\small,
+  shard/.style={rectangle, rounded corners=1.5pt, draw=zirenorange!85, fill=zirenorange!8,
+                minimum width=1.55cm, minimum height=0.62cm, align=center, font=\scriptsize,
+                line width=0.5pt},
+  leaf/.style={rectangle, rounded corners=1.5pt, draw=zirenblue!90, fill=zirenblue!10,
+               minimum width=1.55cm, minimum height=0.62cm, align=center, font=\scriptsize,
+               line width=0.5pt},
+  comp/.style={rectangle, rounded corners=1.5pt, draw=zirenteal!90, fill=zirenteal!12,
+               minimum width=2.6cm, minimum height=0.68cm, align=center, font=\scriptsize,
+               line width=0.55pt},
+  root/.style={comp, draw=zirenteal!90, fill=zirenteal!22, minimum width=3.0cm},
+  a/.style={-{Latex[length=1.8mm]}, line width=0.6pt, zirenslate!85},
+  cond/.style={font=\scriptsize, zirenslate, align=center, inner sep=1pt},
+  side/.style={rectangle, rounded corners=2pt, draw=zirenslate!45, fill=zirenlight,
+               align=left, font=\scriptsize, inner sep=5pt, line width=0.5pt},
+  band/.style={font=\scriptsize\scshape, black!55, anchor=east, inner sep=2pt},
+]
+
+% ---- shard proofs, each with the public values it publishes
+\foreach \k/\x in {0/0, 1/2.5, 2/5.0} {
+  \node[shard] (s\k) at (\x,0) {$\pi^{\mathrm{shard}}_\k$};
+}
+\node[band] at (-1.05,0) {shard proofs};
+
+% ---- one leaf per shard proof
+\foreach \k/\x in {0/0, 1/2.5, 2/5.0} {
+  \node[leaf] (l\k) at (\x,1.25) {leaf};
+  \draw[a] (s\k) -- (l\k);
+}
+\node[band] at (-1.05,1.25) {leaves};
+
+% ---- one compose node of arity three
+\node[comp] (c) at (2.5,2.6) {compose, arity $3$};
+\foreach \k in {0,1,2} { \draw[a] (l\k) -- (c); }
+\node[band] at (-1.05,2.6) {compose};
+
+\node[root] (r) at (2.5,3.9) {root};
+\draw[a] (c) -- (r);
+\node[band] at (-1.05,3.9) {root};
+
+% ---- what the compose node checks on its children
+\node[cond, anchor=west] at (6.15,1.25)
+  {each child's key lies in the\\allowlist at $\mathsf{root}$};
+\draw[a, zirenslate!55] (6.05,1.25) -- (l2.east);
+
+\node[cond, anchor=west] at (6.15,2.6)
+  {$\mathsf{exit}_i=\mathsf{entry}_{i+1}$, cursors tile,\\
+   $D=\sum_i D_i$, and $\mathsf{vk}$, $h$,\\
+   the exit code and $\mathsf{root}$ agree};
+\draw[a, zirenslate!55] (6.05,2.6) -- (c.east);
+
+\node[cond, anchor=west] at (6.15,3.95)
+  {cursors empty, $D=O$,\\exit code $0$};
+\draw[a, zirenslate!55] (6.05,3.95) -- (r.east);
+
+% ---- the tuple every node carries
+\node[side, anchor=north west] at (-1.35,-0.62)
+  {$\mathsf{pv}=(\mathsf{vk},\ \mathsf{entry},\ \mathsf{exit},\
+    \mathsf{cur}_{\mathrm{in}},\ \mathsf{cur}_{\mathrm{out}},\ D,\ h,\ \mathsf{root})$\quad
+   carried by every node, and by the proof that leaves the block};
+\end{tikzpicture}

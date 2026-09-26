@@ -12,7 +12,7 @@ TEXT ·SyscallWrite(SB), $0-24
 
 TEXT ·SyscallHintWrite(SB), $0-16
     MOVW $0x02, R2            // v0 = WRITE (Ziren syscall code 0x02)
-    MOVW $4, R4               // a0 = fd = FD_HINT = 4
+    MOVW $14, R4              // a0 = fd = FD_HINT = 4 + LOWEST_ALLOWED_FD
     MOVW write_buf+0(FP), R5  // a1 = buf pointer (first field of slice)
     MOVW nbytes+12(FP), R6   // a2 = nbytes (after slice: ptr=0, len=4, cap=8, nbytes=12)
     SYSCALL

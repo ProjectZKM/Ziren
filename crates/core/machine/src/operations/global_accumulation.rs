@@ -1,17 +1,14 @@
 use crate::operations::GlobalLookupOperation;
 use p3_air::AirBuilder;
 use p3_field::Field;
-use p3_field::FieldAlgebra;
-use p3_field::FieldExtensionAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::BaseAirBuilder;
-use zkm_stark::air::SepticExtensionAirBuilder;
-use zkm_stark::septic_curve::SepticCurveComplete;
-use zkm_stark::ZKMAirBuilder;
-use zkm_stark::{
+use zkm_pcs::air::SepticExtensionAirBuilder;
+use zkm_pcs::septic_curve::SepticCurveComplete;
+use zkm_pcs::ZKMAirBuilder;
+use zkm_pcs::{
     septic_curve::SepticCurve,
-    septic_digest::SepticDigest,
     septic_extension::{SepticBlock, SepticExtension},
 };
 
@@ -22,7 +19,14 @@ use zkm_stark::{
 #[repr(C)]
 pub struct GlobalAccumulationOperation<T, const N: usize> {
     pub initial_digest: [SepticBlock<T>; 2],
-    pub sum_checker: [SepticBlock<T>; N],
+    /// `(x2 - x1)^{-1}` for each accumulation step — the witness that makes the
+    /// chord denominator provably nonzero.
+    ///
+    /// Placed BETWEEN `initial_digest` and `cumulative_sum` on purpose: the
+    /// struct must stay at the end of the main trace with `cumulative_sum` last
+    /// (the permutation constraints and the shard-digest read depend on it), and
+    /// `initial_digest` must stay at `GLOBAL_INITIAL_DIGEST_POS`.
+    pub denominator_inv: [SepticBlock<T>; N],
     pub cumulative_sum: [[SepticBlock<T>; 2]; N],
 }
 
@@ -30,7 +34,7 @@ impl<T: Default, const N: usize> Default for GlobalAccumulationOperation<T, N> {
     fn default() -> Self {
         Self {
             initial_digest: core::array::from_fn(|_| SepticBlock::<T>::default()),
-            sum_checker: core::array::from_fn(|_| SepticBlock::<T>::default()),
+            denominator_inv: core::array::from_fn(|_| SepticBlock::<T>::default()),
             cumulative_sum: core::array::from_fn(|_| {
                 [SepticBlock::<T>::default(), SepticBlock::<T>::default()]
             }),
@@ -59,52 +63,66 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
             } else {
                 *initial_digest
             };
-            let sum_checker = if is_real[i] == F::ONE {
-                SepticExtension::<F>::ZERO
-            } else {
-                SepticCurve::<F>::sum_checker_x(*initial_digest, point_cur, sum_point)
-            };
-            self.sum_checker[i] = SepticBlock::from(sum_checker.0);
             self.cumulative_sum[i][0] = SepticBlock::from(sum_point.x.0);
             self.cumulative_sum[i][1] = SepticBlock::from(sum_point.y.0);
             *initial_digest = sum_point;
         }
     }
 
-    pub fn populate_dummy(
-        &mut self,
-        final_digest: SepticCurve<F>,
-        final_sum_checker: SepticExtension<F>,
-    ) {
-        self.initial_digest[0] = SepticBlock::from(final_digest.x.0);
-        self.initial_digest[1] = SepticBlock::from(final_digest.y.0);
+    /// Lay out a padding row as a GENUINE addition `final_digest = (final_digest - dummy) +
+    /// dummy`: `initial_digest = final_digest - dummy`, `cumulative_sum = final_digest`, with the
+    /// lookup point set to `dummy` by `GlobalLookupOperation::populate_dummy`.  This keeps the
+    /// unconditional `sum_checker_x == 0` true without a witness column, and keeps the shard's
+    /// digest in the LAST row's trailing 14 columns, which is where the prover reads the chip's
+    /// global cumulative sum from and what `permutation.rs` pins with `when_last_row`.  Padding
+    /// rows are outside the `GlobalAccumulation` bus chain (multiplicity `is_real == 0`).
+    pub fn populate_dummy(&mut self, final_digest: SepticCurve<F>) {
+        let dummy = SepticCurve::<F>::dummy();
+        let initial = final_digest.add_incomplete(dummy.neg());
+        self.initial_digest[0] = SepticBlock::from(initial.x.0);
+        self.initial_digest[1] = SepticBlock::from(initial.y.0);
+        let denom = dummy.x - initial.x;
+        assert!(
+            denom != SepticExtension::<F>::ZERO,
+            "padding row: the dummy layout's chord denominator is zero, so the row is not a \
+             valid addition",
+        );
+        let inv = denom.inverse();
         for i in 0..N {
-            self.sum_checker[i] = SepticBlock::from(final_sum_checker.0);
+            self.denominator_inv[i] = SepticBlock::from(inv.0);
+        }
+        for i in 0..N {
             self.cumulative_sum[i][0] = SepticBlock::from(final_digest.x.0);
             self.cumulative_sum[i][1] = SepticBlock::from(final_digest.y.0);
         }
     }
 
+    /// `point_to_add_x` is the row's event point x-coordinate — the `x2` of the
+    /// chord — needed for the denominator witness (x2 - x1)^{-1}.
     pub fn populate_real(
         &mut self,
         sums: &[SepticCurveComplete<F>],
-        final_digest: SepticCurve<F>,
-        final_sum_checker: SepticExtension<F>,
+        point_to_add_x: SepticExtension<F>,
     ) {
         let len = sums.len();
+        debug_assert!(len >= 2);
         let sums = sums.iter().map(|complete_point| complete_point.point()).collect::<Vec<_>>();
         self.initial_digest[0] = SepticBlock::from(sums[0].x.0);
         self.initial_digest[1] = SepticBlock::from(sums[0].y.0);
+        let denom = point_to_add_x - sums[0].x;
+        assert!(
+            denom != SepticExtension::<F>::ZERO,
+            "the running sum equals the event point, so the chord addition is exceptional \
+             (x2 == x1): this trace is not provable",
+        );
+        let inv = denom.inverse();
         for i in 0..N {
-            if len >= i + 2 {
-                self.sum_checker[i] = SepticBlock([F::ZERO; 7]);
-                self.cumulative_sum[i][0] = SepticBlock::from(sums[i + 1].x.0);
-                self.cumulative_sum[i][1] = SepticBlock::from(sums[i + 1].y.0);
-            } else {
-                self.sum_checker[i] = SepticBlock::from(final_sum_checker.0);
-                self.cumulative_sum[i][0] = SepticBlock::from(final_digest.x.0);
-                self.cumulative_sum[i][1] = SepticBlock::from(final_digest.y.0);
-            }
+            self.denominator_inv[i] = SepticBlock::from(inv.0);
+        }
+        for i in 0..N {
+            let s = &sums[(i + 1).min(len - 1)];
+            self.cumulative_sum[i][0] = SepticBlock::from(s.x.0);
+            self.cumulative_sum[i][1] = SepticBlock::from(s.y.0);
         }
     }
 }
@@ -114,26 +132,16 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
         builder: &mut AB,
         global_lookup_cols: [GlobalLookupOperation<AB::Var>; N],
         local_is_real: [AB::Var; N],
-        next_is_real: [AB::Var; N],
         local_accumulation: GlobalAccumulationOperation<AB::Var, N>,
-        next_accumulation: GlobalAccumulationOperation<AB::Var, N>,
     ) {
-        // First, constrain the control flow regarding `is_real`.
-        // Constrain that all `is_real` values are boolean.
         for i in 0..N {
             builder.assert_bool(local_is_real[i]);
         }
 
-        // Constrain that `is_real = 0` implies the next `is_real` values are all zero.
         for i in 0..N - 1 {
-            // `is_real[i] == 0` implies `is_real[i + 1] == 0`.
             builder.when_not(local_is_real[i]).assert_zero(local_is_real[i + 1]);
         }
 
-        // Constrain that `is_real[N - 1] == 0` implies `next.is_real[0] == 0`
-        builder.when_transition().when_not(local_is_real[N - 1]).assert_zero(next_is_real[0]);
-
-        // Next, constrain the accumulation.
         let initial_digest = SepticCurve::<AB::Expr> {
             x: SepticExtension::<AB::Expr>::from_base_fn(|i| {
                 local_accumulation.initial_digest[0][i].into()
@@ -168,69 +176,141 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             }),
         };
 
-        // Constrain that the first `initial_digest` is the zero digest.
-        let zero_digest = SepticDigest::<AB::Expr>::zero().0;
-        builder.when_first_row().assert_septic_ext_eq(initial_digest.x.clone(), zero_digest.x);
-        builder.when_first_row().assert_septic_ext_eq(initial_digest.y.clone(), zero_digest.y);
-
-        // Defense-in-depth: every witnessed running digest must stay on-curve even if the
-        // incomplete Weierstrass addition edge case is triggered.
         assert_on_curve(builder, initial_digest.clone());
 
-        // Constrain that when `is_real = 1`, addition is being carried out, and when `is_real = 0`, the sum remains the same.
         for i in 0..N {
             let current_sum =
                 if i == 0 { initial_digest.clone() } else { ith_cumulative_sum(i - 1) };
             let point_to_add = ith_point_to_add(i);
             let next_sum = ith_cumulative_sum(i);
             assert_on_curve(builder, next_sum.clone());
-            // If `local_is_real[i] == 1`, current_sum + point_to_add == next_sum must hold.
-            // To do this, constrain that `sum_checker_x` and `sum_checker_y` are both zero when `is_real == 1`.
             let sum_checker_x = SepticCurve::<AB::Expr>::sum_checker_x(
                 current_sum.clone(),
                 point_to_add.clone(),
                 next_sum.clone(),
             );
-            let sum_checker_y = SepticCurve::<AB::Expr>::sum_checker_y(
-                current_sum.clone(),
-                point_to_add,
-                next_sum.clone(),
+            let sum_checker_y =
+                SepticCurve::<AB::Expr>::sum_checker_y(current_sum.clone(), point_to_add, next_sum);
+            builder.assert_septic_ext_eq(
+                sum_checker_x,
+                SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO),
             );
-            let witnessed_sum_checker_x = SepticExtension::<AB::Expr>::from_base_fn(|idx| {
-                local_accumulation.sum_checker[i].0[idx].into()
+            builder.when(local_is_real[i]).assert_septic_ext_eq(
+                sum_checker_y,
+                SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO),
+            );
+
+            let denominator = ith_point_to_add(i).x - current_sum.x.clone();
+            let denominator_inv = SepticExtension::<AB::Expr>::from_base_fn(|j| {
+                local_accumulation.denominator_inv[i].0[j].into()
             });
-            // Since `sum_checker_x` is degree 3, we constrain it to be equal to `witnessed_sum_checker_x` first.
-            builder.assert_septic_ext_eq(sum_checker_x, witnessed_sum_checker_x.clone());
-            // Now we can constrain that when `local_is_real[i] == 1`, the two `sum_checker` values are both zero.
-            builder
-                .when(local_is_real[i])
-                .assert_septic_ext_eq(witnessed_sum_checker_x, SepticExtension::<AB::Expr>::zero());
-            builder
-                .when(local_is_real[i])
-                .assert_septic_ext_eq(sum_checker_y, SepticExtension::<AB::Expr>::zero());
-
-            // If `is_real == 0`, current_sum == next_sum must hold.
-            builder
-                .when_not(local_is_real[i])
-                .assert_septic_ext_eq(current_sum.x.clone(), next_sum.x.clone());
-            builder.when_not(local_is_real[i]).assert_septic_ext_eq(current_sum.y, next_sum.y);
+            builder.when(local_is_real[i]).assert_septic_ext_eq(
+                denominator * denominator_inv,
+                SepticExtension::<AB::Expr>::from_base_fn(|j| {
+                    if j == 0 {
+                        AB::Expr::ONE
+                    } else {
+                        AB::Expr::ZERO
+                    }
+                }),
+            );
         }
+    }
+}
 
-        // Constrain that the final digest is the next row's initial_digest.
-        let final_digest = ith_cumulative_sum(N - 1);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+    use zkm_pcs::septic_curve::{SepticCurve, SepticCurveComplete};
+    use zkm_pcs::septic_extension::SepticExtension;
 
-        let next_initial_digest = SepticCurve::<AB::Expr> {
-            x: SepticExtension::<AB::Expr>::from_base_fn(|i| {
-                next_accumulation.initial_digest[0][i].into()
-            }),
-            y: SepticExtension::<AB::Expr>::from_base_fn(|i| {
-                next_accumulation.initial_digest[1][i].into()
-            }),
-        };
+    type F = KoalaBear;
 
-        builder
-            .when_transition()
-            .assert_septic_ext_eq(final_digest.x.clone(), next_initial_digest.x.clone());
-        builder.when_transition().assert_septic_ext_eq(final_digest.y, next_initial_digest.y);
+    /// A deterministic on-curve point, lifted from an x the curve accepts.
+    fn point(seed: u32) -> SepticCurve<F> {
+        let x: SepticExtension<F> = SepticExtension::from_base_fn(|i| F::from_u32(seed + i as u32));
+        let (p, _) = SepticCurve::<F>::lift_x(x);
+        assert!(p.check_on_point(), "lift_x must land on the curve");
+        p
+    }
+
+    /// The constraint is `is_real · ((x2 - x1) · inv - 1) = 0`, so on an honest
+    /// row the populated inverse must satisfy `(x2 - x1) · inv = 1` exactly. A
+    /// populate path that leaves `inv = 0` makes every real row unsatisfiable,
+    /// so this asserts the witness, not just that populate returned.
+    fn assert_inverse_witness(
+        cols: &GlobalAccumulationOperation<F, 1>,
+        x2: SepticExtension<F>,
+        x1: SepticExtension<F>,
+    ) {
+        let inv = SepticExtension::<F>::from_base_fn(|j| cols.denominator_inv[0].0[j]);
+        let denom = x2 - x1;
+        assert_eq!(
+            denom * inv,
+            SepticExtension::<F>::ONE,
+            "the populated denominator_inv does not invert the chord denominator, so the \
+             constraint is_real * ((x2 - x1) * inv - 1) = 0 is unsatisfiable on an honest row",
+        );
+    }
+
+    /// ORDINARY ADDITION (`x2 != x1`): provable, and the witness inverts the
+    /// chord denominator.
+    #[test]
+    fn global_accumulation_ordinary_addition_is_provable() {
+        let p1 = point(0x2013);
+        let p2 = point(0x7777);
+        assert_ne!(p1.x, p2.x, "the fixture must be a genuine addition");
+        let sums = vec![
+            SepticCurveComplete::Affine(p1),
+            SepticCurveComplete::Affine(p1.add_incomplete(p2)),
+        ];
+        let mut cols = GlobalAccumulationOperation::<F, 1>::default();
+        cols.populate_real(&sums, p2.x);
+        assert_inverse_witness(&cols, p2.x, p1.x);
+    }
+
+    /// DOUBLING (`x2 == x1`, same point): the chord denominator vanishes, so the
+    /// row is the exceptional case and the trace is not provable. With the
+    /// denominator unconstrained, both chord identities vanish at `x2 = x1` and
+    /// a doubling could be presented as an addition with any on-curve
+    /// successor.
+    #[test]
+    #[should_panic(expected = "this trace is not provable")]
+    fn global_accumulation_doubling_is_not_provable() {
+        let p = point(0x2013);
+        let sums = vec![SepticCurveComplete::Affine(p), SepticCurveComplete::Affine(p.double())];
+        let mut cols = GlobalAccumulationOperation::<F, 1>::default();
+        cols.populate_real(&sums, p.x);
+    }
+
+    /// INVERSE (`x2 == x1`, `y2 == -y1`): the other vanishing-denominator case.
+    /// Its sum is the point at infinity, which the digest cannot represent, so
+    /// it must fail for the same reason rather than produce a row.
+    #[test]
+    #[should_panic(expected = "this trace is not provable")]
+    fn global_accumulation_inverse_pair_is_not_provable() {
+        let p = point(0x2013);
+        let neg = p.neg();
+        assert_eq!(p.x, neg.x, "an inverse pair shares its x");
+        assert_ne!(p.y, neg.y, "...and negates its y");
+        let sums = vec![SepticCurveComplete::Affine(p), SepticCurveComplete::Affine(p)];
+        let mut cols = GlobalAccumulationOperation::<F, 1>::default();
+        cols.populate_real(&sums, neg.x);
+    }
+
+    /// PADDING / no-event rows: the dummy layout is the genuine addition
+    /// `(final - dummy) + dummy`, so it must be provable too — the padding rows
+    /// are the majority of the chip and a vanishing denominator there would make
+    /// every shard unprovable.
+    #[test]
+    fn global_accumulation_padding_row_is_provable() {
+        let final_digest = point(0x4242);
+        let dummy = SepticCurve::<F>::dummy();
+        let initial = final_digest.add_incomplete(dummy.neg());
+        let mut cols = GlobalAccumulationOperation::<F, 1>::default();
+        cols.populate_dummy(final_digest);
+        assert_inverse_witness(&cols, dummy.x, initial.x);
     }
 }

@@ -1,0 +1,357 @@
+//! Sequenced-block program representation.
+//!
+//! `RawProgram<T>` is a sequence of `SeqBlock<T>`s. A `SeqBlock` is either
+//! a `BasicBlock` (linearly ordered instructions) or a `Parallel` block
+//! (multiple `RawProgram`s that can execute concurrently).
+//!
+//! The discipline that makes parallel execution sound: each parallel
+//! sub-program is emitted with a monotonically-increasing address counter, so
+//! per-block written-address ranges are pairwise disjoint. The runtime writes
+//! through shared references with `mw_unchecked` and relies on exactly that;
+//! two children writing one address is a data race, not a wrong proof.
+//!
+//! Disjointness is CHECKED where the block is formed, in the compiler's
+//! lowering of `DslIr::Parallel`, against the `addrs_written` range each
+//! sub-block carries, so the invariant does not rest on one emitter's
+//! construction.
+//!
+//! `Parallel` is live, not scaffolding: a compose program with `n` inputs
+//! carries at least one `Parallel` block, one sub-program per input.
+
+use serde::{Deserialize, Serialize};
+use std::iter::Flatten;
+
+/// A linearly ordered sequence of instructions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BasicBlock<T> {
+    pub instrs: Vec<T>,
+}
+
+impl<T> Default for BasicBlock<T> {
+    fn default() -> Self {
+        Self { instrs: Vec::new() }
+    }
+}
+
+/// A segment that may be sequentially composed with other segments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SeqBlock<T> {
+    /// One basic block, executed sequentially.
+    Basic(BasicBlock<T>),
+    /// Many sub-programs to be executed in parallel. Each sub-program's
+    /// written-address range is disjoint from the others', which the
+    /// compiler checks when it lowers `DslIr::Parallel`.
+    Parallel(Vec<RawProgram<T>>),
+}
+
+impl<T> SeqBlock<T> {
+    pub fn iter(&self) -> SeqBlockIter<'_, T> {
+        self.into_iter()
+    }
+}
+
+/// A program: a sequence of `SeqBlock`s.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawProgram<T> {
+    pub seq_blocks: Vec<SeqBlock<T>>,
+}
+
+impl<T> Default for RawProgram<T> {
+    fn default() -> Self {
+        Self { seq_blocks: Vec::new() }
+    }
+}
+
+impl<T> RawProgram<T> {
+    pub fn iter(&self) -> impl Iterator<Item = &'_ T> {
+        self.seq_blocks.iter().flatten()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &'_ mut T> {
+        self.seq_blocks.iter_mut().flatten()
+    }
+
+    /// Total instruction count across all blocks (recursive into
+    /// parallel sub-programs).
+    pub fn instruction_count(&self) -> usize {
+        self.iter().count()
+    }
+
+    /// Sizing diagnostic: count `(parallel_blocks, total_sub_programs,
+    /// total_instructions_in_parallel_subs)`. A program with a non-zero
+    /// second component is one where `par_iter` walker dispatch would
+    /// help; the third component bounds the wall-time win.
+    ///
+    /// `n_par_instrs` counts each instruction AT MOST ONCE: it is the number
+    /// of instructions lying inside at least one `Parallel`, so it is bounded
+    /// by [`Self::instruction_count`] and a ratio against that total is a
+    /// proportion.
+    ///
+    /// It previously added `sub_instr_count(b)`, which already descends into
+    /// nested `Parallel` blocks, and then recursed into the same `b` and added
+    /// those same instructions again — one extra copy per nesting level. A
+    /// program whose parallel blocks nest reported more parallel instructions
+    /// than it contains; a compose program reported 137%. Nothing caught it
+    /// because the only fixture exercising this had a single flat block.
+    pub fn parallelism_summary(&self) -> (usize, usize, usize) {
+        fn walk<T>(
+            block: &SeqBlock<T>,
+            inside_parallel: bool,
+            n_par: &mut usize,
+            n_subs: &mut usize,
+            n_par_instrs: &mut usize,
+        ) {
+            match block {
+                SeqBlock::Basic(b) => {
+                    if inside_parallel {
+                        *n_par_instrs += b.instrs.len();
+                    }
+                }
+                SeqBlock::Parallel(subs) => {
+                    *n_par += 1;
+                    *n_subs += subs.len();
+                    for sub in subs {
+                        for b in &sub.seq_blocks {
+                            walk(b, true, n_par, n_subs, n_par_instrs);
+                        }
+                    }
+                }
+            }
+        }
+        let (mut n_par, mut n_subs, mut n_par_instrs) = (0, 0, 0);
+        for b in &self.seq_blocks {
+            walk(b, false, &mut n_par, &mut n_subs, &mut n_par_instrs);
+        }
+        (n_par, n_subs, n_par_instrs)
+    }
+
+    /// Build a `RawProgram` containing one `Basic` block — useful for
+    /// programs that don't yet use parallelism.
+    pub fn from_linear(instrs: Vec<T>) -> Self {
+        Self { seq_blocks: vec![SeqBlock::Basic(BasicBlock { instrs })] }
+    }
+}
+
+impl<T> IntoIterator for RawProgram<T> {
+    type Item = T;
+    type IntoIter = Flatten<<Vec<SeqBlock<T>> as IntoIterator>::IntoIter>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.seq_blocks.into_iter().flatten()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a RawProgram<T> {
+    type Item = &'a T;
+    type IntoIter = Flatten<<&'a Vec<SeqBlock<T>> as IntoIterator>::IntoIter>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.seq_blocks.iter().flatten()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut RawProgram<T> {
+    type Item = &'a mut T;
+    type IntoIter = Flatten<<&'a mut Vec<SeqBlock<T>> as IntoIterator>::IntoIter>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.seq_blocks.iter_mut().flatten()
+    }
+}
+
+// SeqBlock iterator boilerplate — recursive into Parallel sub-programs.
+
+#[derive(Debug)]
+pub enum SeqBlockIter<'a, T> {
+    Basic(<&'a Vec<T> as IntoIterator>::IntoIter),
+    Parallel(Box<Flatten<<&'a Vec<RawProgram<T>> as IntoIterator>::IntoIter>>),
+}
+
+impl<'a, T> Iterator for SeqBlockIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            SeqBlockIter::Basic(it) => it.next(),
+            SeqBlockIter::Parallel(it) => it.next(),
+        }
+    }
+}
+
+impl<'a, T> IntoIterator for &'a SeqBlock<T> {
+    type Item = &'a T;
+    type IntoIter = SeqBlockIter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            SeqBlock::Basic(b) => SeqBlockIter::Basic(b.instrs.iter()),
+            SeqBlock::Parallel(progs) => SeqBlockIter::Parallel(Box::new(progs.iter().flatten())),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum SeqBlockIterMut<'a, T> {
+    Basic(<&'a mut Vec<T> as IntoIterator>::IntoIter),
+    Parallel(Box<Flatten<<&'a mut Vec<RawProgram<T>> as IntoIterator>::IntoIter>>),
+}
+
+impl<'a, T> Iterator for SeqBlockIterMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            SeqBlockIterMut::Basic(it) => it.next(),
+            SeqBlockIterMut::Parallel(it) => it.next(),
+        }
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut SeqBlock<T> {
+    type Item = &'a mut T;
+    type IntoIter = SeqBlockIterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            SeqBlock::Basic(b) => SeqBlockIterMut::Basic(b.instrs.iter_mut()),
+            SeqBlock::Parallel(progs) => {
+                SeqBlockIterMut::Parallel(Box::new(progs.iter_mut().flatten()))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SeqBlockIntoIter<T> {
+    Basic(<Vec<T> as IntoIterator>::IntoIter),
+    Parallel(Box<Flatten<<Vec<RawProgram<T>> as IntoIterator>::IntoIter>>),
+}
+
+impl<T> Iterator for SeqBlockIntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            SeqBlockIntoIter::Basic(it) => it.next(),
+            SeqBlockIntoIter::Parallel(it) => it.next(),
+        }
+    }
+}
+
+impl<T> IntoIterator for SeqBlock<T> {
+    type Item = T;
+    type IntoIter = SeqBlockIntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            SeqBlock::Basic(b) => SeqBlockIntoIter::Basic(b.instrs.into_iter()),
+            SeqBlock::Parallel(progs) => {
+                SeqBlockIntoIter::Parallel(Box::new(progs.into_iter().flatten()))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A parallel region's instruction count is a PROPORTION of the program,
+    /// so it can never exceed the program's own instruction count: a nested
+    /// block is counted once, not once per nesting level.
+    #[test]
+    fn nested_parallel_instructions_are_counted_once() {
+        let basic = |n: usize| SeqBlock::Basic(BasicBlock { instrs: vec![0u8; n] });
+
+        let inner = SeqBlock::Parallel(vec![
+            RawProgram { seq_blocks: vec![basic(3)] },
+            RawProgram { seq_blocks: vec![basic(3)] },
+        ]);
+        let program = RawProgram {
+            seq_blocks: vec![SeqBlock::Parallel(vec![
+                RawProgram { seq_blocks: vec![basic(2), inner] },
+                RawProgram { seq_blocks: vec![basic(4)] },
+            ])],
+        };
+
+        let (n_par, n_subs, n_par_instrs) = program.parallelism_summary();
+        assert_eq!(n_par, 2, "the outer and the inner Parallel");
+        assert_eq!(n_subs, 4, "two children each");
+        assert_eq!(n_par_instrs, 12, "2 + 3 + 3 + 4, each instruction once");
+
+        let total: usize = program.seq_blocks.iter().map(count_all).sum();
+        assert_eq!(total, 12, "every instruction here is inside the outer Parallel");
+        assert!(
+            n_par_instrs <= total,
+            "parallel instructions ({n_par_instrs}) cannot exceed the total ({total})",
+        );
+    }
+
+    /// Instructions outside any `Parallel` are not parallel instructions.
+    #[test]
+    fn instructions_outside_a_parallel_are_not_counted() {
+        let basic = |n: usize| SeqBlock::Basic(BasicBlock { instrs: vec![0u8; n] });
+        let program = RawProgram {
+            seq_blocks: vec![
+                basic(7),
+                SeqBlock::Parallel(vec![RawProgram { seq_blocks: vec![basic(5)] }]),
+            ],
+        };
+        let (n_par, n_subs, n_par_instrs) = program.parallelism_summary();
+        assert_eq!((n_par, n_subs), (1, 1));
+        assert_eq!(n_par_instrs, 5, "the leading Basic(7) is sequential");
+    }
+
+    fn count_all(block: &SeqBlock<u8>) -> usize {
+        match block {
+            SeqBlock::Basic(b) => b.instrs.len(),
+            SeqBlock::Parallel(subs) => {
+                subs.iter().map(|s| s.seq_blocks.iter().map(count_all).sum::<usize>()).sum()
+            }
+        }
+    }
+
+    #[test]
+    fn iterates_basic_block_in_order() {
+        let p: RawProgram<i32> = RawProgram::from_linear(vec![1, 2, 3]);
+        let collected: Vec<_> = p.iter().copied().collect();
+        assert_eq!(collected, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn iterates_parallel_subprograms_in_order() {
+        let p: RawProgram<i32> = RawProgram {
+            seq_blocks: vec![
+                SeqBlock::Basic(BasicBlock { instrs: vec![1, 2] }),
+                SeqBlock::Parallel(vec![
+                    RawProgram::from_linear(vec![10, 11]),
+                    RawProgram::from_linear(vec![20, 21]),
+                ]),
+                SeqBlock::Basic(BasicBlock { instrs: vec![3] }),
+            ],
+        };
+        let collected: Vec<_> = p.iter().copied().collect();
+        assert_eq!(collected, vec![1, 2, 10, 11, 20, 21, 3]);
+    }
+
+    #[test]
+    fn instruction_count_recurses() {
+        let p: RawProgram<i32> = RawProgram {
+            seq_blocks: vec![SeqBlock::Parallel(vec![
+                RawProgram::from_linear(vec![1, 2, 3]),
+                RawProgram::from_linear(vec![4, 5]),
+            ])],
+        };
+        assert_eq!(p.instruction_count(), 5);
+    }
+
+    #[test]
+    fn from_linear_round_trip() {
+        let p: RawProgram<u32> = RawProgram::from_linear(vec![7, 8, 9]);
+        assert_eq!(p.seq_blocks.len(), 1);
+        match &p.seq_blocks[0] {
+            SeqBlock::Basic(b) => assert_eq!(b.instrs, vec![7, 8, 9]),
+            _ => panic!("expected Basic"),
+        }
+    }
+}

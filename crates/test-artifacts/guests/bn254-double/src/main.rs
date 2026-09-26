@@ -31,5 +31,4 @@ pub fn main() {
         assert_eq!(a, b);
     }
 
-    // println!("done");
 }

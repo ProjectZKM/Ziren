@@ -125,7 +125,6 @@ pub fn bls12381_decompress<E: EllipticCurve>(
         flags |= Y_IS_ODD_FLAG;
     };
 
-    // set sign and compression flag
     g1_bytes_be[0] |= flags;
     let point =
         deserialize_g1(&g1_bytes_be).map_err(|_| CurveError::InvalidG1(g1_bytes_be.to_vec()))?;
@@ -168,9 +167,6 @@ mod tests {
 
     #[test]
     fn test_bls12381_decompress() {
-        // This test checks that decompression of generator, 2x generator, 4x generator, etc. works.
-
-        // Get the generator point.
         let mut point = {
             let (x, y) = Bls12381Parameters::generator();
             AffinePoint::<SwCurve<Bls12381Parameters>>::new(x, y)
@@ -182,11 +178,9 @@ mod tests {
                 result[..x.len()].copy_from_slice(&x);
                 result.reverse();
 
-                // Evaluate if y > -y
                 let y = point.y.clone();
                 let y_neg = Bls12381BaseField::modulus() - y.clone();
 
-                // Set flags
                 let mut is_odd = 0;
                 if y > y_neg {
                     result[0] += Y_IS_ODD_FLAG;
@@ -198,7 +192,6 @@ mod tests {
             };
             assert_eq!(point, bls12381_decompress(&compressed_point, is_odd).unwrap());
 
-            // Double the point to create a "random" point for the next iteration.
             point = point.clone().sw_double();
         }
     }
@@ -207,8 +200,6 @@ mod tests {
     fn test_bls12381_sqrt() {
         let mut rng = thread_rng();
         for _ in 0..NUM_TEST_CASES {
-            // Check that sqrt(x^2)^2 == x^2
-            // We use x^2 since not all field elements have a square root
             let x = rng.gen_biguint(256) % Bls12381BaseField::modulus();
             let x_2 = (&x * &x) % Bls12381BaseField::modulus();
             let sqrt = bls12381_sqrt(&x_2).unwrap();

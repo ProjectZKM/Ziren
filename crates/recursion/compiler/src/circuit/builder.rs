@@ -1,15 +1,14 @@
 //! An implementation of Poseidon2 over BN254.
 
-use std::iter::repeat;
-
 use itertools::Itertools;
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
+use zkm_pcs::septic_curve::SepticCurve;
+use zkm_pcs::septic_digest::SepticDigest;
+use zkm_pcs::septic_extension::SepticExtension;
+use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_core::air::RecursionPublicValues;
-use zkm_recursion_core::{chips::poseidon2_skinny::WIDTH, D, DIGEST_SIZE, HASH_RATE};
-use zkm_stark::septic_curve::SepticCurve;
-use zkm_stark::septic_digest::SepticDigest;
-use zkm_stark::septic_extension::SepticExtension;
+use zkm_recursion_core::{chips::poseidon2_wide::WIDTH, D, DIGEST_SIZE, HASH_RATE};
 
 use crate::prelude::*;
 pub trait CircuitV2Builder<C: Config> {
@@ -18,6 +17,7 @@ pub trait CircuitV2Builder<C: Config> {
         bits: impl IntoIterator<Item = Felt<<C as Config>::F>>,
     ) -> Felt<C::F>;
     fn num2bits_v2_f(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>>;
+    fn hint_bits_boolean_v2(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>>;
     fn exp_reverse_bits_v2(&mut self, input: Felt<C::F>, power_bits: Vec<Felt<C::F>>)
         -> Felt<C::F>;
     fn batch_fri_v2(
@@ -63,8 +63,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     ) -> Felt<<C as Config>::F> {
         let mut num: Felt<_> = self.eval(C::F::ZERO);
         for (i, bit) in bits.into_iter().enumerate() {
-            // Add `bit * 2^i` to the sum.
-            num = self.eval(num + bit * C::F::from_wrapped_u32(1 << i));
+            num = self.eval(num + bit * C::F::from_u32(1 << i));
         }
         num
     }
@@ -79,22 +78,13 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             .enumerate()
             .map(|(i, &bit)| {
                 self.assert_felt_eq(bit * (bit - C::F::ONE), C::F::ZERO);
-                bit * C::F::from_wrapped_u32(1 << i)
+                bit * C::F::from_u32(1 << i)
             })
             .sum();
 
-        // Range check the bits to be less than the KoalaBear modulus.
-
         assert!(num_bits <= 31, "num_bits must be less than or equal to 31");
 
-        // If there are less than 31 bits, there is nothing to check.
         if num_bits > 30 {
-            // Since KoalaBear modulus is 2^31 - 2^24 + 1, if any of the top `7` bits are zero, the
-            // number is less than 2^24, and we can stop the iteration. Otherwise, if all the top
-            // `7` bits are '1`, we need to check that all the bottom `24` are '0`
-
-            // Get a flag that is zero if any of the top `7` bits are zero, and one otherwise. We
-            // can do this by simply taking their product (which is bitwise AND).
             let are_all_top_bits_one: Felt<_> = self.eval(
                 output
                     .iter()
@@ -105,15 +95,39 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
                     .product::<SymbolicFelt<_>>(),
             );
 
-            // Assert that if all the top `7` bits are one, then all the bottom `24` bits are zero.
             for bit in output.iter().take(24).copied() {
                 self.assert_felt_eq(bit * are_all_top_bits_one, C::F::ZERO);
             }
         }
 
-        // Check that the original number matches the bit decomposition.
         self.assert_felt_eq(x, num);
 
+        output
+    }
+
+    /// Hint the low `num_bits` bits of `num` WITHOUT binding them back to
+    /// `num`: booleanity is asserted per bit, and nothing else — no
+    /// recomposition assert and no modulus range check.
+    ///
+    /// Sound ONLY when the caller separately pins the bit vector's VALUE — the
+    /// jagged verifier does, through the step-(7) prefix-sum walk (every
+    /// column's Horner-recomposed prefix sum is asserted against the running
+    /// row-count total) and the final-area assert.  `num_bits <= 30` is a hard
+    /// requirement: a 30-bit boolean vector's value is at most 2^30 - 1, below
+    /// the KoalaBear modulus, so bits -> felt is injective and the walk's felt
+    /// equation pins the bits exactly; at 31 bits two boolean vectors can map
+    /// to one felt (wraparound) and the caller must use `num2bits_v2_f`.
+    fn hint_bits_boolean_v2(&mut self, num: Felt<C::F>, num_bits: usize) -> Vec<Felt<C::F>> {
+        assert!(
+            num_bits <= 30,
+            "hint_bits_boolean_v2: {num_bits} bits could wrap the modulus; \
+             use num2bits_v2_f"
+        );
+        let output = std::iter::from_fn(|| Some(self.uninit())).take(num_bits).collect::<Vec<_>>();
+        self.push_op(DslIr::CircuitV2HintBitsF(output.clone(), num));
+        for &bit in output.iter() {
+            self.assert_felt_eq(bit * (bit - C::F::ONE), C::F::ZERO);
+        }
         output
     }
 
@@ -151,7 +165,6 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     ///
     /// Reference: [p3_symmetric::PaddingFreeSponge]
     fn poseidon2_hash_v2(&mut self, input: &[Felt<C::F>]) -> [Felt<C::F>; DIGEST_SIZE] {
-        // static_assert(RATE < WIDTH)
         let mut state = core::array::from_fn(|_| self.eval(C::F::ZERO));
         for input_chunk in input.chunks(HASH_RATE) {
             state[..input_chunk.len()].copy_from_slice(input_chunk);
@@ -168,9 +181,13 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         &mut self,
         input: impl IntoIterator<Item = Felt<C::F>>,
     ) -> [Felt<C::F>; DIGEST_SIZE] {
-        // debug_assert!(DIGEST_SIZE * N <= WIDTH);
-        let mut pre_iter = input.into_iter().chain(repeat(self.eval(C::F::default())));
-        let pre = core::array::from_fn(move |_| pre_iter.next().unwrap());
+        let mut collected: Vec<Felt<C::F>> = input.into_iter().take(WIDTH).collect();
+        if collected.len() < WIDTH {
+            let pad = self.eval(C::F::default());
+            collected.resize(WIDTH, pad);
+        }
+        let pre: [Felt<C::F>; WIDTH] =
+            collected.try_into().unwrap_or_else(|_| unreachable!("collected to WIDTH"));
         let post = self.poseidon2_permute_v2(pre);
         let post: [Felt<C::F>; DIGEST_SIZE] = post[..DIGEST_SIZE].try_into().unwrap();
         post
@@ -190,16 +207,25 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     /// Decomposes an ext into its felt coordinates.
     fn ext2felt_v2(&mut self, ext: Ext<C::F, C::EF>) -> [Felt<C::F>; D] {
         let felts = core::array::from_fn(|_| self.uninit());
-        self.push_op(DslIr::CircuitExt2Felt(felts, ext));
-        // Verify that the decomposed extension element is correct.
-        let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
-        for i in 0..4 {
-            let felt = felts[i];
-            let monomial: Ext<C::F, C::EF> = self.constant(C::EF::monomial(i));
-            reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);
-        }
+        match self.program_type {
+            RecursionProgramType::Core
+            | RecursionProgramType::Deferred
+            | RecursionProgramType::Compress => {
+                self.push_op(DslIr::CircuitV2Ext2Felt(felts, ext));
+            }
+            RecursionProgramType::Shrink | RecursionProgramType::Wrap => {
+                self.push_op(DslIr::CircuitExt2Felt(felts, ext));
+                let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
+                for i in 0..D {
+                    let felt = felts[i];
+                    let monomial: Ext<C::F, C::EF> =
+                        self.constant(C::EF::ith_basis_element(i).unwrap());
+                    reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);
+                }
 
-        self.assert_ext_eq(reconstructed_ext, ext);
+                self.assert_ext_eq(reconstructed_ext, ext);
+            }
+        }
 
         felts
     }
@@ -239,18 +265,22 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             self.assert_felt_eq(limb, C::F::ZERO);
         }
 
+        let point_on_curve = SepticCurve::convert(point, |x| x.into());
+        let curve_formula = SepticCurve::<SymbolicFelt<C::F>>::curve_formula(point_on_curve.x);
+        for (lhs, rhs) in point_on_curve.y.square().0.into_iter().zip_eq(curve_formula.0) {
+            self.assert_felt_eq(lhs - rhs, C::F::ZERO);
+        }
+
         point
     }
 
     /// Asserts that the SepticDigest is zero.
     fn assert_digest_zero_v2(&mut self, is_real: Felt<C::F>, digest: SepticDigest<Felt<C::F>>) {
         let zero = SepticDigest::<SymbolicFelt<C::F>>::zero();
-        for (digest_limb_x, zero_limb_x) in digest.0.x.0.into_iter().zip_eq(zero.0.x.0.into_iter())
-        {
+        for (digest_limb_x, zero_limb_x) in digest.0.x.0.into_iter().zip_eq(zero.0.x.0) {
             self.assert_felt_eq(is_real * digest_limb_x, is_real * zero_limb_x);
         }
-        for (digest_limb_y, zero_limb_y) in digest.0.y.0.into_iter().zip_eq(zero.0.y.0.into_iter())
-        {
+        for (digest_limb_y, zero_limb_y) in digest.0.y.0.into_iter().zip_eq(zero.0.y.0) {
             self.assert_felt_eq(is_real * digest_limb_y, is_real * zero_limb_y);
         }
     }

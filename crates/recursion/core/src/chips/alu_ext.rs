@@ -1,17 +1,17 @@
 use core::borrow::Borrow;
 use std::{borrow::BorrowMut, iter::zip};
 
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{Air, BaseAir, WindowAccess};
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
-use zkm_core_machine::utils::next_power_of_two;
+use zkm_core_machine::utils::next_multiple_of_32_rows;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{ExtensionAirBuilder, MachineAir};
+use zkm_pcs::air::{ExtensionAirBuilder, MachineAir};
 
 use crate::{builder::ZKMRecursionAirBuilder, *};
 
@@ -53,6 +53,11 @@ pub struct ExtAluAccessCols<F: Copy> {
     pub is_sub: F,
     pub is_mul: F,
     pub is_div: F,
+    /// is_div AND mult≠0. Skips division constraint for dead instructions.
+    pub is_div_active: F,
+    /// is_div AND opcode == DivEAssert.  Mirrors `is_div_soundness`
+    /// on `BaseAluAccessCols`.
+    pub is_div_soundness: F,
     pub mult: F,
 }
 
@@ -79,21 +84,17 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
         let nb_rows = instrs_len.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
-        let fixed_log2_rows = program.fixed_log2_rows(self);
-        Some(match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => {
-                next_power_of_two(nb_rows, None, <ExtAluChip as MachineAir<F>>::name(self).as_str())
-            }
-        })
+        Some(next_multiple_of_32_rows(
+            nb_rows,
+            program.fixed_rows(self),
+            <ExtAluChip as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        // Allocating an intermediate `Vec` is faster.
         let instrs = program
-            .instructions
-            .iter() // Faster than using `rayon` for some reason. Maybe vectorization?
+            .iter_instructions()
             .filter_map(|instruction| match instruction {
                 Instruction::ExtAlu(x) => Some(x),
                 _ => None,
@@ -103,31 +104,33 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
         let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT_ALU_PREPROCESSED_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * NUM_EXT_ALU_ACCESS_COLS;
         values[..populate_len].par_chunks_mut(NUM_EXT_ALU_ACCESS_COLS).zip_eq(instrs).for_each(
             |(row, instr)| {
                 let ExtAluInstr { opcode, mult, addrs } = instr;
                 let access: &mut ExtAluAccessCols<_> = row.borrow_mut();
+                let is_div_op = opcode.is_div();
+                let is_div_assert = opcode.is_div_assert();
                 *access = ExtAluAccessCols {
                     addrs: addrs.to_owned(),
                     is_add: F::from_bool(false),
                     is_sub: F::from_bool(false),
                     is_mul: F::from_bool(false),
                     is_div: F::from_bool(false),
+                    is_div_active: F::from_bool(is_div_op && !mult.is_zero()),
+                    is_div_soundness: F::from_bool(is_div_assert),
                     mult: mult.to_owned(),
                 };
                 let target_flag = match opcode {
                     ExtAluOpcode::AddE => &mut access.is_add,
                     ExtAluOpcode::SubE => &mut access.is_sub,
                     ExtAluOpcode::MulE => &mut access.is_mul,
-                    ExtAluOpcode::DivE => &mut access.is_div,
+                    ExtAluOpcode::DivE | ExtAluOpcode::DivEAssert => &mut access.is_div,
                 };
                 *target_flag = F::from_bool(true);
             },
         );
 
-        // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(values, NUM_EXT_ALU_PREPROCESSED_COLS))
     }
 
@@ -139,12 +142,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
             "generate_trace only supports KoalaBear field"
         );
 
-        // Allocating an intermediate `Vec` is faster.
         let instrs = unsafe {
             std::mem::transmute::<Vec<&ExtAluInstr<F>>, Vec<&ExtAluInstr<KoalaBear>>>(
                 program
-                    .instructions
-                    .iter()
+                    .iter_instructions()
                     .filter_map(|instruction| match instruction {
                         Instruction::ExtAlu(x) => Some(x),
                         _ => None,
@@ -156,7 +157,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
         let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * NUM_EXT_ALU_PREPROCESSED_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * NUM_EXT_ALU_ACCESS_COLS;
         values[..populate_len].par_chunks_mut(NUM_EXT_ALU_ACCESS_COLS).zip_eq(instrs).for_each(
             |(row, instr)| {
@@ -167,7 +167,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
             NUM_EXT_ALU_PREPROCESSED_COLS,
@@ -179,20 +178,17 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
         _: &Self::Record,
         _: &mut Self::Record,
     ) -> Result<(), Self::Error> {
-        // This is a no-op.
         Ok(())
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.ext_alu_events;
         let nb_rows = events.len().div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
-        let fixed_log2_rows = input.fixed_log2_rows(self);
-        Some(match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => {
-                next_power_of_two(nb_rows, None, <ExtAluChip as MachineAir<F>>::name(self).as_str())
-            }
-        })
+        Some(next_multiple_of_32_rows(
+            nb_rows,
+            input.fixed_rows(self),
+            <ExtAluChip as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]
@@ -203,9 +199,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let events = &input.ext_alu_events;
         let padded_nb_rows = self.num_rows(input).unwrap();
+
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT_ALU_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * NUM_EXT_ALU_VALUE_COLS;
         values[..populate_len].par_chunks_mut(NUM_EXT_ALU_VALUE_COLS).zip_eq(events).for_each(
             |(row, &vals)| {
@@ -214,7 +210,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_EXT_ALU_COLS))
     }
 
@@ -230,15 +225,15 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
             "generate_trace only supports KoalaBear field"
         );
 
+        let padded_nb_rows = self.num_rows(input).unwrap();
+
         let events = unsafe {
             std::mem::transmute::<&Vec<ExtAluIo<Block<F>>>, &Vec<ExtAluIo<Block<KoalaBear>>>>(
                 &input.ext_alu_events,
             )
         };
-        let padded_nb_rows = self.num_rows(input).unwrap();
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * NUM_EXT_ALU_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * NUM_EXT_ALU_VALUE_COLS;
         values[..populate_len].par_chunks_mut(NUM_EXT_ALU_VALUE_COLS).zip_eq(events).for_each(
             |(row, &vals)| {
@@ -249,7 +244,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
             NUM_EXT_ALU_COLS,
@@ -259,48 +253,50 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
     fn included(&self, _record: &Self::Record) -> bool {
         true
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<AB> Air<AB> for ExtAluChip
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ExtAluCols<AB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &ExtAluPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
         for (
             ExtAluValueCols { vals },
-            ExtAluAccessCols { addrs, is_add, is_sub, is_mul, is_div, mult },
+            ExtAluAccessCols {
+                addrs,
+                is_add,
+                is_sub,
+                is_mul,
+                is_div,
+                is_div_active,
+                is_div_soundness,
+                mult,
+            },
         ) in zip(local.values, prep_local.accesses)
         {
             let in1 = vals.in1.as_extension::<AB>();
             let in2 = vals.in2.as_extension::<AB>();
             let out = vals.out.as_extension::<AB>();
 
-            // Check exactly one flag is enabled.
             let is_real = is_add + is_sub + is_mul + is_div;
             builder.assert_bool(is_real.clone());
 
             builder.when(is_add).assert_ext_eq(in1.clone() + in2.clone(), out.clone());
             builder.when(is_sub).assert_ext_eq(in1.clone(), in2.clone() + out.clone());
             builder.when(is_mul).assert_ext_eq(in1.clone() * in2.clone(), out.clone());
-            builder.when(is_div).assert_ext_eq(in1, in2 * out);
+            builder.when(is_div_active + is_div_soundness).assert_ext_eq(in1, in2 * out);
 
-            // Read the inputs from memory.
             builder.receive_block(addrs.in1, vals.in1, is_real.clone());
 
             builder.receive_block(addrs.in2, vals.in2, is_real);
 
-            // Write the output to memory.
             builder.send_block(addrs.out, vals.out, mult);
         }
     }
@@ -309,13 +305,13 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::{extension::BinomialExtensionField, FieldAlgebra, FieldExtensionAlgebra};
+    use p3_field::{extension::BinomialExtensionField, BasedVectorSpace, PrimeCharacteristicRing};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use stark::KoalaBearPoseidon2Outer;
-    use zkm_stark::StarkGenericConfig;
+    use zkm_pcs::StarkGenericConfig;
 
     use super::*;
 
@@ -346,8 +342,8 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut random_extfelt = move || {
-            let inner: [F; 4] = core::array::from_fn(|_| rng.sample(rand::distributions::Standard));
-            BinomialExtensionField::<F, D>::from_base_slice(&inner)
+            let inner: [F; 4] = core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()));
+            BinomialExtensionField::<F, D>::from_basis_coefficients_slice(&inner).unwrap()
         };
         let mut addr = 0;
 
@@ -374,7 +370,12 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram::new(
+            crate::RawProgram::from_linear(instructions),
+            0,
+            Vec::new(),
+            None,
+        );
 
         run_recursion_test_machines(program);
     }

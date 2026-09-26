@@ -3,13 +3,15 @@ use core::{
     mem::size_of,
 };
 use std::marker::PhantomData;
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
 use crate::{air::MemoryAirBuilder, utils::pad_rows_fixed_with_err, CoreChipError};
 use generic_array::GenericArray;
 use num::{BigUint, One};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use typenum::U32;
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, EdDecompressEvent, FieldOperation, PrecompileEvent},
@@ -25,11 +27,7 @@ use zkm_curves::{
     CurveError,
 };
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
@@ -44,8 +42,7 @@ pub const NUM_ED_DECOMPRESS_COLS: usize = size_of::<EdDecompressCols<u8>>();
 /// compressed Y (without sign bit).
 ///
 /// After `EdDecompress`, the first 32 bytes of the slice are overwritten with the decompressed X.
-#[derive(Debug, Clone, AlignedBorrow)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct EdDecompressCols<T> {
     pub is_real: T,
@@ -55,6 +52,7 @@ pub struct EdDecompressCols<T> {
     pub sign: T,
     pub x_access: GenericArray<MemoryWriteCols<T>, WordsFieldElement>,
     pub y_access: GenericArray<MemoryReadCols<T>, WordsFieldElement>,
+    pub(crate) neg_x_range: FieldLtCols<T, Ed25519BaseField>,
     pub(crate) y_range: FieldLtCols<T, Ed25519BaseField>,
     pub(crate) yy: FieldOpCols<T, Ed25519BaseField>,
     pub(crate) u: FieldOpCols<T, Ed25519BaseField>,
@@ -73,9 +71,9 @@ impl<F: PrimeField32> EdDecompressCols<F> {
     ) -> Result<(), CurveError> {
         let mut new_byte_lookup_events = Vec::new();
         self.is_real = F::from_bool(true);
-        self.shard = F::from_canonical_u32(event.shard);
-        self.clk = F::from_canonical_u32(event.clk);
-        self.ptr = F::from_canonical_u32(event.ptr);
+        self.shard = F::from_u32(event.shard);
+        self.clk = F::from_u32(event.clk);
+        self.ptr = F::from_u32(event.ptr);
         self.sign = F::from_bool(event.sign);
         for i in 0..8 {
             self.x_access[i].populate(event.x_memory_records[i], &mut new_byte_lookup_events);
@@ -102,7 +100,8 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         let v = self.v.populate(blu_events, &one, &dyy, FieldOperation::Add);
         let u_div_v = self.u_div_v.populate(blu_events, &u, &v, FieldOperation::Div);
         let x = self.x.populate(blu_events, &u_div_v, ed25519_sqrt)?;
-        self.neg_x.populate(blu_events, &BigUint::ZERO, &x, FieldOperation::Sub);
+        let neg_x = self.neg_x.populate(blu_events, &BigUint::ZERO, &x, FieldOperation::Sub);
+        self.neg_x_range.populate(blu_events, &neg_x, &Ed25519BaseField::modulus());
         Ok(())
     }
 }
@@ -117,18 +116,15 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.assert_bool(self.sign);
 
         let y: Limbs<V, U32> = limbs_from_prev_access(&self.y_access);
-        let max_num_limbs = P::to_limbs_field_vec(&Ed25519BaseField::modulus());
-        self.y_range.eval(
-            builder,
-            &y,
-            &limbs_from_vec::<AB::Expr, P::Limbs, AB::F>(max_num_limbs),
-            self.is_real,
-        );
+        let modulus = limbs_from_vec::<AB::Expr, P::Limbs, AB::F>(P::to_limbs_field_vec(
+            &Ed25519BaseField::modulus(),
+        ));
+        self.y_range.eval(builder, &y, &modulus, self.is_real);
         self.yy.eval(builder, &y, &y, FieldOperation::Mul, self.is_real);
         self.u.eval(
             builder,
             &self.yy.result,
-            &[AB::Expr::one()].iter(),
+            &[AB::Expr::ONE].iter(),
             FieldOperation::Sub,
             self.is_real,
         );
@@ -137,7 +133,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.dyy.eval(builder, &d_const, &self.yy.result, FieldOperation::Mul, self.is_real);
         self.v.eval(
             builder,
-            &[AB::Expr::one()].iter(),
+            &[AB::Expr::ONE].iter(),
             &self.dyy.result,
             FieldOperation::Add,
             self.is_real,
@@ -152,11 +148,12 @@ impl<V: Copy> EdDecompressCols<V> {
         self.x.eval(builder, &self.u_div_v.result, AB::F::ZERO, self.is_real);
         self.neg_x.eval(
             builder,
-            &[AB::Expr::zero()].iter(),
+            &[AB::Expr::ZERO].iter(),
             &self.x.multiplication.result,
             FieldOperation::Sub,
             self.is_real,
         );
+        self.neg_x_range.eval(builder, &self.neg_x.result, &modulus, self.is_real);
 
         builder.eval_memory_access_slice(
             self.shard,
@@ -168,12 +165,11 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.eval_memory_access_slice(
             self.shard,
             self.clk,
-            self.ptr.into() + AB::F::from_canonical_u32(32),
+            self.ptr.into() + AB::F::from_u32(32),
             &self.y_access,
             self.is_real,
         );
 
-        // Constrain that the correct result is written into x.
         let x_limbs: Limbs<V, U32> = limbs_from_access(&self.x_access);
         builder.when(self.is_real).when(self.sign).assert_all_eq(self.neg_x.result, x_limbs);
         builder
@@ -184,7 +180,7 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.receive_syscall(
             self.shard,
             self.clk,
-            AB::F::from_canonical_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
+            AB::F::from_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
             self.ptr,
             self.sign,
             self.is_real,
@@ -215,7 +211,6 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
         "EdDecompress".to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         EdDecompressCols::<u8>::picus_info()
     }
@@ -269,10 +264,6 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
             !shard.get_precompile_events(SyscallCode::ED_DECOMPRESS).is_empty()
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<F, E: EdwardsParameters> BaseAir<F> for EdDecompressChip<E> {
@@ -287,7 +278,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &EdDecompressCols<AB::Var> = (*local).borrow();
 
         local.eval::<AB, E::BaseField, E>(builder);
@@ -296,11 +287,94 @@ where
 
 #[cfg(test)]
 pub mod tests {
+    use super::*;
+    use itertools::Itertools;
+    use p3_field::extension::BinomialExtensionField;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
     use test_artifacts::ED_DECOMPRESS_ELF;
-    use zkm_core_executor::Program;
-    use zkm_stark::CpuProver;
+    use zkm_core_executor::{ExecutionRecord, Executor, Program};
+    use zkm_curves::edwards::ed25519::Ed25519Parameters;
+    use zkm_pcs::{constraints_hold_on_row, CpuProver, ZKMCoreOpts};
 
     use crate::utils;
+
+    fn limbs_to_biguint<F: PrimeField32>(limbs: &[F]) -> BigUint {
+        BigUint::from_bytes_le(&limbs.iter().map(|x| x.as_canonical_u32() as u8).collect_vec())
+    }
+
+    /// The negation and its binding to memory alone accept `-x + p`.
+    struct NegationAndBindingOnly;
+
+    impl<F> BaseAir<F> for NegationAndBindingOnly {
+        fn width(&self) -> usize {
+            NUM_ED_DECOMPRESS_COLS
+        }
+    }
+
+    impl<AB: ZKMAirBuilder> Air<AB> for NegationAndBindingOnly {
+        fn eval(&self, builder: &mut AB) {
+            let main = builder.main();
+            let local = main.current_slice();
+            let local: &EdDecompressCols<AB::Var> = (*local).borrow();
+            local.neg_x.eval(
+                builder,
+                &[AB::Expr::ZERO].iter(),
+                &local.x.multiplication.result,
+                FieldOperation::Sub,
+                local.is_real,
+            );
+            let x_limbs: Limbs<AB::Var, U32> = limbs_from_access(&local.x_access);
+            builder.when(local.is_real).when(local.sign).assert_all_eq(local.neg_x.result, x_limbs);
+        }
+    }
+
+    #[test]
+    fn non_canonical_negated_x_is_rejected() {
+        type F = KoalaBear;
+        type EF = BinomialExtensionField<KoalaBear, 4>;
+        utils::setup_logger();
+        let program = Program::from(ED_DECOMPRESS_ELF).unwrap();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        let record = runtime
+            .records
+            .iter()
+            .find(|r| !r.get_precompile_events(SyscallCode::ED_DECOMPRESS).is_empty())
+            .expect("an ED_DECOMPRESS event");
+        let chip = EdDecompressChip::<Ed25519Parameters>::new();
+        let trace: RowMajorMatrix<F> =
+            chip.generate_trace(record, &mut ExecutionRecord::default()).unwrap();
+        let honest: Vec<F> = (0..trace.height())
+            .map(|i| trace.row_slice(i).unwrap().to_vec())
+            .find(|r| {
+                let cols: &EdDecompressCols<F> = r.as_slice().borrow();
+                cols.is_real == F::ONE && cols.sign == F::ONE
+            })
+            .expect("an event taking the negated root");
+        assert!(constraints_hold_on_row::<F, EF, _>(&chip, &honest, &honest, &[]));
+
+        let p = Ed25519BaseField::modulus();
+        let mut row = honest.clone();
+        let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
+        let x = limbs_to_biguint(&cols.x.multiplication.result.0);
+        let forged = limbs_to_biguint(&cols.neg_x.result.0) + &p;
+        assert!(forged.bits() <= 256);
+        cols.neg_x.populate_carry_and_witness(&forged, &x, FieldOperation::Add, &p);
+        let limbs = Ed25519BaseField::to_limbs_field::<F, _>(&forged);
+        for (i, limb) in limbs.0.iter().enumerate() {
+            cols.x_access[i / 4].access.value.0[i % 4] = *limb;
+        }
+        cols.neg_x.result = limbs;
+        assert!(
+            constraints_hold_on_row::<F, EF, _>(&NegationAndBindingOnly, &row, &row, &[]),
+            "the forged row must pass the negation and binding"
+        );
+        assert!(
+            !constraints_hold_on_row::<F, EF, _>(&chip, &row, &row, &[]),
+            "the chip must reject a coordinate of p or more"
+        );
+    }
 
     #[test]
     fn test_ed_decompress() {

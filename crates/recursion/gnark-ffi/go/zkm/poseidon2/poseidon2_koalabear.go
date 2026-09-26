@@ -4,12 +4,18 @@ import (
 	"math/big"
 
 	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/poseidon2/diagonal"
 	"github.com/consensys/gnark/frontend"
 )
 
 const KOALABEAR_WIDTH = 16
 const koalabearNumExternalRounds = 8
-const koalabearNumInternalRounds = 13
+// Must equal `zkm_primitives::poseidon2_init`'s ROUNDS_P.  Plonky3's
+// poseidon2_round_numbers_128 gives (8, 20) for a 31-bit prime at width 16 with
+// S-box degree 3; 13 is the degree-7 (BabyBear) number.  The rc16 table has 30
+// rows, and this loop indexes it as 0..4, 4..4+P, 4+P..8+P, the same layout the
+// Rust and CUDA implementations use, so 8 + 20 = 28 still fits.
+const koalabearNumInternalRounds = 20
 
 type Poseidon2KoalaBearChip struct {
 	api      frontend.API
@@ -113,27 +119,10 @@ func (p *Poseidon2KoalaBearChip) externalLinearLayer(state *[KOALABEAR_WIDTH]koa
 	}
 }
 
-// todo: update
 func (p *Poseidon2KoalaBearChip) diffusionPermuteMut(state *[KOALABEAR_WIDTH]koalabear.Variable) {
-	// Reference: https://github.com/ProjectZKM/Plonky3/blob/main/koala-bear/src/poseidon2.rs#L10
-	// V = [-2, 1, 2, 1/2, 3, 4, -1/2, -3, -4, 1/2^8, 1/8, 1/2^24, -1/2^8, -1/8, -1/16, -1/2^24]
-	matInternalDiagM1 := [KOALABEAR_WIDTH]koalabear.Variable{
-		koalabear.NewFConst("2130706431"),
-		koalabear.NewFConst("1"),
-		koalabear.NewFConst("2"),
-		koalabear.NewFConst("1065353217"),
-		koalabear.NewFConst("3"),
-		koalabear.NewFConst("4"),
-		koalabear.NewFConst("1065353216"),
-		koalabear.NewFConst("2130706430"),
-		koalabear.NewFConst("2130706429"),
-		koalabear.NewFConst("2122383361"),
-		koalabear.NewFConst("1864368129"),
-		koalabear.NewFConst("2130706306"),
-		koalabear.NewFConst("8323072"),
-		koalabear.NewFConst("266338304"),
-		koalabear.NewFConst("133169152"),
-		koalabear.NewFConst("127"),
+	matInternalDiagM1 := [KOALABEAR_WIDTH]koalabear.Variable{}
+	for i, v := range diagonal.KoalaBearInternalDiagM1 {
+		matInternalDiagM1[i] = koalabear.NewFConst(v)
 	}
 	p.matmulInternal(state, &matInternalDiagM1)
 }

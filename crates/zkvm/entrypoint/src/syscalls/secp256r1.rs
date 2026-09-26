@@ -67,7 +67,6 @@ pub extern "C" fn syscall_secp256r1_double(p: *mut [u32; 16]) {
 pub extern "C" fn syscall_secp256r1_decompress(point: &mut [u8; 64], is_odd: bool) {
     #[cfg(target_os = "zkvm")]
     {
-        // Memory system/FpOps are little endian so we'll just flip the whole array before/after
         point.reverse();
         let p = point.as_mut_ptr();
         unsafe {

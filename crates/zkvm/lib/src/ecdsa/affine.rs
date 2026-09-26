@@ -94,7 +94,6 @@ impl<C: ECDSACurve> FromEncodedPoint<C> for AffinePoint<C> {
 
                 x.and_then(|x| {
                     y.and_then(|y| {
-                        // Ensure the point is on the curve.
                         let lhs = (y * y).normalize();
                         let rhs = (x * x * x) + (C::EQUATION_A * x) + C::EQUATION_B;
 
@@ -110,14 +109,12 @@ impl<C: ECDSACurve> FromEncodedPoint<C> for AffinePoint<C> {
 
 impl<C: ECDSACurve> ToEncodedPoint<C> for AffinePoint<C> {
     fn to_encoded_point(&self, compress: bool) -> EncodedPoint<C> {
-        // If the point is the identity point, just return the identity point.
         if self.is_identity().into() {
             return EncodedPoint::<C>::identity();
         }
 
         let (x, y) = self.field_elements();
 
-        // The field elements are already normalized by virtue of being created via `FromBytes`.
         EncodedPoint::<C>::from_affine_coordinates(&x.to_bytes(), &y.to_bytes(), compress)
     }
 }
@@ -129,7 +126,6 @@ impl<C: ECDSACurve> DecompressPoint<C> for AffinePoint<C> {
             let beta = alpha.sqrt();
 
             beta.map(|beta| {
-                // Ensure the element is normalized for consistency.
                 let beta = beta.normalize();
 
                 let y = FieldElement::<C>::conditional_select(
@@ -138,7 +134,6 @@ impl<C: ECDSACurve> DecompressPoint<C> for AffinePoint<C> {
                     beta.is_odd().ct_eq(&y_is_odd),
                 );
 
-                // X is normalized by virtue of being created via `FromBytes`.
                 AffinePoint::from_field_elements_unchecked(x, y.normalize())
             })
         })
@@ -163,16 +158,12 @@ impl<C: ECDSACurve> AffineCoordinates for AffinePoint<C> {
     fn y_is_odd(&self) -> Choice {
         let (_, y) = self.field_elements();
 
-        // As field elements are created via [`Field::from_bytes`], they are already normalized.
         y.is_odd()
     }
 }
 
 impl<C: ECDSACurve> ConditionallySelectable for AffinePoint<C> {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        // Conditional select is a constant time if-else operation.
-        //
-        // In the ZKM vm, there are no attempts made to prevent side channel attacks.
         if choice.into() {
             *b
         } else {
@@ -189,7 +180,6 @@ impl<C: ECDSACurve> ConstantTimeEq for AffinePoint<C> {
         let (x2, y2) = other.field_elements();
         let (x2, y2) = (x2, y2);
 
-        // These are already normalized by virtue of being created via `FromBytes`.
         x1.ct_eq(&x2) & y1.ct_eq(&y2)
     }
 }
@@ -217,8 +207,6 @@ impl<C: ECDSACurve> GroupEncoding for AffinePoint<C> {
         EncodedPoint::<C>::from_bytes(bytes)
             .map(|point| CtOption::new(point, Choice::from(1)))
             .unwrap_or_else(|_| {
-                // SEC1 identity encoding is technically 1-byte 0x00, but the
-                // `GroupEncoding` API requires a fixed-width `Repr`.
                 let is_identity = bytes.ct_eq(&Self::Repr::default());
                 CtOption::new(EncodedPoint::<C>::identity(), is_identity)
             })
@@ -226,7 +214,6 @@ impl<C: ECDSACurve> GroupEncoding for AffinePoint<C> {
     }
 
     fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
-        // There is no unchecked conversion for compressed points.
         Self::from_bytes(bytes)
     }
 

@@ -1,0 +1,852 @@
+//! In-circuit zerocheck verifier helpers.
+//!
+//! Hosts the small, self-contained helpers used by the BaseFold-
+//! pipeline shard verifier's zerocheck phase:
+//!
+//!   - [`full_geq`]: in-circuit "≥" indicator for one boolean point
+//!     versus an extension-field point; it gives the padded-row mask
+//!     that gates the zerocheck constraint outside the real-data
+//!     window of each chip.
+//!   - [`eq_eval`]: `eq(x, y) = Π_i (x_i y_i + (1−x_i)(1−y_i))` for two
+//!     extension-field points of the same dimension; it ties the
+//!     GKR-evaluation point to the sumcheck-reduced point.
+//!
+//! The full `verify_zerocheck` orchestrator composes these helpers
+//! with [`crate::sumcheck::verify_sumcheck`], constraint folding, and
+//! per-chip openings batching.
+
+use std::marker::PhantomData;
+
+use p3_air::{Air, BaseAir};
+use p3_field::{Algebra, PrimeCharacteristicRing, TwoAdicField};
+use zkm_pcs::folder::PairWindow;
+use zkm_pcs::septic_digest::SepticDigest;
+use zkm_pcs::{air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter, SymbolicExt};
+
+use crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable;
+use crate::basefold_constraint_folder::ShardConstraintFolder;
+use crate::challenger::FieldChallengerVariable;
+use crate::logup_proof::LogUpEvaluations;
+use crate::partial_sumcheck::PartialSumcheckProof;
+use crate::sumcheck::verify_sumcheck;
+use crate::{CircuitConfig, KoalaBearFriParametersVariable};
+
+/// In-circuit "≥" indicator for `eval_point` ≥ `threshold` in
+/// lexicographic order, where `threshold` is a boolean point and
+/// `eval_point` is an extension-field point.
+///
+/// Both points must have the same dimension.  Output is `1` if
+/// `eval_point` lexicographically dominates `threshold`, `0`
+/// otherwise (when both are boolean), and a soft interpolation
+/// when `eval_point` is a non-boolean extension element.
+///
+/// Used by the zerocheck verifier to mask out the padded-row
+/// region of each chip: constraints fire only for real rows
+/// (indices below the chip's height), so the padded-row adjustment
+/// gets multiplied by `geq(degree, sumcheck_point)` to zero it out
+/// for in-range positions.
+///
+/// Iterates MSB-first — note this differs from the LSB-first
+/// `partial_lagrange` convention used elsewhere in Ziren's BaseFold
+/// port.
+pub fn full_geq<C: CircuitConfig>(
+    threshold: &[SymbolicExt<C::F, C::EF>],
+    eval_point: &[SymbolicExt<C::F, C::EF>],
+) -> SymbolicExt<C::F, C::EF> {
+    assert_eq!(
+        threshold.len(),
+        eval_point.len(),
+        "full_geq: threshold and eval_point must have equal dimension"
+    );
+    threshold.iter().rev().zip(eval_point.iter().rev()).fold(SymbolicExt::ONE, |acc, (x, y)| {
+        let one = SymbolicExt::ONE;
+        ((one - *y) * (one - *x) + *y * *x) * acc + *y * (one - *x)
+    })
+}
+
+/// Full Lagrange equality evaluation for two extension-field points.
+/// Computes
+///
+/// ```text
+///   eq(a, b) = Π_k ((1 - a_k)(1 - b_k) + a_k · b_k)
+/// ```
+///
+/// — the indicator that a == b on the boolean hypercube, lifted to
+/// the extension field via the standard multilinear extension.
+///
+/// Used by the zerocheck verifier to check that the GKR-emitted
+/// evaluation point matches the sumcheck-reduced point.
+pub fn eq_eval<C: CircuitConfig>(
+    a: &[SymbolicExt<C::F, C::EF>],
+    b: &[SymbolicExt<C::F, C::EF>],
+) -> SymbolicExt<C::F, C::EF> {
+    assert_eq!(a.len(), b.len(), "eq_eval: points must have equal dimension");
+    let one = SymbolicExt::<C::F, C::EF>::ONE;
+    a.iter().zip(b.iter()).fold(one, |acc, (ai, bi)| acc * ((one - *ai) * (one - *bi) + *ai * *bi))
+}
+
+/// Verify that a chip's opening has the expected per-batch widths.
+///
+/// Returns `Ok(())` if the preprocessed and main widths match the
+/// chip's expected dimensions; otherwise returns an
+/// [`OpeningShapeError`].  Called by the zerocheck verifier
+/// before evaluating the chip's constraints to catch shape
+/// mismatches early.
+pub fn verify_opening_shape<C, SC, A>(
+    chip: &MachineChip<SC, A>,
+    opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+) -> Result<(), OpeningShapeError>
+where
+    C: CircuitConfig<F = SC::Val>,
+    SC: KoalaBearFriParametersVariable<C>,
+    A: MachineAir<C::F>,
+{
+    if opening.preprocessed.local.len() != chip.preprocessed_width() {
+        return Err(OpeningShapeError::PreprocessedWidthMismatch(
+            chip.preprocessed_width(),
+            opening.preprocessed.local.len(),
+        ));
+    }
+    if opening.main.local.len() != chip.width() {
+        return Err(OpeningShapeError::MainWidthMismatch(chip.width(), opening.main.local.len()));
+    }
+    Ok(())
+}
+
+/// Verify a chip's BaseFold-pipeline opening has the expected
+/// per-batch widths.  Mirrors [`verify_opening_shape`] but
+/// consumes the BaseFold-shape opening type.
+pub fn verify_opening_shape_basefold<C, SC, A>(
+    chip: &MachineChip<SC, A>,
+    opening: &crate::basefold_chip_opened_values::JaggedChipOpenedValuesVariable<C>,
+) -> Result<(), OpeningShapeError>
+where
+    C: CircuitConfig<F = SC::Val>,
+    SC: KoalaBearFriParametersVariable<C>,
+    A: MachineAir<C::F>,
+{
+    if opening.preprocessed.local.len() != chip.preprocessed_width() {
+        return Err(OpeningShapeError::PreprocessedWidthMismatch(
+            chip.preprocessed_width(),
+            opening.preprocessed.local.len(),
+        ));
+    }
+    if opening.main.local.len() != chip.width() {
+        return Err(OpeningShapeError::MainWidthMismatch(chip.width(), opening.main.local.len()));
+    }
+    Ok(())
+}
+
+/// Zerocheck verifier wrapper that threads the trait bounds needed
+/// for [`MachineChip::eval`] dispatch through a [`ShardConstraintFolder`].
+///
+/// Methods are gathered on this zero-sized struct so the
+/// `where SymbolicExt: Algebra<EF>` + `for<'a> Air<...>` bounds
+/// can be declared once at impl level rather than repeated at every
+/// function signature, as in [`crate::stark::StarkVerifier`].
+///
+/// `SC` is generic for the same reason as in `StarkVerifier`:
+/// keeping `MachineChip<SC, A>` opaque lets the compiler elaborate
+/// `MachineChip<SC, A>::F = SC::Val = C::F` (via the
+/// `C: CircuitConfig<F = SC::Val>` bound) so the `Chip::eval` impl's
+/// `ZKMAirBuilder<F = chip.F>` requirement unifies with the folder's
+/// `AirBuilder::F = C::F`.  Pinning `SC` to `KoalaBearPoseidon2`
+/// up front sounds cleaner but trips a normalisation gap where the
+/// compiler doesn't see `Chip<KoalaBear, A>::F` and `C::F` as the
+/// same type even with `C::F = KoalaBear` declared.
+pub struct ShardZerocheckVerifier<C, SC, A>(PhantomData<(C, SC, A)>);
+
+impl<C, SC, A> ShardZerocheckVerifier<C, SC, A>
+where
+    C::F: TwoAdicField,
+    SC: KoalaBearFriParametersVariable<C>,
+    C: CircuitConfig<F = SC::Val>,
+    A: MachineAir<C::F> + for<'b> Air<ShardConstraintFolder<'b, C>>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+{
+    /// Evaluate a chip's constraint polynomial at the sumcheck point
+    /// implied by `opening` (the chip's preprocessed and main local
+    /// values), returning the constraint accumulator as a single Ext
+    /// value.
+    ///
+    /// `local_cumulative_sum` and `global_cumulative_sum` thread
+    /// through to the `MultiTableAirBuilder` impl on the folder so
+    /// chips that read them via that trait see consistent values
+    /// (in the BaseFold pipeline these come from the LogUp-GKR
+    /// sumcheck output, not a per-chip permutation column).
+    /// Variant of [`Self::eval_constraints`] consuming a
+    /// [`JaggedChipOpenedValuesVariable`] (with the cumulative
+    /// sums and degree bundled into the opening).
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval_constraints_basefold<'a>(
+        builder: &mut Builder<C>,
+        chip: &MachineChip<SC, A>,
+        opening: &'a crate::basefold_chip_opened_values::JaggedChipOpenedValuesVariable<C>,
+        alpha: Ext<C::F, C::EF>,
+        public_values: &'a [Felt<C::F>],
+    ) -> Ext<C::F, C::EF> {
+        let preprocessed_row: Vec<SymbolicExt<C::F, C::EF>> =
+            opening.preprocessed.local.iter().map(|e| (*e).into()).collect();
+        let main_row: Vec<SymbolicExt<C::F, C::EF>> =
+            opening.main.local.iter().map(|e| (*e).into()).collect();
+        let preprocessed = PairWindow { local: &preprocessed_row, next: &preprocessed_row };
+        let main = PairWindow { local: &main_row, next: &main_row };
+        let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
+        let mut folder = ShardConstraintFolder::<C> {
+            preprocessed,
+            main,
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values,
+            local_cumulative_sum: &zero_lcs,
+            global_cumulative_sum: &zero_gcs,
+            _marker: PhantomData,
+        };
+        chip.eval(&mut folder);
+        builder.eval(folder.accumulator)
+    }
+
+    /// Zero `(local_cumulative_sum, global_cumulative_sum)` for the
+    /// zerocheck constraint folder, matching the host
+    /// (`eval_air_constraints_at_row`).
+    fn zero_cumulative_sums(
+        builder: &mut Builder<C>,
+    ) -> (Ext<C::F, C::EF>, SepticDigest<Felt<C::F>>) {
+        use zkm_pcs::septic_curve::SepticCurve;
+        use zkm_pcs::septic_extension::SepticExtension;
+        let zero_lcs: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+        let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
+        let zero_gcs: SepticDigest<Felt<C::F>> = SepticDigest(SepticCurve {
+            x: SepticExtension(core::array::from_fn(|_| zero_felt)),
+            y: SepticExtension(core::array::from_fn(|_| zero_felt)),
+        });
+        (zero_lcs, zero_gcs)
+    }
+
+    /// Variant of [`Self::compute_padded_row_adjustment`]
+    /// consuming a [`JaggedChipOpenedValuesVariable`] (so the
+    /// per-chip cumulative-sum references come from the opening
+    /// rather than parallel slices).
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_padded_row_adjustment_basefold<'a>(
+        builder: &mut Builder<C>,
+        chip: &MachineChip<SC, A>,
+        _opening: &'a crate::basefold_chip_opened_values::JaggedChipOpenedValuesVariable<C>,
+        alpha: Ext<C::F, C::EF>,
+        public_values: &'a [Felt<C::F>],
+    ) -> Ext<C::F, C::EF> {
+        let main_width = chip.width();
+        let preproc_width = chip.preprocessed_width();
+        let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
+        let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
+        let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
+        let mut folder = ShardConstraintFolder::<C> {
+            preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
+            main: PairWindow { local: &main_row, next: &main_row },
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values,
+            local_cumulative_sum: &zero_lcs,
+            global_cumulative_sum: &zero_gcs,
+            _marker: PhantomData,
+        };
+        chip.eval(&mut folder);
+        builder.eval(folder.accumulator)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval_constraints<'a>(
+        builder: &mut Builder<C>,
+        chip: &MachineChip<SC, A>,
+        opening: &'a ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        alpha: Ext<C::F, C::EF>,
+        public_values: &'a [Felt<C::F>],
+        local_cumulative_sum: &'a Ext<C::F, C::EF>,
+        global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
+    ) -> Ext<C::F, C::EF> {
+        let preprocessed_row: Vec<SymbolicExt<C::F, C::EF>> =
+            opening.preprocessed.local.iter().map(|e| (*e).into()).collect();
+        let main_row: Vec<SymbolicExt<C::F, C::EF>> =
+            opening.main.local.iter().map(|e| (*e).into()).collect();
+        let preprocessed = PairWindow { local: &preprocessed_row, next: &preprocessed_row };
+        let main = PairWindow { local: &main_row, next: &main_row };
+        let mut folder = ShardConstraintFolder::<C> {
+            preprocessed,
+            main,
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values,
+            local_cumulative_sum,
+            global_cumulative_sum,
+            _marker: PhantomData,
+        };
+        chip.eval(&mut folder);
+        builder.eval(folder.accumulator)
+    }
+
+    /// Compute the "padded row adjustment" — the constraint-folder
+    /// accumulator that a chip's eval would produce if invoked on a
+    /// dummy all-zero row.  Used by the zerocheck verifier to subtract
+    /// the constraint contribution from out-of-range padded rows.
+    ///
+    /// The padded-row mask returned by [`full_geq`] gates this value
+    /// to fire only outside the chip's real-data window; inside the
+    /// real window the mask is zero and this adjustment cancels.
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_padded_row_adjustment<'a>(
+        builder: &mut Builder<C>,
+        chip: &MachineChip<SC, A>,
+        alpha: Ext<C::F, C::EF>,
+        public_values: &'a [Felt<C::F>],
+        local_cumulative_sum: &'a Ext<C::F, C::EF>,
+        global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
+    ) -> Ext<C::F, C::EF> {
+        let main_width = chip.width();
+        let preproc_width = chip.preprocessed_width();
+        let preproc_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; preproc_width];
+        let main_row: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ZERO; main_width];
+        let mut folder = ShardConstraintFolder::<C> {
+            preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
+            main: PairWindow { local: &main_row, next: &main_row },
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values,
+            local_cumulative_sum,
+            global_cumulative_sum,
+            _marker: PhantomData,
+        };
+        chip.eval(&mut folder);
+        builder.eval(folder.accumulator)
+    }
+
+    /// Full zerocheck-phase verifier for a single shard.
+    ///
+    /// Replays the BaseFold zerocheck IOP on the in-circuit
+    /// transcript: samples the per-chip constraint-folding scalar,
+    /// the GKR-batch-open challenge, and the chip-RLC scalar; for
+    /// each chip, batches the constraint accumulator with the
+    /// padded-row mask and the chip's main+preprocessed openings;
+    /// asserts the cross-chip RLC matches the prover's claimed
+    /// evaluation; reduces the GKR-side modifier into the zerocheck
+    /// `claimed_sum`; runs [`verify_sumcheck`]; and observes the
+    /// per-chip openings into the transcript so the next phase
+    /// (jagged PCS opening) sees a consistent challenger state.
+    ///
+    /// # Arguments
+    ///
+    ///   * `shard_chips` — ordered slice of chips active in this
+    ///     shard, parallel to `opened_values.chips`.
+    ///   * `opened_values` — per-chip preprocessed/main openings
+    ///     at the sumcheck-reduced point.
+    ///   * `chip_degrees` — per-chip "degree point" (big-endian
+    ///     boolean coordinates of the chip's height); used by
+    ///     [`full_geq`] to compute the padded-row mask.
+    ///   * `cumulative_sums` — per-chip local cumulative-sum value
+    ///     from the LogUp-GKR sumcheck output.
+    ///   * `global_cumulative_sums` — per-chip global
+    ///     cumulative-sum digest references; same source as
+    ///     `cumulative_sums`.
+    ///   * `gkr_evaluations` — output of [`verify_logup_gkr`]:
+    ///     the GKR-emitted evaluation point + per-chip column
+    ///     evaluations the zerocheck reduction targets.
+    ///   * `zerocheck_proof` — the zerocheck sumcheck proof
+    ///     itself.
+    ///   * `pcs_max_log_row_count` — the PCS verifier's
+    ///     `max_log_row_count` parameter; the zerocheck reduced
+    ///     point's dimension is asserted equal to this.
+    ///   * `public_values` — shard public values (passed through
+    ///     to per-chip constraint folders).
+    ///   * `challenger` — in-circuit transcript.
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
+    pub fn verify_zerocheck<'a, FC>(
+        builder: &mut Builder<C>,
+        shard_chips: &[&MachineChip<SC, A>],
+        opened_values: &'a JaggedShardOpenedValuesVariable<C>,
+        gkr_evaluations: &LogUpEvaluations<Ext<C::F, C::EF>>,
+        zerocheck_proof: &PartialSumcheckProof<Ext<C::F, C::EF>>,
+        pcs_max_log_row_count: usize,
+        public_values: &'a [Felt<C::F>],
+        challenger: &mut FC,
+    ) where
+        FC: FieldChallengerVariable<C, C::Bit>,
+    {
+        assert_eq!(
+            shard_chips.len(),
+            opened_values.chips.len(),
+            "verify_zerocheck: chip count mismatch (chips={}, openings={})",
+            shard_chips.len(),
+            opened_values.chips.len(),
+        );
+
+        let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
+        let one_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ONE);
+
+        let verifier_use_rev = !gkr_evaluations.chip_openings.is_empty()
+            && gkr_evaluations
+                .chip_openings
+                .values()
+                .all(|ce| ce.main_trace_evaluations_full.is_some());
+
+        let alpha = challenger.sample_ext(builder);
+        let gkr_batch_open_ext = challenger.sample_ext(builder);
+        let gkr_batch_open_challenge: SymbolicExt<C::F, C::EF> = gkr_batch_open_ext.into();
+        let lambda = challenger.sample_ext(builder);
+
+        let point_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+            zerocheck_proof.point_and_eval.0.iter().map(|x| (*x).into()).collect();
+        let gkr_point_symbolic: Vec<SymbolicExt<C::F, C::EF>> = if verifier_use_rev {
+            gkr_evaluations.point.iter().rev().map(|x| (*x).into()).collect()
+        } else {
+            gkr_evaluations.point.iter().map(|x| (*x).into()).collect()
+        };
+        let zerocheck_eq_val: Ext<C::F, C::EF> =
+            builder.eval(eq_eval::<C>(&gkr_point_symbolic, &point_symbolic));
+
+        let max_elements = shard_chips
+            .iter()
+            .map(|chip| chip.width() + chip.preprocessed_width())
+            .max()
+            .unwrap_or(0);
+        let gkr_batch_open_challenge_powers: Vec<SymbolicExt<C::F, C::EF>> =
+            std::iter::successors(Some(SymbolicExt::ONE), |prev| {
+                Some(*prev * gkr_batch_open_challenge)
+            })
+            .skip(1)
+            .take(max_elements)
+            .collect();
+
+        let mut rlc_eval: Ext<C::F, C::EF> = zero_ext;
+
+        let chip_contributions: Vec<Ext<C::F, C::EF>> = shard_chips
+            .iter()
+            .zip(opened_values.chips.iter())
+            .ir_par_map_collect(builder, |builder, (chip, opening)| {
+                let degree = &opening.degree;
+
+                verify_opening_shape_basefold::<C, SC, A>(chip, opening)
+                    .expect("verify_zerocheck: chip opening shape mismatch");
+
+                let dimension = zerocheck_proof.point_and_eval.0.len();
+                assert_eq!(
+                    dimension, pcs_max_log_row_count,
+                    "verify_zerocheck: zerocheck point dimension {} != pcs max_log_row_count {}",
+                    dimension, pcs_max_log_row_count,
+                );
+
+                let mut proof_point_extended = point_symbolic.clone();
+                proof_point_extended.insert(0, SymbolicExt::ZERO);
+
+                let degree_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+                    degree.iter().map(|x| (*x).into()).collect();
+                for (i, x) in degree_symbolic.iter().enumerate() {
+                    builder.assert_ext_eq(*x * (*x - SymbolicExt::ONE), SymbolicExt::ZERO);
+                    if i >= 1 {
+                        builder.assert_ext_eq(
+                            *x * *degree_symbolic.first().unwrap(),
+                            SymbolicExt::ZERO,
+                        );
+                    }
+                }
+
+                let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
+                let padded_row_adjustment = Self::compute_padded_row_adjustment_basefold(
+                    builder,
+                    chip,
+                    opening,
+                    alpha,
+                    public_values,
+                );
+
+                let constraint_eval_ext =
+                    Self::eval_constraints_basefold(builder, chip, opening, alpha, public_values);
+                let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
+                let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
+                let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val;
+
+                let openings_batch: SymbolicExt<C::F, C::EF> = opening
+                    .main
+                    .local
+                    .iter()
+                    .chain(opening.preprocessed.local.iter())
+                    .copied()
+                    .zip(
+                        gkr_batch_open_challenge_powers
+                            .iter()
+                            .take(opening.main.local.len() + opening.preprocessed.local.len())
+                            .copied(),
+                    )
+                    .map(|(opening, power)| {
+                        let o_sym: SymbolicExt<C::F, C::EF> = opening.into();
+                        o_sym * power
+                    })
+                    .sum();
+
+                let eq_sym: SymbolicExt<C::F, C::EF> = zerocheck_eq_val.into();
+                let contribution: Ext<C::F, C::EF> =
+                    builder.eval(eq_sym * (constraint_eval + openings_batch));
+                contribution
+            });
+
+        for contribution in chip_contributions {
+            let rlc_sym: SymbolicExt<C::F, C::EF> = rlc_eval.into();
+            let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
+            rlc_eval = builder.eval(rlc_sym * lambda_sym + contribution);
+        }
+
+        builder.assert_ext_eq(rlc_eval, zerocheck_proof.point_and_eval.1);
+
+        let zerocheck_sum_modifications_from_gkr: Vec<SymbolicExt<C::F, C::EF>> = gkr_evaluations
+            .chip_openings
+            .values()
+            .zip(opened_values.chips.iter())
+            .map(|(chip_evaluation, _opening)| {
+                let main_full = chip_evaluation.main_trace_evaluations_full.as_deref().expect(
+                    "rev claim-collapse requires main_trace_evaluations_full \
+                             (FIX-off core proof)",
+                );
+                let prep_full =
+                    chip_evaluation.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]);
+                main_full
+                    .iter()
+                    .copied()
+                    .chain(prep_full.iter().copied())
+                    .zip(gkr_batch_open_challenge_powers.iter().copied())
+                    .map(|(o, power)| {
+                        let o_sym: SymbolicExt<C::F, C::EF> = o.into();
+                        o_sym * power
+                    })
+                    .sum::<SymbolicExt<C::F, C::EF>>()
+            })
+            .collect();
+
+        let zero_sym: SymbolicExt<C::F, C::EF> = zero_ext.into();
+        let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
+        let zerocheck_sum_modification: SymbolicExt<C::F, C::EF> =
+            zerocheck_sum_modifications_from_gkr
+                .iter()
+                .fold(zero_sym, |acc, modification| lambda_sym * acc + *modification);
+
+        builder.assert_ext_eq(zerocheck_proof.claimed_sum, zerocheck_sum_modification);
+
+        let _ = one_ext;
+
+        verify_sumcheck::<C, FC>(builder, challenger, zerocheck_proof);
+
+        let len_felt: Felt<C::F> = builder.constant(C::F::from_canonical_usize(shard_chips.len()));
+        challenger.observe(builder, len_felt);
+        for opening in opened_values.chips.iter() {
+            crate::logup_gkr::observe_length_prefixed_ext_slice::<C, FC>(
+                builder,
+                challenger,
+                &opening.preprocessed.local,
+            );
+            crate::logup_gkr::observe_length_prefixed_ext_slice::<C, FC>(
+                builder,
+                challenger,
+                &opening.main.local,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_field::PrimeCharacteristicRing;
+    use zkm_pcs::{InnerChallenge, InnerVal};
+    use zkm_recursion_compiler::circuit::AsmBuilder;
+    use zkm_recursion_compiler::config::InnerConfig;
+    use zkm_recursion_compiler::ir::Ext;
+
+    type C = InnerConfig;
+    type F = InnerVal;
+    type EF = InnerChallenge;
+
+    /// Construction smoke test: full_geq builds a symbolic
+    /// expression from two same-length point vectors without
+    /// panicking.
+    #[test]
+    fn full_geq_constructs() {
+        let mut builder = AsmBuilder::<F, EF>::default();
+        let threshold: Vec<SymbolicExt<F, EF>> = (0..3)
+            .map(|_| {
+                let e: Ext<F, EF> = builder.constant(EF::ZERO);
+                e.into()
+            })
+            .collect();
+        let eval_point: Vec<SymbolicExt<F, EF>> = (0..3)
+            .map(|_| {
+                let e: Ext<F, EF> = builder.constant(EF::ONE);
+                e.into()
+            })
+            .collect();
+        let _result = full_geq::<C>(&threshold, &eval_point);
+    }
+
+    /// Construction smoke test: eq_eval builds a symbolic
+    /// expression for two same-length point vectors.
+    #[test]
+    fn eq_eval_constructs() {
+        let mut builder = AsmBuilder::<F, EF>::default();
+        let a: Vec<SymbolicExt<F, EF>> = (0..4)
+            .map(|_| {
+                let e: Ext<F, EF> = builder.constant(EF::ZERO);
+                e.into()
+            })
+            .collect();
+        let b: Vec<SymbolicExt<F, EF>> = (0..4)
+            .map(|_| {
+                let e: Ext<F, EF> = builder.constant(EF::ONE);
+                e.into()
+            })
+            .collect();
+        let _result = eq_eval::<C>(&a, &b);
+    }
+
+    // in-circuit *_full → claimed_sum CLAIM-BINDING tests
+    //
+    // These EXECUTED-CIRCUIT tests (`run_test_recursion`) drive the EXACT
+    // section-(6)/(7) claim-binding arithmetic that `verify_zerocheck` computes
+    // under the rev (collapsed) convention — the per-chip seed
+    //   modification = Σ (main_full ++ prep_full) · β^(1..)        [no embed]
+    // the cross-chip fold `acc = λ·acc + modification`, and the binding assert
+    //   builder.assert_ext_eq(claimed_sum, zerocheck_sum_modification)   [§(7)]
+    // — and assert it against a supplied `claimed_sum`.  This is the in-circuit
+    // analog of the host's "GKR sum-modification identity" check.
+    //
+    // There is no LogUp reconstruction check in this harness.  The reconstruction lives in `verify_logup_gkr`, a SEPARATE
+    // phase; here we exercise ONLY the zerocheck claim-binding.  So a forged
+    // `*_full` that trips `run_full_claim_binding` proves the binding rejects
+    // INDEPENDENTLY of the reconstruction — exactly the property this
+    // claim-binding adds (forging `*_full` must trip an INDEPENDENT in-circuit
+    // claim-binding assert, not just the reconstruction).
+
+    /// Off-circuit replica of the rev-path per-chip seed (no embed): the
+    /// honest `claimed_sum` a single-chip shard would carry.  Mirrors the
+    /// in-circuit section (6) rev branch + the section-(3) β-power convention
+    /// (β powers start at β¹ — `successors(ONE).skip(1)`).
+    fn host_full_claim_single_chip(main_full: &[EF], prep_full: &[EF], beta: EF) -> EF {
+        let n = main_full.len() + prep_full.len();
+        let mut powers: Vec<EF> = Vec::with_capacity(n);
+        let mut acc = EF::ONE;
+        for _ in 0..n {
+            acc *= beta;
+            powers.push(acc);
+        }
+        main_full
+            .iter()
+            .copied()
+            .chain(prep_full.iter().copied())
+            .zip(powers.iter().copied())
+            .fold(EF::ZERO, |a, (o, p)| a + o * p)
+    }
+
+    /// Build + EXECUTE the in-circuit rev-path claim-binding for ONE chip:
+    /// rebuild `modification = Σ (main_full ++ prep_full) · β^(1..)` exactly as
+    /// the section-(6) rev branch does, then assert it equals the supplied
+    /// `claimed_sum` — the section-(7) binding `assert_ext_eq`.  Runs the DSL so
+    /// the assert fires at runtime.  No reconstruction is present.
+    fn run_full_claim_binding(
+        main_full_vals: &[EF],
+        prep_full_vals: &[EF],
+        beta_val: EF,
+        claimed_sum_val: EF,
+    ) {
+        use crate::utils::tests::run_test_recursion;
+        use zkm_recursion_compiler::ir::Builder;
+        let mut builder = Builder::<C>::default();
+
+        let main_full: Vec<Ext<F, EF>> =
+            main_full_vals.iter().map(|&v| builder.constant(v)).collect();
+        let prep_full: Vec<Ext<F, EF>> =
+            prep_full_vals.iter().map(|&v| builder.constant(v)).collect();
+        let beta_ext: Ext<F, EF> = builder.constant(beta_val);
+        let claimed_sum: Ext<F, EF> = builder.constant(claimed_sum_val);
+
+        let beta_sym: SymbolicExt<F, EF> = beta_ext.into();
+        let n = main_full.len() + prep_full.len();
+        let powers: Vec<SymbolicExt<F, EF>> =
+            std::iter::successors(Some(SymbolicExt::ONE), |prev| Some(*prev * beta_sym))
+                .skip(1)
+                .take(n)
+                .collect();
+
+        let modification: SymbolicExt<F, EF> = main_full
+            .iter()
+            .chain(prep_full.iter())
+            .copied()
+            .zip(powers.iter().copied())
+            .map(|(o, power)| {
+                let o_sym: SymbolicExt<F, EF> = o.into();
+                o_sym * power
+            })
+            .sum();
+
+        let zerocheck_sum_modification: Ext<F, EF> = builder.eval(modification);
+        builder.assert_ext_eq(claimed_sum, zerocheck_sum_modification);
+
+        run_test_recursion(builder.into_operations(), std::iter::empty());
+    }
+
+    /// POSITIVE: honest `*_full` → the rebuilt `modification` equals the
+    /// `claimed_sum` computed from the SAME honest `*_full` → the section-(7)
+    /// binding `assert_ext_eq` is a no-op → the circuit runs clean.
+    #[test]
+    fn full_claim_binding_accepts_honest_full() {
+        let main_full =
+            vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
+        let prep_full = vec![EF::from(F::from_u32(3))];
+        let beta = EF::from(F::from_u32(11));
+        let claimed_sum = host_full_claim_single_chip(&main_full, &prep_full, beta);
+        run_full_claim_binding(&main_full, &prep_full, beta, claimed_sum);
+    }
+
+    /// NEGATIVE (the `*_full` → commitment binding, INDEPENDENT of the LogUp
+    /// reconstruction): keep the HONEST `claimed_sum` (seeded from the honest
+    /// `*_full`, the value pinned to `opened_values@z*` via the telescoping
+    /// claimed_sum + eq-bridge), but FORGE `main_trace_evaluations_full`.  The
+    /// rebuilt section-(6) `modification` now diverges from the honest
+    /// `claimed_sum` → the section-(7) binding `assert_ext_eq` TRIPS.
+    ///
+    /// This harness contains NO reconstruction (that is a separate phase,
+    /// `verify_logup_gkr`), so the trip is purely the claim-binding — proving a
+    /// forged `*_full` is rejected by the zerocheck binding ON ITS OWN.  This is
+    /// the recursion analog of the host's sum-modification identity; combined
+    /// with the reconstruction (`verify_logup_gkr`, which a forged degree trips and
+    /// which forces a compensating `*_full` change), NO `*_full` satisfies both
+    /// → the joint adaptive forgery is impossible.
+    #[test]
+    #[should_panic]
+    fn full_claim_binding_rejects_forged_full() {
+        let honest_main_full =
+            vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
+        let prep_full = vec![EF::from(F::from_u32(3))];
+        let beta = EF::from(F::from_u32(11));
+        let claimed_sum = host_full_claim_single_chip(&honest_main_full, &prep_full, beta);
+        let forged_main_full =
+            vec![EF::from(F::from_u32(6)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
+        run_full_claim_binding(&forged_main_full, &prep_full, beta, claimed_sum);
+    }
+
+    /// NEGATIVE (the preprocessed `*_full` side): same binding, forging the
+    /// `preprocessed_trace_evaluations_full` entry instead of the main one —
+    /// confirms BOTH the main and preprocessed full-point openings are inputs to
+    /// the section-(7) claim-binding assert.
+    #[test]
+    #[should_panic]
+    fn full_claim_binding_rejects_forged_prep_full() {
+        let main_full =
+            vec![EF::from(F::from_u32(5)), EF::from(F::from_u32(7)), EF::from(F::from_u32(9))];
+        let honest_prep_full = vec![EF::from(F::from_u32(3))];
+        let beta = EF::from(F::from_u32(11));
+        let claimed_sum = host_full_claim_single_chip(&main_full, &honest_prep_full, beta);
+        let forged_prep_full = vec![EF::from(F::from_u32(4))];
+        run_full_claim_binding(&main_full, &forged_prep_full, beta, claimed_sum);
+    }
+}
+
+#[cfg(test)]
+mod padded_row_tests {
+    use super::*;
+    use zkm_pcs::folder::PairWindow;
+    use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+    use zkm_pcs::septic_curve::SepticCurve;
+    use zkm_pcs::septic_extension::SepticExtension;
+    use zkm_recursion_compiler::config::InnerConfig;
+    use zkm_recursion_core::machine::RecursionAir;
+
+    type F = p3_koala_bear::KoalaBear;
+    type EF = zkm_pcs::InnerChallenge;
+
+    /// Emitted-instruction count for one `chip.eval` over an all-zero row,
+    /// with the row held either as runtime values or as compile-time zeros.
+    fn count<A>(
+        builder: &mut Builder<InnerConfig>,
+        chip: &zkm_pcs::Chip<F, A>,
+        alpha: Ext<F, EF>,
+        pv: &[Felt<F>],
+        lcs: &Ext<F, EF>,
+        gcs: &SepticDigest<Felt<F>>,
+        runtime_row: bool,
+    ) -> usize
+    where
+        A: zkm_pcs::air::MachineAir<F>
+            + for<'b> p3_air::Air<
+                crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
+            >,
+    {
+        let (main_row, prep_row) = if runtime_row {
+            let z: SymbolicExt<F, EF> = builder.eval::<Ext<F, EF>, _>(SymbolicExt::ZERO).into();
+            (vec![z; chip.width()], vec![z; chip.preprocessed_width()])
+        } else {
+            (
+                vec![SymbolicExt::ZERO; chip.width()],
+                vec![SymbolicExt::ZERO; chip.preprocessed_width()],
+            )
+        };
+        let before = builder.get_mut_operations().vec.len();
+        let mut folder = crate::basefold_constraint_folder::ShardConstraintFolder::<InnerConfig> {
+            preprocessed: PairWindow { local: &prep_row, next: &prep_row },
+            main: PairWindow { local: &main_row, next: &main_row },
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values: pv,
+            local_cumulative_sum: lcs,
+            global_cumulative_sum: gcs,
+            _marker: std::marker::PhantomData,
+        };
+        chip.eval(&mut folder);
+        let _: Ext<F, EF> = builder.eval(folder.accumulator);
+        builder.get_mut_operations().vec.len() - before
+    }
+
+    /// `verify_zerocheck` evaluates every chip's constraint polynomial TWICE:
+    /// once at the opened values, and once on an all-zero row for the
+    /// adjustment `full_geq` gates onto the padded rows.  That second row is
+    /// known to be zero while the program is being built, so it has to fold
+    /// away rather than emit the polynomial a second time -- which it only
+    /// does while the folder's `Var` stays symbolic and `assert_zero` elides
+    /// its build-time identities.  Make either concrete again and the padded
+    /// pass silently costs a full constraint evaluation per chip.
+    ///
+    /// A runtime row must still emit what it always did; that half is the
+    /// guarantee the real opening path is untouched.
+    #[test]
+    fn padded_row_adjustment_folds_away_on_a_constant_row() {
+        let mut builder = Builder::<InnerConfig>::default();
+        let alpha: Ext<F, EF> = builder.constant(EF::default());
+        let lcs: Ext<F, EF> = builder.constant(EF::default());
+        let pv: Vec<Felt<F>> =
+            (0..zkm_pcs::PROOF_MAX_NUM_PVS).map(|_| builder.constant(F::default())).collect();
+        let zero_felt: Felt<F> = builder.constant(F::default());
+        let gcs: SepticDigest<Felt<F>> = SepticDigest(SepticCurve {
+            x: SepticExtension(core::array::from_fn(|_| zero_felt)),
+            y: SepticExtension(core::array::from_fn(|_| zero_felt)),
+        });
+
+        let recursion = RecursionAir::<F, 3>::compress_machine(KoalaBearPoseidon2::default());
+        let (mut rec_runtime, mut rec_const) = (0usize, 0usize);
+        for chip in recursion.chips().iter() {
+            rec_runtime += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, true);
+            rec_const += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, false);
+        }
+
+        let core = zkm_core_machine::mips::MipsAir::<F>::machine(KoalaBearPoseidon2::default());
+        let (mut core_runtime, mut core_const) = (0usize, 0usize);
+        for chip in core.chips().iter() {
+            core_runtime += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, true);
+            core_const += count(&mut builder, chip, alpha, &pv, &lcs, &gcs, false);
+        }
+
+        assert!(
+            rec_const * 4 < rec_runtime,
+            "recursion: a constant row must be far cheaper ({rec_const} vs {rec_runtime})"
+        );
+        assert!(
+            core_const * 10 < core_runtime,
+            "core: a constant row must be far cheaper ({core_const} vs {core_runtime})"
+        );
+    }
+}

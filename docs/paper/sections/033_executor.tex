@@ -1,0 +1,197 @@
+\section{The just-in-time executor}
+\label{sec:executor}
+
+Section~\ref{sec:isa-emulator} states that the execution relation is realised
+twice and says what connects the two realisations. This appendix gives the
+mechanism of the second one, a just-in-time compiler for Linux x86-64 hosts,
+which is what a production prover runs. Nothing in the protocol depends on it:
+a platform without the compiler proves the same statements more slowly.
+
+\subsection{Two implementations, three jobs}
+\label{sec:exec-roles}
+
+The interpreter is a single loop over \texttt{execute\_cycle}: fetch, dispatch
+on the opcode, apply the state transition, append the events the trace
+generator will consume. It implements every instruction, every syscall and
+every error path, and it is the only implementation that emits the full event
+record.
+
+The compiler is used for the two jobs that dominate wall-clock time and need no
+events. The first is \emph{whole-program execution}, when a caller wants only
+the output stream and the exit status. The second, which the multi-GPU prover
+depends on, is \emph{minimal-trace production}: the coordinating process runs
+the guest to the end and emits, per shard, a chunk descriptor holding the
+pre-access value of every memory word the shard reads, the register records at
+its boundary, and the boundary itself. A worker then re-executes the shard from
+that descriptor under the interpreter and emits the events locally. The
+consequence is that no event record crosses a process boundary and the
+coordinator holds one shard's state at a time, and also that the event-emitting
+path stays the interpreter's: the compiler never has to reproduce an event
+stream, only the state and the accounting a replay needs.
+
+Availability is a build-time decision. The parent crate's build script emits
+\texttt{cfg(zkm\_use\_native\_executor)} on Linux x86-64 without the profiling
+feature; elsewhere the flag is absent and every entry point stays on the
+interpreter, so a platform without the compiler is slower and not otherwise
+different.
+
+\subsection{Transpilation and the program cache}
+\label{sec:exec-transpile}
+
+Compilation is one-shot and per program, not per basic block discovered at run
+time. The driver walks the program's instruction stream once, and for each
+instruction records the native offset that the guest program counter maps to,
+dispatches on the opcode to a lowering, and emits the epilogue that advances
+the clock and the program counter. The result is a native code buffer, mapped
+executable from an anonymous file, together with a jump table holding one
+native address per guest program counter. Control transfers inside the compiled
+program are table dispatches, so the compiled chip is the whole program and a
+branch never leaves it.
+
+Two properties of the lowering are worth stating because they are what make it
+tractable. Delay slots are resolved statically: a branch or jump whose delay
+slot holds another branch or jump, or which ends the program, is rejected at
+compile time and the host falls back to the interpreter, so the only
+instruction that has to read a delayed target is the one immediately after a
+transfer. And an opcode the lowering does not model is a compile-time refusal
+rather than a run-time surprise: the driver returns the offending opcode and
+the caller falls back.
+
+Compiled programs are cached process-wide. The key must be a hash of the entire
+instruction stream: the base address, the instruction count and, for every
+instruction, the opcode and all three operands with their immediate flags. A
+cheaper fingerprint is unsound in a way that does not announce itself: two
+guests that agree on a prefix and a suffix but differ in the middle collide,
+and the second one silently executes the first one's code. \Ziren{} hashes the
+whole stream for this reason, and a test asserts that changing any single
+instruction changes the key.
+
+\subsection{Machine state in host registers}
+\label{sec:exec-state}
+
+The guest's register file is held in host registers for the duration of a run.
+There are 33 live guest registers (31 general-purpose plus \texttt{HI} and
+\texttt{LO}) and 16 vector registers offering 32 half-slots, so exactly one
+must live elsewhere: general registers 1 to 30 pack two per vector register
+into the first fifteen, \texttt{HI} and \texttt{LO} take the halves of the
+sixteenth, and the return-address register takes a general-purpose host
+register of its own, because it is read and written by every call sequence and
+a half-slot access costs an insert or extract. Register 0 is not stored at all.
+The two registers that only \texttt{mmap}-style syscalls touch stay in the
+context structure in memory.
+
+Three quantities are pinned to host registers alongside the guest state: the
+packed clock, the oracle tail pointer, and the remaining trace-area budget.
+All three are written back to the context around any call into the host and on
+exit, so the host never reads a stale copy.
+
+Guest memory is a flat array with one sixteen-byte entry per guest word, a
+value, the timestamp and shard of its last access, and padding that keeps the
+index a shift of the address. The array is a shared mapping of an anonymous
+file with reservation disabled, so it is sparse and only touched pages are ever
+committed, and an unconstrained block is entered by mapping a private
+copy-on-write view of the same file and left by unmapping it, so the rollback
+that the paged executor performs with a per-address diff becomes one unmap. Two
+alignments in that entry are load-bearing. Its first twelve bytes are exactly
+the image of an oracle entry, so recording a pre-access value is one twelve-byte
+copy; and its timestamp and shard fields are the little-endian image of the
+packed clock register, so stamping an access is one eight-byte store.
+
+\subsection{What the compiled code accounts for}
+\label{sec:exec-accounting}
+
+A compiled instruction is not just its state transition. To let a worker replay
+a shard, and to close shards where the interpreter would, the emitted code also
+performs the bookkeeping of Section~\ref{sec:isa}:
+
+\begin{itemize}
+  \item \textbf{Access stamps.} Every register the interpreter stamps is
+  stamped here, with the same shard and the same sub-cycle position, at the
+  highest position at which the instruction touches it.
+  \item \textbf{The clock.} An instruction executes at $\mathsf{clk}$ and its
+  accesses occupy $\mathsf{clk}+1,\dots,\mathsf{clk}+4$ by position, so the
+  clock advances by five per instruction. The pinned register holds the shard
+  and the clock as one word, which is what makes the memory stamp a single
+  store.
+  \item \textbf{The oracle.} A read or write of an address above the register
+  window copies the entry as it stood before the access to the oracle tail,
+  which is the descriptor the replaying worker will answer memory reads from.
+  \item \textbf{Shard budgets.} The trace-area budget in its pinned register
+  and the per-chip height budgets in the context are charged the exact amounts
+  the interpreter's accumulator charges, supplied per instruction by the
+  compiler. Exhaustion of any one of them is the condition under which the
+  interpreter would fence, and the compiled function returns a shard-fence
+  status so the host seals the chunk and re-enters.
+\end{itemize}
+
+Because the budgets are charged in native code and checked on every
+instruction, the shard boundaries a compiled run produces are the boundaries an
+interpreted run would produce, which is what allows the two to be compared
+chunk by chunk.
+
+\subsection{What the interpreter keeps}
+\label{sec:exec-traps}
+
+The compiler deliberately implements no error path and no syscall. Every
+\texttt{SYSCALL}, every division by zero, every trap instruction, every
+misaligned or out-of-range address, and every operand form the lowering does
+not model is a \emph{trap site}: the emitted code stores the guest program
+counter and jumps to a shared stub whose host handler synchronises the native
+state into the interpreter, runs that one instruction there, synchronises back
+and resumes the compiled code at the resulting program counter. The interpreter
+therefore owns the precompiles, the unconstrained blocks and every failure, and
+the compiler owns the arithmetic, memory and control flow that make up almost
+every instruction of a real workload.
+
+This split is what keeps the compiler small enough to argue about. It is also
+why a syscall-dense guest sees less speedup than a compute-dense one: each trap
+is a state synchronisation in both directions.
+
+\subsection{Evidence that the two agree}
+\label{sec:exec-equivalence}
+
+Three checks connect the implementations, and none of them is a proof of
+equivalence for every program.
+
+The producer's output is compared against the interpreter's directly: tests
+assert that the chunk descriptors a compiled run emits are byte-identical to
+those of an interpreted run of the same program, which covers the state, the
+oracle, the stamps and the shard boundaries in one comparison. The 770
+specification vectors of Section~\ref{sec:verification} are executed on both
+implementations and against an independent reference emulator. And continuous
+integration compares digests of the emitted records across runs and across
+implementations on the tested corpus, which is evidence of determinism and of
+agreement there rather than everywhere.
+
+Section~\ref{sec:perf-emu} measures what the compiler buys: on the reference
+block it emulates the guest at roughly 130\,MHz against the
+interpreter's 5--20\,MHz, depending on whether the interpreter
+is recording events.
+
+\subsection{The record pipeline under a host budget}
+\label{sec:app-hostbudget}
+
+Section~\ref{sec:perf-emu} states that on a host feeding several accelerators the executor, not the accelerator, is what binds, because each shard is re-emulated by the worker that proves it. The event stream written by one shard replay was approximately 1\,GB. Table~\ref{tab:host} lists the changes made under an explicit host budget. Each preserves the represented execution semantics: the trace columns every constraint reads are unchanged, so the verifying keys and the proofs are unchanged. The record layout itself does change; the table below removes fields and narrows record widths, so each change is witness-equivalent rather than byte-identical, and it is the event record, not the committed trace, whose bytes move.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{Emulator and record pipeline under a host memory and processor budget. Sizes are per event or per shard of the block of \S\ref{sec:perf-setup}; times are host-side, single process, three repetitions.}
+\label{tab:host}
+\begin{tabular}{p{0.44\textwidth} r r p{0.27\textwidth}}
+\toprule
+Change & before & after & effect \\
+\midrule
+Per-cycle event: keep clock, \textsf{pc} pair and exit code only (no CPU chip reads the rest) & 184\,B & 20\,B & event stream per shard 1{,}000\,MB $\to$ 462\,MB; replay 700\,ms $\to$ 435\,ms \\
+Memory-instruction event: drop the three fields no column reads & 168\,B & 136\,B & every load/store event \\
+Register-access record: carry only the witnessed values (no shard fields; one arm for read/write) & 48 / 24\,B & 20 / 16\,B & every instruction event \\
+Memory oracle shipped to a worker: pre-access value, stamp and shard as one byte run & 24\,B, 25\,MB & 12\,B, 12\,MB & per access, per shard; serialise 6--7 $\to$ 1\,ms \\
+Coordinator producer without checkpoints: no state clone or first-touch map per shard & 22.9\,s & 20.4\,s & per block; state $O(\text{shard})$ \\
+Native (JIT) producer in the coordinator & 12.3\,s & 6.1\,s & per 420\,M-cycle block \\
+Flat guest memory: one 16-byte entry per word in a sparse mapping; untouched pages cost nothing; unconstrained blocks are copy-on-write views & paged table & flat, sparse & no per-block memory diff \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two rules follow. An event should carry exactly what a column witnesses: three of the seven rows remove fields that only a debug assertion or an unused code path had kept alive; on the shared register records alone this is 44 bytes for every instruction event, one write record and two read records. And the process that coordinates several GPUs should never hold the whole execution: the coordinator's resident state is one shard's oracle and the guest image, so the block size is not bounded by host memory; only the shard size is bounded, by the accelerator's memory (\S\ref{sec:perf-changes}). Both rules apply to any \zkVM{} whose prover is fed by a re-executing host.

@@ -177,6 +177,21 @@ pub enum SyscallCode {
     SYS_NANOSLEEP = 4166,
     SYS_OPENAT = 4288,
     SYS_PRLIMIT64 = 4338,
+    /// `uname`.  Go >= 1.27's runtime calls this at startup on 32-bit Linux
+    /// (runtime/os_linux32.go, build tag `mips || mipsle || 386 || arm`) to read the
+    /// kernel release and decide whether futex_time64 exists.  A NOP answers
+    /// "success" with an all-zero utsname, which the runtime cannot parse, so it
+    /// falls through to probing futex_time64 -- hence the next entry.
+    SYS_UNAME = 4122,
+    /// `futex_time64`.  Reached only by that probe (`FUTEX_WAKE_PRIVATE`, count 0,
+    /// a no-op when the syscall exists).  A NOP returns 0, which is != -ENOSYS, so
+    /// the runtime settles on the 64-bit time path and startup completes.
+    SYS_FUTEX_TIME64 = 4422,
+    /// `prctl`.  Go >= 1.25's runtime calls it to name anonymous VMAs and
+    /// threads.  Purely informational -- the runtime ignores the result -- so a
+    /// NOP is the whole implementation.  Reached once the module's `go`
+    /// directive is 1.25, which is what selects the newer runtime behaviour.
+    SYS_PRCTL = 4192,
 
     /// Executes the `POSEIDON2_PERMUTE` precompile.
     POSEIDON2_PERMUTE = 0x00_01_00_30,
@@ -256,6 +271,9 @@ impl SyscallCode {
             4263 => SyscallCode::SYS_CLOCK_GETTIME,
             4288 => SyscallCode::SYS_OPENAT,
             4338 => SyscallCode::SYS_PRLIMIT64,
+            4122 => SyscallCode::SYS_UNAME,
+            4422 => SyscallCode::SYS_FUTEX_TIME64,
+            4192 => SyscallCode::SYS_PRCTL,
             _ => SyscallCode::UNIMPLEMENTED,
         }
     }

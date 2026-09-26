@@ -71,7 +71,6 @@ impl Transcript {
             return Ok(challenge.value.clone());
         }
 
-        // Reset the hash function before and after computing the challenge
         self.h.reset();
 
         self.h.update(challenge_id.as_bytes());
@@ -96,7 +95,6 @@ impl Transcript {
         challenge.value = res.to_vec();
         challenge.is_computed = true;
 
-        // Update the previous challenge reference
         self.previous_challenge = Some(challenge.clone());
 
         Ok(res.to_vec())

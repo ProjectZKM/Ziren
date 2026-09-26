@@ -19,7 +19,7 @@ pub struct Elf {
     /// The path to the ELF file
     #[arg(long = "elf")]
     path: Option<String>,
-    /// The crate used to generate the ELF file
+    /// The crate that generates the ELF file
     #[arg(long)]
     program: Option<String>,
 }
@@ -44,15 +44,12 @@ impl VkeyCmd {
         let prover = ProverClient::new();
 
         for (target, elf_path) in elf_paths {
-            // Read the elf file contents
             let mut file = File::open(elf_path)?;
             let mut elf = Vec::new();
             file.read_to_end(&mut elf)?;
 
-            // Get the verification key
             let (_, vk) = prover.setup(&elf);
 
-            // Print the verification key hash
             if let Some(target) = target {
                 println!("Verification Key Hash for '{target}':\n{}", vk.vk.bytes32());
             } else {

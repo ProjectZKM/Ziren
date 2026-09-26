@@ -1,15 +1,15 @@
+use crate::memory::RegisterCols;
 use std::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder};
-use p3_field::FieldAlgebra;
-use p3_matrix::Matrix;
+use p3_air::{Air, AirBuilder, WindowAccess};
+use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::Opcode;
-use zkm_stark::{
-    air::{BaseAirBuilder, ZKMAirBuilder},
-    Word,
-};
+use zkm_pcs::air::{BaseAirBuilder, ZKMAirBuilder};
 
-use crate::{air::WordAirBuilder, operations::KoalaBearWordRangeChecker};
+use crate::{
+    air::WordAirBuilder,
+    operations::{AddOperation, KoalaBearWordRangeChecker},
+};
 
 use super::{BranchChip, BranchColumns};
 
@@ -21,21 +21,19 @@ use super::{BranchChip, BranchColumns};
 /// 2. It verifies the correct value of branching based on the helper bool columns (a_eq_b,
 ///    a_gt_b, a_lt_b).
 /// 3. It verifies the correct values of the helper bool columns based on op_a and op_b.
-///
 impl<AB> Air<AB> for BranchChip
 where
     AB: ZKMAirBuilder,
     AB::Var: Sized,
 {
+    /// Constrains one branch row. The six opcode selectors and their sum `is_real`
+    /// are boolean, so a real row has exactly one selector on and `opcode` matches it.
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &BranchColumns<AB::Var> = (*local).borrow();
 
-        // SAFETY: All selectors `is_beq`, `is_bne`, `is_bltz`, `is_bgez`, `is_blez`, `is_bgtz` are checked to be boolean.
-        // Each "real" row has exactly one selector turned on, as `is_real`, the sum of the six selectors, is boolean.
-        // Therefore, the `opcode` matches the corresponding opcode.
         builder.assert_bool(local.is_beq);
         builder.assert_bool(local.is_bne);
         builder.assert_bool(local.is_bltz);
@@ -57,41 +55,29 @@ where
             + local.is_blez * Opcode::BLEZ.as_field::<AB::F>()
             + local.is_bgtz * Opcode::BGTZ.as_field::<AB::F>();
 
-        // SAFETY: This checks the following.
-        // - `num_extra_cycles = 0`
-        // - `op_a_val` will be constrained in the BranchChip as `op_a_immutable = 1`
-        // - `op_a_immutable = 1`, as this is a branch instruction
-        // - `is_rw_a = 0`
-        // - `is_syscall = 0`
-        // - `is_halt = 0`
-        // `next_pc` still has to be constrained, and this is done below.
-        builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.pc,
+        let _ = opcode;
+
+        crate::frame::eval_i_type_frame(
+            builder,
+            &local.frame,
+            local.is_beq * Opcode::BEQ.as_field::<AB::F>()
+                + local.is_bne * Opcode::BNE.as_field::<AB::F>()
+                + local.is_bltz * Opcode::BLTZ.as_field::<AB::F>()
+                + local.is_bgez * Opcode::BGEZ.as_field::<AB::F>()
+                + local.is_blez * Opcode::BLEZ.as_field::<AB::F>()
+                + local.is_bgtz * Opcode::BGTZ.as_field::<AB::F>(),
+            local.pc.into(),
             local.next_pc.reduce::<AB>(),
             local.next_next_pc.reduce::<AB>(),
-            AB::Expr::zero(),
-            opcode,
-            local.op_a_value,
-            local.op_b_value,
-            local.op_c_value,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::one(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            local.next_pc.reduce::<AB>(),
+            AB::Expr::ZERO,
             is_real.clone(),
         );
+        builder
+            .when(is_real.clone())
+            .assert_word_eq(*local.frame.op_a_access.value(), local.frame.op_a_access.prev_value);
 
-        // Evaluate program counter constraints.
         {
-            // Range check local.next_pc, local.next_next_pc and local.target_pc, .
-            // SAFETY: `is_real` is already checked to be boolean.
-            // The `KoalaBearWordRangeChecker` assumes that the value is checked to be a valid word.
-            // This is done when the word form is relevant, i.e. when `pc` and `next_pc` are sent to the ADD ALU table.
-            // The ADD ALU table checks the inputs are valid words, when it invokes `AddOperation`.
             KoalaBearWordRangeChecker::<AB::F>::range_check(
                 builder,
                 local.next_pc,
@@ -106,106 +92,73 @@ where
                 is_real.clone(),
             );
 
-            // When we are branching, assert that local.target_pc <==> local.next_pc + c.
-            builder.send_alu(
-                Opcode::ADD.as_field::<AB::F>(),
-                local.target_pc,
+            AddOperation::<AB::F>::eval(
+                builder,
                 local.next_pc,
-                local.op_c_value,
-                local.is_branching,
+                local.frame.op_c_val(),
+                local.target_add,
+                local.is_branching.into(),
             );
 
-            // When we are not branching, assert that local.next_pc + 4 <==> next.next_next_pc.
             builder.when(is_real.clone()).when_not(local.is_branching).assert_eq(
-                local.next_pc.reduce::<AB>() + AB::Expr::from_canonical_u32(4),
+                local.next_pc.reduce::<AB>() + AB::Expr::from_u32(4),
                 local.next_next_pc.reduce::<AB>(),
             );
 
-            // check local.next_pc/next_next_pc to be valid word when we are not branching.
-            // they are checked as valid value by the ADD ALU table when we are branching.
             builder.slice_range_check_u8(&local.next_pc.0, is_real.clone() - local.is_branching);
             builder
                 .slice_range_check_u8(&local.next_next_pc.0, is_real.clone() - local.is_branching);
 
-            // When we are branching, assert that local.next_next_pc <==> next.target_pc.
             builder
                 .when(is_real.clone())
                 .when(local.is_branching)
-                .assert_word_eq(local.target_pc, local.next_next_pc);
+                .assert_word_eq(local.target_add.value, local.next_next_pc);
 
-            // To prevent the ALU send above to be non-zero when the row is a padding row.
             builder.when_not(is_real.clone()).assert_zero(local.is_branching);
 
-            // Assert the branching or not branching when the instruction is a
             builder.when(is_real.clone()).assert_bool(local.is_branching);
         }
 
-        // Evaluate branching value constraints.
-        {
-            // When the opcode is BEQ and we are branching, assert that a_gt_b + a_lt_b is false.
-            builder
-                .when(local.is_beq * local.is_branching)
-                .assert_zero(local.a_gt_b + local.a_lt_b);
+        let av = *local.frame.op_a_access.value();
+        let bv = local.frame.op_b_val();
+        let two_pow_8 = AB::Expr::from_u32(1 << 8);
+        let d_lo = (av[0] - bv[0]) + (av[1] - bv[1]) * two_pow_8.clone();
+        let d_hi = (av[2] - bv[2]) + (av[3] - bv[3]) * two_pow_8;
 
-            // When the opcode is BEQ and we are not branching, assert that either a_gt_b or a_lt_b
-            // is true.
-            builder
-                .when(local.is_beq)
-                .when_not(local.is_branching)
-                .assert_one(local.a_gt_b + local.a_lt_b);
+        builder.when(is_real.clone()).assert_zero(local.eq_lo * d_lo.clone());
+        builder
+            .when(is_real.clone())
+            .assert_eq(local.eq_lo, AB::Expr::ONE - d_lo * local.eq_lo_inv);
+        builder.when(is_real.clone()).assert_zero(local.eq_hi * d_hi.clone());
+        builder
+            .when(is_real.clone())
+            .assert_eq(local.eq_hi, AB::Expr::ONE - d_hi * local.eq_hi_inv);
+        builder.when(is_real.clone()).assert_eq(local.a_eq_b, local.eq_lo * local.eq_hi);
 
-            // When the opcode is BNE and we are branching, assert that either a_gt_b or a_lt_b is
-            // true.
-            builder.when(local.is_bne * local.is_branching).assert_one(local.a_gt_b + local.a_lt_b);
-
-            // When the opcode is BNE and we are not branching, assert that a_gt_b + a_lt_b is false.
-            builder
-                .when(local.is_bne)
-                .when_not(local.is_branching)
-                .assert_zero(local.a_gt_b + local.a_lt_b);
-
-            // When the opcode is BLTZ and we are branching, assert that a_lt_b is true.
-            builder.when(local.is_bltz * local.is_branching).assert_one(local.a_lt_b);
-
-            // When the opcode is BLTZ and we are not branching, assert a_lt_b is false.
-            builder.when(local.is_bltz).when_not(local.is_branching).assert_zero(local.a_lt_b);
-
-            // When the opcode is BLEZ and we are branching, assert that either a_gt_b is false
-            builder.when(local.is_blez * local.is_branching).assert_zero(local.a_gt_b);
-
-            // When the opcode is BLEZ and we are not branching, assert that a_gt_b is true.
-            builder.when(local.is_blez).when_not(local.is_branching).assert_one(local.a_gt_b);
-
-            // When the opcode is BGTZ and we are branching, assert that a_gt_b is true.
-            builder.when(local.is_bgtz * local.is_branching).assert_one(local.a_gt_b);
-
-            // When the opcode is BGTZ and we are not branching, assert that a_gt_b is false.
-            builder.when(local.is_bgtz).when_not(local.is_branching).assert_zero(local.a_gt_b);
-
-            // When the opcode is BGEZ and we are branching, assert that a_lt_b is false.
-            builder.when(local.is_bgez * local.is_branching).assert_zero(local.a_lt_b);
-
-            // When the opcode is BGEZ and we are not branching, assert that a_lt_b is true.
-            builder.when(local.is_bgez).when_not(local.is_branching).assert_one(local.a_lt_b);
-        }
-
-        // Calculate a_lt_b <==> a < b (using appropriate signedness).
-        // SAFETY: `use_signed_comparison` is boolean, since at most one selector is turned on.
-        builder.send_alu(
-            Opcode::SLT.as_field::<AB::F>(),
-            Word::extend_var::<AB>(local.a_lt_b),
-            local.op_a_value,
-            local.op_b_value,
-            is_real.clone(),
+        let zero_ops = local.is_bltz + local.is_blez + local.is_bgtz + local.is_bgez;
+        builder.send_byte(
+            AB::Expr::from_u8(zkm_core_executor::ByteOpcode::MSB as u8),
+            local.msb_a,
+            av[3],
+            AB::Expr::ZERO,
+            zero_ops.clone(),
+        );
+        builder.when(zero_ops).assert_eq(
+            local.a_gt_0,
+            (AB::Expr::ONE - local.msb_a) * (AB::Expr::ONE - local.a_eq_b),
         );
 
-        // Calculate a_gt_b <==> a > b (using appropriate signedness).
-        builder.send_alu(
-            Opcode::SLT.as_field::<AB::F>(),
-            Word::extend_var::<AB>(local.a_gt_b),
-            local.op_b_value,
-            local.op_a_value,
-            is_real.clone(),
-        );
+        builder.when(local.is_beq * local.is_branching).assert_one(local.a_eq_b);
+        builder.when(local.is_beq).when_not(local.is_branching).assert_zero(local.a_eq_b);
+        builder.when(local.is_bne * local.is_branching).assert_zero(local.a_eq_b);
+        builder.when(local.is_bne).when_not(local.is_branching).assert_one(local.a_eq_b);
+        builder.when(local.is_bltz * local.is_branching).assert_one(local.msb_a);
+        builder.when(local.is_bltz).when_not(local.is_branching).assert_zero(local.msb_a);
+        builder.when(local.is_blez * local.is_branching).assert_zero(local.a_gt_0);
+        builder.when(local.is_blez).when_not(local.is_branching).assert_one(local.a_gt_0);
+        builder.when(local.is_bgtz * local.is_branching).assert_one(local.a_gt_0);
+        builder.when(local.is_bgtz).when_not(local.is_branching).assert_zero(local.a_gt_0);
+        builder.when(local.is_bgez * local.is_branching).assert_zero(local.msb_a);
+        builder.when(local.is_bgez).when_not(local.is_branching).assert_one(local.msb_a);
     }
 }

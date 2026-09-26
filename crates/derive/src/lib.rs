@@ -35,7 +35,6 @@ pub fn aligned_borrow_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
     let name = &ast.ident;
 
-    // Get first generic which must be type (ex. `T`) for input <T, N: NumLimbs, const M: usize>
     let type_generic = ast
         .generics
         .params
@@ -47,8 +46,6 @@ pub fn aligned_borrow_derive(input: TokenStream) -> TokenStream {
         .next()
         .expect("Expected at least one generic");
 
-    // Get generics after the first (ex. `N: NumLimbs, const M: usize`)
-    // We need this because when we assert the size, we want to substitute u8 for T.
     let non_first_generics = ast
         .generics
         .params
@@ -61,8 +58,6 @@ pub fn aligned_borrow_derive(input: TokenStream) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
-    // Get impl generics (`<T, N: NumLimbs, const M: usize>`), type generics (`<T, N>`), where
-    // clause (`where T: Clone`)
     let (impl_generics, type_generics, where_clause) = ast.generics.split_for_impl();
 
     let methods = quote! {
@@ -153,84 +148,75 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
             let name_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::name(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::name(x)
                 }
             });
 
             let preprocessed_width_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::preprocessed_width(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::preprocessed_width(x)
                 }
             });
 
             let generate_preprocessed_trace_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::generate_preprocessed_trace(x, program)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::generate_preprocessed_trace(x, program)
                 }
             });
 
             let generate_trace_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::generate_trace(x, input, output)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::generate_trace(x, input, output)
                 }
             });
 
             let generate_dependencies_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::generate_dependencies(x, input, output)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::generate_dependencies(x, input, output)
                 }
             });
 
             let included_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::included(x, shard)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::included(x, shard)
                 }
             });
 
             let commit_scope_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::commit_scope(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::commit_scope(x)
                 }
             });
 
-            let local_only_arms = variants.iter().map(|(variant_name, field)| {
-                let field_ty = &field.ty;
-                quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::local_only(x)
-                }
-            });
-
-            // Calls the underlying chip's `picus_info()` method
             let picus_info_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::picus_info(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::picus_info(x)
                 }
             });
 
-            let selectors_partition_real_rows_arms = variants.iter().map(|(variant_name, field)| {
+            let selectors_partition_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::selectors_partition_real_rows(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::selectors_partition_real_rows(x)
                 }
             });
 
-            let picus_selector_specialization_allowed_arms =
-                variants.iter().map(|(variant_name, field)| {
-                    let field_ty = &field.ty;
-                    quote! {
-                        #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::picus_selector_specialization_allowed(x, phase, selector_name)
-                    }
-                });
+            let selector_allowed_arms = variants.iter().map(|(variant_name, field)| {
+                let field_ty = &field.ty;
+                quote! {
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::picus_selector_specialization_allowed(x, selector_name)
+                }
+            });
 
             let machine_air = quote! {
-                impl #impl_generics zkm_stark::air::MachineAir<F> for #name #ty_generics #where_clause {
+                impl #impl_generics zkm_pcs::air::MachineAir<F> for #name #ty_generics #where_clause {
                     type Record = #execution_record_path;
 
                     type Program = #program_path;
@@ -290,12 +276,6 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                         }
                     }
 
-                    fn local_only(&self) -> bool {
-                        match self {
-                            #(#local_only_arms,)*
-                        }
-                    }
-
                     fn picus_info(&self) -> PicusInfo {
                         match self {
                             #(#picus_info_arms,)*
@@ -304,17 +284,13 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
 
                     fn selectors_partition_real_rows(&self) -> bool {
                         match self {
-                            #(#selectors_partition_real_rows_arms,)*
+                            #(#selectors_partition_arms,)*
                         }
                     }
 
-                    fn picus_selector_specialization_allowed(
-                        &self,
-                        phase: &str,
-                        selector_name: &str,
-                    ) -> bool {
+                    fn picus_selector_specialization_allowed(&self, selector_name: &str) -> bool {
                         match self {
-                            #(#picus_selector_specialization_allowed_arms,)*
+                            #(#selector_allowed_arms,)*
                         }
                     }
                 }
@@ -327,10 +303,14 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 }
             });
 
-            // Attach an extra generic AB : crate::air::ZKMAirBuilder to the generics of the enum
             let generics = &ast.generics;
             let mut new_generics = generics.clone();
-            new_generics.params.push(syn::parse_quote! { AB: p3_air::PairBuilder + #builder_path });
+            let first_segment = builder_path.segments.first().map(|s| s.ident.to_string());
+            if first_segment.as_deref() == Some("crate") {
+                new_generics.params.push(syn::parse_quote! { AB: #builder_path });
+            } else {
+                new_generics.params.push(syn::parse_quote! { AB: p3_air::#builder_path });
+            }
 
             let (air_impl_generics, _, _) = new_generics.split_for_impl();
 
@@ -432,12 +412,12 @@ fn find_eval_trait_bound(attrs: &[syn::Attribute]) -> Option<String> {
     None
 }
 
-#[proc_macro_derive(PicusProjection, attributes(picus, picus_projection))]
-pub fn picus_projection_derive(input: TokenStream) -> TokenStream {
-    picus_annotations::picus_projection_derive(input)
-}
-
 #[proc_macro_derive(PicusAnnotations, attributes(picus))]
 pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
     picus_annotations::picus_annotations_derive(input)
+}
+
+#[proc_macro_derive(PicusProjection, attributes(picus, picus_projection))]
+pub fn picus_projection_derive(input: TokenStream) -> TokenStream {
+    picus_annotations::picus_projection_derive(input)
 }

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 use clap::Parser;
 use zkm_core_executor::MipsAirId;
 use zkm_core_machine::utils::setup_logger;
-use zkm_stark::shape::Shape;
+use zkm_pcs::shape::Shape;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -17,19 +17,15 @@ struct Args {
 }
 
 fn main() {
-    // Setup logger.
     setup_logger();
 
-    // Parse arguments.
     let args = Args::parse();
 
-    // Load the maximal shapes, indexed by log shard size.
     let maximal_shapes: BTreeMap<usize, Vec<Shape<MipsAirId>>> = serde_json::from_slice(
         &std::fs::read(&args.maximal_shapes_json).expect("failed to read maximal shapes"),
     )
     .expect("failed to deserialize maximal shapes");
 
-    // For each maximal shape, generate all small shapes by varying the memory heights.
     let mut small_shapes = Vec::new();
     for (log2_shard_size, shapes) in maximal_shapes.iter() {
         if *log2_shard_size > 22 {
@@ -54,7 +50,6 @@ fn main() {
         }
     }
 
-    // Serialize the small shapes.
     let serialized =
         serde_json::to_string_pretty(&small_shapes).expect("failed to serialize small shapes");
     std::fs::write(&args.output, serialized).expect("failed to write small shapes");

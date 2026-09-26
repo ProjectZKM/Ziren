@@ -28,6 +28,9 @@ impl Syscall for EnterUnconstrainedSyscall {
             executor_mode: ctx.rt.executor_mode,
         };
         ctx.rt.executor_mode = ExecutorMode::Simple;
+        if let Some(flat) = ctx.rt.flat_mem.as_deref_mut() {
+            flat.enter_unconstrained().expect("flat memory: unconstrained COW view");
+        }
         Ok(Some(1))
     }
 }
@@ -42,7 +45,6 @@ impl Syscall for ExitUnconstrainedSyscall {
         _: u32,
         _: u32,
     ) -> Result<Option<u32>, ExecutionError> {
-        // Reset the state of the runtime.
         if ctx.rt.unconstrained {
             ctx.rt.state.global_clk = ctx.rt.unconstrained_state.global_clk;
             ctx.rt.state.clk = ctx.rt.unconstrained_state.clk;
@@ -62,6 +64,9 @@ impl Syscall for ExitUnconstrainedSyscall {
             ctx.rt.memory_accesses = std::mem::take(&mut ctx.rt.unconstrained_state.op_record);
             ctx.rt.executor_mode = ctx.rt.unconstrained_state.executor_mode;
             ctx.rt.unconstrained = false;
+            if let Some(flat) = ctx.rt.flat_mem.as_deref_mut() {
+                flat.exit_unconstrained();
+            }
         }
         ctx.rt.unconstrained_state = ForkState::default();
         Ok(Some(0))

@@ -2,23 +2,149 @@ name: Time-consuming test
 
 on:
   push:
-    branches: ["main"]
+    # The feature branch is gated too: with only `main` gated, an `#[ignore]`d
+    # end-to-end test rotted for weeks and nothing ran it.
+    branches: ["main", "feat/upgrade-plonky3"]
+  # The SNARK proofs run nightly, not per push: they held the only self-hosted
+  # slot for hours. A schedule runs on the default branch only, so a feature
+  # branch needs `workflow_dispatch`.
+  schedule:
+    - cron: "0 2 * * *"
   workflow_dispatch:
+
+# One run per branch. Without this a superseded push queues behind the run it
+# replaces, on a runner that has one slot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changes:
+    # Does this push touch anything that can move the wrap vk? Runs on a hosted
+    # runner so it never costs the one self-hosted slot.
+    name: Wrap-vk-affecting paths
+    runs-on: ubuntu-latest
+    outputs:
+      vk_affecting: ${{ steps.check.outputs.vk_affecting }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          # A push can carry several commits, so diff the whole push and not just
+          # its tip. A new branch or a force-push leaves no usable base, and then
+          # the answer is yes: an extra run costs slot time, a missed wrap-vk move
+          # ships artifacts no released verifier accepts.
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "no usable base ($BEFORE); assuming the wrap vk may have moved"
+            echo "vk_affecting=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILES=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
+          echo "$FILES" | sed 's/^/  /'
+          if echo "$FILES" | grep -qE '^crates/(recursion|pcs)/|^crates/verifier/bn254-vk/'; then
+            echo "vk_affecting=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "vk_affecting=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Cargo Test
     runs-on: self-hosted-cpu
+    # See ci.yml: tests prove at a quarter of the area fence, two at a time.
+    env:
+      RUST_TEST_THREADS: "2"
+      ELEMENT_THRESHOLD: "115000000"
+      # The same cache and the same flags as ci.yml's self-hosted job, so the
+      # two share artifacts instead of rebuilding the workspace for each other.
+      CARGO_TARGET_DIR: /data/actions-runner/cache/ziren-target
+      RUSTFLAGS: "-C target-cpu=native"
     steps:
       - uses: actions/checkout@v5
       - run: export PATH=~/.cargo/bin:$PATH
       - run: |
           source ~/.zkm-toolchain/env
-          cargo test -r -p zkm-core-machine
-          for pkg in zkm-sdk zkm-verifier; do
-            RUSTFLAGS="-C target-cpu=native" cargo test -r -p $pkg
+          # core-machine at 3 test threads, not the job's 2. Its cases prove at a
+          # quarter of the area fence (~26 GB each), so three fit in ~78 GB of the
+          # runner's 123 GB, while the sdk and e2e cases below peak near 77-102 GB
+          # alone and stay at 2. Worth ~12 min of a 38 min segment.
+          #
+          # Self-checking: a sampler records the lowest MemAvailable seen, so the
+          # run says whether 3 was actually safe instead of leaving it to be
+          # discovered by an earlyoom kill.
+          ( while :; do awk '/MemAvailable/ {print $2}' /proc/meminfo; sleep 5; done > /tmp/memavail.txt ) &
+          SAMPLER=$!
+          RUST_TEST_THREADS=3 cargo test -r -p zkm-core-machine
+          kill $SAMPLER 2>/dev/null || true
+          echo "::notice title=core-machine memory::lowest MemAvailable $(sort -n /tmp/memavail.txt | head -1 | awk '{printf "%.1f", $1/1048576}') GB at 3 test threads"
+          # The gnark cases never return their R1CS and proving key, so the
+          # growth is cumulative and no thread count bounds it; GOMEMLIMIT cannot
+          # either, because the solver's witness is live. They run in the `snark`
+          # job, one process each, and the swapfile is what keeps this box alive.
+          cargo test -r -p zkm-sdk -- \
+            --skip tests::test_compress_to_groth16 \
+            --skip tests::test_e2e_prove_groth16 \
+            --skip tests::test_e2e_prove_plonk \
+            --skip tests::test_generate_dvsnark_r1cs_witness \
+            --skip tests::test_groth16_public_values
+          cargo test -r -p zkm-verifier
+          # The recursion gates, all `#[ignore]`d for slowness and all
+          # load-bearing: compress and wrap cover core->compress->shrink->wrap,
+          # and the circuit gate is the only thing driving the gnark outer circuit
+          # and its jagged-eval closing identity. It needs Go on the runner.
+          VERIFY_VK=false cargo test -r -p zkm-prover -- --ignored --test-threads=1 \
+            tests::test_e2e_compress_fibonacci \
+            tests::test_e2e_wrap_fibonacci \
+            tests::test_e2e_circuit_fibonacci
+
+  snark:
+    name: SNARK proofs
+    # Nightly, on main, on request, or on a push that can move the wrap vk --
+    # a schedule runs on the default branch only, so without that last clause a
+    # feature branch gets these proofs by manual dispatch alone, which is what let
+    # a moved wrap vk reach the published artifacts unnoticed.
+    # One process per case, which caps the peak at a single case's footprint.
+    needs: changes
+    if: >-
+      !cancelled() && (
+        github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        || github.ref == 'refs/heads/main'
+        || needs.changes.outputs.vk_affecting == 'true'
+      )
+    runs-on: self-hosted-cpu
+    env:
+      RUST_TEST_THREADS: "2"
+      ELEMENT_THRESHOLD: "115000000"
+      CARGO_TARGET_DIR: /data/actions-runner/cache/ziren-target
+      RUSTFLAGS: "-C target-cpu=native"
+    steps:
+      - uses: actions/checkout@v5
+      - run: export PATH=~/.cargo/bin:$PATH
+      - run: |
+          source ~/.zkm-toolchain/env
+          for t in test_compress_to_groth16 test_e2e_prove_groth16 \
+                   test_e2e_prove_plonk test_generate_dvsnark_r1cs_witness \
+                   test_groth16_public_values; do
+            s=$(date +%s)
+            cargo test -r -p zkm-sdk -- --exact "tests::$t"
+            echo "::notice title=$t::$(( $(date +%s)-s ))s mem_avail=$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo)GB"
           done
-          RUSTFLAGS="-C target-cpu=native" cargo test -r --features ark -- --ignored test_verify_groth16_imm_wrap_vk
+          # The imm-wrap-vk path, in both verifier implementations: the only
+          # check that the committed IMM_GROTH16_VK_BYTES and PART_STARK_VK_BYTES
+          # match the published imm archive, since this mode hashes the vk with
+          # part_stark_vk and the standard suite stays green when they drift.
+          # ZKM_IMM_WRAP_VK is set by the test, never exported: exporting it makes
+          # zkm-build pass --features imm-wrap-vk to the plain `guests`
+          # workspace, which has no such feature, and the guest build fails.
+          for f in "" "--features ark"; do
+            s=$(date +%s)
+            cargo test -r -p zkm-verifier $f -- --ignored --exact \
+              tests::test_verify_groth16_imm_wrap_vk
+            echo "::notice title=imm_wrap_vk ${f:-default}::$(( $(date +%s)-s ))s mem_avail=$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo)GB"
+          done

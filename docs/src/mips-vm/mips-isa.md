@@ -170,7 +170,9 @@ The support instructions are as follows:
 | SEB		  | 011111     | 00000       | rt          | rd	         | 10000        | 100000	  | rd = signExtend(rt[7..0])                                  |
 | INS         |	011111     | rs          | rt	       | msb	     | lsb	        | 000100	  | rt = rt[32:msb+1] \|\| rs[msb+1-lsb : 0] \|\| rt[lsb-1:0]         |
 | MADDU		  | 011100	   | rs	         | rt          | 00000	     | 00000	    | 000001      | (hi, lo) = rs * rt + (hi,lo)                                |
+| MADD		  | 011100	   | rs	         | rt          | 00000	     | 00000	    | 000000      | (hi, lo) = (hi,lo) + rs * rt (signed)
 | MSUBU		  | 011100	   | rs	         | rt	       | 00000	     | 00000	    | 000101	  | (hi, lo) = (hi,lo) - rs * rt                                | 
+| MSUB		  | 011100	   | rs	         | rt          | 00000	     | 00000	    | 000100      | (hi, lo) = (hi,lo) - rs * rt (signed)
 
 
 ## Supported syscalls

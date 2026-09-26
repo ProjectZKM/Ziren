@@ -1,9 +1,9 @@
 use std::mem::size_of;
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-use zkm_stark::Word;
+use zkm_pcs::Word;
 
 use crate::{
     memory::MemoryReadWriteCols,
@@ -12,8 +12,6 @@ use crate::{
         XorOperation,
     },
 };
-#[cfg(feature = "picus")]
-use zkm_stark::PicusInfo;
 
 pub const NUM_SHA_COMPRESS_COLS: usize = size_of::<ShaCompressCols<u8>>();
 
@@ -24,21 +22,19 @@ pub const NUM_SHA_COMPRESS_COLS: usize = size_of::<ShaCompressCols<u8>>();
 /// During init, the columns are initialized with the input values, one word at a time. During each
 /// compression cycle, one iteration of sha compress is computed. During finalize, the columns are
 /// combined and written back to memory.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShaCompressCols<T> {
     /// Inputs.
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub shard: T,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub clk: T,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub w_ptr: T,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub h_ptr: T,
 
-    pub start: T,
+    /// Per-row position in `0..80` (`index = 8*octet_num + octet`), carried on the
+    /// `PrecompileChain` bus; the syscall itself is received by
+    /// `ShaCompressControlChip`.
+    pub index: T,
 
     /// Which cycle within the octet we are currently processing.
     pub octet: [T; 8],
@@ -49,28 +45,20 @@ pub struct ShaCompressCols<T> {
     ///  - The last octet is for finalize.
     pub octet_num: [T; 10],
 
-    /// Memory access. During init and compression, this is read only. During finalize, this is
-    /// used to write the result into memory.
+    /// Memory access: read-only during init and compression; during finalize it
+    /// writes the result into memory.
     pub mem: MemoryReadWriteCols<T>,
     /// Current memory address being written/read. During init and finalize, this is A-H. During
     /// compression, this is w[i] being read only.
     pub mem_addr: T,
 
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub a: Word<T>,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub b: Word<T>,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub c: Word<T>,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub d: Word<T>,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub e: Word<T>,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub f: Word<T>,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub g: Word<T>,
-    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub h: Word<T>,
 
     /// Current value of K[i]. This is a constant array that loops around every 64 iterations.
@@ -118,13 +106,11 @@ pub struct ShaCompressCols<T> {
     pub finalized_operand: Word<T>,
     pub finalize_add: AddOperation<T>,
 
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_initialize: T,
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_compression: T,
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_finalize: T,
-    pub is_last_row: T,
-
     pub is_real: T,
 }

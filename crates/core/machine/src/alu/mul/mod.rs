@@ -30,33 +30,31 @@
 
 mod utils;
 
+use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
+use zkm_pcs::air::BaseAirBuilder;
 
-use hashbrown::HashMap;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition, MemoryRecordEnum},
-    ByteOpcode, ExecutionRecord, Opcode, Program, UNUSED_PC,
+    ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 use zkm_primitives::consts::WORD_SIZE;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::{air::MachineAir, Word};
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     alu::mul::utils::get_msb,
+    frame::{eval_r_type_frame, RTypeFrameCols},
     memory::{MemoryCols, MemoryReadWriteCols},
-    utils::{next_power_of_two, zeroed_f_vec},
+    utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
@@ -78,12 +76,11 @@ pub const BYTE_MASK: u8 = 0xff;
 pub struct MulChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MulCols<T> {
     /// The current/next pc, used for instruction lookup table.
-    #[cfg_attr(feature = "picus", picus(input))]
+    #[picus(input)]
     pub pc: T,
     pub next_pc: T,
 
@@ -91,14 +88,6 @@ pub struct MulCols<T> {
     pub hi: Word<T>,
 
     /// The output operand.
-    pub a: Word<T>,
-
-    /// The first input operand.
-    pub b: Word<T>,
-
-    /// The second input operand.
-    pub c: Word<T>,
-
     /// Trace.
     pub carry: [T; PRODUCT_SIZE],
 
@@ -118,15 +107,15 @@ pub struct MulCols<T> {
     pub c_sign_extend: T,
 
     /// Flag indicating whether the opcode is `MUL`.
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_mul: T,
 
     /// Flag indicating whether the opcode is `MULT`.
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_mult: T,
 
     /// Flag indicating whether the opcode is `MULTU`.
-    #[cfg_attr(feature = "picus", picus(selector))]
+    #[picus(selector)]
     pub is_multu: T,
 
     pub is_real: T,
@@ -137,10 +126,10 @@ pub struct MulCols<T> {
     /// Flag indicating whether the hi_access record is real.
     pub hi_record_is_real: T,
 
-    /// The shard number.
-    pub shard: T,
-    /// The clock cycle number.
-    pub clk: T,
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every Mul row is an instruction — the Instruction bus and
+    /// its dependency rows are gone).
+    pub frame: RTypeFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for MulChip {
@@ -154,13 +143,12 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
         "Mul".to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         MulCols::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.mul_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <MulChip as MachineAir<F>>::name(self).as_str(),
@@ -173,7 +161,6 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // Generate the trace rows for each event.
         let padded_nb_rows = <MulChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MUL_COLS);
         let nb_rows = input.mul_events.len();
@@ -188,13 +175,18 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
                     if idx < nb_rows {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.mul_events[idx];
-                        self.event_to_row(event, cols, &mut byte_lookup_events);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut byte_lookup_events,
+                            &input.program,
+                            input.public_values.execution_shard,
+                        );
                     }
                 });
             },
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_MUL_COLS))
     }
 
@@ -209,11 +201,17 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
             .mul_events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_MUL_COLS];
                     let cols: &mut MulCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    self.event_to_row(
+                        event,
+                        cols,
+                        &mut blu,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
                 });
                 blu
             })
@@ -230,10 +228,6 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
             !shard.mul_events.is_empty()
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl MulChip {
@@ -243,48 +237,42 @@ impl MulChip {
         event: &CompAluEvent,
         cols: &mut MulCols<F>,
         blu: &mut impl ByteRecord,
+        program: &Program,
+        shard: u32,
     ) {
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
+        cols.frame.populate_from_comp_alu(event, program, shard, blu);
+
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
 
         cols.hi_record_is_real = F::from_bool(event.hi_record_is_real);
         if event.hi_record_is_real {
-            // For madd[u]/msub[u] instructions, pass in a dummy byte lookup vector.  This madd[u]/msub[u]
-            // instruction chip also has a op_hi_access field that will be populated and that will contribute
-            // to the byte lookup dependencies.
             cols.op_hi_access.populate(MemoryRecordEnum::Write(event.hi_record), blu);
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
         }
 
         let hi_word = event.hi.to_le_bytes();
-        let a_word = event.a.to_le_bytes();
         let b_word = event.b.to_le_bytes();
         let c_word = event.c.to_le_bytes();
 
         let mut b = b_word.to_vec();
         let mut c = c_word.to_vec();
 
-        // Handle b and c's signs.
         {
             let b_msb = get_msb(b_word);
-            cols.b_msb = F::from_canonical_u8(b_msb);
+            cols.b_msb = F::from_u8(b_msb);
             let c_msb = get_msb(c_word);
-            cols.c_msb = F::from_canonical_u8(c_msb);
+            cols.c_msb = F::from_u8(c_msb);
 
-            // If b is signed and it is negative, sign extend b.
             if event.opcode == Opcode::MULT && b_msb == 1 {
                 cols.b_sign_extend = F::ONE;
                 b.resize(PRODUCT_SIZE, BYTE_MASK);
             }
 
-            // If c is signed and it is negative, sign extend c.
             if event.opcode == Opcode::MULT && c_msb == 1 {
                 cols.c_sign_extend = F::ONE;
                 c.resize(PRODUCT_SIZE, BYTE_MASK);
             }
 
-            // Insert the MSB lookup events.
             {
                 let words = [b_word, c_word];
                 let mut blu_events: Vec<ByteLookupEvent> = vec![];
@@ -311,8 +299,6 @@ impl MulChip {
             }
         }
 
-        // Calculate the correct product using the `product` array. We store the
-        // correct carry value for verification.
         let base = (1 << BYTE_SIZE) as u32;
         let mut carry = [0u32; PRODUCT_SIZE];
         for i in 0..PRODUCT_SIZE {
@@ -321,20 +307,16 @@ impl MulChip {
             if i + 1 < PRODUCT_SIZE {
                 product[i + 1] += carry[i];
             }
-            cols.carry[i] = F::from_canonical_u32(carry[i]);
+            cols.carry[i] = F::from_u32(carry[i]);
         }
 
-        cols.product = product.map(F::from_canonical_u32);
-        cols.hi = Word(hi_word.map(F::from_canonical_u8));
-        cols.a = Word(a_word.map(F::from_canonical_u8));
-        cols.b = Word(b_word.map(F::from_canonical_u8));
-        cols.c = Word(c_word.map(F::from_canonical_u8));
+        cols.product = product.map(F::from_u32);
+        cols.hi = Word(hi_word.map(F::from_u8));
         cols.is_real = F::ONE;
         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
         cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);
         cols.is_multu = F::from_bool(event.opcode == Opcode::MULTU);
 
-        // Range check.
         {
             blu.add_u16_range_checks(&carry.map(|x| x as u16));
             blu.add_u8_range_checks(&product.map(|x| x as u8));
@@ -354,19 +336,20 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MulCols<AB::Var> = (*local).borrow();
-        let base = AB::F::from_canonical_u32(1 << 8);
+        let op_b = local.frame.op_b_val();
+        let op_c = local.frame.op_c_val();
+        let base = AB::F::from_u32(1 << 8);
 
         let zero: AB::Expr = AB::F::ZERO.into();
         let one: AB::Expr = AB::F::ONE.into();
-        let byte_mask = AB::F::from_canonical_u8(BYTE_MASK);
+        let byte_mask = AB::F::from_u8(BYTE_MASK);
 
-        // Calculate the MSBs.
         let (b_msb, c_msb) = {
             let msb_pairs =
-                [(local.b_msb, local.b[WORD_SIZE - 1]), (local.c_msb, local.c[WORD_SIZE - 1])];
-            let opcode = AB::F::from_canonical_u32(ByteOpcode::MSB as u32);
+                [(local.b_msb, op_b[WORD_SIZE - 1]), (local.c_msb, op_c[WORD_SIZE - 1])];
+            let opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
             for msb_pair in msb_pairs.iter() {
                 let msb = msb_pair.0;
                 let byte = msb_pair.1;
@@ -375,7 +358,6 @@ where
             (local.b_msb, local.c_msb)
         };
 
-        // Calculate whether to extend b and c's sign.
         let (b_sign_extend, c_sign_extend) = {
             let is_b_i32 = local.is_mult;
             let is_c_i32 = local.is_mult;
@@ -385,14 +367,13 @@ where
             (local.b_sign_extend, local.c_sign_extend)
         };
 
-        // Sign extend local.b and local.c whenever appropriate.
         let (b, c) = {
             let mut b: Vec<AB::Expr> = vec![AB::F::ZERO.into(); PRODUCT_SIZE];
             let mut c: Vec<AB::Expr> = vec![AB::F::ZERO.into(); PRODUCT_SIZE];
             for i in 0..PRODUCT_SIZE {
                 if i < WORD_SIZE {
-                    b[i] = local.b[i].into();
-                    c[i] = local.c[i].into();
+                    b[i] = op_b[i].into();
+                    c[i] = op_c[i].into();
                 } else {
                     b[i] = b_sign_extend * byte_mask;
                     c[i] = c_sign_extend * byte_mask;
@@ -401,7 +382,6 @@ where
             (b, c)
         };
 
-        // Compute the uncarried product b(x) * c(x) = m(x).
         let mut m: Vec<AB::Expr> = vec![AB::F::ZERO.into(); PRODUCT_SIZE];
         for i in 0..PRODUCT_SIZE {
             for j in 0..PRODUCT_SIZE {
@@ -411,7 +391,6 @@ where
             }
         }
 
-        // Propagate carry.
         let product = {
             for i in 0..PRODUCT_SIZE {
                 if i == 0 {
@@ -426,16 +405,13 @@ where
             local.product
         };
 
-        // Compare the product's appropriate bytes with that of the result.
         {
             let has_hi = local.is_mult + local.is_multu;
             for i in 0..WORD_SIZE {
-                builder.assert_eq(product[i], local.a[i]);
                 builder.when(has_hi.clone()).assert_eq(product[i + WORD_SIZE], local.hi[i]);
             }
         }
 
-        // Check that the boolean values are indeed boolean values.
         {
             let booleans = [
                 local.b_msb,
@@ -453,75 +429,57 @@ where
             }
         }
 
-        // If signed extended, the MSB better be 1.
         builder.when(local.b_sign_extend).assert_eq(local.b_msb, one.clone());
         builder.when(local.c_sign_extend).assert_eq(local.c_msb, one.clone());
 
-        // Calculate the opcode.
         let opcode = {
-            // Exactly one of the op codes must be on.
             builder.when(local.is_real).assert_one(local.is_mul + local.is_mult + local.is_multu);
 
-            let mul: AB::Expr = AB::F::from_canonical_u32(Opcode::MUL as u32).into();
-            let mult: AB::Expr = AB::F::from_canonical_u32(Opcode::MULT as u32).into();
-            let multu: AB::Expr = AB::F::from_canonical_u32(Opcode::MULTU as u32).into();
+            let mul: AB::Expr = AB::F::from_u32(Opcode::MUL as u32).into();
+            let mult: AB::Expr = AB::F::from_u32(Opcode::MULT as u32).into();
+            let multu: AB::Expr = AB::F::from_u32(Opcode::MULTU as u32).into();
             local.is_mul * mul + local.is_mult * mult + local.is_multu * multu
         };
 
-        // Range check.
         {
-            // Ensure that the carry is at most 2^16. This ensures that
-            // product_before_carry_propagation - carry * base + last_carry never overflows or
-            // underflows enough to "wrap" around to create a second solution.
             builder.slice_range_check_u16(&local.carry, local.is_real);
 
             builder.slice_range_check_u8(&local.product, local.is_real);
         }
 
-        // Receive the arguments.
-        builder.receive_instruction(
-            local.shard,
-            local.clk,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
-            opcode,
-            local.a,
-            local.b,
-            local.c,
-            local.hi,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.hi_record_is_real,
-            AB::Expr::zero(),
-            AB::Expr::one(),
-            local.is_real,
+        let _ = opcode;
+
+        builder.when(local.is_real).when_not(local.frame.op_a_0).assert_word_eq(
+            Word([local.product[0], local.product[1], local.product[2], local.product[3]]),
+            *local.frame.op_a_access.value(),
         );
 
-        // Write the HI register, the register can only be Register::HI（33）.
+        eval_r_type_frame(
+            builder,
+            &local.frame,
+            local.is_mul * Opcode::MUL.as_field::<AB::F>()
+                + local.is_mult * Opcode::MULT.as_field::<AB::F>()
+                + local.is_multu * Opcode::MULTU.as_field::<AB::F>(),
+            local.pc.into(),
+            local.next_pc.into(),
+            local.next_pc + AB::Expr::from_u32(4),
+            local.next_pc.into(),
+            AB::Expr::ZERO,
+            local.is_real.into(),
+        );
         builder.eval_memory_access(
-            local.shard,
-            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
-            AB::F::from_canonical_u32(33),
+            local.frame.shard,
+            crate::frame::clk_from_r_type_frame::<AB>(&local.frame)
+                + AB::Expr::from_u32(MemoryAccessPosition::HI as u32),
+            AB::F::from_u32(33),
             &local.op_hi_access,
             local.hi_record_is_real,
         );
 
-        // Check hi_record_is_real.
-        // hi_record_is_real can only be set for MULT and MULTU instruction when is_real = 1.
-        // if hi_record_is_real = 0, both clk and shard should be zero.
         builder.when_not(local.is_real).assert_zero(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
-        // Hardware MULT/MULTU rows must write HI. Dependency-only multiply
-        // rows use UNUSED_PC and keep hi_record_is_real = 0.
-        builder.when(local.is_mult + local.is_multu).assert_zero(
-            (local.pc - AB::Expr::from_canonical_u32(UNUSED_PC))
-                * (AB::Expr::one() - local.hi_record_is_real),
-        );
+        builder.when(local.is_mult + local.is_multu).assert_one(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
-        builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
-        builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
         builder.when(local.is_mul).assert_word_zero(local.hi);
     }
 }
@@ -531,23 +489,20 @@ mod tests {
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::CompAluEvent, ExecutionRecord, Opcode};
-    use zkm_stark::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
+    use zkm_core_executor::{ExecutionRecord, Opcode};
+    use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::MulChip;
+    use crate::programs::tests::{alu_op, run_instructions};
 
     #[test]
     fn generate_trace_mul() {
-        let mut shard = ExecutionRecord::default();
-
-        // Fill mul_events with 10 MUL events.
-        let mut mul_events: Vec<CompAluEvent> = Vec::new();
+        let mut instructions = Vec::new();
         for _ in 0..10 {
-            mul_events.push(CompAluEvent::new(0, Opcode::MUL, 0x80004000, 0x80000000, 0xffff8000));
+            instructions.extend(alu_op(Opcode::MUL, 0x80000000, 0xffff8000));
         }
-        shard.mul_events = mul_events;
+        let shard = run_instructions(instructions);
+        assert!(!shard.mul_events.is_empty());
         let chip = MulChip::default();
         let _trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
@@ -556,29 +511,8 @@ mod tests {
     #[cfg(feature = "sys")]
     #[test]
     fn test_mul_generate_trace_ffi_eq_rust() {
-        use zkm_core_executor::events::MemoryWriteRecord;
-
-        let mut shard = ExecutionRecord::default();
-        shard.mul_events = vec![CompAluEvent {
-            shard: 5,
-            clk: 790405,
-            pc: 1017624,
-            next_pc: 1017628,
-            opcode: Opcode::MULT,
-            hi: 241306,
-            a: 1298966409,
-            b: 274417,
-            c: 3776743705,
-            hi_record: MemoryWriteRecord {
-                value: 241306,
-                shard: 5,
-                timestamp: 790409,
-                prev_value: 3431,
-                prev_shard: 5,
-                prev_timestamp: 790387,
-            },
-            hi_record_is_real: true,
-        }];
+        let shard = run_instructions(alu_op(Opcode::MULT, 274417, 3776743705));
+        assert!(!shard.mul_events.is_empty());
 
         let chip = MulChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
@@ -591,7 +525,7 @@ mod tests {
     #[cfg(feature = "sys")]
     fn generate_trace_ffi(input: &ExecutionRecord) -> RowMajorMatrix<KoalaBear> {
         use super::{MulCols, NUM_MUL_COLS};
-        use crate::utils::next_power_of_two;
+        use crate::utils::next_multiple_of_32;
         use crate::utils::zeroed_f_vec;
         use p3_koala_bear::KoalaBear;
         use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -599,7 +533,7 @@ mod tests {
 
         type F = KoalaBear;
 
-        let padded_nb_rows = next_power_of_two(input.mul_events.len(), None, "Mul");
+        let padded_nb_rows = next_multiple_of_32(input.mul_events.len(), None, "Mul");
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MUL_COLS);
         let nb_rows = input.mul_events.len();
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
@@ -612,15 +546,21 @@ mod tests {
 
                     if idx < nb_rows {
                         let event = &input.mul_events[idx];
+                        let instruction: zkm_core_executor::InstructionFfi =
+                            input.program.fetch(event.pc).into();
                         unsafe {
-                            crate::sys::mul_event_to_row_koalabear(event, cols);
+                            crate::sys::mul_event_to_row_koalabear(
+                                event,
+                                cols,
+                                instruction,
+                                input.public_values.execution_shard,
+                            );
                         }
                     }
                 });
             },
         );
 
-        // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, NUM_MUL_COLS)
     }
 
@@ -629,35 +569,34 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let mut shard = ExecutionRecord::default();
-        let mut mul_events: Vec<CompAluEvent> = Vec::new();
-
-        let mul_instructions: Vec<(Opcode, u32, u32, u32)> = vec![
-            (Opcode::MUL, 0x00001200, 0x00007e00, 0xb6db6db7),
-            (Opcode::MUL, 0x00001240, 0x00007fc0, 0xb6db6db7),
-            (Opcode::MUL, 0x00000000, 0x00000000, 0x00000000),
-            (Opcode::MUL, 0x00000001, 0x00000001, 0x00000001),
-            (Opcode::MUL, 0x00000015, 0x00000003, 0x00000007),
-            (Opcode::MUL, 0x00000000, 0x00000000, 0xffff8000),
-            (Opcode::MUL, 0x00000000, 0x80000000, 0x00000000),
-            (Opcode::MUL, 0x00000000, 0x80000000, 0xffff8000),
-            (Opcode::MUL, 0x0000ff7f, 0xaaaaaaab, 0x0002fe7d),
-            (Opcode::MUL, 0x0000ff7f, 0x0002fe7d, 0xaaaaaaab),
-            (Opcode::MUL, 0x00000000, 0xff000000, 0xff000000),
-            (Opcode::MUL, 0x00000001, 0xffffffff, 0xffffffff),
-            (Opcode::MUL, 0xffffffff, 0xffffffff, 0x00000001),
-            (Opcode::MUL, 0xffffffff, 0x00000001, 0xffffffff),
+        let mul_instructions: Vec<(Opcode, u32, u32)> = vec![
+            (Opcode::MUL, 0x00007e00, 0xb6db6db7),
+            (Opcode::MUL, 0x00007fc0, 0xb6db6db7),
+            (Opcode::MUL, 0x00000000, 0x00000000),
+            (Opcode::MUL, 0x00000001, 0x00000001),
+            (Opcode::MUL, 0x00000003, 0x00000007),
+            (Opcode::MUL, 0x00000000, 0xffff8000),
+            (Opcode::MUL, 0x80000000, 0x00000000),
+            (Opcode::MUL, 0x80000000, 0xffff8000),
+            (Opcode::MUL, 0xaaaaaaab, 0x0002fe7d),
+            (Opcode::MUL, 0x0002fe7d, 0xaaaaaaab),
+            (Opcode::MUL, 0xff000000, 0xff000000),
+            (Opcode::MUL, 0xffffffff, 0xffffffff),
+            (Opcode::MUL, 0xffffffff, 0x00000001),
+            (Opcode::MUL, 0x00000001, 0xffffffff),
+            (Opcode::MULT, 0x00000001, 0xffffffff),
+            (Opcode::MULTU, 0xffffffff, 0xffffffff),
         ];
-        for t in mul_instructions.iter() {
-            mul_events.push(CompAluEvent::new(0, t.0, t.1, t.2, t.3));
+        let mut instructions = Vec::new();
+        for &(opcode, b, c) in mul_instructions.iter() {
+            instructions.extend(alu_op(opcode, b, c));
         }
 
-        // Append more events until we have 1000 tests.
         for _ in 0..(1000 - mul_instructions.len()) {
-            mul_events.push(CompAluEvent::new(0, Opcode::MUL, 1, 1, 1));
+            instructions.extend(alu_op(Opcode::MUL, 1, 1));
         }
 
-        shard.mul_events = mul_events;
+        let shard = run_instructions(instructions);
         let chip = MulChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();

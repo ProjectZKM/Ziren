@@ -9,9 +9,7 @@ pub fn f(x: usize) -> usize {
 }
 
 pub fn g(x: usize) -> usize {
-    // println!("cycle-tracker-start: g");
     let y = x + 1;
-    // println!("cycle-tracker-end: g");
     y
 }
 

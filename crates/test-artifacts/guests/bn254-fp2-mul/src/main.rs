@@ -11,7 +11,6 @@ const MODULUS: &str =
     "21888242871839275222246405745257275088696311157297823662689037894645226208583";
 
 fn random_u64_4(modulus: &BigUint) -> [u64; 4] {
-    //let mut rng = rand::thread_rng();
     let mut arr = [0u64; 4];
     let modulus_bytes = modulus.to_bytes_le();
     let modulus_u64: [u64; 4] = [
@@ -94,5 +93,4 @@ pub fn main() {
         assert_eq!(c1, u64_4_to_biguint(&res_c1) % &modulus);
     }
 
-    // println!("All tests passed!");
 }

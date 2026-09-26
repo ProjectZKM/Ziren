@@ -15,7 +15,12 @@ pub const RATE: usize = WIDTH / 2;
 pub const NUM_EXTERNAL_ROUNDS: usize = 8;
 
 /// The number of internal rounds.
-pub const NUM_INTERNAL_ROUNDS: usize = 13;
+///
+/// See `zkm_primitives::poseidon2_init`: 20 is the KoalaBear width-16
+/// partial-round count at S-box degree 3; 13 was the BabyBear parameter and is
+/// the wrong margin for this field.  Must stay equal to the host permutation's
+/// `ROUNDS_P` and to the GPU kernel's, or the AIR proves a different hash.
+pub const NUM_INTERNAL_ROUNDS: usize = 20;
 
 /// The total number of rounds.
 pub const NUM_ROUNDS: usize = NUM_EXTERNAL_ROUNDS + NUM_INTERNAL_ROUNDS;

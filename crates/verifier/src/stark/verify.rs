@@ -7,7 +7,7 @@ use core::iter::repeat;
 use itertools::Itertools;
 
 use once_cell::sync::Lazy;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::{CryptographicHasher, Permutation};
 use p3_util::reverse_slice_index_bits;
@@ -17,18 +17,22 @@ use rayon::slice::ParallelSlice;
 use serde::{Deserialize, Serialize};
 use zkm_core_executor::ZKMReduceProof;
 use zkm_core_machine::utils::log2_strict_usize;
+use zkm_pcs::{
+    inner_perm, koala_bear_poseidon2::MyHash as InnerHash, MachineProof, MachineVerificationError,
+    StarkGenericConfig, DIGEST_SIZE,
+};
 use zkm_recursion_core::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH};
 use zkm_recursion_core::machine::RecursionAir;
-use zkm_stark::{
-    inner_perm, koala_bear_poseidon2::MyHash as InnerHash, CpuProver, MachineProof, MachineProver,
-    MachineVerificationError, StarkGenericConfig, DIGEST_SIZE,
-};
 
 use super::{HashableKey, InnerSC, ZKMVerifyingKey};
 
 const COMPRESS_DEGREE: usize = 3;
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
-type CompressProver = CpuProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>;
+
+/// The allowlist tree height the recursion programs bake in; one definition,
+/// shared with the prover, so the root recomputed here is the root the proof
+/// carries.
+pub use zkm_recursion_core::VK_MERKLE_TREE_HEIGHT;
 
 pub static VK_MAP: Lazy<&'static [u8]> = Lazy::new(|| {
     #[cfg(feature = "dummy-vk-map")]
@@ -48,11 +52,15 @@ pub(crate) fn verify_stark_compressed_proof(
 ) -> Result<(), MachineVerificationError<InnerSC>> {
     let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
         bincode::deserialize(&VK_MAP).unwrap();
-    let (recursion_vk_root, _merkle_tree) =
-        MerkleTree::<KoalaBear, InnerSC>::commit(allowed_vk_map.keys().copied().collect());
+    let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> = allowed_vk_map.keys().copied().collect();
+    assert!(
+        leaves.len() <= (1 << VK_MERKLE_TREE_HEIGHT),
+        "vk_map exceeds the fixed merkle capacity"
+    );
+    leaves.resize(1 << VK_MERKLE_TREE_HEIGHT, [KoalaBear::ZERO; DIGEST_SIZE]);
+    let (recursion_vk_root, _merkle_tree) = MerkleTree::<KoalaBear, InnerSC>::commit(leaves);
 
     let compress_machine = CompressAir::compress_machine(InnerSC::default());
-    let compress_prover = CompressProver::new(compress_machine);
 
     let ZKMReduceProof { vk: compress_vk, proof } = proof;
 
@@ -61,9 +69,13 @@ pub(crate) fn verify_stark_compressed_proof(
         return Err(MachineVerificationError::InvalidVerificationKey);
     }
 
-    // Validate public values
+    if proof.public_values.len() != zkm_recursion_core::air::RECURSIVE_PROOF_NUM_PV_ELTS {
+        return Err(MachineVerificationError::InvalidPublicValues(
+            "recursion public values have the wrong length",
+        ));
+    }
     let public_values: &RecursionPublicValues<_> = proof.public_values.as_slice().borrow();
-    if !is_recursion_public_values_valid(compress_prover.machine().config(), public_values) {
+    if !is_recursion_public_values_valid(compress_machine.config(), public_values) {
         return Err(MachineVerificationError::InvalidPublicValues(
             "recursion public values are invalid",
         ));
@@ -73,21 +85,18 @@ pub(crate) fn verify_stark_compressed_proof(
         return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
     }
 
-    // `is_complete` should be 1. In the reduce program, this ensures that the proof is fully
-    // reduced.
     if public_values.is_complete != KoalaBear::ONE {
         return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
     }
 
-    // Verify that the proof is for the Ziren vkey we are expecting.
     let vkey_hash = vk.vk.hash_koalabear();
     if public_values.zkm_vk_digest != vkey_hash {
         return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
     }
 
-    let mut challenger = compress_prover.config().challenger();
+    let mut challenger = compress_machine.config().challenger();
     let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
-    compress_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
+    compress_machine.verify(compress_vk, &machine_proof, &mut challenger)?;
 
     Ok(())
 }
@@ -152,22 +161,18 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let new_len = leaves.len().next_power_of_two();
         let height = log2_strict_usize(new_len);
 
-        // Pre-allocate the vector.
         let mut digest_layers = Vec::with_capacity(2 * new_len - 2);
 
-        // If `leaves.len()` is not a power of 2, we pad the leaves with default values.
         let mut last_layer = leaves;
         let old_len = last_layer.len();
         for _ in old_len..new_len {
             last_layer.push(HV::Digest::default());
         }
 
-        // Store the leaves in bit-reversed order.
         reverse_slice_index_bits(&mut last_layer);
 
         digest_layers.extend(last_layer.iter());
 
-        // Compute the rest of the layers.
         for _ in 0..height - 1 {
             let mut next_layer = Vec::with_capacity(last_layer.len() / 2);
             last_layer

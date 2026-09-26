@@ -1,0 +1,27 @@
+[package]
+name = "zkm-picus"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+zkm-core-machine = { workspace = true }
+zkm-core-executor = {workspace = true}
+zkm-pcs = {workspace = true}
+p3-air = { workspace = true  }
+p3-matrix = { workspace = true  }
+p3-field = {workspace = true}
+p3-koala-bear = {workspace = true}
+
+clap = { version = "4.5.7", features = ["derive", "env"] }
+tracing = { workspace = true }
+
+[lints.clippy]
+# The jagged/BaseFold generics (`Challenger` x `Mmcs` x `Dft` over two rings)
+# make the honest signatures wide; factoring them behind aliases hides which
+# ring a function is instantiated for, which is exactly what the soundness
+# review needs to read off the signature.
+type_complexity = "allow"

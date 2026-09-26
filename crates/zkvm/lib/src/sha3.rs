@@ -12,7 +12,6 @@ pub fn sha3_256(data: &[u8]) -> [u8; 32] {
         ];
     }
 
-    // Padding input to reach the required size.
     let final_block_len = len % 136;
     let padded_len = len - final_block_len + 136;
 
@@ -27,7 +26,6 @@ pub fn sha3_256(data: &[u8]) -> [u8; 32] {
         padded_data[padded_len - 1_usize] = 0b10000000;
     }
 
-    // covert to u32 to align the memory
     let mut count = 0;
     u32_array.reserve(padded_len / 4 + (padded_len / 136) * 2);
     for chunk in padded_data.chunks_exact(4) {
@@ -42,9 +40,7 @@ pub fn sha3_256(data: &[u8]) -> [u8; 32] {
 
     let mut general_result = [0u32; 17];
     let mut sha3_256_result = [0u8; 32];
-    // Write the number which indicate the rate length (bytes) in the first cell of result.
     general_result[16] = u32_array.len() as u32;
-    // Call precompile
     unsafe {
         syscall_keccak_sponge(u32_array.as_ptr(), &mut general_result);
     }

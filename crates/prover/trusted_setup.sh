@@ -8,7 +8,11 @@ echo "--------Prerequisites--------"
 make build-circuits
 
 echo "--------Powers of Tau--------"
-export NB_CONSTRAINTS_LOG2=23
+# Bumped 23->25: the post-soundness wrap verifier R1CS is ~21.75M constraints
+# (>2^24=16.78M), so the ceremony needs ptau >= 2^25 (33.5M). The 2^25 ptau
+# (38.7GB) is pre-downloaded at /data/stephen/ptau25/powersOfTau28_hez_final_25.ptau;
+# symlink it to $FILE (see RUNBOOK) so the `[ -s "$FILE" ]` check skips the wget.
+export NB_CONSTRAINTS_LOG2=25
 URL="https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONSTRAINTS_LOG2}.ptau"
 FILE="powersOfTau28_hez_final.ptau"
 if [ -s "$FILE" ]; then
@@ -68,9 +72,8 @@ cp build/groth16/part_stark_vk.bin ../verifier/bn254-vk/
 echo "--------Post Trusted Setup--------"
 cargo run --bin post_trusted_setup --release -- --build-dir build/groth16
 
-echo "--------[TODO] Release--------"
-# make release-circuits
-
-echo "--------[TODO] Clear--------"
-# rm -rf build powersOfTau28_hez_final.ptau semaphore-gnark-11 \
-    # semaphore-mtb-setup trusted-setup pk vk Groth16Verifier.sol
+# Manual steps after this script: the artifacts are released with
+# `make release-circuits`, and the working set (build, the ptau, the
+# semaphore-gnark-11 and semaphore-mtb-setup checkouts, trusted-setup, pk, vk,
+# Groth16Verifier.sol) is removed only once the release is verified, so a
+# failed release can be retried from the generated files.

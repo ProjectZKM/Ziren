@@ -7,9 +7,13 @@ use std::{
 };
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
+use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_circuit::{
     hash::FieldHasherVariable,
-    machine::{ZKMCompressWitnessValues, ZKMWrapVerifier},
+    machine::{
+        wrap_basefold::{verify_wrap_basefold_core, ZKMWrapBasefoldWitnessValues},
+        PublicValuesOutputDigest, ZKMMerkleProofWitnessValues, ZKMWrapBasefoldWitnessVariable,
+    },
 };
 use zkm_recursion_compiler::{
     config::OuterConfig,
@@ -22,8 +26,8 @@ use zkm_recursion_core::{air::RecursionPublicValues, hash_vkey_with_part_vk};
 
 pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
+use zkm_pcs::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
 use zkm_recursion_gnark_ffi::{DvSnarkBn254Prover, Groth16Bn254Prover, PlonkBn254Prover};
-use zkm_stark::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
 
 use crate::{
     utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
@@ -82,7 +86,7 @@ pub fn try_build_dvsnark_bn254_artifacts_dev(
 
     if r1cs_cached_content_exist && r1cs_to_dvsnark_content_exist {
         println!("[zkm] build dir contains cached r1cs");
-        return build_dir; // early return if content already exist
+        return build_dir;
     }
 
     println!("[zkm] building dv-snark bn254 artifacts in development mode");
@@ -130,7 +134,6 @@ pub fn build_groth16_bn254_artifacts(
     let (constraints, witness) = build_constraints_and_witness(template_vk, template_proof);
     Groth16Bn254Prover::build(constraints, witness, build_dir.clone());
 
-    // Serialize the part vk to a file
     let serialized = bincode::serialize(&template_vk.part_vk()).unwrap();
     let path = build_dir.join(PART_STARK_VK_PATH);
     let mut file = File::create(path).unwrap();
@@ -177,9 +180,11 @@ pub fn build_constraints_and_witness(
     template_proof: &ShardProof<OuterSC>,
 ) -> (Vec<Constraint>, OuterWitness<OuterConfig>) {
     tracing::info!("building verifier constraints");
-    let template_input = ZKMCompressWitnessValues {
-        vks_and_proofs: vec![(template_vk.clone(), template_proof.clone())],
-        is_complete: true,
+    let basefold_proof = (*template_proof.jagged_shard_proof).clone();
+    let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
+    let template_input = ZKMWrapBasefoldWitnessValues {
+        vks_and_proofs: vec![(template_vk.clone(), basefold_proof)],
+        vk_merkle_data,
     };
     let constraints =
         tracing::info_span!("wrap circuit").in_scope(|| build_outer_circuit(&template_input));
@@ -200,6 +205,7 @@ pub fn build_constraints_and_witness(
     template_input.write(&mut witness);
     witness.write_committed_values_digest(committed_values_digest);
     witness.write_vkey_hash(vkey_hash);
+    witness.write_vk_root(koalabears_to_bn254(&pv.vk_root));
 
     (constraints, witness)
 }
@@ -234,33 +240,42 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
     (wrapped_proof.vk, wrapped_proof.proof)
 }
 
-fn build_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>) -> Vec<Constraint> {
+fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -> Vec<Constraint> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
+    let max_log_row_count =
+        zkm_pcs::shard_level::verifier::JaggedShardVerifier::production_default().max_log_row_count;
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();
-    let mut builder = Builder::<OuterConfig>::default();
+    let mut builder = Builder::<OuterConfig>::new(RecursionProgramType::Wrap);
 
-    // Get the value of the vk.
     let template_vk = template_input.vks_and_proofs.first().unwrap().0.clone();
-    // Get an input variable.
     let input = template_input.read(&mut builder);
-    // Fix the `wrap_vk` value to be the same as the template `vk`. Since the chip information and
-    // the ordering is already a constant, we just need to constrain the commitment and pc_start.
+    let ZKMWrapBasefoldWitnessVariable {
+        vks_and_proofs,
+        chip_cumulative_sums_per_input,
+        chip_heights_per_input,
+        vk_merkle_data: _,
+    } = input;
 
     if !zkm_imm_wrap_vk_mode() {
-        // Get the vk variable from the input.
-        let vk = input.vks_and_proofs.first().unwrap().0.clone();
-        // Get the expected commitment.
-        let expected_commitment: [_; 1] = template_vk.commit.into();
-        let expected_commitment = expected_commitment.map(|x| builder.eval(x));
-        // Constrain `commit` to be the same as the template `vk`.
+        let vk = &vks_and_proofs.first().unwrap().0;
+        let cap: &[_] = template_vk.commit.as_ref();
+        let expected_commitment = [builder.eval(cap[0][0])];
         OuterSC::assert_digest_eq(&mut builder, expected_commitment, vk.commitment);
-        // Constrain `pc_start` to be the same as the template `vk`.
         builder.assert_felt_eq(vk.pc_start, template_vk.pc_start);
     }
 
-    // Verify the proof.
-    ZKMWrapVerifier::verify(&mut builder, &wrap_machine, input);
+    let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
+    verify_wrap_basefold_core::<OuterConfig, OuterSC, WrapAir<KoalaBear>>(
+        &mut builder,
+        vk_legacy,
+        proof_tuple,
+        chip_cumulative_sums_per_input,
+        chip_heights_per_input,
+        &wrap_machine,
+        max_log_row_count,
+        PublicValuesOutputDigest::Root,
+    );
 
     let mut backend = ConstraintCompiler::<OuterConfig>::default();
     let operations = backend.emit(builder.into_operations());

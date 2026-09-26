@@ -37,7 +37,7 @@ mod test {
         utils::setup_logger();
 
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
         let elf = test_artifacts::FIBONACCI_ELF;
         let client = ProverClient::network();
         let (pk, vk) = client.setup(elf);

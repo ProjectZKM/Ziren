@@ -23,16 +23,15 @@ impl Syscall for SysFcntlSyscall {
         a1: u32,
     ) -> Result<Option<u32>, ExecutionError> {
         let start_clk = rt.clk;
-        let v0: u32; // Default return value for unsupported operations
+        let v0: u32;
         let a3_record = if a1 == 3 {
-            // F_GETFL: get file descriptor flags
             match a0 {
                 FD_STDIN => {
-                    v0 = 0; // O_RDONLY
+                    v0 = 0;
                     rt.rw_traced(Register::A3, 0)
                 }
                 FD_STDOUT | FD_STDERR => {
-                    v0 = 1; // O_WRONLY
+                    v0 = 1;
                     rt.rw_traced(Register::A3, 0)
                 }
                 _ => {
@@ -41,7 +40,6 @@ impl Syscall for SysFcntlSyscall {
                 }
             }
         } else if a1 == 1 {
-            // GET_FD
             match a0 {
                 FD_STDIN | FD_STDOUT | FD_STDERR => {
                     v0 = a0;

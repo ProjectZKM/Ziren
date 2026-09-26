@@ -9,7 +9,7 @@ use zkm_cuda::{ZKMCudaProver, ZKMGpuServer};
 use zkm_prover::ZKM_CIRCUIT_VERSION;
 use zkm_prover::{components::DefaultProverComponents, ZKMProver};
 
-use crate::install::try_install_circuit_artifacts;
+use crate::install::{try_install_circuit_artifacts, CircuitArtifacts};
 use crate::{
     provers::ProofOpts, Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey,
     ZKMVerifyingKey,
@@ -33,9 +33,8 @@ impl CudaProver {
         }
     }
 
-    /// Proves the given program on the given input in the given proof mode.
-    ///
-    /// Returns the cycle count in addition to the proof.
+    /// Proves the given program on the given input in the given proof mode,
+    /// together with its cycle count.
     pub fn prove_with_cycles(
         &self,
         pk: &ZKMProvingKey,
@@ -46,8 +45,11 @@ impl CudaProver {
             return Ok((self.compress_to_groth16(stdin.clone())?, 0));
         }
 
-        // Generate the core proof.
-        let proof = self.cuda_prover.prove_core_stateless(pk, stdin)?;
+        let proof = self.cuda_prover.prove_core_stateless_retaining(
+            pk,
+            stdin,
+            kind != ZKMProofKind::Core,
+        )?;
         let cycles = proof.cycles;
         if kind == ZKMProofKind::Core {
             let proof_with_pv = ZKMProofWithPublicValues {
@@ -58,7 +60,6 @@ impl CudaProver {
             return Ok((proof_with_pv, cycles));
         }
 
-        // Generate the compressed proof.
         let deferred_proofs =
             stdin.proofs.iter().map(|(reduce_proof, _)| reduce_proof.clone()).collect();
         let public_values = proof.public_values.clone();
@@ -72,16 +73,10 @@ impl CudaProver {
             return Ok((proof_with_pv, cycles));
         }
 
-        // Generate the shrink proof.
         let compress_proof = self.cuda_prover.shrink(reduce_proof)?;
 
-        // Generate the wrap proof.
         let outer_proof = self.cuda_prover.wrap_bn254(compress_proof)?;
 
-        // Check that the guest's committed-values digest was hashed with whichever algorithm this
-        // process currently expects (see `zkm_imm_wrap_vk_mode`), before spending time on the
-        // (potentially expensive) Plonk/Groth16/DvSnark proving below. A mismatch here means the
-        // guest ELF was built in a different mode than this prover currently believes.
         let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
             .as_canonical_biguint();
         let expected_digest = public_values.hash_bn254();
@@ -101,7 +96,7 @@ impl CudaProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("plonk", ZKM_CIRCUIT_VERSION)
+                try_install_circuit_artifacts(CircuitArtifacts::Plonk, ZKM_CIRCUIT_VERSION)
             };
             let proof = self.cpu_prover.wrap_plonk_bn254(outer_proof, &plonk_bn254_artifacts);
             let proof_with_pv = ZKMProofWithPublicValues {
@@ -117,7 +112,7 @@ impl CudaProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
+                try_install_circuit_artifacts(CircuitArtifacts::Groth16, ZKM_CIRCUIT_VERSION)
             };
 
             let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
@@ -128,7 +123,6 @@ impl CudaProver {
             };
             return Ok((proof_with_pv, cycles));
         } else if kind == ZKMProofKind::DvSnark {
-            // Get the store dvsnark assets dir via the environment variable.
             let store_dir: PathBuf = std::env::var("DVSNARK_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::new())
@@ -163,13 +157,10 @@ impl CudaProver {
         assert_eq!(stdin.proofs.len(), 1);
         let (proof, _) = stdin.proofs.pop().unwrap();
 
-        // Generate the shrink proof.
         let shrink_proof = self.cuda_prover.shrink(proof)?;
 
-        // Generate the wrap proof.
         let outer_proof = self.cuda_prover.wrap_bn254(shrink_proof)?;
 
-        // See the equivalent check in `prove_with_cycles` for why this is here.
         let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
             .as_canonical_biguint();
         let expected_digest = public_values.hash_bn254();
@@ -188,7 +179,7 @@ impl CudaProver {
                 &outer_proof.proof,
             )
         } else {
-            try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
+            try_install_circuit_artifacts(CircuitArtifacts::Groth16, ZKM_CIRCUIT_VERSION)
         };
 
         let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
@@ -213,6 +204,10 @@ impl Prover<DefaultProverComponents> for CudaProver {
 
     fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {
         &self.cpu_prover
+    }
+
+    fn take_prove_ms(&self) -> Option<u64> {
+        self.cuda_prover.take_server_prove_ms()
     }
 
     fn prove_impl<'a>(
@@ -248,9 +243,56 @@ mod test {
         let client = ProverClient::cuda();
         let (pk, vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
-        stdin.write(&10usize);
+        stdin.write(&10u32);
 
         let proof = client.prove(&pk, stdin).run().unwrap();
         client.verify(&proof, &vk).unwrap();
+    }
+
+    /// Deferred proofs through the GPU server: two compressed keccak proofs
+    /// are absorbed by the verify program, whose reduce tree takes them as
+    /// first-layer inputs after its core leaves.
+    #[ignore]
+    #[test]
+    fn test_deferred_proofs_cuda() {
+        use crate::{ZKMProof, ZKMProofWithPublicValues};
+        use zkm_prover::types::HashableKey;
+        utils::setup_logger();
+
+        let client = ProverClient::cuda();
+        let (keccak_pk, keccak_vk) = client.setup(test_artifacts::KECCAK_SPONGE_ELF);
+        let (verify_pk, verify_vk) = client.setup(test_artifacts::VERIFY_PROOF_ELF);
+
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&1usize);
+        stdin.write(&vec![0u8, 0, 0]);
+        let proof_1 = client.prove(&keccak_pk, stdin).compressed().run().unwrap();
+        client.verify(&proof_1, &keccak_vk).unwrap();
+
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&3usize);
+        stdin.write(&vec![0u8, 1, 2]);
+        stdin.write(&vec![2, 3, 4]);
+        stdin.write(&vec![5, 6, 7]);
+        let proof_2 = client.prove(&keccak_pk, stdin).compressed().run().unwrap();
+        client.verify(&proof_2, &keccak_vk).unwrap();
+
+        let reduced = |p: &ZKMProofWithPublicValues| match &p.proof {
+            ZKMProof::Compressed(r) => (**r).clone(),
+            _ => panic!("a compressed proof"),
+        };
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&keccak_vk.hash_u32());
+        stdin.write(&vec![
+            proof_1.public_values.as_slice().to_vec(),
+            proof_2.public_values.as_slice().to_vec(),
+            proof_2.public_values.as_slice().to_vec(),
+        ]);
+        stdin.write_proof(reduced(&proof_1), keccak_vk.vk.clone());
+        stdin.write_proof(reduced(&proof_2), keccak_vk.vk.clone());
+        stdin.write_proof(reduced(&proof_2), keccak_vk.vk.clone());
+
+        let proof = client.prove(&verify_pk, stdin).compressed().run().unwrap();
+        client.verify(&proof, &verify_vk).unwrap();
     }
 }

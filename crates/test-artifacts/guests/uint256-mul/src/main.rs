@@ -7,7 +7,6 @@ use num::{BigUint, One};
 use zkm_zkvm::syscalls::sys_bigint;
 
 fn uint256_mul(x: &[u8; 32], y: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
-    // println!("cycle-tracker-start: uint256_mul");
     let mut result = [0u32; 8];
     sys_bigint(
         result.as_mut_ptr() as *mut [u32; 8],
@@ -16,7 +15,6 @@ fn uint256_mul(x: &[u8; 32], y: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
         y.as_ptr() as *const [u32; 8],
         modulus.as_ptr() as *const [u32; 8],
     );
-    // println!("cycle-tracker-end: uint256_mul");
     bytemuck::cast::<[u32; 8], [u8; 32]>(result)
 }
 
@@ -29,7 +27,6 @@ fn biguint_to_bytes_le(x: BigUint) -> [u8; 32] {
 pub fn main() {
     for j in 0..50 {
         // Test with random numbers.
-        //let mut rng = rand::thread_rng();
         let mut x: [u8; 32] = [0u8;32];//rng.gen();
         x[j/2] = 1;
         let mut y: [u8; 32] = [0u8;32];//rng.gen();
@@ -58,7 +55,6 @@ pub fn main() {
     let modulus_big: BigUint = BigUint::one() << 256;
     for j in 0..50 {
         // Test with random numbers.
-        //let mut rng = rand::thread_rng();
         let mut x: [u8; 32] = [0u8;32];//rng.gen();
         x[j/2] = 1;
         let mut y: [u8; 32] = [0u8;32];//rng.gen();
@@ -78,7 +74,6 @@ pub fn main() {
     }
 
     // Test with random numbers.
-    //let mut rng = rand::thread_rng();
     let x: [u8; 32] = [0u8; 32]; //rng.gen();
 
     // Hardcoded edge case: Multiplying by 1
@@ -95,5 +90,4 @@ pub fn main() {
     let result_zero = uint256_mul(&x, &zero, &modulus);
     assert_eq!(result_zero, zero, "Multiplying by 0 should yield 0.");
 
-    // println!("All tests passed successfully!");
 }

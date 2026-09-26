@@ -44,11 +44,6 @@ fn main() {
 
     client.verify(&proof, &vk).expect("verification failed");
 
-    // Also pull the committed-values digest out of the Groth16 proof's own public inputs, and
-    // compare it against an independently computed hash of the raw public values, using whichever
-    // algorithm this guest build should have used. This checks the guest hasher itself directly,
-    // in addition to the host-side verification path above (rather than reusing
-    // `ZKMPublicValues::hash_bn254()`, which is the same function under test).
     let ZKMProof::Groth16(groth16_proof) = &proof.proof else {
         panic!("expected a groth16 proof");
     };
@@ -60,8 +55,6 @@ fn main() {
     } else {
         Sha256::digest(raw_public_values).into()
     };
-    // Mask the top 3 bits, matching the BN254 scalar field encoding used for Groth16 public
-    // inputs (same masking `ZKMPublicValues::hash_bn254()` applies internally).
     hash[0] &= 0b00011111;
     let expected_digest = BigUint::from_bytes_be(&hash).to_string();
 
