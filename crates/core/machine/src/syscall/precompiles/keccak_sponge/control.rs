@@ -15,7 +15,17 @@
 //!   * **bus P**: SEND the absorbed state `@ (b, round 0)` (seed) and RECEIVE the
 //!     permuted state `@ (b, round 24)` (drain);
 //!   * **bus B**: RECEIVE `original_state @ b` (= prev block's permuted state;
-//!     forced to 0 on the first block) and SEND the permuted state `@ b+1`;
+//!     forced to 0 on the first block) and SEND the permuted state `@ b+1`; the
+//!     header also carries the call's context `(input_address, output_address,
+//!     input_length)`, the send with `input_address + 4·rate`, so every block
+//!     reads the next `rate` words of the same input and the final block writes
+//!     to the syscall's output address;
+//!   * the first block has `block = 0` and binds `input_length` to the length
+//!     word it reads (top byte `< INPUT_LENGTH_TOP_BOUND`); the final block has
+//!     `(block + 1)·rate = input_length`, so a call absorbs exactly
+//!     `input_length / rate` blocks;
+//!   * the first and final flags imply `is_real`, so the syscall receive and the
+//!     output write only happen on rows whose permutation is checked on bus P;
 //!   * final block: write the first [`KECCAK_GENERAL_OUTPUT_U32S`] permuted words.
 //!
 //! All sponge state is held in byte (`Word`) form for the absorb/memory; the
@@ -34,7 +44,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, PrecompileEvent},
     syscalls::SyscallCode,
-    ExecutionRecord, Program,
+    ByteOpcode, ExecutionRecord, Program,
 };
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{
@@ -53,6 +63,10 @@ use crate::syscall::precompiles::keccak_sponge::{
 use crate::{utils::pad_rows_fixed, CoreChipError};
 
 pub const NUM_KECCAK_SPONGE_CONTROL_COLS: usize = size_of::<KeccakSpongeControlCols<u8>>();
+
+/// Exclusive bound on the top byte of the input length word: the length is below `2^30` words, so
+/// `(block + 1)·rate = length` holds as integers and not only modulo the field.
+pub const INPUT_LENGTH_TOP_BOUND: u8 = 64;
 
 #[derive(PicusAnnotations, AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
@@ -78,6 +92,8 @@ pub struct KeccakSpongeControlCols<T> {
     pub block_mem: [MemoryReadCols<T>; KECCAK_GENERAL_RATE_U32S],
     pub input_length_mem: MemoryReadCols<T>,
     pub output_mem: [MemoryWriteCols<T>; KECCAK_GENERAL_OUTPUT_U32S],
+    /// The input length in `u32` words: the word read on the first block, carried on bus B.
+    pub input_length: T,
 }
 
 /// Keccak-sponge control chip.  One row per sponge block.
@@ -114,6 +130,7 @@ impl KeccakSpongeControlChip {
             cols.input_address = F::from_canonical_u32(
                 event.input_addr + b as u32 * KECCAK_GENERAL_RATE_U32S as u32 * 4,
             );
+            cols.input_length = F::from_canonical_u32(event.input_len_u32s);
 
             for j in 0..KECCAK_STATE_U32S {
                 cols.original_state[j] = Word::from(state_u32s[j]);
@@ -132,6 +149,13 @@ impl KeccakSpongeControlChip {
 
             if b == 0 {
                 cols.input_length_mem.populate(event.input_length_record, blu);
+                blu.add_byte_lookup_event(ByteLookupEvent {
+                    opcode: ByteOpcode::LTU,
+                    a1: 1,
+                    a2: 0,
+                    b: (event.input_len_u32s >> 24) as u8,
+                    c: INPUT_LENGTH_TOP_BOUND,
+                });
             }
 
             keccakf_u32s(&mut state_u32s);
@@ -245,6 +269,29 @@ where
             .assert_eq(local.do_block_recv, local.is_real * (AB::Expr::ONE - local.is_first_block));
         builder
             .assert_eq(local.do_block_send, local.is_real * (AB::Expr::ONE - local.is_final_block));
+        builder.when(local.is_first_block).assert_one(local.is_real);
+        builder.when(local.is_final_block).assert_one(local.is_real);
+
+        builder.when(local.is_first_block).assert_zero(local.block);
+        let length = local.input_length_mem.value().0;
+        builder.when(local.is_first_block).assert_eq(
+            local.input_length,
+            length[0]
+                + length[1] * AB::Expr::from_u32(1 << 8)
+                + length[2] * AB::Expr::from_u32(1 << 16)
+                + length[3] * AB::Expr::from_u32(1 << 24),
+        );
+        builder.send_byte(
+            AB::Expr::from_u8(ByteOpcode::LTU as u8),
+            AB::Expr::ONE,
+            length[3],
+            AB::Expr::from_u8(INPUT_LENGTH_TOP_BOUND),
+            local.is_first_block,
+        );
+        builder.when(local.is_final_block).assert_eq(
+            (local.block + AB::Expr::ONE) * AB::Expr::from_u32(KECCAK_GENERAL_RATE_U32S as u32),
+            local.input_length,
+        );
 
         builder.receive_syscall(
             local.shard,
@@ -370,16 +417,27 @@ impl KeccakSpongeControlChip {
             LookupScope::Local,
         );
 
-        let b_header = |block: AB::Expr| -> Vec<AB::Expr> {
-            vec![pid.clone(), AB::Expr::from_u32(KECCAK_BUS_BLOCK), local.clk.into(), block]
+        let b_header = |block: AB::Expr, input_address: AB::Expr| -> Vec<AB::Expr> {
+            vec![
+                pid.clone(),
+                AB::Expr::from_u32(KECCAK_BUS_BLOCK),
+                local.clk.into(),
+                block,
+                input_address,
+                local.output_address.into(),
+                local.input_length.into(),
+            ]
         };
-        let mut b_recv = b_header(local.block.into());
+        let mut b_recv = b_header(local.block.into(), local.input_address.into());
         b_recv.extend(Self::state_limbs::<AB>(orig));
         builder.receive(
             AirLookup::new(b_recv, local.do_block_recv.into(), LookupKind::PrecompileChain),
             LookupScope::Local,
         );
-        let mut b_send = b_header(local.block.into() + AB::Expr::ONE);
+        let mut b_send = b_header(
+            local.block.into() + AB::Expr::ONE,
+            local.input_address.into() + AB::Expr::from_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
+        );
         b_send.extend(Self::state_limbs::<AB>(recv));
         builder.send(
             AirLookup::new(b_send, local.do_block_send.into(), LookupKind::PrecompileChain),
