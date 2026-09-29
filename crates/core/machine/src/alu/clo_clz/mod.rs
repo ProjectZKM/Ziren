@@ -191,6 +191,15 @@ where
         let zero: AB::Expr = AB::F::ZERO.into();
 
         let is_clo: AB::Expr = local.is_real.into() - local.is_clz.into();
+        builder.mark_gadget("leading_one", || {
+            (
+                local.is_real.into(),
+                vec![
+                    vec![local.a[0].into(), local.is_bb_zero.into()],
+                    local.bb.0.iter().map(|&v| v.into()).collect(),
+                ],
+            )
+        });
 
         {
             local.frame.op_b_val().0.iter().zip_eq(local.bb.0.iter()).for_each(|(a, b)| {

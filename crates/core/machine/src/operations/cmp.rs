@@ -94,6 +94,16 @@ impl<F: Field> GtColsBytes<F> {
         is_real: AB::Var,
         cols: GtColsBytes<AB::Var>,
     ) {
+        builder.mark_gadget("gt_bytes", || {
+            (
+                is_real.into(),
+                vec![
+                    vec![cols.result.into()],
+                    a.0.iter().map(|&v| v.into()).collect(),
+                    b.0.iter().map(|&v| v.into()).collect(),
+                ],
+            )
+        });
         builder.slice_range_check_u8(&a.0, is_real);
         builder.slice_range_check_u8(&b.0, is_real);
 

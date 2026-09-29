@@ -415,6 +415,23 @@ where
         let zero: AB::Expr = AB::F::ZERO.into();
 
         let is_real = local.is_div + local.is_divu + local.is_mod + local.is_modu;
+        builder.mark_gadget("divrem", || {
+            (
+                is_real.clone(),
+                vec![
+                    local
+                        .quotient
+                        .0
+                        .iter()
+                        .chain(local.remainder.0.iter())
+                        .map(|&v| v.into())
+                        .collect(),
+                    op_b.0.iter().map(|&v| v.into()).collect(),
+                    op_c.0.iter().map(|&v| v.into()).collect(),
+                    vec![local.is_div + local.is_mod],
+                ],
+            )
+        });
         {
             let msb_sign_pairs = [
                 (local.b_msb, local.b_neg),

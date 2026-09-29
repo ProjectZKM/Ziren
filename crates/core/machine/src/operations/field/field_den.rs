@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use num::BigUint;
 use p3_air::AirBuilder;
-use p3_field::PrimeField32;
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_core_executor::events::ByteRecord;
 use zkm_curves::params::{FieldParameters, Limbs};
 use zkm_derive::AlignedBorrow;
@@ -115,6 +115,19 @@ where
         let p_b: Polynomial<<AB as AirBuilder>::Expr> = (*b).into();
         let p_result: Polynomial<<AB as AirBuilder>::Expr> = self.result.into();
         let p_carry: Polynomial<<AB as AirBuilder>::Expr> = self.carry.into();
+
+        builder.mark_gadget("field_den", || {
+            (
+                is_real.clone().into(),
+                vec![
+                    p_result.coefficients().to_vec(),
+                    P::modulus_field_iter::<AB::F>().map(AB::Expr::from).collect(),
+                    p_a.coefficients().to_vec(),
+                    p_b.coefficients().to_vec(),
+                    vec![if sign { AB::Expr::ONE } else { AB::Expr::ZERO }],
+                ],
+            )
+        });
 
         let p_equation_lhs =
             if sign { &p_b * &p_result + &p_result } else { &p_b * &p_result + &p_a };

@@ -49,6 +49,13 @@ pub trait MessageBuilder<M> {
 
     /// Receives a message.
     fn receive(&mut self, message: M, scope: LookupScope);
+
+    /// Names a gadget and its operands for a static analyser: `operands()[0]` is what the gadget
+    /// determines, the rest are what it reads, in the order the gadget's `mark_gadget` call
+    /// documents.  It adds no constraint and no message, and only an analyser calls `operands`,
+    /// so a builder that proves, verifies or compiles a verifier never evaluates them: the AIR
+    /// and every recursion program are unchanged.
+    fn annotate<O: FnOnce() -> Vec<M>>(&mut self, _gadget: &'static str, _operands: O) {}
 }
 
 /// A message builder for which sending and receiving messages is a no-op.
@@ -62,6 +69,27 @@ impl<AB: EmptyMessageBuilder, M> MessageBuilder<M> for AB {
 
 /// A trait which contains basic methods for building an AIR.
 pub trait BaseAirBuilder: AirBuilder<F: Field> + MessageBuilder<AirLookup<Self::Expr>> {
+    /// Marks a gadget for a static analyser (see [`MessageBuilder::annotate`]): `operands`
+    /// returns the gate the gadget's range checks are enforced under (carried as the first
+    /// operand's multiplicity) and the operands, each a list of limbs.
+    fn mark_gadget<O: FnOnce() -> (Self::Expr, Vec<Vec<Self::Expr>>)>(
+        &mut self,
+        gadget: &'static str,
+        operands: O,
+    ) {
+        self.annotate(gadget, move || {
+            let (gate, operands) = operands();
+            operands
+                .into_iter()
+                .enumerate()
+                .map(|(i, values)| {
+                    let multiplicity = if i == 0 { gate.clone() } else { Self::Expr::ONE };
+                    AirLookup::new(values, multiplicity, LookupKind::Byte)
+                })
+                .collect()
+        });
+    }
+
     /// Returns a sub-builder whose constraints are enforced only when `condition` is not one.
     fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<'_, Self> {
         self.when_ne(condition, Self::F::ONE)
@@ -554,6 +582,10 @@ impl<AB: AirBuilder + MessageBuilder<M>, M> MessageBuilder<M> for FilteredAirBui
 
     fn receive(&mut self, message: M, scope: LookupScope) {
         self.inner.receive(message, scope);
+    }
+
+    fn annotate<O: FnOnce() -> Vec<M>>(&mut self, gadget: &'static str, operands: O) {
+        self.inner.annotate(gadget, operands);
     }
 }
 

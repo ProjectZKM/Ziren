@@ -97,6 +97,18 @@ where
         let p_result: Polynomial<<AB as AirBuilder>::Expr> = self.result.into();
         let p_carry: Polynomial<<AB as AirBuilder>::Expr> = self.carry.into();
 
+        builder.mark_gadget("field_inner_product", || {
+            let mut operands = vec![
+                p_result.coefficients().to_vec(),
+                P::modulus_field_iter::<AB::F>().map(AB::Expr::from).collect(),
+            ];
+            for (p_a, p_b) in p_a_vec.iter().zip(p_b_vec.iter()) {
+                operands.push(p_a.coefficients().to_vec());
+                operands.push(p_b.coefficients().to_vec());
+            }
+            (is_real.clone().into(), operands)
+        });
+
         let p_zero = Polynomial::<AB::Expr>::new(vec![AB::Expr::ZERO]);
 
         let p_inner_product = p_a_vec

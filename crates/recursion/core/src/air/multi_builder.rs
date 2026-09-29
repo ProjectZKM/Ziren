@@ -105,4 +105,8 @@ impl<AB: AirBuilder + MessageBuilder<M>, M> MessageBuilder<M> for MultiBuilder<'
     fn receive(&mut self, message: M, scope: LookupScope) {
         self.inner.receive(message, scope);
     }
+
+    fn annotate<O: FnOnce() -> Vec<M>>(&mut self, gadget: &'static str, operands: O) {
+        self.inner.annotate(gadget, operands);
+    }
 }

@@ -4,7 +4,7 @@ use crate::air::WordAirBuilder;
 use num::BigUint;
 
 use p3_air::AirBuilder;
-use p3_field::PrimeField32;
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 
 use zkm_core_executor::events::{ByteRecord, FieldOperation};
 use zkm_derive::AlignedBorrow;
@@ -210,6 +210,40 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
 }
 
 impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
+    /// Marks the operation for the determinism analyser: `result ≡ a + b`, `a − b`, `a · b` or
+    /// `a / b (mod modulus)` under the four selectors (see
+    /// [`zkm_pcs::air::MessageBuilder::annotate`]).
+    /// `operands` returns `(a, b, modulus, selectors, is_real)`; only an analyser calls it.
+    #[allow(clippy::type_complexity)]
+    fn mark<AB: ZKMAirBuilder<Var = V>>(
+        &self,
+        builder: &mut AB,
+        operands: impl FnOnce() -> (
+            Polynomial<AB::Expr>,
+            Polynomial<AB::Expr>,
+            Polynomial<AB::Expr>,
+            [AB::Expr; 4],
+            AB::Expr,
+        ),
+    ) where
+        V: Into<AB::Expr>,
+        Limbs<V, P::Limbs>: Copy,
+    {
+        let result = self.result;
+        builder.mark_gadget("field_op", move || {
+            let (a, b, modulus, selectors, is_real) = operands();
+            let result: Polynomial<AB::Expr> = result.into();
+            let mut operands = vec![
+                result.as_coefficients(),
+                modulus.as_coefficients(),
+                a.as_coefficients(),
+                b.as_coefficients(),
+            ];
+            operands.extend(selectors.into_iter().map(|s| vec![s]));
+            (is_real, operands)
+        });
+    }
+
     /// Allows an evaluation over operations specified by boolean flags.
     #[allow(clippy::too_many_arguments)]
     pub fn eval_variable<AB: ZKMAirBuilder<Var = V>>(
@@ -238,6 +272,15 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
 
         let p_result = p_res_param.clone() * (is_add.clone() + is_mul.clone())
             + p_a_param.clone() * (is_sub.clone() + is_div.clone());
+        self.mark(builder, || {
+            (
+                p_a_param.clone(),
+                p_b.clone(),
+                modulus.clone().into(),
+                [is_add.clone(), is_sub.clone(), is_mul.clone(), is_div.clone()],
+                is_real.clone().into(),
+            )
+        });
 
         let p_add = p_a_param.clone() + p_b.clone();
         let p_sub = p_res_param.clone() + p_b.clone();
@@ -286,6 +329,15 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
 
         let p_result = p_res_param.clone() * (is_add.clone() + is_mul.clone())
             + p_a_param.clone() * is_sub.clone();
+        self.mark(builder, || {
+            (
+                p_a_param.clone(),
+                p_b.clone(),
+                modulus.clone().into(),
+                [is_add.clone(), is_sub.clone(), is_mul.clone(), AB::Expr::ZERO],
+                is_real.clone().into(),
+            )
+        });
         let p_add = p_a_param.clone() + p_b.clone();
         let p_sub = p_res_param + p_b.clone();
         let p_mul = p_a_param * p_b;
@@ -334,6 +386,15 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let is_sub: AB::Expr = is_sub.into();
 
         let p_result = p_res_param.clone() * is_add.clone() + p_a_param.clone() * is_sub.clone();
+        self.mark(builder, || {
+            (
+                p_a_param.clone(),
+                p_b.clone(),
+                modulus.clone().into(),
+                [is_add.clone(), is_sub.clone(), AB::Expr::ZERO, AB::Expr::ZERO],
+                is_real.clone().into(),
+            )
+        });
         let p_add = p_a_param + p_b.clone();
         let p_sub = p_res_param + p_b;
         let p_op = p_add * is_add + p_sub * is_sub;
@@ -357,6 +418,19 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_a: Polynomial<AB::Expr> = (a).clone().into();
         let p_b: Polynomial<AB::Expr> = (b).clone().into();
         let p_c: Polynomial<AB::Expr> = (c).clone().into();
+        builder.mark_gadget("field_mul_add", || {
+            let result: Polynomial<AB::Expr> = self.result.into();
+            (
+                is_real.clone().into(),
+                vec![
+                    result.as_coefficients(),
+                    modulus.clone().into().as_coefficients(),
+                    p_a.coefficients().to_vec(),
+                    p_b.coefficients().to_vec(),
+                    p_c.coefficients().to_vec(),
+                ],
+            )
+        });
 
         let p_result: Polynomial<_> = self.result.into();
         let p_op = p_a * p_b + p_c;
@@ -379,6 +453,21 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
     {
         let p_a_param: Polynomial<AB::Expr> = (a).clone().into();
         let p_b: Polynomial<AB::Expr> = (b).clone().into();
+        let selector = |o: FieldOperation| if o == op { AB::Expr::ONE } else { AB::Expr::ZERO };
+        self.mark(builder, || {
+            (
+                p_a_param.clone(),
+                p_b.clone(),
+                modulus.clone().into(),
+                [
+                    selector(FieldOperation::Add),
+                    selector(FieldOperation::Sub),
+                    selector(FieldOperation::Mul),
+                    selector(FieldOperation::Div),
+                ],
+                is_real.clone().into(),
+            )
+        });
 
         let (p_a, p_result): (Polynomial<_>, Polynomial<_>) = match op {
             FieldOperation::Add | FieldOperation::Mul => (p_a_param, self.result.into()),

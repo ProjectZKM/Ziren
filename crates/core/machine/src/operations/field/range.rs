@@ -87,6 +87,9 @@ impl<V: Copy, P: FieldParameters> FieldLtCols<V, P> {
 
         let rhs: Polynomial<_> = rhs.clone().into();
         let lhs: Polynomial<_> = lhs.clone().into();
+        builder.mark_gadget("field_lt", || {
+            (is_real.clone().into(), vec![lhs.coefficients().to_vec(), rhs.coefficients().to_vec()])
+        });
 
         let mut lhs_comparison_byte = AB::Expr::ZERO;
         let mut rhs_comparison_byte = AB::Expr::ZERO;

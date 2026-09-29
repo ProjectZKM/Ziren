@@ -219,6 +219,13 @@ impl SyscallInstrsChip {
             local.is_hint_len.result
         };
 
+        builder.mark_gadget("hint_input", || {
+            (
+                local.is_real * is_hint_len,
+                vec![local.op_a_value.0.iter().map(|&v| v.into()).collect()],
+            )
+        });
+
         let zero_word = Word::<AB::F>::from(0);
         builder
             .when(local.is_real)

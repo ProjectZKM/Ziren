@@ -367,6 +367,23 @@ where
 
         let y_limbs: Limbs<AB::Var, <E::BaseField as NumLimbs>::Limbs> =
             limbs_from_access(&local.y_access);
+        builder.mark_gadget(
+            match self.sign_rule {
+                SignChoiceRule::LeastSignificantBit => "sqrt_choice_lsb",
+                SignChoiceRule::Lexicographic => "sqrt_choice_lex",
+            },
+            || {
+                (
+                    local.is_real.into(),
+                    vec![
+                        y_limbs.0.iter().map(|&v| v.into()).collect(),
+                        modulus_limbs.0.to_vec(),
+                        local.x_3_plus_b_plus_ax.result.0.iter().map(|&v| v.into()).collect(),
+                        vec![local.sign_bit.into()],
+                    ],
+                )
+            },
+        );
 
         match self.sign_rule {
             SignChoiceRule::LeastSignificantBit => {

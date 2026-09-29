@@ -159,6 +159,28 @@ where
             builder.assert_eq(computed_a_prime_prime_prime_0_0_limb, a_prime_prime_prime_0_0_limb);
         }
 
+        builder.mark_gadget("keccak_round", || {
+            let limbs = |f: &dyn Fn(usize, usize, usize) -> AB::Var| -> Vec<AB::Expr> {
+                let mut v = Vec::with_capacity(5 * 5 * U64_LIMBS);
+                for y in 0..5 {
+                    for x in 0..5 {
+                        for limb in 0..U64_LIMBS {
+                            v.push(f(y, x, limb).into());
+                        }
+                    }
+                }
+                v
+            };
+            (
+                local.is_real.into(),
+                vec![
+                    limbs(&|y, x, limb| local.keccak.a_prime_prime_prime(y, x, limb)),
+                    limbs(&|y, x, limb| local.keccak.a[y][x][limb]),
+                    vec![local.index.into()],
+                ],
+            )
+        });
+
         self.eval_state_bus(builder, local);
     }
 }

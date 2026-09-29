@@ -102,6 +102,18 @@ where
         V: Into<AB::Expr>,
     {
         let sqrt = self.multiplication.result;
+        let is_odd: AB::Expr = is_odd.into();
+        builder.mark_gadget("field_sqrt", || {
+            (
+                is_real.clone().into(),
+                vec![
+                    sqrt.0.iter().map(|&v| v.into()).collect(),
+                    P::modulus_field_iter::<AB::F>().map(AB::Expr::from).collect(),
+                    a.0.iter().map(|&v| v.into()).collect(),
+                    vec![is_odd.clone()],
+                ],
+            )
+        });
         let mut multiplication = self.multiplication.clone();
         multiplication.result = *a;
 
