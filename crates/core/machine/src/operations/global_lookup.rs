@@ -120,6 +120,10 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
 
 impl<F: Field> GlobalLookupOperation<F> {
     /// Constrain that the elliptic curve point for the global interaction is correctly derived.
+    ///
+    /// A real row is exactly one of a send or a receive: `is_send`, `is_receive` are bits with
+    /// `is_send + is_receive = is_real`.  The flag picks the sign of `y` (the range of `y.0[6]`),
+    /// so a real row with neither flag would accept both `(x, y)` and `(x, −y)`.
     pub fn eval_single_digest<AB: ZKMAirBuilder>(
         builder: &mut AB,
         values: [AB::Expr; 7],
@@ -130,6 +134,9 @@ impl<F: Field> GlobalLookupOperation<F> {
         kind: AB::Var,
     ) {
         builder.assert_bool(is_real);
+        builder.assert_bool(is_send.clone());
+        builder.assert_bool(is_receive.clone());
+        builder.assert_eq(is_send.clone() + is_receive.clone(), is_real);
 
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
