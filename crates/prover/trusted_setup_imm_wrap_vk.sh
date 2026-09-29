@@ -23,7 +23,7 @@ else
 fi
 
 echo "--------Semaphore Install--------"
-git clone https://github.com/ProjectZKM/semaphore-gnark-11.git -b zkm2 semaphore-mtb-setup
+git clone https://github.com/ProjectZKM/semaphore-gnark-11.git -b zkm2-par semaphore-mtb-setup
 cd semaphore-mtb-setup
 go build
 cd ..
