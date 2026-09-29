@@ -27,7 +27,7 @@ use zkm_curves::{
     AffinePoint, CurveType, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryCols, MemoryWriteCols},
@@ -64,6 +64,7 @@ pub struct WeierstrassDoubleAssignCols<T, P: FieldParameters + NumWords> {
     pub(crate) slope_times_p_x_minus_x: FieldOpCols<T, P>,
     pub(crate) x3_range: FieldLtCols<T, P>,
     pub(crate) y3_range: FieldLtCols<T, P>,
+    pub(crate) inverse_check: FieldOpCols<T, P>,
 }
 
 #[derive(Default)]
@@ -81,6 +82,7 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
         cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField>,
         p_x: BigUint,
         p_y: BigUint,
+        is_real: bool,
     ) {
         let a = E::a_int();
         let slope = {
@@ -106,6 +108,17 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
                 &BigUint::from(2u32),
                 &p_y,
                 FieldOperation::Mul,
+            );
+            let numerator = if is_real && slope_denominator != BigUint::ZERO {
+                BigUint::one()
+            } else {
+                BigUint::ZERO
+            };
+            cols.inverse_check.populate(
+                blu_events,
+                &numerator,
+                &slope_denominator,
+                FieldOperation::Div,
             );
 
             cols.slope.populate(
@@ -240,7 +253,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         let zero = BigUint::ZERO;
         let one = BigUint::one();
         cols.p_access[num_words_field_element].populate(dummy_memory_record, &mut vec![]);
-        Self::populate_field_ops(&mut vec![], cols, zero, one);
+        Self::populate_field_ops(&mut vec![], cols, zero, one, false);
 
         values.chunks_mut(chunk_size * num_cols).enumerate().par_bridge().for_each(|(i, rows)| {
             rows.chunks_mut(num_cols).enumerate().for_each(|(j, row)| {
@@ -304,7 +317,7 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
         cols.clk = F::from_u32(event.clk);
         cols.p_ptr = F::from_u32(event.p_ptr);
 
-        Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y);
+        Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y, true);
 
         for i in 0..cols.p_access.len() {
             cols.p_access[i].populate(event.p_memory_records[i], new_byte_lookup_events);
@@ -360,6 +373,15 @@ where
                 &E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&BigUint::from(2u32)),
                 &p_y,
                 FieldOperation::Mul,
+                local.is_real,
+            );
+            let mut one = vec![AB::Expr::ZERO; E::BaseField::NB_LIMBS];
+            one[0] = local.is_real.into();
+            local.inverse_check.eval(
+                builder,
+                &Polynomial::from_coefficients(&one),
+                &local.slope_denominator.result,
+                FieldOperation::Div,
                 local.is_real,
             );
 
@@ -485,5 +507,184 @@ pub mod tests {
         setup_logger();
         let program = Program::from(BLS12381_DOUBLE_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+}
+
+/// Doubling a point whose `y` vanishes (issue #534).
+///
+/// The slope gadget proves `slope · 2y ≡ 3x² + a (mod p)` and nothing about `2y`: for
+/// `P = (0, 0)` on a curve with `a = 0` both sides vanish for every slope `s`, and without
+/// `inverse_check` the row writing `(s², −s³)` satisfied every constraint of the chip.
+/// `inverse_check` proves `is_real / 2y` exists, so every such row is rejected, honest or forged;
+/// the executor refuses the input in `sw_double`.  The control forges the slope of the generator
+/// `(1, 2)`, whose `2y` is invertible, and is rejected while its honest double is accepted.
+#[cfg(test)]
+mod zero_y {
+    use core::borrow::BorrowMut;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    use num::{BigUint, Zero};
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+    use zkm_core_executor::events::{EllipticCurveDoubleEvent, FieldOperation, MemoryWriteRecord};
+    use zkm_curves::{
+        params::FieldParameters,
+        weierstrass::{bn254::Bn254Parameters, SwCurve},
+        AffinePoint, EllipticCurveParameters,
+    };
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+
+    use super::{
+        num_weierstrass_double_cols, WeierstrassDoubleAssignChip, WeierstrassDoubleAssignCols,
+    };
+    use crate::utils::{uni_stark_prove, uni_stark_verify};
+
+    type E = SwCurve<Bn254Parameters>;
+    type Base = <E as EllipticCurveParameters>::BaseField;
+    type F = KoalaBear;
+
+    const ROWS: usize = 16;
+
+    /// The chip's trace with one real row doubling `p` and writing `out`; `slope`, when given,
+    /// replaces the honest slope and every column computed from it.
+    fn trace(
+        p: &AffinePoint<E>,
+        out: &AffinePoint<E>,
+        slope: Option<&BigUint>,
+    ) -> RowMajorMatrix<F> {
+        let num_cols = num_weierstrass_double_cols::<Base>();
+        let words_in = p.to_words_le();
+        let words_out = out.to_words_le();
+        let event = EllipticCurveDoubleEvent {
+            shard: 1,
+            clk: 8,
+            p_ptr: 0x1000,
+            p: words_in.clone(),
+            p_memory_records: words_in
+                .iter()
+                .zip(&words_out)
+                .map(|(&prev_value, &value)| MemoryWriteRecord {
+                    value,
+                    shard: 1,
+                    timestamp: 8,
+                    prev_value,
+                    prev_shard: 1,
+                    prev_timestamp: 4,
+                })
+                .collect(),
+            local_mem_access: vec![],
+        };
+        let mut values = vec![F::default(); ROWS * num_cols];
+        let mut blu = vec![];
+        {
+            let cols: &mut WeierstrassDoubleAssignCols<F, Base> = values[..num_cols].borrow_mut();
+            WeierstrassDoubleAssignChip::<E>::populate_row(&event, cols, &mut blu);
+            if let Some(s) = slope {
+                let modulus = Base::modulus();
+                let x1 = p.x.clone();
+                let y1 = p.y.clone();
+                cols.slope.populate_carry_and_witness(
+                    s,
+                    &((BigUint::from(2u32) * &y1) % &modulus),
+                    FieldOperation::Mul,
+                    &modulus,
+                );
+                cols.slope.result = Base::to_limbs_field::<F, _>(s);
+                let s2 = cols.slope_squared.populate(&mut blu, s, s, FieldOperation::Mul);
+                let two_x = cols.p_x_plus_p_x.populate(&mut blu, &x1, &x1, FieldOperation::Add);
+                let x3 = cols.x3_ins.populate(&mut blu, &s2, &two_x, FieldOperation::Sub);
+                let dx = cols.p_x_minus_x.populate(&mut blu, &x1, &x3, FieldOperation::Sub);
+                let t =
+                    cols.slope_times_p_x_minus_x.populate(&mut blu, s, &dx, FieldOperation::Mul);
+                let y3 = cols.y3_ins.populate(&mut blu, &t, &y1, FieldOperation::Sub);
+                cols.x3_range.populate(&mut blu, &x3, &modulus);
+                cols.y3_range.populate(&mut blu, &y3, &modulus);
+            }
+        }
+        let mut dummy = vec![F::default(); num_cols];
+        {
+            let cols: &mut WeierstrassDoubleAssignCols<F, Base> = dummy.as_mut_slice().borrow_mut();
+            let record = MemoryWriteRecord {
+                value: 1,
+                shard: 0,
+                timestamp: 1,
+                prev_value: 1,
+                prev_shard: 0,
+                prev_timestamp: 0,
+            };
+            cols.p_access[Base::NB_LIMBS / 4].populate(record, &mut vec![]);
+            WeierstrassDoubleAssignChip::<E>::populate_field_ops(
+                &mut vec![],
+                cols,
+                BigUint::zero(),
+                BigUint::from(1u32),
+                false,
+            );
+        }
+        for row in values[num_cols..].chunks_mut(num_cols) {
+            row.copy_from_slice(&dummy);
+        }
+        RowMajorMatrix::new(values, num_cols)
+    }
+
+    /// Whether a proof over the chip's AIR alone accepts `trace`.
+    fn accepted(trace: RowMajorMatrix<F>) -> bool {
+        let config = KoalaBearPoseidon2::new();
+        let chip = WeierstrassDoubleAssignChip::<E>::new();
+        catch_unwind(AssertUnwindSafe(|| {
+            let mut challenger = config.challenger();
+            let proof =
+                uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+            let mut challenger = config.challenger();
+            uni_stark_verify(&config, &chip, &mut challenger, &proof).is_ok()
+        }))
+        .unwrap_or(false)
+    }
+
+    /// The forged point `(s², −s³)` for the double of `(0, 0)` on a curve with `a = 0`.
+    fn forged(s: &BigUint) -> AffinePoint<E> {
+        let p = Base::modulus();
+        let x3 = (s * s) % &p;
+        let y3 = (&p - (s * s * s) % &p) % &p;
+        AffinePoint::new(x3, y3)
+    }
+
+    #[test]
+    fn honest_double_of_zero_point_is_rejected() {
+        let zero = AffinePoint::<E>::new(BigUint::zero(), BigUint::zero());
+        assert!(!accepted(trace(&zero, &zero, None)));
+    }
+
+    #[test]
+    fn forged_double_of_zero_point_is_rejected() {
+        let zero = AffinePoint::<E>::new(BigUint::zero(), BigUint::zero());
+        for s in [5u32, 7, 0xdead_beef] {
+            let s = BigUint::from(s);
+            assert!(
+                !accepted(trace(&zero, &forged(&s), Some(&s))),
+                "forged slope {s} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "y = 0")]
+    fn executor_refuses_zero_y() {
+        let zero = AffinePoint::<E>::new(BigUint::zero(), BigUint::zero());
+        let _ = zero.sw_double();
+    }
+
+    #[test]
+    fn forged_double_of_generator_is_rejected() {
+        let (gx, gy) =
+            <Bn254Parameters as zkm_curves::weierstrass::WeierstrassParameters>::generator();
+        let g = AffinePoint::<E>::new(gx, gy);
+        let honest = g.sw_double();
+        assert!(accepted(trace(&g, &honest, None)));
+        let s = BigUint::from(5u32);
+        let p = Base::modulus();
+        let x3 = (&s * &s + &p + &p - BigUint::from(2u32)) % &p;
+        let y3 = (&s * ((&p + BigUint::from(1u32) - &x3) % &p) + &p - BigUint::from(2u32)) % &p;
+        assert!(!accepted(trace(&g, &AffinePoint::new(x3, y3), Some(&s))));
     }
 }

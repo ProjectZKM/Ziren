@@ -223,6 +223,9 @@ impl<E: WeierstrassParameters> AffinePoint<SwCurve<E>> {
     }
 
     pub fn sw_double(&self) -> AffinePoint<SwCurve<E>> {
+        if &self.y % E::BaseField::modulus() == BigUint::ZERO {
+            panic!("Error: the point has y = 0, so its double is the point at infinity.");
+        }
         cfg_if::cfg_if! {
             if #[cfg(feature = "bigint-rug")] {
                 self.sw_double_rug()
@@ -391,7 +394,8 @@ mod ring_inverse_tests {
 
     /// The formulas agree for every field element pair, on the curve or not,
     /// so random coordinates exercise them (plus the generator's orbit for
-    /// genuine curve points and the zero-denominator degenerate inputs).
+    /// genuine curve points and the zero-denominator addition); doubling a
+    /// point with `y = 0` is refused, since its double is the point at infinity.
     fn check_curve<E: WeierstrassParameters>(name: &str, rng: &mut StdRng) {
         let p = E::BaseField::modulus();
         let n = 200;
@@ -417,7 +421,10 @@ mod ring_inverse_tests {
         let y = rng.gen_biguint_below(&p);
         pairs.push((AffinePoint::new(x.clone(), y.clone()), AffinePoint::new(x.clone(), &p - &y)));
         let zero_y = AffinePoint::<SwCurve<E>>::new(x, BigUint::from(0u32));
-        assert_eq!(xy(&zero_y.sw_double()), xy(&fermat_double(&zero_y)), "{name}: y=0 double");
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| zero_y.sw_double())).is_err(),
+            "{name}: doubling a point with y = 0 must be refused"
+        );
 
         let t = Instant::now();
         let fermat: Vec<_> =
