@@ -102,7 +102,6 @@ pub struct AffinePoint<E> {
 }
 
 impl<E: EllipticCurveParameters> AffinePoint<E> {
-    #[allow(dead_code)]
     pub const fn new(x: BigUint, y: BigUint) -> Self {
         Self { x, y, _marker: std::marker::PhantomData }
     }

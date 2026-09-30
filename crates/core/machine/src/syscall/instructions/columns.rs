@@ -1,24 +1,31 @@
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
 use zkm_derive::PicusAnnotations;
-use zkm_stark::{air::PV_DIGEST_NUM_WORDS, Word};
+use zkm_pcs::PicusInfo;
+use zkm_pcs::{air::PV_DIGEST_NUM_WORDS, Word};
 
 use crate::operations::{IsZeroOperation, KoalaBearWordRangeChecker};
-#[cfg(feature = "picus")]
-use zkm_stark::PicusInfo;
 
 pub const NUM_SYSCALL_INSTR_COLS: usize = size_of::<SyscallInstrColumns<u8>>();
 
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct SyscallInstrColumns<T> {
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every Syscall row is an instruction).
+    /// Register-form: SYSCALL's three operands are the fixed registers
+    /// `$v0` / `$a0` / `$a1`, so the R-type frame carries bare indices.
+    pub frame: crate::frame::RTypeFrameCols<T>,
+
     pub pc: T,
     pub next_pc: T,
-    pub shard: T,
-    pub clk: T,
     pub num_extra_cycles: T,
+
+    /// The `next_pc` RECEIVED on the `State` bus — a COLUMN because interaction
+    /// values must be linear.  Equals `next_pc` on a normal row but `pc + 4` on
+    /// a halt row (the predecessor's lookahead), so the chain telescopes into
+    /// the halt.  Every other chip passes `next_pc` directly.
+    pub state_recv_next_pc: T,
 
     /// Whether the current instruction is a halt instruction.
     pub is_halt: T,
@@ -32,9 +39,6 @@ pub struct SyscallInstrColumns<T> {
     pub syscall_id: T,
 
     pub op_a_value: Word<T>,
-    pub op_b_value: Word<T>,
-    pub op_c_value: Word<T>,
-    pub prev_a_value: Word<T>,
 
     pub is_enter_unconstrained: IsZeroOperation<T>,
     pub is_hint_len: IsZeroOperation<T>,

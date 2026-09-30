@@ -5,10 +5,10 @@
 //! The idea is that 1 - input * inverse is exactly the boolean value indicating whether the input
 //! is 0.
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_derive::AlignedBorrow;
 
-use zkm_stark::air::ZKMAirBuilder;
+use zkm_pcs::air::ZKMAirBuilder;
 
 /// A set of columns needed to compute whether the given word is 0.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
@@ -23,7 +23,7 @@ pub struct IsZeroOperation<T> {
 
 impl<F: Field> IsZeroOperation<F> {
     pub fn populate(&mut self, a: u32) -> u32 {
-        self.populate_from_field_element(F::from_canonical_u32(a))
+        self.populate_from_field_element(F::from_u32(a))
     }
 
     pub fn populate_from_field_element(&mut self, a: F) -> u32 {
@@ -39,7 +39,7 @@ impl<F: Field> IsZeroOperation<F> {
         (a == F::ZERO) as u32
     }
 
-    fn eval_exact<AB: ZKMAirBuilder>(
+    pub fn eval<AB: ZKMAirBuilder>(
         builder: &mut AB,
         a: AB::Expr,
         cols: IsZeroOperation<AB::Var>,
@@ -47,34 +47,10 @@ impl<F: Field> IsZeroOperation<F> {
     ) {
         let one: AB::Expr = AB::F::ONE.into();
 
-        // 1. Input == 0 => is_zero = 1 regardless of the inverse.
-        // 2. Input != 0
-        //   2.1. inverse is correctly set => is_zero = 0.
-        //   2.2. inverse is incorrect
-        //     2.2.1 inverse is nonzero => is_zero isn't bool, it fails.
-        //     2.2.2 inverse is 0 => is_zero is 1. But then we would assert that a = 0. And that
-        //                           assert fails.
-
-        // If the input is 0, then any product involving it is 0. If it is nonzero and its inverse
-        // is correctly set, then the product is 1.
         let is_zero = one - cols.inverse * a.clone();
         builder.when(is_real.clone()).assert_eq(is_zero, cols.result);
         builder.when(is_real.clone()).assert_bool(cols.result);
 
-        // If the result is 1, then the input is 0.
         builder.when(is_real).when(cols.result).assert_zero(a);
-    }
-
-    pub fn eval<AB: ZKMAirBuilder>(
-        builder: &mut AB,
-        a: AB::Expr,
-        cols: IsZeroOperation<AB::Var>,
-        is_real: AB::Expr,
-    ) {
-        if builder.try_emit_is_zero_summary(a.clone(), cols.result.into(), is_real.clone()) {
-            return;
-        }
-
-        Self::eval_exact(builder, a, cols, is_real);
     }
 }

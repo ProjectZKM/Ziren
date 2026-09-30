@@ -190,7 +190,6 @@ impl<V: Copy + 'static> IntoIterator for Registers<V> {
 }
 
 /// A page of memory.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Page<V>(VecMap<V>);
 
@@ -329,11 +328,6 @@ impl<V: Copy> PagedMemory<V> {
             .sum()
     }
 
-    /// Estimate the number of addresses in use.
-    pub fn estimate_len(&self) -> usize {
-        self.index.iter().filter(|&i| *i != NO_PAGE).count() * PAGE_LEN
-    }
-
     /// Clears the page table. Drops all `Page`s, but retains the memory used by the table itself.
     pub fn clear(&mut self) {
         self.page_table.clear();
@@ -410,7 +404,6 @@ pub struct VacantEntry<'a, V: Copy> {
 impl<'a, V: Copy> VacantEntry<'a, V> {
     /// Insert a value into the `VacantEntry`, returning a mutable reference to it.
     pub fn insert(self, value: V) -> &'a mut V {
-        // By construction, the slot in the page is `None`.
         *self.entry = Some(value);
         self.entry.as_mut().unwrap()
     }

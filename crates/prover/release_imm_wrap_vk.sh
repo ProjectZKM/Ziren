@@ -24,7 +24,7 @@ fi
 echo "$COMMIT_HASH $VERSION" > ./build-imm-wrap-vk/ZKM_COMMIT
 
 # Create archives for Groth16 and Trusted Setup
-GROTH16_ARCHIVE="groth16-imm-wrap-vk.tar.gz"
+GROTH16_ARCHIVE="${VERSION}-groth16-imm-wrap-vk.tar.gz"
 TRUSTED_SETUP_ARCHIVE="${VERSION}-trusted-setup-imm-wrap-vk.tar.gz"
 
 # Create Groth16 archive

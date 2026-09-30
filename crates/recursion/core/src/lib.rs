@@ -18,12 +18,19 @@ pub mod stark;
 pub mod sys;
 
 pub use runtime::*;
+
+/// Height of the recursion verifying-key Merkle tree: the allowlist is
+/// committed padded to `2^VK_MERKLE_TREE_HEIGHT` leaves, and every recursion
+/// program bakes that height into its membership paths.  The prover, the
+/// standalone verifier and the wasm verifier all read this one value; a root
+/// computed over a tree of another height matches no proof.
+pub const VK_MERKLE_TREE_HEIGHT: usize = 14;
 pub use stark::hash_vkey_with_part_vk;
 
 // Re-export the stark stuff from `zkm_recursion_core` for now, until we will migrate it here.
 // pub use zkm_recursion_core::stark;
 
-use crate::chips::poseidon2_skinny::WIDTH;
+use crate::chips::poseidon2_wide::WIDTH;
 
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub struct RecursionChipError;
@@ -450,4 +457,43 @@ pub struct CommitPublicValuesInstr<F> {
 #[repr(C)]
 pub struct CommitPublicValuesEvent<F> {
     pub public_values: RecursionPublicValues<F>,
+}
+
+#[cfg(test)]
+mod poseidon2_diffusion_tests {
+    use p3_field::{PrimeCharacteristicRing, PrimeField32};
+    use p3_koala_bear::{KoalaBear, KoalaBearInternalLayerParameters, KoalaBearParameters};
+    use p3_monty_31::InternalLayerBaseParameters;
+
+    /// The internal-layer diagonal the Groth16/PLONK circuit carries
+    /// (`crates/recursion/gnark-ffi/go/zkm/poseidon2/diagonal/diagonal.go`,
+    /// `KoalaBearInternalDiagM1`), as canonical KoalaBear residues.
+    const CIRCUIT_DIAGONAL: [u32; 16] = [
+        2130706431, 1, 2, 1065353217, 3, 4, 1065353216, 2130706430, 2130706429, 2122383361,
+        1864368129, 2130706306, 8323072, 266338304, 133169152, 127,
+    ];
+
+    /// The host's internal linear layer is `s -> (J + Diag(V)) s` with `J` the
+    /// all-ones matrix, so on the unit vector `e_i` it returns `1` everywhere
+    /// and `1 + V_i` at `i`.  Probing every `e_i` recovers `V`, which must be
+    /// the diagonal the circuit multiplies by.
+    #[test]
+    fn go_internal_diagonal_matches_the_rust_permutation() {
+        for (i, want) in CIRCUIT_DIAGONAL.iter().enumerate() {
+            let mut state = [KoalaBear::ZERO; 16];
+            state[i] = KoalaBear::ONE;
+            <KoalaBearInternalLayerParameters as InternalLayerBaseParameters<
+                KoalaBearParameters,
+                16,
+            >>::generic_internal_linear_layer(&mut state);
+            for (j, s) in state.iter().enumerate() {
+                let expect = if j == i {
+                    KoalaBear::ONE + KoalaBear::from_u32(*want)
+                } else {
+                    KoalaBear::ONE
+                };
+                assert_eq!(s.as_canonical_u32(), expect.as_canonical_u32(), "row {i} column {j}");
+            }
+        }
+    }
 }

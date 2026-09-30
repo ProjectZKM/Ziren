@@ -31,3 +31,15 @@ serial_test = "3.1.1"
 # Hash `committed_values_digest` with BLAKE3 instead of SHA256, matching the guest's own switch
 # (see `zkm-zkvm`'s `imm-wrap-vk` feature) and the Groth16 wrap circuit's immutable-vk mode.
 imm-wrap-vk = []
+
+# The production guest ELF is built from this crate BY PATH (reth-processor
+# patches `zkm-zkvm`/`zkm-lib` onto this tree), so its bytes -- and therefore
+# the program vk that eth-proofs publishes -- move with any source edit here.
+# Style lints are therefore silenced in the MANIFEST rather than with in-source
+# `#[allow]`: a lint level reaches rustc as a flag and cannot perturb guest
+# codegen, whereas editing the `.rs` would rebuild the ELF for a style fix.
+[lints.clippy]
+# Fires on the byte-packing loops (`chunks_exact(8)` -> `as_chunks::<8>()`).
+# Rewriting them touches guest hot paths; defer to a landing that rebuilds and
+# gates the ELF deliberately.
+chunks_exact_to_as_chunks = "allow"

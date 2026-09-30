@@ -48,22 +48,20 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let new_len = leaves.len().next_power_of_two();
         let height = log2_strict_usize(new_len);
 
-        // Pre-allocate the vector.
+        let (new_len, height) = if new_len < 2 { (2, 1) } else { (new_len, height) };
+
         let mut digest_layers = Vec::with_capacity(2 * new_len - 2);
 
-        // If `leaves.len()` is not a power of 2, we pad the leaves with default values.
         let mut last_layer = leaves;
         let old_len = last_layer.len();
         for _ in old_len..new_len {
             last_layer.push(HV::Digest::default());
         }
 
-        // Store the leaves in bit-reversed order.
         reverse_slice_index_bits(&mut last_layer);
 
         digest_layers.extend(last_layer.iter());
 
-        // Compute the rest of the layers.
         for _ in 0..height - 1 {
             let mut next_layer = Vec::with_capacity(last_layer.len() / 2);
             last_layer
@@ -89,7 +87,6 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let mut bit_rev_index = reverse_bits_len(index, self.height);
         let value = self.digest_layers[bit_rev_index];
 
-        // Variable to keep track index of the first element in the current layer.
         let mut offset = 0;
         for i in 0..self.height {
             let sibling = if bit_rev_index.is_multiple_of(2) {
@@ -100,7 +97,6 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
             path.push(sibling);
             bit_rev_index >>= 1;
 
-            // The current layer has 1 << (height - i) elements, so we shift offset by that amount.
             offset += 1 << (self.height - i);
         }
         debug_assert_eq!(path.len(), self.height);
@@ -119,7 +115,6 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let mut index = reverse_bits_len(index, path.len());
 
         for sibling in path {
-            // If the index is odd, swap the order of [value, sibling].
             let new_pair =
                 if index.is_multiple_of(2) { [value, sibling] } else { [sibling, value] };
             value = HV::constant_compress(new_pair);
@@ -143,7 +138,6 @@ pub fn verify<C: CircuitConfig, HV: FieldHasherVariable<C>>(
     for (sibling, bit) in proof.path.iter().zip(proof.index.iter().rev()) {
         let sibling = *sibling;
 
-        // If the index is odd, swap the order of [value, sibling].
         let new_pair = HV::select_chain_digest(builder, *bit, [value, sibling]);
         value = HV::compress(builder, new_pair);
     }
@@ -153,17 +147,17 @@ pub fn verify<C: CircuitConfig, HV: FieldHasherVariable<C>>(
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_util::log2_ceil_usize;
-    use rand::rngs::OsRng;
-    use zkhash::ark_ff::UniformRand;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+
+    use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
     use zkm_recursion_compiler::{
         config::InnerConfig,
         ir::{Builder, Felt},
     };
     use zkm_recursion_core::DIGEST_SIZE;
-    use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
 
     use crate::{
         merkle_tree::{verify, MerkleTree},
@@ -177,14 +171,13 @@ mod tests {
 
     #[test]
     fn test_merkle_tree_inner() {
-        let mut rng = OsRng;
+        let mut rng = StdRng::seed_from_u64(0xDEAD_BEEF);
         let mut builder = Builder::<InnerConfig>::default();
-        // Run five times with different randomness.
         for _ in 0..5 {
-            // Test with different number of leaves.
             for j in 2..20 {
-                let leaves: Vec<[F; DIGEST_SIZE]> =
-                    (0..j).map(|_| std::array::from_fn(|_| F::rand(&mut rng))).collect();
+                let leaves: Vec<[F; DIGEST_SIZE]> = (0..j)
+                    .map(|_| std::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
+                    .collect();
                 let (root, tree) = MerkleTree::<KoalaBear, HV>::commit(leaves.to_vec());
                 for (i, leaf) in leaves.iter().enumerate() {
                     let (_, proof) = MerkleTree::<KoalaBear, HV>::open(&tree, i);
@@ -198,7 +191,7 @@ mod tests {
                             .collect_vec(),
                     );
 
-                    let index_var = builder.constant(KoalaBear::from_canonical_usize(i));
+                    let index_var = builder.constant(KoalaBear::from_usize(i));
                     let index_bits = C::num2bits(&mut builder, index_var, log2_ceil_usize(j));
                     let root_variable: [Felt<_>; 8] =
                         root.iter().map(|x| builder.constant(*x)).collect_vec().try_into().unwrap();

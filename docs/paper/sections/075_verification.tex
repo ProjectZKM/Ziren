@@ -1,0 +1,93 @@
+\section{The verification flow and its findings}
+\label{sec:verification}
+
+The soundness argument of Sections~\ref{sec:air}--\ref{sec:iopp} establishes that an accepting proof implies the existence of a trace satisfying every constraint. Two further questions decide whether that trace is an execution of the advertised machine: does the executor implement the ISA, and does each constrained chip admit exactly one output behaviour for a fixed input? We address both with a specification-derived conformance suite against an independent reference, an executable formal model, and per-chip uniqueness theorems. This section reports the verification artifacts of \S\ref{sec:ipcore-collateral}: the suites and their reference results, the formal model and its two checks, the extracted theorems with the tactic that discharges them and the list of those still open, and the defects register of Table~\ref{tab:defects}. A deployer reads them to decide what has been established for a release and what remains conditional.
+
+\subsection{ISA conformance}
+\label{sec:verification-isa}
+
+\paragraph{Vectors from the specification.} The MIPS32 architecture manual's encoding tables were transcribed into a machine-readable table of 77 instructions (all integer, shift, branch, jump, load/store, bit-manipulation and conditional-move forms the guest supports), reproduced with the chip that proves each one in Appendix~\ref{sec:app-isa}. For each instruction a generator emits ten programs with pseudo-random operands, boundary values and the delay-slot placements the instruction admits, assembled with \texttt{llvm-mc}; the reference is the Unicorn/QEMU MIPS32 emulator~\citep{unicorn}, which shares no code with \Ziren{}'s own, and each vector compares the general registers, \texttt{HI}/\texttt{LO} and the touched memory after execution. All 770 vectors agree, on both the interpreter and the JIT.
+
+\paragraph{Shared instruction suites.} The generated vectors cover the encoding space broadly but shallowly. A second collection contains fifteen hand-written suites, 144 cases in all, for instructions with difficult MIPS32 semantics: signed and unsigned division, multiply-accumulate pairs, bit-field and byte-order instructions, rotates, and count-leading-one and count-leading-zero instructions. One crate supplies case data to both the emulator and the prover tests, so every case is executed and proved against the same result. The generated vectors are shared in the same way. A regression in only the emulator or prover therefore appears as a disagreement rather than two tests drifting together.
+
+\paragraph{The Cannon suite.} The third suite is independent of us. Optimism's Cannon ships a suite of hand-written MIPS test programs~\citep{cannon}, written by the fault-proof project whose ISA semantics a hybrid deployment must match (\S\ref{sec:ipcore-integration}); they exercise the machine against another team's reading of the architecture manual rather than against our own generator or our own regressions. A harness byte-swaps them to little-endian and adapts the halt convention; the 49 programs applicable to a little-endian guest all pass.
+
+\paragraph{From vectors to proofs.} 224 of the generated programs and 48 of the 49 Cannon programs were also proved end to end and verified. The single exception halts with a non-zero exit code, which the emulator accepts and the arithmetisation does not admit as a valid execution to prove. On everything else the arithmetisation accepts every behaviour the reference exhibits; the next subsection is the converse direction.
+
+\paragraph{Executable formal model.} A \Lean{} model of the ISA was written independently of \Ziren{}'s emulator: a decoder transcribed from the encoding tables, an interpreter with the delay-slot program-counter pair and little-endian byte memory, and an ALU. Two checks connect it to the implementation, both discharged by \texttt{native\_decide}: the decoder agrees with the emulator's decoder on all 2\,275 distinct instruction words appearing in the vectors, and the model reproduces the reference emulator's results on all 770 vectors. \Ziren{}'s two emulator implementations are additionally run twice on every vector with a digest of the emitted event records; the digests agree between runs and between the interpreter and the JIT, and this is evidence of reproducibility rather than a proof of determinism.
+
+\subsection{Determinism of the chips}
+\label{sec:verification-det}
+
+\paragraph{What is proved.} For a chip $U$ with constraint system $C_U$ over a row $w$ of columns, and with \emph{inputs} $I_U(w)$ (the values the row receives on its buses: the fetched instruction, the register and memory values read, the incoming state) and \emph{outputs} $O_U(w)$ (the values it sends: the register and memory values written, the outgoing state), determinism is the statement
+\[
+  \forall w, w'.\; C_U(w) \wedge C_U(w') \wedge I_U(w) = I_U(w') \;\Rightarrow\; O_U(w) = O_U(w').
+\]
+The statement is Definition~\ref{def:det}, with byte-table lookups lowered to range constraints or to calls of an abstract deterministic table.
+
+Theorem~\ref{thm:unique} is what makes a satisfying trace unique given the determinism of every chip. The theorems below are its premises, machine-checked for the chips the automation closes and stated with an explicit gap for the rest.
+
+\paragraph{Extraction.} The theorems are not written by hand. The same Rust constraint description that the prover evaluates and the verifier checks is evaluated once with symbolic columns, the resulting polynomial constraints, range facts and bus interactions are lowered to a first-order statement, and a generator emits one \Lean{} file per chip: a record type for the row, the constraints as a conjunction, the input and output projections with their provenance, and the theorem above. Selector-specialised chips (one theorem per opcode selector) and an \emph{is\_real}~$=1$ specialisation keep each statement about real rows of one opcode. The extraction covers every chip of the core machine catalogued in Appendix~\ref{sec:app-chips}: \ndettotal{} determinism theorems.
+
+\paragraph{Proof automation.} A theorem is closed by a tactic that lifts the statement from $\F$ to the integers: every column is replaced by an integer with the bound its range fact gives (a byte, a 16-bit limb, a bit, or $[0, p)$ when unconstrained), every field equation becomes an exact integer equation once its slack is shown to vanish under those bounds, and the remaining goal is linear arithmetic over bounded integers, decided by \Lean{}'s \texttt{omega}. Between the lifting and the decision the tactic runs the propagation loop of Picus inside the proof assistant: it proves corresponding columns of $w$ and $w'$ equal one pair at a time, substitutes, resolves selector bits to constants, and case-splits only on selector bits already known to agree. The automation runs with a fixed wall-clock budget per theorem. 
+
+\paragraph{Coverage.} At the time of writing \ndetproved{} of the \ndettotal{} theorems are closed (Figure~\ref{fig:verification}, by chip family). \ndetopen{} were attempted and remain open: integer chips whose constraints multiply by $2^{24}$ or $2^{32}$ and are only meaningful modulo $p$ (multiply, the conditional moves, the memory-argument chips), which the integer lifting does not model, or whose selector case structure exceeds the split budget. \ndetskipped{} are not attempted by the generator: \ndetskipacc{} are accelerator chips above the size threshold (the same theorem at 1\,000--5\,600 conjuncts), and \ndetskipcase{} are chips whose constraints contain comparison case-splits from the byte-table summaries, which the current tactic does not handle. \ndetpending{} had not finished their attempt when the numbers were taken. The syscall chip, which was under-determined as first extracted (next paragraph), closes after the bus change; the count above is therefore for the constraint system with that change applied. Two chips separate it from the system measured in Section~\ref{sec:performance}: that one, and the hash chip, whose round schedule was corrected afterwards (Table~\ref{tab:defects}). All theorem statements compile; open ones carry an explicit \texttt{sorry} and are listed in the artifact.
+
+\begin{figure}[t]
+\centering
+\input{figures/verification}
+\caption{The current artifact closes \ndetproved{} of \ndettotal{} extracted chip and opcode-selector determinism statements. The remaining statements are open, skipped because of accelerator size or comparison case splits, or unfinished under the fixed automation budget.}
+\label{fig:verification}
+\end{figure}
+
+\subsection{A negative control for the height claims}
+\label{sec:verification-forgery}
+
+The suites above test that the machine accepts what it should. A verification
+flow also needs the opposite evidence: that the argument \emph{rejects} a
+trace whose declared shape is a lie. This matters here because the shape is
+not incidental. The verifying key is a function of the chip set
+(\S\ref{sec:recursion}), the committed geometry is quantised from the declared
+heights (\S\ref{sec:pcs-geometry}), and the enumeration of admissible leaf
+keys rests on both. If a prover could declare a shape it did not execute, the
+enumeration would be a statement about nothing.
+
+A harness therefore proves real shard proofs and then tampers with the claimed
+heights before verification, in eighteen cases across two guests, an
+arithmetic one and a hash-heavy one. The forgeries are over- and under-claims
+of a chip's height, lies about which chips are active, tampering with the
+column count and tampering with the row count, each injected at the stage that
+would carry it: the degree mask alone, the Fiat--Shamir prologue alone, and
+both together. Every case is rejected, and the interest is in which check
+rejects it, because no single mechanism covers the space.
+
+\begin{itemize}
+  \item Height and activity lies that reach the degree mask are caught by the
+  \LogUp{} last-layer reconstruction, as a numerator or denominator mismatch.
+  \item Lies confined to the transcript are caught by the grinding witness,
+  because the Fiat--Shamir prologue observes the declared heights, so a changed
+  height invalidates the proof of work.
+  \item A tampered column count is caught by the jagged verifier, and a
+  tampered row count by the preprocessed round, which takes the row count from
+  the verifying key rather than from the prover.
+\end{itemize}
+
+One case in the harness is a control on the control: a degree-only over-claim
+that an earlier configuration allowed to survive, because the reconstruction
+could be disabled. That configuration no longer exists, the anchor is
+unconditional, and the case now expects rejection. A negative control whose
+negative case cannot fail is not a control, which is why it is reported here
+rather than removed.
+
+\subsection{Findings}
+\label{sec:verification-findings}
+
+The flow surfaced nine defects, and their discovery methods distinguish three classes. Three determinism-theorem findings are under-constraints, where the constraints permit more than one value. Three end-to-end proving findings are integration mistakes between components that use different conventions. Three line-by-line comparison findings are omitted checks, a class that neither honest tests nor local determinism statements can detect.
+
+That distinction is worth stating plainly, because it bounds what the first two techniques can establish. A determinism theorem asks whether the constraints present admit two behaviours; it is silent about a constraint that was never written, since its absence makes no theorem false. Testing is silent for the same reason: an omitted check breaks nothing that an honest execution does, so no test fails. The completeness flag left unpinned at the terminal stages is the sharpest example. Every honest proof sets it, so every test passes and every extracted theorem holds; only a reader asking what enforces it finds that nothing does. Differential reading against an independent implementation of the same protocol is the cheapest way we know to find that class, and it is the reason we report it as a third technique rather than as incidental review.
+
+Appendix~\ref{sec:app-defects} tabulates all nine. One is described in detail here, because it is the one the extracted theorems found unaided and it shows what such a theorem does and does not say.
+
+
+
+\paragraph{Syscall argument half-words.} The syscall chip receives two reduced 32-bit arguments from the instruction that raised the syscall and witnesses each of them, written $a \in \F$ here, as two 16-bit half-words $a_{\mathrm{lo}}, a_{\mathrm{hi}}$ constrained by $a_{\mathrm{lo}} + 2^{16} a_{\mathrm{hi}} = a$ in $\F$ and two 16-bit range checks. Because $2^{32} > p$, this does not determine the half-words: for every $a \in \F$ both the decomposition of $a$ and that of $a + p$ satisfy the constraints, since $2p < 2^{32}$. The extracted theorem for the chip is false and the automation reports exactly these four half-word columns as open. Whether the ambiguity is exploitable depends on the consumer: an accelerator that re-reduces the half-words modulo $p$ sees the same field element either way, while one that uses them as an exact 32-bit pointer does not. The finding is a specification gap between the two sides of the syscall bus. The remedy, applied after the finding, is to carry the half-words rather than the reduced sum on the bus, together with the chip's Linux selector; with that change the chip's determinism theorem closes in under a minute. The change alters the constraints of two chips and therefore the verifying keys, so it is staged with the next key-changing release rather than deployed alone.

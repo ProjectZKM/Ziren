@@ -1,0 +1,57 @@
+% Panel (b) of the instruction frame: ONE row enlarged, showing the four fixed
+% sub-cycle access positions.  A narrow canvas, so it scales up rather than down
+% and its pin labels are the largest text in the figure.  The pins sit ON the
+% row's lower edge with their labels BELOW it, so they cannot collide with the
+% datapath lines inside the box.
+\begin{tikzpicture}[
+  font=\large,
+  chip/.style={rectangle, rounded corners=2pt, draw=zirenblue!85, line width=0.7pt,
+               minimum width=7.2cm, minimum height=1.9cm, fill=zirenblue!5},
+  mbus/.style={line width=1.6pt, zirenorange!90!black},
+  pbus/.style={line width=1.6pt, zirenblue!90},
+  wire/.style={line width=0.5pt, black!80},
+  sig/.style={-{Latex[length=1.8mm]}, line width=0.7pt, zirenteal!90!black},
+  pin/.style={circle, fill=black!80, inner sep=0pt, minimum size=3.4pt},
+  npin/.style={circle, draw=black!45, fill=white, inner sep=0pt, minimum size=3.4pt},
+  lbl/.style={font=\normalsize, black!70},
+  hdr/.style={font=\large\bfseries},
+]
+% ---------- the row itself (spans y = -0.95 .. 0.95)
+\node[chip] (u) at (0,0) {};
+\node[hdr, anchor=north west] at ($(u.north west)+(0.14,-0.10)$) {\texttt{LoadWord} row};
+\node[lbl, anchor=north east] at ($(u.north east)+(-0.14,-0.12)$) {\texttt{lw \$t3,0(\$t4)}};
+\node[lbl, align=left, anchor=south west] at ($(u.south west)+(0.18,0.12)$)
+  {$\mathsf{addr} \leftarrow \mathsf{op\_b} + \mathsf{imm}$,\quad
+   $\mathsf{op\_a} \leftarrow \mathsf{mem}[\mathsf{addr}]$};
+
+% ---------- fetch, upward to the program bus
+\draw[pbus] (-4.6,2.0) -- (4.6,2.0)
+  node[right, font=\normalsize, text=zirenblue!80!black] {program bus};
+\node[pin] (uf) at (u.north) {};
+\draw[sig] (uf) -- (u.north |- 0,2.0);
+\node[lbl, anchor=south east] at ($(uf)+(-0.1,0.42)$) {fetch $(\mathsf{pc},\mathsf{op})$};
+
+% ---------- the four access positions, pinned to the lower edge
+\draw[mbus] (-4.6,-3.1) -- (4.6,-3.1)
+  node[right, font=\normalsize, text=zirenorange!80!black] {memory bus};
+\foreach \k/\t in {1/{rd $\mathsf{op\_b}$},2/{},3/{mem rd},4/{wr $\mathsf{op\_a}$}} {
+  \pgfmathsetmacro{\px}{-2.7+1.8*(\k-1)}
+  \ifx\t\empty
+    \node[npin] (p\k) at (\px,-0.95) {};
+    \node[lbl, anchor=north, align=center, black!40] at (\px,-1.10) {@\k\\ unused};
+  \else
+    \node[pin] (p\k) at (\px,-0.95) {};
+    \node[lbl, anchor=north, align=center] at (\px,-1.10) {@\k\\ \t};
+    \draw[sig] (\px,-2.05) -- (\px,-3.1);
+  \fi
+}
+
+% ---------- the sub-cycle ruler under the bus
+\draw[wire] (-3.3,-3.65) -- (3.3,-3.65);
+\foreach \k in {1,...,4} {
+  \pgfmathsetmacro{\px}{-2.7+1.8*(\k-1)}
+  \draw[wire] (\px,-3.55) -- (\px,-3.75);
+  \node[lbl, anchor=north] at (\px,-3.79) {$\mathsf{clk}{+}\k$};
+}
+\node[lbl, anchor=east, align=right] at (-3.4,-3.65) {access\\positions};
+\end{tikzpicture}

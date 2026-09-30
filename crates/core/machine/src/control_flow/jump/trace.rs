@@ -1,20 +1,17 @@
 use std::borrow::BorrowMut;
 
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, JumpEvent},
+    events::{ByteRecord, JumpEvent},
     ExecutionRecord, Opcode, Program,
 };
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
-    utils::{next_power_of_two, zeroed_f_vec},
+    utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
@@ -31,13 +28,12 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
         "Jump".to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         JumpColumns::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.jump_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <JumpChip as MachineAir<F>>::name(self).as_str(),
@@ -59,14 +55,22 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
             .enumerate()
             .par_bridge()
             .map(|(i, rows)| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 rows.chunks_mut(NUM_JUMP_COLS).enumerate().for_each(|(j, row)| {
                     let idx = i * chunk_size + j;
                     let cols: &mut JumpColumns<F> = row.borrow_mut();
 
                     if idx < input.jump_events.len() {
                         let event = &input.jump_events[idx];
-                        self.event_to_row(event, cols, &mut blu);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut blu,
+                            &input.program,
+                            input.public_values.execution_shard,
+                        );
+                    } else {
+                        cols.frame.populate_dependency();
                     }
                 });
                 blu
@@ -75,7 +79,6 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
 
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, NUM_JUMP_COLS))
     }
 
@@ -86,10 +89,6 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
             !shard.jump_events.is_empty()
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl JumpChip {
@@ -98,20 +97,24 @@ impl JumpChip {
         &self,
         event: &JumpEvent,
         cols: &mut JumpColumns<F>,
-        _blu: &mut HashMap<ByteLookupEvent, usize>,
+        blu: &mut zkm_core_executor::events::ByteLookupMap,
+        program: &zkm_core_executor::Program,
+        shard: u32,
     ) {
-        cols.pc = F::from_canonical_u32(event.pc);
+        cols.frame.populate_from_jump(event, program, shard, blu);
+
+        cols.pc = F::from_u32(event.pc);
         cols.is_jump = F::from_bool(matches!(event.opcode, Opcode::Jump));
         cols.is_jumpi = F::from_bool(matches!(event.opcode, Opcode::Jumpi));
         cols.is_jumpdirect = F::from_bool(matches!(event.opcode, Opcode::JumpDirect));
 
-        cols.op_a_value = event.a.into();
-        cols.op_b_value = event.b.into();
-        cols.op_c_value = event.c.into();
-        cols.op_a_range_checker.populate(event.a);
+        cols.op_a_range_checker.populate(blu, event.a);
         cols.next_pc = Word::from(event.next_pc);
-        cols.next_pc_range_checker.populate(event.next_pc);
+        cols.next_pc_range_checker.populate(blu, event.next_pc);
         cols.next_next_pc = Word::from(event.next_next_pc);
-        cols.next_next_pc_range_checker.populate(event.next_next_pc);
+        cols.next_next_pc_range_checker.populate(blu, event.next_next_pc);
+        if matches!(event.opcode, Opcode::JumpDirect) {
+            cols.target_add.populate(blu, event.next_pc, event.b);
+        }
     }
 }

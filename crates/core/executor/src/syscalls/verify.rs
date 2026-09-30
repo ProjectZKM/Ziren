@@ -21,9 +21,6 @@ impl Syscall for VerifySyscall {
             return Ok(None);
         }
 
-        // vkey_ptr is a pointer to [u32; 8] which contains the verification key.
-        // pv_digest_ptr is a pointer to [u32; 8] which contains the public values digest.
-
         if !vkey_ptr.is_multiple_of(4) || !pv_digest_ptr.is_multiple_of(4) {
             return Err(ExecutionError::InvalidSyscallArgs());
         }

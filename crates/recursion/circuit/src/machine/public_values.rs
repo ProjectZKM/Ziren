@@ -1,11 +1,11 @@
 use itertools::Itertools;
 use zkm_derive::AlignedBorrow;
+use zkm_pcs::{air::PV_DIGEST_NUM_WORDS, Word};
 use zkm_recursion_compiler::ir::{Builder, Felt};
 use zkm_recursion_core::{
     air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
     DIGEST_SIZE,
 };
-use zkm_stark::{air::PV_DIGEST_NUM_WORDS, Word};
 
 use crate::{hash::Poseidon2KoalaBearHasherVariable, CircuitConfig};
 
@@ -42,20 +42,6 @@ where
     H::poseidon2_hash(builder, &pv_slice[..NUM_PV_ELMS_TO_HASH])
 }
 
-/// Assert that the digest of the root public values is correct.
-pub(crate) fn assert_root_public_values_valid<C, H>(
-    builder: &mut Builder<C>,
-    public_values: &RootPublicValues<Felt<C::F>>,
-) where
-    C: CircuitConfig,
-    H: Poseidon2KoalaBearHasherVariable<C>,
-{
-    let expected_digest = root_public_values_digest::<C, H>(builder, &public_values.inner);
-    for (value, expected) in public_values.inner.digest.iter().copied().zip_eq(expected_digest) {
-        builder.assert_felt_eq(value, expected);
-    }
-}
-
 /// Compute the digest of the root public values.
 pub(crate) fn root_public_values_digest<C, H>(
     builder: &mut Builder<C>,
@@ -69,6 +55,8 @@ where
         .zkm_vk_digest
         .into_iter()
         .chain(public_values.committed_value_digest.into_iter().flat_map(|word| word.0.into_iter()))
+        .chain(core::iter::once(public_values.exit_code))
+        .chain(public_values.vk_root)
         .collect::<Vec<_>>();
     H::poseidon2_hash(builder, &input)
 }
@@ -88,8 +76,27 @@ impl<T> RootPublicValues<T> {
         &self.inner.committed_value_digest
     }
 
+    /// The completeness flag reflected from the proof this root wraps.
+    ///
+    /// Every predicate of `assert_complete` is gated on it, so a host verifier
+    /// that does not check it accepts a wrapped proof of an execution prefix.
+    #[inline]
+    pub const fn is_complete(&self) -> &T {
+        &self.inner.is_complete
+    }
+
     #[inline]
     pub const fn digest(&self) -> &[T; DIGEST_SIZE] {
         &self.inner.digest
+    }
+
+    #[inline]
+    pub const fn exit_code(&self) -> &T {
+        &self.inner.exit_code
+    }
+
+    #[inline]
+    pub const fn vk_root(&self) -> &[T; DIGEST_SIZE] {
+        &self.inner.vk_root
     }
 }

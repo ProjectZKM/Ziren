@@ -8,6 +8,5 @@ pub fn main() {
     for _ in 0..25 {
         let mut state = [1u8; 100];
         keccak256(&mut state);
-        //println!("{:?}", state);
     }
 }

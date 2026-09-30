@@ -40,14 +40,12 @@ impl NewCmd {
     pub fn run(&self) -> Result<()> {
         let root = Path::new(&self.name);
 
-        // Create the root directory if it doesn't exist.
         if !root.exists() {
             fs::create_dir(&self.name)?;
         }
 
         println!("     \x1b[1m{}\x1b[0m {}", Paint::green("Cloning"), TEMPLATE_REPOSITORY_URL);
 
-        // Clone the repository with the specified version.
         let mut command = Command::new("git");
 
         command
@@ -58,7 +56,6 @@ impl NewCmd {
             .arg(root.as_os_str())
             .arg("--depth=1");
 
-        // Stream output to stdout.
         command.stdout(Stdio::inherit()).stderr(Stdio::piped());
 
         let output = command.output().expect("failed to execute command");
@@ -67,11 +64,9 @@ impl NewCmd {
             return Err(anyhow::anyhow!("Failed to clone repository: {stderr}"));
         }
 
-        // Remove the .git directory.
         fs::remove_dir_all(root.join(".git"))?;
 
         if self.template.evm {
-            // Check if the user has `foundry` installed.
             if Command::new("forge").arg("--version").output().is_err() {
                 println!(
                     "    \x1b[1m{}\x1b[0m Make sure to install Foundry and run `forge install` in the \"contracts\" folder to use contracts: https://book.getfoundry.sh/getting-started/installation",
@@ -84,10 +79,8 @@ impl NewCmd {
                     );
             }
         } else {
-            // Remove the `contracts` directory.
             fs::remove_dir_all(root.join("contracts"))?;
 
-            // Remove the `.gitmodules` file.
             fs::remove_file(root.join(".gitmodules"))?;
         }
 

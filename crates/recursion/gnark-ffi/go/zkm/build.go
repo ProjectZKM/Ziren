@@ -1,35 +1,69 @@
 package zkm
 
 import (
-    "bufio"
+	"bufio"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log"
-	"os"
-	"strings"
-	"path/filepath"
-    "io"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/trusted_setup"
 	"github.com/consensys/gnark-crypto/ecc"
+	fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/consensys/gnark-crypto/kzg"
 	groth16 "github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/backend/plonk"
 	"github.com/consensys/gnark/constraint"
+	bcs "github.com/consensys/gnark/constraint/bn254"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/frontend/cs/scs"
 	"github.com/consensys/gnark/test/unsafekzg"
-	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/trusted_setup"
-	bcs "github.com/consensys/gnark/constraint/bn254"
-    fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 )
 
+// buildMutex serializes the build entry points: the circuit configuration is
+// read from process-global environment variables, so two builds in one process
+// would otherwise race on each other's constraints file and Groth16 flag.
+var buildMutex sync.Mutex
+
+// withBuildConfig runs `body` with CONSTRAINTS_JSON and GROTH16 set for this
+// build, under buildMutex, and restores both variables afterwards so a later
+// build or prove in the same process starts from the state it found.
+func withBuildConfig(constraintsJson string, groth16 bool, body func()) {
+	buildMutex.Lock()
+	defer buildMutex.Unlock()
+	prevConstraints, hadConstraints := os.LookupEnv("CONSTRAINTS_JSON")
+	prevGroth16, hadGroth16 := os.LookupEnv("GROTH16")
+	defer func() {
+		restoreEnv("CONSTRAINTS_JSON", prevConstraints, hadConstraints)
+		restoreEnv("GROTH16", prevGroth16, hadGroth16)
+	}()
+	os.Setenv("CONSTRAINTS_JSON", constraintsJson)
+	if groth16 {
+		os.Setenv("GROTH16", "1")
+	} else {
+		os.Unsetenv("GROTH16")
+	}
+	body()
+}
+
+func restoreEnv(key string, value string, present bool) {
+	if present {
+		os.Setenv(key, value)
+	} else {
+		os.Unsetenv(key)
+	}
+}
+
 func BuildPlonk(dataDir string) {
-	// Set the environment variable for the constraints file.
-	//
-	// TODO: There might be some non-determinism if a single process is running this command
-	// multiple times.
-	os.Setenv("CONSTRAINTS_JSON", dataDir+"/"+constraintsJsonFile)
+	withBuildConfig(dataDir+"/"+constraintsJsonFile, false, func() { buildPlonk(dataDir) })
+}
+
+func buildPlonk(dataDir string) {
 
 	// Read the file.
 	witnessInputPath := dataDir + "/" + plonkWitnessPath
@@ -100,11 +134,11 @@ func BuildPlonk(dataDir string) {
 				panic(err)
 			}
 
-			_, err = srsLagrange.ReadFrom(srsLagrangeFile)
+			srsLagrange = trusted_setup.ToLagrange(scs, srs)
+			_, err = srsLagrange.WriteTo(srsLagrangeFile)
 			if err != nil {
 				panic(err)
 			}
-
 		}
 	} else {
 		srs, srsLagrange, err = unsafekzg.NewSRS(scs)
@@ -202,12 +236,10 @@ func BuildPlonk(dataDir string) {
 }
 
 func BuildGroth16(dataDir string) {
-	// Set the environment variable for the constraints file.
-	//
-	// TODO: There might be some non-determinism if a single process is running this command
-	// multiple times.
-	os.Setenv("CONSTRAINTS_JSON", dataDir+"/"+constraintsJsonFile)
-	os.Setenv("GROTH16", "1")
+	withBuildConfig(dataDir+"/"+constraintsJsonFile, true, func() { buildGroth16(dataDir) })
+}
+
+func buildGroth16(dataDir string) {
 
 	// Read the file.
 	witnessInputPath := dataDir + "/" + groth16WitnessPath
@@ -304,7 +336,6 @@ func BuildGroth16(dataDir string) {
 	}
 }
 
-
 // Dump writes the coefficient table and the fully‑expanded R1Cs rows into w.
 // Caller decides where w points to (file, buffer, network, …).
 // Dump writes the coefficient table and the fully-expanded R1Cs rows into w.
@@ -312,7 +343,7 @@ func BuildGroth16(dataDir string) {
 // through an internal bufio.Writer and uses raw little-endian encodes for
 // scalars to avoid reflection overhead in binary.Write.
 func Dump(r1cs *bcs.R1CS, w io.Writer) error {
-// Wrap the destination with a large buffered writer (1 MiB; tune as needed).
+	// Wrap the destination with a large buffered writer (1 MiB; tune as needed).
 	bw := bufio.NewWriterSize(w, 1<<20)
 	defer bw.Flush() // ensure everything is pushed downstream
 
@@ -381,8 +412,8 @@ func Dump(r1cs *bcs.R1CS, w io.Writer) error {
 }
 
 func DumpR1CSIfItExists(storeDir string) bool {
-    // Check input exists
-    cacheFilePath := filepath.Join(storeDir, "r1cs_cached")
+	// Check input exists
+	cacheFilePath := filepath.Join(storeDir, "r1cs_cached")
 	if stat, err := os.Stat(cacheFilePath); err != nil {
 		// doesn't exist or not accessible
 		return false
@@ -420,18 +451,15 @@ func DumpR1CSIfItExists(storeDir string) bool {
 }
 
 func BuildDvSnark(dataDir string, storeDir string) {
-    r1cs_dumped := DumpR1CSIfItExists(storeDir)
+	withBuildConfig(dataDir+"/"+constraintsJsonFile, true, func() { buildDvSnark(dataDir, storeDir) })
+}
+
+func buildDvSnark(dataDir string, storeDir string) {
+	r1cs_dumped := DumpR1CSIfItExists(storeDir)
 	if r1cs_dumped {
 		fmt.Println("r1cs_cache already exists, converted to format r1cs_to_dvsnark")
 		return
 	}
-
-	// Set the environment variable for the constraints file.
-	//
-	// TODO: There might be some non-determinism if a single process is running this command
-	// multiple times.
-	os.Setenv("CONSTRAINTS_JSON", dataDir+"/"+constraintsJsonFile)
-	os.Setenv("GROTH16", "1")
 
 	// Read the file.
 	witnessInputPath := dataDir + "/" + dvsnarkWitnessPath
@@ -452,54 +480,54 @@ func BuildDvSnark(dataDir string, storeDir string) {
 
 	// Compile the circuit.
 	r1cs, err := frontend.Compile(fr.Modulus(), r1cs.NewBuilder, &circuit)
-    if err != nil {
+	if err != nil {
 		panic(err)
 	}
 
 	{
-        // benchmark
-        nbCoeff := r1cs.GetNbCoefficients()
-        bytesCoeffTable := nbCoeff * 32
-        fmt.Printf("Coeff-table: %d elements  ≈  %d bytes\n",
-            nbCoeff, bytesCoeffTable)
+		// benchmark
+		nbCoeff := r1cs.GetNbCoefficients()
+		bytesCoeffTable := nbCoeff * 32
+		fmt.Printf("Coeff-table: %d elements  ≈  %d bytes\n",
+			nbCoeff, bytesCoeffTable)
 
-        var nTerms int
+		var nTerms int
 
-	    r1cs_contr := r1cs.(*bcs.R1CS)
-        for _, r := range r1cs_contr.GetR1Cs() { // materialises each row once
-            nTerms += len(r.L) + len(r.R) + len(r.O) // three linear-expressions
-        }
-        fmt.Printf("Total terms in matrix: %d  (≈ %d bytes)\n",
-        			nTerms, nTerms*8) // a Term is 2×uint32 = 8 B
+		r1cs_contr := r1cs.(*bcs.R1CS)
+		for _, r := range r1cs_contr.GetR1Cs() { // materialises each row once
+			nTerms += len(r.L) + len(r.R) + len(r.O) // three linear-expressions
+		}
+		fmt.Printf("Total terms in matrix: %d  (≈ %d bytes)\n",
+			nTerms, nTerms*8) // a Term is 2×uint32 = 8 B
 
-	    num_vars := (r1cs.GetNbSecretVariables() + r1cs.GetNbPublicVariables() + r1cs.GetNbInternalVariables())
-        naive := 3 * r1cs.GetNbConstraints() * num_vars * 32
+		num_vars := (r1cs.GetNbSecretVariables() + r1cs.GetNbPublicVariables() + r1cs.GetNbInternalVariables())
+		naive := 3 * r1cs.GetNbConstraints() * num_vars * 32
 
-        fmt.Printf("Naive cost num_vars=(%d) num_constraints=(%d)  (≈ %d bytes)\n", num_vars, r1cs.GetNbConstraints(), naive) // a Term is 2×uint32 = 8 B
-    }
+		fmt.Printf("Naive cost num_vars=(%d) num_constraints=(%d)  (≈ %d bytes)\n", num_vars, r1cs.GetNbConstraints(), naive) // a Term is 2×uint32 = 8 B
+	}
 
 	{
-        r1cs_fn := filepath.Join(storeDir, "r1cs_cached")
-        file, err := os.Create(r1cs_fn)
-        if err != nil {
-            log.Fatalf("Failed to create file: %v", err)
-        }
-        defer file.Close()
-        bytesWritten, err := r1cs.WriteTo(file)
-        if err != nil {
-            panic("err is not nil for solve")
-        }
-        fmt.Printf("Successfully wrote %d bytes to %s\n", bytesWritten, r1cs_fn)
-    }
+		r1cs_fn := filepath.Join(storeDir, "r1cs_cached")
+		file, err := os.Create(r1cs_fn)
+		if err != nil {
+			log.Fatalf("Failed to create file: %v", err)
+		}
+		defer file.Close()
+		bytesWritten, err := r1cs.WriteTo(file)
+		if err != nil {
+			panic("err is not nil for solve")
+		}
+		fmt.Printf("Successfully wrote %d bytes to %s\n", bytesWritten, r1cs_fn)
+	}
 
-    {
-        r1cs_fn := filepath.Join(storeDir, "r1cs_to_dvsnark")
-        file, err := os.Create(r1cs_fn)
-        if err != nil {
-            log.Fatalf("Failed to create file: %v", err)
-        }
-        defer file.Close()
-        r1cs_contr := r1cs.(*bcs.R1CS)
-        Dump(r1cs_contr, file)
-    }
+	{
+		r1cs_fn := filepath.Join(storeDir, "r1cs_to_dvsnark")
+		file, err := os.Create(r1cs_fn)
+		if err != nil {
+			log.Fatalf("Failed to create file: %v", err)
+		}
+		defer file.Close()
+		r1cs_contr := r1cs.(*bcs.R1CS)
+		Dump(r1cs_contr, file)
+	}
 }

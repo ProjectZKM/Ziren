@@ -90,7 +90,6 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
         b_bits_le: &[bool],
         mut b: Self,
     ) -> Self {
-        // The length of the bit vectors must be the same.
         debug_assert!(a_bits_le.len() == b_bits_le.len());
 
         let mut res: Self = Self::identity();
@@ -153,38 +152,28 @@ pub trait WeierstrassAffinePoint<const N: usize>: AffinePoint<N> {
     /// Implements the complete addition cases according to the
     /// [Zcash complete addition spec](https://zcash.github.io/halo2/design/gadgets/ecc/addition.html#complete-addition).
     fn weierstrass_add_assign(&mut self, other: &Self) {
-        // Case 1: p1 is infinity.
         if self.is_infinity() {
             *self = other.clone();
             return;
         }
 
-        // Case 2: p2 is infinity.
         if other.is_infinity() {
             return;
         }
 
-        // Once it's known the points are not infinity, their limbs can be safely used.
         let p1 = self.limbs_mut();
         let p2 = other.limbs_ref();
 
-        // Case 3: p1 equals p2.
         if p1 == p2 {
             self.double();
             return;
         }
 
-        // Case 4: p1 is the negation of p2.
-        // Note: If p1 and p2 are valid elliptic curve points, and p1.x == p2.x, that means that
-        // either p1.y == p2.y or p1.y + p2.y == p. Because we are past Case 3, we know that p1.y !=
-        // p2.y, so we can just check if p1.x == p2.x. Therefore, this implicitly checks that
-        // p1.x == p2.x AND p1.y + p2.y == p without modular negation.
         if p1[..N / 2] == p2[..N / 2] {
             *self = Self::infinity();
             return;
         }
 
-        // Case 5: Default addition.
         self.add_assign(other);
     }
 }

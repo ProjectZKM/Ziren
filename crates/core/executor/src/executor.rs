@@ -5,24 +5,20 @@ use std::{
 };
 
 use super::program::MAX_MEMORY;
-use enum_map::EnumMap;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zkm_curves::CurveError;
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 use crate::{
     context::ZKMContext,
-    dependencies::{
-        emit_branch_dependencies, emit_cloclz_dependencies, emit_divrem_dependencies,
-        emit_jump_dependencies, emit_memory_dependencies, emit_misc_dependencies,
-    },
-    estimate_mips_event_counts, estimate_mips_lde_size,
+    estimate_mips_lde_size,
     events::{
         AluEvent, BranchEvent, CompAluEvent, CpuEvent, JumpEvent, MemInstrEvent,
-        MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord,
-        MemoryRecord, MemoryRecordEnum, MemoryWriteRecord, MiscEvent, MovCondEvent, SyscallEvent,
+        MemoryAccessPosition, MemoryBumpEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
+        MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord, MiscEvent,
+        MovCondEvent, SyscallEvent,
     },
     hook::{HookEnv, HookRegistry},
     memory::{Entry, Memory},
@@ -33,7 +29,7 @@ use crate::{
     subproof::SubproofVerifier,
     syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
     ExecutionReport, Instruction, MaximalShapes, MipsAirId, Opcode, Program, Register,
-    NUM_REGISTERS,
+    ShardSplitAccumulator, NUM_REGISTERS,
 };
 
 /// The maximum number of instructions in a program.
@@ -45,6 +41,114 @@ pub const DEFAULT_PC_INC: u32 = 4;
 /// This is used in the `InstrEvent` to indicate that the instruction is not from the CPU.
 /// A valid pc should be divisible by 4, so we use 1 to indicate that the pc is not used.
 pub const UNUSED_PC: u32 = 1;
+
+/// A valid core shard must satisfy TWO hard bounds that the `SHARD_SIZE` cycle budget does
+/// NOT imply at its current default:
+///
+///  1. Every chip's trace height must fit the recursion's per-chip cube cap
+///     `2^CORE_MAX_LOG_ROW_COUNT` — see [`CORE_SHARD_HEIGHT_THRESHOLD`].
+///  2. Every per-shard `clk` (timestamp) must fit the width the memory argument range-checks
+///     timestamp differences to — see
+///     `crates/core/machine/src/air/memory.rs::send_timestamp_range_checks` and
+///     `eval_memory_access_timestamp`, and [`CORE_SHARD_CLK_LIMIT`].
+///
+/// `SHARD_SIZE` is stored as `cycles * 4` and the cycle exit fires at `clk >= 4 * SHARD_SIZE`,
+/// so a `SHARD_SIZE` of exactly `2^22` would coincide with the OLD 24-bit form of bound (2).
+/// The default is `1 << 24` (`zkm_pcs::opts::ZKMCoreOpts::default`), so the cycle exit is
+/// unreachable and bounds (1)/(2) must be — and are — enforced directly here. Because
+/// `clk += 5` per instruction, bound (2) caps any shard at `CORE_SHARD_CLK_LIMIT / 5` cycles no
+/// matter what `SHARD_SIZE` says. At the old 24-bit width that was 3.355 M cycles and it was the
+/// bound that fired: over a 60-shard reth block the close reasons were clk 52 / area 7 / final 1,
+/// with the clk-closed shards stopping at 470-488 M cells against a 500 M budget. At 25 bits it
+/// is 6.71 M cycles and the trace-area bound (1) is the one that binds again.
+const CORE_MAX_LOG_ROW_COUNT: usize =
+    zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
+
+/// The per-chip height at which the executor forces a new core shard.
+///
+/// Tied to the recursion's per-chip cube cap so the two stay consistent: splitting once the
+/// tallest chip reaches this height keeps every chip within `2^CORE_MAX_LOG_ROW_COUNT` rows —
+/// exactly the cube the base-cube recursion (and hence vk_map / the gnark ceremony) is pinned
+/// to verify. The `CORE_SHARD_HEIGHT_HEADROOM` band below the cube keeps the tallest chip
+/// strictly under it (>= 1 padding row) and absorbs the coarseness of the mid-shard height
+/// estimate, which is refreshed only every `shape_check_frequency` cycles and omits some
+/// dependency rows, so the real trace height cannot overshoot the cube between checks.
+const CORE_SHARD_HEIGHT_HEADROOM: u64 = 1 << 16;
+const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SHARD_HEIGHT_HEADROOM;
+
+/// The `clk` (timestamp) ceiling for a single core shard.
+///
+/// This is the executor half of ONE argument whose other half is
+/// `MemoryAirBuilder::send_timestamp_range_checks` (`TIMESTAMP_HIGH_LIMB_BITS`). The memory
+/// argument orders two accesses to the same address by range-checking `current - prev - 1` to
+/// `2^26`, which proves `current > prev`
+/// only when BOTH comparands are themselves bounded by `2^26` and the field is large enough that
+/// an underflow cannot land back inside the range (`p >= 2^26`; KoalaBear's
+/// `p = 2^31 - 2^24 + 1` allows widths up to 29 bits). The AIR supplies the bound on each
+/// comparand — 16- and 8-bit limbs from the byte table plus a boolean top bit — and this
+/// constant is what makes it true of the timestamps the executor actually emits.
+///
+/// So the two numbers are the same number. Raising this without widening the range check makes
+/// the argument INCOMPLETE (a legal gap stops fitting the limbs, and the shard becomes
+/// unprovable); widening the range check without a matching bound here makes it UNSOUND.
+///
+/// The margin below the fence is deliberate: the check runs BEFORE the next instruction, which
+/// executes at `clk` and places its register / memory accesses at `clk + 1 ..= clk + 4`
+/// (`MemoryAccessPosition`), while a syscall additionally consumes up to `max_syscall_cycles`
+/// further timestamps. Subtracting both keeps every timestamp that reaches the memory argument
+/// strictly under the fence.
+///
+/// At `clk += 5` per instruction this caps any shard at `2^26 / 5 ≈ 13.4 M` cycles.
+/// Measured Sep 6 at 25 bits (8 M shards, reth): the clk fence closed 29 of 48 execution shards
+/// at 6.71 M cycles with only ~363 M of the 460 M-cell area budget used, so the width was the
+/// binding fence; at 26 bits `ELEMENT_THRESHOLD` (trace area) binds again.
+pub(crate) const CORE_SHARD_CLK_LIMIT: u32 = 1 << 25;
+
+/// BLOCK-START RAMP.  A block's first shards decide how quickly every card can
+/// start: a card cannot prove what the parent has not cut yet.  MEASURED on 76
+/// production blocks at 8 cards: the first shard ships 84 ms in and all eight
+/// cards are busy by 336 ms, but the cards then run dry -- 70% of ALL card idle
+/// (7.0 s per block summed over 8 cards, ~0.9 s per card) falls in the first two
+/// seconds, and in that window the parent's wait for a free card slot is ZERO at
+/// 19 ships/s.  The parent is flat out and still cannot fill 8 x 4 queue slots;
+/// from the third second on it waits 44-56 ms per ship, i.e. the steady state is
+/// card-bound, which is why "host starvation" was refuted when measured there.
+///
+/// So the first shards are cut at a fraction of the area budget: smaller shards
+/// close sooner, so shards-per-second rises exactly while the cards are starving.
+/// The cost is the per-shard fixed overhead (~0.111 s of card time) on the few
+/// extra shards, against the idle it removes -- and that trade is TIGHT.
+/// MEASURED on 4 cards, ABBA on a cached block: 16 shards at a quarter of the
+/// budget cut early idle 3,290 -> 950 ms/block (-71%) but added 12 shards (82 ->
+/// 94) and 6 compose nodes, and the wall went 12.94 -> 13.22 s. Half the ramp
+/// at half the cut keeps most of the idle win for a third of the extra shards.
+const RAMP_SHARDS: u32 = 8;
+/// The first [`RAMP_SHARDS`] shards close at `1 / 2^RAMP_AREA_SHIFT` of the area
+/// budget.
+const RAMP_AREA_SHIFT: u32 = 1;
+
+/// Whether to log one `SHARD_CLOSE` line per closed core shard, naming the
+/// fence that closed it.  Read once; off unless `ZIREN_SHARD_CLOSE_CENSUS` is
+/// `1`/`true`.
+fn shard_close_census_enabled() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| {
+        matches!(
+            std::env::var("ZIREN_SHARD_CLOSE_CENSUS").ok().as_deref(),
+            Some("1") | Some("true")
+        )
+    })
+}
+
+/// How often the offline shape-search tooling (`lde_size_check` / `maximal_shapes`) samples the
+/// live chip heights.
+///
+/// This is NOT a production knob. The two limits that actually close shards — trace area and
+/// per-chip height — are exact on every cycle and have no frequency at all; this constant only
+/// bounds the cost of the O(shapes x chips) scan that a populated `core_shape_config` and the
+/// `find_maximal_shapes` script enable, neither of which runs on the prove path. It is the
+/// former `SHAPE_CHECK_FREQUENCY` default, kept so that tooling behaves exactly as before.
+const SHAPE_SEARCH_CHECK_FREQUENCY: u64 = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Whether to verify deferred proofs during execution.
@@ -95,12 +199,11 @@ pub struct Executor<'a> {
     /// The options for the runtime.
     pub opts: ZKMCoreOpts,
 
-    /// Memory addresses that were touched in this batch of shards. Used to minimize the size of
-    /// checkpoints.
+    /// Memory addresses touched in this batch of shards; keeps checkpoints minimal.
     pub memory_checkpoint: Memory<Option<MemoryRecord>>,
 
-    /// Memory addresses that were initialized in this batch of shards. Used to minimize the size of
-    /// checkpoints. The value stored is whether it had a value at the beginning of the batch.
+    /// Memory addresses initialized in this batch of shards; keeps checkpoints minimal. The
+    /// stored value says whether the address held a value at the start of the batch.
     pub uninitialized_memory_checkpoint: Memory<bool>,
 
     /// The memory accesses for the current cycle.
@@ -123,10 +226,33 @@ pub struct Executor<'a> {
     pub records: Vec<ExecutionRecord>,
 
     /// Local memory access events.
-    pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
+    ///
+    /// switched from `HashMap<…>` (ahash)
+    /// to `IntMap<…>` (NoHashHasher) — u32 keys don't need hash mixing
+    /// since the HashMap probe sequence handles collision distribution.
+    /// Cuts per-cycle HashMap overhead in half for user-memory accesses
+    /// (addresses >= 36) that bypass the register-slot fast path.
+    pub local_memory_access: nohash_hasher::IntMap<u32, MemoryLocalEvent>,
+
+    /// fast-path register-slot mirror
+    /// of `local_memory_access`. MIPS register addresses are 0..36
+    /// (32 GPRs + HI/LO/BRK/HEAP) and dominate per-cycle access
+    /// patterns. Every ALU is 3 register touches; every memory op is
+    /// 2-3 register touches + 1 user-memory touch. Mirroring registers
+    /// into a fixed `[Option<MemoryLocalEvent>; 36]` skips the
+    /// HashMap hash + probe for the ~95% case. User-memory addresses
+    /// (>= 36) still flow through the HashMap. Drained alongside the
+    /// HashMap at `bump_record`.
+    pub local_reg_access: [Option<MemoryLocalEvent>; 36],
 
     /// A counter for the number of cycles that have been executed in certain functions.
-    pub cycle_tracker: HashMap<String, (u64, u32)>,
+    /// Open cycle-tracker scopes, innermost LAST.
+    ///
+    /// A STACK, not a name-keyed map: as a map, starting an already-open name
+    /// silently overwrote its start clock, ending an outer name while an inner
+    /// one was still open succeeded, and both produced plausible but wrong
+    /// attribution. Depth is the index, so it cannot disagree with nesting.
+    pub cycle_tracker: Vec<(String, u64)>,
 
     /// A buffer for stdout and stderr IO.
     pub io_buf: HashMap<u32, String>,
@@ -140,29 +266,168 @@ pub struct Executor<'a> {
     /// Report of the program execution.
     pub report: ExecutionReport,
 
-    /// Statistics for event counts.
-    pub local_counts: LocalCounts,
+    /// Exact, incrementally-maintained trace area / tallest-chip height for the shard being
+    /// executed. Read by [`Self::inc_shard_if_need`] as an O(1) pair of comparisons.
+    pub split_acct: ShardSplitAccumulator,
 
-    /// Verifier used to sanity check `verify_zkm_proof` during runtime.
+    /// The fingerprint of the shard that just closed, waiting for
+    /// [`Self::bump_record`] to stamp it on that shard's [`TraceChunk`].  Set
+    /// in the close path while `split_acct` still holds the shard's heights;
+    /// `bump_record` runs after the per-shard reset, so it cannot compute it.
+    pub pending_shape_fingerprint: u64,
+    /// The per-slot classes behind it; see `TraceChunk::shape_classes`.
+    pub pending_shape_classes: Vec<u8>,
+    /// The area behind it; see `TraceChunk::shape_area`.
+    pub pending_shape_area: u64,
+
+    /// Verifier that sanity-checks `verify_zkm_proof` calls at runtime.
     pub subproof_verifier: Option<&'a dyn SubproofVerifier>,
 
     /// Registry of hooks, to be invoked by writing to certain file descriptors.
     pub hook_registry: HookRegistry<'a>,
 
     /// The maximal shapes for the program.
+    ///
+    /// `None` on the production prove path — it is set from
+    /// `prover.core_shape_config`, which only the offline shape tooling
+    /// populates.  See the `shape_match_found` note in `inc_shard_if_need`.
     pub maximal_shapes: Option<MaximalShapes>,
 
     /// The costs of the program.
     pub costs: HashMap<MipsAirId, u64>,
 
-    /// The frequency to check the stopping condition.
-    pub shape_check_frequency: u64,
-
     /// Early exit if the estimate LDE size is too big.
+    ///
+    /// `false` everywhere except the offline `find_maximal_shapes` script.
     pub lde_size_check: bool,
 
     /// The maximum LDE size to allow.
+    ///
+    /// Defaults to `0`, so [`Self::lde_size_check`] must never be enabled without
+    /// also setting this — otherwise `padded_lde_size > 0` holds on every check and
+    /// the executor closes a shard at every `SHAPE_SEARCH_CHECK_FREQUENCY` boundary.
     pub lde_size_threshold: u64,
+
+    /// optional MinimalTrace collector. When `Some`,
+    /// each `bump_record()` push also stamps a `TraceChunk` capturing
+    /// (clk, pc, registers) so a subsequent parallel `TracingVM` can
+    /// replay each shard independently. `None` (default) records
+    /// nothing and costs nothing.
+    pub minimal_trace_collector: Option<crate::minimal_trace::MinimalTrace>,
+
+    /// Skip replay-irrelevant
+    /// bookkeeping in `execute_operation`. When set, the executor:
+    ///   - skips `report.opcode_counts` increments (per cycle)
+    ///   - skips the `split_acct` trace-area / height accumulation (per cycle)
+    ///   - skips the per-class branch/jump opcode-count adjustments
+    ///     (~30 LOC of bookkeeping per cycle)
+    ///
+    /// These are all duplicate work in TracingVM replay — they were
+    /// already computed during the original checkpoint-gen pass, and
+    /// the worker's `report`/`local_counts` outputs are discarded.
+    /// Default false; TracingVM workers set true.
+    pub skip_replay_bookkeeping: bool,
+
+    /// Run every instruction in the interpreter even when the native
+    /// minimal-trace producer would take the program. Only the A/B tests
+    /// that compare the two set this.
+    #[doc(hidden)]
+    pub force_interpreter: bool,
+
+    /// The hint stream was RECORDED by a prior pass and pre-seeded, so the
+    /// syscalls that would produce it must not run again.
+    ///
+    /// `FD_HINT` pushes onto `state.input_stream` and a registered hook splices
+    /// its results in at the cursor (`syscalls::write::write_fd`).  On a replay
+    /// seeded with the finished stream those entries are already present, so
+    /// re-producing them would double every hint and shift the cursor -- and
+    /// would re-run each hook's side effects once per parallel worker.
+    ///
+    /// Default false; TracingVM workers set true when a stream is seeded.
+    pub hint_stream_prerecorded: bool,
+
+    /// Flat guest memory of the minimal-trace PRODUCER, `Some` from the
+    /// first [`Self::execute_minimal`] on (Linux). While set,
+    /// `state.memory.page_table` is EMPTY and every user word lives here:
+    /// [`Self::mr`], [`Self::mw`], [`Self::word`] and
+    /// [`Self::word_traced`] take their flat branch first, an unconstrained
+    /// block is a copy-on-write view of it, and
+    /// [`Self::seal_minimal_trace_final_memory`] walks its committed pages.
+    /// Registers stay in `state.memory.registers`. See [`crate::flat_mem`].
+    pub flat_mem: Option<Box<crate::flat_mem::FlatMem>>,
+
+    /// In-flight buffer for the current
+    /// chunk's mem_reads oracle. Populated by `mr()` whenever the
+    /// `minimal_trace_collector` is `Some`. Drained at `bump_record()`
+    /// when the chunk closes — the accumulated entries become the
+    /// previous chunk's `mem_reads` field (moved, not copied).
+    pub recording_chunk_mem_reads: Vec<crate::minimal_trace::MemValue>,
+
+    /// Replay source for user-memory accesses: the chunk's oracle as a CURSOR.
+    ///
+    /// When set, `mr` / `mw` take the next entry as the pre-access record and
+    /// never read a value out of `state.memory` -- the oracle IS the memory.
+    /// Registers are excluded (the
+    /// producer records only `addr >= NUM_REGISTERS`); they come from the
+    /// chunk's `start_register_records`.
+    pub replay_mem: Option<crate::minimal_trace::ReplayMem>,
+
+    /// Producer: when set, the JIT fast-path
+    /// (`try_run_fast_jit`) captures a whole-program
+    /// [`crate::minimal_trace::TraceChunk`] via
+    /// `jit_runner::run_jit_capture_trace_chunk` instead of the plain
+    /// `run_jit`. The captured chunk lands in `d4_captured_chunk`.
+    /// Default false — zero effect on the production JIT path.
+    pub d4_capture_chunk: bool,
+
+    /// Producer: the whole-program chunk captured
+    /// by the last `run_fast` under `d4_capture_chunk`. `None` unless a
+    /// capture just ran (or the program fell back to the interpreter).
+    pub d4_captured_chunk: Option<crate::minimal_trace::TraceChunk>,
+}
+
+/// dispatch helper that picks the
+/// fastest sink for a local-memory-access update.
+///
+/// - `override_map`: passed-in syscall-context HashMap; if Some,
+///   wins (syscall context never touches registers but must use its
+///   own map for precompile lifetime).
+/// - `reg_slots`: fixed `[Option<MemoryLocalEvent>; 36]` mirror for
+///   register addresses (0..36). Skips HashMap hash + probe entirely.
+/// - `fallback_map`: executor's main HashMap; used for user-memory
+///   addresses (>= 36).
+#[inline]
+fn upsert_local_mem(
+    override_map: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
+    reg_slots: &mut [Option<MemoryLocalEvent>; 36],
+    fallback_map: &mut nohash_hasher::IntMap<u32, MemoryLocalEvent>,
+    addr: u32,
+    prev_record: MemoryRecord,
+    record: MemoryRecord,
+    is_register: bool,
+) {
+    if let Some(m) = override_map {
+        m.entry(addr).and_modify(|e| e.final_mem_access = record).or_insert(MemoryLocalEvent {
+            addr,
+            initial_mem_access: prev_record,
+            final_mem_access: record,
+        });
+    } else if is_register && (addr as usize) < 36 {
+        let slot = &mut reg_slots[addr as usize];
+        if let Some(e) = slot {
+            e.final_mem_access = record;
+        } else {
+            *slot = Some(MemoryLocalEvent {
+                addr,
+                initial_mem_access: prev_record,
+                final_mem_access: record,
+            });
+        }
+    } else {
+        fallback_map.entry(addr).and_modify(|e| e.final_mem_access = record).or_insert(
+            MemoryLocalEvent { addr, initial_mem_access: prev_record, final_mem_access: record },
+        );
+    }
 }
 
 /// The different modes the executor can run in.
@@ -177,17 +442,6 @@ pub enum ExecutorMode {
     Trace,
 }
 
-/// Information about event counts which are relevant for shape fixing.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct LocalCounts {
-    /// The event counts.
-    pub event_counts: Box<EnumMap<Opcode, u64>>,
-    /// The number of syscalls sent globally in the current shard.
-    pub syscalls_sent: usize,
-    /// The number of addresses touched in this shard.
-    pub local_mem: usize,
-}
-
 /// Errors that the [``Executor``] can throw.
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum ExecutionError {
@@ -199,6 +453,25 @@ pub enum ExecutionError {
     #[error("invalid memory access for opcode {0} and address {1}")]
     InvalidMemoryAccess(Opcode, u32),
 
+    /// A replay worker fell out of lockstep with the producer's capture.
+    ///
+    /// Either the memory oracle ran dry mid-chunk (`exhausted`, always a bug:
+    /// the reads after it came from the unseeded paged image) or the chunk
+    /// ended with entries left over, which means the replay took a different
+    /// path through the same cycles.
+    #[error(
+        "replay oracle out of lockstep: consumed {consumed} of {total} memory records \
+         (exhausted: {exhausted})"
+    )]
+    ReplayOracleDesync {
+        /// Accesses served before the chunk ended.
+        consumed: usize,
+        /// Accesses the producer captured.
+        total: usize,
+        /// Whether an access found the oracle already spent.
+        exhausted: bool,
+    },
+
     /// The execution failed with an unimplemented syscall.
     #[error("unimplemented syscall {0}")]
     UnsupportedSyscall(u32),
@@ -206,6 +479,10 @@ pub enum ExecutionError {
     /// The execution failed with an unimplemented instruction.
     #[error("unimplemented instruction {0}")]
     UnsupportedInstruction(u32),
+    /// The JIT's indirect dispatch was handed a jump target outside the
+    /// program.  Carries `(target, last_executed_pc)`.
+    #[error("JIT jump target {0:#010x} is outside the program (last pc {1:#010x})")]
+    JitJumpTargetOutOfRange(u32, u32),
 
     /// The execution failed with a breakpoint.
     #[error("breakpoint encountered")]
@@ -297,18 +574,34 @@ impl<'a> Executor<'a> {
     /// This function may panic if it fails to create the trace file if `TRACE_FILE` is set.
     #[must_use]
     pub fn with_context(program: Program, opts: ZKMCoreOpts, context: ZKMContext<'a>) -> Self {
-        // Create a shared reference to the program.
-        let program = Arc::new(program);
+        Self::with_context_shared(Arc::new(program), opts, context)
+    }
 
-        // Create a default record with the program.
-        let record = ExecutionRecord::new(program.clone());
+    /// As [`Self::with_context`], for a caller that already holds the program
+    /// behind an `Arc`.
+    ///
+    /// The executor keeps the program in an `Arc` regardless, so a caller that
+    /// has one is otherwise forced to deep-clone a whole `Program` — 800K
+    /// instructions plus the image for reth — only for it to be re-wrapped
+    /// here. The replay path builds one sub-executor per shard, so that clone
+    /// was per shard.
+    ///
+    /// # Panics
+    ///
+    /// This function may panic if it fails to create the trace file if `TRACE_FILE` is set.
+    #[must_use]
+    pub fn with_context_shared(
+        program: Arc<Program>,
+        opts: ZKMCoreOpts,
+        context: ZKMContext<'a>,
+    ) -> Self {
+        let event_reservation = (opts.shard_size / 8).max(1);
+        let record = ExecutionRecord::new_preallocated(program.clone(), event_reservation);
 
-        // Determine the maximum number of cycles for any syscall.
         let syscall_map = default_syscall_map();
         let max_syscall_cycles =
             syscall_map.values().map(|syscall| syscall.num_extra_cycles()).max().unwrap_or(0);
 
-        // If `TRACE_FILE`` is set, initialize the trace buffer.
         let trace_buf = if let Ok(trace_file) = std::env::var("TRACE_FILE") {
             let file = File::create(trace_file).unwrap();
             Some(BufWriter::new(file))
@@ -318,7 +611,13 @@ impl<'a> Executor<'a> {
 
         let hook_registry = context.hook_registry.unwrap_or_default();
 
-        let costs = crate::mips_costs();
+        let costs: HashMap<MipsAirId, u64> =
+            crate::mips_costs().into_iter().map(|(k, v)| (k, v as u64)).collect();
+        let split_acct = ShardSplitAccumulator::new(
+            &costs,
+            opts.element_threshold as u64,
+            CORE_SHARD_HEIGHT_THRESHOLD,
+        );
 
         Self {
             record,
@@ -328,7 +627,7 @@ impl<'a> Executor<'a> {
             memory_accesses: MemoryAccessRecord::default(),
             shard_size: (opts.shard_size as u32) * 4,
             shard_batch_size: opts.shard_batch_size as u32,
-            cycle_tracker: HashMap::new(),
+            cycle_tracker: Vec::new(),
             io_buf: HashMap::new(),
             trace_buf,
             unconstrained: false,
@@ -338,7 +637,10 @@ impl<'a> Executor<'a> {
             emit_global_memory_events: true,
             max_syscall_cycles,
             report: ExecutionReport::default(),
-            local_counts: LocalCounts::default(),
+            split_acct,
+            pending_shape_fingerprint: 0,
+            pending_shape_classes: Vec::new(),
+            pending_shape_area: 0,
             print_report: false,
             subproof_verifier: context.subproof_verifier,
             hook_registry,
@@ -351,12 +653,21 @@ impl<'a> Executor<'a> {
             },
             memory_checkpoint: Memory::default(),
             uninitialized_memory_checkpoint: Memory::default(),
-            local_memory_access: HashMap::new(),
+            local_memory_access: nohash_hasher::IntMap::default(),
+            local_reg_access: std::array::from_fn(|_| None),
             maximal_shapes: None,
-            costs: costs.into_iter().map(|(k, v)| (k, v as u64)).collect(),
-            shape_check_frequency: opts.shape_check_frequency,
+            costs,
             lde_size_check: false,
             lde_size_threshold: 0,
+            minimal_trace_collector: None,
+            skip_replay_bookkeeping: false,
+            force_interpreter: false,
+            hint_stream_prerecorded: false,
+            flat_mem: None,
+            recording_chunk_mem_reads: Vec::new(),
+            replay_mem: None,
+            d4_capture_chunk: false,
+            d4_captured_chunk: None,
         }
     }
 
@@ -383,10 +694,15 @@ impl<'a> Executor<'a> {
     /// Recover runtime state from a program and existing execution state.
     #[must_use]
     pub fn recover(program: Program, state: ExecutionState, opts: ZKMCoreOpts) -> Self {
-        let mut runtime = Self::new(program, opts);
+        Self::recover_shared(Arc::new(program), state, opts)
+    }
+
+    /// As [`Self::recover`], for a caller that already holds an `Arc<Program>`
+    /// — see [`Self::with_context_shared`].
+    #[must_use]
+    pub fn recover_shared(program: Arc<Program>, state: ExecutionState, opts: ZKMCoreOpts) -> Self {
+        let mut runtime = Self::with_context_shared(program, opts, ZKMContext::default());
         runtime.state = state;
-        // Disable deferred proof verification since we're recovering from a checkpoint, and the
-        // checkpoint creator already had a chance to check the proofs.
         runtime.deferred_proof_verification = DeferredProofVerification::Disabled;
         runtime
     }
@@ -399,9 +715,6 @@ impl<'a> Executor<'a> {
         for i in 0..NUM_REGISTERS as u32 {
             let record = self.state.memory.registers.get(i);
 
-            // Only add the previous memory state to checkpoint map if we're in checkpoint mode,
-            // or if we're in unconstrained mode. In unconstrained mode, the mode is always
-            // Simple.
             if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
                 match record {
                     Some(record) => {
@@ -446,9 +759,19 @@ impl<'a> Executor<'a> {
     }
 
     /// Get the current value of a word.
+    ///
+    /// Under replay an address the chunk has not touched yet is absent from
+    /// the page table (the `mem_reads` oracle is a CURSOR, not a seed) and
+    /// reads 0 here; every recorded access goes through `mr`/`mw` and takes
+    /// its pre-access record from the cursor instead. The one unrecorded read
+    /// that feeds a recorded value -- the containing word a narrow store
+    /// merges into -- is served by [`Self::peek_replay_word`].
     #[must_use]
     #[inline]
     pub fn word(&mut self, addr: u32) -> u32 {
+        if let Some(flat) = self.flat_mem.as_deref() {
+            return flat.get(addr).value;
+        }
         #[allow(clippy::single_match_else)]
         let record = self.state.memory.page_table.get(addr);
 
@@ -467,6 +790,61 @@ impl<'a> Executor<'a> {
             Some(record) => record.value,
             None => 0,
         }
+    }
+
+    /// A syscall's read of a word it is about to overwrite and so does not
+    /// record (`SyscallContext::slice_unsafe`): the value the producer saw
+    /// still has to reach the replay, whose page table is empty: the producer
+    /// traces each word into the chunk's oracle and the replay consumes it.
+    /// Not an access -- no record is touched
+    /// -- so the entry carries the address's current record as it stands.
+    ///
+    /// Without this the replay read 0 (or a stale write) for the point a
+    /// `SECP256K1_ADD` overwrites: the event's `p` was wrong while its memory
+    /// records were right, which the chip's `populate` caught only when the
+    /// stale `p` happened to equal `q` (division by zero in the slope).
+    #[must_use]
+    #[inline]
+    pub fn word_traced(&mut self, addr: u32) -> u32 {
+        if self.replay_mem.is_some() {
+            if let Some(record) = self.take_replay_mem(addr) {
+                return record.value;
+            }
+        }
+        if let Some(flat) = self.flat_mem.as_deref() {
+            let e = *flat.get(addr);
+            if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+                self.recording_chunk_mem_reads.push(e.mem_value());
+            }
+            return e.value;
+        }
+        let value = self.word(addr);
+        if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+            let record = self.state.memory.page_table.get(addr).copied().unwrap_or_default();
+            self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
+                value,
+                shard: record.shard,
+                timestamp: record.timestamp,
+            });
+        }
+        value
+    }
+
+    /// Under replay, the PRE-access value of the address the very next
+    /// recorded access touches, without consuming the cursor entry.
+    ///
+    /// A narrow or unaligned store reads the containing word (an unrecorded
+    /// read) and merges its bytes into it; under replay that word may be
+    /// absent from the page table, and a zero there silently writes the bytes
+    /// alone: `(mem & mask) | val` with `mem == 0`. The write it feeds is the
+    /// very next recorded access on that same address, so the cursor head IS
+    /// the word's pre-access value. `None` off replay (or on an exhausted
+    /// oracle, reported by the consuming read that follows).
+    #[must_use]
+    #[inline]
+    fn peek_replay_word(&self) -> Option<u32> {
+        let cursor = self.replay_mem.as_ref()?;
+        cursor.entries.get(cursor.pos).map(|mv| mv.value)
     }
 
     /// Get the current value of a byte.
@@ -496,9 +874,25 @@ impl<'a> Executor<'a> {
         addr: u32,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
-        // Get the memory record entry.
+        if let Some(flat) = self.flat_mem.as_deref_mut() {
+            let e = flat.get_mut(addr);
+            let prev = e.mem_value();
+            if !self.unconstrained
+                && !self.skip_replay_bookkeeping
+                && (prev.shard != shard || local_memory_access.is_some())
+            {
+                self.split_acct.add_touched_address();
+            }
+            e.shard = shard;
+            e.timestamp = timestamp;
+            if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+                self.recording_chunk_mem_reads.push(prev);
+            }
+            return MemoryReadRecord::new(prev.value, shard, timestamp, prev.shard, prev.timestamp);
+        }
+        let replay_prev = self.take_replay_mem(addr);
         let entry = self.state.memory.page_table.entry(addr);
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
             match entry {
@@ -512,8 +906,6 @@ impl<'a> Executor<'a> {
             }
         }
 
-        // If we're in unconstrained mode, we don't want to modify state, so we'll save the
-        // original state if it's the first time modifying it.
         if self.unconstrained {
             let record = match entry {
                 Entry::Occupied(ref entry) => Some(entry.get()),
@@ -522,11 +914,9 @@ impl<'a> Executor<'a> {
             self.unconstrained_state.memory_diff.entry(addr).or_insert(record.copied());
         }
 
-        // If it's the first time accessing this address, initialize previous values.
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
                 let value = self.state.uninitialized_memory.page_table.get(addr).unwrap_or(&0);
                 self.uninitialized_memory_checkpoint
                     .page_table
@@ -536,40 +926,43 @@ impl<'a> Executor<'a> {
             }
         };
 
-        // We update the local memory counter in two cases:
-        //  1. This is the first time the address is touched, this corresponds to the
-        //     condition record.shard != shard.
-        //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
-        //     local_memory_access to detect this. *WARNING*: This means that we are counting
-        //     on the .is_some() condition to be true only in the SyscallContext.
-        if !self.unconstrained && (record.shard != shard || local_memory_access.is_some()) {
-            self.local_counts.local_mem += 1;
+        if !self.unconstrained
+            && !self.skip_replay_bookkeeping
+            && (record.shard != shard || local_memory_access.is_some())
+        {
+            self.split_acct.add_touched_address();
         }
 
-        let prev_record = *record;
+        let prev_record = match replay_prev {
+            Some(mv) => {
+                *record = mv;
+                mv
+            }
+            None => *record,
+        };
         record.shard = shard;
         record.timestamp = timestamp;
 
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
-
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                *record,
+                false,
+            );
         }
 
-        // Construct the memory read record.
+        if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+            self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
+                value: prev_record.value,
+                shard: prev_record.shard,
+                timestamp: prev_record.timestamp,
+            });
+        }
+
         MemoryReadRecord::new(
             record.value,
             record.shard,
@@ -583,7 +976,6 @@ impl<'a> Executor<'a> {
     ///
     /// Assumes that the executor mode IS NOT [`ExecutorMode::Trace`]
     pub fn rr(&mut self, register: Register, shard: u32, timestamp: u32) -> u32 {
-        // Get the memory record entry.
         let addr = register as u32;
         let entry = self.state.memory.registers.entry(addr);
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
@@ -598,8 +990,6 @@ impl<'a> Executor<'a> {
             }
         }
 
-        // If we're in unconstrained mode, we don't want to modify state, so we'll save the
-        // original state if it's the first time modifying it.
         if self.unconstrained {
             let record = match entry {
                 Entry::Occupied(ref entry) => Some(entry.get()),
@@ -608,11 +998,9 @@ impl<'a> Executor<'a> {
             self.unconstrained_state.memory_diff.entry(addr).or_insert(record.copied());
         }
 
-        // If it's the first time accessing this address, initialize previous values.
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
                 let value = self.state.uninitialized_memory.registers.get(addr).unwrap_or(&0);
                 self.uninitialized_memory_checkpoint
                     .registers
@@ -635,9 +1023,9 @@ impl<'a> Executor<'a> {
         register: Register,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
-        // Get the memory record entry.
+        let is_syscall_access = local_memory_access.is_some();
         let addr = register as u32;
         let entry = self.state.memory.registers.entry(addr);
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
@@ -651,8 +1039,6 @@ impl<'a> Executor<'a> {
                 }
             }
         }
-        // If we're in unconstrained mode, we don't want to modify state, so we'll save the
-        // original state if it's the first time modifying it.
         if self.unconstrained {
             let record = match entry {
                 Entry::Occupied(ref entry) => Some(entry.get()),
@@ -660,11 +1046,9 @@ impl<'a> Executor<'a> {
             };
             self.unconstrained_state.memory_diff.entry(addr).or_insert(record.copied());
         }
-        // If it's the first time accessing this address, initialize previous values.
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
                 let value = self.state.uninitialized_memory.registers.get(addr).unwrap_or(&0);
                 self.uninitialized_memory_checkpoint
                     .registers
@@ -676,31 +1060,75 @@ impl<'a> Executor<'a> {
         let prev_record = *record;
         record.shard = shard;
         record.timestamp = timestamp;
+        let cur_record = *record;
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                cur_record,
+                true,
+            );
         }
-        // Construct the memory read record.
+        let (prev_shard, prev_timestamp) =
+            self.bump_register_timestamp(addr, shard, prev_record, is_syscall_access);
         MemoryReadRecord::new(
-            record.value,
-            record.shard,
-            record.timestamp,
-            prev_record.shard,
-            prev_record.timestamp,
+            cur_record.value,
+            cur_record.shard,
+            cur_record.timestamp,
+            prev_shard,
+            prev_timestamp,
         )
+    }
+
+    /// Emit a register timestamp bump (a "shadow read") if this is the first touch of `addr` in
+    /// the current shard, and return the `(prev_shard, prev_timestamp)` that the register access
+    /// columns should witness.
+    ///
+    /// Registers carry their `(shard, clk)` across shard boundaries, so the first touch of a
+    /// register in a shard would otherwise witness `prev_shard < shard` and the access would have
+    /// to compare *shards* rather than clks.  The bump inserts a shadow read at `(shard, 0)`,
+    /// which is strictly below every real register access in the shard (those live at sub-cycle
+    /// positions `1..=4`, and `clk` restarts at 0 each shard), so it is always the first link of
+    /// the shard's access chain for that register.
+    ///
+    /// The resulting invariant — every register access has `prev_shard == shard` — is what lets
+    /// `RegisterAccessCols` drop `prev_shard`, `compare_clk` and `diff_8bit_limb` (9 columns to
+    /// 6).  The dropped shard comparison is paid for exactly once per (register, shard) by the
+    /// `MemoryBump` chip instead of once per first-touch.
+    ///
+    /// `is_syscall_access` says the access came through a [`crate::syscalls::SyscallContext`]
+    /// (i.e. `local_memory_access` was `Some`), which means it will be proven by a *precompile*
+    /// chip.  Those accesses must NOT be bumped: `ExecutionRecord::split` moves precompile events
+    /// into their own shard while `bump_memory_events` stays in the main record, so the shadow
+    /// read and the access it bumps would land in two different shards and leave the local memory
+    /// bus unbalanced in both.  Only the `Cpu` chip uses the 6-column `RegisterAccessCols` that
+    /// need `prev_shard == shard`; every precompile chip witnesses the full `MemoryAccessCols`
+    /// (`crate::air::MemoryAirBuilder::eval_memory_access`) and handles `prev_shard != shard`
+    /// itself.
+    #[inline]
+    fn bump_register_timestamp(
+        &mut self,
+        addr: u32,
+        shard: u32,
+        prev_record: MemoryRecord,
+        is_syscall_access: bool,
+    ) -> (u32, u32) {
+        if self.unconstrained || is_syscall_access || prev_record.shard == shard {
+            return (prev_record.shard, prev_record.timestamp);
+        }
+        if self.executor_mode == ExecutorMode::Trace {
+            self.record.bump_memory_events.push(MemoryBumpEvent {
+                addr,
+                shard,
+                value: prev_record.value,
+                prev_shard: prev_record.shard,
+                prev_timestamp: prev_record.timestamp,
+            });
+        }
+        (shard, 0)
     }
 
     /// Write a word to memory and create an access record.
@@ -710,9 +1138,33 @@ impl<'a> Executor<'a> {
         value: u32,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
-        // Get the memory record entry.
+        if let Some(flat) = self.flat_mem.as_deref_mut() {
+            let e = flat.get_mut(addr);
+            let prev = e.mem_value();
+            if !self.unconstrained
+                && !self.skip_replay_bookkeeping
+                && (prev.shard != shard || local_memory_access.is_some())
+            {
+                self.split_acct.add_touched_address();
+            }
+            e.value = value;
+            e.shard = shard;
+            e.timestamp = timestamp;
+            if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+                self.recording_chunk_mem_reads.push(prev);
+            }
+            return MemoryWriteRecord::new(
+                value,
+                shard,
+                timestamp,
+                prev.value,
+                prev.shard,
+                prev.timestamp,
+            );
+        }
+        let replay_prev = self.take_replay_mem(addr);
         let entry = self.state.memory.page_table.entry(addr);
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
             match entry {
@@ -726,8 +1178,6 @@ impl<'a> Executor<'a> {
             }
         }
 
-        // If we're in unconstrained mode, we don't want to modify state, so we'll save the
-        // original state if it's the first time modifying it.
         if self.unconstrained {
             let record = match entry {
                 Entry::Occupied(ref entry) => Some(entry.get()),
@@ -736,11 +1186,9 @@ impl<'a> Executor<'a> {
             self.unconstrained_state.memory_diff.entry(addr).or_insert(record.copied());
         }
 
-        // If it's the first time accessing this address, initialize previous values.
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
                 let value = self.state.uninitialized_memory.page_table.get(addr).unwrap_or(&0);
                 self.uninitialized_memory_checkpoint
                     .page_table
@@ -751,41 +1199,44 @@ impl<'a> Executor<'a> {
             }
         };
 
-        // We update the local memory counter in two cases:
-        //  1. This is the first time the address is touched, this corresponds to the
-        //     condition record.shard != shard.
-        //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
-        //     local_memory_access to detect this. *WARNING*: This means that we are counting
-        //     on the .is_some() condition to be true only in the SyscallContext.
-        if !self.unconstrained && (record.shard != shard || local_memory_access.is_some()) {
-            self.local_counts.local_mem += 1;
+        if !self.unconstrained
+            && !self.skip_replay_bookkeeping
+            && (record.shard != shard || local_memory_access.is_some())
+        {
+            self.split_acct.add_touched_address();
         }
 
-        let prev_record = *record;
+        let prev_record = match replay_prev {
+            Some(mv) => {
+                *record = mv;
+                mv
+            }
+            None => *record,
+        };
         record.value = value;
         record.shard = shard;
         record.timestamp = timestamp;
 
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
-
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                *record,
+                false,
+            );
         }
 
-        // Construct the memory write record.
+        if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+            self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
+                value: prev_record.value,
+                shard: prev_record.shard,
+                timestamp: prev_record.timestamp,
+            });
+        }
+
         MemoryWriteRecord::new(
             record.value,
             record.shard,
@@ -803,10 +1254,10 @@ impl<'a> Executor<'a> {
         value: u32,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
+        let is_syscall_access = local_memory_access.is_some();
         let addr = register as u32;
-        // Get the memory record entry.
         let entry = self.state.memory.registers.entry(addr);
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
             match entry {
@@ -820,8 +1271,6 @@ impl<'a> Executor<'a> {
             }
         }
 
-        // If we're in unconstrained mode, we don't want to modify state, so we'll save the
-        // original state if it's the first time modifying it.
         if self.unconstrained {
             let record = match entry {
                 Entry::Occupied(ref entry) => Some(entry.get()),
@@ -830,11 +1279,9 @@ impl<'a> Executor<'a> {
             self.unconstrained_state.memory_diff.entry(addr).or_insert(record.copied());
         }
 
-        // If it's the first time accessing this address, initialize previous values.
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
                 let value = self.state.uninitialized_memory.page_table.get(addr).unwrap_or(&0);
                 self.uninitialized_memory_checkpoint
                     .page_table
@@ -845,14 +1292,11 @@ impl<'a> Executor<'a> {
             }
         };
 
-        // We update the local memory counter in two cases:
-        //  1. This is the first time the address is touched, this corresponds to the
-        //     condition record.shard != shard.
-        //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
-        //     local_memory_access to detect this. *WARNING*: This means that we are counting
-        //     on the .is_some() condition to be true only in the SyscallContext.
-        if !self.unconstrained && (record.shard != shard || local_memory_access.is_some()) {
-            self.local_counts.local_mem += 1;
+        if !self.unconstrained
+            && !self.skip_replay_bookkeeping
+            && (record.shard != shard || local_memory_access.is_some())
+        {
+            self.split_acct.add_touched_address();
         }
 
         let prev_record = *record;
@@ -860,33 +1304,36 @@ impl<'a> Executor<'a> {
         record.shard = shard;
         record.timestamp = timestamp;
 
+        let cur_record = *record;
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
-
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                cur_record,
+                true,
+            );
         }
 
-        // Construct the memory write record.
+        if self.minimal_trace_collector.is_some() && addr >= NUM_REGISTERS as u32 {
+            self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
+                value: prev_record.value,
+                shard: prev_record.shard,
+                timestamp: prev_record.timestamp,
+            });
+        }
+
+        let (prev_shard, prev_timestamp) =
+            self.bump_register_timestamp(addr, shard, prev_record, is_syscall_access);
         MemoryWriteRecord::new(
-            record.value,
-            record.shard,
-            record.timestamp,
+            cur_record.value,
+            cur_record.shard,
+            cur_record.timestamp,
             prev_record.value,
-            prev_record.shard,
-            prev_record.timestamp,
+            prev_shard,
+            prev_timestamp,
         )
     }
 
@@ -899,11 +1346,11 @@ impl<'a> Executor<'a> {
         value: u32,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
+        let is_syscall_access = local_memory_access.is_some();
         let addr = register as u32;
 
-        // Get the memory record entry.
         let entry = self.state.memory.registers.entry(addr);
         if self.unconstrained {
             match entry {
@@ -917,8 +1364,6 @@ impl<'a> Executor<'a> {
             }
         }
 
-        // If we're in unconstrained mode, we don't want to modify state, so we'll save the
-        // original state if it's the first time modifying it.
         if self.unconstrained {
             let record = match entry {
                 Entry::Occupied(ref entry) => Some(entry.get()),
@@ -927,11 +1372,9 @@ impl<'a> Executor<'a> {
             self.unconstrained_state.memory_diff.entry(addr).or_insert(record.copied());
         }
 
-        // If it's the first time accessing this register, initialize previous values.
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
                 let value = self.state.uninitialized_memory.registers.get(addr).unwrap_or(&0);
                 self.uninitialized_memory_checkpoint
                     .registers
@@ -947,33 +1390,28 @@ impl<'a> Executor<'a> {
         record.shard = shard;
         record.timestamp = timestamp;
 
+        let cur_record = *record;
         if !self.unconstrained {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
-
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                cur_record,
+                true,
+            );
         }
 
-        // Construct the memory write record.
+        let (prev_shard, prev_timestamp) =
+            self.bump_register_timestamp(addr, shard, prev_record, is_syscall_access);
         MemoryWriteRecord::new(
-            record.value,
-            record.shard,
-            record.timestamp,
+            cur_record.value,
+            cur_record.shard,
+            cur_record.timestamp,
             prev_record.value,
-            prev_record.shard,
-            prev_record.timestamp,
+            prev_shard,
+            prev_timestamp,
         )
     }
 
@@ -983,7 +1421,6 @@ impl<'a> Executor<'a> {
     #[inline]
     pub fn rw(&mut self, register: Register, value: u32, shard: u32, timestamp: u32) {
         let addr = register as u32;
-        // Get the memory record entry.
         let entry = self.state.memory.registers.entry(addr);
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
             match entry {
@@ -997,8 +1434,6 @@ impl<'a> Executor<'a> {
             }
         }
 
-        // If we're in unconstrained mode, we don't want to modify state, so we'll save the
-        // original state if it's the first time modifying it.
         if self.unconstrained {
             let record = match entry {
                 Entry::Occupied(ref entry) => Some(entry.get()),
@@ -1007,11 +1442,9 @@ impl<'a> Executor<'a> {
             self.unconstrained_state.memory_diff.entry(addr).or_insert(record.copied());
         }
 
-        // If it's the first time accessing this register, initialize previous values.
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
                 let value = self.state.uninitialized_memory.registers.get(addr).unwrap_or(&0);
                 self.uninitialized_memory_checkpoint
                     .registers
@@ -1030,10 +1463,8 @@ impl<'a> Executor<'a> {
     /// Read from memory, assuming that all addresses are aligned.
     #[inline]
     pub fn mr_cpu(&mut self, addr: u32) -> u32 {
-        // Read the address from memory and create a memory read record.
         let record =
             self.mr(addr, self.shard(), self.timestamp(&MemoryAccessPosition::Memory), None);
-        // If we're not in unconstrained mode, record the access for the current cycle.
         if self.executor_mode == ExecutorMode::Trace {
             self.memory_accesses.memory = Some(record.into());
         }
@@ -1043,7 +1474,6 @@ impl<'a> Executor<'a> {
     /// Read a register.
     #[inline]
     pub fn rr_cpu(&mut self, register: Register, position: MemoryAccessPosition) -> u32 {
-        // Read the address from memory and create a memory read record if in trace mode.
         if self.executor_mode == ExecutorMode::Trace {
             let record = self.rr_traced(register, self.shard(), self.timestamp(&position), None);
             if !self.unconstrained {
@@ -1067,10 +1497,8 @@ impl<'a> Executor<'a> {
     /// This function will panic if the address is not aligned or if the memory accesses are already
     /// initialized.
     pub fn mw_cpu(&mut self, addr: u32, value: u32) {
-        // Read the address from memory and create a memory read record.
         let record =
             self.mw(addr, value, self.shard(), self.timestamp(&MemoryAccessPosition::Memory), None);
-        // If we're not in unconstrained mode, record the access for the current cycle.
         if self.executor_mode == ExecutorMode::Trace {
             debug_assert!(self.memory_accesses.memory.is_none());
             self.memory_accesses.memory = Some(record.into());
@@ -1079,16 +1507,12 @@ impl<'a> Executor<'a> {
 
     /// Write to a register.
     pub fn rw_cpu(&mut self, register: Register, value: u32, position: MemoryAccessPosition) {
-        // Register %x0 should always be 0. See 2.6 Load and Store Instruction on
-        // P.18 of the RISC-V spec. We always write 0 to %x0.
         let value = if register == Register::ZERO { 0 } else { value };
 
-        // Read the address from memory and create a memory read record.
         if self.executor_mode == ExecutorMode::Trace {
             let record =
                 self.rw_traced(register, value, self.shard(), self.timestamp(&position), None);
             if !self.unconstrained {
-                // The only time we are writing to a register is when it is in operand A.
                 match position {
                     MemoryAccessPosition::A => {
                         debug_assert!(self.memory_accesses.a.is_none());
@@ -1106,14 +1530,19 @@ impl<'a> Executor<'a> {
         }
     }
 
+    /// Emit the events of one executed instruction.
+    ///
+    /// * `next_next_pc`: the successor of `next_pc` (branch delay slot).
+    /// * `recv_next_pc`: the entry `next_pc` received on the `State` bus (the
+    ///   predecessor's `next_next_pc`); equals `next_pc` except on the halt row.
     #[allow(clippy::too_many_arguments)]
     fn emit_events(
         &mut self,
         clk: u32,
         pc: u32,
         next_pc: u32,
-        // this is added for branch instruction
         next_next_pc: u32,
+        recv_next_pc: u32,
         instruction: &Instruction,
         a: u32,
         b: u32,
@@ -1123,18 +1552,50 @@ impl<'a> Executor<'a> {
         exit_code: u32,
         syscall_code: u32,
     ) {
-        self.emit_cpu(clk, pc, next_pc, next_next_pc, a, b, c, hi_or_prev_a, record, exit_code);
+        self.emit_cpu(clk, pc, next_pc, next_next_pc, exit_code);
 
         if instruction.is_alu_instruction() {
-            self.emit_alu_event(clk, instruction.opcode, hi_or_prev_a, a, b, c, record.hi);
+            self.emit_alu_event(
+                clk,
+                instruction.opcode,
+                instruction.imm_c,
+                hi_or_prev_a,
+                a,
+                b,
+                c,
+                record.hi,
+                next_next_pc,
+                recv_next_pc,
+                &record,
+            );
         } else if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
         {
-            self.emit_mem_instr_event(instruction.opcode, a, b, c, hi_or_prev_a.unwrap_or(0));
+            self.emit_mem_instr_event(instruction.opcode, a, b, c, &record);
         } else if instruction.is_branch_instruction() {
-            self.emit_branch_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
+            self.emit_branch_event(
+                clk,
+                instruction.opcode,
+                a,
+                b,
+                c,
+                next_pc,
+                next_next_pc,
+                recv_next_pc,
+                &record,
+            );
         } else if instruction.is_jump_instruction() {
-            self.emit_jump_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
+            self.emit_jump_event(
+                clk,
+                instruction.opcode,
+                a,
+                b,
+                c,
+                next_pc,
+                next_next_pc,
+                recv_next_pc,
+                &record,
+            );
         } else if instruction.is_misc_instruction() {
             self.emit_misc_event(
                 clk,
@@ -1144,9 +1605,20 @@ impl<'a> Executor<'a> {
                 c,
                 hi_or_prev_a.unwrap_or(0),
                 record.hi,
+                recv_next_pc,
+                &record,
             );
         } else if instruction.is_syscall_instruction() {
-            self.emit_syscall_event(clk, record.a, syscall_code, b, c, next_pc);
+            self.emit_syscall_event(
+                clk,
+                record.a,
+                syscall_code,
+                b,
+                c,
+                next_pc,
+                recv_next_pc,
+                &record,
+            );
         } else {
             log::debug!("wrong {}\n", instruction.opcode);
             unreachable!()
@@ -1154,51 +1626,33 @@ impl<'a> Executor<'a> {
     }
 
     /// Emit a CPU event.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// There is no Cpu chip: `MipsAirId::Cpu` is only the virtual cycles axis
+    /// for shard splitting, so the event carries just the five fields that
+    /// have readers.
     #[inline]
-    fn emit_cpu(
-        &mut self,
-        clk: u32,
-        pc: u32,
-        next_pc: u32,
-        // this is added for branch instruction
-        next_next_pc: u32,
-        a: u32,
-        b: u32,
-        c: u32,
-        hi_or_prev_a: Option<u32>,
-        record: MemoryAccessRecord,
-        exit_code: u32,
-    ) {
-        self.record.cpu_events.push(CpuEvent {
-            clk,
-            pc,
-            next_pc,
-            next_next_pc,
-            a,
-            a_record: record.a,
-            b,
-            b_record: record.b,
-            c,
-            c_record: record.c,
-            hi: hi_or_prev_a,
-            hi_record: record.hi,
-            memory_record: record.memory,
-            exit_code,
-        });
+    fn emit_cpu(&mut self, clk: u32, pc: u32, next_pc: u32, next_next_pc: u32, exit_code: u32) {
+        self.record.cpu_events.push(CpuEvent { clk, pc, next_pc, next_next_pc, exit_code });
     }
 
     /// Emit an ALU event.
+    /// Deliberately not `#[inline]`: the body is large (builds `CompAluEvent`
+    /// and `AluEvent`, branches on `hi_record`), and inlining it bloats the
+    /// instruction-cache footprint of `execute_alu`.
     #[allow(clippy::too_many_arguments)]
     fn emit_alu_event(
         &mut self,
         clk: u32,
         opcode: Opcode,
+        imm_c: bool,
         hi_or_prev_a: Option<u32>,
         a: u32,
         b: u32,
         c: u32,
         hi_record: Option<MemoryRecordEnum>,
+        next_next_pc: u32,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
         let event = AluEvent {
             pc: self.state.pc,
@@ -1208,6 +1662,13 @@ impl<'a> Executor<'a> {
             a,
             b,
             c,
+            is_instruction: 1,
+            clk,
+            next_next_pc,
+            recv_next_pc,
+            a_record: record.a.into(),
+            b_record: record.b.into(),
+            c_record: record.c.into(),
         };
 
         let (hi_access, hi_record_is_real) = match hi_record {
@@ -1227,34 +1688,58 @@ impl<'a> Executor<'a> {
             c,
             hi_record: hi_access,
             hi_record_is_real,
+            is_instruction: 1,
+            next_next_pc,
+            recv_next_pc,
+            a_record: record.a.into(),
+            b_record: record.b.into(),
+            c_record: record.c.into(),
         };
 
         match opcode {
             Opcode::ADD | Opcode::SUB => {
-                self.record.add_sub_events.push(event);
+                if imm_c {
+                    self.record.add_sub_imm_events.push(event);
+                } else {
+                    self.record.add_sub_events.push(event);
+                }
             }
             Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => {
-                self.record.bitwise_events.push(event);
+                if imm_c {
+                    self.record.bitwise_imm_events.push(event);
+                } else {
+                    self.record.bitwise_events.push(event);
+                }
             }
             Opcode::SLL => {
-                self.record.shift_left_events.push(event);
+                if imm_c {
+                    self.record.shift_left_imm_events.push(event);
+                } else {
+                    self.record.shift_left_events.push(event);
+                }
             }
             Opcode::SRL | Opcode::SRA | Opcode::ROR => {
-                self.record.shift_right_events.push(event);
+                if imm_c {
+                    self.record.shift_right_imm_events.push(event);
+                } else {
+                    self.record.shift_right_events.push(event);
+                }
             }
             Opcode::SLT | Opcode::SLTU => {
-                self.record.lt_events.push(event);
+                if imm_c {
+                    self.record.lt_imm_events.push(event);
+                } else {
+                    self.record.lt_events.push(event);
+                }
             }
             Opcode::MUL | Opcode::MULT | Opcode::MULTU => {
                 self.record.mul_events.push(event_comp);
             }
             Opcode::DIV | Opcode::DIVU | Opcode::MOD | Opcode::MODU => {
                 self.record.divrem_events.push(event_comp);
-                emit_divrem_dependencies(self, event);
             }
             Opcode::CLZ | Opcode::CLO => {
                 self.record.cloclz_events.push(event);
-                emit_cloclz_dependencies(self, event);
             }
             _ => {}
         }
@@ -1262,7 +1747,18 @@ impl<'a> Executor<'a> {
 
     /// Emit a memory instruction event.
     #[inline]
-    fn emit_mem_instr_event(&mut self, opcode: Opcode, a: u32, b: u32, c: u32, prev_a_val: u32) {
+    fn emit_mem_instr_event(
+        &mut self,
+        opcode: Opcode,
+        a: u32,
+        b: u32,
+        c: u32,
+        record: &MemoryAccessRecord,
+    ) {
+        debug_assert!(
+            record.c.is_none(),
+            "a memory instruction produced a register read for op_c: {opcode:?}"
+        );
         let event = MemInstrEvent {
             shard: self.shard(),
             clk: self.state.clk,
@@ -1273,15 +1769,23 @@ impl<'a> Executor<'a> {
             b,
             c,
             mem_access: self.memory_accesses.memory.expect("Must have memory access"),
-            prev_a_val,
+            is_instruction: 1,
+            a_record: record.a.into(),
+            b_record: record.b.into(),
         };
 
-        self.record.memory_instr_events.push(event);
-        emit_memory_dependencies(
-            self,
-            event,
-            self.memory_accesses.memory.expect("Must have memory access").current_record(),
-        );
+        match opcode {
+            Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU => {
+                self.record.memory_load_narrow_events.push(event);
+            }
+            Opcode::LW | Opcode::LL => self.record.memory_load_word_events.push(event),
+            Opcode::SB | Opcode::SH => self.record.memory_store_narrow_events.push(event),
+            Opcode::SW | Opcode::SC => self.record.memory_store_word_events.push(event),
+            Opcode::LWL | Opcode::LWR | Opcode::SWL | Opcode::SWR => {
+                self.record.memory_unaligned_events.push(event);
+            }
+            _ => unreachable!("non-memory opcode {opcode:?} in emit_mem_instr_event"),
+        }
     }
 
     /// Emit a branch event.
@@ -1289,16 +1793,32 @@ impl<'a> Executor<'a> {
     #[allow(clippy::too_many_arguments)]
     fn emit_branch_event(
         &mut self,
+        clk: u32,
         opcode: Opcode,
         a: u32,
         b: u32,
         c: u32,
         next_pc: u32,
         next_next_pc: u32,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
-        let event = BranchEvent { pc: self.state.pc, next_pc, next_next_pc, opcode, a, b, c };
+        let event = BranchEvent {
+            pc: self.state.pc,
+            next_pc,
+            next_next_pc,
+            opcode,
+            a,
+            b,
+            c,
+            is_instruction: 1,
+            clk,
+            recv_next_pc,
+            a_record: record.a.into(),
+            b_record: record.b.into(),
+            c_record: record.c.into(),
+        };
         self.record.branch_events.push(event);
-        emit_branch_dependencies(self, event);
     }
 
     /// Emit a jump event.
@@ -1306,16 +1826,24 @@ impl<'a> Executor<'a> {
     #[allow(clippy::too_many_arguments)]
     fn emit_jump_event(
         &mut self,
+        clk: u32,
         opcode: Opcode,
         a: u32,
         b: u32,
         c: u32,
         next_pc: u32,
         next_next_pc: u32,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
-        let event = JumpEvent::new(self.state.pc, next_pc, next_next_pc, opcode, a, b, c);
+        let mut event = JumpEvent::new(self.state.pc, next_pc, next_next_pc, opcode, a, b, c);
+        event.is_instruction = 1;
+        event.clk = clk;
+        event.recv_next_pc = recv_next_pc;
+        event.a_record = record.a.into();
+        event.b_record = record.b.into();
+        event.c_record = record.c.into();
         self.record.jump_events.push(event);
-        emit_jump_dependencies(self, event);
     }
 
     /// Emit a misc event.
@@ -1330,10 +1858,18 @@ impl<'a> Executor<'a> {
         c: u32,
         prev_a: u32,
         hi_record: Option<MemoryRecordEnum>,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
         if matches!(opcode, Opcode::MNE | Opcode::MEQ | Opcode::WSBH) {
-            let event =
+            let mut event =
                 MovCondEvent::new(self.state.pc, self.state.next_pc, opcode, a, b, c, prev_a);
+            event.is_instruction = 1;
+            event.clk = clk;
+            event.recv_next_pc = recv_next_pc;
+            event.a_record = record.a.into();
+            event.b_record = record.b.into();
+            event.c_record = record.c.into();
             self.record.movcond_events.push(event);
         } else {
             let hi_access = match hi_record {
@@ -1341,7 +1877,7 @@ impl<'a> Executor<'a> {
                 _ => MemoryWriteRecord::default(),
             };
 
-            let event = MiscEvent::new(
+            let mut event = MiscEvent::new(
                 clk,
                 self.shard(),
                 self.state.pc,
@@ -1353,8 +1889,12 @@ impl<'a> Executor<'a> {
                 prev_a,
                 hi_access,
             );
+            event.is_instruction = 1;
+            event.recv_next_pc = recv_next_pc;
+            event.a_record = record.a.into();
+            event.b_record = record.b.into();
+            event.c_record = record.c.into();
             self.record.misc_events.push(event);
-            emit_misc_dependencies(self, event);
         }
     }
 
@@ -1384,6 +1924,10 @@ impl<'a> Executor<'a> {
             syscall_id,
             arg1,
             arg2,
+            is_instruction: 0,
+            recv_next_pc: 0,
+            b_record: None.into(),
+            c_record: None.into(),
         }
     }
 
@@ -1396,9 +1940,14 @@ impl<'a> Executor<'a> {
         arg1: u32,
         arg2: u32,
         next_pc: u32,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
-        let syscall_event = self.syscall_event(clk, a_record, next_pc, syscall_id, arg1, arg2);
-
+        let mut syscall_event = self.syscall_event(clk, a_record, next_pc, syscall_id, arg1, arg2);
+        syscall_event.is_instruction = 1;
+        syscall_event.recv_next_pc = recv_next_pc;
+        syscall_event.b_record = record.b.into();
+        syscall_event.c_record = record.c.into();
         self.record.syscall_events.push(syscall_event);
     }
     /// Fetch the destination register and input operand values for an ALU instruction.
@@ -1450,8 +1999,8 @@ impl<'a> Executor<'a> {
     fn branch_rr(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
         let (src1, src2, target) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
-        let b = if instruction.opcode.only_one_operand() {
-            0
+        let b = if instruction.imm_b {
+            instruction.op_b
         } else {
             self.rr_cpu(src2, MemoryAccessPosition::B)
         };
@@ -1470,10 +2019,11 @@ impl<'a> Executor<'a> {
     fn execute_operation(&mut self, instruction: &Instruction) -> Result<(), ExecutionError> {
         let mut pc = self.state.pc;
         let mut clk = self.state.clk;
-        let mut exit_code = 0u32; // use in halt code
+        let mut exit_code = 0u32;
 
         let mut next_pc = self.state.next_pc;
         let mut next_next_pc = self.state.next_pc + 4;
+        let mut recv_next_pc = self.state.next_pc;
 
         let mut a = 0;
         let mut b = 0;
@@ -1487,41 +2037,9 @@ impl<'a> Executor<'a> {
             self.memory_accesses = MemoryAccessRecord::default();
         }
 
-        if !self.unconstrained {
+        if !self.unconstrained && !self.skip_replay_bookkeeping {
             self.report.opcode_counts[instruction.opcode] += 1;
-            self.local_counts.event_counts[instruction.opcode] += 1;
-            if instruction.is_memory_load_instruction() {
-                self.local_counts.event_counts[Opcode::ADD] += 2;
-            } else if instruction.is_branch_cmp_instruction() {
-                self.local_counts.event_counts[Opcode::ADD] += 1;
-                self.local_counts.event_counts[Opcode::SLT] += 2;
-            } else if instruction.is_mov_cond_instruction() {
-                self.local_counts.event_counts[Opcode::ADD] += 1;
-            } else if instruction.opcode == Opcode::EXT {
-                self.local_counts.event_counts[Opcode::SLL] += 1;
-                self.local_counts.event_counts[Opcode::SRL] += 1;
-            } else if instruction.is_cloclz_instruction() {
-                self.local_counts.event_counts[Opcode::SRL] += 1;
-            } else if instruction.is_maddsubu_instruction() {
-                self.local_counts.event_counts[Opcode::MULTU] += 1;
-            } else if instruction.opcode == Opcode::INS {
-                self.local_counts.event_counts[Opcode::ROR] += 2;
-                self.local_counts.event_counts[Opcode::SLL] += 1;
-                self.local_counts.event_counts[Opcode::SRL] += 2;
-                self.local_counts.event_counts[Opcode::ADD] += 1;
-            } else if instruction.opcode == Opcode::DIV {
-                self.local_counts.event_counts[Opcode::MULT] += 2;
-                self.local_counts.event_counts[Opcode::ADD] += 2;
-                self.local_counts.event_counts[Opcode::SLTU] += 1;
-            } else if instruction.opcode == Opcode::DIVU {
-                self.local_counts.event_counts[Opcode::MULTU] += 2;
-                self.local_counts.event_counts[Opcode::ADD] += 2;
-                self.local_counts.event_counts[Opcode::SLTU] += 1;
-            } else if instruction.is_maddsub_instruction() {
-                self.local_counts.event_counts[Opcode::MULT] += 1;
-            } else if instruction.opcode == Opcode::JumpDirect {
-                self.local_counts.event_counts[Opcode::ADD] += 1;
-            }
+            charge_instruction(&mut self.split_acct, instruction);
         }
 
         if instruction.is_alu_instruction() {
@@ -1534,7 +2052,6 @@ impl<'a> Executor<'a> {
             (a, b, c, next_next_pc) = self.execute_branch(instruction, next_pc, next_next_pc);
             self.state.next_is_delayslot = true;
         } else if instruction.is_jump_instruction() {
-            // Jump instructions.
             (a, b, c, next_next_pc) = if instruction.opcode == Opcode::Jump {
                 self.execute_jump(instruction)
             } else if instruction.opcode == Opcode::Jumpi {
@@ -1573,15 +2090,9 @@ impl<'a> Executor<'a> {
             let mut prev_a = syscall_id;
             log::trace!("pc: {:X} syscall {}, a0: {:X}, a1: {:X}", self.state.pc, syscall_id, b, c);
 
-            if self.print_report && !self.unconstrained {
+            if self.print_report && !self.unconstrained && !self.skip_replay_bookkeeping {
                 self.report.syscall_counts[syscall] += 1;
             }
-
-            // `hint_slice` is allowed in unconstrained mode since it is used to write the hint.
-            // Other syscalls are not allowed because they can lead to non-deterministic
-            // behavior, especially since many syscalls modify memory in place,
-            // which is not permitted in unconstrained mode. This will result in
-            // non-zero memory lookups when generating a proof.
 
             if self.unconstrained
                 && (syscall != SyscallCode::EXIT_UNCONSTRAINED && syscall != SyscallCode::WRITE)
@@ -1589,19 +2100,17 @@ impl<'a> Executor<'a> {
                 return Err(ExecutionError::InvalidSyscallUsage(syscall_id as u64));
             }
 
-            // Update the syscall counts.
-            let syscall_for_count = syscall.count_map();
-            let syscall_count = self.state.syscall_counts.entry(syscall_for_count).or_insert(0);
-            *syscall_count += 1;
+            if !self.skip_replay_bookkeeping {
+                let syscall_for_count = syscall.count_map();
+                let syscall_count = self.state.syscall_counts.entry(syscall_for_count).or_insert(0);
+                *syscall_count += 1;
+            }
 
             let syscall_impl = self.get_syscall(syscall).cloned();
             syscall_code = syscall.syscall_id();
             let mut precompile_rt = SyscallContext::new(self);
             let (precompile_next_pc, precompile_cycles, returned_exit_code) =
                 if let Some(syscall_impl) = syscall_impl {
-                    // Executing a syscall optionally returns a value to write to the t0
-                    // register. If it returns None, we just keep the
-                    // syscall_id in t0.
                     let res = syscall_impl.execute(&mut precompile_rt, syscall, b, c)?;
                     if let Some(r0) = res {
                         a = r0;
@@ -1609,8 +2118,9 @@ impl<'a> Executor<'a> {
                         a = syscall_id;
                     }
 
-                    // If the syscall is `HALT` and the exit code is non-zero, return an error.
-                    if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
+                    if matches!(syscall, SyscallCode::HALT | SyscallCode::SYS_EXT_GROUP)
+                        && precompile_rt.exit_code != 0
+                    {
                         return Err(ExecutionError::HaltWithNonZeroExitCode(
                             precompile_rt.exit_code,
                         ));
@@ -1625,26 +2135,27 @@ impl<'a> Executor<'a> {
                     return Err(ExecutionError::UnsupportedSyscall(syscall_id));
                 };
 
-            if syscall == SyscallCode::HALT && returned_exit_code == 0 {
+            if matches!(syscall, SyscallCode::HALT | SyscallCode::SYS_EXT_GROUP)
+                && returned_exit_code == 0
+            {
                 self.state.exited = true;
             }
 
-            // If the syscall is `EXIT_UNCONSTRAINED`, the memory was restored to pre-unconstrained code
-            // in the execute function, so we need to re-read from A0 and A1.  Just do a peek on the
-            // registers.
             if syscall == SyscallCode::EXIT_UNCONSTRAINED {
                 b = self.register(Register::A0);
                 c = self.register(Register::A1);
                 prev_a = self.register(Register::V0);
             }
 
-            // Allow the syscall impl to modify state.clk/pc (exit unconstrained does this)
             clk = self.state.clk;
             pc = self.state.pc;
 
             self.rw_cpu(Register::V0, a, MemoryAccessPosition::A);
             next_pc = precompile_next_pc;
             next_next_pc = precompile_next_pc + 4;
+            if !matches!(syscall, SyscallCode::HALT | SyscallCode::SYS_EXT_GROUP) {
+                recv_next_pc = next_pc;
+            }
             self.state.clk += precompile_cycles;
             exit_code = returned_exit_code;
             hi_or_prev_a = Some(prev_a);
@@ -1660,13 +2171,13 @@ impl<'a> Executor<'a> {
             return Err(ExecutionError::NullPointerReference());
         }
 
-        // Emit the CPU event for this cycle.
         if self.executor_mode == ExecutorMode::Trace {
             self.emit_events(
                 clk,
                 pc,
                 next_pc,
                 next_next_pc,
+                recv_next_pc,
                 instruction,
                 a,
                 b,
@@ -1678,11 +2189,9 @@ impl<'a> Executor<'a> {
             );
         };
 
-        // Update the program counter.
         self.state.pc = next_pc;
         self.state.next_pc = next_next_pc;
 
-        // Update the clk to the next cycle.
         self.state.clk += 5;
         Ok(())
     }
@@ -1797,9 +2306,6 @@ impl<'a> Executor<'a> {
         let b = self.rr_cpu(rt, MemoryAccessPosition::B);
         let msbd = c >> 5;
         let lsb = c & 0x1f;
-        // `lsb + msbd < 32` is architecturally required (and enforced by the EXT AIR
-        // constraint). Otherwise the `31 - lsb - msbd` shift amount used here and in trace
-        // generation underflows as a `u32`. Reject the undefined encoding instead of panicking.
         if msbd + lsb >= 32 {
             return Err(ExecutionError::ExceptionOrTrap());
         }
@@ -1887,7 +2393,6 @@ impl<'a> Executor<'a> {
             Opcode::SLL => (b << (c & 0x1f), 0),
             Opcode::SRL => (b >> (c & 0x1F), 0),
             Opcode::SRA => {
-                // same as SRA
                 let sin = b as i32;
                 let sout = sin >> (c & 0x1f);
                 (sout as u32, 0)
@@ -1915,19 +2420,18 @@ impl<'a> Executor<'a> {
 
             Opcode::MULT => {
                 let out = (((b as i32) as i64) * ((c as i32) as i64)) as u64;
-                (out as u32, (out >> 32) as u32) // lo,hi
+                (out as u32, (out >> 32) as u32)
             }
             Opcode::MULTU => {
                 let out = b as u64 * c as u64;
-                (out as u32, (out >> 32) as u32) //lo,hi
+                (out as u32, (out >> 32) as u32)
             }
-            Opcode::DIV => (
-                ((b as i32) / (c as i32)) as u32, // lo
-                ((b as i32) % (c as i32)) as u32, // hi
-            ),
-            Opcode::DIVU => (b / c, b % c), //lo,hi
-            Opcode::MOD => (((b as i32) % (c as i32)) as u32, 0),
-            Opcode::MODU => (b % c, 0), //lo,hi
+            Opcode::DIV => {
+                ((b as i32).wrapping_div(c as i32) as u32, (b as i32).wrapping_rem(c as i32) as u32)
+            }
+            Opcode::DIVU => (b / c, b % c),
+            Opcode::MOD => ((b as i32).wrapping_rem(c as i32) as u32, 0),
+            Opcode::MODU => (b % c, 0),
             Opcode::AND => (b & c, 0),
             Opcode::OR => (b | c, 0),
             Opcode::XOR => (b ^ c, 0),
@@ -1949,8 +2453,6 @@ impl<'a> Executor<'a> {
         let (rt_reg, rs_reg, offset_ext) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let rs_raw = self.rr_cpu(rs_reg, MemoryAccessPosition::B);
-        // We needn't the memory access record here, because we will write to rt_reg,
-        // and we could use the `prev_value` of the MemoryWriteRecord in the circuit.
         let rt = self.register(rt_reg);
 
         let addr = rs_raw.wrapping_add(offset_ext);
@@ -2037,7 +2539,10 @@ impl<'a> Executor<'a> {
         let addr = rs.wrapping_add(offset_ext);
         let aligned_addr = addr & 0xFFFF_FFFC;
 
-        let mem = self.word(aligned_addr);
+        let mem = match self.peek_replay_word() {
+            Some(mem) => mem,
+            None => self.word(aligned_addr),
+        };
 
         let val = match instruction.opcode {
             Opcode::SB => {
@@ -2087,7 +2592,6 @@ impl<'a> Executor<'a> {
                 }
                 rt
             }
-            // Opcode::SDC1 => 0,
             _ => unreachable!("unexpected store opcode: {:?}", instruction.opcode),
         };
 
@@ -2095,10 +2599,7 @@ impl<'a> Executor<'a> {
             return Err(ExecutionError::MemoryOutOfBoundsAccess(addr as u64));
         }
 
-        self.mw_cpu(
-            aligned_addr, // align addr
-            val,
-        );
+        self.mw_cpu(aligned_addr, val);
         if instruction.opcode == Opcode::SC {
             self.rw_cpu(rt_reg, 1, MemoryAccessPosition::A);
 
@@ -2168,23 +2669,18 @@ impl<'a> Executor<'a> {
     /// Executes one cycle of the program, returning whether the program has finished.
     #[inline]
     #[allow(clippy::too_many_lines)]
-    fn execute_cycle(&mut self) -> Result<bool, ExecutionError> {
-        // Fetch the instruction at the current program counter.
+    pub(crate) fn execute_cycle(&mut self) -> Result<bool, ExecutionError> {
         let instruction = self.fetch();
 
-        // Log the current state of the runtime.
         #[cfg(debug_assertions)]
         self.log(&instruction);
 
-        // Execute the instruction.
         self.execute_operation(&instruction)?;
 
-        // Increment the clock.
         self.state.global_clk += 1;
 
-        // If the cycle limit is exceeded, return an error.
         if let Some(max_cycles) = self.max_cycles {
-            if self.state.global_clk >= max_cycles {
+            if self.state.global_clk >= max_cycles && !self.unconstrained {
                 return Err(ExecutionError::ExceededCycleLimit(max_cycles));
             }
         }
@@ -2201,21 +2697,223 @@ impl<'a> Executor<'a> {
         Ok(done)
     }
 
+    /// Serve one user-memory access from the replay cursor.
+    ///
+    /// `None` when not replaying, or for a register address.  Exhaustion means
+    /// the replay issued more accesses than the producer recorded -- a lockstep
+    /// break, reported once rather than silently degrading to a zero read.
+    #[inline]
+    fn take_replay_mem(&mut self, addr: u32) -> Option<MemoryRecord> {
+        if addr < NUM_REGISTERS as u32 {
+            return None;
+        }
+        let cursor = self.replay_mem.as_mut()?;
+        let Some(mv) = cursor.entries.get(cursor.pos).copied() else {
+            cursor.exhausted = true;
+            let pos = cursor.pos;
+            let len = cursor.entries.len();
+            tracing::error!(
+                "replay memory oracle exhausted at access {pos} of {len} (addr {addr:#x}) \
+                 — the replay is not in lockstep with the producer",
+            );
+            return None;
+        };
+        cursor.pos += 1;
+        Some(MemoryRecord { value: mv.value, shard: mv.shard, timestamp: mv.timestamp })
+    }
+
     /// Bump the record.
     pub fn bump_record(&mut self) {
-        self.local_counts = LocalCounts::default();
-        // Copy all of the existing local memory accesses to the record's local_memory_access vec.
+        let closed_shape_fingerprint = std::mem::take(&mut self.pending_shape_fingerprint);
+        let closed_shape_classes = std::mem::take(&mut self.pending_shape_classes);
+        let closed_shape_area = std::mem::take(&mut self.pending_shape_area);
+        if let Some(trace) = self.minimal_trace_collector.as_mut() {
+            use crate::minimal_trace::TraceChunk;
+            let next_chunk_pc = self.state.pc;
+            let next_chunk_clk = self.state.global_clk;
+            let mut next_registers = vec![0u32; 36];
+            let mut next_register_records = vec![(0u32, 0u32, 0u32); 36];
+            for i in 0..36u32 {
+                if let Some(r) = self.state.memory.registers.get(i) {
+                    next_registers[i as usize] = r.value;
+                    next_register_records[i as usize] = (r.value, r.shard, r.timestamp);
+                }
+            }
+            let next_current_shard = self.state.current_shard;
+            let next_input_ptr = self.state.input_stream_ptr as u32;
+            let next_proof_ptr = self.state.proof_stream_ptr as u32;
+            let next_pv_ptr = self.state.public_values_stream_ptr as u32;
+            if let Some(prev) = trace.chunks.last_mut() {
+                prev.clk_end = next_chunk_clk;
+                prev.shape_fingerprint = closed_shape_fingerprint;
+                prev.shape_classes = closed_shape_classes;
+                prev.shape_area = closed_shape_area;
+                let cap = self.recording_chunk_mem_reads.len();
+                let drained =
+                    std::mem::replace(&mut self.recording_chunk_mem_reads, Vec::with_capacity(cap));
+                prev.mem_reads = std::sync::Arc::new(drained);
+                let from = prev.input_stream_ptr as usize;
+                let to = self
+                    .state
+                    .input_stream_ptr
+                    .saturating_add(1)
+                    .min(self.state.input_stream.len());
+                prev.input_stream_slice = Some(if from < to {
+                    self.state.input_stream[from..to].to_vec()
+                } else {
+                    Vec::new()
+                });
+            } else {
+                self.recording_chunk_mem_reads.clear();
+            }
+            trace.chunks.push(TraceChunk {
+                shard_index: trace.next_shard_index(),
+                shape_fingerprint: 0,
+                shape_classes: Vec::new(),
+                shape_area: 0,
+                start_registers: next_registers,
+                start_register_records: next_register_records,
+                pc_start: next_chunk_pc,
+                clk_start: next_chunk_clk,
+                clk_end: u64::MAX,
+                current_shard: next_current_shard,
+                input_stream_slice: None,
+                input_stream_ptr: next_input_ptr,
+                proof_stream_ptr: next_proof_ptr,
+                public_values_stream_ptr: next_pv_ptr,
+                final_memory: Vec::new(),
+                final_uninit_memory: Vec::new(),
+                mem_reads: std::sync::Arc::new(Vec::new()),
+            });
+            trace.total_cycles = next_chunk_clk;
+        }
+        self.split_acct.reset();
         if self.executor_mode == ExecutorMode::Trace {
+            for slot in self.local_reg_access.iter_mut() {
+                if let Some(event) = slot.take() {
+                    self.record.cpu_local_memory_access.push(event);
+                }
+            }
             for (_, event) in self.local_memory_access.drain() {
                 self.record.cpu_local_memory_access.push(event);
             }
         }
 
-        let removed_record =
-            std::mem::replace(&mut self.record, ExecutionRecord::new(self.program.clone()));
+        let event_reservation = if self.executor_mode == ExecutorMode::Trace {
+            ((self.shard_size as usize) / 4 / 8).max(1)
+        } else {
+            0
+        };
+        let removed_record = std::mem::replace(
+            &mut self.record,
+            ExecutionRecord::new_preallocated(self.program.clone(), event_reservation),
+        );
         let public_values = removed_record.public_values;
         self.record.public_values = public_values;
         self.records.push(removed_record);
+    }
+
+    /// Consumer support: seal the collected `MinimalTrace`
+    /// at program halt — finalize the last chunk's `clk_end`, drop
+    /// degenerate empty chunks, and stamp the FULL final memory image
+    /// (page_table + registers, with records) plus the uninitialized
+    /// (hint) image onto the terminal chunk so the Stage-2 consumer can
+    /// emit the global memory init/finalize argument (which iterates
+    /// every touched address). No-op when the collector is disabled.
+    pub fn seal_minimal_trace_final_memory(&mut self) {
+        let final_clk = self.state.global_clk;
+        let mut final_memory: Vec<(u32, u32, u32, u32)> = Vec::new();
+        for addr in 0..NUM_REGISTERS as u32 {
+            if let Some(r) = self.state.memory.registers.get(addr) {
+                final_memory.push((addr, r.value, r.shard, r.timestamp));
+            }
+        }
+        if let Some(flat) = self.flat_mem.as_deref() {
+            let image = &self.program.image;
+            flat.for_each_committed(|addr, e| {
+                if e.shard != 0 || e.timestamp != 0 || image.contains_key(&addr) {
+                    final_memory.push((addr, e.value, e.shard, e.timestamp));
+                }
+            });
+        } else {
+            for addr in self.state.memory.page_table.keys() {
+                let r = self.state.memory.page_table.get(addr).unwrap();
+                final_memory.push((addr, r.value, r.shard, r.timestamp));
+            }
+        }
+        let mut final_uninit: Vec<(u32, u32)> = Vec::new();
+        for addr in 0..NUM_REGISTERS as u32 {
+            if let Some(v) = self.state.uninitialized_memory.registers.get(addr) {
+                final_uninit.push((addr, *v));
+            }
+        }
+        for addr in self.state.uninitialized_memory.page_table.keys() {
+            let v = self.state.uninitialized_memory.page_table.get(addr).unwrap();
+            final_uninit.push((addr, *v));
+        }
+
+        if let Some(trace) = self.minimal_trace_collector.as_mut() {
+            trace.finalize(final_clk);
+            if let Some(last) = trace.chunks.last_mut() {
+                last.final_memory = final_memory;
+                last.final_uninit_memory = final_uninit;
+            }
+        }
+    }
+
+    /// Take every chunk that is already SEALED, leaving the still-open one in
+    /// the collector.
+    ///
+    /// This is the streaming half of the minimal-trace producer, and the whole
+    /// reason it exists: the batched path materialises every chunk (and, in the
+    /// consumer, every `ExecutionRecord`) before any of them is used, which is
+    /// a whole-program peak nobody needs. Draining after each
+    /// [`Self::execute_state`] hands a shard's chunk downstream the moment its
+    /// boundary is crossed and bounds the live set by the dispatch window
+    /// instead of the program length.
+    ///
+    /// A chunk is sealed once the NEXT `bump_record` patches its `clk_end`, so
+    /// the open chunk is always the last one.
+    ///
+    /// # Ordering -- the terminal chunk
+    ///
+    /// When `execute_state` reports `done`, call
+    /// [`Self::seal_minimal_trace_final_memory`] BEFORE the final drain:
+    ///
+    /// ```ignore
+    /// loop {
+    ///     let (_state, done) = exec.execute_state(false)?;
+    ///     if done { exec.seal_minimal_trace_final_memory(); }
+    ///     ship(exec.drain_sealed_chunks());
+    ///     if done { break; }
+    /// }
+    /// ```
+    ///
+    /// The last turn can leave the terminal chunk already sealed by a trailing
+    /// `bump_record`, and `seal_minimal_trace_final_memory` stamps the
+    /// whole-memory image onto `chunks.last_mut()` -- so draining first hands
+    /// out a terminal chunk with an EMPTY `final_memory`, and the replay then
+    /// silently emits no global memory init/finalize events for the last shard.
+    ///
+    /// Degenerate zero-cycle chunks are dropped here on the same rule
+    /// `MinimalTrace::finalize` uses, but they still consume a `shard_index`,
+    /// so an index is skipped rather than reused -- exactly what the batched
+    /// path's `retain` does.
+    ///
+    /// Returns an empty `Vec` when the collector is disabled.
+    pub fn drain_sealed_chunks(&mut self) -> Vec<crate::minimal_trace::TraceChunk> {
+        let Some(trace) = self.minimal_trace_collector.as_mut() else {
+            return Vec::new();
+        };
+        let keep = usize::from(trace.chunks.last().is_some_and(|c| c.clk_end == u64::MAX));
+        if trace.chunks.len() <= keep {
+            return Vec::new();
+        }
+        let still_open = trace.chunks.split_off(trace.chunks.len() - keep);
+        let mut sealed = std::mem::replace(&mut trace.chunks, still_open);
+        trace.emitted += sealed.len() as u32;
+        sealed.retain(|c| c.clk_end > c.clk_start);
+        sealed
     }
 
     /// Execute up to `self.shard_batch_size` cycles, returning the events emitted and whether the
@@ -2249,7 +2947,6 @@ impl<'a> Executor<'a> {
         self.executor_mode = ExecutorMode::Checkpoint;
         self.emit_global_memory_events = emit_global_memory_events;
 
-        // Clone self.state without memory, uninitialized_memory, proof_stream in it so it's faster.
         let memory = std::mem::take(&mut self.state.memory);
         let uninitialized_memory = std::mem::take(&mut self.state.uninitialized_memory);
         let proof_stream = std::mem::take(&mut self.state.proof_stream);
@@ -2259,16 +2956,11 @@ impl<'a> Executor<'a> {
         self.state.proof_stream = proof_stream;
 
         let done = tracing::debug_span!("execute").in_scope(|| self.execute())?;
-        // Create a checkpoint using `memory_checkpoint`. Just include all memory if `done` since we
-        // need it all for MemoryFinalize.
         tracing::debug_span!("create memory checkpoint").in_scope(|| {
             let memory_checkpoint = std::mem::take(&mut self.memory_checkpoint);
             let uninitialized_memory_checkpoint =
                 std::mem::take(&mut self.uninitialized_memory_checkpoint);
             if done && !self.emit_global_memory_events {
-                // If it's the last shard, and we're not emitting memory events, we need to include
-                // all memory so that memory events can be emitted from the checkpoint. But we need
-                // to first reset any modified memory to as it was before the execution.
                 checkpoint.memory.clone_from(&self.state.memory);
                 memory_checkpoint.into_iter().for_each(|(addr, record)| {
                     if let Some(record) = record {
@@ -2278,7 +2970,6 @@ impl<'a> Executor<'a> {
                     }
                 });
                 checkpoint.uninitialized_memory = self.state.uninitialized_memory.clone();
-                // Remove memory that was written to in this batch.
                 for (addr, is_old) in uninitialized_memory_checkpoint {
                     if !is_old {
                         checkpoint.uninitialized_memory.remove(addr);
@@ -2303,24 +2994,128 @@ impl<'a> Executor<'a> {
         Ok((checkpoint, done))
     }
 
+    /// Execute up to `self.shard_batch_size` shards for the minimal-trace
+    /// collector alone, returning whether the program ended.
+    ///
+    /// The controller that ships `TraceChunk`s to workers needs the chunks and
+    /// nothing else, and keeps no checkpoint. [`Self::execute_state`] is the
+    /// `trace_checkpoint` producer -- it snapshots the state, records every
+    /// first touch into `memory_checkpoint` and assembles an
+    /// [`ExecutionState`] per call -- which is bookkeeping the chunk
+    /// producer paid for and dropped (10% of its wall on reth, chunks
+    /// byte-identical either way). This runs in [`ExecutorMode::Simple`]: no
+    /// events, no checkpoint, the collector's per-shard seal and `mem_reads`
+    /// oracle are mode-independent.
+    ///
+    /// Drain with [`Self::drain_sealed_chunks`] after every call, sealing
+    /// with [`Self::seal_minimal_trace_final_memory`] first when done, exactly
+    /// as for `execute_state`.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the program execution fails.
+    pub fn execute_minimal(&mut self) -> Result<bool, ExecutionError> {
+        self.executor_mode = ExecutorMode::Simple;
+        self.emit_global_memory_events = false;
+        if self.state.global_clk == 0
+            && self.flat_mem.is_none()
+            && self.minimal_trace_collector.is_some()
+            && self.replay_mem.is_none()
+        {
+            match crate::flat_mem::FlatMem::new() {
+                Ok(flat) => self.flat_mem = Some(Box::new(flat)),
+                Err(err) => tracing::warn!("flat guest memory unavailable ({err}); paged"),
+            }
+        }
+        let done = self.execute()?;
+        if !done {
+            self.records.clear();
+        }
+        self.uninitialized_memory_checkpoint.clear();
+        Ok(done)
+    }
+
     fn initialize(&mut self) {
         self.state.clk = 0;
         self.state.records_clk_index = 0;
 
         tracing::debug!("loading memory image");
-        for (&addr, value) in &self.program.image {
-            self.state.memory.insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
+        if let Some(flat) = self.flat_mem.as_deref_mut() {
+            for (&addr, value) in &self.program.image {
+                if addr < NUM_REGISTERS as u32 {
+                    self.state
+                        .memory
+                        .insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
+                } else {
+                    *flat.get_mut(addr) = crate::flat_mem::FlatEntry {
+                        value: *value,
+                        timestamp: 0,
+                        shard: 0,
+                        _pad: 0,
+                    };
+                }
+            }
+        } else {
+            for (&addr, value) in &self.program.image {
+                self.state
+                    .memory
+                    .insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
+            }
+        }
+
+        if let Some(trace) = self.minimal_trace_collector.as_mut() {
+            if trace.emitted == 0 && trace.chunks.is_empty() {
+                use crate::minimal_trace::TraceChunk;
+                let mut start_regs = vec![0u32; 36];
+                let mut start_reg_records = vec![(0u32, 0u32, 0u32); 36];
+                for i in 0..36u32 {
+                    if let Some(r) = self.state.memory.registers.get(i) {
+                        start_regs[i as usize] = r.value;
+                        start_reg_records[i as usize] = (r.value, r.shard, r.timestamp);
+                    }
+                }
+                trace.chunks.push(TraceChunk {
+                    shard_index: 0,
+                    shape_fingerprint: 0,
+                    shape_classes: Vec::new(),
+                    shape_area: 0,
+                    start_registers: start_regs,
+                    start_register_records: start_reg_records,
+                    pc_start: self.state.pc,
+                    clk_start: 0,
+                    current_shard: self.state.current_shard,
+                    input_stream_slice: None,
+                    input_stream_ptr: self.state.input_stream_ptr as u32,
+                    proof_stream_ptr: self.state.proof_stream_ptr as u32,
+                    public_values_stream_ptr: self.state.public_values_stream_ptr as u32,
+                    clk_end: u64::MAX,
+                    final_memory: Vec::new(),
+                    final_uninit_memory: Vec::new(),
+                    mem_reads: std::sync::Arc::new(Vec::new()),
+                });
+            }
         }
     }
 
     pub fn run_very_fast(&mut self) -> Result<(), ExecutionError> {
         self.executor_mode = ExecutorMode::Simple;
         self.print_report = false;
+        if self.try_run_fast_jit()? {
+            return Ok(());
+        }
         while !self.execute()? {}
         Ok(())
     }
 
     /// Executes the program without tracing and without emitting events.
+    ///
+    /// On Linux x86_64 the executor first attempts the JIT path
+    /// (`jit_runner::build_jit_function` + `run_jit`).  If the program
+    /// contains an opcode the JIT can't lower (LWL/LWR/SWL/SWR or
+    /// SYSCALL — see [`jit_runner::first_unsupported_opcode`]) the
+    /// executor falls back to the interpreter transparently.  Set the
+    /// env var `ZIREN_DISABLE_JIT=1` to force the interpreter
+    /// regardless.
     ///
     /// # Errors
     ///
@@ -2328,8 +3123,222 @@ impl<'a> Executor<'a> {
     pub fn run_fast(&mut self) -> Result<(), ExecutionError> {
         self.executor_mode = ExecutorMode::Simple;
         self.print_report = true;
+        if self.try_run_fast_jit()? {
+            return Ok(());
+        }
         while !self.execute()? {}
         Ok(())
+    }
+
+    /// Producer: run the whole program on the JIT
+    /// (`run_fast`) while capturing a whole-program
+    /// [`crate::minimal_trace::TraceChunk`]. This is the fast
+    /// "checkpoint pass" replacement — it fast-forwards execution on the
+    /// JIT (populating `state.public_values_stream` + the final cycle
+    /// count) and returns the chunk describing the run
+    /// (`start_registers` / `pc_start` / `clk_start=0` / `clk_end=total`).
+    ///
+    /// The returned chunk is the MinimalTrace product: the pipeline routes
+    /// byte-equivalent record reconstruction through the from-start
+    /// `trace_checkpoint`, which needs the executor's `input_stream` /
+    /// `proof_stream`.  The chunk's `mem_reads` oracle is captured for
+    /// diagnostics but not consumed.
+    ///
+    /// Falls back to the interpreter transparently for JIT-ineligible
+    /// programs; in that case a best-effort chunk header is synthesised
+    /// from the executor's pre/post state.
+    pub fn run_fast_capture_whole_program_chunk(
+        &mut self,
+    ) -> Result<crate::minimal_trace::TraceChunk, ExecutionError> {
+        if self.state.global_clk == 0 {
+            self.initialize();
+        }
+        let pc_start = self.state.pc;
+        let clk_start = self.state.global_clk;
+        let mut start_registers = vec![0u32; 36];
+        for (i, slot) in start_registers.iter_mut().enumerate() {
+            *slot = self.register(Register::from(i as u8));
+        }
+
+        self.d4_capture_chunk = true;
+        self.d4_captured_chunk = None;
+        let res = self.run_fast();
+        self.d4_capture_chunk = false;
+        res?;
+
+        let clk_end = self.state.global_clk;
+        let chunk =
+            self.d4_captured_chunk.take().unwrap_or_else(|| crate::minimal_trace::TraceChunk {
+                input_stream_slice: None,
+                shard_index: 0,
+                shape_fingerprint: 0,
+                shape_classes: Vec::new(),
+                shape_area: 0,
+                start_registers,
+                start_register_records: Vec::new(),
+                pc_start,
+                clk_start,
+                clk_end,
+                current_shard: 0,
+                input_stream_ptr: 0,
+                proof_stream_ptr: 0,
+                public_values_stream_ptr: 0,
+                final_memory: Vec::new(),
+                final_uninit_memory: Vec::new(),
+                mem_reads: std::sync::Arc::new(Vec::new()),
+            });
+        Ok(chunk)
+    }
+
+    /// Attempt to run the program through the JIT (`run_fast` semantics
+    /// only — no event emission).  Returns `Ok(true)` on success,
+    /// `Ok(false)` if the JIT skipped the program (unsupported opcode,
+    /// a cycle limit set, disabled by env, or non-x86_64-Linux build) so the
+    /// caller falls back to the interpreter loop, which enforces the limit per
+    /// cycle.  A guest HALT with exit code `c ≠ 0` is
+    /// `HaltWithNonZeroExitCode(c)`, as in the interpreter. The trampoline's `*mut` accesses are sound
+    /// because `self`, `mem_bridge` and `bridge_state` outlive the JIT call.
+    fn try_run_fast_jit(&mut self) -> Result<bool, ExecutionError> {
+        #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+        {
+            if std::env::var_os("ZIREN_DISABLE_JIT").is_some() {
+                return Ok(false);
+            }
+            if crate::jit_runner::first_unsupported_opcode(&self.program).is_some() {
+                return Ok(false);
+            }
+            if self.max_cycles.is_some() {
+                return Ok(false);
+            }
+            if self.state.global_clk == 0 {
+                self.initialize();
+            }
+
+            use crate::jit_runner::{build_context, run_jit, BuildParams};
+
+            let pc_start = self.state.pc;
+            let pc_base = self.program.pc_base;
+            let params = BuildParams {
+                program_size: self.program.instructions.len(),
+                memory_size: 4096,
+                max_trace_size: 4096,
+                pc_start,
+                pc_base,
+                clk_bump: 1,
+                mem_read_recorder: None,
+            };
+            let jit_fn_arc = match crate::jit_runner::cached_jit_function(
+                &self.program,
+                params,
+                Some(
+                    crate::jit_runner::jit_syscall_handler as crate::jit_runner::JitSyscallHandler,
+                ),
+            ) {
+                Ok(f) => f,
+                Err(_) => return Ok(false),
+            };
+            let jit_fn: &zkm_core_jit::JitFunction = &jit_fn_arc;
+
+            let mut mem_bridge = match crate::jit_runner::JitMemoryBridge::new() {
+                Ok(b) => b,
+                Err(_) => return Ok(false),
+            };
+            let prog_fp = crate::jit_runner::program_fingerprint_of(&self.program);
+            if mem_bridge.last_program_fingerprint != prog_fp {
+                for (&addr, &word) in &self.program.image {
+                    mem_bridge.store_word(addr, word);
+                }
+                mem_bridge.set_program_fingerprint(prog_fp);
+            }
+            let pre_seeded: Vec<u32> = self.state.memory.page_table.keys().collect();
+            for addr in pre_seeded {
+                if let Some(rec) = self.state.memory.page_table.get(addr) {
+                    mem_bridge.store_word(addr, rec.value);
+                }
+            }
+            let memory_ptr = mem_bridge.as_ptr();
+            let jump_table_ptr: *const *const u8 = jit_fn.jump_table.as_ptr();
+            let mut trace_buf = vec![0u8; 4096];
+
+            let mut regs = [0u32; 36];
+            for (i, slot) in regs.iter_mut().enumerate() {
+                *slot = self.register(crate::Register::from(i as u8));
+            }
+
+            let mut ctx = build_context(
+                pc_start,
+                memory_ptr,
+                jump_table_ptr,
+                jit_fn.jump_table.len(),
+                trace_buf.as_mut_ptr(),
+                regs,
+            );
+            let executor_ptr: *mut Self = self;
+            let bridge_ptr: *mut crate::jit_runner::JitMemoryBridge = &mut mem_bridge;
+            let mut bridge_state = crate::jit_runner::JitBridgeState {
+                executor: unsafe { &mut *executor_ptr },
+                bridge: unsafe { &mut *bridge_ptr },
+                unconstrained_reg_snapshot: None,
+            };
+            ctx.user_data = &mut bridge_state as *mut _ as *mut std::ffi::c_void;
+
+            if self.d4_capture_chunk {
+                let chunk =
+                    unsafe { crate::jit_runner::run_jit_capture_trace_chunk(jit_fn, &mut ctx, 0) };
+                self.d4_captured_chunk = Some(chunk);
+            } else {
+                unsafe { run_jit(jit_fn, &mut ctx) };
+            }
+
+            ctx.user_data = std::ptr::null_mut();
+
+            let raw_exit = ctx.exit_code;
+            let normalised_exit = if raw_exit == 0x8000_0000 { 0 } else { raw_exit };
+            if raw_exit == 0xDEAD_C0DE {
+                return Err(ExecutionError::UnsupportedInstruction(0));
+            }
+            if raw_exit == zkm_core_jit::backends::x86::JIT_EXIT_BAD_JUMP {
+                tracing::error!(
+                    "JIT bad dispatch: target={:#x} pc_base={:#x} n_instr={} range=[{:#x},{:#x})",
+                    ctx.bad_jump_target,
+                    pc_base,
+                    self.program.instructions.len(),
+                    pc_base,
+                    pc_base as u64 + 4 * self.program.instructions.len() as u64,
+                );
+                return Err(ExecutionError::JitJumpTargetOutOfRange(
+                    ctx.bad_jump_target,
+                    ctx.last_executed_pc,
+                ));
+            }
+            if raw_exit != 0 && (raw_exit & 0x4000_0000) == 0 {
+                self.state.exited = true;
+            }
+            let _ = normalised_exit;
+
+            use crate::events::MemoryRecord;
+            for (i, &v) in ctx.registers[..36].iter().enumerate() {
+                self.state
+                    .memory
+                    .registers
+                    .insert(i as u32, MemoryRecord { value: v, shard: 0, timestamp: 0 });
+            }
+            self.state.pc = ctx.pc;
+            self.state.global_clk = ctx.global_clk;
+
+            if self.print_report && self.report.opcode_counts.values().all(|&v| v == 0) {
+                let cycles = (ctx.global_clk / 5).max(1);
+                self.report.opcode_counts[crate::Opcode::ADD] = cycles;
+            }
+            if raw_exit != 0 && raw_exit & 0xC000_0000 == 0 {
+                return Err(ExecutionError::HaltWithNonZeroExitCode(raw_exit));
+            }
+            Ok(true)
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
+        {
+            Ok(false)
+        }
     }
 
     /// Executes the program and prints the execution report.
@@ -2347,76 +3356,80 @@ impl<'a> Executor<'a> {
     /// Executes up to `self.shard_batch_size` cycles of the program, returning whether the program
     /// has finished.
     pub fn execute(&mut self) -> Result<bool, ExecutionError> {
-        // Get the program.
         let program = self.program.clone();
 
-        // Get the current shard.
         let start_shard = self.state.current_shard;
 
-        // If it's the first cycle, initialize the program.
         if self.state.global_clk == 0 {
             self.initialize();
         }
 
-        // Loop until we've executed `self.shard_batch_size` shards if `self.shard_batch_size` is
-        // set.
         let mut done = false;
         let mut num_shards_executed = 0;
-        loop {
-            if self.execute_cycle()? {
-                done = true;
-                break;
-            }
 
-            // We restrict the execution of branch/jump and its delay slot to be in the same shard.
-            if self.shard_batch_size > 0
-                && !self.unconstrained
-                && !self.state.next_is_delayslot
-                && self.inc_shard_if_need()
-            {
-                num_shards_executed += 1;
-                self.bump_record();
-                if num_shards_executed >= self.shard_batch_size {
+        if let Some(batch_done) = crate::jit_producer::run(self, &mut num_shards_executed)? {
+            done = batch_done;
+        } else {
+            loop {
+                if self.execute_cycle()? {
+                    done = true;
                     break;
+                }
+
+                if self.shard_batch_size > 0
+                    && !self.unconstrained
+                    && !self.state.next_is_delayslot
+                    && self.inc_shard_if_need()
+                {
+                    num_shards_executed += 1;
+                    self.bump_record();
+                    if num_shards_executed >= self.shard_batch_size {
+                        break;
+                    }
                 }
             }
         }
 
-        // Get the final public values.
+        self.record.public_values.last_timestamp = self.state.clk;
+
         let public_values = self.record.public_values;
 
         if done {
             self.postprocess();
 
-            // Push the remaining execution record with memory initialize & finalize events.
             self.bump_record();
             log::debug!("last step {}", self.state.global_clk);
         }
 
-        // Push the remaining execution record, if there are any CPU events.
         if !self.record.cpu_events.is_empty() {
             self.bump_record();
         }
 
-        // Set the global public values for all shards.
         let mut last_next_pc = 0;
         let mut last_exit_code = 0;
         for (i, record) in self.records.iter_mut().enumerate() {
+            let shard_last_timestamp = record.public_values.last_timestamp;
             record.program = program.clone();
             record.public_values = public_values;
             record.public_values.committed_value_digest = public_values.committed_value_digest;
             record.public_values.deferred_proofs_digest = public_values.deferred_proofs_digest;
             record.public_values.execution_shard = start_shard + i as u32;
+            record.public_values.initial_timestamp = 0;
+            record.public_values.last_timestamp = shard_last_timestamp;
             if record.cpu_events.is_empty() {
                 record.public_values.start_pc = last_next_pc;
                 record.public_values.next_pc = last_next_pc;
                 record.public_values.exit_code = last_exit_code;
+                record.public_values.start_next_pc = last_next_pc;
+                record.public_values.next_next_pc = last_next_pc;
             } else {
                 record.public_values.start_pc = record.cpu_events[0].pc;
                 record.public_values.next_pc = record.cpu_events.last().unwrap().next_pc;
                 record.public_values.exit_code = record.cpu_events.last().unwrap().exit_code;
                 last_next_pc = record.public_values.next_pc;
                 last_exit_code = record.public_values.exit_code;
+                record.public_values.start_next_pc = record.cpu_events[0].next_pc;
+                record.public_values.next_next_pc = record.cpu_events.last().unwrap().next_next_pc;
             }
         }
 
@@ -2424,12 +3437,38 @@ impl<'a> Executor<'a> {
     }
 
     #[inline]
-    fn inc_shard_if_need(&mut self) -> bool {
+    /// Whether [`Self::inc_shard_if_need`] would close the shard right now,
+    /// without closing it. Mirrors the four production limits it tests; the
+    /// offline shape block cannot fire here because the producer only runs
+    /// with `lde_size_check` off and `maximal_shapes` unset.
+    pub(crate) fn shard_fence_due(&self) -> bool {
+        let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
+        let clk_exit = self.state.clk + self.max_syscall_cycles + MemoryAccessPosition::HI as u32
+            >= CORE_SHARD_CLK_LIMIT;
+        let (area_split, height_split) =
+            self.split_acct.check_shard_limit((self.state.clk / 5) as u64);
+        cpu_exit || clk_exit || area_split || height_split || self.ramp_split_due()
+    }
+
+    /// Whether the block-start ramp would close this shard: see [`RAMP_SHARDS`].
+    /// Only the cutting pass consults it -- a replay follows the boundaries the
+    /// cutting pass already recorded.
+    #[inline]
+    fn ramp_split_due(&self) -> bool {
+        if self.state.current_shard > RAMP_SHARDS {
+            return false;
+        }
+        let area = self.split_acct.trace_area((self.state.clk / 5) as u64);
+        area >= (self.split_acct.element_threshold() >> RAMP_AREA_SHIFT)
+    }
+
+    pub(crate) fn inc_shard_if_need(&mut self) -> bool {
         if self.executor_mode == ExecutorMode::Trace && !self.state.records_clk.is_empty() {
             let records_clk_index = self.state.records_clk_index as usize;
             if records_clk_index < self.state.records_clk.len()
                 && self.state.clk >= self.state.records_clk[self.state.records_clk_index as usize]
             {
+                self.record.public_values.last_timestamp = self.state.clk;
                 self.state.current_shard += 1;
                 self.state.clk = 0;
                 self.state.records_clk_index += 1;
@@ -2438,26 +3477,26 @@ impl<'a> Executor<'a> {
             return false;
         }
 
-        // If there's not enough cycles left for another instruction, move to the next shard.
         let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
 
-        // Every N cycles, check if there exists at least one shape that fits.
-        //
-        // If we're close to not fitting, early stop the shard to ensure we don't OOM.
-        let mut shape_match_found = true;
-        if self.state.global_clk.is_multiple_of(self.shape_check_frequency) {
-            // Estimate the number of events in the trace.
-            let event_counts = estimate_mips_event_counts(
-                (self.state.clk / 5) as u64,
-                self.local_counts.local_mem as u64,
-                self.local_counts.syscalls_sent as u64,
-                *self.local_counts.event_counts,
-            );
+        let clk_exit = self.state.clk + self.max_syscall_cycles + MemoryAccessPosition::HI as u32
+            >= CORE_SHARD_CLK_LIMIT;
 
-            // Check if the LDE size is too large.
+        let cpu_cycles = (self.state.clk / 5) as u64;
+
+        let (area_split, height_split) = self.split_acct.check_shard_limit(cpu_cycles);
+
+        let ramp_split = self.ramp_split_due();
+
+        let mut shape_match_found = true;
+        if (self.lde_size_check || self.maximal_shapes.is_some())
+            && self.state.global_clk.is_multiple_of(SHAPE_SEARCH_CHECK_FREQUENCY)
+        {
+            let event_counts = self.split_acct.event_counts(cpu_cycles);
+
             if self.lde_size_check {
                 let padded_event_counts =
-                    pad_mips_event_counts(event_counts, self.shape_check_frequency);
+                    pad_mips_event_counts(event_counts, SHAPE_SEARCH_CHECK_FREQUENCY);
                 let padded_lde_size = estimate_mips_lde_size(padded_event_counts, &self.costs);
                 if padded_lde_size > self.lde_size_threshold {
                     tracing::warn!(
@@ -2467,8 +3506,6 @@ impl<'a> Executor<'a> {
                     shape_match_found = false;
                 }
             } else if let Some(maximal_shapes) = &self.maximal_shapes {
-                // Check if we're too "close" to a maximal shape.
-
                 let distance = |threshold: usize, count: usize| {
                     if count != 0 {
                         threshold - count
@@ -2508,7 +3545,7 @@ impl<'a> Executor<'a> {
                         continue;
                     }
 
-                    if l_infinity >= 32 * (self.shape_check_frequency as usize) {
+                    if l_infinity >= 32 * (SHAPE_SEARCH_CHECK_FREQUENCY as usize) {
                         shape_match_found = true;
                         break;
                     }
@@ -2527,10 +3564,61 @@ impl<'a> Executor<'a> {
             }
         }
 
-        if cpu_exit || !shape_match_found {
+        if cpu_exit || clk_exit || !shape_match_found || height_split || area_split || ramp_split {
+            if shard_close_census_enabled() {
+                let reason = if clk_exit {
+                    "clk"
+                } else if height_split {
+                    "height"
+                } else if area_split {
+                    "area"
+                } else if cpu_exit {
+                    "cpu"
+                } else if ramp_split {
+                    "ramp"
+                } else {
+                    "shape"
+                };
+                let counts = self.split_acct.event_counts(cpu_cycles);
+                let mut census: Vec<String> = counts
+                    .iter()
+                    .filter(|(_, &n)| n != 0)
+                    .map(|(air, n)| format!("{air}:{n}"))
+                    .collect();
+                census.sort();
+                tracing::warn!(
+                    "SHARD_CLOSE reason={reason} shard={} cycles={} area={} max_height={} counts={}",
+                    self.state.current_shard,
+                    cpu_cycles,
+                    self.split_acct.trace_area(cpu_cycles),
+                    self.split_acct.max_height(cpu_cycles),
+                    census.join(","),
+                );
+            }
+            self.pending_shape_fingerprint = {
+                use std::hash::{Hash, Hasher};
+                let area = self.split_acct.trace_area(cpu_cycles);
+                let log_dense = (area.max(1)).next_power_of_two().trailing_zeros();
+                let stripes = area.div_ceil(1 << 21);
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                log_dense.hash(&mut h);
+                stripes.hash(&mut h);
+                let counts = self.split_acct.event_counts(cpu_cycles);
+                let mut classes = vec![0u8; counts.len()];
+                for (air, &rows) in &counts {
+                    if rows > 0 {
+                        classes[ShardSplitAccumulator::slot(air)] =
+                            rows.next_power_of_two().trailing_zeros() as u8 + 1;
+                    }
+                }
+                self.pending_shape_classes = classes;
+                self.pending_shape_area = area;
+                h.finish() | 1
+            };
             if self.executor_mode == ExecutorMode::Checkpoint {
                 self.state.records_clk.push(self.state.clk);
             }
+            self.record.public_values.last_timestamp = self.state.clk;
             self.state.current_shard += 1;
             self.state.clk = 0;
             return true;
@@ -2539,27 +3627,32 @@ impl<'a> Executor<'a> {
     }
 
     fn postprocess(&mut self) {
-        // Flush remaining stdout/stderr
         for (fd, buf) in &self.io_buf {
             if !buf.is_empty() {
                 match fd {
                     1 => {
-                        println!("stdout: {buf}");
+                        tracing::info!("stdout: {buf}");
                     }
                     2 => {
-                        println!("stderr: {buf}");
+                        tracing::info!("stderr: {buf}");
                     }
                     _ => {}
                 }
             }
         }
 
-        // Flush trace buf
         if let Some(ref mut buf) = self.trace_buf {
             buf.flush().unwrap();
         }
 
-        // Ensure that all proofs and input bytes were read, otherwise warn the user.
+        if !self.cycle_tracker.is_empty() {
+            let open: Vec<&str> = self.cycle_tracker.iter().map(|(n, _)| n.as_str()).collect();
+            tracing::warn!(
+                "execution ended with unclosed cycle-tracker scopes: {open:?} -- their cycles \
+                 are absent from the report"
+            );
+        }
+
         if self.state.proof_stream_ptr != self.state.proof_stream.len() {
             tracing::warn!(
                 "Not all proofs were read. Proving will fail during recursion. Did you pass too
@@ -2574,11 +3667,8 @@ impl<'a> Executor<'a> {
             && (self.executor_mode == ExecutorMode::Trace
                 || self.executor_mode == ExecutorMode::Checkpoint)
         {
-            // SECTION: Set up all MemoryInitializeFinalizeEvents needed for memory argument.
             let memory_finalize_events = &mut self.record.global_memory_finalize_events;
 
-            // We handle the addr = 0 case separately, as we constrain it to be 0 in the first row
-            // of the memory finalize table so it must be first in the array of events.
             let addr_0_record = self.state.memory.get(0);
 
             let addr_0_final_record = match addr_0_record {
@@ -2592,8 +3682,6 @@ impl<'a> Executor<'a> {
             let addr_0_initialize_event = MemoryInitializeFinalizeEvent::initialize(0, 0);
             memory_initialize_events.push(addr_0_initialize_event);
 
-            // Count the number of touched memory addresses manually, since `PagedMemory` doesn't
-            // already know its length.
             self.report.touched_memory_addresses = 0;
             for addr in 1..NUM_REGISTERS as u32 {
                 let record = self.state.memory.registers.get(addr);
@@ -2601,9 +3689,6 @@ impl<'a> Executor<'a> {
                     if self.print_report {
                         self.report.touched_memory_addresses += 1;
                     }
-                    // Program memory is initialized in the MemoryProgram chip and doesn't require
-                    // any events, so we only send init events for other memory
-                    // addresses.
                     if !self.record.program.image.contains_key(&addr) {
                         let initial_value =
                             self.state.uninitialized_memory.registers.get(addr).unwrap_or(&0);
@@ -2618,12 +3703,9 @@ impl<'a> Executor<'a> {
             for addr in self.state.memory.page_table.keys() {
                 self.report.touched_memory_addresses += 1;
                 if addr == 0 {
-                    // Handled above.
                     continue;
                 }
 
-                // Program memory is initialized in the MemoryProgram chip and doesn't require any
-                // events, so we only send init events for other memory addresses.
                 if !self.record.program.image.contains_key(&addr) {
                     let initial_value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
                     memory_initialize_events
@@ -2645,7 +3727,6 @@ impl<'a> Executor<'a> {
     #[inline]
     #[cfg(debug_assertions)]
     fn log(&mut self, _: &Instruction) {
-        // Write the current program counter to the trace buffer for the cycle tracer.
         if let Some(ref mut buf) = self.trace_buf {
             if !self.unconstrained {
                 buf.write_all(&u32::to_be_bytes(self.state.pc)).unwrap();
@@ -2656,20 +3737,58 @@ impl<'a> Executor<'a> {
             log::info!("clk = {} pc = 0x{:x?}", self.state.global_clk, self.state.pc);
         }
     }
-
-    #[allow(dead_code)]
-    fn show_regs(&self) {
-        let regs = (0..NUM_REGISTERS)
-            .map(|i| self.state.memory.get(i as u32).unwrap().value)
-            .collect::<Vec<_>>();
-        println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
-    }
 }
 
 /// Aligns an address to the nearest word below or equal to it.
 #[must_use]
 pub const fn align(addr: u32) -> u32 {
     addr - addr % 4
+}
+
+/// Charge `instruction`'s rows to the shard accumulator: one row on its own
+/// chip (form-split ALU rows land by operand form), plus the rows it induces
+/// on the chips it depends on. The interpreter charges every instruction it
+/// executes here, and the JIT producer tabulates the same charges per
+/// `(opcode, imm_c)` to subtract from its budgets natively; it is the only
+/// place opcode-driven rows are counted, so the two cannot drift.
+pub(crate) fn charge_instruction(acct: &mut ShardSplitAccumulator, instruction: &Instruction) {
+    let imm_air =
+        if instruction.imm_c { crate::mips_imm_air_from_opcode(instruction.opcode) } else { None };
+    if let Some(air) = imm_air {
+        acct.add_air(air, 1);
+    } else {
+        acct.add_opcode(instruction.opcode, 1);
+    }
+    if instruction.is_branch_cmp_instruction() {
+        acct.add_opcode(Opcode::ADD, 1);
+        acct.add_opcode(Opcode::SLT, 2);
+    } else if instruction.is_mov_cond_instruction() {
+        acct.add_opcode(Opcode::ADD, 1);
+    } else if instruction.opcode == Opcode::EXT {
+        acct.add_opcode(Opcode::SLL, 1);
+        acct.add_opcode(Opcode::SRL, 1);
+    } else if instruction.is_cloclz_instruction() {
+        acct.add_opcode(Opcode::SRL, 1);
+    } else if instruction.is_maddsubu_instruction() {
+        acct.add_opcode(Opcode::MULTU, 1);
+    } else if instruction.opcode == Opcode::INS {
+        acct.add_opcode(Opcode::ROR, 2);
+        acct.add_opcode(Opcode::SLL, 1);
+        acct.add_opcode(Opcode::SRL, 2);
+        acct.add_opcode(Opcode::ADD, 1);
+    } else if instruction.opcode == Opcode::DIV {
+        acct.add_opcode(Opcode::MULT, 2);
+        acct.add_opcode(Opcode::ADD, 2);
+        acct.add_opcode(Opcode::SLTU, 1);
+    } else if instruction.opcode == Opcode::DIVU {
+        acct.add_opcode(Opcode::MULTU, 2);
+        acct.add_opcode(Opcode::ADD, 2);
+        acct.add_opcode(Opcode::SLTU, 1);
+    } else if instruction.is_maddsub_instruction() {
+        acct.add_opcode(Opcode::MULT, 1);
+    } else if instruction.opcode == Opcode::JumpDirect {
+        acct.add_opcode(Opcode::ADD, 1);
+    }
 }
 
 #[cfg(test)]
@@ -2679,7 +3798,7 @@ mod tests {
         secp256r1_double_program, simple_memory_program, simple_program, ssz_withdrawals_program,
         u256xu2048_mul_program,
     };
-    use zkm_stark::ZKMCoreOpts;
+    use zkm_pcs::ZKMCoreOpts;
 
     use crate::{Instruction, Opcode, Register};
 
@@ -2714,35 +3833,30 @@ mod tests {
         runtime.run_very_fast().unwrap();
     }
 
-    //
     #[test]
     fn test_secp256r1_add_program_run() {
         let program = secp256r1_add_program();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
-    //
     #[test]
     fn test_secp256r1_double_program_run() {
         let program = secp256r1_double_program();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
-    //
     #[test]
     fn test_u256xu2048_mul() {
         let program = u256xu2048_mul_program();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
-    //
     #[test]
     fn test_ssz_withdrawals_program_run() {
         let program = ssz_withdrawals_program();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
-    //
     #[test]
     #[should_panic]
     fn test_panic() {
@@ -2787,13 +3901,8 @@ mod tests {
         assert_eq!(runtime.state.pc + 4, runtime.state.next_pc);
     }
 
-    //
     #[test]
     fn test_add() {
-        // main:
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     add RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2807,9 +3916,6 @@ mod tests {
 
     #[test]
     fn test_sub() {
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     sub RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2824,9 +3930,6 @@ mod tests {
 
     #[test]
     fn test_xor() {
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     xor RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2841,9 +3944,6 @@ mod tests {
 
     #[test]
     fn test_or() {
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     or RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2859,9 +3959,6 @@ mod tests {
 
     #[test]
     fn test_and() {
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     and RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2876,9 +3973,6 @@ mod tests {
 
     #[test]
     fn test_sll() {
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     sll RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2893,9 +3987,6 @@ mod tests {
 
     #[test]
     fn test_srl() {
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     srl RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2910,9 +4001,6 @@ mod tests {
 
     #[test]
     fn test_sra() {
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     sra RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2927,9 +4015,6 @@ mod tests {
 
     #[test]
     fn test_slt() {
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     slt RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2944,9 +4029,6 @@ mod tests {
 
     #[test]
     fn test_sltu() {
-        //     addi x29, x0, 5
-        //     addi x30, x0, 37
-        //     sltu RA, x30, x29
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
@@ -2961,9 +4043,6 @@ mod tests {
 
     #[test]
     fn test_addi() {
-        //     addi x29, x0, 5
-        //     addi x30, x29, 37
-        //     addi RA, x30, 42
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 29, 37, false, true),
@@ -2978,9 +4057,6 @@ mod tests {
 
     #[test]
     fn test_addi_negative() {
-        //     addi x29, x0, 5
-        //     addi x30, x29, -1
-        //     addi RA, x30, 4
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 29, 0xFFFF_FFFF, false, true),
@@ -2994,9 +4070,6 @@ mod tests {
 
     #[test]
     fn test_xori() {
-        //     addi x29, x0, 5
-        //     xori x30, x29, 37
-        //     xori RA, x30, 42
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::XOR, 30, 29, 37, false, true),
@@ -3010,9 +4083,6 @@ mod tests {
 
     #[test]
     fn test_ori() {
-        //     addi x29, x0, 5
-        //     ori x30, x29, 37
-        //     ori RA, x30, 42
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::OR, 30, 29, 37, false, true),
@@ -3026,9 +4096,6 @@ mod tests {
 
     #[test]
     fn test_andi() {
-        //     addi x29, x0, 5
-        //     andi x30, x29, 37
-        //     andi RA, x30, 42
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::AND, 30, 29, 37, false, true),
@@ -3042,8 +4109,6 @@ mod tests {
 
     #[test]
     fn test_slli() {
-        //     addi x29, x0, 5
-        //     slli RA, x29, 37
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::SLL, 31, 29, 4, false, true),
@@ -3056,8 +4121,6 @@ mod tests {
 
     #[test]
     fn test_srli() {
-        //    addi x29, x0, 5
-        //    srli RA, x29, 37
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 42, false, true),
             Instruction::new(Opcode::SRL, 31, 29, 4, false, true),
@@ -3070,8 +4133,6 @@ mod tests {
 
     #[test]
     fn test_srai() {
-        //   addi x29, x0, 5
-        //   srai RA, x29, 37
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 42, false, true),
             Instruction::new(Opcode::SRA, 31, 29, 4, false, true),
@@ -3084,8 +4145,6 @@ mod tests {
 
     #[test]
     fn test_slti() {
-        //   addi x29, x0, 5
-        //   slti RA, x29, 37
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 42, false, true),
             Instruction::new(Opcode::SLT, 31, 29, 37, false, true),
@@ -3098,8 +4157,6 @@ mod tests {
 
     #[test]
     fn test_sltiu() {
-        //   addi x29, x0, 5
-        //   sltiu RA, x29, 37
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 42, false, true),
             Instruction::new(Opcode::SLTU, 31, 29, 37, false, true),
@@ -3112,10 +4169,6 @@ mod tests {
 
     #[test]
     fn test_j() {
-        //   j 100
-        //
-        // The j instruction performs an unconditional jump to a specified address.
-
         let instructions = vec![Instruction::new(Opcode::Jumpi, 0, 100, 0, false, true)];
         let program = Program::new(instructions, 0, 0);
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
@@ -3125,11 +4178,6 @@ mod tests {
 
     #[test]
     fn test_jr() {
-        //   addi x11, x11, 100
-        //   jr x11
-        //
-        // The jr instruction jumps to an address stored in a register.
-
         let instructions = vec![
             Instruction::new(Opcode::ADD, 11, 11, 100, false, true),
             Instruction::new(Opcode::Jump, 0, 11, 0, false, true),
@@ -3142,11 +4190,6 @@ mod tests {
 
     #[test]
     fn test_jal() {
-        //   addi x11, x11, 100
-        //   jal x11
-        //
-        // The jal instruction jumps to an address and stores the return address in $ra.
-
         let instructions = vec![Instruction::new(Opcode::Jumpi, 31, 100, 0, false, true)];
         let program = Program::new(instructions, 0, 0);
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
@@ -3157,11 +4200,6 @@ mod tests {
 
     #[test]
     fn test_jalr() {
-        //   addi x11, x11, 100
-        //   jalr x11
-        //
-        // Similar to jal, but jumps to an address stored in a register.
-
         let instructions = vec![
             Instruction::new(Opcode::ADD, 11, 0, 100, false, true),
             Instruction::new(Opcode::Jump, 5, 11, 0, false, true),
@@ -3183,6 +4221,29 @@ mod tests {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(12.into()), expected);
+    }
+
+    /// `-2^31 / -1` is the one overflow case of signed division.  Rust's `/`
+    /// and `%` PANIC on it, so before the `wrapping_*` fix a guest containing
+    /// this division took the prover down with "attempt to divide with
+    /// overflow" -- on an operation the AIR is built to prove (`is_overflow`
+    /// in `alu/divrem`, quotient `-2^31`, remainder `0`) and the JIT already
+    /// returned `0x8000_0000` for.  `c == 0` is the separate, trapped case.
+    #[test]
+    #[allow(clippy::unreadable_literal)]
+    fn signed_division_overflow_does_not_panic() {
+        simple_op_code_test(Opcode::MOD, 0x00000000, 0x80000000, 0xffffffff);
+
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 10, 0, 0x80000000, false, true),
+            Instruction::new(Opcode::ADD, 11, 0, 0xffffffff, false, true),
+            Instruction::new(Opcode::DIV, 0, 10, 11, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.register(Register::LO), 0x80000000);
+        assert_eq!(runtime.register(Register::HI), 0x00000000);
     }
 
     #[test]
@@ -3279,34 +4340,27 @@ mod tests {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
 
-        // Assert SW & LW case
         assert_eq!(runtime.register(28.into()), 0x12348765);
 
-        // Assert LBU cases
         assert_eq!(runtime.register(27.into()), 0x65);
         assert_eq!(runtime.register(26.into()), 0x87);
         assert_eq!(runtime.register(25.into()), 0x34);
         assert_eq!(runtime.register(24.into()), 0x12);
 
-        // Assert LB cases
         assert_eq!(runtime.register(23.into()), 0x65);
         assert_eq!(runtime.register(22.into()), 0xffffff87);
 
-        // Assert LHU cases
         assert_eq!(runtime.register(21.into()), 0x8765);
         assert_eq!(runtime.register(20.into()), 0x1234);
 
-        // Assert LH cases
         assert_eq!(runtime.register(19.into()), 0xffff8765);
         assert_eq!(runtime.register(18.into()), 0x1234);
 
-        // Assert SB cases
         assert_eq!(runtime.register(16.into()), 0x12348725);
         assert_eq!(runtime.register(15.into()), 0x12342525);
         assert_eq!(runtime.register(14.into()), 0x12252525);
         assert_eq!(runtime.register(13.into()), 0x25252525);
 
-        // Assert SH cases
         assert_eq!(runtime.register(12.into()), 0x12346525);
         assert_eq!(runtime.register(11.into()), 0x65256525);
     }

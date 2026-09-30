@@ -7,7 +7,7 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields};
 #[proc_macro_derive(DslVariable)]
 pub fn derive_variable(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = input.ident; // Struct name
+    let name = input.ident;
 
     let gen = match input.data {
         Data::Struct(data) => match data.fields {
@@ -62,7 +62,6 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                     let ftype = &f.ty;
                     quote! {
                         {
-                            // let address = builder.eval(ptr + Usize::Const(offset));
                             self.#fname.load(ptr, index, builder);
                             index.offset += <#ftype as MemVariable<C>>::size_of();
                         }
@@ -74,7 +73,6 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                     let ftype = &f.ty;
                     quote! {
                         {
-                            // let address = builder.eval(ptr + Usize::Const(offset));
                             self.#fname.store(ptr, index, builder);
                             index.offset += <#ftype as MemVariable<C>>::size_of();
                         }

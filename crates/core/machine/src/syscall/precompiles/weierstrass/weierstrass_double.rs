@@ -3,13 +3,15 @@ use core::{
     mem::size_of,
 };
 use std::{fmt::Debug, marker::PhantomData};
+use zkm_derive::PicusAnnotations;
+use zkm_pcs::PicusInfo;
 
 use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use num::{BigUint, One};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
     events::{
@@ -20,20 +22,16 @@ use zkm_core_executor::{
     ExecutionRecord, Program,
 };
 use zkm_curves::{
-    params::{FieldParameters, Limbs, NumLimbs, NumWords},
+    params::{limbs_from_vec, FieldParameters, Limbs, NumLimbs, NumWords},
     weierstrass::WeierstrassParameters,
     AffinePoint, CurveType, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
-#[cfg(feature = "picus")]
-use zkm_derive::PicusAnnotations;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
-use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryCols, MemoryWriteCols},
-    operations::field::field_op::FieldOpCols,
+    operations::field::{field_op::FieldOpCols, range::FieldLtCols},
     utils::limbs_from_prev_access,
 };
 
@@ -45,8 +43,7 @@ pub const fn num_weierstrass_double_cols<P: FieldParameters + NumWords>() -> usi
 ///
 /// Right now the number of limbs is assumed to be a constant, although this could be macro-ed or
 /// made generic in the future.
-#[derive(Debug, Clone, AlignedBorrow)]
-#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
+#[derive(PicusAnnotations, Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct WeierstrassDoubleAssignCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
@@ -65,6 +62,9 @@ pub struct WeierstrassDoubleAssignCols<T, P: FieldParameters + NumWords> {
     pub(crate) p_x_minus_x: FieldOpCols<T, P>,
     pub(crate) y3_ins: FieldOpCols<T, P>,
     pub(crate) slope_times_p_x_minus_x: FieldOpCols<T, P>,
+    pub(crate) x3_range: FieldLtCols<T, P>,
+    pub(crate) y3_range: FieldLtCols<T, P>,
+    pub(crate) inverse_check: FieldOpCols<T, P>,
 }
 
 #[derive(Default)]
@@ -82,12 +82,10 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
         cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField>,
         p_x: BigUint,
         p_y: BigUint,
+        is_real: bool,
     ) {
-        // This populates necessary field operations to double a point on a Weierstrass curve.
-
         let a = E::a_int();
         let slope = {
-            // slope_numerator = a + (p.x * p.x) * 3.
             let slope_numerator = {
                 let p_x_squared =
                     cols.p_x_squared.populate(blu_events, &p_x, &p_x, FieldOperation::Mul);
@@ -105,12 +103,22 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
                 )
             };
 
-            // slope_denominator = 2 * y.
             let slope_denominator = cols.slope_denominator.populate(
                 blu_events,
                 &BigUint::from(2u32),
                 &p_y,
                 FieldOperation::Mul,
+            );
+            let numerator = if is_real && slope_denominator != BigUint::ZERO {
+                BigUint::one()
+            } else {
+                BigUint::ZERO
+            };
+            cols.inverse_check.populate(
+                blu_events,
+                &numerator,
+                &slope_denominator,
+                FieldOperation::Div,
             );
 
             cols.slope.populate(
@@ -121,7 +129,6 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
             )
         };
 
-        // x = slope * slope - (p.x + p.x).
         let x = {
             let slope_squared =
                 cols.slope_squared.populate(blu_events, &slope, &slope, FieldOperation::Mul);
@@ -130,8 +137,7 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
             cols.x3_ins.populate(blu_events, &slope_squared, &p_x_plus_p_x, FieldOperation::Sub)
         };
 
-        // y = slope * (p.x - x) - p.y.
-        {
+        let y = {
             let p_x_minus_x = cols.p_x_minus_x.populate(blu_events, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
                 blu_events,
@@ -139,8 +145,12 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
-            cols.y3_ins.populate(blu_events, &slope_times_p_x_minus_x, &p_y, FieldOperation::Sub);
-        }
+            cols.y3_ins.populate(blu_events, &slope_times_p_x_minus_x, &p_y, FieldOperation::Sub)
+        };
+
+        let modulus = E::BaseField::modulus();
+        cols.x3_range.populate(blu_events, &x, &modulus);
+        cols.y3_range.populate(blu_events, &y, &modulus);
     }
 }
 
@@ -161,7 +171,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         }
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         WeierstrassDoubleAssignCols::<u8, E::BaseField>::picus_info()
     }
@@ -185,7 +194,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         let blu_events: Vec<Vec<ByteLookupEvent>> = events
             .par_chunks(chunk_size)
             .map(|ops: &[(SyscallEvent, PrecompileEvent)]| {
-                // The blu map stores shard -> map(byte lookup event -> multiplicity).
                 let mut blu = Vec::new();
                 ops.iter().for_each(|(_, op)| match op {
                     PrecompileEvent::Secp256k1Double(event)
@@ -214,7 +222,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        // collects the events based on the curve type.
         let events = match E::CURVE_TYPE {
             CurveType::Secp256k1 => input.get_precompile_events(SyscallCode::SECP256K1_DOUBLE),
             CurveType::Secp256r1 => input.get_precompile_events(SyscallCode::SECP256R1_DOUBLE),
@@ -246,7 +253,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         let zero = BigUint::ZERO;
         let one = BigUint::one();
         cols.p_access[num_words_field_element].populate(dummy_memory_record, &mut vec![]);
-        Self::populate_field_ops(&mut vec![], cols, zero, one);
+        Self::populate_field_ops(&mut vec![], cols, zero, one, false);
 
         values.chunks_mut(chunk_size * num_cols).enumerate().par_bridge().for_each(|(i, rows)| {
             rows.chunks_mut(num_cols).enumerate().for_each(|(j, row)| {
@@ -269,7 +276,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
             });
         });
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(values, num_weierstrass_double_cols::<E::BaseField>()))
     }
 
@@ -294,10 +300,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
             }
         }
     }
-
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
@@ -306,20 +308,17 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
         cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField>,
         new_byte_lookup_events: &mut Vec<ByteLookupEvent>,
     ) {
-        // Decode affine points.
         let p = &event.p;
         let p = AffinePoint::<E>::from_words_le(p);
         let (p_x, p_y) = (p.x, p.y);
 
-        // Populate basic columns.
         cols.is_real = F::ONE;
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.p_ptr = F::from_canonical_u32(event.p_ptr);
+        cols.shard = F::from_u32(event.shard);
+        cols.clk = F::from_u32(event.clk);
+        cols.p_ptr = F::from_u32(event.p_ptr);
 
-        Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y);
+        Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y, true);
 
-        // Populate the memory access columns.
         for i in 0..cols.p_access.len() {
             cols.p_access[i].populate(event.p_memory_records[i], new_byte_lookup_events);
         }
@@ -339,26 +338,23 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &WeierstrassDoubleAssignCols<AB::Var, E::BaseField> = (*local).borrow();
 
         let num_words_field_element = E::BaseField::NB_LIMBS / 4;
         let p_x = limbs_from_prev_access(&local.p_access[0..num_words_field_element]);
         let p_y = limbs_from_prev_access(&local.p_access[num_words_field_element..]);
 
-        // `a` in the Weierstrass form: y^2 = x^3 + a * x + b.
-        let a = E::BaseField::to_limbs_field::<AB::Expr, _>(&E::a_int());
+        let a = E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&E::a_int());
 
-        // slope = slope_numerator / slope_denominator.
         let slope = {
-            // slope_numerator = a + (p.x * p.x) * 3.
             {
                 local.p_x_squared.eval(builder, &p_x, &p_x, FieldOperation::Mul, local.is_real);
 
                 local.p_x_squared_times_3.eval(
                     builder,
                     &local.p_x_squared.result,
-                    &E::BaseField::to_limbs_field::<AB::Expr, _>(&BigUint::from(3u32)),
+                    &E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&BigUint::from(3u32)),
                     FieldOperation::Mul,
                     local.is_real,
                 );
@@ -372,12 +368,20 @@ where
                 );
             };
 
-            // slope_denominator = 2 * y.
             local.slope_denominator.eval(
                 builder,
-                &E::BaseField::to_limbs_field::<AB::Expr, _>(&BigUint::from(2u32)),
+                &E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&BigUint::from(2u32)),
                 &p_y,
                 FieldOperation::Mul,
+                local.is_real,
+            );
+            let mut one = vec![AB::Expr::ZERO; E::BaseField::NB_LIMBS];
+            one[0] = local.is_real.into();
+            local.inverse_check.eval(
+                builder,
+                &Polynomial::from_coefficients(&one),
+                &local.slope_denominator.result,
+                FieldOperation::Div,
                 local.is_real,
             );
 
@@ -392,7 +396,6 @@ where
             &local.slope.result
         };
 
-        // x = slope * slope - (p.x + p.x).
         let x = {
             local.slope_squared.eval(builder, slope, slope, FieldOperation::Mul, local.is_real);
             local.p_x_plus_p_x.eval(builder, &p_x, &p_x, FieldOperation::Add, local.is_real);
@@ -406,7 +409,6 @@ where
             &local.x3_ins.result
         };
 
-        // y = slope * (p.x - x) - p.y.
         {
             local.p_x_minus_x.eval(builder, &p_x, x, FieldOperation::Sub, local.is_real);
             local.slope_times_p_x_minus_x.eval(
@@ -425,8 +427,12 @@ where
             );
         }
 
-        // Constraint self.p_access.value = [self.x3_ins.result, self.y3_ins.result]. This is to
-        // ensure that p_access is updated with the new value.
+        let modulus = limbs_from_vec::<AB::Expr, <E::BaseField as NumLimbs>::Limbs, AB::F>(
+            E::BaseField::to_limbs_field_vec(&E::BaseField::modulus()),
+        );
+        local.x3_range.eval(builder, &local.x3_ins.result, &modulus, local.is_real);
+        local.y3_range.eval(builder, &local.y3_ins.result, &modulus, local.is_real);
+
         for i in 0..E::BaseField::NB_LIMBS {
             builder
                 .when(local.is_real)
@@ -445,18 +451,11 @@ where
             local.is_real,
         );
 
-        // Fetch the syscall id for the curve type.
         let syscall_id_felt = match E::CURVE_TYPE {
-            CurveType::Secp256k1 => {
-                AB::F::from_canonical_u32(SyscallCode::SECP256K1_DOUBLE.syscall_id())
-            }
-            CurveType::Secp256r1 => {
-                AB::F::from_canonical_u32(SyscallCode::SECP256R1_DOUBLE.syscall_id())
-            }
-            CurveType::Bn254 => AB::F::from_canonical_u32(SyscallCode::BN254_DOUBLE.syscall_id()),
-            CurveType::Bls12381 => {
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_DOUBLE.syscall_id())
-            }
+            CurveType::Secp256k1 => AB::F::from_u32(SyscallCode::SECP256K1_DOUBLE.syscall_id()),
+            CurveType::Secp256r1 => AB::F::from_u32(SyscallCode::SECP256R1_DOUBLE.syscall_id()),
+            CurveType::Bn254 => AB::F::from_u32(SyscallCode::BN254_DOUBLE.syscall_id()),
+            CurveType::Bls12381 => AB::F::from_u32(SyscallCode::BLS12381_DOUBLE.syscall_id()),
             _ => panic!("Unsupported curve"),
         };
 
@@ -465,7 +464,7 @@ where
             local.clk,
             syscall_id_felt,
             local.p_ptr,
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             local.is_real,
             LookupScope::Local,
         );
@@ -478,7 +477,7 @@ pub mod tests {
         BLS12381_DOUBLE_ELF, BN254_DOUBLE_ELF, SECP256K1_DOUBLE_ELF, SECP256R1_DOUBLE_ELF,
     };
     use zkm_core_executor::Program;
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 
@@ -508,5 +507,184 @@ pub mod tests {
         setup_logger();
         let program = Program::from(BLS12381_DOUBLE_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+}
+
+/// Doubling a point whose `y` vanishes (issue #534).
+///
+/// The slope gadget proves `slope · 2y ≡ 3x² + a (mod p)` and nothing about `2y`: for
+/// `P = (0, 0)` on a curve with `a = 0` both sides vanish for every slope `s`, and without
+/// `inverse_check` the row writing `(s², −s³)` satisfied every constraint of the chip.
+/// `inverse_check` proves `is_real / 2y` exists, so every such row is rejected, honest or forged;
+/// the executor refuses the input in `sw_double`.  The control forges the slope of the generator
+/// `(1, 2)`, whose `2y` is invertible, and is rejected while its honest double is accepted.
+#[cfg(test)]
+mod zero_y {
+    use core::borrow::BorrowMut;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    use num::{BigUint, Zero};
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+    use zkm_core_executor::events::{EllipticCurveDoubleEvent, FieldOperation, MemoryWriteRecord};
+    use zkm_curves::{
+        params::FieldParameters,
+        weierstrass::{bn254::Bn254Parameters, SwCurve},
+        AffinePoint, EllipticCurveParameters,
+    };
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+
+    use super::{
+        num_weierstrass_double_cols, WeierstrassDoubleAssignChip, WeierstrassDoubleAssignCols,
+    };
+    use crate::utils::{uni_stark_prove, uni_stark_verify};
+
+    type E = SwCurve<Bn254Parameters>;
+    type Base = <E as EllipticCurveParameters>::BaseField;
+    type F = KoalaBear;
+
+    const ROWS: usize = 16;
+
+    /// The chip's trace with one real row doubling `p` and writing `out`; `slope`, when given,
+    /// replaces the honest slope and every column computed from it.
+    fn trace(
+        p: &AffinePoint<E>,
+        out: &AffinePoint<E>,
+        slope: Option<&BigUint>,
+    ) -> RowMajorMatrix<F> {
+        let num_cols = num_weierstrass_double_cols::<Base>();
+        let words_in = p.to_words_le();
+        let words_out = out.to_words_le();
+        let event = EllipticCurveDoubleEvent {
+            shard: 1,
+            clk: 8,
+            p_ptr: 0x1000,
+            p: words_in.clone(),
+            p_memory_records: words_in
+                .iter()
+                .zip(&words_out)
+                .map(|(&prev_value, &value)| MemoryWriteRecord {
+                    value,
+                    shard: 1,
+                    timestamp: 8,
+                    prev_value,
+                    prev_shard: 1,
+                    prev_timestamp: 4,
+                })
+                .collect(),
+            local_mem_access: vec![],
+        };
+        let mut values = vec![F::default(); ROWS * num_cols];
+        let mut blu = vec![];
+        {
+            let cols: &mut WeierstrassDoubleAssignCols<F, Base> = values[..num_cols].borrow_mut();
+            WeierstrassDoubleAssignChip::<E>::populate_row(&event, cols, &mut blu);
+            if let Some(s) = slope {
+                let modulus = Base::modulus();
+                let x1 = p.x.clone();
+                let y1 = p.y.clone();
+                cols.slope.populate_carry_and_witness(
+                    s,
+                    &((BigUint::from(2u32) * &y1) % &modulus),
+                    FieldOperation::Mul,
+                    &modulus,
+                );
+                cols.slope.result = Base::to_limbs_field::<F, _>(s);
+                let s2 = cols.slope_squared.populate(&mut blu, s, s, FieldOperation::Mul);
+                let two_x = cols.p_x_plus_p_x.populate(&mut blu, &x1, &x1, FieldOperation::Add);
+                let x3 = cols.x3_ins.populate(&mut blu, &s2, &two_x, FieldOperation::Sub);
+                let dx = cols.p_x_minus_x.populate(&mut blu, &x1, &x3, FieldOperation::Sub);
+                let t =
+                    cols.slope_times_p_x_minus_x.populate(&mut blu, s, &dx, FieldOperation::Mul);
+                let y3 = cols.y3_ins.populate(&mut blu, &t, &y1, FieldOperation::Sub);
+                cols.x3_range.populate(&mut blu, &x3, &modulus);
+                cols.y3_range.populate(&mut blu, &y3, &modulus);
+            }
+        }
+        let mut dummy = vec![F::default(); num_cols];
+        {
+            let cols: &mut WeierstrassDoubleAssignCols<F, Base> = dummy.as_mut_slice().borrow_mut();
+            let record = MemoryWriteRecord {
+                value: 1,
+                shard: 0,
+                timestamp: 1,
+                prev_value: 1,
+                prev_shard: 0,
+                prev_timestamp: 0,
+            };
+            cols.p_access[Base::NB_LIMBS / 4].populate(record, &mut vec![]);
+            WeierstrassDoubleAssignChip::<E>::populate_field_ops(
+                &mut vec![],
+                cols,
+                BigUint::zero(),
+                BigUint::from(1u32),
+                false,
+            );
+        }
+        for row in values[num_cols..].chunks_mut(num_cols) {
+            row.copy_from_slice(&dummy);
+        }
+        RowMajorMatrix::new(values, num_cols)
+    }
+
+    /// Whether a proof over the chip's AIR alone accepts `trace`.
+    fn accepted(trace: RowMajorMatrix<F>) -> bool {
+        let config = KoalaBearPoseidon2::new();
+        let chip = WeierstrassDoubleAssignChip::<E>::new();
+        catch_unwind(AssertUnwindSafe(|| {
+            let mut challenger = config.challenger();
+            let proof =
+                uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+            let mut challenger = config.challenger();
+            uni_stark_verify(&config, &chip, &mut challenger, &proof).is_ok()
+        }))
+        .unwrap_or(false)
+    }
+
+    /// The forged point `(s², −s³)` for the double of `(0, 0)` on a curve with `a = 0`.
+    fn forged(s: &BigUint) -> AffinePoint<E> {
+        let p = Base::modulus();
+        let x3 = (s * s) % &p;
+        let y3 = (&p - (s * s * s) % &p) % &p;
+        AffinePoint::new(x3, y3)
+    }
+
+    #[test]
+    fn honest_double_of_zero_point_is_rejected() {
+        let zero = AffinePoint::<E>::new(BigUint::zero(), BigUint::zero());
+        assert!(!accepted(trace(&zero, &zero, None)));
+    }
+
+    #[test]
+    fn forged_double_of_zero_point_is_rejected() {
+        let zero = AffinePoint::<E>::new(BigUint::zero(), BigUint::zero());
+        for s in [5u32, 7, 0xdead_beef] {
+            let s = BigUint::from(s);
+            assert!(
+                !accepted(trace(&zero, &forged(&s), Some(&s))),
+                "forged slope {s} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "y = 0")]
+    fn executor_refuses_zero_y() {
+        let zero = AffinePoint::<E>::new(BigUint::zero(), BigUint::zero());
+        let _ = zero.sw_double();
+    }
+
+    #[test]
+    fn forged_double_of_generator_is_rejected() {
+        let (gx, gy) =
+            <Bn254Parameters as zkm_curves::weierstrass::WeierstrassParameters>::generator();
+        let g = AffinePoint::<E>::new(gx, gy);
+        let honest = g.sw_double();
+        assert!(accepted(trace(&g, &honest, None)));
+        let s = BigUint::from(5u32);
+        let p = Base::modulus();
+        let x3 = (&s * &s + &p + &p - BigUint::from(2u32)) % &p;
+        let y3 = (&s * ((&p + BigUint::from(1u32) - &x3) % &p) + &p - BigUint::from(2u32)) % &p;
+        assert!(!accepted(trace(&g, &AffinePoint::new(x3, y3), Some(&s))));
     }
 }

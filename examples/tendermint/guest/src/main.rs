@@ -7,10 +7,6 @@ use tendermint_light_client_verifier::{
 };
 
 pub fn main() {
-    // Normally we could just do this to read in the LightBlocks, but bincode doesn't work with
-    // LightBlock. This is likely a bug in tendermint-rs.
-    // let light_block_1 = zkm_zkvm::io::read::<LightBlock>();
-    // let light_block_2 = zkm_zkvm::io::read::<LightBlock>();
 
     println!("cycle-tracker-start: io");
     println!("cycle-tracker-start: reading bytes");

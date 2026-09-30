@@ -1,0 +1,191 @@
+\section{The argument system}
+\label{sec:argument}
+
+This section states what is proved and how, independently of how any component
+is built. A \emph{shard argument} reduces every claim about one shard's
+execution to a single evaluation of a single committed polynomial, and one
+opening authenticates it. A \emph{block argument} composes shard arguments by
+recursion into one proof of the relation $\mathcal R$ of
+Section~\ref{sec:statement}. Sections~\ref{sec:air} to~\ref{sec:recursion}
+instantiate each component named here, and Section~\ref{sec:verification} asks
+whether the instantiation admits only executions of the advertised machine.
+
+\subsection{Parameters}
+\label{sec:argument-params}
+
+The protocol is stated over the following parameters, and is symbolic in all of
+them: a different choice gives a different instantiation of the same protocol.
+Numeric values are fixed where the component is built.
+Table~\ref{tab:whir-schedule} fixes the proximity-test schedule of the
+checked-in core and compress profiles, \S\ref{sec:pcs-geometry} the stacking
+height and the row cube, \S\ref{sec:prelim} the permutation schedule,
+\S\ref{sec:isa} the clock fence and \S\ref{sec:recursion} the recursion
+arity. The measured baseline of Section~\ref{sec:performance} differs from the
+checked-in configuration in two of these parameters, and one of them is a
+security parameter: it sets the lookup grinding to zero, and it carries the
+degree-seven $\Poseidon{}$ round count rather than the corrected degree-three
+schedule (\S\ref{sec:prelim}).
+
+\begin{itemize}
+  \item The base field $\F$ and the extension $\EF$ from which challenges are
+  drawn. The extension degree bounds every soundness term of the form
+  $\deg/|\EF|$.
+  \item The permutation used for the transcript and for the commitment trees,
+  with its round counts, and the arity of those trees.
+  \item The stacking height $H=2^{\ell}$, the row cube $2^{n}$, and the bucket
+  rule that maps a round's real area to its committed area
+  (\S\ref{sec:pcs-geometry}). These fix the committed geometry, and with it
+  the set of recursion programs a prover can produce.
+  \item For the proximity test: the initial rate $\rho$, the per-round folding
+  factors, the query counts, the number of out-of-domain samples, the grinding
+  bits spent on each query phase and on the bus challenges, and the regime in
+  which the query soundness is counted.
+  \item For recursion: the arity of a compose node and the height of the tree of
+  admissible recursion keys (\S\ref{sec:recursion}).
+  \item For the machine: the configured shard size, the clock fence and the
+  per-chip height budgets, whichever of which binds first closing a shard
+  (\S\ref{sec:isa}).
+  \item The guest-accelerator set, which fixes the precompile chips a shard may
+  contain and therefore the chip set itself (\S\ref{sec:ipcore-config}).
+  \item For the cross-shard digest: the curve and its extension, the bound
+  $N_{\mathrm{int}}$ on the interactions a block proof may contain, and the
+  per-interaction multiplicity bound $B$ (\S\ref{sec:air-digest-security}).
+\end{itemize}
+
+Two properties of the instantiation are worth stating with the parameters
+rather than leaving to a discussion. Query soundness is counted in the
+unique-decoding regime, where no conjecture is needed, rather than at the
+Johnson bound or towards capacity (\S\ref{sec:iopp-soundness}). And no
+blinding is applied anywhere: the protocol is succinct, not hiding, and a proof
+reveals what its committed trace reveals.
+
+\subsection{Syntax and components}
+\label{sec:argument-components}
+
+We state the shard argument and each primitive it uses as a tuple of
+algorithms, so that the protocol of \S\ref{sec:argument-shard} can be read
+against interfaces rather than against any one construction. Throughout,
+$\mathsf{pp}$ are the public parameters of \S\ref{sec:argument-params} and
+$\tau$ is the transcript the Fiat--Shamir transform maintains.
+
+A \emph{shard argument} is a tuple $\mathsf{SA} = (\mathsf{Setup},
+\mathsf{Prove}, \mathsf{Verify})$:
+
+\begin{description}
+  \item[$\mathsf{Setup}(\mathsf{pp}, P) \to (\mathsf{pk}, \mathsf{vk})$:] on
+  input a program image $P$, commits to the program ROM and the preprocessed
+  tables and outputs a proving key and a verifying key.
+  \item[$\mathsf{Prove}(\mathsf{pk}, T) \to \pi$:] on input the execution
+  record $T$ of one shard, outputs a shard proof.
+  \item[$\mathsf{Verify}(\mathsf{vk}, \mathsf{pv}, \pi) \to b$:] on input the
+  shard's public values, outputs $b \in \{0,1\}$.
+\end{description}
+
+It is built from four primitives. A \emph{chip} is a table of columns over
+$\F$ with a constraint system and a set of bus interactions
+(Definitions~\ref{def:chip} and~\ref{def:bus}), and a shard is a set of chips
+with a shared public-value row; chips are data rather than algorithms, so they
+carry no syntax here. The other three do.
+
+A \emph{bus argument} $\mathsf{BA} = (\mathsf{Prove}, \mathsf{Verify})$
+certifies that the multiset of tuples sent on each bus equals the multiset
+received:
+
+\begin{description}
+  \item[$\mathsf{BA.Prove}(\tau, \{U_i\}) \to (\pi_{\mathrm{bus}}, \bm z, \{v_{i,j}\})$:]
+  outputs a proof together with the point $\bm z$ and the claimed evaluations
+  $v_{i,j}$ of column $j$ of chip $i$ at $\bm z$.
+  \item[$\mathsf{BA.Verify}(\tau, \pi_{\mathrm{bus}}) \to (\bm z, \{v_{i,j}\}) \lor \bot$:]
+  accepts and outputs the point and the claims it has reduced to, or rejects.
+\end{description}
+
+A \emph{constraint argument} $\mathsf{CA} = (\mathsf{Prove}, \mathsf{Verify})$
+has the same shape and certifies instead that every chip's constraints vanish
+on its real rows, reducing that claim to evaluations at the same point.
+
+A \emph{jagged commitment} $\mathsf{JC} = (\mathsf{Commit}, \mathsf{Reduce},
+\mathsf{Open}, \mathsf{VerifyOpen})$ carries columns of differing heights:
+
+\begin{description}
+  \item[$\mathsf{JC.Commit}(\mathsf{pp}, (c_1,\dots,c_M)) \to (\mathsf{com}, \mathsf{st})$:]
+  on input $M$ columns of arbitrary heights, places them into the committed
+  geometry and outputs a commitment and prover state.
+  \item[$\mathsf{JC.Reduce}(\mathsf{st}, \{(i, \bm z, v_i)\}) \to (\pi_{\mathrm{jag}}, \bm z^{*}, v^{*})$:]
+  reduces any set of column-evaluation claims to a single evaluation
+  $v^{*}$ of one dense multilinear polynomial at one point $\bm z^{*}$.
+  \item[$\mathsf{JC.Open}(\mathsf{st}, \bm z^{*}) \to \pi_{\mathrm{open}}$] and
+  \item[$\mathsf{JC.VerifyOpen}(\mathsf{com}, \bm z^{*}, v^{*}, \pi_{\mathrm{open}}) \to b$:]
+  authenticate that single evaluation against the commitment.
+\end{description}
+
+Only the last interface constrains the others: because every claim is reduced
+to one evaluation of one polynomial, the number of chips, their widths and
+their heights are invisible to the opening, and a chip may be added, widened or
+removed without changing the layer above it.
+
+\subsection{The shard argument}
+\label{sec:argument-shard}
+
+Protocol~\ref{prot:shard} states the reduction.
+Each step ends with claims of the same kind it began with, evaluations of
+committed columns, so the steps compose without the verifier ever reading a
+column.
+
+\begin{protocol}[Shard argument]
+\label{prot:shard}
+\textbf{Statement:} a verifying key committing to the program and the
+preprocessed tables, and the public values of one shard.\\
+\textbf{Witness:} the shard's execution record.
+\begin{enumerate}
+  \item \textbf{Commit.} The prover arranges each chip's events into rows,
+  places the columns of each commitment round into one dense vector and
+  commits to it. Round order is fixed and the per-chip dimensions enter the
+  transcript, so the geometry is public before any challenge is drawn
+  (Section~\ref{sec:pcs}).
+  \item \textbf{Buses.} The verifier draws the bus challenges. The prover runs
+  the bus argument, which reduces every send and receive of every chip to
+  column evaluations at one point (Section~\ref{sec:air-logup}).
+  \item \textbf{Constraints.} The verifier draws the constraint challenges. The
+  prover runs the constraint argument on the same point, so each column is
+  opened once for both arguments (Section~\ref{sec:air-zerocheck}).
+  \item \textbf{Jagged reduction.} The column claims of the two previous steps,
+  together with explicit zero claims for the gaps in the committed geometry,
+  are batched and reduced to one evaluation of the dense polynomial
+  (Section~\ref{sec:pcs-jagged}).
+  \item \textbf{Assist.} The verifier does not materialise the weight table the
+  previous step reduced against. A second sumcheck over the public column
+  boundaries certifies it, and any point-extension coordinates are sampled
+  here, in an order that is itself part of the protocol
+  (Section~\ref{sec:pcs-jagged-assist}).
+  \item \textbf{Opening.} One batched opening authenticates that evaluation
+  against every commitment of step~1 (Section~\ref{sec:iopp}).
+\end{enumerate}
+\textbf{Output:} a shard proof whose public values carry the entry and exit
+machine state, the memory-address cursors, the digest of committed output and
+the exit code that the relation of Section~\ref{sec:statement} is stated over,
+and a digest of the interactions this shard leaves unbalanced.
+\end{protocol}
+
+\paragraph{From shards to a block.} A shard argument proves one shard in
+isolation. Three things tie the shards of one execution together, and each is
+discharged where it arises rather than by the opening: the machine state
+chains through the public values, the memory-address cursors tile, and the
+interactions that cross a shard boundary accumulate into a digest that must
+cancel over the whole execution (Section~\ref{sec:air-global}). A recursion
+layer then verifies shard proofs inside the argument system itself and merges
+them, so that the verifier of a block reads one proof rather than one per
+shard (Section~\ref{sec:recursion}).
+
+\paragraph{What is proved.} Two statements carry the construction, and both are
+conditional in ways the paper makes explicit rather than hiding.
+Theorem~\ref{thm:composition} bounds a cheating prover for the whole tree by
+the number of random-oracle queries times the sum of the per-node errors, plus
+the digest term, under a per-node round-by-round premise and a hypothesis about
+composed extractors. Theorem~\ref{thm:unique} shows that two satisfying traces for the same
+program and public values agree up to permutation, given chip determinism and
+the real-row premises that Section~\ref{sec:verification} reports coverage
+for; identifying that trace with an execution of the machine needs the
+conformance evidence of the same section.
+Neither statement is about a particular chip set, a particular field or a
+particular proximity test; those are the instantiation, fixed where each
+component is built.

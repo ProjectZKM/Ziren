@@ -36,7 +36,6 @@ fn mul(lhs: &[u32; 12], rhs: &[u32; 12]) -> [u32; 12] {
 }
 
 fn random_u32_12() -> [u32; 12] {
-    //let mut rng = rand::thread_rng();
     let mut arr = [0u32; 12];
     for item in arr.iter_mut() {
         *item = 1; // rng.gen();
@@ -128,5 +127,4 @@ pub fn main() {
             u32_12_to_biguint(&mul(&a_reduced, &zero)) % &modulus
         );
     }
-    // println!("All tests passed!");
 }

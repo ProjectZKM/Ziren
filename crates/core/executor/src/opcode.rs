@@ -157,7 +157,7 @@ impl Opcode {
     /// Convert the opcode to a field element.
     #[must_use]
     pub fn as_field<F: Field>(self) -> F {
-        F::from_canonical_u32(self as u32)
+        F::from_u32(self as u32)
     }
 
     pub fn is_use_lo_hi_alu(&self) -> bool {
@@ -172,10 +172,6 @@ impl Opcode {
                 | Opcode::MADD
                 | Opcode::MSUB
         )
-    }
-
-    pub fn only_one_operand(&self) -> bool {
-        matches!(self, Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ)
     }
 }
 
@@ -213,4 +209,7 @@ pub enum ByteOpcode {
     U16Range = 8,
     /// Bitwise NOR.
     NOR = 9,
+    /// Parametric bit-width range check: `a1 < 2^b`, `b <= 16`.  Served by the
+    /// dedicated `RangeChip` table, NOT the byte table.
+    Range = 10,
 }

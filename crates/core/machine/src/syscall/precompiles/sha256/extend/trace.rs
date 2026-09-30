@@ -1,17 +1,15 @@
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use std::borrow::BorrowMut;
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, PrecompileEvent, ShaExtendEvent},
+    events::{ByteRecord, PrecompileEvent, ShaExtendEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::air::MachineAir;
-#[cfg(feature = "picus")]
-use zkm_stark::air::PicusInfo;
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::PicusInfo;
 
 use crate::CoreChipError;
 
@@ -28,7 +26,6 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         "ShaExtend".to_string()
     }
 
-    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         ShaExtendCols::<u8>::picus_info()
     }
@@ -54,14 +51,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         if padded_nb_rows == 2 || padded_nb_rows == 1 {
             padded_nb_rows = 4;
         }
-        for i in nb_rows..padded_nb_rows {
-            let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
-            let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
-            cols.populate_flags(i);
-            rows.push(row);
+        for _ in nb_rows..padded_nb_rows {
+            rows.push([F::ZERO; NUM_SHA_EXTEND_COLS]);
         }
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SHA_EXTEND_COLS))
     }
 
@@ -76,7 +69,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         let blu_batches = events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
+                let mut blu: zkm_core_executor::events::ByteLookupMap = Default::default();
                 events.iter().for_each(|(_, event)| {
                     let event = if let PrecompileEvent::ShaExtend(event) = event {
                         event
@@ -113,18 +106,16 @@ impl ShaExtendChip {
             let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
             cols.is_real = F::ONE;
-            cols.populate_flags(j);
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
+            cols.i = F::from_u32((16 + j) as u32);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
 
             cols.w_i_minus_15.populate(event.w_i_minus_15_reads[j], blu);
             cols.w_i_minus_2.populate(event.w_i_minus_2_reads[j], blu);
             cols.w_i_minus_16.populate(event.w_i_minus_16_reads[j], blu);
             cols.w_i_minus_7.populate(event.w_i_minus_7_reads[j], blu);
 
-            // `s0 := (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18) xor (w[i-15] rightshift
-            // 3)`.
             let w_i_minus_15 = event.w_i_minus_15_reads[j].value;
             let w_i_minus_15_rr_7 = cols.w_i_minus_15_rr_7.populate(blu, w_i_minus_15, 7);
             let w_i_minus_15_rr_18 = cols.w_i_minus_15_rr_18.populate(blu, w_i_minus_15, 18);
@@ -133,8 +124,6 @@ impl ShaExtendChip {
                 cols.s0_intermediate.populate(blu, w_i_minus_15_rr_7, w_i_minus_15_rr_18);
             let s0 = cols.s0.populate(blu, s0_intermediate, w_i_minus_15_rs_3);
 
-            // `s1 := (w[i-2] rightrotate 17) xor (w[i-2] rightrotate 19) xor (w[i-2] rightshift
-            // 10)`.
             let w_i_minus_2 = event.w_i_minus_2_reads[j].value;
             let w_i_minus_2_rr_17 = cols.w_i_minus_2_rr_17.populate(blu, w_i_minus_2, 17);
             let w_i_minus_2_rr_19 = cols.w_i_minus_2_rr_19.populate(blu, w_i_minus_2, 19);
@@ -143,7 +132,6 @@ impl ShaExtendChip {
                 cols.s1_intermediate.populate(blu, w_i_minus_2_rr_17, w_i_minus_2_rr_19);
             let s1 = cols.s1.populate(blu, s1_intermediate, w_i_minus_2_rs_10);
 
-            // Compute `s2`.
             let w_i_minus_7 = event.w_i_minus_7_reads[j].value;
             let w_i_minus_16 = event.w_i_minus_16_reads[j].value;
             cols.s2.populate(blu, w_i_minus_16, s0, w_i_minus_7, s1);

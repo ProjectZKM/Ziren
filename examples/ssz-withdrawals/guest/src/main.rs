@@ -12,7 +12,6 @@ use ssz_rs::prelude::*;
 use std::collections::HashMap;
 
 pub fn main() {
-    // Get inputs.
     let beacon_block_root =
         node_from_bytes(hex!("d00c4da1a3ad4d42bd35f128544227d19e163194569d69d54a3d14112e3c897c"));
     let start_slot = 7855804;
@@ -21,15 +20,11 @@ pub fn main() {
         ExecutionAddress::try_from(hex!("e9cd1419a015dd05d47f6139f5b8e86b1e9e5cdd").to_vec())
             .unwrap();
 
-    // Get slot number from block by proving the block header.
     let source_slot = prove::block_header(beacon_block_root).slot;
 
-    // Load the witness data from outside of the vm.
     let (withdrawal_slots, validator_indexes) =
         hints::withdrawals_range(beacon_block_root, start_slot, end_slot, &eigenpod_address);
 
-    // For all validator_indexes in the range, prove their withdrawable epoch so we can check
-    // whether each withdrawal is partial or full.
     let validators_root = prove::validators_root(beacon_block_root);
     let mut withdrawable_epochs = HashMap::<u64, u64>::new();
     for validator_index in validator_indexes {
@@ -38,7 +33,6 @@ pub fn main() {
         withdrawable_epochs.insert(validator_index, validator.withdrawable_epoch);
     }
 
-    // Compute the sum of all partial withdrawals.
     let mut sum = 0;
     for (slot, withdrawal_indexes) in withdrawal_slots {
         let historical_block_root =

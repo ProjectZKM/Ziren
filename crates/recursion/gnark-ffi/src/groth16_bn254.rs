@@ -1,3 +1,8 @@
+/// The recursion verifying-key-allowlist root baked into the generated Solidity
+/// verifier. Kept next to `crates/verifier/bn254-vk/vk_root.bin`, which
+/// `cargo run -p zkm-prover --bin write_vk_root --release` regenerates.
+static VK_ROOT_BYTES: &[u8; 32] = include_bytes!("../../../verifier/bn254-vk/vk_root.bin");
+
 use std::{
     fs::File,
     io::{Read, Write},
@@ -40,11 +45,9 @@ impl Groth16Bn254Prover {
     pub fn test<C: Config>(constraints: Vec<Constraint>, witness: Witness<C>) {
         let serialized = serde_json::to_string(&constraints).unwrap();
 
-        // Write constraints.
         let mut constraints_file = tempfile::NamedTempFile::new().unwrap();
         constraints_file.write_all(serialized.as_bytes()).unwrap();
 
-        // Write witness.
         let mut witness_file = tempfile::NamedTempFile::new().unwrap();
         let gnark_witness = GnarkWitness::new(witness);
         let serialized = serde_json::to_string(&gnark_witness).unwrap();
@@ -57,12 +60,12 @@ impl Groth16Bn254Prover {
     }
 
     pub fn build_contracts(build_dir: PathBuf) {
-        // Write the corresponding asset files to the build dir.
         let zkm_verifier_path = build_dir.join("ZKMVerifierGroth16.sol");
         let vkey_hash = Self::get_vkey_hash(&build_dir);
         let zkm_verifier_str = include_str!("../assets/ZKMVerifierGroth16.txt")
             .replace("{ZKM_CIRCUIT_VERSION}", ZKM_CIRCUIT_VERSION)
             .replace("{VERIFIER_HASH}", format!("0x{}", hex::encode(vkey_hash)).as_str())
+            .replace("{VK_ROOT}", format!("0x{}", hex::encode(*VK_ROOT_BYTES)).as_str())
             .replace("{PROOF_SYSTEM}", "Groth16");
         let mut zkm_verifier_file = File::create(zkm_verifier_path).unwrap();
         zkm_verifier_file.write_all(zkm_verifier_str.as_bytes()).unwrap();
@@ -75,28 +78,23 @@ impl Groth16Bn254Prover {
     pub fn build<C: Config>(constraints: Vec<Constraint>, witness: Witness<C>, build_dir: PathBuf) {
         let serialized = serde_json::to_string(&constraints).unwrap();
 
-        // Write constraints.
         let constraints_path = build_dir.join("constraints.json");
         let mut file = File::create(constraints_path).unwrap();
         file.write_all(serialized.as_bytes()).unwrap();
 
-        // Write witness.
         let witness_path = build_dir.join("groth16_witness.json");
         let gnark_witness = GnarkWitness::new(witness);
         let mut file = File::create(witness_path).unwrap();
         let serialized = serde_json::to_string(&gnark_witness).unwrap();
         file.write_all(serialized.as_bytes()).unwrap();
 
-        // Build the circuit.
         build_groth16_bn254(build_dir.to_str().unwrap());
 
-        // Build the contracts.
         Self::build_contracts(build_dir);
     }
 
     /// Generates a Groth16 proof given a witness.
     pub fn prove<C: Config>(&self, witness: Witness<C>, build_dir: PathBuf) -> Groth16Bn254Proof {
-        // Write witness.
         let mut witness_file = tempfile::NamedTempFile::new().unwrap();
         let gnark_witness = GnarkWitness::new(witness);
         let serialized = serde_json::to_string(&gnark_witness).unwrap();
@@ -115,6 +113,7 @@ impl Groth16Bn254Prover {
         proof: &Groth16Bn254Proof,
         vkey_hash: &BigUint,
         committed_values_digest: &BigUint,
+        vk_root: &BigUint,
         build_dir: &Path,
     ) -> Result<()> {
         if proof.groth16_vkey_hash != Self::get_vkey_hash(build_dir) {
@@ -129,6 +128,7 @@ impl Groth16Bn254Prover {
             &proof.raw_proof,
             &vkey_hash.to_string(),
             &committed_values_digest.to_string(),
+            &vk_root.to_string(),
         )
         .map_err(|e| anyhow::anyhow!("failed to verify proof: {e}"))
     }

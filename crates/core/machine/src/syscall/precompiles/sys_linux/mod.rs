@@ -15,7 +15,7 @@ impl SysLinuxChip {
 pub mod sys_linux_tests {
 
     use zkm_core_executor::{syscalls::SyscallCode, Instruction, Opcode, Program};
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 
@@ -176,6 +176,35 @@ pub mod sys_linux_tests {
             Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
         ]);
         Program::new(instructions, 0, 0)
+    }
+
+    /// A Linux syscall whose argument exceeds the KoalaBear modulus.
+    ///
+    /// `AT_FDCWD = 0xFFFFFF9C` is a legal `fcntl`/`openat` dirfd, but it is
+    /// larger than the KoalaBear prime (0x7F000001).  Linux syscall arguments
+    /// travel to `SysLinuxChip` via U16-range-checked half-word columns in
+    /// `SyscallChip`, so a `reduce()` collision is impossible and the
+    /// KoalaBear word range check must NOT be activated for them -- if it is,
+    /// this program cannot be proven at all.
+    fn sys_linux_large_arg_program() -> Program {
+        let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 5, false, true)];
+        instructions.extend(vec![
+            Instruction::new(Opcode::ADD, 2, 0, SyscallCode::SYS_CLONE as u32, false, true),
+            Instruction::new(Opcode::ADD, 4, 0, 0xFFFF_FF9C_u32, false, true),
+            Instruction::new(Opcode::ADD, 5, 0, 0xFFFF_FF9C_u32, false, true),
+            Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
+            Instruction::new(Opcode::ADD, 2, 0, SyscallCode::HALT as u32, false, true),
+            Instruction::new(Opcode::ADD, 4, 0, 0, false, true),
+            Instruction::new(Opcode::ADD, 5, 0, 0, false, true),
+            Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
+        ]);
+        Program::new(instructions, 0, 0)
+    }
+
+    #[test]
+    fn prove_linux_arg_above_koalabear_modulus() {
+        setup_logger();
+        run_test::<CpuProver<_, _>>(sys_linux_large_arg_program()).unwrap();
     }
 
     #[test]

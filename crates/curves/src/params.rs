@@ -10,7 +10,7 @@ use typenum::{Unsigned, U2, U4};
 
 use generic_array::{sequence::GenericSequence, ArrayLength, GenericArray};
 use num::BigUint;
-use zkm_stark::air::Polynomial;
+use zkm_poly::Polynomial;
 
 use p3_field::Field;
 
@@ -46,7 +46,7 @@ pub trait FieldParameters:
     }
 
     fn modulus_field_iter<F: Field>() -> impl Iterator<Item = F> {
-        Self::MODULUS.iter().map(|x| F::from_canonical_u8(*x)).take(Self::NB_LIMBS)
+        Self::MODULUS.iter().map(|x| F::from_u8(*x)).take(Self::NB_LIMBS)
     }
 
     /// Convert a BigUint to a Vec of u8 limbs (with len NB_LIMBS).
@@ -58,7 +58,7 @@ pub trait FieldParameters:
 
     /// Convert a BigUint to a Vec of F limbs (with len NB_LIMBS).
     fn to_limbs_field_vec<E: From<F>, F: Field>(x: &BigUint) -> Vec<E> {
-        Self::to_limbs(x).into_iter().map(|x| F::from_canonical_u8(x).into()).collect::<Vec<_>>()
+        Self::to_limbs(x).into_iter().map(|x| F::from_u8(x).into()).collect::<Vec<_>>()
     }
 
     /// Convert a BigUint to Limbs<F, Self::Limbs>.

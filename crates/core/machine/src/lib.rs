@@ -18,8 +18,9 @@ pub mod air;
 pub mod alu;
 pub mod bytes;
 pub mod control_flow;
-pub mod cpu;
+pub mod frame;
 pub mod global;
+pub mod instruction;
 pub mod io;
 pub mod memory;
 pub mod mips;
@@ -28,12 +29,12 @@ pub mod operations;
 pub mod program;
 #[cfg(test)]
 pub mod programs;
+pub mod range;
 pub mod shape;
 #[cfg(feature = "sys")]
 pub mod sys;
 pub mod syscall;
 pub mod utils;
-pub use cpu::*;
 pub use mips::*;
 
 use serde::{Deserialize, Serialize};

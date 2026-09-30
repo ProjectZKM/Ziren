@@ -17,14 +17,14 @@ use thiserror::Error;
 use zkm_core_executor::ExecutionReport;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
+use zkm_pcs::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 use zkm_primitives::io::ZKMPublicValues;
 use zkm_prover::{
     components::{DefaultProverComponents, ZKMProverComponents},
     CoreSC, InnerSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey, ZKMVerifyingKey,
 };
-use zkm_stark::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 
-use crate::install::try_install_circuit_artifacts;
+use crate::install::{try_install_circuit_artifacts, CircuitArtifacts};
 use crate::ProverClient;
 use crate::{ZKMProof, ZKMProofKind, ZKMProofWithPublicValues};
 
@@ -60,6 +60,14 @@ pub enum ZKMVerificationError {
     Plonk(anyhow::Error),
     #[error("Groth16 verification error: {0}")]
     Groth16(anyhow::Error),
+    /// `ZKMProof` is public and deserializable, so a structurally impossible
+    /// value (an empty `Core` shard vector) is reachable input, not a bug.
+    #[error("Malformed proof")]
+    MalformedProof,
+    /// A representable variant this verifier does not handle, e.g. `DvSnark` or
+    /// `CompressToGroth16`. Previously `unreachable!()`.
+    #[error("Unsupported proof kind")]
+    UnsupportedProofKind,
 }
 
 /// An implementation of [crate::ProverClient].
@@ -96,6 +104,17 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
     /// elf_id:
     ///    The SHA-256 hash of the ELF, without the 0x prefix.
     ///    If this field is not none, the network prover will use it to index the cached ELF.
+    /// How long this prover spent on the last proof, in milliseconds, when it
+    /// knows better than the caller's stopwatch.
+    ///
+    /// A remote prover times only its own work: a caller that times the RPC
+    /// also times the request waiting in the server's queue, which is not
+    /// proving time.  `None` means the caller should use its own measurement.
+    /// Reading it clears the value.
+    fn take_prove_ms(&self) -> Option<u64> {
+        None
+    }
+
     fn prove_with_cycles(
         &self,
         pk: &ZKMProvingKey,
@@ -137,17 +156,19 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         }
         match &bundle.proof {
             ZKMProof::Core(proof) => {
+                let last = proof.last().ok_or(ZKMVerificationError::MalformedProof)?;
+                if last.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
+                    return Err(ZKMVerificationError::MalformedProof);
+                }
                 let public_values: &PublicValues<Word<_>, _> =
-                    proof.last().unwrap().public_values.as_slice().borrow();
+                    last.public_values.as_slice().borrow();
 
-                // Get the committed value digest bytes.
                 let committed_value_digest_bytes = public_values
                     .committed_value_digest
                     .iter()
                     .flat_map(|w| w.0.iter().map(|x| x.as_canonical_u32() as u8))
                     .collect_vec();
 
-                // Make sure the committed value digest matches the public values hash.
                 for (a, b) in
                     committed_value_digest_bytes.iter().zip_eq(bundle.public_values.hash())
                 {
@@ -156,23 +177,23 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     }
                 }
 
-                // Verify the core proof.
                 self.zkm_prover()
                     .verify(&ZKMCoreProofData(proof.clone()), vkey)
                     .map_err(ZKMVerificationError::Core)
             }
             ZKMProof::Compressed(proof) => {
+                if proof.proof.public_values.len() < zkm_pcs::PROOF_MAX_NUM_PVS {
+                    return Err(ZKMVerificationError::MalformedProof);
+                }
                 let public_values: &PublicValues<Word<_>, _> =
                     proof.proof.public_values.as_slice().borrow();
 
-                // Get the committed value digest bytes.
                 let committed_value_digest_bytes = public_values
                     .committed_value_digest
                     .iter()
                     .flat_map(|w| w.0.iter().map(|x| x.as_canonical_u32() as u8))
                     .collect_vec();
 
-                // Make sure the committed value digest matches the public values hash.
                 for (a, b) in
                     committed_value_digest_bytes.iter().zip_eq(bundle.public_values.hash())
                 {
@@ -194,7 +215,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     &if zkm_prover::build::zkm_dev_mode() {
                         zkm_prover::build::plonk_bn254_artifacts_dev_dir()
                     } else {
-                        try_install_circuit_artifacts("plonk", ZKM_CIRCUIT_VERSION)
+                        try_install_circuit_artifacts(CircuitArtifacts::Plonk, ZKM_CIRCUIT_VERSION)
                     },
                 )
                 .map_err(ZKMVerificationError::Plonk),
@@ -207,18 +228,25 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     &if zkm_prover::build::zkm_dev_mode() {
                         zkm_prover::build::groth16_bn254_artifacts_dev_dir()
                     } else {
-                        try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
+                        try_install_circuit_artifacts(
+                            CircuitArtifacts::Groth16,
+                            ZKM_CIRCUIT_VERSION,
+                        )
                     },
                 )
                 .map_err(ZKMVerificationError::Groth16),
-            _ => unreachable!(),
+            _ => Err(ZKMVerificationError::UnsupportedProofKind),
         }
     }
 }
 
 impl Prover<DefaultProverComponents> for ProverClient {
     fn id(&self) -> ProverType {
-        todo!()
+        self.prover.id()
+    }
+
+    fn take_prove_ms(&self) -> Option<u64> {
+        self.prover.take_prove_ms()
     }
 
     fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {

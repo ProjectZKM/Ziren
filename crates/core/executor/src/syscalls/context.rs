@@ -1,5 +1,3 @@
-use hashbrown::HashMap;
-
 use crate::{
     events::{
         MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord, PrecompileEvent, SyscallEvent,
@@ -12,7 +10,6 @@ use super::SyscallCode;
 
 /// A runtime for syscalls that is protected so that developers cannot arbitrarily modify the
 /// runtime.
-#[allow(dead_code)]
 pub struct SyscallContext<'a, 'b: 'a> {
     /// The current shard.
     pub current_shard: u32,
@@ -25,7 +22,7 @@ pub struct SyscallContext<'a, 'b: 'a> {
     /// The runtime.
     pub rt: &'a mut Executor<'b>,
     /// The local memory access events for the syscall.
-    pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
+    pub local_memory_access: nohash_hasher::IntMap<u32, MemoryLocalEvent>,
 }
 
 impl<'a, 'b> SyscallContext<'a, 'b> {
@@ -39,7 +36,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
             next_pc: runtime.state.pc.wrapping_add(4),
             exit_code: 0,
             rt: runtime,
-            local_memory_access: HashMap::new(),
+            local_memory_access: nohash_hasher::IntMap::default(),
         }
     }
 
@@ -129,14 +126,17 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
         let mut syscall_local_mem_events = Vec::new();
 
         if !self.rt.unconstrained && self.rt.executor_mode == ExecutorMode::Trace {
-            // Will need to transfer the existing memory local events in the executor to it's record,
-            // and return all the syscall memory local events.  This is similar to what
-            // `bump_record` does.
             for (addr, event) in self.local_memory_access.drain() {
                 let local_mem_access = self.rt.local_memory_access.remove(&addr);
 
                 if let Some(local_mem_access) = local_mem_access {
                     self.rt.record.cpu_local_memory_access.push(local_mem_access);
+                }
+
+                if (addr as usize) < 36 {
+                    if let Some(reg_event) = self.rt.local_reg_access[addr as usize].take() {
+                        self.rt.record.cpu_local_memory_access.push(reg_event);
+                    }
                 }
 
                 syscall_local_mem_events.push(event);
@@ -146,31 +146,12 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
         syscall_local_mem_events
     }
 
-    /// Get the current value of a register, but doesn't use a memory record.
-    /// This is generally unconstrained, so you must be careful using it.
-    #[must_use]
-    pub fn register_unsafe(&mut self, register: Register) -> u32 {
-        self.rt.register(register)
-    }
-
-    /// Get the current value of a byte, but doesn't use a memory record.
-    #[must_use]
-    pub fn byte_unsafe(&mut self, addr: u32) -> u8 {
-        self.rt.byte(addr)
-    }
-
-    /// Get the current value of a word, but doesn't use a memory record.
-    #[must_use]
-    pub fn word_unsafe(&mut self, addr: u32) -> u32 {
-        self.rt.word(addr)
-    }
-
     /// Get a slice of words, but doesn't use a memory record.
     #[must_use]
     pub fn slice_unsafe(&mut self, addr: u32, len: usize) -> Vec<u32> {
         let mut values = Vec::with_capacity(len);
         for i in 0..len {
-            values.push(self.rt.word(addr + i as u32 * 4));
+            values.push(self.rt.word_traced(addr + i as u32 * 4));
         }
         values
     }

@@ -1,0 +1,217 @@
+\section{Introduction}
+\label{sec:intro}
+
+A \emph{succinct argument for machine execution} lets a prover convince a verifier that a program, run on a given instruction-set architecture, produced a given output, with a proof whose verification cost is essentially independent of the length of the run. Representative RISC-V systems include SP1, OpenVM, ZisK and Jolt~\citep{sp1,openvm,zisk,jolt}; we restrict system-level comparisons to these four. Such systems are commonly called zero-knowledge virtual machines (\zkVM{}s), although the term does not by itself establish that a proof hides its witness, and the proofs studied here, including ours, are succinct but not hiding. Section~\ref{sec:statement} states the public relation, and Theorem~\ref{thm:composition} the conditions under which the implemented protocol is knowledge sound for it.
+
+The benchmark used throughout is an Ethereum block of several hundred million instructions~\citep{ethproofs}. Public block-proving workloads spend much of their work on hashing, for Merkle updates, signatures and content addressing, because a hash commits to data the verifier does not hold; we use the block as a benchmark rather than as the application.
+
+\paragraph{MIPS32, and this project's part in it.} zkMIPS, the first generation of this system, was the first zkVM for the MIPS32 instruction set; earlier proof systems addressed MIPS-\emph{like} models or named MIPS as one mode among several (\S\ref{sec:related}). Three properties of the architecture itself pay for that choice, and none of them is about any one application. \emph{It is finished.} Since its owner moved its own roadmap to RISC-V in 2021~\citep{mips-riscv-2021,mips-at-40} the instruction set does not change, so the specification an argument system implements is fixed, and so are the verifying keys derived from it, since an extension ratified next year cannot invalidate this year's arithmetisation or the artifacts released against it. \emph{It is uniform.} Fixed 32-bit encodings in a handful of formats let one row of one chip carry an instruction's whole frame, with no CPU chip to decode into and no compressed encodings to widen it. \emph{It is tooled, and that is what carries languages.} Every compiler that already targets MIPS32 reaches the guest without a bespoke backend: Rust, Go and C programs compile to the same MIPS32 little-endian ELF, for which this repository carries the guest runtimes, and the architecture is deployed at a scale few others match~\citep{mips-shipped}. What follows from those properties, rather than motivating them, is that the guest software the fault-proof infrastructure of Ethereum rollups executes, namely Optimism's Cannon and Kona~\citep{cannon,kona}, is in range for this system too, subject to compatible runtime conventions and image formats. We therefore ask:
+
+\begin{center}
+\emph{Can the MIPS32 instruction set be given a succinct argument system whose prover cost is attributable to identified arithmetisation and scheduling choices on commodity GPUs, whose soundness is accounted for component by component rather than as a headline number, and whose constraint system is carried by a verification workflow with machine-checked theorem coverage?}
+\end{center}
+
+Four properties of the problem make that hard, and they are what the design answers. First, MIPS32 executes the instruction after a branch before control transfers,\footnote{The delay slot is specified by the architecture rather than left to an implementation: for jumps and for conditional branches alike, the instruction that follows executes before control transfers, and after a conditional branch it executes whether or not the branch is taken~\citep{mips32-isa}. An argument system therefore has to constrain it, and cannot normalise it away in the emulator without proving a different machine.} so an instruction's successor is data rather than the following address, and a machine sequenced by one central table indexed by cycle has to carry that data through the table. Second, the relations that hold such a machine together are multiset relations \emph{across} chips, not polynomial identities inside one, so discharging them chip by chip would cost one argument per bus per chip. Third, a shard of the block workload commits about $3.6\cdot10^4$ columns whose heights run from 32 rows to millions, so neither one commitment per column nor padding every column to a common height is affordable. Fourth, soundness of the argument yields a satisfying trace and nothing more: whether that trace is an execution of the advertised machine depends on the arithmetisation admitting one behaviour per input, which the proof system cannot establish about itself.
+
+MIPS proof systems predate \Ziren{}. Zilch implements zMIPS, a MIPS-like processor model~\citep{zilch}, and o1VM documents a prover with MIPS and RISC-V modes~\citep{o1vm}. We cite them to establish the MIPS antecedents, not as systems whose design axes are contrasted below. The first generation of \Ziren{}, zkMIPS~\citep{zkmips}, uses a single CPU chip over the Goldilocks field. Cannon~\citep{cannon} executes MIPS inside a fault-proof game but adjudicates one instruction at a time on-chain rather than proving an execution succinctly. This paper describes the second generation of \Ziren{}~\citep{ziren} as an implemented verifiable-execution system: its guest executor produces a MIPS32 execution record; opcode-specific tables and polynomial identities arithmetise that record; Jagged--\WHIR{} commitments and recursion turn it into a succinct proof; and standalone verifiers check the resulting artifact. Section~\ref{sec:ipcore} fixes the implementation and evaluation boundary. Trace cells, proved guest cycles per second and proof bytes are proof-system metrics rather than silicon area, clock frequency or energy.
+
+\paragraph{Contributions.} This paper contributes a machine: the MIPS32
+execution relation turned into constraints, the determinism of those constraints
+machine-checked rather than argued, and a prover that runs them on commodity
+GPUs at a cost attributed to identified choices. Its commitment scheme,
+proximity test, lookup argument and recursion shape are prior work, used as
+published and cited where each is built.
+
+\emph{The MIPS32 instruction set, and its arithmetisation}
+(\S\ref{sec:isa}, \S\ref{sec:air}). The instruction set is specified, frozen
+and uniformly encoded, and this is the first arithmetisation of it without a
+CPU chip: each opcode chip fetches its own instruction, performs its accesses
+at four fixed sub-cycle positions and passes the machine state on a bus, so an
+executed instruction costs one row of one chip. What separates this from
+carrying the same template to another register machine is the architectural
+delay slot. The instruction after a branch executes before control transfers,
+so a row's successor is data rather than the following address, and the
+instruction frame carries it as such; the entry and exit state of a shard is
+therefore a program-counter \emph{pair}, and Lemma~\ref{lem:chain} is what the
+construction buys, that the state bus balances only if the rows form one chain.
+
+\emph{Determinism enforced in \Lean{}} (\S\ref{sec:verification}). An accepting proof establishes only that some assignment satisfies the constraints; that the assignment is an execution of the advertised machine is a separate statement, and the one that has been wrong in deployed systems. This paper states it as a theorem per chip, extracts those theorems mechanically from the
+constraint system, and discharges them in \Lean{} against an executable model of
+the instruction set: \ndetproved{} of the \ndettotal{} generated cases close,
+the coverage and the gaps are reported rather than summarised, and the
+extraction found under-determined columns that are now constrained
+(Table~\ref{tab:defects}).
+
+\emph{Proving-efficiency techniques for this proof system}
+(\S\ref{sec:performance}). The GPU work is specific to the kernels this argument
+needs rather than generic acceleration: the jagged fold and the round
+polynomial it feeds are one kernel, so folded values do not round-trip through
+device memory; the leaves and compose nodes of the reduce tree are proved while
+core shards are still being proved, so the recursion tree is not a phase that
+begins when core proving ends; and the proof-of-work searches run where the parallelism is, which is what makes a soundness target affordable at all. Each change is measured against
+the configuration it replaced, and reported as instruction efficiency or
+proving efficiency accordingly.
+
+Two further results are engineering rather than novelty, and are claimed as
+such. The verifying-key allowlist is \emph{enumerated} from the machine's
+declared shard shapes rather than collected from runs (\S\ref{sec:recursion}):
+about $6.4 \cdot 10^{3}$ keys generated without executing a guest,
+where a sampled allowlist leaves the next shard shape one uncollected key away
+from a refusal. And the soundness level is reported as a union bound over every
+component of the transcript, per profile and again with every node of a block's
+tree charged (\S\ref{sec:iopp-soundness}), where projects more often report the smallest component; it yields a smaller
+number than a headline would carry, which is the point of reporting it that way.
+
+\begin{theorem}[Conditional argument statement, informal]
+\label{thm:main-informal}
+Let $\mathsf{Emulate}$ be the MIPS32 execution relation of Section~\ref{sec:isa}. The implemented protocol over the 31-bit field \KB{} consists of one lookup argument and one zerocheck per shard, a jagged multilinear commitment opened through \WHIR{}, and a recursion tree. Supported honest executions within the configured resource limits that halt with exit code zero produce accepting proofs; the arithmetisation admits no other halt (\S\ref{sec:verification}). Suppose that every shard and recursion-node protocol satisfies the round-by-round knowledge-soundness premise of Theorem~\ref{thm:composition}, that child extractors accept the transcripts produced by parent extractors, and that Assumption~\ref{ass:digest} holds. Then the recursion tree is knowledge sound for its satisfying witness rows in the random-oracle model, with the conditional error bound of Theorem~\ref{thm:composition}. Identifying those rows with a unique $\mathsf{Emulate}$ execution additionally requires the chip-determinism and real-row-exhaustiveness premises of Theorem~\ref{thm:unique}; Section~\ref{sec:verification} reports their current coverage.
+\end{theorem}
+
+The construction is one reduction per layer. Every executed instruction is one row of the chip that implements its opcode, and the row carries an \emph{instruction frame}, so there is no CPU chip (\S\ref{sec:air-frame}); registers and memory share one offline multiset argument whose cross-shard part is an elliptic-curve digest; every bus is discharged by one logarithmic-derivative argument per shard and every polynomial identity by one zerocheck; the tens of thousands of columns of a shard, of widely differing heights, are reduced by the jagged sumcheck of Hemo et al.~\citep{jagged-pcs} to one evaluation of one dense polynomial, which a single batched \WHIR{} opening~\citep{whir} authenticates against every root. Section~\ref{sec:argument} states that chain as a protocol over primitives, and the sections after it build each one.
+
+\paragraph{Two efficiencies, and which one each result is about.} Cost
+here has two independent parts, and confusing them is how a zkVM comes to
+report a faster prover for a machine that does more work. \emph{Instruction
+efficiency} is the price of representing one executed guest instruction: the
+rows and trace cells it occupies, together with the bus interactions it raises.
+It is a property of the arithmetisation and of the instruction set, it is
+measured by a per-chip area census with a \emph{(row, interaction)} cost model,
+and it does not change when the hardware does. \emph{Proving efficiency} is the
+rate at which an implementation turns those cells into a proof, in guest cycles
+per second on named hardware; it is a property of the implementation and moves
+with the field, the commitment schedule, the kernels and the device count. The
+end-to-end time is the first divided by the second, so a result that improves
+one says nothing about the other, and each of the measurements in
+Section~\ref{sec:performance} is labelled with which it is: three
+arithmetisation changes and one configuration change ($-9.4\%$ together) are
+instruction efficiency, while the kernel profile, the memory-traffic work and
+the scaling from one to four GPUs are proving efficiency. One combined
+configuration change, the lookup circuit's layer order together with the
+doubled shard size it makes fit, reduces time by $28\%$ for the pair; the
+present experiment cannot decompose the two factors. All timings predate the
+Poseidon2 round correction described in Section~\ref{sec:perf-threats}; they
+isolate engineering effects but are not measurements of the corrected release.
+
+\paragraph{Beyond proving: verifying the execution semantics.} Soundness of the argument says that an accepting proof implies a satisfying trace. Whether that trace is an execution of the advertised machine is a separate question. So is whether each chip's constraint system admits exactly one behaviour per input. We therefore report a verification flow for these questions. Its central object is extracted from the constraint system itself, but its present theorem coverage is partial.
+
+\begin{theorem}[Chip determinism, informal]
+\label{thm:det-informal}
+For every chip $U$ of the core machine there is a mechanically extracted \Lean{} theorem stating that two rows of $U$ that satisfy its constraints and agree on their bus inputs agree on their bus outputs. Of the \ndettotal{} such theorems, \ndetproved{} are closed by a tactic that lifts the statement to bounded integer arithmetic and replays the propagation loop of Picus~\citep{picus} inside the proof assistant; the remainder are open and classified in Figure~\ref{fig:verification}. Together with the bus arguments, chip determinism implies that an accepting shard proof determines, up to permutation, every row reachable from the entry state along the state and memory buses (Theorem~\ref{thm:unique}); that this exhausts the real rows is a property of the chip set, which we argue but do not prove.
+\end{theorem}
+
+The flow found real defects: the syscall chip's argument half-words were not determined by the reduced argument it received (because $2^{32}$ exceeds the field modulus), and its Linux selector had no input pinning it. Both were fixed by carrying the exact half-words and the selector on the syscall bus, after which the chip's theorem closes (Section~\ref{sec:verification-findings}).
+
+\subsection{The statement being proved}
+\label{sec:statement}
+
+Let $\mathsf{Emulate}$ be the deterministic MIPS32 execution relation of Section~\ref{sec:isa}, the relation the emulator realises: given a program image $P$ (code and initial data), an input stream $\mathsf{in}$ and a host-supplied \emph{hint} stream $\mathsf{hint}$, it produces an output stream $\mathsf{out}$ and an exit status $e$, or diverges. \Ziren{} proves the relation
+\[
+  \mathcal R \;=\; \big\{ \big((\mathsf{vk},\ h),\ (P, \mathsf{in}, \mathsf{hint})\big) \;:\; \mathsf{vk} = \mathsf{Setup}(P) \ \wedge\ \exists\, \mathsf{out} :\ \mathsf{Emulate}(P, \mathsf{in}, \mathsf{hint}) = (\mathsf{out}, 0) \ \wedge\ h = H(\mathsf{out}) \big\},
+\]
+where $\mathsf{Setup}$ maps a program image to its verifying key, a Merkle commitment to the program ROM and the preprocessed tables of Section~\ref{sec:air}, and $H$ is SHA-256 over the committed output. The program image, input stream and hint stream are witness components, while $(\mathsf{vk},h)$ is the public statement. The verifying key pins the image. The relation admits only executions that halt with exit code zero, because that is the only halt the arithmetisation admits as a valid execution to prove: $\mathsf{Emulate}$ itself accepts a non-zero exit, and one generated test program does exactly that and cannot be proved (\S\ref{sec:verification}). The exit status is therefore not a free public input of $\mathcal R$. Because the protocol applies no blinding and makes no zero-knowledge claim, witness status alone does not imply confidentiality of the input or hint stream. Honest executions \emph{that halt with exit code zero} produce accepting proofs; extraction of $(\mathsf{in},\mathsf{hint})$ from an accepting prover is conditional on the hypotheses of Theorem~\ref{thm:composition} and on the trace-to-execution premises of Theorem~\ref{thm:unique}.
+
+\subsection{Techniques}
+\label{sec:techniques}
+
+This section gives an overview of the design and of the arguments behind the two theorems; the sections that follow give the definitions and proofs. Figure~\ref{fig:pipeline} shows the proving pipeline; Protocol~\ref{prot:shard} states the shard argument, and Section~\ref{sec:argument} the argument system as a whole.
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/pipeline}}
+\caption{No stage of the pipeline sees the whole run: the proof of a block of any length is assembled from fixed-size pieces. The emulator cuts the run into $N$ shards of a few million cycles and emits one record per shard; each record is proved independently as one Jagged-\WHIR{} shard proof $\pi_i$; leaf programs (L) verify one shard proof each and a tree of compose programs (C, arity at most three) merges contiguous shard ranges; the root of the tree is the \emph{compressed proof}, the object measured throughout this paper.}
+\label{fig:pipeline}
+\end{figure}
+
+
+The four ideas that carry the design answer those four difficulties in the same order, and are developed in the sections named. The \emph{instruction frame} (\S\ref{sec:air-frame}) removes the CPU chip this system's first generation used. Each opcode chip fetches its own instruction, performs accesses at fixed sub-cycle positions and passes the machine state on a bus, so a cycle costs one row of one chip. \emph{One lookup and one zerocheck} per shard (\S\ref{sec:air-logup}, \S\ref{sec:air-zerocheck}) discharge every bus and polynomial identity, batched across chips and sharing one opening per column. \emph{Stacking and the jagged reduction} (\S\ref{sec:pcs}) preserve separate roots for preprocessed and main data while reducing tens of thousands of columns to one logical multilinear evaluation and one batched opening. The verifier depends only on the committed-area class and fixed column geometry. Finally, \emph{chip determinism} (\S\ref{sec:verification-det}) is the local property used by the conditional trace-uniqueness argument: two satisfying rows that agree on bus inputs must agree on bus outputs.
+
+\subsection{Scope and limitations}
+\label{sec:scope}
+
+The proofs are not zero-knowledge. The soundness statement rests on a computational assumption for the cross-shard digest in addition to the information-theoretic bounds of the proximity test. The checked-in soundcalc report describes a schedule with 16 bits of lookup grinding, whereas the performance baseline uses none; Section~\ref{sec:iopp-soundness} therefore does not assign the measured baseline that report's numerical level. The determinism theorems cover the core machine and not the recursion machine, a substantial fraction remain open under the automation's budget, and Theorem~\ref{thm:unique} is stated rather than machine-checked. The evaluation uses one workload class on one GPU model and predates the Poseidon2 round correction. The verifying-key allowlist is enumerated from the machine's declared chip-set clusters, which are curated from the workloads it is built for rather than exhaustive over chip sets, so a guest that produces a shard outside them is refused rather than admitted (\S\ref{sec:recursion}). Timing closure and power have no counterpart in this setting, and area is measured in trace cells rather than gates.
+
+\subsection{Related work}
+\label{sec:related}
+
+Table~\ref{tab:related} places the systems discussed along the axes of this introduction: guest instruction set, field, arithmetisation, lookup argument, commitment with its proximity test, and the regime in which each project states its soundness level.
+
+\begin{table}[t]
+\centering
+\scriptsize\setlength{\tabcolsep}{3pt}
+\caption{Design axes of \Ziren{} and four systems it is most often read against, from their public descriptions, read at the release named in the last column and retrieved on 2026-09-24. AIR is an algebraic intermediate representation, PCS a polynomial commitment scheme and IOPP an interactive oracle proof of proximity. The \emph{Regime} column names the basis on which each project states its soundness level; regimes and conjectures differ and levels are not comparable without the accounting of Section~\ref{sec:iopp-soundness}. These projects move quickly, so every row is a dated snapshot rather than a standing description.}
+\label{tab:related}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.125\textwidth}
+                  >{\raggedright\arraybackslash}p{0.095\textwidth}
+                  >{\raggedright\arraybackslash}p{0.090\textwidth}
+                  >{\raggedright\arraybackslash}p{0.105\textwidth}
+                  >{\raggedright\arraybackslash}p{0.085\textwidth}
+                  >{\raggedright\arraybackslash}p{0.120\textwidth}
+                  >{\raggedright\arraybackslash}p{0.135\textwidth}
+                  >{\raggedright\arraybackslash}p{0.075\textwidth}@{}}
+\toprule
+System & ISA & Field & Instruction tables & Lookup & Commitment / IOPP & Regime & Release \\
+\midrule
+\Ziren{} & MIPS32 & KoalaBear ($2^{31}$) & chip per opcode, frames & \LogUp{} & Jagged over \WHIR{} & unique decoding, union bound & this paper \\
+SP1 Hypercube~\citep{sp1-hypercube} & RV64IM & KoalaBear & chip per opcode & \LogUp{} & Jagged over BaseFold & unique decoding, no proximity-gap conjecture & v6.8.0 \\
+ZisK~\citep{zisk} & RV64IMA & Goldilocks & micro-operations, PIL2 & LogUp & PIL2 (e)STARK & not stated & v1.3.0-alpha \\
+OpenVM~\citep{openvm} & own ISA, RV32IM transpiler & BabyBear & modular executor chips & LogUp & SWIRL: stacked \WHIR{} & unique decoding at the leaves, list decoding above & v2.0.2 \\
+Jolt~\citep{jolt} & RV64IMAC & BN254 scalar (Dory), 128-bit (Akita) & Twist and Shout, small R1CS & Twist and Shout & Dory (default), Akita (lattice) & not stated & v0.3.0-alpha \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Chip-decomposed machines.} SP1~\citep{sp1} established the template \Ziren{} follows: one chip per opcode, \LogUp{} and recursive aggregation. SP1 Hypercube~\citep{sp1-hypercube} added the jagged commitment and shard-level lookup and zerocheck shape; its just-in-time executor~\citep{sp1-jit} is the model for ours. \Ziren{} inherits that template, the septic cross-shard digest and the shadow-read device that makes register accesses cheaper than memory accesses. It differs in the guest ISA and its frame, in opening the jagged commitment with \WHIR{} rather than BaseFold, and in reporting a union bound over components rather than a single level; both systems count query soundness in the unique-decoding regime, and SP1 states that it relies on proximity-gap theorems rather than conjectures~\citep{sp1-security} (retrieved 2026-09-24). 
+
+\paragraph{The closest layer-level neighbour.} OpenVM~\citep{openvm} likewise has no CPU chip; the instruction frame specialises that idea to MIPS.
+\paragraph{The closest current overlap.} OpenVM's SWIRL combines stacked \WHIR{}
+with \LogUp{} interaction reduction, which is the same pair of ideas as this
+paper's Jagged--\WHIR{} layer. Four axes separate them at the snapshot above:
+we place columns of differing heights under ordered rounds whose committed
+areas, padding included, form one logical dense vector and reduce every column
+claim by the jagged sumcheck; our \WHIR{} rounds fold several variables at a
+time under the per-round arity and rate schedule of Section~\ref{sec:iopp};
+\KB{} rather than BabyBear changes the extension degree available for
+challenges and hence the fingerprinting term; and our soundness level is a
+union bound over components rather than a project target, which is a different
+basis and not numerically comparable. 
+
+\paragraph{And a second.} Ceno is a second point of proximity: its
+backend selects a commitment at run time, offering a jagged reduction over
+BaseFold by default and \WHIR{} as an alternative, rather than the two in
+composition~\citep{ceno} (repository revision \texttt{7c58fdd4}, retrieved
+2026-09-24). What this paper claims of that layer is the composition itself, its
+parameter schedule and its recursive verifier, not the jagged reduction or
+\WHIR{}. Where the axes of the table are
+design axes, no cross-system performance claim follows from them, and no
+same-hardware comparison against any of these systems is attempted here.
+Machine-checked constraint-system correctness is an axis the table omits
+deliberately: stating where other projects stand would need a dated survey of
+each project's artifacts at a fixed revision, which we have not performed, so
+we report our own coverage (Section~\ref{sec:verification}) and make no
+comparative claim.
+
+\paragraph{Where the prover's work is put.} Jolt~\citep{jolt} evaluates instructions by lookups rather than by per-opcode constraints, moving the dominant cost into the lookup argument and its multiplicities; since v0.2.0 it does so through the Twist and Shout arguments~\citep{twist-shout} in place of the Lasso construction~\citep{lasso} of its original design, with a small R1CS instance for instruction fetch. \Ziren{} uses lookups for byte-granular facts and for buses, and evaluates instructions by polynomial constraints. ZisK~\citep{zisk} instead lowers the RV64IMA execution to micro-operations constrained in PIL2 and commits a STARK trace. The evaluation of Section~\ref{sec:performance} measures this system against itself.
+
+\paragraph{Systems not contrasted above.} The wider field is larger than the
+table, and we name it rather than leave it implicit. RISC Zero~\citep{risc0}
+proves a RISC-V machine through a single table of execution steps and a FRI-based STARK with
+continuations. Cairo~\citep{cairo} and Valida~\citep{valida} take the opposite
+route to \Ziren{} on the ISA question, designing an instruction set for proving
+instead of inheriting a hardware one. Ceno~\citep{ceno} builds non-uniform
+circuits per basic block and proves them with GKR over parallel segments.
+Nexus~\citep{nexus} accumulates execution by folding rather than merging shard
+proofs in a tree. Airbender~\citep{airbender} targets Mersenne-31 with a
+degree-two arithmetisation and DEEP-FRI, a different point on the trade-off of
+Section~\ref{sec:prelim}. Cysic~\citep{cysic} pursues dedicated proving
+hardware, outside the CPU--GPU scope of Section~\ref{sec:ipcore}. None is
+measured here.
+
+\paragraph{Fields, proximity and commitment.} The field, $\Poseidon{}$ permutation~\citep{poseidon2}, constraint interfaces and transforms come from Plonky3~\citep{plonky3}. Circle STARKs~\citep{circle-starks} reach smooth Mersenne-31 domains through the circle group. \KB{} instead has two-adicity 24 and uses ordinary Reed--Solomon domains, requiring the word splitting of Section~\ref{sec:prelim}; Binius~\citep{binius,fri-binius} avoids that split with binary towers. The proximity line runs from FRI~\citep{ben2018fast} through DEEP-FRI~\citep{deep-fri} and proximity-gap bounds~\citep{proximity-gaps} to BaseFold~\citep{basefold}, STIR~\citep{stir} and \WHIR{}~\citep{whir}. Ligero~\citep{ligero} and Brakedown~\citep{brakedown} are linear-time alternatives not used here. The jagged commitment is from~\citep{jagged-pcs}, with the branching-program evaluation of Holmgren and Rothblum~\citep{hr18}; our contribution at this layer is its composition with \WHIR{} and the measured schedule. The lookup uses Hab\"ock's logarithmic derivative~\citep{haboeck} in its published GKR realisation~\citep{logup-gkr}. Plookup~\citep{plookup} and cq~\citep{cq} are univariate alternatives that do not transfer directly to this multilinear many-bus workload. The memory argument descends from~\citep{blum1994}.
+
+\paragraph{MIPS, embedded verification, and circuit verification.} Zilch's zMIPS verifies a MIPS-like instruction model and composes instruction proofs~\citep{zilch}; o1VM documents a segmented prover intended to run in MIPS and RISC-V modes~\citep{o1vm}. \Ziren{} differs by targeting the MIPS32 execution relation used by the rollup fault-proof ecosystem, by its chip-decomposed AIR and Jagged--\WHIR{} commitment, and by its recursion and verification collateral. Cannon~\citep{cannon} is a single-step MIPS interpreter for interactive fault proofs, and its suite is one of our conformance inputs; Kona~\citep{kona} is the fault-proof program of the same ecosystem. zkMIPS~\citep{zkmips} is the first-generation \Ziren{} prover. Proofs reach constrained devices today as authentication and attestation protocols~\citep{zk-iot-survey,zpie,zekra,zra}, where the statement is small and about the device; a \zkVM{} for the device's instruction set instead makes its software execution the statement and the constrained party the verifier.
+
+Picus~\citep{picus} introduced the determinism formulation of under-constrained circuits and an SMT solver for it; Section~\ref{sec:verification-det} states the same property and discharges it in \Lean{}, because we could not run the public solver at the chip sizes of Table~\ref{tab:chips}. OpenVM's verification project extracts the AIR of its RV32IM and precompile chips and proves refinement to Lean reference specifications~\citep{openvm-fv}; its closed opcode proofs provide a stronger correctness baseline than the partial determinism coverage reported here, while targeting a different ISA and constraint system. The accounting follows the round-by-round methodology of~\citep{whir} and is computed with \texttt{soundcalc}~\citep{soundcalc}; the ethSTARK documentation~\citep{ethstark} provides another published treatment of this style of accounting.
+
+\subsection{Organisation}
+
+Section~\ref{sec:prelim} defines the field, the code, and the chip, bus and determinism notions the rest of the paper is stated over. Section~\ref{sec:isa} defines the execution relation, and Section~\ref{sec:ipcore} fixes what is measured and what is not. Section~\ref{sec:argument} states the argument system as a protocol over four primitives. Sections~\ref{sec:air} to~\ref{sec:iopp} instantiate them: Section~\ref{sec:air} builds the arithmetisation and proves the bus lemmas and the trace-uniqueness theorem, Section~\ref{sec:pcs} builds the jagged commitment, and Section~\ref{sec:iopp} instantiates the opening and accounts for soundness component by component. Section~\ref{sec:recursion} then composes shard proofs into a block proof and states what binds that composition to the advertised machine. Section~\ref{sec:verification} describes the verification flow and its findings, and Section~\ref{sec:performance} the concrete efficiency. Appendix~\ref{sec:executor} gives the just-in-time executor and Appendix~\ref{sec:app-ipcore} specifies the system interfaces, configuration parameters, integration paths and delivered verification artifacts.

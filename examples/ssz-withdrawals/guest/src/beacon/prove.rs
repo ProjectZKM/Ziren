@@ -48,7 +48,6 @@ pub fn validator(block_root: Node, validators_root: Node, validator_index: u64) 
     let (mut validator, branch) = black_box(hints::validator_proof(block_root, validator_index));
     let leaf = validator.hash_tree_root().unwrap();
     let depth = 41;
-    // ssz.phase0.Validators.getPathInfo([0]).gindex
     let index = alloy_primitives::U256::from_str("2199023255552")
         .unwrap()
         .wrapping_add(alloy_primitives::U256::from(validator_index));

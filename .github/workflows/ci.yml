@@ -9,6 +9,10 @@ on:
       - main
   workflow_dispatch:
 
+# Least privilege by default: nothing in this workflow writes to the repo.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -40,18 +44,75 @@ jobs:
       - name: Install Dependencies
         run: sudo apt update && sudo apt install protobuf-compiler
       - run: cargo clippy --all-targets -- -D warnings
+      # `ark` is optional, so the line above never compiles
+      # `groth16::ark_converter` and cannot lint it.
+      - run: cargo clippy -p zkm-verifier --features ark --all-targets -- -D warnings
+      - name: The published SDK must not carry the test PKI
+        # `crates/sdk/tool/` holds the insecure test CA and its private key.
+        # Without the manifest's `exclude`, a published crate would ship a usable
+        # signing key. Asserted here because no source can see what
+        # `cargo package` includes.
+        run: |
+          if cargo package -p zkm-sdk --list --allow-dirty | grep -q '^tool/'; then
+            echo "zkm-sdk would publish crates/sdk/tool/ -- see the exclude key in its manifest" >&2
+            cargo package -p zkm-sdk --list --allow-dirty | grep '^tool/' >&2
+            exit 1
+          fi
   test:
     name: Cargo Test
     runs-on: self-hosted-cpu
+    # A CPU proof at the production fence peaks near 77 GB on a 126 GB runner
+    # shared with other jobs, so tests prove at a quarter of the fence, two at a
+    # time; production-size shards are left to the GPU gates.
+    env:
+      RUST_TEST_THREADS: "2"
+      ELEMENT_THRESHOLD: "115000000"
+      # `actions/checkout` deletes `target/`, so the cache lives outside the
+      # checkout. Both self-hosted jobs share it and one RUSTFLAGS, since a second
+      # value invalidates the first's artifacts.
+      CARGO_TARGET_DIR: /data/actions-runner/cache/ziren-target
+      RUSTFLAGS: "-C target-cpu=native"
+    # This job runs contributor `build.rs` and test code as native code on a
+    # persistent self-hosted runner holding the zkm toolchain and its own runner
+    # credentials, and `pull_request` fires for forks. Fork PRs still get the two
+    # `ubuntu-latest` jobs; run the full suite in-repo once the diff is read.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v5
       - run: export PATH=~/.cargo/bin:$PATH
       - run: |
           source ~/.zkm-toolchain/env
-          for pkg in zkm-core-executor zkm-curves zkm-derive zkm-primitives zkm-prover \
-            zkm-recursion-circuit zkm-recursion-compiler zkm-recursion-core \
-            zkm-recursion-gnark-ffi zkm-stark zkm-zkvm zkm-lib; do
-              cargo test -r -p $pkg
+          # A nextest pass replaced this loop and was measured slower: at the
+          # RUST_TEST_THREADS this runner can afford, per-test process spawn costs
+          # more than cross-binary scheduling saves (815s for the loop against
+          # 1053s, same 636 tests). It also skips doctests. Keep the loop.
+          #
+          # The loop does not stop at the first failing package, so one failure
+          # cannot hide the rest: each rc is recorded and the step fails at the
+          # end with every failing package named.
+          FAILED=""
+          for pkg in zkm-core-executor zkm-curves zkm-derive zkm-primitives \
+            zkm-prover zkm-recursion-circuit zkm-recursion-compiler \
+            zkm-recursion-core zkm-recursion-gnark-ffi zkm-pcs zkm-zkvm zkm-lib; do
+              cargo test -r -p $pkg || FAILED="$FAILED $pkg"
           done
+          if [ -n "$FAILED" ]; then
+            echo "::error title=Failing packages::$FAILED"
+            exit 1
+          fi
+        env:
+          RUSTFLAGS: "-C target-cpu=native"
+      - name: Verifier malformed-input guards, default AND `ark` features
+        # `zkm-verifier` is absent from the pass above. Its `ark` loaders sit
+        # behind an optional feature, so a default run builds 9 of the 12
+        # malformed-input tests and none of the three `ark_converter` ones.
+        # Filtered to `malformed_input` because the crate's other tests need
+        # prover artifacts this job does not build.
+        run: |
+          source ~/.zkm-toolchain/env
+          cargo test -r -p zkm-verifier malformed_input
+          cargo test -r -p zkm-verifier --features ark malformed_input
         env:
           RUSTFLAGS: "-C target-cpu=native"

@@ -14,7 +14,6 @@ pub fn expensive_function(x: usize) -> usize {
 pub fn main() {
     let mut nums = vec![1, 1];
 
-    // Setup a large vector with Fibonacci-esque numbers.
     println!("cycle-tracker-report-start: setup");
     for _ in 0..100 {
         let mut c = nums[nums.len() - 1] + nums[nums.len() - 2];

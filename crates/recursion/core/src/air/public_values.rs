@@ -1,9 +1,6 @@
-use crate::runtime::{DIGEST_SIZE, HASH_RATE, PERMUTATION_WIDTH};
+use crate::runtime::{DIGEST_SIZE, PERMUTATION_WIDTH};
 
 use core::fmt::Debug;
-use p3_challenger::DuplexChallenger;
-use p3_field::PrimeField32;
-use p3_symmetric::CryptographicPermutation;
 use serde::{Deserialize, Serialize};
 use static_assertions::const_assert_eq;
 use std::{
@@ -12,7 +9,7 @@ use std::{
 };
 use zkm_core_machine::utils::indices_arr;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::POSEIDON_NUM_WORDS, septic_digest::SepticDigest, Word, PROOF_MAX_NUM_PVS};
+use zkm_pcs::{air::POSEIDON_NUM_WORDS, septic_digest::SepticDigest, Word, PROOF_MAX_NUM_PVS};
 
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
 
@@ -47,19 +44,6 @@ pub struct ChallengerPublicValues<T> {
 }
 
 impl<T: Clone> ChallengerPublicValues<T> {
-    pub fn set_challenger<P: CryptographicPermutation<[T; PERMUTATION_WIDTH]>>(
-        &self,
-        challenger: &mut DuplexChallenger<T, P, PERMUTATION_WIDTH, HASH_RATE>,
-    ) where
-        T: PrimeField32,
-    {
-        challenger.sponge_state = self.sponge_state;
-        let num_inputs = self.num_inputs.as_canonical_u32() as usize;
-        challenger.input_buffer = self.input_buffer[..num_inputs].to_vec();
-        let num_outputs = self.num_outputs.as_canonical_u32() as usize;
-        challenger.output_buffer = self.output_buffer[..num_outputs].to_vec();
-    }
-
     pub fn as_array(&self) -> [T; CHALLENGER_STATE_NUM_ELTS]
     where
         T: Copy,

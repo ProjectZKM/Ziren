@@ -9,5 +9,4 @@ pub fn main() {
     syscall_sha256_extend(&mut w);
     syscall_sha256_extend(&mut w);
     syscall_sha256_extend(&mut w);
-    //println!("{:?}", w);
 }

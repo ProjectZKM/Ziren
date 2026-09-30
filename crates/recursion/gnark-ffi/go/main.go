@@ -5,19 +5,19 @@ package main
 #include <stdlib.h>
 
 typedef struct {
-	char *PublicInputs[2];
+	char *PublicInputs[3];
 	char *EncodedProof;
 	char *RawProof;
 } C_PlonkBn254Proof;
 
 typedef struct {
-	char *PublicInputs[2];
+	char *PublicInputs[3];
 	char *EncodedProof;
 	char *RawProof;
 } C_Groth16Bn254Proof;
 
 typedef struct {
-	char *PublicInputs[2];
+	char *PublicInputs[3];
 	char *EncodedProof;
 	char *RawProof;
 } C_DvSnarkBn254Proof;
@@ -36,6 +36,7 @@ import (
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/frontend/cs/scs"
+	"github.com/consensys/gnark/test"
 	"github.com/consensys/gnark/test/unsafekzg"
 	zkm "github.com/ProjectZKM/zkm-recursion-gnark/zkm"
 	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
@@ -59,6 +60,7 @@ func ProvePlonkBn254(dataDir *C.char, witnessPath *C.char) *C.C_PlonkBn254Proof 
 	structPtr := (*C.C_PlonkBn254Proof)(ms)
 	structPtr.PublicInputs[0] = C.CString(zkmPlonkBn254Proof.PublicInputs[0])
 	structPtr.PublicInputs[1] = C.CString(zkmPlonkBn254Proof.PublicInputs[1])
+	structPtr.PublicInputs[2] = C.CString(zkmPlonkBn254Proof.PublicInputs[2])
 	structPtr.EncodedProof = C.CString(zkmPlonkBn254Proof.EncodedProof)
 	structPtr.RawProof = C.CString(zkmPlonkBn254Proof.RawProof)
 	return structPtr
@@ -70,6 +72,7 @@ func FreePlonkBn254Proof(proof *C.C_PlonkBn254Proof) {
 	C.free(unsafe.Pointer(proof.RawProof))
 	C.free(unsafe.Pointer(proof.PublicInputs[0]))
 	C.free(unsafe.Pointer(proof.PublicInputs[1]))
+	C.free(unsafe.Pointer(proof.PublicInputs[2]))
 	C.free(unsafe.Pointer(proof))
 }
 
@@ -82,13 +85,14 @@ func BuildPlonkBn254(dataDir *C.char) {
 }
 
 //export VerifyPlonkBn254
-func VerifyPlonkBn254(dataDir *C.char, proof *C.char, vkeyHash *C.char, committedValuesDigest *C.char) *C.char {
+func VerifyPlonkBn254(dataDir *C.char, proof *C.char, vkeyHash *C.char, committedValuesDigest *C.char, vkRoot *C.char) *C.char {
 	dataDirString := C.GoString(dataDir)
 	proofString := C.GoString(proof)
 	vkeyHashString := C.GoString(vkeyHash)
 	committedValuesDigestString := C.GoString(committedValuesDigest)
+	vkRootString := C.GoString(vkRoot)
 
-	err := zkm.VerifyPlonk(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
+	err := zkm.VerifyPlonk(dataDirString, proofString, vkeyHashString, committedValuesDigestString, vkRootString)
 	if err != nil {
 		return C.CString(err.Error())
 	}
@@ -128,6 +132,7 @@ func ProveGroth16Bn254(dataDir *C.char, witnessPath *C.char) *C.C_Groth16Bn254Pr
 	structPtr := (*C.C_Groth16Bn254Proof)(ms)
 	structPtr.PublicInputs[0] = C.CString(zkmGroth16Bn254Proof.PublicInputs[0])
 	structPtr.PublicInputs[1] = C.CString(zkmGroth16Bn254Proof.PublicInputs[1])
+	structPtr.PublicInputs[2] = C.CString(zkmGroth16Bn254Proof.PublicInputs[2])
 	structPtr.EncodedProof = C.CString(zkmGroth16Bn254Proof.EncodedProof)
 	structPtr.RawProof = C.CString(zkmGroth16Bn254Proof.RawProof)
 	return structPtr
@@ -139,6 +144,7 @@ func FreeGroth16Bn254Proof(proof *C.C_Groth16Bn254Proof) {
 	C.free(unsafe.Pointer(proof.RawProof))
 	C.free(unsafe.Pointer(proof.PublicInputs[0]))
 	C.free(unsafe.Pointer(proof.PublicInputs[1]))
+	C.free(unsafe.Pointer(proof.PublicInputs[2]))
 	C.free(unsafe.Pointer(proof))
 }
 
@@ -151,13 +157,14 @@ func BuildGroth16Bn254(dataDir *C.char) {
 }
 
 //export VerifyGroth16Bn254
-func VerifyGroth16Bn254(dataDir *C.char, proof *C.char, vkeyHash *C.char, committedValuesDigest *C.char) *C.char {
+func VerifyGroth16Bn254(dataDir *C.char, proof *C.char, vkeyHash *C.char, committedValuesDigest *C.char, vkRoot *C.char) *C.char {
 	dataDirString := C.GoString(dataDir)
 	proofString := C.GoString(proof)
 	vkeyHashString := C.GoString(vkeyHash)
 	committedValuesDigestString := C.GoString(committedValuesDigest)
+	vkRootString := C.GoString(vkRoot)
 
-	err := zkm.VerifyGroth16(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
+	err := zkm.VerifyGroth16(dataDirString, proofString, vkeyHashString, committedValuesDigestString, vkRootString)
 	if err != nil {
 		return C.CString(err.Error())
 	}
@@ -251,6 +258,7 @@ func ProveDvSnarkBn254(dataDir *C.char, witnessPath *C.char, storeDir *C.char) *
 	structPtr := (*C.C_DvSnarkBn254Proof)(ms)
 	structPtr.PublicInputs[0] = C.CString(zkmDvSnarkBn254Proof.PublicInputs[0])
 	structPtr.PublicInputs[1] = C.CString(zkmDvSnarkBn254Proof.PublicInputs[1])
+	structPtr.PublicInputs[2] = C.CString(zkmDvSnarkBn254Proof.PublicInputs[2])
 	structPtr.EncodedProof = C.CString(zkmDvSnarkBn254Proof.EncodedProof)
 	structPtr.RawProof = C.CString(zkmDvSnarkBn254Proof.RawProof)
 	return structPtr
@@ -283,6 +291,21 @@ func TestMain() error {
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return err
+	}
+
+	if os.Getenv("ZIREN_LOCALIZE") == "1" {
+		sc := zkm.NewCircuit(inputs)
+		vc := zkm.NewCircuit(inputs)
+		zkm.LocLastConstraintIdx = -1
+		zkm.LocLastOpcode = ""
+		serr := test.IsSolved(&sc, &vc, ecc.BN254.ScalarField())
+		fmt.Printf("[localize] first-failing-assert constraintIdx=%d opcode=%s\n", zkm.LocLastConstraintIdx, zkm.LocLastOpcode)
+		if serr != nil {
+			fmt.Printf("[localize] engine error: %v\n", serr)
+		} else {
+			fmt.Printf("[localize] engine: circuit SOLVED\n")
+		}
+		return serr
 	}
 
 	// Compile the circuit.
@@ -346,22 +369,22 @@ func TestPoseidonKoalaBear2() *C.char {
 	}
 
 	expectedOutput := [poseidon2.KOALABEAR_WIDTH]koalabear.Variable{
-		koalabear.NewF("1246627235"),
-		koalabear.NewF("628715430"),
-		koalabear.NewF("728127883"),
-		koalabear.NewF("1210800983"),
-		koalabear.NewF("1104325841"),
-		koalabear.NewF("123548278"),
-		koalabear.NewF("109211657"),
-		koalabear.NewF("1347389604"),
-		koalabear.NewF("350632487"),
-		koalabear.NewF("1919729472"),
-		koalabear.NewF("1334300527"),
-		koalabear.NewF("1417472912"),
-		koalabear.NewF("1710206249"),
-		koalabear.NewF("1032515169"),
-		koalabear.NewF("431466777"),
-		koalabear.NewF("1825850772"),
+		koalabear.NewF("1330215056"),
+		koalabear.NewF("1388930081"),
+		koalabear.NewF("1337212159"),
+		koalabear.NewF("2038180411"),
+		koalabear.NewF("1881671374"),
+		koalabear.NewF("164509734"),
+		koalabear.NewF("498654582"),
+		koalabear.NewF("1841854018"),
+		koalabear.NewF("82116708"),
+		koalabear.NewF("1571428065"),
+		koalabear.NewF("117003252"),
+		koalabear.NewF("1678395592"),
+		koalabear.NewF("2088326992"),
+		koalabear.NewF("1852522451"),
+		koalabear.NewF("1063576961"),
+		koalabear.NewF("1871812444"),
 	}
 
 	circuit := zkm.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}

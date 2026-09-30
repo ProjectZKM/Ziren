@@ -16,17 +16,14 @@ pub(crate) fn create_local_command(
     let canonicalized_program_dir =
         program_dir.canonicalize().expect("Failed to canonicalize program directory");
 
-    // When executing the local command:
-    // 1. Set the target directory to a subdirectory of the program's target directory to avoid
-    //    build
-    // conflicts with the parent process. Source: https://github.com/rust-lang/cargo/issues/6412
-    // 2. Set the rustup toolchain to Ziren.
-    // 3. Set the encoded rust flags.
-    // 4. Remove the rustc configuration, otherwise in a build script it will attempt to compile the
-    //    program with the toolchain of the normal build process, rather than the Ziren toolchain.
+    let toolchain = env::var("ZKM_GUEST_TOOLCHAIN").unwrap_or_else(|_| "zkm".to_string());
 
     command
         .current_dir(canonicalized_program_dir)
+        .env("RUSTUP_TOOLCHAIN", toolchain)
+        .env_remove("RUSTC")
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env("CARGO_ENCODED_RUSTFLAGS", get_rust_compiler_flags(args))
         .env("CARGO_TARGET_DIR", program_metadata.target_directory.join(HELPER_TARGET_SUBDIR))
         .args(get_program_build_args(args));

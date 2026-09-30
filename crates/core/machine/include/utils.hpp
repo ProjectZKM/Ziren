@@ -156,9 +156,11 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ size_t nb_bits_to_shift(uint32_t shift_amount) {
     return n % BYTE_SIZE;
 }
 
-/// Returns `true` if the given opcode is a signed operation.
+/// Returns `true` if the given division opcode is signed: `DIV` and `MOD`
+/// are the two signed division opcodes, `DIVU` and `MODU` their unsigned
+/// counterparts, so this is the complete signedness classification for the
+/// quotient/remainder computation below.
 __ZKM_HOSTDEV__ __ZKM_INLINE__ bool is_signed_operation(Opcode opcode) {
-    // todo: add more signed operations
     return (opcode == Opcode::DIV || opcode == Opcode::MOD);
 }
 
@@ -216,24 +218,13 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t to_syscall_id(SyscallCode self) {
     return ((uint32_t)self) & 0x0FFFF;
 }
 
+/// Mirrors `KoalaBearWordRangeChecker::populate`.  The gadget's one column
+/// flags the single case where the lower limbs are constrained, `v[3] ==
+/// 0x7F`; the other case is discharged by a byte lookup, and the byte events
+/// come from the Rust dependency pass, not from here.
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_range_checker(KoalaBearWordRangeChecker<F>& self, const uint32_t value) {
-    for (size_t i = 0; i < 8; ++i) {
-        bool bit = (value & (1u << (i + 24))) != 0;
-        self.most_sig_byte_decomp[i] = F::from_bool(bit);
-    }
-    self.and_most_sig_byte_decomp_0_to_2 =
-        self.most_sig_byte_decomp[0] * self.most_sig_byte_decomp[1];
-    self.and_most_sig_byte_decomp_0_to_3 =
-        self.and_most_sig_byte_decomp_0_to_2 * self.most_sig_byte_decomp[2];
-    self.and_most_sig_byte_decomp_0_to_4 =
-        self.and_most_sig_byte_decomp_0_to_3 * self.most_sig_byte_decomp[3];
-    self.and_most_sig_byte_decomp_0_to_5 =
-        self.and_most_sig_byte_decomp_0_to_4 * self.most_sig_byte_decomp[4];
-    self.and_most_sig_byte_decomp_0_to_6 =
-        self.and_most_sig_byte_decomp_0_to_5 * self.most_sig_byte_decomp[5];
-    self.and_most_sig_byte_decomp_0_to_7 =
-        self.and_most_sig_byte_decomp_0_to_6 * self.most_sig_byte_decomp[6];
+    self.most_sig_byte_is_max = F::from_bool(((value >> 24) & 0xFFu) == 0x7Fu);
 }
 
 template<class F>
@@ -281,54 +272,10 @@ populate_is_equal_word_operaion(IsEqualWordOperation<F>& self, uint32_t a_u32, u
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint64_t
 populate_add_double_operaion(AddDoubleOperation<F>& self, uint64_t a_u64, uint64_t b_u64) {
+    // Carries are recovered in the AIR now — values only.
     uint64_t expected = a_u64 + b_u64;
     write_word_from_u32_v2<F>(self.value, (uint32_t)expected);
     write_word_from_u32_v2<F>(self.value_hi, (uint32_t)(expected >> 32));
-
-    auto a = u64_to_le_bytes(a_u64);
-    auto b = u64_to_le_bytes(b_u64);
-
-    uint8_t carry[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    for (int i = 0; i < 7; i++) {
-        self.carry[i] = F::zero();
-    }
-
-    if ((uint32_t)a[0] + (uint32_t)b[0] > 255) {
-        carry[0] = 1;
-        self.carry[0] = F::one();
-    }
-    if ((uint32_t)a[1] + (uint32_t)b[1] + (uint32_t)carry[0] > 255) {
-        carry[1] = 1;
-        self.carry[1] = F::one();
-    }
-    if ((uint32_t)a[2] + (uint32_t)b[2] + (uint32_t)carry[1] > 255) {
-        carry[2] = 1;
-        self.carry[2] = F::one();
-    }
-
-    if ((uint32_t)a[3] + (uint32_t)b[3] + (uint32_t)carry[2] > 255) {
-        carry[3] = 1;
-        self.carry[3] = F::one();
-    }
-
-    if ((uint32_t)a[4] + (uint32_t)b[4] + (uint32_t)carry[3] > 255) {
-        carry[4] = 1;
-        self.carry[4] = F::one();
-    }
-
-    if ((uint32_t)a[5] + (uint32_t)b[5] + (uint32_t)carry[4] > 255) {
-        carry[5] = 1;
-        self.carry[5] = F::one();
-    }
-
-    if ((uint32_t)a[6] + (uint32_t)b[6] + (uint32_t)carry[5] > 255) {
-        carry[6] = 1;
-        self.carry[6] = F::one();
-    }
-
-    uint32_t base = 256;
-    uint32_t overflow = (uint32_t)a[0] + (uint32_t)b[0] - (uint32_t)u64_to_le_bytes(expected)[0];
-    assert(overflow * (overflow - base) == 0);
     return expected;
 }
 

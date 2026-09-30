@@ -51,7 +51,6 @@ impl Syscall for U256xU2048MulSyscall {
         hi_bytes.resize(U256_NUM_BYTES, 0u8);
         let hi_words = bytes_to_words_le::<U256_NUM_WORDS>(&hi_bytes);
 
-        // Increment clk so that the write is not at the same cycle as the read.
         rt.clk += 1;
 
         let lo_memory_records = rt.mw_slice(lo_ptr, &lo_words);

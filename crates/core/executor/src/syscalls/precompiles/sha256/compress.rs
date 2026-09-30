@@ -40,7 +40,6 @@ impl Syscall for Sha256CompressSyscall {
         let mut w_i_read_records = Vec::new();
         let mut h_write_records = Vec::new();
 
-        // Execute the "initialize" phase where we read in the h values.
         let mut hx = [0u32; 8];
         #[allow(clippy::needless_range_loop)]
         for i in 0..8 {
@@ -50,7 +49,6 @@ impl Syscall for Sha256CompressSyscall {
         }
 
         let mut original_w = Vec::new();
-        // Execute the "compress" phase.
         let mut a = hx[0];
         let mut b = hx[1];
         let mut c = hx[2];
@@ -83,18 +81,14 @@ impl Syscall for Sha256CompressSyscall {
             b = a;
             a = temp1.wrapping_add(temp2);
         }
-        // Increment the clk by 1 before writing to h, since we've already read h at the start_clk
-        // during the initialization phase.
         rt.clk += 1;
 
-        // Execute the "finalize" phase.
         let v = [a, b, c, d, e, f, g, h];
         for i in 0..8 {
             let record = rt.mw(h_ptr + i as u32 * 4, hx[i].wrapping_add(v[i]));
             h_write_records.push(record);
         }
 
-        // Push the SHA compress event.
         let shard = rt.current_shard();
         let event = PrecompileEvent::ShaCompress(ShaCompressEvent {
             shard,

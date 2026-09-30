@@ -143,8 +143,6 @@ mod tests {
     fn test_secp256k_sqrt() {
         let mut rng = thread_rng();
         for _ in 0..10 {
-            // Check that sqrt(x^2)^2 == x^2
-            // We use x^2 since not all field elements have a square root
             let x = rng.gen_biguint(256) % Secp256k1BaseField::modulus();
             let x_2 = (&x * &x) % Secp256k1BaseField::modulus();
             let sqrt = secp256k1_sqrt(&x_2).unwrap();

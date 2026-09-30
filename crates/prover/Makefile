@@ -7,10 +7,10 @@ build-circuits:
 	mkdir -p build && \
 	mkdir -p build/groth16 && \
 	mkdir -p build/plonk && \
-	RUST_LOG=debug RUSTFLAGS='-C target-cpu=native' \
+	RUST_LOG=debug RUSTFLAGS='' \
 		cargo run -p zkm-prover --release --bin build_groth16_bn254 --features native-gnark -- \
 		--build-dir=./build/groth16 && \
-	RUST_LOG=debug RUSTFLAGS='-C target-cpu=native' \
+	RUST_LOG=debug RUSTFLAGS='' \
 		cargo run -p zkm-prover --release --bin build_plonk_bn254 --features native-gnark -- \
 		--build-dir=./build/plonk
 
@@ -18,7 +18,7 @@ build-circuits-imm-wrap-vk:
 	rm -rf build-imm-wrap-vk && \
 	mkdir -p build-imm-wrap-vk && \
 	mkdir -p build-imm-wrap-vk/groth16 && \
-	RUST_LOG=info RUSTFLAGS='-C target-cpu=native' ZKM_IMM_WRAP_VK=1 \
+	RUST_LOG=info RUSTFLAGS='' ZKM_IMM_WRAP_VK=1 \
 		cargo run -p zkm-prover --release --bin build_groth16_bn254 --features native-gnark -- \
 		--build-dir=./build-imm-wrap-vk/groth16
 
@@ -34,5 +34,5 @@ release-shapes:
 	bash shapes.sh
 
 test-e2e:
-	RUSTFLAGS='-C target-cpu=native' \
+	RUSTFLAGS='' \
 	cargo test --package zkm-prover --lib --release -- tests::test_e2e --exact --show-output

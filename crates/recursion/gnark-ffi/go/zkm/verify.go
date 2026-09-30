@@ -12,7 +12,7 @@ import (
 	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
 )
 
-func VerifyPlonk(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHash string, verifyCmdCommittedValuesDigest string) error {
+func VerifyPlonk(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHash string, verifyCmdCommittedValuesDigest string, verifyCmdVkRoot string) error {
 	// Sanity check the required arguments have been provided.
 	if verifyCmdDataDir == "" {
 		panic("--data is required")
@@ -43,6 +43,7 @@ func VerifyPlonk(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHa
 		Exts:                  []koalabear.ExtensionVariable{},
 		VkeyHash:              verifyCmdVkeyHash,
 		CommittedValuesDigest: verifyCmdCommittedValuesDigest,
+		VkRoot:                verifyCmdVkRoot,
 	}
 	witness, err := frontend.NewWitness(&circuit, ecc.BN254.ScalarField())
 	if err != nil {
@@ -58,7 +59,7 @@ func VerifyPlonk(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHa
 	return err
 }
 
-func VerifyGroth16(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHash string, verifyCmdCommittedValuesDigest string) error {
+func VerifyGroth16(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHash string, verifyCmdCommittedValuesDigest string, verifyCmdVkRoot string) error {
 	// Sanity check the required arguments have been provided.
 	if verifyCmdDataDir == "" {
 		panic("--data is required")
@@ -89,6 +90,7 @@ func VerifyGroth16(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkey
 		Exts:                  []koalabear.ExtensionVariable{},
 		VkeyHash:              verifyCmdVkeyHash,
 		CommittedValuesDigest: verifyCmdCommittedValuesDigest,
+		VkRoot:                verifyCmdVkRoot,
 	}
 	witness, err := frontend.NewWitness(&circuit, ecc.BN254.ScalarField())
 	if err != nil {

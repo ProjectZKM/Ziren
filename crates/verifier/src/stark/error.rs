@@ -1,6 +1,6 @@
 use thiserror::Error;
 // use zkm_prover::{CoreSC, InnerSC};
-use zkm_stark::MachineVerificationError;
+use zkm_pcs::MachineVerificationError;
 
 use super::{CoreSC, InnerSC};
 
@@ -8,6 +8,12 @@ use super::{CoreSC, InnerSC};
 pub enum StarkError {
     #[error("Invalid public values")]
     InvalidPublicValues,
+    #[error("Malformed proof bytes")]
+    MalformedProof,
+    #[error("Malformed verifying key bytes")]
+    MalformedVerifyingKey,
+    #[error("Expected a compressed proof")]
+    UnexpectedProofVariant,
     #[error("Version mismatch")]
     VersionMismatch(String),
     #[error("Core machine verification error: {0}")]

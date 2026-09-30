@@ -1,16 +1,10 @@
 use std::array;
-#[cfg(feature = "picus")]
-use std::mem::size_of;
 
-use p3_air::PairBuilder;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
-use p3_poseidon2::matmul_internal;
+use zkm_pcs::air::MachineAirBuilder;
 use zkm_primitives::RC_16_30_U32;
-use zkm_stark::air::{MachineAirBuilder, OperationSummaryAirBuilder};
 
-#[cfg(feature = "picus")]
-use super::permutation::{permutation, Poseidon2Degree3Cols, Poseidon2Degree3Projection};
 use super::{permutation::Poseidon2Cols, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
 
 const INTERNAL_DIAG_MONTY_16: [KoalaBear; 16] = KoalaBear::new_array([
@@ -34,7 +28,7 @@ const INTERNAL_DIAG_MONTY_16: [KoalaBear; 16] = KoalaBear::new_array([
 
 pub fn apply_m_4_mut<AF>(x: &mut [AF])
 where
-    AF: FieldAlgebra,
+    AF: PrimeCharacteristicRing,
 {
     let t01 = x[0].clone() + x[1].clone();
     let t23 = x[2].clone() + x[3].clone();
@@ -47,7 +41,7 @@ where
     x[2] = t01233 + t23;
 }
 
-pub fn external_linear_layer_mut<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
+pub fn external_linear_layer_mut<AF: PrimeCharacteristicRing>(state: &mut [AF; WIDTH]) {
     for j in (0..WIDTH).step_by(4) {
         apply_m_4_mut(&mut state[j..j + 4]);
     }
@@ -59,44 +53,41 @@ pub fn external_linear_layer_mut<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     }
 }
 
-pub fn external_linear_layer<AF: FieldAlgebra + Copy>(state: &[AF; WIDTH]) -> [AF; WIDTH] {
+pub fn external_linear_layer<AF: PrimeCharacteristicRing + Copy>(
+    state: &[AF; WIDTH],
+) -> [AF; WIDTH] {
     let mut state = *state;
     external_linear_layer_mut(&mut state);
     state
 }
 
-pub fn internal_linear_layer_mut<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
-    let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] = INTERNAL_DIAG_MONTY_16
-        .iter()
-        .map(|x| <F as FieldAlgebra>::F::from_wrapped_u32(x.as_canonical_u32()))
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
-    matmul_internal(state, matmul_constants);
+pub fn internal_linear_layer_mut<F: PrimeCharacteristicRing>(state: &mut [F; WIDTH]) {
+    let matmul_constants: [F; WIDTH] =
+        core::array::from_fn(|i| F::from_u32(INTERNAL_DIAG_MONTY_16[i].as_canonical_u32()));
+    let sum: F = state.iter().cloned().sum();
+    for i in 0..WIDTH {
+        state[i] *= matmul_constants[i].clone();
+        state[i] += sum.clone();
+    }
 }
 
 /// Eval the constraints for the external rounds.
 pub fn eval_external_round<AB>(builder: &mut AB, local_row: &dyn Poseidon2Cols<AB::Var>, r: usize)
 where
-    AB: MachineAirBuilder + PairBuilder,
+    AB: MachineAirBuilder,
 {
     let mut local_state: [AB::Expr; WIDTH] =
         array::from_fn(|i| local_row.external_rounds_state()[r][i].into());
 
-    // For the first round, apply the linear layer.
     if r == 0 {
         external_linear_layer_mut(&mut local_state);
     }
 
-    // Add the round constants.
     let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
-    let add_rc: [AB::Expr; WIDTH] = array::from_fn(|i| {
-        local_state[i].clone() + AB::F::from_wrapped_u32(RC_16_30_U32[round][i])
-    });
+    let add_rc: [AB::Expr; WIDTH] =
+        array::from_fn(|i| local_state[i].clone() + AB::F::from_u32(RC_16_30_U32[round][i]));
 
-    // Apply the sboxes.
-    // See `populate_external_round` for why we don't have columns for the sbox output here.
-    let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::zero());
+    let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
     for i in 0..WIDTH {
         let calculated_sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
 
@@ -108,7 +99,6 @@ where
         }
     }
 
-    // Apply the linear layer.
     let mut state = sbox_deg_3;
     external_linear_layer_mut(&mut state);
 
@@ -128,16 +118,15 @@ where
 /// Eval the constraints for the internal rounds.
 pub fn eval_internal_rounds<AB>(builder: &mut AB, local_row: &dyn Poseidon2Cols<AB::Var>)
 where
-    AB: MachineAirBuilder + PairBuilder,
+    AB: MachineAirBuilder,
 {
     let state = &local_row.internal_rounds_state();
     let s0 = local_row.internal_rounds_s0();
     let mut state: [AB::Expr; WIDTH] = core::array::from_fn(|i| state[i].into());
     for r in 0..NUM_INTERNAL_ROUNDS {
-        // Add the round constant.
         let round = r + NUM_EXTERNAL_ROUNDS / 2;
         let add_rc = if r == 0 { state[0].clone() } else { s0[r - 1].into() }
-            + AB::Expr::from_wrapped_u32(RC_16_30_U32[round][0]);
+            + AB::Expr::from_u32(RC_16_30_U32[round][0]);
 
         let mut sbox_deg_3 = add_rc.clone() * add_rc.clone() * add_rc.clone();
         if let Some(internal_sbox) = local_row.internal_rounds_sbox() {
@@ -145,8 +134,6 @@ where
             sbox_deg_3 = internal_sbox[r].into();
         }
 
-        // Apply the linear layer.
-        // See `populate_internal_rounds` for why we don't have columns for the new state here.
         state[0] = sbox_deg_3.clone();
         internal_linear_layer_mut(&mut state);
 
@@ -159,49 +146,4 @@ where
     for i in 0..WIDTH {
         builder.assert_eq(external_state[i], state[i].clone())
     }
-}
-
-/// Evaluate the degree-3 Poseidon2 permutation, optionally replacing the exact
-/// inlined constraints with a semantic projected submodule.
-///
-/// The projected interface exposes only the caller-visible permutation
-/// boundary:
-/// - input: the first external-round state
-/// - output: the final permutation state
-///
-/// All intermediate round-state and S-box witness columns remain existential
-/// inside the submodule.
-pub fn eval_degree3<AB>(builder: &mut AB, local_row: &dyn Poseidon2Cols<AB::Var>)
-where
-    AB: MachineAirBuilder + PairBuilder + OperationSummaryAirBuilder,
-{
-    #[cfg(feature = "picus")]
-    let current_inputs: Vec<AB::Expr> =
-        local_row.external_rounds_state()[0].iter().map(|value| (*value).into()).collect();
-    #[cfg(feature = "picus")]
-    let current_outputs: Vec<AB::Expr> =
-        local_row.perm_output().iter().map(|value| (*value).into()).collect();
-
-    #[cfg(feature = "picus")]
-    if builder.try_emit_projected_summary(
-        "Poseidon2Degree3Permutation",
-        &Poseidon2Degree3Projection::picus_projection_info(),
-        &current_inputs,
-        &current_outputs,
-        size_of::<Poseidon2Degree3Cols<u8>>(),
-        |builder, source_row| {
-            let projected = permutation::<_, 3>(source_row);
-            for r in 0..NUM_EXTERNAL_ROUNDS {
-                eval_external_round(builder, projected.as_ref(), r);
-            }
-            eval_internal_rounds(builder, projected.as_ref());
-        },
-    ) {
-        return;
-    }
-
-    for r in 0..NUM_EXTERNAL_ROUNDS {
-        eval_external_round(builder, local_row, r);
-    }
-    eval_internal_rounds(builder, local_row);
 }

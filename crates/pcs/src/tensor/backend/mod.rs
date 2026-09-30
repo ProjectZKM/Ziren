@@ -1,0 +1,169 @@
+//! Part of the Ziren backend-generic tensor stack.
+//!
+//! `CpuBackend` is the only implementor **in this tree**; `ziren-gpu` implements the
+//! device half as `CudaBackend` (`core/src/device/backend.rs`), a thin wrapper over its
+//! `CudaStream` (`cudaMallocAsync` / `cudaFreeAsync` / `cudaMemcpyAsync` /
+//! `cudaMemsetAsync`).
+//! So `Buffer<T, CudaBackend>` / `Tensor<T, CudaBackend>` are real, device-resident
+//! types over there.
+//!
+//! What that does NOT mean: nothing in either tree currently **consumes** a non-CPU
+//! backend. Every shard-prover use site still pins `CpuBackend` — the CPU/GPU split
+//! lives at the PROVER level, not in this parameter. In particular ziren-gpu's device
+//! traces remain a bespoke COLUMN-major `ColMajorMatrixDevice` over `DeviceBuffer`,
+//! whereas `Tensor` here is ROW-major, so the two stacks are still not interchangeable.
+//! Do not infer from the generics that a device backend is wired into any proving path.
+
+pub mod cpu;
+mod io;
+
+use std::{borrow::Cow, fmt::Debug, rc::Rc, sync::Arc};
+
+pub use cpu::*;
+pub use io::*;
+
+use crate::tensor::{
+    mem::{CopyError, DeviceMemory},
+    Allocator,
+};
+
+/// A memory space with its own allocator and copy primitives.
+///
+/// # Safety
+///
+/// The safe containers (`Buffer`, `Tensor`) turn this trait's guarantees into
+/// references and slices, so an implementation must uphold all of the
+/// following; each one is a soundness condition on a safe caller.
+///
+/// * **Allocation ownership.** Every block returned by the [`Allocator`]
+///   methods belongs to the container that received it until that container
+///   deallocates it through the same backend; the block stays valid (same
+///   address, same size, same memory space) for that whole time, across
+///   clones of the backend value and across threads.
+/// * **Clone equivalence.** A clone of a backend value addresses the same
+///   memory space and the same allocator state: a block allocated through one
+///   clone may be read, written, copied and deallocated through any other,
+///   with identical results.
+/// * **Memory operations.** [`DeviceMemory::copy_nonoverlapping`] and
+///   [`DeviceMemory::write_bytes`] act on the memory space this backend
+///   names for each direction and are COMPLETE when they return (the
+///   completion condition documented on [`DeviceMemory`]); an asynchronous
+///   backend synchronizes before returning, because the safe callers free
+///   the source and read the destination on the next line.
+/// * **Deallocation.** `deallocate` is called exactly once per block, with
+///   the layout it was allocated under, and must not run while any copy into
+///   or out of the block is outstanding.
+/// * **Thread safety.** The `Send + Sync` bound is a promise that all of the
+///   above hold when the backend value is shared between threads: allocation,
+///   copy and deallocation of DISTINCT blocks may proceed concurrently, and
+///   operations on one block are ordered by the container that owns it.
+///
+/// Only a backend whose pointers are host-dereferenceable may additionally
+/// implement [`HostAddressable`]; the bound above says nothing about that.
+pub unsafe trait Backend:
+    Sized + Allocator + DeviceMemory + Clone + Debug + Send + Sync + 'static
+{
+    fn copy_from<B, T>(&self, data: T) -> Result<T::Output, CopyError>
+    where
+        B: Backend,
+        T: HasBackend + CopyIntoBackend<Self, B>,
+    {
+        data.copy_into_backend(self)
+    }
+}
+
+/// A backend whose allocations are addressable by the HOST.
+///
+/// # Safety
+///
+/// A pointer this backend returns must be dereferenceable by the CPU for the
+/// lifetime of the allocation, so that `slice::from_raw_parts` over it is
+/// sound. A backend that allocates device-resident memory must NOT implement
+/// this: constructing a Rust reference or slice already requires host-valid
+/// memory, so `&buffer[..]` over a device pointer is undefined behaviour at
+/// the moment the reference is formed, before anything reads it.
+///
+/// This is what separates `Deref`/`Index` — which hand out host references —
+/// from the copy operations, which go through the backend's own memcpy and
+/// are therefore valid for either memory space.
+pub unsafe trait HostAddressable: Backend {}
+
+// The CPU backend allocates through the global allocator, so its pointers are
+// ordinary host pointers.
+unsafe impl HostAddressable for CpuBackend {}
+
+pub trait GlobalBackend: Backend + 'static {
+    fn global() -> &'static Self;
+}
+
+pub trait HasBackend {
+    type Backend: Backend;
+
+    fn backend(&self) -> &Self::Backend;
+}
+
+impl<T> HasBackend for &T
+where
+    T: HasBackend,
+{
+    type Backend = T::Backend;
+
+    fn backend(&self) -> &Self::Backend {
+        (**self).backend()
+    }
+}
+
+impl<T> HasBackend for &mut T
+where
+    T: HasBackend,
+{
+    type Backend = T::Backend;
+
+    fn backend(&self) -> &Self::Backend {
+        (**self).backend()
+    }
+}
+
+impl<'a, T> HasBackend for Cow<'a, T>
+where
+    T: HasBackend + Clone,
+{
+    type Backend = T::Backend;
+
+    fn backend(&self) -> &Self::Backend {
+        self.as_ref().backend()
+    }
+}
+
+impl<T> HasBackend for Box<T>
+where
+    T: HasBackend,
+{
+    type Backend = T::Backend;
+
+    fn backend(&self) -> &Self::Backend {
+        self.as_ref().backend()
+    }
+}
+
+impl<T> HasBackend for Arc<T>
+where
+    T: HasBackend,
+{
+    type Backend = T::Backend;
+
+    fn backend(&self) -> &Self::Backend {
+        self.as_ref().backend()
+    }
+}
+
+impl<T> HasBackend for Rc<T>
+where
+    T: HasBackend,
+{
+    type Backend = T::Backend;
+
+    fn backend(&self) -> &Self::Backend {
+        self.as_ref().backend()
+    }
+}

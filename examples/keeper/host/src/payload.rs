@@ -20,7 +20,7 @@ fn to_be_bytes_minimal(val: usize) -> Vec<u8> {
 /// RLP-encode a u64 value.
 fn rlp_encode_u64(val: u64) -> Vec<u8> {
     if val == 0 {
-        return vec![0x80]; // empty byte string
+        return vec![0x80];
     }
     let bytes = val.to_be_bytes();
     let start = bytes.iter().position(|&b| b != 0).unwrap();
@@ -146,12 +146,10 @@ fn fetch_raw_block(url: &str, block_tag: &str) -> Result<Vec<u8>> {
 fn fetch_witness_rlp(url: &str, block_tag: &str) -> Result<Vec<u8>> {
     let result = rpc_call(url, "debug_executionWitness", &[json!(block_tag)])?;
 
-    // Format 1: hex string (modern go-ethereum)
     if let Some(hex_str) = result.as_str() {
         return decode_hex(hex_str);
     }
 
-    // Format 2/3: JSON object
     if let Some(obj) = result.as_object() {
         return encode_witness_from_json(obj);
     }
@@ -184,7 +182,6 @@ fn json_hex_bigint_bytes(v: &Value) -> Result<Vec<u8>> {
     match v.as_str() {
         Some(s) => {
             let bytes = decode_hex(s)?;
-            // Strip leading zeros
             let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
             Ok(bytes[start..].to_vec())
         }
@@ -202,7 +199,7 @@ fn rlp_encode_fixed_bytes(data: &[u8]) -> Vec<u8> {
 /// Same encoding as uint64 but from arbitrary-length bytes.
 fn rlp_encode_bigint(bytes: &[u8]) -> Vec<u8> {
     if bytes.is_empty() {
-        return vec![0x80]; // zero
+        return vec![0x80];
     }
     if bytes.len() == 1 && bytes[0] < 0x80 {
         return bytes.to_vec();
@@ -245,37 +242,33 @@ fn rlp_encode_optional_bigint(v: &Value) -> Result<Option<Vec<u8>>> {
 /// Field order matches go-ethereum's `core/types.Header` struct definition,
 /// with rlp:"optional" trailing fields omitted when null.
 fn rlp_encode_header_json(h: &Value) -> Result<Vec<u8>> {
-    // Required fields (always present)
     let mut fields: Vec<Vec<u8>> = vec![
-        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("parentHash").unwrap_or(&Value::Null))?),     // ParentHash  common.Hash
-        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("sha3Uncles").unwrap_or(&Value::Null))?),     // UncleHash   common.Hash
-        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("miner").unwrap_or(&Value::Null))?),          // Coinbase    common.Address
-        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("stateRoot").unwrap_or(&Value::Null))?),      // Root        common.Hash
-        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("transactionsRoot").unwrap_or(&Value::Null))?), // TxHash    common.Hash
-        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("receiptsRoot").unwrap_or(&Value::Null))?),   // ReceiptHash common.Hash
-        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("logsBloom").unwrap_or(&Value::Null))?),      // Bloom       Bloom
-        rlp_encode_bigint(&json_hex_bigint_bytes(h.get("difficulty").unwrap_or(&Value::Null))?),   // Difficulty  *big.Int
-        rlp_encode_bigint(&json_hex_bigint_bytes(h.get("number").unwrap_or(&Value::Null))?),       // Number      *big.Int
-        rlp_encode_u64(json_hex_u64(h.get("gasLimit").unwrap_or(&Value::Null))?),                  // GasLimit    uint64
-        rlp_encode_u64(json_hex_u64(h.get("gasUsed").unwrap_or(&Value::Null))?),                   // GasUsed     uint64
-        rlp_encode_u64(json_hex_u64(h.get("timestamp").unwrap_or(&Value::Null))?),                 // Time        uint64
-        rlp_encode_bytes(&json_hex_bytes(h.get("extraData").unwrap_or(&Value::Null))?),            // Extra       []byte
-        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("mixHash").unwrap_or(&Value::Null))?),        // MixDigest   common.Hash
-        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("nonce").unwrap_or(&Value::Null))?),          // Nonce       BlockNonce (8 bytes)
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("parentHash").unwrap_or(&Value::Null))?),
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("sha3Uncles").unwrap_or(&Value::Null))?),
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("miner").unwrap_or(&Value::Null))?),
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("stateRoot").unwrap_or(&Value::Null))?),
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("transactionsRoot").unwrap_or(&Value::Null))?),
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("receiptsRoot").unwrap_or(&Value::Null))?),
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("logsBloom").unwrap_or(&Value::Null))?),
+        rlp_encode_bigint(&json_hex_bigint_bytes(h.get("difficulty").unwrap_or(&Value::Null))?),
+        rlp_encode_bigint(&json_hex_bigint_bytes(h.get("number").unwrap_or(&Value::Null))?),
+        rlp_encode_u64(json_hex_u64(h.get("gasLimit").unwrap_or(&Value::Null))?),
+        rlp_encode_u64(json_hex_u64(h.get("gasUsed").unwrap_or(&Value::Null))?),
+        rlp_encode_u64(json_hex_u64(h.get("timestamp").unwrap_or(&Value::Null))?),
+        rlp_encode_bytes(&json_hex_bytes(h.get("extraData").unwrap_or(&Value::Null))?),
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("mixHash").unwrap_or(&Value::Null))?),
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("nonce").unwrap_or(&Value::Null))?),
     ];
 
-    // Optional fields (rlp:"optional") — must be appended in order,
-    // trailing nulls are omitted.
     let optional: Vec<(&str, Box<dyn Fn(&Value) -> Result<Option<Vec<u8>>>>)> = vec![
-        ("baseFeePerGas",        Box::new(|v| rlp_encode_optional_bigint(v))),    // BaseFee          *big.Int
-        ("withdrawalsRoot",      Box::new(|v| rlp_encode_optional_hash(v))),      // WithdrawalsHash  *common.Hash
-        ("blobGasUsed",          Box::new(|v| rlp_encode_optional_u64(v))),       // BlobGasUsed      *uint64
-        ("excessBlobGas",        Box::new(|v| rlp_encode_optional_u64(v))),       // ExcessBlobGas    *uint64
-        ("parentBeaconBlockRoot", Box::new(|v| rlp_encode_optional_hash(v))),     // ParentBeaconRoot *common.Hash
-        ("requestsHash",         Box::new(|v| rlp_encode_optional_hash(v))),      // RequestsHash     *common.Hash
+        ("baseFeePerGas",        Box::new(|v| rlp_encode_optional_bigint(v))),
+        ("withdrawalsRoot",      Box::new(|v| rlp_encode_optional_hash(v))),
+        ("blobGasUsed",          Box::new(|v| rlp_encode_optional_u64(v))),
+        ("excessBlobGas",        Box::new(|v| rlp_encode_optional_u64(v))),
+        ("parentBeaconBlockRoot", Box::new(|v| rlp_encode_optional_hash(v))),
+        ("requestsHash",         Box::new(|v| rlp_encode_optional_hash(v))),
     ];
 
-    // Find last non-null optional field to know how many to include.
     let mut last_present = 0;
     for (i, (key, _)) in optional.iter().enumerate() {
         let v = h.get(*key).unwrap_or(&Value::Null);
@@ -284,7 +277,6 @@ fn rlp_encode_header_json(h: &Value) -> Result<Vec<u8>> {
         }
     }
 
-    // Append optional fields up to the last present one.
     for (i, (key, encoder)) in optional.iter().enumerate() {
         if i >= last_present {
             break;
@@ -292,7 +284,7 @@ fn rlp_encode_header_json(h: &Value) -> Result<Vec<u8>> {
         let v = h.get(*key).unwrap_or(&Value::Null);
         match encoder(v)? {
             Some(encoded) => fields.push(encoded),
-            None => fields.push(rlp_encode_bytes(&[])), // null in the middle → encode as empty
+            None => fields.push(rlp_encode_bytes(&[])),
         }
     }
 
@@ -324,14 +316,11 @@ fn encode_witness_from_json(obj: &serde_json::Map<String, Value>) -> Result<Vec<
         .and_then(|v| v.as_array())
         .unwrap_or(&empty_vec);
 
-    // Encode headers — support both JSON objects and hex RLP strings.
     let mut header_items: Vec<Vec<u8>> = Vec::new();
     for h in headers {
         if let Some(hex_str) = h.as_str() {
-            // Hex-encoded RLP string
             header_items.push(decode_hex(hex_str)?);
         } else if h.is_object() {
-            // JSON header object → RLP encode
             header_items.push(rlp_encode_header_json(h)?);
         } else {
             return Err("witness: header must be hex string or JSON object".into());
@@ -348,7 +337,6 @@ fn encode_witness_from_json(obj: &serde_json::Map<String, Value>) -> Result<Vec<
         .map(|v| json_hex_bytes(v))
         .collect();
 
-    // ExtWitness RLP: list([headers_list, codes_list, state_list, keys_list])
     let header_refs: Vec<&[u8]> = header_items.iter().map(|v| v.as_slice()).collect();
     let headers_list = rlp_wrap_list(&header_refs);
     let codes_list = rlp_encode_bytes_list(&codes_bytes?);
@@ -389,7 +377,6 @@ pub fn fetch_payload(url: &str, block_arg: &str, save: bool) -> Result<(u64, Vec
     let block_rlp = fetch_raw_block(url, &block_tag)?;
     let witness_rlp = fetch_witness_rlp(url, &block_tag)?;
 
-    // Payload RLP: list([chainID, block, witness])
     let chain_id_encoded = rlp_encode_u64(chain_id);
     let content_len = chain_id_encoded.len() + block_rlp.len() + witness_rlp.len();
     let mut payload = rlp_list_header(content_len);

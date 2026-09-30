@@ -26,18 +26,15 @@ pub fn execute_build_program(
     args: &BuildArgs,
     program_dir: Option<PathBuf>,
 ) -> Result<Vec<(String, Utf8PathBuf)>> {
-    // If the program directory is not specified, use the current directory.
     let program_dir = program_dir
         .unwrap_or_else(|| std::env::current_dir().expect("Failed to get current directory."));
     let program_dir: Utf8PathBuf =
         program_dir.try_into().expect("Failed to convert PathBuf to Utf8PathBuf");
 
-    // Get the program metadata.
     let program_metadata_file = program_dir.join("Cargo.toml");
     let mut program_metadata_cmd = cargo_metadata::MetadataCommand::new();
     let program_metadata = program_metadata_cmd.manifest_path(program_metadata_file).exec()?;
 
-    // Get the command
     let cmd = create_local_command(args, &program_dir, &program_metadata);
 
     execute_command(cmd)?;
@@ -51,7 +48,6 @@ pub fn execute_build_program(
 
 /// Internal helper function to build the program with or without arguments.
 pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
-    // Get the root package name and metadata.
     let program_dir = std::path::Path::new(path);
     let metadata_file = program_dir.join("Cargo.toml");
     let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
@@ -59,12 +55,10 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
     let root_package = metadata.root_package();
     let root_package_name = root_package.as_ref().map(|p| p.name.as_str()).unwrap_or("Program");
 
-    // Skip the program build if the ZKM_SKIP_PROGRAM_BUILD environment variable is set to true.
     let skip_program_build = std::env::var("ZKM_SKIP_PROGRAM_BUILD")
         .map(|v| v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
     if skip_program_build {
-        // Still need to set ELF env vars even if build is skipped.
         let target_elf_paths = generate_elf_paths(&metadata, args.as_ref())
             .expect("failed to collect target ELF paths");
 
@@ -78,22 +72,14 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
         return;
     }
 
-    // Activate the build command if the dependencies change.
     cargo_rerun_if_changed(&metadata, program_dir);
 
-    // Also rebuild if `ZKM_IMM_WRAP_VK` changes, since it decides whether the guest is built with
-    // the `imm-wrap-vk` feature. Cargo only tracks what's declared here, so without this the guest
-    // would stay stale (built in the old mode) whenever the env var changes but no source changes.
     println!("cargo:rerun-if-env-changed=ZKM_IMM_WRAP_VK");
 
-    // Check if RUSTC_WORKSPACE_WRAPPER is set to clippy-driver (i.e. if `cargo clippy` is the
-    // current compiler). If so, don't execute `cargo ziren build` because it breaks
-    // rust-analyzer's `cargo clippy` feature.
     let is_clippy_driver = std::env::var("RUSTC_WORKSPACE_WRAPPER")
         .map(|val| val.contains("clippy-driver"))
         .unwrap_or(false);
     if is_clippy_driver {
-        // Still need to set ELF env vars even if build is skipped.
         let target_elf_paths = generate_elf_paths(&metadata, args.as_ref())
             .expect("failed to collect target ELF paths");
 
@@ -103,7 +89,6 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
         return;
     }
 
-    // Build the program with the given arguments.
     let mut args = args.unwrap_or_default();
     if imm_wrap_vk_mode() {
         args.features.push("imm-wrap-vk".to_string());
@@ -165,7 +150,6 @@ pub fn generate_elf_paths(
         for bin_target in program.targets.iter().filter(|t| {
             t.kind.contains(&"bin".to_owned()) && t.crate_types.contains(&"bin".to_owned())
         }) {
-            // Filter out irrelevant targets if `--bin` is used.
             if let Some(args) = args {
                 if !args.binaries.is_empty() && !args.binaries.contains(&bin_target.name) {
                     continue;

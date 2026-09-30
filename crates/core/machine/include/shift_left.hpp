@@ -1,17 +1,23 @@
 #pragma once
 
+#include "frame.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
 #include "kb31_septic_extension_t.hpp"
 
 namespace zkm_core_machine_sys::shift_left {
     template<class F>
-    __ZKM_HOSTDEV__ void event_to_row(const AluEvent& event, ShiftLeftCols<F>& cols) {
+    __ZKM_HOSTDEV__ void event_to_row(
+    const AluEvent& event,
+    ShiftLeftCols<F>& cols,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
+    // Every row is a real instruction owning its frame.
+    frame::populate_from_alu_r<AluEvent, F>(cols.frame, event, instruction, shard);
+
         auto a = u32_to_le_bytes(event.a);
         auto b = u32_to_le_bytes(event.b);
-        write_word_from_le_bytes<F>(cols.a, a);
-        write_word_from_le_bytes<F>(cols.b, b);
-        write_word_from_u32_v2<F>(cols.c, event.c);
 
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);

@@ -13,8 +13,9 @@ pub fn main() {
     // Read an input to the program.
     //
     // Behind the scenes, this compiles down to a system call which handles reading inputs
-    // from the prover.
-    let n = 10;
+    // from the prover.  The type must match what the host writes: `u32`, as in
+    // `examples/fibonacci`.
+    let n = zkm_zkvm::io::read::<u32>();
     // Compute the n'th fibonacci number, using normal Rust code.
     let mut a = 0;
     let mut b = 1;

@@ -10,8 +10,6 @@ pub(crate) fn current_datetime() -> String {
 
 /// Re-run the cargo command if the Cargo.toml or Cargo.lock file changes.
 pub(crate) fn cargo_rerun_if_changed(metadata: &Metadata, program_dir: &Path) {
-    // Tell cargo to rerun the script only if program/{src, bin, build.rs, Cargo.toml} changes
-    // Ref: https://doc.rust-lang.org/nightly/cargo/reference/build-scripts.html#rerun-if-changed
     let dirs = vec![
         program_dir.join("src"),
         program_dir.join("bin"),
@@ -31,11 +29,20 @@ pub(crate) fn cargo_rerun_if_changed(metadata: &Metadata, program_dir: &Path) {
         }
     }
 
-    // Re-run the build script if the workspace root's Cargo.lock changes. If the program is its own
-    // workspace, this will be the program's Cargo.lock.
+    for package in &metadata.packages {
+        let manifest = Path::new(package.manifest_path.as_str());
+        if let Some(dir) = manifest.parent() {
+            for sub in ["src", "bin"] {
+                let path = dir.join(sub);
+                if path.exists() {
+                    println!("cargo::rerun-if-changed={}", path.display());
+                }
+            }
+        }
+    }
+
     println!("cargo::rerun-if-changed={}", metadata.workspace_root.join("Cargo.lock").as_str());
 
-    // Re-run if any local dependency changes.
     for package in &metadata.packages {
         for dependency in &package.dependencies {
             if let Some(path) = &dependency.path {

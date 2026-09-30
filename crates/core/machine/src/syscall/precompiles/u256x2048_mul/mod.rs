@@ -16,10 +16,10 @@ mod tests {
         syscalls::SyscallCode,
         ExecutionRecord, Program,
     };
-    use zkm_primitives::consts::bytes_to_words_le;
-    use zkm_stark::{
+    use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, StarkGenericConfig,
     };
+    use zkm_primitives::consts::bytes_to_words_le;
 
     use crate::{
         io::ZKMStdin,
@@ -156,6 +156,10 @@ mod tests {
             syscall_id: syscall_code.syscall_id(),
             arg1: a_ptr,
             arg2: b_ptr,
+            is_instruction: 0,
+            recv_next_pc: 0,
+            b_record: None.into(),
+            c_record: None.into(),
         };
 
         execution_record.precompile_events.add_event(syscall_code, syscall_event, event);
@@ -164,7 +168,7 @@ mod tests {
     }
 
     use zkm_core_executor::Executor;
-    use zkm_stark::ZKMCoreOpts;
+    use zkm_pcs::ZKMCoreOpts;
     #[test]
     pub fn test_uint256_mul_program_execute() {
         utils::setup_logger();

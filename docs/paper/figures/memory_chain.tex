@@ -1,0 +1,84 @@
+% The memory argument for ONE address: a chain that is shard-local on the
+% memory bus and closed across shards only by the septic digest.  Solid edges
+% are memory-bus tuples, dashed edges are global interactions.  The two shards
+% are stacked rather than placed side by side, so that the canvas stays close
+% to 2:1 and the tuple labels survive scaling to \textwidth.
+\begin{tikzpicture}[
+  font=\large,
+  acc/.style={rectangle, rounded corners=2pt, draw=zirenblue!85, fill=zirenblue!6,
+              line width=0.7pt, minimum width=2.2cm, minimum height=1.25cm,
+              align=center, font=\normalsize},
+  loc/.style={rectangle, rounded corners=2pt, draw=zirenteal!85, fill=zirenteal!9,
+              line width=0.7pt, minimum width=2.2cm, minimum height=1.25cm,
+              align=center, font=\normalsize},
+  glob/.style={rectangle, rounded corners=2pt, draw=zirenslate!80, fill=zirenlight,
+               line width=0.7pt, minimum width=2.4cm, minimum height=1.25cm,
+               align=center, font=\normalsize},
+  bus/.style={-{Latex[length=2.4mm]}, line width=1.2pt, zirenorange!85!black},
+  gl/.style={-{Latex[length=2.4mm]}, line width=1.1pt, zirenslate!85, dashed,
+             dash pattern=on 3.5pt off 2.5pt},
+  tup/.style={font=\normalsize, text=zirenorange!70!black, inner sep=1.5pt},
+  gtup/.style={font=\normalsize, text=zirenslate, align=center, inner sep=2.5pt,
+               fill=white},
+  note/.style={font=\small, black!70, align=center, inner sep=1.5pt},
+  hdr/.style={font=\normalsize\bfseries, black!65},
+  shardbox/.style={rectangle, rounded corners=3pt, draw=black!35, dashed,
+                   dash pattern=on 3pt off 2.5pt, line width=0.8pt},
+]
+
+% ================= shard s: the memory bus balances inside this box
+\draw[shardbox] (-1.35,-1.8) rectangle (13.35,1.75);
+\node[hdr, anchor=north west] at (-1.2,1.66) {shard $s$};
+
+\node[loc] (li) at (0,0)    {\texttt{MemoryLocal}\\initial};
+\node[acc] (r1) at (4.4,0)  {\texttt{lw}\\read at $c_1$};
+\node[acc] (w1) at (8.8,0)  {\texttt{sw}\\write at $c_2$};
+\node[loc] (lf) at (13.2,0) {\texttt{MemoryLocal}\\final};
+
+\draw[bus] (li) -- (r1);
+\draw[bus] (r1) -- (w1);
+\draw[bus] (w1) -- (lf);
+\node[tup] at (2.2,1.02)  {$(s,\,0,\,a,\,v_0)$};
+\node[tup] at (6.6,1.02)  {$(s,\,c_1,\,a,\,v_0)$};
+\node[tup] at (11.0,1.02) {$(s,\,c_2,\,a,\,v_1)$};
+\node[note] at (6.6,-1.08) {a read carries $v_0$ forward};
+\node[note] at (11.0,-1.08) {a write installs $v_1$};
+
+% ================= shard s+1: the chain resumes at the tuple shard s left
+\draw[shardbox] (-1.35,-6.0) rectangle (9.05,-2.45);
+\node[hdr, anchor=north east] at (8.9,-2.54) {shard $s{+}1$};
+
+\node[loc] (li2) at (0,-4.2)   {\texttt{MemoryLocal}\\initial};
+\node[acc] (r2)  at (4.4,-4.2) {\texttt{lw}\\read at $c_1'$};
+\node[loc] (lf2) at (8.8,-4.2) {\texttt{MemoryLocal}\\final};
+
+\draw[bus] (li2) -- (r2);
+\draw[bus] (r2) -- (lf2);
+\node[tup] at (2.2,-3.18) {$(s,\,c_2,\,a,\,v_1)$};
+\node[tup] at (6.6,-3.18) {$(s{+}1,\,c_1',\,a,\,v_1)$};
+
+% ================= the same tuple, forwarded as two global interactions
+\draw[gl] (lf.south) -- (13.2,-2.13) -- (0,-2.13) -- (li2.north);
+\node[gtup] at (7.0,-2.13)
+  {one tuple: sent in shard $s$, received in shard $s{+}1$, cancels in $D$};
+
+% ================= the whole-execution tables at the two ends of the chain
+\node[glob] (gi) at (-4.6,0)    {\texttt{MemoryGlobalInit}};
+\node[glob] (gf) at (12.7,-4.2) {\texttt{MemoryGlobalFinalize}};
+\draw[gl] (gi) -- (li);
+\draw[gl] (lf2) -- (gf);
+\node[note, text width=4.0cm] at (-4.6,-1.35)
+  {program image and hint data; its digest is pinned by $\mathsf{vk}$};
+\node[note, text width=4.2cm] at (12.7,-5.55)
+  {addresses strictly increasing; the cursors are public values};
+
+% ================= legend
+\node[note, anchor=north west, align=left] at (-5.9,-6.55)
+  {\textcolor{zirenorange!85!black}{\rule[0.22em]{1.4em}{1.1pt}}\ \
+   memory bus: balances within one shard, and $(s,c)$ strictly increases
+   along the chain \qquad
+   \textcolor{zirenslate!85}{\rule[0.22em]{0.45em}{1.1pt}\hspace{0.18em}%
+   \rule[0.22em]{0.45em}{1.1pt}}\ \
+   global interaction: summed into the digest $D$, cancels only over the whole
+   execution};
+\end{tikzpicture}

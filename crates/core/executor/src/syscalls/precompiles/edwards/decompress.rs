@@ -45,14 +45,10 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
 
         let y_bytes: [u8; COMPRESSED_POINT_BYTES] = words_to_bytes_le(&y_vec);
 
-        // Copy bytes into another array so we can modify the last byte and make CompressedEdwardsY,
-        // which we'll use to compute the expected X.
-        // Re-insert sign bit into last bit of Y for CompressedEdwardsY format
         let mut compressed_edwards_y: [u8; COMPRESSED_POINT_BYTES] = y_bytes;
         compressed_edwards_y[compressed_edwards_y.len() - 1] &= 0b0111_1111;
         compressed_edwards_y[compressed_edwards_y.len() - 1] |= (sign as u8) << 7;
 
-        // Compute actual decompressed X
         let compressed_y = CompressedEdwardsY(compressed_edwards_y);
         let decompressed = decompress(&compressed_y).map_err(ExecutionError::CurveError)?;
 
@@ -61,7 +57,6 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
         let decompressed_x_words: [u32; WORDS_FIELD_ELEMENT] =
             bytes_to_words_le(&decompressed_x_bytes);
 
-        // Write decompressed X into slice
         let x_memory_records_vec = rt.mw_slice(slice_ptr, &decompressed_x_words);
         let x_memory_records: [MemoryWriteRecord; 8] = x_memory_records_vec.try_into().unwrap();
 

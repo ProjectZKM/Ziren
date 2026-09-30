@@ -7,7 +7,7 @@ use zkm_core_machine::io::ZKMStdin;
 use zkm_prover::ZKM_CIRCUIT_VERSION;
 use zkm_prover::{components::DefaultProverComponents, ZKMProver};
 
-use crate::install::try_install_circuit_artifacts;
+use crate::install::{try_install_circuit_artifacts, CircuitArtifacts};
 use crate::{
     provers::ProofOpts, Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey,
     ZKMVerifyingKey,
@@ -44,13 +44,10 @@ impl CpuProver {
         assert_eq!(stdin.proofs.len(), 1);
         let (proof, _) = stdin.proofs.pop().unwrap();
 
-        // Generate the shrink proof.
         let shrink_proof = self.prover.shrink(proof, opts.zkm_prover_opts)?;
 
-        // Generate the wrap proof.
         let outer_proof = self.prover.wrap_bn254(shrink_proof, opts.zkm_prover_opts)?;
 
-        // See the equivalent check in `prove_impl` for why this is here.
         let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
             .as_canonical_biguint();
         let expected_digest = public_values.hash_bn254();
@@ -69,7 +66,7 @@ impl CpuProver {
                 &outer_proof.proof,
             )
         } else {
-            try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
+            try_install_circuit_artifacts(CircuitArtifacts::Groth16, ZKM_CIRCUIT_VERSION)
         };
 
         let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
@@ -110,7 +107,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
 
         let program = self.prover.get_program(&pk.elf).unwrap();
 
-        // Generate the core proof.
         let proof: zkm_prover::ZKMProofWithMetadata<zkm_prover::ZKMCoreProofData> =
             self.prover.prove_core(&pk.pk, program, &stdin, opts.zkm_prover_opts, context)?;
         let cycles = proof.cycles;
@@ -129,7 +125,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
             stdin.proofs.iter().map(|(reduce_proof, _)| reduce_proof.clone()).collect();
         let public_values = proof.public_values.clone();
 
-        // Generate the compressed proof.
         let reduce_proof =
             self.prover.compress(&pk.vk, proof, deferred_proofs, opts.zkm_prover_opts)?;
         if kind == ZKMProofKind::Compressed {
@@ -143,16 +138,10 @@ impl Prover<DefaultProverComponents> for CpuProver {
             ));
         }
 
-        // Generate the shrink proof.
         let compress_proof = self.prover.shrink(reduce_proof, opts.zkm_prover_opts)?;
 
-        // Generate the wrap proof.
         let outer_proof = self.prover.wrap_bn254(compress_proof, opts.zkm_prover_opts)?;
 
-        // Check that the guest's committed-values digest was hashed with whichever algorithm this
-        // process currently expects (see `zkm_imm_wrap_vk_mode`), before spending time on the
-        // (potentially expensive) Plonk/Groth16/DvSnark proving below. A mismatch here means the
-        // guest ELF was built in a different mode than this prover currently believes.
         let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
             .as_canonical_biguint();
         let expected_digest = public_values.hash_bn254();
@@ -172,7 +161,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("plonk", ZKM_CIRCUIT_VERSION)
+                try_install_circuit_artifacts(CircuitArtifacts::Plonk, ZKM_CIRCUIT_VERSION)
             };
             let proof = self.prover.wrap_plonk_bn254(outer_proof, &plonk_bn254_artifacts);
 
@@ -191,7 +180,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
+                try_install_circuit_artifacts(CircuitArtifacts::Groth16, ZKM_CIRCUIT_VERSION)
             };
 
             let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
@@ -204,7 +193,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
                 cycles,
             ));
         } else if kind == ZKMProofKind::DvSnark {
-            // Get the store dvsnark assets dir via the environment variable.
             let store_dir: PathBuf = std::env::var("DVSNARK_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::new())

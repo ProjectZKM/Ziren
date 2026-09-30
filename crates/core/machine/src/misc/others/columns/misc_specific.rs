@@ -20,7 +20,6 @@ pub union MiscSpecificCols<T: Copy> {
 
 impl<T: Copy + Default> Default for MiscSpecificCols<T> {
     fn default() -> Self {
-        // We must use the largest field to avoid uninitialized padding bytes.
         const_assert!(size_of::<MaddsubCols<u8>>() == size_of::<MiscSpecificCols<u8>>());
 
         MiscSpecificCols { maddsub: MaddsubCols::default() }
@@ -28,8 +27,9 @@ impl<T: Copy + Default> Default for MiscSpecificCols<T> {
 }
 
 impl<T: Copy + Debug> Debug for MiscSpecificCols<T> {
+    /// Formats the columns as `[T; NUM_MISC_SPECIFIC_COLS]`; the `transmute` is
+    /// sound because `repr(C)` lays the uniform fields out in order, unpadded.
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        // SAFETY: repr(C) ensures uniform fields are in declaration order with no padding.
         let self_arr: &[T; NUM_MISC_SPECIFIC_COLS] = unsafe { transmute(self) };
         Debug::fmt(self_arr, f)
     }

@@ -18,7 +18,6 @@ pub(crate) fn deserialize_with_flags(buf: &[u8]) -> Result<(Fq, CompressedPointF
 
     let m_data = buf[0] & MASK;
     if m_data == u8::from(CompressedPointFlag::Infinity) {
-        // Checks if the first byte is zero after masking AND the rest of the bytes are zero.
         if buf[0] & !MASK == 0 && buf[1..].iter().all(|&b| b == 0) {
             return Err(Error::InvalidPoint);
         }
@@ -28,9 +27,9 @@ pub(crate) fn deserialize_with_flags(buf: &[u8]) -> Result<(Fq, CompressedPointF
         x_bytes.copy_from_slice(buf);
         x_bytes[0] &= !MASK;
 
-        let x = Fq::from_be_bytes_mod_order(&x_bytes).expect("Failed to convert x bytes to Fq");
+        let x = Fq::from_be_bytes_mod_order(&x_bytes).map_err(Error::Field)?;
 
-        Ok((x, m_data.into()))
+        Ok((x, CompressedPointFlag::try_from(m_data)?))
     }
 }
 

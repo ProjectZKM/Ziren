@@ -1,7 +1,7 @@
 //! Types and methods for subproof verification inside the [`crate::Executor`].
 
 use crate::ZKMReduceProof;
-use zkm_stark::{
+use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, MachineVerificationError, StarkVerifyingKey,
 };
 

@@ -11,11 +11,9 @@ use regex::Regex;
 // inside the zkVM.
 
 pub fn main() {
-    // Read two inputs from the prover: a regex pattern and a target string.
     let pattern = zkm_zkvm::io::read::<String>();
     let target_string = zkm_zkvm::io::read::<String>();
 
-    // Try to compile the regex pattern. If it fails, write `false` as output and return.
     let regex = match Regex::new(&pattern) {
         Ok(regex) => regex,
         Err(_) => {
@@ -23,9 +21,7 @@ pub fn main() {
         }
     };
 
-    // Perform the regex search on the target string.
     let result = regex.is_match(&target_string);
 
-    // Write the result (true or false) to the output.
     zkm_zkvm::io::commit(&result);
 }

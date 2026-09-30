@@ -6,17 +6,19 @@ cfg_if::cfg_if! {
         use crate::syscalls::VERIFY_ZKM_PROOF;
         use crate::zkvm::DEFERRED_PROOFS_DIGEST;
         use p3_koala_bear::KoalaBear;
-        use p3_field::FieldAlgebra;
+        use p3_field::PrimeCharacteristicRing;
         use zkm_primitives::hash_deferred_proof;
     }
 }
 
+/// Verifies a deferred proof `(vk_digest, pv_digest)` and folds it into
+/// `DEFERRED_PROOFS_DIGEST`; the `static mut` access is sound because the
+/// zkVM is single threaded.
 #[no_mangle]
 #[allow(unused_variables)]
 pub extern "C" fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8; 32]) {
     #[cfg(target_os = "zkvm")]
     {
-        // Call syscall to verify the next proof at runtime
         unsafe {
             asm!(
                 "syscall",
@@ -26,20 +28,15 @@ pub extern "C" fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8
             );
         }
 
-        // Update digest to p2_hash(prev_digest[0..8] || vkey_digest[0..8] || pv_digest[0..32])
-        // First 8 elements are previous hash (initially zero)
         let deferred_proofs_digest;
-        // SAFETY: we have sole access because zkvm is single threaded.
         unsafe {
             deferred_proofs_digest = DEFERRED_PROOFS_DIGEST.as_mut().unwrap();
         }
 
-        // Next 8 elements are vkey_digest
         let vk_digest_koalabear =
-            vk_digest.iter().map(|x| KoalaBear::from_canonical_u32(*x)).collect::<Vec<_>>();
-        // Remaining 32 elements are pv_digest converted from u8 to KoalaBear
+            vk_digest.iter().map(|x| KoalaBear::from_u32(*x)).collect::<Vec<_>>();
         let pv_digest_koalabear =
-            pv_digest.iter().map(|b| KoalaBear::from_canonical_u8(*b)).collect::<Vec<_>>();
+            pv_digest.iter().map(|b| KoalaBear::from_u8(*b)).collect::<Vec<_>>();
 
         *deferred_proofs_digest = hash_deferred_proof(
             deferred_proofs_digest,

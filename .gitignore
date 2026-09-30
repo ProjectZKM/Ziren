@@ -8,9 +8,16 @@ crates/test-artifacts/guests-imm-wrap-vk/Cargo.lock
 *.log
 bins
 *.s
+# ...but the Go runtime overlay IS source: it replaces stock runtime
+# assembly in the guest build, and `*.s` above silently kept it out of
+# every clone (the zkvm RuntimeExit commit-then-halt path lives here).
+!crates/go-runtime/zkvm_overlay/**/*.s
 *.txt
+# ...except the protocol profile the vk map is valid under.  It is `include_str!`d
+# by zkm-prover, so an untracked copy is a build that does not compile for anyone
+# who clones, and a silently absent one would be a guard that never runs.
+!crates/prover/vk_map_profile.txt
 *.codex
-picus_out
 
 # Proofs
 **/proof-with-pis.bin
@@ -19,3 +26,36 @@ proof-with-is-prime.bin
 **/program.bin
 **/stdin.bin
 
+/.claude/scheduled_tasks.lock
+.claude/ralph-loop.local.md
+.claude/
+docs/whitepaper/*
+!docs/whitepaper/main.pdf
+
+# untrack root-level design memos (keep on disk, exclude README)
+docs/*.md
+!docs/README.md
+.chainstack
+
+# The paper is carried by the repo: sources, figures and the built PDF.  Only
+# LaTeX's own by-products and the figure preview renders are ignored.
+docs/paper/*.aux
+docs/paper/*.log
+docs/paper/*.out
+docs/paper/*.bbl
+docs/paper/*.blg
+docs/paper/*.toc
+docs/paper/*.synctex.gz
+# The PDF is a build output, not a source: keeping it in git let it drift from the
+# .tex it was supposed to represent. Build it with `make` in docs/paper.
+docs/paper/*.pdf
+docs/paper/sections/*.aux
+docs/paper/figures/*.aux
+docs/paper/figures/out/
+docs/paper/figures/unused/
+docs/paper/page-04-review.png
+# Superseded section drafts from the pre-restructure outline; kept locally only.
+docs/paper/sections/old/
+
+# Soundness working notes stay local; they are not release material.
+docs/soundness/

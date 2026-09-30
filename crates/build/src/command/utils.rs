@@ -61,8 +61,6 @@ pub(crate) fn get_rust_compiler_flags(args: &BuildArgs) -> String {
         "link-arg=-nostdlib".to_string(),
         "-C".to_string(),
         "link-arg=-g".to_string(),
-        //"-C".to_string(),
-        //"link-arg=-nostartfiles".to_string(),
         "-C".to_string(),
         "link-arg=--entry=main".to_string(),
     ];
@@ -86,7 +84,6 @@ pub(crate) fn get_rust_compiler_flags(args: &BuildArgs) -> String {
 
 /// Execute the command and handle the output depending on the context.
 pub(crate) fn execute_command(mut command: Command) -> Result<()> {
-    // Add necessary tags for stdout and stderr from the command.
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -95,10 +92,8 @@ pub(crate) fn execute_command(mut command: Command) -> Result<()> {
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let stderr = BufReader::new(child.stderr.take().unwrap());
 
-    // Add prefix to the output of the process depending on the context.
     let msg = "[zkm] ";
 
-    // Pipe stdout and stderr to the parent process with [docker] prefix
     let stdout_handle = thread::spawn(move || {
         stdout.lines().for_each(|line| {
             println!("{} {}", msg, line.unwrap());
@@ -109,10 +104,8 @@ pub(crate) fn execute_command(mut command: Command) -> Result<()> {
     });
     stdout_handle.join().unwrap();
 
-    // Wait for the child process to finish and check the result.
     let result = child.wait()?;
     if !result.success() {
-        // Error message is already printed by cargo.
         exit(result.code().unwrap_or(1))
     }
     Ok(())

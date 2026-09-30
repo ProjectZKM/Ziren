@@ -2,18 +2,177 @@ use backtrace::Backtrace;
 use p3_field::Field;
 use serde::{Deserialize, Serialize};
 use shape::RecursionShape;
-use zkm_stark::air::{MachineAir, MachineProgram};
-use zkm_stark::septic_digest::SepticDigest;
+use zkm_pcs::air::{MachineAir, MachineProgram};
+use zkm_pcs::septic_digest::SepticDigest;
 
+use crate::machine::RecursionAirEventCount;
+use crate::runtime::RawProgram;
 use crate::*;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionProgram<F> {
-    pub instructions: Vec<Instruction<F>>,
+    /// The program, already analyzed.
+    ///
+    /// `analyze()` assigns every instruction its offset in the execution
+    /// record. It is a pure function of the instruction stream, so it runs once
+    /// at construction and the analyzed stream is the only stored copy.
+    ///
+    /// Invariant: the offsets here and `event_counts` are derived together
+    /// from this exact instruction stream. Mutating the stream desynchronizes
+    /// both, and the record writes are unchecked, so build a new program with
+    /// [`RecursionProgram::new`] instead.
+    #[serde(default = "RawProgram::default")]
+    pub seq_blocks: RawProgram<AnalyzedInstruction<F>>,
     pub total_memory: usize,
     #[serde(skip)]
     pub traces: Vec<Option<Backtrace>>,
     pub shape: Option<RecursionShape>,
+    /// Per-chip event counts, derived by the same `analyze()` pass that
+    /// assigned the offsets.  `UnsafeRecord` is sized from it.
+    #[serde(default)]
+    pub event_counts: RecursionAirEventCount,
+}
+
+impl<F> RecursionProgram<F> {
+    /// Build a program from a raw instruction stream, analyzing it once.
+    ///
+    /// This is the only way to make a program, so a program cannot exist in
+    /// an un-analyzed state and `run()` has nothing to derive.
+    pub fn new(
+        seq_blocks: RawProgram<Instruction<F>>,
+        total_memory: usize,
+        traces: Vec<Option<Backtrace>>,
+        shape: Option<RecursionShape>,
+    ) -> Self {
+        let (seq_blocks, event_counts) = seq_blocks.analyze();
+        Self { seq_blocks, total_memory, traces, shape, event_counts }
+    }
+}
+
+/// The identity a proving key is built from.
+///
+/// `MachineProver::setup` reads exactly three things off a program — the
+/// instruction stream, the shape it was snapped onto, and the memory size —
+/// so two programs with the same digest necessarily produce the same
+/// `(pk, vk)`.  That is what lets a recursion key be looked up instead of
+/// rebuilt: the recursion tree proves hundreds of nodes whose programs
+/// repeat, and rebuilding a key per node is by far the most expensive thing
+/// the compress stage does.
+///
+/// SHA-256 over the canonical serialization, streamed rather than
+/// materialized: the buffer for a multi-million-instruction program would
+/// otherwise be hundreds of megabytes.
+pub fn setup_digest<F: Serialize>(program: &RecursionProgram<F>) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+
+    /// Feeds `serialize_into` straight to the hasher.
+    struct HashWriter(Sha256);
+    impl std::io::Write for HashWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.update(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut w = HashWriter(Sha256::new());
+    std::io::Write::write_all(&mut w, b"zkm-recursion-setup-digest-v1")
+        .expect("hashing cannot fail");
+    bincode::serialize_into(&mut w, &program.seq_blocks)
+        .expect("a program that was built is serializable");
+    bincode::serialize_into(&mut w, &program.total_memory)
+        .expect("a program that was built is serializable");
+    bincode::serialize_into(&mut w, &program.shape)
+        .expect("a program that was built is serializable");
+    w.0.finalize().into()
+}
+
+impl<F> RecursionProgram<F> {
+    /// Iterate over the program's instructions in execution order,
+    /// recursing through parallel sub-programs in deterministic vec
+    /// order (the runtime collapses Parallel to sequential today; a
+    /// follow-up will dispatch via `par_iter` once the memory layer
+    /// is thread-safe).
+    pub fn iter_instructions(&self) -> impl Iterator<Item = &Instruction<F>> {
+        self.seq_blocks.iter().map(AnalyzedInstruction::inner)
+    }
+
+    /// Total instruction count, recursing through parallel sub-programs.
+    pub fn instruction_count(&self) -> usize {
+        self.seq_blocks.instruction_count()
+    }
+}
+
+impl<F: p3_field::PrimeField64> RecursionProgram<F> {
+    /// Number of memory cells the program addresses, i.e. `max(addr) + 1`.
+    ///
+    /// `Runtime::new` sizes its `ParMemVec` from `total_memory`, and
+    /// `ParMemVec` never grows -- the disjoint-address invariant that makes
+    /// its unsafe writes sound depends on a fixed allocation.  The compiler
+    /// sets the field while lowering (`AsmCompiler::compile`), but a program
+    /// assembled by hand from instructions has no such step, and
+    /// `..Default::default()` leaves it at 0.  Every write then panics with
+    /// "address N out of bounds (len=0)".
+    ///
+    /// The match is exhaustive on purpose: a new `Instruction` variant that
+    /// addresses memory must be accounted for here, and the compiler will say
+    /// so rather than letting the omission surface as a runtime panic.
+    #[must_use]
+    pub fn computed_total_memory(&self) -> usize {
+        let mut max_addr: Option<u32> = None;
+        let mut see = |a: &Address<F>| {
+            let v = a.as_usize() as u32;
+            max_addr = Some(max_addr.map_or(v, |m| m.max(v)));
+        };
+        for instruction in self.iter_instructions() {
+            match instruction {
+                Instruction::BaseAlu(i) => {
+                    see(&i.addrs.out);
+                    see(&i.addrs.in1);
+                    see(&i.addrs.in2);
+                }
+                Instruction::ExtAlu(i) => {
+                    see(&i.addrs.out);
+                    see(&i.addrs.in1);
+                    see(&i.addrs.in2);
+                }
+                Instruction::Mem(i) => see(&i.addrs.inner),
+                Instruction::Poseidon2(i) => {
+                    i.addrs.input.iter().for_each(&mut see);
+                    i.addrs.output.iter().for_each(&mut see);
+                }
+                Instruction::Select(i) => {
+                    see(&i.addrs.bit);
+                    see(&i.addrs.out1);
+                    see(&i.addrs.out2);
+                    see(&i.addrs.in1);
+                    see(&i.addrs.in2);
+                }
+                Instruction::HintBits(i) => {
+                    see(&i.input_addr);
+                    i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
+                }
+                Instruction::HintAddCurve(i) => {
+                    i.output_x_addrs_mults.iter().for_each(|(a, _)| see(a));
+                    i.output_y_addrs_mults.iter().for_each(|(a, _)| see(a));
+                }
+                Instruction::Print(i) => see(&i.addr),
+                Instruction::HintExt2Felts(i) | Instruction::Ext2Felts(i) => {
+                    see(&i.input_addr);
+                    i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
+                }
+                Instruction::CommitPublicValues(i) => {
+                    i.pv_addrs.as_array().iter().for_each(&mut see);
+                }
+                Instruction::Hint(i) => {
+                    i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
+                }
+            }
+        }
+        max_addr.map_or(0, |m| m as usize + 1)
+    }
 }
 
 impl<F: Field> MachineProgram<F> for RecursionProgram<F> {
@@ -24,11 +183,18 @@ impl<F: Field> MachineProgram<F> for RecursionProgram<F> {
     fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
         SepticDigest::<F>::zero()
     }
+
+    fn area_pins(&self) -> Option<zkm_pcs::jagged::RecursionPins> {
+        self.shape.as_ref().and_then(|s| s.pins)
+    }
 }
 
 impl<F: Field> RecursionProgram<F> {
+    /// The EXACT row count this program's shape pins for `air`, if it has a
+    /// shape.  A recursion shape carries row counts, not log2 heights — see
+    /// [`zkm_core_machine::utils::next_multiple_of_32_rows`].
     #[inline]
-    pub fn fixed_log2_rows<A: MachineAir<F>>(&self, air: &A) -> Option<usize> {
+    pub fn fixed_rows<A: MachineAir<F>>(&self, air: &A) -> Option<usize> {
         self.shape
             .as_ref()
             .map(|shape| {
@@ -42,5 +208,32 @@ impl<F: Field> RecursionProgram<F> {
 
     pub fn shape_mut(&mut self) -> &mut Option<RecursionShape> {
         &mut self.shape
+    }
+}
+
+#[cfg(test)]
+mod analyzed_at_construction_tests {
+    use super::*;
+    use p3_koala_bear::KoalaBear;
+
+    /// A program cannot exist un-analyzed: `new` is the only constructor and
+    /// it analyzes, so `run()` has nothing left to derive.
+    #[test]
+    fn a_program_is_analyzed_when_it_is_built() {
+        use crate::runtime::instruction as instr;
+        use crate::MemAccessKind;
+
+        let instrs: Vec<Instruction<KoalaBear>> =
+            (0..8).map(|i| instr::mem(MemAccessKind::Write, 1, i, i)).collect();
+        let raw = RawProgram::from_linear(instrs);
+        let program = RecursionProgram::<KoalaBear>::new(raw, 0, Vec::new(), None);
+
+        assert_eq!(program.seq_blocks.instruction_count(), 8);
+        assert_eq!(program.event_counts.mem_const_events, 8, "counts derived with the offsets");
+        let offsets: Vec<usize> = program.seq_blocks.iter().map(|ai| ai.offset()).collect();
+        let mut sorted = offsets.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), offsets.len(), "two instructions share a record offset");
     }
 }

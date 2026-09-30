@@ -1,4 +1,4 @@
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
@@ -49,6 +49,26 @@ pub trait FieldChallengerVariable<C: Config, Bit>:
     fn sample_ext(&mut self, builder: &mut Builder<C>) -> Ext<C::F, C::EF>;
 
     fn check_witness(&mut self, builder: &mut Builder<C>, nb_bits: usize, witness: Felt<C::F>);
+
+    /// LogUp-GKR grinding check, mirroring the host `gkr_check_witness`
+    /// (crates/pcs/src/logup_gkr.rs).
+    ///
+    /// EVERY production ring performs it. The default delegates to
+    /// [`Self::check_witness`] — observe the witness, sample `nb_bits`, assert
+    /// they are zero — and no ring overrides it.
+    ///
+    /// An override that returned without touching the challenger would not be a
+    /// cheaper equivalent. It would leave the transcript un-advanced while the
+    /// prover's grind advanced its own, desynchronising every subsequent
+    /// alpha/beta; and `docs/soundness/ziren.soundcalc.toml` credits
+    /// `grinding_bits_lookup = 16` on every circuit, so the accounting would
+    /// describe a transcript the protocol did not execute. Such an override
+    /// existed here on the wrap ring, on the premise that the outer challenger
+    /// could not grind — a premise the wrap BaseFold open disproves by grinding
+    /// `pow_bits = 22` through the same trait.
+    fn gkr_check_witness(&mut self, builder: &mut Builder<C>, nb_bits: usize, witness: Felt<C::F>) {
+        self.check_witness(builder, nb_bits, witness);
+    }
 
     fn duplexing(&mut self, builder: &mut Builder<C>);
 }
@@ -118,8 +138,8 @@ impl<C: Config<F = KoalaBear>> DuplexChallengerVariable<C> {
         assert!(self.output_buffer.len() <= PERMUTATION_WIDTH);
 
         let sponge_state = self.sponge_state;
-        let num_inputs = builder.eval(C::F::from_canonical_usize(self.input_buffer.len()));
-        let num_outputs = builder.eval(C::F::from_canonical_usize(self.output_buffer.len()));
+        let num_inputs = builder.eval(C::F::from_usize(self.input_buffer.len()));
+        let num_outputs = builder.eval(C::F::from_usize(self.output_buffer.len()));
 
         let input_buffer: [_; PERMUTATION_WIDTH] = self
             .input_buffer
@@ -212,6 +232,9 @@ impl<C: Config<F = KoalaBear>> FieldChallengerVariable<C, Felt<C::F>>
         nb_bits: usize,
         witness: Felt<<C as Config>::F>,
     ) {
+        if nb_bits == 0 {
+            return;
+        }
         self.observe(builder, witness);
         let element_bits = self.sample_bits(builder, nb_bits);
         for bit in element_bits {
@@ -262,11 +285,10 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
         }
         self.input_buffer.clear();
 
-        // TODO make this a method for the builder.
         builder.push_op(DslIr::CircuitPoseidon2Permute(self.sponge_state));
 
         self.output_buffer.clear();
-        for &pf_val in self.sponge_state.iter() {
+        for &pf_val in self.sponge_state[..OUTER_MULTI_FIELD_CHALLENGER_RATE].iter() {
             let f_vals = split_32(builder, pf_val, self.num_f_elms);
             for f_val in f_vals {
                 self.output_buffer.push(f_val);
@@ -305,11 +327,9 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
     }
 
     pub fn sample_ext(&mut self, builder: &mut Builder<C>) -> Ext<C::F, C::EF> {
-        let a = self.sample(builder);
-        let b = self.sample(builder);
-        let c = self.sample(builder);
-        let d = self.sample(builder);
-        builder.felts2ext(&[a, b, c, d])
+        let dim = <C::EF as BasedVectorSpace<C::F>>::DIMENSION;
+        let samples: Vec<Felt<C::F>> = (0..dim).map(|_| self.sample(builder)).collect();
+        builder.felts2ext(&samples)
     }
 
     pub fn sample_bits(&mut self, builder: &mut Builder<C>, bits: usize) -> Vec<Var<C::N>> {
@@ -318,10 +338,13 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
     }
 
     pub fn check_witness(&mut self, builder: &mut Builder<C>, bits: usize, witness: Felt<C::F>) {
+        if bits == 0 {
+            return;
+        }
         self.observe(builder, witness);
-        let element = self.sample_bits(builder, bits);
-        for bit in element {
-            builder.assert_var_eq(bit, C::N::from_canonical_usize(0));
+        let sampled = self.sample_bits(builder, bits);
+        for bit in sampled {
+            builder.assert_var_eq(bit, C::N::ZERO);
         }
     }
 }
@@ -391,6 +414,12 @@ impl<C: Config> FieldChallengerVariable<C, Var<C::N>> for MultiField32Challenger
         MultiField32ChallengerVariable::check_witness(self, builder, bits, witness);
     }
 
+    // No `gkr_check_witness` override: this ring takes the trait default, which
+    // delegates to `check_witness` above — observe the witness, sample
+    // `nb_bits`, assert they are zero.  The prover grinds on every ring
+    // (`prove_shard_logup_gkr_rows`), so a no-op here would leave the
+    // transcript un-advanced and desync every subsequent alpha/beta.
+
     fn duplexing(&mut self, builder: &mut Builder<C>) {
         MultiField32ChallengerVariable::duplexing(self, builder);
     }
@@ -402,7 +431,7 @@ pub fn reduce_32<C: Config>(builder: &mut Builder<C>, vals: &[Felt<C::F>]) -> Va
     for val in vals.iter() {
         let val = builder.felt2var_circuit(*val);
         builder.assign(result, result + val * power);
-        power *= C::N::from_canonical_u64(1u64 << 32);
+        power *= C::N::from_u64(1u64 << 32);
     }
     result
 }
@@ -414,7 +443,7 @@ pub fn split_32<C: Config>(builder: &mut Builder<C>, val: Var<C::N>, n: usize) -
         let result: Felt<C::F> = builder.eval(C::F::ZERO);
         for j in 0..64 {
             let bit = bits[i * 64 + j];
-            let t = builder.eval(result + C::F::from_wrapped_u64(1 << j));
+            let t = builder.eval(result + C::F::from_u64(1 << j));
             let z = builder.select_f(bit, t, result);
             builder.assign(result, z);
         }
@@ -432,11 +461,12 @@ pub(crate) mod tests {
         hash::{FieldHasherVariable, BN254_DIGEST_SIZE},
         utils::tests::run_test_recursion,
     };
-    use p3_bn254_fr::Bn254Fr;
+    use p3_bn254_fr::Bn254;
     use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger};
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
     use zkm_recursion_compiler::{
         circuit::{AsmBuilder, AsmConfig},
         config::OuterConfig,
@@ -447,7 +477,6 @@ pub(crate) mod tests {
         outer_perm, KoalaBearPoseidon2Outer, OuterCompress, OuterHash,
     };
     use zkm_recursion_gnark_ffi::PlonkBn254Prover;
-    use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::{
         challenger::{DuplexChallengerVariable, FieldChallengerVariable},
@@ -469,7 +498,7 @@ pub(crate) mod tests {
         challenger.observe(F::TWO);
         let result: F = challenger.sample();
         println!("expected result: {result}");
-        let result_ef: EF = challenger.sample_ext_element();
+        let result_ef: EF = challenger.sample_algebra_element();
         println!("expected result_ef: {result_ef}");
 
         let mut builder = AsmBuilder::<F, EF>::default();
@@ -516,7 +545,7 @@ pub(crate) mod tests {
         challenger.observe(commit);
         let result: F = challenger.sample();
         println!("expected result: {result}");
-        let result_ef: EF = challenger.sample_ext_element();
+        let result_ef: EF = challenger.sample_algebra_element();
         println!("expected result_ef: {result_ef}");
         let mut bits = challenger.sample_bits(30);
         let mut bits_vec = vec![];
@@ -528,19 +557,16 @@ pub(crate) mod tests {
 
         let mut builder = Builder::<C>::default();
 
-        // let width: Var<_> = builder.eval(F::from_canonical_usize(PERMUTATION_WIDTH));
         let mut challenger = MultiField32ChallengerVariable::<C>::new(&mut builder);
         let one: Felt<_> = builder.eval(F::ONE);
         let two: Felt<_> = builder.eval(F::TWO);
         let two_var: Var<_> = builder.eval(N::TWO);
-        // builder.halt();
         challenger.observe(&mut builder, one);
         challenger.observe(&mut builder, two);
         challenger.observe(&mut builder, two);
         challenger.observe(&mut builder, two);
         challenger.observe_commitment(&mut builder, [two_var]);
 
-        // Check to make sure the copying works.
         challenger = challenger.copy(&mut builder);
         let element = challenger.sample(&mut builder);
         let element_ef = challenger.sample_ext(&mut builder);
@@ -553,7 +579,7 @@ pub(crate) mod tests {
         builder.print_e(element_ef);
         builder.assert_ext_eq(expected_result_ef, element_ef);
         for (expected_bit, bit) in zip(bits_vec.iter(), bits.iter()) {
-            let expected_bit: Var<_> = builder.eval(N::from_canonical_usize(*expected_bit));
+            let expected_bit: Var<_> = builder.eval(N::from_usize(*expected_bit));
             builder.print_v(*bit);
             builder.assert_var_eq(expected_bit, *bit);
         }
@@ -591,13 +617,13 @@ pub(crate) mod tests {
         let hasher = OuterHash::new(perm.clone()).unwrap();
 
         let input: [KoalaBear; 7] = [
-            KoalaBear::from_canonical_u32(0),
-            KoalaBear::from_canonical_u32(1),
-            KoalaBear::from_canonical_u32(2),
-            KoalaBear::from_canonical_u32(2),
-            KoalaBear::from_canonical_u32(2),
-            KoalaBear::from_canonical_u32(2),
-            KoalaBear::from_canonical_u32(2),
+            KoalaBear::from_u32(0),
+            KoalaBear::from_u32(1),
+            KoalaBear::from_u32(2),
+            KoalaBear::from_u32(2),
+            KoalaBear::from_u32(2),
+            KoalaBear::from_u32(2),
+            KoalaBear::from_u32(2),
         ];
         let output = hasher.hash_iter(input);
 
@@ -624,8 +650,8 @@ pub(crate) mod tests {
         let perm = outer_perm();
         let compressor = OuterCompress::new(perm.clone());
 
-        let a: [Bn254Fr; 1] = [Bn254Fr::TWO];
-        let b: [Bn254Fr; 1] = [Bn254Fr::TWO];
+        let a: [Bn254; 1] = [Bn254::TWO];
+        let b: [Bn254; 1] = [Bn254::TWO];
         let gt = compressor.compress([a, b]);
 
         let mut builder = Builder::<C>::default();

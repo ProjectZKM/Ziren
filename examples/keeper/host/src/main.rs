@@ -144,7 +144,7 @@ fn execute_keeper(data: &Vec<u8>, block_tag: &str, report_path: &Option<PathBuf>
     let (_, report) = match result {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("execution failed for {block_tag}: {e}");
+            tracing::error!("execution failed for {block_tag}: {e}");
             return false;
         }
     };
@@ -212,7 +212,7 @@ fn run_data(data: Vec<u8>, execute_only: bool, block_tag: &str, report_path: &Op
 }
 
 fn print_usage() -> ! {
-    eprintln!(
+    tracing::info!(
         "Usage: {} [options] [<payload_file>]\n\
          \n\
          Options:\n\
@@ -257,7 +257,7 @@ fn run_follow(rpc_url: &str, start_block: &str, save_only: bool, execute_only: b
 
             if !save_only {
                 if !run_data(data, execute_only, &block_tag, report_path) {
-                    eprintln!("block {block_tag} failed, skipping");
+                    tracing::error!("block {block_tag} failed, skipping");
                 }
             }
 
@@ -268,14 +268,14 @@ fn run_follow(rpc_url: &str, start_block: &str, save_only: bool, execute_only: b
 
 fn main() {
     dotenv::dotenv().ok();
-    utils::setup_logger();
+    utils::setup_cli_logger();
 
     let args: Vec<String> = env::args().skip(1).collect();
     let args = parse_args(&args);
 
     if args.follow {
         let rpc_url = args.rpc.as_deref().unwrap_or_else(|| {
-            eprintln!("--follow requires --rpc");
+            tracing::error!("--follow requires --rpc");
             std::process::exit(1);
         });
         let block_arg = args.block.as_deref().unwrap_or("latest");

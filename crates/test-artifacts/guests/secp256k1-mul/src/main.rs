@@ -23,9 +23,7 @@ pub fn main() {
         // 3
         let scalar: [u32; 8] = [3, 0, 0, 0, 0, 0, 0, 0];
 
-        // println!("cycle-tracker-start: secp256k1_mul");
         a_point.mul_assign(&scalar);
-        // println!("cycle-tracker-end: secp256k1_mul");
 
         // 3 * generator.
         // 112711660439710606056748659173929673102114977341539408544630613555209775888121
@@ -40,5 +38,4 @@ pub fn main() {
         assert_eq!(a_point.to_le_bytes(), c);
     }
 
-    // println!("done");
 }

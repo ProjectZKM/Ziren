@@ -11,10 +11,8 @@ const RSA_2048_PRIV_DER: &[u8] = include_bytes!("rsa2048-priv.der");
 const RSA_2048_PUB_DER: &[u8] = include_bytes!("rsa2048-pub.der");
 
 fn main() {
-    // Setup a tracer for logging.
     utils::setup_logger();
 
-    // Create a new stdin with the input for the program.
     let mut stdin = ZKMStdin::new();
 
     let private_key = RsaPrivateKey::from_pkcs8_der(RSA_2048_PRIV_DER).unwrap();
@@ -39,36 +37,25 @@ fn main() {
         22, 44, 88, 95, 9, 64, 224, 101, 57, 54, 171, 218, 6, 160, 137, 97, 114, 90, 32, 47, 184,
     ];
 
-    // Write inputs for program to stdin.
     stdin.write(&RSA_2048_PUB_DER);
     stdin.write(&message);
     stdin.write(&signature);
 
-    // Instead of generating and verifying the proof each time while developing,
-    // execute the program with the Ziren runtime and read stdout.
-    //
-    // let mut stdout = ZKMProver::execute(REGEX_IO_ELF, stdin).expect("proving failed");
-    // let verified = stdout.read::<bool>();
 
-    // Generate the proof for the given program and input.
     let client = ProverClient::new();
     let (pk, vk) = client.setup(RSA_ELF);
 
-    // Execute the guest using the `ProverClient.execute` method, without generating a proof.
     let (_, report) = client.execute(RSA_ELF, &stdin).run().unwrap();
     println!("executed program with {} cycles", report.total_instruction_count());
 
     let proof = client.prove(&pk, stdin).run().expect("proving failed");
 
-    // Verify proof.
     client.verify(&proof, &vk).expect("verification failed");
 
-    // Test a round trip of proof serialization and deserialization.
     proof.save("proof-with-pis.bin").expect("saving proof failed");
     let deserialized_proof =
         ZKMProofWithPublicValues::load("proof-with-pis.bin").expect("loading proof failed");
 
-    // Verify the deserialized proof.
     client.verify(&deserialized_proof, &vk).expect("verification failed");
 
     println!("successfully generated and verified proof for the program!")

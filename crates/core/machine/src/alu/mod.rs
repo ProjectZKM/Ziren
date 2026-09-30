@@ -1,17 +1,31 @@
+/// The number of bits in a byte.  Defined here rather than per chip so the
+/// `pub use <chip>::*` globs below cannot re-export the same name twice.
+pub const BYTE_SIZE: usize = 8;
+
 pub mod add_sub;
+pub mod add_sub_imm;
 pub mod bitwise;
+pub mod bitwise_imm;
 mod clo_clz;
 pub mod divrem;
 pub mod lt;
+pub mod lt_imm;
 pub mod mul;
 pub mod sll;
+pub mod sll_imm;
 pub mod sr;
+pub mod sr_imm;
 
 pub use add_sub::*;
+pub use add_sub_imm::*;
 pub use bitwise::*;
+pub use bitwise_imm::*;
 pub use clo_clz::*;
 pub use divrem::*;
 pub use lt::*;
+pub use lt_imm::*;
 pub use mul::*;
 pub use sll::*;
+pub use sll_imm::*;
 pub use sr::*;
+pub use sr_imm::*;

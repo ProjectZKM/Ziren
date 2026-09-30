@@ -1,6 +1,5 @@
 //! MIPS ELFs used for testing.
 
-#[allow(dead_code)]
 #[allow(missing_docs)]
 pub mod tests {
     use zkm_core_executor::{Instruction, Opcode, Program};
@@ -19,6 +18,30 @@ pub mod tests {
             Instruction::new(Opcode::ADD, 31, 30, 29, false, false),
         ];
         Program::new(instructions, 0, 0)
+    }
+
+    /// Execute a hand-built instruction list and return the first shard's
+    /// record.  Chip unit tests use this instead of hand-writing events:
+    /// every real row carries an instruction frame (program fetch + register
+    /// records), which only the executor can populate consistently.
+    #[must_use]
+    pub fn run_instructions(instructions: Vec<Instruction>) -> zkm_core_executor::ExecutionRecord {
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime =
+            zkm_core_executor::Executor::new(program, zkm_pcs::ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        runtime.records[0].clone()
+    }
+
+    /// Build the canonical `rd = op(rs=b, rt=c)` triple — two immediate loads
+    /// and the operation itself — for [`run_instructions`].
+    #[must_use]
+    pub fn alu_op(opcode: Opcode, b: u32, c: u32) -> Vec<Instruction> {
+        vec![
+            Instruction::new(Opcode::ADD, 29, 0, b, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, c, false, true),
+            Instruction::new(opcode, 31, 29, 30, false, false),
+        ]
     }
 
     /// Get the fibonacci program.
@@ -126,26 +149,19 @@ pub mod tests {
     pub fn simple_memory_program() -> Program {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 0x12348765, false, true),
-            // SW and LW
             Instruction::new(Opcode::SW, 29, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LW, 28, 0, 0x27654320, false, true),
-            // LBU
             Instruction::new(Opcode::LBU, 27, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LBU, 26, 0, 0x27654321, false, true),
             Instruction::new(Opcode::LBU, 25, 0, 0x27654322, false, true),
             Instruction::new(Opcode::LBU, 24, 0, 0x27654323, false, true),
-            // LB
             Instruction::new(Opcode::LB, 23, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LB, 22, 0, 0x27654321, false, true),
-            // LHU
             Instruction::new(Opcode::LHU, 21, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LHU, 20, 0, 0x27654322, false, true),
-            // LH:
             Instruction::new(Opcode::LH, 19, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LH, 18, 0, 0x27654322, false, true),
-            // SB
             Instruction::new(Opcode::ADD, 17, 0, 0x38276525, false, true),
-            // Save the value 0x12348765 into address 0x43627530
             Instruction::new(Opcode::SW, 29, 0, 0x43627530, false, true),
             Instruction::new(Opcode::SB, 17, 0, 0x43627530, false, true),
             Instruction::new(Opcode::LW, 16, 0, 0x43627530, false, true),
@@ -155,8 +171,6 @@ pub mod tests {
             Instruction::new(Opcode::LW, 14, 0, 0x43627530, false, true),
             Instruction::new(Opcode::SB, 17, 0, 0x43627533, false, true),
             Instruction::new(Opcode::LW, 13, 0, 0x43627530, false, true),
-            // SH
-            // Save the value 0x12348765 into address 0x43627530
             Instruction::new(Opcode::SW, 29, 0, 0x43627530, false, true),
             Instruction::new(Opcode::SH, 17, 0, 0x43627530, false, true),
             Instruction::new(Opcode::LW, 12, 0, 0x43627530, false, true),

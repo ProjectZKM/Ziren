@@ -14,5 +14,4 @@ pub fn main() {
     let verifying_key = black_box(VerifyingKey::from_bytes(&pub_bytes).unwrap());
     let sig1 = black_box(Signature::try_from(&sig_bytes[..]).unwrap());
     assert!(verifying_key.verify_strict(&black_box(msg_bytes), &black_box(sig1)).is_ok());
-    // println!("done");
 }

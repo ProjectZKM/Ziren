@@ -3,6 +3,7 @@ use crate::{
         unchecked_compressed_x_to_g1_point, unchecked_compressed_x_to_g2_point,
         uncompressed_bytes_to_g1_point,
     },
+    cursor::Cursor,
     error::Error,
 };
 use alloc::vec::Vec;
@@ -18,71 +19,44 @@ use super::{
 pub(crate) fn load_plonk_verifying_key_from_bytes(
     buffer: &[u8],
 ) -> Result<PlonkVerifyingKey, PlonkError> {
-    let size = u64::from_be_bytes([
-        buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
-    ]) as usize;
-    let size_inv =
-        Fr::from_slice(&buffer[8..40]).map_err(|e| PlonkError::GeneralError(Error::Field(e)))?;
-    let generator =
-        Fr::from_slice(&buffer[40..72]).map_err(|e| PlonkError::GeneralError(Error::Field(e)))?;
+    let mut c = Cursor::new(buffer);
+    let fr = |c: &mut Cursor<'_>| -> Result<Fr, PlonkError> {
+        Fr::from_slice(c.take(32)?).map_err(|e| PlonkError::GeneralError(Error::Field(e)))
+    };
+    let g1c = |c: &mut Cursor<'_>| -> Result<AffineG1, PlonkError> {
+        Ok(unchecked_compressed_x_to_g1_point(c.take(32)?)?)
+    };
 
-    let nb_public_variables = u64::from_be_bytes([
-        buffer[72], buffer[73], buffer[74], buffer[75], buffer[76], buffer[77], buffer[78],
-        buffer[79],
-    ]) as usize;
+    let size = c.u64_be()? as usize;
+    let size_inv = fr(&mut c)?;
+    let generator = fr(&mut c)?;
+    let nb_public_variables = c.u64_be()? as usize;
+    let coset_shift = fr(&mut c)?;
+    let s0 = g1c(&mut c)?;
+    let s1 = g1c(&mut c)?;
+    let s2 = g1c(&mut c)?;
+    let ql = g1c(&mut c)?;
+    let qr = g1c(&mut c)?;
+    let qm = g1c(&mut c)?;
+    let qo = g1c(&mut c)?;
+    let qk = g1c(&mut c)?;
 
-    let coset_shift =
-        Fr::from_slice(&buffer[80..112]).map_err(|e| PlonkError::GeneralError(Error::Field(e)))?;
-    let s0 = unchecked_compressed_x_to_g1_point(&buffer[112..144])?;
-    let s1 = unchecked_compressed_x_to_g1_point(&buffer[144..176])?;
-    let s2 = unchecked_compressed_x_to_g1_point(&buffer[176..208])?;
-    let ql = unchecked_compressed_x_to_g1_point(&buffer[208..240])?;
-    let qr = unchecked_compressed_x_to_g1_point(&buffer[240..272])?;
-    let qm = unchecked_compressed_x_to_g1_point(&buffer[272..304])?;
-    let qo = unchecked_compressed_x_to_g1_point(&buffer[304..336])?;
-    let qk = unchecked_compressed_x_to_g1_point(&buffer[336..368])?;
-    let num_qcp = u32::from_be_bytes([buffer[368], buffer[369], buffer[370], buffer[371]]);
+    let num_qcp = c.u32_be()?;
     let mut qcp = Vec::new();
-    let mut offset = 372;
-
     for _ in 0..num_qcp {
-        let point = unchecked_compressed_x_to_g1_point(&buffer[offset..offset + 32])?;
-        qcp.push(point);
-        offset += 32;
+        qcp.push(g1c(&mut c)?);
     }
 
-    let g1 = unchecked_compressed_x_to_g1_point(&buffer[offset..offset + 32])?;
-    let g2_0 = unchecked_compressed_x_to_g2_point(&buffer[offset + 32..offset + 96])?;
-    let g2_1 = unchecked_compressed_x_to_g2_point(&buffer[offset + 96..offset + 160])?;
+    let g1 = g1c(&mut c)?;
+    let g2_0 = unchecked_compressed_x_to_g2_point(c.take(64)?)?;
+    let g2_1 = unchecked_compressed_x_to_g2_point(c.take(64)?)?;
 
-    offset += 160 + 33788;
+    c.skip(33788)?;
 
-    let num_commitment_constraint_indexes = u64::from_be_bytes([
-        buffer[offset],
-        buffer[offset + 1],
-        buffer[offset + 2],
-        buffer[offset + 3],
-        buffer[offset + 4],
-        buffer[offset + 5],
-        buffer[offset + 6],
-        buffer[offset + 7],
-    ]) as usize;
-
-    let mut commitment_constraint_indexes = Vec::new();
-    offset += 8;
+    let num_commitment_constraint_indexes = c.count(8)?;
+    let mut commitment_constraint_indexes = Vec::with_capacity(num_commitment_constraint_indexes);
     for _ in 0..num_commitment_constraint_indexes {
-        let index = u64::from_be_bytes([
-            buffer[offset],
-            buffer[offset + 1],
-            buffer[offset + 2],
-            buffer[offset + 3],
-            buffer[offset + 4],
-            buffer[offset + 5],
-            buffer[offset + 6],
-            buffer[offset + 7],
-        ]) as usize;
-        commitment_constraint_indexes.push(index);
-        offset += 8;
+        commitment_constraint_indexes.push(c.u64_be()? as usize);
     }
 
     let result = PlonkVerifyingKey {
@@ -118,44 +92,39 @@ pub(crate) fn load_plonk_proof_from_bytes(
     buffer: &[u8],
     num_bsb22_commitments: usize,
 ) -> Result<PlonkProof, PlonkError> {
-    let lro0 = uncompressed_bytes_to_g1_point(&buffer[..64])?;
-    let lro1 = uncompressed_bytes_to_g1_point(&buffer[64..128])?;
-    let lro2 = uncompressed_bytes_to_g1_point(&buffer[128..192])?;
-    let h0 = uncompressed_bytes_to_g1_point(&buffer[192..256])?;
-    let h1 = uncompressed_bytes_to_g1_point(&buffer[256..320])?;
-    let h2 = uncompressed_bytes_to_g1_point(&buffer[320..384])?;
+    let mut c = Cursor::new(buffer);
+    let g1 = |c: &mut Cursor<'_>| -> Result<AffineG1, PlonkError> {
+        Ok(uncompressed_bytes_to_g1_point(c.take(64)?)?)
+    };
+    let lro0 = g1(&mut c)?;
+    let lro1 = g1(&mut c)?;
+    let lro2 = g1(&mut c)?;
+    let h0 = g1(&mut c)?;
+    let h1 = g1(&mut c)?;
+    let h2 = g1(&mut c)?;
 
-    // Stores l_at_zeta, r_at_zeta, o_at_zeta, s1_at_zeta, s2_at_zeta, bsb22_commitments
+    let fr = |c: &mut Cursor<'_>| -> Result<Fr, PlonkError> {
+        Fr::from_slice(c.take(32)?).map_err(|e| PlonkError::GeneralError(Error::Field(e)))
+    };
+
     let mut claimed_values = Vec::with_capacity(5 + num_bsb22_commitments);
-    let mut offset = 384;
     for _ in 1..6 {
-        let value = Fr::from_slice(&buffer[offset..offset + 32])
-            .map_err(|e| PlonkError::GeneralError(Error::Field(e)))?;
-        claimed_values.push(value);
-        offset += 32;
+        claimed_values.push(fr(&mut c)?);
     }
 
-    let z = uncompressed_bytes_to_g1_point(&buffer[offset..offset + 64])?;
-    let z_shifted_opening_value = Fr::from_slice(&buffer[offset + 64..offset + 96])
-        .map_err(|e| PlonkError::GeneralError(Error::Field(e)))?;
-    offset += 96;
+    let z = g1(&mut c)?;
+    let z_shifted_opening_value = fr(&mut c)?;
 
-    let batched_proof_h = uncompressed_bytes_to_g1_point(&buffer[offset..offset + 64])?;
-    let z_shifted_opening_h = uncompressed_bytes_to_g1_point(&buffer[offset + 64..offset + 128])?;
-    offset += 128;
+    let batched_proof_h = g1(&mut c)?;
+    let z_shifted_opening_h = g1(&mut c)?;
 
     for _ in 0..num_bsb22_commitments {
-        let commitment = Fr::from_slice(&buffer[offset..offset + 32])
-            .map_err(|e| PlonkError::GeneralError(Error::Field(e)))?;
-        claimed_values.push(commitment);
-        offset += 32;
+        claimed_values.push(fr(&mut c)?);
     }
 
     let mut bsb22_commitments = Vec::with_capacity(num_bsb22_commitments);
     for _ in 0..num_bsb22_commitments {
-        let commitment = uncompressed_bytes_to_g1_point(&buffer[offset..offset + 64])?;
-        bsb22_commitments.push(commitment);
-        offset += 64;
+        bsb22_commitments.push(g1(&mut c)?);
     }
 
     let result = PlonkProof {
@@ -178,4 +147,81 @@ pub(crate) fn g1_to_bytes(g1: &AffineG1) -> Result<[u8; 64], PlonkError> {
     bytes[..32].reverse();
     bytes[32..].reverse();
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{load_plonk_proof_from_bytes, load_plonk_verifying_key_from_bytes};
+
+    /// Totality over arbitrary bytes: these loaders are reached from the public
+    /// `verify_gnark_proof` with caller-supplied input, so no length may panic.
+    ///
+    /// Testing the loaders directly rather than through `PlonkVerifier::verify`
+    /// is deliberate: `verify` rejects on a vkey-hash prefix mismatch, and
+    /// `verify_gnark_proof` parses the VK first, so a truncation test written
+    /// against either never reaches the proof loader at all.
+    /// 64 uncompressed bytes for the BN254 G1 generator `(1, 2)`.
+    ///
+    /// Zero bytes are NOT a point -- `AffineG1::new(0, 0)` is not on the curve,
+    /// so a zero-filled proof fails at the very first read and never reaches
+    /// the later offsets. The truncation test needs the leading points to parse
+    /// so that it actually walks past byte 384.
+    fn g1_generator() -> [u8; 64] {
+        let mut b = [0u8; 64];
+        b[31] = 1;
+        b[63] = 2;
+        b
+    }
+
+    /// A proof whose first six points are real, then zeros.
+    fn well_formed_prefix(len: usize) -> Vec<u8> {
+        let mut v = vec![0u8; len.max(384)];
+        for i in 0..6 {
+            v[i * 64..(i + 1) * 64].copy_from_slice(&g1_generator());
+        }
+        v.truncate(len);
+        v
+    }
+
+    #[test]
+    fn proof_loader_is_total() {
+        for commitments in [0usize, 1, 3] {
+            for n in 0..1100usize {
+                let _ = load_plonk_proof_from_bytes(&well_formed_prefix(n), commitments);
+            }
+        }
+    }
+
+    #[test]
+    fn proof_loader_survives_the_384_boundary() {
+        assert!(load_plonk_proof_from_bytes(&well_formed_prefix(384), 0).is_err());
+        for n in 384..520usize {
+            assert!(load_plonk_proof_from_bytes(&well_formed_prefix(n), 0).is_err());
+        }
+    }
+
+    #[test]
+    fn proof_loader_rejects_a_hostile_commitment_count() {
+        let _ = load_plonk_proof_from_bytes(&vec![0u8; 1024], usize::MAX);
+        assert!(load_plonk_proof_from_bytes(&vec![0u8; 1024], usize::MAX).is_err());
+    }
+
+    #[test]
+    fn vk_loader_is_total() {
+        for n in 0..1200usize {
+            let _ = load_plonk_verifying_key_from_bytes(&vec![0u8; n]);
+        }
+    }
+
+    #[test]
+    fn vk_loader_rejects_hostile_counts() {
+        let mut vk = vec![0u8; 40000];
+        vk[368..372].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(load_plonk_verifying_key_from_bytes(&vk).is_err());
+
+        let mut vk = vec![0u8; 40000];
+        let at = 372 + 160 + 33788;
+        vk[at..at + 8].copy_from_slice(&u64::MAX.to_be_bytes());
+        assert!(load_plonk_verifying_key_from_bytes(&vk).is_err());
+    }
 }
