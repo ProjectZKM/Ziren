@@ -71,10 +71,10 @@ pub enum Opcode {
 All MIPS instructions can be divided into the following taxonomies:
 
 **ALU Operators**  
-This category includes the fundamental arithmetic logical operations and count operations. It covers addition (ADD) and subtraction (SUB), several multiplication and division variants (MULT, MULTU, MUL, DIV, DIVU), as well as bit shifting and rotation operations (SLL, SRL, SRA, ROR), comparison operations like set less than (SLT, SLTU) a range of bitwise logical operations (AND, OR, XOR, NOR) and count operations like CLZ counts the number of leading zeros, while CLO counts the number of leading ones. These operations are useful in bit-level data analysis.
+This category includes the fundamental arithmetic logical operations and count operations. It covers addition (ADD) and subtraction (SUB), several multiplication, division and remainder variants (MULT, MULTU, MUL, DIV, DIVU, MOD, MODU), as well as bit shifting and rotation operations (SLL, SRL, SRA, ROR), comparison operations like set less than (SLT, SLTU) a range of bitwise logical operations (AND, OR, XOR, NOR) and count operations like CLZ counts the number of leading zeros, while CLO counts the number of leading ones. These operations are useful in bit-level data analysis.
 
 **Memory Operations**  
-This category is dedicated to moving data between memory and registers. It contains a comprehensive set of load instructions—such as LH (load halfword), LWL (load word left), LW (load word), LB (load byte), LBU (load byte unsigned), LHU (load halfword unsigned), LWR (load word right), and LL (load linked)—as well as corresponding store instructions like SB (store byte), SH (store halfword), SWL (store word left), SW (store word), SWR (store word right), and SC (store conditional). These operations ensure that data is correctly and efficiently read from or written to memory.
+This category is dedicated to moving data between memory and registers. It contains a comprehensive set of load instructions, such as LH (load halfword), LWL (load word left), LW (load word), LB (load byte), LBU (load byte unsigned), LHU (load halfword unsigned), LWR (load word right), and LL (load linked), as well as corresponding store instructions like SB (store byte), SH (store halfword), SWL (store word left), SW (store word), SWR (store word right), and SC (store conditional). These operations ensure that data is correctly and efficiently read from or written to memory.
 
 **Branching Instructions**  
 Instructions BEQ (branch if equal), BGEZ (branch if greater than or equal to zero), BGTZ (branch if greater than zero), BLEZ (branch if less than or equal to zero), BLTZ (branch if less than zero), and BNE (branch if not equal) are used to change the flow of execution based on comparisons. These instructions are vital for implementing loops, conditionals, and other control structures.
@@ -83,96 +83,98 @@ Instructions BEQ (branch if equal), BGEZ (branch if greater than or equal to zer
 Jump-related instructions, including Jump, Jumpi, and JumpDirect, are responsible for altering the execution flow by redirecting it to different parts of the program. They are used for implementing function calls, loops, and other control structures that require non-sequential execution, ensuring that the program can navigate its code dynamically.
 
 **Syscall Instructions**  
-SYSCALL triggers a system call, allowing the program to request services from the zkvm operating system. The service can be a precompile computation, such as do sha extend operation by `SHA_EXTEND` precompile. it also can be input/output operation such as `SYSHINTREADYSHINTREAD` and `WRITE`.
+SYSCALL triggers a system call, allowing the program to request services from the zkvm operating system. The service can be a precompile computation, such as do sha extend operation by `SHA_EXTEND` precompile. It can also be an input/output operation such as `SYSHINTREAD` and `WRITE`, or a Linux system call (see [Linux ABI](./linux-abi.md)).
 
 **Misc Instructions**  
-This category includes other instructions. TEQ is typically used to test equality conditions between registers. MADDU/MSUBU is used for multiply accumulation. SEB/SEH is for data sign extended. EXT/INS is for bits extraction and insertion.
+This category includes other instructions. TEQ is typically used to test equality conditions between registers. MADDU/MSUBU is used for multiply accumulation. SEB/SEH (executor opcode SEXT) sign-extend a byte or halfword. EXT/INS extract and insert bit fields. WSBH swaps the bytes within each halfword. MOVZ/MOVN (executor opcodes MEQ/MNE) are conditional moves.
 
 
 ## Supported instructions
 
 The support instructions are as follows:
 
-| instruction | Op [31:26] | rs [25:21]  | rt [20:16]  | rd [15:11]  | shamt [10:6] | func [5:0]  | function                                                     |
-| ----------- | ---------- | ----------- | ----------- | ----------- | ------------ | ----------- | ------------------------------------------------------------ |
-| ADD         | 000000     | rs          | rt          | rd          | 00000        | 100000      | rd = rs + rt                                                   |
-| ADDI        | 001000     | rs          | rt          | imm         | imm          | imm         | rt = rs + sext(imm)                                          |
-| ADDIU       | 001001     | rs          | rt          | imm         | imm          | imm         | rt = rs + sext(imm)                                          |
-| ADDU        | 000000     | rs          | rt          | rd          | 00000        | 100001      | rd = rs + rt                                                   |
-| AND         | 000000     | rs          | rt          | rd          | 00000        | 100100      | rd = rs & rt                                                   |
-| ANDI        | 001100     | rs          | rt          | imm         | imm          | imm         | rt = rs & zext(imm)                                          |
-| BEQ         | 000100     | rs          | rt          | offset      | offset       | offset      | PC = PC + sext(offset<<2)， if rs == rt                    |
-| BGEZ        | 000001     | rs          | 00001       | offset      | offset       | offset      | PC = PC + sext(offset<<2)， if rs >= 0                     |
-| BGTZ        | 000111     | rs          | 00000       | offset      | offset       | offset      | PC = PC + sext(offset<<2)， if rs > 0                      |
-| BLEZ        | 000110     | rs          | 00000       | offset      | offset       | offset      | PC = PC + sext(offset<<2)， if rs <= 0                     |
-| BLTZ        | 000001     | rs          | 00000       | offset      | offset       | offset      | PC = PC + sext(offset<<2)， if rs < 0                      |
-| BNE         | 000101     | rs          | rt          | offset      | offset       | offset      | PC = PC + sext(offset<<2)， if rs != rt                    |
-| CLO         | 011100     | rs          | rt          | rd          | 00000        | 100001      | rd = count_leading_ones(rs)                                  |
-| CLZ         | 011100     | rs          | rt          | rd          | 00000        | 100000      | rd = count_leading_zeros(rs)                                 |
-| DIV         | 000000     | rs          | rt          | 00000       | 00000        | 011010      | (hi, lo) = (rs%rt, rs/ rt), signed                              |
-| DIVU        | 000000     | rs          | rt          | 00000       | 00000        | 011011      | (hi, lo) = (rs%rt, rs/rt), unsigned                                      |
-| J           | 000010     | instr_index | instr_index | instr_index | instr_index  | instr_index | PC = PC[GPRLEN-1..28] \|\| instr_index \|\| 00                      |
-| JAL         | 000011     | instr_index | instr_index | instr_index | instr_index  | instr_index | r31 = PC + 8, PC = PC[GPRLEN-1..28] \|\| instr_index \|\| 00 |
-| JALR        | 000000     | rs          | 00000       | rd          | hint         | 001001      | rd = PC + 8, PC = rs                                          |
-| JR          | 000000     | rs          | 00000       | 00000       | hint         | 001000      | PC = rs                                                      |
-| LB          | 100000     | base        | rt          | offset      | offset       | offset      | rt = sext(mem_byte(base + offset))                           |
-| LBU         | 100100     | base        | rt          | offset      | offset       | offset      | rt = zext(mem_byte(base + offset))                           |
-| LH          | 100001     | base        | rt          | offset      | offset       | offset      | rt = sext(mem_halfword(base + offset))                       |
-| LHU         | 100101     | base        | rt          | offset      | offset       | offset      | rt = zext(mem_halfword(base + offset))                       |
-| LL          | 110000     | base        | rt          | offset      | offset       | offset      | rt = mem_word(base + offset)                                 |
-| LUI         | 001111     | 00000       | rt          | imm         | imm          | imm         | rt = imm<<16                                               |
-| LW          | 100011     | base        | rt          | offset      | offset       | offset      | rt = mem_word(base + offset)                                 |
-| LWL         | 100010     | base        | rt          | offset      | offset       | offset      | rt = rt merge most significant part of mem(base+offset)                               |
-| LWR         | 100110     | base        | rt          | offset      | offset       | offset      | rt = rt merge least significant part of mem(base+offset)                               |
-| MFHI        | 000000     | 00000       | 00000       | rd          | 00000        | 010000      | rd = hi                                                      |
-| MFLO        | 000000     | 00000       | 00000       | rd          | 00000        | 010010      | rd = lo                                                      |
-| MOVN        | 000000     | rs          | rt          | rd          | 00000        | 001011      | rd = rs, if rt != 0                                          |
-| MOVZ        | 000000     | rs          | rt          | rd          | 00000        | 001010      | rd = rs, if rt == 0                                          |
-| MTHI        | 000000     | rs          | 00000       | 00000       | 00000        | 010001      | hi = rs                                                      |
-| MTLO        | 000000     | rs          | 00000       | 00000       | 00000        | 010011      | lo = rs                                                      |
-| MUL         | 011100     | rs          | rt          | rd          | 00000        | 000010      | rd = rs * rt                                                 |
-| MULT        | 000000     | rs          | rt          | 00000       | 00000        | 011000      | (hi, lo) = rs * rt                                           |
-| MULTU       | 000000     | rs          | rt          | 00000       | 00000        | 011001      | (hi, lo) = rs * rt                                           |
-| NOR         | 000000     | rs          | rt          | rd          | 00000        | 100111      | rd = !rs \| rt                                           |
-| OR          | 000000     | rs          | rt          | rd          | 00000        | 100101      | rd = rs \| rt                                                |
-| ORI         | 001101     | rs          | rt          | imm         | imm          | imm         | rd = rs \| zext(imm)                                         |
-| SB          | 101000     | base        | rt          | offset      | offset       | offset      | mem_byte(base + offset) = rt                                 |
-| SC          | 111000     | base        | rt          | offset      | offset       | offset      | mem_word(base + offset) = rt, rt = 1, if atomic update, else  rt = 0 |
-| SH          | 101001     | base        | rt          | offset      | offset       | offset      | mem_halfword(base + offset) = rt                             |
-| SLL         | 000000     | 00000       | rt          | rd          | sa           | 000000      | rd = rt<<sa                                                |
-| SLLV        | 000000     | rs          | rt          | rd          | 00000        | 000100      | rd = rt << rs[4:0]                                           |
-| SLT         | 000000     | rs          | rt          | rd          | 00000        | 101010      | rd = rs < rt                                                 |
-| SLTI        | 001010     | rs          | rt          | imm         | imm          | imm         | rt = rs < sext(imm)                                          |
-| SLTIU       | 001011     | rs          | rt          | imm         | imm          | imm         | rt = rs < sext(imm)                                          |
-| SLTU        | 000000     | rs          | rt          | rd          | 00000        | 101011      | rd = rs < rt                                                 |
-| SRA         | 000000     | 00000       | rt          | rd          | sa           | 000011      | rd = rt >> sa                                                |
-| SRAV        | 000000     | rs          | rt          | rd          | 00000        | 000111      | rd = rt >> rs[4:0]                                           |
-| SYNC        | 000000     | 00000       | 00000       | 00000       | stype        | 001111      | sync (nop)                                           |
-| SRL         | 000000     | 00000       | rt          | rd          | sa           | 000010      | rd = rt >> sa                                                |
-| SRLV        | 000000     | rs          | rt          | rd          | 00000        | 000110      | rd = rt >> rs[4:0]                                           |
-| SUB         | 000000     | rs          | rt          | rd          | 00000        | 100010      | rd = rs - rt                                                 |
-| SUBU        | 000000     | rs          | rt          | rd          | 00000        | 100011      | rd = rs - rt                                                 |
-| SW          | 101011     | base        | rt          | offset      | offset       | offset      | mem_word(base + offset) = rt                                 |
-| SWL         | 101010     | base        | rt          | offset      | offset       | offset      | store most significant part of rt                                 |
-| SWR         | 101110     | base        | rt          | offset      | offset       | offset      | store least significant part of rt                                 |
-| SYSCALL     | 000000     | code        | code        | code        | code         | 001100      | syscall                                                      |
-| XOR         | 000000     | rs          | rt          | rd          | 00000        | 100110      | rd = rs ^ rt                                                 |
-| XORI        | 001110     | rs          | rt          | imm         | imm          | imm         | rd = rs ^ zext(imm)                                          |
-| BAL         | 000001     | 00000       | 10001       | offset      | offset       | offset      | RA = PC + 8， PC = PC + sign_extend(offset \|\| 00) |
-| SYNCI         | 000001     | base       | 11111       | offset      | offset       | offset      | sync (nop) |
-| PREF        | 110011     | base        | hint        | offset      | offset       | offset      | prefetch(nop)                                                |
-| TEQ         | 000000     | rs          | rt          | code        | code         | 110100      | trap，if rs == rt                                            |
-| ROTR        |	000000	   | 00001	     | rt	       | rd	         | sa	        | 000010	  | rd = rotate_right(rt, sa）                                  |
-| ROTRV       | 000000     | rs          | rt          | rd          | 00001        | 000110      | rd = rotate_right(rt, rs[4:0])                                           |
-| WSBH 		  | 011111	   | 00000	     | rt	       | rd     	 | 00010	    | 100000      | rd = swaphalf(rt)                                           |	
-| EXT         |	011111     | rs	         | rt	       | msbd	     | lsb	        | 000000	  | rt =  rs[msbd+lsb..lsb]                                      |
-| SEH		  | 011111     | 00000       | rt          | rd	         | 11000        | 100000	  | rd = signExtend(rt[15..0])                                 |
-| SEB		  | 011111     | 00000       | rt          | rd	         | 10000        | 100000	  | rd = signExtend(rt[7..0])                                  |
-| INS         |	011111     | rs          | rt	       | msb	     | lsb	        | 000100	  | rt = rt[32:msb+1] \|\| rs[msb+1-lsb : 0] \|\| rt[lsb-1:0]         |
-| MADDU		  | 011100	   | rs	         | rt          | 00000	     | 00000	    | 000001      | (hi, lo) = rs * rt + (hi,lo)                                |
-| MADD		  | 011100	   | rs	         | rt          | 00000	     | 00000	    | 000000      | (hi, lo) = (hi,lo) + rs * rt (signed)
-| MSUBU		  | 011100	   | rs	         | rt	       | 00000	     | 00000	    | 000101	  | (hi, lo) = (hi,lo) - rs * rt                                | 
-| MSUB		  | 011100	   | rs	         | rt          | 00000	     | 00000	    | 000100      | (hi, lo) = (hi,lo) - rs * rt (signed)
+| instruction | Op [31:26] | rs [25:21] | rt [20:16] | rd [15:11] | shamt [10:6] | func [5:0] | function | chip |
+| ----------- | ---------- | ----------- | ----------- | ----------- | ------------ | ----------- | ------------------------------------------------------------ | ---- |
+| ADD | 000000 | rs | rt | rd | 00000 | 100000 | rd = rs + rt | `AddSub` |
+| ADDI | 001000 | rs | rt | imm | imm | imm | rt = rs + sext(imm) | `AddSubImm` |
+| ADDIU | 001001 | rs | rt | imm | imm | imm | rt = rs + sext(imm) | `AddSubImm` |
+| ADDU | 000000 | rs | rt | rd | 00000 | 100001 | rd = rs + rt | `AddSub` |
+| AND | 000000 | rs | rt | rd | 00000 | 100100 | rd = rs & rt | `Bitwise` |
+| ANDI | 001100 | rs | rt | imm | imm | imm | rt = rs & zext(imm) | `BitwiseImm` |
+| BEQ | 000100 | rs | rt | offset | offset | offset | PC = PC + sext(offset<<2)， if rs == rt | `Branch` |
+| BGEZ | 000001 | rs | 00001 | offset | offset | offset | PC = PC + sext(offset<<2)， if rs >= 0 | `Branch` |
+| BGTZ | 000111 | rs | 00000 | offset | offset | offset | PC = PC + sext(offset<<2)， if rs > 0 | `Branch` |
+| BLEZ | 000110 | rs | 00000 | offset | offset | offset | PC = PC + sext(offset<<2)， if rs <= 0 | `Branch` |
+| BLTZ | 000001 | rs | 00000 | offset | offset | offset | PC = PC + sext(offset<<2)， if rs < 0 | `Branch` |
+| BNE | 000101 | rs | rt | offset | offset | offset | PC = PC + sext(offset<<2)， if rs != rt | `Branch` |
+| CLO | 011100 | rs | rt | rd | 00000 | 100001 | rd = count_leading_ones(rs) | `CloClz` |
+| CLZ | 011100 | rs | rt | rd | 00000 | 100000 | rd = count_leading_zeros(rs) | `CloClz` |
+| DIV | 000000 | rs | rt | 00000 | 00000 | 011010 | (hi, lo) = (rs % rt, rs / rt), signed; division by zero is rejected | `DivRem` |
+| DIVU | 000000 | rs | rt | 00000 | 00000 | 011011 | (hi, lo) = (rs % rt, rs / rt), unsigned; division by zero is rejected | `DivRem` |
+| MOD | 000000 | rs | rt | rd | 00011 | 011010 | rd = rs % rt, signed (MIPS32 Release 6 encoding) | `DivRem` |
+| MODU | 000000 | rs | rt | rd | 00011 | 011011 | rd = rs % rt, unsigned (MIPS32 Release 6 encoding) | `DivRem` |
+| J | 000010 | instr_index | instr_index | instr_index | instr_index | instr_index | PC = instr_index \|\| 00 (the PC[31..28] region bits are taken as 0) | `Jump` |
+| JAL | 000011 | instr_index | instr_index | instr_index | instr_index | instr_index | r31 = PC + 8, PC = instr_index \|\| 00 (the PC[31..28] region bits are taken as 0) | `Jump` |
+| JALR | 000000 | rs | 00000 | rd | hint | 001001 | rd = PC + 8, PC = rs | `Jump` |
+| JR | 000000 | rs | 00000 | 00000 | hint | 001000 | PC = rs | `Jump` |
+| LB | 100000 | base | rt | offset | offset | offset | rt = sext(mem_byte(base + offset)) | `LoadNarrow` |
+| LBU | 100100 | base | rt | offset | offset | offset | rt = zext(mem_byte(base + offset)) | `LoadNarrow` |
+| LH | 100001 | base | rt | offset | offset | offset | rt = sext(mem_halfword(base + offset)) | `LoadNarrow` |
+| LHU | 100101 | base | rt | offset | offset | offset | rt = zext(mem_halfword(base + offset)) | `LoadNarrow` |
+| LL | 110000 | base | rt | offset | offset | offset | rt = mem_word(base + offset) | `LoadWord` |
+| LUI | 001111 | 00000 | rt | imm | imm | imm | rt = imm<<16 | `AddSubImm` |
+| LW | 100011 | base | rt | offset | offset | offset | rt = mem_word(base + offset) | `LoadWord` |
+| LWL | 100010 | base | rt | offset | offset | offset | rt = rt merge most significant part of mem(base+offset) | `MemoryUnaligned` |
+| LWR | 100110 | base | rt | offset | offset | offset | rt = rt merge least significant part of mem(base+offset) | `MemoryUnaligned` |
+| MFHI | 000000 | 00000 | 00000 | rd | 00000 | 010000 | rd = hi | `AddSubImm` |
+| MFLO | 000000 | 00000 | 00000 | rd | 00000 | 010010 | rd = lo | `AddSubImm` |
+| MOVN | 000000 | rs | rt | rd | 00000 | 001011 | rd = rs, if rt != 0 (executor opcode MNE) | `MovCond` |
+| MOVZ | 000000 | rs | rt | rd | 00000 | 001010 | rd = rs, if rt == 0 (executor opcode MEQ) | `MovCond` |
+| MTHI | 000000 | rs | 00000 | 00000 | 00000 | 010001 | hi = rs | `AddSubImm` |
+| MTLO | 000000 | rs | 00000 | 00000 | 00000 | 010011 | lo = rs | `AddSubImm` |
+| MUL | 011100 | rs | rt | rd | 00000 | 000010 | rd = rs * rt | `Mul` |
+| MULT | 000000 | rs | rt | 00000 | 00000 | 011000 | (hi, lo) = rs * rt | `Mul` |
+| MULTU | 000000 | rs | rt | 00000 | 00000 | 011001 | (hi, lo) = rs * rt | `Mul` |
+| NOR | 000000 | rs | rt | rd | 00000 | 100111 | rd = !(rs \| rt) | `Bitwise` |
+| OR | 000000 | rs | rt | rd | 00000 | 100101 | rd = rs \| rt | `Bitwise` |
+| ORI | 001101 | rs | rt | imm | imm | imm | rt = rs \| zext(imm) | `BitwiseImm` |
+| SB | 101000 | base | rt | offset | offset | offset | mem_byte(base + offset) = rt | `StoreNarrow` |
+| SC | 111000 | base | rt | offset | offset | offset | mem_word(base + offset) = rt, rt = 1, if atomic update, else  rt = 0 | `StoreWord` |
+| SH | 101001 | base | rt | offset | offset | offset | mem_halfword(base + offset) = rt | `StoreNarrow` |
+| SLL | 000000 | 00000 | rt | rd | sa | 000000 | rd = rt<<sa | `ShiftLeftImm` |
+| SLLV | 000000 | rs | rt | rd | 00000 | 000100 | rd = rt << rs[4:0] | `ShiftLeft` |
+| SLT | 000000 | rs | rt | rd | 00000 | 101010 | rd = rs < rt | `Lt` |
+| SLTI | 001010 | rs | rt | imm | imm | imm | rt = rs < sext(imm) | `LtImm` |
+| SLTIU | 001011 | rs | rt | imm | imm | imm | rt = rs < sext(imm) | `LtImm` |
+| SLTU | 000000 | rs | rt | rd | 00000 | 101011 | rd = rs < rt | `Lt` |
+| SRA | 000000 | 00000 | rt | rd | sa | 000011 | rd = rt >> sa | `ShiftRightImm` |
+| SRAV | 000000 | rs | rt | rd | 00000 | 000111 | rd = rt >> rs[4:0] | `ShiftRight` |
+| SYNC | 000000 | 00000 | 00000 | 00000 | stype | 001111 | sync (nop) | `AddSubImm` |
+| SRL | 000000 | 00000 | rt | rd | sa | 000010 | rd = rt >> sa | `ShiftRightImm` |
+| SRLV | 000000 | rs | rt | rd | 00000 | 000110 | rd = rt >> rs[4:0] | `ShiftRight` |
+| SUB | 000000 | rs | rt | rd | 00000 | 100010 | rd = rs - rt | `AddSub` |
+| SUBU | 000000 | rs | rt | rd | 00000 | 100011 | rd = rs - rt | `AddSub` |
+| SW | 101011 | base | rt | offset | offset | offset | mem_word(base + offset) = rt | `StoreWord` |
+| SWL | 101010 | base | rt | offset | offset | offset | store most significant part of rt | `MemoryUnaligned` |
+| SWR | 101110 | base | rt | offset | offset | offset | store least significant part of rt | `MemoryUnaligned` |
+| SYSCALL | 000000 | code | code | code | code | 001100 | syscall | `SyscallInstrs` |
+| XOR | 000000 | rs | rt | rd | 00000 | 100110 | rd = rs ^ rt | `Bitwise` |
+| XORI | 001110 | rs | rt | imm | imm | imm | rt = rs ^ zext(imm) | `BitwiseImm` |
+| BAL | 000001 | 00000 | 10001 | offset | offset | offset | RA = PC + 8， PC = PC + sign_extend(offset \|\| 00) | `Jump` |
+| SYNCI | 000001 | base | 11111 | offset | offset | offset | sync (nop) | `AddSubImm` |
+| PREF | 110011 | base | hint | offset | offset | offset | prefetch(nop) | `AddSubImm` |
+| TEQ | 000000 | rs | rt | code | code | 110100 | trap if rs == rt (the execution is rejected) | `MiscInstrs` |
+| ROTR | 000000 | 00001 | rt | rd | sa | 000010 | rd = rotate_right(rt, sa） | `ShiftRightImm` |
+| ROTRV | 000000 | rs | rt | rd | 00001 | 000110 | rd = rotate_right(rt, rs[4:0]) | `ShiftRight` |
+| WSBH | 011111 | 00000 | rt | rd | 00010 | 100000 | rd = swaphalf(rt) | `MovCond` |
+| EXT | 011111 | rs | rt | msbd | lsb | 000000 | rt =  rs[msbd+lsb..lsb] | `MiscInstrs` |
+| SEH | 011111 | 00000 | rt | rd | 11000 | 100000 | rd = signExtend(rt[15..0]) | `MiscInstrs` |
+| SEB | 011111 | 00000 | rt | rd | 10000 | 100000 | rd = signExtend(rt[7..0]) | `MiscInstrs` |
+| INS | 011111 | rs | rt | msb | lsb | 000100 | rt = rt[32:msb+1] \|\| rs[msb+1-lsb : 0] \|\| rt[lsb-1:0] | `MiscInstrs` |
+| MADDU | 011100 | rs | rt | 00000 | 00000 | 000001 | (hi, lo) = rs * rt + (hi,lo) | `MiscInstrs` |
+| MADD | 011100 | rs | rt | 00000 | 00000 | 000000 | (hi, lo) = (hi,lo) + rs * rt (signed) | `MiscInstrs` |
+| MSUBU | 011100 | rs | rt | 00000 | 00000 | 000101 | (hi, lo) = (hi,lo) - rs * rt | `MiscInstrs` |
+| MSUB | 011100 | rs | rt | 00000 | 00000 | 000100 | (hi, lo) = (hi,lo) - rs * rt (signed) | `MiscInstrs` |
 
 
 ## Supported syscalls
@@ -220,14 +222,13 @@ The support instructions are as follows:
 | SECP256R1_DOUBLE = 0x00_01_002D,       | Executes the `SECP256R1_DOUBLE` precompile.        |
 | SECP256R1_DECOMPRESS = 0x00_01_002E,   | Executes the `SECP256R1_DECOMPRESS` precompile.    |
 | POSEIDON2_PERMUTE = 0x00_01_0030,      | Executes the `POSEIDON2_PERMUTE` precompile.       |
-| SYS_MMAP = 4210,                       | Executes the `Linux MMAP API` precompile.          |
-| SYS_MMAP2 = 4090,                      | Executes the `Linux MMAP2 API` precompile.         |
-| SYS_BRK = 4045,                        | Executes the `Linux BRK API` precompile.           |
-| SYS_CLONE = 4120,                      | Executes the `Linux CLONE API` precompile.         |
-| SYS_EXIT_GROUP = 4246,                 | Executes the `Linux EXIT GROUP API` precompile.    |
-| SYS_READ = 4003,                       | Executes the `Linux READ API` precompile.          |
-| SYS_WRITE = 4004,                      | Executes the `Linux WRITE API` precompile.         |
-| SYS_FCNTL = 4055,                      | Executes the `Linux FCNTL API` precompile.         |
-| SYS_NOP = 4000,                        | Executes the `NOP API` precompile.                 |
+| SYS_MMAP = 4210,                       | Linux `mmap`: allocate memory from the heap.       |
+| SYS_MMAP2 = 4090,                      | Linux `mmap2`: same as `mmap`.                     |
+| SYS_BRK = 4045,                        | Linux `brk`: return the program break.             |
+| SYS_CLONE = 4120,                      | Linux `clone`: simulated, returns 1.               |
+| SYS_EXT_GROUP = 4246,                  | Linux `exit_group`: halt with an exit code.        |
+| SYS_READ = 4003,                       | Linux `read`: only stdin, returns 0 bytes.         |
+| SYS_WRITE = 4004,                      | Linux `write`: stdout, stderr, or the public-values (3) and hint (4) descriptors. |
+| SYS_FCNTL = 4055,                      | Linux `fcntl`: `F_GETFD` and `F_GETFL` on fds 0-2. |
 
-All the unimplemented Linux syscalls API are treated as SYS_NOP.
+Linux syscalls not listed above but handled as no-ops (`open`, `close`, `munmap`, `rt_sigaction`, `uname`, `futex_time64`, `prctl` and others) are listed in [Linux ABI](./linux-abi.md). All Linux syscalls are proved by one chip, `SysLinux`; in the proof they are grouped under the code `SYS_LINUX = 4000`, which is not itself a syscall. Any other syscall number is rejected by the executor (`UnsupportedSyscall`).

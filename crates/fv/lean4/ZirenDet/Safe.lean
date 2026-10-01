@@ -34,13 +34,11 @@ elab "picus_safe " t:tactic : tactic => do
     (Core.withCurrHeartbeats <|
       withTheReader Core.Context (fun ctx => { ctx with maxHeartbeats := kilo * 1000 }) do
         evalTactic t; pure true)
-    (fun e => do
-      Core.withCurrHeartbeats do
-        logWarning m!"picus_safe: automation aborted ({e.toMessageData}); goal admitted"
-      pure false)
+    (fun _ => pure false)
   unless ok do
     Core.withCurrHeartbeats do
       s.restore
+      logWarning m!"picus_safe: automation aborted (over budget); goal admitted"
       for g in gs do
         g.admit
       setGoals []

@@ -6,5 +6,6 @@ pub mod lean;
 pub mod lower;
 pub mod pcl;
 pub mod picus_builder;
+pub mod propagate;
 
 pub use pcl::*;

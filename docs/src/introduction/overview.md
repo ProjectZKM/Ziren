@@ -1,70 +1,51 @@
 # Overview
 
-[Ziren](https://github.com/ProjectZKM/Ziren) is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32r2 instruction set architecture(ISA).
+[Ziren](https://github.com/ProjectZKM/Ziren) is an open-source zero-knowledge virtual machine (zkVM) for the MIPS32r2 instruction set architecture (ISA), developed by ZKM. A program compiled for MIPS32r2, for example from Rust or Go, runs inside Ziren, and Ziren produces a proof that the execution was correct. A verifier checks the proof far faster than it could replay the execution, either natively or on-chain after the proof is wrapped into a SNARK.
 
+Ziren proves the complete user-mode integer instruction set of MIPS32r2, branch-delay slot included, and proves Ethereum mainnet blocks end to end in production. It is used by the Entangled Rollup protocol for native cross-chain asset circulation, with deployments including the GOAT Network Bitcoin L2 and the Metis Hybrid Rollup.
 
-Ziren is the industry's first zero-knowledge proof virtual machine supporting the MIPS instruction set, developed by the ZKM team, enabling zero-knowledge proof generation for general-purpose computation. Ziren is fully open-source and comes equipped with a comprehensive developer toolkit and an efficient proof network. The Entangled Rollup protocol, designed specifically to utilize Ziren, is a native asset cross-chain circulation protocol, with typical application cases including the Metis Hybrid Rollup design and the GOAT Network Bitcoin L2.
+This documentation describes Ziren V2.0.
 
 ## Architectural Workflow
 
-The workflow of Ziren is as follows:
-- Frontend Compilation
-  
-  Source code (Rust) → MIPS assembly → Optimized MIPS instructions for algebraic representation.
-- Arithmetization
+- **Compilation.** Guest source code (Rust, or Go) is compiled by the Ziren toolchain for the `mipsel-zkm-zkvm-elf` target into a MIPS32r2 ELF binary. The ELF image, loaded into memory, fixes the program the proof is about.
 
-  Emulates MIPS instructions while generating execution traces with embedded constraints (ALU, memory consistency, range checks, etc.) and treating columns of execution traces as polynomials.
-- STARK Proof Generation
+- **Execution.** The executor runs the ELF, either with an interpreter or with a just-in-time compiler, and cuts the run into shards. For each shard it records the events (instructions, memory accesses, syscalls and precompile calls) the prover needs.
 
-  Compiles traces into Plonky3 AIR (Algebraic Intermediate Representation), and proves the constraints using the Fast Reed-Solomon Interactive Oracle Proof of Proximity (FRI) technique.
-- STARK Compression and STARK-to-SNARK Proof Recursion
-  
-  To produce a constant-size proof, Ziren supports first generating a recursive argument to compress STARK proofs, and then wrapping the compressed proof into a SNARK for efficient on-chain verification.
-- Verification
-  
-  The SNARK proof can be verified on-chain. The STARK proof can be verified on any verification layer for faster optimistic finalization.
+- **Arithmetization.** Every executed instruction becomes one row of the chip for its opcode family; there is no central CPU table. The branch-delay slot is carried in the machine state as a pair `(pc, next_pc)`. Chips exchange values over buses (program fetch, register and memory accesses, byte lookups, syscalls), which are checked by a lookup argument.
 
-## Core Innovations
+- **Shard proving.** Each shard is proved with one LogUp-GKR lookup argument for all of its buses and one zerocheck for all of its constraints, over the 31-bit KoalaBear field. A jagged polynomial commitment reduces the claims on the shard's columns, which have differing heights, to a single evaluation that is opened by one batched WHIR proof. Hashing uses Poseidon2.
 
+- **Recursion and compression.** A recursion tree composes the shard proofs: a leaf program verifies one shard proof, and compose programs merge contiguous ranges of proofs up to a single root. Every recursion program's verifying key must belong to an enumerated allowlist, committed to as a Merkle root (the vk root). The result is a compressed proof whose size does not grow with the execution.
 
-Ziren is the world's first MIPS-based zkVM, achieving the industry-leading performance through the following core innovations:
+- **SNARK wrapping.** For on-chain verification the compressed proof is shrunk and wrapped into a Groth16 or PLONK proof over BN254.
 
-- Ziren Compiler
-   
-  Implement the first zero-knowledge compiler for [MIPS32r2](/mips-vm/mips-vm.md). Convert standard MIPS binaries into constraint systems with deterministic execution traces using proof-system-friendly compilation and PAIR builder.
+- **Verification.** Groth16 and PLONK proofs are verified by Solidity contracts or by the `zkm-verifier` crate; core and compressed proofs are verified natively by the SDK.
 
-- "Area Minimization" Chip Design
+## Design Choices
 
-  Ziren partitions circuit constraints into highly segmented chips, strategically minimizing the total layout area while preserving logical completeness. This fine-grained decomposition enables compact polynomial representations with reduced commitment and evaluation overhead, thereby directly optimizing ZKP proof generation efficiency.
+- **MIPS32r2 execution.** The guest executes the MIPS32r2 integer instructions listed in [MIPS ISA](../mips-vm/mips-isa.md), including the branch-delay slot, with a minimal Linux ABI for runtimes such as Go (see [Linux ABI](../mips-vm/linux-abi.md)).
 
-- Multiset Hashing for Memory Consistency Checking
+- **Per-opcode chips.** Instructions are proved by narrow per-family chips rather than one wide table, so a common instruction pays only for its own columns. An addition or bitwise operation costs 33 to 37 committed cells per row, of which 29 to 32 are the shared instruction frame.
 
-  Replaces MerkleTree hashing with [Multiset Hashing](/design/memory-checking.md) for memory consistency checks, significantly reducing witness data and enabling parallel verification.
- 
-- KoalaBear Prime Field
+- **Cross-shard memory consistency by multiset hashing.** Accesses to memory that crosses shard boundaries are accumulated as points on an elliptic curve over a degree-7 extension of KoalaBear (see [Memory Consistency Checking](../design/memory-checking.md)), rather than by Merkle hashing.
 
-  Using KoalaBear Prime \\(2^{31} - 2^{24} + 1\\) instead of 64-bit Goldilocks Prime, accelerating algebraic operations in proofs.
+- **KoalaBear field.** Arithmetic is over the prime \\(2^{31} - 2^{24} + 1\\), with a degree-4 extension for challenges.
 
-- Hardware Acceleration
+- **GPU proving.** A CUDA implementation of the same protocol generates traces and proves shards on the GPU; the host only executes the guest and coordinates.
 
-  Ziren supports AVX2/512 and GPU acceleration. The GPU prover can achieve 30x faster for Core proof, 15x for Aggregation proof and 30x for BN254 Wrapping proof than CPU prover. 
- 
-- Integrating Cutting-edge Industry Advancements
+- **Formal determinism.** A Lean 4 statement that each core chip's outputs are determined by its inputs is extracted mechanically from the chip's constraints (`crates/fv`).
 
-  Ziren constructs its zero-knowledge proof system by integrating [Plonky3](https://github.com/Plonky3/Plonky3)'s optimized Fast Reed-Solomon IOP (FRI) protocol and adapting [SP1](https://github.com/succinctlabs/sp1)'s circuit builder, recursion compiler, and precompiles for the MIPS architecture.
+- **Foundations.** Ziren builds on [Plonky3](https://github.com/Plonky3/Plonky3) and adapts [SP1](https://github.com/succinctlabs/sp1)'s circuit builder, recursion compiler and precompiles for MIPS32.
 
 ## Target Use Cases
-Ziren enables universal verifiable computation via STARK proofs, including:
-- Bitcoin L2
- 
-  [GOAT Network](https://www.goat.network/) is a Bitcoin L2 built on Ziren and BitVM2 to improve the scalability and interoperability of Bitcoin. 
-  
-- ZK-OP (HybridRollups) 
-  
-  Combines optimistic rollup’s cost efficiency with validity proof verifiability, allowing users to choose withdrawal modes (fast/high-cost vs. slow/low-cost) while enhancing cross-chain capital efficiency. 
-- Entangled Rollup
 
-  Entanglement of rollups for trustless cross-chain communication, with universal L2 extension resolving fragmented liquidity via proof-of-burn mechanisms (e.g. cross-chain asset transfers).
- 
-- zkML Verification
-  Protects sensitive ML model/data privacy (e.g. healthcare), allowing result verification without exposing raw inputs (e.g. doctors validating diagnoses without patient ECG data).
+Ziren enables verifiable computation for general programs, including:
+
+- **Bitcoin L2.** [GOAT Network](https://www.goat.network/) is a Bitcoin L2 built on Ziren and BitVM2 to improve the scalability and interoperability of Bitcoin. See [Use Cases](./use-cases.md).
+
+- **ZK-OP (hybrid rollups).** Combines an optimistic rollup's cost with validity-proof verifiability, letting users choose between a fast, higher-cost withdrawal and a slow, lower-cost one.
+
+- **Entangled Rollup.** Entangles rollups for trustless cross-chain communication, with a universal L2 extension that addresses fragmented liquidity through proof-of-burn (for example, cross-chain asset transfers).
+
+- **zkML verification.** Verifies the result of a machine-learning computation without exposing the model or its inputs (for example, validating a diagnosis without revealing patient data).

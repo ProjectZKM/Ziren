@@ -59,3 +59,11 @@ docs/paper/sections/old/
 
 # Soundness working notes stay local; they are not release material.
 docs/soundness/
+
+# Lean chip determinism files are generated (crates/fv/lean4/check/regen_all.sh), not committed
+crates/fv/lean4/ZirenDet/Chips/
+crates/fv/lean4/ZirenDet/Chips.lean
+__pycache__/
+picus_out/
+crates/fv/lean4/snippets/tools/
+crates/fv/lean4/check/

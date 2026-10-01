@@ -18,6 +18,7 @@ use zkm_picus::{
         build_selector_env, extract_module, ColumnOutputMode, ExtractionConfig, PicusBuilder,
         ShrCarrySummaryMode, SubmoduleMode,
     },
+    propagate::{analyze, Verdict},
 };
 
 #[derive(Parser, Debug)]
@@ -67,6 +68,20 @@ struct Args {
     /// Do not specialize `is_real = 1` (extract padding rows too).
     #[arg(long = "keep-padding", default_value_t = false)]
     pub keep_padding: bool,
+
+    /// Run the determinism propagation triage on every extracted module and write nothing.
+    #[arg(long, default_value_t = false)]
+    pub analyze: bool,
+
+    /// Run the triage before writing Lean and replay each determined module's derivation as
+    /// its determinism proof.
+    #[arg(long, default_value_t = false)]
+    pub derive: bool,
+
+    /// With `--derive`: admit open steps with `sorry` (report every one) instead of falling
+    /// back to `picus_det`.
+    #[arg(long = "derive-diagnose", default_value_t = false)]
+    pub derive_diagnose: bool,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -268,6 +283,8 @@ fn main() {
             .collect()
     };
 
+    zkm_picus::lean::REPLAY_DIAGNOSE
+        .store(args.derive_diagnose, std::sync::atomic::Ordering::Relaxed);
     let mut failures = Vec::new();
     for chip in selected {
         println!("Extracting {} .....", chip.name());
@@ -280,6 +297,44 @@ fn main() {
                 continue;
             }
         };
+        zkm_picus::propagate::set_names(names.clone());
+        if args.analyze || args.derive {
+            for (name, m) in program.modules() {
+                if name == "top" || !name.starts_with(&chip.name()) {
+                    continue;
+                }
+                let verdict = analyze(m);
+                let line = match &verdict {
+                    Verdict::Determined { branches, rules, lemmas, .. } if lemmas.is_empty() => {
+                        format!("DETERMINED branches={branches} rules={rules:?}")
+                    }
+                    Verdict::Determined { branches, rules, lemmas, .. } => {
+                        format!("DETERMINED branches={branches} rules={rules:?} lemmas={lemmas:?}")
+                    }
+                    Verdict::Stuck { branches, stuck_outputs, opaque } => {
+                        let shown: Vec<String> = stuck_outputs
+                            .iter()
+                            .take(12)
+                            .map(|v| names.get(v).cloned().unwrap_or_else(|| format!("expr{v}")))
+                            .collect();
+                        format!(
+                            "STUCK branches={branches} opaque={opaque} stuck={} [{}]",
+                            stuck_outputs.len(),
+                            shown.join(", ")
+                        )
+                    }
+                    Verdict::TooManyBranches => "TOO_MANY_BRANCHES".to_string(),
+                    Verdict::Timeout => "TIMEOUT".to_string(),
+                };
+                println!("ANALYZE {name} {line}");
+                if let Verdict::Determined { derivation, .. } = verdict {
+                    zkm_picus::lean::DERIVATIONS.lock().unwrap().insert(name.clone(), derivation);
+                }
+            }
+            if !args.derive {
+                continue;
+            }
+        }
         if matches!(args.format, Format::Picus | Format::Both) {
             let path = args.picus_out_dir.join(format!("{}.picus", chip.name()));
             program.write_to_path(&path).unwrap_or_else(|e| panic!("write {path:?}: {e}"));

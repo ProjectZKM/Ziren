@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 pub mod edwards;
 pub mod params;
 // pub mod polynomial;

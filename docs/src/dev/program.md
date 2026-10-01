@@ -1,17 +1,10 @@
 # Program
 
-The setting of Ziren is that Prover runs a public program on private inputs
-and wants to convince Verifier that the program has executed correctly and produces an
-asserted output, without revealing anything about the computation’s input or intermediate
-state.
+In Ziren, a prover runs a public program on private inputs and wants to convince a verifier that the program executed correctly and produced the asserted output, without revealing anything about the inputs or the intermediate state of the computation.
 
 ![program](/dev/program.jpg)
 
-We consider all the inputs as private, the program and output should be public.
+All inputs are private; the program and its committed output are public.
 
-The program can be separated into 2 parts from a developer's perspective, the program to be proved and the program to prove. 
-The former program we call it [`guest`](/dev/guest-program.md), and the latter is [`host`](/dev/host-program.md).
-
-
-
-
+From a developer's perspective a Ziren application has two parts: the program to be proved and the program that proves it.
+The former is called the [`guest`](/dev/guest-program.md), and the latter the [`host`](/dev/host-program.md).

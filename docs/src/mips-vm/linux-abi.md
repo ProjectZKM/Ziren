@@ -9,7 +9,7 @@ Ziren runs MIPS guest programs compiled against a Linux userspace ABI. The guest
 1. **Executes** the syscall in the host executor (producing a concrete result), then
 2. **Proves** that the result is correct via AIR constraints in the `SysLinuxChip`.
 
-The guest never touches real kernel code. The zkVM emulates a minimal Linux kernel that supports memory management, basic I/O, and process lifecycle — enough to run programs compiled with standard C/Go/Rust toolchains targeting MIPS.
+The guest never touches real kernel code. The zkVM emulates a minimal Linux kernel that supports memory management, basic I/O, and process lifecycle, enough to run programs compiled with standard C/Go/Rust toolchains targeting MIPS.
 
 ## Architecture
 
@@ -39,7 +39,7 @@ The guest never touches real kernel code. The zkVM emulates a minimal Linux kern
            |   send_syscall()   |     |   receive_syscall()    |
            |        |           |     |         |              |
            | SyscallChip(Core)  |     |    SysLinuxChip        |
-           |  receive_syscall() |     |    (81 columns)        |
+           |  receive_syscall() |     |                        |
            +--------|-----------+     +---------|------------- +
                     |                           |
                     |   global lookup message:  |
@@ -70,7 +70,7 @@ All registers are 32-bit (`u32`). In the AIR, each is represented as `Word<T>` =
 
 ## Supported Linux Syscalls
 
-### SYS_MMAP (4210) / SYS_MMAP2 (4090) — Memory Mapping
+### SYS_MMAP (4210) / SYS_MMAP2 (4090): Memory Mapping
 
 Used by the guest allocator to request memory pages.
 
@@ -112,7 +112,7 @@ Where `not_aligned = 1` when `page_offset != 0` (round up to next page). The car
 Heap update uses bytewise `AddOperation` (4 x u8 + 3 carry bits):
 `new_heap = old_heap + mmap_size`.
 
-### SYS_BRK (4045) — Program Break
+### SYS_BRK (4045): Program Break
 
 | Arg | Width | Semantics |
 |-----|-------|-----------|
@@ -123,7 +123,7 @@ Heap update uses bytewise `AddOperation` (4 x u8 + 3 carry bits):
 
 AIR uses `GtColsBytes` (bytewise greater-than with complementary LTU lookups) to compare `a0` against the BRK register.
 
-### SYS_CLONE (4120) — Process Clone (Simulated)
+### SYS_CLONE (4120): Process Clone (Simulated)
 
 | Arg | Width | Semantics |
 |-----|-------|-----------|
@@ -134,7 +134,7 @@ AIR uses `GtColsBytes` (bytewise greater-than with complementary LTU lookups) to
 
 Threading is not implemented. The syscall always returns 1 (simulated parent PID).
 
-### SYS_EXIT_GROUP (4246) — Terminate Execution
+### SYS_EXT_GROUP (4246): `exit_group`, Terminate Execution
 
 | Arg | Width | Semantics |
 |-----|-------|-----------|
@@ -143,20 +143,20 @@ Threading is not implemented. The syscall always returns 1 (simulated parent PID
 | **return** `v0` | 32-bit | Always `0x00000000`. |
 | **output** `A3` | 32-bit | Always `0x00000000`. |
 
-Sets `next_pc = 0` and records the exit code. Equivalent to `HALT`.
+Sets `next_pc = 0` and records the exit code. Equivalent to `HALT`: the executor reports a nonzero exit code as an execution error (`HaltWithNonZeroExitCode`).
 
-### SYS_READ (4003) — Read from File Descriptor
+### SYS_READ (4003): Read from File Descriptor
 
 | Arg | Width | Semantics |
 |-----|-------|-----------|
 | `a0` | 32-bit | File descriptor. Only `0` (stdin) is valid. |
 | `a1` | 32-bit | Buffer address. |
-| **return** `v0` | 32-bit | Bytes read, or `0xFFFFFFFF` on error. |
+| **return** `v0` | 32-bit | `0` (end of file) for stdin, or `0xFFFFFFFF` on error. |
 | **output** `A3` | 32-bit | `0x00000000` on success, `0x00000009` (EBADF) on invalid fd. |
 
-Only stdin (fd 0) is supported. All other fds return -1 with EBADF.
+Only stdin (fd 0) is accepted, and it reads no bytes: guest input is provided through the hint syscalls (`SYSHINTLEN`, `SYSHINTREAD`), not through `read`. All other fds return -1 with EBADF.
 
-### SYS_WRITE (4004) — Write to File Descriptor
+### SYS_WRITE (4004): Write to File Descriptor
 
 | Arg | Width | Semantics |
 |-----|-------|-----------|
@@ -168,7 +168,7 @@ Only stdin (fd 0) is supported. All other fds return -1 with EBADF.
 
 AIR constrains `inorout.value == inorout.prev_value` (read-only guard on A2 memory access).
 
-### SYS_FCNTL (4055) — File Control
+### SYS_FCNTL (4055): File Control
 
 | Arg | Width | Semantics |
 |-----|-------|-----------|
@@ -193,7 +193,7 @@ Full case matrix:
 
 AIR uses bidirectional `IsZeroOperation` decoders on `a0` (3 decoders) and `a1` (2 decoders) with exhaustive branch constraints.
 
-### NOP Syscalls — No Operation
+### NOP Syscalls: No Operation
 
 | Arg | Width | Semantics |
 |-----|-------|-----------|
@@ -218,8 +218,13 @@ AIR uses bidirectional `IsZeroOperation` decoders on `a0` (3 decoders) and `a1` 
 | SYS_CLOCK_GETTIME | 4263 |
 | SYS_OPENAT | 4288 |
 | SYS_PRLIMIT64 | 4338 |
+| SYS_UNAME | 4122 |
+| SYS_PRCTL | 4192 |
+| SYS_FUTEX_TIME64 | 4422 |
 
-Any unrecognized Linux syscall ID also falls into the NOP path.
+The last three are called by newer Go runtimes. From Go 1.25 the runtime calls `prctl` to name memory regions and threads, and ignores the result. From Go 1.27 it calls `uname` at startup to decide whether `futex_time64` exists; the no-op returns success with a zeroed `utsname`, which the runtime cannot parse, so the runtime probes `futex_time64`, receives 0, and uses the 64-bit time path.
+
+The executor rejects any syscall number not listed on this page or in [MIPS ISA](./mips-isa.md) with `UnsupportedSyscall`. In the `SysLinuxChip` constraints, a Linux syscall ID that is not one of the handled calls (MMAP, MMAP2, BRK, CLONE, EXIT_GROUP, READ, WRITE, FCNTL) is treated as a no-op, so every ID the executor accepts as a no-op is proved by the NOP branch.
 
 ## Cross-Shard Verification
 
@@ -262,8 +267,8 @@ Ziren supports two categories of syscalls, distinguished by the encoding of the 
 
 The `SyscallInstrsChip` examines byte 1 of the syscall code (`prev_a_value[1]`):
 
-- `byte[1] != 0` → **Linux syscall** — routes to `SysLinuxChip` via lookup
-- `byte[1] == 0` → **Precompile syscall** — routes to the precompile's dedicated chip
+- `byte[1] != 0` → **Linux syscall**, routed to `SysLinuxChip` via lookup
+- `byte[1] == 0` → **Precompile syscall**, routed to the precompile's dedicated chip
 
 This is enforced bidirectionally via an `IsZeroOperation`, preventing a malicious prover from misrouting a precompile call into the Linux path or vice versa.
 
@@ -295,9 +300,9 @@ The key distinction: linux syscalls need **byte-level** argument constraints (e.
 
 The `SysLinuxChip` enforces these key properties (all proven bidirectionally):
 
-1. **Syscall routing**: Each Linux syscall ID maps to exactly one handler branch. Bidirectional `IsZeroOperation` decoders prevent misrouting (e.g., CLONE cannot be routed to NOP).
+1. **Syscall routing**: Each Linux syscall ID maps to exactly one handler branch, and IDs outside the handled set take the NOP branch. Bidirectional `IsZeroOperation` decoders prevent misrouting (e.g., CLONE cannot be routed to NOP).
 
-2. **Argument decoding**: `a0 == 0/1/2` and `a1 == 1/3` flags are bidirectional — when the argument matches a known value, the flag MUST be set.
+2. **Argument decoding**: `a0 == 0/1/2` and `a1 == 1/3` flags are bidirectional: when the argument matches a known value, the flag MUST be set.
 
 3. **Result correctness**: Every branch constrains both `result` (V0) and `output` (A3) to specific values matching the executor semantics.
 
@@ -305,4 +310,4 @@ The `SysLinuxChip` enforces these key properties (all proven bidirectionally):
 
 5. **Page alignment**: MMAP size is constrained byte-by-byte. Low 12 bits of `mmap_size` are structurally zero (byte0 = 0, byte1 is always a multiple of 16). No field `reduce()` is used.
 
-6. **Cross-shard linkage**: Two global lookups per syscall — one for collision-resistant argument matching (half-word packed), one for result consistency. U16Range checks on all half-words ensure canonical decomposition for both linux and non-linux syscalls.
+6. **Cross-shard linkage**: Two global lookups per syscall: one for collision-resistant argument matching (half-word packed), one for result consistency. U16Range checks on all half-words ensure canonical decomposition for both linux and non-linux syscalls.

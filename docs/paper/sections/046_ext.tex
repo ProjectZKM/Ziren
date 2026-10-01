@@ -1,0 +1,77 @@
+\subsection{Chips for the extended instruction set and system calls}
+\label{sec:ext}
+
+Each of these instructions is still one row of one chip, which carries as columns the work a lookup-based design spreads over a sequence of virtual instructions~\citep{jolt}, and \texttt{HI} (register 33) is written by a second access at sub-cycle position 4. That access raises eight interactions, counted as ``an access'' in the tables below: a send and a receive on the memory bus, two timestamp lookups, and two byte lookups each for its previous and its new word.
+
+\subsubsection{Multiplication}
+\label{sec:ext-mul}
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Instructions & Chip (width), frame & Result & Added lookups \\
+\midrule
+\texttt{mul} & \texttt{Mul} (74), R & $a = b \cdot c \bmod 2^{32}$ & 14, and an access \\
+\texttt{mult}, \texttt{multu} & \texttt{Mul} (74), R & $(\texttt{HI}, \texttt{LO}) = b \cdot c$, signed or unsigned & 14, and an access \\
+\texttt{madd}, \texttt{maddu}, \texttt{msub}, \texttt{msubu} & \texttt{MiscInstrs} (432), universal & $(\texttt{HI}, \texttt{LO}) \mathrel{\pm}= b \cdot c$ & 26, and an access \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A 64-bit product exceeds the field, so it is formed as a convolution of bytes. Both operands are extended to eight bytes, with $\mathtt{0xFF}$ times the sign bit for the signed forms \texttt{mult}, \texttt{madd} and \texttt{msub} (two \texttt{MSB} lookups) and zeros otherwise; the sign extension does in the row what Jolt's virtual sequence for signed high multiplication does~\citep{jolt}. The uncarried convolution $m_k = \sum_{i+j=k} b_i c_j$, $k < 8$, is tied to witnessed product bytes $\pi_k$ and carries $\theta_k$ by $m_k + \theta_{k-1} = \pi_k + 256\,\theta_k$, with carries range-checked to 16 bits and product bytes to 8. The low word $\pi_{0..3}$ goes to $\mathsf{op\_a}$ (\texttt{LO} for \texttt{mult} and \texttt{multu}, $\mathsf{rd}$ for \texttt{mul}) and the high word to \texttt{HI}. The multiply--accumulate forms add the same product to the 64-bit $(\texttt{HI}, \texttt{LO})$ with a byte-carry addition, and prove a subtraction as the addition that undoes it.
+
+\subsubsection{Division and remainder}
+\label{sec:ext-div}
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Instructions & Chip (width), frame & Result & Added lookups \\
+\midrule
+\texttt{div}, \texttt{divu} & \texttt{DivRem} (163), R & $\texttt{LO} = q$, $\texttt{HI} = r$ with $b = qc + r$, $|r| < |c|$ & 36, and an access \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+As in Jolt~\citep{jolt}, the prover supplies the quotient $q$ and remainder $r$ as advice and the row checks them; Jolt's check is eight virtual instructions; here it is 131 columns beyond the frame. $qc$ is formed by the \texttt{Mul} convolution, signed for \texttt{div}, and $r$, sign-extended to eight bytes, is added with byte carries; the low word of the sum must equal $b$ and the high word its sign extension. The remainder takes the dividend's sign, and $|r| < |c|$ compares absolute values, each proved by an addition to zero when negative, with the one-flag comparison of \texttt{Lt}. The overflowing case $b = -2^{31}$, $c = -1$ is detected by two word-equality tests and exempts the high word. Division by zero is an execution error (\S\ref{sec:isa-emulator}), and the row asserts $c \neq 0$.
+
+\subsubsection{Bit manipulation and conditional moves}
+\label{sec:ext-bits}
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Instructions & Chip (width), frame & Result & Added lookups \\
+\midrule
+\texttt{clz}, \texttt{clo} & \texttt{CloClz} (93), I & leading zeros of $b$, or of $\neg b$ & 28 \\
+\texttt{movz}, \texttt{movn} & \texttt{MovCond} (49), universal & $a = b$ if $[c = 0]$ (resp.\ $\neq$), else $a$ unchanged & none \\
+\texttt{wsbh} & \texttt{MovCond} (49), universal & $a = (b_1, b_0, b_3, b_2)$ & none \\
+\texttt{seb}, \texttt{seh} & \texttt{MiscInstrs} (432), universal & $b_0$ or $(b_0, b_1)$, sign-extended & 1 \texttt{MSB} \\
+\texttt{ext}, \texttt{ins} & \texttt{MiscInstrs} (432), universal & bit-field extract, insert & up to 113 \\
+\texttt{teq} & \texttt{MiscInstrs} (432), universal & no trap: $a \neq b$ & none \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{clo} is \texttt{clz} of the complemented word. For \texttt{clz}, the zero word yields 32; otherwise the row proves, with the right-shift construction of \S\ref{sec:base-shift} inlined, that shifting $b$ right by $31 - a$ leaves exactly 1, and an \texttt{LTU} lookup bounds $a$ by 32. The conditional moves test $c = 0$ by two witnessed inverses on its 16-bit halves and select between $b$ and the previous value of $\mathsf{op\_a}$, which the frame's read--write access carries; \texttt{wsbh} is a byte permutation. \texttt{ext} is a left shift followed by a right shift, and \texttt{ins} rotates the destination, shifts, adds the shifted source and rotates back. These rare opcodes share \texttt{MiscInstrs}, whose opcode-specific columns overlap in a union, so the row is as wide as \texttt{ins} and every lookup is gated by an opcode selector. \texttt{teq} is provable only when it does not trap.
+
+\subsubsection{System calls}
+\label{sec:ext-syscall}
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Instructions & Chip (width), frame & Effect & Added interactions \\
+\midrule
+\texttt{syscall} & \texttt{SyscallInstrs} (68), R & sends $\mathit{id}$, $b$, $c$ as 16-bit halves & 2 \texttt{LTU}, 2 syscall-bus \\
+Linux ABI calls & \texttt{SysLinux} (100), none & \texttt{brk}, \texttt{mmap}, \texttt{read}, \texttt{write}, \ldots & up to 50, gated \\
+accelerators & per precompile, none & a hash or curve operation in memory & per chip \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{SYSCALL} is the one place a row hands work to another table. The call number in \texttt{\$v0} is read as bytes: the low two are the call identifier, the third says whether the call is sent to a table, and the fourth is a count of extra clock ticks, by which the frame advances the clock beyond five so that a precompile's memory accesses fit before the successor. The two arguments travel on the syscall bus as exact 16-bit halves with a Linux flag. A halting call sets the next program counter to zero and exposes its first argument as the public exit code; a commit call compares its argument with the public output digest. \texttt{SysLinux} receives the Linux-ABI calls and performs their memory accesses at the calling cycle, and the precompile chips of \S\ref{sec:isa} receive accelerator calls, routed across shards through the digest or, with Merkle roots, proved in the shard that issues them (\S\ref{sec:air-global}). The Jolt design~\citep{jolt} has no precompile tables; cryptographic operations there are compiled into sequences of ordinary and virtual instructions.

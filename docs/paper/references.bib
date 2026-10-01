@@ -11,7 +11,6 @@
   title        = {{sp1-jit: Just-in-time RISC-V executor for SP1}},
   howpublished = {\url{https://github.com/succinctlabs/sp1}},
   year         = {2025},
-  note         = {Component of the SP1 repository.}
 }
 
 @misc{ziren,
@@ -49,6 +48,7 @@
   title        = {{Jagged Polynomial Commitments (or: How to Stack Multilinears)}},
   howpublished = {Cryptology ePrint Archive, Paper 2025/917},
   year         = {2025},
+  note         = {Version of April 10, 2026},
   url          = {https://eprint.iacr.org/2025/917}
 }
 
@@ -125,10 +125,12 @@
 }
 
 @misc{cairo,
-  author       = {{StarkWare Industries}},
-  title        = {{Cairo: A Turing-complete STARK-friendly CPU architecture}},
-  howpublished = {\url{https://www.cairo-lang.org}},
-  year         = {2021}
+  author       = {Lior Goldberg and Shahar Papini and Michael Riabzev},
+  title        = {{Cairo -- a Turing-complete STARK-friendly CPU architecture}},
+  howpublished = {Cryptology ePrint Archive, Paper 2021/1063},
+  year         = {2021},
+  note         = {Revision of February 2025},
+  url          = {https://eprint.iacr.org/2021/1063}
 }
 
 @misc{cannon,
@@ -198,7 +200,6 @@
   title        = {{Building Cryptographic Proofs from Hash Functions}},
   year         = {2024},
   howpublished = {\url{https://github.com/hash-based-snargs-book}},
-  note         = {Textbook treatment of the {BCS} transformation, round-by-round soundness and state restoration}
 }
 
 @misc{soundcalc,
@@ -216,11 +217,11 @@
 }
 
 @misc{sp1-hypercube,
-  title        = {{SP1 Hypercube}: Real-Time Proving of {Ethereum} Blocks},
+  title        = {{SP1 Hypercube}: Proving {Ethereum} in Real-Time},
   author       = {{Succinct Labs}},
   year         = {2025},
   howpublished = {\url{https://blog.succinct.xyz/sp1-hypercube/}},
-  note         = {Technical report and open-source implementation}
+  note         = {Announcement, May 20, 2025},
 }
 
 @misc{jolt,
@@ -237,6 +238,20 @@
   howpublished = {EUROCRYPT 2024; Cryptology ePrint Archive, Paper 2023/1216},
 }
 
+@inproceedings{vram,
+  author       = {Yupeng Zhang and Daniel Genkin and Jonathan Katz and Dimitrios Papadopoulos and Charalampos Papamanthou},
+  title        = {{vRAM}: Faster Verifiable {RAM} with Program-Independent Preprocessing},
+  booktitle    = {IEEE Symposium on Security and Privacy (S\&P)},
+  year         = {2018}
+}
+
+@inproceedings{spice,
+  author       = {Srinath Setty and Sebastian Angel and Trinabh Gupta and Jonathan Lee},
+  title        = {Proving the Correct Execution of Concurrent Services in Zero-Knowledge},
+  booktitle    = {USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
+  year         = {2018}
+}
+
 @misc{ceno,
   title        = {Ceno: Non-uniform, Segment and Parallel Zero-Knowledge Virtual Machine},
   author       = {Tianyi Liu and Zhenfei Zhang and Yuncong Zhang and Wenqing Hu and Ye Zhang},
@@ -245,10 +260,11 @@
 }
 
 @misc{openvm,
-  title        = {{OpenVM}: A Performant and Modular {zkVM} Framework},
-  author       = {{Axiom}},
-  year         = {2024},
+  title        = {{OpenVM} Whitepaper},
+  author       = {{OpenVM Contributors}},
+  year         = {2026},
   howpublished = {\url{https://openvm.dev/whitepaper.pdf}},
+  note         = {Version of July 21, 2026}
 }
 
 @misc{valida,
@@ -262,7 +278,8 @@
   title        = {Nexus 1.0: Enabling Verifiable Computation},
   author       = {{Nexus Labs}},
   year         = {2024},
-  howpublished = {\url{https://whitepaper.nexus.xyz/}},
+  howpublished = {\url{https://nexus-xyz.github.io/assets/nexus_whitepaper.pdf}},
+  note         = {January 2024}
 }
 
 @misc{zisk,
@@ -277,7 +294,6 @@
   author       = {{Cysic}},
   year         = {2025},
   howpublished = {\url{https://cysic.xyz}},
-  note         = {Listed on the public block-proving dashboard~\cite{ethproofs}},
 }
 
 @misc{airbender,
@@ -344,7 +360,7 @@
 }
 
 @misc{kona,
-  title        = {Kona: A Rust Implementation of the {OP Stack} Fault-Proof Program},
+  title        = {Kona: A {Rust} Implementation of the {OP Stack} Fault-Proof Program},
   author       = {{OP Labs}},
   year         = {2024},
   howpublished = {\url{https://github.com/op-rs/kona}},
@@ -382,14 +398,14 @@
   author = {{MIPS Tech LLC}},
   title = {{IP} Processors},
   howpublished = {\url{https://mips.com/products/hardware/}},
-  note = {States ``over 8.5B MIPS-based devices shipped''. Accessed September 2026},
+  note         = {Accessed September 2026},
   year = {2026}
 }
 @misc{mediatek-mt7621,
   author = {{MediaTek Inc.}},
   title = {{MT7621A/N} dual-core network processor},
   howpublished = {\url{https://www.mediatek.com/products/home-networking/mt7621}},
-  note = {880\,MHz MIPS 1004KEc dual-core Wi-Fi/router SoC. Accessed September 2026},
+  note         = {Accessed September 2026},
   year = {2026}
 }
 @misc{openwrt-targets,
@@ -467,14 +483,12 @@
   year = {2024},
   month = dec,
   howpublished = {\url{https://www.o1labs.org/blog/applied-cryptography-team-roadmap}},
-  note = {Describes o1VM's MIPS and RISC-V modes}
 }
 @misc{openvm-fv,
   author = {{OpenVM Project}},
   title = {Formal Verification of the {OpenVM} {RISC-V}, {Keccak}, and {SHA-2} Extensions},
   year = {2026},
   howpublished = {\url{https://github.com/openvm-org/openvm-fv}},
-  note = {Lean proofs extracted from OpenVM v2.0.0}
 }
 
 @misc{aws-f2,
@@ -498,7 +512,6 @@
   title        = {{Twist} and {Shout}: faster memory checking arguments via one-hot addressing and increments},
   year         = {2025},
   howpublished = {Cryptology ePrint Archive, Paper 2025/105},
-  note         = {Adopted by Jolt from v0.2.0 in place of Lasso and Spice}
 }
 
 @misc{sp1-security,
@@ -521,19 +534,141 @@
   author       = {Supranational},
   title        = {sppark: Zero-knowledge template library for accelerating {SNARK} provers},
   howpublished = {\url{https://github.com/supranational/sppark}},
-  note         = {Apache-2.0; the inline-PTX Montgomery field primitives used here are
-                  \texttt{ff/mont\_t.cuh} and \texttt{ff/ptx.cuh} by Dag Arne Osvik. Retrieved
-                  2026-09-25},
+  note         = {Retrieved 2026-09-25},
   year         = {2025},
 }
 
 @misc{mips32-isa,
   author       = {{MIPS Technologies}},
-  title        = {{MIPS32} Architecture For Programmers Volume II-A: The {MIPS32} Instruction Set},
+  title        = {{MIPS32} Architecture For Programmers Volume {II-A}: The {MIPS32} Instruction Set},
   howpublished = {Document MD00086},
-  note         = {The branch-delay behaviour this paper relies on is specified by the
-                  architecture, not left to an implementation: for both conditional branches and
-                  jumps, the instruction in the delay slot executes before control transfers,
-                  and for conditional branches it executes whether or not the branch is taken},
   year         = {2010},
+}
+
+@misc{swirl,
+  title        = {{SWIRL}: Stacked {WHIR} with Interaction Reductions via {LogUp}},
+  author       = {{OpenVM Contributors}},
+  year         = {2026},
+  howpublished = {\url{https://openvm.dev/swirl.pdf}},
+  note         = {March 13, 2026}
+}
+
+@misc{openvm-logup,
+  title        = {On the Soundness of Interactions via {LogUp}},
+  author       = {{OpenVM Contributors}},
+  year         = {2026},
+  howpublished = {\url{https://github.com/openvm-org/stark-backend}},
+}
+
+@misc{ceno-repo,
+  title        = {Ceno},
+  author       = {{Scroll}},
+  year         = {2026},
+  howpublished = {\url{https://github.com/scroll-tech/ceno}},
+  note         = {Revision 7c58fdd4, retrieved 2026-09-24}
+}
+
+@misc{sp1-docs,
+  title        = {{SP1} Proof System},
+  author       = {{Succinct Labs}},
+  year         = {2026},
+  howpublished = {\url{https://docs.succinct.xyz}},
+}
+
+@misc{sp1-turbo-memo,
+  title        = {{SP1 V4 Turbo}: Memory Argument via Elliptic Curve based Multiset Hashing},
+  author       = {Gyumin Roh and Ron D. Rothblum},
+  year         = {2024},
+  howpublished = {Succinct Labs technical memo},
+  note         = {December 2024}
+}
+
+@misc{nexus3,
+  title        = {Nexus {zkVM} 3.0 Specification},
+  author       = {{Nexus Labs}},
+  year         = {2025},
+  howpublished = {\url{https://specification.nexus.xyz/}},
+  note         = {March 2025}
+}
+
+@inproceedings{bellare-micciancio,
+  author       = {Mihir Bellare and Daniele Micciancio},
+  title        = {A New Paradigm for Collision-Free Hashing: Incrementality at Reduced Cost},
+  booktitle    = {Advances in Cryptology -- EUROCRYPT},
+  year         = {1997}
+}
+
+@inproceedings{multiset-hash,
+  author       = {Dwaine Clarke and Srinivas Devadas and Marten van Dijk and Blaise Gassend and G. Edward Suh},
+  title        = {Incremental Multiset Hash Functions and Their Application to Memory Integrity Checking},
+  booktitle    = {Advances in Cryptology -- ASIACRYPT},
+  year         = {2003}
+}
+
+@article{ec-multiset-hash,
+  author       = {Jeremy Maitin-Shepard and Mehdi Tibouchi and Diego F. Aranha},
+  title        = {Elliptic Curve Multiset Hash},
+  journal      = {The Computer Journal},
+  year         = {2017}
+}
+
+@inproceedings{cms19,
+  author    = {Alessandro Chiesa and Peter Manohar and Nicholas Spooner},
+  title     = {Succinct Arguments in the Quantum Random Oracle Model},
+  booktitle = {Theory of Cryptography Conference (TCC)},
+  year      = {2019},
+  note      = {Cryptology ePrint Archive, Paper 2019/834}
+}
+
+@inproceedings{bht98,
+  author    = {Gilles Brassard and Peter H{\o}yer and Alain Tapp},
+  title     = {Quantum Cryptanalysis of Hash and Claw-Free Functions},
+  booktitle = {LATIN'98: Theoretical Informatics},
+  series    = {LNCS},
+  volume    = {1380},
+  pages     = {163--169},
+  year      = {1998}
+}
+
+@article{shor97,
+  author  = {Peter W. Shor},
+  title   = {Polynomial-Time Algorithms for Prime Factorization and Discrete Logarithms on a Quantum Computer},
+  journal = {SIAM Journal on Computing},
+  volume  = {26},
+  number  = {5},
+  pages   = {1484--1509},
+  year    = {1997}
+}
+
+@inproceedings{funky26,
+  author       = {Alessandro Chiesa and Ziyi Guan and Christian Knabenhans and Zihan Yu},
+  title        = {{On the Fiat--Shamir Security of Succinct Arguments from Functional Commitments}},
+  booktitle    = {Advances in Cryptology --- CRYPTO 2026},
+  pages        = {189--213},
+  year         = {2026},
+  doi          = {10.1007/978-3-032-35424-2_7}
+}
+
+@misc{blake3,
+  author       = {Jack O'Connor and Jean-Philippe Aumasson and Samuel Neves and Zooko Wilcox-O'Hearn},
+  title        = {{BLAKE3}: one function, fast everywhere},
+  year         = {2020},
+  howpublished = {\url{https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf}}
+}
+
+@misc{zisk-lthash,
+  author       = {Hector Massip},
+  title        = {Secure Challenge Derivation in {ZisK}},
+  howpublished = {ZisK blog},
+  year         = {2025},
+  month        = oct,
+  url          = {https://zisk.technology/secure-challenge-derivation-in-zisk/}
+}
+
+@misc{lthash,
+  author       = {Kevin Lewi and Wonho Kim and Ilya Maykov and Stephen Weis},
+  title        = {Securing Update Propagation with Homomorphic Hashing},
+  howpublished = {Cryptology ePrint Archive, Paper 2019/227},
+  year         = {2019},
+  url          = {https://eprint.iacr.org/2019/227}
 }

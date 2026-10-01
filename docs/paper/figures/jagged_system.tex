@@ -1,163 +1,66 @@
-% Figure 5: physical commitments, logical jagged reduction, and authenticated closing claims.
+% The jagged commitment: (a) sparse column view, (b) dense representation with
+% two ordered input rounds and the aligned indicator W.
 \begin{tikzpicture}[
   font=\scriptsize,
-  cell0/.style={draw=zirenblue!90, fill=zirenblue!16, line width=0.55pt},
-  cell1/.style={draw=zirenorange!90!black, fill=zirenorange!17, line width=0.55pt},
-  pad0/.style={draw=zirenblue!75, fill=white, pattern=north east lines,
-               pattern color=zirenblue!42, line width=0.55pt},
-  pad1/.style={draw=zirenorange!78, fill=white, pattern=north east lines,
-               pattern color=zirenorange!42, line width=0.55pt},
-  implicit/.style={draw=zirenslate!65, densely dashed, fill=zirenslate!4, line width=0.55pt},
-  box/.style={rectangle, rounded corners=2pt, draw=zirenslate!78, fill=white,
-              align=center, minimum height=0.82cm, inner sep=4pt, line width=0.6pt},
-  root/.style={rectangle, rounded corners=2pt, draw=zirenslate!80, fill=white,
-               minimum width=0.92cm, minimum height=0.42cm, inner sep=2pt,
-               font=\scriptsize\bfseries},
-  badge/.style={circle, draw=zirenteal!90, fill=zirenteal!12,
-                minimum size=0.36cm, inner sep=0pt, font=\tiny\bfseries},
-  flow/.style={-{Latex[length=1.8mm]}, line width=0.7pt, zirenteal!95!black},
-  bind/.style={-{Latex[length=1.7mm]}, line width=0.6pt, zirenslate!75},
-  lab/.style={font=\scriptsize, text=zirenslate},
-  tinylabel/.style={font=\tiny, text=zirenslate},
-  panel/.style={font=\scriptsize\bfseries, text=zirenslate,
-                anchor=north west, inner sep=0pt},
+  col0/.style={draw=zirenblue!90, fill=zirenblue!18, line width=0.5pt},
+  col1/.style={draw=zirenorange!90!black, fill=zirenorange!14, line width=0.5pt},
+  pad/.style={draw=zirenslate!80, fill=white, pattern=north east lines,
+              pattern color=zirenslate!60, line width=0.5pt},
+  virt/.style={draw=zirenslate!55, densely dotted, line width=0.4pt},
+  tail/.style={draw=zirenslate!65, dashed, line width=0.4pt},
+  wcell/.style={draw=zirenteal!70, fill=zirenteal!8, line width=0.4pt},
+  lab/.style={text=black!75},
+  panel/.style={font=\scriptsize\bfseries, text=black!75, anchor=west, inner sep=0pt},
 ]
 
-% (a) Physical input commitments.
-\node[panel] at (-0.10,3.34) {(a) Physical input-commitment rounds};
+% ------------------------------------------------------------------ (a) sparse
+\node[panel] at (0,3.05) {(a) Sparse: $K$ columns of heights $h_k$};
+\def\H{2.2}
+\foreach \i/\h/\s/\n in {0/1.8/col0/c_0, 1/1.3/col0/c_1, 2/0.9/col0/c_2, 3/0.8/pad/,
+                         4/2.0/col1/c_4, 5/1.2/col1/c_5, 6/0.6/pad/} {
+  \pgfmathsetmacro{\x}{0.55+0.72*\i}
+  \draw[virt] (\x,0) rectangle ++(0.56,\H);
+  \draw[\s] (\x,0) rectangle ++(0.56,\h);
+  \ifx\n\empty
+    \node[lab, font=\tiny] at (\x+0.28,-0.22) {pad};
+  \else
+    \node at (\x+0.28,-0.22) {$\mathbf{\n}$};
+  \fi
+}
+\draw[zirenslate, |-|] (0.25,0) -- node[lab, left, font=\tiny] {$2^{n}$} (0.25,\H);
+\node[lab, font=\tiny, align=left, anchor=west] at (0.55,2.55)
+  {dotted: virtual zeros above $h_k$, never committed};
 
-\node[lab, anchor=east, text=zirenblue!90!black] at (1.62,2.78)
-  {round 0};
-\draw[cell0] (1.82,2.55) rectangle (2.92,2.98);
-\draw[cell0] (2.92,2.55) rectangle (3.74,2.98);
-\draw[cell0] (3.74,2.55) rectangle (4.40,2.98);
-\draw[pad0]  (4.40,2.55) rectangle (5.08,2.98);
-\node[tinylabel] at (2.37,2.765) {$\mathbf c_0$};
-\node[tinylabel] at (3.33,2.765) {$\mathbf c_1$};
-\node[tinylabel] at (4.07,2.765) {$\mathbf c_2$};
-\node[tinylabel] at (4.74,2.765) {$0$};
-\draw[bind] (5.12,2.765) -- (5.72,2.765);
-\node[root, draw=zirenblue!80] (c0) at (6.30,2.765) {$C_0$};
+% ------------------------------------------------------------------ (b) dense
+\node[panel] at (6.2,3.05) {(b) Dense: $\mathbf Q = \mathbf q_0 \Vert \mathbf q_1$, and the indicator $W$};
+\def\y{1.75}
+% segment lengths = 0.62 * column height
+\coordinate (s0) at (6.4,\y);
+\foreach \k/\len/\s/\n [count=\c from 1, remember=\c as \pc (initially 0)] in
+    {0/1.116/col0/c_0, 1/0.806/col0/c_1, 2/0.558/col0/c_2, 3/0.496/pad/,
+     4/1.240/col1/c_4, 5/0.744/col1/c_5, 6/0.372/pad/} {
+  \path (s\pc) ++(\len,0) coordinate (s\c);
+  \draw[\s] (s\pc) rectangle ($(s\c)+(0,0.45)$);
+  \ifx\n\empty\else
+    \node at ($(s\pc)!0.5!(s\c)+(0,0.225)$) {$\mathbf{\n}$};
+  \fi
+  \draw[wcell] ($(s\pc)+(0,-0.72)$) rectangle ($(s\c)+(0,-0.30)$);
+  \node[lab, font=\tiny] at ($(s\pc)+(0,0.62)$) {$t_{\k}$};
+}
+\node[lab, font=\tiny] at ($(s7)+(0,0.62)$) {$A$};
+\draw[tail, fill=zirenslate!4] (s7) rectangle ($(s7)+(0.95,0.45)$);
+\node[lab, font=\tiny] at ($(s7)+(0.475,0.225)$) {$0$};
+\node[lab, font=\tiny] at ($(s7)+(0.95,0.62)$) {$2^{m}$};
+\draw[tail] ($(s7)+(0,-0.72)$) rectangle ($(s7)+(0.95,-0.30)$);
+\node[lab, anchor=east] at ($(s0)+(-0.08,0.225)$) {$\mathbf Q$};
+\node[lab, anchor=east] at ($(s0)+(-0.08,-0.51)$) {$W$};
+\node[lab, font=\tiny, anchor=west] at ($(s7)+(1.05,-0.51)$)
+  {$W[t_k{+}j] = w_k\,\mathsf{eq}(j, \bm z_{\mathrm{row}})$};
+\node[lab, font=\tiny, anchor=west] at ($(s7)+(1.05,0.225)$) {free padding};
+% rounds and roots
+\draw[decorate, decoration={brace, mirror, amplitude=4pt}, zirenblue!80]
+  ($(s0)+(0,-0.85)$) -- node[below=4pt, text=zirenblue!85!black] {round 0 $\to$ root $C_0$} ($(s4)+(0,-0.85)$);
+\draw[decorate, decoration={brace, mirror, amplitude=4pt}, zirenorange!85!black]
+  ($(s4)+(0,-0.85)$) -- node[below=4pt, text=zirenorange!85!black] {round 1 $\to$ root $C_1$} ($(s7)+(0,-0.85)$);
 
-\node[lab, anchor=east, text=zirenorange!90!black] at (1.62,2.03)
-  {round 1};
-\draw[cell1] (1.82,1.80) rectangle (3.18,2.23);
-\draw[cell1] (3.18,1.80) rectangle (4.12,2.23);
-\draw[pad1]  (4.12,1.80) rectangle (5.08,2.23);
-\node[tinylabel] at (2.50,2.015) {$\mathbf c_4$};
-\node[tinylabel] at (3.65,2.015) {$\mathbf c_5$};
-\node[tinylabel] at (4.60,2.015) {$0$};
-\draw[bind] (5.12,2.015) -- (5.72,2.015);
-\node[root, draw=zirenorange!82] (c1) at (6.30,2.015) {$C_1$};
-
-\node[box, text width=3.55cm, fill=zirenlight] (roots) at (10.03,2.39)
-  {separate ordered roots\\[1pt]
-   transcript binds $(C_0,C_1)$};
-\draw[bind] (c0.east) -- (roots.west |- c0.east);
-\draw[bind] (c1.east) -- (roots.west |- c1.east);
-
-% (b) Aligned logical tables.
-\node[panel] at (-0.10,1.62) {(b) One logical layout for the reduction};
-
-\node[lab, anchor=east, font=\scriptsize\bfseries] at (0.95,0.73) {$Q$};
-\draw[cell0] (1.15,0.50) rectangle (2.42,0.94);
-\draw[cell0] (2.42,0.50) rectangle (3.38,0.94);
-\draw[cell0] (3.38,0.50) rectangle (4.16,0.94);
-\draw[pad0]  (4.16,0.50) rectangle (4.94,0.94);
-\draw[cell1] (4.94,0.50) rectangle (6.50,0.94);
-\draw[cell1] (6.50,0.50) rectangle (7.62,0.94);
-\draw[pad1]  (7.62,0.50) rectangle (8.70,0.94);
-\draw[implicit] (8.70,0.50) rectangle (9.86,0.94);
-\node[tinylabel] at (1.785,0.72) {$\mathbf c_0$};
-\node[tinylabel] at (2.90,0.72) {$\mathbf c_1$};
-\node[tinylabel] at (3.77,0.72) {$\mathbf c_2$};
-\node[tinylabel] at (4.55,0.72) {$0$};
-\node[tinylabel] at (5.72,0.72) {$\mathbf c_4$};
-\node[tinylabel] at (7.06,0.72) {$\mathbf c_5$};
-\node[tinylabel] at (8.16,0.72) {$0$};
-\node[tinylabel] at (9.28,0.72) {implicit $0$};
-
-\node[tinylabel, anchor=south] at (1.15,0.97) {$t_0$};
-\node[tinylabel, anchor=south] at (2.42,0.97) {$t_1$};
-\node[tinylabel, anchor=south] at (3.38,0.97) {$t_2$};
-\node[tinylabel, anchor=south] at (4.16,0.97) {$t_3$};
-\node[tinylabel, anchor=south] at (4.94,0.97) {$t_4$};
-\node[tinylabel, anchor=south] at (6.50,0.97) {$t_5$};
-\node[tinylabel, anchor=south] at (7.62,0.97) {$t_6$};
-\node[tinylabel, anchor=south] at (8.70,0.97) {$A$};
-\node[tinylabel, anchor=south] at (9.86,0.97) {$2^m$};
-
-\node[lab, anchor=east, font=\scriptsize\bfseries] at (0.95,0.03) {$W$};
-\draw[cell0] (1.15,-0.20) rectangle (2.42,0.24);
-\draw[cell0] (2.42,-0.20) rectangle (3.38,0.24);
-\draw[cell0] (3.38,-0.20) rectangle (4.16,0.24);
-\draw[pad0]  (4.16,-0.20) rectangle (4.94,0.24);
-\draw[cell1] (4.94,-0.20) rectangle (6.50,0.24);
-\draw[cell1] (6.50,-0.20) rectangle (7.62,0.24);
-\draw[pad1]  (7.62,-0.20) rectangle (8.70,0.24);
-\draw[implicit] (8.70,-0.20) rectangle (9.86,0.24);
-\node[tinylabel] at (1.785,0.02) {$w_0\chi$};
-\node[tinylabel] at (2.90,0.02) {$w_1\chi$};
-\node[tinylabel] at (3.77,0.02) {$w_2\chi$};
-\node[tinylabel] at (4.55,0.02) {$w_3\chi$};
-\node[tinylabel] at (5.72,0.02) {$w_4\chi$};
-\node[tinylabel] at (7.06,0.02) {$w_5\chi$};
-\node[tinylabel] at (8.16,0.02) {$w_6\chi$};
-\node[tinylabel] at (9.28,0.02) {$0$};
-
-\node[box, text width=3.05cm, fill=zirenblue!5] at (11.70,0.38)
-  {$W[t_k+j]=w_k\eqf(j,\bm z_{\mathrm{row}})$\\[2pt]
-   $y_3=y_6=0$ (synthetic columns)\\[2pt]
-   $T=\langle Q,W\rangle=\sum_kw_k y_k$};
-
-% (c) Proof obligations after the reduction.
-\node[panel] at (-0.10,-0.70) {(c) One reduction, two authenticated closing values};
-
-\node[box, text width=1.55cm, fill=zirenlight] (claims) at (0.95,-2.10)
-  {column claims\\$\{y_k\}$};
-
-\node[box, text width=1.70cm] (mix) at (3.16,-2.10)
-  {$w_k=\eqf(k,\bm z_c)$\\
-   $T=\sum_kw_k y_k$};
-\node[badge] at ($(mix.north west)+(0.02,0.02)$) {1};
-
-\node[box, text width=2.10cm, fill=zirenblue!6] (sumcheck) at (5.92,-2.10)
-  {Hadamard sumcheck\\
-   $T\Longrightarrow v_Qv_W$\\
-   $v_Q=\widetilde Q(\bm z^*)$};
-\node[badge] at ($(sumcheck.north west)+(0.02,0.02)$) {2};
-
-\node[box, text width=2.23cm, fill=zirenorange!7] (assist) at (9.12,-2.93)
-  {jagged assist\\
-   derives $v_W=\widetilde W(\bm z^*)$\\
-   from public $\{t_k\}$};
-\node[badge] at ($(assist.north west)+(0.02,0.02)$) {3};
-
-\node[box, text width=2.23cm, fill=zirenteal!7] (open) at (9.12,-1.30)
-  {one batched opening\\
-   authenticates $v_Q$\\
-   against ordered $(C_0,C_1)$};
-\node[badge] at ($(open.north west)+(0.02,0.02)$) {4};
-
-\node[box, text width=1.72cm, fill=zirenlight] (close) at (12.35,-2.10)
-  {accept only if\\
-   $T_{\rm final}=v_Qv_W$};
-
-\draw[flow] (claims) -- (mix);
-\draw[flow] (mix) -- (sumcheck);
-\draw[flow] (sumcheck.east) -- ++(0.40,0) |- (open.west);
-\draw[flow] (sumcheck.east) -- ++(0.40,0) |- (assist.west);
-\draw[flow] (open.east) -- ++(0.34,0) |- (close.north west);
-\draw[flow] (assist.east) -- ++(0.34,0) |- (close.south west);
-
-\node[tinylabel, anchor=north, align=center] at (6.85,-3.62)
-  {Challenges are sampled LSB-first; the assist reads $\operatorname{rev}(\bm z^*)$.\\
-   Badges give Fiat--Shamir transcript order.};
-
-% Quiet panel backgrounds, drawn last on the background layer.
-\begin{scope}[on background layer]
-  \fill[zirenblue!3, rounded corners=4pt] (-0.34,1.55) rectangle (13.55,3.55);
-  \fill[zirenorange!3, rounded corners=4pt] (-0.34,-0.42) rectangle (13.55,1.48);
-  \fill[zirenteal!3, rounded corners=4pt] (-0.34,-3.98) rectangle (13.55,-0.55);
-\end{scope}
 \end{tikzpicture}

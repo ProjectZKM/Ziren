@@ -22,7 +22,7 @@
     - [Optimizations](./dev/optimizations.md)
 - [Design](./design/design.md)
     - [State Machine](./design/chips/state-machine.md)
-        - [CPU](./design/chips/cpu.md)
+        - [Instruction Frame (CPU)](./design/chips/cpu.md)
         - [Memory](./design/chips/memory.md)
         - [ALU](./design/chips/alu.md)
         - [Flow Control](./design/chips/flow-ctrl.md)

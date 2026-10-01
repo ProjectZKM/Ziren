@@ -16,8 +16,10 @@
 //!    | `Memory` (prev / current)   | prev record = inputs      | current record = outputs  |
 //!    | `State` (shard, clk, pc, …) | next state = outputs      | current state = inputs    |
 //!    | `Syscall`                   | outputs (the call)        | inputs (the callee)       |
-//!    | `SyscallResult`             | result = outputs, args = inputs | result = inputs, args = inputs |
-//!    | `Global`                    | outputs                   | inputs                    |
+//!    | `SyscallResult`             | result = outputs of the chip computing it (`SysLinux`, `SyscallPrecompile`), inputs elsewhere; args = inputs | same |
+//!    | `Global`, `is_receive` = 1  | inputs (from another shard) | —                       |
+//!    | `Global`, `is_send` = 1     | outputs (to another shard)  | —                       |
+//!    | `Global`, flags are columns | outputs                   | inputs                    |
 //!    | chaining buses (`GlobalAccumulation`, `MemoryGlobal*Control`, `PrecompileChain`, …) | outputs | inputs |
 //!    | `Byte`                      | lowered to range / bit constraints or abstract calls  |
 //!
@@ -46,6 +48,7 @@ use crate::{
         fresh_picus_expr, partial_evaluate_expr, Felt, PicusCall, PicusConstraint, PicusExpr,
         PicusModule,
     },
+    propagate::{GadgetMark, GADGET_MARKS},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,6 +94,8 @@ pub struct PicusBuilder {
     pub constraints: Vec<SymbolicExpression<Felt>>,
     pub sends: Vec<AirLookup<SymbolicExpression<Felt>>>,
     pub receives: Vec<AirLookup<SymbolicExpression<Felt>>>,
+    /// Gadgets the AIR marked, in evaluation order (see `MessageBuilder::annotate`).
+    pub gadgets: Vec<(&'static str, Vec<AirLookup<SymbolicExpression<Felt>>>)>,
 }
 
 impl PicusBuilder {
@@ -122,6 +127,7 @@ impl PicusBuilder {
             constraints: Vec::new(),
             sends: Vec::new(),
             receives: Vec::new(),
+            gadgets: Vec::new(),
         }
     }
 }
@@ -172,6 +178,14 @@ impl MessageBuilder<AirLookup<SymbolicExpression<Felt>>> for PicusBuilder {
     fn receive(&mut self, message: AirLookup<SymbolicExpression<Felt>>, _scope: LookupScope) {
         self.receives.push(message);
     }
+
+    fn annotate<O: FnOnce() -> Vec<AirLookup<SymbolicExpression<Felt>>>>(
+        &mut self,
+        gadget: &'static str,
+        operands: O,
+    ) {
+        self.gadgets.push((gadget, operands()));
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -181,6 +195,41 @@ enum Port {
 }
 
 /// Turns one recorded evaluation into a [`PicusModule`] under a specialization environment.
+/// Chips that compute a syscall's result from its arguments (see
+/// `Emitter::handle_syscall_result`).
+const SYSCALL_RESULT_PRODUCERS: &[&str] = &["SysLinux", "SyscallPrecompile"];
+
+/// Chips whose rows are the memory's initial contents.  The words they send to the global bus
+/// are not computed from anything: the program image is fixed by the verifying key and the
+/// hint words are the prover's input, so the tuple is an input of the row and determinism is
+/// stated for what the row derives from it.
+const INITIAL_MEMORY_TABLES: &[&str] = &["MemoryGlobalInit"];
+
+/// Chips whose rows stand at a shard boundary for the accesses the shard cannot see.  Their
+/// memory-bus messages carry the timestamps the row forwards, so every field is a port: the
+/// tuple the row consumes (what the shard's last access produced) is an input with its
+/// multiplicity, and the tuple it produces for the shard's first access is an output.  On the memory bus a send consumes a
+/// tuple and a receive produces one, so the row's send is the input.
+const SHARD_BOUNDARY_TABLES: &[&str] = &["MemoryLocal"];
+
+/// Columns the determinism statement takes as inputs although no bus carries them, as
+/// `(chip, field, column within the field, origin)`: witness freedom the protocol accepts by
+/// design, which the statement names instead of quantifying away.  The Global chip's `lift_x`
+/// offset is a byte the prover picks among those that lift the message to a curve point
+/// (`GlobalLookupOperation::offset`, the first column of `lookup`); any such offset is sound
+/// because `values[6] < 2^16` keeps the encoding injective, as in SP1.
+///
+/// `KeccakSpongeControl` spreads one call over a chain of rows, one per absorbed block, and a
+/// row's place in that chain (`is_first_block`, `is_final_block`) is fixed by the other ends of
+/// its lookups, not by the row: the syscall is sent once, so exactly the call's first row
+/// receives it, and a block is final when the call's length `(block + 1)·rate` is reached, which
+/// the bus-B chain from the first row enforces.  Determinism is stated given that place.
+const CHOSEN_INPUTS: &[(&str, &str, usize, &str)] = &[
+    ("Global", "lookup", 0, "column.lookup.offset"),
+    ("KeccakSpongeControl", "is_first_block", 0, "column.is_first_block"),
+    ("KeccakSpongeControl", "is_final_block", 0, "column.is_final_block"),
+];
+
 struct Emitter<'a> {
     cfg: ExtractionConfig,
     env: &'a BTreeMap<usize, u64>,
@@ -278,6 +327,9 @@ impl<'a> Emitter<'a> {
     // Layout: values = [opcode, a1, a2, b, c]  (see `ByteAirBuilder::send_byte_pair`).
     // ----------------------------------------------------------------------------------------
 
+    /// Byte-table lookups.  Every row of the table (`bytes::ByteChip::trace`) has operands
+    /// `b, c ∈ [0, 255]` and, for AND/OR/XOR/NOR/SLL, a byte result, so a lookup implies those
+    /// ranges on top of the opcode's relation.
     fn handle_byte(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
         if matches!(multiplicity, PicusExpr::Const(0)) {
             return;
@@ -306,6 +358,21 @@ impl<'a> Emitter<'a> {
                 ));
             }
         };
+        let table_ops = [
+            ByteOpcode::AND,
+            ByteOpcode::OR,
+            ByteOpcode::XOR,
+            ByteOpcode::NOR,
+            ByteOpcode::SLL,
+            ByteOpcode::LTU,
+        ];
+        if table_ops.iter().any(|op| *op as u64 == opcode) {
+            range(self, b, 255);
+            range(self, c, 255);
+            if opcode != ByteOpcode::LTU as u64 {
+                range(self, a1, 255);
+            }
+        }
         match opcode {
             x if x == ByteOpcode::U8Range as u64 => {
                 for e in [a1, a2, b, c] {
@@ -341,17 +408,26 @@ impl<'a> Emitter<'a> {
                 }
             }
             x if x == ByteOpcode::LTU as u64 => {
-                let lt = PicusConstraint::new_lt(b.clone(), c.clone());
-                match a1 {
-                    PicusExpr::Const(1) => self.push_constraint(lt),
-                    PicusExpr::Const(0) => {
-                        self.push_constraint(PicusConstraint::new_geq(b.clone(), c.clone()))
+                let m = &multiplicity;
+                let gated = |e: &PicusExpr| e.clone() * m.clone();
+                match (a1, c) {
+                    (PicusExpr::Const(1), PicusExpr::Const(k)) if *k >= 1 => {
+                        self.push_constraint(PicusConstraint::new_lt(gated(b), c.clone()))
+                    }
+                    (PicusExpr::Const(1), _) => self.push_constraint(PicusConstraint::new_lt(
+                        gated(b),
+                        gated(c) + (PicusExpr::Const(1) - m.clone()),
+                    )),
+                    (PicusExpr::Const(0), _) => {
+                        self.push_constraint(PicusConstraint::new_geq(gated(b), gated(c)))
                     }
                     _ => {
-                        self.push_constraint(PicusConstraint::new_bit(a1.clone()));
+                        self.push_constraint(PicusConstraint::Eq(Box::new(
+                            m.clone() * a1.clone() * (a1.clone() - PicusExpr::Const(1)),
+                        )));
                         self.push_constraint(PicusConstraint::Iff(
-                            Box::new(PicusConstraint::new_equality(a1.clone(), 1.into())),
-                            Box::new(lt),
+                            Box::new(PicusConstraint::new_equality(gated(a1), 1.into())),
+                            Box::new(PicusConstraint::new_lt(gated(b), gated(c))),
                         ));
                     }
                 }
@@ -359,29 +435,79 @@ impl<'a> Emitter<'a> {
             x if x == ByteOpcode::ShrCarry as u64 => match self.cfg.shr_carry {
                 ShrCarrySummaryMode::AbstractModule => self.abstract_call(
                     "byte_shr_carry",
-                    &[b.clone(), c.clone()],
-                    &[a1.clone(), a2.clone()],
+                    &[b.clone() * multiplicity.clone(), c.clone() * multiplicity.clone()],
+                    &[a1.clone() * multiplicity.clone(), a2.clone() * multiplicity.clone()],
                 ),
                 ShrCarrySummaryMode::Precise => self.shr_carry_precise(&multiplicity, values),
             },
-            x if x == ByteOpcode::AND as u64 => self.bitwise_call("byte_and", a1, b, c),
-            x if x == ByteOpcode::OR as u64 => self.bitwise_call("byte_or", a1, b, c),
-            x if x == ByteOpcode::XOR as u64 => self.bitwise_call("byte_xor", a1, b, c),
-            x if x == ByteOpcode::NOR as u64 => self.bitwise_call("byte_nor", a1, b, c),
-            x if x == ByteOpcode::SLL as u64 => self.bitwise_call("byte_sll", a1, b, c),
+            x if x == ByteOpcode::AND as u64 => {
+                self.bitwise_call("byte_and", a1, b, c, &multiplicity, 0)
+            }
+            x if x == ByteOpcode::OR as u64 => {
+                self.bitwise_call("byte_or", a1, b, c, &multiplicity, 0)
+            }
+            x if x == ByteOpcode::XOR as u64 => {
+                self.bitwise_call("byte_xor", a1, b, c, &multiplicity, 0)
+            }
+            x if x == ByteOpcode::NOR as u64 => {
+                self.bitwise_call("byte_nor", a1, b, c, &multiplicity, 255)
+            }
+            x if x == ByteOpcode::SLL as u64 => {
+                self.bitwise_call("byte_sll", a1, b, c, &multiplicity, 0)
+            }
             other => panic!("unknown byte opcode {other}"),
         }
     }
 
-    fn bitwise_call(&mut self, name: &str, a1: &PicusExpr, b: &PicusExpr, c: &PicusExpr) {
+    /// A bitwise table lookup under multiplicity `m`, a bit.  A row that does not look up
+    /// (`m = 0`) is not constrained by the table, so the call is stated on gated operands:
+    /// `rel [b·m, c·m] [a·m + (1 − m)·at_zero]`, where `at_zero` is the operation's value at
+    /// `(0, 0)`, the table row the gated call names when `m = 0`.  An `AND` with `127` or `1`
+    /// splits a byte, so it is stated exactly: `b = 128·hi + a` with `a < 128` and `hi` a bit,
+    /// or `b = 2·hi + a` with `a` a bit and `hi ≤ 127`.
+    fn bitwise_call(
+        &mut self,
+        name: &str,
+        a1: &PicusExpr,
+        b: &PicusExpr,
+        c: &PicusExpr,
+        m: &PicusExpr,
+        at_zero: u64,
+    ) {
+        let gated = |e: &PicusExpr| e.clone() * m.clone();
         if name == "byte_and" && matches!(c, PicusExpr::Const(127)) {
             let hi = fresh_picus_expr();
-            self.push_constraint(PicusConstraint::new_lt(a1.clone(), 128.into()));
-            self.push_constraint(PicusConstraint::new_bit(hi.clone()));
-            self.push_constraint(PicusConstraint::new_equality(b.clone(), hi * 128 + a1.clone()));
+            self.push_constraint(PicusConstraint::new_lt(gated(a1), 128.into()));
+            self.push_constraint(PicusConstraint::Eq(Box::new(
+                m.clone() * hi.clone() * (hi.clone() - PicusExpr::Const(1)),
+            )));
+            self.push_constraint(PicusConstraint::Eq(Box::new(
+                m.clone() * (b.clone() - (hi * 128 + a1.clone())),
+            )));
             return;
         }
-        self.abstract_call(name, &[b.clone(), c.clone()], std::slice::from_ref(a1));
+        if name == "byte_and" && matches!(c, PicusExpr::Const(1)) {
+            let hi = fresh_picus_expr();
+            self.push_constraint(PicusConstraint::Eq(Box::new(
+                m.clone() * a1.clone() * (a1.clone() - PicusExpr::Const(1)),
+            )));
+            self.push_constraint(PicusConstraint::new_leq(gated(&hi), 127.into()));
+            self.push_constraint(PicusConstraint::Eq(Box::new(
+                m.clone() * (b.clone() - (hi * 2 + a1.clone())),
+            )));
+            return;
+        }
+        let out = if matches!(m, PicusExpr::Const(1)) {
+            a1.clone()
+        } else {
+            gated(a1) + (PicusExpr::Const(1) - m.clone()) * PicusExpr::Const(at_zero)
+        };
+        let ins = if matches!(m, PicusExpr::Const(1)) {
+            [b.clone(), c.clone()]
+        } else {
+            [gated(b), gated(c)]
+        };
+        self.abstract_call(name, &ins, std::slice::from_ref(&out));
     }
 
     /// Precise summary for `ByteOpcode::ShrCarry` (values = [op, out, carry, input, shift]).
@@ -400,16 +526,19 @@ impl<'a> Emitter<'a> {
             let cond = PicusConstraint::new_equality(shift.clone(), PicusExpr::Const(i));
             let consequence = if i == 0 {
                 PicusConstraint::And(
-                    Box::new(PicusConstraint::new_equality(out.clone(), input.clone())),
-                    Box::new(PicusConstraint::new_equality(carry.clone(), PicusExpr::Const(0))),
+                    Box::new(PicusConstraint::Eq(Box::new(
+                        multiplicity.clone() * (out.clone() - input.clone()),
+                    ))),
+                    Box::new(PicusConstraint::Eq(Box::new(multiplicity.clone() * carry.clone()))),
                 )
             } else {
                 let p2 = 1u64 << i;
                 PicusConstraint::And(
-                    Box::new(PicusConstraint::new_equality(
-                        input.clone(),
-                        out.clone() * PicusExpr::Const(p2) + carry.clone(),
-                    )),
+                    Box::new(PicusConstraint::Eq(Box::new(
+                        multiplicity.clone()
+                            * (input.clone()
+                                - (out.clone() * PicusExpr::Const(p2) + carry.clone())),
+                    ))),
                     Box::new(PicusConstraint::new_lt(
                         carry.clone() * multiplicity.clone(),
                         PicusExpr::Const(p2),
@@ -431,6 +560,25 @@ impl<'a> Emitter<'a> {
             return;
         }
         assert!(values.len() >= 4, "memory lookup must carry addr + value limbs");
+        let chip = self.module.name.split("__").next().unwrap_or_default();
+        if SHARD_BOUNDARY_TABLES.contains(&chip) {
+            let (port, tag) =
+                if is_send { (Port::Input, "mem_final") } else { (Port::Output, "mem_initial") };
+            let k = if is_send { self.mem_reads } else { self.mem_writes };
+            if is_send {
+                self.mem_reads += 1
+            } else {
+                self.mem_writes += 1
+            }
+            self.bind_port(
+                Port::Input,
+                &multiplicity,
+                &PicusExpr::Const(1),
+                &format!("{tag}[{k}].multiplicity"),
+            );
+            self.bind_ports(port, values, &multiplicity, &format!("{tag}[{k}]"));
+            return;
+        }
         let port = if is_send { Port::Input } else { Port::Output };
         let k = if is_send { self.mem_reads } else { self.mem_writes };
         if is_send {
@@ -496,6 +644,39 @@ impl<'a> Emitter<'a> {
         self.bind_ports(port, values, &multiplicity, &format!("{kind}_{dir}"));
     }
 
+    /// Global-bus messages are `[message (7), is_send, is_receive, kind]`, always sent on the
+    /// local bus to the Global chip; the cross-shard direction is the flag pair.  A message whose
+    /// `is_receive` flag is set (the constant one, or the lookup's own multiplicity when a row
+    /// packs several gated entries) carries values produced in another shard, so its fields are inputs of this row; one whose `is_send` flag is the
+    /// constant one carries values this row produces, so its fields are outputs.  Flags that
+    /// are columns (the Global chip itself) keep the direction of the local lookup.
+    fn handle_global(&mut self, multiplicity: PicusExpr, values: &[PicusExpr], is_send: bool) {
+        if matches!(multiplicity, PicusExpr::Const(0)) {
+            return;
+        }
+        if is_send && values.len() == 10 {
+            let set = |e: &PicusExpr| matches!(e, PicusExpr::Const(1)) || *e == multiplicity;
+            let clear = |e: &PicusExpr| matches!(e, PicusExpr::Const(0));
+            let receive = set(&values[8]) && clear(&values[7]);
+            let send = set(&values[7]) && clear(&values[8]);
+            if receive || send {
+                let chip = self.module.name.split("__").next().unwrap_or_default();
+                let image = send && INITIAL_MEMORY_TABLES.contains(&chip);
+                let port = if receive || image { Port::Input } else { Port::Output };
+                let dir = if image {
+                    "image"
+                } else if receive {
+                    "recv"
+                } else {
+                    "send"
+                };
+                self.bind_ports(port, &values[..7], &multiplicity, &format!("global_{dir}"));
+                return;
+            }
+        }
+        self.handle_chain("global", multiplicity, values, is_send);
+    }
+
     /// Syscall lookups are `[shard, clk, syscall_id, arg1, arg2]`; timing is routing metadata.
     fn handle_syscall(&mut self, multiplicity: PicusExpr, values: &[PicusExpr], is_send: bool) {
         if matches!(multiplicity, PicusExpr::Const(0)) {
@@ -515,6 +696,11 @@ impl<'a> Emitter<'a> {
     /// through the core-shard syscall chip, the global bus and the precompile-shard syscall
     /// chip to the Linux syscall chip, which checks it: a sender produces the result (output),
     /// a receiver consumes it (input).  The argument halves are inputs on both sides.
+    /// A syscall result is an output of the chip that computes it from the arguments and an input
+    /// of the chip that consumes it.  The bus direction does not say which: a linux syscall's
+    /// result is sent by the calling instruction and received (and computed) by
+    /// [`SYSCALL_RESULT_PRODUCERS`]' `SysLinux`, while a precompile's is sent (computed) by
+    /// `SyscallPrecompile` and received by `SyscallCore`.
     fn handle_syscall_result(
         &mut self,
         multiplicity: PicusExpr,
@@ -525,7 +711,10 @@ impl<'a> Emitter<'a> {
             return;
         }
         assert_eq!(values.len(), 8, "syscall result lookup must carry 8 values");
-        let result_port = if is_send { Port::Output } else { Port::Input };
+        let chip = self.module.name.split("__").next().unwrap_or_default();
+        let _ = is_send;
+        let result_port =
+            if SYSCALL_RESULT_PRODUCERS.contains(&chip) { Port::Output } else { Port::Input };
         self.bind_ports(Port::Input, &values[0..2], &multiplicity, "syscall_result.at");
         self.bind_ports(result_port, &values[2..4], &multiplicity, "syscall_result.result");
         self.bind_ports(Port::Input, &values[4..8], &multiplicity, "syscall_result.arg");
@@ -566,6 +755,7 @@ impl<'a> Emitter<'a> {
                 )
             }
             LookupKind::Range => self.handle_chain("range", m, v, is_send),
+            LookupKind::Global => self.handle_global(m, v, is_send),
             other => {
                 let kind = format!("{other:?}").to_lowercase();
                 self.handle_chain(&kind, m, v, is_send)
@@ -629,6 +819,17 @@ where
     let receives: Vec<_> = builder.receives.iter().map(|l| lower_lookup(&mut lowerer, l)).collect();
     let bindings = std::mem::take(&mut lowerer.bindings);
     drop(lowerer);
+    let mut plain = Lowerer::new(&builder.layout, 0);
+    let gadgets: Vec<(&'static str, PicusExpr, Vec<Vec<PicusExpr>>)> = builder
+        .gadgets
+        .iter()
+        .map(|(g, ops)| {
+            let gate = ops.first().map_or(PicusExpr::Const(1), |o| plain.lower(&o.multiplicity));
+            let ops = ops.iter().map(|o| o.values.iter().map(|e| plain.lower(e)).collect());
+            (*g, gate, ops.collect())
+        })
+        .collect();
+    drop(plain);
     drop(builder.constraints);
     drop(builder.sends);
     drop(builder.receives);
@@ -689,6 +890,15 @@ where
         let name = info.col_to_name.get(&col).cloned().unwrap_or_default();
         em.push_port_from(Port::Input, PicusExpr::Var(col), &format!("column.{name}"));
     }
+    let chip_name = chip.name();
+    for (_, field, at, origin) in CHOSEN_INPUTS.iter().filter(|(c, ..)| *c == chip_name) {
+        if let Some((start, _)) = info.name_to_colrange.get(*field) {
+            let col = start + at;
+            if col < width && !env.contains_key(&col) {
+                em.push_port_from(Port::Input, PicusExpr::Var(col), origin);
+            }
+        }
+    }
     for col in annotated(&info.output_ranges) {
         let name = info.col_to_name.get(&col).cloned().unwrap_or_default();
         em.push_port_from(Port::Output, PicusExpr::Var(col), &format!("column.{name}"));
@@ -709,6 +919,31 @@ where
         .lock()
         .unwrap()
         .insert(em.module.name.clone(), (em.input_origins.clone(), em.output_origins.clone()));
+    let (hints, gadgets): (Vec<_>, Vec<_>) =
+        gadgets.into_iter().partition(|(gadget, _, _)| *gadget == "hint_input");
+    for (_, gate, operands) in hints {
+        let gate = em.specialize(gate);
+        for (i, v) in operands.into_iter().flatten().enumerate() {
+            let v = em.specialize(v);
+            em.bind_port(Port::Input, &v, &gate, &format!("hint[{i}]"));
+        }
+    }
+    PORT_ORIGINS
+        .lock()
+        .unwrap()
+        .insert(em.module.name.clone(), (em.input_origins.clone(), em.output_origins.clone()));
+    let marks = gadgets
+        .into_iter()
+        .map(|(gadget, gate, operands)| GadgetMark {
+            gadget,
+            gate: em.specialize(gate),
+            operands: operands
+                .into_iter()
+                .map(|o| o.into_iter().map(|e| em.specialize(e)).collect())
+                .collect(),
+        })
+        .collect();
+    GADGET_MARKS.lock().unwrap().insert(em.module.name.clone(), marks);
     (em.module, em.aux_modules)
 }
 

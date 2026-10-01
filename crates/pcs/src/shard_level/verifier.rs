@@ -1370,10 +1370,9 @@ where
 
     let mut alphas: Vec<EF> = Vec::with_capacity(n);
     let mut prev_poly = p0;
-    for i in 1..n {
+    for (i, curr) in proof.univariate_polys.iter().enumerate().skip(1) {
         let alpha: EF = challenger.sample_algebra_element::<EF>();
         alphas.insert(0, alpha);
-        let curr = &proof.univariate_polys[i];
         if curr.coefficients.len() != expected_degree + 1 {
             return Err(JaggedShardVerifyError::LogupGkr(format!(
                 "sumcheck round {i} poly has {} coefficients, expected {}",

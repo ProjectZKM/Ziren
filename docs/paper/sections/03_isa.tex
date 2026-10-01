@@ -1,31 +1,112 @@
-\section{The machine and its execution relation}
+\section{An overview of MIPS32 and Ziren's approach}
+\label{sec:overview}
 \label{sec:isa}
 
-\subsection{MIPS32 as a guest}
+This section gives enough of MIPS32 to follow the paper, and then how \Ziren{} proves an execution of it; the specification is the architecture manual~\citep{mips32-isa}. The guest has no floating-point unit, privileged state or interrupts; it executes the 77 instructions of Appendix~\ref{sec:app-isa} and reaches the outside world only through \texttt{SYSCALL}.
 
-Throughout this paper MIPS32 means Release 2 of the specification, the revision this work targets and the last before Release~6 re-encoded the instruction set incompatibly. The guest machine is a 32-bit MIPS32 core with 32 integer registers (register 0 hard-wired to zero), the \texttt{HI}/\texttt{LO} pair written by multiplication and division, and a little-endian byte-addressed memory. Three features of the ISA shape the arithmetisation more than anything else.
+\begin{definition}[Machine state]
+\label{def:state}
+The machine state is $(\mathsf{pc}, \mathsf{next\_pc}, R, M)$. $R$ holds 32 general registers of 32 bits, register 0 reading as zero, together with the \texttt{HI}/\texttt{LO} pair written by multiplication and division; $M$ is a little-endian, byte-addressed memory over a 32-bit address space. $\mathsf{pc}$ is the address of the instruction about to execute and $\mathsf{next\_pc}$ the address of the one that executes after it, which is not in general $\mathsf{pc}+4$.
+\end{definition}
 
-\paragraph{Branch-delay slots.} The instruction that follows a branch or jump is executed before control transfers. The machine state therefore carries a program counter \emph{pair}: the address of the current instruction and the address of the one that follows it. A sequential instruction advances the pair as $(\mathsf{pc}, \mathsf{next\_pc}) \mapsto (\mathsf{next\_pc}, \mathsf{next\_pc} + 4)$; a branch instruction sets $\mathsf{next\_next\_pc}$ to the target or to $\mathsf{next\_pc}+4$. Consequently the successor of a sequential instruction is \emph{data}, not $\mathsf{pc}+4$: when the instruction sits in a delay slot its successor is the branch target. Every instruction row carries $\mathsf{next\_pc}$ as a witnessed column for this reason.
+\begin{definition}[Instruction format]
+\label{def:format}
+Every instruction of the guest is decoded, once and before proving, into a tuple $(\mathsf{opcode}, \mathsf{op\_a}, \mathsf{op\_b}, \mathsf{op\_c}, \mathsf{imm\_b}, \mathsf{imm\_c})$. $\mathsf{op\_a}$ is the index of the register the instruction writes (or, for a store or branch, reads); $\mathsf{op\_b}$ and $\mathsf{op\_c}$ are each either a register index or an immediate already sign- or zero-extended to 32 bits, as the flags $\mathsf{imm\_b}$ and $\mathsf{imm\_c}$ say.
+\end{definition}
 
-\paragraph{Unaligned and narrow accesses.} \texttt{LB}, \texttt{LBU}, \texttt{LH}, \texttt{LHU}, \texttt{SB}, \texttt{SH} address individual bytes and half-words of a word, and \texttt{LWL}/\texttt{LWR}/\texttt{SWL}/\texttt{SWR} merge the left or right part of an unaligned word with a register. Memory is modelled at word granularity, so these instructions select and merge bytes of a word in-circuit; they get chips of their own (Section~\ref{sec:air-chips}).
+The decoded form abstracts MIPS32's three encodings as Jolt's five-tuple abstracts RISC-V's~\citep{jolt}; the correspondence (Table~\ref{tab:encoding}) is fixed by the opcode and recomputable by anyone from the image. Figure~\ref{fig:step} gives the transition of one instruction.
 
-\paragraph{Bit manipulation.} \texttt{EXT}, \texttt{INS}, \texttt{WSBH}, \texttt{SEB}/\texttt{SEH}, \texttt{ROTR}, \texttt{CLO}/\texttt{CLZ} and the conditional moves are common in hashing and serialisation code. All of them are supported natively rather than lowered.
+\begin{table}[t]
+\centering
+\small
+\caption{From the three MIPS32 encodings to the decoded tuple of Definition~\ref{def:format}. Field widths are in bits, most significant first; \textit{off} and \textit{imm} are 16-bit, \textit{target} 26-bit and \textit{sa} 5-bit. Immediates are extended when decoded, as the opcode dictates.}
+\label{tab:encoding}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Format & Fields & Instructions & $(\mathsf{op\_a}, \mathsf{op\_b}, \mathsf{op\_c})$ \\
+\midrule
+R & \textit{op}\,6 $|$ \textit{rs}\,5 $|$ \textit{rt}\,5 $|$ \textit{rd}\,5 $|$ \textit{sa}\,5 $|$ \textit{func}\,6 & register ALU & $(\mathit{rd}, \mathit{rs}, \mathit{rt})$ \\
+ & & shift by \textit{sa} & $(\mathit{rd}, \mathit{rt}, \mathit{sa})$ \\
+ & & \texttt{jr}, \texttt{jalr} & $(\mathit{rd}, \mathit{rs}, -)$ \\
+I & \textit{op}\,6 $|$ \textit{rs}\,5 $|$ \textit{rt}\,5 $|$ \textit{imm}\,16 & immediate ALU, loads, stores & $(\mathit{rt}, \mathit{rs}, \mathrm{ext}(\mathit{imm}))$ \\
+ & & branches & $(\mathit{rs}, \mathit{rt}, \mathrm{sext}(\mathit{off}) \ll 2)$ \\
+J & \textit{op}\,6 $|$ \textit{target}\,26 & \texttt{j}, \texttt{jal} & $(0 \text{ or } 31, \mathit{target} \ll 2, -)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.95\textwidth}
+\small
+$\mathsf{Step}(\mathsf{pc}, \mathsf{next\_pc}, R, M) \to (\mathsf{pc}', \mathsf{next\_pc}', R', M')$ \textbf{or} $\mathsf{reject}$
+\begin{enumerate}
+  \item \emph{Fetch.} $(\mathsf{opcode}, \mathsf{op\_a}, \mathsf{op\_b}, \mathsf{op\_c}, \mathsf{imm\_b}, \mathsf{imm\_c}) \gets \mathsf{Decode}(M[\mathsf{pc}])$; if the word does not decode, $\mathsf{reject}$.
+  \item \emph{Operands.} $b \gets \mathsf{op\_b}$ if $\mathsf{imm\_b}$ else $R[\mathsf{op\_b}]$; $c \gets \mathsf{op\_c}$ if $\mathsf{imm\_c}$ else $R[\mathsf{op\_c}]$; $a \gets R[\mathsf{op\_a}]$.
+  \item \emph{Execute}, by family (\S\S\ref{sec:base} and~\ref{sec:ext}):
+  \begin{itemize}
+    \item ALU, shift, bit-field, move: $R[\mathsf{op\_a}] \gets f_{\mathsf{opcode}}(a, b, c)$; multiplication and division also set \texttt{HI}; division by zero: $\mathsf{reject}$.
+    \item load: $\mathit{addr} \gets b + c$; $R[\mathsf{op\_a}] \gets$ the selected bytes of $M[\mathit{addr}]$, extended; store: $M[\mathit{addr}] \gets$ the selected bytes of $a$ merged into it.
+    \item branch or jump: $t \gets$ the target ($b$, $\mathsf{next\_pc} + b$, or $\mathsf{next\_pc} + c$); $\mathit{taken} \gets$ the condition on $a, b$ (true for a jump); a linking jump sets $R[\mathsf{op\_a}] \gets \mathsf{next\_pc} + 4$.
+    \item \texttt{teq} with $a = b$: $\mathsf{reject}$. \texttt{syscall}: the call of \S\ref{sec:ext-syscall}, which may halt.
+  \end{itemize}
+  \item \emph{Register 0.} $R'[0] \gets 0$.
+  \item \emph{Advance.} $\mathsf{next\_next\_pc} \gets t$ if $\mathit{taken}$ else $\mathsf{next\_pc} + 4$; return $(\mathsf{next\_pc}, \mathsf{next\_next\_pc}, R', M')$.
+\end{enumerate}
+\end{minipage}}
+\caption{The transition function of the guest machine. Step~5 departs from RISC-V: a transfer sets the \emph{second} component of the pair, so the instruction in its delay slot still executes. A transfer in a delay slot, which the manual leaves unpredictable, gets the meaning the same rule gives it. In \Ziren{} the instruction frame performs fetch, operand reads, register writes and advance; the memory argument the memory access; and the chip's own columns only the function $f$.}
+\label{fig:step}
+\end{figure}
+
+\paragraph{Three features that shape the arithmetisation.} \emph{Branch-delay slots}: a sequential instruction advances the counter pair as $(\mathsf{pc}, \mathsf{next\_pc}) \mapsto (\mathsf{next\_pc}, \mathsf{next\_pc} + 4)$ and a transfer sets $\mathsf{next\_next\_pc}$, so the successor of an instruction in a delay slot is the branch target and every row carries $\mathsf{next\_pc}$ as a witnessed column. The pair is architectural state that crosses every shard boundary (\S\ref{sec:recursion}). \emph{Unaligned and narrow accesses}: \texttt{LB}, \texttt{LBU}, \texttt{LH}, \texttt{LHU}, \texttt{SB}, \texttt{SH} address bytes and half-words, and \texttt{LWL}/\texttt{LWR}/\texttt{SWL}/\texttt{SWR} merge part of an unaligned word with a register; memory is word-granular, so these select and merge bytes in-row, in chips of their own (\S\ref{sec:base-memory}). \emph{Bit manipulation}: \texttt{EXT}, \texttt{INS}, \texttt{WSBH}, \texttt{SEB}/\texttt{SEH}, \texttt{ROTR}, \texttt{CLO}/\texttt{CLZ} and the conditional moves, common in hashing and serialisation code, are supported natively.
+
+\subsection{Performing instruction logic with chips}
+\label{sec:overview-chips}
+
+Every opcode family has a chip with one row per executed instruction, and the row carries all of Figure~\ref{fig:step}. Fetch, operand reads, write-back and advance are the same for every instruction and are factored into the \emph{instruction frame} (\S\ref{sec:air-frame}); the memory access goes through the memory argument; and only the family's function is the chip's own columns. Byte-granular operations (bitwise operations, comparisons, range facts) are looked up in a preprocessed byte-pair table, the original Jolt design's decomposition into small subtables (\S\ref{sec:air-bytes}); addition, multiplication and shifts are constraints over byte limbs with witnessed carries (\S\S\ref{sec:base} and~\ref{sec:ext}).
+
+\subsection{Using memory checking}
+\label{sec:overview-memory}
+
+Registers and memory are one read--write memory, checked offline, with registers at the low addresses (\S\ref{sec:air-memory}); the first and last access to each word in a shard go into an elliptic-curve digest that must cancel over the execution (\S\ref{sec:air-global}). The program is read-only, and a fetch is an indexed lookup into a committed table.
+
+\subsection{Formatting the program}
+\label{sec:overview-format}
+
+Before proving, the image is decoded (Definition~\ref{def:format}) into a preprocessed \emph{program table} keyed by address, with immediates already extended. \texttt{LO} and \texttt{HI} are registers 32 and 33, so moves between them and the general registers need no chip, and two further slots hold the program break and heap pointer used only by memory-management syscalls. The program table and the other preprocessed tables are committed at setup; that commitment is the verifying key naming the program in the statement (\S\ref{sec:statement}).
 
 \subsection{Syscalls and precompiles}
 
-Guest programs reach the host through \texttt{SYSCALL}. Besides input/output the syscall table exposes \emph{precompiles}: SHA-256, Keccak-f[1600], the $\Poseidon{}$ permutation, curve arithmetic on secp256k1, secp256r1, BN254, BLS12-381 and Ed25519, field arithmetic for BN254 and BLS12-381, 256-bit modular and $256\times 2048$-bit multiplication. A precompile reads and writes guest memory directly; each invocation becomes one or more rows of a dedicated chip whose memory accesses are timestamped at the invoking cycle.
+Besides input/output, \texttt{SYSCALL} exposes \emph{precompiles}: SHA-256, Keccak-f[1600], the $\Poseidon{}$ permutation, curve arithmetic on secp256k1, secp256r1, BN254, BLS12-381 and Ed25519, field arithmetic for BN254 and BLS12-381, 256-bit modular and $256\times 2048$-bit multiplication. A precompile reads and writes guest memory directly; each invocation becomes one or more rows of a dedicated chip whose memory accesses are timestamped at the invoking cycle.
 
-\paragraph{Hash functions.} Hashing is the dominant primitive of the workloads this class of machine is asked to prove, and it motivates the accelerator interface. An unaccelerated guest computing SHA-256 or Keccak in MIPS instructions pays tens of instructions per round, each occupying an instruction-chip row, whereas an accelerator computes a permutation in a handful of wide rows. Three hash families are accelerated. SHA-256 is split into its message-schedule extension and compression rounds, with a control chip sequencing memory accesses. Keccak-f[1600] is a sponge chip with its own controller and, at 2\,637 columns, is one of the two widest chips (Table~\ref{tab:chips}). $\Poseidon{}$ is accelerated for guests that verify proofs of this system. The same permutation also implements Merkle commitments and the Fiat--Shamir transcript (Section~\ref{sec:prelim}) and appears in the recursion machine (Section~\ref{sec:recursion}). Hint data written by the host into untouched memory becomes part of the memory's initial state (Section~\ref{sec:air-memory}), so it remains subject to the argument's range discipline.
+Hashing dominates the target workloads: in MIPS instructions a SHA-256 or Keccak round costs tens of rows, an accelerator a handful of wide ones. SHA-256 is split into message-schedule and compression chips, each with a control chip; Keccak-f[1600] is a sponge chip with its own controller and, at 2\,637 columns, one of the two widest chips (Table~\ref{tab:chips}); $\Poseidon{}$ serves guests that verify proofs of this system, and is also the permutation of the commitments, transcript (Section~\ref{sec:prelim}) and recursion machine (Section~\ref{sec:recursion}). Hint data written into untouched memory becomes part of the initial memory (Section~\ref{sec:air-memory}) and is subject to the same range discipline.
 
 \subsection{Clock, shards and the execution record}
+\label{sec:isa-record}
 
-Execution is divided into \emph{shards}. Within a shard a clock $\mathsf{clk}$ advances by five per instruction; a syscall additionally advances it by a bounded number of ticks so that the memory accesses of a precompile fit strictly between the calling instruction and its successor. An instruction executes at $\mathsf{clk}$ and its memory and register accesses occupy the four \emph{sub-cycle positions} $\mathsf{clk}+1,\dots,\mathsf{clk}+4$, one per operand role (Section~\ref{sec:air-frame}), so a $(\mathsf{shard}, \mathsf{clk} + \mathsf{pos})$ pair identifies every access uniquely and the memory argument timestamps an access by $\mathsf{clk}+\mathsf{pos}$. The clock is bounded by $2^{25}$, which caps a shard at $2^{25}/5 \approx 6.71$\,M cycles whatever the configured shard size says. The clock is witnessed as a 16-bit limb and a 10-bit high limb, the same decomposition the memory argument range-checks. A shard therefore closes on whichever of three bounds binds first: that fence; the configured shard size, a few million cycles, against which the executor compares $\mathsf{clk} + \mathsf{max\_syscall\_cycles}$ after scaling the configured figure by four, since it is given in cycles and the clock advances by five per instruction; or a chip's height budget. Which one binds depends on the configuration, and Section~\ref{sec:performance} reports the shard counts that result from four of them.
+Execution is divided into \emph{shards}. Within a shard a clock $\mathsf{clk}$ advances by five per instruction, and a syscall by a bounded extra number of ticks so that a precompile's accesses fit between the call and its successor. An instruction executes at $\mathsf{clk}$, and its accesses occupy five \emph{sub-cycle positions}, one per role: a memory access at $\mathsf{clk}$ itself, the reads of $\mathsf{op\_c}$ and $\mathsf{op\_b}$ and the access to $\mathsf{op\_a}$ at $\mathsf{clk}+1$, $+2$ and $+3$, and a write of \texttt{HI} at $\mathsf{clk}+4$ (Section~\ref{sec:air-frame}), so $(\mathsf{shard}, \mathsf{clk} + \mathsf{pos})$ identifies and timestamps every access. The executor fences the clock below $2^{25}$, capping a shard at about $6.71$\,M cycles; the circuit witnesses it as a 16-bit and a 10-bit limb, the decomposition the memory argument range-checks, which proves it below $2^{26}$ and so still excludes wrap-around. A shard closes on whichever binds first: that fence, the configured shard size of a few million cycles, a chip's height budget, or a committed-area budget of $4.6\cdot10^{8}$ cells, which binds on precompile-heavy blocks, while on the measured blocks the shard size binds for most shards (\S\ref{sec:perf-profile}, Table~\ref{tab:levers}); Section~\ref{sec:performance} reports the resulting shard counts.
 
-At a shard boundary the emulator emits, for every memory word touched in the shard, the value and timestamp of its first and last access; these are the leaves of the cross-shard memory argument. The prover arithmetises a shard record containing per-chip event lists, the touched-address ledger and public values. Those public values contain the committed-output and deferred-proof digests, entry and exit program-counter pairs and clocks, exit code, shard indices, global-memory cursors and row counts, and the septic digest of Section~\ref{sec:air-global}. They are the interface through which consecutive shards and recursion layers are chained.
+At a shard boundary the emulator emits, for every word touched in the shard, the value and timestamp of its first and last access, the leaves of the cross-shard memory argument. A shard record holds per-chip event lists, this ledger and the public values: the output digest and a deferred-proof digest (zero here, since verifying other proofs inside the guest is out of scope), entry and exit counter pairs and clocks, exit code, shard indices, global-memory cursors and row counts, and the septic digest (\S\ref{sec:air-global}), through which shards and recursion layers are chained.
 
 \subsection{The execution relation}
 \label{sec:isa-emulator}
 
-Write $\mathsf{Emulate}(P, \mathsf{in}, \mathsf{hint}) = (\mathsf{out}, e)$ for the relation this section defines: the machine of \S\ref{sec:isa} started on the program image $P$ with the two streams available to it, run until it halts, produces the output stream $\mathsf{out}$ and the exit status $e$. It is deterministic: no step reads a clock, a random source or any host state other than the streams.
+\begin{definition}[Execution]
+\label{def:execution}
+An \emph{execution} of a program image $P$ on streams $(\mathsf{in}, \mathsf{hint})$ is a sequence of machine states $\sigma_0, \sigma_1, \ldots, \sigma_T$ in which $\sigma_0$ is the state the image defines, with the counter pair $(\mathit{entry}, \mathit{entry}+4)$, the registers the image initialises (the stack pointer among them) and zero in the others, and the image's memory, $\sigma_{i+1} = \mathsf{Step}(\sigma_i)$ for every $i < T$ (Figure~\ref{fig:step}), no step rejects, and step $T$ is a halting system call with exit code $e$.
+\end{definition}
 
-The relation is realised twice, and the two realisations must agree. The reference is an interpreter: it implements every instruction, every syscall and every error path, and it is the only one that emits the event record the prover consumes. A just-in-time compiler serves the two jobs that dominate wall-clock time and need no events, namely running a guest for its output alone and producing, per shard, the descriptor from which a worker replays that shard. Three checks connect them, none of which is a proof of equivalence for every program: the descriptors of a compiled run are byte-identical to an interpreted one on the tested corpus, the specification vectors of Section~\ref{sec:verification} run on both, and continuous integration compares digests of the emitted records. The difference that matters to the rest of the paper is rate, because a host feeding several accelerators is bound by the executor rather than by the accelerator (\S\ref{sec:perf-host}); Appendix~\ref{sec:executor} gives the mechanism.
+Write $\mathsf{Emulate}(P, \mathsf{in}, \mathsf{hint}) = (\mathsf{out}, e)$ for the output stream and exit status of that execution. It is deterministic: no step reads a clock, a random source or host state other than the streams. Where the manual leaves room, or describes behaviour a single-threaded guest cannot observe, $\mathsf{Emulate}$ fixes a choice and the arithmetisation proves the same one: \texttt{add} and \texttt{addi} do not trap on signed overflow and behave as \texttt{addu} and \texttt{addiu}. \texttt{j} and \texttt{jal} take the region bits of the program counter as zero, which is exact for text below $2^{28}$. \texttt{ll} places no reservation and \texttt{sc} always succeeds. And a trap, a division by zero, or an unrecognised instruction ends the execution with an error, which is not a halt the relation admits, so such an execution has no proof.
+
+The relation is realised twice: an interpreter, which implements every path and alone emits the event record the prover consumes, and a just-in-time compiler for output-only runs and for the per-shard descriptors workers replay. Byte-identical descriptors on the tested corpus, the specification vectors of \S\ref{sec:verification} and record digests in continuous integration connect them, without proving equivalence for every program. The compiler matters for rate, since a host feeding several accelerators is bound by the executor (\S\ref{sec:perf-host}, Appendix~\ref{sec:executor}).
+
+\paragraph{Where the arithmetisation is stricter than the relation.} The arithmetisation refuses some executions the relation admits, which costs completeness, never soundness~\citep[Note~1]{cairo}. A shard's clock is bounded by $2^{25}$, so an execution is cut into shards, and never between a transfer and its delay slot. The only halt proved is exit code zero. A load or store must address memory above the 36 register slots, and every address and program counter must be a canonical field element, below $p$. And a shard whose chip set lies outside the machine's declared clusters has no admissible verifying key (\S\ref{sec:recursion}).
+
+\subsection{The statement being proved}
+\label{sec:statement}
+
+With $P$ a program image, $\mathsf{in}$ an input stream and $\mathsf{hint}$ a host-supplied \emph{hint} stream, \Ziren{} proves the relation
+\[
+  \mathcal R \;=\; \big\{ \big((\mathsf{vk},\ h),\ (P, \mathsf{in}, \mathsf{hint})\big) \;:\; \mathsf{vk} = \mathsf{Setup}(P) \ \wedge\ \exists\, \mathsf{out} :\ \mathsf{Emulate}(P, \mathsf{in}, \mathsf{hint}) = (\mathsf{out}, 0) \ \wedge\ h = H(\mathsf{out}) \big\},
+\]
+where $\mathsf{Setup}$ maps an image to its verifying key, a Merkle commitment to the program ROM and the preprocessed tables of Section~\ref{sec:air}, and $H$ is SHA-256 over the committed output. $(\mathsf{vk},h)$ is public and pins the image; $(P, \mathsf{in}, \mathsf{hint})$ is the witness, though without blinding it is not confidential. Only exit code zero is admitted, since it is the only halt the arithmetisation proves; $\mathsf{Emulate}$ accepts a non-zero exit, and one Cannon test program does exactly that and cannot be proved (\S\ref{sec:verification}). Supported honest executions within the configured resource limits that halt with exit code zero produce accepting proofs; extraction of $(\mathsf{in},\mathsf{hint})$ is conditional on Theorem~\ref{thm:composition} and on the trace-to-execution premises of Theorem~\ref{thm:unique}.

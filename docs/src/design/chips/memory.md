@@ -1,85 +1,66 @@
 # Memory
 
-The Memory chip family manages memory operations in the MIPS execution environment through specialized column-based constraints. It covers five core subsystems: MemoryGlobal, MemoryLocal, MemoryProgram, MemoryAccess, and MemoryInstructions. Together, they enforce the correct execution of MIPS memory operations.
+Registers and memory share one address space and one memory argument. The 36 registers (the 32 general-purpose registers, `LO`, `HI` and two internal registers for the program break and heap) occupy addresses 0 to 35, and memory instructions may not address them. Every access is a pair of tuples on the `Memory` bus: the accessing row sends the previous access `(prev_shard, prev_clk, addr, prev_value)` and receives the current one `(shard, clk, addr, value)`, and asserts that the current timestamp is strictly larger. The argument is described in [Memory Consistency Checking](../memory-checking.md). This page describes the chips.
 
-## MemoryGlobal 
-Handles cross-shard memory management, initialization/finalization of global memory blocks, enforcement of address continuity, and verification of zero-register protection
+The memory chips are the five memory-instruction chips, `MemoryBump`, `MemoryLocal`, `MemoryGlobalInit` and `MemoryGlobalFinal`. The sources are in `crates/core/machine/src/memory/`.
 
-Major Columns:
+## Memory instructions
 
-- ​Address Tracking: Monitors shard ID and 32-bit memory addresses, while enforcing sequential order.
-- ​Value Validation: Stores 4-byte memory values with byte-level decomposition.
-- ​Control Flags: Identify valid operations and mark terminal addresses in access sequences.
-- ​Zero-Register Protection: Flags operations targeting protected memory regions.
+The load and store opcodes are split by width and direction so that each chip carries only the columns its opcodes need:
 
-Key Constraints:
+| Chip | Opcodes |
+|---|---|
+| `LoadWord` | `LW`, `LL` |
+| `LoadNarrow` | `LB`, `LBU`, `LH`, `LHU` |
+| `StoreWord` | `SW`, `SC` |
+| `StoreNarrow` | `SB`, `SH` |
+| `MemoryUnaligned` | `LWL`, `LWR`, `SWL`, `SWR` |
 
-- Addresses must follow strict ascending order verified via 32-bit comparator checks.
-- Memory at address 0 remains immutable after initialization.
-- Cross-shard finalization requires consistency with Global chip.
+Each chip embeds the I-type instruction frame and a common block that constrains:
+
+1. The effective address \\( addr = op_b + op_c \\), computed inline with an addition gadget (value and carries).
+2. That the address word is a canonical KoalaBear value with byte-checked limbs, and that \\( addr \ge 36 \\), so a memory instruction cannot touch a register.
+3. The two low address bits, and the memory access at the aligned address \\( addr - (addr \bmod 4) \\), at timestamp \\( clk + 0 \\).
+4. \\( next\\_next\\_pc = next\\_pc + 4 \\): memory instructions are sequential.
+
+Per chip:
+
+- `LoadWord` and `StoreWord` pin the low address bits to zero. A load's value is `op_a`; a store's memory value is `op_a`.
+- `SC` stores the previous value of `op_a` and sets `op_a` to 1. The machine is single-threaded, so a store-conditional always succeeds and `LL` is an ordinary load.
+- `LoadNarrow` selects the byte or half-word with three offset flags and extends it. For a signed load whose top bit is set, the bytes above the loaded value are `0xFF`. This is a byte constraint, not an ALU lookup.
+- `StoreNarrow` uses the offset flags to replace one byte or half-word of the previous memory word.
+- `MemoryUnaligned` combines the memory word with the previous value of `op_a` according to the offset, as `LWL`/`LWR`/`SWL`/`SWR` specify.
+
+The memory-instruction chips do not range-check the bytes of the loaded or stored word. A stored word comes from a register, and a loaded word goes to one. Values written into memory from any other source (global initialization, precompiles) are byte-checked where they enter.
+
+## MemoryBump
+
+A register access compares only clocks, not shards. To make that sound, `MemoryBump` has one row per (register, shard) for every register the shard touches: a *shadow read* of the register at timestamp `(shard, 0)`. Its previous access may be in any earlier shard, so this row uses the full access columns with a shard comparison. Because `clk` restarts at 0 in every shard and real register accesses sit at \\( clk + 1 \\) to \\( clk + 4 \\), the shadow read is always the first access of the shard to that register. Every other register access then has `prev_shard = shard`. This reduces each register access to six columns (value, previous clock and one 16-bit limb of the clock difference) instead of nine.
 
 ## MemoryLocal
 
-Maintains single-shard memory operations, tracking read/write events within a shard and preserving initial and final value consistency between consecutive shards.
+`MemoryLocal` has one row per address the shard accesses. The row opens and closes the shard's chain for that address:
 
-Major Columns:
+- It receives the initial tuple `(initial_shard, initial_clk, addr, initial_value)` on the `Memory` bus, where the shard's first access sends it as its "previous" access. It also sends the same tuple to the `Global` bus as a receive message.
+- It sends the final tuple `(final_shard, final_clk, addr, final_value)`, matching the shard's last access, and sends it to the `Global` bus as a send message.
 
-- ​Shard Identification: Tracks initial/final shard IDs for multi-shard transitions.
-- ​Temporal Metadata: Records start/end clock cycles of memory operations.
-- ​Value States: Preserves original and modified values for atomicity checks.
-- ​Time Difference Limbs: Splits clock differentials for range verification.
+The initial side is otherwise a free witness, so the row range-checks both shards to 16 bits, both clocks to 26 bits (a 16-bit and a 10-bit limb) and every value limb to a byte.
 
-Key Constraints:
+On the `Global` bus, a shard's final value for an address cancels against the next accessing shard's initial value (see [Memory Consistency Checking](../memory-checking.md)).
 
-- Final values must correspond to explicit write operations.
-- Overlapping accesses require a minimum 1-clock gap between operations.
-- Decomposed bytes must recompose to valid 32-bit words.
+## MemoryGlobalInit and MemoryGlobalFinal
 
-## MemoryProgram 
+These chips cover the lifetime of an address across the whole execution:
 
-Responsible for locking executable code into immutable memory regions during proof generation, preventing runtime modification.
+- `MemoryGlobalInit` has a row for each address the program touches that is not in the program image. It sends `(0, 0, addr, value)` on the `Global` bus with its initial value.
+- `MemoryGlobalFinal` has a row for each touched address. It receives the last `(shard, clk, addr, value)` from the `Global` bus.
 
-Major Columns:
+Initial values of the program image do not have rows. They are folded into the verifying key as `initial_global_cumulative_sum`, which the leaf of the first shard adds to the global sum.
 
-- ​Address-Value Binding: Maps fixed addresses to preloaded executable code.
-- Lock Flags: Enforces write protection for program memory regions.
-- Multiplicity Checks: Ensures single initialization of static memory.
+Each address may be initialized and finalized once. Both chips enforce it the same way:
 
-Key Constraints:
+- The value is witnessed as 32 bits and the address is bit-decomposed.
+- Consecutive rows are chained on a control bus (`MemoryGlobalInitControl` or `MemoryGlobalFinalizeControl`) carrying `(index, addr, valid)`.
+- Each row asserts `prev_addr < addr` with a 32-bit comparison.
 
-- Preloaded addresses cannot be modified during runtime.
-- Each code shard address must be initialized exactly once.
-- Access attempts to locked regions trigger validation failures.
-
-## MemoryAccess 
-
-Ensures global state synchronization, maintaining memory coherence across shards via multiset hashing.
-
-Major Columns:
-
-- ​Previous State Tracking: Stores prior shard ID and timestamp for dependency checks.
-- Time Difference Analysis: Splits timestamp gaps into 16-bit and 8-bit components.
-- Shard Transition Flags: Differentiate intra-shard vs. cross-shard operations.
-
-Key Constraints:
-
-- Cross-shard operations must reference valid prior states.
-- Timestamp differences must be constrained within 24-bit range (16+8 bit decomposition).
-- Intra-shard operations require sequential clock progression.
-
-## MemoryInstructions
-Validates MIPS load/store operations, verifying semantics of memory-related instructions (e.g., LW, SW, LB) and alignment rules.
-
-Major Columns:
-
-- ​Instruction Type Flags: Identifies various memory operations (LW/SB/SC/etc.).
-- ​Address Alignment: Tracks least-significant address bits for format checks.
-- ​Sign Conversion: Manages sign-extension logic for narrow-width loads.
-- ​Atomic Operation Bindings: Establishes linkage between load-linked (LL) to store-conditional (SC) events.
-
-Key Constraints:
-
-- Word operations (LW/SW) require 4-byte alignment (enforced by verifying last 2 address bits = 0).
-- Signed loads (LB/LH) perform extension using most significant bit/byte.
-- SC operations succeed only if memory remains unchanged since the corresponding LL.
-- Address ranges are validated through bitwise decomposition checks.
+The chain continues across shards: each shard's first row receives the previous shard's last address from the public values (`previous_init_addr_bits`, `last_init_addr_bits` and the finalize equivalents), and the leaf checks that the ranges of consecutive shards join. The only row exempt from the comparison is the genesis row, index 0 with previous address 0, which initializes and finalizes address 0 to zero.

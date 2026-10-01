@@ -1,10 +1,10 @@
-% Trace area by chip (executor census of block 25907955, 19.6 G cells).
+% Trace area by chip (executor census of block 25955640 at the current revision, 29.2 G cells).
 \begin{tikzpicture}
 \begin{axis}[
-  xbar, xmin=0, xmax=28, width=0.9\textwidth, height=7.2cm,
+  xbar, xmin=0, xmax=20, scale only axis, width=0.5\linewidth, height=6.2cm,
   bar width=7pt, xlabel={share of trace area (\%)},
-  symbolic y coords={Other,LoadNarrow,Bitwise,AddSub,ShiftLeftImm,AddSubImm,Branch,MemoryUnaligned,StoreWord,LoadWord,Global},
-  ytick={Other,LoadNarrow,Bitwise,AddSub,ShiftLeftImm,AddSubImm,Branch,MemoryUnaligned,StoreWord,LoadWord,Global},
+  symbolic y coords={Other,LoadNarrow,Bitwise,AddSub,ShiftLeftImm,AddSubImm,Branch,MemoryUnaligned,StoreWord,Global,LoadWord},
+  ytick={Other,LoadNarrow,Bitwise,AddSub,ShiftLeftImm,AddSubImm,Branch,MemoryUnaligned,StoreWord,Global,LoadWord},
   y dir=normal, nodes near coords, nodes near coords align={horizontal},
   every node near coord/.append style={font=\scriptsize},
   tick label style={font=\scriptsize}, label style={font=\small},
@@ -12,10 +12,10 @@
   enlarge y limits=0.06,
 ]
 \addplot[fill=zirenslate!30, draw=zirenslate!80, bar shift=0pt] coordinates {
-  (6.3,Branch) (6.2,AddSubImm) (5.8,ShiftLeftImm) (3.9,AddSub)
-  (3.3,Bitwise) (2.7,LoadNarrow) (12.9,Other)};
+  (6.9,Branch) (6.7,AddSubImm) (5.4,ShiftLeftImm) (4.4,AddSub)
+  (4.1,Bitwise) (3.1,LoadNarrow) (15.9,Other)};
 \addplot[fill=zirenblue!65, draw=zirenblue!95!black, bar shift=0pt] coordinates {
-  (24.5,Global) (12.7,LoadWord) (12.6,StoreWord) (9.1,MemoryUnaligned)
+  (15.0,Global) (15.2,LoadWord) (14.6,StoreWord) (8.6,MemoryUnaligned)
 };
 \end{axis}
 \end{tikzpicture}

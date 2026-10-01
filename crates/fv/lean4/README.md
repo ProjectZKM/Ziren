@@ -38,11 +38,12 @@ program fetch and a previous memory value are *sends* on the bus but *inputs* to
 | `ZirenDet/Lib.lean` | hand-written | The field `F = ZMod (2^31 - 2^24 + 1)`, the lifting lemmas from `F` to bounded integers, and the `picus_det` tactic. |
 | `ZirenDet/Safe.lean` | hand-written | `picus_safe`, a wrapper that catches any runtime failure of the automation and admits the goal, so a generated file always elaborates. |
 | `ZirenDet/Basic.lean` | generated | The prelude every generated chip file imports. |
-| `ZirenDet/Chips/*.lean` | generated (64 files) | One file per chip; inside, one *module* per opcode selector, each with its determinism theorem. |
+| `ZirenDet/Chips/*.lean` | generated, not committed (62 files, `check/regen_all.sh`) | One file per chip; inside, one *module* per opcode selector, each with its determinism theorem. |
+| `ZirenDet/Chips.lean` | generated, not committed | Imports every generated chip file and the bridges built on them. |
 | `ZirenDet/Isa.lean` | hand-written | Executable MIPS32r2 semantics: `decode`, `step`, `run`. Little-endian, delay slots, `$zero` sink, separate `HI`/`LO`. |
 | `ZirenDet/IsaVectors.lean` | generated | 770 specification vectors replayed through `Isa.run`, each `by native_decide`. |
 | `ZirenDet/IsaDecode.lean` | generated | 2275 decodings of real instruction words checked against the emulator's decoder output. |
-| `ZirenDet/Bridge/*.lean` | hand-written | The *functional* direction: this chip computes *that* ISA function. One worked example (`AddSub`), still open. |
+| `ZirenDet/Bridge/*.lean` | hand-written | The *functional* direction: this chip computes *that* ISA function. One worked example (`AddSub`), still open; it builds against the generated chip files. |
 
 ## What a generated theorem looks like
 
@@ -87,33 +88,34 @@ every theorem into a `sorry`, so check the count after changing it.
 
 ## Building
 
-**Builds run on the GPU box, never on the dev host.** Mathlib plus 64 generated files is tens
-of gigabytes of elaboration; individual chip files have peaked above 200 GB of resident
-memory, so run them where there is room and watch the machine.
+**Build on a machine with plenty of memory, not a laptop.** Mathlib plus the generated chip files
+is tens of gigabytes of elaboration, and a large chip file built as one module has peaked above
+200 GB of resident memory. Build the library with `lake`, and check chip files with
+`check/check.sh`, which splits each into modules built in parallel under a memory gate
+(`check/README.md`).
 
 ```bash
-# from the repo root
-rsync -a --exclude .lake crates/fv/lean4/ ant-5090-2:/mnt_zkm/stephen/lean4/
-
-ssh ant-5090-2 'export ELAN_HOME=/mnt_zkm/stephen/.elan \
-                       PATH=/mnt_zkm/stephen/.elan/bin:$PATH \
-                       XDG_CACHE_HOME=/mnt_zkm/stephen/.cache
-                cd /mnt_zkm/stephen/lean4 && lake build 2>&1 | tee build.log'
+cd crates/fv/lean4
+lake build                      # ZirenDet: the library and the gadget proofs
 ```
 
-`ELAN_HOME` and `XDG_CACHE_HOME` matter: a non-interactive shell has no toolchain on its
-`PATH`, and without them `lake` re-downloads the toolchain onto the box's nearly full root
-filesystem.
+Point `ELAN_HOME` and `XDG_CACHE_HOME` at a disk with room when the home filesystem is small, and
+put `$ELAN_HOME/bin` on `PATH` in non-interactive shells, or `lake` cannot find or re-downloads
+the toolchain.
 
-To work on one chip, build its module alone — the files are independent:
+The `check/` scripts are not yet in the repository; until they are, take them from the archived
+snapshot of the checked files (`src/crates/fv/lean4/check`). The chip files are generated, not committed. `check/regen_all.sh OUT` writes all of them, with
+their gadget snippets, under `OUT`; `zkm-picus --chip NAME --format lean --derive --lean-out-dir
+crates/fv/lean4` writes one into this project. To work on one chip, build its module alone (the
+files are independent), or check a large one in parallel with `check/check.sh`:
 
 ```bash
 lake build ZirenDet.Chips.AddSub
 ```
 
 Kill a runaway file by explicit PID (`ps -o pid,rss,args -C lean --sort=-rss`). Never
-`pkill -f lean` on the box: the pattern matches the ssh session running it, and it will take
-down the other files with it.
+`pkill -f lean`: the pattern can match the shell that launched the build and take down the
+other files with it.
 
 ## Reading the result
 

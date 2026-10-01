@@ -1,64 +1,69 @@
+# Verifier
+
 ## Proof Verification Overview
 
-Once a proof attesting to the correct execution of a computation is generated, the verifier checks whether the proof is valid. Verification requires four components: 
+A verifier checks a proof against:
 
-- the verifying key: vk
-- the proof itself: π
-- the public inputs: x
-- the result of the computation: y
+- the program's verifying key (or its 32-byte hash);
+- the public values the program committed;
+- the proof itself.
 
-For zkVMs, both the proving and verifying keys are generated from the compiled ELF binary. The proving key, together with the inputs (x), is used to generate the proof (π), which attests that the program executed correctly on the given inputs and produced the claimed output (y). Here, `P(pk, x) = π`. 
-
-Verification then checks that the proof, verifying key, inputs, and outputs are consistent. If the verification function `V(vk, x, y, π)` evaluates to true, the proof is accepted; otherwise, it is rejected.
-
-The verifying key is produced during the key generation phase, alongside the proving key used by the prover. A 32-byte verifying key hash serves as a unique identifier, binding the proof to a specific compiled guest program and preventing it from being validated under another program’s key. Retrieve a program’s verifying key hash in code using the SDK:
+Both the proving key and the verifying key are derived from the compiled guest ELF by `setup`. The 32-byte verifying key hash identifies the program: a proof verifies only under the key of the program that produced it, and any change to the guest ELF changes the key. Retrieve the hash with the SDK:
 
 ```rust
-use zkm_sdk::ProverClient;
+use zkm_sdk::{HashableKey, ProverClient};
 
 let client = ProverClient::new();
 let (_pk, vk) = client.setup(ELF);
-let vkey_hash = vk.bytes32(); // 32-byte program verifying key hash
+let vkey_hash = vk.bytes32(); // 0x-prefixed hex string of the 32-byte program vk hash
 ```
+
+Within a host, `client.verify(&proof, &vk)` verifies any proof kind. The rest of this page covers verification outside the SDK: on-chain, with the `zkm-verifier` crate, in WASM, inside the zkVM, and in BitVM.
 
 ## On-chain verification
 
-Ziren enables users to post and verify proofs directly on-chain. A verifier smart contract encodes the verifying key and verification logic, allowing anyone to check a proof against the declared public inputs.
+A verifier smart contract lets anyone check a proof on an EVM chain. The proof is generated off-chain; the chain only pays for verification, whose cost does not depend on the size of the proved computation.
 
-When a proof and its public inputs are submitted to the verifier contract, the contract performs checks to ensure the inputs match those committed in the proof. If successful, the contract returns true; otherwise, it reverts. This approach lets applications run heavy computations off-chain, generate a succinct proof, and then verify it on-chain. Gas fees are only incurred for verification, not for executing the full computation. 
+STARK proofs are too large to verify economically on Ethereum, so Ziren wraps them into Groth16 or PLONK proofs over BN254. A Groth16 proof is 260 bytes and a PLONK proof about 868 bytes, and both are checked with a constant number of BN254 precompile calls. Every on-chain proof has three public inputs:
 
-Verification costs remain constant regardless of the size of the original computation. Because STARK proofs are too large to be efficiently verified on Ethereum, Ziren wraps them into Groth16 or PLONK proofs, both of which are succinct and EVM-friendly. STARK proofs are typically hundreds of kilobytes, while Groth16 proofs are only a few hundred bytes. By shrinking the proof to a more succinct format, they are more feasible to verify. Groth16 and PLONK also offer constant-time verification (O(1)) independent of circuit size, making them practical for on-chain use.
+1. the program verifying key hash (`vk.bytes32()`);
+2. the digest of the public values: SHA-256 of the committed bytes, masked to 253 bits so it fits in a BN254 field element;
+3. the root of the recursion verifying key allowlist (the "vk map") of the Ziren release that produced the proof.
 
-The advantage of this is rather than incurring direct gas costs for your application’s logic during execution, you can simply execute off-chain and verify your proof on-chain, paying for gas only when requesting a proof and the callback. Since verification costs remain constant regardless of the size of the original computation, whether the proof represents a small Fibonacci calculation or millions of execution steps, the gas cost depends only on the proof and the size of the public outputs (y).
+### Verifier Contracts
 
-Ziren currently offers the capability to post and verify a proof on testnet e.g., Sepolia. Support for on-chain verification contracts deployed on additional chains is coming soon.
+The verifier contracts of each release are generated when the circuit is built, from the templates in [`crates/recursion/gnark-ffi/assets`](https://github.com/ProjectZKM/Ziren/tree/main/crates/recursion/gnark-ffi/assets), and are shipped in the release's circuit artifacts. After the SDK has installed the artifacts (see [Prover](./prover.md)), they are in:
 
-### Verifier Contracts in the Project Template
+- `~/.zkm/circuits/groth16/<version>/`: `ZKMVerifierGroth16.sol` and `Groth16Verifier.sol`;
+- `~/.zkm/circuits/plonk/<version>/`: `ZKMVerifierPlonk.sol` and `PlonkVerifier.sol`.
 
-Ziren’s project template includes sample verifier contracts, forge scripts for deploying contracts, and Foundry tests to validate verifier functionality prior to deployment (which incurs gas costs). These include:
+The contracts are:
 
-- **IZKMVerifier** — a verifier interface.
-- **Fibonacci.sol** — an example application contract verifying a proof for a Fibonacci guest program.
-- **ZKMVerifierGroth16.sol** and **ZKMVerifierPlonk.sol** — verifier instances that enforces the `VERIFIER_HASH` selector, decodes inputs and calls the corresponding proof system verifier.
-- **Groth16Verifier.sol** and **PLONKVerifier.sol** — the contracts implementing the cryptographic verification logic of the underlying proof system.
+- **IZKMVerifier** is the verifier interface.
+- **ZKMVerifierGroth16.sol** and **ZKMVerifierPlonk.sol** (both define a contract named `ZKMVerifier`) check the verifier selector, compute the public inputs, and call the proof system verifier.
+- **Groth16Verifier.sol** and **PlonkVerifier.sol** implement the pairing checks of the proof systems; they are generated by gnark from the circuit's verifying key.
 
-The following is `IZKMVerifier.sol`, Ziren’s verifier interface:
+`IZKMVerifier.sol`:
 
-```rust
+```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @title zkMIPS Verifier Interface
-/// @author ZKM
-/// @notice This contract is the interface for the zkMIPS Verifier.
+/// @title Ziren Verifier Interface
+/// @author ZKM Labs
+/// @notice This contract is the interface for the Ziren Verifier.
 interface IZKMVerifier {
     /// @notice Verifies a proof with given public values and vkey.
     /// @dev It is expected that the first 4 bytes of proofBytes must match the first 4 bytes of
     /// target verifier's VERIFIER_HASH.
     /// @param programVKey The verification key for the MIPS program.
     /// @param publicValues The public values encoded as bytes.
-    /// @param proofBytes The proof of the program execution the zkMIPS zkVM encoded as bytes.
-    function verifyProof(bytes32 programVKey, bytes calldata publicValues, bytes calldata proofBytes) external view;
+    /// @param proofBytes The proof of the program execution the Ziren zkVM encoded as bytes.
+    function verifyProof(
+        bytes32 programVKey,
+        bytes calldata publicValues,
+        bytes calldata proofBytes
+    ) external view;
 }
 
 interface IZKMVerifierWithHash is IZKMVerifier {
@@ -67,68 +72,20 @@ interface IZKMVerifierWithHash is IZKMVerifier {
 }
 ```
 
-The `verifyProof` function takes the vkey, public values and proof as arguments. `VERIFIER_HASH` is a guardrail-type check that verifies that the first 4 bytes of the proof matches the first 4 bytes of the verifier hash. This provides a pre-check to prevent misrouted proofs and ensuring that Groth16 proofs are fed into a Groth16 verifier, PLONK proofs are fed into a PLONK verifier, etc. 
+`verifyProof` takes the program verifying key hash, the public values and the proof. `VERIFIER_HASH` is the SHA-256 hash of the Groth16 or PLONK verifying key; the first 4 bytes of every proof (as returned by `proof.bytes()`) must equal its first 4 bytes. The check rejects a proof sent to the wrong verifier, for example a PLONK proof sent to the Groth16 verifier or a proof from another release.
 
-The `IZKMVerifier.sol`interface can be used in a verifier contract. An example of its implementation can be found in the following verifier contract for the Fibonacci example: 
+The Groth16 template, `ZKMVerifierGroth16.txt`, from which each release's `ZKMVerifierGroth16.sol` is generated:
 
-```rust
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-import {IZKMVerifier} from "./IZKMVerifier.sol";
-
-struct PublicValuesStruct {
-    uint32 n;
-    uint32 a;
-    uint32 b;
-}
-
-/// @title Fibonacci.
-/// @author ZKM
-/// @notice This contract implements a simple example of verifying the proof of a computing a
-///         fibonacci number.
-contract Fibonacci {
-    /// @notice The address of the zkMIPS verifier contract.
-    /// @dev This is a specific ZKMVerifier for a specific version.
-    IZKMVerifier public verifier;
-
-    /// @notice The verification key for the fibonacci program.
-    bytes32 public fibonacciProgramVKey;
-
-    constructor(IZKMVerifier _verifier, bytes32 _fibonacciProgramVKey) {
-        verifier = _verifier;
-        fibonacciProgramVKey = _fibonacciProgramVKey;
-    }
-
-    /// @notice The entrypoint for verifying the proof of a fibonacci number.
-    /// @param _proofBytes The encoded proof.
-    /// @param _publicValues The encoded public values.
-    function verifyFibonacciProof(bytes calldata _publicValues, bytes calldata _proofBytes)
-        public
-        view
-        returns (uint32, uint32, uint32)
-    {
-        IZKMVerifier(verifier).verifyProof(fibonacciProgramVKey, _publicValues, _proofBytes);
-        PublicValuesStruct memory publicValues = abi.decode(_publicValues, (PublicValuesStruct));
-        return (publicValues.n, publicValues.a, publicValues.b);
-    }
-}
-```
-
-Application contracts like `**Fibonacci.sol**` use the verifier interface, in addition to the verifying key, public values and proof bytes to call a deployed contract verifier such as `ZKMVerifierGroth16.sol` or `ZKMVerifierPlonk.sol`. If verification succeeds, the contract decodes and returns the public values. If it fails, the call reverts.
-
-There are two verifier instance contracts: `ZKMVerifierGroth16.sol` and `ZKMVerifierPlonk.sol`. The following is the contract for `ZKMVerifierGroth16.sol`: 
-
-```rust
+```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import {IZKMVerifier, IZKMVerifierWithHash} from "../IZKMVerifier.sol";
 import {Groth16Verifier} from "./Groth16Verifier.sol";
 
-/// @title zkMIPS Verifier
-/// @author ZKM
-/// @notice This contracts implements a solidity verifier for zkMIPS.
+/// @title Ziren Verifier
+/// @author ZKM Labs
+/// @notice This contracts implements a solidity verifier for Ziren.
 contract ZKMVerifier is Groth16Verifier, IZKMVerifierWithHash {
     /// @notice Thrown when the verifier selector from this proof does not match the one in this
     /// verifier. This indicates that this proof was sent to the wrong verifier.
@@ -140,25 +97,41 @@ contract ZKMVerifier is Groth16Verifier, IZKMVerifierWithHash {
     error InvalidProof();
 
     function VERSION() external pure returns (string memory) {
-        return "v1.0.0";
+        return "{ZKM_CIRCUIT_VERSION}";
     }
 
     /// @inheritdoc IZKMVerifierWithHash
     function VERIFIER_HASH() public pure returns (bytes32) {
-        return 0xc7bd17e8b69c0f5d28ad39a60019df51079a6aa160013bc4a4485219a97fec97;
+        return {VERIFIER_HASH};
+    }
+
+    /// @notice The root of the Merkle tree of recursion verifying keys this verifier accepts.
+    /// @dev Inside the proof tree this root is a witness the prover supplies, so the in-circuit
+    /// checks only establish that every child key lies in a tree with *that* root. Supplying this
+    /// value as a public input here, rather than taking it from the caller, is what binds a proof
+    /// to the published recursion programs and rules out one built around a substituted compose,
+    /// leaf or shrink program.
+    function VK_ROOT() public pure returns (bytes32) {
+        return {VK_ROOT};
     }
 
     /// @notice Hashes the public values to a field elements inside Bn254.
     /// @param publicValues The public values.
-    function hashPublicValues(bytes calldata publicValues) public pure returns (bytes32) {
+    function hashPublicValues(
+        bytes calldata publicValues
+    ) public pure returns (bytes32) {
         return sha256(publicValues) & bytes32(uint256((1 << 253) - 1));
     }
 
     /// @notice Verifies a proof with given public values and vkey.
     /// @param programVKey The verification key for the MIPS program.
     /// @param publicValues The public values encoded as bytes.
-    /// @param proofBytes The proof of the program execution the zkMIPS zkVM encoded as bytes.
-    function verifyProof(bytes32 programVKey, bytes calldata publicValues, bytes calldata proofBytes) external view {
+    /// @param proofBytes The proof of the program execution the Ziren zkVM encoded as bytes.
+    function verifyProof(
+        bytes32 programVKey,
+        bytes calldata publicValues,
+        bytes calldata proofBytes
+    ) external view {
         bytes4 receivedSelector = bytes4(proofBytes[:4]);
         bytes4 expectedSelector = bytes4(VERIFIER_HASH());
         if (receivedSelector != expectedSelector) {
@@ -166,81 +139,133 @@ contract ZKMVerifier is Groth16Verifier, IZKMVerifierWithHash {
         }
 
         bytes32 publicValuesDigest = hashPublicValues(publicValues);
-        uint256[2] memory inputs;
+        uint256[3] memory inputs;
         inputs[0] = uint256(programVKey);
         inputs[1] = uint256(publicValuesDigest);
+        inputs[2] = uint256(VK_ROOT());
         uint256[8] memory proof = abi.decode(proofBytes[4:], (uint256[8]));
         this.Verify(proof, inputs);
     }
+}
 ```
 
-This contract executes a series of checks to determine whether a proof is valid. If all checks pass, the proof is accepted. The verification process includes:
+The release build fills in `{ZKM_CIRCUIT_VERSION}` (for example `v2.0.0`), `{VERIFIER_HASH}` and `{VK_ROOT}`. The contract:
 
-- An initial guardrail check to ensure proof type compatibility by checking that the first 4 bytes of `proofBytes` match the contract’s `VERIFIER_HASH`.
-- Confirming that the proof is tied to the correct program verifying key (`programVKey`), such as Fibonacci’s vKey.
-- Checking that the proof’s embedded public inputs match the declared public output bytes of the guest program.
-- Delegating to the appropriate underlying proof-system verifier, either `Groth16Verifier` or `PlonkVerifier`.
+- checks that the first 4 bytes of `proofBytes` match `VERIFIER_HASH`;
+- binds the proof to the program through `programVKey`;
+- binds it to the public values through their SHA-256 digest;
+- binds it to the release's recursion programs through `VK_ROOT`, which is a constant of the contract and not an argument, so a caller cannot substitute another allowlist;
+- calls `Groth16Verifier.Verify`, which reverts if the proof is invalid.
 
-The `Groth16Verifier` and `PlonkVerifier` contracts implement the core cryptographic logic for their respective proof systems. For example, `Groth16Verifier` performs pairing checks over bn128 precompiles.
+The PLONK contract is the same except for the last step: it passes the three inputs as a `uint256[]` together with the raw proof bytes to `PlonkVerifier.Verify`, and reverts with `InvalidProof()` when that returns `false`.
 
-Deployment scripts for these verifiers are provided in the contracts > scripts directory. Specifically, `ZKMVerifierGroth16.s.sol` and `ZKMVerifierPlonk.s.sol` deploy the corresponding verifier contracts.
+A proof verifies only against the contracts of the release that produced it: a different release has a different `VERIFIER_HASH` or `VK_ROOT`.
 
-Below is the `ZKMVerifierGroth16.s.sol` script:
+### Application Contracts
 
-```rust
+An application contract stores the program verifying key hash and calls a deployed `ZKMVerifier` through the interface. The following contract accepts proofs of a Fibonacci guest that commits its outputs ABI-encoded as `(uint32 n, uint32 a, uint32 b)` (for example with `alloy_sol_types::SolType::abi_encode`):
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {IZKMVerifier} from "./IZKMVerifier.sol";
+
+struct PublicValuesStruct {
+    uint32 n;
+    uint32 a;
+    uint32 b;
+}
+
+contract Fibonacci {
+    /// @notice The address of the Ziren verifier contract.
+    IZKMVerifier public verifier;
+
+    /// @notice The verification key hash for the fibonacci program.
+    bytes32 public fibonacciProgramVKey;
+
+    constructor(IZKMVerifier _verifier, bytes32 _fibonacciProgramVKey) {
+        verifier = _verifier;
+        fibonacciProgramVKey = _fibonacciProgramVKey;
+    }
+
+    function verifyFibonacciProof(bytes calldata _publicValues, bytes calldata _proofBytes)
+        public
+        view
+        returns (uint32, uint32, uint32)
+    {
+        verifier.verifyProof(fibonacciProgramVKey, _publicValues, _proofBytes);
+        PublicValuesStruct memory publicValues = abi.decode(_publicValues, (PublicValuesStruct));
+        return (publicValues.n, publicValues.a, publicValues.b);
+    }
+}
+```
+
+The arguments come from the host (see [`examples/fibonacci/host/bin/groth16_bn254.rs`](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci/host/bin/groth16_bn254.rs)):
+
+- `_fibonacciProgramVKey` is `vk.bytes32()`;
+- `_publicValues` is `proof.public_values.as_slice()`;
+- `_proofBytes` is `proof.bytes()`.
+
+### Deployment
+
+The contracts are plain Solidity and can be deployed with any tool. With Foundry, place `IZKMVerifier.sol` in `src/` and the release's two Groth16 contracts in `src/<version>/` (the layout their imports expect), and deploy the verifier with a script:
+
+```solidity
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
-import {Script, console} from "forge-std/Script.sol";
-import {ZKMVerifier} from "../src/v1.0.0/ZKMVerifierGroth16.sol";
+import {Script} from "forge-std/Script.sol";
+import {ZKMVerifier} from "../src/v2.0.0/ZKMVerifierGroth16.sol";
 
 contract ZKMVerifierGroth16Script is Script {
-    ZKMVerifier public verifier;
-
-    function setUp() public {}
-
     function run() public {
         vm.startBroadcast();
-
-        verifier = new ZKMVerifier();
-
+        new ZKMVerifier();
         vm.stopBroadcast();
     }
 }
 ```
 
-The Forge script deploys the selected verifier contract ( `ZKMVerifierGroth16.sol`) to a target network. The script starts broadcasting, deploys the verifier, then stops broadcasting while recording the verification time. Once completed, the deployed verifier’s address is outputted.
-
-From the end-user perspective, contracts can be deployed and bytecode published using the Forge script command. For example:
-
 ```bash
-forge script scripts/ZKMVerifierGroth16.sol:ZKMVerifierGroth16 \
+forge script script/ZKMVerifierGroth16.s.sol:ZKMVerifierGroth16Script \
   --rpc-url $RPC_URL --private-key $PK --broadcast
 ```
 
-This command executes the script and deploys the `ZKMVerifierGroth16` contract to the specified network.
-
-Running this process locally (without broadcasting) simulates an EVM call against the deployed verifier contract. This is considered off-chain verification, since the verification logic executes locally and only returns the result.
-
-When deployed, the verifier logic is placed on Ethereum at a specific contract address, making proof verification publicly accessible. The main value proposition of on-chain deployment is **public verifiability**: once the verifier is live, anyone can call it with `programVKey`, `publicValues`, and `proofBytes`.
-
-The deployed contract points to the correct verifier implementation (e.g., `ZKMVerifierGroth16`), and users interact with it by calling the `verifyProof()` function.
-
-The proof lifecycle for EVM-based verification is as follows:
-
-1. After proof generation, the proof bytes, verifying key, and public values are submitted in a transaction to the deployed verifier contract (e.g., `ZKMVerifierGroth16`).
-2. Full nodes execute the verifier contract, checking that the proof matches the verifying key, that the public values are consistent, and that all cryptographic constraints of the proof system hold.
-3. If the proof is valid, the call succeeds and Ethereum records the result in its state. If invalid, the transaction reverts.
-
-Although verification incurs a gas cost it runs in constant time where the cost is independent of the size of the original computation.
+Then deploy the application contract with the verifier's address and the program verifying key hash. Anyone can then call `verifyProof` (directly or through the application contract) with a proof; the call reverts if the proof is invalid.
 
 ## Off-chain verification
 
-In addition to on-chain verification through deployed verifier contracts, Ziren offer off-chain verification for all supported proof systems.
+Off-chain verification checks compressed STARK, Groth16 and PLONK proofs without a chain, and so without gas. Compressed proofs can be verified directly, without the STARK-to-SNARK wrapping. The result is only known to whoever runs the check.
 
-Off-chain verification allows developers to check STARK (core and compressed), PLONK, and Groth16 proofs directly, without incurring gas. This approach also avoids the overhead of STARK-to-SNARK wrapping, since STARK proofs can also be verified natively.
+### **The `zkm-verifier` Crate**
 
-Because the verification runs on a local CPU rather than on-chain, the process does not costs related to gas (unlike EVM-based verification) or dispute resolution (unlike BitVM-based verification). However, unlike on-chain verification, off-chain verification is not publicly verifiable. The result is only visible locally to the entity performing the check.
+The [`zkm-verifier`](https://github.com/ProjectZKM/Ziren/tree/main/crates/verifier) crate verifies proofs without the prover. It supports `no_std` (disable the default `std` feature), so it also builds for WASM and for the zkVM itself. It embeds the verifying keys of its Ziren release:
+
+- `GROTH16_VK_BYTES` and `PLONK_VK_BYTES`: the Groth16 and PLONK verifying keys;
+- `VK_ROOT_BYTES`: the recursion verifying key allowlist root, the third public input;
+- `IMM_GROTH16_VK_BYTES` and `PART_STARK_VK_BYTES`: the keys for the immutable-wrap-vk mode.
+
+Its verifiers take the byte encodings the SDK produces (`proof.bytes()`, `proof.public_values.to_vec()`, `vk.bytes32()`):
+
+| Function | Verifies |
+|---|---|
+| `Groth16Verifier::verify(proof, public_values, vkey_hash, groth16_vk)` | a Groth16 proof |
+| `Groth16Verifier::verify_by_imm_groth16_vk(proof, public_values, vkey_hash, imm_groth16_vk, part_stark_vk)` | a Groth16 proof made in the immutable-wrap-vk mode; `Groth16Verifier::get_part_stark_vk(version)` returns a bundled release's partial STARK key |
+| `PlonkVerifier::verify(proof, public_values, vkey_hash, plonk_vk)` | a PLONK proof |
+| `StarkVerifier::verify(proof, public_values, vk)` | a compressed proof (`proof.bytes()`) against the bincode-serialized `ZKMVerifyingKey`, and checks that the public values match the digest committed in the proof |
+| `StarkVerifier::verify_proof(proof, vk)` | a compressed proof, without the public values check |
+
+For example:
+
+```rust
+use zkm_verifier::{Groth16Verifier, GROTH16_VK_BYTES};
+
+Groth16Verifier::verify(&proof_bytes, &public_values, &vkey_hash, *GROTH16_VK_BYTES)
+    .expect("invalid proof");
+```
+
+With the `ark` feature, the crate also converts proofs to [arkworks](https://github.com/arkworks-rs) types and verifies them with `ark-groth16`.
 
 ### **WASM Verification**
 
@@ -290,7 +315,7 @@ All Rust functions in the `zkm_verifier` crate encoding the verification logic f
 
 The repository also contains a few examples. The `wasm_example` script demonstrates verifying proofs in Node.js: 
 
-```rust
+```javascript
 /**
  * This script verifies the proofs generated by the script in `example/host`.
  *
@@ -374,11 +399,11 @@ This example logs:
 - Verification time (in ms)
 - Whether the proof is valid
 
-The `eth_wasm` example demonstrates **in-browser STARK verification for Ethereum block proofs** as part of the [EthProofs](https://ethproofs.org/?utm_source=chatgpt.com) initiate. 
+The `eth_wasm` example demonstrates **in-browser STARK verification for Ethereum block proofs** for [EthProofs](https://ethproofs.org/).
 
 main.js: 
 
-```jsx
+```javascript
 /**
  * This script verifies the proofs generated by the script in `example/host`.
  *
@@ -403,65 +428,24 @@ console.assert(result, "result:", result, "proof should be valid");
 console.log(`ETH proof is valid.`);
 ```
 
-The script’s main functions are:
+The script reads a STARK verifying key and an Ethereum block proof downloaded from [EthProofs](https://ethproofs.org/), and calls `verify_stark_proof`, which wraps `StarkVerifier::verify_proof`. Unlike `verify_stark`, it takes no separate public values: it checks the proof against the verifying key only, and the block's public values are read from the proof. The proof and the verifying key must come from the same Ziren release as the verifier.
 
-- Loading the verifier WASM module with Rust bindings
-- Reading the verifying key
-- Reading the Ethereum block proof file
-- Calling the `verify_stark_proof` function
-- Measuring verification time
-- Checking whether the proof is valid
+The EthProofs project uses a modified version of the WASM verifier, published as an npm package: [@ethproofs/ziren-wasm-stark-verifier](https://www.npmjs.com/package/@ethproofs/ziren-wasm-stark-verifier).
 
-The script in the `example/binaries` directory demonstrates these steps using a STARK verifying key downloaded from the Ziren prover network and a sample proof from EthProofs, which attests that Ethereum Block `23,174,000` was executed correctly. Users can also download and run in-browser verification for Ziren directly from [EthProofs](https://ethproofs.org/clusters/84a01f4b-8078-44cf-b463-90ddcd124960?utm_source=chatgpt.com). The verification process uses the WASM bindings generated by `wasm-pack build`, which expose the `verify_stark_proof` function wrapping the Rust `StarkVerifier`.
+For the Fibonacci example with `n = 1000`, the script prints `n: 1000`, `a: 5965` and `b: 3651`, the verification time, and whether each proof is valid.
 
-During execution, the script records start and end times to measure verification latency. The call `wasm.verify_stark_proof(proof, vkey)` runs verification in WASM by parsing the proof bytes, checking the proof against the verifying key, and confirming correctness.
-
-Unlike the generic `wasm_example`, which requires passing explicit public outputs to `verify_stark`, the EthProofs example uses only the `verify_stark_proof` function. Here, all relevant public data is embedded directly within the proof. The verifier checks that the proof is valid against the verifying key and that the committed public inputs are consistent with the proof itself. This design removes the need to pass public inputs separately, reducing overhead and making block-level verification faster.
-
-The EthProofs project uses a modified version of the WASM verifier, published as an npm package: [@ethproofs/ziren-wasm-stark-verifier](https://www.npmjs.com/package/@ethproofs/ziren-wasm-stark-verifier?utm_source=chatgpt.com).
-
-Using the fibonacci example, the expected output including the public inputs used, verification time and confirmation of the proof’s validity is as follows: 
-
-```rust
-n: 1000
-a: 5965
-b: 3651
-groth16 verification took 10827.951916999999ms
-Proof in fibonacci_groth16_proof.json is valid.
-n: 1000
-a: 5965
-b: 3651
-plonk verification took 20315.557584000002ms
-Proof in fibonacci_plonk_proof.json is valid.
-n: 1000
-a: 5965
-b: 3651
-stark verification took 30252.595458ms
-Proof in fibonacci_stark_proof.json is valid.
-```
+The WASM verifier embeds the verifying keys of one Ziren release, so it verifies only proofs of that release.
 
 ### **no_std Verification**
 
-Ziren also supports verifying STARK, Groth16, and PLONK proofs in no_std environments, making it possible to run proof verification logic without depending on the Rust standard library. This allows the verifier to:
+Because `zkm-verifier` is `no_std`, it can run where the Rust standard library is unavailable:
 
-1. Run in resource-constrained or bare-metal environments. 
-2. Execute inside the zkVM as a guest program. 
+1. in resource-constrained or bare-metal environments;
+2. inside the zkVM, as a guest program.
 
-This approach is especially useful for off-chain computation pipelines, such as client-side verification or pre-verification before submitting proofs on-chain.
+A verifier guest reads a proof, its public values and the program verifying key hash from the input stream and verifies the proof. Proving that guest yields a proof of verification. The [groth16 example](https://github.com/ProjectZKM/Ziren/tree/main/examples/groth16) executes such a guest on a Groth16 proof of the Fibonacci program.
 
-This approach is especially useful for off-chain computation pipelines, such as client-side verification or pre-verification before submitting proofs on-chain.
-
-In the no_std model, the verifier itself is compiled as a guest binary and executed inside the zkVM. The workflow is as follows:
-
-1. Compile the verifier guest in Rust (no_std style). The guest reads inputs, runs the verifier logic, and prints success/failure.
-2. Provide inputs via `ZKMStdin` stream from the host. These include proof bytes, public values, and the verifying key hash.
-3. Execute inside zkVM. The host runs the verifier guest program in the zkVM.
-
-Because all no_std targets run outside of a full OS runtime, verification is performed entirely off-chain. Additionally, recursive verification is possible: a verifier guest can itself be wrapped in a proof, producing a proof-of-verification. This enables recursive proof composition.
-
-As an example of using no_std verification for verifying Groth16 proofs, see the [groth16 example](https://github.com/ProjectZKM/Ziren/tree/main/examples/groth16).
-
-The following is the host program implementation for a Groth16 proof of the Fibonacci program: 
+The host generates the Fibonacci proof and executes the verifier guest on it:
 
 ```rust
 //! A script that generates a Groth16 proof for the Fibonacci program, and verifies the
@@ -480,50 +464,38 @@ const FIBONACCI_ELF: &[u8] = include_elf!("fibonacci");
 ///
 /// Returns the proof bytes, public values, and vkey hash.
 fn generate_fibonacci_proof() -> (Vec<u8>, Vec<u8>, String) {
-    // Create an input stream and write '20' to it.
     let n = 20u32;
 
-    // The input stream that the program will read from using `zkm_zkvm::io::read`. Note that the
-    // types of the elements in the input stream must match the types being read in the program.
     let mut stdin = ZKMStdin::new();
     stdin.write(&n);
 
-    // Create a `ProverClient`.
     let client = ProverClient::new();
 
-    // Generate the groth16 proof for the Fibonacci program.
     let (pk, vk) = client.setup(FIBONACCI_ELF);
     println!("vk: {:?}", vk.bytes32());
     let proof = client.prove(&pk, stdin).groth16().run().unwrap();
-    (proof.bytes(), proof.public_values.to_vec(), vk.bytes32())
+    (proof.bytes().expect("the proof has a byte encoding"), proof.public_values.to_vec(), vk.bytes32())
 }
 
 fn main() {
-    // Setup logging.
     utils::setup_logger();
 
-    // Generate the Fibonacci proof, public values, and vkey hash.
     let (fibonacci_proof, fibonacci_public_values, vk) = generate_fibonacci_proof();
 
-    // Write the proof, public values, and vkey hash to the input stream.
     let mut stdin = ZKMStdin::new();
     stdin.write_vec(fibonacci_proof);
     stdin.write_vec(fibonacci_public_values);
     stdin.write(&vk);
 
-    // Create a `ProverClient`.
     let client = ProverClient::new();
 
-    // Execute the program using the `ProverClient.execute` method, without generating a proof.
-    let (_, report) = client.execute(GROTH16_ELF, stdin).run().unwrap();
+    let (_, report) = client.execute(GROTH16_ELF, &stdin).run().unwrap();
     println!("executed groth16 program with {} cycles", report.total_instruction_count());
     println!("{}", report);
 }
 ```
 
-The host compiles and proves a target program (e.g., Fibonacci) to generate the proof, public values, and verifying key. These values are serialized and written to the zkVM input channel (ZKMStdin). The host then executes the verifier guest ELF inside the zkVM, reading the inputs from stdin and verifying the proof with `client.prove(&pk, stdin).groth16().run().unwrap().`
-
-The following is the corresponding guest program implementation: 
+The verifier guest:
 
 ```rust
 //! A program that verifies a Groth16 proof in ZKM.
@@ -534,12 +506,10 @@ zkm_zkvm::entrypoint!(main);
 use zkm_verifier::Groth16Verifier;
 
 pub fn main() {
-    // Read the proof, public values, and vkey hash from the input stream.
     let proof = zkm_zkvm::io::read_vec();
     let zkm_public_values = zkm_zkvm::io::read_vec();
     let zkm_vkey_hash: String = zkm_zkvm::io::read();
 
-    // Verify the groth16 proof.
     let groth16_vk = *zkm_verifier::GROTH16_VK_BYTES;
     println!("cycle-tracker-start: verify");
     let result = Groth16Verifier::verify(&proof, &zkm_public_values, &zkm_vkey_hash, groth16_vk);
@@ -556,11 +526,7 @@ pub fn main() {
 }
 ```
 
-The guest reads all the inputs, including the proof, public values and verifying key hash from ZKMStdin provided by the host. The guest then runs `Groth16Verifier::verify` checking that: 
-
-- The proof is valid for the given circuit (`groth16_vk`)
-- The committed public values match those in the proof
-- The verifying key hash matches
+`Groth16Verifier::verify` checks that the proof's selector matches the Groth16 verifying key, then verifies the proof against the three public inputs: the program verifying key hash, the digest of the public values, and `VK_ROOT_BYTES`.
 
 ## BitVM Verifier
 
@@ -570,7 +536,7 @@ Ziren generates a proof for each L2 block, which is then ingested and stored by 
 
 Proofs are verified off-chain for peg-ins, peg-outs and sequencer commitments. During a peg-in, an SPV proof is generated proving that the user’s transaction of their deposit was included in a valid block. The GOAT contract and committee verify this proof off-chain. During a peg-out, Ziren generates a ZK proof that attests to the correctness of the PegBTC burn and the L2 state. This proof is initially checked off-chain by watchers, the committee, and potential challengers.
 
- If no dispute is raised, the operator is reimbursed without requiring any further on-chain action. If a dispute is raised, the on-chain challenge process begins. The Watchtower generates the longest chain proof and verifies that the operator’s Kickoff commitment matches the canonical longest chain. If this chain-level check passes, challengers can proceed to the circuit-level dispute. At that stage, the entire execution trace is revealed and challenge protocol narrows the disagreement down to to the disputed computation. The Bitcoin covenant then executes the check on-chain to verify if the step belongs to the committed state and if the state transition  is either valid or invalid. As a result, direct costs are only incurred during disputes.
+ If no dispute is raised, the operator is reimbursed without requiring any further on-chain action. If a dispute is raised, the on-chain challenge process begins. The Watchtower generates the longest chain proof and verifies that the operator’s Kickoff commitment matches the canonical longest chain. If this chain-level check passes, challengers can proceed to the circuit-level dispute. At that stage, the entire execution trace is revealed and challenge protocol narrows the disagreement down to the disputed computation. The Bitcoin covenant then executes the check on-chain to verify if the step belongs to the committed state and if the state transition  is either valid or invalid. As a result, direct costs are only incurred during disputes.
 
 In addition to bridging operations, the BitVM2 protocol also requires sequencer set commitments. Periodically, the committee commits the sequencer set (sequencer public keys) to Bitcoin L1. Merkle proofs of individual sequencers can then be verified off-chain against this root, ensuring that the sequencers producing L2 blocks are consistent with the commitments.
 

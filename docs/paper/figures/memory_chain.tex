@@ -4,6 +4,7 @@
 % are stacked rather than placed side by side, so that the canvas stays close
 % to 2:1 and the tuple labels survive scaling to \textwidth.
 \begin{tikzpicture}[
+  x=0.84cm,
   font=\large,
   acc/.style={rectangle, rounded corners=2pt, draw=zirenblue!85, fill=zirenblue!6,
               line width=0.7pt, minimum width=2.2cm, minimum height=1.25cm,
@@ -76,7 +77,7 @@
 \node[note, anchor=north west, align=left] at (-5.9,-6.55)
   {\textcolor{zirenorange!85!black}{\rule[0.22em]{1.4em}{1.1pt}}\ \
    memory bus: balances within one shard, and $(s,c)$ strictly increases
-   along the chain \qquad
+   along the chain\\
    \textcolor{zirenslate!85}{\rule[0.22em]{0.45em}{1.1pt}\hspace{0.18em}%
    \rule[0.22em]{0.45em}{1.1pt}}\ \
    global interaction: summed into the digest $D$, cancels only over the whole

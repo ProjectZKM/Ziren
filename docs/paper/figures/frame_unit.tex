@@ -1,5 +1,5 @@
-% Panel (b) of the instruction frame: ONE row enlarged, showing the four fixed
-% sub-cycle access positions.  A narrow canvas, so it scales up rather than down
+% Panel (b) of the instruction frame: ONE row enlarged, showing the five fixed
+% sub-cycle access positions (0 memory, 1 op_c, 2 op_b, 3 op_a, 4 HI).  A narrow canvas, so it scales up rather than down
 % and its pin labels are the largest text in the figure.  The pins sit ON the
 % row's lower edge with their labels BELOW it, so they cannot collide with the
 % datapath lines inside the box.
@@ -31,11 +31,11 @@
 \draw[sig] (uf) -- (u.north |- 0,2.0);
 \node[lbl, anchor=south east] at ($(uf)+(-0.1,0.42)$) {fetch $(\mathsf{pc},\mathsf{op})$};
 
-% ---------- the four access positions, pinned to the lower edge
+% ---------- the five access positions, pinned to the lower edge
 \draw[mbus] (-4.6,-3.1) -- (4.6,-3.1)
   node[right, font=\normalsize, text=zirenorange!80!black] {memory bus};
-\foreach \k/\t in {1/{rd $\mathsf{op\_b}$},2/{},3/{mem rd},4/{wr $\mathsf{op\_a}$}} {
-  \pgfmathsetmacro{\px}{-2.7+1.8*(\k-1)}
+\foreach \k/\t in {0/{mem rd},1/{},2/{rd $\mathsf{op\_b}$},3/{wr $\mathsf{op\_a}$},4/{}} {
+  \pgfmathsetmacro{\px}{-3.0+1.5*\k}
   \ifx\t\empty
     \node[npin] (p\k) at (\px,-0.95) {};
     \node[lbl, anchor=north, align=center, black!40] at (\px,-1.10) {@\k\\ unused};
@@ -47,11 +47,15 @@
 }
 
 % ---------- the sub-cycle ruler under the bus
-\draw[wire] (-3.3,-3.65) -- (3.3,-3.65);
-\foreach \k in {1,...,4} {
-  \pgfmathsetmacro{\px}{-2.7+1.8*(\k-1)}
+\draw[wire] (-3.5,-3.65) -- (3.5,-3.65);
+\foreach \k in {0,...,4} {
+  \pgfmathsetmacro{\px}{-3.0+1.5*\k}
   \draw[wire] (\px,-3.55) -- (\px,-3.75);
-  \node[lbl, anchor=north] at (\px,-3.79) {$\mathsf{clk}{+}\k$};
+  \ifnum\k=0
+    \node[lbl, anchor=north] at (\px,-3.79) {$\mathsf{clk}$};
+  \else
+    \node[lbl, anchor=north] at (\px,-3.79) {$\mathsf{clk}{+}\k$};
+  \fi
 }
-\node[lbl, anchor=east, align=right] at (-3.4,-3.65) {access\\positions};
+\node[lbl, anchor=east, align=right] at (-3.6,-3.65) {access\\positions};
 \end{tikzpicture}

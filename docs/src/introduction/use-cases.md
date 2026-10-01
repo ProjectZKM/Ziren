@@ -16,15 +16,15 @@ During the peg-out process, operators act as provers to generate ZK proofs for p
 
 The proof generation pipeline for peg-outs consists of several stages:
 
-- Root Prover: Computes core execution trace.
-- Aggregation Prover: Compresses multiple core proofs.
-- SNARK Prover: Generates Groth16 proofs (allowing for an EVM-compatible format) for Bitcoin verification.
+- Core prover: proves each shard of the block's execution.
+- Compress prover: composes the shard proofs through the recursion tree into one compressed proof.
+- SNARK prover: wraps the compressed proof into a Groth16 proof over BN254, a constant-size, EVM-compatible format used for verification on Bitcoin through BitVM2.
 
 This architecture enables low-latency withdrawals and the rapid inclusion of new blocks. View proofs being generated in real-time for GOAT, including details for each proof in the pipeline here: https://bitvm2.testnet3.goat.network/proof.
 
 **Proof Verification via BitVM Paradigm**
 
-Once generated, proof commitments are submitted to a BitVM2-anchored covenant on Bitcoin L1 and is verified via BitVM2’s fraud-proof challenge mechanism. Verification involves confirming that the public inputs of the ZK proof correspond to a valid transaction on Bitcoin L1 and that this transaction is finalized within a sufficiently long proof-of-work chain.
+Once generated, proof commitments are submitted to a BitVM2-anchored covenant on Bitcoin L1 and verified through BitVM2’s fraud-proof challenge mechanism. Verification involves confirming that the public inputs of the ZK proof correspond to a valid transaction on Bitcoin L1 and that this transaction is finalized within a sufficiently long proof-of-work chain.
 
 All ZK proofs are tied to the committed state; any attempt to manipulate the state would produce a different public input, which would cause verification to fail. Both the L2 state and its execution are fully auditable by any participant.
 
@@ -45,10 +45,8 @@ By treating the L2s as bridges, all L2s part of the Entangled Rollup Network can
 
 Ziren underpins GOAT’s cross-chain interoperability through the Entangled Rollup Network:
 
-- Rollup proofs double as bridge receipts—a single validity proof can verify execution on one L2 and unlock assets on another.
+- Rollup proofs double as bridge receipts: a single validity proof can verify execution on one L2 and unlock assets on another.
 - Enables native asset transfers across incompatible chains (e.g., Bitcoin ↔ Ethereum L2s).
 - Validity proofs ensure L1-final settlement across chains, preserving each chain’s native security.
 
 Read more about how Entangled Network enables native assets and unified liquidity between (even incompatible) chains [here](https://www.zkm.io/whitepaper/entangled-rollups-wp).
-
-.
