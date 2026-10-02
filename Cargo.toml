@@ -53,8 +53,8 @@ debug-assertions = true
 rustc-hash = "2.1.0"
 # Pinned to a rev, not a branch. These crates supply the field, the challenger and
 # the Merkle tree -- the transcript -- so a branch pin lets `cargo update` change
-# every challenge, hence every vk, with no diff to review. This rev is the one
-# ziren-gpu locks, so a CPU-side build here resolves the same Plonky3 production does.
+# every challenge, hence every vk, with no diff to review. This rev is the one the
+# production prover builds against.
 p3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
 p3-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
 p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
