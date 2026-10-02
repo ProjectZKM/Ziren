@@ -8252,8 +8252,10 @@ dependencies = [
  "postcard",
  "serde",
  "tracing",
+ "tracing-subscriber 0.3.23",
  "zkm-derive",
  "zkm-pcs",
+ "zkm-primitives",
  "zkm-recursion-core",
 ]
 
@@ -8587,6 +8589,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tracing",
  "tracing-subscriber 0.3.23",
+ "zkm-binary-stark",
  "zkm-core-executor",
  "zkm-core-machine",
  "zkm-pcs",

@@ -13,6 +13,7 @@ pub mod config;
 pub mod ext;
 pub mod machine;
 pub mod machine_builder;
+pub mod poseidon2;
 pub mod word;
 
 use p3_binary_field::{BinaryChallenger, BinaryField128, BinaryField2, Ghash128};

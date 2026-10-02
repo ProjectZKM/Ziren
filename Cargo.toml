@@ -124,6 +124,7 @@ zkm-recursion-derive = { path = "crates/recursion/derive", default-features = fa
 zkm-recursion-circuit = { path = "crates/recursion/circuit", default-features = false }
 zkm-recursion-gnark-ffi = { path = "crates/recursion/gnark-ffi", default-features = false }
 zkm-recursion-compiler = { path = "crates/recursion/compiler" }
+zkm-binary-stark = { path = "crates/binary" }
 zkm-recursion-core = { path = "crates/recursion/core" }
 zkm-core-executor = { path = "crates/core/executor", default-features = false }
 zkm-instruction-test-defs = { path = "crates/core/instruction-test-defs" }

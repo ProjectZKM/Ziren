@@ -13,6 +13,8 @@ pub mod alu_ext;
 pub mod bits;
 pub mod ledger;
 pub mod memory;
+pub mod poseidon2;
+pub mod public_values;
 pub mod select;
 
 use p3_air::{Air, BaseAir};
@@ -28,13 +30,15 @@ use p3_multi_stark::{
 };
 use p3_sumcheck::layout::Table;
 use p3_sumcheck::TableShape;
-use zkm_recursion_core::{ExecutionRecord, Instruction, RecursionProgram};
+use zkm_recursion_core::{ExecutionRecord, Instruction, RecursionProgram, DIGEST_SIZE};
 
 use self::alu_base::BaseAluAir;
 use self::alu_ext::ExtAluAir;
 use self::bits::Cell;
 use self::ledger::LedgerAir;
 use self::memory::{MemoryConstAir, MemoryVarAir};
+use self::poseidon2::Poseidon2Air;
+use self::public_values::{public_value, PublicValuesAir};
 use self::select::SelectAir;
 use crate::config::{MachineConfig, MachineConfigError, MachineProof};
 use crate::machine_builder::MachineBuilder;
@@ -48,6 +52,8 @@ pub enum RecursionAir {
     BaseAlu(BaseAluAir),
     ExtAlu(ExtAluAir),
     Select(SelectAir),
+    Poseidon2(Box<Poseidon2Air>),
+    PublicValues(PublicValuesAir),
 }
 
 impl RecursionAir {
@@ -61,6 +67,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.log_height(),
             Self::ExtAlu(air) => air.log_height(),
             Self::Select(air) => air.log_height(),
+            Self::Poseidon2(air) => air.log_height(),
+            Self::PublicValues(air) => air.log_height(),
         }
     }
 
@@ -74,6 +82,8 @@ impl RecursionAir {
             Self::BaseAlu(_) => "BaseAlu",
             Self::ExtAlu(_) => "ExtAlu",
             Self::Select(_) => "Select",
+            Self::Poseidon2(_) => "Poseidon2",
+            Self::PublicValues(_) => "PublicValues",
         }
     }
 
@@ -86,6 +96,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.writes(),
             Self::ExtAlu(air) => air.writes(),
             Self::Select(air) => air.writes(),
+            Self::Poseidon2(air) => air.writes(),
+            Self::PublicValues(_) => Vec::new(),
         }
     }
 
@@ -98,6 +110,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.written_values(record),
             Self::ExtAlu(air) => air.written_values(record),
             Self::Select(air) => air.written_values(record),
+            Self::Poseidon2(air) => air.written_values(record),
+            Self::PublicValues(_) => Vec::new(),
         }
     }
 
@@ -111,6 +125,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.main_table(record),
             Self::ExtAlu(air) => air.main_table(record),
             Self::Select(air) => air.main_table(record),
+            Self::Poseidon2(air) => air.main_table(record),
+            Self::PublicValues(air) => air.main_table(record),
         }
     }
 }
@@ -124,6 +140,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => BaseAir::<X>::width(air),
             Self::ExtAlu(air) => BaseAir::<X>::width(air),
             Self::Select(air) => BaseAir::<X>::width(air),
+            Self::Poseidon2(air) => BaseAir::<X>::width(&**air),
+            Self::PublicValues(air) => BaseAir::<X>::width(air),
         }
     }
 
@@ -135,6 +153,15 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => BaseAir::<X>::preprocessed_width(air),
             Self::ExtAlu(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Select(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Poseidon2(air) => BaseAir::<X>::preprocessed_width(&**air),
+            Self::PublicValues(air) => BaseAir::<X>::preprocessed_width(air),
+        }
+    }
+
+    fn num_public_values(&self) -> usize {
+        match self {
+            Self::PublicValues(air) => BaseAir::<X>::num_public_values(air),
+            _ => 0,
         }
     }
 
@@ -146,6 +173,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => air.preprocessed_trace(),
             Self::ExtAlu(air) => air.preprocessed_trace(),
             Self::Select(air) => air.preprocessed_trace(),
+            Self::Poseidon2(air) => air.preprocessed_trace(),
+            Self::PublicValues(air) => air.preprocessed_trace(),
         }
     }
 }
@@ -159,6 +188,8 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for RecursionAir {
             Self::BaseAlu(air) => air.eval(builder),
             Self::ExtAlu(air) => air.eval(builder),
             Self::Select(air) => air.eval(builder),
+            Self::Poseidon2(air) => air.eval(builder),
+            Self::PublicValues(air) => air.eval(builder),
         }
     }
 }
@@ -211,15 +242,15 @@ impl RecursionMachine {
                 Instruction::BaseAlu(_)
                 | Instruction::ExtAlu(_)
                 | Instruction::Select(_)
+                | Instruction::Poseidon2(_)
+                | Instruction::CommitPublicValues(_)
                 | Instruction::Mem(_)
                 | Instruction::Hint(_)
                 | Instruction::HintBits(_)
                 | Instruction::HintExt2Felts(_)
                 | Instruction::Print(_) => continue,
-                Instruction::Poseidon2(_) => "Poseidon2",
                 Instruction::HintAddCurve(_) => "curve hints",
                 Instruction::Ext2Felts(_) => "Ext2Felts",
-                Instruction::CommitPublicValues(_) => "public values",
             };
             return Err(MachineError::Unsupported(unsupported));
         }
@@ -229,6 +260,8 @@ impl RecursionMachine {
             RecursionAir::BaseAlu(BaseAluAir::new(program)),
             RecursionAir::ExtAlu(ExtAluAir::new(program)),
             RecursionAir::Select(SelectAir::new(program)),
+            RecursionAir::Poseidon2(Box::new(Poseidon2Air::new(program))),
+            RecursionAir::PublicValues(PublicValuesAir::new(program)),
         ];
         let writes: Vec<(u32, u32)> = tables.iter().flat_map(RecursionAir::writes).collect();
         let mut airs = vec![RecursionAir::Ledger(LedgerAir::new(&writes))];
@@ -256,16 +289,35 @@ impl RecursionMachine {
         &self.airs
     }
 
+    /// The stage's public values of a program committing `digest`.
+    #[must_use]
+    pub fn public_values(digest: &[u32; DIGEST_SIZE]) -> [F; DIGEST_SIZE] {
+        digest.map(public_value)
+    }
+
+    /// The public values of `air` given the program's `public` ones.
+    fn public_of<'a>(air: &RecursionAir, public: &'a [F; DIGEST_SIZE]) -> &'a [F] {
+        match air {
+            RecursionAir::PublicValues(_) => public,
+            _ => &[],
+        }
+    }
+
     /// Prove `record`, an execution of the machine's program.
     pub fn prove(&self, record: &ExecutionRecord<KoalaBear>) -> Result<MachineProof, MachineError> {
         let written: Vec<Cell> =
             self.airs.iter().flat_map(|air| air.written_values(record)).collect();
-        let public: [F; 0] = [];
+        let public = Self::public_values(&PublicValuesAir::digest(record));
         let instances = ProverInstances::new(
             self.airs
                 .iter()
                 .map(|air| {
-                    ProverInstance::new(air, air.main_table(record, &written), &self.pk, &public)
+                    ProverInstance::new(
+                        air,
+                        air.main_table(record, &written),
+                        &self.pk,
+                        Self::public_of(air, &public),
+                    )
                 })
                 .collect(),
         );
@@ -287,13 +339,25 @@ impl RecursionMachine {
         proof.map_err(MachineError::Prove)
     }
 
-    /// Verify `proof` as a proof of an execution of the machine's program.
-    pub fn verify(&self, proof: &MachineProof) -> Result<(), MachineError> {
-        let public: [F; 0] = [];
+    /// Verify `proof` as a proof of an execution of the machine's program
+    /// committing `digest`.
+    pub fn verify(
+        &self,
+        proof: &MachineProof,
+        digest: &[u32; DIGEST_SIZE],
+    ) -> Result<(), MachineError> {
+        let public = Self::public_values(digest);
         let instances = VerifierInstances::new(
             self.airs
                 .iter()
-                .map(|air| VerifierInstance::new(air, &self.vk, air.log_height(), &public))
+                .map(|air| {
+                    VerifierInstance::new(
+                        air,
+                        &self.vk,
+                        air.log_height(),
+                        Self::public_of(air, &public),
+                    )
+                })
                 .collect(),
         );
         verify(&self.config, instances, proof, 0, &mut challenger()).map_err(MachineError::Verify)
@@ -302,7 +366,12 @@ impl RecursionMachine {
 
 #[cfg(test)]
 mod tests {
+    use core::array;
+    use core::borrow::Borrow;
     use std::sync::Arc;
+
+    use p3_symmetric::Permutation;
+    use zkm_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
 
     use p3_field::extension::BinomialExtensionField;
     use p3_field::BasedVectorSpace;
@@ -360,6 +429,8 @@ mod tests {
                 ]
             })
             .collect::<Vec<_>>();
+        let mut instructions = instructions;
+        instructions.extend(commit(addr, [KoalaBear::ZERO; DIGEST_SIZE]));
         let mut program =
             RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
         program.total_memory = program.computed_total_memory();
@@ -411,10 +482,71 @@ mod tests {
                 ]
             })
             .collect::<Vec<_>>();
+        let mut instructions = instructions;
+        instructions.extend(commit(addr, [KoalaBear::ZERO; DIGEST_SIZE]));
         let mut program =
             RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
         program.total_memory = program.computed_total_memory();
         program
+    }
+
+    /// The instructions committing public values whose digest is `digest`,
+    /// every other public value being zero, from address `base`.
+    fn commit(base: u32, digest: [KoalaBear; DIGEST_SIZE]) -> Vec<Instruction<KoalaBear>> {
+        let addrs: [u32; RECURSIVE_PROOF_NUM_PV_ELTS] = array::from_fn(|i| base + i as u32);
+        let pv_addrs: &RecursionPublicValues<u32> = addrs.as_slice().borrow();
+        let digest_addrs = pv_addrs.digest;
+        let mut instructions: Vec<Instruction<KoalaBear>> = addrs
+            .iter()
+            .map(|&addr| {
+                let word = digest_addrs.iter().position(|&d| d == addr);
+                let value = word.map_or(KoalaBear::ZERO, |w| digest[w]);
+                instr::mem_single(MemAccessKind::Write, u32::from(word.is_some()), addr, value)
+            })
+            .collect();
+        instructions.push(instr::commit_public_values(pv_addrs));
+        instructions
+    }
+
+    /// `n` permutations and a commitment of the last one's first eight
+    /// outputs, each output checked against the VM's permutation.
+    fn poseidon2_program(n: usize) -> RecursionProgram<KoalaBear> {
+        let perm = zkm_pcs::inner_perm();
+        let values = elements(16 * n);
+        let mut addr = 0u32;
+        let mut digest = [KoalaBear::ZERO; DIGEST_SIZE];
+        let mut instructions = Vec::new();
+        for i in 0..n {
+            let input: [KoalaBear; 16] = array::from_fn(|k| values[16 * i + k]);
+            let output = perm.permute(input);
+            let inputs: [u32; 16] = array::from_fn(|k| addr + k as u32);
+            let outputs: [u32; 16] = array::from_fn(|k| addr + 16 + k as u32);
+            addr += 32;
+            instructions.extend(
+                (0..16).map(|k| instr::mem_single(MemAccessKind::Write, 1, inputs[k], input[k])),
+            );
+            instructions.push(instr::poseidon2([1; 16], outputs, inputs));
+            instructions.extend(
+                (0..16).map(|k| instr::mem_single(MemAccessKind::Read, 1, outputs[k], output[k])),
+            );
+            digest = array::from_fn(|k| output[k]);
+        }
+        instructions.extend(commit(addr, digest));
+        let mut program =
+            RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
+        program.total_memory = program.computed_total_memory();
+        program
+    }
+
+    /// Print span timings when `RUST_LOG` asks for them.
+    fn profile() {
+        if std::env::var_os("RUST_LOG").is_some() {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+                .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+                .with_target(false)
+                .try_init();
+        }
     }
 
     fn run(program: &Arc<RecursionProgram<KoalaBear>>) -> ExecutionRecord<KoalaBear> {
@@ -448,13 +580,14 @@ mod tests {
             postcard::to_allocvec(&proof).expect("a proof serializes").len(),
             started.elapsed().as_secs_f64()
         );
-        machine.verify(&proof).expect("the execution verifies");
+        let digest = PublicValuesAir::digest(&record);
+        machine.verify(&proof, &digest).expect("the execution verifies");
 
         let mut wrong_result = record.clone();
         wrong_result.base_alu_events[0].out += KoalaBear::ONE;
         let rejected = match machine.prove(&wrong_result) {
             Err(_) => true,
-            Ok(proof) => machine.verify(&proof).is_err(),
+            Ok(proof) => machine.verify(&proof, &digest).is_err(),
         };
         assert!(rejected, "a changed result must not verify");
 
@@ -462,7 +595,7 @@ mod tests {
         wrong_operand.base_alu_events[1].in1 += KoalaBear::ONE;
         let rejected = match machine.prove(&wrong_operand) {
             Err(_) => true,
-            Ok(proof) => machine.verify(&proof).is_err(),
+            Ok(proof) => machine.verify(&proof, &digest).is_err(),
         };
         assert!(rejected, "a changed operand must not verify");
     }
@@ -490,14 +623,15 @@ mod tests {
             postcard::to_allocvec(&proof).expect("a proof serializes").len(),
             started.elapsed().as_secs_f64()
         );
-        machine.verify(&proof).expect("the execution verifies");
+        let digest = PublicValuesAir::digest(&record);
+        machine.verify(&proof, &digest).expect("the execution verifies");
 
         let mut swapped = record.clone();
         let event = &mut swapped.select_events[0];
         core::mem::swap(&mut event.out1, &mut event.out2);
         let rejected = match machine.prove(&swapped) {
             Err(_) => true,
-            Ok(proof) => machine.verify(&proof).is_err(),
+            Ok(proof) => machine.verify(&proof, &digest).is_err(),
         };
         assert!(rejected, "a swapped select output must not verify");
 
@@ -505,8 +639,53 @@ mod tests {
         wrong_result.ext_alu_events[2].out.0[1] += KoalaBear::ONE;
         let rejected = match machine.prove(&wrong_result) {
             Err(_) => true,
-            Ok(proof) => machine.verify(&proof).is_err(),
+            Ok(proof) => machine.verify(&proof, &digest).is_err(),
         };
         assert!(rejected, "a changed extension result must not verify");
+    }
+
+    /// Permutations and the digest commitment prove through the real
+    /// runtime; the proof does not verify against another digest, and a
+    /// record with a changed permutation output does not prove.
+    #[test]
+    fn poseidon2_and_public_values_prove_and_tampering_fails() {
+        profile();
+        let program = Arc::new(poseidon2_program(3));
+        let record = run(&program);
+        let machine = RecursionMachine::new(&program, &BinarySchedule::default()).expect("machine");
+        for air in machine.airs() {
+            println!(
+                "{}: 2^{} rows x {} bits",
+                air.name(),
+                air.log_height(),
+                BaseAir::<F>::width(air)
+            );
+        }
+        let started = std::time::Instant::now();
+        let proof = machine.prove(&record).expect("the execution proves");
+        println!(
+            "poseidon2 x3: {} proof bytes, prove {:.1} s",
+            postcard::to_allocvec(&proof).expect("a proof serializes").len(),
+            started.elapsed().as_secs_f64()
+        );
+        let digest = PublicValuesAir::digest(&record);
+        let started = std::time::Instant::now();
+        machine.verify(&proof, &digest).expect("the execution verifies");
+        println!("verify {:.3} s", started.elapsed().as_secs_f64());
+
+        let mut other = digest;
+        other[3] ^= 1;
+        assert!(machine.verify(&proof, &other).is_err(), "another digest must not verify");
+
+        let mut wrong_output = record;
+        wrong_output.poseidon2_events[1].output[5] += KoalaBear::ONE;
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match machine.prove(&wrong_output) {
+                Err(_) => true,
+                Ok(proof) => machine.verify(&proof, &digest).is_err(),
+            }
+        }))
+        .unwrap_or(true);
+        assert!(rejected, "a changed permutation output must not verify");
     }
 }

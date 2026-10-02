@@ -47,6 +47,9 @@ use zkm_pcs::{
 };
 // Used only by the `#[cfg(test)]` shape-cardinality census below; the
 // non-test build has no reader, which is why it needs the gate.
+use zkm_binary_stark::machine::public_values::PublicValuesAir;
+use zkm_binary_stark::machine::RecursionMachine;
+use zkm_binary_stark::BinarySchedule;
 #[cfg(test)]
 use zkm_pcs::shape::OrderedShape;
 use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues, types::RecursionProgramType};
@@ -2052,6 +2055,60 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(ZKMReduceProof { vk: shrink_vk, proof })
     }
 
+    /// Prove the shrink program's execution over bits: the binary stage.
+    ///
+    /// The compressed proof is verified by the same shrink program as
+    /// [`Self::shrink`] runs, but its execution record is proven by the
+    /// recursion machine over `GF(2^128)` under Boolean WHIR and Blake3,
+    /// whose verifier is a boolean circuit.
+    #[instrument(name = "shrink_binary", level = "info", skip_all)]
+    pub fn shrink_binary(
+        &self,
+        reduced_proof: ZKMReduceProof<CompressedSC>,
+    ) -> Result<BinaryShrinkProof, ZKMRecursionProverError> {
+        let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
+        let basefold_proof = *compressed_proof.jagged_shard_proof;
+        let vk_merkle_data =
+            self.make_basefold_merkle_proofs(std::slice::from_ref(&compressed_vk))?;
+        let input = ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![(compressed_vk, basefold_proof)],
+            vk_merkle_data,
+        };
+        let program = self.shrink_program_basefold(&input);
+
+        let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+            program.clone(),
+            self.shrink_prover.machine().config().perm.clone(),
+        );
+        let mut witness_stream = Vec::new();
+        Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+        runtime.witness_stream = witness_stream.into();
+        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
+        runtime.print_stats();
+
+        let machine = tracing::debug_span!("binary machine setup")
+            .in_scope(|| RecursionMachine::new(&program, &BinarySchedule::default()))
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        let record = runtime.record;
+        let digest = PublicValuesAir::digest(&record);
+        let proof = tracing::debug_span!("binary machine prove")
+            .in_scope(|| machine.prove(&record))
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        Ok(BinaryShrinkProof { program, digest, proof })
+    }
+
+    /// Verify a proof of the binary stage against the program it names.
+    pub fn verify_shrink_binary(
+        &self,
+        proof: &BinaryShrinkProof,
+    ) -> Result<(), ZKMRecursionProverError> {
+        let machine = RecursionMachine::new(&proof.program, &BinarySchedule::default())
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        machine
+            .verify(&proof.proof, &proof.digest)
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))
+    }
+
     /// Wrap a reduce proof into a STARK proven over a SNARK-friendly field.
     #[instrument(name = "wrap_bn254", level = "info", skip_all)]
     pub fn wrap_bn254(
@@ -3229,6 +3286,33 @@ pub mod tests {
             opts,
             Test::Compress,
         )
+    }
+
+    /// The binary stage on a compressed fibonacci proof: the shrink program
+    /// proven over bits, verified, and its proof size reported.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_shrink_binary_fibonacci() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof =
+            prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
+        let compressed_proof = prover.compress(&vk, core_proof, vec![], opts)?;
+        let started = std::time::Instant::now();
+        let binary_proof = prover.shrink_binary(compressed_proof)?;
+        tracing::info!(
+            "binary shrink proof: {} bytes, {:.1} s",
+            bincode::serialize(&binary_proof.proof).unwrap().len(),
+            started.elapsed().as_secs_f64()
+        );
+        let started = std::time::Instant::now();
+        prover.verify_shrink_binary(&binary_proof)?;
+        tracing::info!("binary shrink verified in {:.3} s", started.elapsed().as_secs_f64());
+        Ok(())
     }
 
     /// Compress a keccak (precompile + multi-shard) workload with unpadded

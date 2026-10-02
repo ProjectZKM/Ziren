@@ -30,8 +30,10 @@ postcard = { version = "1.1", features = ["alloc"] }
 serde = { workspace = true }
 tracing = { workspace = true }
 zkm-derive = { workspace = true }
+zkm-primitives = { workspace = true }
 zkm-recursion-core = { workspace = true }
 
 [dev-dependencies]
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 p3-blake3-air = { workspace = true }
 zkm-pcs = { workspace = true }

@@ -217,6 +217,19 @@ pub enum ZKMRecursionProverError {
     TracesGenerationError,
     #[error("Generate dependencies error")]
     DependenciesGenerationError,
+    #[error("Binary stage error: {0}")]
+    BinaryStage(String),
+}
+
+/// A proof of the binary stage: the shrink program it executes, the digest
+/// it commits to, and the proof of the recursion machine over bits.
+pub struct BinaryShrinkProof {
+    /// The shrink program, which fixes the machine and its keys.
+    pub program: std::sync::Arc<zkm_recursion_core::RecursionProgram<p3_koala_bear::KoalaBear>>,
+    /// The digest the program commits to: the stage's public values.
+    pub digest: [u32; zkm_recursion_core::DIGEST_SIZE],
+    /// The proof.
+    pub proof: zkm_binary_stark::config::MachineProof,
 }
 
 /// A recursion vk whose KoalaBear digest `digest` is not one of the
