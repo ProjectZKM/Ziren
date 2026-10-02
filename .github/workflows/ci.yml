@@ -95,7 +95,8 @@ jobs:
           FAILED=""
           for pkg in zkm-core-executor zkm-curves zkm-derive zkm-primitives \
             zkm-prover zkm-recursion-circuit zkm-recursion-compiler \
-            zkm-recursion-core zkm-recursion-gnark-ffi zkm-pcs zkm-zkvm zkm-lib; do
+            zkm-recursion-core zkm-recursion-gnark-ffi zkm-pcs zkm-zkvm zkm-lib \
+            zkm-binary-stark; do
               cargo test -r -p $pkg || FAILED="$FAILED $pkg"
           done
           if [ -n "$FAILED" ]; then
