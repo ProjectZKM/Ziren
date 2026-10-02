@@ -119,7 +119,7 @@ impl RecursionAir {
     fn mul_request_count(&self) -> usize {
         match self {
             Self::BaseAlu(air) => air.instruction_count(),
-            Self::ExtAlu(air) => 16 * air.instruction_count(),
+            Self::ExtAlu(air) => crate::ext::EXT_MUL_REQUESTS * air.instruction_count(),
             Self::Poseidon2Io(air) => air.mul_request_count(),
             _ => 0,
         }
@@ -706,6 +706,39 @@ mod tests {
             Ok(proof) => machine.verify(&proof, &digest).is_err(),
         };
         assert!(rejected, "a changed extension result must not verify");
+    }
+
+    /// The extension and select program at the scale `ZIREN_BINARY_SCALE`
+    /// groups, for measuring the prover; the proof is verified.
+    #[test]
+    #[ignore]
+    fn scale_ext_and_select() {
+        profile();
+        let n: usize =
+            std::env::var("ZIREN_BINARY_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1024);
+        let program = Arc::new(ext_and_select_program(n));
+        let record = run(&program);
+        let started = std::time::Instant::now();
+        let machine = RecursionMachine::new(&program, &BinarySchedule::default()).expect("machine");
+        println!("machine setup {:.1} s", started.elapsed().as_secs_f64());
+        for air in machine.airs() {
+            println!(
+                "{}: 2^{} rows x {} bits",
+                air.name(),
+                air.log_height(),
+                BaseAir::<F>::width(air)
+            );
+        }
+        let started = std::time::Instant::now();
+        let proof = machine.prove(&record).expect("the execution proves");
+        println!(
+            "scale {n}: {} proof bytes, prove {:.1} s",
+            postcard::to_allocvec(&proof).expect("a proof serializes").len(),
+            started.elapsed().as_secs_f64()
+        );
+        let started = std::time::Instant::now();
+        machine.verify(&proof, &PublicValuesAir::digest(&record)).expect("the execution verifies");
+        println!("verify {:.3} s", started.elapsed().as_secs_f64());
     }
 
     /// Permutations and the digest commitment prove through the real

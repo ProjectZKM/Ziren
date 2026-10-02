@@ -153,10 +153,11 @@ impl ExtAluAir {
         rows.into_table()
     }
 
-    /// The products the table asks for, sixteen per instruction.
+    /// The products the table asks for, nine per instruction.
     #[must_use]
     pub fn mul_requests(&self, record: &ExecutionRecord<KoalaBear>) -> Vec<(u32, u32)> {
-        let mut requests = Vec::with_capacity(16 * record.ext_alu_events.len());
+        let mut requests =
+            Vec::with_capacity(crate::ext::EXT_MUL_REQUESTS * record.ext_alu_events.len());
         let mut row = vec![0u8; NUM_EXT_ALU_COLS];
         for (event, &direct) in record.ext_alu_events.iter().zip(&self.direct) {
             fill_row(

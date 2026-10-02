@@ -138,6 +138,14 @@ impl MultiStarkConfig for MachineConfig {
         1
     }
 
+    /// Every round the sliced kernels can take, the multi-STARK's cap of
+    /// four: the tables are wide, so the bit-sliced evaluation amortizes
+    /// well, and the dense traces that follow shrink by two with each
+    /// sliced round.
+    fn sliced_rounds(&self) -> usize {
+        4
+    }
+
     fn build_witness(&self, tables: Vec<Table<F>>) -> Vec<Table<F>> {
         tables
     }

@@ -253,6 +253,108 @@ pub fn fill_sub(a: u32, b: u32, cols: &mut SubCols<u8>) -> u32 {
 /// Full adders of the carry-save tree of a product.
 pub const TREE_ADDERS: usize = 870;
 
+/// The witness of a sum of `ADDS + 1` terms over `N` bits.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct SumCols<T, const ADDS: usize, const N: usize> {
+    /// The running sums; the last is the sum.
+    pub acc: [[T; N]; ADDS],
+    /// Carries of each addition.
+    pub carries: [[T; N]; ADDS],
+}
+
+/// Constrain the running sums of `cols` to add up `terms`, and return the
+/// sum.
+pub fn eval_sum<AB: AirBuilder, const ADDS: usize, const N: usize>(
+    builder: &mut AB,
+    terms: &[[AB::Expr; N]],
+    cols: &SumCols<AB::Var, ADDS, N>,
+) -> [AB::Expr; N] {
+    assert_eq!(terms.len(), ADDS + 1, "one addition per term after the first");
+    let mut acc = terms[0].clone();
+    for (t, term) in terms[1..].iter().enumerate() {
+        let next = exprs::<AB, N>(&cols.acc[t]);
+        let carry_out = add_bits::<AB, N>(builder, &acc, term, &cols.carries[t], &next);
+        builder.assert_zero(carry_out);
+        acc = next;
+    }
+    acc
+}
+
+/// The witness of [`eval_sum`], and the sum.
+pub fn fill_sum<const ADDS: usize, const N: usize>(
+    terms: &[u128],
+    cols: &mut SumCols<u8, ADDS, N>,
+) -> u128 {
+    assert_eq!(terms.len(), ADDS + 1, "one addition per term after the first");
+    let mut acc = terms[0];
+    for (t, &term) in terms[1..].iter().enumerate() {
+        cols.carries[t] = add_carries_wide::<N>(acc, term);
+        acc += term;
+        assert!(acc < 1 << N, "the sum fits {N} bits");
+        cols.acc[t] = bits_le_wide::<N>(acc);
+    }
+    acc
+}
+
+/// `x` shifted up by `shift` bits over `N` bits.
+#[must_use]
+pub fn shifted<AB: AirBuilder, const N: usize>(x: &[AB::Expr], shift: usize) -> [AB::Expr; N] {
+    array::from_fn(|k| {
+        if k >= shift && k - shift < x.len() {
+            x[k - shift].clone()
+        } else {
+            AB::Expr::ZERO
+        }
+    })
+}
+
+/// The witness of a difference `x - y` over `N` bits that does not borrow
+/// out: `x >= y`.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct DiffCols<T, const N: usize> {
+    /// `x - y`.
+    pub diff: [T; N],
+    /// Borrows of the subtraction; the last is zero.
+    pub borrows: [T; N],
+}
+
+/// Constrain `cols.diff = x - y` with no borrow out, and return it.
+pub fn eval_diff<AB: AirBuilder, const N: usize>(
+    builder: &mut AB,
+    x: &[AB::Expr; N],
+    y: &[AB::Expr; N],
+    cols: &DiffCols<AB::Var, N>,
+) -> [AB::Expr; N] {
+    let diff = exprs::<AB, N>(&cols.diff);
+    let borrow_out = sub_bits::<AB, N>(builder, x, y, &cols.borrows, &diff);
+    builder.assert_zero(borrow_out);
+    diff
+}
+
+/// The witness of [`eval_diff`], and `x - y`.
+pub fn fill_diff<const N: usize>(x: u128, y: u128, cols: &mut DiffCols<u8, N>) -> u128 {
+    assert!(x >= y && x < 1 << N, "a difference that does not borrow, within {N} bits");
+    cols.diff = bits_le_wide::<N>(x - y);
+    cols.borrows = sub_borrows_wide::<N>(x, y);
+    x - y
+}
+
+/// The borrows of `x - y` over `N` bits, as [`sub_borrows`], for wide values.
+#[must_use]
+pub fn sub_borrows_wide<const N: usize>(x: u128, y: u128) -> [u8; N] {
+    let mut borrows = [0u8; N];
+    let mut borrow = 0u128;
+    for (i, slot) in borrows.iter_mut().enumerate() {
+        let lhs = (x >> i) & 1;
+        let rhs = ((y >> i) & 1) + borrow;
+        borrow = u128::from(lhs < rhs);
+        *slot = borrow as u8;
+    }
+    borrows
+}
+
 /// The witness of the integer product of two elements as a carry-save
 /// tree.
 ///

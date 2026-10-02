@@ -21,9 +21,9 @@ use zkm_derive::AlignedBorrow;
 use crate::machine::bits::request_mul;
 use crate::machine_builder::MachineBuilder;
 use crate::word::{
-    add_bits, add_carries_wide, bits_le, bits_le_wide, constant_bits, eval_add, eval_reduce, exprs,
-    fill_add, fill_reduce, from_bits_le, sub_bits, sub_borrows, widen, AddCols, ReduceCols, Word,
-    KB_BITS, KB_PRIME,
+    bits_le, bits_le_wide, constant_bits, eval_add, eval_reduce, eval_sum, exprs, fill_add,
+    fill_reduce, fill_sum, from_bits_le, shifted, sub_bits, sub_borrows, widen, AddCols,
+    ReduceCols, SumCols, Word, KB_BITS, KB_PRIME,
 };
 use crate::F;
 
@@ -75,62 +75,6 @@ impl RoundConstants {
             external_final: array::from_fn(|r| table[HALF_EXTERNAL_ROUNDS + INTERNAL_ROUNDS + r]),
         }
     }
-}
-
-/// The witness of a sum of `ADDS + 1` terms over `N` bits.
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub struct SumCols<T, const ADDS: usize, const N: usize> {
-    /// The running sums; the last is the sum.
-    pub acc: [[T; N]; ADDS],
-    /// Carries of each addition.
-    pub carries: [[T; N]; ADDS],
-}
-
-/// Constrain the running sums of `cols` to add up `terms`, and return the
-/// sum.
-pub fn eval_sum<AB: AirBuilder, const ADDS: usize, const N: usize>(
-    builder: &mut AB,
-    terms: &[[AB::Expr; N]],
-    cols: &SumCols<AB::Var, ADDS, N>,
-) -> [AB::Expr; N] {
-    assert_eq!(terms.len(), ADDS + 1, "one addition per term after the first");
-    let mut acc = terms[0].clone();
-    for (t, term) in terms[1..].iter().enumerate() {
-        let next = exprs::<AB, N>(&cols.acc[t]);
-        let carry_out = add_bits::<AB, N>(builder, &acc, term, &cols.carries[t], &next);
-        builder.assert_zero(carry_out);
-        acc = next;
-    }
-    acc
-}
-
-/// The witness of [`eval_sum`], and the sum.
-pub fn fill_sum<const ADDS: usize, const N: usize>(
-    terms: &[u128],
-    cols: &mut SumCols<u8, ADDS, N>,
-) -> u128 {
-    assert_eq!(terms.len(), ADDS + 1, "one addition per term after the first");
-    let mut acc = terms[0];
-    for (t, &term) in terms[1..].iter().enumerate() {
-        cols.carries[t] = add_carries_wide::<N>(acc, term);
-        acc += term;
-        assert!(acc < 1 << N, "the sum fits {N} bits");
-        cols.acc[t] = bits_le_wide::<N>(acc);
-    }
-    acc
-}
-
-/// `x` shifted up by `shift` bits over `N` bits.
-#[must_use]
-pub fn shifted<AB: AirBuilder, const N: usize>(x: &[AB::Expr], shift: usize) -> [AB::Expr; N] {
-    array::from_fn(|k| {
-        if k >= shift && k - shift < x.len() {
-            x[k - shift].clone()
-        } else {
-            AB::Expr::ZERO
-        }
-    })
 }
 
 /// The witness of a cube: the square, then the square times the base,
