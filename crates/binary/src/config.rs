@@ -7,7 +7,7 @@
 
 use p3_binary_pcs::whir::{
     recommended_cap_height, BooleanWhirData, BooleanWhirDomain, BooleanWhirError, BooleanWhirPcs,
-    BooleanWhirProver, BooleanWhirTracePcs, ProfileError,
+    BooleanWhirProof, BooleanWhirProver, BooleanWhirTracePcs, ProfileError,
 };
 use p3_binary_pcs::BooleanTraceCommitmentData;
 use p3_blake3::Blake3;
@@ -34,6 +34,58 @@ pub type MachinePcs = BooleanWhirTracePcs<F, F, BooleanWhirDomain, MerkleMmcs, C
 
 /// A proof of a machine.
 pub type MachineProof = p3_multi_stark::MultiStarkProof<MachineConfig>;
+
+/// The postcard bytes of each part of `proof`, labelled: the values every
+/// column is opened to, the ring-switch claims, and the WHIR rounds and
+/// final openings of the main and preprocessed commitments.
+#[must_use]
+pub fn proof_breakdown(proof: &MachineProof) -> Vec<(String, usize)> {
+    fn size<T: serde::Serialize>(value: &T) -> usize {
+        postcard::to_allocvec(value).map(|bytes| bytes.len()).unwrap_or(0)
+    }
+    fn whir(
+        parts: &mut Vec<(String, usize)>,
+        label: &str,
+        pcs: &p3_binary_pcs::BooleanTraceCommitmentProof<F, BooleanWhirProof<F, F, MerkleMmcs>>,
+    ) {
+        parts.push((format!("{label}.values ({} values)", pcs.values.len()), size(&pcs.values)));
+        let whir = &pcs.opening;
+        parts.push((
+            format!("{label}.reduction.claims ({} claims)", whir.reduction.claims.len()),
+            size(&whir.reduction.claims),
+        ));
+        parts.push((format!("{label}.reduction.sumcheck"), size(&whir.reduction.sumcheck)));
+        parts.push((format!("{label}.opening.evals"), size(&whir.opening.evals)));
+        parts.push((
+            format!("{label}.opening.whir.initial_sumcheck"),
+            size(&whir.opening.whir.initial_sumcheck),
+        ));
+        parts.push((
+            format!("{label}.opening.whir.rounds ({} rounds)", whir.opening.whir.rounds.len()),
+            size(&whir.opening.whir.rounds),
+        ));
+        parts.push((
+            format!("{label}.opening.whir.final_openings"),
+            size(&whir.opening.whir.final_openings),
+        ));
+        parts.push((
+            format!("{label}.opening.whir.final_poly"),
+            size(&whir.opening.whir.final_poly),
+        ));
+    }
+    let mut parts = vec![
+        ("commitment".to_string(), size(&proof.commitment)),
+        ("lookup".to_string(), size(&proof.lookup)),
+        ("indexed".to_string(), size(&proof.indexed)),
+        ("bus".to_string(), size(&proof.bus)),
+        ("sumcheck".to_string(), size(&proof.sumcheck)),
+    ];
+    whir(&mut parts, "main", &proof.opening);
+    if let Some(preprocessed) = &proof.preprocessed_opening {
+        whir(&mut parts, "preprocessed", preprocessed);
+    }
+    parts
+}
 
 /// Why a machine configuration cannot be built.
 #[derive(Debug)]

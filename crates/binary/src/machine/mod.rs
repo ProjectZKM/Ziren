@@ -501,6 +501,13 @@ mod tests {
         program
     }
 
+    /// Print each part of `proof` with its postcard bytes.
+    fn print_breakdown(proof: &MachineProof) {
+        for (label, bytes) in crate::config::proof_breakdown(proof) {
+            println!("  {label}: {bytes} bytes");
+        }
+    }
+
     /// `n` groups of the four extension operations and a select on each
     /// value of the bit, each result checked against the expected constant.
     fn ext_and_select_program(n: usize) -> RecursionProgram<KoalaBear> {
@@ -736,6 +743,7 @@ mod tests {
             postcard::to_allocvec(&proof).expect("a proof serializes").len(),
             started.elapsed().as_secs_f64()
         );
+        print_breakdown(&proof);
         let started = std::time::Instant::now();
         machine.verify(&proof, &PublicValuesAir::digest(&record)).expect("the execution verifies");
         println!("verify {:.3} s", started.elapsed().as_secs_f64());
@@ -765,6 +773,7 @@ mod tests {
             postcard::to_allocvec(&proof).expect("a proof serializes").len(),
             started.elapsed().as_secs_f64()
         );
+        print_breakdown(&proof);
         let digest = PublicValuesAir::digest(&record);
         let started = std::time::Instant::now();
         machine.verify(&proof, &digest).expect("the execution verifies");

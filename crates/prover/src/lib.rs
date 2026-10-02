@@ -3374,6 +3374,9 @@ pub mod tests {
             bincode::serialize(&binary_proof.proof).unwrap().len(),
             started.elapsed().as_secs_f64()
         );
+        for (label, bytes) in zkm_binary_stark::config::proof_breakdown(&binary_proof.proof) {
+            tracing::info!("binary shrink proof part {label}: {bytes} bytes");
+        }
         let started = std::time::Instant::now();
         prover.verify_shrink_binary(&binary_proof)?;
         tracing::info!("binary shrink verified in {:.3} s", started.elapsed().as_secs_f64());
