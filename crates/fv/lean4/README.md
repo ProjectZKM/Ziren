@@ -91,7 +91,7 @@ every theorem into a `sorry`, so check the count after changing it.
 **Build on a machine with plenty of memory, not a laptop.** Mathlib plus the generated chip files
 is tens of gigabytes of elaboration, and a large chip file built as one module has peaked above
 200 GB of resident memory. Build the library with `lake`, and check chip files with
-`check/check.sh`, which splits each into modules built in parallel under a memory gate
+`check/check.py`, which splits each into modules built in parallel under a memory gate
 (`check/README.md`).
 
 ```bash
@@ -103,11 +103,10 @@ Point `ELAN_HOME` and `XDG_CACHE_HOME` at a disk with room when the home filesys
 put `$ELAN_HOME/bin` on `PATH` in non-interactive shells, or `lake` cannot find or re-downloads
 the toolchain.
 
-The `check/` scripts are not yet in the repository; until they are, take them from the archived
-snapshot of the checked files (`src/crates/fv/lean4/check`). The chip files are generated, not committed. `check/regen_all.sh OUT` writes all of them, with
+The chip files are generated, not committed. `check/regen_all.sh OUT` writes all of them, with
 their gadget snippets, under `OUT`; `zkm-picus --chip NAME --format lean --derive --lean-out-dir
 crates/fv/lean4` writes one into this project. To work on one chip, build its module alone (the
-files are independent), or check a large one in parallel with `check/check.sh`:
+files are independent), or check a large one in parallel with `check/check.py`:
 
 ```bash
 lake build ZirenDet.Chips.AddSub
@@ -143,12 +142,16 @@ say which kind of work would close it.
 
 ## Regenerating
 
-The three generated groups have three separate generators. Regenerate after any change to the
-corresponding source of truth.
+The generated groups have separate generators. Regenerate after any change to the corresponding
+source of truth.
 
 ```bash
-# 1. chip determinism theorems, after any AIR change
-cargo run -p zkm-picus -- --all --format lean --lean-out-dir crates/fv/lean4
+# 1. chip determinism theorems, after any AIR change: regenerate all chip files (with their
+#    generated gadget snippets), then check the chips that changed
+cargo build -r -p zkm-picus
+SNIPPET_TOOLS=/path/to/snippets/tools crates/fv/lean4/check/regen_all.sh /scratch/regen
+LEAN_PROJECT=/path/to/lake/project crates/fv/lean4/check/check.py \
+    /scratch/regen/ZirenDet/Chips/DivRem.lean /scratch/divrem SpDivRem
 
 # 2. ISA conformance vectors, after adding instructions or vectors
 #    SPEC_LEAN_PER_INSTRUCTION defaults to 2; use 10 for the full 770-example set
@@ -158,6 +161,42 @@ python3 crates/core/executor/tests/spec_vectors/gen_decode.py
 
 Both write into `ZirenDet/`, and both overwrite. Diff before committing: a silently truncated
 vector set looks exactly like a successful run.
+
+## After a constraint change
+
+A chip's determinism theorem is extracted from the same constraint description the prover
+evaluates, so changing a chip's AIR changes its statement, and the proofs have to follow. The flow
+is regenerate, check, and, if a statement no longer holds, treat it as a finding: either the
+constraints are fixed, or the value the prover chooses is declared a free value of the statement
+(the three soundness gaps in the paper's findings table were found this way).
+
+What makes this manual today:
+
+- **Indices.** The analyser names columns by position (`w.v123`), and so do the hand-written
+  parts: the `DivRem` snippets and their generator, and the `Global` snippet. A column added or
+  moved breaks them although nothing proved has changed.
+- **Gadget shapes.** Each snippet generator recognises its gadget by the shape of the extracted
+  constraints; a gadget whose internal layout changes no longer matches, and the generator has to
+  be edited. Moving columns or adding unrelated constraints needs no edit.
+- **Silence.** The chip files are not committed, so nothing flags that a change has left the
+  proofs behind.
+
+The planned fixes, in order of cost:
+
+1. **A fingerprint manifest.** `zkm-picus` emits a canonical hash of each chip's extracted
+   constraint system; a committed manifest records, per chip, that hash, its theorem count and the
+   check that closed it. A CI job that needs no Lean recomputes the hashes and names the chips to
+   re-check; their entries change only from a passing check log.
+2. **Stable column names.** The `AlignedBorrow` derive emits each chip's column names (field paths
+   such as `frame.op_a_access.prev_value[2]`), and the analyser uses them, so snippets refer to
+   names rather than positions.
+3. **Gadget lemmas.** Each gadget type registers its instances through the `annotate` hook, its
+   determinism is one library lemma, and a chip's snippet instantiates it; a gadget that changes
+   internally changes one lemma, not a generator.
+
+`check/` stays independent of any chip: `check.py` applies a table of rewrites selected by the
+theorem they target, and the chip-specific snippet recipes live with the generators
+(`recipes.tsv`).
 
 ## Known limits
 
