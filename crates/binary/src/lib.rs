@@ -70,7 +70,9 @@ pub struct BinarySchedule {
     pub term_security_bits: usize,
     /// The composed security the whole proof must reach.
     pub security_bits: usize,
-    /// Ceilings on queries, proof bytes and grinding.
+    /// Ceilings on queries, proof bytes and grinding; the grinding cap is
+    /// what the prover's time is made of, a round's grind being `2^bits`
+    /// hashes on one thread.
     pub budget: BinaryWhirBudget,
 }
 
@@ -81,7 +83,7 @@ impl Default for BinarySchedule {
             folding: 4,
             term_security_bits: 108,
             security_bits: 100,
-            budget: BinaryWhirBudget { max_grinding_bits: 27, ..BinaryWhirBudget::PRODUCTION },
+            budget: BinaryWhirBudget { max_grinding_bits: 20, ..BinaryWhirBudget::PRODUCTION },
         }
     }
 }
