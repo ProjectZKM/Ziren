@@ -29,10 +29,10 @@ use crate::word::{
 };
 use crate::F;
 
-/// The program's part of a row.
+/// The program's part of a row, shared with the extension ALU.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct BaseAluPrep<T> {
+pub struct AluPrep<T> {
     /// Where the first operand is read.
     pub addr_in1: [T; ADDRESS_BITS],
     /// Where the second operand is read.
@@ -73,8 +73,34 @@ pub struct BaseAluCols<T> {
     pub mul: MulCols<T>,
 }
 
-/// Columns of [`BaseAluPrep`].
-pub const NUM_BASE_ALU_PREP_COLS: usize = core::mem::size_of::<BaseAluPrep<u8>>();
+/// Columns of [`AluPrep`].
+pub const NUM_ALU_PREP_COLS: usize = core::mem::size_of::<AluPrep<u8>>();
+
+/// What the program says about one ALU instruction.
+#[derive(Clone, Copy, Debug)]
+pub struct AluFlags {
+    /// The check runs on `(in1, in2)` toward `out`.
+    pub direct: bool,
+    /// The row binds the sum.
+    pub binds_add: bool,
+    /// The row binds the product.
+    pub binds_mul: bool,
+    /// How often the result is read.
+    pub reads: u32,
+}
+
+/// Fill `prep` for an instruction at `addrs = [in1, in2, out]` with `flags`.
+pub fn fill_prep(prep: &mut AluPrep<u8>, addrs: [u32; 3], flags: AluFlags) {
+    prep.addr_in1 = bits_le::<ADDRESS_BITS>(u64::from(addrs[0]));
+    prep.addr_in2 = bits_le::<ADDRESS_BITS>(u64::from(addrs[1]));
+    prep.addr_out = bits_le::<ADDRESS_BITS>(u64::from(addrs[2]));
+    prep.is_real = 1;
+    prep.direct = u8::from(flags.direct);
+    prep.inverse = u8::from(!flags.direct);
+    prep.binds_add = u8::from(flags.binds_add);
+    prep.binds_mul = u8::from(flags.binds_mul);
+    prep.has_out = u8::from(flags.reads > 0);
+}
 
 /// Columns of [`BaseAluCols`].
 pub const NUM_BASE_ALU_COLS: usize = core::mem::size_of::<BaseAluCols<u8>>();
@@ -101,31 +127,30 @@ impl BaseAluAir {
             })
             .collect();
         let log_height = log_height_for(instrs.len());
-        let mut preprocessed = vec![0u8; (1 << log_height) * NUM_BASE_ALU_PREP_COLS];
+        let mut preprocessed = vec![0u8; (1 << log_height) * NUM_ALU_PREP_COLS];
         let mut direct = Vec::with_capacity(instrs.len());
         let mut outputs = Vec::with_capacity(instrs.len());
         for (row, instr) in instrs.iter().enumerate() {
             let BaseAluInstr { opcode, mult, addrs } = instr;
             let mult = mult.as_canonical_u32();
-            let is_direct = matches!(opcode, BaseAluOpcode::AddF | BaseAluOpcode::MulF);
-            let is_add_like = matches!(opcode, BaseAluOpcode::AddF | BaseAluOpcode::SubF);
-            let binds_mul = match opcode {
-                BaseAluOpcode::MulF | BaseAluOpcode::DivFAssert => true,
-                BaseAluOpcode::DivF => mult > 0,
-                BaseAluOpcode::AddF | BaseAluOpcode::SubF => false,
+            let flags = AluFlags {
+                direct: matches!(opcode, BaseAluOpcode::AddF | BaseAluOpcode::MulF),
+                binds_add: matches!(opcode, BaseAluOpcode::AddF | BaseAluOpcode::SubF),
+                binds_mul: match opcode {
+                    BaseAluOpcode::MulF | BaseAluOpcode::DivFAssert => true,
+                    BaseAluOpcode::DivF => mult > 0,
+                    BaseAluOpcode::AddF | BaseAluOpcode::SubF => false,
+                },
+                reads: mult,
             };
-            let prep: &mut BaseAluPrep<u8> = preprocessed
-                [row * NUM_BASE_ALU_PREP_COLS..(row + 1) * NUM_BASE_ALU_PREP_COLS]
-                .borrow_mut();
-            prep.addr_in1 = bits_le::<ADDRESS_BITS>(u64::from(addrs.in1.0.as_canonical_u32()));
-            prep.addr_in2 = bits_le::<ADDRESS_BITS>(u64::from(addrs.in2.0.as_canonical_u32()));
-            prep.addr_out = bits_le::<ADDRESS_BITS>(u64::from(addrs.out.0.as_canonical_u32()));
-            prep.is_real = 1;
-            prep.direct = u8::from(is_direct);
-            prep.inverse = u8::from(!is_direct);
-            prep.binds_add = u8::from(is_add_like);
-            prep.binds_mul = u8::from(binds_mul);
-            prep.has_out = u8::from(mult > 0);
+            let prep: &mut AluPrep<u8> =
+                preprocessed[row * NUM_ALU_PREP_COLS..(row + 1) * NUM_ALU_PREP_COLS].borrow_mut();
+            fill_prep(
+                prep,
+                [addrs.in1.0, addrs.in2.0, addrs.out.0].map(|a| a.as_canonical_u32()),
+                flags,
+            );
+            let is_direct = flags.direct;
             direct.push(is_direct);
             outputs.push((addrs.out.0.as_canonical_u32(), mult));
         }
@@ -204,11 +229,11 @@ impl<X: Field> BaseAir<X> for BaseAluAir {
     }
 
     fn preprocessed_width(&self) -> usize {
-        NUM_BASE_ALU_PREP_COLS
+        NUM_ALU_PREP_COLS
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
-        Some(dense(&self.preprocessed, NUM_BASE_ALU_PREP_COLS))
+        Some(dense(&self.preprocessed, NUM_ALU_PREP_COLS))
     }
 }
 
@@ -217,7 +242,7 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for BaseAluAir {
         let main = builder.main();
         let local: &BaseAluCols<AB::Var> = main.current_slice().borrow();
         let prep = builder.preprocessed();
-        let prep_local: BaseAluPrep<AB::Var> = *prep.current_slice().borrow();
+        let prep_local: AluPrep<AB::Var> = *prep.current_slice().borrow();
 
         for bit in local.in1.iter().chain(local.in2.iter()).chain(local.out.iter()) {
             builder.assert_bool(*bit);
@@ -241,7 +266,7 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for BaseAluAir {
         for i in 0..KB_BITS {
             let z = direct.clone() * local.out[i] + inverse.clone() * local.in1[i];
             builder.when(prep_local.binds_add).assert_eq(local.add.out[i], z.clone());
-            builder.when(prep_local.binds_mul).assert_eq(local.mul.out[i], z);
+            builder.when(prep_local.binds_mul).assert_eq(local.mul.reduce.out[i], z);
         }
 
         let in1 = exprs::<AB, KB_BITS>(&local.in1);

@@ -9,9 +9,11 @@
 //! are preprocessed columns, committed in the verifying key.
 
 pub mod alu_base;
+pub mod alu_ext;
 pub mod bits;
 pub mod ledger;
 pub mod memory;
+pub mod select;
 
 use p3_air::{Air, BaseAir};
 use p3_binary_field::{BinaryField2, Ghash128};
@@ -29,9 +31,11 @@ use p3_sumcheck::TableShape;
 use zkm_recursion_core::{ExecutionRecord, Instruction, RecursionProgram};
 
 use self::alu_base::BaseAluAir;
+use self::alu_ext::ExtAluAir;
 use self::bits::Cell;
 use self::ledger::LedgerAir;
 use self::memory::{MemoryConstAir, MemoryVarAir};
+use self::select::SelectAir;
 use crate::config::{MachineConfig, MachineConfigError, MachineProof};
 use crate::machine_builder::MachineBuilder;
 use crate::{challenger, BinarySchedule, F};
@@ -42,6 +46,8 @@ pub enum RecursionAir {
     MemoryConst(MemoryConstAir),
     MemoryVar(MemoryVarAir),
     BaseAlu(BaseAluAir),
+    ExtAlu(ExtAluAir),
+    Select(SelectAir),
 }
 
 impl RecursionAir {
@@ -53,6 +59,8 @@ impl RecursionAir {
             Self::MemoryConst(air) => air.log_height(),
             Self::MemoryVar(air) => air.log_height(),
             Self::BaseAlu(air) => air.log_height(),
+            Self::ExtAlu(air) => air.log_height(),
+            Self::Select(air) => air.log_height(),
         }
     }
 
@@ -64,6 +72,8 @@ impl RecursionAir {
             Self::MemoryConst(_) => "MemoryConst",
             Self::MemoryVar(_) => "MemoryVar",
             Self::BaseAlu(_) => "BaseAlu",
+            Self::ExtAlu(_) => "ExtAlu",
+            Self::Select(_) => "Select",
         }
     }
 
@@ -74,6 +84,8 @@ impl RecursionAir {
             Self::MemoryConst(air) => air.writes().to_vec(),
             Self::MemoryVar(air) => air.writes(),
             Self::BaseAlu(air) => air.writes(),
+            Self::ExtAlu(air) => air.writes(),
+            Self::Select(air) => air.writes(),
         }
     }
 
@@ -84,6 +96,8 @@ impl RecursionAir {
             Self::MemoryConst(air) => air.written_values(),
             Self::MemoryVar(air) => air.written_values(record),
             Self::BaseAlu(air) => air.written_values(record),
+            Self::ExtAlu(air) => air.written_values(record),
+            Self::Select(air) => air.written_values(record),
         }
     }
 
@@ -95,6 +109,8 @@ impl RecursionAir {
             Self::MemoryConst(air) => air.main_table(),
             Self::MemoryVar(air) => air.main_table(record),
             Self::BaseAlu(air) => air.main_table(record),
+            Self::ExtAlu(air) => air.main_table(record),
+            Self::Select(air) => air.main_table(record),
         }
     }
 }
@@ -106,6 +122,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::MemoryConst(air) => BaseAir::<X>::width(air),
             Self::MemoryVar(air) => BaseAir::<X>::width(air),
             Self::BaseAlu(air) => BaseAir::<X>::width(air),
+            Self::ExtAlu(air) => BaseAir::<X>::width(air),
+            Self::Select(air) => BaseAir::<X>::width(air),
         }
     }
 
@@ -115,6 +133,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::MemoryConst(air) => BaseAir::<X>::preprocessed_width(air),
             Self::MemoryVar(air) => BaseAir::<X>::preprocessed_width(air),
             Self::BaseAlu(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::ExtAlu(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Select(air) => BaseAir::<X>::preprocessed_width(air),
         }
     }
 
@@ -124,6 +144,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::MemoryConst(air) => air.preprocessed_trace(),
             Self::MemoryVar(air) => air.preprocessed_trace(),
             Self::BaseAlu(air) => air.preprocessed_trace(),
+            Self::ExtAlu(air) => air.preprocessed_trace(),
+            Self::Select(air) => air.preprocessed_trace(),
         }
     }
 }
@@ -135,6 +157,8 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for RecursionAir {
             Self::MemoryConst(air) => air.eval(builder),
             Self::MemoryVar(air) => air.eval(builder),
             Self::BaseAlu(air) => air.eval(builder),
+            Self::ExtAlu(air) => air.eval(builder),
+            Self::Select(air) => air.eval(builder),
         }
     }
 }
@@ -185,14 +209,14 @@ impl RecursionMachine {
         for instruction in program.iter_instructions() {
             let unsupported = match instruction {
                 Instruction::BaseAlu(_)
+                | Instruction::ExtAlu(_)
+                | Instruction::Select(_)
                 | Instruction::Mem(_)
                 | Instruction::Hint(_)
                 | Instruction::HintBits(_)
                 | Instruction::HintExt2Felts(_)
                 | Instruction::Print(_) => continue,
-                Instruction::ExtAlu(_) => "the extension ALU",
                 Instruction::Poseidon2(_) => "Poseidon2",
-                Instruction::Select(_) => "select",
                 Instruction::HintAddCurve(_) => "curve hints",
                 Instruction::Ext2Felts(_) => "Ext2Felts",
                 Instruction::CommitPublicValues(_) => "public values",
@@ -203,6 +227,8 @@ impl RecursionMachine {
             RecursionAir::MemoryConst(MemoryConstAir::new(program)),
             RecursionAir::MemoryVar(MemoryVarAir::new(program)),
             RecursionAir::BaseAlu(BaseAluAir::new(program)),
+            RecursionAir::ExtAlu(ExtAluAir::new(program)),
+            RecursionAir::Select(SelectAir::new(program)),
         ];
         let writes: Vec<(u32, u32)> = tables.iter().flat_map(RecursionAir::writes).collect();
         let mut airs = vec![RecursionAir::Ledger(LedgerAir::new(&writes))];
@@ -278,16 +304,21 @@ impl RecursionMachine {
 mod tests {
     use std::sync::Arc;
 
+    use p3_field::extension::BinomialExtensionField;
+    use p3_field::BasedVectorSpace;
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
     use zkm_pcs::StarkGenericConfig;
     use zkm_recursion_core::runtime::instruction as instr;
-    use zkm_recursion_core::{BaseAluOpcode, MemAccessKind, RawProgram, Runtime};
+    use zkm_recursion_core::{BaseAluOpcode, ExtAluOpcode, MemAccessKind, RawProgram, Runtime};
 
     use super::*;
 
     type EF = <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge;
+    const _: () = assert!(
+        core::mem::size_of::<EF>() == core::mem::size_of::<BinomialExtensionField<KoalaBear, 4>>()
+    );
 
     /// Deterministic elements below `p`.
     fn elements(n: usize) -> Vec<KoalaBear> {
@@ -326,6 +357,57 @@ mod tests {
                     instr::mem_single(MemAccessKind::Read, 1, a[4], in1 * in2),
                     instr::base_alu(BaseAluOpcode::DivF, 1, a[5], a[0], a[1]),
                     instr::mem_single(MemAccessKind::Read, 1, a[5], quotient),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let mut program =
+            RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
+        program.total_memory = program.computed_total_memory();
+        program
+    }
+
+    /// `n` groups of the four extension operations and a select on each
+    /// value of the bit, each result checked against the expected constant.
+    fn ext_and_select_program(n: usize) -> RecursionProgram<KoalaBear> {
+        let values = elements(8 * n);
+        let mut addr = 0u32;
+        let instructions = (0..n)
+            .flat_map(|i| {
+                let coefficients = |offset: usize| -> EF {
+                    EF::from_basis_coefficients_fn(|k| values[8 * i + offset + k])
+                };
+                let quotient = coefficients(0);
+                let in2 = {
+                    let in2 = coefficients(4);
+                    if in2.is_zero() {
+                        EF::ONE
+                    } else {
+                        in2
+                    }
+                };
+                let in1 = in2 * quotient;
+                let bit = KoalaBear::from_bool(i % 2 == 1);
+                let (f1, f2) = (values[8 * i], values[8 * i + 1]);
+                let (o1, o2) = if i % 2 == 1 { (f2, f1) } else { (f1, f2) };
+                let a: Vec<u32> = (0..13).map(|x| x + addr).collect();
+                addr += 13;
+                [
+                    instr::mem_ext::<KoalaBear, EF>(MemAccessKind::Write, 4, a[0], in1),
+                    instr::mem_ext::<KoalaBear, EF>(MemAccessKind::Write, 4, a[1], in2),
+                    instr::ext_alu(ExtAluOpcode::AddE, 1, a[2], a[0], a[1]),
+                    instr::mem_ext::<KoalaBear, EF>(MemAccessKind::Read, 1, a[2], in1 + in2),
+                    instr::ext_alu(ExtAluOpcode::SubE, 1, a[3], a[0], a[1]),
+                    instr::mem_ext::<KoalaBear, EF>(MemAccessKind::Read, 1, a[3], in1 - in2),
+                    instr::ext_alu(ExtAluOpcode::MulE, 1, a[4], a[0], a[1]),
+                    instr::mem_ext::<KoalaBear, EF>(MemAccessKind::Read, 1, a[4], in1 * in2),
+                    instr::ext_alu(ExtAluOpcode::DivE, 1, a[5], a[0], a[1]),
+                    instr::mem_ext::<KoalaBear, EF>(MemAccessKind::Read, 1, a[5], quotient),
+                    instr::mem_single(MemAccessKind::Write, 1, a[6], bit),
+                    instr::mem_single(MemAccessKind::Write, 1, a[7], f1),
+                    instr::mem_single(MemAccessKind::Write, 1, a[8], f2),
+                    instr::select(1, 1, a[6], a[9], a[10], a[7], a[8]),
+                    instr::mem_single(MemAccessKind::Read, 1, a[9], o1),
+                    instr::mem_single(MemAccessKind::Read, 1, a[10], o2),
                 ]
             })
             .collect::<Vec<_>>();
@@ -383,5 +465,48 @@ mod tests {
             Ok(proof) => machine.verify(&proof).is_err(),
         };
         assert!(rejected, "a changed operand must not verify");
+    }
+
+    /// The extension operations and select prove through the real runtime,
+    /// and a record with a swapped select output or a changed extension
+    /// result does not.
+    #[test]
+    fn ext_and_select_prove_and_tampering_fails() {
+        let program = Arc::new(ext_and_select_program(8));
+        let record = run(&program);
+        let machine = RecursionMachine::new(&program, &BinarySchedule::default()).expect("machine");
+        for air in machine.airs() {
+            println!(
+                "{}: 2^{} rows x {} bits",
+                air.name(),
+                air.log_height(),
+                BaseAir::<F>::width(air)
+            );
+        }
+        let started = std::time::Instant::now();
+        let proof = machine.prove(&record).expect("the execution proves");
+        println!(
+            "ext and select x8: {} proof bytes, prove {:.1} s",
+            postcard::to_allocvec(&proof).expect("a proof serializes").len(),
+            started.elapsed().as_secs_f64()
+        );
+        machine.verify(&proof).expect("the execution verifies");
+
+        let mut swapped = record.clone();
+        let event = &mut swapped.select_events[0];
+        core::mem::swap(&mut event.out1, &mut event.out2);
+        let rejected = match machine.prove(&swapped) {
+            Err(_) => true,
+            Ok(proof) => machine.verify(&proof).is_err(),
+        };
+        assert!(rejected, "a swapped select output must not verify");
+
+        let mut wrong_result = record;
+        wrong_result.ext_alu_events[2].out.0[1] += KoalaBear::ONE;
+        let rejected = match machine.prove(&wrong_result) {
+            Err(_) => true,
+            Ok(proof) => machine.verify(&proof).is_err(),
+        };
+        assert!(rejected, "a changed extension result must not verify");
     }
 }

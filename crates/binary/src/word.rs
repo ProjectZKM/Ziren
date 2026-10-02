@@ -250,52 +250,33 @@ pub fn fill_sub(a: u32, b: u32, cols: &mut SubCols<u8>) -> u32 {
     out as u32
 }
 
-/// The witness of a modular multiplication `a * b mod p`.
+/// The witness of the integer product of two elements.
 ///
 /// The product is accumulated a row of the schoolbook at a time: `gated[i]`
 /// is `a_i * b`, and `acc[i]` is the partial product after `i + 1` rows, each
-/// step an addition over [`PRODUCT_BITS`] bits.  The product `P` is then
-/// reduced through a quotient and remainder, `P = q p + r` with `r < p`,
-/// checked as `P + 2^24 q = 2^31 q + q + r`, whose right side is `q` written
-/// twice with `r` added, since `p = 2^31 - 2^24 + 1`.
+/// step an addition over [`PRODUCT_BITS`] bits.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
-pub struct MulCols<T> {
+pub struct ProductCols<T> {
     /// `a_i * b` for each bit `i` of `a`.
     pub gated: [Word<T>; KB_BITS],
     /// The partial products; the last is the product.
     pub acc: [[T; PRODUCT_BITS]; KB_BITS],
     /// Carries of each partial-product addition.
     pub acc_carries: [[T; PRODUCT_BITS]; KB_BITS],
-    /// The quotient `P div p`.
-    pub quotient: Word<T>,
-    /// The remainder `P mod p`, the result.
-    pub out: Word<T>,
-    /// `P + 2^24 q` over 64 bits.
-    pub lhs: [T; 64],
-    /// Carries of that addition.
-    pub lhs_carries: [T; 64],
-    /// `2^31 q + q + r` over 64 bits.
-    pub rhs: [T; 64],
-    /// Carries of that addition.
-    pub rhs_carries: [T; 64],
-    /// Borrows of `r - p`; the last must be `1`, so that `r < p`.
-    pub out_borrows: [T; 32],
-    /// `r - p` over 32 bits, the subtraction whose borrows bound `r`.
-    pub out_diff: [T; 32],
 }
 
-/// Columns of [`MulCols`].
-pub const NUM_MUL_COLS: usize =
-    KB_BITS * KB_BITS + 2 * KB_BITS * PRODUCT_BITS + 2 * KB_BITS + 4 * 64 + 2 * 32;
+/// Columns of [`ProductCols`].
+pub const NUM_PRODUCT_COLS: usize = KB_BITS * KB_BITS + 2 * KB_BITS * PRODUCT_BITS;
 
-/// Constrain `cols.out = a * b mod p`.
-pub fn eval_mul<AB: AirBuilder>(
+/// Constrain the last partial product of `cols` to be `a * b`, and return
+/// its bits.
+pub fn eval_product<AB: AirBuilder>(
     builder: &mut AB,
     a: &[AB::Expr; KB_BITS],
     b: &[AB::Expr; KB_BITS],
-    cols: &MulCols<AB::Var>,
-) {
+    cols: &ProductCols<AB::Var>,
+) -> [AB::Expr; PRODUCT_BITS] {
     let zero: [AB::Expr; PRODUCT_BITS] = array::from_fn(|_| AB::Expr::ZERO);
     for i in 0..KB_BITS {
         for j in 0..KB_BITS {
@@ -315,49 +296,98 @@ pub fn eval_mul<AB: AirBuilder>(
             add_bits::<AB, PRODUCT_BITS>(builder, &previous, &shifted, &cols.acc_carries[i], &next);
         builder.assert_zero(carry_out);
     }
+    exprs::<AB, PRODUCT_BITS>(&cols.acc[KB_BITS - 1])
+}
+
+/// The witness of [`eval_product`] for `a * b`, written as bits.
+pub fn fill_product(a: u32, b: u32, cols: &mut ProductCols<u8>) -> u64 {
+    let mut acc: u64 = 0;
+    for i in 0..KB_BITS {
+        let gated = if (a >> i) & 1 == 1 { u64::from(b) } else { 0 };
+        cols.gated[i] = bits_le::<KB_BITS>(gated);
+        let shifted = gated << i;
+        cols.acc_carries[i] = add_carries::<PRODUCT_BITS>(acc, shifted);
+        acc += shifted;
+        cols.acc[i] = bits_le::<PRODUCT_BITS>(acc);
+    }
+    acc
+}
+
+/// The witness of a reduction `value mod p` of an integer below `2^N`,
+/// whose quotient fits `Q` bits.
+///
+/// `value = q p + r` with `r < p` is checked as `value + 2^24 q = 2^31 q + q
+/// + r`, since `p = 2^31 - 2^24 + 1`; both sides are `N`-bit sums with no
+/// carry out, so the equality of their bits is the equality of the
+/// integers.  `2^31 q + q` is its own addition, the two copies of `q`
+/// overlapping once `q` has more than 31 bits.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct ReduceCols<T, const Q: usize, const N: usize> {
+    /// The quotient `value div p`.
+    pub quotient: [T; Q],
+    /// The remainder `value mod p`, the result.
+    pub out: Word<T>,
+    /// `value + 2^24 q` over `N` bits.
+    pub lhs: [T; N],
+    /// Carries of that addition.
+    pub lhs_carries: [T; N],
+    /// `2^31 q + q` over `N` bits.
+    pub q_twice: [T; N],
+    /// Carries of that addition.
+    pub q_twice_carries: [T; N],
+    /// `2^31 q + q + r` over `N` bits.
+    pub rhs: [T; N],
+    /// Carries of that addition.
+    pub rhs_carries: [T; N],
+    /// Borrows of `r - p`; the last must be `1`, so that `r < p`.
+    pub out_borrows: [T; 32],
+    /// `r - p` over 32 bits, the subtraction whose borrows bound `r`.
+    pub out_diff: [T; 32],
+}
+
+/// Columns of [`ReduceCols`].
+pub const fn num_reduce_cols(q: usize, n: usize) -> usize {
+    q + KB_BITS + 6 * n + 2 * 32
+}
+
+/// Constrain `cols.out = value mod p`, `value` having at most `N` bits.
+pub fn eval_reduce<AB: AirBuilder, const Q: usize, const N: usize>(
+    builder: &mut AB,
+    value: &[AB::Expr],
+    cols: &ReduceCols<AB::Var, Q, N>,
+) {
+    assert!(value.len() <= N && Q + KB_BITS <= N, "the reduction fits its width");
     for bit in cols.quotient.iter().chain(cols.out.iter()) {
         builder.assert_bool(*bit);
     }
-    let product = exprs::<AB, PRODUCT_BITS>(&cols.acc[KB_BITS - 1]);
-    let q = exprs::<AB, KB_BITS>(&cols.quotient);
+    let q = exprs::<AB, Q>(&cols.quotient);
     let r = exprs::<AB, KB_BITS>(&cols.out);
+    let widened: [AB::Expr; N] =
+        array::from_fn(|k| if k < value.len() { value[k].clone() } else { AB::Expr::ZERO });
 
-    let q_shift_24: [AB::Expr; 64] = array::from_fn(|k| {
-        if k >= 24 && k - 24 < KB_BITS {
-            q[k - 24].clone()
-        } else {
-            AB::Expr::ZERO
-        }
-    });
-    let lhs = exprs::<AB, 64>(&cols.lhs);
-    let lhs_carry = add_bits::<AB, 64>(
-        builder,
-        &widen::<AB, PRODUCT_BITS, 64>(&product),
-        &q_shift_24,
-        &cols.lhs_carries,
-        &lhs,
-    );
+    let q_shift_24: [AB::Expr; N] =
+        array::from_fn(|k| if k >= 24 && k - 24 < Q { q[k - 24].clone() } else { AB::Expr::ZERO });
+    let lhs = exprs::<AB, N>(&cols.lhs);
+    let lhs_carry = add_bits::<AB, N>(builder, &widened, &q_shift_24, &cols.lhs_carries, &lhs);
     builder.assert_zero(lhs_carry);
 
-    let q_twice: [AB::Expr; 64] = array::from_fn(|k| {
-        if k < KB_BITS {
-            q[k].clone()
-        } else if k >= 31 && k - 31 < KB_BITS {
-            q[k - 31].clone()
-        } else {
-            AB::Expr::ZERO
-        }
-    });
-    let rhs = exprs::<AB, 64>(&cols.rhs);
-    let rhs_carry = add_bits::<AB, 64>(
+    let q_shift_31: [AB::Expr; N] =
+        array::from_fn(|k| if k >= 31 && k - 31 < Q { q[k - 31].clone() } else { AB::Expr::ZERO });
+    let q_twice = exprs::<AB, N>(&cols.q_twice);
+    let q_twice_carry = add_bits::<AB, N>(
         builder,
+        &q_shift_31,
+        &widen::<AB, Q, N>(&q),
+        &cols.q_twice_carries,
         &q_twice,
-        &widen::<AB, KB_BITS, 64>(&r),
-        &cols.rhs_carries,
-        &rhs,
     );
+    builder.assert_zero(q_twice_carry);
+    let rhs = exprs::<AB, N>(&cols.rhs);
+    let rhs_carry =
+        add_bits::<AB, N>(builder, &q_twice, &widen::<AB, KB_BITS, N>(&r), &cols.rhs_carries, &rhs);
     builder.assert_zero(rhs_carry);
-    for k in 0..64 {
+    for k in 0..N {
         builder.assert_zero(lhs[k].clone() + rhs[k].clone());
     }
 
@@ -372,31 +402,78 @@ pub fn eval_mul<AB: AirBuilder>(
     builder.assert_zero(below_p + AB::Expr::ONE);
 }
 
+/// The witness of [`eval_reduce`] for `value mod p`, written as bits.
+pub fn fill_reduce<const Q: usize, const N: usize>(
+    value: u128,
+    cols: &mut ReduceCols<u8, Q, N>,
+) -> u32 {
+    let p = u128::from(KB_PRIME);
+    let q = value / p;
+    let r = value % p;
+    assert!(q < 1 << Q, "the quotient fits {Q} bits");
+    cols.quotient = bits_le_wide::<Q>(q);
+    cols.out = bits_le::<KB_BITS>(r as u64);
+    let q_shift_24 = q << 24;
+    cols.lhs = bits_le_wide::<N>(value + q_shift_24);
+    cols.lhs_carries = add_carries_wide::<N>(value, q_shift_24);
+    let q_twice = (q << 31) + q;
+    cols.q_twice = bits_le_wide::<N>(q_twice);
+    cols.q_twice_carries = add_carries_wide::<N>(q << 31, q);
+    cols.rhs = bits_le_wide::<N>(q_twice + r);
+    cols.rhs_carries = add_carries_wide::<N>(q_twice, r);
+    cols.out_borrows = sub_borrows::<32>(r as u64, u64::from(KB_PRIME));
+    cols.out_diff = bits_le::<32>((r as u64).wrapping_sub(u64::from(KB_PRIME)) & 0xffff_ffff);
+    r as u32
+}
+
+/// The witness of a modular multiplication `a * b mod p`: the integer
+/// product, then its reduction.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct MulCols<T> {
+    /// The integer product.
+    pub product: ProductCols<T>,
+    /// The product reduced.
+    pub reduce: ReduceCols<T, KB_BITS, 64>,
+}
+
+/// Columns of [`MulCols`].
+pub const NUM_MUL_COLS: usize = NUM_PRODUCT_COLS + num_reduce_cols(KB_BITS, 64);
+
+/// Constrain `cols.reduce.out = a * b mod p`.
+pub fn eval_mul<AB: AirBuilder>(
+    builder: &mut AB,
+    a: &[AB::Expr; KB_BITS],
+    b: &[AB::Expr; KB_BITS],
+    cols: &MulCols<AB::Var>,
+) {
+    let product = eval_product(builder, a, b, &cols.product);
+    eval_reduce(builder, &product, &cols.reduce);
+}
+
 /// The witness of [`eval_mul`] for `a * b mod p`, written as bits.
 pub fn fill_mul(a: u32, b: u32, cols: &mut MulCols<u8>) -> u32 {
-    let mut acc: u64 = 0;
-    for i in 0..KB_BITS {
-        let gated = if (a >> i) & 1 == 1 { u64::from(b) } else { 0 };
-        cols.gated[i] = bits_le::<KB_BITS>(gated);
-        let shifted = gated << i;
-        cols.acc_carries[i] = add_carries::<PRODUCT_BITS>(acc, shifted);
-        acc += shifted;
-        cols.acc[i] = bits_le::<PRODUCT_BITS>(acc);
+    let product = fill_product(a, b, &mut cols.product);
+    fill_reduce(u128::from(product), &mut cols.reduce)
+}
+
+/// The bits of `v`, little-endian, `v < 2^N`.
+#[must_use]
+pub fn bits_le_wide<const N: usize>(v: u128) -> [u8; N] {
+    array::from_fn(|i| ((v >> i) & 1) as u8)
+}
+
+/// The carries of `x + y` over `N` bits, as [`add_carries`], for wide sums.
+#[must_use]
+pub fn add_carries_wide<const N: usize>(x: u128, y: u128) -> [u8; N] {
+    let mut carries = [0u8; N];
+    let mut carry = 0u128;
+    for (i, slot) in carries.iter_mut().enumerate() {
+        let bit = ((x >> i) & 1) + ((y >> i) & 1) + carry;
+        carry = bit >> 1;
+        *slot = carry as u8;
     }
-    let product = acc;
-    let q = product / u64::from(KB_PRIME);
-    let r = product % u64::from(KB_PRIME);
-    cols.quotient = bits_le::<KB_BITS>(q);
-    cols.out = bits_le::<KB_BITS>(r);
-    let q_shift_24 = q << 24;
-    cols.lhs = bits_le::<64>(product + q_shift_24);
-    cols.lhs_carries = add_carries::<64>(product, q_shift_24);
-    let q_twice = (q << 31) | q;
-    cols.rhs = bits_le::<64>(q_twice + r);
-    cols.rhs_carries = add_carries::<64>(q_twice, r);
-    cols.out_borrows = sub_borrows::<32>(r, u64::from(KB_PRIME));
-    cols.out_diff = bits_le::<32>(r.wrapping_sub(u64::from(KB_PRIME)) & 0xffff_ffff);
-    r as u32
+    carries
 }
 
 /// The carries of `x + y` over `N` bits, `carries[i]` being the carry into
@@ -465,21 +542,9 @@ mod tests {
                 u64::from(fill_sub(a, b, &mut sub)),
                 (u64::from(a) + p() - u64::from(b)) % p()
             );
-            let mut mul = Box::new(MulCols::<u8> {
-                gated: [[0; KB_BITS]; KB_BITS],
-                acc: [[0; PRODUCT_BITS]; KB_BITS],
-                acc_carries: [[0; PRODUCT_BITS]; KB_BITS],
-                quotient: [0; KB_BITS],
-                out: [0; KB_BITS],
-                lhs: [0; 64],
-                lhs_carries: [0; 64],
-                rhs: [0; 64],
-                rhs_carries: [0; 64],
-                out_borrows: [0; 32],
-                out_diff: [0; 32],
-            });
+            let mut mul: Box<MulCols<u8>> = Box::new(unsafe { core::mem::zeroed() });
             assert_eq!(u64::from(fill_mul(a, b, &mut mul)), (u64::from(a) * u64::from(b)) % p());
-            assert_eq!(mul.lhs, mul.rhs);
+            assert_eq!(mul.reduce.lhs, mul.reduce.rhs);
         }
     }
 }

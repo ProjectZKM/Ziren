@@ -10,6 +10,7 @@
 
 pub mod arith;
 pub mod config;
+pub mod ext;
 pub mod machine;
 pub mod machine_builder;
 pub mod word;
