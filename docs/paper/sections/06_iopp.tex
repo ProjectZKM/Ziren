@@ -15,12 +15,12 @@
 
 The layout is applied separately to every input-commitment round of Section~\ref{sec:pcs-stacking}; the roots are not merged. Within a root the stripes are grouped 32 to a leaf, so a leaf of the first oracle authenticates one coset row from each stripe, $32 \times 2^{k_0}$ field elements. The first folding factor $k_0$ is therefore small: leaf width multiplies every first-round query, and re-hashing those leaves is the recursion verifier's dominant cost. Later rounds query a single folded polynomial and fold more variables at a time. Each committed round re-encodes the folded polynomial at its new rate; the opening of a \texttt{reth} shard costs about 39\,ms of host-visible time on the GPU with device-resident rounds, the round-0 re-encoding being the largest term. No proof-of-work is spent on folding challenges; grinding is spent only on the query phases and on the batching and \LogUp{} challenges.
 
-Table~\ref{tab:whir-schedule} gives the analysed schedule. The first oracle has rate $2^{-2}$, and each recommitment lowers the rate by three powers of two. At log stacking height 21 the three folds consume 15 variables, and the remaining six-variable polynomial is sent in the clear after its final query phase.
+Table~\ref{tab:whir-schedule} gives one schedule, the one the soundness accounting of \S\ref{sec:iopp-soundness} is computed for; \S\ref{sec:perf-proofsize} describes how the schedule controls proof size. The first oracle has rate $2^{-2}$, and each recommitment lowers the rate by three powers of two. At log stacking height 21 the three folds consume 15 variables, and the remaining six-variable polynomial is sent in the clear after its final query phase.
 
 \begin{table}[t]
 \centering
 \small
-\caption{The analysed Jagged--\WHIR{} schedule. OOD entries count samples after committed folds; no folding challenge is ground. The stripe bound covers both ordered input-commitment rounds.}
+\caption{An example Jagged--\WHIR{} schedule, the one \S\ref{sec:iopp-soundness} accounts for. OOD entries count samples after committed folds; no folding challenge is ground. The stripe bound covers both ordered input-commitment rounds.}
 \label{tab:whir-schedule}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lcccccccc}
