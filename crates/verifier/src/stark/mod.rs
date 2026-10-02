@@ -159,7 +159,9 @@ impl StarkVerifier {
     }
 }
 
-impl HashableKey for StarkVerifyingKey<KoalaBearPoseidon2> {
+impl<const P: u8> HashableKey
+    for StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
+{
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
         let commit_elems: Vec<KoalaBear> =
             self.commit.roots().iter().flat_map(|d| d.iter().copied()).collect();

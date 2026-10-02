@@ -194,6 +194,16 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// `bundle.whir_proof`.
     const WHIR_INNER_PCS: bool;
 
+    /// The WHIR schedule this ring commits, opens and verifies under
+    /// ([`crate::whir::jagged::WhirProfile`]).  A stage's ring type fixes it,
+    /// so the verifier of a stage never reads the schedule off a proof.
+    const WHIR_PROFILE: crate::whir::jagged::WhirProfile = crate::whir::jagged::WhirProfile::Core;
+
+    /// The ring's schedule at stacking height `log_stacking_height`.
+    fn whir_config(log_stacking_height: usize) -> crate::whir::config::WhirConfig {
+        crate::whir::jagged::whir_config_for_profile(Self::WHIR_PROFILE, log_stacking_height)
+    }
+
     type BfMmcs: p3_commit::Mmcs<Val<Self>, Commitment: Clone>
         + p3_commit::Mmcs<
             crate::jagged_pcs::JaggedVal,
@@ -343,7 +353,7 @@ pub trait BasefoldRing: StarkGenericConfig {
                     mles,
                     log_stacking_height,
                 );
-            let cfg = crate::whir::jagged::core_whir_config(log_stacking_height as usize);
+            let cfg = Self::whir_config(log_stacking_height as usize);
             let (wcommit, wdata) = crate::whir::jagged::commit_jagged_whir_from_stripes::<
                 Self::BfMmcs,
                 crate::jagged_pcs::JaggedDft,

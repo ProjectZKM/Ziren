@@ -1259,7 +1259,8 @@ pub mod jagged {
         /// The opening this scheme produces.
         type Proof;
 
-        /// Open every round's committed data at one point.
+        /// Open every round's committed data at one point; `profile` selects
+        /// the WHIR schedule, which the BaseFold opening ignores.
         fn open_rounds<Challenger, D>(
             rounds: &[JaggedOpenRound<'_, MT>],
             point: Vec<InnerChallenge>,
@@ -1267,6 +1268,7 @@ pub mod jagged {
             mmcs: MT,
             dft: alloc::sync::Arc<D>,
             fri: crate::basefold::FriConfig<crate::jagged_pcs::JaggedVal>,
+            profile: crate::whir::jagged::WhirProfile,
         ) -> Self::Proof
         where
             MT: p3_commit::Mmcs<
@@ -1363,6 +1365,7 @@ pub mod jagged {
             mmcs: MT,
             dft: alloc::sync::Arc<D>,
             _fri: crate::basefold::FriConfig<crate::jagged_pcs::JaggedVal>,
+            profile: crate::whir::jagged::WhirProfile,
         ) -> Self::Proof
         where
             MT: p3_commit::Mmcs<
@@ -1395,7 +1398,7 @@ pub mod jagged {
                 wdatas.iter().all(|w| w.log_stacking_height as usize == lsh),
                 "jagged-WHIR open: rounds disagree on log_stacking_height",
             );
-            let cfg = crate::whir::jagged::core_whir_config(lsh);
+            let cfg = crate::whir::jagged::whir_config_for_profile(profile, lsh);
             let ef_dft =
                 alloc::sync::Arc::new(p3_dft::Radix2DitParallel::<InnerChallenge>::default());
             crate::whir::jagged::open_jagged_whir_rounds_generic::<Challenger, MT, D, _>(
@@ -1426,6 +1429,7 @@ pub mod jagged {
             mmcs: MT,
             dft: alloc::sync::Arc<D>,
             fri: crate::basefold::FriConfig<crate::jagged_pcs::JaggedVal>,
+            _profile: crate::whir::jagged::WhirProfile,
         ) -> Self::Proof
         where
             MT: p3_commit::Mmcs<
@@ -1465,6 +1469,21 @@ pub mod jagged {
         z_row: &[InnerChallenge],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedPcsProof {
+        prove_jagged_rounds_with_profile(
+            rounds,
+            z_row,
+            challenger,
+            crate::whir::jagged::WhirProfile::Core,
+        )
+    }
+
+    /// [`prove_jagged_rounds`] under the WHIR schedule of `profile`.
+    pub fn prove_jagged_rounds_with_profile(
+        rounds: &[JaggedOpenRound<'_, crate::jagged_pcs::JaggedMmcs>],
+        z_row: &[InnerChallenge],
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        profile: crate::whir::jagged::WhirProfile,
+    ) -> JaggedPcsProof {
         let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
         let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
         let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
@@ -1482,6 +1501,7 @@ pub mod jagged {
             mmcs,
             dft,
             crate::basefold::FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default(),
+            profile,
         )
     }
 
@@ -1632,6 +1652,7 @@ pub mod jagged {
         mmcs: MT,
         dft: alloc::sync::Arc<D>,
         fri: crate::basefold::FriConfig<crate::jagged_pcs::JaggedVal>,
+        profile: crate::whir::jagged::WhirProfile,
     ) -> JaggedPcsProofGeneric<MT>
     where
         P: JaggedDenseOpen<MT>,
@@ -1809,7 +1830,15 @@ pub mod jagged {
         };
 
         let open = |extended_eval_point: Vec<InnerChallenge>, challenger: &mut Challenger| {
-            P::open_rounds::<Challenger, D>(rounds, extended_eval_point, challenger, mmcs, dft, fri)
+            P::open_rounds::<Challenger, D>(
+                rounds,
+                extended_eval_point,
+                challenger,
+                mmcs,
+                dft,
+                fri,
+                profile,
+            )
         };
 
         let log_stacking_height = rounds[0].precomputed.prover_data.log_stacking_height as usize;
@@ -1931,6 +1960,38 @@ pub mod jagged {
         opened_main: &[Vec<InnerChallenge>],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> bool {
+        verify_jagged_no_observe_with_profile(
+            chip_infos,
+            r_row_per_chip,
+            z_row,
+            preceding_rounds,
+            n_prep,
+            bundle,
+            opened_main,
+            challenger,
+            crate::whir::jagged::WhirProfile::Core,
+        )
+    }
+
+    /// [`verify_jagged_no_observe`] under the WHIR schedule of `profile`,
+    /// which the caller takes from the ring of the stage it verifies.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_jagged_no_observe_with_profile(
+        chip_infos: &[JaggedChipInfo],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        preceding_rounds: &[(
+            <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+            usize,
+        )],
+        n_prep: usize,
+        bundle: &JaggedPcsProof,
+        opened_main: &[Vec<InnerChallenge>],
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        profile: crate::whir::jagged::WhirProfile,
+    ) -> bool {
         verify_jagged_inner(
             chip_infos,
             r_row_per_chip,
@@ -1941,6 +2002,7 @@ pub mod jagged {
             opened_main,
             challenger,
             true,
+            profile,
         )
     }
 
@@ -1962,6 +2024,7 @@ pub mod jagged {
         opened_main: &[Vec<InnerChallenge>],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
+        profile: crate::whir::jagged::WhirProfile,
     ) -> bool {
         if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "inner") {
             tracing::info!("[basefold verify] {why}");
@@ -2026,6 +2089,7 @@ pub mod jagged {
                 challenger,
                 if g == 0 { preceding_rounds } else { &[] },
                 g,
+                profile,
             ) {
                 return false;
             }
@@ -2137,6 +2201,7 @@ pub mod jagged {
             usize,
         )],
         g: usize,
+        profile: crate::whir::jagged::WhirProfile,
     ) -> bool {
         if commit.log_stacking_height != crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT {
             return false;
@@ -2196,7 +2261,10 @@ pub mod jagged {
             let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
             let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
             let mmcs = crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0);
-            let cfg = crate::whir::jagged::core_whir_config(commit.log_stacking_height as usize);
+            let cfg = crate::whir::jagged::whir_config_for_profile(
+                profile,
+                commit.log_stacking_height as usize,
+            );
             let res = crate::whir::jagged::verify_jagged_whir_rounds(
                 mmcs,
                 cfg,

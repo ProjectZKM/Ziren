@@ -54,7 +54,7 @@ pub mod zerocheck;
 
 pub use types::*;
 use zkm_pcs::{
-    koala_bear_poseidon2::{KoalaBearPoseidon2, ValMmcs},
+    koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Ring, ValMmcs},
     StarkGenericConfig,
 };
 
@@ -100,6 +100,10 @@ pub trait KoalaBearFriParameters:
         + CanSample<EF>
         + GrindingChallenger<Witness = KoalaBear>
         + FieldChallenger<KoalaBear>;
+
+    /// The WHIR schedule the proofs of this ring were opened under, which
+    /// the in-circuit verifier of those proofs must reproduce.
+    const WHIR_PROFILE: zkm_pcs::whir::jagged::WhirProfile;
 }
 
 pub trait KoalaBearFriParametersVariable<C: CircuitConfig<F = KoalaBear>>:
@@ -703,13 +707,17 @@ impl CircuitConfig for OuterConfig {
     }
 }
 
-impl KoalaBearFriParameters for KoalaBearPoseidon2 {
+impl<const P: u8> KoalaBearFriParameters for KoalaBearPoseidon2Ring<P> {
+    const WHIR_PROFILE: zkm_pcs::whir::jagged::WhirProfile =
+        <Self as zkm_pcs::BasefoldRing>::WHIR_PROFILE;
     type ValMmcs = ValMmcs;
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
     type RowMajorProverData = <ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
 }
 
 impl KoalaBearFriParameters for KoalaBearPoseidon2Outer {
+    const WHIR_PROFILE: zkm_pcs::whir::jagged::WhirProfile =
+        <Self as zkm_pcs::BasefoldRing>::WHIR_PROFILE;
     type ValMmcs = OuterValMmcs;
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
 
@@ -717,8 +725,8 @@ impl KoalaBearFriParameters for KoalaBearPoseidon2Outer {
         <OuterValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
 }
 
-impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriParametersVariable<C>
-    for KoalaBearPoseidon2
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>, const P: u8>
+    KoalaBearFriParametersVariable<C> for KoalaBearPoseidon2Ring<P>
 {
     type FriChallengerVariable = DuplexChallengerVariable<C>;
 

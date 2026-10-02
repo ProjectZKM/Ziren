@@ -2,7 +2,8 @@
 
 use crate::ZKMReduceProof;
 use zkm_pcs::{
-    koala_bear_poseidon2::KoalaBearPoseidon2, MachineVerificationError, StarkVerifyingKey,
+    koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Compress},
+    MachineVerificationError, StarkVerifyingKey,
 };
 
 /// Verifier used in runtime when `zkm_zkvm::precompiles::verify::verify_zkm_proof` is called. This
@@ -15,11 +16,11 @@ pub trait SubproofVerifier: Sync + Send {
     /// Verify a deferred proof.
     fn verify_deferred_proof(
         &self,
-        proof: &ZKMReduceProof<KoalaBearPoseidon2>,
+        proof: &ZKMReduceProof<KoalaBearPoseidon2Compress>,
         vk: &StarkVerifyingKey<KoalaBearPoseidon2>,
         vk_hash: [u32; 8],
         committed_value_digest: [u32; 8],
-    ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>>;
+    ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2Compress>>;
 }
 
 /// A dummy verifier which does nothing.
@@ -28,11 +29,11 @@ pub struct NoOpSubproofVerifier;
 impl SubproofVerifier for NoOpSubproofVerifier {
     fn verify_deferred_proof(
         &self,
-        _proof: &ZKMReduceProof<KoalaBearPoseidon2>,
+        _proof: &ZKMReduceProof<KoalaBearPoseidon2Compress>,
         _vk: &StarkVerifyingKey<KoalaBearPoseidon2>,
         _vk_hash: [u32; 8],
         _committed_value_digest: [u32; 8],
-    ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>> {
+    ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2Compress>> {
         Ok(())
     }
 }

@@ -96,7 +96,7 @@ The shard argument proves one shard; recursion (Section~\ref{sec:recursion}) com
 
 \noindent\textbf{Verify}$(\mathsf{vk}, h, \pi)$.
 \begin{enumerate}
-  \item Verify $\pi$ under $\mathsf{vk}^{\mathrm{rec}}$ with the shard verifier of \S\ref{sec:argument-shard} and the compress schedule.
+  \item Verify $\pi$ under $\mathsf{vk}^{\mathrm{rec}}$ with the shard verifier of \S\ref{sec:argument-shard} and the compress schedule, which the verifier fixes from the stage it expects and never reads from the proof.
   \item Require $\mathsf{vk}^{\mathrm{rec}}$ to be in the allowlist, the exported root to equal $\mathsf{root}_K$, and the completion flag to be set (\S\ref{sec:security-binding}).
   \item Require the exported guest key to equal $\mathsf{vk}$ and the exported output digest to equal $h$; accept.
 \end{enumerate}

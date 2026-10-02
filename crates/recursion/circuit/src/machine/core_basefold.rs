@@ -463,7 +463,10 @@ pub fn verify_core_basefold<C, SC, A>(
                     stacked_pcs_verifier:
                         crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
                             crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
-                                config: zkm_pcs::whir::jagged::core_whir_config(lsh as usize),
+                                config: zkm_pcs::whir::jagged::whir_config_for_profile(
+                        <SC as crate::KoalaBearFriParameters>::WHIR_PROFILE,
+                        lsh as usize,
+                    ),
                                 log_stacking_height: lsh,
                                 _hasher: core::marker::PhantomData,
                             },
@@ -838,6 +841,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         is_complete: bool,
     ) -> Self {
         let (vk0, proof0) = crate::stark::dummy_basefold_vk_and_shard_proof_rows::<
+            _,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >(machine, rows);
         let vks = [vk0];

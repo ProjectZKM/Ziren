@@ -813,7 +813,7 @@ mod tests {
                     merkle_tree_height: crate::VK_MERKLE_TREE_HEIGHT,
                 };
                 let mut witness = ZKMCompressBasefoldWitnessValues::<
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
                 >::dummy(machine, &shape);
                 witness.is_complete = is_complete;
                 let program = build_compose_basefold_recursion_program(
@@ -830,7 +830,7 @@ mod tests {
             let dshape =
                 ZKMDeferredShape::new(compress_shape.clone(), crate::VK_MERKLE_TREE_HEIGHT);
             let witness = ZKMDeferredBasefoldWitnessValues::<
-                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
             >::dummy(machine, &dshape);
             let program = build_deferred_basefold_recursion_program(
                 machine,

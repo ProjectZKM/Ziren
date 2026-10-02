@@ -68,11 +68,13 @@ where
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     ) = if is_inner {
-        let precomputed =
-            <crate::koala_bear_poseidon2::KoalaBearPoseidon2 as BasefoldRing>::commit_multilinears(
-                &named_inner,
-                pin,
-            );
+        let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = {
+            let any: Box<dyn core::any::Any> =
+                Box::new(<SC as BasefoldRing>::commit_multilinears(&named_inner, pin));
+            *any.downcast().unwrap_or_else(|_| {
+                panic!("commit_traces: the inner ring's precompute is a JaggedMmcs precompute")
+            })
+        };
         let raw_root_inner: [InnerVal; 8] =
             crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 

@@ -6,8 +6,8 @@ use p3_symmetric::{Hash, MerkleCap};
 
 use p3_field::PrimeCharacteristicRing;
 use zkm_pcs::{
-    koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
-    StarkVerifyingKey, Word,
+    koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Compress},
+    Com, InnerChallenge, InnerPerm, InnerVal, StarkVerifyingKey, Word,
 };
 use zkm_recursion_compiler::ir::Builder;
 
@@ -314,11 +314,11 @@ mod basefold_witness {
         }
     }
 
-    impl<C> Witnessable<C> for ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2>
+    impl<C> Witnessable<C> for ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2Compress>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
     {
-        type WitnessVariable = ZKMDeferredBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
+        type WitnessVariable = ZKMDeferredBasefoldWitnessVariable<C, KoalaBearPoseidon2Compress>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
@@ -375,11 +375,11 @@ mod basefold_witness {
         }
     }
 
-    impl<C> Witnessable<C> for ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2>
+    impl<C> Witnessable<C> for ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2Compress>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
     {
-        type WitnessVariable = ZKMWrapBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
+        type WitnessVariable = ZKMWrapBasefoldWitnessVariable<C, KoalaBearPoseidon2Compress>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);

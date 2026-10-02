@@ -436,7 +436,10 @@ pub fn verify_compress_basefold<C, SC, A>(
                 stacked_pcs_verifier:
                     crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
                         crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
-                            config: zkm_pcs::whir::jagged::core_whir_config(lsh as usize),
+                            config: zkm_pcs::whir::jagged::whir_config_for_profile(
+                        <SC as crate::KoalaBearFriParameters>::WHIR_PROFILE,
+                        lsh as usize,
+                    ),
                             log_stacking_height: lsh,
                             _hasher: core::marker::PhantomData,
                         },
@@ -960,7 +963,7 @@ where
     }
 }
 
-impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
+impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress> {
     /// Construct a dummy compress witness for a given compress shape.
     /// Drives the multi-chip basefold dummy
     /// helper for each input proof shape.
@@ -970,7 +973,10 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
     /// so the embedded `merkle_tree_height` sizes the vk-merkle witness
     /// (vk-root from witness, not a baked constant).
     pub fn dummy<A>(
-        machine: &zkm_pcs::StarkMachine<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
+        machine: &zkm_pcs::StarkMachine<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
+            A,
+        >,
         shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
@@ -978,7 +984,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             + for<'b> p3_air::Air<
                 zkm_pcs::folder::VerifierConstraintFolder<
                     'b,
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
                 >,
             >,
     {
@@ -987,7 +993,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                crate::stark::dummy_basefold_vk_and_shard_proof_rows::<A>(
+                crate::stark::dummy_basefold_vk_and_shard_proof_rows::<_, A>(
                     machine,
                     &proof_shape.inner,
                 )

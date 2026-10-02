@@ -8,7 +8,7 @@ use p3_koala_bear::KoalaBear;
 use p3_bn254_fr::Bn254;
 use p3_symmetric::Permutation;
 use zkm_pcs::inner_perm;
-use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring;
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{Builder, Config, DslIr, Ext, Felt, Var},
@@ -334,7 +334,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         Self: Sized;
 }
 
-impl FieldHasher<KoalaBear> for KoalaBearPoseidon2 {
+impl<const P: u8> FieldHasher<KoalaBear> for KoalaBearPoseidon2Ring<P> {
     type Digest = [KoalaBear; DIGEST_SIZE];
 
     fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest {
@@ -345,7 +345,9 @@ impl FieldHasher<KoalaBear> for KoalaBearPoseidon2 {
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear>> Poseidon2KoalaBearHasherVariable<C> for KoalaBearPoseidon2 {
+impl<C: CircuitConfig<F = KoalaBear>, const P: u8> Poseidon2KoalaBearHasherVariable<C>
+    for KoalaBearPoseidon2Ring<P>
+{
     #[track_caller]
     fn poseidon2_permute(
         builder: &mut Builder<C>,
@@ -366,8 +368,8 @@ impl<C: CircuitConfig> Poseidon2KoalaBearHasherVariable<C> for KoalaBearPoseidon
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable<C>
-    for KoalaBearPoseidon2
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>, const P: u8> FieldHasherVariable<C>
+    for KoalaBearPoseidon2Ring<P>
 {
     type DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE];
 

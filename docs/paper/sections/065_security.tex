@@ -42,27 +42,27 @@ Conformance evidence (\S\ref{sec:verification}), not a proof, identifies the ari
 \begin{table}[t]
 \centering
 \small
-\caption{Soundness of the analysed configuration by component group, in bits ($-\log_2$ of the error) as computed by \texttt{soundcalc}~\citep{soundcalc}, each component floored to whole bits, with the schedule's third query phase (85 queries and 22 bits of grinding, 106 bits), which the calculator's model omits, added. A group's figure is the union over its members, and the last row the union over the stage. All figures are for the interactive protocol.}
+\caption{Soundness of the analysed configuration by component group, in bits ($-\log_2$ of the error) as computed by \texttt{soundcalc}~\citep{soundcalc}, each component floored to whole bits, with each schedule's final query phase (85 queries and 22 bits of grinding, 106 bits, for core; 14 queries and 26 bits, 108 bits, for compress), which the calculator's model omits, added. A group's figure is the union over its members, and the last row the union over the stage. All figures are for the interactive protocol.}
 \label{tab:components}
 \begin{tabular}{lrr}
 \toprule
 Component group & core & compress \\
 \midrule
-Query phases & 104.42 & 104.42 \\
-Folding rounds & 100.93 & 100.93 \\
-Final polynomial & 106.00 & 106.00 \\
-\LogUp{} & 106.00 & 118.00 \\
-Batching & 107.00 & 110.00 \\
+Query phases & 104.42 & 104.91 \\
+Folding rounds & 100.93 & 101.69 \\
+Final polynomial & 106.00 & 108.00 \\
+\LogUp{} & 106.00 & 116.00 \\
+Batching & 107.00 & 103.00 \\
 Zerocheck & 109.00 & 114.00 \\
 Reduction to the dense polynomial & 116.00 & 116.00 \\
-Out-of-domain samples & 213.00 & 213.00 \\
+Out-of-domain samples & 213.00 & 200.00 \\
 \midrule
-\textbf{Union over the stage} & \textbf{100.70} & \textbf{100.76} \\
+\textbf{Union over the stage} & \textbf{100.70} & \textbf{101.09} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Result.} Table~\ref{tab:components} gives the components. Each stage is above 100 bits, 100.70 for core and 100.76 for compress, and 99.73 bits for the two together; the binding term is the folding rounds, which this schedule does not grind. Summed over every node of the measured block's recursion tree, about 150 proofs, the level is 93.51 bits. These figures bound the interactive protocol's information-theoretic terms. Taking each node's error $\varepsilon_i$ in Theorem~\ref{thm:composition} to be its sum in Table~\ref{tab:components}, which leaves out the unquantified function-binding loss of Layer~2 (\S\ref{sec:iopp-layers}), the Fiat--Shamir compiled level against an adversary making $Q$ oracle queries is $93.51 - \log_2 Q$ bits, 53.5 bits at $Q = 2^{40}$, before the digest term of Assumption~\ref{ass:digest}.
+\paragraph{Result.} Table~\ref{tab:components} gives the components. Each stage is above 100 bits, 100.70 for core and 101.09 for compress, and 99.86 bits for the two together; the binding term of the core schedule is the folding rounds, which it does not grind, and of the compress schedule the batching, whose Johnson-bound list size its 27 bits of grinding pay for. Summed over every node of the measured block's recursion tree, about 150 proofs, the level is 93.51 bits. These figures bound the interactive protocol's information-theoretic terms. Taking each node's error $\varepsilon_i$ in Theorem~\ref{thm:composition} to be its sum in Table~\ref{tab:components}, which leaves out the unquantified function-binding loss of Layer~2 (\S\ref{sec:iopp-layers}), the Fiat--Shamir compiled level against an adversary making $Q$ oracle queries is $93.51 - \log_2 Q$ bits, 53.5 bits at $Q = 2^{40}$, before the digest term of Assumption~\ref{ass:digest}.
 
 \subsection{Security in three layers}
 \label{sec:iopp-layers}

@@ -443,7 +443,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 stacked_pcs_verifier:
                     crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
                         crate::whir_circuit::RecursiveStackedWhirVerifier::<SC> {
-                            config: zkm_pcs::whir::jagged::core_whir_config(lsh as usize),
+                            config: zkm_pcs::whir::jagged::whir_config_for_profile(
+                                <SC as crate::KoalaBearFriParameters>::WHIR_PROFILE,
+                                lsh as usize,
+                            ),
                             log_stacking_height: lsh,
                             _hasher: core::marker::PhantomData,
                         },
@@ -557,12 +560,15 @@ pub fn verify_deferred_basefold<C, SC, A>(
     SC::commit_recursion_public_values(builder, *deferred_public_values);
 }
 
-impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
+impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress> {
     /// Construct a dummy deferred witness for a given deferred shape.
     /// Wraps a basefold compress dummy +
     /// the existing `ZKMMerkleProofWitnessValues::dummy`.
     pub fn dummy<A>(
-        machine: &zkm_pcs::StarkMachine<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
+        machine: &zkm_pcs::StarkMachine<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
+            A,
+        >,
         shape: &super::deferred::ZKMDeferredShape,
     ) -> Self
     where
@@ -570,7 +576,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             + for<'b> p3_air::Air<
                 zkm_pcs::folder::VerifierConstraintFolder<
                     'b,
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
                 >,
             >,
     {
@@ -580,7 +586,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             merkle_tree_height: shape.height,
         };
         let inner = super::compress_basefold::ZKMCompressBasefoldWitnessValues::<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
         >::dummy::<A>(machine, &inner_shape);
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
             inner.vks_and_proofs.len(),

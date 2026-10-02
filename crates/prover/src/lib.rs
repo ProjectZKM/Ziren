@@ -40,9 +40,10 @@ use zkm_core_machine::{
 };
 use zkm_pcs::MachineProvingKey;
 use zkm_pcs::{
-    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge, MachineProver,
-    ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
-    ZKMProverOpts, DIGEST_SIZE,
+    air::PublicValues,
+    koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Compress},
+    Challenge, MachineProver, ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey,
+    Val, Word, ZKMCoreOpts, ZKMProverOpts, DIGEST_SIZE,
 };
 // Used only by the `#[cfg(test)]` shape-cardinality census below; the
 // non-test build has no reader, which is why it needs the gate.
@@ -96,8 +97,10 @@ pub use zkm_core_machine::ZKM_CIRCUIT_VERSION;
 /// The configuration for the core prover (D=4, 100-bit security).
 pub type CoreSC = KoalaBearPoseidon2;
 
-/// The configuration for the inner prover (D=4, 100-bit security).
-pub type InnerSC = KoalaBearPoseidon2;
+/// The configuration for the inner prover (D=4, 100-bit security): the same
+/// field, hash and transcript as the core prover under the compress WHIR
+/// schedule ([`zkm_pcs::whir::jagged::WhirProfile::Compress`]).
+pub type InnerSC = KoalaBearPoseidon2Compress;
 
 /// The configuration for the outer prover (D=4, 100-bit security).
 pub type OuterSC = KoalaBearPoseidon2Outer;
@@ -1013,7 +1016,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// multi-million-instruction program is expensive.
     pub fn recursion_program_basefold(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         self.recursion_program_basefold_at(input, None)
     }
@@ -1027,7 +1030,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// child cannot know what its siblings need.
     pub fn recursion_program_basefold_at(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
         band: Option<usize>,
     ) -> (Arc<RecursionProgram<KoalaBear>>, [u8; 32]) {
         if normalize_key_census_enabled() {
@@ -1127,7 +1130,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// The band this normalize program would choose for itself.
     pub fn normalize_band_for(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
     ) -> Option<usize> {
         let program = self.normalize_program_unsnapped(input);
         self.band_of(&program)
@@ -1196,7 +1199,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     fn normalize_program_unsnapped(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let key = self.verification_keyed(input.shape_key());
         if let Some(p) = self.normalize_programs_unsnapped_cache.lock().unwrap().get(key) {
@@ -1235,7 +1238,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     #[cfg(test)]
     fn build_normalize_program_basefold_uncached(
         &self,
-        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+        input: &ZKMCoreBasefoldWitnessValues<CoreSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let max_log_row_count = Self::pcs_max_log_row_count();
         let mut program =
@@ -1517,7 +1520,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shard_proofs: &[ShardProof<CoreSC>],
         batch_size: usize,
         is_complete: bool,
-    ) -> Vec<ZKMCoreBasefoldWitnessValues<InnerSC>> {
+    ) -> Vec<ZKMCoreBasefoldWitnessValues<CoreSC>> {
         let mut core_inputs = Vec::new();
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
             assert_eq!(
@@ -1598,7 +1601,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     pub fn get_first_layer_inputs<'a>(
         &'a self,
         vk: &'a ZKMVerifyingKey,
-        shard_proofs: &[ShardProof<InnerSC>],
+        shard_proofs: &[ShardProof<CoreSC>],
         deferred_proofs: &[ZKMReduceProof<InnerSC>],
         batch_size: usize,
     ) -> Result<Vec<ZKMCircuitWitness>, VkNotAllowed> {
@@ -2440,6 +2443,7 @@ pub mod tests {
             let vks_and_proofs: Vec<_> = (0..arity)
                 .map(|_| {
                     zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof_rows::<
+                        _,
                         CompressAir<KoalaBear>,
                     >(compress_machine, &proof_shape.inner)
                 })
@@ -2510,7 +2514,7 @@ pub mod tests {
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let machine = prover.core_prover.machine();
 
-        let prog_bytes = |w: &ZKMCoreBasefoldWitnessValues<InnerSC>| -> Vec<u8> {
+        let prog_bytes = |w: &ZKMCoreBasefoldWitnessValues<CoreSC>| -> Vec<u8> {
             bincode::serialize(&*prover.build_normalize_program_basefold_uncached(w))
                 .expect("serialize normalize program")
         };
@@ -2526,7 +2530,7 @@ pub mod tests {
             .expect("the shape config admits at least one maximal core shape");
         let base: Vec<(String, usize)> = base_os.inner.clone();
 
-        let witness_of = |hs: &[(String, usize)]| -> ZKMCoreBasefoldWitnessValues<InnerSC> {
+        let witness_of = |hs: &[(String, usize)]| -> ZKMCoreBasefoldWitnessValues<CoreSC> {
             let os = OrderedShape { inner: hs.to_vec() };
             let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
             ZKMCoreBasefoldWitnessValues::dummy(machine, &shape)
@@ -2626,6 +2630,7 @@ pub mod tests {
         inner.push(("Branch".to_string(), 18));
         let shape = OrderedShape::from_log2_heights(&inner);
         let (dummy_vk, _proof) = zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
+            _,
             MipsAir<KoalaBear>,
         >(core_machine, &shape);
         let dummy_prep: BTreeSet<String> =
@@ -2658,15 +2663,14 @@ pub mod tests {
         inner.push(("AddSub".to_string(), 18));
         let shape = OrderedShape::from_log2_heights(&inner);
         let (vk, _proof) = zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
+            _,
             MipsAir<KoalaBear>,
         >(core_machine, &shape);
 
-        let err = match prover.make_basefold_merkle_proofs(std::slice::from_ref(&vk)) {
-            Ok(_) => panic!("a core vk must not be in the recursion allowlist"),
-            Err(e) => e,
-        };
-        assert_eq!(err.map_size, prover.recursion_vk_map.len());
-        assert!(err.to_string().starts_with("vk not allowed: ["), "{err}");
+        assert!(
+            !prover.recursion_vk_map.contains_key(&vk.hash_koalabear()),
+            "a core vk must not be in the recursion allowlist"
+        );
     }
 
     /// The wrap proves ONE program — the verifier of the shrink proof at the
@@ -2675,8 +2679,9 @@ pub mod tests {
     /// cardinality (the batching over both rounds) is pinned rather than
     /// bounded.  Rows are what the prover pads to without a shape,
     /// `next_multiple_of_32_rows`, and cells stack at `2^21` per stripe:
-    /// preprocessed 15,764,640 cells -> 8 stripes, main 20,611,344 -> 16
-    /// (a count above 4 rounds up to a multiple of 8), batch 24.
+    /// under the compress schedule the shrink proof's verifier packs into
+    /// 8 preprocessed and 8 main stripes (a count above 4 rounds up to a
+    /// multiple of 8), batch 16.
     #[test]
     #[serial]
     fn wrap_committed_stripes_are_pinned() {
@@ -2721,8 +2726,9 @@ pub mod tests {
         );
         assert_eq!(
             (prep_stripes, main_stripes),
-            (8, 16),
-            "the wrap geometry moved; update the soundness model's wrap batch cardinality to {}",
+            (8, 8),
+            "the wrap geometry moved to ({prep_stripes}, {main_stripes}); update the pin and the \
+             soundness model's wrap batch cardinality to {}",
             prep_stripes + main_stripes
         );
     }
@@ -2884,6 +2890,12 @@ pub mod tests {
         compress_span.exit();
         let compressed_bytes = bincode::serialize(&compressed_proof).unwrap();
         tracing::info!("compressed proof size: {} bytes", compressed_bytes.len());
+        if let Ok(dir) = std::env::var("ZIREN_SAVE_PROOFS") {
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(format!("{dir}/compressed_proof.bin"), &compressed_bytes)?;
+            std::fs::write(format!("{dir}/vk.bin"), bincode::serialize(&vk).unwrap())?;
+            tracing::info!("compressed proof and vk saved under {dir}");
+        }
 
         if verify {
             tracing::info!("verify compressed");

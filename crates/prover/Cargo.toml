@@ -122,3 +122,7 @@ imm-wrap-vk = ["zkm-recursion-core/imm-wrap-vk"]
 # ring a function is instantiated for, which is exactly what the soundness
 # review needs to read off the signature.
 type_complexity = "allow"
+
+[[bin]]
+name = "proof_breakdown"
+path = "scripts/proof_breakdown.rs"

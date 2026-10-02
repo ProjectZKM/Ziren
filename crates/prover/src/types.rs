@@ -239,7 +239,7 @@ pub enum ZKMCircuitWitness {
     /// Basefold-shape normalize input — consumes `JaggedShardProof`s from
     /// the core prover (carried on `ShardProof.jagged_shard_proof`).
     /// Dispatches to `build_normalize_basefold_program` during compress.
-    CoreBasefold(ZKMCoreBasefoldWitnessValues<InnerSC>),
+    CoreBasefold(ZKMCoreBasefoldWitnessValues<CoreSC>),
     /// Basefold-shape compose input — tree-reduction layer.
     /// Dispatches to `build_compose_basefold_program`.
     ComposeBasefold(ZKMCompressBasefoldWitnessValues<InnerSC>),

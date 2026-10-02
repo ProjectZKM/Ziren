@@ -386,7 +386,7 @@ where
             >,
 {
     use crate::jagged::JaggedChipInfo;
-    use crate::jagged_pcs::jagged::{verify_jagged_no_observe, JaggedPcsProof};
+    use crate::jagged_pcs::jagged::JaggedPcsProof;
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{InnerChallenge, InnerVal};
     use core::any::{Any, TypeId};
@@ -952,7 +952,7 @@ where
         alloc::vec![(raw.clone(), area)]
     };
 
-    if !verify_jagged_no_observe(
+    if !crate::jagged_pcs::jagged::verify_jagged_no_observe_with_profile(
         &chip_infos,
         &r_row_per_chip,
         &z_row_inner,
@@ -961,6 +961,7 @@ where
         &bundle,
         &opened_main,
         lb_challenger,
+        <SC as crate::BasefoldRing>::WHIR_PROFILE,
     ) {
         return Err(JaggedShardVerifyError::JaggedPcs(
             "verify_jagged_no_observe rejected the bundle".into(),
