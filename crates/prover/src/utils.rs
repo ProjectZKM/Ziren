@@ -19,7 +19,7 @@ use zkm_recursion_core::{
     stark::KoalaBearPoseidon2Outer,
 };
 
-use crate::{InnerSC, ZKMCoreProofData};
+use crate::ZKMCoreProofData;
 
 /// Get the Ziren vkey KoalaBear Poseidon2 digest this reduce proof is representing.
 pub fn zkm_vkey_digest_koalabear(
@@ -48,8 +48,8 @@ pub fn zkm_vk_root_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> Bn2
 }
 
 /// Compute the digest of the public values.
-pub fn recursion_public_values_digest(
-    config: &InnerSC,
+pub fn recursion_public_values_digest<const P: u8>(
+    config: &zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
     public_values: &RecursionPublicValues<KoalaBear>,
 ) -> [KoalaBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
@@ -57,8 +57,8 @@ pub fn recursion_public_values_digest(
     hash.hash_slice(&pv_array[0..NUM_PV_ELMS_TO_HASH])
 }
 
-pub fn root_public_values_digest(
-    config: &InnerSC,
+pub fn root_public_values_digest<const P: u8>(
+    config: &zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
     public_values: &RootPublicValues<KoalaBear>,
 ) -> [KoalaBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
@@ -75,8 +75,8 @@ pub fn root_public_values_digest(
     hash.hash_slice(&input)
 }
 
-pub fn is_root_public_values_valid(
-    config: &InnerSC,
+pub fn is_root_public_values_valid<const P: u8>(
+    config: &zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
     public_values: &RootPublicValues<KoalaBear>,
 ) -> bool {
     let expected_digest = root_public_values_digest(config, public_values);
@@ -89,8 +89,8 @@ pub fn is_root_public_values_valid(
 }
 
 /// Check if the digest of the public values is correct.
-pub fn is_recursion_public_values_valid(
-    config: &InnerSC,
+pub fn is_recursion_public_values_valid<const P: u8>(
+    config: &zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
     public_values: &RecursionPublicValues<KoalaBear>,
 ) -> bool {
     let expected_digest = recursion_public_values_digest(config, public_values);

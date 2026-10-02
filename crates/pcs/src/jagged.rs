@@ -203,7 +203,10 @@ impl RecursionPins {
     /// queries opens one row of every stripe, so the root takes the smallest
     /// class rather than the largest: 16 + 16 stripes instead of 32 + 32.
     /// It is one class for every root so that the shrink program, and the
-    /// wrap circuit behind it, still see one root geometry.  A root whose
+    /// wrap circuit behind it, still see one root geometry.  The tree closes
+    /// every execution with an arity-1 root (`compress_tree::Reduction`), so a
+    /// root verifies one child, which is what keeps it inside this class.  A
+    /// root whose
     /// rows do not fit is a bug the shape check reports; the root programs of
     /// every child-class tuple are built against it by
     /// `every_root_fits_the_root_class`.

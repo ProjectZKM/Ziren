@@ -92,6 +92,11 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
             "basefold.wrap_query_grinding_bits",
             crate::basefold::config::wrap_query_grinding_bits() as u64
         ),
+        // Which recursion proofs the compress schedule applies to: 1 = the
+        // root only (the closing compose), every other node on the core
+        // schedule.  The same two schedules applied to a different set of
+        // nodes give a different key map, so the scope is pinned with them.
+        ("recursion.compress_schedule_scope", 1),
         // Event orders.
         //
         // rev 1: BaseFold absorbs the per-stripe claim vector before batch grinding

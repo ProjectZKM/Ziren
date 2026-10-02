@@ -97,10 +97,18 @@ pub use zkm_core_machine::ZKM_CIRCUIT_VERSION;
 /// The configuration for the core prover (D=4, 100-bit security).
 pub type CoreSC = KoalaBearPoseidon2;
 
-/// The configuration for the inner prover (D=4, 100-bit security): the same
-/// field, hash and transcript as the core prover under the compress WHIR
-/// schedule ([`zkm_pcs::whir::jagged::WhirProfile::Compress`]).
-pub type InnerSC = KoalaBearPoseidon2Compress;
+/// The configuration for the inner prover (D=4, 100-bit security): every
+/// recursion node below the root (leaves, interior composes, deferred nodes)
+/// and the shrink, under the core WHIR schedule, tuned for prover time.
+pub type InnerSC = KoalaBearPoseidon2;
+
+/// The configuration of the ROOT, the closing compose whose proof is the
+/// published compressed proof: the same field, hash and transcript as
+/// [`InnerSC`] under the compress WHIR schedule
+/// ([`zkm_pcs::whir::jagged::WhirProfile::Compress`]), tuned for proof size.
+/// Every consumer of a compressed proof (the shrink, a deferred proof,
+/// `verify_compressed`) verifies it under this ring.
+pub type CompressedSC = KoalaBearPoseidon2Compress;
 
 /// The configuration for the outer prover (D=4, 100-bit security).
 pub type OuterSC = KoalaBearPoseidon2Outer;
@@ -238,6 +246,10 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
 
     /// The machine used for proving the wrapping step.
     pub wrap_prover: C::WrapProver,
+
+    /// The machine used for proving the root: the compress machine under
+    /// [`CompressedSC`].
+    pub root_prover: C::RootProver,
 
     /// The root of the allowed recursion verification keys.
     pub recursion_vk_root: <InnerSC as FieldHasher<KoalaBear>>::Digest,
@@ -607,6 +619,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
         let wrap_prover = C::WrapProver::new(wrap_machine);
 
+        let root_machine = CompressAir::compress_machine(CompressedSC::default());
+        let root_prover = C::RootProver::new(root_machine);
+
         let core_cache_size = NonZeroUsize::new(
             env::var("PROVER_CORE_CACHE_SIZE")
                 .unwrap_or_else(|_| CORE_CACHE_SIZE.to_string())
@@ -664,6 +679,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compress_prover,
             shrink_prover,
             wrap_prover,
+            root_prover,
             recursion_vk_root: root,
             recursion_vk_tree: merkle_tree,
             recursion_vk_map: allowed_vk_map,
@@ -749,8 +765,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 prewarm_bands.iter().map(|b| vec![*b; arity]).collect()
             };
             for t in tuples {
-                pairs.push((t.clone(), false));
-                pairs.push((t, true));
+                if t.len() == 1 {
+                    pairs.push((t.clone(), true));
+                }
+                pairs.push((t, false));
             }
         }
         let n_pairs = pairs.len();
@@ -1392,11 +1410,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// analog of [`Self::deferred_program`].
     pub fn deferred_program_basefold(
         &self,
-        input: &ZKMDeferredBasefoldWitnessValues<InnerSC>,
+        input: &ZKMDeferredBasefoldWitnessValues<CompressedSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let max_log_row_count = Self::pcs_max_log_row_count();
         let mut program = build_deferred_basefold_recursion_program(
-            self.compress_prover.machine(),
+            self.root_prover.machine(),
             input,
             max_log_row_count,
             self.vk_verification,
@@ -1411,11 +1429,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// recursion stage whose verifying key the allowlist has to contain.
     pub fn shrink_program_basefold(
         &self,
-        input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
+        input: &ZKMWrapBasefoldWitnessValues<CompressedSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let max_log_row_count = Self::pcs_max_log_row_count();
         let mut program = build_wrap_basefold_program(
-            self.compress_prover.machine(),
+            self.root_prover.machine(),
             input,
             max_log_row_count,
             self.vk_verification,
@@ -1551,9 +1569,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &'a self,
         vk: &'a StarkVerifyingKey<CoreSC>,
         last_proof_pv: &PublicValues<Word<KoalaBear>, KoalaBear>,
-        deferred_proofs: &[ZKMReduceProof<InnerSC>],
+        deferred_proofs: &[ZKMReduceProof<CompressedSC>],
         batch_size: usize,
-    ) -> Result<Vec<ZKMDeferredBasefoldWitnessValues<InnerSC>>, VkNotAllowed> {
+    ) -> Result<Vec<ZKMDeferredBasefoldWitnessValues<CompressedSC>>, VkNotAllowed> {
         let mut deferred_digest = [Val::<InnerSC>::ZERO; DIGEST_SIZE];
         let mut deferred_inputs = Vec::new();
         for batch in deferred_proofs.chunks(batch_size) {
@@ -1563,7 +1581,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .map(|proof| (proof.vk, *proof.proof.jagged_shard_proof))
                 .collect();
 
-            let vks: Vec<StarkVerifyingKey<InnerSC>> =
+            let vks: Vec<StarkVerifyingKey<CompressedSC>> =
                 vks_and_proofs.iter().map(|(vk, _)| vk.clone()).collect();
             let merkle = self.make_basefold_merkle_proofs(&vks)?;
 
@@ -1602,7 +1620,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &'a self,
         vk: &'a ZKMVerifyingKey,
         shard_proofs: &[ShardProof<CoreSC>],
-        deferred_proofs: &[ZKMReduceProof<InnerSC>],
+        deferred_proofs: &[ZKMReduceProof<CompressedSC>],
         batch_size: usize,
     ) -> Result<Vec<ZKMCircuitWitness>, VkNotAllowed> {
         let mut inputs = Vec::new();
@@ -1629,9 +1647,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         vk: &ZKMVerifyingKey,
         proof: ZKMCoreProof,
-        deferred_proofs: Vec<ZKMReduceProof<InnerSC>>,
+        deferred_proofs: Vec<ZKMReduceProof<CompressedSC>>,
         opts: ZKMProverOpts,
-    ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
+    ) -> Result<ZKMReduceProof<CompressedSC>, ZKMRecursionProverError> {
         let batch_size = REDUCE_BATCH_SIZE;
         let first_layer_batch_size = 1;
 
@@ -1680,6 +1698,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let (record_and_trace_tx, record_and_trace_rx) =
                 sync_channel::<(
                     crate::compress_tree::ShardRange,
+                    bool,
                     Arc<RecursionProgram<KoalaBear>>,
                     ExecutionRecord<KoalaBear>,
                     zkm_pcs::Traces<KoalaBear>,
@@ -1696,6 +1715,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     loop {
                         let received = { input_rx.lock().unwrap().recv() };
                         if let Ok((range, input)) = received {
+                            let is_root = matches!(
+                                &input,
+                                ZKMCircuitWitness::ComposeBasefold(w) if w.is_complete
+                            );
                             let (program, witness_stream) = tracing::debug_span!(
                                 "get program and witness stream"
                             )
@@ -1785,7 +1808,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             record_and_trace_tx
                                 .lock()
                                 .unwrap()
-                                .send((range, program, record, traces))
+                                .send((range, is_root, program, record, traces))
                                 .unwrap();
                         } else {
                             break Ok(());
@@ -1810,7 +1833,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     let _span = span.enter();
                     loop {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
-                        if let Ok((range, program, record, traces)) = received {
+                        if let Ok((range, is_root, program, record, traces)) = received {
+                            if is_root {
+                                drop(traces);
+                                let (vk, proof) = self.prove_root_node(&program, record, opts);
+                                proofs_tx
+                                    .lock()
+                                    .unwrap()
+                                    .send((
+                                        range,
+                                        zkm_pcs::koala_bear_poseidon2::retype_vk(vk),
+                                        zkm_pcs::koala_bear_poseidon2::retype_shard_proof(proof),
+                                    ))
+                                    .unwrap();
+                                continue;
+                            }
                             tracing::debug_span!("batch").in_scope(|| {
                                 let keys =
                                     tracing::debug_span!("Setup compress program").in_scope(|| {
@@ -1936,14 +1973,42 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             Ok((vk, proof))
         })?;
 
-        Ok(ZKMReduceProof { vk, proof })
+        Ok(ZKMReduceProof {
+            vk: zkm_pcs::koala_bear_poseidon2::retype_vk(vk),
+            proof: zkm_pcs::koala_bear_poseidon2::retype_shard_proof(proof),
+        })
+    }
+
+    /// Prove the root, the closing compose, under the compress schedule.
+    ///
+    /// Every other node of the tree is proved by the compress prover under the
+    /// core schedule; the root's proof is the published one, so it alone pays
+    /// for the size-tuned schedule.  Its traces are regenerated by the root
+    /// prover, since the two provers' trace types need not agree.
+    pub fn prove_root_node(
+        &self,
+        program: &Arc<RecursionProgram<KoalaBear>>,
+        record: zkm_recursion_core::runtime::ExecutionRecord<KoalaBear>,
+        _opts: ZKMProverOpts,
+    ) -> (StarkVerifyingKey<CompressedSC>, ShardProof<CompressedSC>) {
+        let _span = tracing::info_span!("prove root").entered();
+        let (pk, vk) = self.root_prover.setup(program);
+        let mut challenger = self.root_prover.machine().config().challenger();
+        pk.observe_into(&mut challenger);
+        let traces = self
+            .root_prover
+            .generate_traces(&record)
+            .expect("root traces: the record was generated for the compress machine");
+        let data = self.root_prover.commit(&record, traces, None);
+        let proof = self.root_prover.open(&pk, data, &mut challenger).expect("root proof");
+        (vk, proof)
     }
 
     /// Wrap a reduce proof into a STARK proven over a SNARK-friendly field.
     #[instrument(name = "shrink", level = "info", skip_all)]
     pub fn shrink(
         &self,
-        reduced_proof: ZKMReduceProof<InnerSC>,
+        reduced_proof: ZKMReduceProof<CompressedSC>,
         opts: ZKMProverOpts,
     ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
@@ -2165,7 +2230,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Accumulate deferred proofs into a single digest.
     pub fn hash_deferred_proofs(
         prev_digest: [Val<CoreSC>; DIGEST_SIZE],
-        deferred_proofs: &[ZKMReduceProof<InnerSC>],
+        deferred_proofs: &[ZKMReduceProof<CompressedSC>],
     ) -> [Val<CoreSC>; 8] {
         let mut digest = prev_digest;
         for proof in deferred_proofs.iter() {
@@ -2188,10 +2253,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Every digest is recorded for collection first.  With `vk_verification`
     /// on, a digest outside the allowlist is [`VkNotAllowed`], which fails the
     /// proof being built and nothing else.
-    pub fn make_basefold_merkle_proofs(
+    pub fn make_basefold_merkle_proofs<const P: u8>(
         &self,
-        vks: &[StarkVerifyingKey<InnerSC>],
-    ) -> Result<ZKMMerkleProofWitnessValues<InnerSC>, VkNotAllowed> {
+        vks: &[StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>],
+    ) -> Result<
+        ZKMMerkleProofWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>,
+        VkNotAllowed,
+    > {
         let num_vks = self.recursion_vk_map.len();
         for vk in vks.iter() {
             vk_collect_record(&vk.hash_koalabear());
@@ -2220,7 +2288,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let (values, proofs): (Vec<_>, Vec<_>) = vk_indices
             .iter()
-            .map(|index| MerkleTree::open(&self.recursion_vk_tree, *index))
+            .map(|index| {
+                let (value, proof) = MerkleTree::open(&self.recursion_vk_tree, *index);
+                (
+                    value,
+                    zkm_recursion_circuit::merkle_tree::MerkleProof {
+                        index: proof.index,
+                        path: proof.path,
+                    },
+                )
+            })
             .unzip();
 
         Ok(ZKMMerkleProofWitnessValues {

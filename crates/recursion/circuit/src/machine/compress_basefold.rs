@@ -963,7 +963,9 @@ where
     }
 }
 
-impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress> {
+impl<const P: u8>
+    ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
+{
     /// Construct a dummy compress witness for a given compress shape.
     /// Drives the multi-chip basefold dummy
     /// helper for each input proof shape.
@@ -974,7 +976,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
     /// (vk-root from witness, not a baked constant).
     pub fn dummy<A>(
         machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
             A,
         >,
         shape: &super::ZKMCompressWithVkeyShape,
@@ -984,7 +986,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             + for<'b> p3_air::Air<
                 zkm_pcs::folder::VerifierConstraintFolder<
                     'b,
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
                 >,
             >,
     {

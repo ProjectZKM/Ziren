@@ -228,7 +228,11 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                         let compile_ns = compile_start.elapsed().as_nanos() as u64;
                         compile_total_ns.fetch_add(compile_ns, Ordering::Relaxed);
                         compile_count.fetch_add(1, Ordering::Relaxed);
-                        let is_shrink = matches!(shape, ZKMCompressProgramShape::Shrink(_));
+                        let is_shrink = match shape {
+                            ZKMCompressProgramShape::Shrink(_) => Stage::Shrink,
+                            ZKMCompressProgramShape::CompressRoot(_) => Stage::Root,
+                            _ => Stage::Compress,
+                        };
                         match program {
                             Ok(program) => program_tx.send((i, program, is_shrink)).unwrap(),
                             Err(e) => {
@@ -254,18 +258,24 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                 s.spawn(move || {
                     while let Ok((i, program, is_shrink)) = program_rx.lock().unwrap().recv() {
                         let setup_start = Instant::now();
-                        let vk = tracing::debug_span!("setup for program {}", i).in_scope(|| {
-                            if is_shrink {
-                                prover.shrink_prover.setup(&program).1
-                            } else {
-                                prover.compress_prover.setup(&program).1
-                            }
-                        });
+                        let vk_digest =
+                            tracing::debug_span!("setup for program {}", i).in_scope(|| {
+                                match is_shrink {
+                                    Stage::Shrink => {
+                                        prover.shrink_prover.setup(&program).1.hash_koalabear()
+                                    }
+                                    Stage::Root => {
+                                        prover.root_prover.setup(&program).1.hash_koalabear()
+                                    }
+                                    Stage::Compress => {
+                                        prover.compress_prover.setup(&program).1.hash_koalabear()
+                                    }
+                                }
+                            });
                         let setup_ns = setup_start.elapsed().as_nanos() as u64;
                         setup_total_ns.fetch_add(setup_ns, Ordering::Relaxed);
                         let done = setup_count.fetch_add(1, Ordering::Relaxed) + 1;
 
-                        let vk_digest = vk.hash_koalabear();
                         tracing::info!(
                             "program {} = {:?}, {}% done",
                             i,
@@ -430,6 +440,16 @@ fn main_buckets(max_blocks: usize) -> Vec<usize> {
     out
 }
 
+/// Which prover sets a program's key up: the root's key is the compress
+/// machine's under the root ring, every other compose and deferred key the
+/// compress machine's under the inner ring, and the shrink's its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Stage {
+    Compress,
+    Root,
+    Shrink,
+}
+
 impl ZKMProofShape {
     /// The enumerable shapes that need VK setup: compose, deferred and shrink.
     ///
@@ -468,8 +488,10 @@ impl ZKMProofShape {
             let mut out = Vec::new();
             for arity in 1..=reduce_batch_size {
                 for t in tuples(arity) {
-                    out.push(Self::Compress(t.clone()));
-                    out.push(Self::CompressRoot(t));
+                    if arity == 1 {
+                        out.push(Self::CompressRoot(t.clone()));
+                    }
+                    out.push(Self::Compress(t));
                 }
             }
             out
@@ -706,7 +728,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
             ZKMCompressProgramShape::Deferred(shape) => {
                 let input =
-                    ZKMDeferredBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
+                    ZKMDeferredBasefoldWitnessValues::dummy(self.root_prover.machine(), &shape);
                 self.deferred_program_basefold(&input)
             }
             ZKMCompressProgramShape::Compress(shape) => {
@@ -715,8 +737,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 self.compose_program_basefold(&input).0
             }
             ZKMCompressProgramShape::Shrink(shape) => {
-                let input =
-                    ZKMWrapBasefoldWitnessValues::dummy(self.compress_prover.machine(), &shape);
+                let input = ZKMWrapBasefoldWitnessValues::dummy(self.root_prover.machine(), &shape);
                 self.shrink_program_basefold(&input)
             }
             ZKMCompressProgramShape::CompressRoot(shape) => {
@@ -741,8 +762,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 mod tests {
     use super::*;
 
-    /// Every root the enumeration can produce — a closing compose of arity
-    /// `1..=REDUCE_BATCH_SIZE` over any tuple of child pin classes — fits
+    /// Every root the enumeration can produce — an arity-1 closing compose
+    /// over a child of any pin class, the only root the tree emits — fits
     /// [`zkm_pcs::jagged::RecursionPins::ROOT_CLASS`].  Building the program
     /// runs the shape check, which panics on a root past its class, so this
     /// is the guarantee that pinning the root to the smallest class cannot
@@ -855,7 +876,7 @@ mod tests {
                     merkle_tree_height: crate::VK_MERKLE_TREE_HEIGHT,
                 };
                 let mut witness = ZKMCompressBasefoldWitnessValues::<
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 >::dummy(machine, &shape);
                 witness.is_complete = is_complete;
                 let program = build_compose_basefold_recursion_program(
@@ -873,9 +894,9 @@ mod tests {
                 ZKMDeferredShape::new(compress_shape.clone(), crate::VK_MERKLE_TREE_HEIGHT);
             let witness = ZKMDeferredBasefoldWitnessValues::<
                 zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
-            >::dummy(machine, &dshape);
+            >::dummy(prover.root_prover.machine(), &dshape);
             let program = build_deferred_basefold_recursion_program(
-                machine,
+                prover.root_prover.machine(),
                 &witness,
                 max_log_row_count,
                 prover.vk_verification,
@@ -1155,7 +1176,8 @@ mod tests {
         let shrink = all.iter().filter(|s| matches!(s, ZKMProofShape::Shrink(_))).count();
         let root = all.iter().filter(|s| matches!(s, ZKMProofShape::CompressRoot(_))).count();
         assert!(compress > 0 && deferred > 0 && shrink > 0, "the enumerable tail must remain");
-        assert_eq!(root, compress, "every compose tuple has its closing variant");
+        let classes = zkm_pcs::jagged::RECURSION_PIN_CLASSES.len();
+        assert_eq!(root, classes, "the root is an arity-1 compose, one per child class");
         assert_eq!(all.len(), compress + root + deferred + shrink, "no other variant is emitted");
         tracing::info!(
             "[ENUM] compress={compress} root={root} deferred={deferred} shrink={shrink}"

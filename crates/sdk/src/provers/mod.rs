@@ -21,7 +21,7 @@ use zkm_pcs::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 use zkm_primitives::io::ZKMPublicValues;
 use zkm_prover::{
     components::{DefaultProverComponents, ZKMProverComponents},
-    CoreSC, InnerSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey, ZKMVerifyingKey,
+    CompressedSC, CoreSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey, ZKMVerifyingKey,
 };
 
 use crate::install::{try_install_circuit_artifacts, CircuitArtifacts};
@@ -55,7 +55,7 @@ pub enum ZKMVerificationError {
     #[error("Core machine verification error: {0}")]
     Core(MachineVerificationError<CoreSC>),
     #[error("Recursion verification error: {0}")]
-    Recursion(MachineVerificationError<InnerSC>),
+    Recursion(MachineVerificationError<CompressedSC>),
     #[error("Plonk verification error: {0}")]
     Plonk(anyhow::Error),
     #[error("Groth16 verification error: {0}")]

@@ -4,7 +4,7 @@
 //! proof_breakdown <compressed_proof.bin> <vk.bin>
 //! ```
 //!
-//! The proof is a bincode `ZKMReduceProof<InnerSC>`, the key its
+//! The proof is a bincode `ZKMReduceProof<CompressedSC>`, the key its
 //! `ZKMVerifyingKey`.  Prints the core and compress WHIR schedules, then the
 //! size of every part of the proof: the LogUp-GKR layer proofs, the zerocheck,
 //! the opened values, the committed area and the WHIR query openings per
@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use zkm_core_executor::ZKMReduceProof;
 use zkm_pcs::whir::config::WhirConfig;
-use zkm_prover::{components::DefaultProverComponents, InnerSC, ZKMProver, ZKMVerifyingKey};
+use zkm_prover::{components::DefaultProverComponents, CompressedSC, ZKMProver, ZKMVerifyingKey};
 
 fn schedule(name: &str, cfg: &WhirConfig) {
     let rounds: Vec<String> = cfg
@@ -99,7 +99,7 @@ fn main() {
 
     let prover = ZKMProver::<DefaultProverComponents>::new();
 
-    let (compressed, vk): (ZKMReduceProof<InnerSC>, ZKMVerifyingKey) = match args.as_slice() {
+    let (compressed, vk): (ZKMReduceProof<CompressedSC>, ZKMVerifyingKey) = match args.as_slice() {
         [proof_path, vk_path] => {
             let proof = bincode::deserialize(
                 &std::fs::read(proof_path).unwrap_or_else(|e| panic!("read {proof_path}: {e}")),

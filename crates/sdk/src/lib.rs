@@ -30,8 +30,8 @@ pub use zkm_core_executor::{ExecutionReport, HookEnv, ZKMContext, ZKMContextBuil
 pub use zkm_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
 pub use zkm_primitives::io::ZKMPublicValues;
 pub use zkm_prover::{
-    CoreSC, HashableKey, InnerSC, OuterSC, PlonkBn254Proof, ProverMode, ZKMProver, ZKMProvingKey,
-    ZKMVerifyingKey,
+    CompressedSC, CoreSC, HashableKey, InnerSC, OuterSC, PlonkBn254Proof, ProverMode, ZKMProver,
+    ZKMProvingKey, ZKMVerifyingKey,
 };
 
 // Re-export the utilities.

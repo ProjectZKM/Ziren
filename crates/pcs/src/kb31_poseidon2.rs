@@ -182,6 +182,33 @@ pub mod koala_bear_poseidon2 {
     /// (normalize, compose, shrink).
     pub type KoalaBearPoseidon2Compress = KoalaBearPoseidon2Ring<WHIR_PROFILE_COMPRESS>;
 
+    /// A shard proof of ring `P` as a shard proof of ring `Q`.  The two rings
+    /// share the field, the hash and the commitment type, so the proof's data
+    /// is the same; only the WHIR schedule a verifier must check it under
+    /// differs, and that is the caller's to keep straight.
+    pub fn retype_shard_proof<const P: u8, const Q: u8>(
+        proof: crate::ShardProof<KoalaBearPoseidon2Ring<P>>,
+    ) -> crate::ShardProof<KoalaBearPoseidon2Ring<Q>> {
+        crate::ShardProof {
+            public_values: proof.public_values,
+            jagged_shard_proof: proof.jagged_shard_proof,
+        }
+    }
+
+    /// A verifying key of ring `P` as one of ring `Q`; see
+    /// [`retype_shard_proof`].
+    pub fn retype_vk<const P: u8, const Q: u8>(
+        vk: crate::StarkVerifyingKey<KoalaBearPoseidon2Ring<P>>,
+    ) -> crate::StarkVerifyingKey<KoalaBearPoseidon2Ring<Q>> {
+        crate::StarkVerifyingKey {
+            commit: vk.commit,
+            pc_start: vk.pc_start,
+            initial_global_cumulative_sum: vk.initial_global_cumulative_sum,
+            chip_information: vk.chip_information,
+            chip_ordering: vk.chip_ordering,
+        }
+    }
+
     impl<const P: u8> KoalaBearPoseidon2Ring<P> {
         #[must_use]
         pub fn new() -> Self {

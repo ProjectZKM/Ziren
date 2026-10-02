@@ -556,13 +556,15 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let _zero: Felt<_> = builder.eval(C::F::ZERO);
 }
 
-impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress> {
+impl<const P: u8>
+    ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>>
+{
     /// Construct a dummy wrap witness for a given compress shape.
     /// Wrap takes a single `(vk, root-proof)` pair, so the input
     /// shape's first proof_shape drives the dummy proof construction.
     pub fn dummy<A>(
         machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
             A,
         >,
         shape: &super::ZKMCompressWithVkeyShape,
@@ -572,7 +574,7 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             + for<'b> p3_air::Air<
                 zkm_pcs::folder::VerifierConstraintFolder<
                     'b,
-                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress,
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring<P>,
                 >,
             >,
     {

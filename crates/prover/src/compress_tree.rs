@@ -272,7 +272,12 @@ pub struct CompressTree<P> {
 
 /// What [`CompressTree::insert`] decided to do with a landing proof.
 pub enum Reduction<P> {
-    /// Reduce this contiguous run now. `is_complete` marks the root.
+    /// Reduce this contiguous run now. `is_complete` marks the root, which is
+    /// always a single proof covering the whole execution: a closing run of
+    /// several proofs is emitted as an ordinary compose first, and its one
+    /// proof then closes as an arity-1 root.  The root alone is proved under
+    /// the compress schedule, and verifying one core-schedule child keeps its
+    /// program inside the root's area class.
     Emit { proofs: RangeProofs<P>, is_complete: bool },
     /// Nothing to do yet — the run is waiting for a neighbour.
     Wait,
@@ -345,12 +350,12 @@ impl<P> CompressTree<P> {
             self.map.insert(rest.range.start, rest);
         }
 
-        let is_complete = in_flight == 0
+        let closes = in_flight == 0
             && self.map.is_empty()
             && full_range.is_some_and(|full| run.range == full);
 
-        if run.len() == self.batch_size || is_complete {
-            Reduction::Emit { proofs: run, is_complete }
+        if run.len() == self.batch_size || closes {
+            Reduction::Emit { is_complete: closes && run.len() == 1, proofs: run }
         } else {
             self.map.insert(run.range.start, run);
             Reduction::Wait
@@ -373,7 +378,7 @@ impl<P> CompressTree<P> {
             return Reduction::Wait;
         }
         let run = self.map.remove(&start).expect("just looked it up");
-        Reduction::Emit { proofs: run, is_complete: true }
+        Reduction::Emit { is_complete: run.len() == 1, proofs: run }
     }
 }
 
@@ -403,6 +408,7 @@ mod tests {
                     emitted.push((range, is_complete));
                     if is_complete {
                         assert!(queue.is_empty(), "root emitted with work outstanding");
+                        assert_eq!(proofs.len(), 1, "the root verifies exactly one proof");
                         return emitted;
                     }
                     in_flight += 1;
@@ -419,7 +425,7 @@ mod tests {
         let emitted = drive(8, 2, &(1..9).collect::<Vec<_>>());
         assert!(emitted.last().unwrap().1, "last emission must be the root");
         assert_eq!(emitted.last().unwrap().0, r(1, 9));
-        assert_eq!(emitted.len(), 7);
+        assert_eq!(emitted.len(), 8, "seven pair composes and the arity-1 root");
     }
 
     #[test]
@@ -541,12 +547,19 @@ mod tests {
         assert_eq!(tree.pending_runs(), 1);
         match tree.settle(0, Some(r(1, 3))) {
             Reduction::Emit { proofs, is_complete } => {
-                assert!(is_complete);
+                assert!(!is_complete, "a closing run of two composes first");
                 assert_eq!(proofs.len(), 2);
             }
-            Reduction::Wait => panic!("settle left the root waiting"),
+            Reduction::Wait => panic!("settle left the closing run waiting"),
         }
         assert_eq!(tree.pending_runs(), 0);
+        match tree.insert(r(1, 3), 0, 0, Some(r(1, 3))) {
+            Reduction::Emit { proofs, is_complete } => {
+                assert!(is_complete, "its one proof closes as the root");
+                assert_eq!(proofs.len(), 1);
+            }
+            Reduction::Wait => panic!("the single closing proof must become the root"),
+        }
     }
 
     /// It must not fire while a reduction is still out, or while the waiting
