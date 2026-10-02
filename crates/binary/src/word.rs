@@ -250,67 +250,119 @@ pub fn fill_sub(a: u32, b: u32, cols: &mut SubCols<u8>) -> u32 {
     out as u32
 }
 
-/// The witness of the integer product of two elements.
+/// Full adders of the carry-save tree of a product.
+pub const TREE_ADDERS: usize = 870;
+
+/// The witness of the integer product of two elements as a carry-save
+/// tree.
 ///
-/// The product is accumulated a row of the schoolbook at a time: `gated[i]`
-/// is `a_i * b`, and `acc[i]` is the partial product after `i + 1` rows, each
-/// step an addition over [`PRODUCT_BITS`] bits.
+/// `gated[i][j] = a_i b_j` is the partial product bit of weight `i + j`.
+/// The tree sums the bits of each weight three at a time with full adders,
+/// whose sum `x + y + z` is free over `GF(2)` and whose carry
+/// `maj(x, y, z)` is witnessed, until every weight holds at most two bits;
+/// the two rows left are added once with a carry chain.  Weights are
+/// compressed in increasing order, a sum staying at its weight and a carry
+/// moving to the next, which is the schedule [`tree`] walks.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct ProductCols<T> {
-    /// `a_i * b` for each bit `i` of `a`.
+    /// `a_i * b_j` for each pair of bits.
     pub gated: [Word<T>; KB_BITS],
-    /// The partial products; the last is the product.
-    pub acc: [[T; PRODUCT_BITS]; KB_BITS],
-    /// Carries of each partial-product addition.
-    pub acc_carries: [[T; PRODUCT_BITS]; KB_BITS],
+    /// The carry of each full adder, in schedule order.
+    pub carries: [T; TREE_ADDERS],
+    /// The product, the sum of the two rows the tree leaves.
+    pub sum: [T; PRODUCT_BITS],
+    /// Carries of that addition.
+    pub sum_carries: [T; PRODUCT_BITS],
 }
 
 /// Columns of [`ProductCols`].
-pub const NUM_PRODUCT_COLS: usize = KB_BITS * KB_BITS + 2 * KB_BITS * PRODUCT_BITS;
+pub const NUM_PRODUCT_COLS: usize = KB_BITS * KB_BITS + TREE_ADDERS + 2 * PRODUCT_BITS;
 
-/// Constrain the last partial product of `cols` to be `a * b`, and return
-/// its bits.
+/// Walk the carry-save tree over `columns`, the bits of each weight, with
+/// `full_adder` turning three bits into their sum and carry, and return the
+/// two rows left.
+pub fn tree<B: Clone>(
+    mut columns: Vec<Vec<B>>,
+    zero: B,
+    mut full_adder: impl FnMut(&B, &B, &B) -> (B, B),
+) -> ([B; PRODUCT_BITS], [B; PRODUCT_BITS]) {
+    assert_eq!(columns.len(), PRODUCT_BITS);
+    let mut adders = 0;
+    for k in 0..PRODUCT_BITS {
+        while columns[k].len() >= 3 {
+            let (x, y, z) = (columns[k].remove(0), columns[k].remove(0), columns[k].remove(0));
+            let (sum, carry) = full_adder(&x, &y, &z);
+            columns[k].push(sum);
+            assert!(k + 1 < PRODUCT_BITS, "a product of two elements fits its width");
+            columns[k + 1].push(carry);
+            adders += 1;
+        }
+    }
+    assert_eq!(adders, TREE_ADDERS, "the schedule is fixed by the widths");
+    let row = |columns: &[Vec<B>], index: usize| -> [B; PRODUCT_BITS] {
+        array::from_fn(|k| columns[k].get(index).cloned().unwrap_or_else(|| zero.clone()))
+    };
+    (row(&columns, 0), row(&columns, 1))
+}
+
+/// The partial products of `a` and `b` by weight.
+fn partial_products<B: Clone>(gated: &[[B; KB_BITS]; KB_BITS]) -> Vec<Vec<B>> {
+    let mut columns: Vec<Vec<B>> = vec![Vec::new(); PRODUCT_BITS];
+    for (i, row) in gated.iter().enumerate() {
+        for (j, bit) in row.iter().enumerate() {
+            columns[i + j].push(bit.clone());
+        }
+    }
+    columns
+}
+
+/// Constrain `cols` to hold the product `a * b`, and return its bits.
 pub fn eval_product<AB: AirBuilder>(
     builder: &mut AB,
     a: &[AB::Expr; KB_BITS],
     b: &[AB::Expr; KB_BITS],
     cols: &ProductCols<AB::Var>,
 ) -> [AB::Expr; PRODUCT_BITS] {
-    let zero: [AB::Expr; PRODUCT_BITS] = array::from_fn(|_| AB::Expr::ZERO);
     for i in 0..KB_BITS {
         for j in 0..KB_BITS {
             builder.assert_zero(a[i].clone() * b[j].clone() + cols.gated[i][j].into());
         }
-        let shifted: [AB::Expr; PRODUCT_BITS] = array::from_fn(|k| {
-            if k >= i && k - i < KB_BITS {
-                cols.gated[i][k - i].into()
-            } else {
-                AB::Expr::ZERO
-            }
-        });
-        let previous: [AB::Expr; PRODUCT_BITS] =
-            if i == 0 { zero.clone() } else { exprs::<AB, PRODUCT_BITS>(&cols.acc[i - 1]) };
-        let next = exprs::<AB, PRODUCT_BITS>(&cols.acc[i]);
-        let carry_out =
-            add_bits::<AB, PRODUCT_BITS>(builder, &previous, &shifted, &cols.acc_carries[i], &next);
-        builder.assert_zero(carry_out);
     }
-    exprs::<AB, PRODUCT_BITS>(&cols.acc[KB_BITS - 1])
+    let gated: [[AB::Expr; KB_BITS]; KB_BITS] =
+        array::from_fn(|i| array::from_fn(|j| cols.gated[i][j].into()));
+    let mut next_carry = 0;
+    let (row0, row1) = tree(partial_products(&gated), AB::Expr::ZERO, |x, y, z| {
+        let carry: AB::Expr = cols.carries[next_carry].into();
+        next_carry += 1;
+        builder.assert_zero(maj::<AB>(x.clone(), y.clone(), z.clone()) + carry.clone());
+        (x.clone() + y.clone() + z.clone(), carry)
+    });
+    let sum = exprs::<AB, PRODUCT_BITS>(&cols.sum);
+    let carry_out = add_bits::<AB, PRODUCT_BITS>(builder, &row0, &row1, &cols.sum_carries, &sum);
+    builder.assert_zero(carry_out);
+    sum
 }
 
 /// The witness of [`eval_product`] for `a * b`, written as bits.
 pub fn fill_product(a: u32, b: u32, cols: &mut ProductCols<u8>) -> u64 {
-    let mut acc: u64 = 0;
-    for i in 0..KB_BITS {
+    for (i, row) in cols.gated.iter_mut().enumerate() {
         let gated = if (a >> i) & 1 == 1 { u64::from(b) } else { 0 };
-        cols.gated[i] = bits_le::<KB_BITS>(gated);
-        let shifted = gated << i;
-        cols.acc_carries[i] = add_carries::<PRODUCT_BITS>(acc, shifted);
-        acc += shifted;
-        cols.acc[i] = bits_le::<PRODUCT_BITS>(acc);
+        *row = bits_le::<KB_BITS>(gated);
     }
-    acc
+    let mut next_carry = 0;
+    let (row0, row1) = tree(partial_products(&cols.gated), 0u8, |&x, &y, &z| {
+        let carry = u8::from(u32::from(x) + u32::from(y) + u32::from(z) >= 2);
+        cols.carries[next_carry] = carry;
+        next_carry += 1;
+        (x ^ y ^ z, carry)
+    });
+    let (r0, r1) = (from_bits_le(&row0), from_bits_le(&row1));
+    let product = r0 + r1;
+    assert_eq!(product, u64::from(a) * u64::from(b));
+    cols.sum = bits_le::<PRODUCT_BITS>(product);
+    cols.sum_carries = add_carries::<PRODUCT_BITS>(r0, r1);
+    product
 }
 
 /// The witness of a reduction `value mod p` of an integer below `2^N`,
