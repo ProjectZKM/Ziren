@@ -6,8 +6,8 @@
 //! builds that configuration from the tables' shapes and the schedule.
 
 use p3_binary_pcs::whir::{
-    recommended_cap_height, BinaryWhirProfile, BooleanWhirData, BooleanWhirDomain,
-    BooleanWhirError, BooleanWhirPcs, BooleanWhirProver, BooleanWhirTracePcs, ProfileError,
+    recommended_cap_height, BooleanWhirData, BooleanWhirDomain, BooleanWhirError, BooleanWhirPcs,
+    BooleanWhirProver, BooleanWhirTracePcs, ProfileError,
 };
 use p3_binary_pcs::BooleanTraceCommitmentData;
 use p3_blake3::Blake3;
@@ -102,11 +102,7 @@ fn commitment(arity: usize, schedule: &BinarySchedule) -> Result<MachinePcs, Mac
         .checked_sub(absorbed)
         .ok_or(MachineConfigError::TooFewVariables { arity, absorbed })?;
     let domain = BooleanWhirDomain::default();
-    let profile = BinaryWhirProfile::proven_list_decoding(
-        schedule.term_security_bits,
-        schedule.log_inv_rate,
-        schedule.folding.min(packed),
-    );
+    let profile = BinarySchedule { folding: schedule.folding.min(packed), ..*schedule }.profile();
     let whir_config = profile
         .config::<F, F, Challenger, _>(packed, &domain)
         .map_err(MachineConfigError::Profile)?;
@@ -179,6 +175,7 @@ mod tests {
     use p3_air::Air;
     use p3_air::{AirBuilder, BaseAir, WindowAccess};
     use p3_binary_pcs::coordinate_basis;
+    use p3_binary_pcs::whir::{BinaryWhirProfile, ProofShape};
     use p3_bus::{BusActivation, BusDirection, BusName};
 
     use crate::machine_builder::MachineBuilder;
@@ -316,6 +313,44 @@ mod tests {
             }
         }
         RowMajorMatrix::new(words, CHAIN_BITS)
+    }
+
+    /// The grinding each regime asks for at the sizes of real programs.
+    #[test]
+    #[ignore]
+    fn schedule_grinding_by_size() {
+        let domain = BooleanWhirDomain::default();
+        for (name, build) in [
+            (
+                "johnson",
+                BinaryWhirProfile::proven_list_decoding
+                    as fn(usize, usize, usize) -> BinaryWhirProfile,
+            ),
+            ("unique", BinaryWhirProfile::unique_decoding),
+        ] {
+            for (security, rate, fold) in
+                [(108, 5, 4), (108, 6, 4), (108, 5, 5), (108, 5, 6), (100, 5, 4)]
+            {
+                for packed in [10usize, 20, 24, 28] {
+                    let profile = build(security, rate, fold);
+                    match profile.config::<F, F, Challenger, _>(packed, &domain) {
+                        Ok(config) => {
+                            let shape = ProofShape::of(&config, 1);
+                            println!(
+                                "{name} security {security} rate 2^-{rate} fold {fold} packed {packed}: pow {} bits, {} queries, {} digests, {} opened base",
+                                config.max_pow_bits(),
+                                shape.stir_queries,
+                                shape.merkle_digests,
+                                shape.opened_base_elements
+                            );
+                        }
+                        Err(error) => println!(
+                            "{name} security {security} rate 2^-{rate} fold {fold} packed {packed}: {error}"
+                        ),
+                    }
+                }
+            }
+        }
     }
 
     /// A preprocessed column and a next-row constraint prove under the

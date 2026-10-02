@@ -17,6 +17,7 @@ pub mod poseidon2;
 pub mod word;
 
 use p3_binary_field::{BinaryChallenger, BinaryField128, BinaryField2, Ghash128};
+use p3_binary_pcs::whir::BinaryWhirProfile;
 use p3_blake3::Blake3;
 use p3_challenger::HashChallenger;
 use p3_examples::binary::{
@@ -61,6 +62,11 @@ pub const TRANSCRIPT_DOMAIN: &[u8] = b"zkm-binary-stage-v1";
 /// size against prover time at a fixed security level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BinarySchedule {
+    /// The decoding regime the queries are counted under.  Unique decoding
+    /// asks more queries of the verifier but almost no proof-of-work of the
+    /// prover, where the Johnson bound's folding grinds grow with the
+    /// witness, past forty bits at a real program's size.
+    pub regime: WhirRegime,
     /// `-log2` of the first oracle's rate.
     pub log_inv_rate: usize,
     /// Variables folded per WHIR round.
@@ -70,20 +76,28 @@ pub struct BinarySchedule {
     pub term_security_bits: usize,
     /// The composed security the whole proof must reach.
     pub security_bits: usize,
-    /// Ceilings on queries, proof bytes and grinding.  The Johnson
-    /// schedule's rounds grind close to thirty bits, which is most of the
-    /// prover's time: a grind is `2^bits` candidate hashes in parallel.
+    /// Ceilings on queries, proof bytes and grinding, per commitment.
     pub budget: BinaryWhirBudget,
+}
+
+impl BinarySchedule {
+    /// The ceiling a unique-decoding schedule holds to at a real program's
+    /// size: a commitment over `2^28` packed variables opens `574`
+    /// positions along `15,226` digests, half a megabyte of proof, after a
+    /// fourteen-bit grind.  Each figure leaves a size class of headroom.
+    pub const BUDGET: BinaryWhirBudget =
+        BinaryWhirBudget { max_stir_queries: 768, max_proof_bytes: 1 << 20, max_grinding_bits: 30 };
 }
 
 impl Default for BinarySchedule {
     fn default() -> Self {
         Self {
+            regime: WhirRegime::UniqueDecoding,
             log_inv_rate: 5,
             folding: 4,
             term_security_bits: 108,
             security_bits: 100,
-            budget: BinaryWhirBudget { max_grinding_bits: 30, ..BinaryWhirBudget::PRODUCTION },
+            budget: Self::BUDGET,
         }
     }
 }
@@ -93,7 +107,7 @@ impl BinarySchedule {
     #[must_use]
     pub const fn whir(&self) -> WhirOptions {
         WhirOptions {
-            regime: WhirRegime::Johnson,
+            regime: self.regime,
             term_security_bits: self.term_security_bits,
             budget: self.budget,
         }
@@ -113,6 +127,23 @@ impl BinarySchedule {
             merkle_arity: 2,
             hash: HashFamily::Blake3,
             leaf_elements: None,
+        }
+    }
+
+    /// The profile of the schedule's commitment at its regime.
+    #[must_use]
+    pub fn profile(&self) -> BinaryWhirProfile {
+        match self.regime {
+            WhirRegime::UniqueDecoding => BinaryWhirProfile::unique_decoding(
+                self.term_security_bits,
+                self.log_inv_rate,
+                self.folding,
+            ),
+            _ => BinaryWhirProfile::proven_list_decoding(
+                self.term_security_bits,
+                self.log_inv_rate,
+                self.folding,
+            ),
         }
     }
 
