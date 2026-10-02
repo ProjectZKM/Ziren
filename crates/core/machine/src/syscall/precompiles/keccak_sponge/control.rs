@@ -118,19 +118,18 @@ impl KeccakSpongeControlChip {
             let mut row = [F::ZERO; NUM_KECCAK_SPONGE_CONTROL_COLS];
             let cols: &mut KeccakSpongeControlCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
             cols.is_real = F::ONE;
-            cols.block = F::from_canonical_u32(b as u32);
+            cols.block = F::from_u32(b as u32);
             cols.is_first_block = F::from_bool(b == 0);
             cols.is_final_block = F::from_bool(b == block_num - 1);
             cols.do_block_recv = F::from_bool(b != 0);
             cols.do_block_send = F::from_bool(b != block_num - 1);
-            cols.output_address = F::from_canonical_u32(event.output_addr);
-            cols.input_address = F::from_canonical_u32(
-                event.input_addr + b as u32 * KECCAK_GENERAL_RATE_U32S as u32 * 4,
-            );
-            cols.input_length = F::from_canonical_u32(event.input_len_u32s);
+            cols.output_address = F::from_u32(event.output_addr);
+            cols.input_address =
+                F::from_u32(event.input_addr + b as u32 * KECCAK_GENERAL_RATE_U32S as u32 * 4);
+            cols.input_length = F::from_u32(event.input_len_u32s);
 
             for j in 0..KECCAK_STATE_U32S {
                 cols.original_state[j] = Word::from(state_u32s[j]);

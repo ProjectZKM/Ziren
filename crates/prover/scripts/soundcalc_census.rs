@@ -64,18 +64,18 @@ where
                 "chip {name} {} main_width={} preprocessed_width={} sends={} receives={} lookup_fields={}",
                 chip.name(),
                 BaseAir::width(&chip.air),
-                chip.preprocessed_width(),
+                zkm_pcs::air::MachineAir::preprocessed_width(chip),
                 chip.sends().len(),
                 chip.receives().len(),
                 fields
             );
         }
         main_width += BaseAir::width(&chip.air);
-        pre_width += chip.preprocessed_width();
+        pre_width += zkm_pcs::air::MachineAir::preprocessed_width(chip);
         let n = get_symbolic_constraints(
             &chip.air,
             AirLayout {
-                preprocessed_width: chip.preprocessed_width(),
+                preprocessed_width: zkm_pcs::air::MachineAir::preprocessed_width(chip),
                 main_width: BaseAir::width(&chip.air),
                 num_public_values: PROOF_MAX_NUM_PVS,
                 ..Default::default()

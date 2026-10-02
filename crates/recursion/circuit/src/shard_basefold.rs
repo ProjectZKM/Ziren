@@ -477,13 +477,12 @@ impl<P> JaggedShardVerifier<P> {
                     }
                     let mut felts_vec: Vec<Felt<C::F>> =
                         Vec::with_capacity(1 + round_row_counts.len() + round_col_counts.len());
-                    felts_vec
-                        .push(builder.eval(C::F::from_canonical_usize(round_col_counts.len())));
+                    felts_vec.push(builder.eval(C::F::from_usize(round_col_counts.len())));
                     for &rc in round_row_counts.iter() {
                         felts_vec.push(rc);
                     }
                     for &cc in round_col_counts.iter() {
-                        felts_vec.push(builder.eval(C::F::from_canonical_usize(cc)));
+                        felts_vec.push(builder.eval(C::F::from_usize(cc)));
                     }
                     let hash = HV::hash(builder, &felts_vec);
                     let expected = HV::compress(builder, [*original, hash]);

@@ -367,14 +367,14 @@ where
         }
 
         {
-            let mut c_byte_sum = AB::Expr::zero();
+            let mut c_byte_sum = AB::Expr::ZERO;
             for i in 0..BYTE_SIZE {
                 let val: AB::Expr = AB::F::from_u32(1 << i).into();
                 c_byte_sum = c_byte_sum.clone() + val * local.c_least_sig_byte[i];
             }
             builder.assert_eq(c_byte_sum, op_c);
 
-            let mut num_bits_to_shift = AB::Expr::zero();
+            let mut num_bits_to_shift = AB::Expr::ZERO;
             for i in 0..3 {
                 num_bits_to_shift =
                     num_bits_to_shift.clone() + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
@@ -433,7 +433,7 @@ where
                     + AB::Expr::from_u32(1u32 << (8 - i)) * local.shift_by_n_bits[i];
             }
 
-            let mut num_bits_to_shift = AB::Expr::zero();
+            let mut num_bits_to_shift = AB::Expr::ZERO;
             for i in 0..3 {
                 num_bits_to_shift =
                     num_bits_to_shift.clone() + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);

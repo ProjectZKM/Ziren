@@ -1,4 +1,7 @@
-use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
+use p3_field::{
+    absorb_radix_bits, max_absorb_injective_limbs, squeeze_field_order_num_limbs, BasedVectorSpace,
+    PrimeCharacteristicRing,
+};
 use p3_koala_bear::KoalaBear;
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
@@ -8,12 +11,12 @@ use zkm_recursion_compiler::{
 use zkm_recursion_core::{
     air::ChallengerPublicValues,
     runtime::{HASH_RATE, PERMUTATION_WIDTH},
-    stark::{OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE, OUTER_MULTI_FIELD_CHALLENGER_RATE},
+    stark::{
+        OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE, OUTER_MULTI_FIELD_CHALLENGER_RATE,
+        OUTER_MULTI_FIELD_CHALLENGER_WIDTH,
+    },
     NUM_BITS,
 };
-
-// Constants for the Multifield challenger.
-pub const POSEIDON_2_BB_RATE: usize = 16;
 
 // use crate::{DigestVariable, VerifyingKeyVariable};
 
@@ -242,12 +245,24 @@ impl<C: Config<F = KoalaBear>> FieldChallengerVariable<C, Felt<C::F>>
         }
     }
 
+    /// Absorb the buffered inputs and permute, as the length-tagged duplex
+    /// sponge does: the inputs fill the first rate lanes, the remaining rate
+    /// lanes are zeroed, and the first capacity lane is raised by the number
+    /// absorbed, so that absorbing `[x]` and `[x, 0]` reach different states.
+    /// An empty absorb, a squeeze, leaves the rate as the last permutation
+    /// left it.
     fn duplexing(&mut self, builder: &mut Builder<C>) {
-        assert!(self.input_buffer.len() <= HASH_RATE);
-
-        self.sponge_state[0..self.input_buffer.len()].copy_from_slice(self.input_buffer.as_slice());
+        let absorbed = self.input_buffer.len();
+        assert!(absorbed <= HASH_RATE);
+        self.sponge_state[0..absorbed].copy_from_slice(self.input_buffer.as_slice());
         self.input_buffer.clear();
-
+        if absorbed > 0 {
+            for lane in self.sponge_state[absorbed..HASH_RATE].iter_mut() {
+                *lane = builder.eval(C::F::ZERO);
+            }
+            self.sponge_state[HASH_RATE] =
+                builder.eval(self.sponge_state[HASH_RATE] + C::F::from_u8(absorbed as u8));
+        }
         self.sponge_state = builder.poseidon2_permute_v2(self.sponge_state);
 
         self.output_buffer.clear();
@@ -256,74 +271,140 @@ impl<C: Config<F = KoalaBear>> FieldChallengerVariable<C, Felt<C::F>>
 }
 
 #[derive(Clone)]
+/// The outer ring's transcript in the circuit.
+///
+/// Reference: [`p3_challenger::MultiField32Challenger`]: observed felts are
+/// packed `absorb_num_f_elms` to a native lane in radix `2^absorb_radix_bits`,
+/// every absorb raises the first capacity lane by the number of felts (or
+/// digests) it carried, and each sampled felt is one base-`F::ORDER` limb of
+/// a rate lane.
 pub struct MultiField32ChallengerVariable<C: Config> {
-    sponge_state: [Var<C::N>; 3],
+    sponge_state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH],
+    /// Felts observed since the last absorb.
     input_buffer: Vec<Felt<C::F>>,
-    output_buffer: Vec<Felt<C::F>>,
-    num_f_elms: usize,
+    /// Rate lanes of the last permutation not yet split into felts.
+    output_buffer: Vec<Var<C::N>>,
+    /// Felts split from the rate lanes, popped by `sample`.
+    f_squeeze_buffer: Vec<Felt<C::F>>,
+    /// Felts packed into one native lane on absorb.
+    absorb_num_f_elms: usize,
+    /// Felts split from one native lane on squeeze.
+    squeeze_num_f_elms: usize,
 }
 
 impl<C: Config> MultiField32ChallengerVariable<C> {
     pub fn new(builder: &mut Builder<C>) -> Self {
         MultiField32ChallengerVariable::<C> {
-            sponge_state: [
-                builder.eval(C::N::ZERO),
-                builder.eval(C::N::ZERO),
-                builder.eval(C::N::ZERO),
-            ],
+            sponge_state: core::array::from_fn(|_| builder.eval(C::N::ZERO)),
             input_buffer: vec![],
             output_buffer: vec![],
-            num_f_elms: C::N::bits() / 64,
+            f_squeeze_buffer: vec![],
+            absorb_num_f_elms: max_absorb_injective_limbs::<C::F, C::N>(),
+            squeeze_num_f_elms: squeeze_field_order_num_limbs::<C::N, C::F>(),
         }
     }
 
-    pub fn duplexing(&mut self, builder: &mut Builder<C>) {
-        assert!(self.input_buffer.len() <= self.num_f_elms * OUTER_MULTI_FIELD_CHALLENGER_RATE);
-
-        for (i, f_chunk) in self.input_buffer.chunks(self.num_f_elms).enumerate() {
-            self.sponge_state[i] = reduce_32(builder, f_chunk);
+    /// Reference: `MultiField32Challenger::flush_f_if_non_empty`.
+    fn flush_f_if_non_empty(&mut self, builder: &mut Builder<C>) {
+        if self.input_buffer.is_empty() {
+            return;
         }
+        let tag = self.input_buffer.len();
+        assert!(tag <= self.absorb_num_f_elms * OUTER_MULTI_FIELD_CHALLENGER_RATE);
+        let packed: Vec<Var<C::N>> = self
+            .input_buffer
+            .chunks(self.absorb_num_f_elms)
+            .map(|chunk| reduce_packed(builder, chunk))
+            .collect();
         self.input_buffer.clear();
+        self.absorb_rate_padded_with_tag(builder, &packed, tag);
+    }
 
+    /// Reference: `DuplexChallenger::absorb_rate_padded_with_tag`: `values`
+    /// fill the first rate lanes, the remaining rate lanes are zeroed, the
+    /// first capacity lane is raised by `tag`, and the state is permuted.
+    fn absorb_rate_padded_with_tag(
+        &mut self,
+        builder: &mut Builder<C>,
+        values: &[Var<C::N>],
+        tag: usize,
+    ) {
+        assert!(values.len() <= OUTER_MULTI_FIELD_CHALLENGER_RATE);
+        for (lane, value) in self.sponge_state.iter_mut().zip(values) {
+            *lane = builder.eval(*value);
+        }
+        for lane in &mut self.sponge_state[values.len()..OUTER_MULTI_FIELD_CHALLENGER_RATE] {
+            *lane = builder.eval(C::N::ZERO);
+        }
+        let capacity = self.sponge_state[OUTER_MULTI_FIELD_CHALLENGER_RATE];
+        self.sponge_state[OUTER_MULTI_FIELD_CHALLENGER_RATE] =
+            builder.eval(capacity + C::N::from_usize(tag));
+        self.permute(builder);
+    }
+
+    /// Permute the state and hold its rate lanes for the next squeeze.
+    fn permute(&mut self, builder: &mut Builder<C>) {
         builder.push_op(DslIr::CircuitPoseidon2Permute(self.sponge_state));
+        self.output_buffer = self.sponge_state[..OUTER_MULTI_FIELD_CHALLENGER_RATE]
+            .iter()
+            .map(|lane| builder.eval(*lane))
+            .collect();
+        self.f_squeeze_buffer.clear();
+    }
 
-        self.output_buffer.clear();
-        for &pf_val in self.sponge_state[..OUTER_MULTI_FIELD_CHALLENGER_RATE].iter() {
-            let f_vals = split_32(builder, pf_val, self.num_f_elms);
-            for f_val in f_vals {
-                self.output_buffer.push(f_val);
-            }
+    /// Reference: `MultiField32Challenger::refill_f_squeeze_from_inner`.
+    fn refill_f_squeeze(&mut self, builder: &mut Builder<C>) {
+        self.f_squeeze_buffer.clear();
+        for lane in core::mem::take(&mut self.output_buffer) {
+            self.f_squeeze_buffer
+                .extend(builder.var2felt_limbs_circuit(lane, self.squeeze_num_f_elms));
+        }
+    }
+
+    /// Absorb the buffered felts, or permute the state when there are none.
+    pub fn duplexing(&mut self, builder: &mut Builder<C>) {
+        if self.input_buffer.is_empty() {
+            self.permute(builder);
+        } else {
+            self.flush_f_if_non_empty(builder);
         }
     }
 
     pub fn observe(&mut self, builder: &mut Builder<C>, value: Felt<C::F>) {
         self.output_buffer.clear();
+        self.f_squeeze_buffer.clear();
 
         self.input_buffer.push(value);
-        if self.input_buffer.len() == self.num_f_elms * OUTER_MULTI_FIELD_CHALLENGER_RATE {
-            self.duplexing(builder);
+        if self.input_buffer.len() == self.absorb_num_f_elms * OUTER_MULTI_FIELD_CHALLENGER_RATE {
+            self.flush_f_if_non_empty(builder);
         }
     }
 
+    /// Reference: `CanObserve<Hash<F, PF, N>> for MultiField32Challenger`: a
+    /// digest is absorbed as native lanes, after any pending felts.
     pub fn observe_commitment(
         &mut self,
         builder: &mut Builder<C>,
         value: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE],
     ) {
-        for val in value {
-            let f_vals: Vec<Felt<C::F>> = split_32(builder, val, self.num_f_elms);
-            for f_val in f_vals {
-                self.observe(builder, f_val);
-            }
+        self.output_buffer.clear();
+        self.f_squeeze_buffer.clear();
+        self.flush_f_if_non_empty(builder);
+        for chunk in value.chunks(OUTER_MULTI_FIELD_CHALLENGER_RATE) {
+            self.absorb_rate_padded_with_tag(builder, chunk, chunk.len());
         }
     }
 
     pub fn sample(&mut self, builder: &mut Builder<C>) -> Felt<C::F> {
-        if !self.input_buffer.is_empty() || self.output_buffer.is_empty() {
-            self.duplexing(builder);
+        self.flush_f_if_non_empty(builder);
+        if self.f_squeeze_buffer.is_empty() {
+            if self.output_buffer.is_empty() {
+                self.permute(builder);
+            }
+            self.refill_f_squeeze(builder);
         }
 
-        self.output_buffer.pop().expect("output buffer should be non-empty")
+        self.f_squeeze_buffer.pop().expect("output buffer should be non-empty")
     }
 
     pub fn sample_ext(&mut self, builder: &mut Builder<C>) -> Ext<C::F, C::EF> {
@@ -356,15 +437,20 @@ impl<C: Config> CanCopyChallenger<C> for MultiField32ChallengerVariable<C> {
             sponge_state,
             input_buffer,
             output_buffer,
-            num_f_elms,
+            f_squeeze_buffer,
+            absorb_num_f_elms,
+            squeeze_num_f_elms,
         } = self;
         let sponge_state = sponge_state.map(|x| builder.eval(x));
-        let mut copy_vec = |v: &Vec<Felt<C::F>>| v.iter().map(|x| builder.eval(*x)).collect();
+        let output_buffer = output_buffer.iter().map(|x| builder.eval(*x)).collect();
+        let mut copy_felts = |v: &Vec<Felt<C::F>>| v.iter().map(|x| builder.eval(*x)).collect();
         MultiField32ChallengerVariable::<C> {
             sponge_state,
-            num_f_elms: *num_f_elms,
-            input_buffer: copy_vec(input_buffer),
-            output_buffer: copy_vec(output_buffer),
+            input_buffer: copy_felts(input_buffer),
+            output_buffer,
+            f_squeeze_buffer: copy_felts(f_squeeze_buffer),
+            absorb_num_f_elms: *absorb_num_f_elms,
+            squeeze_num_f_elms: *squeeze_num_f_elms,
         }
     }
 }
@@ -425,13 +511,29 @@ impl<C: Config> FieldChallengerVariable<C, Var<C::N>> for MultiField32Challenger
     }
 }
 
-pub fn reduce_32<C: Config>(builder: &mut Builder<C>, vals: &[Felt<C::F>]) -> Var<C::N> {
+/// Reference: [`p3_field::reduce_packed`] at the absorb radix of `C::F`: the
+/// canonical values of `vals` as the digits of one native lane.
+pub fn reduce_packed<C: Config>(builder: &mut Builder<C>, vals: &[Felt<C::F>]) -> Var<C::N> {
+    pack_limbs(builder, vals, C::N::ZERO)
+}
+
+/// Reference: [`p3_field::reduce_packed_shifted`]: as [`reduce_packed`], with
+/// every digit raised by one so that a trailing zero changes the lane.
+pub fn reduce_packed_shifted<C: Config>(
+    builder: &mut Builder<C>,
+    vals: &[Felt<C::F>],
+) -> Var<C::N> {
+    pack_limbs(builder, vals, C::N::ONE)
+}
+
+fn pack_limbs<C: Config>(builder: &mut Builder<C>, vals: &[Felt<C::F>], offset: C::N) -> Var<C::N> {
+    let base = C::N::from_u64(1u64 << absorb_radix_bits::<C::F>());
     let mut power = C::N::ONE;
     let result: Var<C::N> = builder.eval(C::N::ZERO);
     for val in vals.iter() {
         let val = builder.felt2var_circuit(*val);
-        builder.assign(result, result + val * power);
-        power *= C::N::from_u64(1u64 << 32);
+        builder.assign(result, result + val * power + offset * power);
+        power *= base;
     }
     result
 }

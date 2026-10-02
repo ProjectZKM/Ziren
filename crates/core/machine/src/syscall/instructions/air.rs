@@ -140,7 +140,7 @@ impl SyscallInstrsChip {
         );
         builder
             .when(local.is_real)
-            .assert_eq(local.is_sys_linux, AB::Expr::one() - local.is_prev_a1_zero.result);
+            .assert_eq(local.is_sys_linux, AB::Expr::ONE - local.is_prev_a1_zero.result);
 
         builder.when(AB::Expr::ONE - local.is_real).assert_zero(send_to_table.clone());
 

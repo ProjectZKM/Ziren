@@ -82,6 +82,12 @@ where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
 {
+    type PeriodicVar = Self::Var;
+
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition_window(2)
+    }
+
     type F = C::F;
     type Expr = SymbolicExt<C::F, C::EF>;
     // The trace window carries SYMBOLIC values, not `Ext` handles.  For a real

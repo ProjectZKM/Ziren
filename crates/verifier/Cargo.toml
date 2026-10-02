@@ -47,7 +47,7 @@ zkm-sdk = { workspace = true, optional = true }
 zkm-prover = { workspace = true }
 zkm-sdk = { workspace = true }
 test-artifacts = { workspace = true }
-num-bigint = "0.4.6"
+num-bigint = "0.5.1"
 num-traits = "0.2.19"
 
 [features]

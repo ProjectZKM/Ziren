@@ -28,6 +28,12 @@ impl<'a, AB: AirBuilder> MultiBuilder<'a, AB> {
 }
 
 impl<AB: AirBuilder> AirBuilder for MultiBuilder<'_, AB> {
+    type PeriodicVar = Self::Var;
+
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition_window(2)
+    }
+
     type F = AB::F;
     type Expr = AB::Expr;
     type Var = AB::Var;

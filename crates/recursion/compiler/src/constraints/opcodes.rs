@@ -34,6 +34,7 @@ pub enum ConstraintOpcode {
     Permute,
     Num2BitsV,
     Num2BitsF,
+    Var2FeltLimbs,
     SelectV,
     SelectF,
     SelectE,

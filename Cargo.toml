@@ -10,6 +10,7 @@ categories = ["cryptography"]
 [workspace]
 members = [
     "crates/build",
+    "crates/binary",
     "crates/cli",
     "crates/core/executor",
     "crates/core/instruction-test-defs",
@@ -52,28 +53,38 @@ debug-assertions = true
 rustc-hash = "2.1.0"
 # Pinned to a rev, not a branch. These crates supply the field, the challenger and
 # the Merkle tree -- the transcript -- so a branch pin lets `cargo update` change
-# every challenge, hence every vk, with no diff to review. This rev is the one the
-# production prover builds against.
-p3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-commit = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-dft = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-maybe-rayon = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-util = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-fri = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-koala-bear = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-circle = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-keccak = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-keccak-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-mersenne-31 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-monty-31 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-poseidon2 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
-p3-bn254-fr = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2", package = "p3-bn254" }
-p3-uni-stark = { git = "https://github.com/ProjectZKM/Plonky3", rev = "4dd0d47a8176503fbaa7293c9f0e3b20004e16b2" }
+# every challenge, hence every vk, with no diff to review. This rev is fork branch
+# `zkm/binary-whir`: upstream 3acc8b70 plus the fork's coset serde, VirtualPairCol
+# accessors, MerkleTree::from_parts and sequential find_first shim.
+p3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-commit = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-dft = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-maybe-rayon = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-util = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-binary-field = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-binary-pcs = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-multi-stark = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-sumcheck = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-blake3 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-blake3-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-bus = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-lookup = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-examples = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-fri = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-koala-bear = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-circle = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-keccak = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-keccak-air = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-mersenne-31 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-monty-31 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-poseidon2 = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
+p3-bn254-fr = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba", package = "p3-bn254" }
+p3-uni-stark = { git = "https://github.com/ProjectZKM/Plonky3", rev = "d117b15874711d688aaaea7809e2151344321dba" }
 
 # p3-air = { path = "../patch/Plonky3/air" }
 # p3-field = { path = "../patch/Plonky3/field" }

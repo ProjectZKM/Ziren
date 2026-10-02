@@ -144,7 +144,7 @@ impl MiscInstrsChip {
             sext_cols.is_seb = F::ONE;
             (((event.b as u8) >> 7) as u16, event.b as u8)
         };
-        sext_cols.most_sig_bit = F::from_canonical_u16(sig_bit);
+        sext_cols.most_sig_bit = F::from_u16(sig_bit);
         sext_cols.sig_byte = F::from_u8(sig_byte);
         sext_cols.a_eq_b.populate(event.a, event.b);
 

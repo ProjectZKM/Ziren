@@ -135,7 +135,7 @@ where
 pub(crate) fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::PrimeField64 + p3_field::integers::QuotientMap<u64> + Send + Sync,
-    C: GrindingChallenger<Witness = F> + 'static,
+    C: GrindingChallenger<Witness = F> + 'static + Clone + Sync,
 {
     use p3_maybe_rayon::prelude::*;
     if bits == 0 {
@@ -395,7 +395,9 @@ where
         Challenger: FieldChallenger<F>
             + GrindingChallenger<Witness = F>
             + CanObserve<MT::Commitment>
-            + 'static,
+            + 'static
+            + Clone
+            + Sync,
     {
         let num_variables = eval_point.len();
 

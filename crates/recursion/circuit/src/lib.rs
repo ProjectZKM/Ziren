@@ -92,6 +92,7 @@ pub trait KoalaBearFriParameters:
             KoalaBear,
             ProverData<RowMajorMatrix<KoalaBear>> = Self::RowMajorProverData,
             Proof: Send + Sync,
+            MultiProof: Send + Sync,
             Error: Send + Sync,
         > + Send
         + Sync;

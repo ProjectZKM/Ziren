@@ -1184,6 +1184,10 @@ mod tests {
         fn width(&self) -> usize {
             self.ncols
         }
+
+        fn num_public_values(&self) -> usize {
+            crate::PROOF_MAX_NUM_PVS
+        }
     }
     impl<AB: BaseAirBuilder> Air<AB> for MockAir {
         fn eval(&self, builder: &mut AB) {

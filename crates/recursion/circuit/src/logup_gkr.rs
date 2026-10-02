@@ -96,7 +96,7 @@ pub fn observe_length_prefixed_ext_slice<C, FC>(
     C: CircuitConfig,
     FC: FieldChallengerVariable<C, C::Bit>,
 {
-    let len_felt: Felt<C::F> = builder.constant(C::F::from_canonical_usize(slice.len()));
+    let len_felt: Felt<C::F> = builder.constant(C::F::from_usize(slice.len()));
     challenger.observe(builder, len_felt);
     observe_ext_slice::<C, FC>(builder, challenger, slice);
 }
@@ -565,8 +565,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         builder.assert_ext_eq(denominator_eval, expected_denominator);
     }
 
-    let num_chips_felt: Felt<C::F> =
-        builder.constant(C::F::from_canonical_usize(shard_chips.len()));
+    let num_chips_felt: Felt<C::F> = builder.constant(C::F::from_usize(shard_chips.len()));
     challenger.observe(builder, num_chips_felt);
     for chip_evaluation in logup_evaluations.chip_openings.values() {
         observe_length_prefixed_ext_slice::<C, FC>(

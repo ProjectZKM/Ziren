@@ -181,7 +181,7 @@ where
     let picus_info = chip.picus_info();
     let layout = VarLayout {
         main_width: chip.air.width(),
-        prep_width: chip.preprocessed_width().max(1),
+        prep_width: zkm_pcs::air::MachineAir::preprocessed_width(chip).max(1),
         num_public: PROOF_MAX_NUM_PVS,
     };
     let mut names = picus_info.col_to_name.clone();

@@ -144,7 +144,7 @@ impl<F: Field> GtColsBytes<F> {
 
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::Expr::one() - cols.result,
+            AB::Expr::ONE - cols.result,
             cols.a_comparison_byte,
             cols.b_comparison_byte,
             cols.has_comparison,

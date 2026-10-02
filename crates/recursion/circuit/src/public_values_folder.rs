@@ -66,6 +66,12 @@ where
     C::EF: ExtensionField<C::F>,
     SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
 {
+    type PeriodicVar = Self::Var;
+
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition_window(2)
+    }
+
     type F = C::F;
     type Expr = SymbolicExt<C::F, C::EF>;
     type Var = Ext<C::F, C::EF>;

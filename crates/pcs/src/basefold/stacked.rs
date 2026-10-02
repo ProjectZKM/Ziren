@@ -312,7 +312,9 @@ where
         Challenger: FieldChallenger<F>
             + GrindingChallenger<Witness = F>
             + CanObserve<MT::Commitment>
-            + 'static,
+            + 'static
+            + Clone
+            + Sync,
     {
         let stack_dim = self.log_stacking_height as usize;
         let stack_point: Vec<EF> = eval_point[..stack_dim].to_vec();

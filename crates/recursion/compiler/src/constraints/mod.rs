@@ -267,6 +267,10 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                     opcode: ConstraintOpcode::Num2BitsF,
                     args: vec![output.iter().map(|x| x.id()).collect(), vec![value.id()]],
                 }),
+                DslIr::CircuitVar2FeltLimbs(value, output) => constraints.push(Constraint {
+                    opcode: ConstraintOpcode::Var2FeltLimbs,
+                    args: vec![output.iter().map(|x| x.id()).collect(), vec![value.id()]],
+                }),
                 DslIr::CircuitPoseidon2Permute(state) => constraints.push(Constraint {
                     opcode: ConstraintOpcode::Permute,
                     args: state.iter().map(|x| vec![x.id()]).collect(),

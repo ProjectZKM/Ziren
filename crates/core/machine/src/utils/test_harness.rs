@@ -127,37 +127,37 @@ use zkm_pcs::UniConfig;
 /// only because the fixtures pass one.
 #[cfg(test)]
 pub fn uni_stark_prove<SC, A>(
-    config: &SC,
+    _config: &SC,
     air: &A,
     _challenger: &mut SC::Challenger,
-    trace: RowMajorMatrix<SC::Val>,
-) -> Proof<UniConfig<SC>>
+    trace: RowMajorMatrix<zkm_pcs::InnerVal>,
+) -> Proof<UniConfig>
 where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
+    SC: StarkGenericConfig<Val = zkm_pcs::InnerVal>,
+    A: Air<p3_uni_stark::SymbolicAirBuilder<zkm_pcs::InnerVal>>
+        + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig>>
+        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, zkm_pcs::InnerVal>>,
 {
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &[])
+    p3_uni_stark::prove(&zkm_pcs::uni_config(), air, trace, &[]).expect("uni-stark proof")
 }
 
-/// `p3_uni_stark::verify` over a single hand-built AIR fixture.
-///
-/// See [`uni_stark_prove`].
+/// `p3_uni_stark::verify` of a [`uni_stark_prove`] proof, under the same
+/// fixture configuration; `_config` and `_challenger` are accepted so the
+/// fixtures keep passing the machine's.
 #[cfg(test)]
 pub fn uni_stark_verify<SC, A>(
-    config: &SC,
+    _config: &SC,
     air: &A,
     _challenger: &mut SC::Challenger,
-    proof: &Proof<UniConfig<SC>>,
-) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
+    proof: &Proof<UniConfig>,
+) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig>>>
 where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
+    SC: StarkGenericConfig<Val = zkm_pcs::InnerVal>,
+    A: Air<p3_uni_stark::SymbolicAirBuilder<zkm_pcs::InnerVal>>
+        + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig>>
+        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, zkm_pcs::InnerVal>>,
 {
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &[])
+    p3_uni_stark::verify(&zkm_pcs::uni_config(), air, proof, &[])
 }
 
 /// Pad a row-major buffer of `N`-wide rows out to a power-of-two height (at

@@ -200,6 +200,8 @@ pub enum DslIr<C: Config> {
     /// Decompose a field element into bits (bits = num2bits(felt)). Should only be used when
     /// target is a gnark circuit.
     CircuitNum2BitsF(Felt<C::F>, Vec<Var<C::N>>),
+    /// The least significant base-`F::ORDER` limbs of a variable, as felts (circuit only).
+    CircuitVar2FeltLimbs(Var<C::N>, Vec<Felt<C::F>>),
     /// Convert a Felt to a Var in a circuit. Avoids decomposing to bits and then reconstructing.
     CircuitFelt2Var(Felt<C::F>, Var<C::N>),
 

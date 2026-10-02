@@ -46,6 +46,18 @@ impl<C: Config> Builder<C> {
         output
     }
 
+    /// The `limbs` least significant base-`F::ORDER` digits of the canonical
+    /// value of `num`, least significant first, inside a circuit.
+    ///
+    /// Reference: [`p3_field::split_pf_to_field_order_limbs`].
+    pub fn var2felt_limbs_circuit(&mut self, num: Var<C::N>, limbs: usize) -> Vec<Felt<C::F>> {
+        let output: Vec<Felt<C::F>> = (0..limbs).map(|_| self.uninit()).collect();
+
+        self.push_op(DslIr::CircuitVar2FeltLimbs(num, output.clone()));
+
+        output
+    }
+
     /// Range checks a felt to a certain number of bits.
     pub fn range_check_f(&mut self, num: Felt<C::F>, num_bits: usize) {
         let bits = self.num2bits_f(num);

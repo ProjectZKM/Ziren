@@ -91,10 +91,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressControlChip {
             };
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_CONTROL_COLS];
             let cols: &mut ShaCompressControlCols<F> = row.as_mut_slice().borrow_mut();
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
-            cols.h_ptr = F::from_canonical_u32(event.h_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
+            cols.h_ptr = F::from_u32(event.h_ptr);
             cols.is_real = F::ONE;
             for i in 0..8 {
                 let prev = event.h[i];

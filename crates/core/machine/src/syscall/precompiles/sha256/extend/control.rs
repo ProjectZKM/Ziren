@@ -80,9 +80,9 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendControlChip {
                 if let PrecompileEvent::ShaExtend(event) = event { event } else { unreachable!() };
             let mut row = [F::ZERO; NUM_SHA_EXTEND_CONTROL_COLS];
             let cols: &mut ShaExtendControlCols<F> = row.as_mut_slice().borrow_mut();
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
             cols.is_real = F::ONE;
             rows.push(row);
         }

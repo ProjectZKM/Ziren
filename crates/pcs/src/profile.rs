@@ -139,9 +139,9 @@ pub fn transcript_profile_digest() -> [JaggedVal; 8] {
 
     let mut felts: Vec<JaggedVal> = Vec::new();
     let profile = transcript_profile();
-    felts.push(JaggedVal::from_canonical_usize(profile.len()));
+    felts.push(JaggedVal::from_usize(profile.len()));
     for (name, value) in &profile {
-        felts.push(JaggedVal::from_canonical_usize(name.len()));
+        felts.push(JaggedVal::from_usize(name.len()));
         felts.extend(name.bytes().map(JaggedVal::from_u8));
         push_u64(&mut felts, *value);
     }
@@ -154,7 +154,7 @@ pub fn transcript_profile_digest() -> [JaggedVal; 8] {
         &mut felts,
         &crate::whir::jagged::compress_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
     );
-    felts.push(JaggedVal::from_canonical_usize(crate::jagged::RecursionPins::ROOT_CLASS));
+    felts.push(JaggedVal::from_usize(crate::jagged::RecursionPins::ROOT_CLASS));
     absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::from_env_or_default());
     absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::wrap_fri_config());
 
@@ -175,15 +175,15 @@ pub fn transcript_profile_digest() -> [JaggedVal; 8] {
 /// representation of `v < 2⁶⁴` is unique, `u64 → F³` is injective on the whole
 /// domain.
 fn push_u64(felts: &mut Vec<JaggedVal>, value: u64) {
-    felts.push(JaggedVal::from_canonical_u32((value & 0xFF_FFFF) as u32));
-    felts.push(JaggedVal::from_canonical_u32(((value >> 24) & 0xFF_FFFF) as u32));
-    felts.push(JaggedVal::from_canonical_u32((value >> 48) as u32));
+    felts.push(JaggedVal::from_u32((value & 0xFF_FFFF) as u32));
+    felts.push(JaggedVal::from_u32(((value >> 24) & 0xFF_FFFF) as u32));
+    felts.push(JaggedVal::from_u32((value >> 48) as u32));
 }
 
 /// A length-prefixed run of `usize`, so a shorter vector cannot alias a longer
 /// one that happens to start the same way.
 fn push_usizes(felts: &mut Vec<JaggedVal>, values: &[usize]) {
-    felts.push(JaggedVal::from_canonical_usize(values.len()));
+    felts.push(JaggedVal::from_usize(values.len()));
     for &v in values {
         push_u64(felts, v as u64);
     }
@@ -212,7 +212,7 @@ fn absorb_whir_config(felts: &mut Vec<JaggedVal>, cfg: &crate::whir::config::Whi
     push_u64(felts, *starting_interleaved_log_height as u64);
     push_u64(felts, *starting_domain_log_size as u64);
     push_usizes(felts, starting_folding_pow_bits);
-    felts.push(JaggedVal::from_canonical_usize(round_parameters.len()));
+    felts.push(JaggedVal::from_usize(round_parameters.len()));
     for r in round_parameters.iter() {
         let crate::whir::config::RoundConfig {
             folding_factor,
@@ -330,9 +330,9 @@ mod tests {
         let hasher = crate::kb31_poseidon2::InnerHash::new(perm);
         let digest_of = |entries: &[ProfileEntry]| -> [JaggedVal; 8] {
             let mut felts: Vec<JaggedVal> = Vec::new();
-            felts.push(JaggedVal::from_canonical_usize(entries.len()));
+            felts.push(JaggedVal::from_usize(entries.len()));
             for (name, value) in entries {
-                felts.push(JaggedVal::from_canonical_usize(name.len()));
+                felts.push(JaggedVal::from_usize(name.len()));
                 felts.extend(name.bytes().map(JaggedVal::from_u8));
                 push_u64(&mut felts, *value);
             }

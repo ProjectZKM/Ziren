@@ -56,6 +56,12 @@ impl<'a, AB: AirBuilder, SubAir: BaseAir<T>, T> SubAirBuilder<'a, AB, SubAir, T>
 
 /// Implement `AirBuilder` for `SubAirBuilder`.
 impl<AB: AirBuilder, SubAir: BaseAir<F>, F> AirBuilder for SubAirBuilder<'_, AB, SubAir, F> {
+    type PeriodicVar = Self::Var;
+
+    fn is_transition(&self) -> Self::Expr {
+        self.is_transition_window(2)
+    }
+
     type F = AB::F;
     type Expr = AB::Expr;
     type Var = AB::Var;

@@ -260,7 +260,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
 
         rows.resize(
             <SyscallChip as MachineAir<F>>::num_rows(self, input).unwrap(),
-            [F::zero(); NUM_SYSCALL_COLS],
+            [F::ZERO; NUM_SYSCALL_COLS],
         );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SYSCALL_COLS))
@@ -309,7 +309,7 @@ where
 
         builder.assert_bool(local.is_real);
         builder.assert_bool(local.is_linux);
-        builder.when(AB::Expr::one() - local.is_real).assert_zero(local.is_linux);
+        builder.when(AB::Expr::ONE - local.is_real).assert_zero(local.is_linux);
         builder.when_not(local.is_linux).assert_zero(local.result_lo);
         builder.when_not(local.is_linux).assert_zero(local.result_hi);
 
@@ -321,29 +321,29 @@ where
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg1_lo,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.is_real,
         );
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg1_hi,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.is_real,
         );
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg2_lo,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.is_real,
         );
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg2_hi,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.is_real,
         );
 
@@ -383,8 +383,8 @@ where
                             local.arg1_hi.into(),
                             local.arg2_lo.into(),
                             local.arg2_hi.into(),
-                            local.is_real.into() * AB::Expr::one(),
-                            local.is_real.into() * AB::Expr::zero(),
+                            local.is_real.into() * AB::Expr::ONE,
+                            local.is_real.into() * AB::Expr::ZERO,
                             AB::Expr::from_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),
@@ -401,10 +401,10 @@ where
                             local.syscall_id.into(),
                             local.result_lo.into(),
                             local.result_hi.into(),
-                            AB::Expr::zero(),
-                            AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
-                            local.is_real.into() * AB::Expr::zero(),
+                            AB::Expr::ZERO,
+                            AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ONE,
+                            local.is_real.into() * AB::Expr::ZERO,
                             AB::Expr::from_u8(LookupKind::SyscallResult as u8),
                         ],
                         local.is_real.into(),
@@ -447,8 +447,8 @@ where
                             local.arg1_hi.into(),
                             local.arg2_lo.into(),
                             local.arg2_hi.into(),
-                            local.is_real.into() * AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
+                            local.is_real.into() * AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ONE,
                             AB::Expr::from_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),
@@ -465,10 +465,10 @@ where
                             local.syscall_id.into(),
                             local.result_lo.into(),
                             local.result_hi.into(),
-                            AB::Expr::zero(),
-                            AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
+                            AB::Expr::ZERO,
+                            AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ONE,
                             AB::Expr::from_u8(LookupKind::SyscallResult as u8),
                         ],
                         local.is_real.into(),
