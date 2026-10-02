@@ -483,8 +483,11 @@ impl ZKMProofShape {
             }
             out
         };
-        let shrink_shapes: Vec<Self> =
-            compress_child_classes.last().map(|os| Self::Shrink(os.clone())).into_iter().collect();
+        let shrink_shapes: Vec<Self> = compress_child_classes
+            .get(zkm_pcs::jagged::RecursionPins::ROOT_CLASS)
+            .map(|os| Self::Shrink(os.clone()))
+            .into_iter()
+            .collect();
 
         arity_compress_shapes.into_iter().chain(deferred_shapes).chain(shrink_shapes)
     }
@@ -737,6 +740,45 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every root the enumeration can produce — a closing compose of arity
+    /// `1..=REDUCE_BATCH_SIZE` over any tuple of child pin classes — fits
+    /// [`zkm_pcs::jagged::RecursionPins::ROOT_CLASS`].  Building the program
+    /// runs the shape check, which panics on a root past its class, so this
+    /// is the guarantee that pinning the root to the smallest class cannot
+    /// strand a block.
+    ///
+    /// `cargo test -r -p zkm-prover every_root_fits_the_root_class -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn every_root_fits_the_root_class() {
+        use crate::components::DefaultProverComponents;
+        use crate::REDUCE_BATCH_SIZE;
+        use zkm_recursion_core::shape::RecursionShapeConfig;
+
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let rec_cfg = prover.compress_shape_config.as_ref().expect("compress shape config");
+        let roots: Vec<ZKMProofShape> = ZKMProofShape::generate(rec_cfg, REDUCE_BATCH_SIZE)
+            .filter(|s| matches!(s, ZKMProofShape::CompressRoot(_)))
+            .collect();
+        assert!(!roots.is_empty(), "the enumeration emits closing composes");
+        for (i, shape) in roots.into_iter().enumerate() {
+            let program = prover.program_from_shape(
+                ZKMCompressProgramShape::from_proof_shape(shape, crate::VK_MERKLE_TREE_HEIGHT),
+                None,
+            );
+            let heights = CompressAir::<KoalaBear>::heights(&program);
+            let organic =
+                RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::organic_shape(&heights);
+            let class =
+                RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::class_for_rows(&organic);
+            tracing::info!("[ROOT] #{i} organic class {class:?} rows {organic:?}");
+            assert!(
+                class.is_some_and(|c| c <= zkm_pcs::jagged::RecursionPins::ROOT_CLASS),
+                "root #{i} needs class {class:?}, past the root class"
+            );
+        }
+    }
 
     /// Does a compose program — and with it its verifying key — depend on its
     /// children's PER-CHIP heights, or only on their committed-geometry class?

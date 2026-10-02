@@ -145,6 +145,11 @@ pub fn transcript_profile_digest() -> [JaggedVal; 8] {
         &mut felts,
         &crate::whir::jagged::core_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
     );
+    absorb_whir_config(
+        &mut felts,
+        &crate::whir::jagged::compress_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
+    );
+    felts.push(JaggedVal::from_canonical_usize(crate::jagged::RecursionPins::ROOT_CLASS));
     absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::from_env_or_default());
     absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::wrap_fri_config());
 
