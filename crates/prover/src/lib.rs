@@ -74,6 +74,7 @@ use zkm_recursion_compiler::{
     config::InnerConfig,
     ir::{Builder, Witness},
 };
+use zkm_recursion_core::Instruction;
 use zkm_recursion_core::{
     air::RecursionPublicValues,
     hash_vkey_with_part_vk,
@@ -2086,15 +2087,52 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
         runtime.print_stats();
 
-        let machine = tracing::debug_span!("binary machine setup")
-            .in_scope(|| RecursionMachine::new(&program, &BinarySchedule::default()))
-            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        let machine = self.binary_machine(&program)?;
         let record = runtime.record;
         let digest = PublicValuesAir::digest(&record);
         let proof = tracing::debug_span!("binary machine prove")
             .in_scope(|| machine.prove(&record))
             .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
         Ok(BinaryShrinkProof { program, digest, proof })
+    }
+
+    /// The binary machine of `program`, with its tables' shapes and the
+    /// program's instruction mix reported.
+    pub fn binary_machine(
+        &self,
+        program: &Arc<RecursionProgram<KoalaBear>>,
+    ) -> Result<RecursionMachine, ZKMRecursionProverError> {
+        let mut mix = std::collections::BTreeMap::new();
+        for instruction in program.iter_instructions() {
+            let kind = match instruction {
+                Instruction::BaseAlu(_) => "BaseAlu",
+                Instruction::ExtAlu(_) => "ExtAlu",
+                Instruction::Mem(_) => "Mem",
+                Instruction::Poseidon2(_) => "Poseidon2",
+                Instruction::Select(_) => "Select",
+                Instruction::HintBits(_) => "HintBits",
+                Instruction::HintAddCurve(_) => "HintAddCurve",
+                Instruction::Print(_) => "Print",
+                Instruction::HintExt2Felts(_) => "HintExt2Felts",
+                Instruction::Ext2Felts(_) => "Ext2Felts",
+                Instruction::CommitPublicValues(_) => "CommitPublicValues",
+                Instruction::Hint(_) => "Hint",
+            };
+            *mix.entry(kind).or_insert(0usize) += 1;
+        }
+        tracing::info!("binary stage program mix: {mix:?}");
+        let machine = tracing::debug_span!("binary machine setup")
+            .in_scope(|| RecursionMachine::new(program, &BinarySchedule::default()))
+            .map_err(|e| ZKMRecursionProverError::BinaryStage(e.to_string()))?;
+        for air in machine.airs() {
+            tracing::info!(
+                "binary stage table {}: 2^{} rows x {} bits",
+                air.name(),
+                air.log_height(),
+                p3_air::BaseAir::<zkm_binary_stark::F>::width(air)
+            );
+        }
+        Ok(machine)
     }
 
     /// Verify a proof of the binary stage against the program it names.
@@ -3286,6 +3324,33 @@ pub mod tests {
             opts,
             Test::Compress,
         )
+    }
+
+    /// The shapes of the binary stage's tables on the shrink program of a
+    /// compressed fibonacci proof, without proving.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_shrink_binary_shape_fibonacci() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof =
+            prover.prove_core(&pk_d, program, &fib_stdin(10), opts, ZKMContext::default())?;
+        let compressed_proof = prover.compress(&vk, core_proof, vec![], opts)?;
+        let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
+        let basefold_proof = *compressed_proof.jagged_shard_proof;
+        let vk_merkle_data =
+            prover.make_basefold_merkle_proofs(std::slice::from_ref(&compressed_vk))?;
+        let input = ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![(compressed_vk, basefold_proof)],
+            vk_merkle_data,
+        };
+        let program = prover.shrink_program_basefold(&input);
+        prover.binary_machine(&program)?;
+        Ok(())
     }
 
     /// The binary stage on a compressed fibonacci proof: the shrink program

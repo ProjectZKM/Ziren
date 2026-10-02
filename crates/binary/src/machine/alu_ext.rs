@@ -105,6 +105,12 @@ impl ExtAluAir {
         self.log_height
     }
 
+    /// The instructions of the table.
+    #[must_use]
+    pub fn instruction_count(&self) -> usize {
+        self.outputs.len()
+    }
+
     /// The writes `(address, reads)` of the table that are read, in order.
     #[must_use]
     pub fn writes(&self) -> Vec<(u32, u32)> {
@@ -125,7 +131,7 @@ impl ExtAluAir {
     }
 
     /// The witness: every instruction's operands, result and checks; the
-    /// rows past the program check `0 + 0` and `0 * 0`.
+    /// rows past the program check `0 + 0` and ask for nothing.
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         assert_eq!(record.ext_alu_events.len(), self.outputs.len(), "one event per instruction");
@@ -140,17 +146,44 @@ impl ExtAluAir {
                 }
                 None => ([0; 4], [0; 4], [0; 4], true),
             };
-            fill_row(in1, in2, out, direct, &mut row);
+            let mut requests = Vec::new();
+            fill_row(in1, in2, out, direct, &mut row, &mut requests);
             rows.set_row(r, &row);
         }
         rows.into_table()
+    }
+
+    /// The products the table asks for, sixteen per instruction.
+    #[must_use]
+    pub fn mul_requests(&self, record: &ExecutionRecord<KoalaBear>) -> Vec<(u32, u32)> {
+        let mut requests = Vec::with_capacity(16 * record.ext_alu_events.len());
+        let mut row = vec![0u8; NUM_EXT_ALU_COLS];
+        for (event, &direct) in record.ext_alu_events.iter().zip(&self.direct) {
+            fill_row(
+                cell_of(&event.in1),
+                cell_of(&event.in2),
+                cell_of(&event.out),
+                direct,
+                &mut row,
+                &mut requests,
+            );
+        }
+        requests
     }
 }
 
 /// Fill `row` with the witness of an instruction on `in1`, `in2` with
 /// result `out`, whose checks run on `(in1, in2)` when `direct` and on
-/// `(in2, out)` otherwise.
-pub fn fill_row(in1: Cell, in2: Cell, out: Cell, direct: bool, row: &mut [u8]) {
+/// `(in2, out)` otherwise, adding the products it asks the multiply table
+/// for to `requests`.
+pub fn fill_row(
+    in1: Cell,
+    in2: Cell,
+    out: Cell,
+    direct: bool,
+    row: &mut [u8],
+    requests: &mut Vec<(u32, u32)>,
+) {
     let cols: &mut ExtAluCols<u8> = row.borrow_mut();
     let words = |cell: Cell| -> ExtWord<u8> { cell.map(|w| bits_le::<KB_BITS>(u64::from(w))) };
     cols.in1 = words(in1);
@@ -160,7 +193,7 @@ pub fn fill_row(in1: Cell, in2: Cell, out: Cell, direct: bool, row: &mut [u8]) {
     cols.x = words(x);
     cols.y = words(y);
     fill_ext_add(x, y, &mut cols.add);
-    fill_ext_mul(x, y, &mut cols.mul);
+    fill_ext_mul(x, y, &mut cols.mul, requests);
 }
 
 impl<X: Field> BaseAir<X> for ExtAluAir {
@@ -204,7 +237,7 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for ExtAluAir {
         let x = ext_exprs::<AB>(&local.x);
         let y = ext_exprs::<AB>(&local.y);
         eval_ext_add(builder, &x, &y, &local.add);
-        eval_ext_mul(builder, &x, &y, &local.mul);
+        eval_ext_mul(builder, &x, &y, &local.mul, prep_local.is_real.into());
         for k in 0..EXT_DEGREE {
             for i in 0..KB_BITS {
                 let z = direct.clone() * local.out[k][i] + inverse.clone() * local.in1[k][i];

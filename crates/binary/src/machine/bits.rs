@@ -9,11 +9,12 @@
 
 use p3_air::AirBuilder;
 use p3_binary_pcs::coordinate_basis;
-use p3_bus::BusName;
+use p3_bus::{BusActivation, BusDirection, BusName};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
 
+use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, KB_BITS};
 use crate::F;
 
@@ -31,6 +32,19 @@ pub const MEMORY: BusName<'static> = BusName::new("memory");
 
 /// The channel every write of a cell pushes to, once, for the ledger.
 pub const WRITE: BusName<'static> = BusName::new("write");
+
+/// The channel every product of two words is asked for on, served by the
+/// multiply table.
+pub const MUL: BusName<'static> = BusName::new("mul");
+
+/// The channel a permutation's state travels on from round to round.
+pub const POSEIDON2: BusName<'static> = BusName::new("poseidon2");
+
+/// Bits of a permutation's identity on that channel.
+pub const PERMUTATION_ID_BITS: usize = 24;
+
+/// Bits of a round index on that channel.
+pub const ROUND_BITS: usize = 5;
 
 /// A memory block as integers.
 pub type Cell = [u32; 4];
@@ -116,4 +130,49 @@ pub fn cell_tuple<AB: AirBuilder<F = F>>(
 #[must_use]
 pub fn single_block<AB: AirBuilder>(element: &[AB::Expr; KB_BITS]) -> [AB::Expr; BLOCK_BITS] {
     core::array::from_fn(|i| if i < KB_BITS { element[i].clone() } else { AB::Expr::ZERO })
+}
+
+/// The bus tuple of a product: both factors in one field, the product in
+/// another.
+#[must_use]
+pub fn mul_tuple<AB: AirBuilder<F = F>>(
+    a: &[AB::Expr; KB_BITS],
+    b: &[AB::Expr; KB_BITS],
+    c: &[AB::Expr; KB_BITS],
+) -> Vec<AB::Expr> {
+    let factors: Vec<AB::Expr> = a.iter().chain(b.iter()).cloned().collect();
+    vec![pack_field::<AB>(&factors), pack_field::<AB>(c)]
+}
+
+/// Ask the multiply table for `c = a * b` on rows where `active`.
+pub fn request_mul<AB: MachineBuilder<F = F>>(
+    builder: &mut AB,
+    a: &[AB::Expr; KB_BITS],
+    b: &[AB::Expr; KB_BITS],
+    c: &[AB::Expr; KB_BITS],
+    active: AB::Expr,
+) {
+    builder.declare_bus(
+        MUL,
+        BusDirection::Push,
+        mul_tuple::<AB>(a, b, c),
+        BusActivation::Boolean(active),
+    );
+}
+
+/// The bus tuple of a permutation's state at a round: the identity and the
+/// round in one field, the sixteen lanes in four.
+#[must_use]
+pub fn state_tuple<AB: AirBuilder<F = F>>(
+    id: &[AB::Expr; PERMUTATION_ID_BITS],
+    round: &[AB::Expr; ROUND_BITS],
+    state: &[[AB::Expr; KB_BITS]; 16],
+) -> Vec<AB::Expr> {
+    let header: Vec<AB::Expr> = id.iter().chain(round.iter()).cloned().collect();
+    let mut tuple = vec![pack_field::<AB>(&header)];
+    for lanes in state.chunks(4) {
+        let block: Vec<AB::Expr> = lanes.iter().flatten().cloned().collect();
+        tuple.push(pack_field::<AB>(&block));
+    }
+    tuple
 }

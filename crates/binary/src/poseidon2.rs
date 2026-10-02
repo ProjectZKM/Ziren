@@ -9,8 +9,8 @@
 //! multiple or a power-of-two fraction of itself plus the sum of all lanes.
 //!
 //! Over bits every lane is a word, every linear combination is a sum of
-//! shifted words reduced once, a cube is two multiplies, and a fraction
-//! `x / 2^k` is a witnessed `y` with `2^k y = x + m p`.
+//! shifted words reduced once, a cube is two products of the multiply
+//! table, and a fraction `x / 2^k` is a witnessed `y` with `2^k y = x + m p`.
 
 use core::array;
 
@@ -18,11 +18,14 @@ use p3_air::AirBuilder;
 use p3_field::PrimeCharacteristicRing;
 use zkm_derive::AlignedBorrow;
 
+use crate::machine::bits::request_mul;
+use crate::machine_builder::MachineBuilder;
 use crate::word::{
-    add_bits, add_carries_wide, bits_le, bits_le_wide, constant_bits, eval_add, eval_mul,
-    eval_reduce, exprs, fill_add, fill_mul, fill_reduce, from_bits_le, sub_bits, sub_borrows,
-    widen, AddCols, MulCols, ReduceCols, Word, KB_BITS, KB_PRIME,
+    add_bits, add_carries_wide, bits_le, bits_le_wide, constant_bits, eval_add, eval_reduce, exprs,
+    fill_add, fill_reduce, from_bits_le, sub_bits, sub_borrows, widen, AddCols, ReduceCols, Word,
+    KB_BITS, KB_PRIME,
 };
+use crate::F;
 
 /// Lanes of the permutation.
 pub const WIDTH: usize = 16;
@@ -130,30 +133,44 @@ pub fn shifted<AB: AirBuilder, const N: usize>(x: &[AB::Expr], shift: usize) -> 
     })
 }
 
-/// The witness of a cube: the square, then the square times the base.
+/// The witness of a cube: the square, then the square times the base,
+/// both from the multiply table.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct CubeCols<T> {
-    pub square: MulCols<T>,
-    pub cube: MulCols<T>,
+    pub square: Word<T>,
+    pub cube: Word<T>,
 }
 
-/// Constrain `cols.cube.reduce.out = x^3`, and return it.
-pub fn eval_cube<AB: AirBuilder>(
+/// Constrain `cols.cube = x^3` through the multiply table on rows where
+/// `active`, and return it.
+pub fn eval_cube<AB: MachineBuilder<F = F>>(
     builder: &mut AB,
     x: &[AB::Expr; KB_BITS],
     cols: &CubeCols<AB::Var>,
+    active: AB::Expr,
 ) -> [AB::Expr; KB_BITS] {
-    eval_mul(builder, x, x, &cols.square);
-    let square = exprs::<AB, KB_BITS>(&cols.square.reduce.out);
-    eval_mul(builder, &square, x, &cols.cube);
-    exprs::<AB, KB_BITS>(&cols.cube.reduce.out)
+    for bit in cols.square.iter().chain(cols.cube.iter()) {
+        builder.assert_bool(*bit);
+    }
+    let square = exprs::<AB, KB_BITS>(&cols.square);
+    let cube = exprs::<AB, KB_BITS>(&cols.cube);
+    request_mul(builder, x, x, &square, active.clone());
+    request_mul(builder, &square, x, &cube, active);
+    cube
 }
 
-/// The witness of [`eval_cube`], and the cube.
-pub fn fill_cube(x: u32, cols: &mut CubeCols<u8>) -> u32 {
-    let square = fill_mul(x, x, &mut cols.square);
-    fill_mul(square, x, &mut cols.cube)
+/// The witness of [`eval_cube`], its two products added to `requests`,
+/// and the cube.
+pub fn fill_cube(x: u32, cols: &mut CubeCols<u8>, requests: &mut Vec<(u32, u32)>) -> u32 {
+    let p = u64::from(KB_PRIME);
+    let square = (u64::from(x) * u64::from(x) % p) as u32;
+    let cube = (u64::from(square) * u64::from(x) % p) as u32;
+    cols.square = bits_le::<KB_BITS>(u64::from(square));
+    cols.cube = bits_le::<KB_BITS>(u64::from(cube));
+    requests.push((x, x));
+    requests.push((square, x));
+    cube
 }
 
 /// The witness of `p - x` for `x < p`.
@@ -372,21 +389,17 @@ pub struct ExternalRoundCols<T> {
 
 /// Constrain `cols` to be an external round on `state` with `constants`,
 /// and return the new state.
-pub fn eval_external_round<AB: AirBuilder>(
+pub fn eval_external_round<AB: MachineBuilder<F = F>>(
     builder: &mut AB,
     state: &StateExprs<AB>,
-    constants: &[u32; WIDTH],
+    constants: &StateExprs<AB>,
     cols: &ExternalRoundCols<AB::Var>,
+    active: AB::Expr,
 ) -> StateExprs<AB> {
     let cubed: StateExprs<AB> = array::from_fn(|i| {
-        eval_add(
-            builder,
-            &state[i],
-            &constant_bits::<AB, KB_BITS>(u64::from(constants[i])),
-            &cols.rc[i],
-        );
+        eval_add(builder, &state[i], &constants[i], &cols.rc[i]);
         let added = exprs::<AB, KB_BITS>(&cols.rc[i].out);
-        eval_cube(builder, &added, &cols.cube[i])
+        eval_cube(builder, &added, &cols.cube[i], active.clone())
     });
     eval_mds(builder, &cubed, &cols.mds)
 }
@@ -396,16 +409,18 @@ pub fn fill_external_round(
     state: &[u32; WIDTH],
     constants: &[u32; WIDTH],
     cols: &mut ExternalRoundCols<u8>,
+    requests: &mut Vec<(u32, u32)>,
 ) -> [u32; WIDTH] {
     let cubed: [u32; WIDTH] = array::from_fn(|i| {
         let added = fill_add(state[i], constants[i], &mut cols.rc[i]);
-        fill_cube(added, &mut cols.cube[i])
+        fill_cube(added, &mut cols.cube[i], requests)
     });
     fill_mds(&cubed, &mut cols.mds)
 }
 
-/// The witness of one lane of the diagonal layer: the lane negated when
-/// `NEG`, divided by `2^K`, multiplied by `MUL` as shifted terms (`ADDS`
+/// The witness of one lane of the diagonal layer: the lane divided by
+/// `2^K`, negated when `NEG` (as `p - y`, at most `p`, which the final
+/// reduction absorbs), multiplied by `MUL` as shifted terms (`ADDS`
 /// additions with the sum of all lanes), and reduced.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
@@ -427,8 +442,8 @@ fn multiple_shifts(multiple: u32) -> Vec<usize> {
     }
 }
 
-/// Constrain `cols.reduce.out` to be `MUL * (-x) / 2^K + sum` (or without
-/// the negation), and return it.
+/// Constrain `cols.reduce.out` to be `sum - MUL * x / 2^K` (or `sum + MUL
+/// * x / 2^K` without the negation), and return it.
 pub fn eval_lane<
     AB: AirBuilder,
     const K: usize,
@@ -441,8 +456,8 @@ pub fn eval_lane<
     sum: &[AB::Expr; LANE_SUM_BITS],
     cols: &LaneCols<AB::Var, K, NEG, MUL, ADDS>,
 ) -> [AB::Expr; KB_BITS] {
-    let signed = if NEG { eval_neg(builder, x, &cols.neg) } else { x.clone() };
-    let scaled = eval_fraction::<AB, K>(builder, &signed, &cols.fraction);
+    let fraction = eval_fraction::<AB, K>(builder, x, &cols.fraction);
+    let scaled = if NEG { eval_neg(builder, &fraction, &cols.neg) } else { fraction };
     let mut terms: Vec<[AB::Expr; MDS_BITS]> = vec![shifted::<AB, MDS_BITS>(sum, 0)];
     terms.extend(
         multiple_shifts(MUL).into_iter().map(|shift| shifted::<AB, MDS_BITS>(&scaled, shift)),
@@ -458,8 +473,8 @@ pub fn fill_lane<const K: usize, const NEG: bool, const MUL: u32, const ADDS: us
     sum: u128,
     cols: &mut LaneCols<u8, K, NEG, MUL, ADDS>,
 ) -> u32 {
-    let signed = if NEG { fill_neg(x, &mut cols.neg) } else { x };
-    let scaled = fill_fraction::<K>(u64::from(signed), &mut cols.fraction);
+    let fraction = fill_fraction::<K>(u64::from(x), &mut cols.fraction);
+    let scaled = if NEG { fill_neg(fraction, &mut cols.neg) } else { fraction };
     let mut terms = vec![sum];
     terms.extend(multiple_shifts(MUL).into_iter().map(|shift| u128::from(scaled) << shift));
     let total = fill_sum::<ADDS, MDS_BITS>(&terms, &mut cols.sum);
@@ -499,15 +514,16 @@ pub struct InternalRoundCols<T> {
 
 /// Constrain `cols` to be an internal round on `state` with `constant`,
 /// and return the new state.
-pub fn eval_internal_round<AB: AirBuilder>(
+pub fn eval_internal_round<AB: MachineBuilder<F = F>>(
     builder: &mut AB,
     state: &StateExprs<AB>,
-    constant: u32,
+    constant: &[AB::Expr; KB_BITS],
     cols: &InternalRoundCols<AB::Var>,
+    active: AB::Expr,
 ) -> StateExprs<AB> {
-    eval_add(builder, &state[0], &constant_bits::<AB, KB_BITS>(u64::from(constant)), &cols.rc);
+    eval_add(builder, &state[0], constant, &cols.rc);
     let added = exprs::<AB, KB_BITS>(&cols.rc.out);
-    let cubed = eval_cube(builder, &added, &cols.cube);
+    let cubed = eval_cube(builder, &added, &cols.cube, active);
     let others: [[AB::Expr; LANE_SUM_BITS]; WIDTH - 1] =
         array::from_fn(|i| shifted::<AB, LANE_SUM_BITS>(&state[i + 1], 0));
     let part_sum = eval_sum::<AB, 14, LANE_SUM_BITS>(builder, &others, &cols.part_sum);
@@ -541,9 +557,10 @@ pub fn fill_internal_round(
     state: &[u32; WIDTH],
     constant: u32,
     cols: &mut InternalRoundCols<u8>,
+    requests: &mut Vec<(u32, u32)>,
 ) -> [u32; WIDTH] {
     let added = fill_add(state[0], constant, &mut cols.rc);
-    let cubed = fill_cube(added, &mut cols.cube);
+    let cubed = fill_cube(added, &mut cols.cube, requests);
     let others: [u128; WIDTH - 1] = array::from_fn(|i| u128::from(state[i + 1]));
     let part_sum = fill_sum::<14, LANE_SUM_BITS>(&others, &mut cols.part_sum);
     let full_sum = fill_sum::<1, LANE_SUM_BITS>(&[part_sum, u128::from(cubed)], &mut cols.full_sum);
@@ -583,42 +600,97 @@ pub const NUM_PERMUTATION_COLS: usize = core::mem::size_of::<PermutationCols<u8>
 
 /// Constrain `cols` to be the permutation of `input`, and return the
 /// output state.
-pub fn eval_permutation<AB: AirBuilder>(
+pub fn eval_permutation<AB: MachineBuilder<F = F>>(
     builder: &mut AB,
     input: &StateExprs<AB>,
     constants: &RoundConstants,
     cols: &PermutationCols<AB::Var>,
+    active: AB::Expr,
 ) -> StateExprs<AB> {
+    let words = |constants: &[u32; WIDTH]| -> StateExprs<AB> {
+        constants.map(|c| constant_bits::<AB, KB_BITS>(u64::from(c)))
+    };
     let mut state = eval_mds(builder, input, &cols.initial);
     for (round, cols) in cols.external_initial.iter().enumerate() {
-        state = eval_external_round(builder, &state, &constants.external_initial[round], cols);
+        let constants = words(&constants.external_initial[round]);
+        state = eval_external_round(builder, &state, &constants, cols, active.clone());
     }
     for (round, cols) in cols.internal.iter().enumerate() {
-        state = eval_internal_round(builder, &state, constants.internal[round], cols);
+        let constant = constant_bits::<AB, KB_BITS>(u64::from(constants.internal[round]));
+        state = eval_internal_round(builder, &state, &constant, cols, active.clone());
     }
     for (round, cols) in cols.external_final.iter().enumerate() {
-        state = eval_external_round(builder, &state, &constants.external_final[round], cols);
+        let constants = words(&constants.external_final[round]);
+        state = eval_external_round(builder, &state, &constants, cols, active.clone());
     }
     state
 }
 
-/// The witness of [`eval_permutation`], and the output.
+/// The witness of [`eval_permutation`], its products added to `requests`,
+/// and the output.
 pub fn fill_permutation(
     input: &[u32; WIDTH],
     constants: &RoundConstants,
     cols: &mut PermutationCols<u8>,
+    requests: &mut Vec<(u32, u32)>,
 ) -> [u32; WIDTH] {
+    fill_permutation_states(input, constants, cols, requests)[ROUNDS]
+}
+
+/// Rounds of the permutation.
+pub const ROUNDS: usize = 2 * HALF_EXTERNAL_ROUNDS + INTERNAL_ROUNDS;
+
+/// The witness of [`eval_permutation`], its products added to `requests`,
+/// and the state entering each round, the last being the output.
+pub fn fill_permutation_states(
+    input: &[u32; WIDTH],
+    constants: &RoundConstants,
+    cols: &mut PermutationCols<u8>,
+    requests: &mut Vec<(u32, u32)>,
+) -> [[u32; WIDTH]; ROUNDS + 1] {
+    let mut states = [[0u32; WIDTH]; ROUNDS + 1];
     let mut state = fill_mds(input, &mut cols.initial);
-    for (round, cols) in cols.external_initial.iter_mut().enumerate() {
-        state = fill_external_round(&state, &constants.external_initial[round], cols);
+    states[0] = state;
+    let mut round = 0;
+    for (r, cols) in cols.external_initial.iter_mut().enumerate() {
+        state = fill_external_round(&state, &constants.external_initial[r], cols, requests);
+        round += 1;
+        states[round] = state;
     }
-    for (round, cols) in cols.internal.iter_mut().enumerate() {
-        state = fill_internal_round(&state, constants.internal[round], cols);
+    for (r, cols) in cols.internal.iter_mut().enumerate() {
+        state = fill_internal_round(&state, constants.internal[r], cols, requests);
+        round += 1;
+        states[round] = state;
     }
-    for (round, cols) in cols.external_final.iter_mut().enumerate() {
-        state = fill_external_round(&state, &constants.external_final[round], cols);
+    for (r, cols) in cols.external_final.iter_mut().enumerate() {
+        state = fill_external_round(&state, &constants.external_final[r], cols, requests);
+        round += 1;
+        states[round] = state;
     }
-    state
+    states
+}
+
+impl RoundConstants {
+    /// The constants of round `round`: a word per lane for an external
+    /// round, the first lane's for an internal one.
+    #[must_use]
+    pub fn of_round(&self, round: usize) -> [u32; WIDTH] {
+        if round < HALF_EXTERNAL_ROUNDS {
+            self.external_initial[round]
+        } else if round < HALF_EXTERNAL_ROUNDS + INTERNAL_ROUNDS {
+            let mut constants = [0u32; WIDTH];
+            constants[0] = self.internal[round - HALF_EXTERNAL_ROUNDS];
+            constants
+        } else {
+            self.external_final[round - HALF_EXTERNAL_ROUNDS - INTERNAL_ROUNDS]
+        }
+    }
+
+    /// Whether `round` is an external round.
+    #[must_use]
+    pub fn is_external(round: usize) -> bool {
+        !(HALF_EXTERNAL_ROUNDS..HALF_EXTERNAL_ROUNDS + INTERNAL_ROUNDS).contains(&round)
+    }
 }
 
 /// The output words of a filled permutation, read back from its columns.
@@ -655,8 +727,10 @@ mod tests {
             });
             let expected =
                 perm.permute(input.map(KoalaBear::from_u32)).map(|x| x.as_canonical_u32());
-            let output = fill_permutation(&input, &constants, cols);
+            let mut requests = Vec::new();
+            let output = fill_permutation(&input, &constants, cols, &mut requests);
             assert_eq!(output, expected);
+            assert_eq!(requests.len(), 2 * (WIDTH * 2 * HALF_EXTERNAL_ROUNDS + INTERNAL_ROUNDS));
             assert_eq!(output_of(cols), expected);
         }
         println!("permutation: {NUM_PERMUTATION_COLS} bits");

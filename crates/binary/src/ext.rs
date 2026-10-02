@@ -3,19 +3,21 @@
 //! An element is four words, `c_0 + c_1 X + c_2 X^2 + c_3 X^3` with
 //! `X^4 = 3`, so the product of `a` and `b` has coefficients
 //! `c_k = sum_{i+j=k} a_i b_j + 3 sum_{i+j=k+4} a_i b_j`.  Each `a_i b_j`
-//! is an integer product, each coefficient is a sum of those products with
-//! `3 P` taken as `P + 2P`, and each sum is reduced once.
+//! is reduced by the multiply table, each coefficient is a sum of those
+//! products with `3 P` taken as `P + 2P`, and each sum is reduced once.
 
 use core::array;
 
 use p3_air::AirBuilder;
 use p3_field::PrimeCharacteristicRing;
 
+use crate::machine::bits::request_mul;
+use crate::machine_builder::MachineBuilder;
 use crate::word::{
-    add_bits, add_carries_wide, bits_le_wide, eval_add, eval_product, eval_reduce, exprs, fill_add,
-    fill_product, fill_reduce, num_reduce_cols, AddCols, ProductCols, ReduceCols, Word, KB_BITS,
-    NUM_ADD_COLS, NUM_PRODUCT_COLS, PRODUCT_BITS,
+    add_bits, add_carries_wide, bits_le, bits_le_wide, eval_add, eval_reduce, exprs, fill_add,
+    fill_reduce, num_reduce_cols, AddCols, ReduceCols, Word, KB_BITS, KB_PRIME, NUM_ADD_COLS,
 };
+use crate::F;
 
 /// Words of an extension element.
 pub const EXT_DEGREE: usize = 4;
@@ -23,15 +25,18 @@ pub const EXT_DEGREE: usize = 4;
 /// The binomial constant: `X^4 = W`.
 pub const W: u64 = 3;
 
-/// Bits of a coefficient's sum of products, which is below `13 * 2^62`.
-pub const SUM_BITS: usize = 68;
+/// Bits of a coefficient's sum of reduced products, which is below `13 p`.
+pub const SUM_BITS: usize = 36;
 
 /// Terms a coefficient sums at most: one direct product and three wrapped
 /// products, each wrapped product as `P + 2P`.
 pub const TERMS: usize = 7;
 
-/// Bits of a coefficient's quotient by `p`, the sum being below `2^66`.
-pub const QUOTIENT_BITS: usize = 36;
+/// Bits of a coefficient's quotient by `p`, the sum being below `13 p`.
+pub const QUOTIENT_BITS: usize = 4;
+
+/// Bits of the reduction of a coefficient's sum.
+pub const REDUCE_BITS: usize = 40;
 
 /// An extension element as words.
 pub type ExtWord<T> = [Word<T>; EXT_DEGREE];
@@ -70,24 +75,26 @@ pub fn fill_ext_add(a: [u32; EXT_DEGREE], b: [u32; EXT_DEGREE], cols: &mut ExtAd
     }
 }
 
-/// The witness of an extension multiplication.
+/// The witness of an extension multiplication: the sixteen products of
+/// the words, each reduced by the multiply table, summed per coefficient
+/// and reduced once more.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct ExtMulCols<T> {
-    /// `products[i][j] = a_i * b_j` as integers.
-    pub products: [[ProductCols<T>; EXT_DEGREE]; EXT_DEGREE],
+    /// `products[i][j] = a_i * b_j mod p`, from the multiply table.
+    pub products: [[Word<T>; EXT_DEGREE]; EXT_DEGREE],
     /// The running sums of each coefficient's terms; the last is the sum.
     pub acc: [[[T; SUM_BITS]; TERMS - 1]; EXT_DEGREE],
     /// Carries of each running-sum addition.
     pub acc_carries: [[[T; SUM_BITS]; TERMS - 1]; EXT_DEGREE],
     /// Each coefficient's sum reduced; `reduce[k].out` is the result.
-    pub reduce: [ReduceCols<T, QUOTIENT_BITS, SUM_BITS>; EXT_DEGREE],
+    pub reduce: [ReduceCols<T, QUOTIENT_BITS, REDUCE_BITS>; EXT_DEGREE],
 }
 
 /// Columns of [`ExtMulCols`].
-pub const NUM_EXT_MUL_COLS: usize = EXT_DEGREE * EXT_DEGREE * NUM_PRODUCT_COLS
+pub const NUM_EXT_MUL_COLS: usize = EXT_DEGREE * EXT_DEGREE * KB_BITS
     + 2 * EXT_DEGREE * (TERMS - 1) * SUM_BITS
-    + EXT_DEGREE * num_reduce_cols(QUOTIENT_BITS, SUM_BITS);
+    + EXT_DEGREE * num_reduce_cols(QUOTIENT_BITS, REDUCE_BITS);
 
 /// The terms of coefficient `k` as `(i, j, shift)`: `a_i b_j` shifted by
 /// `shift` bits, a wrapped product appearing at shifts 0 and 1.
@@ -106,29 +113,35 @@ fn terms(k: usize) -> Vec<(usize, usize, usize)> {
     terms
 }
 
-/// `product` shifted up by `shift` bits over [`SUM_BITS`].
-fn shifted<AB: AirBuilder>(
-    product: &[AB::Expr; PRODUCT_BITS],
-    shift: usize,
-) -> [AB::Expr; SUM_BITS] {
+/// `word` shifted up by `shift` bits over [`SUM_BITS`].
+fn shifted<AB: AirBuilder>(word: &[AB::Expr; KB_BITS], shift: usize) -> [AB::Expr; SUM_BITS] {
     array::from_fn(|k| {
-        if k >= shift && k - shift < PRODUCT_BITS {
-            product[k - shift].clone()
+        if k >= shift && k - shift < KB_BITS {
+            word[k - shift].clone()
         } else {
             AB::Expr::ZERO
         }
     })
 }
 
-/// Constrain `cols.reduce[k].out` to be the `k`th coefficient of `a * b`.
-pub fn eval_ext_mul<AB: AirBuilder>(
+/// Constrain `cols.reduce[k].out` to be the `k`th coefficient of `a * b`,
+/// asking the multiply table for every product on rows where `active`.
+pub fn eval_ext_mul<AB: MachineBuilder<F = F>>(
     builder: &mut AB,
     a: &ExtExprs<AB>,
     b: &ExtExprs<AB>,
     cols: &ExtMulCols<AB::Var>,
+    active: AB::Expr,
 ) {
-    let products: [[[AB::Expr; PRODUCT_BITS]; EXT_DEGREE]; EXT_DEGREE] = array::from_fn(|i| {
-        array::from_fn(|j| eval_product(builder, &a[i], &b[j], &cols.products[i][j]))
+    let products: [[[AB::Expr; KB_BITS]; EXT_DEGREE]; EXT_DEGREE] = array::from_fn(|i| {
+        array::from_fn(|j| {
+            for bit in cols.products[i][j].iter() {
+                builder.assert_bool(*bit);
+            }
+            let product = exprs::<AB, KB_BITS>(&cols.products[i][j]);
+            request_mul(builder, &a[i], &b[j], &product, active.clone());
+            product
+        })
     });
     let zero: [AB::Expr; SUM_BITS] = array::from_fn(|_| AB::Expr::ZERO);
     for k in 0..EXT_DEGREE {
@@ -149,17 +162,21 @@ pub fn eval_ext_mul<AB: AirBuilder>(
     }
 }
 
-/// The witness of [`eval_ext_mul`] for `a * b`, written as bits, and the
-/// product.
+/// The witness of [`eval_ext_mul`] for `a * b`, the products it asks the
+/// multiply table for, and the product.
 pub fn fill_ext_mul(
     a: [u32; EXT_DEGREE],
     b: [u32; EXT_DEGREE],
     cols: &mut ExtMulCols<u8>,
+    requests: &mut Vec<(u32, u32)>,
 ) -> [u32; EXT_DEGREE] {
-    let mut products = [[0u64; EXT_DEGREE]; EXT_DEGREE];
+    let p = u64::from(KB_PRIME);
+    let mut products = [[0u32; EXT_DEGREE]; EXT_DEGREE];
     for i in 0..EXT_DEGREE {
         for j in 0..EXT_DEGREE {
-            products[i][j] = fill_product(a[i], b[j], &mut cols.products[i][j]);
+            products[i][j] = (u64::from(a[i]) * u64::from(b[j]) % p) as u32;
+            cols.products[i][j] = bits_le::<KB_BITS>(u64::from(products[i][j]));
+            requests.push((a[i], b[j]));
         }
     }
     array::from_fn(|k| {
@@ -220,7 +237,9 @@ mod tests {
         for (a, b) in samples {
             let expected = words(element(a) * element(b));
             assert_eq!(ext_mul(a, b), expected);
-            assert_eq!(fill_ext_mul(a, b, &mut cols), expected);
+            let mut requests = Vec::new();
+            assert_eq!(fill_ext_mul(a, b, &mut cols, &mut requests), expected);
+            assert_eq!(requests.len(), EXT_DEGREE * EXT_DEGREE);
             for reduce in &cols.reduce {
                 assert_eq!(reduce.lhs, reduce.rhs);
             }

@@ -13,6 +13,7 @@ pub mod alu_ext;
 pub mod bits;
 pub mod ledger;
 pub mod memory;
+pub mod mul;
 pub mod poseidon2;
 pub mod public_values;
 pub mod select;
@@ -37,7 +38,8 @@ use self::alu_ext::ExtAluAir;
 use self::bits::Cell;
 use self::ledger::LedgerAir;
 use self::memory::{MemoryConstAir, MemoryVarAir};
-use self::poseidon2::Poseidon2Air;
+use self::mul::MulAir;
+use self::poseidon2::{Permutations, Poseidon2ExternalAir, Poseidon2InternalAir, Poseidon2IoAir};
 use self::public_values::{public_value, PublicValuesAir};
 use self::select::SelectAir;
 use crate::config::{MachineConfig, MachineConfigError, MachineProof};
@@ -52,8 +54,11 @@ pub enum RecursionAir {
     BaseAlu(BaseAluAir),
     ExtAlu(ExtAluAir),
     Select(SelectAir),
-    Poseidon2(Box<Poseidon2Air>),
+    Poseidon2Io(Poseidon2IoAir),
+    Poseidon2External(Poseidon2ExternalAir),
+    Poseidon2Internal(Poseidon2InternalAir),
     PublicValues(PublicValuesAir),
+    Mul(MulAir),
 }
 
 impl RecursionAir {
@@ -67,8 +72,11 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.log_height(),
             Self::ExtAlu(air) => air.log_height(),
             Self::Select(air) => air.log_height(),
-            Self::Poseidon2(air) => air.log_height(),
+            Self::Poseidon2Io(air) => air.log_height(),
+            Self::Poseidon2External(air) => air.log_height(),
+            Self::Poseidon2Internal(air) => air.log_height(),
             Self::PublicValues(air) => air.log_height(),
+            Self::Mul(air) => air.log_height(),
         }
     }
 
@@ -82,8 +90,11 @@ impl RecursionAir {
             Self::BaseAlu(_) => "BaseAlu",
             Self::ExtAlu(_) => "ExtAlu",
             Self::Select(_) => "Select",
-            Self::Poseidon2(_) => "Poseidon2",
+            Self::Poseidon2Io(_) => "Poseidon2Io",
+            Self::Poseidon2External(_) => "Poseidon2External",
+            Self::Poseidon2Internal(_) => "Poseidon2Internal",
             Self::PublicValues(_) => "PublicValues",
+            Self::Mul(_) => "Mul",
         }
     }
 
@@ -96,8 +107,31 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.writes(),
             Self::ExtAlu(air) => air.writes(),
             Self::Select(air) => air.writes(),
-            Self::Poseidon2(air) => air.writes(),
-            Self::PublicValues(_) => Vec::new(),
+            Self::Poseidon2Io(air) => air.writes(),
+            Self::Poseidon2External(_)
+            | Self::Poseidon2Internal(_)
+            | Self::PublicValues(_)
+            | Self::Mul(_) => Vec::new(),
+        }
+    }
+
+    /// How many products the table asks for, fixed by the program.
+    fn mul_request_count(&self) -> usize {
+        match self {
+            Self::BaseAlu(air) => air.instruction_count(),
+            Self::ExtAlu(air) => 16 * air.instruction_count(),
+            Self::Poseidon2Io(air) => air.mul_request_count(),
+            _ => 0,
+        }
+    }
+
+    /// The products the table asks the multiply table for.
+    fn mul_requests(&self, record: &ExecutionRecord<KoalaBear>) -> Vec<(u32, u32)> {
+        match self {
+            Self::BaseAlu(air) => air.mul_requests(record),
+            Self::ExtAlu(air) => air.mul_requests(record),
+            Self::Poseidon2Io(air) => air.mul_requests(record),
+            _ => Vec::new(),
         }
     }
 
@@ -110,14 +144,22 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.written_values(record),
             Self::ExtAlu(air) => air.written_values(record),
             Self::Select(air) => air.written_values(record),
-            Self::Poseidon2(air) => air.written_values(record),
-            Self::PublicValues(_) => Vec::new(),
+            Self::Poseidon2Io(air) => air.written_values(record),
+            Self::Poseidon2External(_)
+            | Self::Poseidon2Internal(_)
+            | Self::PublicValues(_)
+            | Self::Mul(_) => Vec::new(),
         }
     }
 
     /// The witness of the table for `record`, the ledger's being the
-    /// written values.
-    fn main_table(&self, record: &ExecutionRecord<KoalaBear>, written: &[Cell]) -> Table<F> {
+    /// written values and the multiply table's the products asked for.
+    fn main_table(
+        &self,
+        record: &ExecutionRecord<KoalaBear>,
+        written: &[Cell],
+        requests: &[(u32, u32)],
+    ) -> Table<F> {
         match self {
             Self::Ledger(air) => air.main_table(written),
             Self::MemoryConst(air) => air.main_table(),
@@ -125,8 +167,11 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.main_table(record),
             Self::ExtAlu(air) => air.main_table(record),
             Self::Select(air) => air.main_table(record),
-            Self::Poseidon2(air) => air.main_table(record),
+            Self::Poseidon2Io(air) => air.main_table(record),
+            Self::Poseidon2External(air) => air.main_table(record),
+            Self::Poseidon2Internal(air) => air.main_table(record),
             Self::PublicValues(air) => air.main_table(record),
+            Self::Mul(air) => air.main_table(requests),
         }
     }
 }
@@ -140,8 +185,11 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => BaseAir::<X>::width(air),
             Self::ExtAlu(air) => BaseAir::<X>::width(air),
             Self::Select(air) => BaseAir::<X>::width(air),
-            Self::Poseidon2(air) => BaseAir::<X>::width(&**air),
+            Self::Poseidon2Io(air) => BaseAir::<X>::width(air),
+            Self::Poseidon2External(air) => BaseAir::<X>::width(air),
+            Self::Poseidon2Internal(air) => BaseAir::<X>::width(air),
             Self::PublicValues(air) => BaseAir::<X>::width(air),
+            Self::Mul(air) => BaseAir::<X>::width(air),
         }
     }
 
@@ -153,8 +201,11 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => BaseAir::<X>::preprocessed_width(air),
             Self::ExtAlu(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Select(air) => BaseAir::<X>::preprocessed_width(air),
-            Self::Poseidon2(air) => BaseAir::<X>::preprocessed_width(&**air),
+            Self::Poseidon2Io(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Poseidon2External(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Poseidon2Internal(air) => BaseAir::<X>::preprocessed_width(air),
             Self::PublicValues(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Mul(air) => BaseAir::<X>::preprocessed_width(air),
         }
     }
 
@@ -173,8 +224,11 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => air.preprocessed_trace(),
             Self::ExtAlu(air) => air.preprocessed_trace(),
             Self::Select(air) => air.preprocessed_trace(),
-            Self::Poseidon2(air) => air.preprocessed_trace(),
+            Self::Poseidon2Io(air) => air.preprocessed_trace(),
+            Self::Poseidon2External(air) => air.preprocessed_trace(),
+            Self::Poseidon2Internal(air) => air.preprocessed_trace(),
             Self::PublicValues(air) => air.preprocessed_trace(),
+            Self::Mul(air) => air.preprocessed_trace(),
         }
     }
 }
@@ -188,8 +242,11 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for RecursionAir {
             Self::BaseAlu(air) => air.eval(builder),
             Self::ExtAlu(air) => air.eval(builder),
             Self::Select(air) => air.eval(builder),
-            Self::Poseidon2(air) => air.eval(builder),
+            Self::Poseidon2Io(air) => air.eval(builder),
+            Self::Poseidon2External(air) => air.eval(builder),
+            Self::Poseidon2Internal(air) => air.eval(builder),
             Self::PublicValues(air) => air.eval(builder),
+            Self::Mul(air) => air.eval(builder),
         }
     }
 }
@@ -254,18 +311,23 @@ impl RecursionMachine {
             };
             return Err(MachineError::Unsupported(unsupported));
         }
+        let permutations = std::sync::Arc::new(Permutations::new(program));
         let tables = vec![
             RecursionAir::MemoryConst(MemoryConstAir::new(program)),
             RecursionAir::MemoryVar(MemoryVarAir::new(program)),
             RecursionAir::BaseAlu(BaseAluAir::new(program)),
             RecursionAir::ExtAlu(ExtAluAir::new(program)),
             RecursionAir::Select(SelectAir::new(program)),
-            RecursionAir::Poseidon2(Box::new(Poseidon2Air::new(program))),
+            RecursionAir::Poseidon2Io(Poseidon2IoAir::new(permutations.clone())),
+            RecursionAir::Poseidon2External(Poseidon2ExternalAir::new(permutations.clone())),
+            RecursionAir::Poseidon2Internal(Poseidon2InternalAir::new(permutations)),
             RecursionAir::PublicValues(PublicValuesAir::new(program)),
         ];
         let writes: Vec<(u32, u32)> = tables.iter().flat_map(RecursionAir::writes).collect();
+        let products = tables.iter().map(RecursionAir::mul_request_count).sum();
         let mut airs = vec![RecursionAir::Ledger(LedgerAir::new(&writes))];
         airs.extend(tables);
+        airs.push(RecursionAir::Mul(MulAir::new(products)));
 
         let main_shapes: Vec<TableShape> = airs
             .iter()
@@ -307,6 +369,8 @@ impl RecursionMachine {
     pub fn prove(&self, record: &ExecutionRecord<KoalaBear>) -> Result<MachineProof, MachineError> {
         let written: Vec<Cell> =
             self.airs.iter().flat_map(|air| air.written_values(record)).collect();
+        let requests: Vec<(u32, u32)> =
+            self.airs.iter().flat_map(|air| air.mul_requests(record)).collect();
         let public = Self::public_values(&PublicValuesAir::digest(record));
         let instances = ProverInstances::new(
             self.airs
@@ -314,7 +378,7 @@ impl RecursionMachine {
                 .map(|air| {
                     ProverInstance::new(
                         air,
-                        air.main_table(record, &written),
+                        air.main_table(record, &written, &requests),
                         &self.pk,
                         Self::public_of(air, &public),
                     )

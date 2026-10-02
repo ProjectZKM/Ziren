@@ -4,8 +4,9 @@
 //! Every operation is one check of `z = x + y` or `z = x * y` on operands
 //! chosen by the program: an add checks `out = in1 + in2`, a subtract checks
 //! `in1 = in2 + out`, a multiply `out = in1 * in2` and a divide
-//! `in1 = in2 * out`.  A row carries both checks' witnesses on its chosen
-//! operands, and the program's flags say which result the row binds.
+//! `in1 = in2 * out`.  A row carries the sum's witness and asks the
+//! multiply table for the product, and the program's flags say which
+//! result the row binds.
 
 use core::borrow::{Borrow, BorrowMut};
 
@@ -21,12 +22,11 @@ use zkm_recursion_core::{
 };
 
 use super::bits::{
-    cell_tuple, dense, log_height_for, single_block, BitRows, Cell, ADDRESS_BITS, MEMORY, WRITE,
+    cell_tuple, dense, log_height_for, request_mul, single_block, BitRows, Cell, ADDRESS_BITS,
+    MEMORY, WRITE,
 };
 use crate::machine_builder::MachineBuilder;
-use crate::word::{
-    bits_le, eval_add, eval_mul, exprs, fill_add, fill_mul, AddCols, MulCols, Word, KB_BITS,
-};
+use crate::word::{bits_le, eval_add, exprs, fill_add, AddCols, Word, KB_BITS, KB_PRIME};
 use crate::F;
 
 /// The program's part of a row, shared with the extension ALU.
@@ -69,8 +69,8 @@ pub struct BaseAluCols<T> {
     pub y: Word<T>,
     /// `x + y mod p`.
     pub add: AddCols<T>,
-    /// `x * y mod p`.
-    pub mul: MulCols<T>,
+    /// `x * y mod p`, from the multiply table.
+    pub product: Word<T>,
 }
 
 /// Columns of [`AluPrep`].
@@ -113,6 +113,37 @@ pub struct BaseAluAir {
     direct: Vec<bool>,
     /// `(address, reads)` of every result, in order.
     outputs: Vec<(u32, u32)>,
+}
+
+/// The multiply table rows a record asks for: one per real row.
+impl BaseAluAir {
+    /// The products the table asks for, `(x, y)` per instruction.
+    #[must_use]
+    pub fn mul_requests(&self, record: &ExecutionRecord<KoalaBear>) -> Vec<(u32, u32)> {
+        record
+            .base_alu_events
+            .iter()
+            .zip(&self.direct)
+            .map(|(event, &direct)| {
+                operands(
+                    event.in1.as_canonical_u32(),
+                    event.in2.as_canonical_u32(),
+                    event.out.as_canonical_u32(),
+                    direct,
+                )
+            })
+            .collect()
+    }
+}
+
+/// The operands the checks run on: `(in1, in2)` when `direct`, else
+/// `(in2, out)`.
+fn operands(in1: u32, in2: u32, out: u32, direct: bool) -> (u32, u32) {
+    if direct {
+        (in1, in2)
+    } else {
+        (in2, out)
+    }
 }
 
 impl BaseAluAir {
@@ -163,6 +194,12 @@ impl BaseAluAir {
         self.log_height
     }
 
+    /// The instructions of the table.
+    #[must_use]
+    pub fn instruction_count(&self) -> usize {
+        self.outputs.len()
+    }
+
     /// The writes `(address, reads)` of the table that are read, in order.
     #[must_use]
     pub fn writes(&self) -> Vec<(u32, u32)> {
@@ -183,7 +220,7 @@ impl BaseAluAir {
     }
 
     /// The witness: every instruction's operands, result and checks; the
-    /// rows past the program check `0 + 0` and `0 * 0`.
+    /// rows past the program check `0 + 0` and ask for nothing.
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
         assert_eq!(record.base_alu_events.len(), self.outputs.len(), "one event per instruction");
@@ -216,11 +253,12 @@ pub fn fill_row(in1: u32, in2: u32, out: u32, direct: bool, row: &mut [u8]) {
     cols.in1 = bits_le::<KB_BITS>(u64::from(in1));
     cols.in2 = bits_le::<KB_BITS>(u64::from(in2));
     cols.out = bits_le::<KB_BITS>(u64::from(out));
-    let (x, y) = if direct { (in1, in2) } else { (in2, out) };
+    let (x, y) = operands(in1, in2, out, direct);
     cols.x = bits_le::<KB_BITS>(u64::from(x));
     cols.y = bits_le::<KB_BITS>(u64::from(y));
     fill_add(x, y, &mut cols.add);
-    fill_mul(x, y, &mut cols.mul);
+    let product = u64::from(x) * u64::from(y) % u64::from(KB_PRIME);
+    cols.product = bits_le::<KB_BITS>(product);
 }
 
 impl<X: Field> BaseAir<X> for BaseAluAir {
@@ -259,14 +297,18 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for BaseAluAir {
                 direct.clone() * local.in2[i] + inverse.clone() * local.out[i],
             );
         }
+        for bit in local.product.iter() {
+            builder.assert_bool(*bit);
+        }
         let x = exprs::<AB, KB_BITS>(&local.x);
         let y = exprs::<AB, KB_BITS>(&local.y);
         eval_add(builder, &x, &y, &local.add);
-        eval_mul(builder, &x, &y, &local.mul);
+        let product = exprs::<AB, KB_BITS>(&local.product);
+        request_mul(builder, &x, &y, &product, prep_local.is_real.into());
         for i in 0..KB_BITS {
             let z = direct.clone() * local.out[i] + inverse.clone() * local.in1[i];
             builder.when(prep_local.binds_add).assert_eq(local.add.out[i], z.clone());
-            builder.when(prep_local.binds_mul).assert_eq(local.mul.reduce.out[i], z);
+            builder.when(prep_local.binds_mul).assert_eq(local.product[i], z);
         }
 
         let in1 = exprs::<AB, KB_BITS>(&local.in1);
