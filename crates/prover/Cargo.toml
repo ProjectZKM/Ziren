@@ -98,6 +98,10 @@ name = "check_vk_coverage"
 path = "scripts/check_vk_coverage.rs"
 
 [[bin]]
+name = "prove_dump"
+path = "scripts/prove_dump.rs"
+
+[[bin]]
 name = "find_maximal_shapes"
 path = "scripts/find_maximal_shapes.rs"
 

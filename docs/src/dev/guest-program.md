@@ -95,6 +95,16 @@ fn main() {
 }
 ```
 
+The `cc` crate compiles for the guest target, so it needs a C compiler that emits MIPS32r2 objects; the host's default `cc` emits objects the guest linker rejects as incompatible. Without a MIPS cross compiler, clang works when it is given the guest target's ABI (soft float, no abicalls, static relocation):
+
+```bash
+FLAGS="--target=mipsel-unknown-none-elf -march=mips32r2 -msoft-float -mno-abicalls -fno-pic -ffreestanding"
+export CC_mipsel_zkm_zkvm_elf=clang CXX_mipsel_zkm_zkvm_elf=clang++ AR_mipsel_zkm_zkvm_elf=llvm-ar
+export CFLAGS_mipsel_zkm_zkvm_elf="$FLAGS" CXXFLAGS_mipsel_zkm_zkvm_elf="$FLAGS -fno-exceptions -fno-rtti"
+```
+
+The same settings build the `bitcoin` example, whose `secp256k1-sys` dependency compiles C.
+
 `add.cpp`:
 
 ```C
