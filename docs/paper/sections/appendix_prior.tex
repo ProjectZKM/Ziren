@@ -1,0 +1,32 @@
+\section{Results used from prior work}
+\label{sec:app-prior}
+
+Table~\ref{tab:prior} lists each result proved elsewhere that this paper uses, with its number in the source; where a result is specialised, the section using it says how.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Results imported from prior work.}
+\label{tab:prior}
+\begin{tabular}{@{}p{0.34\textwidth}p{0.3\textwidth}p{0.26\textwidth}@{}}
+\toprule
+Result & Source & Used in \\
+\midrule
+Basic jagged reduction, soundness $2m/|\EF|$ & \citep[Thm.~1.4]{jagged-pcs} & Theorem~\ref{thm:jagged} \\
+Jagged assist; batch evaluation & \citep[Thm.~1.5, Lemma~5.1]{jagged-pcs} & Theorem~\ref{thm:jagged-assist} \\
+Indicator as a sum over columns & \citep[Claim~3.2.1, Eq.~(5)]{jagged-pcs} & \S\ref{sec:pcs-jagged-assist} \\
+Width-four branching program for $g$ & \citep[Claim~3.2.2]{jagged-pcs} & \S\ref{sec:pcs-jagged-assist} \\
+Evaluating a read-once branching program's extension & \citep[Lemma~4.2]{jagged-pcs}, after Holmgren and Rothblum~\citep{hr18} & \S\ref{sec:pcs-jagged-assist} \\
+Sumcheck for a product of multilinears & \citep[Lemma~2.3]{jagged-pcs} & \S\ref{sec:pcs-jagged} \\
+Round-by-round soundness of \WHIR{} & \citep{whir} & \S\ref{sec:iopp-soundness} \\
+Round-by-round soundness of sumcheck; Fiat--Shamir compilation & \citep{bcs16,chiesa-yogev} & Theorem~\ref{thm:composition} \\
+Hash-collision term of the compilation & \citep[Cor.~4.2.6]{swirl} & Theorem~\ref{thm:composition} \\
+Integer reading of balanced \LogUp{} buses & \citep[Cor.~3.6]{openvm-logup} & Definition~\ref{def:bus} \\
+Limbs determine integers & \citep[Thm.~1]{cairo} & Lemma~\ref{lem:limbs} \\
+Offline memory checking & \citep{blum1994,spice} & Lemma~\ref{lem:memory} \\
+Functional IOPs and the commit-and-open compiler & \citep{funky26} & Definition~\ref{def:fiop}, \S\ref{sec:iopp-layers} \\
+Fiat--Shamir against quantum adversaries; quantum collision search & \citep{cms19,bht98} & \S\ref{sec:pq} \\
+Multiset hashing; on an elliptic curve & \citep{multiset-hash,bellare-micciancio,ec-multiset-hash} & \S\ref{sec:air-global}; the security argument of \S\ref{sec:air-digest-security} is not inherited \\
+\bottomrule
+\end{tabular}
+\end{table}

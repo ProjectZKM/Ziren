@@ -424,6 +424,16 @@ impl SysLinuxChip {
         builder.when(is_write).assert_word_zero(*local.output.value());
     }
 
+    /// A Linux syscall none of the decoders recognizes is a no-op: `eval` sets
+    /// `is_nop = is_real − (is_mmap + is_clone + is_exit_group + is_brk + is_fnctl + is_read +
+    /// is_write)`, so every other syscall number, and not only the no-op handlers the executor
+    /// registers, is accepted here with a zero result and a zero output word.
+    ///
+    /// This is wider than the executor, which returns `ExecutionError::UnsupportedSyscall` for a
+    /// number it has no handler for, so an honest trace never contains such a row.  A proof with
+    /// one proves only that the syscall returned 0 and wrote nothing, which is the no-op
+    /// semantics, so the statement stays sound; pinning the accepted numbers to the executor's
+    /// set would make the chip reject what the executor rejects.
     fn eval_nop<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,

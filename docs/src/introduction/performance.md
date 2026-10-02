@@ -1,101 +1,71 @@
 # Performance
 
 ## Metrics
-To evaluate a zkVM’s performance, two primary metrics are considered: `Efficiency` and `Cost`.
 
-**Efficiency** 
+Three quantities describe a zkVM's performance:
 
-The `Efficiency`, or cycles per instruction, means how many cycles the zkVM can prove in one second. One cycle is usually mapped to `one` MIPS instruction in the zkVM. 
+- **Instruction efficiency**: the committed trace area (cells) and bus interactions one executed instruction costs. It is a property of the arithmetization, independent of the hardware.
+- **Proving throughput**: guest cycles proved per second on named hardware, from reading the input to writing the compressed proof. It is a rate, not a clock frequency. One cycle is one executed MIPS instruction; a precompile call is one cycle and many rows of its chip.
+- **Proof size**: the bytes of the compressed proof a verifier reads.
 
-For each MIPS instruction in a shard, it goes through two main phases: the execution phase and the proving phase (to generate the proof). 
+Proving cost follows from throughput and the price of the hardware: the cost of a proof is its proving time multiplied by the cost per second of the machine. [ethproofs.org](https://ethproofs.org/) reports proving time, proof size and cost per Mgas for Ethereum mainnet blocks proved by each zkVM.
 
-In the execution phase, the MIPS VM (Emulator) reads the instruction at the program counter (PC) from the program image and executes it to generate execution traces (events). These traces are converted into a matrix for the proving phase. The number of traces depends on the program's instruction sequence - the shorter the sequence, the more efficient the execution and proving.
+To reproduce measurements on your own hardware, use the [zkvm-benchmarks](https://github.com/ProjectZKM/zkvm-benchmarks) suite.
 
-In the proving phase, the Ziren prover uses a Polynomial Commitment Scheme (PCS) — specifically FRI — to commit the execution traces. The proving complexity is determined by the matrix size of the trace table.
+## Measurements
 
-Therefore, the instruction sequence size and prover efficiency directly impact overall proving performance.
+The figures below are from the Ziren V2.0 paper (`docs/paper`). The workload is Ethereum mainnet blocks executed by a MIPS32 build of the `reth` execution client. The hardware is NVIDIA RTX 5090 GPUs (32 GB) in a host with an AMD EPYC 9355 processor and 925 GB of memory.
 
-**Cost**
+The proving times and proof size were measured on revisions of the v2.0.0 branch that precede the release in two respects: the Poseidon2 permutation used 13 partial rounds instead of the released 20, and the lookup challenge was not ground. The released configuration therefore differs from these numbers by an unmeasured amount.
 
-Proving cost is a more comprehensive metric that measures the total expense of proving a specific program. It can be approximated as: `Prover Efficiency * Unit`, Where Prover Efficiency reflects execution performance, and Unit Price refers to the cost per second of the server running the prover. 
+### Instruction efficiency
 
-For example, [ethproofs.org](https://ethproofs.org/) provides a platform for all zkVMs to submit their Ethereum mainnet block proofs, which includes the proof size, proving time and proving cost per Mgas (`Efficiency * Unit / GasUsed`, where the GasUsed is of unit Mgas).
+Committed cells and bus interactions for one row of the most frequent chips. The frame (fetch, operand reads, register write and the `(pc, next_pc)` pair) is shared by every instruction chip:
 
+| Chip | cells: frame | cells: own | cells: row | interactions: row |
+|------|-------------:|-----------:|-----------:|------------------:|
+| `AddSubImm` | 29 | 4 | 33 | 16 |
+| `AddSub` | 32 | 4 | 36 | 20 |
+| `Bitwise` | 32 | 5 | 37 | 24 |
+| `Lt` | 32 | 18 | 50 | 23 |
+| `ShiftLeftImm` | 26 | 19 | 45 | 20 |
+| `ShiftRight` | 32 | 57 | 89 | 45 |
+| `Branch` | 29 | 27 | 56 | ≤ 25 |
+| `LoadWord` | 29 | 19 | 48 | 25 |
+| `StoreWord` | 29 | 23 | 52 | 25 |
+| `LoadNarrow` | 29 | 30 | 59 | 26 |
+| `Mul` | 32 | 42 | 74 | 42 |
+| `DivRem` | 32 | 131 | 163 | 64 |
 
-## zkVM benchmarks
+Over a whole block the cost per instruction is higher, mainly because of the per-shard memory-argument rows. Block 25,955,640 (495.6 million cycles) commits 29.2 G cells and 12.8 G (row, interaction) pairs: 59.5 cells and 26.2 pairs per executed instruction. The cross-shard `Global` chip holds 15% of the area (8.9 cells per instruction), because every word a shard touches costs two of its rows. The figure depends on the workload: a block that uses more precompiles has more cells per cycle.
 
-To facilitate the fairest possible comparison among different zkVMs, we provide the [zkvm-benchmarks](https://github.com/ProjectZKM/zkvm-benchmarks)  suite, enabling anyone to reproduce the performance data.
+### Proving throughput
 
+One RTX 5090 proves a 288-million-cycle block at 5.9 MHz. Multi-GPU results, on warm wall-clock time of three consecutive proofs:
 
-## Performance of Ziren
+| Block (guest cycles) | 1 GPU (s) | 2 GPUs (s) | 4 GPUs (s) | 1 GPU (MHz) | 2 GPUs (MHz) | 4 GPUs (MHz) |
+|----------------------|----------:|-----------:|-----------:|------------:|-------------:|-------------:|
+| 420 M | 65.9 | 34.3 | 21.0 | 6.4 | 12.2 | 20.0 |
+| 530 M | 84.3 | 44.7 | 26.5 | 6.3 | 11.9 | 20.0 |
+| 912 M | 124.3 | 65.0 | 38.0 | 7.3 | 14.0 | 24.0 |
 
-The performance of Ziren on an AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge) instance, a CPU-based server, is presented below:
+Four GPUs reach 3.1 to 3.3 times the throughput of one. The gap to linear scaling is the serial recursion tail over the last shards and the start-up interval before every GPU has a shard.
 
-Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - Ziren)/Ziren`. 
+On a GPU, the lookup argument (LogUp-GKR) takes 42% of kernel time and WHIR commitment and opening 19%, in a ten-shard profile. The lookup cost scales with (row, interaction) pairs, so memory instructions, which carry 25 to 26 interactions per row, account for 47% of all pairs.
 
+### Execution
 
-**Fibonacci**
+On one core of an AMD EPYC 9355:
 
-| n      | ROVM 2.0.1 | Ziren 0.3 | Ziren 1.0 | SP1 4.1.1 | Rate  |
-|--------|-------------|--------|--------|-----------|--------|
-| 100    | 1691        | 6478   | 1947   | 5828      | 199.33 |
-| 1000   | 3291        | 8037   | 1933   | 5728      | 196.32 |
-| 10000  | 12881       | 44239  | 2972   | 7932      | 166.89 |
-| 58218  | 64648       | 223534 | 14985  | 31063     | 107.29 |
+| Executor | Rate |
+|----------|-----:|
+| JIT compiler, once compiled (496 M-cycle block) | 198 MHz |
+| JIT compiler, including its compilation pass | 166 MHz |
+| Interpreter, without the event record | 40.6 MHz |
+| Interpreter, with the event record | 14.6 MHz |
 
-**sha2**
+With one GPU, execution does not limit proving. With several GPUs fed by one host, each GPU worker re-executes the shard it proves.
 
-| Byte Length | ROVM 2.0.1 | Ziren 0.3 | Ziren 1.0 | SP1 4.1.1 | Rate  |
-|-------------|-------------|--------|--------|-----------|--------|
-| 32          | 3307        | 7866   | 1927   | 5931      | 207.78 |
-| 256         | 6540        | 8318   | 1913   | 5872      | 206.95 |
-| 512         | 6504        | 11530  | 1970   | 5970      | 203.04 |
-| 1024        | 12972       | 13434  | 2192   | 6489      | 196.03 |
-| 2048        | 25898       | 22774  | 2975   | 7686      | 158.35 |
+### Proof size
 
-**sha3**
-
-| Byte Length | ROVM 2.0.1 | Ziren 0.3 | Ziren 1.0 | SP1 4.1.1 | Rate  |
-|-------------|-------------|--------|--------|-----------|--------|
-| 32          | 3303        | 7891   | 1972   | 5942      | 201.31 |
-| 256         | 6487        | 10636  | 2267   | 5909      | 160.65 |
-| 512         | 12965       | 13015  | 2225   | 6580      | 195.73 |
-| 1024        | 13002       | 21044  | 3283   | 7612      | 131.86 |
-| 2048        | 26014       | 43249  | 4923   | 10087     | 104.89 |
-
-Proving with precompile:
-
-| Byte Length | Ziren 1.0 | SP1 4.1.1 | Rate  |
-|-------------|--------|-----------|-------|
-| 32          | 646    | 980       | 51.70 |
-| 256         | 634    | 990       | 56.15 |
-| 512         | 731    | 993       | 35.84 |
-| 1024        | 755    | 1034      | 36.95 |
-| 2048        | 976    | 1257      | 28.79 |
-
-**big-memory**
-
-| Value | ROVM 2.0.1 | Ziren 0.3 | Ziren 1.0 | SP1 4.1.1 | Rate  |
-|-------|-------------|---------|--------|-----------|-------|
-| 5     | 78486       | 199344  | 21218  | 36927     | 74.03 |
-
-**sha2-chain**
-
-| Iterations | ROVM 2.0.1 | Ziren 0.3 | Ziren 1.0 | SP1 4.1.1 | Rate  |
-|------------|-------------|---------|--------|-----------|-------|
-| 230        | 53979       | 141451  | 8756   | 15850     | 81.01 |
-| 460        | 104584      | 321358  | 17789  | 31799     | 78.75 |
-
-**sha3-chain**
-
-| Iterations | ROVM 2.0.1 | Ziren 0.3 | Ziren 1.0 | SP1 4.1.1 | Rate  |
-|------------|-------------|----------|--------|-----------|-------|
-| 230        | 208734      | 718678   | 36205  | 39987     | 10.44 |
-| 460        | 417773      | 1358248  | 68488  | 68790     | 0.44  |
-
-Proving with precompile:
-
-| Iterations | Ziren 1.0 | SP1 4.1.1 | Rate  |
-|------------|----------|-----------|-------|
-| 230        | 3491     | 4277      | 22.51 |
-| 460        | 6471     | 7924      | 22.45 |
+The compressed proof is 603 KiB (617,618 bytes in an instrumented run) and does not grow with the length of the execution. Openings of the first WHIR oracle account for 79% of it. Groth16 and PLONK proofs wrapped from it are constant-size SNARKs for on-chain verification.

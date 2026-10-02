@@ -1,87 +1,29 @@
 # Prover Architecture
 
-Ziren zkVM’s prover is built on a scalable, modular, and highly parallelizable architecture that reimagines end-to-end zero-knowledge proof generation for complex programs. The system leverages four tightly-coupled components—**Runtime Executor**, **Machine Prover**, **STARK Aggregation**, and **STARK-to-SNARK Adapter**—to deliver high-throughput proving, succinct on-chain verification, and exceptional developer flexibility.
+The Ziren prover turns one execution of a guest ELF into a proof in four stages. Each stage is a function of `ZKMProver` in `crates/prover/src/lib.rs`, and the SDK calls them in this order:
 
-### 1. Runtime Executor
+1. **Execute and prove shards** (`prove_core`). The executor runs the program and cuts the execution into shards. Each shard's events become chip traces, and each shard gets its own shard proof (see [STARK Protocol](../stark.md)). The result is a `ZKMCoreProof`, a list of shard proofs.
+2. **Compress** (`compress`). A recursion tree verifies all shard proofs, and any deferred proofs, and reduces them to one recursion proof over the whole execution (see [STARK Aggregation](./stark-aggregation.md) and [Recursive STARK](./recursive-stark.md)).
+3. **Shrink and wrap** (`shrink`, `wrap_bn254`). The compressed proof is verified by a fixed-shape shrink program and then by a wrap program. The wrap program is proved with a BN254-friendly hash so that a SNARK can verify it.
+4. **SNARK** (`wrap_groth16_bn254`, `wrap_plonk_bn254`, `wrap_dvsnark_bn254`). A gnark circuit verifies the wrap proof and produces a Groth16, PLONK or designated-verifier SNARK over BN254 (see [STARK to SNARK](./stark-to-snark.md)).
 
-At the heart of the Ziren prover is the **Runtime Executor**, which orchestrates program execution, manages state transitions, and partitions computation into shards for efficient parallel processing. The workflow consists of:
+The SDK proof kinds stop at different stages: `core` after stage 1, `compressed` after stage 2, and `groth16`, `plonk` or `dvsnark` after stage 4.
 
-- **Instruction Stream Partitioning**:
-    
-    The executor splits compiled program binaries (ELF files) into fixed-size execution shards. Each shard represents a self-contained computation slice, enabling pipelined, parallelized execution.
-    
-- **Event-Driven Constraint Generation**:
-    
-    As each instruction executes, the runtime dynamically emits algebraic constraints capturing the semantics of register states, memory operations, control flow, and system events.
-    
-- **Multiset Hash State Transitions**:
-    
-    Memory consistency and integrity are preserved across shards through cryptographically secure multiset hashing, ensuring tamper-proof execution continuity.
-    
-- **Checkpoint & Trace Management**:
-    
-    The executor periodically checkpoints the global execution state, allowing for robust recovery, trace replay, and efficient shard-wise proof generation.
-    
+## Execution and sharding
 
-This parallelism and modularity provide a robust foundation for high-performance zero-knowledge proof workflows.
+The executor (`crates/core/executor`) interprets the MIPS32r2 program and records events: one per executed instruction, memory access, syscall and precompile call. It closes the current shard and starts a new one when any of these limits is reached:
 
-### 2. Machine Prover
+- the cycle budget (`shard_size`);
+- the per-shard clock, so that every timestamp stays below the \\( 2^{26} \\) range the memory argument checks;
+- the estimated trace area of the shard, in cells;
+- the height of the tallest chip, which must stay below \\( 2^{22} \\) rows, the size the recursion verifier is built for.
 
-Once shards and execution traces are produced, the **Machine Prover** takes over, generating STARK proofs for each shard in isolation. This stage features:
+A shard is never closed in front of a delay slot. Precompile events are moved into separate precompile shards, and the memory initialization and finalization events of the whole execution are placed in the last shards. Each shard records its public values: start and end `pc`, shard and execution-shard numbers, the memory address ranges it initialized and finalized, the committed-value and deferred-proof digests, the exit code and its global digest.
 
-- **KoalaBear Field Optimization**:
-    
-    All arithmetic and constraint evaluations are performed in a custom, highly efficient field (KoalaBear), minimizing circuit complexity and maximizing throughput.
-    
-- **Poseidon2-based Merkle Matrix Commitment**:
-    
-    The system commits to all polynomial traces using a Merkle Matrix Commitment Scheme (MMCS), leveraging the Poseidon2 hash for both speed and post-quantum security.
-    
-- **FRI-based Low-Degree Testing**:
-    
-    Soundness is guaranteed by advanced Fast Reed-Solomon IOPP (FRI) protocols, providing strong assurance of trace integrity with compact commitments.
-    
-- **Concurrent Proof Generation**:
-    
-    Proving tasks for all shards are executed in parallel, fully utilizing available CPU cores and significantly reducing end-to-end proving time compared to sequential approaches.
-    
+## Shard proofs
 
-Together, these components deliver high-speed, secure, and scalable zero-knowledge proof generation for arbitrary program logic.
+Shard proofs are independent of each other, so they are generated in parallel. Every constraint between shards is a public value or a message on the global bus, and the recursion checks them. Trace generation and proving can run on the CPU prover or on GPUs.
 
-### 3. STARK Aggregation
+## Recursion and SNARK
 
-Following independent proof generation, **STARK Aggregation** recursively compresses multiple shard proofs into a single, compact STARK proof. The aggregation process involves:
-
-- **Proof Normalization & Context Bridging**:
-    
-    Shard proofs are converted into a uniform, recursion-friendly format, with mechanisms to preserve and bridge execution context across shard boundaries.
-    
-- **Recursive Composition Engine**:
-    
-    The aggregation system recursively combines proofs in multiple layers. The base layer ingests raw shard proofs, performing initial verification and aggregation. Intermediate layers employ “2-to-1” recursive circuits to further compress certificates, and the final composition step yields a single, globally-valid STARK proof.
-    
-- **Batch Optimization**:
-    
-    Proofs are batched for optimal parallel processing, minimizing aggregation time and maximizing throughput for large-scale computations.
-    
-
-This multi-phase approach ensures that even highly parallel and fragmented computations can be succinctly and efficiently verified as a single cryptographic object.
-
-### 4. STARK-to-SNARK Adapter
-
-To enable efficient and universally compatible on-chain verification, Ziren incorporates a **STARK-to-SNARK Adapter** that transforms the final STARK proof into a Groth16-based SNARK. This pipeline includes:
-
-- **Field Adaptation & Circuit Shrinkage**:
-    
-    Aggregated STARK proofs, originally constructed over the KoalaBear field, are recursively transformed into the BN254-friendly field suitable for Groth16. The proof is compressed and converted in a way that preserves validity while optimizing for size.
-    
-- **SNARK Wrapping**:
-    
-    The SNARK wrapping process generates a Groth16-compatible circuit, packages the transformed proof using BN254 elliptic curve primitives, and produces both the final proof and its verification key.
-    
-- **On-Chain Optimization**:
-    
-    The resulting Groth16 proof is succinct, supports constant-time verification (O(1)), and can be directly verified by Ethereum and other EVM-based blockchains using standard pairing checks.
-    
-
-This dual-proof pipeline enables Ziren to combine the scalability and transparency of STARKs with the succinctness and universality of SNARKs, making advanced cryptographic verifiability available for all blockchain applications.
+The recursion machine is a separate STARK machine (`RecursionAir`) over KoalaBear. It runs recursion programs, which are verifiers of shard proofs compiled to the recursion machine's instruction set, and proves their execution with the same shard argument. Each proof it produces is again a shard proof, so recursion proofs can be verified recursively. The final wrap proof uses the same machine with a Poseidon2 hash over BN254, which the gnark circuit can check.

@@ -199,6 +199,21 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
                 sum_checker_y,
                 SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO),
             );
+            builder.mark_gadget("septic_add", || {
+                let current =
+                    if i == 0 { initial_digest.clone() } else { ith_cumulative_sum(i - 1) };
+                let coords = |p: SepticCurve<AB::Expr>| -> Vec<AB::Expr> {
+                    p.x.0.into_iter().chain(p.y.0).collect()
+                };
+                (
+                    local_is_real[i].into(),
+                    vec![
+                        coords(ith_cumulative_sum(i)),
+                        coords(current),
+                        coords(ith_point_to_add(i)),
+                    ],
+                )
+            });
 
             let denominator = ith_point_to_add(i).x - current_sum.x.clone();
             let denominator_inv = SepticExtension::<AB::Expr>::from_base_fn(|j| {

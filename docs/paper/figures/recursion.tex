@@ -12,7 +12,7 @@
                line width=0.55pt},
   root/.style={comp, draw=zirenteal!90, fill=zirenteal!22, minimum width=3.0cm},
   a/.style={-{Latex[length=1.8mm]}, line width=0.6pt, zirenslate!85},
-  cond/.style={font=\scriptsize, zirenslate, align=center, inner sep=1pt},
+  cond/.style={font=\scriptsize, black!75, align=center, inner sep=1pt},
   side/.style={rectangle, rounded corners=2pt, draw=zirenslate!45, fill=zirenlight,
                align=left, font=\scriptsize, inner sep=5pt, line width=0.5pt},
   band/.style={font=\scriptsize\scshape, black!55, anchor=east, inner sep=2pt},
@@ -42,22 +42,23 @@
 
 % ---- what the compose node checks on its children
 \node[cond, anchor=west] at (6.15,1.25)
-  {each child's key lies in the\\allowlist at $\mathsf{root}$};
+  {first-shard leaf:\\$\mathsf{entry}=\mathsf{start}(\mathsf{vk})$};
 \draw[a, zirenslate!55] (6.05,1.25) -- (l2.east);
 
 \node[cond, anchor=west] at (6.15,2.6)
-  {$\mathsf{exit}_i=\mathsf{entry}_{i+1}$, cursors tile,\\
-   $D=\sum_i D_i$, and $\mathsf{vk}$, $h$,\\
+  {children's keys in the allowlist;\\
+   shards consecutive, $\mathsf{exit}_i=\mathsf{entry}_{i+1}$,\\
+   cursors tile, $D=\sum_i D_i$; $\mathsf{vk}$, $h$,\\
    the exit code and $\mathsf{root}$ agree};
 \draw[a, zirenslate!55] (6.05,2.6) -- (c.east);
 
 \node[cond, anchor=west] at (6.15,3.95)
-  {cursors empty, $D=O$,\\exit code $0$};
+  {starts at shard $1$, halted,\\cursors empty, $D=O$,\\exit code $0$};
 \draw[a, zirenslate!55] (6.05,3.95) -- (r.east);
 
 % ---- the tuple every node carries
 \node[side, anchor=north west] at (-1.35,-0.62)
-  {$\mathsf{pv}=(\mathsf{vk},\ \mathsf{entry},\ \mathsf{exit},\
-    \mathsf{cur}_{\mathrm{in}},\ \mathsf{cur}_{\mathrm{out}},\ D,\ h,\ \mathsf{root})$\quad
+  {$\mathsf{pv}=(\mathsf{vk},\ \mathsf{sh}_{\mathrm{in}},\ \mathsf{sh}_{\mathrm{out}},\ \mathsf{entry},\ \mathsf{exit},\
+    \mathsf{cur}_{\mathrm{in}},\ \mathsf{cur}_{\mathrm{out}},\ D,\ h,\ \mathsf{code},\ \mathsf{root})$\quad
    carried by every node, and by the proof that leaves the block};
 \end{tikzpicture}

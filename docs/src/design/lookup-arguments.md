@@ -1,84 +1,39 @@
 # Lookup Arguments
 
-Lookup arguments allow generating cryptographic proofs showing that elements from a witness vector belong to a predefined table (public or private). Given:
-- Table \\(T = \\{t_i\\}\\), where \\(i=0,…,N−1 \\) (public/private)
-- Lookups \\(F = \\{f_j\\}\\), where \\(j=0,…,M−1 \\) (private witness)
-
-The protocol proves  \\(F \subseteq T \\), ensuring all witness values adhere to permissible table entries. 
-
-Since its inception, lookup protocols have evolved through continuous [optimizations](https://link.springer.com/chapter/10.1007/978-3-030-03326-2_20). Ziren implements the [​LogUp](https://eprint.iacr.org/2023/1518) protocol to enable efficient proof generation.
+A lookup argument proves that every value a table *looks up* appears in another table. Ziren uses one general form of it for every relation between rows and between chips: each chip row *sends* or *receives* tuples on named buses, and a single argument per shard proves that on every bus the multiset of sent tuples equals the multiset of received tuples. A byte range check, an instruction fetch, a memory access and the hand-off from one instruction to the next are all instances. See [State Machine](./chips/state-machine.md) for the list of buses.
 
 ## LogUp
 
-LogUp employs logarithmic derivatives for linear-complexity verification. For a randomly chosen challenge \\(\alpha\\), the relation \\(F \subseteq T\\) holds with high probability when: 
-\\[ \sum_{i=0}^{M-1} \frac{1}{f_i - \alpha} = \sum_{i=0}^{N-1} \frac{m_i}{t_i - \alpha} \\]
-, where \\(m_i\\) denotes the multiplicity of \\(t_i\\) in \\(F\\). See [full protocol details](https://eprint.iacr.org/2022/1530.pdf).
+Ziren uses the logarithmic-derivative form of the multiset check, [LogUp](https://eprint.iacr.org/2022/1530). A multiset \\( \\{ f_j \\} \\) with multiplicities \\( m_j \\) equals a multiset \\( \\{ t_i \\} \\) with multiplicities \\( m'_i \\) exactly when, as rational functions of \\( X \\),
 
-## LogUp Implementation in Ziren
+\\[ \sum_j \frac{m_j}{X + f_j} = \sum_i \frac{m'_i}{X + t_i}. \\]
 
-Cross-chip verification in Ziren utilizes LogUp for consistency checks, as shown in the dependency diagram:
-![Ziren chips lookup scheme](zkmips-chips-lookup.png)
-<!-- source: [zkMIPS-chips.drawio](https://drive.google.com/file/d/1loR3llVMTm9gw97kgsu72NEGARau1ReX/view?usp=sharing) -->
+The verifier checks the identity at a random \\( X = \alpha \\). A false identity survives only if \\( \alpha \\) is a root of a nonzero polynomial whose degree is bounded by the total number of terms, so the error is at most that number divided by the size of the extension field.
 
-Key Lookup Relationships:
+A tuple \\( (v_1, \dots, v_k) \\) on bus \\( b \\) is compressed to a single field element, its *fingerprint*, with further random challenges:
 
-| Index | Source(F)          | Target(T)           | Verification Purpose                    |
-|-------|--------------------|---------------------|-----------------------------------------|
-| 1     | Global Memory      | Local Memory        | Overall memory consistency *             |
-| 2     | CPU                | Memory              | Memory access patterns                  |
-| 3     | Memory             | Bytes               | 8-bit range constraints                 |
-| 4     | CPU                | Program             | Instruction validity                    |
-| 5     | CPU                | Instructions        | Instructions operations                 |
-| 6     | Instructions       | Bytes               | Operand bytes verification              |
-| 7     | CPU                | Bytes               | Operand range verification              |
-| 8     | Syscall            | Precompiles         | Syscall/precompiled function execution  |
+\\[ f = \alpha + \beta_0 \cdot b + \sum_{j=1}^{k} \beta_j \cdot v_j. \\]
 
-<small>* In the latest implementation, Ziren employs multiset-hashing to ensure memory consistency checking, enhancing proof efficiency and modularity.</small>
+Each interaction contributes the fraction \\( m / f \\), with \\( m \\) the row's multiplicity expression for a send and \\( -m \\) for a receive. The multiplicity is a column expression, typically `is_real` or a selector, and is zero on padding rows. The argument holds when the sum of all fractions over all rows of all chips in the shard is zero. The exception is buses that the shard's public values close (`State`, `GlobalAccumulation` and the two global-memory control buses), where the sum must equal the fractions of the boundary tuples the verifier computes from the public values.
 
+The challenges are drawn from the degree-4 extension of KoalaBear after the prover has committed to all traces.
 
-## Range Check Implementation Example
+## Proving the sum with GKR
 
-**8-bit Range Check Design**
+The sum has one term per (row, interaction) pair, many millions per shard. Ziren does not commit to running-sum columns. It proves the sum with the [GKR](https://eprint.iacr.org/2023/1284) protocol for fractional sums (LogUp-GKR):
 
-In Ziren's architecture, 32-bit values undergo byte-wise decomposition into four 8-bit components, with each byte occupying a dedicated memory column. This structural approach enables native support for 8-bit range constraints (0 ≤ value < 255) during critical operations including arithmetic logic unit (ALU) computations and memory address verification.
+1. Each chip's `(numerator, denominator)` pairs form a table indexed by row and interaction. Chips are padded to a common number of rows and interactions with the neutral fraction \\( 0/1 \\).
+2. A layered circuit adds the fractions pairwise: \\( \frac{n_0}{d_0} + \frac{n_1}{d_1} = \frac{n_0 d_1 + n_1 d_0}{d_0 d_1} \\). Each layer halves the row dimension, and the last layer combines interactions and chips into one fraction.
+3. The prover sends the output fraction, and the verifier checks that it matches the expected total. Then, layer by layer, a sumcheck reduces a claim about one layer's multilinear extensions to a claim about the layer below at a new random point.
+4. At the bottom, the claim is about the numerator and denominator at a random point. These are low-degree expressions in the chips' columns, so it reduces to claims about the multilinear extensions of the trace columns at that point.
 
-- Starting Lookup Table (T)
+These column claims are not checked by the lookup argument itself. They are passed to the zerocheck, which batches them with the constraint check, and the resulting openings are proved by the polynomial commitment (see [STARK Protocol](./stark.md)). Before the first GKR challenge is sampled, the prover grinds a proof of work of `ZIREN_LOGUP_GRINDING_BITS` bits (default 22). The grind raises the soundness of this step to the per-component target.
 
-| t |
-|:---:|
-| 0 |
-| 1 |
-| ... |
-| 255 |
+## Byte and range lookups
 
-For lookups \\(\\{f_0, f_1, \\dots, f_{M-1}\\}\\) (all elements in [0, 255]), we: 
-1. Choose random \\(\alpha\\);
-2. Construct two verification tables.
+The two lookup tables are preprocessed chips that receive on the `Byte` and `Range` buses.
 
-- Lookups (F)
-  
-  | f     |\\(d = 1/(f-\alpha)\\)   | sum |
-  |-------|-------------------------|----------------------|
-  | \\(f_0\\)   | \\(d_0=1/(f_0-\alpha)\\)| \\(d_0\\)            | 
-  | \\(f_1\\)   | \\(d_1=1/(f_1-\alpha)\\)|  \\(d_0 + d_1\\)     |
-  | \\(f_2\\)   | \\(d_2=1/(f_2-\alpha)\\)| \\(d_0+d_1+d_2\\)    | 
-  | ...   |...                      | ...                  | 
-  | \\(f_{M-1}\\)   | \\(d_m=1/(f_{M-1}-\alpha)\\)| \\(\sum_{i=0}^{M-1}d_i\\)| 
-  
-- Updated Lookup Table
+- `ByteLookup` has one row for each pair of bytes \\( (b, c) \\), \\( 2^{16} \\) rows. The preprocessed columns hold the result of each byte operation on that pair (`AND`, `OR`, `XOR`, `NOR`, `SLL`, shift-right with carry, `LTU`, `MSB`), and the pair itself doubles as a 16-bit value for `U16Range`. A lookup `(op, a, b, c)` claims that `a` is the result of `op` on `b` and `c` (or, for range checks, that the operand is in range). The main trace has one multiplicity column per operation.
+- `RangeLookup` holds the pairs `(a, bits)` with \\( a < 2^{bits} \\) for \\( bits \le 10 \\). The machine uses it for limbs narrower than a byte or a half-word, chiefly the 10-bit high limb of a 26-bit timestamp.
 
-  | t     |m             |\\(d = m/(f+\alpha)\\)              |sum                    |
-  |-------|--------------|------------------------------------|-----------------------|
-  | 0     | \\(m_0\\)    | \\(d_0 = m_0/\alpha \\)            | \\(d_0\\)             |
-  | 1     | \\(m_1\\)    | \\(d_1 = m_1/(1-\alpha)\\)         | \\(d_0 + d_1\\)       |
-  | 2     | \\(m_2\\)    | \\(d_2 = m_2/(2-\alpha)\\)         |\\(d_0+d_1+d_2\\)      |
-  | ...   |...           | ...                                | ..                    |
-  | 255   | \\(m_{255}\\)|\\(d_{255} = m_{255}/(255-\alpha)\\)|\\(\sum_{i=0}^{255}d_i\\)| 
-,where \\(m_i\\) denotes the occurrence count of \\(i\\) in lookups.
-
-LogUp ensures that if the final cumulative sums in both tables match (which is exactly
-\\[
-\sum_{i=0}^{M-1} \frac{1}{f_i - \alpha} = \sum_{i=0}^{N-1} \frac{m_i}{t_i - \alpha}
-\\]
-), then with high probability every \\(f_i\\) originates from table \\(T\\) (i.e., falls within 0-255 range).
-
+For example, the check that a word consists of four bytes is two `U8Range` lookups, `(U8Range, 0, b_0, b_1)` and `(U8Range, 0, b_2, b_3)`. Each tuple exists in the table only if both bytes are below 256. The table row for that pair counts the requests in its `U8Range` multiplicity column, and bus balance forces the counts to be right.

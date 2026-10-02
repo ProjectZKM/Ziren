@@ -1,90 +1,45 @@
-# Proof Composition 
+# Proof Composition
 
-Ziren zkVM introduces an innovative **proof composition system** that empowers developers to nest and aggregate cryptographic proofs within zkVM programs. This flexible architecture enables recursive verification, multi-proof aggregation, and modular program upgrades, all while ensuring seamless compatibility with Ziren’s verification framework.
+A guest program can verify other Ziren proofs. The guest states which proofs it relies on, and the recursion tree checks them as *deferred* proofs, so the guest does not run a STARK verifier inside the MIPS machine.
 
-## Key Use Cases
+## Use cases
 
-- **Privacy-Preserving Computation**
-    
-    Securely process distributed or confidential data by splitting computations into sub-proofs, each protecting its own data fragment, and then aggregating them into a unified, privacy-preserving proof.
-    
-- **Cryptographic Proof Nesting**
-    
-    Enable recursive verification of encrypted values—such as zero-knowledge proofs, digital signatures, or homomorphic encryption—without revealing underlying data, thus strengthening both privacy and security.
-    
-- **Proof Aggregation & Cross-Chain Verification**
-    
-    Combine independent proofs from multiple sources or blockchains (e.g., Ethereum, other rollups) into a single aggregate proof, facilitating trusted cross-chain data flows and unified validation.
-    
-- **Rollup Optimization**
-    
-    Batch and compress large numbers of transaction proofs or state changes into a single, compact proof to improve scalability, reduce verification cost, and maximize on-chain throughput.
-    
-- **Modular Program Architecture & Maintainability**
-    
-    Break complex applications into independently verifiable modules, allowing developers to update or upgrade specific components without re-running the entire workflow, increasing maintainability and development agility.
-    
-- **Pipeline Proof and Concurrent Verification**
-    
-    Divide lengthy computations into parallel, independently verifiable sub-proofs, streamlining the overall proof generation and validation process for greater efficiency.
-    
+- **Aggregation.** Combine many independent proofs, for example of blocks or transactions, into one proof.
+- **Modular programs.** Split an application into programs that are proved separately and composed, so that one part can change without re-proving the rest.
+- **Pipelining.** Prove the parts of a long computation in parallel and join them in a final program.
 
-## Core Components
+## Interface
 
-Ziren packages each proof into an object called a **receipt**. The proof composition system is built around the idea of recursively verifying receipts inside other zkVM programs. The main components are:
+In the guest, with the `verify` feature of `zkm-zkvm`:
 
-- **Assumption**
-    
-    A formal assertion that declares what needs to be proven, serving as a dependency within the proof composition pipeline.
-    
-- **Receipt Claim**
-    
-    A structured statement identifying a specific receipt, which includes metadata such as the program image ID and a SHA-256 commitment to the public input/output, ensuring unique and tamper-evident referencing.
-    
-- **Inner Receipt**
-    
-    The fundamental container of a base proof, holding the STARK proof, public values, and the corresponding claim.
-    
-- **Assumption Receipt**
-    
-    A conditional receipt that is valid only if its dependencies (assumptions) are fulfilled by other receipts.
-    
-- **Composite Receipt**
-    
-    A recursively constructed bundle that aggregates multiple layers of verification, supporting nested proofs and multi-stage validation.
-    
-- **Final Receipt**
-    
-    The ultimate artifact that confirms all assumptions have been resolved and all required proofs successfully verified.
-    
+```rust
+zkm_zkvm::lib::verify::verify_zkm_proof(&vk_digest, &public_values_digest);
+```
 
-## Implementation Workflow
+`vk_digest: &[u32; 8]` is the digest of the inner program's verifying key, and `public_values_digest: &[u8; 32]` is the digest of its public values. The call does not verify anything by itself. It issues the `VERIFY_ZKM_PROOF` syscall (`0x1B`) and folds the pair into the guest's running deferred-proof digest:
 
-### Proof Generation
+\\[ D \leftarrow \mathrm{Poseidon2}(D, \mathit{vk\\_digest}, \mathit{pv\\_digest}), \qquad D_0 = 0. \\]
 
-- **Base Proof Generation**
-    
-    Generate a STARK proof for a given (possibly nested) guest program, resulting in an initial inner receipt.
-    
-- **Recursive Composition**
-    
-    Use the base and composite receipts as building blocks, recursively aggregate them using Ziren’s aggregation engine, and form higher-level proofs as needed.
-    
-- **Final Receipt Assembly**
-    
-    Collect and combine all required receipts (base, assumption, composite) into a final, comprehensive receipt representing the complete proof.
-    
+When the guest halts, it commits \\( D \\) word by word with the `COMMIT_DEFERRED_PROOFS` syscall. The `SyscallInstrs` chip checks each word against the shard's public `deferred_proofs_digest`.
 
-### Verification
+On the host, the inner proofs must be compressed proofs (`ZKMReduceProof`). They are passed in with the input, in the order the guest verifies them:
 
-- **Composite Receipt Verification**
-    
-    Validate the STARK constraints for the main (composite) proof to ensure correctness of the aggregated verification.
-    
-- **Inner Receipt Validation**
-    
-    Recursively verify all dependent proofs (assumptions) included within the composition.
-    
-- **Receipt Claim Consistency**
-    
-    Check that SHA-256 commitments match across all receipt claims to ensure input/output consistency and cross-proof integrity.
+```rust
+stdin.write_proof(inner_proof, inner_vk);
+```
+
+During execution, each `VERIFY_ZKM_PROOF` call takes the next proof from this list, and unless deferred-proof verification is disabled in the executor options, the executor checks it against the call's `(vk_digest, pv_digest)`. This check only reports errors early; soundness comes from the recursion.
+
+## How the recursion checks it
+
+`compress` passes the inner proofs to the *deferred* program in batches (`get_recursion_deferred_inputs_basefold`). For each batch, the deferred program:
+
+1. verifies each inner compressed proof, including the Merkle proof that its verifying key is in the recursion key set;
+2. requires each proof to be complete;
+3. folds each proof's verifying-key digest and committed-value digest into the reconstructed digest with the same Poseidon2 hash, starting from the previous batch's value.
+
+Deferred batches are placed in the shard range after the last execution shard, so the compose programs join them to the execution like any other range and chain `start_reconstruct_deferred_digest` to `end_reconstruct_deferred_digest`. At the root, `assert_complete` requires the reconstruction to start at zero and to end at the `deferred_proofs_digest` the guest committed. A guest that claims a proof the prover did not supply, or a different one, therefore produces a digest that the reconstruction cannot match.
+
+## Verification
+
+The outer proof is verified like any other Ziren proof, against the outer program's verifying key. Its public values are only the outer guest's. The inner proofs and their public values are bound through the deferred digest and are not needed by the verifier.

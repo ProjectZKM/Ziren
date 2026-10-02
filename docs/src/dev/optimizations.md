@@ -1,59 +1,99 @@
 # Optimizations
 
-There are various ways to optimize your program, including: 
+There are several ways to reduce the cost of proving a program:
 
-- identifying places for improvement performance via cycle tracking and profiling
-- acceleration for cryptographic primitives via precompiles
-- hardware prover acceleration with AVX support
-- other general practices e.g., avoiding copying or serializing and deserializing data when it is not necessary
+- measure where the cycles go with cycle tracking, and optimize those parts;
+- route cryptographic operations through precompiles, directly or via patched crates;
+- prove on a GPU, or enable AVX on the CPU prover;
+- avoid unnecessary work in the guest, such as copying data or serializing and deserializing it more often than needed.
 
 ### Testing Your Program
 
-It is best practice to test your program and check its outputs prior to generating proofs and save on proof generation costs and time.
+Test your program and check its outputs before generating proofs; execution is much faster than proving.
 
-To execute your program without generating a proof, run it from the host using the `ProverClient::execute` API instead of generating a proof:
+To execute your program without generating a proof, call `ProverClient::execute` from the host:
 
 ```rust
 let client = ProverClient::new();
-let (_, report) = client.execute(ELF, stdin).run().unwrap();
+let (_, report) = client.execute(ELF, &stdin).run().unwrap();
 println!("executed program with {} cycles", report.total_instruction_count());
 ```
 
-You can also determine the public inputs with `zkm_zkvm::io::commit` to commit to the public values of the program. 
+`execute` returns the public values the program committed with `zkm_zkvm::io::commit` and an `ExecutionReport`, which holds the instruction count per opcode (`opcode_counts`), the system call count per system call (`syscall_counts`) and the cycle tracker results (`cycle_tracker`). The report implements `Display`, so `println!("{}", report)` prints all of them.
 
 ### Acceleration Options
 
-**Acceleration via Precompiles** 
+**Acceleration via Precompiles**
 
-Precompiles are specialized circuits in Ziren’s implementation used to accelerate programs utilizing certain cryptographic operations, allowing for faster program execution and less computationally expensive workload during proving. 
+Precompiles are dedicated chips for common cryptographic operations, such as SHA-256, Keccak-256, elliptic curve arithmetic over secp256k1, secp256r1, Ed25519, BN254 and BLS12-381, and 256-bit modular multiplication. A precompile call costs far fewer cycles than the same operation compiled to MIPS instructions.
 
-To use a precompile, you can directly interact with them using external system calls. Ziren has a list of all available precompiles [here.](https://docs.zkm.io/mips-vm/mips-isa.html#supported-syscalls) The [precompiles section](https://docs.zkm.io/dev/precompiles.html) also has an example on calling a precompile and an accompanying guest program. 
+A guest can call the precompiles directly with system calls. The [Precompiles](./precompiles.md) page lists them and has an example guest program.
 
-Alternatively, you can interact with the precompiles through patched crates. The patched crates can be added to your dependencies for performance improvements in your programs without directly using a system call. View all of Ziren’s supported crates and examples on adding patch entries [here](https://docs.zkm.io/dev/patched-crates.html). 
+Alternatively, use the [patched crates](./patched-crates.md), which replace the implementation of common crates (`sha2`, `k256`, `p256`, `substrate-bn`, and others) with precompile calls, so that existing code uses the precompiles without changes.
 
-An example on using these crates for proving the execution of EVM blocks using Reth can be found in [reth-processor](https://github.com/ProjectZKM/reth-processor). Note the patch entries of `sha2`, `bn`, `k256`, `p256`, and `alloy-primitives` in the guest’s `Cargo.toml` file. 
+The Ethereum block prover [reth-processor](https://github.com/ProjectZKM/reth-processor) is an example; note the patch entries for `sha2`, `bn`, `k256`, `p256` and `alloy-primitives` in its guest's `Cargo.toml`.
 
-**Acceleration via Hardware** 
+**Acceleration via Hardware**
 
-Ziren provides hardware acceleration support for proof generation via both GPU and CPU:
+Ziren supports hardware acceleration for proof generation on both GPU and CPU:
 
-- CUDA-based GPU prover, selectable via the `ZKM_PROVER=cuda` environment variable or the `ProverClient::cuda()` constructor.
-- AVX2/AVX512 optimizations on x86 CPUs via Plonky3, enabled through appropriate `RUSTFLAGS` settings.
+- a CUDA-based GPU prover, selected with the `ZKM_PROVER=cuda` environment variable or the `ProverClient::cuda()` constructor;
+- AVX2/AVX512 optimizations on x86 CPUs via Plonky3, enabled through `RUSTFLAGS`.
 
-For detailed setup and examples, see the [Prover](./prover.md) documentation.
+For setup and examples, see the [Prover](./prover.md) page.
 
 ### Cycle Tracking
 
-Tracking the number of cycles for your program’s execution can be a helpful way to identify performance bottlenecks and identify specific parts of your program for improvement. A higher number of cycles in an execution will lead to longer proving times. 
+Cycle counts show where a program spends its execution and which parts to optimize. More cycles mean longer proving. Proving cost more precisely follows the number of rows the execution fills across all chip tables, and precompile calls and memory accesses add rows of their own; the cycle count is a good first proxy.
 
-To print to your console the number of execution cycles occurring while executing your program, 
+The guest marks a region with `cycle-tracker-start` and `cycle-tracker-end` lines printed to stdout, or a whole function with the `#[zkm_derive::cycle_tracker]` attribute (from the `zkm-derive` crate). The executor then logs the cycles each region takes. With `cycle-tracker-report-start` and `cycle-tracker-report-end`, it also stores the count in the execution report under the region's name.
 
-- cycle-tracking example:
+The [cycle-tracking example](https://github.com/ProjectZKM/Ziren/tree/main/examples/cycle-tracking) has two guest programs. [`normal.rs`](https://github.com/ProjectZKM/Ziren/blob/main/examples/cycle-tracking/guest/bin/normal.rs) logs the cycles of its regions:
 
-The cycle-tracking example can help measure the execution cost of guest programs in terms of MIPS instruction cycles consisting of a host and two guest program [normal.rs](http://normal.rs) and [report.rs](http://report.rs)  that reads and prints the cycle count. For example:
 ```rust
-stdout: result: 5561
-stdout: result: 2940
-Using cycle-tracker-report saves the number of cycles to the cycle-tracker mapping in the report.
-Here's the number of cycles used by the setup: 3191
+#![no_main]
+zkm_zkvm::entrypoint!(main);
+
+#[zkm_derive::cycle_tracker]
+pub fn expensive_function(x: usize) -> usize {
+    let mut y = 1;
+    for _ in 0..100 {
+        y *= x;
+        y %= 7919;
+    }
+    y
+}
+
+pub fn main() {
+    let mut nums = vec![1, 1];
+
+    println!("cycle-tracker-start: setup");
+    for _ in 0..100 {
+        let mut c = nums[nums.len() - 1] + nums[nums.len() - 2];
+        c %= 7919;
+        nums.push(c);
+    }
+    println!("cycle-tracker-end: setup");
+
+    println!("cycle-tracker-start: main-body");
+    for i in 0..2 {
+        let result = expensive_function(nums[nums.len() - i - 1]);
+        println!("result: {}", result);
+    }
+    println!("cycle-tracker-end: main-body");
+}
+```
+
+[`report.rs`](https://github.com/ProjectZKM/Ziren/blob/main/examples/cycle-tracking/guest/bin/report.rs) uses `cycle-tracker-report-start: setup` and `cycle-tracker-report-end: setup` instead, and the host reads the result from the report:
+
+```rust
+let (_, report) = client.execute(REPORT_ELF, &ZKMStdin::new()).run().expect("proving failed");
+
+let setup_cycles = report.cycle_tracker.get("setup").unwrap();
+```
+
+Run the example with `RUST_LOG=info` from `examples/cycle-tracking/host` to see the logged cycle counts:
+
+```shell
+RUST_LOG=info cargo run --release
 ```

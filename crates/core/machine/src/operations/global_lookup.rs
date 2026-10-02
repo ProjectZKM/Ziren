@@ -189,6 +189,17 @@ impl<F: Field> GlobalLookupOperation<F> {
             + cols.y6_mid8 * AB::F::from_u32(1 << 16)
             + cols.y6_top * AB::F::from_u32(1 << 24);
 
+        builder.mark_gadget("septic_lift", || {
+            (
+                is_real.into(),
+                vec![
+                    (0..7).map(|i| cols.y_coordinate[i].into()).collect(),
+                    (0..7).map(|i| cols.x_coordinate[i].into()).collect(),
+                    vec![is_receive.clone(), is_send.clone()],
+                ],
+            )
+        });
+
         builder.when(is_receive).assert_eq(y.0[6].clone(), AB::Expr::ONE + y6_value.clone());
         builder.when(is_send).assert_eq(y.0[6].clone(), AB::Expr::from_u32(SEND_Y6_MIN) + y6_value);
     }

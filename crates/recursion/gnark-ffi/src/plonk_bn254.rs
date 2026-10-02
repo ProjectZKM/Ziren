@@ -74,6 +74,13 @@ impl PlonkBn254Prover {
 
         build_plonk_bn254(build_dir.to_str().unwrap());
 
+        Self::build_contracts(build_dir);
+    }
+
+    /// Renders `ZKMVerifierPlonk.sol` for the circuit in `build_dir` (its verifier hash, the
+    /// circuit version and the vk root this crate is built with) and prepares the exported
+    /// `PlonkVerifier.sol`; running it again on the same directory gives the same files.
+    pub fn build_contracts(build_dir: PathBuf) {
         let zkm_verifier_path = build_dir.join("ZKMVerifierPlonk.sol");
         let vkey_hash = Self::get_vkey_hash(&build_dir);
         let zkm_verifier_str = include_str!("../assets/ZKMVerifierPlonk.txt")

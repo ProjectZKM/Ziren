@@ -21,6 +21,7 @@
 \usepackage{caption}
 \captionsetup{font=small}
 \usepackage{subcaption}
+\usepackage[section,above]{placeins}
 \usepackage{graphicx}
 
 % ---------- Algorithms ----------
@@ -76,7 +77,7 @@
   linkcolor=black,
   citecolor=black,
   urlcolor=blue,
-  pdftitle={Ziren: Succinct Arguments for MIPS32 Execution on GPUs},
+  pdftitle={Ziren: Succinct Arguments for MIPS32 Execution},
   pdfauthor={ZKM Team},
 }
 \usepackage{url}
@@ -89,6 +90,7 @@
 \theoremstyle{definition}
 \newtheorem{definition}[theorem]{Definition}
 \newtheorem{assumption}[theorem]{Assumption}
+\newtheorem{example}[theorem]{Example}
 \theoremstyle{remark}
 \newtheorem{remark}[theorem]{Remark}
 \newtheorem{protocol}[theorem]{Protocol}
@@ -105,6 +107,7 @@
 \newcommand{\Jagged}{\ensuremath{\mathsf{Jagged}}}
 \newcommand{\Stacked}{\ensuremath{\mathsf{Stacked}}}
 \newcommand{\Poseidon}{\ensuremath{\mathsf{Poseidon2}}}
+\newcommand{\Hash}{\ensuremath{\mathsf{H}}}
 \newcommand{\zkVM}{zkVM}
 \newcommand{\Ziren}{\textsc{Ziren}}
 \newcommand{\Zirenver}{\textsc{Ziren}}
@@ -113,16 +116,9 @@
 \newcommand{\CRS}{\ensuremath{\mathsf{CRS}}}
 \newcommand{\Fold}{\ensuremath{\mathsf{Fold}}}
 \newcommand{\Lean}{Lean~4}
-\newcommand{\ndetproved}{17}
-\newcommand{\ndettotal}{106}
-\newcommand{\ndetopen}{22}
-\newcommand{\ndetskipped}{41}
-\newcommand{\ndetskipacc}{24}
-\newcommand{\ndetskipcase}{17}
-\newcommand{\ndetpending}{26}
+\newcommand{\ndettotal}{104}
 
-\title{\Zirenver{}: Succinct Arguments for MIPS32 Execution on
-GPUs\thanks{Source and artifacts: \url{https://github.com/ProjectZKM/Ziren}, v2.0.0.}}
+\title{\Zirenver{}: Succinct Arguments for MIPS32 Execution\thanks{Source code: \url{https://github.com/ProjectZKM/Ziren}. Measurements name the configuration they were taken on (\S\ref{sec:perf-revision}).}}
 
 \author[1, 2]{Stephen Duan\thanks{Corresponding author: \texttt{stephen.d@zkm.io}}}
 \author[1]{Jingping Yin}
@@ -133,18 +129,18 @@ GPUs\thanks{Source and artifacts: \url{https://github.com/ProjectZKM/Ziren}, v2.
 \affil[1]{ZKM Team}
 \affil[2]{GOAT Network}
 
-\date{September 2026}
+\date{October 2026}
 
 \begin{document}
 
 \maketitle
 
 \begin{abstract}
-\Ziren{} is a zero-knowledge virtual machine for MIPS32 (Release~2) execution and the second generation of zkMIPS~\citep{zkmips}, which was the first zkVM for the MIPS32 instruction set itself rather than for a MIPS-like model. It proves the execution of arbitrary MIPS32 programs, and the architecture rewards that choice: Release~2 is finished, so an arithmetisation pinned to it never chases a moving instruction set and the verifying keys derived from it stay valid; its fixed-width encodings in a handful of formats let one row of one chip carry an instruction's whole frame, with no CPU chip to decode into; and every compiler that already targets MIPS32 reaches the guest without a bespoke backend, so Rust, Go and C programs become the same ELF. Its delayed branches make a row's successor data rather than the following address, which shapes everything above.
+A succinct argument for machine execution convinces a verifier that a program compiled for a real instruction set ran correctly, with a proof far shorter than the execution and a check far cheaper than replaying it. We present \Ziren{}, a production \zkVM{} for MIPS32: it proves 77 user-mode integer instructions of MIPS32r2, branch-delay slot included, and has proved Ethereum mainnet blocks end to end in production.
 
-Four layers carry an execution to a proof: an instruction frame per row, whose state bus balances only if the rows form one chain; one offline-memory-checking argument for registers and memory, carried across shards by an elliptic-curve digest, with one lookup argument and one zerocheck per shard; a jagged reduction of tens of thousands of columns of widely differing heights to one dense-polynomial evaluation that a single batched \WHIR{} proof opens in the unique-decoding regime; and a recursion layer whose verifying keys are enumerated from the machine's declared shapes rather than collected from runs.
+\Ziren{} proves each executed instruction as one row of its opcode's chip, with no CPU table; the MIPS32 branch-delay slot, which makes an instruction's successor data rather than the next address, is carried in the machine state as a program-counter pair. Each shard is proved by one lookup argument for all of its buses and one zerocheck for all of its constraints, and the claims on its tens of thousands of columns of differing heights are reduced by a jagged sumcheck to a single evaluation, opened by one batched \WHIR{} proof. A recursion tree composes the shard proofs under an enumerated allowlist of verifying keys, and the determinism of 57 of its chips (all but two SHA-256 control chips among those with statements) is extracted mechanically, as \Lean{} theorems, from the same constraint description the prover evaluates.
 
-Soundness is composed by a union bound over each proof stage's two dozen transcript components rather than quoted as the smallest of them, which leaves every stage above 100 bits and the whole tree of a measured block at $93.5$ once every node in it is charged (\S\ref{sec:iopp-soundness}). All of these bound the \emph{interactive} protocol: Fiat--Shamir subtracts $\log_2 Q$ against an adversary making $Q$ oracle queries, and the cross-shard digest is an assumption rather than an error term. Determinism of the arithmetisation is enforced in \Lean{} rather than argued: theorems extracted mechanically from the constraint system, and an executable \Lean{} model of the instruction set beside them, close \ndetproved{} of the \ndettotal{} generated cases. One NVIDIA RTX~5090 proves a 288-million-cycle Ethereum block at $5.9$\,MHz and four reach $20$\,MHz on 420 million cycles, with each engineering change measured against the configuration it replaced; those timings precede a correction to the $\Poseidon{}$ round schedule, and \S\ref{sec:ipcore} states which claim attaches to which revision.
+On a configuration that precedes four later changes (a correction to the hash round count, lookup grinding, a syscall-bus change and a set of three soundness fixes), one NVIDIA RTX~5090 proves a 288-million-cycle Ethereum block at $5.9$\,MHz with a 603\,KiB compressed proof, and four reach $20$\,MHz on a 420-million-cycle block. For the analysed parameter schedule, the error accounting of the interactive protocol gives above 100 bits for each proof stage and $93.5$ bits for the measured block's recursion tree of about 150 proofs (the level falls with the logarithm of the proof count), and Fiat--Shamir subtracts $\log_2 Q$ against $Q$ oracle queries. The end-to-end statement is conditional: it assumes round-by-round knowledge soundness of every node, compatibility of the composed extractors, that the recursion programs, which are not extracted, enforce the compose relation, and a property of the cross-shard digest to which we assign no value. All \ndettotal{} extracted determinism theorems are proved in \Lean{}: a propagation analysis derives every output column, and the derivation is replayed as step lemmas over gadget theorems proved once.
 \end{abstract}
 
 \noindent\textbf{Index terms:} arithmetic circuits, formal verification, GPU acceleration, MIPS32, polynomial commitment schemes, round-by-round soundness, verifiable computation, zero-knowledge virtual machines.
@@ -152,36 +148,36 @@ Soundness is composed by a union bound over each proof stage's two dozen transcr
 \input{sections/01_introduction}
 \input{sections/02_preliminaries}
 \input{sections/03_isa}
-\input{sections/035_ipcore}
-\input{sections/037_argument}
 \input{sections/04_air}
+\input{sections/045_base}
+\input{sections/046_ext}
 \input{sections/05_pcs}
 \input{sections/06_iopp}
 \input{sections/07_recursion}
+\input{sections/037_argument}
+\input{sections/065_security}
 \input{sections/075_verification}
+\input{sections/066_pq}
+\FloatBarrier
 \input{sections/08_performance}
+\FloatBarrier
 \input{sections/09_conclusion}
 
 \section*{Acknowledgements}
 
-This system is built on work done by others, and two debts are large enough to
-name here rather than only in citations. The Plonky3~\citep{plonky3} toolkit
-supplies the field, the $\Poseidon{}$ permutation~\citep{poseidon2}, the
-constraint interfaces and the transforms this implementation is written
-against. SP1~\citep{sp1,sp1-hypercube} is the system this design learned the
-most from: the decomposition into one chip per opcode with a shared lookup
-argument, the elliptic-curve digest that carries interactions across shards,
-the shadow read that makes register accesses cheaper than memory accesses, and
-the shape of the recursion layer all follow it, and its just-in-time executor
-is the model for ours. Where this paper departs from either, the section that
-does so says why.
+The Plonky3~\citep{plonky3} toolkit supplies the field, the $\Poseidon{}$ permutation~\citep{poseidon2}, the constraint interfaces and the transforms this implementation is written against. We thank the developers of SP1~\citep{sp1,sp1-hypercube} and OpenVM~\citep{openvm} for publishing their systems openly; the components of theirs that this paper uses are cited where they are used.
 
+\FloatBarrier
 \appendix
-\input{sections/033_executor}
-\input{sections/appendix_isa}
 \input{sections/appendix_units}
+\FloatBarrier
+\input{sections/appendix_isa}
+\FloatBarrier
+\input{sections/033_executor}
+\FloatBarrier
 \input{sections/appendix_levers}
-\input{sections/appendix_ipcore}
+\FloatBarrier
+\input{sections/appendix_prior}
 
 % Clear the appendix's pending floats before the references, so a large
 % appendix table cannot be deferred past the bibliography heading and then

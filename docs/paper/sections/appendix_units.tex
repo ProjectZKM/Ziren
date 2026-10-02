@@ -1,29 +1,44 @@
-\section{The chip set of the core machine}
+\section{The frame and the chips in detail}
 \label{sec:app-chips}
+\label{sec:app-frame}
 
-Section~\ref{sec:air} describes the arithmetisation as a set of chips, a frame
-and two shared arguments, without depending on which chips exist. This appendix
-is the catalogue of the chips themselves. The widths matter only to the area
-accounting: the protocol of Section~\ref{sec:argument} sees the whole shard as
-one dense vector, so a chip may be added, widened or removed without changing
-anything above the jagged reduction.
+This appendix itemises the columns and interactions of the instruction frame (Table~\ref{tab:frame}) and the width of every chip (Table~\ref{tab:chips}).
 
-Every width in Table~\ref{tab:chips} was read from the machine at the commit
-this paper describes (\S\ref{sec:perf-setup}) rather than from a census, and
-the table lists all 62 chips rather than the ones that dominate the area. That
-pins it to one revision, which the evaluation's tables are not: the
-measurements of \S\ref{sec:perf-changes} were taken on earlier revisions, so a
-few chips differ between them and this table. The \texttt{Global} chip is the
-clearest case. It carries 65 columns here, against the 100 of the census in
-\S\ref{sec:perf-profile} and the 58 that the change of \S\ref{sec:perf-changes}
-reduced it to; work landed between that measurement and this commit. Where the
-two disagree, the evaluation's numbers belong to the revision each table names
-and this one belongs to the commit.
+\subsection{The instruction frame}
 
 \begin{table}[t]
 \centering
 \small
-\caption{The 62 chips of the core machine with their main-trace widths (columns over $\F$), read from the machine of the release named in \S\ref{sec:perf-setup}; a second figure is a preprocessed width. The immediate (\texttt{Imm}) variants take the second operand from the instruction word. \texttt{MovCond} proves \texttt{movn}, \texttt{movz} and \texttt{wsbh}, and \texttt{SysLinux} the Linux-ABI syscalls of Section~\ref{sec:ipcore}; Appendix~\ref{sec:app-isa} gives the instruction-to-chip map.}
+\caption{Columns of the R-type instruction frame. The I-type frame replaces the $\mathsf{op\_c}$ index and access (7 columns) by a word immediate (4), 27 columns in all; the shift-amount frame replaces them by a scalar immediate (1) and drops the access, 24 columns. The program-counter pair is owned by the chip and passed to the frame.}
+\label{tab:frame}
+\begin{tabular}{@{}lp{0.62\textwidth}r@{}}
+\toprule
+Element & Purpose & Columns \\
+\midrule
+$\mathsf{shard}$ & shard index, the high part of every timestamp; 16-bit range check & 1 \\
+$\mathsf{clk}$ limbs & the instruction's clock as a 16-bit and a 10-bit limb, both range-checked & 2 \\
+$\mathsf{opcode}$, $\mathsf{op\_a}$, $\mathsf{op\_b}$, $\mathsf{op\_c}$ & the decoded instruction, sent on the program bus with $\mathsf{pc}$ & 4 \\
+$\mathsf{op\_a\_0}$ & set when the destination is register 0, which pins the written word to zero & 1 \\
+$\mathsf{op\_a}$ access & previous word, written word, previous timestamp and one limb of the timestamp difference & 10 \\
+$\mathsf{op\_b}$ access & word read, previous timestamp, one difference limb & 6 \\
+$\mathsf{op\_c}$ access & word read, previous timestamp, one difference limb & 6 \\
+\midrule
+Frame & & 30 \\
+$\mathsf{pc}$, $\mathsf{next\_pc}$ & the counter pair received on the state bus; owned by the chip & 2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The R-type frame raises 20 interactions per row: one program fetch; a receive of $(\mathsf{shard}, \mathsf{clk}, \mathsf{pc}, \mathsf{next\_pc})$ and a send of $(\mathsf{shard}, \mathsf{clk} + 5 + \delta, \mathsf{next\_pc}, \mathsf{next\_next\_pc})$ on the state bus, where $\delta$ is zero except for a system call; a send of the previous and a receive of the new tuple on the memory bus for each of its three accesses; and eleven table lookups, one 16-bit check of the shard, two for the clock limbs, two per access for the timestamp difference, and two for the four bytes of the written word, which the byte table checks in pairs. The I-type and shift-amount frames have one access fewer, and raise 16.
+
+\subsection{The chips}
+
+Table~\ref{tab:chips} lists all 62 chips with their widths in the analysed configuration. \texttt{Global} differs most from the measured configuration: it has 65 columns here, against 100 in the measured baseline and 58 after the change of \S\ref{sec:perf-changes}, because the analysed configuration keeps seven chord-witness columns that change removed.
+
+\begin{table}[t]
+\centering
+\small
+\caption{The 62 chips of the core machine with their main-trace widths (columns over $\F$), in the analysed configuration; a second figure is a preprocessed width. The immediate (\texttt{Imm}) variants take the second operand from the instruction word. \texttt{MovCond} proves \texttt{movn}, \texttt{movz} and \texttt{wsbh}, and \texttt{SysLinux} the Linux-ABI syscalls of \S\ref{sec:ext-syscall}; Appendix~\ref{sec:app-isa} gives the instruction-to-chip map.}
 \label{tab:chips}
 \begin{tabular}{p{0.2\textwidth} p{0.74\textwidth}}
 \toprule

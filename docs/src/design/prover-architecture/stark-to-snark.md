@@ -1,67 +1,35 @@
-# STARK to SNARK 
+# STARK to SNARK
 
-Ziren’s proof pipeline does not stop at scalable STARK aggregation. To enable **fast, cost-efficient on-chain verification**, Ziren recursively transforms large STARK proofs into succinct SNARKs (Plonk or Groth16), achieving **O(1) verification time** independent of the original program’s size or complexity.
-## 1. Field Adaptation & Circuit Shrinkage
+A compressed proof is a KoalaBear STARK. Verifying it on a blockchain would cost too much, so Ziren verifies it inside a SNARK over BN254. There are two recursion steps before the SNARK and then the SNARK itself.
 
-### **Purpose**
+## 1. Shrink
 
-The core challenge in going from STARK to SNARK lies in **field compatibility**: STARKs natively operate over a large extension field (quartic over KoalaBear Prime), while efficient SNARKs (e.g., Plonk, Groth16) require proofs to be expressed over the BN254 curve field.
+`ZKMProver::shrink(reduced_proof, opts)` runs the *shrink* program. The program verifies the compressed proof, including the Merkle proof that its verifying key is in the recursion key set, and is proved with the recursion machine (`ShrinkAir`) at a fixed shape. The compressed proof's shape depends on the execution; the shrink proof's does not. This gives the next step a single input shape. The shrink proof still uses the inner configuration: KoalaBear, Poseidon2 over KoalaBear and jagged WHIR.
 
-Ziren addresses this with a **two-phase cryptographic transformation**:
+## 2. Wrap
 
-### a. **Proof Compression**
+`ZKMProver::wrap_bn254(shrink_proof, opts)` runs the *wrap* program, which verifies the shrink proof. The wrap program is proved with a different configuration (`OuterSC` in `crates/recursion/core/src/stark/config.rs`), chosen to be cheap to verify in a BN254 circuit:
 
-- **What it does**: Recursively compresses the (potentially massive) aggregated STARK proof into a much shorter proof, maintaining all necessary soundness and context.
-- **How**: The compression step leverages FRI-based recursion and context-aware aggregation circuits.
-- **Key function**:
-    - `ZKMProver::shrink(reduced_proof, opts)`
-        - Internally creates a new aggregation circuit (the “shrink” circuit), which operates over a compressed field representation.
+- the field is still KoalaBear with its degree-4 extension, but Merkle trees and the transcript use Poseidon2 over the BN254 scalar field (width 3). The transcript is a `MultiField32Challenger`, which packs KoalaBear elements into BN254 elements;
+- the dense polynomial commitment under the jagged layer is BaseFold at rate \\( 2^{-3} \\), with 94 queries and 26 bits of query grinding (`ZIREN_WRAP_QUERY_GRINDING_BITS`);
+- the wrap machine (`WrapAir`) allows constraints of degree 9, so its Poseidon2 chip uses the degree-9 column layout with fewer intermediate columns than the degree-3 layout of the compress and shrink machines.
 
-### b. **Recursive Field Conversion**
+## 3. SNARK
 
-- **What it does**: Transforms the compressed proof from the KoalaBear quartic extension field to the SNARK-friendly BN254 field.
-- **How**: Wraps the shrunken STARK proof inside a “wrapping” circuit specifically designed to fit within the constraints and arithmetic of BN254.
-- **Key function**:
-    - `ZKMProver::wrap_bn254(shrinked_proof, opts)`
-        - Internally creates and executes the wrap circuit, outputting a proof whose public inputs and commitments are fully compatible with SNARKs (Plonk/Groth16).
+The wrap proof is verified by a gnark circuit. `build_outer_circuit` in `crates/prover/src/build.rs` compiles the wrap verifier into constraints over BN254, and the circuit is proved with one of:
 
-**Engineering Insight**
+- `wrap_groth16_bn254`: Groth16, the smallest proof and cheapest on-chain verification;
+- `wrap_plonk_bn254`: PLONK, with a universal setup;
+- `wrap_dvsnark_bn254`: a designated-verifier SNARK.
 
-- This two-stage transformation ensures that the final proof is not only succinct, but also verifiable on any EVM-compatible chain or zero-knowledge SNARK circuit.
+The circuit has three public inputs:
 
-## 2. SNARK Wrapping
+| Input | Meaning |
+|---|---|
+| `vkey_hash` | the digest of the guest program's verifying key (`zkm_vk_digest`) |
+| `committed_values_digest` | the digest of the guest's public outputs (SHA-256; BLAKE3 when the guest is built with the `imm-wrap-vk` feature), as 32 bytes packed into one BN254 element |
+| `vk_root` | the root of the recursion verifying-key set |
 
-After adapting the proof to the BN254 field, Ziren applies a final **SNARK wrapping** step, producing a Groth16 or Plonk proof that is maximally efficient for blockchain verification.
+The circuit also pins the wrap verifying key: in the standard build it asserts the wrap key's preprocessed commitment and `pc_start` against the values the circuit was built from, so a change to the recursion programs requires a new circuit and setup. The build with `ZKM_IMM_WRAP_VK` instead folds the wrap key into `vkey_hash` with Poseidon2, so the circuit does not change when the wrap key does.
 
-### a. **Circuit Specialization**
-
-- **What it does**: Specializes the constraint system for the target SNARK protocol, mapping the BN254-adapted proof to a form Groth16/Plonk can consume.
-- **How**: Generates a custom constraint system and witness for the chosen SNARK, reflecting the final state and commitments from the STARK pipeline.
-- **Key function**:
-    - `ZKMProver::wrap_plonk_bn254(proof, build_dir)`
-    - `ZKMProver::wrap_groth16_bn254(proof, build_dir)`
-        - These invoke circuit synthesis, key generation, and proof construction for the chosen SNARK system.
-
-### b. **Proof Packaging**
-
-- **What it does**: Encodes and serializes the proof using BN254 elliptic curve primitives, including public input encoding and elliptic curve commitments.
-- **How**: Utilizes efficient encoding routines and cryptographic libraries for serialization and EVM compatibility.
-- **Key function**:
-    - Still within the above `wrap_*_bn254` functions, which return a ready-to-verify SNARK proof object.
-
-### c. **On-Chain Optimization**
-
-- **What it does**: Ensures the final proof is optimized for low-cost, constant-time verification on EVM or other smart contract platforms.
-- **How**: Outputs are structured for native use in Solidity and similar VMs, supporting direct on-chain pairing checks (using BN254 curve operations).
-- **Key output**:
-    - The returned `PlonkBn254Proof` or `Groth16Bn254Proof` can be immediately used for on-chain verification via Ethereum precompiles or standard verification contracts.
-
-## **Source Mapping Table**
-
-| Pipeline Stage | Core Implementation Functions/Structs |
-| --- | --- |
-| Proof Compression | `shrink` |
-| Field Conversion/Wrap | `wrap_bn254` |
-| SNARK Circuit Specialize | `wrap_plonk_bn254`, `wrap_groth16_bn254` |
-| Proof Packaging | `PlonkBn254Proof`, `Groth16Bn254Proof` |
-| On-Chain Verification | Output proof objects for EVM/BN254 verification |
+A verifier of the SNARK proof takes the program's `vkey_hash` and the public values, recomputes `committed_values_digest` from the public values, and checks the proof against those inputs and the expected `vk_root`.

@@ -1,204 +1,89 @@
 # STARK Protocol
 
-## Polynomial Constraint System Architecture
+This page describes how one shard is proved: the *shard argument*. Its inputs are the shard's chip traces (see [Arithmetization](./arithmetization.md)) and its public values. The argument has four parts, run in this order under one Fiat-Shamir transcript:
 
-Following [arithmetization](./arithmetization.md), the computation is represented through a structured polynomial system.
+1. a commitment to all main traces of the shard with one *jagged* polynomial commitment;
+2. a LogUp-GKR argument that every bus balances;
+3. a *zerocheck* that every chip's constraints hold on every row;
+4. an opening of the committed columns at one random point, proved with WHIR.
 
-### Core Components
-- ​Execution Trace Polynomials
-  
-  Encode state transitions across computation steps as:
-  \\[ T_i(x) = \sum_{k=0}^{N-1} t_{i,k} \cdot L_k(x),\\]
-  where \\(L_k(x)\\) are Lagrange basis polynomials over domain H. 
-​
-- Constraint Polynomials
-  Encode verification conditions as algebraic relations:
-  \\[C_j(x) = R_j(T_1(x),T_2(x), \cdots, T_m(x), T_1(g \cdot x), T_2(g \cdot x), \cdots, T_m(g \cdot x)) = 0,\\]
-  for all \\(x \in H\\), where \\(g\\) is the generator of H.
+The code is in `crates/pcs/src/shard_level/` (prover and verifier), `crates/pcs/src/jagged*.rs` and `crates/pcs/src/whir/`.
 
-### Constraint Aggregation
-For proof efficiency, we combine constraints using:
-\\[C_{comb}(x) = \sum_j \alpha_j C_j(x),\\]
-where \\( \alpha_j\\) are derived through the Fiat-Shamir transformation.
+## Fields, hash and transcript
 
-## Mixed Matrix Commitment Scheme (MMCS)
+- Base field: KoalaBear, \\( p = 2^{31} - 2^{24} + 1 \\).
+- Challenge field: the degree-4 extension, `BinomialExtensionField<KoalaBear, 4>`.
+- Hash: Poseidon2 over KoalaBear with width 16. Merkle trees use a padding-free sponge for leaves and a truncated permutation for internal nodes, with 8-element digests.
+- Transcript: a duplex challenger on the same permutation.
 
-### Polynomial Commitments in STARK
+The wrap proof, which is verified inside a BN254 SNARK, uses a different hash and challenger (see [STARK to SNARK](./prover-architecture/stark-to-snark.md)).
 
-STARK uses Merkle trees for polynomial commitments:
+## Traces as multilinear polynomials
 
-- Setup: No trusted setup is needed, but a hash function for Merkle tree construction must be predefined. We use Poseidon2 as the predefined hash function.
+Each column of a chip trace with \\( 2^n \\) rows is read as the multilinear extension of its values over the Boolean hypercube \\( \\{0,1\\}^n \\). There are no cyclic domains, no "next row" and no quotient polynomial. A chip's constraints are polynomials \\( C_j \\) in the values of one row (main and preprocessed columns, plus public values), of degree at most 3.
 
-- Commit: Evaluate polynomials at all roots of unity in its domain, construct a Merkle tree with these values as leaves, and publish the root as the commitment.
+## Transcript prologue
 
-- Open: The verifier selects a random challenge point, and the prover provides the value and Merkle path for verification.
+The verifier observes the verifying key (the preprocessed commitment, the start `pc`, the initial global digest and the chip layout). For each shard it then observes the public values, the main commitment, and the number, heights and names of the chips present. Binding the heights before any challenge prevents the prover from choosing trace dimensions after seeing randomness.
 
-### Batch Commitment Protocol
+## Lookup argument
 
-The "Mixed Matrix Commitment Scheme" (MMCS) is a generalization of a vector commitment scheme used in Ziren. It supports:
+The first sub-argument proves that every bus balances. The prover grinds a proof of work, then runs LogUp-GKR over all interactions of all chips (see [Lookup Arguments](./lookup-arguments.md)). It ends with claimed evaluations of the columns that appear in interactions, at a random point.
 
-- Committing to matrices.
-- Opening rows.
-- Batch operations - committing to multiple matrices simultaneously, even when they differ in dimensions.
+## Zerocheck
 
-When opening a particular row index:
+The zerocheck proves that every constraint vanishes on every real row. Constraints are batched within a chip with powers of a challenge \\( \alpha \\), giving \\( C(x) = \sum_j \alpha^j C_j(x) \\), and across chips with powers of a challenge \\( \lambda \\). The GKR's column claims are folded into the same sum with a third challenge. The prover then runs one sumcheck for
 
-- For matrices with maximum height: use the full row index.
-- For smaller matrices: truncate least-significant bits of the index.
+\\[ \sum_{b \in \\{0,1\\}^n} \mathrm{eq}(r, b) \cdot C(b) = \text{(the combination of the GKR claims)}, \\]
 
-These semantics are particularly useful in the FRI protocol.
+where \\( r \\) is a random point and \\( \mathrm{eq} \\) is the multilinear equality polynomial. Each round polynomial has degree 4 (degree 3 from the constraints, 1 from \\( \mathrm{eq} \\)), and there is one round per row variable of a fixed cube, \\( 2^{22} \\) rows for core shards (`CORE_MAX_LOG_ROW_COUNT`). A chip shorter than the cube is extended virtually, and the contribution of the virtual rows is removed analytically, so they need not satisfy the constraints. The sumcheck ends with claimed evaluations of every column of every chip at one point \\( z^* \\).
 
-### Low-Degree Extension (LDE)
+## Jagged commitment
 
-Suppose the trace polynomials are initially of length \\(N\\). For security, we evaluate them on a larger domain (e.g., \\(2^k \cdot N\\)), called the LDE domain.
+A shard has dozens of chips with different heights and widths. Committing each separately would cost one Merkle tree and one opening per chip. Ziren uses a jagged polynomial commitment ([Jagged Polynomial Commitments](https://eprint.iacr.org/2025/917)). All columns of all chips are concatenated into one dense vector
 
-Using Lagrange interpolation:
-- Compute polynomial coefficients.
-- Extend evaluations to the larger domain,
+\\[ q = [\\, T_0[:,0] \mid T_0[:,1] \mid \cdots \mid T_N[:,w_N - 1] \\,] \\]
 
-Ziren implements this via Radix2DitParallel - a parallel FFT algorithm that divides butterfly network layers into two halves.
+without padding the columns to a common height. Prefix sums \\( t_k \\) of the column heights record where each column starts. The sparse "table of all columns" is related to \\( q \\) by
 
-## Low-Degree Enforcement
+\\[ p(z_r, z_c) = \sum_j q(j) \cdot \mathrm{eq}(\mathrm{row}(j), z_r) \cdot \mathrm{eq}(\mathrm{col}(j), z_c), \\]
 
-### Quotient Polynomial Construction
+where \\( \mathrm{col}(j) \\) and \\( \mathrm{row}(j) \\) are the column and row that position \\( j \\) belongs to according to \\( t \\).
 
-To prove \\(C_{comb}(x)\\) vanishes over subset \\(H\\), construct quotient polynomial \\(Q(x)\\):
-\\[Q(x) = \frac{C_{comb}(x)} {Z_{H}(x)} = \frac{\sum_j \alpha_j C_j(x)}{\prod_{h \in H}(x-h)}.\\]
+The dense vector is cut into stripes of \\( 2^{21} \\) values (the stacking height, `DEFAULT_LOG_STACKING_HEIGHT`). Each stripe is Reed-Solomon encoded, and all stripes of a round are committed in one Merkle tree. The preprocessed traces form a round committed at setup, whose root is in the verifying key; the main traces form a round committed per shard.
 
-The existence of such a low-degree \\(Q(x)\\) proves \\(C_{comb}(x)\\) vanishes over \\(H\\).
+To open the columns at \\( z^* \\), a sumcheck reduces the per-column claims to one claim about \\( q \\) at a random point. The verifier evaluates the jagged indicator from the heights it already observed. The heights are part of the transcript, so the verifier checks the layout it was committed to. The claim about \\( q \\) is proved with WHIR.
 
-## FRI Protocol 
+## WHIR
 
-The Fast Reed-Solomon Interactive Oracle Proof (FRI) protocol proves the low-degree of \\(P(x)\\). Ziren optimizes FRI by leveraging:
-- Algebraic structure of quartic extension \\(\mathbb{F}_{p^4}\\).
-- KoalaBear prime field \\(p = 2^{31} - 2^{24} + 1\\).
-- Efficient Poseidon2 hash computation.
+[WHIR](https://eprint.iacr.org/2024/1586) is a multilinear polynomial commitment built on Reed-Solomon proximity testing. The stripes of both committed rounds are batched into one virtual polynomial \\( F = \sum_i \mu^i \cdot \mathrm{stripe}_i \\), and \\( \mu \\) is drawn after the claims are fixed. The prover grinds before the batching challenge. WHIR then alternates folding sumchecks, commitments to the folded codeword at a lower rate, out-of-domain samples and queries into the previous codeword. Each query opens a Merkle path, and a round-0 query opens the same row of every stripe.
 
-**Three-Phase FRI Procedure**
-- Commitment Phase:
-
-  - The prover splits \\(P(x)\\) into two lower-degree polynomials \\(P_0(x)\\), \\(P_1(x)\\), such that: \\(P(x) = P_0(x^2) + x \cdot P_1(x^2)\\).
-
-  - The verifier sends a random challenge \\(\alpha \in  \mathbb{F}_{p^4}\\) 
-  - The prover computes a new polynomial: \\(P'(x) = P_0(x) + \alpha \cdot P_1(x)\\), and sends the commitment of the polynomials to the verifier.
-
-- ​Recursive Reduction:
-  - Repeat splitting process for \\(P'(x)\\).
-  - Halve degree each iteration until constant term or degree ≤ d.
-
-- ​Verification Phase:
-  - Verifier checks consistency between committed values at random point \\(z\\) in initial subgroup.
-
-## Verifying 
-
-### Verification contents
-To ensure the correctness of the folding process in a FRI-based proof system, the verifier performs checks over multiple rounds using randomly chosen points from the evaluation domain. In each round, the verifier essentially re-executes a step of the folding process and verifies that the values provided by the prover are consistent with the committed Merkle root. The detailed interaction for a single round is as follows:
-
-1. The verifier randomly selects a point \\(t \in \Omega\\).
-2. The prover returns the evaluation \\(p(t)\\) along with the corresponding Merkle proof to verify its inclusion in the committed polynomial.
-
-Then, for each folding round \\(i = 1\\) to \\(\log d\\) (d: polynomial degree): 
-
-1. The verifier updates the query point using the rule \\(t \leftarrow t^2\\), simulating the recursive domain reduction of FRI.
-2. The prover returns the folded evaluation \\(P_{\text{fold}}(t)\\) and the corresponding Merkle path.
-3. The verifier checks whether the folding constraint holds: \\(P_{\text{fold}}(t) = P_e(t) + t \cdot P_o(t)\\), where \\(P_e(t)\\) and \\(P_o(t)\\) are the even and odd parts of the polynomial at the given layer.
-
-4. This phase will end until a predefined threshold or the polynomial is reduced to a constant.
-
-### Grinding Factor & Repeating Factor
-
-Given the probabilistic nature of STARK verification, the protocol prevents brute-force attacks by requiring either:
-- A Proof of Work (PoW) accompanying each proof, or
-- multiple verification rounds.
-
-This approach significantly increases the computational cost of malicious attempts. In Ziren, we employ multiple verification rounds to achieve the desired security level.
-
-## Security Configurations
-
-Ziren supports two security levels, selectable at compile time:
-
-### 100-bit Security (Default)
-
-Uses a **quartic extension** (D=4) over KoalaBear:
+The production schedule for a core shard (`core_whir_config` in `crates/pcs/src/whir/jagged.rs`) is:
 
 | Parameter | Value |
-|-----------|-------|
-| Base field | KoalaBear (p = 2^31 - 2^24 + 1, ~31 bits) |
-| Extension field | BinomialExtensionField<KoalaBear, 4> (~124 bits) |
-| FRI queries | 84 |
-| Proof-of-work | 16 bits |
-| Protocol security | 84 bits (100 - 16 PoW) |
-| Security model | Unique Decoding (proven) |
+|---|---|
+| Stacking height | \\( 2^{21} \\) |
+| Starting rate | \\( \rho = 2^{-2} \\); each committed round divides it by 8 |
+| Folding factors | 3, then 6, 6 |
+| Queries per round | 124, 88, 85 (final: 85) |
+| Out-of-domain samples | 2 per committed round |
+| Query grinding | 22 bits (`ZIREN_WHIR_QUERY_GRINDING_BITS`) |
+| Batching grinding | 14 bits (`ZIREN_WHIR_BATCH_GRINDING_BITS`) |
+| LogUp-GKR grinding | 22 bits (`ZIREN_LOGUP_GRINDING_BITS`) |
 
-Config: `KoalaBearPoseidon2` / `KoalaBearPoseidon2Inner`
+The query counts are not listed in the code but solved. In the unique-decoding regime, a query into a code of rate \\( \rho \\) is worth \\( -\log_2((1 + \rho)/2) \\) bits, so a round with \\( q \\) queries and \\( g \\) grinding bits gives \\( q \cdot (-\log_2((1+\rho)/2)) + g \\) bits. The solver picks the least \\( q \\) that reaches the per-component target, `ZIREN_SOUNDNESS_TARGET_BITS` (default 106). At the defaults:
 
-### Configurable Security with D=5 (Quintic Extension)
+\\[ 124 \cdot 0.678 + 22 = 106.08, \quad 88 \cdot 0.956 + 22 = 106.09, \quad 85 \cdot 0.994 + 22 = 106.52. \\]
 
-The quintic extension config `KoalaBearPoseidon2D5` supports any security level up to ~155 bits. FRI queries are automatically derived from the target:
+The target is 106 rather than 100 because a shard transcript has about two dozen components, and a union bound over them should still exceed 100 bits: \\( 100 + \log_2 24 \approx 104.6 \\). Lowering a grinding parameter through the environment raises the query counts instead of weakening a round. These are bounds on the interactive protocol; the Fiat-Shamir transformation costs a further factor in the number of hash queries an adversary makes.
 
-```rust
-// 128-bit security
-let config = KoalaBearPoseidon2D5::with_security(128);
+## Verification
 
-// Or any other target
-let config = KoalaBearPoseidon2D5::with_security(112);
-```
+The verifier, `verify_shard` in `crates/pcs/src/shard_level/verifier.rs`:
 
-| Parameter | Value |
-|-----------|-------|
-| Base field | KoalaBear (p = 2^31 - 2^24 + 1, ~31 bits) |
-| Extension field | QuinticTrinomialExtensionField<KoalaBear> (~155 bits) |
-| FRI queries | Auto-derived from security target |
-| Proof-of-work | 16 bits |
-| Security model | Unique Decoding / Johnson Bound (proven) |
+1. replays the prologue;
+2. checks the LogUp-GKR proof, using the public values for the endpoints of the `State`, `GlobalAccumulation` and global-memory control buses;
+3. checks the zerocheck sumcheck and recomputes every chip's batched constraint at \\( z^* \\) from the claimed column values;
+4. checks the jagged reduction and the WHIR proof against the preprocessed root in the verifying key and the shard's main commitment.
 
-Reference: [Plonky3-recursion](https://github.com/Plonky3/Plonky3-recursion) uses D=5 for KoalaBear with parameterized security. The Johnson Bound proximity gaps from [BCSS25] (Ben-Sasson, Carmon, Haboeck, Kopparty, Saraf, 2025) improve the error bound from O(n^2/eta^7) to O(n/eta^5), enabling provable 128-bit security.
-
-**Trade-offs vs D=4 at same security level:**
-- Proofs are ~20% larger (more queries needed at higher targets)
-- Verification is ~15% slower (quintic field arithmetic vs quartic)
-- Proving is ~10% slower (wider extension)
-- No security conjectures required at 128-bit
-
-## WHIR PCS (Alternative to FRI)
-
-WHIR (Worst-case to average-case reduction for Interactive Reed-Solomon) is an alternative polynomial commitment scheme available via the `whir` feature flag.
-
-### How WHIR Differs from FRI
-
-| Property | FRI | WHIR |
-|----------|-----|------|
-| Polynomial type | Univariate | Multilinear |
-| Reduction method | Domain halving | Folding + sumcheck |
-| Vars per round | 1 | 4 (configurable) |
-| Proof structure | Merkle paths at each round | Merkle paths + sumcheck proofs |
-
-### Performance (100-bit security, 2^20 trace)
-
-| Metric | FRI | WHIR | Improvement |
-|--------|-----|------|-------------|
-| Proof size | ~53 KB | ~14 KB | 3.6x smaller |
-| Verification hashes | 1,680 | 455 | 3.7x faster |
-| Prover cost | baseline | comparable | ~neutral |
-
-### WHIR Security Levels
-
-WHIR PCS is generic over the challenge field and security level:
-
-```rust
-// 100-bit with D=4
-let params = whir_parameters(100);
-let pcs = koalabear_whir_pcs::<WhirChallenge>(num_vars, params);
-
-// 128-bit with D=5
-let params = whir_parameters(128);
-let pcs = koalabear_whir_pcs::<Whir128Challenge>(num_vars, params);
-```
-
-The `whir_parameters()` function automatically selects the soundness assumption:
-- `<= 100 bits`: Capacity Bound (conjectured, most efficient)
-- `> 100 bits`: Johnson Bound (proven via [BCSS25], requires D=5)
-
-### Integration Status
-
-WHIR implements the `MultilinearPcs` trait, not the univariate `Pcs` trait used by the current STARK pipeline. Full integration requires either an adapter from `MultilinearPcs` to `Pcs`, or a new STARK pipeline built on `MultilinearPcs` (as done in [Plonky3-recursion](https://github.com/Plonky3/Plonky3-recursion)). The parameter configuration and type aliases are available in `zkm_pcs::whir_config` (feature-gated).
+Checks between shards (the `pc` chain, shard numbers, memory address ranges, the global digest) are not part of the shard argument. The recursion enforces them (see [Recursive STARK](./prover-architecture/recursive-stark.md)).

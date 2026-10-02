@@ -1,123 +1,105 @@
 # Memory Consistency Checking
 
-[Offline memory checking](https://georgwiese.github.io/crypto-summaries/Concepts/Protocols/Offline-Memory-Checking) is a method that enables a prover to demonstrate to a verifier that a read/write memory was used correctly. In such a memory system, a value \\(v\\) can be written to an address \\(a\\) and subsequently retrieved. This technique allows the verifier to efficiently confirm that the prover adhered to the memory's rules (i.e., that the value returned by any read operation is indeed the most recent value that was written to that memory address).
+[Offline memory checking](https://georgwiese.github.io/crypto-summaries/Concepts/Protocols/Offline-Memory-Checking) lets a prover show that a read/write memory was used correctly: every read returns the value most recently written to that address. Unlike online checking with Merkle paths, it checks nothing per access. Each access adds tuples to two multisets, and one equality check between the multisets at the end covers all accesses. Ziren uses it for registers and memory alike, within a shard through the lookup argument and across shards through a multiset hash on an elliptic curve.
 
-This is in contrast to "online memory checking" techniques like Merkle hashing which ​immediately verify that a memory read was done correctly by insisting that each read includes an authentication path. Merkle hashing is  ​computationally expensive on a per-read basis for ZK provers, and offline memory checking suffices for zkVM design.
+## Read set and write set
 
-Ziren replaces ZKM’s online memory checking with multiset-hashing-based offline memory checking for improved efficiency. Ziren's verifies the consistency of read/write operations by constructing a ​read set \\(RS\\) and a ​write set \\(WS\\) and proving their equivalence. This mechanism leverages ​multiset hashing on an elliptic curve over KoalaBear Prime's 7th extension field to ensure memory integrity efficiently. Below is a detailed breakdown of its key components.
+The read set \\( RS \\) and write set \\( WS \\) are multisets of tuples \\( (a, v, c) \\): an address, a value and a timestamp.
 
-## Construction of Read Set and Write Set
+- **Initialization.** \\( RS = WS = \emptyset \\). For every address \\( a_i \\) with initial value \\( v_i \\), add \\( (a_i, v_i, 0) \\) to \\( WS \\).
+- **Access.** To access address \\( a \\) at time \\( c_{now} \\), take the last tuple \\( (a, v, c) \\) written for \\( a \\), add it to \\( RS \\), and add \\( (a, v', c_{now}) \\) to \\( WS \\). For a read \\( v' = v \\); for a write \\( v' \\) is the new value.
+- **Post-processing.** For every address, add its last tuple in \\( WS \\) to \\( RS \\).
 
-Definition: The read set \\(RS\\) and write set  \\(WS\\) are sets of tuples \\(a, v, c\\), where:
+The memory was used correctly if:
 
-- \\(a\\): Memory address
-- \\(v\\): Value stored at address \\(a\\)
-- \\(c\\): Operation counter
+1. the sets were initialized correctly;
+2. at every access \\( c < c_{now} \\), so the timestamps of an address strictly increase;
+3. a read adds the same value to \\( RS \\) and \\( WS \\);
+4. after post-processing, \\( RS = WS \\).
 
-**Three-Stage Construction**
+Suppose the first incorrect read of address \\( a \\) returns \\( (a, v', c') \\) instead of the last written \\( (a, v, c) \\). All tuples in \\( WS \\) are distinct because timestamps strictly increase, and \\( (a, v', c') \\) was never written. So \\( RS \\) contains a tuple that \\( WS \\) does not contain, and no later step can remove it. Then \\( RS \neq WS \\).
 
-Initialization:
+## Within a shard
 
-- \\(RS = WS = \emptyset\\);
-- All memory cells \\(a_i\\) are initialized with some value \\(v_i\\) at op count \\(c=0\\). Add the initial tuples to the write set \\(WS = WS \bigcup \\{(a_i, v_i, 0)\\}\\) for all \\(i\\).
+A shard's accesses are tuples `(shard, clk, addr, value)` on the `Memory` bus. The timestamp is the pair `(shard, clk)`.
 
-Read and write operations:
-- ​Read Operation, for reading a value from address \\(a\\):
-  - Find the last tuple \\((a, v, c)\\) added to write set \\(WS\\) with the address \\(a\\).
-  - \\(RS = RS \bigcup \\{(a, v, c)\\}\\) and \\(WS = WS \bigcup \\{(a, v, c_{now})\\}\\), with \\(c_{now}\\) the current op count.
-- ​Write Operation, for writing a value \\(v'\\) to address \\(a\\):
-  - Find the last tuple \\((a, v, c)\\) added to write set \\(WR\\) with the address \\(a\\). 
-  - \\(RS = RS \bigcup \\{(a, v, c)\\}\\) and \\(WS = WS \bigcup \\{(a, v', c_{now})\\}\\).
+- An access sends its previous tuple `(prev_shard, prev_clk, addr, prev_value)` (the read) and receives its new tuple (the write). It asserts that `(shard, clk)` is strictly larger than `(prev_shard, prev_clk)`. When the shards are equal, the difference `clk - prev_clk - 1` is split into a 16-bit and a 10-bit limb and both are range-checked, which proves `clk > prev_clk` because both clocks are below \\( 2^{26} \\). Otherwise the same check is applied to the shards.
+- `MemoryLocal` has one row per address the shard touches. The row supplies the address's first tuple in the shard and consumes its last one.
+- Registers are addresses 0 to 35. `MemoryBump` inserts a read of every touched register at `(shard, 0)`, so the check for every other register access compares clocks only (see [Memory](./chips/memory.md)).
 
-Post-processing：
+The `Memory` bus balances when the sends equal the receives, which is condition 4 for the shard. The LogUp-GKR argument proves it together with all other buses (see [Lookup Arguments](./lookup-arguments.md)).
 
-- For all memory cells \\(a_i\\), add the last tuple \\((a_i, v_i, c_i)\\) in write set \\(WS\\) to \\(RS\\): \\(RS = RS \bigcup \\{(a_i, v_i, c_i)\\}\\).
+## Across shards
 
+The first and last tuple of each address in a shard must also match the neighbouring shards. These tuples go on the `Global` bus:
 
-## Core Observation
+- `MemoryLocal` *receives* the address's initial tuple and *sends* its final tuple.
+- `MemoryGlobalInit` sends the initial value of each address outside the program image, at timestamp `(0, 0)`.
+- `MemoryGlobalFinal` receives the final value of each touched address.
+- The initial values of the program image are not rows. Their contribution is precomputed at setup as the verifying key's `initial_global_cumulative_sum`.
 
-The prover adheres to the memory rules ​if the following conditions hold:
+Because shards are proved independently, the lookup argument, which only balances within one shard, cannot match these messages. Instead each message is hashed to a point on an elliptic curve, the `Global` chip adds up the shard's points, and the shard's sum is a public value. The recursion adds the sums of all shards and the verifying key's initial sum, and the root checks that the total is the neutral digest. A matching send and receive map to opposite points and cancel. The same mechanism carries syscalls from an execution shard to the precompile shard that proves them.
 
-1) The read and write sets are correctly initialized; 
-2) For each address \\(a_i\\), the instruction count added to \\(WS\\) strictly increases over time;
-3) ​For read operations: Tuples added to \\(RS\\) and \\(WS\\) must have the same value.
-4) ​For write operations: The operation counter of the tuple in \\(RS\\) must be less than that in \\(WS\\).
-5) After post-processing, \\(RS = WS\\).
+## Multiset hashing
 
-Brief Proof: Consider the first erroneous read memory operation. Assume that a read operation was expected to return the tuple \\((a,v,c)\\), but it actually returned an incorrect tuple \\((a, v' \neq v, c')\\) and added it to read set \\(RS\\). Note that all tuples in \\(WS\\) are distinct. After adding \\((a,v',c_{now})\\) to \\(WS\\), the tuples \\((a,v,c)\\) and \\((a,v',c_{now})\\) are not in the read set \\(RS\\). According to restriction 3, after each read-write operation, there are always at least two tuples in \\(WS\\) that are not in \\(RS\\), making it impossible to adjust to \\(RS = WS\\) through post-processing.
+A multiset hash maps a multiset to a short value such that it is infeasible to find two different multisets with the same hash, and such that the hash can be updated one element at a time in any order. Ziren maps each element to a point on an elliptic curve and hashes a multiset to the sum of its points.
 
-## Multiset Hashing
+To map a message \\( m = (m_0, \dots, m_6) \\) to a point, Ziren follows [Constraint-Friendly Map-to-Elliptic-Curve-Group Relations and Their Applications](https://eprint.iacr.org/2025/1503) and uses the message directly as the \\( x \\)-coordinate, without hashing it first:
 
-Multiset hashing maps a (multi-)set to a short string, making it computationally infeasible to find two distinct sets with the same hash. The hash is computed incrementally, with ​order-independence as a key property.
+- \\( x_0 = m_0 + 2^{16} \cdot kind \\), where \\( m_0 \\) is range-checked to 16 bits and \\( kind \\) names the bus the message came from;
+- \\( x_i = m_i \\) for \\( 1 \le i \le 5 \\);
+- \\( x_6 = 256 \cdot m_6 + t \\), where \\( m_6 \\) is a byte and \\( t \\) is an 8-bit tweak.
 
-**Implementation on Elliptic Curve**
+The prover tries tweaks \\( t = 0, 1, \dots \\) until \\( x \\) is on the curve. For the square root \\( y \\), the top coefficient \\( y_6 \\) fixes the sign. A received message must have \\( 1 \le y_6 \le 63 \cdot 2^{24} \\), and a sent message \\( 2^{30} + 1 \le y_6 \le p - 1 \\). The two ranges are disjoint and mirror each other under \\( y \mapsto -y \\), so a send and the matching receive give opposite points. Each row sets exactly one of `is_send` and `is_receive`.
 
-Let \\(G\\) denote the group of points \\((x,y)\\) on the elliptic curve defined by \\(y^2 = x^3 +Ax+B\\), including the point at infinity. We adopt a hash-to-group approach following the framework described in [Constraint-Friendly Map-to-Elliptic-Curve-Group Relations and Their
-Applications](https://eprint.iacr.org/2025/1503.pdf). To map a set element to a point on the curve, we first assign it directly to the \\(x\\)-coordinate of a candidate point—without an intermediate hashing step. Since this \\(x\\)-value may not correspond to a valid point on the curve, we apply an 8-bit tweak \\(t\\) to adjust it. The sign of the resulting \\(y\\)-coordinate is constrained to prevent ambiguity, either by restricting \\(y\\) to be a quadratic residue or by imposing explicit range checks. Furthermore, the message length is bounded by 110 bits, and the base field of the curve operates over the 7th extension field of the KolearBear Prime to ensure a security level of at least 100 bits.
+The `Global` chip adds the points in a chain on the `GlobalAccumulation` bus using the chord formula. It witnesses \\( (x_2 - x_1)^{-1} \\) at each step so that doubling and adding an inverse are not provable. Sums start at a fixed point derived from \\( \sqrt{2} \\), and that point is the neutral digest.
 
-In Ziren, the following parameters are used.
-- KoalaBear Prime field: \\(\mathbb{F}_P\\), with \\(P = 2^{31} - 2^{24} +1\\).
-- Septic extension field: Defined under irreducible polynomial \\( u^7 + 2u -8\\).
-- Elliptic curve: Defined with \\(A = 3*u , B= -3\\) (provides ≥102-bit security).
+The parameters are:
 
+- base field KoalaBear, \\( p = 2^{31} - 2^{24} + 1 \\);
+- extension \\( \mathbb{F}_{p^7} = \mathbb{F}_p[z]/(z^7 + 2z - 8) \\);
+- curve \\( y^2 = x^3 + 3z \cdot x - 3 \\).
 
-## Elliptic Curve Selection over KoalaBear Prime Extension Field
+## Elliptic curve selection over the KoalaBear extension field
 
 **Objective**
 
-Construct an elliptic curve over the 7th-degree extension field of KoalaBear Prime \\(P = 2^{31} - 2^{24} +1\\), achieving >100-bit security against known attacks while maintaining computational efficiency.
+Find an elliptic curve over the degree-7 extension of KoalaBear, \\( p = 2^{31} - 2^{24} + 1 \\), with more than 100 bits of security against known attacks and cheap arithmetic.
 
-**Code Location**
+**Code location**
 
-Implementation available [here](
-https://github.com/ProjectZKM/septic-curve-over-koalabear). It is a fork from [Cheetah](https://github.com/toposware/cheetah) that finds secure curve over a sextic extension of Goldilock Prime \\(2^{64} - 2^{32} + 1\\).
+The search is in [septic-curve-over-koalabear](https://github.com/ProjectZKM/septic-curve-over-koalabear), a fork of [Cheetah](https://github.com/toposware/cheetah), which finds a curve over a sextic extension of the Goldilocks prime \\( 2^{64} - 2^{32} + 1 \\).
 
-**Construction Workflow**
+**Construction**
 
-- Step 1: Sparse Irreducible Polynomial Selection
-  - Requirements​​:
-    - Minimal non-zero coefficients in polynomial
-    - Small absolute values of non-zero coefficients
-    - Irreducibility over base field
-  - Implementation​​ (septic_search.sage):
-    - `poly = find_sparse_irreducible_poly(Fpx, extension_degree, use_root=True)`
-    - The selected polynomial: \\(x^7 + 2x - 8\\). This sparse form minimizes arithmetic complexity while ensuring irreducibility.
+- Step 1: sparse irreducible polynomial.
+  - Requirements: few nonzero coefficients, small coefficients, irreducible over the base field.
+  - Implementation (`septic_search.sage`): `poly = find_sparse_irreducible_poly(Fpx, extension_degree, use_root=True)`.
+  - Result: \\( z^7 + 2z - 8 \\).
 
-- Step 2: Candidate Curve Filtering
-  - ​Curve Form​​: \\(y^2 = x^3 + ax + b\\), with small |a| and |b| to optimize arithmetic operations.
-  - ​Parameter Search​ in septic_search.sage​:
+- Step 2: candidate curves.
+  - Form \\( y^2 = x^3 + ax + b \\) with small coefficients.
+  - Search in `septic_search.sage`:
     ```
     for i in range(wid, 1000000000, processes):
         coeff_a = 3 * a  # Fixed coefficient scaling
         coeff_b = i - 3
         E = EllipticCurve(extension, [coeff_a, coeff_b])
     ```
-  - Final parameters chosen: \\(a = 3u, b = -3\\) (with \\(u\\) as extension field generator).
+  - Result: \\( a = 3z \\), \\( b = -3 \\), with \\( z \\) the generator of the extension.
 
-- Step 3: Security Validation
-  - Pollard-Rho Resistance​​
-
-    Verify prime subgroup order > 210 bits:
+- Step 3: security checks.
+  - Pollard rho: the largest prime factor of the group order has more than 210 bits.
     ```
     prime_order = list(ecm.factor(n))[-1]
     assert prime_order.nbits() > 210
     ```
-  - ​​Embedding Degree Check​​:
+  - Embedding degree:
     ```
     embedding_degree = calculate_embedding_degree(E)
     assert embedding_degree.nbits() > EMBEDDING_DEGREE_SECURITY
     ```
-  - ​Twist Security​​:
-    - Pollard-Rho Resistance​​
-    - ​Embedding Degree Check​​
+  - The same two checks for the quadratic twist.
 
-- Step 4: Complex Discriminant Verification
-
-  Check discriminant condition for secure parameterization: \\( D=(P^7 + 1 − n)^ 2 - 4P^7 \\), where \\(n\\) is the full order of the original curve. Where \\(\text{D}\\) must satisfies:
-  - Large negative integer (absolute value > 100 bits)  
-  - ​​Square-free part​​ > 100 bits ​​
-  
-  ​​Validation command​​:
-  `sage verify.sage`
-
-The selected curve achieves ​​>100-bit security​​. This construction follows NIST-recommended practices while optimizing for zkSNARK arithmetic circuits through ​​sparse polynomial selection​​ and ​​small curve coefficients​​.
+- Step 4: complex discriminant.
+  With \\( n \\) the order of the curve, \\( D = (p^7 + 1 - n)^2 - 4p^7 \\) must be a large negative integer (absolute value above 100 bits) whose square-free part exceeds 100 bits. Run `sage verify.sage` to check.

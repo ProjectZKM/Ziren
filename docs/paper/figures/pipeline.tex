@@ -22,7 +22,7 @@
 \node[card] at (13.5,0.16) {}; \node[card] at (13.4,0.08) {};
 \node[card] (prf) at (13.3,0) {shard\\proof $\pi_i$};
 \draw[a] (elf) -- (exec);
-\draw[a] (exec) -- node[lab, above] {$N$ shards} (rec);
+\draw[a] (exec) -- (rec);
 \draw[a] (rec) -- (core);
 \draw[a] (core) -- (prf);
 % ---------------- fan-in of shard proofs to the leaves
@@ -46,7 +46,7 @@
 \draw[ln] (c1.south) -- (root.north);
 \draw[ln] (c2.south) -- (root.north);
 % ---------------- output: the compressed proof
-\node[io, minimum width=2.8cm, fill=zirenteal!8, draw=zirenteal!80] (final) at (8.2,-3.85) {compressed root proof\\{\scriptsize 603\,KiB; host-verifiable}};
+\node[io, minimum width=2.8cm, fill=zirenteal!8, draw=zirenteal!80] (final) at (8.2,-3.85) {compressed root proof\\{\scriptsize host-verifiable}};
 \draw[a] (root) -- node[lab, above] {root} (final);
 \node[lab, anchor=north west] at (10.15,-4.23) {\textbf{L}: leaf verifier\qquad \textbf{C}: compose verifier};
 % ---------------- stage bands (background)

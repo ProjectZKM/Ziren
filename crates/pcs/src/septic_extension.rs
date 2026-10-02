@@ -295,8 +295,8 @@ impl<F: PrimeCharacteristicRing> Mul<F> for SepticExtension<F> {
 
 impl<F: PrimeCharacteristicRing> MulAssign<F> for SepticExtension<F> {
     fn mul_assign(&mut self, rhs: F) {
-        for i in 0..7 {
-            self.0[i] *= rhs.clone();
+        for x in self.0.iter_mut() {
+            *x *= rhs.clone();
         }
     }
 }

@@ -329,7 +329,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >>::Commitment,
         >,
         Self: Sized,
-    {
+{
         None
     }
 

@@ -1,10 +1,10 @@
 # Host Program
 
-In a Ziren application, the host is the machine that is running the zkVM. The host is an untrusted agent that sets up the zkVM environment and handles inputs/outputs during execution for guest.
+In a Ziren application, the host is the machine that runs the zkVM. The host is an untrusted agent that sets up the zkVM environment, supplies inputs to the guest, and collects its outputs and proofs.
 
 ## Example: [Fibonacci](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci/host/src/main.rs)
 
-This host program sends the input `n = 1000` to the guest program for proving knowledge of the Nth Fibonacci number without revealing the computational path.
+This host program sends the input `n = 1000` to the guest program, executes it, proves it, and verifies the proof.
 
 ```rust
 use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
@@ -13,40 +13,49 @@ use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStd
 const ELF: &[u8] = include_elf!("fibonacci");
 
 fn main() {
-    // Create an input stream and write '1000' to it.
-    let n = 1000u32;
+    utils::setup_logger();
 
-    // The input stream that the guest will read from using `zkm_zkvm::io::read`. Note that the
-    // types of the elements in the input stream must match the types being read in the program.
+    // The input stream that the guest reads with `zkm_zkvm::io::read`. The types written here
+    // must match the types the guest reads, in the same order.
+    let n = 1000u32;
     let mut stdin = ZKMStdin::new();
     stdin.write(&n);
 
-    // Create a `ProverClient` method.
+    // The prover is selected by the `ZKM_PROVER` environment variable (CPU by default).
     let client = ProverClient::new();
 
-    // Execute the guest using the `ProverClient.execute` method, without generating a proof.
-    let (_, report) = client.execute(ELF, stdin.clone()).run().unwrap();
+    // Execute the guest without generating a proof.
+    let (_, report) = client.execute(ELF, &stdin).run().unwrap();
     println!("executed program with {} cycles", report.total_instruction_count());
 
-    // Generate the proof for the given program and input.
+    // Generate the proving and verifying keys, then a proof (core mode by default).
     let (pk, vk) = client.setup(ELF);
     let mut proof = client.prove(&pk, stdin).run().unwrap();
 
-    // Read and verify the output.
-    //
-    // Note that this output is read from values committed to in the program using
-    // `zkm_zkvm::io::commit`.
-    let n = proof.public_values.read::<u32>();
+    println!("generated proof");
+
+    // Read the values the guest committed with `zkm_zkvm::io::commit`, in the same order.
+    let _ = proof.public_values.read::<u32>();
     let a = proof.public_values.read::<u32>();
     let b = proof.public_values.read::<u32>();
 
-    println!("n: {}", n);
     println!("a: {}", a);
     println!("b: {}", b);
 
-    // Verify proof and public values
+    // Verify the proof and its public values.
     client.verify(&proof, &vk).expect("verification failed");
+
+    // Proofs can be saved and loaded.
+    proof.save("proof-with-pis.bin").expect("saving proof failed");
+    let deserialized_proof =
+        ZKMProofWithPublicValues::load("proof-with-pis.bin").expect("loading proof failed");
+
+    client.verify(&deserialized_proof, &vk).expect("verification failed");
+
+    println!("successfully generated and verified proof for the program!")
 }
 ```
 
-For more details, please refer to document [prover](./prover.md).
+Note that `execute` takes the input stream by reference (`&stdin`), while `prove` takes it by value.
+
+For more details, see the [Prover](./prover.md) page.

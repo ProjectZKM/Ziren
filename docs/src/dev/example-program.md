@@ -1,13 +1,22 @@
-# Example Walkthrough - Best Practices 
+# Example Walkthrough - Best Practices
 
-From Ziren’s [project template](https://github.com/ProjectZKM/Ziren), you can directly make adjustments to the guest and host Rust programs: 
+This page walks through the [Fibonacci example](https://github.com/ProjectZKM/Ziren/tree/main/examples/fibonacci) in the Ziren repository. It has the standard layout of a Ziren application:
 
-- guest/main.rs
-- host/main.rs
+```shell
+examples/fibonacci
+├── guest
+│   ├── Cargo.toml
+│   └── src/main.rs        # the program that is proved
+└── host
+    ├── Cargo.toml
+    ├── build.rs           # compiles the guest to a MIPS ELF
+    ├── bin/               # one binary per proof mode
+    └── src/main.rs        # executes, proves and verifies the guest
+```
 
-The implementations with the guest and host programs for proving the Fibonacci sequence (the default example in the project template are below): 
+## Guest
 
-`./guest/main.rs`
+`guest/src/main.rs`:
 
 ```rust
 //! A simple program that takes a number `n` as input, and writes the `n-1`th and `n`th fibonacci
@@ -17,242 +26,171 @@ The implementations with the guest and host programs for proving the Fibonacci s
 //
 // Under the hood, we wrap your main function with some extra code so that it behaves properly
 // inside the zkVM.
-
-// directives to make the Rust program compatible with the zkVM 
 #![no_std]
 #![no_main]
-zkm_zkvm::entrypoint!(main); // marks main() as the program entrypoint when compiled for the zkVM
+zkm_zkvm::entrypoint!(main);
 
-use alloy_sol_types::SolType; // abi encoding and decoding compatible with Solidity for verification
-use fibonacci_lib::{PublicValuesStruct, fibonacci}; // crate with struct to represent public output values and function to compute Fibonacci numbers
+pub fn main() {
+    // Read an input to the program. Behind the scenes, this is a system call that reads from
+    // the input stream the host provided.
+    let n = zkm_zkvm::io::read::<u32>();
 
-pub fn main() { // main function for guest. Execution begins here 
-    // Read an input to the program.
-    //
-    // Behind the scenes, this compiles down to a system call which handles reading inputs
-    // from the prover.
-    let n = zkm_zkvm::io::read::<u32>(); // reads an input n from the host. System call allows host to pass in serialized input
+    // Commit n to the public values.
+    zkm_zkvm::io::commit(&n);
 
-    // Compute the n'th fibonacci number using a function from the workspace lib crate.
-    let (a, b) = fibonacci(n); // computes (n-1)th = a and nth = b Fibonacci numbers
+    // Compute the n'th fibonacci number, using normal Rust code.
+    let mut a = 0;
+    let mut b = 1;
+    for _ in 0..n {
+        let mut c = a + b;
+        c %= 7919; // Modulus to prevent overflow.
+        a = b;
+        b = c;
+    }
 
-    // Encode the public values of the program.
-    let bytes = PublicValuesStruct::abi_encode(&PublicValuesStruct { n, a, b }); // wraps result into struct and ABI encodes it into a byte array using SolType
-
-    // Commit to the public values of the program. The final proof will have a commitment to all the
-    // bytes that were committed to.
-    zkm_zkvm::io::commit_slice(&bytes); // commits output bytes to zkVM's public output allowing verifier to validate that output matches input and computation
+    // Commit the outputs of the program.
+    zkm_zkvm::io::commit(&a);
+    zkm_zkvm::io::commit(&b);
 }
-
 ```
 
-`./host/main.rs`
+`guest/Cargo.toml`:
+
+```toml
+[package]
+name = "fibonacci"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zkm-zkvm = { path = "../../../crates/zkvm/entrypoint", features= ["embedded"] }
+```
+
+The package name (`fibonacci`) is the name the host passes to `include_elf!`. The `embedded` feature selects an allocator that can free memory, in place of the default bump allocator. Outside the Ziren repository, replace the `path` dependency by a git dependency, as shown in [Guest Program](./guest-program.md#compiling-guest-program).
+
+## Host
+
+`host/build.rs` compiles the guest whenever the host is built:
 
 ```rust
-//! An end-to-end example of using the zkMIPS SDK to generate a proof of a program that can be executed
-//! or have a core proof generated.
-//!
-//! You can run this script using the following command:
-//! ```shell
-//! RUST_LOG=info cargo run --release -- --execute
-//! ```
-//! or
-//! ```shell
-//! RUST_LOG=info cargo run --release -- --core
-//! ```
-//! or
-//! ```shell
-//! RUST_LOG=info cargo run --release -- --compressed
-//! ```
-
-use alloy_sol_types::SolType; // abi encoding and decoding compatible with Solidity for verification
-use clap::Parser;
-use fibonacci_lib::PublicValuesStruct;
-use zkm_sdk::{ProverClient, ZKMStdin, include_elf};
-
-/// The ELF (executable and linkable format) file for the zkMIPS zkVM.
-pub const FIBONACCI_ELF: &[u8] = include_elf!("fibonacci"); // includes compiled fibonacci guest ELF binary at compile
-
-/// The arguments for the command.
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args { // defines CLI arguments 
-    #[arg(long)]
-    execute: bool, // runs guest directly inside zkVM 
-
-    #[arg(long)]
-    core: bool, // generates core proof 
-
-    #[arg(long)]
-    compressed: bool, // generates compressed proof 
-
-    #[arg(long, default_value = "20")]
-    n: u32, // input value to send to guest program 
+fn main() {
+    zkm_build::build_program("../guest");
 }
+```
+
+`host/Cargo.toml` (abbreviated; the example also declares the other binaries in `bin/`):
+
+```toml
+[package]
+name = "fibonacci-host"
+version = { workspace = true }
+edition = { workspace = true }
+default-run = "fibonacci-host"
+publish = false
+
+[dependencies]
+hex = "0.4.3"
+zkm-sdk = { workspace = true }
+
+[build-dependencies]
+zkm-build = { workspace = true }
+
+[[bin]]
+name = "groth16_bn254"
+path = "bin/groth16_bn254.rs"
+
+[[bin]]
+name = "fibonacci-host"
+path = "src/main.rs"
+```
+
+`host/src/main.rs` executes the guest, generates a core proof, reads the public values, and verifies the proof; it is listed on the [Host Program](./host-program.md) page. The `bin/` directory holds one host per mode:
+
+| Binary          | What it does                                            |
+|-----------------|---------------------------------------------------------|
+| `execute`       | executes the guest and prints the execution report      |
+| `compressed`    | generates and verifies a compressed proof               |
+| `groth16_bn254` | generates and verifies a Groth16 proof for on-chain use |
+| `plonk_bn254`   | generates and verifies a PLONK proof for on-chain use   |
+
+`host/bin/groth16_bn254.rs`:
+
+```rust
+use zkm_sdk::{include_elf, utils, HashableKey, ProverClient, ZKMStdin};
+
+/// The ELF we want to execute inside the zkVM.
+const ELF: &[u8] = include_elf!("fibonacci");
 
 fn main() {
-    // Setup the logger. 
-    zkm_sdk::utils::setup_logger(); // logging setup
-    dotenv::dotenv().ok(); // loading any .env variables 
+    utils::setup_logger();
 
-    // Parse the CLI arguments and enforces exactly one mode is chosen 
-    let args = Args::parse();
+    let n = 500u32;
 
-    if args.execute == args.core && args.compressed == args.execute {
-        eprintln!("Error: You must specify either --execute, --core, or --compress");
-        std::process::exit(1);
-    }
-
-    // Setup the prover client.
-    let client = ProverClient::new();
-
-    // Setup the inputs.
     let mut stdin = ZKMStdin::new();
-    stdin.write(&args.n); // writes n into stdin for guest to read 
+    stdin.write(&n);
 
-    println!("n: {}", args.n);
+    let client = ProverClient::new();
+    let (pk, vk) = client.setup(ELF);
+    println!("vk: {:?}", vk.bytes32());
 
-		// execution mode: 
-    if args.execute {
-        // Execute the program
-        let (output, report) = client.execute(FIBONACCI_ELF, stdin).run().unwrap();
-        println!("Program executed successfully.");
-        // runs guest program inside zkVM without generating proof and captures output and report 
+    let proof = client.prove(&pk, stdin).groth16().run().unwrap();
+    println!("generated proof");
 
-        // Read the output.
-        // output decoding from guest using ABI rules 
-        let decoded = PublicValuesStruct::abi_decode(output.as_slice()).unwrap();
-        let PublicValuesStruct { n, a, b } = decoded;
-        
-        // validates output correctness by re-computing it locally and comparing
-        println!("n: {}", n);
-        println!("a: {}", a);
-        println!("b: {}", b);
+    let public_values = proof.public_values.as_slice();
+    println!("public values: 0x{}", hex::encode(public_values));
 
-        let (expected_a, expected_b) = fibonacci_lib::fibonacci(n);
-        assert_eq!(a, expected_a);
-        assert_eq!(b, expected_b);
-        println!("Values are correct!");
+    let solidity_proof = proof.bytes().expect("the proof has a byte encoding");
+    println!("proof: 0x{}", hex::encode(solidity_proof));
 
-        // Record the number of cycles executed.
-        println!("Number of cycles: {}", report.total_instruction_count());
-        
-    // proving mode: 
-    } else {
-        // Setup the program for proving.
-        // sets up proving and verification keys from the ELF
-        let (pk, vk) = client.setup(FIBONACCI_ELF);
+    client.verify(&proof, &vk).expect("verification failed");
 
-        // Generate the Core proof
-        let proof = if args.core {
-            client.prove(&pk, stdin).run().expect("failed to generate Core proof")
-        // generates compressed proof 
-        } else {
-            client
-                .prove(&pk, stdin)
-                .compressed()
-                .run()
-                .expect("failed to generate Compressed Proof")
-        };
-        println!("Successfully generated proof!");
+    proof.save("fibonacci-groth16.bin").expect("saving proof failed");
 
-        // Verify the proof using verification key. ends process if successful 
-        client.verify(&proof, &vk).expect("failed to verify proof");
-        println!("Successfully verified proof!");
-    }
-}
-
-```
-
-### Guest Program Best Practices
-
-From the example above, the guest program includes the code that will be executed inside Ziren. It must be compiled to a MIPS-compatible ELF binary. Key components to include in the guest program are: 
-
-- `#![no_std]`, `#![no_main]` using the zkm_zkvm crate: this is required for the compilation to MIPS ELF
-    
-    ```rust
-    #![no_std]
-    #![no_main]
-    zkm_zkvm::entrypoint!(main);
-    ```
-    
-- `zkm_zkvm::entrypoint!(main)`: Defines the entrypoint for zkVM
-- `zkm_zkvm::io::read::<T>()`: System call to receive input from the host
-- Computation logic: Call or define functions e.g., the fibonacci function in the example (recommended to separate logic in a shared crate)
-- To minimize memory, avoid dynamic memory allocation and test on smaller inputs first to avoid exceeding cycle limits.
-- ABI encoding: Use `SolType` from `alloy_sol_types` for Solidity-compatible public output
-- `zkm_zkvm::io::commit_slice`: Commits data to zkVM’s public output
-- For programs utilizing cryptographic operations e.g., SHA256, Keccak, BN254, Ziren provides precompiles which you can call via a syscall. For example, when utilizing the keccak precompile:
-
-```rust
-use zkm_zkvm::syscalls::syscall_keccak;
-
-let input: [u8; 64] = [0u8; 64];
-let mut output: [u8; 32] = [0u8; 32];
-syscall_keccak(&input, &mut output);
-
-```
-
-### Host Program Best Practices
-
-The **host** handles setup, runs the guest, and optionally generates/verifies a proof.
-
-The host program manages the VM execution, proof generation, and verification, handling:
-
-- Input preparation
-- zkVM execution or proof generation (core, compressed, evm-compatible)
-- Output decoding
-- Output validation
-
-Structure your host around the following:
-
-1. Parse CLI args
-2. Load or compile guest program
-3. Set up for execution or proving 
-4. Printing the verifier key 
-
-- You can define CLI args to configure the program:
-
-```rust
-#[derive(Parser)]
-struct Args {
-    #[arg(long)]
-    pub a: u32,
-    #[arg(long)]
-    pub b: u32,
+    println!("successfully generated and verified proof for the program!")
 }
 ```
 
-In the above fibonacci example, execute, core, compressed and n are defined as CLI arguments: 
+`vk.bytes32()` is the program verifying key hash that an on-chain verifier checks the proof against, `proof.public_values.as_slice()` are the committed public values, and `proof.bytes()` is the proof in the encoding the Solidity verifier expects (see [Verifier](./verifier.md)).
 
-```rust
+## Running the Example
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args { // defines CLI arguments 
-    #[arg(long)]
-    execute: bool, // runs guest directly inside zkVM 
+From `examples/fibonacci/host`:
 
-    #[arg(long)]
-    core: bool, // generates core proof 
+```shell
+# execute, prove (core mode) and verify
+RUST_LOG=info cargo run --release
 
-    #[arg(long)]
-    compressed: bool, // generates compressed proof 
+# execute only
+RUST_LOG=info cargo run --release --bin execute
 
-    #[arg(long, default_value = "20")]
-    n: u32, // input value to send to guest program 
+# Groth16 proof for on-chain verification
+RUST_LOG=info cargo run --release --bin groth16_bn254
 ```
 
-- Printing the `vkey_hash` after proof generation will bind the guest code to the verifier contract:
+## Best Practices
 
-```rust
-let vkey_hash = prover.vkey_hash();
-println!("vkey_hash: {:?}", vkey_hash);
+### Guest
 
-```
+- Start every Rust guest with `#![no_std]`, `#![no_main]` and `zkm_zkvm::entrypoint!(main);`.
+- Read inputs in the order the host wrote them, with the same types. `read::<T>()` deserializes with bincode; for raw bytes, `read_vec()` and `commit_slice()` skip serialization and cost fewer cycles.
+- Commit only what the verifier needs to see. Everything committed with `commit` or `commit_slice` becomes public.
+- If a Solidity contract consumes the public values, commit them in an ABI encoding (for example with `alloy_sol_types::SolType::abi_encode`) and decode them on-chain with `abi.decode`.
+- Use the precompiles for cryptographic operations; they are much cheaper than the same code compiled to MIPS instructions. For example, the [keccak-precompile example](https://github.com/ProjectZKM/Ziren/blob/main/examples/keccak-precompile/guest/src/main.rs) hashes with:
 
-Some additional best practices for output handling and validation: 
+  ```rust
+  use zkm_zkvm::lib::keccak256::keccak256;
 
-- Define a `SolType`compatible struct for outputs (e.g., `PublicValuesStruct`)
-- Use `.abi_encode()` in guest and `.abi_decode()` in host to ensure Solidity/verifier compatibility
-- Recompute expected outputs in host using `execute` and assert they match guest output, ensuring correctness (expected outputs) before proving and selecting form the proving modes:  `-core` , `-compressed` , `-evm`.
+  let output = keccak256(&input.as_slice());
+  ```
+
+  Many common crates (`sha2`, `k256`, `p256`, `substrate-bn`, and others) have [patched versions](./patched-crates.md) that call the precompiles.
+- Keep the guest's dependencies pinned. Any change to the guest ELF changes the program's verifying key.
+
+### Host
+
+- Run `execute` before `prove`. It is much faster, catches guest panics, and its report gives the cycle count (see [Optimizations](./optimizations.md)).
+- Read the public values in the order the guest committed them. In the Fibonacci example the first value is `n`.
+- Choose the proof mode by the consumer: core or compressed proofs for off-chain verification, Groth16 or PLONK for on-chain verification.
+- Publish `vk.bytes32()` with the application. A verifier contract must be configured with this value, and it only changes when the guest ELF changes.
+- Save proofs with `proof.save(...)` and load them with `ZKMProofWithPublicValues::load(...)` to verify them elsewhere.
