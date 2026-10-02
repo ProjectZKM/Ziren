@@ -44,6 +44,8 @@ pub enum MachineConfigError {
     Profile(ProfileError),
     /// The commitment refused the configuration.
     Commitment(BooleanWhirError),
+    /// The schedule grinds more bits than the budget allows.
+    Grinding { actual: usize, budget: usize },
 }
 
 impl core::fmt::Display for MachineConfigError {
@@ -54,6 +56,9 @@ impl core::fmt::Display for MachineConfigError {
             }
             Self::Profile(error) => write!(f, "WHIR profile: {error}"),
             Self::Commitment(error) => write!(f, "Boolean WHIR commitment: {error}"),
+            Self::Grinding { actual, budget } => {
+                write!(f, "the schedule grinds {actual} bits, the budget allows {budget}")
+            }
         }
     }
 }
@@ -105,6 +110,13 @@ fn commitment(arity: usize, schedule: &BinarySchedule) -> Result<MachinePcs, Mac
     let whir_config = profile
         .config::<F, F, Challenger, _>(packed, &domain)
         .map_err(MachineConfigError::Profile)?;
+    let grinding = whir_config.max_pow_bits();
+    if grinding > schedule.budget.max_grinding_bits {
+        return Err(MachineConfigError::Grinding {
+            actual: grinding,
+            budget: schedule.budget.max_grinding_bits,
+        });
+    }
     let cap_height = recommended_cap_height(&whir_config);
     let merkle = MerkleMmcs::new(
         SerializingHasher::new(Blake3),
