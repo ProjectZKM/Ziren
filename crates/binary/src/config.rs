@@ -60,43 +60,60 @@ impl core::fmt::Display for MachineConfigError {
 
 impl std::error::Error for MachineConfigError {}
 
-/// The configuration of one machine: its tables' shapes fix the commitment.
+/// The configuration of one machine: its tables' shapes fix the commitments.
 pub struct MachineConfig {
     pcs: MachinePcs,
-    /// Variables of the stacked commitment.
+    /// The commitment of the preprocessed tables, planned from their shapes.
+    preprocessed_pcs: MachinePcs,
+    /// Variables of the stacked main commitment.
     pub arity: usize,
 }
 
 impl MachineConfig {
-    /// The configuration of the tables at `shapes` under `schedule`.
+    /// The configuration of the tables at `main` under `schedule`, whose
+    /// preprocessed tables have the shapes `preprocessed`.
     pub fn new(
-        shapes: &[TableShape],
+        main: &[TableShape],
+        preprocessed: &[TableShape],
         schedule: &BinarySchedule,
     ) -> Result<Self, MachineConfigError> {
-        let (arity, _) = plan_stacked_layout(shapes);
-        let absorbed = BitRingSwitch::<F>::ABSORBED;
-        let packed = arity
-            .checked_sub(absorbed)
-            .ok_or(MachineConfigError::TooFewVariables { arity, absorbed })?;
-        let domain = BooleanWhirDomain::default();
-        let profile = BinaryWhirProfile::proven_list_decoding(
-            schedule.term_security_bits,
-            schedule.log_inv_rate,
-            schedule.folding,
-        );
-        let whir_config = profile
-            .config::<F, F, Challenger, _>(packed, &domain)
-            .map_err(MachineConfigError::Profile)?;
-        let cap_height = recommended_cap_height(&whir_config);
-        let merkle = MerkleMmcs::new(
-            SerializingHasher::new(Blake3),
-            CompressionFunctionFromHasher::new(Blake3),
-            cap_height,
-        );
-        let prover = BooleanWhirProver::new(whir_config, domain, merkle);
-        let pcs = BooleanWhirPcs::new(prover, arity).map_err(MachineConfigError::Commitment)?;
-        Ok(Self { pcs: BooleanWhirTracePcs::from_commitment(pcs), arity })
+        let (arity, _) = plan_stacked_layout(main);
+        let pcs = commitment(arity, schedule)?;
+        let preprocessed_pcs = if preprocessed.is_empty() {
+            commitment(arity, schedule)?
+        } else {
+            commitment(plan_stacked_layout(preprocessed).0, schedule)?
+        };
+        Ok(Self { pcs, preprocessed_pcs, arity })
     }
+}
+
+/// The Boolean WHIR commitment of a stacked witness of `arity` variables
+/// under `schedule`; the fold is shortened to fit a witness smaller than
+/// one fold.
+fn commitment(arity: usize, schedule: &BinarySchedule) -> Result<MachinePcs, MachineConfigError> {
+    let absorbed = BitRingSwitch::<F>::ABSORBED;
+    let packed = arity
+        .checked_sub(absorbed)
+        .ok_or(MachineConfigError::TooFewVariables { arity, absorbed })?;
+    let domain = BooleanWhirDomain::default();
+    let profile = BinaryWhirProfile::proven_list_decoding(
+        schedule.term_security_bits,
+        schedule.log_inv_rate,
+        schedule.folding.min(packed),
+    );
+    let whir_config = profile
+        .config::<F, F, Challenger, _>(packed, &domain)
+        .map_err(MachineConfigError::Profile)?;
+    let cap_height = recommended_cap_height(&whir_config);
+    let merkle = MerkleMmcs::new(
+        SerializingHasher::new(Blake3),
+        CompressionFunctionFromHasher::new(Blake3),
+        cap_height,
+    );
+    let prover = BooleanWhirProver::new(whir_config, domain, merkle);
+    let pcs = BooleanWhirPcs::new(prover, arity).map_err(MachineConfigError::Commitment)?;
+    Ok(BooleanWhirTracePcs::from_commitment(pcs))
 }
 
 impl MultiStarkConfig for MachineConfig {
@@ -107,6 +124,10 @@ impl MultiStarkConfig for MachineConfig {
 
     fn pcs(&self) -> &Self::Pcs {
         &self.pcs
+    }
+
+    fn preprocessed_pcs(&self) -> &Self::Pcs {
+        &self.preprocessed_pcs
     }
 
     fn collision_resistance_bits(&self) -> Option<usize> {
@@ -136,12 +157,13 @@ mod tests {
 
     use p3_air::utils::word_view;
     use p3_air::Air;
-    use p3_air::{BaseAir, WindowAccess};
+    use p3_air::{AirBuilder, BaseAir, WindowAccess};
     use p3_binary_pcs::coordinate_basis;
     use p3_bus::{BusActivation, BusDirection, BusName};
 
     use crate::machine_builder::MachineBuilder;
     use p3_binary_field::{BinaryField2, Ghash128};
+    use p3_field::{Field, PrimeCharacteristicRing};
     use p3_matrix::dense::RowMajorMatrix;
     use p3_multi_stark::{
         prove_with_backend, setup, verify, ProverInstance, ProverInstances, ReprBackend,
@@ -214,6 +236,108 @@ mod tests {
         RowMajorMatrix::new(words, NUM_CELL_COLS)
     }
 
+    const CHAIN_BITS: usize = 8;
+    const CHAIN_GROUP: usize = 5;
+
+    /// Rows come in groups of `CHAIN_GROUP`; the first row of each group is
+    /// flagged in the preprocessed trace.
+    fn starts_group(row: usize) -> bool {
+        row.is_multiple_of(CHAIN_GROUP)
+    }
+
+    /// A table whose value is copied down each group: a row equals the row
+    /// before it unless the preprocessed flag starts a group there.
+    #[derive(Clone, Copy, Debug)]
+    struct ChainAir {
+        log_height: usize,
+    }
+
+    impl<X: Field> BaseAir<X> for ChainAir {
+        fn width(&self) -> usize {
+            CHAIN_BITS
+        }
+
+        fn preprocessed_width(&self) -> usize {
+            1
+        }
+
+        fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
+            let flags = (0..1usize << self.log_height)
+                .map(|row| if starts_group(row) { X::ONE } else { X::ZERO })
+                .collect();
+            Some(RowMajorMatrix::new(flags, 1))
+        }
+    }
+
+    impl<AB: MachineBuilder<F = F>> Air<AB> for ChainAir {
+        fn eval(&self, builder: &mut AB) {
+            let main = builder.main();
+            let local = main.current_slice();
+            let next = main.next_slice();
+            let prep = builder.preprocessed();
+            let next_starts: AB::Expr = prep.next_slice()[0].into();
+            for bit in local {
+                builder.assert_bool(*bit);
+            }
+            let copied = builder.is_transition() * (AB::Expr::ONE - next_starts);
+            for (a, b) in local.iter().zip(next) {
+                builder.when(copied.clone()).assert_eq(*a, *b);
+            }
+        }
+    }
+
+    fn chain_packed(values: &[u8]) -> RowMajorMatrix<u64> {
+        let blocks = values.len().div_ceil(64);
+        let mut words = vec![0u64; blocks * CHAIN_BITS];
+        for (r, &value) in values.iter().enumerate() {
+            let block = &mut words[(r / 64) * CHAIN_BITS..(r / 64 + 1) * CHAIN_BITS];
+            for (i, word) in block.iter_mut().enumerate() {
+                *word |= u64::from((value >> i) & 1) << (r % 64);
+            }
+        }
+        RowMajorMatrix::new(words, CHAIN_BITS)
+    }
+
+    /// A preprocessed column and a next-row constraint prove under the
+    /// machine configuration; a value changed inside a group does not.
+    #[test]
+    fn preprocessed_flag_and_transition_chain() {
+        let log_height = 10;
+        let air = ChainAir { log_height };
+        let shapes = [TableShape::new(log_height, CHAIN_BITS)];
+        let preprocessed = [TableShape::new(log_height, 1)];
+        let config = MachineConfig::new(&shapes, &preprocessed, &BinarySchedule::default())
+            .expect("machine config");
+        let (pk, vk) = setup(&config, &[&air], &mut challenger()).expect("keys");
+        let public: [F; 0] = [];
+
+        let values: Vec<u8> =
+            (0..1usize << log_height).map(|row| ((row / CHAIN_GROUP) * 37 + 11) as u8).collect();
+        let prove = |values: &[u8]| {
+            let table = Table::<F>::from_packed_bits(chain_packed(values), log_height);
+            let instances =
+                ProverInstances::new(vec![ProverInstance::new(&air, table, &pk, &public)]);
+            prove_with_backend::<_, _, ReprBackend<BinaryField2, Ghash128, true>>(
+                &config,
+                instances,
+                0,
+                &mut challenger(),
+            )
+        };
+        let verifier =
+            || VerifierInstances::new(vec![VerifierInstance::new(&air, &vk, log_height, &public)]);
+        let proof = prove(&values).expect("the chain proves");
+        verify(&config, verifier(), &proof, 0, &mut challenger()).expect("the chain verifies");
+
+        let mut broken = values;
+        broken[CHAIN_GROUP + 2] ^= 1;
+        let rejected = match prove(&broken) {
+            Err(_) => true,
+            Ok(proof) => verify(&config, verifier(), &proof, 0, &mut challenger()).is_err(),
+        };
+        assert!(rejected, "a value changed inside a group must not verify");
+    }
+
     /// A writer table and a reader table balance one channel under one
     /// stacked Boolean WHIR commitment; a reader that pulls a value never
     /// pushed does not verify.
@@ -223,11 +347,16 @@ mod tests {
         let airs = [ProbeAir::Writer, ProbeAir::Reader];
         let shapes = [TableShape::new(log_height, NUM_CELL_COLS); 2];
         let schedule = BinarySchedule::default();
-        let config = MachineConfig::new(&shapes, &schedule).expect("machine config");
+        let config = MachineConfig::new(&shapes, &[], &schedule).expect("machine config");
         let (pk, vk) = setup(&config, &[&airs[0], &airs[1]], &mut challenger()).expect("keys");
 
         let cells: Vec<(u8, u32)> = (0..1u32 << log_height)
-            .map(|i| ((i % 37) as u8, (i * 2_654_435_761) % crate::word::KB_PRIME))
+            .map(|i| {
+                (
+                    (i % 37) as u8,
+                    ((u64::from(i) * 2_654_435_761) % u64::from(crate::word::KB_PRIME)) as u32,
+                )
+            })
             .collect();
         let mut reads = cells.clone();
         reads.reverse();

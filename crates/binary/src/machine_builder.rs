@@ -89,6 +89,15 @@ where
     }
 }
 
+/// A builder that holds no bus still asserts a selecting activation to be
+/// boolean, as the recording builders do, so that every builder counts the
+/// same constraints.
+fn assert_selector_bool<AB: AirBuilder>(builder: &mut AB, activation: BusActivation<AB::Expr>) {
+    if let BusActivation::Boolean(selector) = activation {
+        builder.assert_bool(selector);
+    }
+}
+
 /// The sliced kernels evaluate constraints only; the bus is reduced elsewhere.
 impl<'a, F, S, R> MachineBuilder for SlicedFolder<'a, F, S, R>
 where
@@ -99,8 +108,9 @@ where
         _bus: BusName<'_>,
         _direction: BusDirection,
         _fields: Vec<Self::Expr>,
-        _activation: BusActivation<Self::Expr>,
+        activation: BusActivation<Self::Expr>,
     ) {
+        assert_selector_bool(self, activation);
     }
 }
 
@@ -113,8 +123,9 @@ where
         _bus: BusName<'_>,
         _direction: BusDirection,
         _fields: Vec<Self::Expr>,
-        _activation: BusActivation<Self::Expr>,
+        activation: BusActivation<Self::Expr>,
     ) {
+        assert_selector_bool(self, activation);
     }
 }
 
@@ -125,7 +136,8 @@ impl<F: Field, EF: ExtensionField<F>> MachineBuilder for SymbolicAirBuilder<F, E
         _bus: BusName<'_>,
         _direction: BusDirection,
         _fields: Vec<Self::Expr>,
-        _activation: BusActivation<Self::Expr>,
+        activation: BusActivation<Self::Expr>,
     ) {
+        assert_selector_bool(self, activation);
     }
 }

@@ -8241,6 +8241,7 @@ dependencies = [
  "p3-challenger",
  "p3-examples",
  "p3-field",
+ "p3-koala-bear",
  "p3-lookup",
  "p3-matrix",
  "p3-maybe-rayon",
@@ -8252,6 +8253,8 @@ dependencies = [
  "serde",
  "tracing",
  "zkm-derive",
+ "zkm-pcs",
+ "zkm-recursion-core",
 ]
 
 [[package]]

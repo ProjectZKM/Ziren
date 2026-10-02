@@ -1,0 +1,387 @@
+//! The recursion machine over bits: the tables that prove one execution of
+//! a recursion program, under the stage.
+//!
+//! The tables are those of the recursion VM re-arithmetised over bits, tied
+//! together by two channels: every table that computes a cell pushes it
+//! once on [`bits::WRITE`], and every operand read pulls it from
+//! [`bits::MEMORY`]; the [`ledger::LedgerAir`] bridges the two, one row per
+//! read.  The program fixes every address, flag and multiplicity, so those
+//! are preprocessed columns, committed in the verifying key.
+
+pub mod alu_base;
+pub mod bits;
+pub mod ledger;
+pub mod memory;
+
+use p3_air::{Air, BaseAir};
+use p3_binary_field::{BinaryField2, Ghash128};
+use p3_field::Field;
+use p3_koala_bear::KoalaBear;
+use p3_matrix::dense::RowMajorMatrix;
+use p3_multi_stark::config::{PcsError, PcsProverError};
+use p3_multi_stark::{
+    prove_with_backend, setup, verify, ProverInstance, ProverInstances, ProvingError, ProvingKey,
+    ReprBackend, SubfieldBackend, VerificationError, VerifierInstance, VerifierInstances,
+    VerifyingKey,
+};
+use p3_sumcheck::layout::Table;
+use p3_sumcheck::TableShape;
+use zkm_recursion_core::{ExecutionRecord, Instruction, RecursionProgram};
+
+use self::alu_base::BaseAluAir;
+use self::bits::Cell;
+use self::ledger::LedgerAir;
+use self::memory::{MemoryConstAir, MemoryVarAir};
+use crate::config::{MachineConfig, MachineConfigError, MachineProof};
+use crate::machine_builder::MachineBuilder;
+use crate::{challenger, BinarySchedule, F};
+
+/// One table of the machine.
+pub enum RecursionAir {
+    Ledger(LedgerAir),
+    MemoryConst(MemoryConstAir),
+    MemoryVar(MemoryVarAir),
+    BaseAlu(BaseAluAir),
+}
+
+impl RecursionAir {
+    /// The log height of the table.
+    #[must_use]
+    pub fn log_height(&self) -> usize {
+        match self {
+            Self::Ledger(air) => air.log_height(),
+            Self::MemoryConst(air) => air.log_height(),
+            Self::MemoryVar(air) => air.log_height(),
+            Self::BaseAlu(air) => air.log_height(),
+        }
+    }
+
+    /// The name of the table.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Ledger(_) => "Ledger",
+            Self::MemoryConst(_) => "MemoryConst",
+            Self::MemoryVar(_) => "MemoryVar",
+            Self::BaseAlu(_) => "BaseAlu",
+        }
+    }
+
+    /// The writes `(address, reads)` of the table that are read, in order.
+    fn writes(&self) -> Vec<(u32, u32)> {
+        match self {
+            Self::Ledger(_) => Vec::new(),
+            Self::MemoryConst(air) => air.writes().to_vec(),
+            Self::MemoryVar(air) => air.writes(),
+            Self::BaseAlu(air) => air.writes(),
+        }
+    }
+
+    /// The values of [`Self::writes`], in order.
+    fn written_values(&self, record: &ExecutionRecord<KoalaBear>) -> Vec<Cell> {
+        match self {
+            Self::Ledger(_) => Vec::new(),
+            Self::MemoryConst(air) => air.written_values(),
+            Self::MemoryVar(air) => air.written_values(record),
+            Self::BaseAlu(air) => air.written_values(record),
+        }
+    }
+
+    /// The witness of the table for `record`, the ledger's being the
+    /// written values.
+    fn main_table(&self, record: &ExecutionRecord<KoalaBear>, written: &[Cell]) -> Table<F> {
+        match self {
+            Self::Ledger(air) => air.main_table(written),
+            Self::MemoryConst(air) => air.main_table(),
+            Self::MemoryVar(air) => air.main_table(record),
+            Self::BaseAlu(air) => air.main_table(record),
+        }
+    }
+}
+
+impl<X: Field> BaseAir<X> for RecursionAir {
+    fn width(&self) -> usize {
+        match self {
+            Self::Ledger(air) => BaseAir::<X>::width(air),
+            Self::MemoryConst(air) => BaseAir::<X>::width(air),
+            Self::MemoryVar(air) => BaseAir::<X>::width(air),
+            Self::BaseAlu(air) => BaseAir::<X>::width(air),
+        }
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        match self {
+            Self::Ledger(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::MemoryConst(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::MemoryVar(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::BaseAlu(air) => BaseAir::<X>::preprocessed_width(air),
+        }
+    }
+
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<X>> {
+        match self {
+            Self::Ledger(air) => air.preprocessed_trace(),
+            Self::MemoryConst(air) => air.preprocessed_trace(),
+            Self::MemoryVar(air) => air.preprocessed_trace(),
+            Self::BaseAlu(air) => air.preprocessed_trace(),
+        }
+    }
+}
+
+impl<AB: MachineBuilder<F = F>> Air<AB> for RecursionAir {
+    fn eval(&self, builder: &mut AB) {
+        match self {
+            Self::Ledger(air) => air.eval(builder),
+            Self::MemoryConst(air) => air.eval(builder),
+            Self::MemoryVar(air) => air.eval(builder),
+            Self::BaseAlu(air) => air.eval(builder),
+        }
+    }
+}
+
+/// Why a machine cannot be built or run.
+#[derive(Debug)]
+pub enum MachineError {
+    /// The program uses an instruction the machine has no table for.
+    Unsupported(&'static str),
+    /// The configuration cannot be built.
+    Config(MachineConfigError),
+    /// The keys cannot be built.
+    Setup(ProvingError<PcsProverError<MachineConfig>>),
+    /// Proving failed.
+    Prove(ProvingError<PcsProverError<MachineConfig>>),
+    /// Verification failed.
+    Verify(VerificationError<PcsError<MachineConfig>>),
+}
+
+impl core::fmt::Display for MachineError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Unsupported(what) => write!(f, "the binary machine has no table for {what}"),
+            Self::Config(error) => write!(f, "machine configuration: {error}"),
+            Self::Setup(error) => write!(f, "machine setup: {error:?}"),
+            Self::Prove(error) => write!(f, "machine proving: {error:?}"),
+            Self::Verify(error) => write!(f, "machine verification: {error:?}"),
+        }
+    }
+}
+
+impl std::error::Error for MachineError {}
+
+/// The machine of one program: its tables, their configuration and keys.
+pub struct RecursionMachine {
+    airs: Vec<RecursionAir>,
+    config: MachineConfig,
+    pk: ProvingKey<MachineConfig>,
+    vk: VerifyingKey<MachineConfig>,
+}
+
+impl RecursionMachine {
+    /// The machine of `program` under `schedule`.
+    pub fn new(
+        program: &RecursionProgram<KoalaBear>,
+        schedule: &BinarySchedule,
+    ) -> Result<Self, MachineError> {
+        for instruction in program.iter_instructions() {
+            let unsupported = match instruction {
+                Instruction::BaseAlu(_)
+                | Instruction::Mem(_)
+                | Instruction::Hint(_)
+                | Instruction::HintBits(_)
+                | Instruction::HintExt2Felts(_)
+                | Instruction::Print(_) => continue,
+                Instruction::ExtAlu(_) => "the extension ALU",
+                Instruction::Poseidon2(_) => "Poseidon2",
+                Instruction::Select(_) => "select",
+                Instruction::HintAddCurve(_) => "curve hints",
+                Instruction::Ext2Felts(_) => "Ext2Felts",
+                Instruction::CommitPublicValues(_) => "public values",
+            };
+            return Err(MachineError::Unsupported(unsupported));
+        }
+        let tables = vec![
+            RecursionAir::MemoryConst(MemoryConstAir::new(program)),
+            RecursionAir::MemoryVar(MemoryVarAir::new(program)),
+            RecursionAir::BaseAlu(BaseAluAir::new(program)),
+        ];
+        let writes: Vec<(u32, u32)> = tables.iter().flat_map(RecursionAir::writes).collect();
+        let mut airs = vec![RecursionAir::Ledger(LedgerAir::new(&writes))];
+        airs.extend(tables);
+
+        let main_shapes: Vec<TableShape> = airs
+            .iter()
+            .map(|air| TableShape::new(air.log_height(), BaseAir::<F>::width(air)))
+            .collect();
+        let preprocessed_shapes: Vec<TableShape> = airs
+            .iter()
+            .filter(|air| BaseAir::<F>::preprocessed_width(*air) > 0)
+            .map(|air| TableShape::new(air.log_height(), BaseAir::<F>::preprocessed_width(air)))
+            .collect();
+        let config = MachineConfig::new(&main_shapes, &preprocessed_shapes, schedule)
+            .map_err(MachineError::Config)?;
+        let refs: Vec<&RecursionAir> = airs.iter().collect();
+        let (pk, vk) = setup(&config, &refs, &mut challenger()).map_err(MachineError::Setup)?;
+        Ok(Self { airs, config, pk, vk })
+    }
+
+    /// The tables of the machine.
+    #[must_use]
+    pub fn airs(&self) -> &[RecursionAir] {
+        &self.airs
+    }
+
+    /// Prove `record`, an execution of the machine's program.
+    pub fn prove(&self, record: &ExecutionRecord<KoalaBear>) -> Result<MachineProof, MachineError> {
+        let written: Vec<Cell> =
+            self.airs.iter().flat_map(|air| air.written_values(record)).collect();
+        let public: [F; 0] = [];
+        let instances = ProverInstances::new(
+            self.airs
+                .iter()
+                .map(|air| {
+                    ProverInstance::new(air, air.main_table(record, &written), &self.pk, &public)
+                })
+                .collect(),
+        );
+        let proof = if p3_binary_field::poly_basis::HAS_HARDWARE_CLMUL {
+            prove_with_backend::<_, _, ReprBackend<BinaryField2, Ghash128, true>>(
+                &self.config,
+                instances,
+                0,
+                &mut challenger(),
+            )
+        } else {
+            prove_with_backend::<_, _, SubfieldBackend<BinaryField2>>(
+                &self.config,
+                instances,
+                0,
+                &mut challenger(),
+            )
+        };
+        proof.map_err(MachineError::Prove)
+    }
+
+    /// Verify `proof` as a proof of an execution of the machine's program.
+    pub fn verify(&self, proof: &MachineProof) -> Result<(), MachineError> {
+        let public: [F; 0] = [];
+        let instances = VerifierInstances::new(
+            self.airs
+                .iter()
+                .map(|air| VerifierInstance::new(air, &self.vk, air.log_height(), &public))
+                .collect(),
+        );
+        verify(&self.config, instances, proof, 0, &mut challenger()).map_err(MachineError::Verify)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
+    use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+    use zkm_pcs::StarkGenericConfig;
+    use zkm_recursion_core::runtime::instruction as instr;
+    use zkm_recursion_core::{BaseAluOpcode, MemAccessKind, RawProgram, Runtime};
+
+    use super::*;
+
+    type EF = <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge;
+
+    /// Deterministic elements below `p`.
+    fn elements(n: usize) -> Vec<KoalaBear> {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                KoalaBear::from_u64(state >> 33)
+            })
+            .collect()
+    }
+
+    /// `n` groups of the four operations on constants, each result checked
+    /// against the expected constant.
+    fn four_ops_program(n: usize) -> RecursionProgram<KoalaBear> {
+        let values = elements(2 * n);
+        let mut addr = 0u32;
+        let instructions = (0..n)
+            .flat_map(|i| {
+                let in2 =
+                    if values[2 * i + 1].is_zero() { KoalaBear::ONE } else { values[2 * i + 1] };
+                let quotient = values[2 * i];
+                let in1 = in2 * quotient;
+                let a: Vec<u32> = (0..6).map(|x| x + addr).collect();
+                addr += 6;
+                [
+                    instr::mem_single(MemAccessKind::Write, 4, a[0], in1),
+                    instr::mem_single(MemAccessKind::Write, 4, a[1], in2),
+                    instr::base_alu(BaseAluOpcode::AddF, 1, a[2], a[0], a[1]),
+                    instr::mem_single(MemAccessKind::Read, 1, a[2], in1 + in2),
+                    instr::base_alu(BaseAluOpcode::SubF, 1, a[3], a[0], a[1]),
+                    instr::mem_single(MemAccessKind::Read, 1, a[3], in1 - in2),
+                    instr::base_alu(BaseAluOpcode::MulF, 1, a[4], a[0], a[1]),
+                    instr::mem_single(MemAccessKind::Read, 1, a[4], in1 * in2),
+                    instr::base_alu(BaseAluOpcode::DivF, 1, a[5], a[0], a[1]),
+                    instr::mem_single(MemAccessKind::Read, 1, a[5], quotient),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let mut program =
+            RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
+        program.total_memory = program.computed_total_memory();
+        program
+    }
+
+    fn run(program: &Arc<RecursionProgram<KoalaBear>>) -> ExecutionRecord<KoalaBear> {
+        let mut runtime = Runtime::<KoalaBear, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
+            program.clone(),
+            KoalaBearPoseidon2::new().perm,
+        );
+        runtime.run().expect("the program runs");
+        runtime.record
+    }
+
+    /// The four base operations prove through the real runtime, and a
+    /// record with one result or one operand changed does not.
+    #[test]
+    fn four_ops_prove_and_tampering_fails() {
+        let program = Arc::new(four_ops_program(40));
+        let record = run(&program);
+        let machine = RecursionMachine::new(&program, &BinarySchedule::default()).expect("machine");
+        for air in machine.airs() {
+            println!(
+                "{}: 2^{} rows x {} bits",
+                air.name(),
+                air.log_height(),
+                BaseAir::<F>::width(air)
+            );
+        }
+        let started = std::time::Instant::now();
+        let proof = machine.prove(&record).expect("the execution proves");
+        println!(
+            "four ops x40: {} proof bytes, prove {:.1} s",
+            postcard::to_allocvec(&proof).expect("a proof serializes").len(),
+            started.elapsed().as_secs_f64()
+        );
+        machine.verify(&proof).expect("the execution verifies");
+
+        let mut wrong_result = record.clone();
+        wrong_result.base_alu_events[0].out += KoalaBear::ONE;
+        let rejected = match machine.prove(&wrong_result) {
+            Err(_) => true,
+            Ok(proof) => machine.verify(&proof).is_err(),
+        };
+        assert!(rejected, "a changed result must not verify");
+
+        let mut wrong_operand = record;
+        wrong_operand.base_alu_events[1].in1 += KoalaBear::ONE;
+        let rejected = match machine.prove(&wrong_operand) {
+            Err(_) => true,
+            Ok(proof) => machine.verify(&proof).is_err(),
+        };
+        assert!(rejected, "a changed operand must not verify");
+    }
+}
