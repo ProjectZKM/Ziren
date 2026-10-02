@@ -67,6 +67,9 @@ pub struct BaseAluCols<T> {
     pub x: Word<T>,
     /// The right operand of the checks.
     pub y: Word<T>,
+    /// The result the checks bind: `out` for an add or a multiply, `in1`
+    /// for a subtract or a divide.
+    pub z: Word<T>,
     /// `x + y mod p`.
     pub add: AddCols<T>,
     /// `x * y mod p`, from the multiply table.
@@ -256,6 +259,7 @@ pub fn fill_row(in1: u32, in2: u32, out: u32, direct: bool, row: &mut [u8]) {
     let (x, y) = operands(in1, in2, out, direct);
     cols.x = bits_le::<KB_BITS>(u64::from(x));
     cols.y = bits_le::<KB_BITS>(u64::from(y));
+    cols.z = bits_le::<KB_BITS>(u64::from(if direct { out } else { in1 }));
     fill_add(x, y, &mut cols.add);
     let product = u64::from(x) * u64::from(y) % u64::from(KB_PRIME);
     cols.product = bits_le::<KB_BITS>(product);
@@ -296,6 +300,10 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for BaseAluAir {
                 local.y[i],
                 direct.clone() * local.in2[i] + inverse.clone() * local.out[i],
             );
+            builder.assert_eq(
+                local.z[i],
+                direct.clone() * local.out[i] + inverse.clone() * local.in1[i],
+            );
         }
         for bit in local.product.iter() {
             builder.assert_bool(*bit);
@@ -306,9 +314,8 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for BaseAluAir {
         let product = exprs::<AB, KB_BITS>(&local.product);
         request_mul(builder, &x, &y, &product, prep_local.is_real.into());
         for i in 0..KB_BITS {
-            let z = direct.clone() * local.out[i] + inverse.clone() * local.in1[i];
-            builder.when(prep_local.binds_add).assert_eq(local.add.out[i], z.clone());
-            builder.when(prep_local.binds_mul).assert_eq(local.product[i], z);
+            builder.when(prep_local.binds_add).assert_eq(local.add.out[i], local.z[i]);
+            builder.when(prep_local.binds_mul).assert_eq(local.product[i], local.z[i]);
         }
 
         let in1 = exprs::<AB, KB_BITS>(&local.in1);

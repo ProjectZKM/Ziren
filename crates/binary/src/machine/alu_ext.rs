@@ -39,6 +39,9 @@ pub struct ExtAluCols<T> {
     pub x: ExtWord<T>,
     /// The right operand of the checks.
     pub y: ExtWord<T>,
+    /// The result the checks bind: `out` for an add or a multiply, `in1`
+    /// for a subtract or a divide.
+    pub z: ExtWord<T>,
     /// `x + y`.
     pub add: ExtAddCols<T>,
     /// `x * y`.
@@ -193,6 +196,7 @@ pub fn fill_row(
     let (x, y) = if direct { (in1, in2) } else { (in2, out) };
     cols.x = words(x);
     cols.y = words(y);
+    cols.z = words(if direct { out } else { in1 });
     fill_ext_add(x, y, &mut cols.add);
     fill_ext_mul(x, y, &mut cols.mul, requests);
 }
@@ -233,6 +237,10 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for ExtAluAir {
                     local.y[k][i],
                     direct.clone() * local.in2[k][i] + inverse.clone() * local.out[k][i],
                 );
+                builder.assert_eq(
+                    local.z[k][i],
+                    direct.clone() * local.out[k][i] + inverse.clone() * local.in1[k][i],
+                );
             }
         }
         let x = ext_exprs::<AB>(&local.x);
@@ -241,9 +249,10 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for ExtAluAir {
         eval_ext_mul(builder, &x, &y, &local.mul, prep_local.is_real.into());
         for k in 0..EXT_DEGREE {
             for i in 0..KB_BITS {
-                let z = direct.clone() * local.out[k][i] + inverse.clone() * local.in1[k][i];
-                builder.when(prep_local.binds_add).assert_eq(local.add[k].out[i], z.clone());
-                builder.when(prep_local.binds_mul).assert_eq(local.mul.reduce[k].out[i], z);
+                builder.when(prep_local.binds_add).assert_eq(local.add[k].out[i], local.z[k][i]);
+                builder
+                    .when(prep_local.binds_mul)
+                    .assert_eq(local.mul.reduce[k].out[i], local.z[k][i]);
             }
         }
 
