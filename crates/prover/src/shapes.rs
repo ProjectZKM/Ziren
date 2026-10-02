@@ -795,7 +795,7 @@ mod tests {
                 RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::class_for_rows(&organic);
             tracing::info!("[ROOT] #{i} organic class {class:?} rows {organic:?}");
             assert!(
-                class.is_some_and(|c| c <= zkm_pcs::jagged::RecursionPins::ROOT_CLASS),
+                class.is_some_and(|c| c.cmp(&zkm_pcs::jagged::RecursionPins::ROOT_CLASS).is_le()),
                 "root #{i} needs class {class:?}, past the root class"
             );
         }

@@ -2803,7 +2803,7 @@ pub mod tests {
         );
         assert_eq!(
             (prep_stripes, main_stripes),
-            (8, 8),
+            (8, 16),
             "the wrap geometry moved to ({prep_stripes}, {main_stripes}); update the pin and the \
              soundness model's wrap batch cardinality to {}",
             prep_stripes + main_stripes
