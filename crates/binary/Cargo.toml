@@ -1,0 +1,34 @@
+[package]
+name = "zkm-binary-stark"
+description = "The binary stage: a multi-STARK over GF(2^128) under Boolean WHIR and Blake3"
+readme = "../../README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+p3-air = { workspace = true }
+p3-binary-field = { workspace = true, features = ["parallel"] }
+p3-binary-pcs = { workspace = true, features = ["parallel"] }
+p3-blake3 = { workspace = true }
+p3-symmetric = { workspace = true }
+p3-merkle-tree = { workspace = true }
+p3-lookup = { workspace = true }
+p3-bus = { workspace = true }
+p3-challenger = { workspace = true }
+p3-examples = { workspace = true }
+p3-field = { workspace = true }
+p3-matrix = { workspace = true }
+p3-maybe-rayon = { workspace = true, features = ["parallel"] }
+p3-multi-stark = { workspace = true, features = ["parallel"] }
+p3-sumcheck = { workspace = true, features = ["parallel"] }
+postcard = { version = "1.1", features = ["alloc"] }
+serde = { workspace = true }
+tracing = { workspace = true }
+zkm-derive = { workspace = true }
+
+[dev-dependencies]
+p3-blake3-air = { workspace = true }
