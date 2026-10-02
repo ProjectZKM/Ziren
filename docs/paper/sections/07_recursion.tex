@@ -22,9 +22,9 @@ and where the exit code is required to be the one the relation admits.}
 \[
   \mathsf{pv} = (\mathsf{vk}, \mathsf{sh}_{\mathrm{in}}, \mathsf{sh}_{\mathrm{out}}, \mathsf{entry}, \mathsf{exit}, \mathsf{cur}_{\mathrm{in}}, \mathsf{cur}_{\mathrm{out}}, D, h, \mathsf{code}, \mathsf{root}),
 \]
-the guest's verifying key, the index of the node's first shard and the index after its last, the entry and exit machine states, the memory-address cursors the node opens and closes with, the accumulated cross-shard digest, the digest of committed output, the exit code, and the root of the allowlist of admissible recursion keys; a completion flag $\mathsf{complete}$, set only by the root, accompanies the tuple. With a delay slot the entry and exit states are \emph{pairs} $(\mathsf{pc}, \mathsf{pc}_{\mathrm{next}})$, so adjacency must pin both components. A compose node of arity $k$ proves $\mathcal R_{\mathrm{comp}}(\mathsf{pv}; \pi_0,\dots,\pi_{k-1})$, which holds when each $\pi_i$ verifies against a key the allowlist at $\mathsf{root}$ contains; the children agree on $\mathsf{vk}$, $h$ and $\mathsf{code}$; every $\mathsf{root}_i$ equals the published $\mathsf{root}$; the ranges are adjacent, $\mathsf{sh}_{\mathrm{out},i} = \mathsf{sh}_{\mathrm{in},i+1}$, $\mathsf{exit}_i = \mathsf{entry}_{i+1}$ and $\mathsf{cur}_{\mathrm{out},i} = \mathsf{cur}_{\mathrm{in},i+1}$; and $\mathsf{sh}_{\mathrm{in}} = \mathsf{sh}_{\mathrm{in},0}$, $\mathsf{sh}_{\mathrm{out}} = \mathsf{sh}_{\mathrm{out},k-1}$, $\mathsf{entry} = \mathsf{entry}_0$, $\mathsf{exit} = \mathsf{exit}_{k-1}$, $\mathsf{cur}_{\mathrm{in}} = \mathsf{cur}_{\mathrm{in},0}$, $\mathsf{cur}_{\mathrm{out}} = \mathsf{cur}_{\mathrm{out},k-1}$ and $D = \sum_i D_i$. Digests are stored offset by the starting point $D_{\mathrm{off}}$ of \S\ref{sec:air-global}, so this sum is computed as $D_0 + D_1 - D_{\mathrm{off}}$ and so on, and $D = O$ below means the stored value equals $D_{\mathrm{off}}$.
+the guest's verifying key, the index of the node's first shard and the index after its last, the entry and exit machine states, the memory-address cursors the node opens and closes with, the accumulated cross-shard digest, the digest of committed output, the exit code, and the root of the allowlist of admissible recursion keys; a completion flag $\mathsf{complete}$, set only by the root, accompanies the tuple. With a delay slot the entry and exit states are \emph{pairs} $(\mathsf{pc}, \mathsf{next\_pc})$, so adjacency must pin both components. A compose node of arity $k$ proves $\mathcal R_{\mathrm{comp}}(\mathsf{pv}; \pi_0,\dots,\pi_{k-1})$, which holds when each $\pi_i$ verifies against a key the allowlist at $\mathsf{root}$ contains; the children agree on $\mathsf{vk}$, $h$ and $\mathsf{code}$; every $\mathsf{root}_i$ equals the published $\mathsf{root}$; the ranges are adjacent, $\mathsf{sh}_{\mathrm{out},i} = \mathsf{sh}_{\mathrm{in},i+1}$, $\mathsf{exit}_i = \mathsf{entry}_{i+1}$ and $\mathsf{cur}_{\mathrm{out},i} = \mathsf{cur}_{\mathrm{in},i+1}$; and $\mathsf{sh}_{\mathrm{in}} = \mathsf{sh}_{\mathrm{in},0}$, $\mathsf{sh}_{\mathrm{out}} = \mathsf{sh}_{\mathrm{out},k-1}$, $\mathsf{entry} = \mathsf{entry}_0$, $\mathsf{exit} = \mathsf{exit}_{k-1}$, $\mathsf{cur}_{\mathrm{in}} = \mathsf{cur}_{\mathrm{in},0}$, $\mathsf{cur}_{\mathrm{out}} = \mathsf{cur}_{\mathrm{out},k-1}$ and $D = \sum_i D_i$. Digests are stored offset by the starting point $D_{\mathrm{off}}$ of \S\ref{sec:air-global}, so this sum is computed as $D_0 + D_1 - D_{\mathrm{off}}$ and so on, and $D = O$ below means the stored value equals $D_{\mathrm{off}}$.
 
-\paragraph{Leaves and the root.} A leaf proves the same relation for its one or more fused children, except that each child is a core shard proof verified against the guest's $\mathsf{vk}$; it is the leaf's own key that the allowlist must contain, checked by its parent. A leaf sets $\mathsf{sh}_{\mathrm{in}}$ and $\mathsf{sh}_{\mathrm{out}}$ from the shard indices it verifies, and the leaf of the first shard, index~1, also requires its entry state to be $\mathsf{start}(\mathsf{vk})$, the start state the guest key fixes. The root additionally requires $\mathsf{sh}_{\mathrm{in}} = 1$, so its leftmost leaf is that first-shard leaf; an exit state with program counter zero, the halted state (\S\ref{sec:ext-syscall}); empty cursors, $D$ the identity and exit code zero; and it sets $\mathsf{complete}$, which closes the memory argument and the cross-shard digest over the execution and admits only the halts of Section~\ref{sec:statement}. Algorithm~\ref{alg:compose} states the checks.
+\paragraph{Leaves and the root.} A leaf proves the same relation for its one or more fused children, except that each child is a core shard proof verified against the guest's $\mathsf{vk}$; it is the leaf's own key that the allowlist must contain, checked by its parent. A leaf sets $\mathsf{sh}_{\mathrm{in}}$ and $\mathsf{sh}_{\mathrm{out}}$ from the shard indices it verifies. The leaf of the first shard, index~1, also requires its entry state to be $\mathsf{start}(\mathsf{vk})$, the start state the guest key fixes, and its starting cursors to be zero. The root additionally requires $\mathsf{sh}_{\mathrm{in}} = 1$, so that its leftmost leaf is the first-shard leaf. It also requires an exit program counter of zero, which the halt row sets (\S\ref{sec:ext-syscall}), $D$ the identity and exit code zero, and it sets $\mathsf{complete}$, which closes the memory argument and the cross-shard digest over the execution and requires the exit code zero that the relation of Section~\ref{sec:statement} admits. Algorithm~\ref{alg:compose} states the checks.
 
 \begin{algorithm}[t]
 \caption{The compose node of arity $k$, and what the root additionally
@@ -42,7 +42,7 @@ would verify \emph{some} proof rather than a proof of this machine.}
   \lIf{$\neg\,\mathsf{Verify}(\mathsf{vk}^{\mathrm{rec}}_i, \mathsf{pv}_i, \pi_i)$}{\Return $\bot$}
 }
 \lIf{$\exists\, i:\ \mathsf{root}_i \neq \mathsf{root}$}{\Return $\bot$
-    \tcp*[f]{children agree with the root they were checked against}}
+    \tcp*[f]{children share the root}}
 \lIf{$\mathsf{vk}_i$, $h_i$, $\mathsf{code}_i$ not all equal over $i$}{\Return $\bot$}
 \For{$i \gets 0$ \KwTo $k-2$}{
   \lIf{$\mathsf{sh}_{\mathrm{out},i} \neq \mathsf{sh}_{\mathrm{in},i+1} \lor \mathsf{exit}_i \neq \mathsf{entry}_{i+1}$}{\Return $\bot$
@@ -55,9 +55,8 @@ $\mathsf{pv} \gets (\mathsf{vk},\ \mathsf{sh}_{\mathrm{in},0},\ \mathsf{sh}_{\ma
   \mathsf{cur}_{\mathrm{in},0},\ \mathsf{cur}_{\mathrm{out},k-1},\ D,\ h,\ \mathsf{code},\ \mathsf{root})$\;
 \If{this node is the root}{
   \lIf{$\mathsf{sh}_{\mathrm{in}} \neq 1 \lor \mathsf{pc}(\mathsf{exit}) \neq 0$}{\Return $\bot$
-    \tcp*[f]{starts at the first shard, halted}}
-  \lIf{$\mathsf{cur}_{\mathrm{in}}, \mathsf{cur}_{\mathrm{out}}$ non-empty
-       $\lor\ D \neq O \lor \mathsf{code} \neq 0$}{\Return $\bot$}
+    \tcp*[f]{first shard; exit pc zero}}
+  \lIf{$D \neq O \lor \mathsf{code} \neq 0$}{\Return $\bot$}
   set $\mathsf{complete}$\;
 }
 \Return $\mathsf{pv}$\;
@@ -71,7 +70,7 @@ $\mathsf{pv} \gets (\mathsf{vk},\ \mathsf{sh}_{\mathrm{in},0},\ \mathsf{sh}_{\ma
 
 Sampling the leaf keys from a corpus of proved shards instead would leave every shard shape the corpus missed outside the allowlist. The enumeration is checked against such a corpus class by class and against the programs the classes generate. Algorithm~\ref{alg:enum} states it; every quantity it ranges over is fixed by the machine and the committed geometry.
 
-\begin{algorithm}[t]
+\begin{algorithm}[!htb]
 \caption{Enumerating the admissible leaf and compose keys. The loop bounds come from the
 machine's chip clusters and from the bucket rule of \S\ref{sec:pcs-geometry};
 no guest is executed.}

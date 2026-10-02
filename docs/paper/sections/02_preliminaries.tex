@@ -66,7 +66,7 @@ Two facts connect balance to the fraction identity over $\EF$. The multiplicity 
 
 \begin{definition}[Shard relation]
 \label{def:shard}
-A \emph{shard} is a set of tables, one per chip, together with public values $\mathsf{pv}$ (the entry and exit state, the address cursors of the global memory tables, and the septic digest: the running sum of the cross-shard digest, a point of an elliptic curve over the degree-7 extension $\F_{p^7}$, \S\ref{sec:air-global}). It is \emph{valid} if every real row is satisfying and every bus balances, where the public-values table contributes the entry state as a send and the exit state as a receive on the state bus, and the program bus is received by the preprocessed program table with the recorded multiplicities.
+A \emph{shard} is a set of tables, one per chip, together with public values $\mathsf{pv} = (\mathsf{sh}, \mathsf{entry}, \mathsf{exit}, \mathsf{cur}_{\mathrm{in}}, \mathsf{cur}_{\mathrm{out}}, D, h, \mathsf{code})$: its shard index; its entry and exit states, each a program-counter pair with the clock; the address cursors of the global memory tables before and after it; its cross-shard digest, a point of an elliptic curve over the degree-7 extension $\F_{p^7}$ (\S\ref{sec:air-global}); the digest of committed output; and the exit code. It is \emph{valid} for a verifying key $\mathsf{vk}$ if its preprocessed tables are those $\mathsf{vk}$ commits to, every real row is satisfying and every bus balances, where the public-values table contributes the entry state as a send and the exit state as a receive on the state bus, and the program bus is received by the preprocessed program table with the recorded multiplicities.
 \end{definition}
 
 \begin{definition}[Inputs, outputs and determinism of a chip]

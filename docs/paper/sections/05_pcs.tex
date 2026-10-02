@@ -182,14 +182,14 @@ The step order, the round order and the reversal convention fix the challenges; 
 \subsection{Quantised committed geometry}
 \label{sec:pcs-geometry}
 
-The stacking height is $H=2^{21}$, so a round is committed as a whole number of $2^{21}$-cell blocks, and a column is at most $2^{22}$ rows, which bounds the gap one synthetic column can absorb. A round with $\beta=\lceil a_r/H\rceil$ blocks of real data is committed in a \emph{bucket} of $\hat\beta$ blocks, where $\hat\beta=\beta$ for $\beta\le4$ and otherwise the next multiple of eight:
+The stacking height is $H=2^{21}$, so a round is committed as a whole number of $2^{21}$-cell blocks, and a column is at most $2^{22}$ rows, which bounds the gap one synthetic column can absorb. A round with $\nu=\lceil a_r/H\rceil$ blocks of real data is committed in a \emph{bucket} of $\hat\nu$ blocks, where $\hat\nu=\nu$ for $\nu\le4$ and otherwise the next multiple of eight:
 \[
   1,\;2,\;3,\;4,\;8,\;16,\;24,\;\ldots\ \text{blocks}.
 \]
 For an unpinned round, which is every core round, the gap is split into
 \[
-  \Bigl\lceil \frac{(\hat\beta-\hat\beta_{\mathrm{prev}})\,H}{2^{22}} \Bigr\rceil
-  \ \text{columns},\qquad \hat\beta_{\mathrm{prev}}=\text{the bucket below }\hat\beta,
+  \Bigl\lceil \frac{(\hat\nu-\hat\nu_{\mathrm{prev}})\,H}{2^{22}} \Bigr\rceil
+  \ \text{columns},\qquad \hat\nu_{\mathrm{prev}}=\text{the bucket below }\hat\nu,
 \]
 at least one: the number the widest gap of the bucket needs, so the count depends on the bucket alone, and a narrower gap leaves trailing columns short or empty. A pinned round, as in the compress machine, uses a fixed column count.
 
