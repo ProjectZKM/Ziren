@@ -28,8 +28,8 @@ use crate::{
     build::zkm_imm_wrap_vk_mode,
     components::ZKMProverComponents,
     utils::{is_recursion_public_values_valid, is_root_public_values_valid},
-    CompressedSC, CoreSC, HashableKey, InnerSC, OuterSC, ZKMCoreProofData, ZKMProver,
-    ZKMVerifyingKey,
+    CompressedSC, CoreSC, HashableKey, InnerSC, OuterSC, ShrinkBlake3SC, ZKMCoreProofData,
+    ZKMProver, ZKMVerifyingKey,
 };
 
 #[derive(Error, Debug)]
@@ -281,6 +281,32 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
         }
 
+        Ok(())
+    }
+
+    /// Verify a shrink proof under the Blake3 ring: the proof itself over the
+    /// ring's own transcript, and the recursion public values it closes with.
+    /// The ring's keys are not in the recursion allowlist, which covers the
+    /// Poseidon2 rings; the stage after this one pins the program instead.
+    pub fn verify_shrink_blake3(
+        &self,
+        proof: &ZKMReduceProof<ShrinkBlake3SC>,
+    ) -> Result<(), MachineVerificationError<ShrinkBlake3SC>> {
+        let mut challenger = self.shrink_blake3_prover.machine().config().challenger();
+        let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
+        self.shrink_blake3_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
+
+        let public_values: &RecursionPublicValues<_> =
+            proof.proof.public_values.as_slice().borrow();
+        if !is_recursion_public_values_valid(self.compress_prover.machine().config(), public_values)
+        {
+            return Err(MachineVerificationError::InvalidPublicValues(
+                "recursion public values are invalid",
+            ));
+        }
+        if public_values.vk_root != self.recursion_vk_root {
+            return Err(MachineVerificationError::InvalidPublicValues("vk_root mismatch"));
+        }
         Ok(())
     }
 
