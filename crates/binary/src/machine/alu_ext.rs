@@ -23,6 +23,7 @@ use crate::ext::{
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs, KB_BITS};
+use crate::BinaryBase;
 use crate::F;
 
 /// The witness part of a row.
@@ -230,7 +231,7 @@ impl<X: Field> BaseAir<X> for ExtAluAir {
     }
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for ExtAluAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for ExtAluAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &ExtAluCols<AB::Var> = main.current_slice().borrow();

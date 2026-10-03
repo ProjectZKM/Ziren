@@ -17,7 +17,7 @@ use crate::word::{
     fill_reduce, fill_sum, shifted, AddCols, DiffCols, ReduceCols, SumCols, Word, KB_BITS,
     KB_PRIME, NUM_ADD_COLS,
 };
-use crate::F;
+use crate::BinaryBase;
 
 /// Words of an extension element.
 pub const EXT_DEGREE: usize = 4;
@@ -158,7 +158,7 @@ type Factors<'a, AB> =
 
 /// Constrain `cols.reduce[k].out` to be the `k`th coefficient of `a * b`,
 /// asking the multiply table for every product on rows where `active`.
-pub fn eval_ext_mul<AB: MachineBuilder<F = F>>(
+pub fn eval_ext_mul<AB: MachineBuilder<F: BinaryBase>>(
     builder: &mut AB,
     a: &ExtExprs<AB>,
     b: &ExtExprs<AB>,

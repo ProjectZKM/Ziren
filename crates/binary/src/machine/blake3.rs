@@ -35,6 +35,7 @@ use super::bits::{
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{add_bits, add_carries, bits_le, constant_bits, exprs, widen, KB_BITS};
+use crate::BinaryBase;
 use crate::F;
 
 /// Rounds of a compression.
@@ -543,7 +544,7 @@ fn word_of_limbs<AB: AirBuilder>(
     )
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for Blake3IoAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for Blake3IoAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &Blake3IoCols<AB::Var> = main.current_slice().borrow();
@@ -703,7 +704,7 @@ impl<X: Field> BaseAir<X> for Blake3RoundAir {
     }
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for Blake3RoundAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for Blake3RoundAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &Blake3RoundCols<AB::Var> = main.current_slice().borrow();

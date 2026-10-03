@@ -35,6 +35,20 @@ use p3_sumcheck::TableShape;
 /// The field every trace cell and every challenge lives in.
 pub type F = BinaryField128;
 
+/// A field the machine's constraints can be evaluated over: `GF(2^128)`
+/// itself, or a type that records the evaluation, given the constants the
+/// constraints use.
+pub trait BinaryBase: p3_field::Field {
+    /// The constant `value` of `GF(2^128)`.
+    fn from_native(value: F) -> Self;
+}
+
+impl BinaryBase for F {
+    fn from_native(value: F) -> Self {
+        value
+    }
+}
+
 /// The transcript: Blake3 over bytes, sampling `GF(2^128)` challenges.
 pub type Challenger = BinaryChallenger<F, HashChallenger<u8, Blake3, 32>>;
 

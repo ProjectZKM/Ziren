@@ -17,6 +17,7 @@ use zkm_derive::AlignedBorrow;
 use super::bits::{log_height_for, mul_tuple, BitRows, MUL};
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, eval_mul, exprs, fill_mul, MulCols, Word, KB_BITS};
+use crate::BinaryBase;
 use crate::F;
 
 /// A row of the table.
@@ -81,7 +82,7 @@ impl<X: Field> BaseAir<X> for MulAir {
     }
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for MulAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for MulAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &MulRow<AB::Var> = main.current_slice().borrow();

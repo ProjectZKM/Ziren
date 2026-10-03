@@ -27,6 +27,7 @@ use super::bits::{
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, eval_add, exprs, fill_add, AddCols, Word, KB_BITS, KB_PRIME};
+use crate::BinaryBase;
 use crate::F;
 
 /// The program's part of a row, shared with the extension ALU.
@@ -290,7 +291,7 @@ impl<X: Field> BaseAir<X> for BaseAluAir {
     }
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for BaseAluAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for BaseAluAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &BaseAluCols<AB::Var> = main.current_slice().borrow();

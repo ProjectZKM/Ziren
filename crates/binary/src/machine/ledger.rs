@@ -24,6 +24,7 @@ use super::bits::{
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs};
+use crate::BinaryBase;
 use crate::F;
 
 /// The program's part of a ledger row.
@@ -127,7 +128,7 @@ impl<X: Field> BaseAir<X> for LedgerAir {
 
 /// The first row never continues a group, so the window that wraps from the
 /// last row to the first binds nothing.
-impl<AB: MachineBuilder<F = F>> Air<AB> for LedgerAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for LedgerAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &LedgerCols<AB::Var> = main.current_slice().borrow();

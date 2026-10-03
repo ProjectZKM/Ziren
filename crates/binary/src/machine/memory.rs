@@ -20,6 +20,7 @@ use super::bits::{
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs};
+use crate::BinaryBase;
 use crate::F;
 
 /// `block` as integers.
@@ -145,7 +146,7 @@ impl<X: Field> BaseAir<X> for MemoryConstAir {
     }
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for MemoryConstAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for MemoryConstAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &MemoryConstCols<AB::Var> = main.current_slice().borrow();
@@ -288,7 +289,7 @@ impl<X: Field> BaseAir<X> for MemoryVarAir {
     }
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for MemoryVarAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for MemoryVarAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &MemoryVarCols<AB::Var> = main.current_slice().borrow();

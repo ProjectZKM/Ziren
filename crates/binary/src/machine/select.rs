@@ -22,6 +22,7 @@ use super::bits::{
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs, Word, KB_BITS};
+use crate::BinaryBase;
 use crate::F;
 
 /// The program's part of a row.
@@ -178,7 +179,7 @@ impl<X: Field> BaseAir<X> for SelectAir {
     }
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for SelectAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for SelectAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &SelectCols<AB::Var> = main.current_slice().borrow();

@@ -24,7 +24,7 @@ use p3_binary_field::{BinaryField2, Ghash128};
 use p3_field::Field;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_multi_stark::config::{PcsError, PcsProverError};
+use p3_multi_stark::config::{MultiStarkConfig, PcsError, PcsProverError};
 use p3_multi_stark::{
     prove_with_backend, setup, verify, ProverInstance, ProverInstances, ProvingError, ProvingKey,
     ReprBackend, SubfieldBackend, VerificationError, VerifierInstance, VerifierInstances,
@@ -46,7 +46,7 @@ use self::public_values::{public_value, PublicValuesAir};
 use self::select::SelectAir;
 use crate::config::{MachineConfig, MachineConfigError, MachineProof};
 use crate::machine_builder::MachineBuilder;
-use crate::{challenger, BinarySchedule, F};
+use crate::{challenger, BinaryBase, BinarySchedule, F};
 
 /// One table of the machine.
 pub enum RecursionAir {
@@ -229,7 +229,7 @@ impl<X: Field> BaseAir<X> for RecursionAir {
     }
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for RecursionAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for RecursionAir {
     fn eval(&self, builder: &mut AB) {
         match self {
             Self::Ledger(air) => air.eval(builder),
@@ -275,6 +275,20 @@ impl core::fmt::Display for MachineError {
 }
 
 impl std::error::Error for MachineError {}
+
+/// The shapes of the main and preprocessed tables of `airs`, in order.
+fn shapes(airs: &[RecursionAir]) -> (Vec<TableShape>, Vec<TableShape>) {
+    let main = airs
+        .iter()
+        .map(|air| TableShape::new(air.log_height(), BaseAir::<F>::width(air)))
+        .collect();
+    let preprocessed = airs
+        .iter()
+        .filter(|air| BaseAir::<F>::preprocessed_width(*air) > 0)
+        .map(|air| TableShape::new(air.log_height(), BaseAir::<F>::preprocessed_width(air)))
+        .collect();
+    (main, preprocessed)
+}
 
 /// The machine of one program: its tables, their configuration and keys.
 pub struct RecursionMachine {
@@ -327,15 +341,7 @@ impl RecursionMachine {
         airs.extend(tables);
         airs.push(RecursionAir::Mul(MulAir::new(products)));
 
-        let main_shapes: Vec<TableShape> = airs
-            .iter()
-            .map(|air| TableShape::new(air.log_height(), BaseAir::<F>::width(air)))
-            .collect();
-        let preprocessed_shapes: Vec<TableShape> = airs
-            .iter()
-            .filter(|air| BaseAir::<F>::preprocessed_width(*air) > 0)
-            .map(|air| TableShape::new(air.log_height(), BaseAir::<F>::preprocessed_width(air)))
-            .collect();
+        let (main_shapes, preprocessed_shapes) = shapes(&airs);
         let config = MachineConfig::new(&main_shapes, &preprocessed_shapes, schedule)
             .map_err(MachineError::Config)?;
         let refs: Vec<&RecursionAir> = airs.iter().collect();
@@ -401,6 +407,41 @@ impl RecursionMachine {
         proof.map_err(MachineError::Prove)
     }
 
+    /// The shapes of the machine's main and preprocessed tables, which fix
+    /// its configuration.
+    #[must_use]
+    pub fn shapes(&self) -> (Vec<TableShape>, Vec<TableShape>) {
+        shapes(&self.airs)
+    }
+
+    /// The machine's verifying key.
+    #[must_use]
+    pub const fn verifying_key(&self) -> &VerifyingKey<MachineConfig> {
+        &self.vk
+    }
+
+    /// The verifier's statement under any configuration of the machine: each
+    /// table at its height under `vk`, the public values table given `public`.
+    #[must_use]
+    pub fn verifier_instances<'a, C: MultiStarkConfig>(
+        &'a self,
+        vk: &'a VerifyingKey<C>,
+        public: &'a [C::Val; DIGEST_SIZE],
+    ) -> VerifierInstances<'a, C, RecursionAir> {
+        VerifierInstances::new(
+            self.airs
+                .iter()
+                .map(|air| {
+                    let public_values: &[C::Val] = match air {
+                        RecursionAir::PublicValues(_) => public,
+                        _ => &[],
+                    };
+                    VerifierInstance::new(air, vk, air.log_height(), public_values)
+                })
+                .collect(),
+        )
+    }
+
     /// Verify `proof` as a proof of an execution of the machine's program
     /// committing `digest`.
     pub fn verify(
@@ -409,19 +450,7 @@ impl RecursionMachine {
         digest: &[u32; DIGEST_SIZE],
     ) -> Result<(), MachineError> {
         let public = Self::public_values(digest);
-        let instances = VerifierInstances::new(
-            self.airs
-                .iter()
-                .map(|air| {
-                    VerifierInstance::new(
-                        air,
-                        &self.vk,
-                        air.log_height(),
-                        Self::public_of(air, &public),
-                    )
-                })
-                .collect(),
-        );
+        let instances = self.verifier_instances(&self.vk, &public);
         verify(&self.config, instances, proof, 0, &mut challenger()).map_err(MachineError::Verify)
     }
 }

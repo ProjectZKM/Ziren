@@ -23,6 +23,7 @@ use super::bits::{
 };
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, exprs, Word, KB_BITS};
+use crate::BinaryBase;
 use crate::F;
 
 /// Bits of a limb.
@@ -162,7 +163,7 @@ impl<X: Field> BaseAir<X> for LimbsAir {
     }
 }
 
-impl<AB: MachineBuilder<F = F>> Air<AB> for LimbsAir {
+impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for LimbsAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local: &LimbsCols<AB::Var> = main.current_slice().borrow();

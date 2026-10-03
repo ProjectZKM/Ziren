@@ -16,6 +16,7 @@ use p3_sumcheck::layout::Table;
 
 use crate::machine_builder::MachineBuilder;
 use crate::word::{bits_le, KB_BITS};
+use crate::BinaryBase;
 use crate::F;
 
 /// Bits of a memory address, a KoalaBear element.
@@ -111,15 +112,17 @@ pub fn dense<X: Field>(bits: &[u8], width: usize) -> RowMajorMatrix<X> {
 
 /// `bits` as one field element, bit `i` on coordinate `i`.
 #[must_use]
-pub fn pack_field<AB: AirBuilder<F = F>>(bits: &[AB::Expr]) -> AB::Expr {
+pub fn pack_field<AB: AirBuilder<F: BinaryBase>>(bits: &[AB::Expr]) -> AB::Expr {
     let basis = coordinate_basis::<F>();
     assert!(bits.len() <= basis.len(), "a field element holds at most one bit per coordinate");
-    bits.iter().zip(basis.iter()).fold(AB::Expr::ZERO, |acc, (bit, e)| acc + bit.clone() * *e)
+    bits.iter()
+        .zip(basis.iter())
+        .fold(AB::Expr::ZERO, |acc, (bit, e)| acc + bit.clone() * AB::F::from_native(*e))
 }
 
 /// The bus tuple of a cell: its address and its block, one field each.
 #[must_use]
-pub fn cell_tuple<AB: AirBuilder<F = F>>(
+pub fn cell_tuple<AB: AirBuilder<F: BinaryBase>>(
     addr: &[AB::Expr; ADDRESS_BITS],
     block: &[AB::Expr; BLOCK_BITS],
 ) -> Vec<AB::Expr> {
@@ -136,7 +139,7 @@ pub fn single_block<AB: AirBuilder>(element: &[AB::Expr; KB_BITS]) -> [AB::Expr;
 /// The bus tuple of a product: both factors in one field, the product in
 /// another.
 #[must_use]
-pub fn mul_tuple<AB: AirBuilder<F = F>>(
+pub fn mul_tuple<AB: AirBuilder<F: BinaryBase>>(
     a: &[AB::Expr; KB_BITS],
     b: &[AB::Expr; KB_BITS],
     c: &[AB::Expr; KB_BITS],
@@ -146,7 +149,7 @@ pub fn mul_tuple<AB: AirBuilder<F = F>>(
 }
 
 /// Ask the multiply table for `c = a * b` on rows where `active`.
-pub fn request_mul<AB: MachineBuilder<F = F>>(
+pub fn request_mul<AB: MachineBuilder<F: BinaryBase>>(
     builder: &mut AB,
     a: &[AB::Expr; KB_BITS],
     b: &[AB::Expr; KB_BITS],
@@ -165,7 +168,7 @@ pub fn request_mul<AB: MachineBuilder<F = F>>(
 /// round in one field, the sixteen state words in four and the sixteen
 /// message words in four more.
 #[must_use]
-pub fn blake3_tuple<AB: AirBuilder<F = F>>(
+pub fn blake3_tuple<AB: AirBuilder<F: BinaryBase>>(
     id: &[AB::Expr; PERMUTATION_ID_BITS],
     round: &[AB::Expr; BLAKE3_ROUND_BITS],
     state: &[[AB::Expr; 32]; 16],
