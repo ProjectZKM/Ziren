@@ -3,6 +3,8 @@ use p3_field::{
     PrimeCharacteristicRing,
 };
 use p3_koala_bear::KoalaBear;
+
+use crate::CircuitConfig;
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{DslIr, Var},
@@ -267,6 +269,175 @@ impl<C: Config<F = KoalaBear>> FieldChallengerVariable<C, Felt<C::F>>
 
         self.output_buffer.clear();
         self.output_buffer.extend_from_slice(&self.sponge_state[..HASH_RATE]);
+    }
+}
+
+/// The Blake3 ring's transcript in the circuit, over 16-bit limbs.
+///
+/// Reference: [`zkm_pcs::kb31_blake3::Blake3Challenger`]: the state is a
+/// digest, zero at the start, and a buffer of observed limbs; folding
+/// hashes the state followed by the buffer into the next state, at the cap
+/// and at every squeeze; samples read the state's words in order and an
+/// observation discards the words still unread.  An element is observed as
+/// the two limbs of its canonical value, a digest as its sixteen limbs; a
+/// sampled element is two words reduced into the field, and sampled bits
+/// are the low bits of one word.  The buffer length and the words left are
+/// program structure, as the host's are a function of the protocol alone.
+#[derive(Clone, Debug)]
+pub struct Blake3ChallengerVariable<C: Config> {
+    state: [Felt<C::F>; crate::blake3_circuit::DIGEST_LIMBS],
+    buffer: Vec<Felt<C::F>>,
+    words_left: usize,
+}
+
+/// Limbs the buffer holds before folding: the host's byte cap, halved.
+const BLAKE3_ABSORB_CAP_LIMBS: usize = zkm_pcs::kb31_blake3::ABSORB_CAP_BYTES / 2;
+
+/// Words a squeeze yields.
+const BLAKE3_SQUEEZE_WORDS: usize = crate::blake3_circuit::DIGEST_LIMBS / 2;
+
+impl<C: CircuitConfig<F = KoalaBear>> Blake3ChallengerVariable<C> {
+    pub fn new(builder: &mut Builder<C>) -> Self {
+        Self {
+            state: core::array::from_fn(|_| builder.constant(C::F::ZERO)),
+            buffer: Vec::new(),
+            words_left: 0,
+        }
+    }
+
+    fn observe_limbs(
+        &mut self,
+        builder: &mut Builder<C>,
+        limbs: impl IntoIterator<Item = Felt<C::F>>,
+    ) {
+        self.words_left = 0;
+        for limb in limbs {
+            self.buffer.push(limb);
+            if self.buffer.len() == BLAKE3_ABSORB_CAP_LIMBS {
+                self.fold(builder);
+            }
+        }
+    }
+
+    fn fold(&mut self, builder: &mut Builder<C>) {
+        let buffered = self.buffer.len();
+        let input: Vec<Felt<C::F>> =
+            self.state.iter().copied().chain(self.buffer.drain(..)).collect();
+        self.state = crate::blake3_circuit::hash_limbs(builder, &input);
+        if zkm_pcs::kb31_blake3::transcript_trace_enabled() {
+            let marker: Felt<C::F> = builder.constant(C::F::from_usize(2 * buffered));
+            builder.print_f(marker);
+            for limb in self.state {
+                builder.print_f(limb);
+            }
+        }
+    }
+
+    fn squeeze(&mut self, builder: &mut Builder<C>) {
+        self.fold(builder);
+        self.words_left = BLAKE3_SQUEEZE_WORDS;
+    }
+
+    /// The next word of the transcript as its two limbs.
+    fn next_word(&mut self, builder: &mut Builder<C>) -> [Felt<C::F>; 2] {
+        if self.words_left == 0 {
+            self.squeeze(builder);
+        }
+        let at = BLAKE3_SQUEEZE_WORDS - self.words_left;
+        self.words_left -= 1;
+        [self.state[2 * at], self.state[2 * at + 1]]
+    }
+}
+
+impl<C: CircuitConfig<F = KoalaBear>> CanCopyChallenger<C> for Blake3ChallengerVariable<C> {
+    fn copy(&self, builder: &mut Builder<C>) -> Self {
+        Self {
+            state: self.state.map(|x| builder.eval(x)),
+            buffer: self.buffer.iter().map(|x| builder.eval(*x)).collect(),
+            words_left: self.words_left,
+        }
+    }
+}
+
+impl<C: CircuitConfig<F = KoalaBear>> CanObserveVariable<C, Felt<C::F>>
+    for Blake3ChallengerVariable<C>
+{
+    fn observe(&mut self, builder: &mut Builder<C>, value: Felt<C::F>) {
+        let limbs = crate::blake3_circuit::felt_limbs(builder, value);
+        self.observe_limbs(builder, limbs);
+    }
+}
+
+impl<C: CircuitConfig<F = KoalaBear>>
+    CanObserveVariable<C, [Felt<C::F>; crate::blake3_circuit::DIGEST_LIMBS]>
+    for Blake3ChallengerVariable<C>
+{
+    fn observe(
+        &mut self,
+        builder: &mut Builder<C>,
+        digest: [Felt<C::F>; crate::blake3_circuit::DIGEST_LIMBS],
+    ) {
+        self.observe_limbs(builder, digest);
+    }
+}
+
+impl<C: CircuitConfig<F = KoalaBear>> CanSampleVariable<C, Felt<C::F>>
+    for Blake3ChallengerVariable<C>
+{
+    fn sample(&mut self, builder: &mut Builder<C>) -> Felt<C::F> {
+        let low = self.next_word(builder);
+        let high = self.next_word(builder);
+        let weights = [1u64, 1 << 16, 1 << 32, 1 << 48].map(C::F::from_u64);
+        builder.eval(
+            low[0] * weights[0] + low[1] * weights[1] + high[0] * weights[2] + high[1] * weights[3],
+        )
+    }
+}
+
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> CanSampleBitsVariable<C, Felt<C::F>>
+    for Blake3ChallengerVariable<C>
+{
+    fn sample_bits(&mut self, builder: &mut Builder<C>, nb_bits: usize) -> Vec<Felt<C::F>> {
+        assert!(nb_bits <= 32, "a word carries at most 32 bits");
+        let [low, high] = self.next_word(builder);
+        let mut bits = builder.num2bits_v2_f(low, crate::blake3_circuit::LIMB_BITS);
+        if nb_bits > crate::blake3_circuit::LIMB_BITS {
+            bits.extend(builder.num2bits_v2_f(high, crate::blake3_circuit::LIMB_BITS));
+        }
+        bits.truncate(nb_bits);
+        bits
+    }
+}
+
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldChallengerVariable<C, Felt<C::F>>
+    for Blake3ChallengerVariable<C>
+{
+    fn sample_ext(&mut self, builder: &mut Builder<C>) -> Ext<C::F, C::EF> {
+        let a = self.sample(builder);
+        let b = self.sample(builder);
+        let c = self.sample(builder);
+        let d = self.sample(builder);
+        builder.ext_from_base_slice(&[a, b, c, d])
+    }
+
+    fn check_witness(
+        &mut self,
+        builder: &mut Builder<C>,
+        nb_bits: usize,
+        witness: Felt<<C as Config>::F>,
+    ) {
+        if nb_bits == 0 {
+            return;
+        }
+        self.observe(builder, witness);
+        for bit in self.sample_bits(builder, nb_bits) {
+            builder.assert_felt_eq(bit, C::F::ZERO);
+        }
+    }
+
+    /// Fold the buffer into the state without squeezing.
+    fn duplexing(&mut self, builder: &mut Builder<C>) {
+        self.fold(builder);
     }
 }
 

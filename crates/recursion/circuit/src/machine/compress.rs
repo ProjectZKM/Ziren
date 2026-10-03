@@ -21,6 +21,11 @@ use zkm_pcs::shape::OrderedShape;
 pub enum PublicValuesOutputDigest {
     Reduce,
     Root,
+    /// The digest is carried from the verified proof's public values and
+    /// not recomputed: the stage whose ring has no Poseidon2 (the binary
+    /// stage over the Blake3 ring) relies on the digest having been
+    /// constrained by the stage that produced the proof it verifies.
+    Carried,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

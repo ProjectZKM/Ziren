@@ -290,7 +290,7 @@ pub fn verify_core_basefold<C, SC, A>(
                         host.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
                     ));
                     whir_evaluation_proof_var =
-                        Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
+                        Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _, _>(
                             builder,
                             host,
                             whir_proof.clone(),
@@ -330,6 +330,9 @@ pub fn verify_core_basefold<C, SC, A>(
                         None,
                         cps_heights,
                     ))
+                }
+                LiftedEvalProof::WhirBundleBlake3 { .. } => {
+                    unreachable!("the Blake3 ring is verified by the binary stage alone")
                 }
                 LiftedEvalProof::Bytes(bytes) => {
                     Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(

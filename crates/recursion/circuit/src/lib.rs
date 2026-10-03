@@ -23,6 +23,7 @@ pub mod basefold_chip_opened_values;
 pub mod basefold_constraint_folder;
 pub mod basefold_verifier;
 pub mod basefold_witness;
+pub mod blake3_circuit;
 pub mod challenger;
 pub mod domain;
 pub mod dummy;
@@ -716,6 +717,16 @@ impl<const P: u8> KoalaBearFriParameters for KoalaBearPoseidon2Ring<P> {
     type RowMajorProverData = <ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
 }
 
+impl KoalaBearFriParameters for zkm_pcs::KoalaBearBlake3 {
+    const WHIR_PROFILE: zkm_pcs::whir::jagged::WhirProfile =
+        <Self as zkm_pcs::BasefoldRing>::WHIR_PROFILE;
+    type ValMmcs = zkm_pcs::kb31_blake3::Blake3Mmcs;
+    type FriChallenger = <Self as StarkGenericConfig>::Challenger;
+    type RowMajorProverData = <zkm_pcs::kb31_blake3::Blake3Mmcs as Mmcs<KoalaBear>>::ProverData<
+        RowMajorMatrix<KoalaBear>,
+    >;
+}
+
 impl KoalaBearFriParameters for KoalaBearPoseidon2Outer {
     const WHIR_PROFILE: zkm_pcs::whir::jagged::WhirProfile =
         <Self as zkm_pcs::BasefoldRing>::WHIR_PROFILE;
@@ -759,6 +770,41 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>, const P: u8>
         commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
     ) -> [Felt<<C as Config>::F>; 8] {
         commitment
+    }
+}
+
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriParametersVariable<C>
+    for zkm_pcs::KoalaBearBlake3
+{
+    type FriChallengerVariable = challenger::Blake3ChallengerVariable<C>;
+
+    fn challenger_variable(&self, builder: &mut Builder<C>) -> Self::FriChallengerVariable {
+        challenger::Blake3ChallengerVariable::new(builder)
+    }
+
+    fn commit_recursion_public_values(
+        builder: &mut Builder<C>,
+        public_values: RecursionPublicValues<Felt<<C>::F>>,
+    ) {
+        builder.commit_public_values_v2(public_values);
+    }
+
+    fn commit_recursion_public_values_imm_wrap_vk(
+        builder: &mut Builder<C>,
+        public_values: RecursionPublicValues<Felt<<C>::F>>,
+        _vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+        _pc_start: Felt<<C as Config>::F>,
+    ) {
+        builder.commit_public_values_v2(public_values);
+    }
+
+    /// The observed form of a Blake3 root, the twin of the host
+    /// `root_felts`.
+    fn vk_preprocessed_commit_felts(
+        builder: &mut Builder<C>,
+        commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+    ) -> [Felt<<C as Config>::F>; 8] {
+        blake3_circuit::root_felts(builder, &commitment)
     }
 }
 

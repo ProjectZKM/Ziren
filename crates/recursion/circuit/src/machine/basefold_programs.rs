@@ -166,16 +166,83 @@ where
             crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
         >,
 {
+    build_wrap_basefold_program_for::<KoalaBearPoseidon2Compress, A>(
+        machine,
+        input,
+        max_log_row_count,
+        value_assertions,
+        crate::machine::compress::PublicValuesOutputDigest::Reduce,
+        None,
+    )
+}
+
+/// The binary stage's program: verifies one shrink proof under the Blake3
+/// ring.  There is one shrink key, so the program pins the key's digest
+/// instead of looking it up in a key tree, and the public values digest
+/// is carried from the verified proof, the ring having no Poseidon2.
+pub fn build_binary_basefold_program<A>(
+    machine: &StarkMachine<zkm_pcs::KoalaBearBlake3, A>,
+    input: &ZKMWrapBasefoldWitnessValues<zkm_pcs::KoalaBearBlake3>,
+    max_log_row_count: usize,
+) -> RecursionProgram<KoalaBear>
+where
+    A: MachineAir<KoalaBear>
+        + for<'b> p3_air::Air<
+            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
+        >,
+{
+    let (vk, _) = input.vks_and_proofs.first().expect("the binary stage verifies one proof");
+    build_wrap_basefold_program_for::<zkm_pcs::KoalaBearBlake3, A>(
+        machine,
+        input,
+        max_log_row_count,
+        true,
+        crate::machine::compress::PublicValuesOutputDigest::Carried,
+        Some(crate::blake3_circuit::vk_digest(vk)),
+    )
+}
+
+/// Build a wrap program for any inner-field ring: the terminal stage of
+/// that ring's proof chain.
+pub fn build_wrap_basefold_program_for<SC, A>(
+    machine: &StarkMachine<SC, A>,
+    input: &ZKMWrapBasefoldWitnessValues<SC>,
+    max_log_row_count: usize,
+    value_assertions: bool,
+    output_digest_kind: crate::machine::compress::PublicValuesOutputDigest,
+    pinned_vk_digest: Option<<SC as crate::hash::FieldHasher<KoalaBear>>::Digest>,
+) -> RecursionProgram<KoalaBear>
+where
+    SC: crate::KoalaBearFriParametersVariable<InnerConfig, Val = KoalaBear>
+        + crate::hash::FieldHasherVariable<InnerConfig>
+        + crate::hash::FieldHasher<KoalaBear>,
+    <SC as crate::hash::FieldHasherVariable<InnerConfig>>::DigestVariable:
+        IntoIterator<Item = zkm_recursion_compiler::ir::Felt<KoalaBear>>,
+    ZKMWrapBasefoldWitnessValues<SC>: Witnessable<
+        InnerConfig,
+        WitnessVariable = super::wrap_basefold::ZKMWrapBasefoldWitnessVariable<InnerConfig, SC>,
+    >,
+    A: MachineAir<KoalaBear>
+        + for<'b> p3_air::Air<
+            crate::basefold_constraint_folder::ShardConstraintFolder<'b, InnerConfig>,
+        >,
+{
     let builder_span = tracing::debug_span!("build wrap-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Shrink);
     let input_var = input.read(&mut builder);
-    verify_wrap_basefold::<InnerConfig, KoalaBearPoseidon2Compress, A>(
+    if let Some(digest) = pinned_vk_digest {
+        let expected = SC::const_digest(&mut builder, digest);
+        let (vk, _) = input_var.vks_and_proofs.first().expect("a pinned key is one key");
+        let actual = vk.hash(&mut builder);
+        SC::assert_digest_eq(&mut builder, actual, expected);
+    }
+    verify_wrap_basefold::<InnerConfig, SC, A>(
         &mut builder,
         input_var,
         machine,
         value_assertions,
         max_log_row_count,
-        crate::machine::compress::PublicValuesOutputDigest::Reduce,
+        output_digest_kind,
     );
     let operations = builder.into_operations();
     builder_span.exit();

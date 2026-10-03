@@ -291,6 +291,23 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         commit_root: [Felt<C::F>; 8],
         modified_commitment: [Felt<C::F>; 8],
     },
+    /// The Blake3 ring's jagged-WHIR bundle, witnessed: as `WhirBundle` with
+    /// the digests as sixteen limbs of a Blake3 root.  `commit_root` is the
+    /// witnessed main root; `main_commitment` is the observed eight-element
+    /// form the lift binds it to.
+    WhirBundleBlake3 {
+        host: zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<zkm_pcs::kb31_blake3::Blake3Mmcs>,
+        whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; crate::blake3_circuit::DIGEST_LIMBS],
+        >,
+        sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
+        jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
+        expected_eval: Ext<C::F, C::EF>,
+        commit_root: [Felt<C::F>; crate::blake3_circuit::DIGEST_LIMBS],
+        main_commitment: [Felt<C::F>; 8],
+    },
     // The gnark wrap path.  The host carries the outer bundle
     // (`JaggedPcsProofGeneric<OuterValMmcs>`, BN254 commitments) as
     // `EvaluationProof::Bytes`.  Rather than BAKE its proof-specific values in
@@ -369,6 +386,23 @@ pub struct PreprocessedRoundWitness<C: CircuitConfig> {
     pub padding_heights: Vec<Vec<Felt<C::F>>>,
 }
 
+/// The Blake3 ring's bundle, when `bytes` carry one that opens under WHIR.
+/// The inner rings carry their bundles structured and the outer ring's bytes
+/// are consumed by its config before this is asked, so a parse here is the
+/// Blake3 ring's; a Poseidon2 bundle's bytes do not parse as one, its roots
+/// being eight elements and not thirty-two bytes.
+pub fn blake3_whir_bundle_from_bytes(
+    bytes: &[u8],
+) -> Option<zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<zkm_pcs::kb31_blake3::Blake3Mmcs>> {
+    if bytes.is_empty() {
+        return None;
+    }
+    zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric::<zkm_pcs::kb31_blake3::Blake3Mmcs>::from_bytes(
+        bytes,
+    )
+    .filter(|bundle| bundle.whir_proof.is_some())
+}
+
 impl<C> Witnessable<C>
     for zkm_pcs::shard_level::shard_proof::JaggedShardProof<InnerVal, InnerChallenge>
 where
@@ -417,12 +451,44 @@ where
         } else {
             match &self.evaluation_proof {
                 HostEvalProof::Empty => LiftedEvalProof::Empty,
-                HostEvalProof::Bytes(b) => LiftedEvalProof::Bytes(b.clone()),
+                HostEvalProof::Bytes(b) => match blake3_whir_bundle_from_bytes(b) {
+                    Some(bundle) => {
+                        let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive_blake3(
+                            bundle.whir_proof.as_ref().expect("a Blake3 bundle opens under WHIR"),
+                        );
+                        let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C, _>(
+                            &whir_host, builder,
+                        );
+                        let sumcheck = read_sumcheck_from_stream::<C>(
+                            &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+                            builder,
+                        );
+                        let jagged_eval = read_sumcheck_from_stream::<C>(
+                            &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+                            builder,
+                        );
+                        let expected_eval = bundle.reduction.q_at_z.read(builder);
+                        let commit_root = crate::blake3_circuit::digest_limbs(
+                            &bundle.commit.original_commitment.roots()[0],
+                        )
+                        .read(builder);
+                        LiftedEvalProof::WhirBundleBlake3 {
+                            host: bundle,
+                            whir_proof,
+                            sumcheck,
+                            jagged_eval,
+                            expected_eval,
+                            commit_root,
+                            main_commitment: main_commitment_arr,
+                        }
+                    }
+                    None => LiftedEvalProof::Bytes(b.clone()),
+                },
                 HostEvalProof::Bundle(bundle) if bundle.whir_proof.is_some() => {
                     let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive(
                         bundle.whir_proof.as_ref().unwrap(),
                     );
-                    let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C>(
+                    let whir_proof = crate::whir_circuit::read_stacked_whir_from_stream::<C, _>(
                         &whir_host, builder,
                     );
                     let sumcheck = read_sumcheck_from_stream::<C>(
@@ -503,13 +569,33 @@ where
         self.public_values.write(witness);
         self.logup_gkr_proof.write(witness);
         self.zerocheck_proof.write(witness);
-        let _handled_outer = C::write_outer_eval_bundle::<_>(&self.evaluation_proof, witness);
+        let handled_outer = C::write_outer_eval_bundle::<_>(&self.evaluation_proof, witness);
+        if let zkm_pcs::shard_level::shard_proof::EvaluationProof::Bytes(b) = &self.evaluation_proof
+        {
+            if let (false, Some(bundle)) = (handled_outer, blake3_whir_bundle_from_bytes(b)) {
+                let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive_blake3(
+                    bundle.whir_proof.as_ref().expect("a Blake3 bundle opens under WHIR"),
+                );
+                crate::whir_circuit::write_stacked_whir_to_stream::<C, _>(&whir_host, witness);
+                write_sumcheck_to_stream::<C>(
+                    &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+                    witness,
+                );
+                write_sumcheck_to_stream::<C>(
+                    &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+                    witness,
+                );
+                bundle.reduction.q_at_z.write(witness);
+                crate::blake3_circuit::digest_limbs(&bundle.commit.original_commitment.roots()[0])
+                    .write(witness);
+            }
+        }
         if let zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) =
             &self.evaluation_proof
         {
             if let Some(whir) = &bundle.whir_proof {
                 let whir_host = crate::whir_circuit::host_stacked_whir_to_recursive(whir);
-                crate::whir_circuit::write_stacked_whir_to_stream::<C>(&whir_host, witness);
+                crate::whir_circuit::write_stacked_whir_to_stream::<C, _>(&whir_host, witness);
             } else {
                 let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
                 crate::basefold_witness::write_basefold_proof_to_stream::<C>(&host_proof, witness);
@@ -1843,17 +1929,17 @@ where
 ///   are rebuilt in the circuit from them; when `None`, they are read off the
 ///   bundle as constants.
 #[allow(clippy::too_many_arguments)]
-pub fn lift_jagged_bundle_generic<C, HV, PP>(
+pub fn lift_jagged_bundle_generic<C, HV, PP, MT>(
     builder: &mut Builder<C>,
-    bundle: &JaggedPcsProof,
+    bundle: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<MT>,
     preread_pcs_proof: PP,
     preread_batch_evaluations: Vec<Vec<Ext<C::F, C::EF>>>,
     preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_expected_eval: Ext<C::F, C::EF>,
-    preread_commit_root: [Felt<C::F>; 8],
-    preread_modified_commitment: [Felt<C::F>; 8],
-    preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
+    preread_commit_root: HV::DigestVariable,
+    preread_modified_commitment: HV::DigestVariable,
+    preceding_commitments: &[(HV::DigestVariable, HV::DigestVariable)],
     padding_heights: &[Vec<Felt<C::F>>],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
@@ -1862,8 +1948,9 @@ pub fn lift_jagged_bundle_generic<C, HV, PP>(
 ) -> JaggedPcsProofVariable<PP, HV::DigestVariable, C::F, C::EF>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
-        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    HV::DigestVariable: Copy,
+    MT: p3_commit::Mmcs<InnerVal>,
 {
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_compiler::circuit::CircuitV2Builder;
@@ -2181,7 +2268,7 @@ where
         + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     let batch_evaluations = preread_basefold_proof.batch_evaluations.clone();
-    lift_jagged_bundle_generic::<C, HV, _>(
+    lift_jagged_bundle_generic::<C, HV, _, _>(
         builder,
         bundle,
         preread_basefold_proof,

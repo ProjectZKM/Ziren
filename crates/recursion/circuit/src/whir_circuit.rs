@@ -84,7 +84,8 @@ pub struct RecursiveStackedWhirProof<F, EF, Dig> {
     pub batch_grinding_witness: F,
 }
 
-/// Extract the host-value mirror from a host stacked-WHIR proof.
+/// Extract the host-value mirror from a host stacked-WHIR proof of the
+/// inner ring.
 pub fn host_stacked_whir_to_recursive(
     proof: &zkm_pcs::whir::stacked::StackedWhirProof<
         InnerVal,
@@ -92,6 +93,39 @@ pub fn host_stacked_whir_to_recursive(
         zkm_pcs::jagged_pcs::JaggedMmcs,
     >,
 ) -> RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]> {
+    host_stacked_whir_to_recursive_with(proof, |root| *root)
+}
+
+/// Extract the host-value mirror from a host stacked-WHIR proof of the
+/// Blake3 ring, its roots as limbs.
+pub fn host_stacked_whir_to_recursive_blake3(
+    proof: &zkm_pcs::whir::stacked::StackedWhirProof<
+        InnerVal,
+        InnerChallenge,
+        zkm_pcs::kb31_blake3::Blake3Mmcs,
+    >,
+) -> RecursiveStackedWhirProof<
+    InnerVal,
+    InnerChallenge,
+    [InnerVal; crate::blake3_circuit::DIGEST_LIMBS],
+> {
+    host_stacked_whir_to_recursive_with(proof, crate::blake3_circuit::digest_limbs)
+}
+
+/// Extract the host-value mirror from a host stacked-WHIR proof, each
+/// root and path digest mapped to the elements the circuit carries it as.
+pub fn host_stacked_whir_to_recursive_with<MT, D, const N: usize>(
+    proof: &zkm_pcs::whir::stacked::StackedWhirProof<InnerVal, InnerChallenge, MT>,
+    digest: impl Fn(&D) -> [InnerVal; N],
+) -> RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; N]>
+where
+    D: Copy,
+    MT: p3_commit::Mmcs<
+        InnerVal,
+        Commitment = p3_symmetric::MerkleCap<InnerVal, D>,
+        Proof = Vec<D>,
+    >,
+{
     let whir = &proof.whir_proof;
     let conv_msgs = |msgs: &[zkm_pcs::whir::proof::SumcheckPoly<InnerChallenge>]| {
         msgs.iter()
@@ -110,7 +144,7 @@ pub fn host_stacked_whir_to_recursive(
             .map(|c| {
                 let roots = c.roots();
                 assert_eq!(roots.len(), 1, "whir round commitment must be a height-0 cap");
-                roots[0]
+                digest(&roots[0])
             })
             .collect(),
         round_query_openings: whir
@@ -126,14 +160,14 @@ pub fn host_stacked_whir_to_recursive(
                             RecursiveWhirLeafOpening {
                                 values: l.values.clone(),
                                 ef_values: Vec::new(),
-                                path: l.proof.clone(),
+                                path: l.proof.iter().map(&digest).collect(),
                             }
                         } else {
                             use p3_field::BasedVectorSpace;
-                            const D: usize = 4;
+                            const EXT_DEGREE: usize = 4;
                             assert_eq!(l.values.len(), 1, "whir ef leaf is one matrix");
                             let ef_values = l.values[0]
-                                .as_chunks::<D>()
+                                .as_chunks::<EXT_DEGREE>()
                                 .0
                                 .iter()
                                 .map(|c| {
@@ -145,7 +179,7 @@ pub fn host_stacked_whir_to_recursive(
                             RecursiveWhirLeafOpening {
                                 values: Vec::new(),
                                 ef_values,
-                                path: l.proof.clone(),
+                                path: l.proof.iter().map(&digest).collect(),
                             }
                         }
                     })
@@ -163,10 +197,10 @@ pub fn host_stacked_whir_to_recursive(
 
 /// Witness the host mirror into circuit variables, element by element, in
 /// declaration order.  [`write_stacked_whir_to_stream`] mirrors the order.
-pub fn read_stacked_whir_from_stream<C>(
-    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
+pub fn read_stacked_whir_from_stream<C, const N: usize>(
+    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; N]>,
     builder: &mut Builder<C>,
-) -> RecursiveStackedWhirProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>
+) -> RecursiveStackedWhirProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; N]>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -228,8 +262,8 @@ where
 
 /// Stream-write the host mirror; MUST match [`read_stacked_whir_from_stream`]
 /// element order exactly.
-pub fn write_stacked_whir_to_stream<C>(
-    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
+pub fn write_stacked_whir_to_stream<C, const N: usize>(
+    host: &RecursiveStackedWhirProof<InnerVal, InnerChallenge, [InnerVal; N]>,
     witness: &mut impl WitnessWriter<C>,
 ) where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
@@ -900,7 +934,7 @@ mod tests {
         for x in &stack_point {
             Witnessable::<InnerConfig>::write(x, &mut witness_stream);
         }
-        write_stacked_whir_to_stream::<InnerConfig>(&host_mirror, &mut witness_stream);
+        write_stacked_whir_to_stream::<InnerConfig, _>(&host_mirror, &mut witness_stream);
 
         run_test_recursion(builder.into_operations(), witness_stream);
     }

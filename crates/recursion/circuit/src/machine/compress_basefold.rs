@@ -271,7 +271,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         let evaluation_proof_var = match &evaluation_proof {
             LiftedEvalProof::WhirBundle { host, whir_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
                 whir_evaluation_proof_var =
-                    Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _>(
+                    Some(crate::shard_level_witness::lift_jagged_bundle_generic::<C, SC, _, _>(
                         builder,
                         host,
                         whir_proof.clone(),
@@ -307,6 +307,9 @@ pub fn verify_compress_basefold<C, SC, A>(
                     None,
                     cps_heights,
                 ))
+            }
+            LiftedEvalProof::WhirBundleBlake3 { .. } => {
+                unreachable!("the Blake3 ring is verified by the binary stage alone")
             }
             LiftedEvalProof::Bytes(bytes) => Some(crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                 builder,
@@ -758,6 +761,9 @@ pub fn verify_compress_basefold<C, SC, A>(
         }
         super::compress::PublicValuesOutputDigest::Root => {
             crate::machine::root_public_values_digest::<C, SC>(builder, _compress_public_values)
+        }
+        super::compress::PublicValuesOutputDigest::Carried => {
+            unreachable!("a compose stage recomputes its public values digest")
         }
     };
 

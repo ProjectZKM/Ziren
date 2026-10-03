@@ -9,6 +9,7 @@ use p3_bn254_fr::Bn254;
 use p3_symmetric::Permutation;
 use zkm_pcs::inner_perm;
 use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Ring;
+use zkm_pcs::KoalaBearBlake3;
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{Builder, Config, DslIr, Ext, Felt, Var},
@@ -209,6 +210,51 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     where
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
         Self: Sized;
+
+    /// The Blake3 ring's twin of [`Self::lift_whir_bundle_dispatch`]: lift
+    /// a WITNESSED jagged-WHIR bundle whose digests are Blake3 roots, as
+    /// sixteen limbs, binding the witnessed root to the observed
+    /// `main_commitment` and the preprocessed round to the key's root.
+    /// Only the Blake3 ring produces a
+    /// [`crate::shard_level_witness::LiftedEvalProof::WhirBundleBlake3`], so
+    /// the other rings never reach this.
+    #[allow(clippy::too_many_arguments)]
+    fn lift_whir_bundle_blake3_dispatch(
+        _builder: &mut Builder<C>,
+        _host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
+            zkm_pcs::kb31_blake3::Blake3Mmcs,
+        >,
+        _whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; crate::blake3_circuit::DIGEST_LIMBS],
+        >,
+        _sumcheck: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _expected_eval: Ext<C::F, C::EF>,
+        _commit_root: [Felt<C::F>; crate::blake3_circuit::DIGEST_LIMBS],
+        _main_commitment: [Felt<C::F>; 8],
+        _preceding_roots: &[Self::DigestVariable],
+        _padding_heights: &[Vec<Felt<C::F>>],
+        _max_log_row_count: usize,
+        _column_counts_by_round: &[Vec<usize>],
+        _chip_height_felts: Option<&[Felt<C::F>]>,
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::whir_circuit::RecursiveStackedWhirProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
+        Self: Sized,
+    {
+        unreachable!("only the Blake3 ring carries a Blake3 WHIR bundle")
+    }
 
     /// Ring-aware dispatch: lift a WITNESSED inner jagged PCS proof (the
     /// value-independent production path) into the
@@ -497,7 +543,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>, const P: u8> FieldH
     where
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
     {
-        crate::shard_level_witness::lift_jagged_bundle_generic::<C, Self, _>(
+        crate::shard_level_witness::lift_jagged_bundle_generic::<C, Self, _, _>(
             builder,
             host,
             whir_proof,
@@ -572,6 +618,318 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>, const P: u8> FieldH
     /// Bundle` (it's an inner KoalaBear bundle, lifted via `lift_bundle_dispatch`).
     /// This arm is dead — build a structural `[Felt;8]` placeholder so the
     /// SC-generic `verify_wrap_basefold_core` type-checks for the inner ring.
+    #[allow(clippy::too_many_arguments)]
+    fn lift_outer_bundle_dispatch(
+        builder: &mut Builder<C>,
+        _host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<
+            zkm_recursion_core::stark::OuterValMmcs,
+        >,
+        _basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [zkm_recursion_compiler::ir::Var<C::N>; 1],
+        >,
+        _sumcheck: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _expected_eval: Ext<C::F, C::EF>,
+        _commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1],
+        _preread_preceding_roots: &[[zkm_recursion_compiler::ir::Var<C::N>; 1]],
+        max_log_row_count: usize,
+        column_counts_by_round: &[Vec<usize>],
+        _row_counts_by_round: Option<&[Vec<usize>]>,
+        _vk_preprocessed_cap: Option<[zkm_recursion_compiler::ir::Var<C::N>; 1]>,
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
+        Self: Sized,
+    {
+        crate::jagged_pcs_lift::lift_empty_placeholder::<C, Self>(
+            builder,
+            max_log_row_count,
+            column_counts_by_round,
+        )
+    }
+
+    fn chip_height_bits_dispatch(
+        builder: &mut Builder<C>,
+        chip_names: &[String],
+        opened_values: &crate::basefold_chip_opened_values::JaggedShardOpenedValuesVariable<C>,
+        _chip_heights: &std::collections::BTreeMap<String, usize>,
+        max_log_row_count: usize,
+    ) -> Vec<(String, Vec<Felt<C::F>>)>
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
+    {
+        crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
+            builder,
+            chip_names,
+            opened_values,
+            max_log_row_count,
+        )
+    }
+}
+
+/// The Blake3 ring hashes over 16-bit limbs: a digest is sixteen of them.
+impl FieldHasher<KoalaBear> for KoalaBearBlake3 {
+    type Digest = [KoalaBear; crate::blake3_circuit::DIGEST_LIMBS];
+
+    fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest {
+        use p3_symmetric::CryptographicHasher;
+        let left = crate::blake3_circuit::limbs_digest(&input[0]);
+        let right = crate::blake3_circuit::limbs_digest(&input[1]);
+        let digest: [u8; 32] =
+            p3_blake3::Blake3.hash_iter(left.iter().copied().chain(right.iter().copied()));
+        crate::blake3_circuit::digest_limbs(&digest)
+    }
+}
+
+/// The ring's eight-element hash, for the public values digests: the
+/// observed form of a Blake3 digest.  The ring has no permutation.
+impl<C: CircuitConfig<F = KoalaBear>> Poseidon2KoalaBearHasherVariable<C> for KoalaBearBlake3 {
+    fn poseidon2_permute(
+        _builder: &mut Builder<C>,
+        _state: [Felt<C::F>; PERMUTATION_WIDTH],
+    ) -> [Felt<C::F>; PERMUTATION_WIDTH] {
+        unreachable!("the Blake3 ring has no Poseidon2 permutation")
+    }
+
+    fn poseidon2_hash(builder: &mut Builder<C>, input: &[Felt<C::F>]) -> [Felt<C::F>; DIGEST_SIZE] {
+        let digest = crate::blake3_circuit::hash_felts(builder, input);
+        crate::blake3_circuit::root_felts(builder, &digest)
+    }
+}
+
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable<C>
+    for KoalaBearBlake3
+{
+    type DigestVariable = [Felt<KoalaBear>; crate::blake3_circuit::DIGEST_LIMBS];
+
+    /// The ring observes the raw root, as the wrap ring does: there is no
+    /// hash-bound digest to rebuild.
+    fn jagged_hash_bind_in_circuit() -> bool {
+        false
+    }
+
+    fn hash(builder: &mut Builder<C>, input: &[Felt<<C as Config>::F>]) -> Self::DigestVariable {
+        crate::blake3_circuit::hash_felts(builder, input)
+    }
+
+    fn compress(
+        builder: &mut Builder<C>,
+        input: [Self::DigestVariable; 2],
+    ) -> Self::DigestVariable {
+        crate::blake3_circuit::compress_digests(builder, input)
+    }
+
+    fn assert_digest_eq(
+        builder: &mut Builder<C>,
+        a: Self::DigestVariable,
+        b: Self::DigestVariable,
+    ) {
+        zip(a, b).for_each(|(e1, e2)| builder.assert_felt_eq(e1, e2));
+    }
+
+    fn select_chain_digest(
+        builder: &mut Builder<C>,
+        should_swap: <C as CircuitConfig>::Bit,
+        input: [Self::DigestVariable; 2],
+    ) -> [Self::DigestVariable; 2] {
+        let result0: Self::DigestVariable = core::array::from_fn(|_| builder.uninit());
+        let result1: Self::DigestVariable = core::array::from_fn(|_| builder.uninit());
+        for i in 0..crate::blake3_circuit::DIGEST_LIMBS {
+            builder.push_op(DslIr::Select(
+                should_swap,
+                result0[i],
+                result1[i],
+                input[0][i],
+                input[1][i],
+            ));
+        }
+        [result0, result1]
+    }
+
+    fn print_digest(builder: &mut Builder<C>, digest: Self::DigestVariable) {
+        for d in digest.iter() {
+            builder.print_f(*d);
+        }
+    }
+
+    fn const_digest(
+        builder: &mut Builder<C>,
+        digest: <Self as FieldHasher<KoalaBear>>::Digest,
+    ) -> Self::DigestVariable {
+        core::array::from_fn(|i| builder.constant(digest[i]))
+    }
+
+    fn digest_from_koalabear_root(
+        _root: [KoalaBear; 8],
+    ) -> <Self as FieldHasher<KoalaBear>>::Digest {
+        unreachable!("the Blake3 ring has no BaseFold roots")
+    }
+
+    fn lift_evaluation_proof_bytes_dispatch(
+        _builder: &mut Builder<C>,
+        bytes: &[u8],
+        _max_log_row_count: usize,
+        _column_counts_by_round: &[Vec<usize>],
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
+        Self: Sized,
+    {
+        panic!("the Blake3 ring witnesses its bundle; {} bytes did not parse as one", bytes.len())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lift_whir_bundle_dispatch(
+        _builder: &mut Builder<C>,
+        _host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProof,
+        _whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; 8],
+        >,
+        _batch_evaluations: Vec<Vec<Ext<C::F, C::EF>>>,
+        _sumcheck: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _expected_eval: Ext<C::F, C::EF>,
+        _commit_root: [Felt<C::F>; 8],
+        _modified_commitment: [Felt<C::F>; 8],
+        _preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
+        _padding_heights: &[Vec<Felt<C::F>>],
+        _max_log_row_count: usize,
+        _column_counts_by_round: &[Vec<usize>],
+        _row_counts_by_round: Option<&[Vec<usize>]>,
+        _chip_height_felts: Option<&[Felt<C::F>]>,
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::whir_circuit::RecursiveStackedWhirProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
+    {
+        unreachable!("the Blake3 ring carries its WHIR bundle with Blake3 roots")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lift_whir_bundle_blake3_dispatch(
+        builder: &mut Builder<C>,
+        host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProofGeneric<zkm_pcs::kb31_blake3::Blake3Mmcs>,
+        whir_proof: crate::whir_circuit::RecursiveStackedWhirProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        sumcheck: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        expected_eval: Ext<C::F, C::EF>,
+        commit_root: Self::DigestVariable,
+        main_commitment: [Felt<C::F>; 8],
+        preceding_roots: &[Self::DigestVariable],
+        padding_heights: &[Vec<Felt<C::F>>],
+        max_log_row_count: usize,
+        column_counts_by_round: &[Vec<usize>],
+        chip_height_felts: Option<&[Felt<C::F>]>,
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::whir_circuit::RecursiveStackedWhirProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
+    {
+        let observed = crate::blake3_circuit::root_felts(builder, &commit_root);
+        for (computed, witnessed) in observed.into_iter().zip(main_commitment) {
+            builder.assert_felt_eq(computed, witnessed);
+        }
+        let preceding: Vec<(Self::DigestVariable, Self::DigestVariable)> =
+            preceding_roots.iter().map(|root| (*root, *root)).collect();
+        let batch_evaluations = whir_proof.batch_evaluations.clone();
+        crate::shard_level_witness::lift_jagged_bundle_generic::<C, Self, _, _>(
+            builder,
+            host,
+            whir_proof,
+            batch_evaluations,
+            sumcheck,
+            jagged_eval,
+            expected_eval,
+            commit_root,
+            commit_root,
+            &preceding,
+            padding_heights,
+            max_log_row_count,
+            column_counts_by_round,
+            None,
+            chip_height_felts,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lift_bundle_dispatch(
+        _builder: &mut Builder<C>,
+        _host: &zkm_pcs::jagged_pcs::jagged::JaggedPcsProof,
+        _basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; 8],
+        >,
+        _sumcheck: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _expected_eval: Ext<C::F, C::EF>,
+        _commit_root: [Felt<C::F>; 8],
+        _modified_commitment: [Felt<C::F>; 8],
+        _preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
+        _padding_heights: &[Vec<Felt<C::F>>],
+        _max_log_row_count: usize,
+        _column_counts_by_round: &[Vec<usize>],
+        _row_counts_by_round: Option<&[Vec<usize>]>,
+        _chip_height_felts: Option<&[Felt<C::F>]>,
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
+        Self: Sized,
+    {
+        unreachable!("the Blake3 ring opens under WHIR, never BaseFold")
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn lift_outer_bundle_dispatch(
         builder: &mut Builder<C>,

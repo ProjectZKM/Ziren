@@ -32,6 +32,7 @@ p3-fri = { workspace = true }
 p3-matrix = { workspace = true }
 p3-util = { workspace = true }
 p3-symmetric = { workspace = true }
+p3-blake3 = { workspace = true }
 p3-challenger = { workspace = true }
 p3-dft = { workspace = true }
 p3-bn254-fr = { workspace = true }

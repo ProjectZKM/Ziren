@@ -102,12 +102,10 @@ pub fn verify_wrap_basefold<C, SC, A>(
     max_log_row_count: usize,
     output_digest_kind: PublicValuesOutputDigest,
 ) where
-    SC: KoalaBearFriParametersVariable<
-            C,
-            DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8],
-            Val = InnerVal,
-        > + FieldHasherVariable<C, DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8]>
+    SC: KoalaBearFriParametersVariable<C, Val = InnerVal>
+        + FieldHasherVariable<C>
         + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    <SC as FieldHasherVariable<C>>::DigestVariable: IntoIterator<Item = Felt<C::F>>,
     SC::FriChallengerVariable: crate::challenger::FieldChallengerVariable<C, C::Bit>,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     A: MachineAir<SC::Val>
@@ -278,6 +276,35 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 ));
             None
         }
+        LiftedEvalProof::WhirBundleBlake3 {
+            host,
+            whir_proof,
+            sumcheck,
+            jagged_eval,
+            expected_eval,
+            commit_root,
+            main_commitment,
+        } => {
+            let preceding_roots: Vec<<SC as FieldHasherVariable<C>>::DigestVariable> =
+                if prep_widths.is_empty() { Vec::new() } else { vec![vk_legacy.commitment] };
+            whir_evaluation_proof_var =
+                Some(<SC as FieldHasherVariable<C>>::lift_whir_bundle_blake3_dispatch(
+                    builder,
+                    host,
+                    whir_proof.clone(),
+                    sumcheck.clone(),
+                    jagged_eval.clone(),
+                    *expected_eval,
+                    *commit_root,
+                    *main_commitment,
+                    &preceding_roots,
+                    &preprocessed_round.padding_heights,
+                    max_log_row_count,
+                    &column_counts_by_round,
+                    Some(&chip_height_felts_pre),
+                ));
+            None
+        }
         LiftedEvalProof::OuterBundle {
             host,
             basefold_proof,
@@ -430,6 +457,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     if let Some(whir_pv) = &whir_shard_proof_variable {
         let lsh = match &evaluation_proof {
             LiftedEvalProof::WhirBundle { host, .. } => host.commit.log_stacking_height,
+            LiftedEvalProof::WhirBundleBlake3 { host, .. } => host.commit.log_stacking_height,
             _ => unreachable!("whir proof variable implies a WhirBundle"),
         };
         let whir_verifier = crate::shard_basefold::JaggedShardVerifier::<
@@ -540,6 +568,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             }
             inner.digest = expected;
         }
+        PublicValuesOutputDigest::Carried => {}
     }
 
     if zkm_imm_wrap_vk_mode() {
