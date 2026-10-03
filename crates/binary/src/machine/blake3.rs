@@ -138,6 +138,10 @@ pub struct Blake3RoundPrep<T> {
     pub next_round: [T; BLAKE3_ROUND_BITS],
     /// The row holds a round.
     pub is_real: T,
+    /// A zero, which makes the width a power of two: a table is opened in
+    /// one aligned block of columns per power of two in its width, and
+    /// each block costs the verifier a claim.
+    pub pad: T,
 }
 
 /// The witness part of a round row.
@@ -189,7 +193,7 @@ fn words_of_limbs<const N: usize>(limbs: &[KoalaBear]) -> [u32; N] {
 }
 
 /// The words permuted for the next round.
-fn permute<T: Clone>(words: &[T; STATE_WORDS]) -> [T; STATE_WORDS] {
+pub fn permute<T: Clone>(words: &[T; STATE_WORDS]) -> [T; STATE_WORDS] {
     core::array::from_fn(|i| words[MSG_PERMUTATION[i]].clone())
 }
 
@@ -267,20 +271,7 @@ impl Compressions {
                 state[8..12].copy_from_slice(&IV[..4]);
                 state[14] = site.block_len;
                 state[15] = site.flags;
-                let mut states = [[0u32; STATE_WORDS]; ROUNDS + 1];
-                states[0] = state;
-                let mut words = block;
-                let mut rounds = Vec::with_capacity(ROUNDS);
-                for round in 0..ROUNDS {
-                    let mut row = vec![0u8; NUM_BLAKE3_ROUND_COLS];
-                    let cols: &mut Blake3RoundCols<u8> = row.as_mut_slice().borrow_mut();
-                    cols.state = states[round].map(word_bits);
-                    cols.words = words.map(word_bits);
-                    states[round + 1] =
-                        fill_round(&states[round], &words, &mut cols.quarter_rounds);
-                    words = permute(&words);
-                    rounds.push(row);
-                }
+                let Filled { states, rounds } = fill_compression(state, block);
                 let expected: [u32; 8] = words_of_limbs(&event.io.output);
                 for i in 0..8 {
                     assert_eq!(
@@ -293,6 +284,24 @@ impl Compressions {
             })
             .collect()
     }
+}
+
+/// One compression's witness from the state entering it and its block.
+fn fill_compression(state: [u32; STATE_WORDS], block: [u32; STATE_WORDS]) -> Filled {
+    let mut states = [[0u32; STATE_WORDS]; ROUNDS + 1];
+    states[0] = state;
+    let mut words = block;
+    let mut rounds = Vec::with_capacity(ROUNDS);
+    for round in 0..ROUNDS {
+        let mut row = vec![0u8; NUM_BLAKE3_ROUND_COLS];
+        let cols: &mut Blake3RoundCols<u8> = row.as_mut_slice().borrow_mut();
+        cols.state = states[round].map(word_bits);
+        cols.words = words.map(word_bits);
+        states[round + 1] = fill_round(&states[round], &words, &mut cols.quarter_rounds);
+        words = permute(&words);
+        rounds.push(row);
+    }
+    Filled { states, rounds }
 }
 
 /// The witness of `sum = x + y mod 2^32`.
@@ -646,14 +655,23 @@ impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for Blake3IoAir {
 pub struct Blake3RoundAir {
     log_height: usize,
     preprocessed: Vec<u8>,
-    compressions: Arc<Compressions>,
+    compressions: Option<Arc<Compressions>>,
 }
 
 impl Blake3RoundAir {
     /// The table of `compressions`' rounds.
     #[must_use]
     pub fn new(compressions: Arc<Compressions>) -> Self {
-        let rows = compressions.len() * ROUNDS;
+        let mut air = Self::for_count(compressions.len());
+        air.compressions = Some(compressions);
+        air
+    }
+
+    /// The table of `count` compressions' rounds, compression `i` having
+    /// identity `i` on [`BLAKE3`], filled by [`Self::table_of`].
+    #[must_use]
+    pub fn for_count(count: usize) -> Self {
+        let rows = count * ROUNDS;
         let log_height = log_height_for(rows);
         let mut preprocessed = vec![0u8; (1 << log_height) * NUM_BLAKE3_ROUND_PREP_COLS];
         for row in 0..rows {
@@ -666,7 +684,30 @@ impl Blake3RoundAir {
             prep.next_round = bits_le::<BLAKE3_ROUND_BITS>(round as u64 + 1);
             prep.is_real = 1;
         }
-        Self { log_height, preprocessed, compressions }
+        Self { log_height, preprocessed, compressions: None }
+    }
+
+    /// The witness of compressions entering with these states and blocks,
+    /// in order, with the state each leaves its last round with.
+    ///
+    /// # Panics
+    /// Panics if there are more compressions than the table was built for.
+    #[must_use]
+    pub fn table_of(
+        &self,
+        inputs: &[([u32; STATE_WORDS], [u32; STATE_WORDS])],
+    ) -> (Table<F>, Vec<[u32; STATE_WORDS]>) {
+        assert!(inputs.len() * ROUNDS <= 1 << self.log_height, "one input per compression");
+        let mut rows = BitRows::new(NUM_BLAKE3_ROUND_COLS, self.log_height);
+        let mut finals = Vec::with_capacity(inputs.len());
+        for (c, &(state, block)) in inputs.iter().enumerate() {
+            let filled = fill_compression(state, block);
+            for (round, row) in filled.rounds.iter().enumerate() {
+                rows.set_row(c * ROUNDS + round, row);
+            }
+            finals.push(filled.states[ROUNDS]);
+        }
+        (rows.into_table(), finals)
     }
 
     /// The log height of the table.
@@ -679,7 +720,11 @@ impl Blake3RoundAir {
     /// rows past the program are zero.
     #[must_use]
     pub fn main_table(&self, record: &ExecutionRecord<KoalaBear>) -> Table<F> {
-        let filled = self.compressions.fill_all(record);
+        let filled = self
+            .compressions
+            .as_ref()
+            .expect("a table built from a program fills from its record")
+            .fill_all(record);
         let mut rows = BitRows::new(NUM_BLAKE3_ROUND_COLS, self.log_height);
         for (c, compression) in filled.iter().enumerate() {
             for (round, row) in compression.rounds.iter().enumerate() {
