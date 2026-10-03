@@ -2401,7 +2401,49 @@ pub mod jagged {
         MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
         Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
+            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>
+            + 'static,
+    {
+        verify_jagged_inner_generic_with_profile(
+            chip_infos,
+            r_row_per_chip,
+            z_row,
+            bundle,
+            challenger,
+            mmcs,
+            skip_commit_observe,
+            fri,
+            preceding_rounds,
+            opened_main,
+            crate::whir::jagged::WhirProfile::Core,
+        )
+    }
+
+    /// [`verify_jagged_inner_generic`] with the WHIR schedule a ring opened
+    /// under, for a bundle whose dense opening is WHIR rather than BaseFold.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_jagged_inner_generic_with_profile<Challenger, MT>(
+        chip_infos: &[JaggedChipInfo],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        bundle: &JaggedPcsProofGeneric<MT>,
+        challenger: &mut Challenger,
+        mmcs: MT,
+        skip_commit_observe: bool,
+        fri: FriConfig<crate::jagged_pcs::JaggedVal>,
+        preceding_rounds: &[(
+            <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+            usize,
+        )],
+        opened_main: &[Vec<InnerChallenge>],
+        profile: crate::whir::jagged::WhirProfile,
+    ) -> bool
+    where
+        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
+        Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>
+            + 'static,
     {
         if let Err(why) = crate::jagged_pcs::check_canonical_packing(&bundle.packing, "outer") {
             tracing::info!("[basefold verify] {why}");
@@ -2470,6 +2512,27 @@ pub mod jagged {
         commitments.push(bundle.commit.original_commitment.clone());
         let mut areas: Vec<usize> = preceding_rounds.iter().map(|(_, a)| *a).collect();
         areas.push(bundle.commit.area);
+        if let Some(wp) = bundle.whir_proof.as_ref() {
+            let cfg = crate::whir::jagged::whir_config_for_profile(
+                profile,
+                bundle.commit.log_stacking_height as usize,
+            );
+            let res = crate::whir::jagged::verify_jagged_whir_rounds(
+                mmcs,
+                cfg,
+                bundle.commit.log_stacking_height,
+                &commitments,
+                &areas,
+                &extended_z_star,
+                wp,
+                q_at_z_adj,
+                challenger,
+            );
+            if let Err(e) = &res {
+                tracing::warn!("[whir verify generic] whir opening REJECTED: {:?}", e);
+            }
+            return res.is_ok();
+        }
         let res = crate::jagged_pcs::verify_jagged_pcs_rounds_generic::<Challenger, MT>(
             &commitments,
             &areas,

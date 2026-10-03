@@ -142,6 +142,49 @@ pub struct Poseidon2SkinnyInstr<F> {
 
 pub type Poseidon2Event<F> = Poseidon2Io<F>;
 
+/// Limbs of a Blake3 chaining value: eight words, each a pair of 16-bit
+/// limbs, low limb first.
+pub const BLAKE3_CV_LIMBS: usize = 16;
+
+/// Limbs of a Blake3 block: sixteen words.
+pub const BLAKE3_BLOCK_LIMBS: usize = 32;
+
+/// Limbs of a Blake3 compression's output: the eight words that chain to
+/// the next block or form the digest.
+pub const BLAKE3_OUT_LIMBS: usize = 16;
+
+/// The inputs and outputs to a Blake3 compression.  Words are pairs of
+/// 16-bit limbs because a 32-bit word does not fit a KoalaBear element;
+/// the counter is zero, since every hash the VM computes is at most one
+/// chunk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
+pub struct Blake3CompressIo<V> {
+    pub chaining_value: [V; BLAKE3_CV_LIMBS],
+    pub block: [V; BLAKE3_BLOCK_LIMBS],
+    pub output: [V; BLAKE3_OUT_LIMBS],
+}
+
+/// An instruction invoking the Blake3 compression function; the block
+/// length and the domain flags are immediates, fixed by the program.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[repr(C)]
+pub struct Blake3CompressInstr<F> {
+    pub addrs: Blake3CompressIo<Address<F>>,
+    pub block_len: F,
+    pub flags: F,
+    pub mults: [F; BLAKE3_OUT_LIMBS],
+}
+
+/// The event of one Blake3 compression: its limbs, length and flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
+pub struct Blake3CompressEvent<F> {
+    pub io: Blake3CompressIo<F>,
+    pub block_len: F,
+    pub flags: F,
+}
+
 /// The inputs and outputs to a select operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(C)]

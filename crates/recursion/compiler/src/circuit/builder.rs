@@ -8,7 +8,10 @@ use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::septic_extension::SepticExtension;
 use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_core::air::RecursionPublicValues;
-use zkm_recursion_core::{chips::poseidon2_wide::WIDTH, D, DIGEST_SIZE, HASH_RATE};
+use zkm_recursion_core::{
+    chips::poseidon2_wide::WIDTH, BLAKE3_BLOCK_LIMBS, BLAKE3_CV_LIMBS, BLAKE3_OUT_LIMBS, D,
+    DIGEST_SIZE, HASH_RATE,
+};
 
 use crate::prelude::*;
 pub trait CircuitV2Builder<C: Config> {
@@ -32,6 +35,13 @@ pub trait CircuitV2Builder<C: Config> {
         &mut self,
         input: impl IntoIterator<Item = Felt<C::F>>,
     ) -> [Felt<C::F>; DIGEST_SIZE];
+    fn blake3_compress_v2(
+        &mut self,
+        chaining_value: [Felt<C::F>; BLAKE3_CV_LIMBS],
+        block: [Felt<C::F>; BLAKE3_BLOCK_LIMBS],
+        block_len: u32,
+        flags: u32,
+    ) -> [Felt<C::F>; BLAKE3_OUT_LIMBS];
     fn fri_fold_v2(&mut self, input: CircuitV2FriFoldInput<C>) -> CircuitV2FriFoldOutput<C>;
     fn ext2felt_v2(&mut self, ext: Ext<C::F, C::EF>) -> [Felt<C::F>; D];
     fn add_curve_v2(
@@ -191,6 +201,27 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         let post = self.poseidon2_permute_v2(pre);
         let post: [Felt<C::F>; DIGEST_SIZE] = post[..DIGEST_SIZE].try_into().unwrap();
         post
+    }
+
+    /// One Blake3 compression of `block` under `chaining_value`, over
+    /// 16-bit limbs, with the counter zero; the output is the eight words
+    /// that chain to the next block or form the digest.
+    fn blake3_compress_v2(
+        &mut self,
+        chaining_value: [Felt<C::F>; BLAKE3_CV_LIMBS],
+        block: [Felt<C::F>; BLAKE3_BLOCK_LIMBS],
+        block_len: u32,
+        flags: u32,
+    ) -> [Felt<C::F>; BLAKE3_OUT_LIMBS] {
+        let output: [Felt<C::F>; BLAKE3_OUT_LIMBS] = core::array::from_fn(|_| self.uninit());
+        self.push_op(DslIr::CircuitV2Blake3Compress(Box::new((
+            output,
+            chaining_value,
+            block,
+            block_len,
+            flags,
+        ))));
+        output
     }
 
     /// Runs FRI fold.

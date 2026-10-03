@@ -11,6 +11,10 @@ pub enum Instruction<F> {
     ExtAlu(ExtAluInstr<F>),
     Mem(MemInstr<F>),
     Poseidon2(Box<Poseidon2Instr<F>>),
+    /// One Blake3 compression over 16-bit limbs; only the binary machine
+    /// has a table for it, so it appears in programs the binary stage
+    /// proves and in no other.
+    Blake3Compress(Box<Blake3CompressInstr<F>>),
     Select(SelectInstr<F>),
     HintBits(HintBitsInstr<F>),
     HintAddCurve(Box<HintAddCurveInstr<F>>),
@@ -172,6 +176,26 @@ pub fn poseidon2<F: PrimeCharacteristicRing>(
     }))
 }
 
+pub fn blake3_compress<F: PrimeCharacteristicRing>(
+    mults: [u32; BLAKE3_OUT_LIMBS],
+    output: [u32; BLAKE3_OUT_LIMBS],
+    chaining_value: [u32; BLAKE3_CV_LIMBS],
+    block: [u32; BLAKE3_BLOCK_LIMBS],
+    block_len: u32,
+    flags: u32,
+) -> Instruction<F> {
+    Instruction::Blake3Compress(Box::new(Blake3CompressInstr {
+        addrs: Blake3CompressIo {
+            chaining_value: chaining_value.map(F::from_u32).map(Address),
+            block: block.map(F::from_u32).map(Address),
+            output: output.map(F::from_u32).map(Address),
+        },
+        block_len: F::from_u32(block_len),
+        flags: F::from_u32(flags),
+        mults: mults.map(F::from_u32),
+    }))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn select<F: PrimeCharacteristicRing>(
     mult1: u32,
@@ -221,6 +245,7 @@ impl<F: Copy> Instruction<F> {
             Instruction::ExtAlu(i) => f(i.addrs.out),
             Instruction::Mem(i) => f(i.addrs.inner),
             Instruction::Poseidon2(i) => i.addrs.output.iter().copied().for_each(f),
+            Instruction::Blake3Compress(i) => i.addrs.output.iter().copied().for_each(f),
             Instruction::Select(i) => {
                 f(i.addrs.out1);
                 f(i.addrs.out2);

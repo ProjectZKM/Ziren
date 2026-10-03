@@ -143,6 +143,11 @@ impl<F: p3_field::PrimeField64> RecursionProgram<F> {
                     i.addrs.input.iter().for_each(&mut see);
                     i.addrs.output.iter().for_each(&mut see);
                 }
+                Instruction::Blake3Compress(i) => {
+                    i.addrs.chaining_value.iter().for_each(&mut see);
+                    i.addrs.block.iter().for_each(&mut see);
+                    i.addrs.output.iter().for_each(&mut see);
+                }
                 Instruction::Select(i) => {
                     see(&i.addrs.bit);
                     see(&i.addrs.out1);

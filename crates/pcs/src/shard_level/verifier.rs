@@ -399,7 +399,8 @@ where
 
     if TypeId::of::<SC::Challenger>() != TypeId::of::<crate::jagged_pcs::JaggedChallenger>() {
         use crate::jagged_pcs::jagged::{
-            build_jagged_verify_inputs, verify_jagged_inner_generic, JaggedPcsProofGeneric,
+            build_jagged_verify_inputs, verify_jagged_inner_generic_with_profile,
+            JaggedPcsProofGeneric,
         };
         use p3_air::BaseAir;
         let bytes = match evaluation_proof {
@@ -582,7 +583,10 @@ where
 
         let mmcs = <SC as crate::BasefoldRing>::bf_mmcs();
         let fri = <SC as crate::BasefoldRing>::fri_config();
-        let ok = verify_jagged_inner_generic::<SC::Challenger, <SC as crate::BasefoldRing>::BfMmcs>(
+        let ok = verify_jagged_inner_generic_with_profile::<
+            SC::Challenger,
+            <SC as crate::BasefoldRing>::BfMmcs,
+        >(
             &chip_infos,
             &r_row_per_chip,
             &z_row,
@@ -608,6 +612,7 @@ where
                 })
                 .collect::<Vec<_>>(),
             &opened_main,
+            <SC as crate::BasefoldRing>::WHIR_PROFILE,
         );
         return if ok {
             Ok(())

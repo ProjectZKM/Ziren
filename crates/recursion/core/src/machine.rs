@@ -52,6 +52,9 @@ pub struct RecursionAirEventCount {
     pub base_alu_events: usize,
     pub ext_alu_events: usize,
     pub poseidon2_wide_events: usize,
+    /// One per `Blake3Compress` instruction; only the binary machine has
+    /// a table for them.
+    pub blake3_compress_events: usize,
     pub fri_fold_events: usize,
     pub batch_fri_events: usize,
     pub select_events: usize,
@@ -178,6 +181,7 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             Instruction::ExtAlu(_) => self.ext_alu_events += 1,
             Instruction::Mem(_) => self.mem_const_events += 1,
             Instruction::Poseidon2(_) => self.poseidon2_wide_events += 1,
+            Instruction::Blake3Compress(_) => self.blake3_compress_events += 1,
             Instruction::Select(_) => self.select_events += 1,
             Instruction::Hint(HintInstr { output_addrs_mults })
             | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {

@@ -8484,6 +8484,7 @@ dependencies = [
  "num-bigint 0.5.1",
  "num-traits",
  "p3-air",
+ "p3-blake3",
  "p3-challenger",
  "p3-circle",
  "p3-commit",
@@ -8611,6 +8612,7 @@ dependencies = [
  "itertools 0.13.0",
  "num-traits",
  "p3-air",
+ "p3-blake3",
  "p3-bn254",
  "p3-challenger",
  "p3-commit",
@@ -8669,6 +8671,7 @@ version = "2.0.0"
 dependencies = [
  "backtrace",
  "bincode",
+ "blake3",
  "cbindgen",
  "cc",
  "ff 0.13.1",

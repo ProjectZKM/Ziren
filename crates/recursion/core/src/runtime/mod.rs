@@ -1,4 +1,5 @@
 mod analyzed;
+pub mod blake3;
 pub mod instruction;
 pub mod memory;
 mod opcode;
@@ -385,7 +386,7 @@ where
         if timing {
             let walk_secs = t_walk.elapsed().as_secs_f64();
             let instrs = analyzed_program.iter().count();
-            let mut mix = [0usize; 12];
+            let mut mix = [0usize; 13];
             for ai in analyzed_program.iter() {
                 let k = match ai.inner() {
                     Instruction::BaseAlu(_) => 0,
@@ -400,6 +401,7 @@ where
                     Instruction::Ext2Felts(_) => 9,
                     Instruction::CommitPublicValues(_) => 10,
                     Instruction::Hint(_) => 11,
+                    Instruction::Blake3Compress(_) => 12,
                 };
                 mix[k] += 1;
             }
@@ -416,6 +418,7 @@ where
                 "Ext2Felts",
                 "CommitPublicValues",
                 "Hint",
+                "Blake3Compress",
             ];
             let mix_str: String = names
                 .iter()
@@ -640,6 +643,49 @@ where
                     Self::raw_write_ev(
                         &rec.poseidon2_events[_offset],
                         Poseidon2Event { input: in_vals, output: perm_output },
+                    );
+                }
+            }
+            Instruction::Blake3Compress(instr) => {
+                let Blake3CompressInstr { addrs, block_len, flags, mults } = &**instr;
+                let limb = |addr: &Address<F>| {
+                    let value = self.mr_us(*addr).val[0];
+                    debug_assert!(value.as_canonical_u32() < 1 << 16, "a Blake3 limb is 16 bits");
+                    value
+                };
+                let cv_limbs: [F; BLAKE3_CV_LIMBS] =
+                    std::array::from_fn(|i| limb(&addrs.chaining_value[i]));
+                let block_limbs: [F; BLAKE3_BLOCK_LIMBS] =
+                    std::array::from_fn(|i| limb(&addrs.block[i]));
+                let word =
+                    |limbs: &[F]| limbs[0].as_canonical_u32() | (limbs[1].as_canonical_u32() << 16);
+                let cv: [u32; blake3::CV_WORDS] = std::array::from_fn(|i| word(&cv_limbs[2 * i..]));
+                let block: [u32; blake3::BLOCK_WORDS] =
+                    std::array::from_fn(|i| word(&block_limbs[2 * i..]));
+                let out = blake3::compress(
+                    &cv,
+                    &block,
+                    0,
+                    block_len.as_canonical_u32(),
+                    flags.as_canonical_u32(),
+                );
+                let out_limbs: [F; BLAKE3_OUT_LIMBS] =
+                    std::array::from_fn(|i| F::from_u32((out[i / 2] >> (16 * (i % 2))) & 0xFFFF));
+                out_limbs.iter().zip(&addrs.output).zip(mults).for_each(|((&val, addr), mult)| {
+                    self.mw_us(*addr, Block::from(val), *mult);
+                });
+                unsafe {
+                    Self::raw_write_ev(
+                        &rec.blake3_compress_events[_offset],
+                        Blake3CompressEvent {
+                            io: Blake3CompressIo {
+                                chaining_value: cv_limbs,
+                                block: block_limbs,
+                                output: out_limbs,
+                            },
+                            block_len: *block_len,
+                            flags: *flags,
+                        },
                     );
                 }
             }

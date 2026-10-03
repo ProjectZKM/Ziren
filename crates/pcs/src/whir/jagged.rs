@@ -249,6 +249,12 @@ pub enum WhirProfile {
     /// challenges ground ([`compress_whir_config`]).  Every parameter can be
     /// set for a different security requirement.
     Compress,
+    /// The schedule of the Blake3 ring, the shrink proof the binary stage
+    /// verifies: a low first rate, unique-decoding query accounting and no
+    /// folding or query grind ([`blake3_whir_config`]).  Its prover is the
+    /// host, where a grind is a serial Blake3 search, and its verifier is a
+    /// Blake3 table over bits, where a query is cheap and a grind is not.
+    Blake3,
 }
 
 /// The schedule of `profile` at stacking height `lsh`.
@@ -256,7 +262,59 @@ pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
     match profile {
         WhirProfile::Core => core_whir_config(lsh),
         WhirProfile::Compress => compress_whir_config(lsh),
+        WhirProfile::Blake3 => blake3_whir_config(lsh),
     }
+}
+
+/// `log2(1/rho)` of the Blake3 schedule's first committed oracle, 3 by
+/// default; bounded by the field's two-adic subgroup like the compress
+/// schedule's.
+pub fn blake3_log_inv_rate() -> usize {
+    crate::params::env_usize("ZIREN_BLAKE3_LOG_INV_RATE", 3)
+}
+
+/// Grinding on the stripe batching of the Blake3 schedule, in bits: the one
+/// grind kept, `2^14` Blake3 compressions on the host.
+pub fn blake3_batch_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_BLAKE3_BATCH_GRINDING_BITS", 14)
+}
+
+/// The schedule of the Blake3 ring at stacking height `lsh`: the compress
+/// schedule's folds and first rate, unique-decoding query counts solved to
+/// the per-component target with no query grind, and no folding grind.
+///
+/// The verifier of this schedule is the binary stage's Blake3 table, where a
+/// query costs Merkle paths of Blake3 compressions over bits, cheap beside
+/// any grind the host prover would have to run serially.
+pub fn blake3_whir_config(lsh: usize) -> WhirConfig {
+    let rate = blake3_log_inv_rate();
+    assert!(
+        lsh + rate <= <JaggedVal as p3_field::TwoAdicField>::TWO_ADICITY,
+        "blake3 schedule: the first oracle at stacking height {lsh} and rate 2^-{rate} \
+         exceeds the field's two-adic subgroup",
+    );
+    let k0 = compress_round0_folding();
+    let mut rem =
+        lsh.checked_sub(k0).expect("stacking height must exceed the round-0 folding factor");
+    let mut folds = alloc::vec![k0];
+    while rem > 7 {
+        folds.push(6);
+        rem -= 6;
+    }
+    let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
+    config.starting_log_inv_rate = rate;
+    let num_rounds = config.round_parameters.len();
+    for (r, rp) in config.round_parameters.iter_mut().enumerate() {
+        rp.log_inv_rate = rate + 3 * (r + 1);
+        rp.num_queries = min_queries(rate + 3 * r, 0);
+        rp.queries_pow_bits = 0;
+        rp.ood_samples = 2;
+        rp.pow_bits = alloc::vec![0; rp.folding_factor];
+    }
+    config.final_queries = min_queries(rate + 3 * num_rounds, 0);
+    config.final_pow_bits = 0;
+    config.batch_pow_bits = blake3_batch_grinding_bits();
+    config
 }
 
 /// `log2(1/rho)` of the compress schedule's first committed oracle, 3 by

@@ -224,6 +224,9 @@ pub enum DslIr<C: Config> {
     CircuitPoseidon2PermuteKoalaBear(Box<[Felt<C::F>; 16]>),
     /// Permutates an array of KoalaBear elements in the circuit using the skinny precompile.
     CircuitV2Poseidon2PermuteKoalaBear(Box<([Felt<C::F>; 16], [Felt<C::F>; 16])>),
+    /// One Blake3 compression over 16-bit limbs: `(output, chaining value,
+    /// block, block length, flags)`; the counter is zero.
+    CircuitV2Blake3Compress(Box<([Felt<C::F>; 16], [Felt<C::F>; 16], [Felt<C::F>; 32], u32, u32)>),
     /// Commits the public values.
     CircuitV2CommitPublicValues(Box<RecursionPublicValues<Felt<C::F>>>),
 

@@ -351,6 +351,27 @@ where
     }
 
     #[inline(always)]
+    fn blake3_compress(
+        &mut self,
+        dst: [impl Reg<C>; BLAKE3_OUT_LIMBS],
+        chaining_value: [impl Reg<C>; BLAKE3_CV_LIMBS],
+        block: [impl Reg<C>; BLAKE3_BLOCK_LIMBS],
+        block_len: u32,
+        flags: u32,
+    ) -> Instruction<C::F> {
+        Instruction::Blake3Compress(Box::new(Blake3CompressInstr {
+            addrs: Blake3CompressIo {
+                chaining_value: chaining_value.map(|r| r.read(self)),
+                block: block.map(|r| r.read(self)),
+                output: dst.map(|r| r.write(self)),
+            },
+            block_len: C::F::from_u32(block_len),
+            flags: C::F::from_u32(flags),
+            mults: [C::F::ZERO; BLAKE3_OUT_LIMBS],
+        }))
+    }
+
+    #[inline(always)]
     fn select(
         &mut self,
         bit: impl Reg<C>,
@@ -561,6 +582,10 @@ where
             DslIr::CircuitV2Poseidon2PermuteKoalaBear(data) => {
                 f(self.poseidon2_permute(data.0, data.1))
             }
+            DslIr::CircuitV2Blake3Compress(data) => {
+                let (output, chaining_value, block, block_len, flags) = *data;
+                f(self.blake3_compress(output, chaining_value, block, block_len, flags))
+            }
             DslIr::CircuitV2HintBitsF(output, value) => {
                 f(self.hint_bit_decomposition(value, output))
             }
@@ -649,6 +674,14 @@ where
                         let Poseidon2SkinnyInstr {
                             addrs: Poseidon2Io { output: ref addrs, .. },
                             mults,
+                        } = instr.as_mut();
+                        mults.iter_mut().zip(addrs).for_each(&mut backfill);
+                    }
+                    Instruction::Blake3Compress(instr) => {
+                        let Blake3CompressInstr {
+                            addrs: Blake3CompressIo { output: ref addrs, .. },
+                            mults,
+                            ..
                         } = instr.as_mut();
                         mults.iter_mut().zip(addrs).for_each(&mut backfill);
                     }
@@ -831,6 +864,7 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::ExtAlu(_) => "ExtAlu",
         Instruction::Mem(_) => "Mem",
         Instruction::Poseidon2(_) => "Poseidon2",
+        Instruction::Blake3Compress(_) => "Blake3Compress",
         Instruction::Select(_) => "Select",
         Instruction::HintBits(_) => "HintBits",
         Instruction::Print(_) => "Print",
