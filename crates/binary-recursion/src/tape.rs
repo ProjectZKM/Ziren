@@ -11,7 +11,7 @@
 use core::cell::RefCell;
 
 use p3_binary_field::{BinaryField128, TowerLevel};
-use p3_field::Field;
+use p3_field::{Field, PrimeCharacteristicRing};
 
 /// The field of every recorded value.
 pub type F = BinaryField128;
@@ -36,6 +36,9 @@ pub enum Op {
     Add(Operand, Operand),
     /// `a * b`.
     Mul(Operand, Operand),
+    /// `a * a`, which over a field of characteristic two is linear in the
+    /// bits of `a`.
+    Square(Operand),
     /// `1 / a`; enforcing it enforces `a != 0`.
     Inv(Operand),
     /// `a = b`.
@@ -50,8 +53,14 @@ pub enum Op {
     FromBytes(Vec<Operand>),
     /// The eight bits of a byte, lowest first, each `0` or `1`.
     ByteBits(Operand),
-    /// The Blake3 digest of a byte string, thirty-two byte variables.
-    Blake3(Vec<Operand>),
+    /// The Blake3 digest of the first `len` bytes of these elements' sixteen
+    /// little-endian bytes each, every byte past `len` zero: two variables,
+    /// the digest's low and high sixteen bytes as elements.
+    Blake3 { slots: Vec<Operand>, len: usize },
+    /// One node of a Merkle path: the Blake3 digest of `cur ‖ sib` if the
+    /// bit is zero and of `sib ‖ cur` if it is one, each digest two elements
+    /// as [`Op::Blake3`] gives it.
+    MerkleNode { bit: Operand, cur: [Operand; 2], sib: [Operand; 2] },
     /// The bit matrix whose rows are these elements, at most 128, read by
     /// column: 128 variables, column `v` having bit `u` set exactly when row
     /// `u` has bit `v` set.
@@ -68,11 +77,12 @@ impl Op {
             Self::AssertEq(..) | Self::AssertNonZero(_) => 0,
             Self::ToBytes(_) => 16,
             Self::ByteBits(_) => 8,
-            Self::Blake3(_) => 32,
+            Self::Blake3 { .. } | Self::MerkleNode { .. } => 2,
             Self::Transpose(_) => 128,
             Self::Input(_)
             | Self::Add(..)
             | Self::Mul(..)
+            | Self::Square(_)
             | Self::Inv(_)
             | Self::FromBytes(_)
             | Self::Select(..) => 1,
@@ -93,9 +103,11 @@ pub const fn kind_index(op: &Op) -> usize {
         Op::ToBytes(_) => 6,
         Op::FromBytes(_) => 7,
         Op::ByteBits(_) => 8,
-        Op::Blake3(_) => 9,
+        Op::Blake3 { .. } => 9,
         Op::Transpose(_) => 10,
         Op::Select(..) => 11,
+        Op::MerkleNode { .. } => 12,
+        Op::Square(_) => 13,
     }
 }
 
@@ -116,8 +128,8 @@ pub struct Tape {
 impl Tape {
     /// The number of operations of each kind, by [`Self::KINDS`].
     #[must_use]
-    pub fn census(&self) -> [usize; 12] {
-        let mut counts = [0; 12];
+    pub fn census(&self) -> [usize; 14] {
+        let mut counts = [0; 14];
         for op in &self.ops {
             let k = kind_index(op);
             counts[k] += 1;
@@ -126,7 +138,7 @@ impl Tape {
     }
 
     /// The names of the kinds [`Self::census`] counts.
-    pub const KINDS: [&'static str; 12] = [
+    pub const KINDS: [&'static str; 14] = [
         "input",
         "add",
         "mul",
@@ -139,7 +151,31 @@ impl Tape {
         "blake3",
         "transpose",
         "select",
+        "merkle_node",
+        "square",
     ];
+
+    /// The AND gates a garbled circuit evaluating the program would hold,
+    /// estimated by operation: XOR is free, so additions, squarings,
+    /// products by a constant and every rewiring of bits cost nothing.
+    #[must_use]
+    pub fn and_gates(&self) -> AndGates {
+        let mut gates = AndGates::default();
+        for op in &self.ops {
+            match op {
+                Op::Mul(Operand::Var(_), Operand::Var(_)) => gates.products += AND_PER_PRODUCT,
+                Op::Inv(_) => gates.products += AND_PER_INVERSE,
+                Op::Select(..) => gates.other += 128,
+                Op::AssertEq(..) | Op::AssertNonZero(_) => gates.other += 127,
+                Op::Blake3 { len, .. } => {
+                    gates.hashing += AND_PER_COMPRESSION * compressions(*len) as u64;
+                }
+                Op::MerkleNode { .. } => gates.hashing += AND_PER_COMPRESSION,
+                _ => {}
+            }
+        }
+        gates
+    }
 
     /// The bytes the Blake3 operations hash, in total.
     #[must_use]
@@ -147,7 +183,8 @@ impl Tape {
         self.ops
             .iter()
             .map(|op| match op {
-                Op::Blake3(bytes) => bytes.len(),
+                Op::Blake3 { len, .. } => *len,
+                Op::MerkleNode { .. } => 64,
                 _ => 0,
             })
             .sum()
@@ -159,8 +196,15 @@ impl Tape {
         match op {
             Op::Input(_) => Vec::new(),
             Op::Add(a, b) | Op::Mul(a, b) | Op::AssertEq(a, b) => vec![*a, *b],
-            Op::Inv(a) | Op::AssertNonZero(a) | Op::ToBytes(a) | Op::ByteBits(a) => vec![*a],
-            Op::FromBytes(xs) | Op::Blake3(xs) | Op::Transpose(xs) => xs.clone(),
+            Op::Inv(a)
+            | Op::AssertNonZero(a)
+            | Op::ToBytes(a)
+            | Op::ByteBits(a)
+            | Op::Square(a) => {
+                vec![*a]
+            }
+            Op::FromBytes(xs) | Op::Transpose(xs) | Op::Blake3 { slots: xs, .. } => xs.clone(),
+            Op::MerkleNode { bit, cur, sib } => vec![*bit, cur[0], cur[1], sib[0], sib[1]],
             Op::Select(s, a, b) => vec![*s, *a, *b],
         }
     }
@@ -212,6 +256,82 @@ pub enum RunError {
     NotByte { op: usize },
     /// Operation `op` reads a value as a bit that is not one.
     NotBit { op: usize },
+    /// Operation `op` hashes a message whose last element has bytes past
+    /// its length.
+    Padding { op: usize },
+}
+
+/// AND gates of a product in `GF(2^128)` over the tower, Karatsuba all the
+/// way down: `3^7`.
+pub const AND_PER_PRODUCT: u64 = 2187;
+
+/// AND gates of an inverse: a product chain of about ten products, the
+/// squarings between them free.
+pub const AND_PER_INVERSE: u64 = 10 * AND_PER_PRODUCT;
+
+/// AND gates of a Blake3 compression: its 336 additions of 32-bit words,
+/// 31 each.
+pub const AND_PER_COMPRESSION: u64 = 336 * 31;
+
+/// The Blake3 compressions of a message of `len` bytes: a block per 64
+/// bytes of each chunk, and a parent per chunk past the first.
+#[must_use]
+pub const fn compressions(len: usize) -> usize {
+    let chunks = if len == 0 { 1 } else { len.div_ceil(1024) };
+    let mut blocks = 0;
+    let mut chunk = 0;
+    while chunk < chunks {
+        let rest = len - chunk * 1024;
+        let chunk_len = if rest < 1024 { rest } else { 1024 };
+        blocks += if chunk_len == 0 { 1 } else { chunk_len.div_ceil(64) };
+        chunk += 1;
+    }
+    blocks + chunks - 1
+}
+
+/// A garbled circuit's AND gates, estimated by what they come from.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AndGates {
+    /// Products of two variables, and inverses.
+    pub products: u64,
+    /// Blake3 compressions.
+    pub hashing: u64,
+    /// Selects and the checks of equality and of being nonzero.
+    pub other: u64,
+}
+
+impl AndGates {
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.products + self.hashing + self.other
+    }
+}
+
+impl core::fmt::Display for AndGates {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{:.2e} AND ({:.2e} products, {:.2e} hashing, {:.2e} other)",
+            self.total() as f64,
+            self.products as f64,
+            self.hashing as f64,
+            self.other as f64
+        )
+    }
+}
+
+/// The Blake3 digest of `message`.
+#[must_use]
+pub fn blake3_bytes(message: &[u8]) -> [u8; 32] {
+    p3_symmetric::CryptographicHasher::hash_iter(&p3_blake3::Blake3, message.iter().copied())
+}
+
+/// A digest as two elements: its low and its high sixteen bytes.
+pub fn digest_elements(digest: [u8; 32]) -> [F; 2] {
+    let half = |range: core::ops::Range<usize>| {
+        F::from_repr(u128::from_le_bytes(digest[range].try_into().expect("sixteen bytes")))
+    };
+    [half(0..16), half(16..32)]
 }
 
 /// The byte `x` holds, if it holds one.
@@ -250,6 +370,7 @@ impl Tape {
                 Op::Input(n) => values.push(inputs[*n]),
                 Op::Add(a, b) => values.push(read(&values, a) + read(&values, b)),
                 Op::Mul(a, b) => values.push(read(&values, a) * read(&values, b)),
+                Op::Square(a) => values.push(read(&values, a).square()),
                 Op::Inv(a) => {
                     let inverse = read(&values, a).try_inverse().ok_or(RunError::Inverse { op })?;
                     values.push(inverse);
@@ -277,11 +398,28 @@ impl Tape {
                     let byte = as_byte(read(&values, b)).ok_or(RunError::NotByte { op })?;
                     values.extend((0..8).map(|i| F::from_repr(u128::from((byte >> i) & 1))));
                 }
-                Op::Blake3(operands) => {
-                    let message = bytes(&values, operands, op)?;
-                    let digest: [u8; 32] =
-                        p3_symmetric::CryptographicHasher::hash_iter(&p3_blake3::Blake3, message);
-                    values.extend(digest.map(|b| F::from_repr(u128::from(b))));
+                Op::Blake3 { slots, len } => {
+                    let message: Vec<u8> = slots
+                        .iter()
+                        .flat_map(|slot| read(&values, slot).to_repr().to_le_bytes())
+                        .collect();
+                    if message.len() < *len || message[*len..].iter().any(|&b| b != 0) {
+                        return Err(RunError::Padding { op });
+                    }
+                    values.extend(digest_elements(blake3_bytes(&message[..*len])));
+                }
+                Op::MerkleNode { bit, cur, sib } => {
+                    let bit = read(&values, bit).to_repr();
+                    if bit > 1 {
+                        return Err(RunError::NotBit { op });
+                    }
+                    let (left, right) = if bit == 1 { (sib, cur) } else { (cur, sib) };
+                    let message: Vec<u8> = left
+                        .iter()
+                        .chain(right)
+                        .flat_map(|half| read(&values, half).to_repr().to_le_bytes())
+                        .collect();
+                    values.extend(digest_elements(blake3_bytes(&message)));
                 }
                 Op::Select(selector, a, b) => {
                     let selector = read(&values, selector).to_repr();
@@ -460,7 +598,8 @@ fn sample(op: &Op) {
                     profile.samples.push((profile.every, false, stack()));
                 }
             }
-            Op::Blake3(bytes) => profile.samples.push((bytes.len(), true, stack())),
+            Op::Blake3 { len, .. } => profile.samples.push((*len, true, stack())),
+            Op::MerkleNode { .. } => profile.samples.push((64, true, stack())),
             _ => {}
         }
     });

@@ -15,6 +15,7 @@ p3-binary-dft = { workspace = true }
 p3-binary-field = { workspace = true }
 p3-binary-pcs = { workspace = true }
 p3-blake3 = { workspace = true }
+p3-bus = { workspace = true }
 p3-challenger = { workspace = true }
 p3-commit = { workspace = true }
 p3-field = { workspace = true }
@@ -30,10 +31,12 @@ postcard = { version = "1.0", default-features = false, features = ["alloc"] }
 rayon = "1.12"
 serde = { workspace = true }
 zkm-binary-stark = { workspace = true }
+zkm-derive = { workspace = true }
+zkm-recursion-core = { workspace = true }
 
 [dev-dependencies]
+p3-examples = { workspace = true }
 p3-koala-bear = { workspace = true }
 zkm-pcs = { workspace = true }
-zkm-recursion-core = { workspace = true }
 blake3 = { workspace = true, features = ["std"] }
 

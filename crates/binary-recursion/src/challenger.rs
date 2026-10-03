@@ -4,7 +4,9 @@
 //! step: observed elements append their sixteen little-endian bytes to the
 //! input, a flush hashes the whole input with Blake3 and the digest becomes
 //! both the next input and the bytes to sample, and samples pop bytes from
-//! the end of the digest.  The bytes are traced, so every hash is recorded.
+//! the end of the digest.  The input is kept as the elements and bytes that
+//! were observed, so a hash reads whole elements wherever they fall on a
+//! sixteen-byte boundary, and every hash is recorded.
 //!
 //! A sampled index is the one value the verifier uses as an integer: a
 //! query position.  Its bits come from sampled bytes, so they are recorded
@@ -17,17 +19,17 @@ use p3_challenger::{
 };
 use p3_field::PrimeCharacteristicRing;
 
-use crate::bytes::{blake3, byte_bits, byte_value, constant_byte, from_bytes, to_bytes};
+use crate::bytes::{blake3, byte_bits, byte_value, constant_byte, digest_bytes, from_bytes, Piece};
 use crate::queries;
 use crate::traced::Traced;
 
 /// Bytes a sampled index is drawn from.
 const INDEX_BYTES: usize = 8;
 
-/// The transcript, over traced bytes.
+/// The transcript, over traced values.
 #[derive(Clone, Debug)]
 pub struct TracedChallenger {
-    input: Vec<Traced>,
+    input: Vec<Piece>,
     output: Vec<Traced>,
 }
 
@@ -36,22 +38,32 @@ impl TracedChallenger {
     /// stage's starts with its domain separator.
     #[must_use]
     pub fn new(initial: &[u8]) -> Self {
-        Self { input: initial.iter().copied().map(constant_byte).collect(), output: Vec::new() }
+        Self {
+            input: initial.iter().map(|&b| Piece::Byte(constant_byte(b))).collect(),
+            output: Vec::new(),
+        }
     }
 
     fn flush(&mut self) {
         let digest = blake3(&self.input);
-        self.input.clear();
-        self.input.extend_from_slice(&digest);
-        self.output.clear();
-        self.output.extend_from_slice(&digest);
+        self.input = digest.map(Piece::Element).to_vec();
+        self.output = digest_bytes(digest).to_vec();
     }
 
     /// Append bytes to the input, discarding the unread output.
     pub fn observe_bytes(&mut self, bytes: &[Traced]) {
         if !bytes.is_empty() {
             self.output.clear();
-            self.input.extend_from_slice(bytes);
+            self.input.extend(bytes.iter().map(|&b| Piece::Byte(b)));
+        }
+    }
+
+    /// Append elements' sixteen bytes each to the input, discarding the
+    /// unread output.
+    pub fn observe_elements(&mut self, elements: &[Traced]) {
+        if !elements.is_empty() {
+            self.output.clear();
+            self.input.extend(elements.iter().map(|&x| Piece::Element(x)));
         }
     }
 
@@ -76,7 +88,7 @@ impl TracedChallenger {
 
 impl CanObserve<Traced> for TracedChallenger {
     fn observe(&mut self, value: Traced) {
-        self.observe_bytes(&to_bytes(value));
+        self.observe_elements(&[value]);
     }
 }
 

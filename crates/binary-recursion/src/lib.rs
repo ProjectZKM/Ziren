@@ -15,6 +15,7 @@ pub mod challenger;
 pub mod config;
 pub mod domain;
 pub mod fields;
+pub mod machine;
 pub mod mmcs;
 pub mod queries;
 pub mod tape;

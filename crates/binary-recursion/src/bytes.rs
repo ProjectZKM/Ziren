@@ -8,7 +8,6 @@
 //! compressions by the machine.
 
 use p3_binary_field::TowerLevel;
-use p3_symmetric::CryptographicHasher;
 
 use crate::tape::{self, Op, F};
 use crate::traced::Traced;
@@ -66,17 +65,102 @@ pub fn byte_bits(b: Traced) -> [Traced; 8] {
     Traced::defined_many(Op::ByteBits(b.operand()), bits)
 }
 
-/// The Blake3 digest of a byte string.
+/// A piece of a message to hash: an element's sixteen little-endian bytes,
+/// or one byte.
+#[derive(Clone, Copy, Debug)]
+pub enum Piece {
+    Element(Traced),
+    Byte(Traced),
+}
+
+impl Piece {
+    const fn len(&self) -> usize {
+        match self {
+            Self::Element(_) => 16,
+            Self::Byte(_) => 1,
+        }
+    }
+}
+
+/// The message `pieces` spell, as the sixteen-byte slots the machine hashes:
+/// an element starting on a slot boundary is its own slot, and any other
+/// slot is assembled from bytes, zero past the end.
+fn slots(pieces: &[Piece]) -> Vec<Traced> {
+    let len: usize = pieces.iter().map(Piece::len).sum();
+    let mut slots = Vec::with_capacity(len.div_ceil(16));
+    let mut pending: Vec<Traced> = Vec::with_capacity(16);
+    let mut offset = 0;
+    for piece in pieces {
+        match *piece {
+            Piece::Element(x) if offset % 16 == 0 => slots.push(x),
+            Piece::Element(x) => pending.extend(to_bytes(x)),
+            Piece::Byte(b) => pending.push(b),
+        }
+        offset += piece.len();
+        while pending.len() >= 16 {
+            let slot: [Traced; 16] = core::array::from_fn(|i| pending[i]);
+            slots.push(from_bytes(&slot));
+            pending.drain(..16);
+        }
+    }
+    if !pending.is_empty() {
+        let slot: [Traced; 16] =
+            core::array::from_fn(|i| pending.get(i).copied().unwrap_or_else(|| constant_byte(0)));
+        slots.push(from_bytes(&slot));
+    }
+    slots
+}
+
+/// The Blake3 digest of the message `pieces` spell, as two elements: its
+/// low and its high sixteen bytes.
 #[must_use]
-pub fn blake3(bytes: &[Traced]) -> [Traced; 32] {
-    let digest: [u8; 32] = p3_blake3::Blake3.hash_iter(bytes.iter().map(byte_value));
-    if bytes.iter().all(Traced::is_constant) {
-        return digest.map(constant_byte);
+pub fn blake3(pieces: &[Piece]) -> [Traced; 2] {
+    let len: usize = pieces.iter().map(Piece::len).sum();
+    let slots = slots(pieces);
+    let message: Vec<u8> =
+        slots.iter().flat_map(|slot| slot.value().to_repr().to_le_bytes()).take(len).collect();
+    let digest = tape::digest_elements(tape::blake3_bytes(&message));
+    if slots.iter().all(Traced::is_constant) {
+        return digest.map(Traced::constant);
     }
     Traced::defined_many(
-        Op::Blake3(bytes.iter().map(Traced::operand).collect()),
-        digest.map(|b| F::from_repr(u128::from(b))),
+        Op::Blake3 { slots: slots.iter().map(Traced::operand).collect(), len },
+        digest,
     )
+}
+
+/// One node of a Merkle path: the digest of `cur ‖ sib` if `bit` is zero,
+/// of `sib ‖ cur` if it is one.
+///
+/// # Panics
+/// Panics if `bit` is not `0` or `1`.
+#[must_use]
+pub fn merkle_node(bit: Traced, cur: [Traced; 2], sib: [Traced; 2]) -> [Traced; 2] {
+    let selector = bit.value().to_repr();
+    assert!(selector <= 1, "a path bit is a bit");
+    let (left, right) = if selector == 1 { (sib, cur) } else { (cur, sib) };
+    let message: Vec<u8> =
+        left.iter().chain(&right).flat_map(|x| x.value().to_repr().to_le_bytes()).collect();
+    let digest = tape::digest_elements(tape::blake3_bytes(&message));
+    if bit.is_constant() {
+        let pieces = left.iter().chain(&right).map(|&x| Piece::Element(x)).collect::<Vec<_>>();
+        return blake3(&pieces);
+    }
+    Traced::defined_many(
+        Op::MerkleNode {
+            bit: bit.operand(),
+            cur: cur.map(|x| x.operand()),
+            sib: sib.map(|x| x.operand()),
+        },
+        digest,
+    )
+}
+
+/// The thirty-two bytes of a digest held as two elements.
+#[must_use]
+pub fn digest_bytes(digest: [Traced; 2]) -> [Traced; 32] {
+    let [lo, hi] = digest.map(to_bytes);
+    core::array::from_fn(|i| if i < 16 { lo[i] } else { hi[i - 16] })
 }
 
 /// The bit matrix whose rows are `rows`, at most 128, read by column.
@@ -133,11 +217,13 @@ mod tests {
             let bits = byte_bits(bytes[1]);
             let recomposed: u8 = bits.iter().enumerate().map(|(i, b)| (byte_value(b)) << i).sum();
             assert_eq!(recomposed, 0x32);
-            let digest = blake3(&bytes);
-            let expected = *::blake3::hash(&x.value().to_repr().to_le_bytes()).as_bytes();
+            let digest = digest_bytes(blake3(&[Piece::Byte(bytes[2]), Piece::Element(x)]));
+            let mut message = vec![0x54];
+            message.extend_from_slice(&x.value().to_repr().to_le_bytes());
+            let expected = *::blake3::hash(&message).as_bytes();
             assert_eq!(digest.map(|b| byte_value(&b)), expected);
             assert_eq!(select(Traced::ONE, x, Traced::ZERO).value(), F::ZERO);
         });
-        assert_eq!(tape.census()[6..10], [1, 1, 1, 1]);
+        assert_eq!(tape.census()[6..10], [4, 3, 1, 1]);
     }
 }

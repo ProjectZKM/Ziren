@@ -15,7 +15,7 @@
 
 use core::marker::PhantomData;
 
-use p3_binary_field::BinaryField128;
+use p3_binary_field::{BinaryField128, TowerLevel};
 use p3_blake3::Blake3;
 use p3_challenger::CanObserve;
 use p3_commit::{BatchOpening, BatchOpeningRef, Mmcs};
@@ -24,10 +24,10 @@ use p3_merkle_tree::{MerkleTreeMmcs, PrunedMerklePaths};
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::bytes::{blake3, constant_byte, select, to_bytes};
+use crate::bytes::{blake3, merkle_node, select, Piece};
 use crate::challenger::TracedChallenger;
 use crate::queries::{self, User};
-use crate::tape::F;
+use crate::tape::{digest_elements, F};
 use crate::traced::Traced;
 
 /// The binary stage's Merkle commitment scheme over native values.
@@ -40,26 +40,38 @@ pub type NativeMmcs = MerkleTreeMmcs<
     32,
 >;
 
-/// A byte of the proof: an input of the program, or a constant when read
-/// outside a recording, as a verifying key's are.
+/// A digest of the proof as two elements, its low and high sixteen bytes:
+/// inputs of the program, or constants when read outside a recording, as a
+/// verifying key's are.
 #[derive(Clone, Copy, Debug)]
-pub struct TracedByte(pub Traced);
+pub struct TracedDigest(pub [Traced; 2]);
 
-impl<'de> Deserialize<'de> for TracedByte {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let byte = u8::deserialize(deserializer)?;
-        let value = crate::bytes::byte_field(byte);
-        Ok(Self(if crate::tape::recording() {
-            Traced::input(value)
-        } else {
-            Traced::constant(value)
+impl TracedDigest {
+    /// `digest` as an input of the program, or a constant outside a
+    /// recording.
+    #[must_use]
+    pub fn read(digest: [u8; 32]) -> Self {
+        Self(digest_elements(digest).map(|half| {
+            if crate::tape::recording() {
+                Traced::input(half)
+            } else {
+                Traced::constant(half)
+            }
         }))
     }
 }
 
-impl Serialize for TracedByte {
+impl<'de> Deserialize<'de> for TracedDigest {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::read(<[u8; 32]>::deserialize(deserializer)?))
+    }
+}
+
+impl Serialize for TracedDigest {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        crate::bytes::byte_value(&self.0).serialize(serializer)
+        let [lo, hi] = self.0.map(|half| half.value().to_repr().to_le_bytes());
+        let digest: [u8; 32] = core::array::from_fn(|i| if i < 16 { lo[i] } else { hi[i - 16] });
+        digest.serialize(serializer)
     }
 }
 
@@ -67,15 +79,15 @@ impl Serialize for TracedByte {
 /// `MerkleCap<F, [u8; 32]>` is written.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TracedCap {
-    cap: Vec<[TracedByte; 32]>,
+    cap: Vec<TracedDigest>,
     _marker: PhantomData<F>,
 }
 
 impl TracedCap {
-    /// The roots, as traced bytes.
+    /// The roots, each as two elements.
     #[must_use]
-    pub fn roots(&self) -> Vec<[Traced; 32]> {
-        self.cap.iter().map(|root| root.map(|b| b.0)).collect()
+    pub fn roots(&self) -> Vec<[Traced; 2]> {
+        self.cap.iter().map(|root| root.0).collect()
     }
 }
 
@@ -88,7 +100,7 @@ impl CanObserve<TracedCap> for TracedChallenger {
 impl CanObserve<&TracedCap> for TracedChallenger {
     fn observe(&mut self, cap: &TracedCap) {
         for root in cap.roots() {
-            self.observe_bytes(&root);
+            self.observe_elements(&root);
         }
     }
 }
@@ -118,17 +130,14 @@ impl TracedMmcs {
     /// Check one query's path from its leaf to the root, recording it.
     fn check_path(
         leaf: &[Traced],
-        siblings: &[[Traced; 32]],
+        siblings: &[[Traced; 2]],
         bits: &[Traced],
-        roots: &[[Traced; 32]],
+        roots: &[[Traced; 2]],
     ) {
-        let leaf_bytes: Vec<Traced> = leaf.iter().copied().flat_map(to_bytes).collect();
-        let mut digest = blake3(&leaf_bytes);
-        for (sibling, &bit) in siblings.iter().zip(bits) {
-            let mut pair = Vec::with_capacity(64);
-            pair.extend((0..32).map(|i| select(bit, digest[i], sibling[i])));
-            pair.extend((0..32).map(|i| select(bit, sibling[i], digest[i])));
-            digest = blake3(&pair);
+        let pieces: Vec<Piece> = leaf.iter().map(|&x| Piece::Element(x)).collect();
+        let mut digest = blake3(&pieces);
+        for (&sibling, &bit) in siblings.iter().zip(bits) {
+            digest = merkle_node(bit, digest, sibling);
         }
         let cap_bits = &bits[siblings.len()..];
         let root = select_root(roots, cap_bits);
@@ -139,9 +148,9 @@ impl TracedMmcs {
 }
 
 /// The root `cap_bits` names, lowest bit first.
-fn select_root(roots: &[[Traced; 32]], cap_bits: &[Traced]) -> [Traced; 32] {
+fn select_root(roots: &[[Traced; 2]], cap_bits: &[Traced]) -> [Traced; 2] {
     assert_eq!(roots.len(), 1 << cap_bits.len(), "one cap root per value of the bits");
-    let mut layer: Vec<[Traced; 32]> = roots.to_vec();
+    let mut layer: Vec<[Traced; 2]> = roots.to_vec();
     for &bit in cap_bits {
         layer = layer
             .chunks(2)
@@ -223,19 +232,10 @@ impl Mmcs<Traced> for TracedMmcs {
                 .iter()
                 .find(|path| path.leaf_index == index)
                 .expect("the reconstruction covers every queried index");
-            let siblings: Vec<[Traced; 32]> = path
-                .siblings
-                .iter()
-                .map(|digest| digest.map(|b| Traced::input(crate::bytes::byte_field(b))))
-                .collect();
+            let siblings: Vec<[Traced; 2]> =
+                path.siblings.iter().map(|&digest| TracedDigest::read(digest).0).collect();
             Self::check_path(rows[0].as_ref(), &siblings, &bits, &roots);
         }
         Ok(())
     }
-}
-
-/// A constant byte, for paths the program fixes.
-#[must_use]
-pub fn constant_digest(digest: [u8; 32]) -> [Traced; 32] {
-    digest.map(constant_byte)
 }

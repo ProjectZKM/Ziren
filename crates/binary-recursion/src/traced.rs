@@ -236,6 +236,9 @@ impl Mul for Traced {
             (false, true) if rhs.value == F::ZERO => Self::ZERO,
             (true, false) if self.value == F::ONE => rhs,
             (false, true) if rhs.value == F::ONE => self,
+            (false, false) if self.var == rhs.var => {
+                Self::defined(Op::Square(self.operand()), value)
+            }
             _ => Self::defined(Op::Mul(self.operand(), rhs.operand()), value),
         }
     }

@@ -134,6 +134,7 @@ fn records_the_verification_of_a_machine_proof() {
     for (kind, count) in Tape::KINDS.iter().zip(tape.census()) {
         println!("  {kind:>14}: {count}");
     }
+    println!("  garbled: {}", tape.and_gates());
 
     let reads = tape.read_counts();
     let read_vars = reads.iter().filter(|&&r| r > 0).count();

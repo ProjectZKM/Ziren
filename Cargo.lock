@@ -8241,8 +8241,10 @@ dependencies = [
  "p3-binary-field",
  "p3-binary-pcs",
  "p3-blake3",
+ "p3-bus",
  "p3-challenger",
  "p3-commit",
+ "p3-examples",
  "p3-field",
  "p3-koala-bear",
  "p3-matrix",
@@ -8256,6 +8258,7 @@ dependencies = [
  "rayon",
  "serde",
  "zkm-binary-stark",
+ "zkm-derive",
  "zkm-pcs",
  "zkm-recursion-core",
 ]

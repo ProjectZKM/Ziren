@@ -138,3 +138,74 @@ pub fn lift_key(vk: &VerifyingKey<MachineConfig>) -> VerifyingKey<TracedConfig> 
     assert!(!crate::tape::recording(), "the key is lifted before the recording");
     vk.lift(|commitment: &Commitment<MachineConfig>| reread(commitment))
 }
+
+/// One table of a machine as its verifier sees it: the AIR, its height and
+/// its public values.
+pub struct Instance<'a, A> {
+    pub air: &'a A,
+    pub log_height: usize,
+    pub public_values: &'a [F],
+}
+
+/// The verification of `proof`, a proof of the machine of `instances`
+/// whose tables have the shapes `main` and `preprocessed` under
+/// `schedule`, recorded: whether it accepted, and the tape.
+///
+/// The public values become the tape's first inputs, in instance order,
+/// then the proof's values in the order the proof is written.
+///
+/// # Panics
+/// Panics if the configuration cannot be built for the shapes.
+pub fn record_verification<A>(
+    instances: &[Instance<'_, A>],
+    main: &[TableShape],
+    preprocessed: &[TableShape],
+    schedule: &BinarySchedule,
+    vk: &VerifyingKey<MachineConfig>,
+    proof: &p3_multi_stark::MultiStarkProof<MachineConfig>,
+) -> (Result<(), String>, crate::tape::Tape)
+where
+    A: p3_multi_stark::folder::VerifierAir<Traced, Traced> + Sync,
+{
+    let config = TracedConfig::new(main, preprocessed, schedule).expect("the traced configuration");
+    let vk = lift_key(vk);
+    let profiling = std::env::var_os("ZIREN_TAPE_PROFILE").is_some();
+    let (verdict, tape) = crate::tape::record(|| {
+        if profiling {
+            crate::tape::profile(97);
+        }
+        let public: Vec<Vec<Traced>> = instances
+            .iter()
+            .map(|instance| instance.public_values.iter().map(|&x| Traced::input(x)).collect())
+            .collect();
+        let proof: TracedProof = reread(proof);
+        let traced = p3_multi_stark::VerifierInstances::new(
+            instances
+                .iter()
+                .zip(&public)
+                .map(|(instance, public)| {
+                    p3_multi_stark::VerifierInstance::new(
+                        instance.air,
+                        &vk,
+                        instance.log_height,
+                        public,
+                    )
+                })
+                .collect(),
+        );
+        let mut challenger = TracedChallenger::new(zkm_binary_stark::TRANSCRIPT_DOMAIN);
+        let verdict = p3_multi_stark::verify(&config, traced, &proof, 0, &mut challenger)
+            .map_err(|error| format!("{error:?}"));
+        crate::queries::take();
+        if let Some(profile) = crate::tape::take_profile() {
+            for (signature, muls, bytes) in profile.by_signature(4).into_iter().take(24) {
+                println!(
+                    "    mul ~{muls:>7} hashed {bytes:>8} B  {}",
+                    &signature[..signature.len().min(140)]
+                );
+            }
+        }
+        verdict
+    });
+    (verdict, tape)
+}
