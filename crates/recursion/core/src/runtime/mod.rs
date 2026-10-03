@@ -1,9 +1,5 @@
 mod analyzed;
 pub mod instruction;
-// Public because the recursion JIT (`zkm-recursion-jit`) emits code that
-// addresses this memory directly — `base + addr * size_of::<MemoryEntry>()`
-// — and asserts that layout at compile time.  Keeping the module private
-// would leave the emitter's addressing unverifiable from outside.
 pub mod memory;
 mod opcode;
 mod program;
