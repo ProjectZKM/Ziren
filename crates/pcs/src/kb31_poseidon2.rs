@@ -151,16 +151,65 @@ pub mod koala_bear_poseidon2 {
         Compressed,
     }
 
+    /// The `P` of the ring that proves under the core WHIR schedule
+    /// ([`crate::whir::jagged::WhirProfile::Core`]): the core shards.
+    pub const WHIR_PROFILE_CORE: u8 = 0;
+
+    /// The `P` of the ring that proves under the compress WHIR schedule
+    /// ([`crate::whir::jagged::WhirProfile::Compress`]): every recursion
+    /// stage below wrap.
+    pub const WHIR_PROFILE_COMPRESS: u8 = 1;
+
+    /// The inner ring: KoalaBear, its quartic extension, the Poseidon2
+    /// sponge, and the jagged-WHIR PCS.  `P` selects the WHIR schedule the
+    /// ring commits, opens and verifies under; the hash, the field and the
+    /// transcript are the same for every `P`, so a proof of one ring is a
+    /// proof over the other's field and hash but under a different schedule,
+    /// which the other ring's verifier rejects.
     #[derive(Deserialize)]
-    #[serde(from = "std::marker::PhantomData<KoalaBearPoseidon2>")]
-    pub struct KoalaBearPoseidon2 {
+    #[serde(from = "std::marker::PhantomData<KoalaBearPoseidon2Ring<P>>")]
+    pub struct KoalaBearPoseidon2Ring<const P: u8> {
         pub perm: Perm,
         pcs: Pcs,
         fri_config: FriParameters<ChallengeMmcs>,
         config_type: KoalaBearPoseidon2Type,
     }
 
-    impl KoalaBearPoseidon2 {
+    /// The inner ring under the core schedule: the core machine.
+    pub type KoalaBearPoseidon2 = KoalaBearPoseidon2Ring<WHIR_PROFILE_CORE>;
+
+    /// The inner ring under the compress schedule: the recursion machines
+    /// (normalize, compose, shrink).
+    pub type KoalaBearPoseidon2Compress = KoalaBearPoseidon2Ring<WHIR_PROFILE_COMPRESS>;
+
+    /// A shard proof of ring `P` as a shard proof of ring `Q`.  The two rings
+    /// share the field, the hash and the commitment type, so the proof's data
+    /// is the same; only the WHIR schedule a verifier must check it under
+    /// differs, and that is the caller's to keep straight.
+    pub fn retype_shard_proof<const P: u8, const Q: u8>(
+        proof: crate::ShardProof<KoalaBearPoseidon2Ring<P>>,
+    ) -> crate::ShardProof<KoalaBearPoseidon2Ring<Q>> {
+        crate::ShardProof {
+            public_values: proof.public_values,
+            jagged_shard_proof: proof.jagged_shard_proof,
+        }
+    }
+
+    /// A verifying key of ring `P` as one of ring `Q`; see
+    /// [`retype_shard_proof`].
+    pub fn retype_vk<const P: u8, const Q: u8>(
+        vk: crate::StarkVerifyingKey<KoalaBearPoseidon2Ring<P>>,
+    ) -> crate::StarkVerifyingKey<KoalaBearPoseidon2Ring<Q>> {
+        crate::StarkVerifyingKey {
+            commit: vk.commit,
+            pc_start: vk.pc_start,
+            initial_global_cumulative_sum: vk.initial_global_cumulative_sum,
+            chip_information: vk.chip_information,
+            chip_ordering: vk.chip_ordering,
+        }
+    }
+
+    impl<const P: u8> KoalaBearPoseidon2Ring<P> {
         #[must_use]
         pub fn new() -> Self {
             let perm = my_perm();
@@ -203,7 +252,7 @@ pub mod koala_bear_poseidon2 {
         }
     }
 
-    impl Clone for KoalaBearPoseidon2 {
+    impl<const P: u8> Clone for KoalaBearPoseidon2Ring<P> {
         fn clone(&self) -> Self {
             match self.config_type {
                 KoalaBearPoseidon2Type::Default => Self::new(),
@@ -212,29 +261,31 @@ pub mod koala_bear_poseidon2 {
         }
     }
 
-    impl Default for KoalaBearPoseidon2 {
+    impl<const P: u8> Default for KoalaBearPoseidon2Ring<P> {
         fn default() -> Self {
             Self::new()
         }
     }
 
     /// Implement serialization manually instead of using serde to avoid cloning the config.
-    impl Serialize for KoalaBearPoseidon2 {
+    impl<const P: u8> Serialize for KoalaBearPoseidon2Ring<P> {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer,
         {
-            std::marker::PhantomData::<KoalaBearPoseidon2>.serialize(serializer)
+            std::marker::PhantomData::<KoalaBearPoseidon2Ring<P>>.serialize(serializer)
         }
     }
 
-    impl From<std::marker::PhantomData<KoalaBearPoseidon2>> for KoalaBearPoseidon2 {
-        fn from(_: std::marker::PhantomData<KoalaBearPoseidon2>) -> Self {
+    impl<const P: u8> From<std::marker::PhantomData<KoalaBearPoseidon2Ring<P>>>
+        for KoalaBearPoseidon2Ring<P>
+    {
+        fn from(_: std::marker::PhantomData<KoalaBearPoseidon2Ring<P>>) -> Self {
             Self::new()
         }
     }
 
-    impl StarkGenericConfig for KoalaBearPoseidon2 {
+    impl<const P: u8> StarkGenericConfig for KoalaBearPoseidon2Ring<P> {
         type Val = KoalaBear;
         type Domain = <Pcs as p3_commit::Pcs<Challenge, Challenger>>::Domain;
         type Pcs = Pcs;
@@ -256,7 +307,9 @@ pub mod koala_bear_poseidon2 {
             )],
             pin: Option<crate::jagged::AreaPin>,
         ) -> Com<Self> {
-            inner_prep_commit(named_preprocessed_traces, pin)
+            <Self::PrepPrecomputed as crate::config::PrepCommitRoot<Self>>::commit_root(
+                &Self::prep_precompute(named_preprocessed_traces, pin),
+            )
         }
 
         type PrepPrecomputed = crate::jagged_pcs::jagged::PrecomputedJaggedCommit;
@@ -268,7 +321,9 @@ pub mod koala_bear_poseidon2 {
             )],
             pin: Option<crate::jagged::AreaPin>,
         ) -> Self::PrepPrecomputed {
-            inner_prep_precompute(named_preprocessed_traces, pin)
+            let views =
+                crate::jagged_pcs::jagged::views_over_traces(named_preprocessed_traces.to_vec());
+            <Self as crate::config::BasefoldRing>::commit_multilinears(&views, pin)
         }
     }
 
@@ -280,7 +335,7 @@ pub mod koala_bear_poseidon2 {
     /// `JaggedMmcs::Commitment` — equal to `Com<KoalaBearPoseidon2>` since the
     /// inner `Pcs` is `TwoAdicFriPcs<_, _, InnerValMmcs, _>` and
     /// `JaggedMmcs == InnerValMmcs` (same Poseidon2-KoalaBear Merkle root).
-    impl crate::config::PrepCommitRoot<KoalaBearPoseidon2>
+    impl<const P: u8> crate::config::PrepCommitRoot<KoalaBearPoseidon2Ring<P>>
         for crate::jagged_pcs::jagged::PrecomputedJaggedCommit
     {
         /// The HASH-BOUND commitment: the raw BaseFold root with the committed
@@ -293,11 +348,11 @@ pub mod koala_bear_poseidon2 {
         /// the traces (the recursion circuit) pins the preprocessed row
         /// counts against this digest.  The raw root travels in the PROOF,
         /// and the verifier re-derives the digest from it.
-        fn commit_root(&self) -> Com<KoalaBearPoseidon2> {
+        fn commit_root(&self) -> Com<KoalaBearPoseidon2Ring<P>> {
             let raw = crate::jagged_pcs::basefold_commit_digest(&self.commit);
             let modified =
                 crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(raw, &self.packing);
-            Com::<KoalaBearPoseidon2>::new(alloc::vec![modified])
+            Com::<KoalaBearPoseidon2Ring<P>>::new(alloc::vec![modified])
         }
     }
 
@@ -305,8 +360,9 @@ pub mod koala_bear_poseidon2 {
         chip_traces: &[(String, p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
         pin: Option<crate::jagged::AreaPin>,
     ) -> Com<KoalaBearPoseidon2> {
-        use crate::config::PrepCommitRoot;
-        inner_prep_precompute(chip_traces, pin).commit_root()
+        <crate::jagged_pcs::jagged::PrecomputedJaggedCommit as crate::config::PrepCommitRoot<
+            KoalaBearPoseidon2,
+        >>::commit_root(&inner_prep_precompute(chip_traces, pin))
     }
 
     /// Same commit as [`inner_prep_commit`], keeping the BaseFold prover data
@@ -332,8 +388,8 @@ pub mod koala_bear_poseidon2 {
         )
     }
 
-    impl ZeroCommitment<KoalaBearPoseidon2> for Pcs {
-        fn zero_commitment(&self) -> Com<KoalaBearPoseidon2> {
+    impl<const P: u8> ZeroCommitment<KoalaBearPoseidon2Ring<P>> for Pcs {
+        fn zero_commitment(&self) -> Com<KoalaBearPoseidon2Ring<P>> {
             DigestHash::from([Val::ZERO; DIGEST_SIZE]).into()
         }
     }
@@ -344,8 +400,14 @@ pub mod koala_bear_poseidon2 {
     // the construction in `crate::jagged_pcs::commit_jagged_pcs_host`
     // (InnerHash/InnerCompress over the shared `poseidon2_init` perm) so the
     // generic BaseFold cores can be driven through this trait.
-    impl crate::config::BasefoldRing for KoalaBearPoseidon2 {
+    impl<const P: u8> crate::config::BasefoldRing for KoalaBearPoseidon2Ring<P> {
         const WHIR_INNER_PCS: bool = true;
+
+        const WHIR_PROFILE: crate::whir::jagged::WhirProfile = if P == WHIR_PROFILE_COMPRESS {
+            crate::whir::jagged::WhirProfile::Compress
+        } else {
+            crate::whir::jagged::WhirProfile::Core
+        };
 
         fn prep_open_data(
             prep: &Self::PrepPrecomputed,
@@ -390,7 +452,12 @@ pub mod koala_bear_poseidon2 {
             rounds: alloc::vec::Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
             challenger: &mut Self::Challenger,
         ) -> crate::shard_level::shard_proof::EvaluationProof {
-            let bundle = crate::jagged_pcs::jagged::prove_jagged_rounds(&rounds, z_row, challenger);
+            let bundle = crate::jagged_pcs::jagged::prove_jagged_rounds_with_profile(
+                &rounds,
+                z_row,
+                challenger,
+                Self::WHIR_PROFILE,
+            );
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
         }
     }

@@ -12,7 +12,6 @@ use crate::utils::koalabears_to_bn254;
 use thiserror::Error;
 use zkm_pcs::{
     air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
-    koala_bear_poseidon2::KoalaBearPoseidon2,
     shard_level::verifier::JaggedShardVerifyError,
     MachineProof, MachineProver, MachineVerificationError, PartStarkVerifyingKey,
     StarkGenericConfig, VerificationError, Word,
@@ -29,7 +28,8 @@ use crate::{
     build::zkm_imm_wrap_vk_mode,
     components::ZKMProverComponents,
     utils::{is_recursion_public_values_valid, is_root_public_values_valid},
-    CoreSC, HashableKey, OuterSC, ZKMCoreProofData, ZKMProver, ZKMVerifyingKey,
+    CompressedSC, CoreSC, HashableKey, InnerSC, OuterSC, ZKMCoreProofData, ZKMProver,
+    ZKMVerifyingKey,
 };
 
 #[derive(Error, Debug)]
@@ -246,17 +246,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Verify a compressed proof.
     pub fn verify_compressed(
         &self,
-        proof: &ZKMReduceProof<KoalaBearPoseidon2>,
+        proof: &ZKMReduceProof<CompressedSC>,
         vk: &ZKMVerifyingKey,
-    ) -> Result<(), MachineVerificationError<CoreSC>> {
+    ) -> Result<(), MachineVerificationError<CompressedSC>> {
         let ZKMReduceProof { vk: compress_vk, proof } = proof;
-        let mut challenger = self.compress_prover.machine().config().challenger();
+        let mut challenger = self.root_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
-        self.compress_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
+        self.root_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
 
         let public_values: &RecursionPublicValues<_> = proof.public_values.as_slice().borrow();
-        if !is_recursion_public_values_valid(self.compress_prover.machine().config(), public_values)
-        {
+        if !is_recursion_public_values_valid(self.root_prover.machine().config(), public_values) {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "recursion public values are invalid",
             ));
@@ -288,9 +287,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Verify a shrink proof.
     pub fn verify_shrink(
         &self,
-        proof: &ZKMReduceProof<KoalaBearPoseidon2>,
+        proof: &ZKMReduceProof<InnerSC>,
         vk: &ZKMVerifyingKey,
-    ) -> Result<(), MachineVerificationError<CoreSC>> {
+    ) -> Result<(), MachineVerificationError<InnerSC>> {
         let mut challenger = self.shrink_prover.machine().config().challenger();
         let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
         self.shrink_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
@@ -472,11 +471,11 @@ pub fn groth16_vk_hash(vk: &ZKMVerifyingKey) -> Result<BigUint> {
 impl<C: ZKMProverComponents> SubproofVerifier for ZKMProver<C> {
     fn verify_deferred_proof(
         &self,
-        proof: &zkm_core_machine::reduce::ZKMReduceProof<KoalaBearPoseidon2>,
-        vk: &zkm_pcs::StarkVerifyingKey<KoalaBearPoseidon2>,
+        proof: &zkm_core_machine::reduce::ZKMReduceProof<CompressedSC>,
+        vk: &zkm_pcs::StarkVerifyingKey<CoreSC>,
         vk_hash: [u32; 8],
         committed_value_digest: [u32; 8],
-    ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>> {
+    ) -> Result<(), MachineVerificationError<CompressedSC>> {
         if vk.hash_u32() != vk_hash {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "vk hash from syscall does not match vkey from input",

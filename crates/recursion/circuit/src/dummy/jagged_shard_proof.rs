@@ -154,6 +154,7 @@ pub fn dummy_jagged_shard_proof<F, EF, A>(
     chip_heights_pairs: &[(String, usize)],
     max_log_row_count: usize,
     pins: Option<zkm_pcs::jagged::RecursionPins>,
+    profile: zkm_pcs::whir::jagged::WhirProfile,
 ) -> JaggedShardProof<F, EF>
 where
     F: Field + Copy + PrimeCharacteristicRing,
@@ -222,36 +223,39 @@ where
         })
         .collect();
 
-    let evaluation_proof =
-        {
-            let heights: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
-            let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
-            name_sorted.sort_by_key(|a| MachineAir::<F>::name(**a));
-            let chip_dims: Vec<(usize, usize)> = name_sorted
-                .iter()
-                .map(|chip| {
-                    let name = MachineAir::<F>::name(**chip);
-                    let w = <_ as BaseAir<F>>::width(&chip.air);
-                    let rows = heights.get(&name).copied().unwrap_or(0);
-                    (w, rows)
-                })
-                .collect();
-            let prep_dims: Vec<(usize, usize)> = name_sorted
-                .iter()
-                .filter_map(|chip| {
-                    let w = MachineAir::<F>::preprocessed_width(**chip);
-                    if w == 0 {
-                        return None;
-                    }
-                    let name = MachineAir::<F>::name(**chip);
-                    let rows = heights.get(&name).copied().unwrap_or(0);
-                    Some((w, rows))
-                })
-                .collect();
-            zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(
-                dummy_jagged_basefold_bundle(&prep_dims, &chip_dims, max_log_row_count, pins),
-            )
-        };
+    let evaluation_proof = {
+        let heights: BTreeMap<String, usize> = chip_heights_pairs.iter().cloned().collect();
+        let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
+        name_sorted.sort_by_key(|a| MachineAir::<F>::name(**a));
+        let chip_dims: Vec<(usize, usize)> = name_sorted
+            .iter()
+            .map(|chip| {
+                let name = MachineAir::<F>::name(**chip);
+                let w = <_ as BaseAir<F>>::width(&chip.air);
+                let rows = heights.get(&name).copied().unwrap_or(0);
+                (w, rows)
+            })
+            .collect();
+        let prep_dims: Vec<(usize, usize)> = name_sorted
+            .iter()
+            .filter_map(|chip| {
+                let w = MachineAir::<F>::preprocessed_width(**chip);
+                if w == 0 {
+                    return None;
+                }
+                let name = MachineAir::<F>::name(**chip);
+                let rows = heights.get(&name).copied().unwrap_or(0);
+                Some((w, rows))
+            })
+            .collect();
+        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(dummy_jagged_basefold_bundle(
+            &prep_dims,
+            &chip_dims,
+            max_log_row_count,
+            pins,
+            profile,
+        ))
+    };
 
     let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) = match &evaluation_proof
     {
@@ -357,6 +361,7 @@ pub fn dummy_jagged_basefold_bundle(
     chip_dims: &[(usize, usize)],
     max_log_row_count: usize,
     pins: Option<zkm_pcs::jagged::RecursionPins>,
+    profile: zkm_pcs::whir::jagged::WhirProfile,
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedPcsProof {
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
@@ -554,7 +559,7 @@ pub fn dummy_jagged_basefold_bundle(
             },
             batch_evaluations: Vec::new(),
         };
-        (empty, Some(dummy_stacked_whir_proof(log_stacking, &round_stripes)))
+        (empty, Some(dummy_stacked_whir_proof(log_stacking, &round_stripes, profile)))
     } else {
         (stacked, None)
     };
@@ -630,6 +635,7 @@ pub fn dummy_jagged_basefold_bundle(
 fn dummy_stacked_whir_proof(
     log_stacking: usize,
     round_stripes: &[usize],
+    profile: zkm_pcs::whir::jagged::WhirProfile,
 ) -> zkm_pcs::whir::stacked::StackedWhirProof<
     zkm_pcs::InnerVal,
     zkm_pcs::InnerChallenge,
@@ -646,7 +652,7 @@ fn dummy_stacked_whir_proof(
     type EF = InnerChallenge;
     const D: usize = 4;
 
-    let config = zkm_pcs::whir::jagged::core_whir_config(log_stacking);
+    let config = zkm_pcs::whir::jagged::whir_config_for_profile(profile, log_stacking);
     let rounds = &config.round_parameters;
     let num_rounds = rounds.len();
     let ff0 = rounds[0].folding_factor;
@@ -808,7 +814,13 @@ mod tests {
 
         let max_log_row_count = 8usize;
 
-        let dummy_bundle = dummy_jagged_basefold_bundle(&[], chip_dims, max_log_row_count, None);
+        let dummy_bundle = dummy_jagged_basefold_bundle(
+            &[],
+            chip_dims,
+            max_log_row_count,
+            None,
+            zkm_pcs::whir::jagged::WhirProfile::Core,
+        );
         let (dummy_rc, dummy_pcc) = derive_row_and_padding_counts(
             &dummy_bundle.packing.column_counts,
             &dummy_bundle.packing.offsets,

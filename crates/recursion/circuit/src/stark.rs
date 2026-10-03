@@ -7,7 +7,7 @@ use p3_koala_bear::KoalaBear;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{air::MachineAir, StarkMachine, StarkVerifyingKey};
 use zkm_pcs::{
-    koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape, Chip, InnerChallenge,
+    koala_bear_poseidon2::KoalaBearPoseidon2Ring, shape::OrderedShape, Chip, InnerChallenge,
 };
 
 use crate::{fri::dummy_commit, hash::FieldHasherVariable, CircuitConfig};
@@ -34,16 +34,16 @@ use crate::{fri::dummy_commit, hash::FieldHasherVariable, CircuitConfig};
 /// A dummy (vk, shard proof) for a CORE child at `shape`, whose values are
 /// LOG2 heights (the core cluster shapes: every core trace in a cluster is
 /// padded to a power of two).
-pub fn dummy_basefold_vk_and_shard_proof<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2, A>,
+pub fn dummy_basefold_vk_and_shard_proof<const P: u8, A>(
+    machine: &StarkMachine<KoalaBearPoseidon2Ring<P>, A>,
     shape: &OrderedShape,
 ) -> (
-    StarkVerifyingKey<KoalaBearPoseidon2>,
+    StarkVerifyingKey<KoalaBearPoseidon2Ring<P>>,
     zkm_pcs::shard_level::shard_proof::JaggedShardProof<KoalaBear, InnerChallenge>,
 )
 where
     A: MachineAir<KoalaBear>
-        + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+        + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2Ring<P>>>,
 {
     let rows: Vec<(String, usize)> =
         shape.inner.iter().map(|(name, log_h)| (name.clone(), 1usize << *log_h)).collect();
@@ -54,16 +54,16 @@ where
 /// (name, row count) — the RECURSION children, whose one shape pins every
 /// chip to a multiple-of-32 row count (`next_multiple_of_32_rows`), not a
 /// power of two.  `ZKMCompressShape::proof_shapes` carries ROWS.
-pub fn dummy_basefold_vk_and_shard_proof_rows<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2, A>,
+pub fn dummy_basefold_vk_and_shard_proof_rows<const P: u8, A>(
+    machine: &StarkMachine<KoalaBearPoseidon2Ring<P>, A>,
     rows: &[(String, usize)],
 ) -> (
-    StarkVerifyingKey<KoalaBearPoseidon2>,
+    StarkVerifyingKey<KoalaBearPoseidon2Ring<P>>,
     zkm_pcs::shard_level::shard_proof::JaggedShardProof<KoalaBear, InnerChallenge>,
 )
 where
     A: MachineAir<KoalaBear>
-        + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+        + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2Ring<P>>>,
 {
     use zkm_pcs::shard_level::ceil_log2;
     use zkm_pcs::shard_level::verifier::JaggedShardVerifier;
@@ -98,6 +98,7 @@ where
         &chip_heights_pairs,
         max_log_row_count,
         machine.pins_for_rows(&chip_heights_pairs),
+        <KoalaBearPoseidon2Ring<P> as zkm_pcs::BasefoldRing>::WHIR_PROFILE,
     );
 
     let chip_ordering = chip_heights_pairs
@@ -194,7 +195,7 @@ pub mod tests {
             ("Bitwise".to_string(), 3),
         ]);
         let (vk, proof) =
-            super::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(&machine, &shape);
+            super::dummy_basefold_vk_and_shard_proof::<_, MipsAir<KoalaBear>>(&machine, &shape);
         assert_eq!(
             vk.chip_ordering.len(),
             shape.inner.len(),

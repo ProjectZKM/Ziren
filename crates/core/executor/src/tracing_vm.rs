@@ -125,7 +125,7 @@ impl<'a> TracingVM<'a> {
         chunk: &TraceChunk,
         input_stream: &[Vec<u8>],
         proof_stream: &[(
-            crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+            crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress>,
             zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
         )],
     ) -> Result<(), ExecutionError> {
@@ -371,7 +371,7 @@ pub fn drive_tracing_vm_parallel_with_streams(
     trace: &MinimalTrace,
     input_stream: &[Vec<u8>],
     proof_stream: &[(
-        crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+        crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress>,
         zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
     )],
 ) -> Result<Vec<ExecutionRecord>, ExecutionError> {
@@ -387,7 +387,7 @@ pub fn drive_tracing_vm_parallel_with_shapes(
     trace: &MinimalTrace,
     input_stream: &[Vec<u8>],
     proof_stream: &[(
-        crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+        crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress>,
         zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
     )],
     maximal_shapes: Option<MaximalShapes>,

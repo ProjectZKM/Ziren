@@ -231,6 +231,153 @@ pub fn min_queries(log_inv_rate: usize, pow: usize) -> usize {
     ((per_component_target_bits() - pow as f64) / bits_per_query(log_inv_rate)).ceil() as usize
 }
 
+/// Which schedule a ring proves and verifies under.
+///
+/// The profile is a property of a stage's ring type
+/// (`BasefoldRing::WHIR_PROFILE`), never of a proof: prover and verifier both
+/// derive the schedule from their own ring and the committed stacking height,
+/// so a proof cannot name a weaker schedule than the stage it claims to be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WhirProfile {
+    /// The schedule of the core shards, tuned for prover time: first rate
+    /// `2^-2`, unique-decoding query accounting, folds `[3, 6, 6, …]`, no
+    /// folding grind ([`core_whir_config`]).
+    Core,
+    /// The schedule of the recursion stages, tuned for the size of the
+    /// published proof: by default first rate `2^-3`, Johnson-bound query
+    /// accounting, folds `[2, 6, 6, …]`, and the folding and batching
+    /// challenges ground ([`compress_whir_config`]).  Every parameter can be
+    /// set for a different security requirement.
+    Compress,
+}
+
+/// The schedule of `profile` at stacking height `lsh`.
+pub fn whir_config_for_profile(profile: WhirProfile, lsh: usize) -> WhirConfig {
+    match profile {
+        WhirProfile::Core => core_whir_config(lsh),
+        WhirProfile::Compress => compress_whir_config(lsh),
+    }
+}
+
+/// `log2(1/rho)` of the compress schedule's first committed oracle, 3 by
+/// default.
+///
+/// The first rate is bounded by the field: the first oracle is the stacked
+/// polynomial encoded at `2^(lsh + rate)` points, which must fit the two-adic
+/// subgroup, `2^24` for KoalaBear.  At the default stacking height of 21,
+/// three is the lowest first rate the field admits.
+pub fn compress_log_inv_rate() -> usize {
+    crate::params::env_usize("ZIREN_COMPRESS_LOG_INV_RATE", 3)
+}
+
+/// The compress schedule's first folding factor, 2 by default.  A
+/// first-round query opens one coset row of every stripe, `2^k0` elements
+/// each, so halving `k0` halves the dominant term of the proof; the variables
+/// move to the later rounds, whose queries are fewer.
+pub fn compress_round0_folding() -> usize {
+    crate::params::env_usize("ZIREN_COMPRESS_ROUND0_FOLDING", 2)
+}
+
+/// The Johnson-bound multiplicity `m` the compress schedule counts queries
+/// with (BCHKS25, Theorem 4.2): the decoding radius is `1 - sqrt(rho) - eta`
+/// with `eta = sqrt(rho) / (2m)`, and the list size `(m + 1/2) / sqrt(rho)`
+/// enters the folding and batching terms, which is what their grinding pays
+/// for.  Zero selects the unique-decoding accounting of the core schedule.
+pub fn compress_johnson_m() -> usize {
+    crate::params::env_usize("ZIREN_COMPRESS_JOHNSON_M", 6)
+}
+
+/// Query-phase grinding of the compress schedule, in bits.
+pub fn compress_query_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_COMPRESS_QUERY_GRINDING_BITS", 26)
+}
+
+/// Grinding on every folding challenge of the compress schedule, in bits.
+///
+/// Under the Johnson bound the proximity-gap error of a fold carries the list
+/// size, `(m + 1/2) / sqrt(rho)`, and the degree of the folded polynomial; at
+/// `m = 6` and stacking height 21 the term sits near 79 bits without grinding
+/// and clears the per-component target with 27.
+pub fn compress_fold_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_COMPRESS_FOLD_GRINDING_BITS", 27)
+}
+
+/// Grinding on the stripe batching of the compress schedule, in bits; the
+/// batching term carries the same list size as the folds.
+pub fn compress_batch_grinding_bits() -> usize {
+    crate::params::env_usize("ZIREN_COMPRESS_BATCH_GRINDING_BITS", 27)
+}
+
+/// What one shift query is worth at rate `2^-log_inv_rate` under the Johnson
+/// bound with multiplicity `m`: the query misses a codeword at proximity
+/// `1 - sqrt(rho) - eta` with probability `sqrt(rho) + eta`, `eta = sqrt(rho) / (2m)`,
+/// so a query is worth `-log2(sqrt(rho) · (1 + 1/(2m)))` bits.
+pub fn bits_per_query_johnson(log_inv_rate: usize, m: usize) -> f64 {
+    let sqrt_rho = 2f64.powi(-(log_inv_rate as i32)).sqrt();
+    -(sqrt_rho * (1.0 + 1.0 / (2.0 * m as f64))).log2()
+}
+
+/// The least query count reaching [`per_component_target_bits`] at this rate
+/// under the compress schedule's accounting with `pow` bits of grinding.
+pub fn min_queries_compress(log_inv_rate: usize, pow: usize) -> usize {
+    let m = compress_johnson_m();
+    let bits =
+        if m == 0 { bits_per_query(log_inv_rate) } else { bits_per_query_johnson(log_inv_rate, m) };
+    ((per_component_target_bits() - pow as f64) / bits).ceil() as usize
+}
+
+/// The size-tuned schedule of the recursion stages at stacking height `lsh`,
+/// solved to the same per-component target as [`core_whir_config`].
+///
+/// Round `r` queries the codeword committed at `2^-(rate + 3r)`; the queries
+/// of each round are the least count reaching the target under the Johnson
+/// bound at [`compress_johnson_m`] with [`compress_query_grinding_bits`] of
+/// grinding, every folding challenge is ground
+/// [`compress_fold_grinding_bits`] and the batching challenge
+/// [`compress_batch_grinding_bits`].  At the defaults and `lsh = 21`:
+///
+/// ```text
+///   rho = 2^-3  : 58 · 1.3846 + 26 = 106.3
+///   rho = 2^-6  : 28 · 2.8845 + 26 = 106.8
+///   rho = 2^-9  : 19 · 4.3845 + 26 = 109.3
+///   rho = 2^-12 : 14 · 5.8845 + 26 = 108.4   (final polynomial)
+/// ```
+///
+/// against `[124, 88, 85, 85]` under the core schedule.  Folds are
+/// `[2, 6, 6]` with seven final variables.
+pub fn compress_whir_config(lsh: usize) -> WhirConfig {
+    let rate = compress_log_inv_rate();
+    assert!(
+        lsh + rate <= <JaggedVal as p3_field::TwoAdicField>::TWO_ADICITY,
+        "compress schedule: the first oracle at stacking height {lsh} and rate 2^-{rate} \
+         exceeds the field's two-adic subgroup",
+    );
+    let k0 = compress_round0_folding();
+    let mut rem =
+        lsh.checked_sub(k0).expect("stacking height must exceed the round-0 folding factor");
+    let mut folds = alloc::vec![k0];
+    while rem > 7 {
+        folds.push(6);
+        rem -= 6;
+    }
+    let mut config = whir_config_for_fold_schedule(lsh, &folds, rem);
+    config.starting_log_inv_rate = rate;
+    let num_rounds = config.round_parameters.len();
+    let pow = compress_query_grinding_bits();
+    let fold_pow = compress_fold_grinding_bits();
+    for (r, rp) in config.round_parameters.iter_mut().enumerate() {
+        rp.log_inv_rate = rate + 3 * (r + 1);
+        rp.num_queries = min_queries_compress(rate + 3 * r, pow);
+        rp.queries_pow_bits = pow;
+        rp.ood_samples = 2;
+        rp.pow_bits = alloc::vec![fold_pow; rp.folding_factor];
+    }
+    config.final_queries = min_queries_compress(rate + 3 * num_rounds, pow);
+    config.final_pow_bits = pow;
+    config.batch_pow_bits = compress_batch_grinding_bits();
+    config
+}
+
 /// Split the stacking interleave's width-`batch` stripes into width-1
 /// polynomials, in the SAME flat order BaseFold's `round_batch_evaluations`
 /// reports (stripe-major, then column: `eval_at` returns per-column evals).

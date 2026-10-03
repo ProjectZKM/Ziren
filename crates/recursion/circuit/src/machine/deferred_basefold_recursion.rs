@@ -8,7 +8,7 @@
 //! body; see [`super::compress_basefold_recursion`] for the parallel compress
 //! program.
 //!
-//! The builder accepts a `StarkMachine<KoalaBearPoseidon2,
+//! The builder accepts a `StarkMachine<KoalaBearPoseidon2Compress,
 //! RecursionAir<KoalaBear, DEGREE>>` and a [`ZKMDeferredBasefoldWitnessValues`]
 //! whose embedded `JaggedShardProof` was produced over recursion-AIR traces;
 //! `RecursionAir<F, DEGREE>` satisfies `Air<ShardConstraintFolder>` via the
@@ -16,7 +16,7 @@
 
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::air::MachineAir;
-use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2Compress;
 use zkm_pcs::StarkMachine;
 use zkm_primitives::types::RecursionProgramType;
 use zkm_recursion_compiler::circuit::AsmCompiler;
@@ -35,8 +35,8 @@ use super::deferred_basefold::{verify_deferred_basefold, ZKMDeferredBasefoldWitn
 /// The verifier body is shared with the MIPS path — see the parallel
 /// scaffold module for the architectural rationale.
 pub fn build_deferred_basefold_recursion_program<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2, A>,
-    input: &ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2>,
+    machine: &StarkMachine<KoalaBearPoseidon2Compress, A>,
+    input: &ZKMDeferredBasefoldWitnessValues<KoalaBearPoseidon2Compress>,
     max_log_row_count: usize,
     value_assertions: bool,
 ) -> RecursionProgram<KoalaBear>
@@ -49,7 +49,7 @@ where
     let builder_span = tracing::debug_span!("build deferred-basefold-recursion program").entered();
     let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Deferred);
     let input_var = input.read(&mut builder);
-    verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
+    verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2Compress, A>(
         &mut builder,
         input_var,
         machine,
@@ -77,7 +77,10 @@ mod tests {
     /// drift across upstream refactors.
     #[test]
     fn shares_verifier_body_with_mips_path() {
-        let _ =
-            verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2, RecursionAir<KoalaBear, 9>>;
+        let _ = verify_deferred_basefold::<
+            InnerConfig,
+            KoalaBearPoseidon2Compress,
+            RecursionAir<KoalaBear, 9>,
+        >;
     }
 }

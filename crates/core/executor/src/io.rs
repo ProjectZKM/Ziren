@@ -1,7 +1,10 @@
 use std::io::Read;
 
 use serde::{de::DeserializeOwned, Serialize};
-use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey};
+use zkm_pcs::{
+    koala_bear_poseidon2::{KoalaBearPoseidon2, KoalaBearPoseidon2Compress},
+    StarkVerifyingKey,
+};
 
 use super::Executor;
 use crate::ZKMReduceProof;
@@ -36,7 +39,7 @@ impl Executor<'_> {
     /// Write a proof and verifying key to the proof stream.
     pub fn write_proof(
         &mut self,
-        proof: ZKMReduceProof<KoalaBearPoseidon2>,
+        proof: ZKMReduceProof<KoalaBearPoseidon2Compress>,
         vk: StarkVerifyingKey<KoalaBearPoseidon2>,
     ) {
         self.state.proof_stream.push((proof, vk));

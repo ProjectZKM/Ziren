@@ -92,6 +92,11 @@ pub fn transcript_profile() -> alloc::vec::Vec<ProfileEntry> {
             "basefold.wrap_query_grinding_bits",
             crate::basefold::config::wrap_query_grinding_bits() as u64
         ),
+        // Which recursion proofs the compress schedule applies to: 1 = the
+        // root only (the closing compose), every other node on the core
+        // schedule.  The same two schedules applied to a different set of
+        // nodes give a different key map, so the scope is pinned with them.
+        ("recursion.compress_schedule_scope", 1),
         // Event orders.
         //
         // rev 1: BaseFold absorbs the per-stripe claim vector before batch grinding
@@ -145,6 +150,11 @@ pub fn transcript_profile_digest() -> [JaggedVal; 8] {
         &mut felts,
         &crate::whir::jagged::core_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
     );
+    absorb_whir_config(
+        &mut felts,
+        &crate::whir::jagged::compress_whir_config(DEFAULT_LOG_STACKING_HEIGHT as usize),
+    );
+    felts.push(JaggedVal::from_canonical_usize(crate::jagged::RecursionPins::ROOT_CLASS));
     absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::from_env_or_default());
     absorb_fri_config(&mut felts, &crate::basefold::FriConfig::<JaggedVal>::wrap_fri_config());
 
@@ -307,7 +317,7 @@ mod tests {
     fn profile_digest_is_pinned() {
         assert_eq!(
             transcript_profile_digest_hex(),
-            "6a40de2d0355a10a6c28059c2ec0c21865e8112d05b51a892bf94ecd50826ea5",
+            "10521b33215c265a03db6744526f9e696bf41ec428c92f3c47869a1c3418efbf",
             "the transcript profile changed -- see this test's documentation",
         );
     }

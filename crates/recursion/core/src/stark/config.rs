@@ -266,6 +266,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
             Self::bf_mmcs(),
             std::sync::Arc::new(zkm_pcs::jagged_pcs::JaggedDft::default()),
             Self::fri_config(),
+            Self::WHIR_PROFILE,
         );
         zkm_pcs::shard_level::shard_proof::EvaluationProof::Bytes(bundle.to_bytes())
     }
@@ -663,7 +664,15 @@ mod basefold_over_bn254_roundtrip_test {
             OuterValMmcs,
             OuterDft,
             BasefoldDenseOpen,
-        >(&rounds, &z_row, &mut p_chal, mmcs.clone(), dft, fri.clone());
+        >(
+            &rounds,
+            &z_row,
+            &mut p_chal,
+            mmcs.clone(),
+            dft,
+            fri.clone(),
+            zkm_pcs::whir::jagged::WhirProfile::Core,
+        );
 
         let chip_widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
         let (chip_infos, r_row_v, z_row_v) =
@@ -856,7 +865,15 @@ mod basefold_over_bn254_roundtrip_test {
             OuterValMmcs,
             OuterDft,
             BasefoldDenseOpen,
-        >(&rounds, &z_row, &mut p_chal, mmcs.clone(), dft, fri.clone());
+        >(
+            &rounds,
+            &z_row,
+            &mut p_chal,
+            mmcs.clone(),
+            dft,
+            fri.clone(),
+            zkm_pcs::whir::jagged::WhirProfile::Core,
+        );
 
         assert_eq!(bundle.preceding_commits.len(), 1);
         assert_eq!(format!("{:?}", bundle.preceding_commits[0]), format!("{prep_root:?}"));

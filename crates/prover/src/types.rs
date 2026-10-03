@@ -21,7 +21,7 @@ use zkm_pcs::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey
 
 use crate::{
     utils::{koalabears_to_bn254, words_to_bytes_be},
-    CoreSC, InnerSC,
+    CompressedSC, CoreSC, InnerSC,
 };
 
 /// The information necessary to generate a proof for a given MIPS program.
@@ -239,11 +239,11 @@ pub enum ZKMCircuitWitness {
     /// Basefold-shape normalize input — consumes `JaggedShardProof`s from
     /// the core prover (carried on `ShardProof.jagged_shard_proof`).
     /// Dispatches to `build_normalize_basefold_program` during compress.
-    CoreBasefold(ZKMCoreBasefoldWitnessValues<InnerSC>),
+    CoreBasefold(ZKMCoreBasefoldWitnessValues<CoreSC>),
     /// Basefold-shape compose input — tree-reduction layer.
     /// Dispatches to `build_compose_basefold_program`.
     ComposeBasefold(ZKMCompressBasefoldWitnessValues<InnerSC>),
     /// Basefold-shape deferred input — verifies already-recursed deferred
     /// branches. Dispatches to `build_deferred_basefold_program`.
-    DeferredBasefold(ZKMDeferredBasefoldWitnessValues<InnerSC>),
+    DeferredBasefold(ZKMDeferredBasefoldWitnessValues<CompressedSC>),
 }

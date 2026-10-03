@@ -24,7 +24,7 @@ use zkm_pcs::{
 use zkm_recursion_core::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH};
 use zkm_recursion_core::machine::RecursionAir;
 
-use super::{HashableKey, InnerSC, ZKMVerifyingKey};
+use super::{CompressedSC, HashableKey, ZKMVerifyingKey};
 
 const COMPRESS_DEGREE: usize = 3;
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
@@ -48,8 +48,8 @@ pub static VK_MAP: Lazy<&'static [u8]> = Lazy::new(|| {
 
 pub(crate) fn verify_stark_compressed_proof(
     vk: &ZKMVerifyingKey,
-    proof: &ZKMReduceProof<InnerSC>,
-) -> Result<(), MachineVerificationError<InnerSC>> {
+    proof: &ZKMReduceProof<CompressedSC>,
+) -> Result<(), MachineVerificationError<CompressedSC>> {
     let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
         bincode::deserialize(&VK_MAP).unwrap();
     let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> = allowed_vk_map.keys().copied().collect();
@@ -58,9 +58,9 @@ pub(crate) fn verify_stark_compressed_proof(
         "vk_map exceeds the fixed merkle capacity"
     );
     leaves.resize(1 << VK_MERKLE_TREE_HEIGHT, [KoalaBear::ZERO; DIGEST_SIZE]);
-    let (recursion_vk_root, _merkle_tree) = MerkleTree::<KoalaBear, InnerSC>::commit(leaves);
+    let (recursion_vk_root, _merkle_tree) = MerkleTree::<KoalaBear, CompressedSC>::commit(leaves);
 
-    let compress_machine = CompressAir::compress_machine(InnerSC::default());
+    let compress_machine = CompressAir::compress_machine(CompressedSC::default());
 
     let ZKMReduceProof { vk: compress_vk, proof } = proof;
 
@@ -103,7 +103,7 @@ pub(crate) fn verify_stark_compressed_proof(
 
 /// Check if the digest of the public values is correct.
 fn is_recursion_public_values_valid(
-    config: &InnerSC,
+    config: &CompressedSC,
     public_values: &RecursionPublicValues<KoalaBear>,
 ) -> bool {
     let expected_digest = recursion_public_values_digest(config, public_values);
@@ -117,7 +117,7 @@ fn is_recursion_public_values_valid(
 
 /// Compute the digest of the public values.
 pub(crate) fn recursion_public_values_digest(
-    config: &InnerSC,
+    config: &CompressedSC,
     public_values: &RecursionPublicValues<KoalaBear>,
 ) -> [KoalaBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
@@ -131,7 +131,7 @@ pub(crate) trait FieldHasher<F: Field> {
     fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest;
 }
 
-impl FieldHasher<KoalaBear> for InnerSC {
+impl FieldHasher<KoalaBear> for CompressedSC {
     type Digest = [KoalaBear; DIGEST_SIZE];
 
     fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest {

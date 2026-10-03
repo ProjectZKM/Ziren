@@ -15,20 +15,20 @@
 
 The layout is applied separately to every input-commitment round of Section~\ref{sec:pcs-stacking}; the roots are not merged. Within a root the stripes are grouped 32 to a leaf, so a leaf of the first oracle authenticates one coset row from each stripe, $32 \times 2^{k_0}$ field elements. The first folding factor $k_0$ is therefore small: leaf width multiplies every first-round query, and re-hashing those leaves is the recursion verifier's dominant cost. Later rounds query a single folded polynomial and fold more variables at a time. Each committed round re-encodes the folded polynomial at its new rate; the opening of a \texttt{reth} shard costs about 39\,ms of host-visible time on the GPU with device-resident rounds, the round-0 re-encoding being the largest term. No proof-of-work is spent on folding challenges; grinding is spent only on the query phases and on the batching and \LogUp{} challenges.
 
-Table~\ref{tab:whir-schedule} gives the analysed schedule. The first oracle has rate $2^{-2}$, and each recommitment lowers the rate by three powers of two. At log stacking height 21 the three folds consume 15 variables, and the remaining six-variable polynomial is sent in the clear after its final query phase.
+Table~\ref{tab:whir-schedule} gives one schedule, the one the soundness accounting of \S\ref{sec:iopp-soundness} is computed for; \S\ref{sec:perf-proofsize} describes how the schedule controls proof size. Each recommitment lowers the rate by three powers of two. The core schedule is tuned for prover time: the first oracle has rate $2^{-2}$, and at log stacking height 21 the three folds consume 15 variables, the remaining six-variable polynomial being sent in the clear after its final query phase. The compress schedule, under which the root of the recursion tree proves, is tuned for the size of the published proof: it starts at $2^{-3}$, the lowest rate the two-adicity of \KB{} admits at this stacking height, counts queries under the Johnson bound, folds two variables first so that a first-round query opens half the leaf, and grinds every folding and batching challenge, which the list size of the Johnson-bound analysis requires. Each of its parameters is a setting, so a deployment with a different security requirement changes the schedule, not the prover.
 
 \begin{table}[t]
 \centering
 \small
-\caption{The analysed Jagged--\WHIR{} schedule. OOD entries count samples after committed folds; no folding challenge is ground. The stripe bound covers both ordered input-commitment rounds.}
+\caption{The Jagged--\WHIR{} schedules \S\ref{sec:iopp-soundness} accounts for: the core schedule, tuned for prover time, and the compress schedule, tuned for proof size. Analysis is the regime queries are counted in. OOD entries count samples after committed folds; the fold grind applies to every folding challenge. The stripe bound covers both ordered input-commitment rounds.}
 \label{tab:whir-schedule}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{lcccccccc}
+\begin{tabular}{lccccccccccc}
 \toprule
-Profile & folds & queries & OOD & query grind & batch grind & \LogUp{} grind & stripe bound & final variables \\
+Profile & first rate & analysis & folds & queries & OOD & query grind & fold grind & batch grind & \LogUp{} grind & stripe bound & final variables \\
 \midrule
-core & $[3,6,6]$ & $[124,88,85]$ & $[2,2]$ & 22 bits & 14 bits & 22 bits & 256 & 6 \\
-compress & $[3,6,6]$ & $[124,88,85]$ & $[2,2]$ & 22 bits & 14 bits & 22 bits & 64 & 6 \\
+core & $2^{-2}$ & unique decoding & $[3,6,6]$ & $[124,88,85]$ & $[2,2]$ & 22 bits & 0 & 14 bits & 22 bits & 256 & 6 \\
+compress & $2^{-3}$ & Johnson, $m=6$ & $[2,6,6]$ & $[58,28,19]$ & $[2,2]$ & 26 bits & 27 bits & 27 bits & 22 bits & 64 & 7 \\
 \bottomrule
 \end{tabular}}
 \end{table}
