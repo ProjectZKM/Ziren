@@ -37,14 +37,15 @@ pub const WRITE: BusName<'static> = BusName::new("write");
 /// multiply table.
 pub const MUL: BusName<'static> = BusName::new("mul");
 
-/// The channel a permutation's state travels on from round to round.
-pub const POSEIDON2: BusName<'static> = BusName::new("poseidon2");
+/// The channel a Blake3 compression's state and message words travel on
+/// from round to round.
+pub const BLAKE3: BusName<'static> = BusName::new("blake3");
 
-/// Bits of a permutation's identity on that channel.
+/// Bits of a Blake3 round index on that channel.
+pub const BLAKE3_ROUND_BITS: usize = 3;
+
+/// Bits of a compression's identity on that channel.
 pub const PERMUTATION_ID_BITS: usize = 24;
-
-/// Bits of a round index on that channel.
-pub const ROUND_BITS: usize = 5;
 
 /// A memory block as integers.
 pub type Cell = [u32; 4];
@@ -160,17 +161,19 @@ pub fn request_mul<AB: MachineBuilder<F = F>>(
     );
 }
 
-/// The bus tuple of a permutation's state at a round: the identity and the
-/// round in one field, the sixteen lanes in four.
+/// The bus tuple of a Blake3 compression at a round: the identity and the
+/// round in one field, the sixteen state words in four and the sixteen
+/// message words in four more.
 #[must_use]
-pub fn state_tuple<AB: AirBuilder<F = F>>(
+pub fn blake3_tuple<AB: AirBuilder<F = F>>(
     id: &[AB::Expr; PERMUTATION_ID_BITS],
-    round: &[AB::Expr; ROUND_BITS],
-    state: &[[AB::Expr; KB_BITS]; 16],
+    round: &[AB::Expr; BLAKE3_ROUND_BITS],
+    state: &[[AB::Expr; 32]; 16],
+    words: &[[AB::Expr; 32]; 16],
 ) -> Vec<AB::Expr> {
     let header: Vec<AB::Expr> = id.iter().chain(round.iter()).cloned().collect();
     let mut tuple = vec![pack_field::<AB>(&header)];
-    for lanes in state.chunks(4) {
+    for lanes in state.chunks(4).chain(words.chunks(4)) {
         let block: Vec<AB::Expr> = lanes.iter().flatten().cloned().collect();
         tuple.push(pack_field::<AB>(&block));
     }

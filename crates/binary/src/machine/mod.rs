@@ -11,10 +11,10 @@
 pub mod alu_base;
 pub mod alu_ext;
 pub mod bits;
+pub mod blake3;
 pub mod ledger;
 pub mod memory;
 pub mod mul;
-pub mod poseidon2;
 pub mod public_values;
 pub mod select;
 
@@ -36,10 +36,10 @@ use zkm_recursion_core::{ExecutionRecord, Instruction, RecursionProgram, DIGEST_
 use self::alu_base::BaseAluAir;
 use self::alu_ext::ExtAluAir;
 use self::bits::Cell;
+use self::blake3::{Blake3IoAir, Blake3RoundAir, Compressions};
 use self::ledger::LedgerAir;
 use self::memory::{MemoryConstAir, MemoryVarAir};
 use self::mul::MulAir;
-use self::poseidon2::{Permutations, Poseidon2ExternalAir, Poseidon2InternalAir, Poseidon2IoAir};
 use self::public_values::{public_value, PublicValuesAir};
 use self::select::SelectAir;
 use crate::config::{MachineConfig, MachineConfigError, MachineProof};
@@ -54,9 +54,8 @@ pub enum RecursionAir {
     BaseAlu(BaseAluAir),
     ExtAlu(ExtAluAir),
     Select(SelectAir),
-    Poseidon2Io(Poseidon2IoAir),
-    Poseidon2External(Poseidon2ExternalAir),
-    Poseidon2Internal(Poseidon2InternalAir),
+    Blake3Io(Blake3IoAir),
+    Blake3Round(Blake3RoundAir),
     PublicValues(PublicValuesAir),
     Mul(MulAir),
 }
@@ -72,9 +71,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.log_height(),
             Self::ExtAlu(air) => air.log_height(),
             Self::Select(air) => air.log_height(),
-            Self::Poseidon2Io(air) => air.log_height(),
-            Self::Poseidon2External(air) => air.log_height(),
-            Self::Poseidon2Internal(air) => air.log_height(),
+            Self::Blake3Io(air) => air.log_height(),
+            Self::Blake3Round(air) => air.log_height(),
             Self::PublicValues(air) => air.log_height(),
             Self::Mul(air) => air.log_height(),
         }
@@ -90,9 +88,8 @@ impl RecursionAir {
             Self::BaseAlu(_) => "BaseAlu",
             Self::ExtAlu(_) => "ExtAlu",
             Self::Select(_) => "Select",
-            Self::Poseidon2Io(_) => "Poseidon2Io",
-            Self::Poseidon2External(_) => "Poseidon2External",
-            Self::Poseidon2Internal(_) => "Poseidon2Internal",
+            Self::Blake3Io(_) => "Blake3Io",
+            Self::Blake3Round(_) => "Blake3Round",
             Self::PublicValues(_) => "PublicValues",
             Self::Mul(_) => "Mul",
         }
@@ -107,11 +104,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.writes(),
             Self::ExtAlu(air) => air.writes(),
             Self::Select(air) => air.writes(),
-            Self::Poseidon2Io(air) => air.writes(),
-            Self::Poseidon2External(_)
-            | Self::Poseidon2Internal(_)
-            | Self::PublicValues(_)
-            | Self::Mul(_) => Vec::new(),
+            Self::Blake3Io(air) => air.writes(),
+            Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) => Vec::new(),
         }
     }
 
@@ -120,7 +114,6 @@ impl RecursionAir {
         match self {
             Self::BaseAlu(air) => air.instruction_count(),
             Self::ExtAlu(air) => crate::ext::EXT_MUL_REQUESTS * air.instruction_count(),
-            Self::Poseidon2Io(air) => air.mul_request_count(),
             _ => 0,
         }
     }
@@ -130,7 +123,6 @@ impl RecursionAir {
         match self {
             Self::BaseAlu(air) => air.mul_requests(record),
             Self::ExtAlu(air) => air.mul_requests(record),
-            Self::Poseidon2Io(air) => air.mul_requests(record),
             _ => Vec::new(),
         }
     }
@@ -144,11 +136,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.written_values(record),
             Self::ExtAlu(air) => air.written_values(record),
             Self::Select(air) => air.written_values(record),
-            Self::Poseidon2Io(air) => air.written_values(record),
-            Self::Poseidon2External(_)
-            | Self::Poseidon2Internal(_)
-            | Self::PublicValues(_)
-            | Self::Mul(_) => Vec::new(),
+            Self::Blake3Io(air) => air.written_values(record),
+            Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) => Vec::new(),
         }
     }
 
@@ -167,9 +156,8 @@ impl RecursionAir {
             Self::BaseAlu(air) => air.main_table(record),
             Self::ExtAlu(air) => air.main_table(record),
             Self::Select(air) => air.main_table(record),
-            Self::Poseidon2Io(air) => air.main_table(record),
-            Self::Poseidon2External(air) => air.main_table(record),
-            Self::Poseidon2Internal(air) => air.main_table(record),
+            Self::Blake3Io(air) => air.main_table(record),
+            Self::Blake3Round(air) => air.main_table(record),
             Self::PublicValues(air) => air.main_table(record),
             Self::Mul(air) => air.main_table(requests),
         }
@@ -185,9 +173,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => BaseAir::<X>::width(air),
             Self::ExtAlu(air) => BaseAir::<X>::width(air),
             Self::Select(air) => BaseAir::<X>::width(air),
-            Self::Poseidon2Io(air) => BaseAir::<X>::width(air),
-            Self::Poseidon2External(air) => BaseAir::<X>::width(air),
-            Self::Poseidon2Internal(air) => BaseAir::<X>::width(air),
+            Self::Blake3Io(air) => BaseAir::<X>::width(air),
+            Self::Blake3Round(air) => BaseAir::<X>::width(air),
             Self::PublicValues(air) => BaseAir::<X>::width(air),
             Self::Mul(air) => BaseAir::<X>::width(air),
         }
@@ -201,9 +188,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => BaseAir::<X>::preprocessed_width(air),
             Self::ExtAlu(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Select(air) => BaseAir::<X>::preprocessed_width(air),
-            Self::Poseidon2Io(air) => BaseAir::<X>::preprocessed_width(air),
-            Self::Poseidon2External(air) => BaseAir::<X>::preprocessed_width(air),
-            Self::Poseidon2Internal(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Blake3Io(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Blake3Round(air) => BaseAir::<X>::preprocessed_width(air),
             Self::PublicValues(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Mul(air) => BaseAir::<X>::preprocessed_width(air),
         }
@@ -224,9 +210,8 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::BaseAlu(air) => air.preprocessed_trace(),
             Self::ExtAlu(air) => air.preprocessed_trace(),
             Self::Select(air) => air.preprocessed_trace(),
-            Self::Poseidon2Io(air) => air.preprocessed_trace(),
-            Self::Poseidon2External(air) => air.preprocessed_trace(),
-            Self::Poseidon2Internal(air) => air.preprocessed_trace(),
+            Self::Blake3Io(air) => air.preprocessed_trace(),
+            Self::Blake3Round(air) => air.preprocessed_trace(),
             Self::PublicValues(air) => air.preprocessed_trace(),
             Self::Mul(air) => air.preprocessed_trace(),
         }
@@ -242,9 +227,8 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for RecursionAir {
             Self::BaseAlu(air) => air.eval(builder),
             Self::ExtAlu(air) => air.eval(builder),
             Self::Select(air) => air.eval(builder),
-            Self::Poseidon2Io(air) => air.eval(builder),
-            Self::Poseidon2External(air) => air.eval(builder),
-            Self::Poseidon2Internal(air) => air.eval(builder),
+            Self::Blake3Io(air) => air.eval(builder),
+            Self::Blake3Round(air) => air.eval(builder),
             Self::PublicValues(air) => air.eval(builder),
             Self::Mul(air) => air.eval(builder),
         }
@@ -299,28 +283,28 @@ impl RecursionMachine {
                 Instruction::BaseAlu(_)
                 | Instruction::ExtAlu(_)
                 | Instruction::Select(_)
-                | Instruction::Poseidon2(_)
                 | Instruction::CommitPublicValues(_)
                 | Instruction::Mem(_)
                 | Instruction::Hint(_)
                 | Instruction::HintBits(_)
                 | Instruction::HintExt2Felts(_)
+                | Instruction::Blake3Compress(_)
                 | Instruction::Print(_) => continue,
                 Instruction::HintAddCurve(_) => "curve hints",
                 Instruction::Ext2Felts(_) => "Ext2Felts",
+                Instruction::Poseidon2(_) => "Poseidon2",
             };
             return Err(MachineError::Unsupported(unsupported));
         }
-        let permutations = std::sync::Arc::new(Permutations::new(program));
+        let compressions = std::sync::Arc::new(Compressions::new(program));
         let tables = vec![
             RecursionAir::MemoryConst(MemoryConstAir::new(program)),
             RecursionAir::MemoryVar(MemoryVarAir::new(program)),
             RecursionAir::BaseAlu(BaseAluAir::new(program)),
             RecursionAir::ExtAlu(ExtAluAir::new(program)),
             RecursionAir::Select(SelectAir::new(program)),
-            RecursionAir::Poseidon2Io(Poseidon2IoAir::new(permutations.clone())),
-            RecursionAir::Poseidon2External(Poseidon2ExternalAir::new(permutations.clone())),
-            RecursionAir::Poseidon2Internal(Poseidon2InternalAir::new(permutations)),
+            RecursionAir::Blake3Io(Blake3IoAir::new(compressions.clone())),
+            RecursionAir::Blake3Round(Blake3RoundAir::new(compressions)),
             RecursionAir::PublicValues(PublicValuesAir::new(program)),
         ];
         let writes: Vec<(u32, u32)> = tables.iter().flat_map(RecursionAir::writes).collect();
@@ -434,12 +418,12 @@ mod tests {
     use core::borrow::Borrow;
     use std::sync::Arc;
 
-    use p3_symmetric::Permutation;
     use zkm_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
 
     use p3_field::extension::BinomialExtensionField;
     use p3_field::BasedVectorSpace;
     use p3_field::PrimeCharacteristicRing;
+    use p3_field::PrimeField32;
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
     use zkm_pcs::StarkGenericConfig;
@@ -499,6 +483,113 @@ mod tests {
             RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
         program.total_memory = program.computed_total_memory();
         program
+    }
+
+    /// `n` compressions of constant limbs, each output limb checked against
+    /// the reference.
+    fn blake3_program(n: usize) -> RecursionProgram<KoalaBear> {
+        blake3_program_committing(n, [KoalaBear::ZERO; DIGEST_SIZE])
+    }
+
+    /// [`blake3_program`] committing a nonzero digest.
+    fn blake3_program_with_digest(n: usize) -> RecursionProgram<KoalaBear> {
+        blake3_program_committing(n, array::from_fn(|i| KoalaBear::from_u32(i as u32 + 1)))
+    }
+
+    fn blake3_program_committing(
+        n: usize,
+        digest: [KoalaBear; DIGEST_SIZE],
+    ) -> RecursionProgram<KoalaBear> {
+        use zkm_recursion_core::runtime::blake3::{compress, CHUNK_END, CHUNK_START, ROOT};
+        let values = elements(24 * n);
+        let mut addr = 0u32;
+        let mut instructions = Vec::new();
+        for i in 0..n {
+            let words: [u32; 24] = array::from_fn(|k| values[24 * i + k].as_canonical_u32());
+            let cv: [u32; 8] = array::from_fn(|k| words[k]);
+            let block: [u32; 16] = array::from_fn(|k| words[8 + k]);
+            let (block_len, flags) = (64u32, CHUNK_START | CHUNK_END | ROOT);
+            let output = compress(&cv, &block, 0, block_len, flags);
+            let limb = |w: u32, h: usize| KoalaBear::from_u32((w >> (16 * h)) & 0xffff);
+            let cv_addrs: [u32; 16] = array::from_fn(|k| addr + k as u32);
+            let block_addrs: [u32; 32] = array::from_fn(|k| addr + 16 + k as u32);
+            let out_addrs: [u32; 16] = array::from_fn(|k| addr + 48 + k as u32);
+            addr += 64;
+            for k in 0..16 {
+                instructions.push(instr::mem_single(
+                    MemAccessKind::Write,
+                    1,
+                    cv_addrs[k],
+                    limb(cv[k / 2], k % 2),
+                ));
+            }
+            for k in 0..32 {
+                instructions.push(instr::mem_single(
+                    MemAccessKind::Write,
+                    1,
+                    block_addrs[k],
+                    limb(block[k / 2], k % 2),
+                ));
+            }
+            instructions.push(instr::blake3_compress(
+                [1; 16],
+                out_addrs,
+                cv_addrs,
+                block_addrs,
+                block_len,
+                flags,
+            ));
+            for k in 0..16 {
+                instructions.push(instr::mem_single(
+                    MemAccessKind::Read,
+                    1,
+                    out_addrs[k],
+                    limb(output[k / 2], k % 2),
+                ));
+            }
+        }
+        instructions.extend(commit(addr, digest));
+        let mut program =
+            RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
+        program.total_memory = program.computed_total_memory();
+        program
+    }
+
+    /// Blake3 compressions prove through the real runtime, and a record
+    /// with a changed output limb does not.
+    #[test]
+    fn blake3_proves_and_tampering_fails() {
+        let program = Arc::new(blake3_program(3));
+        let record = run(&program);
+        let machine = RecursionMachine::new(&program, &BinarySchedule::default()).expect("machine");
+        for air in machine.airs() {
+            println!(
+                "{}: 2^{} rows x {} bits",
+                air.name(),
+                air.log_height(),
+                BaseAir::<F>::width(air)
+            );
+        }
+        let started = std::time::Instant::now();
+        let proof = machine.prove(&record).expect("the execution proves");
+        println!(
+            "blake3 x3: {} proof bytes, prove {:.1} s",
+            postcard::to_allocvec(&proof).expect("a proof serializes").len(),
+            started.elapsed().as_secs_f64()
+        );
+        print_breakdown(&proof);
+        let digest = PublicValuesAir::digest(&record);
+        machine.verify(&proof, &digest).expect("the execution verifies");
+
+        let mut wrong_output = record;
+        wrong_output.blake3_compress_events[0].io.output[3] += KoalaBear::ONE;
+        let rejected = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            machine.prove(&wrong_output)
+        })) {
+            Err(_) | Ok(Err(_)) => true,
+            Ok(Ok(proof)) => machine.verify(&proof, &digest).is_err(),
+        };
+        assert!(rejected, "a changed output must not verify");
     }
 
     /// Print each part of `proof` with its postcard bytes.
@@ -577,36 +668,6 @@ mod tests {
             .collect();
         instructions.push(instr::commit_public_values(pv_addrs));
         instructions
-    }
-
-    /// `n` permutations and a commitment of the last one's first eight
-    /// outputs, each output checked against the VM's permutation.
-    fn poseidon2_program(n: usize) -> RecursionProgram<KoalaBear> {
-        let perm = zkm_pcs::inner_perm();
-        let values = elements(16 * n);
-        let mut addr = 0u32;
-        let mut digest = [KoalaBear::ZERO; DIGEST_SIZE];
-        let mut instructions = Vec::new();
-        for i in 0..n {
-            let input: [KoalaBear; 16] = array::from_fn(|k| values[16 * i + k]);
-            let output = perm.permute(input);
-            let inputs: [u32; 16] = array::from_fn(|k| addr + k as u32);
-            let outputs: [u32; 16] = array::from_fn(|k| addr + 16 + k as u32);
-            addr += 32;
-            instructions.extend(
-                (0..16).map(|k| instr::mem_single(MemAccessKind::Write, 1, inputs[k], input[k])),
-            );
-            instructions.push(instr::poseidon2([1; 16], outputs, inputs));
-            instructions.extend(
-                (0..16).map(|k| instr::mem_single(MemAccessKind::Read, 1, outputs[k], output[k])),
-            );
-            digest = array::from_fn(|k| output[k]);
-        }
-        instructions.extend(commit(addr, digest));
-        let mut program =
-            RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
-        program.total_memory = program.computed_total_memory();
-        program
     }
 
     /// Print span timings when `RUST_LOG` asks for them.
@@ -749,13 +810,13 @@ mod tests {
         println!("verify {:.3} s", started.elapsed().as_secs_f64());
     }
 
-    /// Permutations and the digest commitment prove through the real
+    /// Compressions and the digest commitment prove through the real
     /// runtime; the proof does not verify against another digest, and a
-    /// record with a changed permutation output does not prove.
+    /// record with a changed compression output does not prove.
     #[test]
-    fn poseidon2_and_public_values_prove_and_tampering_fails() {
+    fn blake3_and_public_values_prove_and_tampering_fails() {
         profile();
-        let program = Arc::new(poseidon2_program(3));
+        let program = Arc::new(blake3_program_with_digest(3));
         let record = run(&program);
         let machine = RecursionMachine::new(&program, &BinarySchedule::default()).expect("machine");
         for air in machine.airs() {
@@ -769,7 +830,7 @@ mod tests {
         let started = std::time::Instant::now();
         let proof = machine.prove(&record).expect("the execution proves");
         println!(
-            "poseidon2 x3: {} proof bytes, prove {:.1} s",
+            "blake3 with digest x3: {} proof bytes, prove {:.1} s",
             postcard::to_allocvec(&proof).expect("a proof serializes").len(),
             started.elapsed().as_secs_f64()
         );
@@ -784,7 +845,7 @@ mod tests {
         assert!(machine.verify(&proof, &other).is_err(), "another digest must not verify");
 
         let mut wrong_output = record;
-        wrong_output.poseidon2_events[1].output[5] += KoalaBear::ONE;
+        wrong_output.blake3_compress_events[1].io.output[5] += KoalaBear::ONE;
         let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             match machine.prove(&wrong_output) {
                 Err(_) => true,
@@ -792,6 +853,6 @@ mod tests {
             }
         }))
         .unwrap_or(true);
-        assert!(rejected, "a changed permutation output must not verify");
+        assert!(rejected, "a changed compression output must not verify");
     }
 }
