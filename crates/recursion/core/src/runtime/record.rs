@@ -9,8 +9,8 @@ use crate::machine::RecursionAirEventCount;
 
 use super::{
     BaseAluEvent, BatchFRIEvent, Blake3CompressEvent, CommitPublicValuesEvent, ExpReverseBitsEvent,
-    ExtAluEvent, FriFoldEvent, MemEvent, Poseidon2Event, RecursionProgram, RecursionPublicValues,
-    SelectEvent,
+    ExtAluEvent, FeltLimbsEvent, FriFoldEvent, MemEvent, Poseidon2Event, RecursionProgram,
+    RecursionPublicValues, SelectEvent,
 };
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -38,6 +38,7 @@ pub struct ExecutionRecord<F> {
 
     pub poseidon2_events: Vec<Poseidon2Event<F>>,
     pub blake3_compress_events: Vec<Blake3CompressEvent<F>>,
+    pub felt_limbs_events: Vec<FeltLimbsEvent<F>>,
     pub select_events: Vec<SelectEvent<F>>,
     pub exp_reverse_bits_len_events: Vec<ExpReverseBitsEvent<F>>,
     pub fri_fold_events: Vec<FriFoldEvent<F>>,
@@ -61,6 +62,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
 
         stats.insert("poseidon2_events".to_string(), self.poseidon2_events.len());
         stats.insert("blake3_compress_events".to_string(), self.blake3_compress_events.len());
+        stats.insert("felt_limbs_events".to_string(), self.felt_limbs_events.len());
         stats.insert("exp_reverse_bits_events".to_string(), self.exp_reverse_bits_len_events.len());
         stats.insert("fri_fold_events".to_string(), self.fri_fold_events.len());
 
@@ -79,6 +81,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
             public_values: _,
             poseidon2_events,
             blake3_compress_events,
+            felt_limbs_events,
             select_events,
             exp_reverse_bits_len_events,
             fri_fold_events,
@@ -92,6 +95,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         ext2felt_events.append(&mut other.ext2felt_events);
         poseidon2_events.append(&mut other.poseidon2_events);
         blake3_compress_events.append(&mut other.blake3_compress_events);
+        felt_limbs_events.append(&mut other.felt_limbs_events);
         select_events.append(&mut other.select_events);
         exp_reverse_bits_len_events.append(&mut other.exp_reverse_bits_len_events);
         fri_fold_events.append(&mut other.fri_fold_events);
@@ -144,6 +148,7 @@ pub struct UnsafeRecord<F> {
     pub public_values: MaybeUninit<UnsafeCell<RecursionPublicValues<F>>>,
     pub poseidon2_events: Vec<MaybeUninit<UnsafeCell<Poseidon2Event<F>>>>,
     pub blake3_compress_events: Vec<MaybeUninit<UnsafeCell<Blake3CompressEvent<F>>>>,
+    pub felt_limbs_events: Vec<MaybeUninit<UnsafeCell<FeltLimbsEvent<F>>>>,
     pub select_events: Vec<MaybeUninit<UnsafeCell<SelectEvent<F>>>>,
     pub exp_reverse_bits_len_events: Vec<MaybeUninit<UnsafeCell<ExpReverseBitsEvent<F>>>>,
     pub fri_fold_events: Vec<MaybeUninit<UnsafeCell<FriFoldEvent<F>>>>,
@@ -181,6 +186,7 @@ impl<F> UnsafeRecord<F> {
             public_values: MaybeUninit::uninit(),
             poseidon2_events: create_uninit_vec(event_counts.poseidon2_wide_events),
             blake3_compress_events: create_uninit_vec(event_counts.blake3_compress_events),
+            felt_limbs_events: create_uninit_vec(event_counts.felt_limbs_events),
             select_events: create_uninit_vec(event_counts.select_events),
             exp_reverse_bits_len_events: create_uninit_vec(
                 event_counts.exp_reverse_bits_len_events,
@@ -234,6 +240,10 @@ impl<F> UnsafeRecord<F> {
                 Vec<MaybeUninit<UnsafeCell<Blake3CompressEvent<F>>>>,
                 Vec<Blake3CompressEvent<F>>,
             >(self.blake3_compress_events),
+            felt_limbs_events: std::mem::transmute::<
+                Vec<MaybeUninit<UnsafeCell<FeltLimbsEvent<F>>>>,
+                Vec<FeltLimbsEvent<F>>,
+            >(self.felt_limbs_events),
             select_events: std::mem::transmute::<
                 Vec<MaybeUninit<UnsafeCell<SelectEvent<F>>>>,
                 Vec<SelectEvent<F>>,

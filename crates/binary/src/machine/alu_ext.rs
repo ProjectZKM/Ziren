@@ -57,6 +57,8 @@ pub struct ExtAluAir {
     preprocessed: Vec<u8>,
     /// Whether each instruction checks on `(in1, in2)`, in order.
     direct: Vec<bool>,
+    /// Whether each instruction binds the product, in order.
+    binds_mul: Vec<bool>,
     /// `(address, reads)` of every result, in order.
     outputs: Vec<(u32, u32)>,
 }
@@ -75,6 +77,7 @@ impl ExtAluAir {
         let log_height = log_height_for(instrs.len());
         let mut preprocessed = vec![0u8; (1 << log_height) * NUM_ALU_PREP_COLS];
         let mut direct = Vec::with_capacity(instrs.len());
+        let mut binds_mul = Vec::with_capacity(instrs.len());
         let mut outputs = Vec::with_capacity(instrs.len());
         for (row, instr) in instrs.iter().enumerate() {
             let ExtAluInstr { opcode, mult, addrs } = instr;
@@ -97,9 +100,10 @@ impl ExtAluAir {
                 flags,
             );
             direct.push(flags.direct);
+            binds_mul.push(flags.binds_mul);
             outputs.push((addrs.out.0.as_canonical_u32(), mult));
         }
-        Self { log_height, preprocessed, direct, outputs }
+        Self { log_height, preprocessed, direct, binds_mul, outputs }
     }
 
     /// The log height of the table.
@@ -156,13 +160,24 @@ impl ExtAluAir {
         rows.into_table()
     }
 
-    /// The products the table asks for, nine per instruction.
+    /// How many products the table asks for, fixed by the program: nine per
+    /// instruction binding one.
+    #[must_use]
+    pub fn mul_request_count(&self) -> usize {
+        crate::ext::EXT_MUL_REQUESTS * self.binds_mul.iter().filter(|&&binds| binds).count()
+    }
+
+    /// The products the table asks for, nine per instruction binding one.
     #[must_use]
     pub fn mul_requests(&self, record: &ExecutionRecord<KoalaBear>) -> Vec<(u32, u32)> {
-        let mut requests =
-            Vec::with_capacity(crate::ext::EXT_MUL_REQUESTS * record.ext_alu_events.len());
+        let mut requests = Vec::with_capacity(self.mul_request_count());
         let mut row = vec![0u8; NUM_EXT_ALU_COLS];
-        for (event, &direct) in record.ext_alu_events.iter().zip(&self.direct) {
+        for (event, (&direct, _)) in record
+            .ext_alu_events
+            .iter()
+            .zip(self.direct.iter().zip(&self.binds_mul))
+            .filter(|(_, (_, &binds))| binds)
+        {
             fill_row(
                 cell_of(&event.in1),
                 cell_of(&event.in2),
@@ -246,7 +261,7 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for ExtAluAir {
         let x = ext_exprs::<AB>(&local.x);
         let y = ext_exprs::<AB>(&local.y);
         eval_ext_add(builder, &x, &y, &local.add);
-        eval_ext_mul(builder, &x, &y, &local.mul, prep_local.is_real.into());
+        eval_ext_mul(builder, &x, &y, &local.mul, prep_local.binds_mul.into());
         for k in 0..EXT_DEGREE {
             for i in 0..KB_BITS {
                 builder.when(prep_local.binds_add).assert_eq(local.add[k].out[i], local.z[k][i]);

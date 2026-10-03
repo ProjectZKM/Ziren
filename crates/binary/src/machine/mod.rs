@@ -13,6 +13,7 @@ pub mod alu_ext;
 pub mod bits;
 pub mod blake3;
 pub mod ledger;
+pub mod limbs;
 pub mod memory;
 pub mod mul;
 pub mod public_values;
@@ -38,6 +39,7 @@ use self::alu_ext::ExtAluAir;
 use self::bits::Cell;
 use self::blake3::{Blake3IoAir, Blake3RoundAir, Compressions};
 use self::ledger::LedgerAir;
+use self::limbs::LimbsAir;
 use self::memory::{MemoryConstAir, MemoryVarAir};
 use self::mul::MulAir;
 use self::public_values::{public_value, PublicValuesAir};
@@ -56,6 +58,7 @@ pub enum RecursionAir {
     Select(SelectAir),
     Blake3Io(Blake3IoAir),
     Blake3Round(Blake3RoundAir),
+    Limbs(LimbsAir),
     PublicValues(PublicValuesAir),
     Mul(MulAir),
 }
@@ -73,6 +76,7 @@ impl RecursionAir {
             Self::Select(air) => air.log_height(),
             Self::Blake3Io(air) => air.log_height(),
             Self::Blake3Round(air) => air.log_height(),
+            Self::Limbs(air) => air.log_height(),
             Self::PublicValues(air) => air.log_height(),
             Self::Mul(air) => air.log_height(),
         }
@@ -90,6 +94,7 @@ impl RecursionAir {
             Self::Select(_) => "Select",
             Self::Blake3Io(_) => "Blake3Io",
             Self::Blake3Round(_) => "Blake3Round",
+            Self::Limbs(_) => "Limbs",
             Self::PublicValues(_) => "PublicValues",
             Self::Mul(_) => "Mul",
         }
@@ -105,6 +110,7 @@ impl RecursionAir {
             Self::ExtAlu(air) => air.writes(),
             Self::Select(air) => air.writes(),
             Self::Blake3Io(air) => air.writes(),
+            Self::Limbs(air) => air.writes(),
             Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) => Vec::new(),
         }
     }
@@ -112,8 +118,8 @@ impl RecursionAir {
     /// How many products the table asks for, fixed by the program.
     fn mul_request_count(&self) -> usize {
         match self {
-            Self::BaseAlu(air) => air.instruction_count(),
-            Self::ExtAlu(air) => crate::ext::EXT_MUL_REQUESTS * air.instruction_count(),
+            Self::BaseAlu(air) => air.mul_request_count(),
+            Self::ExtAlu(air) => air.mul_request_count(),
             _ => 0,
         }
     }
@@ -137,6 +143,7 @@ impl RecursionAir {
             Self::ExtAlu(air) => air.written_values(record),
             Self::Select(air) => air.written_values(record),
             Self::Blake3Io(air) => air.written_values(record),
+            Self::Limbs(air) => air.written_values(record),
             Self::Blake3Round(_) | Self::PublicValues(_) | Self::Mul(_) => Vec::new(),
         }
     }
@@ -158,6 +165,7 @@ impl RecursionAir {
             Self::Select(air) => air.main_table(record),
             Self::Blake3Io(air) => air.main_table(record),
             Self::Blake3Round(air) => air.main_table(record),
+            Self::Limbs(air) => air.main_table(record),
             Self::PublicValues(air) => air.main_table(record),
             Self::Mul(air) => air.main_table(requests),
         }
@@ -175,6 +183,7 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::Select(air) => BaseAir::<X>::width(air),
             Self::Blake3Io(air) => BaseAir::<X>::width(air),
             Self::Blake3Round(air) => BaseAir::<X>::width(air),
+            Self::Limbs(air) => BaseAir::<X>::width(air),
             Self::PublicValues(air) => BaseAir::<X>::width(air),
             Self::Mul(air) => BaseAir::<X>::width(air),
         }
@@ -190,6 +199,7 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::Select(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Blake3Io(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Blake3Round(air) => BaseAir::<X>::preprocessed_width(air),
+            Self::Limbs(air) => BaseAir::<X>::preprocessed_width(air),
             Self::PublicValues(air) => BaseAir::<X>::preprocessed_width(air),
             Self::Mul(air) => BaseAir::<X>::preprocessed_width(air),
         }
@@ -212,6 +222,7 @@ impl<X: Field> BaseAir<X> for RecursionAir {
             Self::Select(air) => air.preprocessed_trace(),
             Self::Blake3Io(air) => air.preprocessed_trace(),
             Self::Blake3Round(air) => air.preprocessed_trace(),
+            Self::Limbs(air) => air.preprocessed_trace(),
             Self::PublicValues(air) => air.preprocessed_trace(),
             Self::Mul(air) => air.preprocessed_trace(),
         }
@@ -229,6 +240,7 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for RecursionAir {
             Self::Select(air) => air.eval(builder),
             Self::Blake3Io(air) => air.eval(builder),
             Self::Blake3Round(air) => air.eval(builder),
+            Self::Limbs(air) => air.eval(builder),
             Self::PublicValues(air) => air.eval(builder),
             Self::Mul(air) => air.eval(builder),
         }
@@ -289,6 +301,7 @@ impl RecursionMachine {
                 | Instruction::HintBits(_)
                 | Instruction::HintExt2Felts(_)
                 | Instruction::Blake3Compress(_)
+                | Instruction::FeltLimbs(_)
                 | Instruction::Print(_) => continue,
                 Instruction::HintAddCurve(_) => "curve hints",
                 Instruction::Ext2Felts(_) => "Ext2Felts",
@@ -305,6 +318,7 @@ impl RecursionMachine {
             RecursionAir::Select(SelectAir::new(program)),
             RecursionAir::Blake3Io(Blake3IoAir::new(compressions.clone())),
             RecursionAir::Blake3Round(Blake3RoundAir::new(compressions)),
+            RecursionAir::Limbs(LimbsAir::new(program)),
             RecursionAir::PublicValues(PublicValuesAir::new(program)),
         ];
         let writes: Vec<(u32, u32)> = tables.iter().flat_map(RecursionAir::writes).collect();
@@ -592,7 +606,53 @@ mod tests {
         assert!(rejected, "a changed output must not verify");
     }
 
-    /// Print each part of `proof` with its postcard bytes.
+    /// `n` limb decompositions of constants, each limb checked against the
+    /// reference.
+    fn limbs_program(n: usize) -> RecursionProgram<KoalaBear> {
+        let values = elements(n);
+        let mut addr = 0u32;
+        let mut instructions = Vec::new();
+        for value in values {
+            let word = value.as_canonical_u32();
+            let limbs = [KoalaBear::from_u32(word & 0xffff), KoalaBear::from_u32(word >> 16)];
+            let input = addr;
+            let outputs = [addr + 1, addr + 2];
+            addr += 3;
+            instructions.push(instr::mem_single(MemAccessKind::Write, 1, input, value));
+            instructions.push(instr::felt_limbs([1, 1], outputs, input));
+            for k in 0..2 {
+                instructions.push(instr::mem_single(MemAccessKind::Read, 1, outputs[k], limbs[k]));
+            }
+        }
+        instructions.extend(commit(addr, [KoalaBear::ZERO; DIGEST_SIZE]));
+        let mut program =
+            RecursionProgram::new(RawProgram::from_linear(instructions), 0, Vec::new(), None);
+        program.total_memory = program.computed_total_memory();
+        program
+    }
+
+    /// Limb decompositions prove through the real runtime, and a record
+    /// with a changed limb does not.
+    #[test]
+    fn limbs_prove_and_tampering_fails() {
+        let program = Arc::new(limbs_program(50));
+        let record = run(&program);
+        let machine = RecursionMachine::new(&program, &BinarySchedule::default()).expect("machine");
+        let proof = machine.prove(&record).expect("the execution proves");
+        let digest = PublicValuesAir::digest(&record);
+        machine.verify(&proof, &digest).expect("the execution verifies");
+
+        let mut wrong_limb = record;
+        wrong_limb.felt_limbs_events[7].output[1] += KoalaBear::ONE;
+        let rejected = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            machine.prove(&wrong_limb)
+        })) {
+            Err(_) | Ok(Err(_)) => true,
+            Ok(Ok(proof)) => machine.verify(&proof, &digest).is_err(),
+        };
+        assert!(rejected, "a changed limb must not verify");
+    }
+
     fn print_breakdown(proof: &MachineProof) {
         for (label, bytes) in crate::config::proof_breakdown(proof) {
             println!("  {label}: {bytes} bytes");

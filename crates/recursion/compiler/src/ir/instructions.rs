@@ -227,6 +227,8 @@ pub enum DslIr<C: Config> {
     /// One Blake3 compression over 16-bit limbs: `(output, chaining value,
     /// block, block length, flags)`; the counter is zero.
     CircuitV2Blake3Compress(Box<([Felt<C::F>; 16], [Felt<C::F>; 16], [Felt<C::F>; 32], u32, u32)>),
+    /// The two 16-bit limbs of an element's canonical value: `(limbs, element)`.
+    CircuitV2FeltLimbs([Felt<C::F>; 2], Felt<C::F>),
     /// Commits the public values.
     CircuitV2CommitPublicValues(Box<RecursionPublicValues<Felt<C::F>>>),
 

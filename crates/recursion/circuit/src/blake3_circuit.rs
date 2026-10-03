@@ -83,23 +83,14 @@ pub fn vk_digest(
     hash_felts_host(&inputs)
 }
 
-/// The two limbs of an element's canonical value.  The decomposition is
-/// the canonical one, so the bytes the host hashes are the ones the circuit
-/// hashes.
+/// The two limbs of an element's canonical value, bound by the binary
+/// machine's limb table to the element's bits, so the bytes the host hashes
+/// are the ones the circuit hashes.
 pub fn felt_limbs<C: CircuitConfig<F = KoalaBear>>(
     builder: &mut Builder<C>,
     value: Felt<KoalaBear>,
 ) -> [Felt<KoalaBear>; 2] {
-    let bits = builder.num2bits_v2_f(value, 31);
-    let weigh = |bits: &[Felt<KoalaBear>]| -> SymbolicFelt<KoalaBear> {
-        bits.iter()
-            .enumerate()
-            .map(|(i, &bit)| SymbolicFelt::from(bit) * KoalaBear::from_u32(1 << i))
-            .sum()
-    };
-    let low = builder.eval(weigh(&bits[..LIMB_BITS]));
-    let high = builder.eval(weigh(&bits[LIMB_BITS..]));
-    [low, high]
+    builder.felt_limbs_v2(value)
 }
 
 /// The limbs of a slice of elements, in order.

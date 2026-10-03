@@ -185,6 +185,26 @@ pub struct Blake3CompressEvent<F> {
     pub flags: F,
 }
 
+/// The input and outputs of a limb decomposition: an element and the two
+/// 16-bit limbs of its canonical value, low limb first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
+pub struct FeltLimbsIo<V> {
+    pub input: V,
+    pub output: [V; 2],
+}
+
+/// An instruction decomposing an element into its two limbs; the binary
+/// machine's table binds the limbs to the element's bits.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[repr(C)]
+pub struct FeltLimbsInstr<F> {
+    pub addrs: FeltLimbsIo<Address<F>>,
+    pub mults: [F; 2],
+}
+
+pub type FeltLimbsEvent<F> = FeltLimbsIo<F>;
+
 /// The inputs and outputs to a select operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(C)]

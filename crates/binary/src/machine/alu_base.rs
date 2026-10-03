@@ -114,20 +114,30 @@ pub struct BaseAluAir {
     preprocessed: Vec<u8>,
     /// Whether each instruction checks on `(in1, in2)`, in order.
     direct: Vec<bool>,
+    /// Whether each instruction binds the product, in order.
+    binds_mul: Vec<bool>,
     /// `(address, reads)` of every result, in order.
     outputs: Vec<(u32, u32)>,
 }
 
-/// The multiply table rows a record asks for: one per real row.
+/// The multiply table rows a record asks for: one per row binding a product.
 impl BaseAluAir {
-    /// The products the table asks for, `(x, y)` per instruction.
+    /// How many products the table asks for, fixed by the program.
+    #[must_use]
+    pub fn mul_request_count(&self) -> usize {
+        self.binds_mul.iter().filter(|&&binds| binds).count()
+    }
+
+    /// The products the table asks for, `(x, y)` per instruction binding
+    /// one.
     #[must_use]
     pub fn mul_requests(&self, record: &ExecutionRecord<KoalaBear>) -> Vec<(u32, u32)> {
         record
             .base_alu_events
             .iter()
-            .zip(&self.direct)
-            .map(|(event, &direct)| {
+            .zip(self.direct.iter().zip(&self.binds_mul))
+            .filter(|(_, (_, &binds))| binds)
+            .map(|(event, (&direct, _))| {
                 operands(
                     event.in1.as_canonical_u32(),
                     event.in2.as_canonical_u32(),
@@ -163,6 +173,7 @@ impl BaseAluAir {
         let log_height = log_height_for(instrs.len());
         let mut preprocessed = vec![0u8; (1 << log_height) * NUM_ALU_PREP_COLS];
         let mut direct = Vec::with_capacity(instrs.len());
+        let mut binds_mul = Vec::with_capacity(instrs.len());
         let mut outputs = Vec::with_capacity(instrs.len());
         for (row, instr) in instrs.iter().enumerate() {
             let BaseAluInstr { opcode, mult, addrs } = instr;
@@ -184,11 +195,11 @@ impl BaseAluAir {
                 [addrs.in1.0, addrs.in2.0, addrs.out.0].map(|a| a.as_canonical_u32()),
                 flags,
             );
-            let is_direct = flags.direct;
-            direct.push(is_direct);
+            direct.push(flags.direct);
+            binds_mul.push(flags.binds_mul);
             outputs.push((addrs.out.0.as_canonical_u32(), mult));
         }
-        Self { log_height, preprocessed, direct, outputs }
+        Self { log_height, preprocessed, direct, binds_mul, outputs }
     }
 
     /// The log height of the table.
@@ -312,7 +323,7 @@ impl<AB: MachineBuilder<F = F>> Air<AB> for BaseAluAir {
         let y = exprs::<AB, KB_BITS>(&local.y);
         eval_add(builder, &x, &y, &local.add);
         let product = exprs::<AB, KB_BITS>(&local.product);
-        request_mul(builder, &x, &y, &product, prep_local.is_real.into());
+        request_mul(builder, &x, &y, &product, prep_local.binds_mul.into());
         for i in 0..KB_BITS {
             builder.when(prep_local.binds_add).assert_eq(local.add.out[i], local.z[i]);
             builder.when(prep_local.binds_mul).assert_eq(local.product[i], local.z[i]);

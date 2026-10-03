@@ -85,6 +85,7 @@ fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) 
         Instruction::Mem(_) => incr(&mut counts.mem_const_events, 1),
         Instruction::Poseidon2(_) => incr(&mut counts.poseidon2_wide_events, 1),
         Instruction::Blake3Compress(_) => incr(&mut counts.blake3_compress_events, 1),
+        Instruction::FeltLimbs(_) => incr(&mut counts.felt_limbs_events, 1),
         Instruction::Select(_) => incr(&mut counts.select_events, 1),
         Instruction::Hint(HintInstr { output_addrs_mults })
         | Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr: _ }) => {

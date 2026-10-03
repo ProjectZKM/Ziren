@@ -2204,6 +2204,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 Instruction::CommitPublicValues(_) => "CommitPublicValues",
                 Instruction::Hint(_) => "Hint",
                 Instruction::Blake3Compress(_) => "Blake3Compress",
+                Instruction::FeltLimbs(_) => "FeltLimbs",
             };
             *mix.entry(kind).or_insert(0usize) += 1;
         }

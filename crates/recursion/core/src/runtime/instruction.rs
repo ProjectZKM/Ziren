@@ -15,6 +15,9 @@ pub enum Instruction<F> {
     /// has a table for it, so it appears in programs the binary stage
     /// proves and in no other.
     Blake3Compress(Box<Blake3CompressInstr<F>>),
+    /// The two 16-bit limbs of an element; only the binary machine has a
+    /// table for it.
+    FeltLimbs(FeltLimbsInstr<F>),
     Select(SelectInstr<F>),
     HintBits(HintBitsInstr<F>),
     HintAddCurve(Box<HintAddCurveInstr<F>>),
@@ -196,6 +199,20 @@ pub fn blake3_compress<F: PrimeCharacteristicRing>(
     }))
 }
 
+pub fn felt_limbs<F: PrimeCharacteristicRing>(
+    mults: [u32; 2],
+    output: [u32; 2],
+    input: u32,
+) -> Instruction<F> {
+    Instruction::FeltLimbs(FeltLimbsInstr {
+        addrs: FeltLimbsIo {
+            input: Address(F::from_u32(input)),
+            output: output.map(F::from_u32).map(Address),
+        },
+        mults: mults.map(F::from_u32),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn select<F: PrimeCharacteristicRing>(
     mult1: u32,
@@ -246,6 +263,7 @@ impl<F: Copy> Instruction<F> {
             Instruction::Mem(i) => f(i.addrs.inner),
             Instruction::Poseidon2(i) => i.addrs.output.iter().copied().for_each(f),
             Instruction::Blake3Compress(i) => i.addrs.output.iter().copied().for_each(f),
+            Instruction::FeltLimbs(i) => i.addrs.output.iter().copied().for_each(f),
             Instruction::Select(i) => {
                 f(i.addrs.out1);
                 f(i.addrs.out2);

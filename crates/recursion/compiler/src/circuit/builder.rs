@@ -42,6 +42,7 @@ pub trait CircuitV2Builder<C: Config> {
         block_len: u32,
         flags: u32,
     ) -> [Felt<C::F>; BLAKE3_OUT_LIMBS];
+    fn felt_limbs_v2(&mut self, value: Felt<C::F>) -> [Felt<C::F>; 2];
     fn fri_fold_v2(&mut self, input: CircuitV2FriFoldInput<C>) -> CircuitV2FriFoldOutput<C>;
     fn ext2felt_v2(&mut self, ext: Ext<C::F, C::EF>) -> [Felt<C::F>; D];
     fn add_curve_v2(
@@ -221,6 +222,13 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             block_len,
             flags,
         ))));
+        output
+    }
+
+    /// The two 16-bit limbs of `value`'s canonical value, low limb first.
+    fn felt_limbs_v2(&mut self, value: Felt<C::F>) -> [Felt<C::F>; 2] {
+        let output: [Felt<C::F>; 2] = core::array::from_fn(|_| self.uninit());
+        self.push_op(DslIr::CircuitV2FeltLimbs(output, value));
         output
     }
 

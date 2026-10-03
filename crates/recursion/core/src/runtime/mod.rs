@@ -386,7 +386,7 @@ where
         if timing {
             let walk_secs = t_walk.elapsed().as_secs_f64();
             let instrs = analyzed_program.iter().count();
-            let mut mix = [0usize; 13];
+            let mut mix = [0usize; 14];
             for ai in analyzed_program.iter() {
                 let k = match ai.inner() {
                     Instruction::BaseAlu(_) => 0,
@@ -402,6 +402,7 @@ where
                     Instruction::CommitPublicValues(_) => 10,
                     Instruction::Hint(_) => 11,
                     Instruction::Blake3Compress(_) => 12,
+                    Instruction::FeltLimbs(_) => 13,
                 };
                 mix[k] += 1;
             }
@@ -419,6 +420,7 @@ where
                 "CommitPublicValues",
                 "Hint",
                 "Blake3Compress",
+                "FeltLimbs",
             ];
             let mix_str: String = names
                 .iter()
@@ -686,6 +688,23 @@ where
                             block_len: *block_len,
                             flags: *flags,
                         },
+                    );
+                }
+            }
+            Instruction::FeltLimbs(FeltLimbsInstr {
+                addrs: FeltLimbsIo { input, output },
+                mults,
+            }) => {
+                let value = self.mr_us(*input).val[0];
+                let canonical = value.as_canonical_u32();
+                let limbs = [F::from_u32(canonical & 0xFFFF), F::from_u32(canonical >> 16)];
+                for ((limb, addr), mult) in limbs.iter().zip(output).zip(mults) {
+                    self.mw_us(*addr, Block::from(*limb), *mult);
+                }
+                unsafe {
+                    Self::raw_write_ev(
+                        &rec.felt_limbs_events[_offset],
+                        FeltLimbsEvent { input: value, output: limbs },
                     );
                 }
             }

@@ -372,6 +372,14 @@ where
     }
 
     #[inline(always)]
+    fn felt_limbs(&mut self, dst: [impl Reg<C>; 2], src: impl Reg<C>) -> Instruction<C::F> {
+        Instruction::FeltLimbs(FeltLimbsInstr {
+            addrs: FeltLimbsIo { input: src.read(self), output: dst.map(|r| r.write(self)) },
+            mults: [C::F::ZERO; 2],
+        })
+    }
+
+    #[inline(always)]
     fn select(
         &mut self,
         bit: impl Reg<C>,
@@ -586,6 +594,7 @@ where
                 let (output, chaining_value, block, block_len, flags) = *data;
                 f(self.blake3_compress(output, chaining_value, block, block_len, flags))
             }
+            DslIr::CircuitV2FeltLimbs(output, value) => f(self.felt_limbs(output, value)),
             DslIr::CircuitV2HintBitsF(output, value) => {
                 f(self.hint_bit_decomposition(value, output))
             }
@@ -683,6 +692,12 @@ where
                             mults,
                             ..
                         } = instr.as_mut();
+                        mults.iter_mut().zip(addrs).for_each(&mut backfill);
+                    }
+                    Instruction::FeltLimbs(FeltLimbsInstr {
+                        addrs: FeltLimbsIo { output: ref addrs, .. },
+                        mults,
+                    }) => {
                         mults.iter_mut().zip(addrs).for_each(&mut backfill);
                     }
                     Instruction::Select(SelectInstr {
@@ -865,6 +880,7 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::Mem(_) => "Mem",
         Instruction::Poseidon2(_) => "Poseidon2",
         Instruction::Blake3Compress(_) => "Blake3Compress",
+        Instruction::FeltLimbs(_) => "FeltLimbs",
         Instruction::Select(_) => "Select",
         Instruction::HintBits(_) => "HintBits",
         Instruction::Print(_) => "Print",
