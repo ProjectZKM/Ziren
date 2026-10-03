@@ -1,0 +1,39 @@
+[package]
+name = "zkm-binary-recursion"
+description = "The narrow binary recursion: the binary stage's verifier, recorded from Plonky3's own, as a program over GF(2^128)."
+readme = "../../README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+p3-air = { workspace = true }
+p3-binary-dft = { workspace = true }
+p3-binary-field = { workspace = true }
+p3-binary-pcs = { workspace = true }
+p3-blake3 = { workspace = true }
+p3-challenger = { workspace = true }
+p3-commit = { workspace = true }
+p3-field = { workspace = true }
+p3-matrix = { workspace = true }
+p3-merkle-tree = { workspace = true }
+p3-multilinear-util = { workspace = true }
+p3-multi-stark = { workspace = true }
+p3-sumcheck = { workspace = true }
+p3-symmetric = { workspace = true }
+p3-whir = { workspace = true }
+num-bigint = { version = "0.5.1", default-features = false }
+postcard = { version = "1.0", default-features = false, features = ["alloc"] }
+rayon = "1.12"
+serde = { workspace = true }
+zkm-binary-stark = { workspace = true }
+
+[dev-dependencies]
+p3-koala-bear = { workspace = true }
+zkm-pcs = { workspace = true }
+zkm-recursion-core = { workspace = true }
+blake3 = { workspace = true, features = ["std"] }
+
