@@ -134,7 +134,7 @@ impl LedgerAir {
         let mut rows = BitRows::new(NUM_LEDGER_COLS, self.log_height);
         let mut row = 0;
         for group in &program.groups {
-            let bits = value_bits(Program::value(values, group.cell));
+            let bits = value_bits(Program::cell_value(values, group.cell));
             for _ in 0..group.reads {
                 rows.set_row(row, &bits);
                 row += 1;

@@ -17,10 +17,15 @@
 //! - **Outputs are aligned.**  An operation with `n` outputs writes them at
 //!   a base address aligned to the next power of two, so output `i` sits at
 //!   `base ^ i`, and a table names one address for all of them.
-//! - **Inputs of a rewiring are gathered.**  A transpose reads 128 cells
-//!   and an assembly of bytes 16; each is first copied, by the arithmetic
-//!   table, to an aligned block, so the rewiring table too names one
-//!   address for all its inputs.
+//! - **Inputs of a rewiring are gathered.**  An assembly of bytes reads 16
+//!   cells; each is first copied, by the arithmetic table, to an aligned
+//!   block, so the rewiring table names one address for all of them.
+//! - **A transpose goes through bytes.**  Each of its 128 rows is split into
+//!   its 16 bytes, byte `c` of row `u` written at `bytes ^ (128 c + u)`, and
+//!   one row per byte position gathers byte `c` of every row and writes
+//!   columns `8 c .. 8 c + 8`, bit `j` of every byte making column `8 c + j`.
+//!   A rewiring row is then 128 bytes wide where a whole transpose would be
+//!   128 elements: every column of a table is a value the verifier opens.
 
 use std::collections::HashMap;
 
@@ -55,14 +60,22 @@ pub enum Source {
     Const(F),
 }
 
+/// What a cell holds, in terms of the tape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cell {
+    /// An operand of the tape.
+    Value(Operand),
+    /// Byte `c` of an operand.
+    Byte(Operand, u8),
+}
+
 /// A cell that is read: its address, how often, and its value.
 #[derive(Clone, Copy, Debug)]
 pub struct Group {
     pub addr: u32,
     pub reads: u32,
     pub source: Source,
-    /// The value, as the tape names it.
-    pub cell: Operand,
+    pub cell: Cell,
 }
 
 /// What an arithmetic row computes.
@@ -104,29 +117,45 @@ pub struct ArithRow {
     pub write_c: bool,
 }
 
-/// What a rewiring row does with its bit matrix, whose row `u` is the bits
-/// of input `u`.
+/// What a rewiring row does with its 128 bytes.  An element-input kind
+/// reads one element whose 16 bytes are the row's first bytes; a
+/// byte-input kind reads byte `u` at `in_base ^ u`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RewireKind {
-    /// 128 inputs; output `v` is column `v`.
-    Transpose,
-    /// One input; output `j` is its byte `j`.
+    /// One element; byte `j` is written at `out_base ^ j`.
     ToBytes,
-    /// Sixteen byte inputs; the output has byte `u` from input `u`.
-    FromBytes,
-    /// One input; output `i`, of `outputs`, is its bit `i`.
+    /// One element, a row of a transpose; byte `j` is written at
+    /// `out_base ^ 128 j`.
+    Split,
+    /// One element; bit `i`, of `outputs`, is written at `out_base ^ i`.
     Bits { outputs: usize },
+    /// Sixteen bytes; the element with byte `u` from input `u` is written
+    /// at `out_base`.
+    FromBytes,
+    /// 128 bytes; bit `j` of every byte, input `u` at bit `u`, is written
+    /// at `out_base ^ j`.
+    Gather,
+}
+
+impl RewireKind {
+    /// The address offset of output `i`.
+    #[must_use]
+    pub const fn offset(self, i: usize) -> u32 {
+        match self {
+            Self::Split => 128 * i as u32,
+            _ => i as u32,
+        }
+    }
 }
 
 /// One row of the rewiring table.
 #[derive(Clone, Debug)]
 pub struct RewireRow {
     pub kind: RewireKind,
-    /// Input `u` is read at `in_base ^ u`.
+    /// The element, or byte `u`, is read at `in_base ^ u`.
     pub in_base: u32,
-    /// The inputs' values, as the tape names them.
-    pub inputs: Vec<Operand>,
-    /// Output `i` is written at `out_base ^ i`.
+    pub inputs: Vec<Cell>,
+    /// Output `i` is written at `out_base ^ offset(i)`.
     pub out_base: u32,
     /// Whether each output is read, which [`Program::new`] settles last.
     pub out_reads: Vec<bool>,
@@ -190,7 +219,7 @@ struct Builder {
     var_addr: Vec<u32>,
     var_source: Vec<Source>,
     const_addr: HashMap<u128, u32>,
-    reads: HashMap<u32, (u32, Operand, Source)>,
+    reads: HashMap<u32, (u32, Cell, Source)>,
     program: Program,
 }
 
@@ -226,8 +255,13 @@ impl Builder {
     /// A read of `operand`, counted.
     fn read(&mut self, operand: Operand) -> Read {
         let (addr, source) = self.address(operand);
-        self.reads.entry(addr).or_insert((0, operand, source)).0 += 1;
+        self.count(addr, Cell::Value(operand), source);
         Read { addr, cell: operand }
+    }
+
+    /// One more read of the cell at `addr`.
+    fn count(&mut self, addr: u32, cell: Cell, source: Source) {
+        self.reads.entry(addr).or_insert((0, cell, source)).0 += 1;
     }
 
     /// Copy `operands` to a fresh aligned block, returning its base.
@@ -243,7 +277,7 @@ impl Builder {
                 c: Some(base ^ u as u32),
                 write_c: false,
             });
-            self.reads.entry(base ^ u as u32).or_insert((0, operand, Source::Write)).0 += 1;
+            self.count(base ^ u as u32, Cell::Value(operand), Source::Write);
         }
         base
     }
@@ -385,7 +419,7 @@ impl Program {
                     builder.program.rewire.push(RewireRow {
                         kind,
                         in_base: read.addr,
-                        inputs: vec![*x],
+                        inputs: vec![Cell::Value(*x)],
                         out_base: base.expect("a rewiring has outputs"),
                         out_reads: vec![false; outputs],
                     });
@@ -395,25 +429,48 @@ impl Program {
                     builder.program.rewire.push(RewireRow {
                         kind: RewireKind::Bits { outputs: 128 },
                         in_base: read.addr,
-                        inputs: rows.clone(),
+                        inputs: vec![Cell::Value(rows[0])],
                         out_base: base.expect("a transpose has outputs"),
                         out_reads: vec![false; 128],
                     });
                 }
-                Op::Transpose(rows) | Op::FromBytes(rows) => {
-                    let kind = if matches!(op, Op::Transpose(_)) {
-                        assert_eq!(rows.len(), 128, "a transpose has one row or 128");
-                        RewireKind::Transpose
-                    } else {
-                        RewireKind::FromBytes
-                    };
-                    let in_base = builder.gather(rows);
+                Op::Transpose(rows) => {
+                    assert_eq!(rows.len(), 128, "a transpose has one row or 128");
+                    let out = base.expect("a transpose has outputs");
+                    let bytes = builder.allocate(16 * 128);
+                    for (u, &row) in rows.iter().enumerate() {
+                        let read = builder.read(row);
+                        builder.program.rewire.push(RewireRow {
+                            kind: RewireKind::Split,
+                            in_base: read.addr,
+                            inputs: vec![Cell::Value(row)],
+                            out_base: bytes ^ u as u32,
+                            out_reads: vec![false; 16],
+                        });
+                    }
+                    for c in 0..16u32 {
+                        let inputs: Vec<Cell> =
+                            rows.iter().map(|&row| Cell::Byte(row, c as u8)).collect();
+                        for (u, &cell) in inputs.iter().enumerate() {
+                            builder.count(bytes ^ (128 * c + u as u32), cell, Source::Write);
+                        }
+                        builder.program.rewire.push(RewireRow {
+                            kind: RewireKind::Gather,
+                            in_base: bytes ^ (128 * c),
+                            inputs,
+                            out_base: out ^ (8 * c),
+                            out_reads: vec![false; 8],
+                        });
+                    }
+                }
+                Op::FromBytes(bytes) => {
+                    let in_base = builder.gather(bytes);
                     builder.program.rewire.push(RewireRow {
-                        kind,
+                        kind: RewireKind::FromBytes,
                         in_base,
-                        inputs: rows.clone(),
-                        out_base: base.expect("a rewiring has outputs"),
-                        out_reads: vec![false; outputs],
+                        inputs: bytes.iter().map(|&b| Cell::Value(b)).collect(),
+                        out_base: base.expect("an assembly has an output"),
+                        out_reads: vec![false; 1],
                     });
                 }
                 Op::Blake3 { slots, len } => {
@@ -446,7 +503,7 @@ impl Program {
         }
         for row in &mut program.rewire {
             for (i, read) in row.out_reads.iter_mut().enumerate() {
-                *read = is_read(row.out_base ^ i as u32);
+                *read = is_read(row.out_base ^ row.kind.offset(i));
             }
         }
         for compression in &mut program.compressions {
@@ -463,7 +520,18 @@ impl Program {
         program
     }
 
-    /// The value of `cell` in a run whose variables have `values`.
+    /// The value a cell holds in a run whose variables have `values`.
+    pub fn cell_value(values: &[F], cell: Cell) -> F {
+        match cell {
+            Cell::Value(operand) => Self::value(values, operand),
+            Cell::Byte(operand, c) => {
+                let byte = (Self::value(values, operand).to_repr() >> (8 * c)) & 0xff;
+                F::from_repr(byte)
+            }
+        }
+    }
+
+    /// The value of `operand` in a run whose variables have `values`.
     pub fn value(values: &[F], cell: Operand) -> F {
         match cell {
             Operand::Var(v) => values[v as usize],
