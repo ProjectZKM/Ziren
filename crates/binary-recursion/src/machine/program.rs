@@ -477,6 +477,7 @@ impl Program {
                     builder.hash(slots, *len, base.expect("a hash has a digest"));
                 }
                 Op::MerkleNode { bit, cur, sib } => {
+                    let _ = builder.read(*bit);
                     let bit = builder.read(*bit);
                     let cur = cur.map(|x| builder.read(x));
                     let sib = sib.map(|x| builder.read(x));

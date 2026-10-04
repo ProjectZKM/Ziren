@@ -1,21 +1,29 @@
-//! The Blake3 input and output table: one row per compression.
+//! The Blake3 input and output table: three rows per compression.
 //!
-//! A row assembles the state a compression starts from and its block,
-//! hands both to the round table on [`BLAKE3`], takes the state after the
-//! last round back, and sends the chaining value on:
+//! Two *message* rows read the block and start the state; one *output* row
+//! takes the state after the last round and sends the chaining value on.
+//! The round table moves the state one lane at a time on [`LANE`] and each
+//! message word from round to round on [`MSG`]:
 //!
-//! - **The chaining value** is the initial value for the first block of a
-//!   chunk and for a parent, and otherwise the output of the compression
-//!   before, pulled on [`CHAIN`].
-//! - **The block** is four cells of sixteen bytes pulled from [`MEMORY`],
-//!   or a parent's two children's chaining values pulled on [`CHAIN`].  A
-//!   Merkle node pulls its digest and its sibling as the four cells and
-//!   swaps the halves when its path bit is one: `block = x + bit (x + x')`,
-//!   `x'` the cells with the halves swapped, one packed constraint per
-//!   cell.
+//! - **The block** is four cells of sixteen bytes; message row `p` holds
+//!   cells `p` and `p + 2`, pulled from [`MEMORY`], or for a parent the
+//!   halves `p` of its two children's chaining values, pulled on [`CHAIN`].
+//!   A Merkle node's cells are its digest and its sibling, swapped when its
+//!   path bit is one: cell `k` of the block is `x + bit (x + x')`, `x'` the
+//!   cell two places on, which is in the same row.  The row pushes the
+//!   eight message words of its two cells at their first use.
+//! - **The state** starts with the chaining value in lanes 0 to 7 and the
+//!   initial value, counter, block length and flags in lanes 8 to 15, which
+//!   message row 0 pushes at version zero.  The chaining value is the
+//!   initial value for the first block of a chunk, for a parent and for a
+//!   Merkle node, pushed by the same row; otherwise the output row of the
+//!   compression before pushes it, as this compression's lanes.
 //! - **The output** of a root is the digest, its two halves pushed on
-//!   [`WRITE`]; any other output is pushed on [`CHAIN`] for the one
-//!   compression that continues from it.
+//!   [`WRITE`]; a parent's child pushes its halves on [`CHAIN`].
+//!
+//! A row is 512 columns: a message row holds 257 of them, an output row the
+//! sixteen final lanes.  Every column of a table is a value the machine's
+//! verifier opens, and the rows of a compression were one row of 2,048.
 
 use core::borrow::{Borrow, BorrowMut};
 
@@ -25,74 +33,96 @@ use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_sumcheck::layout::Table;
 use zkm_binary_stark::machine::bits::{
-    blake3_tuple, dense, log_height_for, pack_field, BitRows, BLAKE3, BLAKE3_ROUND_BITS, MEMORY,
-    PERMUTATION_ID_BITS, WRITE,
+    dense, log_height_for, pack_field, BitRows, MEMORY, PERMUTATION_ID_BITS, WRITE,
 };
-use zkm_binary_stark::machine::blake3::{permute, ROUNDS, STATE_WORDS, WORD_BITS};
+use zkm_binary_stark::machine::blake3::{STATE_WORDS, WORD_BITS};
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::word::{bits_le, constant_bits, exprs};
 use zkm_binary_stark::BinaryBase;
 use zkm_derive::AlignedBorrow;
 use zkm_recursion_core::runtime::blake3::IV;
 
-use super::cells::{addr_bits, cell, constant, pack, CHAIN, VALUE_BITS};
+use super::cells::{
+    addr_bits, cell, pack, word_tuple, CHAIN, LANE, LANE_BITS, MSG, MSG_INDEX_BITS, USE_BITS,
+    VALUE_BITS, VERSION_BITS,
+};
 use super::program::{BlockSource, CompressionState, CvSource, Output, Program, ADDR_BITS};
+use super::rounds::FINAL_VERSION;
 use crate::tape::F;
 use p3_binary_field::TowerLevel;
 
-/// Cells of a block.
-const SLOTS: usize = 4;
+/// Rows of a compression.
+pub const ROWS_PER_COMPRESSION: usize = 3;
 
-/// The program's part of a compression row.
+/// Bits of a counter, a block length and a flags word that the program
+/// can set; the rest of each word is zero.
+const COUNTER_BITS: usize = 16;
+const LEN_BITS: usize = 7;
+const FLAG_BITS: usize = 7;
+
+/// The program's part of a row.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct HashPrep<T> {
     pub id: [T; PERMUTATION_ID_BITS],
-    /// The compression whose chaining value this one continues from.
-    pub previous: [T; PERMUTATION_ID_BITS],
-    pub left: [T; PERMUTATION_ID_BITS],
+    /// A message row's left child; an output row's successor.
+    pub other: [T; PERMUTATION_ID_BITS],
+    /// A message row's right child.
     pub right: [T; PERMUTATION_ID_BITS],
-    pub slots: [[T; ADDR_BITS]; SLOTS],
+    /// Where a message row's two cells are read.
+    pub slots: [[T; ADDR_BITS]; 2],
     pub bit_addr: [T; ADDR_BITS],
     pub out_base: [T; ADDR_BITS],
-    pub is_real: T,
+    /// Which pair of cells a message row holds.
+    pub pair: T,
+    pub is_msg: T,
+    pub is_out: T,
+    /// Message row 0, which starts the state.
+    pub first: T,
     /// The chaining value is the initial value.
     pub starts: T,
-    /// The chaining value is pulled on the chain.
-    pub chained: T,
-    /// The block's cells are pulled from memory.
+    /// The cells are pulled from memory.
     pub reads_slots: T,
-    /// The block is two children's chaining values.
+    /// The cells are the children's chaining values.
     pub is_parent: T,
-    /// The row is a Merkle node, and pulls its bit.
+    /// The row is a Merkle node's, and pulls its bit.
     pub is_merkle: T,
-    /// The output is pushed on the chain.
-    pub links: T,
     /// The digest's halves are pushed, each where it is read.
     pub writes: [T; 2],
-    pub counter: [T; WORD_BITS],
-    pub block_len: [T; WORD_BITS],
-    pub flags: [T; WORD_BITS],
+    /// The chaining value is the successor's state.
+    pub links_cv: T,
+    /// The chaining value is pushed for a parent.
+    pub links_parent: T,
+    pub counter: [T; COUNTER_BITS],
+    pub block_len: [T; LEN_BITS],
+    pub flags: [T; FLAG_BITS],
     /// Zeros, which make the width a power of two.
-    pub pad: [T; 512 - 4 * PERMUTATION_ID_BITS - (SLOTS + 2) * ADDR_BITS - 9 - 3 * WORD_BITS],
+    pub pad: [T; 256 - 7 * PERMUTATION_ID_BITS - 12 - COUNTER_BITS - LEN_BITS - FLAG_BITS],
 }
 
-/// The witness part of a compression row.
+/// A message row's witness.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct HashCols<T> {
-    /// The four cells pulled, before a Merkle node's swap.
-    pub cells: [[T; VALUE_BITS]; SLOTS],
+pub struct MsgCols<T> {
+    /// Cells `p` and `p + 2` as pulled, before a Merkle node's swap.
+    pub cells: [[T; VALUE_BITS]; 2],
     pub bit: T,
-    pub cv: [[T; WORD_BITS]; 8],
-    pub block: [[T; WORD_BITS]; STATE_WORDS],
-    pub final_state: [[T; WORD_BITS]; STATE_WORDS],
-    /// Zeros, which make the width a power of two.
-    pub pad: [T; 2048 - SLOTS * VALUE_BITS - 1 - 8 * WORD_BITS - 2 * STATE_WORDS * WORD_BITS],
+    /// Zeros: the output row is the wider.
+    pub pad: [T; 512 - 2 * VALUE_BITS - 1],
+}
+
+/// An output row's witness: the lanes after the last round.
+#[derive(AlignedBorrow, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct OutCols<T> {
+    pub last: [[T; WORD_BITS]; STATE_WORDS],
 }
 
 pub const NUM_HASH_PREP_COLS: usize = core::mem::size_of::<HashPrep<u8>>();
-pub const NUM_HASH_COLS: usize = core::mem::size_of::<HashCols<u8>>();
+pub const NUM_HASH_COLS: usize = core::mem::size_of::<OutCols<u8>>();
+const _: () = assert!(core::mem::size_of::<MsgCols<u8>>() == NUM_HASH_COLS);
+const _: () = assert!(NUM_HASH_PREP_COLS == 256);
+const _: () = assert!(ADDR_BITS == PERMUTATION_ID_BITS);
 
 /// The compression table of one program.
 pub struct HashAir {
@@ -105,51 +135,95 @@ fn word(value: u32) -> [u8; WORD_BITS] {
     bits_le::<WORD_BITS>(u64::from(value))
 }
 
+/// Each compression's consumer: the compression that continues from its
+/// chaining value, or the parent it is a child of.
+#[derive(Clone, Copy)]
+enum Consumer {
+    None,
+    Successor(usize),
+    Parent,
+}
+
+fn consumers(program: &Program) -> Vec<Consumer> {
+    let mut consumers = vec![Consumer::None; program.compressions.len()];
+    let mut set = |i: usize, consumer: Consumer| {
+        assert!(matches!(consumers[i], Consumer::None), "a chaining value is consumed once");
+        consumers[i] = consumer;
+    };
+    for (d, c) in program.compressions.iter().enumerate() {
+        if let CvSource::Chained(previous) = c.cv {
+            set(previous, Consumer::Successor(d));
+        }
+        if let BlockSource::Parent(left, right) = c.block {
+            set(left, Consumer::Parent);
+            set(right, Consumer::Parent);
+        }
+    }
+    consumers
+}
+
 impl HashAir {
     #[must_use]
     pub fn new(program: &Program) -> Self {
-        let log_height = log_height_for(program.compressions.len());
+        let n = program.compressions.len();
+        let log_height = log_height_for(ROWS_PER_COMPRESSION * n);
         let mut preprocessed = vec![0u8; (1 << log_height) * NUM_HASH_PREP_COLS];
-        for (row, c) in program.compressions.iter().enumerate() {
-            let prep: &mut HashPrep<u8> =
-                preprocessed[row * NUM_HASH_PREP_COLS..(row + 1) * NUM_HASH_PREP_COLS].borrow_mut();
-            let id = |i: usize| bits_le::<PERMUTATION_ID_BITS>(i as u64);
-            prep.id = id(row);
-            prep.is_real = 1;
-            match c.cv {
-                CvSource::Iv => prep.starts = 1,
-                CvSource::Chained(previous) => {
-                    prep.chained = 1;
-                    prep.previous = id(previous);
+        let consumers = consumers(program);
+        let id = |i: usize| bits_le::<PERMUTATION_ID_BITS>(i as u64);
+        for (c, compression) in program.compressions.iter().enumerate() {
+            assert!(compression.counter < 1 << COUNTER_BITS, "a counter fits its bits");
+            assert!(compression.block_len < 1 << LEN_BITS, "a block length fits its bits");
+            assert!(compression.flags < 1 << FLAG_BITS, "flags fit their bits");
+            for r in 0..ROWS_PER_COMPRESSION {
+                let at = (ROWS_PER_COMPRESSION * c + r) * NUM_HASH_PREP_COLS;
+                let prep: &mut HashPrep<u8> =
+                    preprocessed[at..at + NUM_HASH_PREP_COLS].borrow_mut();
+                prep.id = id(c);
+                if r < 2 {
+                    prep.is_msg = 1;
+                    prep.pair = r as u8;
+                    if r == 0 {
+                        prep.first = 1;
+                        prep.starts = u8::from(matches!(compression.cv, CvSource::Iv));
+                        prep.counter = bits_le::<COUNTER_BITS>(u64::from(compression.counter));
+                        prep.block_len = bits_le::<LEN_BITS>(u64::from(compression.block_len));
+                        prep.flags = bits_le::<FLAG_BITS>(u64::from(compression.flags));
+                    }
+                    match compression.block {
+                        BlockSource::Slots(reads) => {
+                            prep.reads_slots = 1;
+                            prep.slots = [addr_bits(reads[r].addr), addr_bits(reads[r + 2].addr)];
+                        }
+                        BlockSource::Parent(left, right) => {
+                            prep.is_parent = 1;
+                            prep.other = id(left);
+                            prep.right = id(right);
+                        }
+                        BlockSource::Merkle { bit, cur, sib } => {
+                            prep.reads_slots = 1;
+                            prep.is_merkle = 1;
+                            prep.bit_addr = addr_bits(bit.addr);
+                            prep.slots = [addr_bits(cur[r].addr), addr_bits(sib[r].addr)];
+                        }
+                    }
+                } else {
+                    prep.is_out = 1;
+                    match compression.output {
+                        Output::Root { base, reads } => {
+                            prep.out_base = addr_bits(base);
+                            prep.writes = reads.map(u8::from);
+                        }
+                        Output::Link => match consumers[c] {
+                            Consumer::Successor(d) => {
+                                prep.links_cv = 1;
+                                prep.other = id(d);
+                            }
+                            Consumer::Parent => prep.links_parent = 1,
+                            Consumer::None => panic!("a link has a consumer"),
+                        },
+                    }
                 }
             }
-            match c.block {
-                BlockSource::Slots(reads) => {
-                    prep.reads_slots = 1;
-                    prep.slots = reads.map(|r| addr_bits(r.addr));
-                }
-                BlockSource::Parent(left, right) => {
-                    prep.is_parent = 1;
-                    prep.left = id(left);
-                    prep.right = id(right);
-                }
-                BlockSource::Merkle { bit, cur, sib } => {
-                    prep.reads_slots = 1;
-                    prep.is_merkle = 1;
-                    prep.bit_addr = addr_bits(bit.addr);
-                    prep.slots = [cur[0], cur[1], sib[0], sib[1]].map(|r| addr_bits(r.addr));
-                }
-            }
-            match c.output {
-                Output::Root { base, reads } => {
-                    prep.out_base = addr_bits(base);
-                    prep.writes = reads.map(u8::from);
-                }
-                Output::Link => prep.links = 1,
-            }
-            prep.counter = word(c.counter);
-            prep.block_len = word(c.block_len);
-            prep.flags = word(c.flags);
         }
         Self { log_height, preprocessed }
     }
@@ -182,8 +256,7 @@ impl HashAir {
             .collect()
     }
 
-    /// The witness: each compression's cells, bit, chaining value, block
-    /// and final state.
+    /// The witness: each compression's cells and bit, and its final lanes.
     #[must_use]
     pub fn main_table(
         &self,
@@ -194,11 +267,10 @@ impl HashAir {
     ) -> Table<F> {
         let mut rows = BitRows::new(NUM_HASH_COLS, self.log_height);
         let mut row_bits = vec![0u8; NUM_HASH_COLS];
-        for (row, ((c, s), last)) in program.compressions.iter().zip(states).zip(finals).enumerate()
+        for (c, ((compression, s), last)) in
+            program.compressions.iter().zip(states).zip(finals).enumerate()
         {
-            row_bits.fill(0);
-            let cols: &mut HashCols<u8> = row_bits.as_mut_slice().borrow_mut();
-            let cells: [F; SLOTS] = match c.block {
+            let cells: [F; 4] = match compression.block {
                 BlockSource::Slots(reads) => reads.map(|r| Program::value(values, r.cell)),
                 BlockSource::Merkle { cur, sib, .. } => {
                     [cur[0], cur[1], sib[0], sib[1]].map(|r| Program::value(values, r.cell))
@@ -209,12 +281,17 @@ impl HashAir {
                     F::from_repr(repr)
                 }),
             };
-            cols.cells = cells.map(super::cells::value_bits);
-            cols.bit = u8::from(s.bit);
-            cols.cv = s.cv.map(word);
-            cols.block = s.block.map(word);
-            cols.final_state = last.map(word);
-            rows.set_row(row, &row_bits);
+            for pair in 0..2 {
+                row_bits.fill(0);
+                let cols: &mut MsgCols<u8> = row_bits.as_mut_slice().borrow_mut();
+                cols.cells = [cells[pair], cells[pair + 2]].map(super::cells::value_bits);
+                cols.bit = u8::from(s.bit);
+                rows.set_row(ROWS_PER_COMPRESSION * c + pair, &row_bits);
+            }
+            row_bits.fill(0);
+            let cols: &mut OutCols<u8> = row_bits.as_mut_slice().borrow_mut();
+            cols.last = last.map(word);
+            rows.set_row(ROWS_PER_COMPRESSION * c + 2, &row_bits);
         }
         rows.into_table()
     }
@@ -234,150 +311,144 @@ impl<X: Field> BaseAir<X> for HashAir {
     }
 }
 
-/// A chaining value on [`CHAIN`]: the compression's identity, and the
-/// value as two elements.
+/// Half `half` of a chaining value on [`CHAIN`]: the compression's identity
+/// and the half in one element, the value in another.
 fn chain_tuple<AB: AirBuilder<F: BinaryBase>>(
-    id: &[AB::Var; PERMUTATION_ID_BITS],
-    words: &[[AB::Expr; WORD_BITS]],
+    id: &[AB::Expr; PERMUTATION_ID_BITS],
+    half: AB::Expr,
+    value: AB::Expr,
 ) -> Vec<AB::Expr> {
-    let half = |range: core::ops::Range<usize>| -> AB::Expr {
-        let bits: Vec<AB::Expr> = words[range].iter().flatten().cloned().collect();
-        pack_field::<AB>(&bits)
-    };
-    vec![pack::<AB>(id), half(0..4), half(4..8)]
+    let header: Vec<AB::Expr> = id.iter().cloned().chain(core::iter::once(half)).collect();
+    vec![pack_field::<AB>(&header), value]
+}
+
+/// `bits` of a word, widened to a word with zeros above.
+fn word_of<AB: AirBuilder, const N: usize>(bits: &[AB::Var; N]) -> [AB::Expr; WORD_BITS] {
+    core::array::from_fn(|k| if k < N { bits[k].into() } else { AB::Expr::ZERO })
 }
 
 impl<AB: MachineBuilder<F: BinaryBase>> Air<AB> for HashAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local: &HashCols<AB::Var> = main.current_slice().borrow();
+        let row = main.current_slice();
+        let msg: &MsgCols<AB::Var> = row.borrow();
+        let out_cols: &OutCols<AB::Var> = row.borrow();
         let prep = builder.preprocessed();
         let prep: HashPrep<AB::Var> = *prep.current_slice().borrow();
 
-        let cells: [AB::Expr; SLOTS] = core::array::from_fn(|k| pack::<AB>(&local.cells[k]));
-        let block_cells: [AB::Expr; SLOTS] = core::array::from_fn(|k| {
-            let bits: Vec<AB::Var> =
-                local.block[4 * k..4 * k + 4].iter().flatten().copied().collect();
-            pack::<AB>(&bits)
-        });
-        let bit: AB::Expr = local.bit.into();
-        for k in 0..SLOTS {
-            let swapped = cells[k ^ 2].clone();
-            builder.assert_eq(
-                block_cells[k].clone(),
-                cells[k].clone() + bit.clone() * (cells[k].clone() + swapped),
-            );
-        }
-        builder.assert_zero((AB::Expr::ONE - prep.is_merkle.into()) * bit.clone());
+        let id = exprs::<AB, PERMUTATION_ID_BITS>(&prep.id);
+        let pair: AB::Expr = prep.pair.into();
+        let is_msg: AB::Expr = prep.is_msg.into();
+        let bit: AB::Expr = msg.bit.into();
+        builder.assert_zero(is_msg.clone() * (AB::Expr::ONE - prep.is_merkle.into()) * bit.clone());
 
-        let cv: Vec<[AB::Expr; WORD_BITS]> =
-            local.cv.iter().map(|w| exprs::<AB, WORD_BITS>(w)).collect();
-        for (half, words) in [(0usize, &IV[..4]), (1, &IV[4..])] {
-            let iv = words
-                .iter()
-                .enumerate()
-                .fold(0u128, |acc, (w, &x)| acc | (u128::from(x) << (32 * w)));
-            let bits: Vec<AB::Expr> =
-                cv[4 * half..4 * half + 4].iter().flatten().cloned().collect();
-            builder
-                .when(prep.starts)
-                .assert_eq(pack_field::<AB>(&bits), constant::<AB>(F::from_repr(iv)));
-        }
-        builder.declare_bus(
-            CHAIN,
-            BusDirection::Pull,
-            chain_tuple::<AB>(&prep.previous, &cv),
-            BusActivation::Boolean(prep.chained.into()),
-        );
-        for (k, slot) in prep.slots.iter().enumerate() {
+        let cells: [AB::Expr; 2] = core::array::from_fn(|k| pack::<AB>(&msg.cells[k]));
+        for k in 0..2 {
             builder.declare_bus(
                 MEMORY,
                 BusDirection::Pull,
-                cell::<AB>(slot, 0, cells[k].clone()),
+                cell::<AB>(&prep.slots[k], 0, cells[k].clone()),
                 BusActivation::Boolean(prep.reads_slots.into()),
             );
         }
         builder.declare_bus(
             MEMORY,
             BusDirection::Pull,
-            cell::<AB>(&prep.bit_addr, 0, bit),
+            cell::<AB>(&prep.bit_addr, 0, bit.clone()),
             BusActivation::Boolean(prep.is_merkle.into()),
         );
-        let cell_words = |range: core::ops::Range<usize>| -> Vec<[AB::Expr; WORD_BITS]> {
-            range
-                .flat_map(|k| {
-                    (0..4).map(move |w| core::array::from_fn(|b| local.cells[k][32 * w + b].into()))
-                })
-                .collect()
-        };
-        builder.declare_bus(
-            CHAIN,
-            BusDirection::Pull,
-            chain_tuple::<AB>(&prep.left, &cell_words(0..2)),
-            BusActivation::Boolean(prep.is_parent.into()),
-        );
-        builder.declare_bus(
-            CHAIN,
-            BusDirection::Pull,
-            chain_tuple::<AB>(&prep.right, &cell_words(2..4)),
-            BusActivation::Boolean(prep.is_parent.into()),
-        );
-
-        let is_real: AB::Expr = prep.is_real.into();
-        let initial: [[AB::Expr; WORD_BITS]; STATE_WORDS] = core::array::from_fn(|i| match i {
-            0..=7 => cv[i].clone(),
-            8..=11 => {
-                let iv = constant_bits::<AB, WORD_BITS>(u64::from(IV[i - 8]));
-                core::array::from_fn(|k| iv[k].clone() * is_real.clone())
-            }
-            12 => exprs::<AB, WORD_BITS>(&prep.counter),
-            13 => constant_bits::<AB, WORD_BITS>(0),
-            14 => exprs::<AB, WORD_BITS>(&prep.block_len),
-            _ => exprs::<AB, WORD_BITS>(&prep.flags),
-        });
-        let words: [[AB::Expr; WORD_BITS]; STATE_WORDS] =
-            core::array::from_fn(|i| exprs::<AB, WORD_BITS>(&local.block[i]));
-        let id: [AB::Expr; PERMUTATION_ID_BITS] = exprs::<AB, PERMUTATION_ID_BITS>(&prep.id);
-        builder.declare_bus(
-            BLAKE3,
-            BusDirection::Push,
-            blake3_tuple::<AB>(&id, &constant_bits::<AB, BLAKE3_ROUND_BITS>(0), &initial, &words),
-            BusActivation::Boolean(is_real.clone()),
-        );
-        let mut final_words = words;
-        for _ in 0..ROUNDS {
-            final_words = permute(&final_words);
+        let children = [
+            exprs::<AB, PERMUTATION_ID_BITS>(&prep.other),
+            exprs::<AB, PERMUTATION_ID_BITS>(&prep.right),
+        ];
+        for k in 0..2 {
+            builder.declare_bus(
+                CHAIN,
+                BusDirection::Pull,
+                chain_tuple::<AB>(&children[k], pair.clone(), cells[k].clone()),
+                BusActivation::Boolean(prep.is_parent.into()),
+            );
         }
-        let last: [[AB::Expr; WORD_BITS]; STATE_WORDS] =
-            core::array::from_fn(|i| exprs::<AB, WORD_BITS>(&local.final_state[i]));
-        builder.declare_bus(
-            BLAKE3,
-            BusDirection::Pull,
-            blake3_tuple::<AB>(
-                &id,
-                &constant_bits::<AB, BLAKE3_ROUND_BITS>(ROUNDS as u64),
-                &last,
-                &final_words,
-            ),
-            BusActivation::Boolean(is_real),
-        );
+        let first_use = constant_bits::<AB, USE_BITS>(0);
+        for k in 0..2 {
+            let other = 1 - k;
+            for w in 0..4 {
+                let word: [AB::Expr; WORD_BITS] = core::array::from_fn(|b| {
+                    let x: AB::Expr = msg.cells[k][32 * w + b].into();
+                    let x2: AB::Expr = msg.cells[other][32 * w + b].into();
+                    x.clone() + bit.clone() * (x + x2)
+                });
+                let index: [AB::Expr; MSG_INDEX_BITS] = [
+                    AB::Expr::from_bool(w & 1 == 1),
+                    AB::Expr::from_bool(w & 2 == 2),
+                    pair.clone(),
+                    AB::Expr::from_bool(k == 1),
+                ];
+                builder.declare_bus(
+                    MSG,
+                    BusDirection::Push,
+                    word_tuple::<AB>(&id, &index, &first_use, &word),
+                    BusActivation::Boolean(is_msg.clone()),
+                );
+            }
+        }
 
-        let out: Vec<[AB::Expr; WORD_BITS]> = (0..8)
-            .map(|i| core::array::from_fn(|k| last[i][k].clone() + last[i + 8][k].clone()))
-            .collect();
-        builder.declare_bus(
-            CHAIN,
-            BusDirection::Push,
-            chain_tuple::<AB>(&prep.id, &out),
-            BusActivation::Boolean(prep.links.into()),
-        );
+        let start = constant_bits::<AB, VERSION_BITS>(0);
+        let lane_index = |i: usize| constant_bits::<AB, LANE_BITS>(i as u64);
+        for i in 0..STATE_WORDS {
+            let (value, activation): ([AB::Expr; WORD_BITS], AB::Expr) = match i {
+                0..=7 => (constant_bits::<AB, WORD_BITS>(u64::from(IV[i])), prep.starts.into()),
+                8..=11 => (constant_bits::<AB, WORD_BITS>(u64::from(IV[i - 8])), prep.first.into()),
+                12 => (word_of::<AB, COUNTER_BITS>(&prep.counter), prep.first.into()),
+                13 => (constant_bits::<AB, WORD_BITS>(0), prep.first.into()),
+                14 => (word_of::<AB, LEN_BITS>(&prep.block_len), prep.first.into()),
+                _ => (word_of::<AB, FLAG_BITS>(&prep.flags), prep.first.into()),
+            };
+            builder.declare_bus(
+                LANE,
+                BusDirection::Push,
+                word_tuple::<AB>(&id, &lane_index(i), &start, &value),
+                BusActivation::Boolean(activation),
+            );
+        }
+
+        let last: [[AB::Expr; WORD_BITS]; STATE_WORDS] =
+            core::array::from_fn(|i| exprs::<AB, WORD_BITS>(&out_cols.last[i]));
+        let final_version = constant_bits::<AB, VERSION_BITS>(FINAL_VERSION as u64);
+        for (i, lane) in last.iter().enumerate() {
+            builder.declare_bus(
+                LANE,
+                BusDirection::Pull,
+                word_tuple::<AB>(&id, &lane_index(i), &final_version, lane),
+                BusActivation::Boolean(prep.is_out.into()),
+            );
+        }
+        let out: [[AB::Expr; WORD_BITS]; 8] = core::array::from_fn(|i| {
+            core::array::from_fn(|k| last[i][k].clone() + last[i + 8][k].clone())
+        });
+        let successor = exprs::<AB, PERMUTATION_ID_BITS>(&prep.other);
+        for (i, word) in out.iter().enumerate() {
+            builder.declare_bus(
+                LANE,
+                BusDirection::Push,
+                word_tuple::<AB>(&successor, &lane_index(i), &start, word),
+                BusActivation::Boolean(prep.links_cv.into()),
+            );
+        }
         for half in 0..2 {
             let bits: Vec<AB::Expr> =
                 out[4 * half..4 * half + 4].iter().flatten().cloned().collect();
+            let value = pack_field::<AB>(&bits);
+            builder.declare_bus(
+                CHAIN,
+                BusDirection::Push,
+                chain_tuple::<AB>(&id, AB::Expr::from_bool(half == 1), value.clone()),
+                BusActivation::Boolean(prep.links_parent.into()),
+            );
             builder.declare_bus(
                 WRITE,
                 BusDirection::Push,
-                cell::<AB>(&prep.out_base, half as u32, pack_field::<AB>(&bits)),
+                cell::<AB>(&prep.out_base, half as u32, value),
                 BusActivation::Boolean(prep.writes[half].into()),
             );
         }

@@ -9,8 +9,8 @@
 //!     ledger    one row per read; binds each cell to its source
 //!     arith     one row per field operation, assertion, select or copy
 //!     rewire    one row per transpose, split into bytes or bits, or assembly
-//!     hash      one row per Blake3 compression, with its chaining
-//!     rounds    seven rows per compression, the binary stage's round table
+//!     hash      three rows per Blake3 compression: its block, its output
+//!     rounds    one row per half quarter-round, 112 per compression
 //! ```
 //!
 //! What the verifier of this machine costs grows with its tables and
@@ -23,6 +23,7 @@ pub mod hash;
 pub mod ledger;
 pub mod program;
 pub mod rewire;
+pub mod rounds;
 
 use p3_air::symbolic::AirLayout;
 use p3_air::{Air, BaseAir};
@@ -40,7 +41,6 @@ use p3_multi_stark::{
 use p3_sumcheck::layout::Table;
 use p3_sumcheck::TableShape;
 use zkm_binary_stark::config::{MachineConfig, MachineConfigError, MachineProof};
-use zkm_binary_stark::machine::blake3::Blake3RoundAir;
 use zkm_binary_stark::machine_builder::MachineBuilder;
 use zkm_binary_stark::{challenger, BinaryBase, BinarySchedule};
 
@@ -49,6 +49,7 @@ use self::hash::HashAir;
 use self::ledger::{LedgerAir, MAX_PUBLIC};
 use self::program::Program;
 use self::rewire::RewireAir;
+use self::rounds::RoundsAir;
 use crate::tape::{RunError, Tape, F};
 
 /// One table of the machine.
@@ -57,7 +58,7 @@ pub enum TapeAir {
     Arith(ArithAir),
     Rewire(RewireAir),
     Hash(HashAir),
-    Rounds(Blake3RoundAir),
+    Rounds(RoundsAir),
 }
 
 impl TapeAir {
@@ -176,7 +177,7 @@ impl TapeMachine {
             TapeAir::Arith(ArithAir::new(&program)),
             TapeAir::Rewire(RewireAir::new(&program)),
             TapeAir::Hash(HashAir::new(&program)),
-            TapeAir::Rounds(Blake3RoundAir::for_count(program.compressions.len())),
+            TapeAir::Rounds(RoundsAir::new(program.compressions.len())),
         ];
         let (main, preprocessed) = Self::shapes_of(&airs);
         let config =

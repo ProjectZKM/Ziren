@@ -22,6 +22,41 @@ pub const VALUE_BITS: usize = 128;
 /// computes it to the one that continues from it.
 pub const CHAIN: BusName<'static> = BusName::new("chain");
 
+/// The channel a word of a Blake3 state travels on, one lane at a time:
+/// a half quarter-round pulls the four lanes it reads at their version and
+/// pushes them at the next.
+pub const LANE: BusName<'static> = BusName::new("blake3_lane");
+
+/// The channel a message word travels on from one round that uses it to
+/// the next.
+pub const MSG: BusName<'static> = BusName::new("blake3_msg");
+
+/// Bits of a lane's index.
+pub const LANE_BITS: usize = 4;
+
+/// Bits of a lane's version: each half quarter-round that touches a lane
+/// raises it by one, four times a round.
+pub const VERSION_BITS: usize = 5;
+
+/// Bits of a message word's index.
+pub const MSG_INDEX_BITS: usize = 4;
+
+/// Bits of a message word's use, its round.
+pub const USE_BITS: usize = 3;
+
+/// A Blake3 word on a channel: the compression, the word's place and its
+/// version or use, and its 32 bits, packed into one element.
+#[must_use]
+pub fn word_tuple<AB: AirBuilder<F: BinaryBase>>(
+    id: &[AB::Expr],
+    index: &[AB::Expr],
+    stamp: &[AB::Expr],
+    word: &[AB::Expr],
+) -> Vec<AB::Expr> {
+    let bits: Vec<AB::Expr> = id.iter().chain(index).chain(stamp).chain(word).cloned().collect();
+    vec![pack_field::<AB>(&bits)]
+}
+
 /// The bits of an address, lowest first.
 #[must_use]
 pub fn addr_bits(addr: u32) -> [u8; ADDR_BITS] {
