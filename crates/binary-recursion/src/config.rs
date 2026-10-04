@@ -13,13 +13,13 @@ use p3_binary_pcs::whir::{
 use p3_blake3::Blake3;
 use p3_multi_stark::config::{Commitment, MultiStarkConfig, ProverData};
 use p3_multi_stark::{MultiStarkProof, VerifyingKey};
-use p3_sumcheck::layout::{plan_stacked_layout, Table};
+use p3_sumcheck::layout::Table;
 use p3_sumcheck::ring_switch::bits::BitRingSwitch;
 use p3_sumcheck::TableShape;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use zkm_binary_stark::config::{MachineConfig, MachineConfigError, MerkleMmcs};
+use zkm_binary_stark::config::{paired_arity, MachineConfig, MachineConfigError, MerkleMmcs};
 use zkm_binary_stark::{BinarySchedule, F};
 
 use crate::challenger::TracedChallenger;
@@ -35,6 +35,7 @@ pub type TracedPcs =
 pub struct TracedConfig {
     pcs: TracedPcs,
     preprocessed_pcs: TracedPcs,
+    paired: bool,
 }
 
 impl TracedConfig {
@@ -44,14 +45,12 @@ impl TracedConfig {
         preprocessed: &[TableShape],
         schedule: &BinarySchedule,
     ) -> Result<Self, MachineConfigError> {
-        let (arity, _) = plan_stacked_layout(main);
-        let pcs = commitment(arity, schedule)?;
-        let preprocessed_pcs = if preprocessed.is_empty() {
-            commitment(arity, schedule)?
-        } else {
-            commitment(plan_stacked_layout(preprocessed).0, schedule)?
-        };
-        Ok(Self { pcs, preprocessed_pcs })
+        let arity = paired_arity(main, preprocessed);
+        Ok(Self {
+            pcs: commitment(arity, schedule)?,
+            preprocessed_pcs: commitment(arity, schedule)?,
+            paired: !preprocessed.is_empty(),
+        })
     }
 }
 
@@ -89,6 +88,10 @@ impl MultiStarkConfig for TracedConfig {
 
     fn preprocessed_pcs(&self) -> &Self::Pcs {
         &self.preprocessed_pcs
+    }
+
+    fn pair_openings(&self) -> bool {
+        self.paired
     }
 
     fn collision_resistance_bits(&self) -> Option<usize> {

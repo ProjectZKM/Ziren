@@ -26,7 +26,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::bytes::{blake3, merkle_node, select, Piece};
 use crate::challenger::TracedChallenger;
-use crate::queries::{self, User};
+use crate::queries;
 use crate::tape::{digest_elements, F};
 use crate::traced::Traced;
 
@@ -226,8 +226,8 @@ impl Mmcs<Traced> for TracedMmcs {
             .map_err(TracedMmcsError::Restore)?;
         let roots = commit.roots();
         let depth = dims.height.next_power_of_two().trailing_zeros() as usize;
-        for (&index, rows) in indices.iter().zip(opened_values) {
-            let bits = queries::take_for(User::Merkle, index, depth);
+        let bits = queries::take_paths(indices, depth);
+        for ((&index, rows), bits) in indices.iter().zip(opened_values).zip(bits) {
             let path = paths
                 .iter()
                 .find(|path| path.leaf_index == index)

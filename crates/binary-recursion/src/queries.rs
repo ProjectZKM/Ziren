@@ -6,6 +6,10 @@
 //! path check and the domain's query point, take them from the log in the
 //! order they were drawn.  Each checks that the index it was handed is the
 //! one it took, so a use out of order is refused, not silently mismatched.
+//!
+//! A first round that opens two commitments at the same queries checks a
+//! path in each: the second check of the same index list reads the draws
+//! the first one took.
 
 use core::cell::RefCell;
 
@@ -28,6 +32,8 @@ struct Log {
     queries: Vec<Query>,
     merkle: usize,
     point: usize,
+    /// Where the path check's last index list started in the log, and the list.
+    last_paths: Option<(usize, Vec<usize>)>,
 }
 
 /// The users of a logged index.
@@ -90,6 +96,37 @@ pub fn take_for(user: User, index: usize, width: usize) -> Vec<Traced> {
         }));
         bits
     })
+}
+
+/// The `width` bits of each of `indices` for the path check of one
+/// commitment, as [`take_for`] gives them: a list equal to the one the
+/// previous check took is the same queries opened in another commitment,
+/// and reads the same draws again.
+///
+/// # Panics
+/// As [`take_for`].
+#[must_use]
+pub fn take_paths(indices: &[usize], width: usize) -> Vec<Vec<Traced>> {
+    let again = LOG.with(|log| {
+        let mut log = log.borrow_mut();
+        match &log.last_paths {
+            Some((start, last)) if last == indices => {
+                let start = *start;
+                log.merkle = start;
+                true
+            }
+            _ => {
+                let start = log.merkle;
+                log.last_paths = Some((start, indices.to_vec()));
+                false
+            }
+        }
+    });
+    let bits = indices.iter().map(|&index| take_for(User::Merkle, index, width)).collect();
+    if again {
+        LOG.with(|log| log.borrow_mut().last_paths = None);
+    }
+    bits
 }
 
 /// Take the whole log, resetting it, and return the drawn indices with how

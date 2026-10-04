@@ -6,8 +6,9 @@
 //! builds that configuration from the tables' shapes and the schedule.
 
 use p3_binary_pcs::whir::{
-    recommended_cap_height, BooleanWhirData, BooleanWhirDomain, BooleanWhirError, BooleanWhirPcs,
-    BooleanWhirProof, BooleanWhirProver, BooleanWhirTracePcs, ProfileError,
+    recommended_cap_height, BooleanWhirData, BooleanWhirDomain, BooleanWhirError,
+    BooleanWhirOpening, BooleanWhirPcs, BooleanWhirProof, BooleanWhirProver, BooleanWhirTracePcs,
+    ProfileError,
 };
 use p3_binary_pcs::BooleanTraceCommitmentData;
 use p3_blake3::Blake3;
@@ -37,7 +38,9 @@ pub type MachineProof = p3_multi_stark::MultiStarkProof<MachineConfig>;
 
 /// The postcard bytes of each part of `proof`, labelled: the values every
 /// column is opened to, the ring-switch claims, and the WHIR rounds and
-/// final openings of the main and preprocessed commitments.
+/// final openings of the main and preprocessed commitments; a paired proof
+/// carries one WHIR run, on the preprocessed side, with the cross values
+/// that bind it to both commitments.
 #[must_use]
 pub fn proof_breakdown(proof: &MachineProof) -> Vec<(String, usize)> {
     fn size<T: serde::Serialize>(value: &T) -> usize {
@@ -55,23 +58,27 @@ pub fn proof_breakdown(proof: &MachineProof) -> Vec<(String, usize)> {
             size(&whir.reduction.claims),
         ));
         parts.push((format!("{label}.reduction.sumcheck"), size(&whir.reduction.sumcheck)));
-        parts.push((format!("{label}.opening.evals"), size(&whir.opening.evals)));
+        let run = match &whir.opening {
+            BooleanWhirOpening::Own(opening) => {
+                parts.push((format!("{label}.opening.evals"), size(&opening.evals)));
+                &opening.whir
+            }
+            BooleanWhirOpening::Pair(pair) => {
+                parts.push((
+                    format!("{label}.opening.evals+cross"),
+                    size(&pair.evals) + size(&pair.cross) + size(&pair.pow_witness),
+                ));
+                &pair.whir
+            }
+            BooleanWhirOpening::Paired => return,
+        };
+        parts.push((format!("{label}.opening.whir.initial_sumcheck"), size(&run.initial_sumcheck)));
         parts.push((
-            format!("{label}.opening.whir.initial_sumcheck"),
-            size(&whir.opening.whir.initial_sumcheck),
+            format!("{label}.opening.whir.rounds ({} rounds)", run.rounds.len()),
+            size(&run.rounds),
         ));
-        parts.push((
-            format!("{label}.opening.whir.rounds ({} rounds)", whir.opening.whir.rounds.len()),
-            size(&whir.opening.whir.rounds),
-        ));
-        parts.push((
-            format!("{label}.opening.whir.final_openings"),
-            size(&whir.opening.whir.final_openings),
-        ));
-        parts.push((
-            format!("{label}.opening.whir.final_poly"),
-            size(&whir.opening.whir.final_poly),
-        ));
+        parts.push((format!("{label}.opening.whir.final_openings"), size(&run.final_openings)));
+        parts.push((format!("{label}.opening.whir.final_poly"), size(&run.final_poly)));
     }
     let mut parts = vec![
         ("commitment".to_string(), size(&proof.commitment)),
@@ -118,12 +125,18 @@ impl core::fmt::Display for MachineConfigError {
 impl std::error::Error for MachineConfigError {}
 
 /// The configuration of one machine: its tables' shapes fix the commitments.
+///
+/// Both commitments are words of one code, at the arity the wider of the two
+/// traces stacks to, so one WHIR run opens them as a pair: its first round
+/// opens both trees at each query, and every later round is paid once.
 pub struct MachineConfig {
     pcs: MachinePcs,
-    /// The commitment of the preprocessed tables, planned from their shapes.
+    /// The commitment of the preprocessed tables, at the main arity.
     preprocessed_pcs: MachinePcs,
-    /// Variables of the stacked main commitment.
+    /// Variables of both stacked commitments.
     pub arity: usize,
+    /// Whether a preprocessed trace exists to pair with the main one.
+    paired: bool,
 }
 
 impl MachineConfig {
@@ -134,14 +147,25 @@ impl MachineConfig {
         preprocessed: &[TableShape],
         schedule: &BinarySchedule,
     ) -> Result<Self, MachineConfigError> {
-        let (arity, _) = plan_stacked_layout(main);
-        let pcs = commitment(arity, schedule)?;
-        let preprocessed_pcs = if preprocessed.is_empty() {
-            commitment(arity, schedule)?
-        } else {
-            commitment(plan_stacked_layout(preprocessed).0, schedule)?
-        };
-        Ok(Self { pcs, preprocessed_pcs, arity })
+        let arity = paired_arity(main, preprocessed);
+        Ok(Self {
+            pcs: commitment(arity, schedule)?,
+            preprocessed_pcs: commitment(arity, schedule)?,
+            arity,
+            paired: !preprocessed.is_empty(),
+        })
+    }
+}
+
+/// The arity both commitments are made at: the wider of what the main and
+/// the preprocessed tables stack to, the narrower one zero above its cells.
+#[must_use]
+pub fn paired_arity(main: &[TableShape], preprocessed: &[TableShape]) -> usize {
+    let (arity, _) = plan_stacked_layout(main);
+    if preprocessed.is_empty() {
+        arity
+    } else {
+        arity.max(plan_stacked_layout(preprocessed).0)
     }
 }
 
@@ -188,6 +212,10 @@ impl MultiStarkConfig for MachineConfig {
 
     fn preprocessed_pcs(&self) -> &Self::Pcs {
         &self.preprocessed_pcs
+    }
+
+    fn pair_openings(&self) -> bool {
+        self.paired
     }
 
     fn collision_resistance_bits(&self) -> Option<usize> {
