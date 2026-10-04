@@ -55,7 +55,7 @@ pub const NUM_EXT_ALU_COLS: usize = core::mem::size_of::<ExtAluCols<u8>>();
 /// The extension ALU of one program.
 pub struct ExtAluAir {
     log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) preprocessed: Vec<u8>,
     /// Whether each instruction checks on `(in1, in2)`, in order.
     direct: Vec<bool>,
     /// Whether each instruction binds the product, in order.

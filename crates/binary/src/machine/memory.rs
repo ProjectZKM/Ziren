@@ -61,7 +61,7 @@ pub const NUM_MEMORY_CONST_COLS: usize = core::mem::size_of::<MemoryConstCols<u8
 /// The constants of one program.
 pub struct MemoryConstAir {
     log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) preprocessed: Vec<u8>,
     writes: Vec<(u32, u32)>,
     written: Vec<Cell>,
 }
@@ -199,7 +199,7 @@ pub const NUM_MEMORY_VAR_COLS: usize = core::mem::size_of::<MemoryVarCols<u8>>()
 /// The hint cells of one program, in the order the runtime fills them.
 pub struct MemoryVarAir {
     log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) preprocessed: Vec<u8>,
     /// `(address, reads)` of every hint cell, in order.
     accesses: Vec<(u32, u32)>,
 }

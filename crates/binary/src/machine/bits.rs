@@ -104,6 +104,7 @@ impl BitRows {
 /// ones.
 #[must_use]
 pub fn dense<X: Field>(bits: &[u8], width: usize) -> RowMajorMatrix<X> {
+    assert!(!bits.is_empty(), "the preprocessed trace was released once setup committed it");
     RowMajorMatrix::new(
         bits.iter().map(|&bit| if bit == 1 { X::ONE } else { X::ZERO }).collect(),
         width,

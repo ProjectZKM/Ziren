@@ -64,6 +64,26 @@ pub enum RecursionAir {
 }
 
 impl RecursionAir {
+    /// Release the table's preprocessed trace, a byte per bit, once setup
+    /// has committed it: the proving key holds the committed table, and
+    /// nothing reads the trace again.
+    fn release_preprocessed(&mut self) {
+        let bits = match self {
+            Self::Ledger(air) => &mut air.preprocessed,
+            Self::MemoryConst(air) => &mut air.preprocessed,
+            Self::MemoryVar(air) => &mut air.preprocessed,
+            Self::BaseAlu(air) => &mut air.preprocessed,
+            Self::ExtAlu(air) => &mut air.preprocessed,
+            Self::Select(air) => &mut air.preprocessed,
+            Self::Blake3Io(air) => &mut air.preprocessed,
+            Self::Blake3Round(air) => &mut air.preprocessed,
+            Self::Limbs(air) => &mut air.preprocessed,
+            Self::PublicValues(air) => &mut air.preprocessed,
+            Self::Mul(_) => return,
+        };
+        *bits = Vec::new();
+    }
+
     /// The log height of the table.
     #[must_use]
     pub fn log_height(&self) -> usize {
@@ -346,6 +366,7 @@ impl RecursionMachine {
             .map_err(MachineError::Config)?;
         let refs: Vec<&RecursionAir> = airs.iter().collect();
         let (pk, vk) = setup(&config, &refs, &mut challenger()).map_err(MachineError::Setup)?;
+        airs.iter_mut().for_each(RecursionAir::release_preprocessed);
         Ok(Self { airs, config, pk, vk })
     }
 

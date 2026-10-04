@@ -72,7 +72,7 @@ pub const NUM_SELECT_COLS: usize = core::mem::size_of::<SelectCols<u8>>();
 /// The select table of one program.
 pub struct SelectAir {
     log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) preprocessed: Vec<u8>,
     /// `(address, reads)` of each instruction's two outputs, in order.
     outputs: Vec<[(u32, u32); 2]>,
 }

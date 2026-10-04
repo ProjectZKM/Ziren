@@ -60,7 +60,7 @@ pub const NUM_LIMBS_COLS: usize = core::mem::size_of::<LimbsCols<u8>>();
 /// The limb table of one program.
 pub struct LimbsAir {
     log_height: usize,
-    preprocessed: Vec<u8>,
+    pub(super) preprocessed: Vec<u8>,
     /// `(address, reads)` of each decomposition's limbs, in order.
     outputs: Vec<[(u32, u32); 2]>,
 }

@@ -12,6 +12,7 @@ use p3_binary_pcs::whir::{
 };
 use p3_binary_pcs::BooleanTraceCommitmentData;
 use p3_blake3::Blake3;
+use p3_matrix::dense::RowMajorMatrix;
 use p3_multi_stark::config::MultiStarkConfig;
 use p3_sumcheck::layout::{plan_stacked_layout, Table};
 use p3_sumcheck::ring_switch::bits::BitRingSwitch;
@@ -216,6 +217,12 @@ impl MultiStarkConfig for MachineConfig {
 
     fn pair_openings(&self) -> bool {
         self.paired
+    }
+
+    /// Every preprocessed cell is a bit, so the table is packed as the main
+    /// ones are, at a bit per cell rather than an element.
+    fn preprocessed_table(&self, trace: RowMajorMatrix<F>) -> Table<F> {
+        Table::from_boolean_rows(&trace).expect("every preprocessed cell of the machine is a bit")
     }
 
     fn collision_resistance_bits(&self) -> Option<usize> {
