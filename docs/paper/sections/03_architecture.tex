@@ -1,0 +1,148 @@
+\section{Architecture}
+\label{sec:architecture}
+\label{sec:overview}
+\label{sec:argument}
+
+\label{sec:arch-verifiers}
+\Ziren{} proves one statement, the execution of a MIPS32 image (\S\ref{sec:statement}), and outputs a \emph{compressed proof} of it. A \emph{native verifier} checks that proof as a program, natively or compiled to WebAssembly, as the consumers of the proofs published for real-time proving of Ethereum blocks do; it pays for the proof's size and its own running time. Algorithm~\ref{alg:architecture} states \Ziren{} up to that proof and Figure~\ref{fig:architecture} draws it. The subsections below annotate the algorithm and state its core as two protocols, the shard argument (Protocol~\ref{prot:shard}) and the block argument (Protocol~\ref{prot:block}), symbolic in the parameters of \S\ref{sec:argument-params}; Sections~\ref{sec:isa}--\ref{sec:recursion} construct their components and Section~\ref{sec:security} states what they establish.
+
+Verifiers that count cost differently are served by \emph{applications} built on \Ziren{} (\S\ref{sec:applications}). Each verifies the compressed proof inside another proof system, starting from one shrink node: a wrap into a pairing-based SNARK for an \emph{on-chain verifier}, an Ethereum contract that pays gas, and a binary stage and narrow recursion for a \emph{garbled verifier}, a Boolean circuit that pays for its AND gates and input bits.
+
+\begin{algorithm}[H]
+\caption{\Ziren{}, up to the compressed proof. Lines~\ref{alg:arch-shards}--\ref{alg:arch-root} run as a pipeline (\S\ref{sec:arch-recursion}).}
+\label{alg:architecture}
+\DontPrintSemicolon
+\KwIn{a program image $P$; input and hint streams $(\mathsf{in}, \mathsf{hint})$}
+\KwOut{the compressed proof $\pi$}
+$(\mathsf{pk}, \mathsf{vk}) \gets \mathsf{Setup}(P)$ \tcp*{commit the program and the preprocessed tables}
+$(d_0, \dots, d_{N-1}) \gets \mathsf{Execute}(P, \mathsf{in}, \mathsf{hint})$ \tcp*{one compiled run, cut into shard descriptors}\label{alg:arch-exec}
+\ForEach(\tcp*[f]{in parallel, one shard per accelerator}){$i \in \{0, \dots, N-1\}$}{\label{alg:arch-shards}
+  $T_i \gets \mathsf{Replay}(d_i)$ \tcp*{re-execute shard $i$ to its event record}
+  $\pi_i \gets \mathsf{ShardProve}(\mathsf{pk}, T_i)$ \tcp*{over $\KB$, committed under $\Poseidon$}\label{alg:arch-shard}
+}
+$\mathcal{S} \gets (\mathsf{Leaf}_{\sigma(\pi_i)}(\pi_i))_{i < N}$ \tcp*{one leaf key per quantised shard shape}\label{alg:arch-leaf}
+\While{$|\mathcal{S}| > 1$}{
+  $\mathcal{S} \gets \mathsf{Compose}(\mathcal{S})$ \tcp*{one level; a node takes $\leq 3$ contiguous children}
+}
+$\pi \gets \mathsf{Root}(\mathcal{S})$ \tcp*{arity one, under the compress schedule}\label{alg:arch-root}
+\tcp{the native verifier runs $\mathsf{Verify}(\mathsf{vk}, h, \pi)$ (Protocol~\ref{prot:block})}
+\end{algorithm}
+
+\begin{figure}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/architecture}}
+\caption{One proving stack ends in a 274\,KiB compressed proof for a native verifier, and applications re-prove that proof for on-chain and garbled verifiers. Read left to right. \Ziren{} (top): a guest program compiles to a MIPS32 image; execution cuts one run into shards, which accelerators prove in parallel over \KB{} with \Poseidon{} commitments (the dashed panel lists the objects built along the way), and recursion composes the shard proofs into the compressed proof that a native verifier checks. Applications (bottom): a shrink node re-proves the compressed proof under the hash an application reads; the wrap closes it with a pairing-based SNARK for an on-chain verifier, and a binary stage over $\mathbb F_{2^{128}}$ and narrow recursion reach a garbled verifier.}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{Execution}
+\label{sec:arch-execution}
+\label{sec:executor}
+
+Line~\ref{alg:arch-exec} runs once. An interpreter implements every instruction, syscall and error path and alone emits the event record the prover consumes. A just-in-time compiler runs the guest once and cuts the run into shards, each described by the values its reads observe and its boundary registers, so a worker replays its shard under the interpreter and no event record crosses a process boundary (\S\ref{sec:isa-record}). The two implementations are tested against each other, not proved equal, and nothing in the protocol depends on the compiler.
+
+\subsection{The shard argument}
+\label{sec:arch-shard}
+\label{sec:argument-components}
+\label{sec:argument-shard}
+
+Line~\ref{alg:arch-shard} proves one shard. Chips, with one row per executed instruction, and buses arithmetise it (Section~\ref{sec:air}); their constraints and buses are designed to hold exactly when the shard is a correct piece of the execution, and the premises that remain open are listed in \S\ref{sec:security-relation}. A bus argument $\mathsf{BA}$ (\LogUp{}, \S\ref{sec:air-logup}) and a constraint argument $\mathsf{CA}$ (a zerocheck, \S\ref{sec:air-zerocheck}) reduce every claim to column evaluations at one point; a jagged commitment $\mathsf{JC}$ reduces those to one evaluation of one dense polynomial (\S\ref{sec:pcs}), which one \WHIR{} opening authenticates (\S\ref{sec:iopp}). Protocol~\ref{prot:shard} states the reduction. Each step ends with evaluation claims on committed columns, so the steps compose without the verifier reading a column, and the number, widths and heights of the chips are invisible above $\mathsf{JC}$.
+
+\begin{protocol}[Shard argument]
+\label{prot:shard}
+\textbf{Statement:} a verifying key committing to the program and the
+preprocessed tables, and the public values of one shard.\\
+\textbf{Witness:} the shard's execution record.
+\begin{enumerate}
+  \item \textbf{Commit.} The prover arranges each chip's events into rows,
+  places the columns of each commitment round into one dense vector and
+  commits to it. Round order is fixed and the per-chip dimensions enter the
+  transcript, so the geometry is public before any challenge is drawn
+  (Section~\ref{sec:pcs}).
+  \item \textbf{Buses.} The verifier draws the bus challenges. The prover runs
+  the bus argument, which reduces every send and receive of every chip to
+  column evaluations at one point (Section~\ref{sec:air-logup}).
+  \item \textbf{Constraints.} The verifier draws the constraint challenges. The
+  prover runs the constraint argument on the same point, so each column is
+  opened once for both arguments (Section~\ref{sec:air-zerocheck}).
+  \item \textbf{Jagged reduction.} The column claims of the two previous steps,
+  together with explicit zero claims for the gaps in the committed geometry,
+  are batched and reduced to one evaluation of the dense polynomial
+  (Section~\ref{sec:pcs-jagged}).
+  \item \textbf{Jagged assist.} The verifier does not materialise the indicator table
+  the previous step reduced against. A second sumcheck over the public column
+  boundaries certifies its evaluation, and any point-extension coordinates are sampled
+  here, in an order that is itself part of the protocol
+  (Section~\ref{sec:pcs-jagged-assist}).
+  \item \textbf{Opening.} One batched opening authenticates that evaluation
+  against every commitment of step~1 (Section~\ref{sec:iopp}).
+\end{enumerate}
+\textbf{Output:} a shard proof for the public values $\mathsf{pv}$ of
+Definition~\ref{def:shard}.
+\end{protocol}
+
+\paragraph{What the verifier checks.} No quantity a soundness bound depends on is read from the proof beyond the declared heights, which the configuration caps (a column is at most $2^{22}$ rows, \S\ref{sec:pcs-geometry}), and every algebraic identity the native verifier checks is also checked by the recursive verifier. The verifier (i) absorbs the verifying key, the public values and the per-chip dimensions before drawing any challenge; (ii) checks every sumcheck round of the bus argument, the constraint argument, the jagged sumcheck and the jagged assist, and each one's closing identity, evaluating the constraint polynomials itself; (iii) checks Equation~\eqref{eq:stacking-bind}; (iv) runs the \WHIR{} verifier with the query counts, folding factors and grinding bits of the schedule; and (v) checks that the public values are well formed. Preprocessed row counts come from the verifying key and the schedule from the verifier's configuration.
+
+\paragraph{Costs.} With $A$ the committed area of a shard, $n_{\mathrm{int}}$ its number of bus interactions and $K$ its number of columns, the prover performs $O(A + n_{\mathrm{int}})$ field operations outside the commitment and $O(A/\rho)$ hashing and transform work inside it. The verifier checks $O(\log^2 n_{\mathrm{int}})$ sumcheck rounds for the layered lookup circuit and $O(\log A)$ for each of the other three sumchecks, evaluates each chip's constraints once, spends $O(mK)$ on the jagged assist's closing identity (Theorem~\ref{thm:jagged-assist}), and checks the \WHIR{} queries, whose count is fixed by the schedule. The proof size is dominated by the first \WHIR{} round's openings, $t_0$ queries times the stripes times $2^{k_0}$ (\S\ref{sec:iopp-commit}). Section~\ref{sec:performance} gives the concrete values.
+
+\subsection{The block argument}
+\label{sec:arch-recursion}
+\label{sec:argument-block}
+\label{sec:perf-pipeline}
+
+Lines~\ref{alg:arch-leaf}--\ref{alg:arch-root} compose the shard proofs into one proof of the arithmetised relation $\mathcal R_{\mathrm{arith}}$ of \S\ref{sec:security-relation}, which \S\ref{sec:verification} connects to the relation $\mathcal R$ of \S\ref{sec:statement}. Leaves and compose nodes are recursion programs proved with the same shard argument, and each checks its children's keys against an allowlist enumerated from the machine's declared shapes (\S\ref{sec:recursion}). Protocol~\ref{prot:block} states these lines, and the native verifier, with the conditions each node checks.
+
+\begin{protocol}[Block proof, end to end]
+\label{prot:block}
+\textbf{Public parameters:} the field $\F$ and extension $\EF$, the $\Poseidon{}$ transcript and Merkle trees, the \WHIR{} schedule (Table~\ref{tab:whir-schedule}), the bucket rule (\S\ref{sec:pcs-geometry}), the compose arity (at most three), and the allowlist root $\mathsf{root}_K$ of the admissible leaf and compose keys (Algorithm~\ref{alg:enum}).
+
+\smallskip
+\noindent\textbf{Setup}$(P)$. Commit to the program ROM of image $P$ and to the preprocessed \texttt{Program}, \texttt{Byte} and \texttt{Range} tables; output $(\mathsf{pk}, \mathsf{vk})$.
+
+\smallskip
+\noindent\textbf{Prove}$(\mathsf{pk}, P, \mathit{in}, \mathit{hint})$.
+\begin{enumerate}
+  \item \textbf{Execute and shard.} Execute $P$ on $(\mathit{in}, \mathit{hint})$ and cut the run into shards $T_0, \dots, T_{N-1}$, shard $T_i$ having index $i+1$ and its record emitted by re-executing it (\S\ref{sec:isa-emulator}), at the first of the clock fence, the shard size, a chip's height budget and the area budget; each shard's public values $\mathsf{pv}_i$ are those of Definition~\ref{def:shard} (\S\ref{sec:isa-record}).
+  \item \textbf{Prove the shards.} As each record is produced, prove it with the shard argument (Protocol~\ref{prot:shard}): commit, bus argument, zerocheck, jagged reduction and assist, and one \WHIR{} opening, giving $\pi_i$.
+  \item \textbf{Leaves.} Quantise each shard's geometry into its class $\sigma_i = (\text{cluster}, \mathit{first}, b_{\mathrm p}, b_{\mathrm m}, \mathsf{pad}(b_{\mathrm m}))$. The leaf program of that class verifies $\pi_i$, or a few fused shard proofs, against $\mathsf{vk}$ and outputs the compose tuple of the range (\S\ref{sec:recursion}).
+  \item \textbf{Compose.} As soon as contiguous ranges are complete, merge up to three of them with a compose node (Algorithm~\ref{alg:compose}): check each child's key against $\mathsf{root}_K$ and verify it, require consecutive shard indices, adjacent program-counter pairs and tiling cursors, and add the digests.
+  \item \textbf{Root.} Once one node covers $T_0, \dots, T_{N-1}$, a compose node of arity one over it, proved under the compress schedule, additionally requires the range to start at shard index~1, an exit program counter of zero, $D = O$ and exit code zero, and sets $\mathsf{complete}$; the first shard's leaf has already required $\mathsf{entry}_0 = \mathsf{start}(\mathsf{vk})$ and starting cursors of zero. Its proof, with the recursion key $\mathsf{vk}^{\mathrm{rec}}$ that verifies it, is the compressed proof $\pi$.
+\end{enumerate}
+
+\noindent\textbf{Verify}$(\mathsf{vk}, h, \pi)$.
+\begin{enumerate}
+  \item Verify $\pi$ under $\mathsf{vk}^{\mathrm{rec}}$ with the shard verifier of \S\ref{sec:argument-shard} and the compress schedule, which the verifier fixes from the stage it expects and never reads from the proof.
+  \item Require $\mathsf{vk}^{\mathrm{rec}}$ to be in the allowlist, the exported root to equal $\mathsf{root}_K$, and the completion flag to be set (\S\ref{sec:security-binding}).
+  \item Require the exported guest key to equal $\mathsf{vk}$ and the exported output digest to equal $h$; accept.
+\end{enumerate}
+\end{protocol}
+
+Steps~2 to~4 of \textbf{Prove} overlap: a shard is proved as soon as its record exists and a compose node as soon as its children are proved, with trace generation and proof-of-work on the accelerators. Only the root's proof leaves the prover, so only the root uses the schedule tuned for size (\S\ref{sec:perf-proofsize}). The start-up interval and the serial composes over the last shards remain, and they account for the gap between the multi-device speed-up and linear scaling (Table~\ref{tab:cards}).
+
+\subsection{Parameters}
+\label{sec:argument-params}
+
+The protocol is symbolic in the following parameters; numeric values are fixed where each component is built.
+\begin{itemize}
+  \item The base field $\F$ and the challenge extension $\EF$, whose size bounds every term of the form $\deg/|\EF|$; the permutation of the transcript and commitment trees, with its round counts (\S\ref{sec:prelim}), and the trees' arity.
+  \item The committed geometry: the stacking height $H=2^{\ell}$, the row cube $2^{n}$ and the bucket rule (\S\ref{sec:pcs-geometry}), which together fix the set of recursion programs a prover can produce.
+  \item The proximity test: the initial rate $\rho$, per-round folding factors, query counts, out-of-domain samples, the grinding bits of each query phase and of the bus challenges (Table~\ref{tab:whir-schedule}), and the decoding regime.
+  \item Recursion: the compose arity and the height of the tree of admissible keys (\S\ref{sec:recursion}).
+  \item The machine: the shard size, clock fence and per-chip height budgets (\S\ref{sec:isa}), and the guest-accelerator set, which fixes the chip set.
+  \item The cross-shard digest: the curve and its extension, the interaction bound $N_{\mathrm{int}}$ and the multiplicity bound $B$ (\S\ref{sec:air-digest-security}).
+\end{itemize}
+Query soundness needs no conjecture: it is counted in the unique-decoding regime for the core schedule and under the Johnson bound for the root's compress schedule (\S\ref{sec:iopp-soundness}).
+
+\subsection{Applications}
+\label{sec:applications}
+
+An application verifies the compressed proof inside a proof system whose verifier its consumer can afford. Figure~\ref{fig:architecture} (bottom) draws the two built on \Ziren{}; neither changes the statement, and each output attests the same execution as $\pi$. This paper measures and accounts only \Ziren{} (Algorithm~\ref{alg:architecture}).
+
+
+\paragraph{The shrink.}\label{sec:arch-shrink} A shrink node is a recursion node that verifies the compressed proof. Both applications run the same program, proved under \Poseidon{} for the wrap and under \Blake{}~\citep{blake3}, commitments and transcript alike, for garbled verification, so garbled verification changes the hash before it changes the field (\S\ref{sec:recursion-shrink-wrap}).
+
+\paragraph{On-chain verification.}\label{sec:arch-wrap} An on-chain verifier is an Ethereum contract; it pays gas, which precompiled BN254 pairings make small and independent of the statement only for a pairing-based argument over that curve with a constant-size proof~\citep{groth16,plonk}. A wrap node re-proves the shrink with its commitments and transcript under \Poseidon{} over the BN254 scalar field, and a Groth16 or PLONK circuit over BN254 verifies the wrap proof, hashing natively; the circuit either fixes the wrap key or takes it as an input (\S\ref{sec:recursion-shrink-wrap}). The on-chain verifier checks the result with a constant number of pairings.
+
+\paragraph{Garbled verification.}\label{sec:arch-garbled} A garbled verifier is a Boolean circuit evaluated under garbling~\citep{yao86}, as in protocols that check a computation on Bitcoin only when it is disputed~\citep{bitvm}. Evaluating a garbled verifier on an invalid proof reveals a secret that serves as the fraud proof~\citep{glock}; later protocols build bridges on this~\citep{bitvm3}, make the verification of pairing-based SNARKs far cheaper~\citep{argo-mac,babe}, and shrink the on-chain footprint of malicious security~\citep{mosaic}. They garble the verifier of a pairing-based SNARK or of a designated-verifier variant of one, where this application garbles a hash-based verifier over a binary field. A garbled verifier pays for its AND gates and for its input bits, while XOR gates are free~\citep{free-xor,half-gates}. Over a 31-bit prime field an addition is a carry chain and a multiplication a reduction modulo $p$; over $\mathbb F_{2^{128}}$ an addition is a XOR, so this application moves the arithmetic to a binary field and the hash to one built from word additions, XORs and rotations. The binary stage commits bit columns as packed elements of $\mathbb F_{2^{128}}$ and opens them through ring switching~\citep{binius,fri-binius}, emulating the shrink verifier's \KB{} arithmetic over bits.
+
+Its verifier is not rewritten as a circuit. A recorder runs it over a value type that appends every multiplication, inversion, bit decomposition and \Blake{} hash to a tape, and every comparison as the condition it found, so the tape is fixed by the proof's shape and key and enforces the control flow of the run that recorded it. A narrow machine native to $\mathbb F_{2^{128}}$ proves a run of the tape, with a ledger of read cells and tables for arithmetic, bit rewiring and \Blake{}, and narrow recursion repeats the step on each narrow proof's own verifier. The garbled circuit evaluates the last recorded tape on the bits of the last narrow proof; it pays AND gates for field products, \Blake{} compressions and the per-claim tensor algebra of ring switching, and takes as input every value the proof opens and every Merkle path. The narrow machine follows from that cost: few tables, narrow ones, none reading its next row, power-of-two widths, and a low-rate opening.
