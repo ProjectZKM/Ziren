@@ -2,6 +2,14 @@ use core::mem::MaybeUninit;
 
 use crate::syscall_keccak_sponge;
 
+/// The sponge rate of keccak-256: 136 bytes per block.
+const RATE: usize = 136;
+const RATE_WORDS: usize = RATE / 4;
+/// Words the precompile reads per block: the rate and two zero words.
+const STRIDE: usize = RATE_WORDS + 2;
+/// Inputs of up to this many blocks are laid out on the stack.
+const STACK_BLOCKS: usize = 4;
+
 pub fn keccak256(data: &[u8]) -> [u8; 32] {
     if data.is_empty() {
         return [
@@ -10,10 +18,6 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
             0x85, 0xA4, 0x70,
         ];
     }
-
-    const RATE: usize = 136;
-    const STRIDE: usize = RATE / 4 + 2;
-    const STACK_BLOCKS: usize = 4;
 
     let blocks = data.len() / RATE + 1;
     if blocks <= STACK_BLOCKS {
@@ -58,9 +62,6 @@ fn sponge(input: *const u32, len: usize) -> [u8; 32] {
 /// The uninitialized buffer is sound because all `total` words are written
 /// (data, two stride words per block, and the last block's tail, padding and zeros).
 pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
-    const RATE: usize = 136;
-    const STRIDE: usize = RATE / 4 + 2;
-
     let total = (data.len() / RATE + 1) * STRIDE;
     let mut out_vec: Vec<u32> = Vec::with_capacity(total);
     fill_sponge_words(data, &mut out_vec.spare_capacity_mut()[..total]);
@@ -71,10 +72,6 @@ pub fn keccak_sponge_words(data: &[u8]) -> Vec<u32> {
 /// Writes the sponge layout of `data` into `words`, which must hold exactly
 /// `(⌊len/R⌋ + 1) · S` words; every one of them is written.
 fn fill_sponge_words(data: &[u8], words: &mut [MaybeUninit<u32>]) {
-    const RATE: usize = 136;
-    const RATE_WORDS: usize = RATE / 4;
-    const STRIDE: usize = RATE_WORDS + 2;
-
     let mut full = data.chunks_exact(RATE);
     let mut base = 0;
     for block in &mut full {
