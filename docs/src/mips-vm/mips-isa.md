@@ -231,4 +231,4 @@ The support instructions are as follows:
 | SYS_WRITE = 4004,                      | Linux `write`: stdout, stderr, or the public-values (3) and hint (4) descriptors. |
 | SYS_FCNTL = 4055,                      | Linux `fcntl`: `F_GETFD` and `F_GETFL` on fds 0-2. |
 
-Linux syscalls not listed above but accepted (`close`, `munmap`, `rt_sigaction`, `uname`, `futex_time64`, `prctl` and others as no-ops; `open`, `openat`, `fstat64` and `clock_gettime` failing with `ENOSYS`) are listed in [Linux ABI](./linux-abi.md). All Linux syscalls are proved by one chip, `SysLinux`; in the proof they are grouped under the code `SYS_LINUX = 4000`, which is not itself a syscall. Any other syscall number is rejected by the executor (`UnsupportedSyscall`).
+Linux syscalls not listed above but handled as no-ops (`open`, `close`, `munmap`, `rt_sigaction`, `uname`, `futex_time64`, `prctl` and others) are listed in [Linux ABI](./linux-abi.md). All Linux syscalls are proved by one chip, `SysLinux`; in the proof they are grouped under the code `SYS_LINUX = 4000`, which is not itself a syscall. Any other syscall number is rejected by the executor (`UnsupportedSyscall`).

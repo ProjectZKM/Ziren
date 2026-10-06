@@ -11,6 +11,34 @@ impl SysLinuxChip {
     }
 }
 
+/// The Linux calls the executor accepts as no-ops (`SysNopSyscall`: result 0, `$a3` 0, no
+/// memory access). The chip decodes each of them, so a row whose number is neither one of
+/// these nor one of the calls with semantics has no satisfying assignment: the chip accepts
+/// exactly the calls the executor accepts. A new no-op is added here and in the executor's
+/// map together (`nop_syscalls_match_the_executor` checks it).
+pub(crate) const NOP_SYSCALLS: [zkm_core_executor::syscalls::SyscallCode; 17] = {
+    use zkm_core_executor::syscalls::SyscallCode::*;
+    [
+        SYS_OPEN,
+        SYS_CLOSE,
+        SYS_MUNMAP,
+        SYS_UNAME,
+        SYS_NANOSLEEP,
+        SYS_PRCTL,
+        SYS_RT_SIGACTION,
+        SYS_RT_SIGPROCMASK,
+        SYS_SIGALTSTACK,
+        SYS_FSTAT64,
+        SYS_MADVISE,
+        SYS_GETTID,
+        SYS_SCHED_GETAFFINITY,
+        SYS_CLOCK_GETTIME,
+        SYS_OPENAT,
+        SYS_PRLIMIT64,
+        SYS_FUTEX_TIME64,
+    ]
+};
+
 #[cfg(test)]
 pub mod sys_linux_tests {
 
@@ -212,5 +240,94 @@ pub mod sys_linux_tests {
         setup_logger();
         let program = sys_linux_program();
         run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    /// The Linux numbers the chip accepts are the executor's: the calls with semantics
+    /// plus `NOP_SYSCALLS`.
+    #[test]
+    fn nop_syscalls_match_the_executor() {
+        use std::collections::BTreeSet;
+        let linux = |c: SyscallCode| (c as u32) & 0xFF00 != 0;
+        let executor: BTreeSet<u32> = zkm_core_executor::syscalls::default_syscall_map()
+            .keys()
+            .copied()
+            .filter(|&c| linux(c))
+            .map(|c| c as u32)
+            .collect();
+        let with_semantics = [
+            SyscallCode::SYS_MMAP,
+            SyscallCode::SYS_MMAP2,
+            SyscallCode::SYS_CLONE,
+            SyscallCode::SYS_EXT_GROUP,
+            SyscallCode::SYS_BRK,
+            SyscallCode::SYS_FCNTL,
+            SyscallCode::SYS_READ,
+            SyscallCode::SYS_WRITE,
+        ];
+        let chip: BTreeSet<u32> =
+            with_semantics.iter().chain(super::NOP_SYSCALLS.iter()).map(|&c| c as u32).collect();
+        assert_eq!(chip, executor, "the chip's accepted Linux calls differ from the executor's");
+    }
+
+    /// One SysLinux row with call number `code` (no arguments, result 0, `$a3` written 0,
+    /// no memory access: what a no-op row is), proved on the chip alone.
+    fn prove_one_linux_row(code: u32) -> bool {
+        use p3_koala_bear::KoalaBear;
+        use p3_matrix::dense::RowMajorMatrix;
+        use zkm_core_executor::{
+            events::{LinuxEvent, MemoryWriteRecord, PrecompileEvent, SyscallEvent},
+            ExecutionRecord,
+        };
+        use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+
+        use crate::utils::{uni_stark_prove, uni_stark_verify};
+
+        let clk = 8;
+        let event = LinuxEvent {
+            shard: 0,
+            clk,
+            a0: 0,
+            a1: 0,
+            v0: 0,
+            syscall_code: code,
+            read_records: vec![],
+            write_records: vec![MemoryWriteRecord { timestamp: clk, ..Default::default() }],
+            local_mem_access: vec![],
+        };
+        let syscall_event = SyscallEvent {
+            pc: 32,
+            next_pc: 36,
+            shard: 0,
+            clk,
+            a_record: MemoryWriteRecord::default(),
+            a_record_is_real: false,
+            syscall_id: code,
+            arg1: 0,
+            arg2: 0,
+            is_instruction: 0,
+            recv_next_pc: 0,
+            b_record: None.into(),
+            c_record: None.into(),
+        };
+        let mut record = ExecutionRecord::default();
+        record.precompile_events.add_event(SyscallCode::SYS_LINUX, syscall_event, PrecompileEvent::Linux(event));
+        let chip = super::SysLinuxChip::new();
+        let trace: RowMajorMatrix<KoalaBear> =
+            chip.generate_trace(&record, &mut ExecutionRecord::default()).unwrap();
+        // an unsatisfied constraint makes the prover panic (debug checks) or the proof fail
+        std::panic::catch_unwind(|| {
+            let config = KoalaBearPoseidon2::new();
+            let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut config.challenger(), trace);
+            uni_stark_verify(&config, &chip, &mut config.challenger(), &proof).is_ok()
+        })
+        .unwrap_or(false)
+    }
+
+    /// A row with a number the executor refuses (`unimplemented syscall`) has no satisfying
+    /// assignment; a no-op the executor lists does.
+    #[test]
+    fn a_linux_number_the_executor_refuses_is_refused_by_the_chip() {
+        assert!(prove_one_linux_row(SyscallCode::SYS_OPENAT as u32), "a listed no-op must prove");
+        assert!(!prove_one_linux_row(4999), "an unknown Linux number must not prove");
     }
 }

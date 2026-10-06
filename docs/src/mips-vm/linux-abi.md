@@ -193,27 +193,7 @@ Full case matrix:
 
 AIR uses bidirectional `IsZeroOperation` decoders on `a0` (3 decoders) and `a1` (2 decoders) with exhaustive branch constraints.
 
-### Unimplemented Syscalls: ENOSYS
-
-Calls whose result a program would consume are not faked: they fail the way the kernel reports an unimplemented call, so the program sees the failure through its C library (a Rust `Instant::now()` panics, a `File::open` returns the error; Go's runtime never issues `clock_gettime`, its clock is patched in the guest runtime).
-
-| Arg | Width | Semantics |
-|-----|-------|-----------|
-| `a0` | 32-bit | Ignored. |
-| `a1` | 32-bit | Ignored. |
-| **return** `v0` | 32-bit | Always `ENOSYS` (`89` on MIPS). |
-| **output** `A3` | 32-bit | Always `1` (the error flag). |
-
-| Syscall | Number |
-|---------|--------|
-| SYS_OPEN | 4005 |
-| SYS_FSTAT64 | 4215 |
-| SYS_CLOCK_GETTIME | 4263 |
-| SYS_OPENAT | 4288 |
-
 ### NOP Syscalls: No Operation
-
-Calls the runtimes issue while starting and whose result carries nothing. They must succeed: Go's runtime throws when `rt_sigaction` fails and crashes when `rt_sigprocmask` does.
 
 | Arg | Width | Semantics |
 |-----|-------|-----------|
@@ -224,15 +204,19 @@ Calls the runtimes issue while starting and whose result carries nothing. They m
 
 | Syscall | Number |
 |---------|--------|
+| SYS_OPEN | 4005 |
 | SYS_CLOSE | 4006 |
 | SYS_MUNMAP | 4091 |
 | SYS_NANOSLEEP | 4166 |
 | SYS_RT_SIGACTION | 4194 |
 | SYS_RT_SIGPROCMASK | 4195 |
 | SYS_SIGALTSTACK | 4206 |
+| SYS_FSTAT64 | 4215 |
 | SYS_MADVISE | 4218 |
 | SYS_GETTID | 4222 |
 | SYS_SCHED_GETAFFINITY | 4240 |
+| SYS_CLOCK_GETTIME | 4263 |
+| SYS_OPENAT | 4288 |
 | SYS_PRLIMIT64 | 4338 |
 | SYS_UNAME | 4122 |
 | SYS_PRCTL | 4192 |
@@ -240,7 +224,9 @@ Calls the runtimes issue while starting and whose result carries nothing. They m
 
 The last three are called by newer Go runtimes. From Go 1.25 the runtime calls `prctl` to name memory regions and threads, and ignores the result. From Go 1.27 it calls `uname` at startup to decide whether `futex_time64` exists; the no-op returns success with a zeroed `utsname`, which the runtime cannot parse, so the runtime probes `futex_time64`, receives 0, and uses the 64-bit time path.
 
-The executor rejects any syscall number not listed on this page or in [MIPS ISA](./mips-isa.md) with `UnsupportedSyscall`, and the circuit accepts exactly the same set: `SysLinuxChip` decodes every Linux number it handles (the eight with semantics, the four ENOSYS calls pinned to `v0 = ENOSYS`, `A3 = 1`, and the thirteen no-ops pinned to `v0 = 0`, `A3 = 0`) and requires each real row to be one of them; `SyscallInstrsChip` does the same for the calls it handles itself (halt, write, the unconstrained block, hints, commit, verify). A row with any other number has no satisfying assignment, so a proof never exists for an execution the executor would have refused.
+The executor rejects any syscall number not listed on this page or in [MIPS ISA](./mips-isa.md) with `UnsupportedSyscall`, and the circuit accepts exactly the same set. `SysLinuxChip` decodes every Linux ID it accepts, the handled calls (MMAP, MMAP2, BRK, CLONE, EXIT_GROUP, READ, WRITE, FCNTL) and each no-op above (`NOP_SYSCALLS` in the chip), and requires each real row to be one of them; `SyscallInstrsChip` does the same for the calls it handles itself (halt, write, the unconstrained block, hints, commit, verify). A row with any other number has no satisfying assignment, so no proof exists for an execution the executor would refuse.
+
+To add a no-op syscall: add it to the executor's map (`SysNopSyscall`) and to `NOP_SYSCALLS`, and list it in the table above. The test `nop_syscalls_match_the_executor` fails until both agree. The chip's constraints change, so the verifying keys move: the recursion vk map is regenerated in the next release.
 
 ## Cross-Shard Verification
 

@@ -201,10 +201,6 @@ pub enum SyscallCode {
     UNIMPLEMENTED = 0xFF_FF_FF_FF,
 }
 
-/// Linux's `ENOSYS` on MIPS (`asm-mips/errno.h`): what a Linux call the machine does not
-/// implement returns, in `$v0` with the error flag `$a3` set, as the kernel would.
-pub const ENOSYS: u32 = 89;
-
 impl SyscallCode {
     /// Create a [`SyscallCode`] from a u32.
     #[must_use]

@@ -12,6 +12,9 @@ use crate::{
 
 pub const NUM_SYS_LINUX_COLS: usize = size_of::<SysLinuxCols<u8>>();
 
+/// How many no-op calls the chip decodes.
+pub const NUM_NOP_SYSCALLS: usize = super::NOP_SYSCALLS.len();
+
 /// Linux Syscall AIR columns.
 ///
 /// All branch selectors are **derived** from `syscall_id` / `a0` / `a1` via `IsZeroOperation`.
@@ -35,7 +38,7 @@ pub struct SysLinuxCols<T> {
     /// A3 output register write.
     pub output: MemoryReadWriteCols<T>,
 
-    // Canonical syscall decoder (53 cols)
+    // Canonical syscall decoder (52 cols)
     pub decode_mmap: IsZeroOperation<T>,
     pub decode_mmap2: IsZeroOperation<T>,
     pub decode_clone: IsZeroOperation<T>,
@@ -46,28 +49,9 @@ pub struct SysLinuxCols<T> {
     pub decode_write: IsZeroOperation<T>,
     /// Stored: decode_mmap.result + decode_mmap2.result (for degree).
     pub is_mmap: T,
-    /// The calls answered ENOSYS (open, openat, fstat64, clock_gettime).
-    pub decode_open: IsZeroOperation<T>,
-    pub decode_openat: IsZeroOperation<T>,
-    pub decode_fstat64: IsZeroOperation<T>,
-    pub decode_clock_gettime: IsZeroOperation<T>,
-    /// Stored: the sum of the four above (for degree).
-    pub is_enosys: T,
-    /// The thirteen calls accepted as no-ops (success, nothing written).
-    pub decode_close: IsZeroOperation<T>,
-    pub decode_munmap: IsZeroOperation<T>,
-    pub decode_nanosleep: IsZeroOperation<T>,
-    pub decode_rt_sigaction: IsZeroOperation<T>,
-    pub decode_rt_sigprocmask: IsZeroOperation<T>,
-    pub decode_sigaltstack: IsZeroOperation<T>,
-    pub decode_madvise: IsZeroOperation<T>,
-    pub decode_gettid: IsZeroOperation<T>,
-    pub decode_sched_getaffinity: IsZeroOperation<T>,
-    pub decode_prlimit64: IsZeroOperation<T>,
-    pub decode_uname: IsZeroOperation<T>,
-    pub decode_prctl: IsZeroOperation<T>,
-    pub decode_futex_time64: IsZeroOperation<T>,
-    /// Stored: the sum of the thirteen above (for degree).
+    /// One decode per no-op call (`NOP_SYSCALLS`, in that order).
+    pub decode_nop: [IsZeroOperation<T>; NUM_NOP_SYSCALLS],
+    /// Stored: the sum of the no-op decodes (for degree).
     pub is_nop_known: T,
 
     // Canonical a0 / a1 decoder (10 cols)
