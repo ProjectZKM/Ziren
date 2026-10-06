@@ -47,7 +47,7 @@ $\mathsf{Step}(\mathsf{pc}, \mathsf{next\_pc}, R, M) \to (\mathsf{pc}', \mathsf{
     \item ALU, shift, bit-field, move: $R[\mathsf{op\_a}] \gets f_{\mathsf{opcode}}(a, b, c)$; multiplication and division also set \texttt{HI}; division by zero: $\mathsf{reject}$.
     \item load: $\mathit{addr} \gets b + c$; $R[\mathsf{op\_a}] \gets$ the selected bytes of $M[\mathit{addr}]$, extended; store: $M[\mathit{addr}] \gets$ the selected bytes of $a$ merged into it.
     \item branch or jump: $t \gets$ the target ($b$, $\mathsf{next\_pc} + b$, or $\mathsf{next\_pc} + c$); $\mathit{taken} \gets$ the condition on $a, b$ (true for a jump); a linking jump sets $R[\mathsf{op\_a}] \gets \mathsf{next\_pc} + 4$.
-    \item \texttt{teq} with $a = b$: $\mathsf{reject}$. \texttt{syscall}: the call of \S\ref{sec:ext-syscall}, which may halt.
+    \item \texttt{teq} with $a = b$: $\mathsf{reject}$. \texttt{syscall}: the call of \S\ref{sec:ext-syscall}, which may halt; a call number the machine does not implement: $\mathsf{reject}$ (Appendix~\ref{sec:app-isa}).
   \end{itemize}
   \item \emph{Register 0.} $R'[0] \gets 0$.
   \item \emph{Advance.} $\mathsf{next\_next\_pc} \gets t$ if $\mathit{taken}$ else $\mathsf{next\_pc} + 4$; return $(\mathsf{next\_pc}, \mathsf{next\_next\_pc}, R', M')$.

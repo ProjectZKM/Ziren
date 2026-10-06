@@ -24,6 +24,28 @@ the linking conditional branches \texttt{bgezal} and \texttt{bltzal}, the
 branch-likely forms, \texttt{break} and \texttt{rdhwr}) are not supported: the
 decoder maps them to an unimplemented opcode and execution stops with an error.
 
+\paragraph{System calls the machine does not implement.} The behaviour is fixed in
+every case; none is left unconstrained. A call number outside the machine's table
+(neither an accelerator call nor a listed Linux number) stops execution with an error
+before any state changes: the relation rejects, and no proof exists. Seven Linux calls
+have their semantics (\texttt{brk}, \texttt{read}, \texttt{write},
+\texttt{exit\_group}, \texttt{mmap}/\texttt{mmap2}, \texttt{clone},
+\texttt{fcntl}). Seventeen more, the ones a standard runtime issues while starting
+(\texttt{open}, \texttt{openat}, \texttt{close}, \texttt{fstat64},
+\texttt{clock\_gettime}, \texttt{nanosleep}, \texttt{futex}, \texttt{prctl},
+\texttt{uname}, \texttt{prlimit64}, \texttt{sigaltstack},
+\texttt{rt\_sigaction}, \texttt{rt\_sigprocmask}, \texttt{madvise},
+\texttt{munmap}, \texttt{gettid}, \texttt{sched\_getaffinity}), fall in two
+groups, and the \texttt{SysLinux} table pins each outcome. Four whose result a program
+would consume (\texttt{open}, \texttt{openat}, \texttt{fstat64},
+\texttt{clock\_gettime}) fail as the kernel reports an unimplemented call:
+\texttt{ENOSYS} in \texttt{\$v0} with the error flag \texttt{\$a3} set, no memory
+touched, so the program sees the failure through its C library (a Rust program
+reading the clock stops; a file open returns the error). The rest, issued by the
+runtimes' start-up and ignored by them (Go's runtime stops when a signal call
+fails), succeed with $0$ and touch nothing; none of them carries a value. The
+accelerator calls are listed in Appendix~\ref{sec:app-chips}.
+
 \footnotesize
 \begin{longtable}{@{}llll>{\raggedright\arraybackslash}p{0.27\textwidth}l@{}}
 \caption{The 77 guest instructions, their primary encoding fields and the chip that proves each. \emph{Op} is bits 31--26 and \emph{func} bits 5--0; a dash marks a field the format does not use, and the immediate forms are distinguished from the register forms by \emph{Op} alone. Rows that share both fields are told apart by another field: \texttt{bgez}, \texttt{bltz}, \texttt{bal} and \texttt{synci} by \emph{rt}, \texttt{rotr} and \texttt{rotrv} from \texttt{srl} and \texttt{srlv} by one bit of \emph{rs} or \emph{sa}, and \texttt{wsbh}, \texttt{seb} and \texttt{seh} by \emph{sa}. Semantics are as transcribed from the architecture manual into the specification table that generates the conformance corpus; on rows marked $^\dagger$ the implementation fixes a choice (\S\ref{sec:isa-emulator}): \texttt{j} and \texttt{jal} take the region bits \texttt{(PC + 4)[31:28]} as zero, exact for text below $2^{28}$, and \texttt{sc} always succeeds, setting \texttt{rt = 1}. Bit ranges \texttt{x[h:l]} include both ends.}\label{tab:isa}\\
