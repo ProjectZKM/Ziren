@@ -47,8 +47,11 @@ no-op, and the instruction table accepts any local number it does not recognise 
 absence of memory writes are fixed), so a proof over such a row states a
 deterministic execution; what it does not state is one the emulator would perform,
 since the emulator refuses the call. A program containing such a call is therefore
-never proved by the honest prover, and its verifying key names that program. The
-accelerator calls are listed in Appendix~\ref{sec:app-chips}.
+never proved by the honest prover, and its verifying key names that program. We
+checked this by construction: a guest issuing call number 4999 is refused by the
+emulator, while a prover that handles the number as the tables accept it obtains a
+proof that the unmodified verifier accepts, with the public values the no-op gives.
+The accelerator calls are listed in Appendix~\ref{sec:app-chips}.
 
 \footnotesize
 \begin{longtable}{@{}llll>{\raggedright\arraybackslash}p{0.27\textwidth}l@{}}
