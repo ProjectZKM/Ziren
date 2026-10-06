@@ -26,24 +26,28 @@ decoder maps them to an unimplemented opcode and execution stops with an error.
 
 \paragraph{System calls the machine does not implement.} The behaviour is fixed in
 every case; none is left unconstrained. A call number outside the machine's table
-(neither an accelerator call nor a listed Linux number) stops execution with an error
-before any state changes: the relation rejects, and no proof exists. Seven Linux calls
-have their semantics (\texttt{brk}, \texttt{read}, \texttt{write},
-\texttt{exit\_group}, \texttt{mmap}/\texttt{mmap2}, \texttt{clone},
+(neither an accelerator call nor a listed Linux number) stops the emulator with an error
+before any state changes: the relation rejects, and no proof is produced by the honest
+prover. Seven Linux calls have their semantics (\texttt{brk}, \texttt{read},
+\texttt{write}, \texttt{exit\_group}, \texttt{mmap}/\texttt{mmap2}, \texttt{clone},
 \texttt{fcntl}). Seventeen more, the ones a standard runtime issues while starting
 (\texttt{open}, \texttt{openat}, \texttt{close}, \texttt{fstat64},
 \texttt{clock\_gettime}, \texttt{nanosleep}, \texttt{futex}, \texttt{prctl},
 \texttt{uname}, \texttt{prlimit64}, \texttt{sigaltstack},
 \texttt{rt\_sigaction}, \texttt{rt\_sigprocmask}, \texttt{madvise},
-\texttt{munmap}, \texttt{gettid}, \texttt{sched\_getaffinity}), fall in two
-groups, and the \texttt{SysLinux} table pins each outcome. Four whose result a program
-would consume (\texttt{open}, \texttt{openat}, \texttt{fstat64},
-\texttt{clock\_gettime}) fail as the kernel reports an unimplemented call:
-\texttt{ENOSYS} in \texttt{\$v0} with the error flag \texttt{\$a3} set, no memory
-touched, so the program sees the failure through its C library (a Rust program
-reading the clock stops; a file open returns the error). The rest, issued by the
-runtimes' start-up and ignored by them (Go's runtime stops when a signal call
-fails), succeed with $0$ and touch nothing; none of them carries a value. The
+\texttt{munmap}, \texttt{gettid}, \texttt{sched\_getaffinity}), are accepted as
+no-ops: they touch no memory and return $0$ in \texttt{\$v0} with the error flag
+\texttt{\$a3} clear. That is deterministic, since the machine's memory is fully
+defined, but it is not the ABI's meaning: a program that reads a time, a file or an
+affinity mask through one of them gets no value, and must not depend on one. The
+circuit pins the same outcomes, and is wider than the emulator in one respect: the
+\texttt{SysLinux} table accepts any Linux number it does not recognise as such a
+no-op, and the instruction table accepts any local number it does not recognise with
+\texttt{\$v0} unchanged. Neither leaves the prover a choice (result, flag and the
+absence of memory writes are fixed), so a proof over such a row states a
+deterministic execution; what it does not state is one the emulator would perform,
+since the emulator refuses the call. A program containing such a call is therefore
+never proved by the honest prover, and its verifying key names that program. The
 accelerator calls are listed in Appendix~\ref{sec:app-chips}.
 
 \footnotesize
