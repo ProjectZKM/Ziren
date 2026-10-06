@@ -143,6 +143,22 @@ impl SyscallInstrsChip {
         cols.is_commit_deferred_proofs.populate_from_field_element(
             syscall_id - F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id()),
         );
+        for (code, op) in [
+            (SyscallCode::EXIT_UNCONSTRAINED, &mut cols.is_exit_unconstrained),
+            (SyscallCode::SYSHINTREAD, &mut cols.is_hint_read),
+            (SyscallCode::SYSVERIFY, &mut cols.is_sysverify),
+            (SyscallCode::WRITE, &mut cols.is_write),
+            (SyscallCode::VERIFY_ZKM_PROOF, &mut cols.is_verify_zkm_proof),
+        ] {
+            op.populate_from_field_element(syscall_id - F::from_u32(code.syscall_id()));
+        }
+        let local_calls = [
+            SyscallCode::HALT, SyscallCode::WRITE, SyscallCode::ENTER_UNCONSTRAINED, SyscallCode::EXIT_UNCONSTRAINED,
+            SyscallCode::SYSHINTLEN, SyscallCode::SYSHINTREAD, SyscallCode::SYSVERIFY, SyscallCode::COMMIT,
+            SyscallCode::COMMIT_DEFERRED_PROOFS, SyscallCode::VERIFY_ZKM_PROOF,
+        ];
+        cols.is_known_local =
+            F::from_bool(local_calls.iter().any(|c| syscall_id == F::from_u32(c.syscall_id())));
 
         if syscall_id == F::from_u32(SyscallCode::COMMIT.syscall_id())
             || syscall_id == F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())

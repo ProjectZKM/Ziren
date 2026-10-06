@@ -3294,6 +3294,10 @@ impl<'a> Executor<'a> {
 
             let raw_exit = ctx.exit_code;
             let normalised_exit = if raw_exit == 0x8000_0000 { 0 } else { raw_exit };
+            if raw_exit == 0xDEAD_C0E0 || raw_exit == 0xDEAD_C0E1 {
+                // teq (register / immediate form) trapped: what the interpreter reports
+                return Err(ExecutionError::ExceptionOrTrap());
+            }
             if raw_exit == 0xDEAD_C0DE {
                 return Err(ExecutionError::UnsupportedInstruction(0));
             }

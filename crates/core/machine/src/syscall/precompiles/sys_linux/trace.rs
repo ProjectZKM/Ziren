@@ -138,6 +138,47 @@ impl SysLinuxChip {
             .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_READ as u32));
         cols.decode_write
             .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_WRITE as u32));
+        cols.decode_open.populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_OPEN as u32));
+        cols.decode_openat
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_OPENAT as u32));
+        cols.decode_fstat64
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_FSTAT64 as u32));
+        cols.decode_clock_gettime
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_CLOCK_GETTIME as u32));
+        cols.is_enosys = F::from_bool(matches!(
+            SyscallCode::from_u32(event.syscall_code),
+            SyscallCode::SYS_OPEN | SyscallCode::SYS_OPENAT | SyscallCode::SYS_FSTAT64 | SyscallCode::SYS_CLOCK_GETTIME
+        ));
+        cols.decode_close
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_CLOSE as u32));
+        cols.decode_munmap
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_MUNMAP as u32));
+        cols.decode_nanosleep
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_NANOSLEEP as u32));
+        cols.decode_rt_sigaction
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_RT_SIGACTION as u32));
+        cols.decode_rt_sigprocmask
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_RT_SIGPROCMASK as u32));
+        cols.decode_sigaltstack
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_SIGALTSTACK as u32));
+        cols.decode_madvise
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_MADVISE as u32));
+        cols.decode_gettid
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_GETTID as u32));
+        cols.decode_sched_getaffinity
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_SCHED_GETAFFINITY as u32));
+        cols.decode_prlimit64
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_PRLIMIT64 as u32));
+        cols.decode_uname
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_UNAME as u32));
+        cols.decode_prctl
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_PRCTL as u32));
+        cols.decode_futex_time64
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_FUTEX_TIME64 as u32));
+        cols.is_nop_known = F::from_bool(matches!(
+            SyscallCode::from_u32(event.syscall_code),
+            SyscallCode::SYS_CLOSE | SyscallCode::SYS_MUNMAP | SyscallCode::SYS_NANOSLEEP | SyscallCode::SYS_RT_SIGACTION | SyscallCode::SYS_RT_SIGPROCMASK | SyscallCode::SYS_SIGALTSTACK | SyscallCode::SYS_MADVISE | SyscallCode::SYS_GETTID | SyscallCode::SYS_SCHED_GETAFFINITY | SyscallCode::SYS_PRLIMIT64 | SyscallCode::SYS_UNAME | SyscallCode::SYS_PRCTL | SyscallCode::SYS_FUTEX_TIME64
+        ));
 
         let is_mmap = event.syscall_code == SyscallCode::SYS_MMAP as u32
             || event.syscall_code == SyscallCode::SYS_MMAP2 as u32;

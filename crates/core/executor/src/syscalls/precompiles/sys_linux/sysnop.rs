@@ -1,10 +1,21 @@
 use crate::{
     events::{LinuxEvent, PrecompileEvent},
-    syscalls::{Syscall, SyscallCode, SyscallContext},
+    syscalls::{Syscall, SyscallCode, SyscallContext, ENOSYS},
     ExecutionError, Register,
 };
 
+/// A Linux call accepted as a no-op: it touches no memory and answers success with 0.
+/// For the calls a runtime issues while starting and whose result carries nothing
+/// (signal set-up, `prctl`, `madvise`, `munmap`, `close`, `gettid`, `nanosleep`, ...):
+/// Go's runtime throws when `rt_sigaction` fails and crashes when `rt_sigprocmask` does,
+/// so these must succeed. A call whose result a program consumes is `SysUnimplementedSyscall`.
 pub(crate) struct SysNopSyscall;
+
+/// A Linux call the machine does not implement, failed the way the kernel reports one:
+/// `ENOSYS` in `$v0` with the error flag `$a3` set, no memory touched. For calls whose
+/// result a program would consume (`open`, `openat`, `fstat64`, `clock_gettime`): the
+/// program sees the failure through its C library instead of a value that means nothing.
+pub(crate) struct SysUnimplementedSyscall;
 
 impl Syscall for SysNopSyscall {
     fn num_extra_cycles(&self) -> u32 {
@@ -18,9 +29,38 @@ impl Syscall for SysNopSyscall {
         a0: u32,
         a1: u32,
     ) -> Result<Option<u32>, ExecutionError> {
-        let v0 = 0;
+        linux_answer(rt, syscall_code, a0, a1, 0, 0)
+    }
+}
+
+impl Syscall for SysUnimplementedSyscall {
+    fn num_extra_cycles(&self) -> u32 {
+        0
+    }
+
+    fn execute(
+        &self,
+        rt: &mut SyscallContext,
+        syscall_code: SyscallCode,
+        a0: u32,
+        a1: u32,
+    ) -> Result<Option<u32>, ExecutionError> {
+        linux_answer(rt, syscall_code, a0, a1, ENOSYS, 1)
+    }
+}
+
+/// Answers a Linux call that touches no memory: `v0` as the result, `a3` as the error flag.
+fn linux_answer(
+    rt: &mut SyscallContext,
+    syscall_code: SyscallCode,
+    a0: u32,
+    a1: u32,
+    v0: u32,
+    a3: u32,
+) -> Result<Option<u32>, ExecutionError> {
+    {
         let start_clk = rt.clk;
-        let a3_record = rt.rw_traced(Register::A3, 0);
+        let a3_record = rt.rw_traced(Register::A3, a3);
         let shard = rt.current_shard();
         let event = PrecompileEvent::Linux(LinuxEvent {
             shard,

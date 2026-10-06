@@ -193,7 +193,27 @@ Full case matrix:
 
 AIR uses bidirectional `IsZeroOperation` decoders on `a0` (3 decoders) and `a1` (2 decoders) with exhaustive branch constraints.
 
+### Unimplemented Syscalls: ENOSYS
+
+Calls whose result a program would consume are not faked: they fail the way the kernel reports an unimplemented call, so the program sees the failure through its C library (a Rust `Instant::now()` panics, a `File::open` returns the error; Go's runtime never issues `clock_gettime`, its clock is patched in the guest runtime).
+
+| Arg | Width | Semantics |
+|-----|-------|-----------|
+| `a0` | 32-bit | Ignored. |
+| `a1` | 32-bit | Ignored. |
+| **return** `v0` | 32-bit | Always `ENOSYS` (`89` on MIPS). |
+| **output** `A3` | 32-bit | Always `1` (the error flag). |
+
+| Syscall | Number |
+|---------|--------|
+| SYS_OPEN | 4005 |
+| SYS_FSTAT64 | 4215 |
+| SYS_CLOCK_GETTIME | 4263 |
+| SYS_OPENAT | 4288 |
+
 ### NOP Syscalls: No Operation
+
+Calls the runtimes issue while starting and whose result carries nothing. They must succeed: Go's runtime throws when `rt_sigaction` fails and crashes when `rt_sigprocmask` does.
 
 | Arg | Width | Semantics |
 |-----|-------|-----------|
@@ -204,19 +224,15 @@ AIR uses bidirectional `IsZeroOperation` decoders on `a0` (3 decoders) and `a1` 
 
 | Syscall | Number |
 |---------|--------|
-| SYS_OPEN | 4005 |
 | SYS_CLOSE | 4006 |
 | SYS_MUNMAP | 4091 |
 | SYS_NANOSLEEP | 4166 |
 | SYS_RT_SIGACTION | 4194 |
 | SYS_RT_SIGPROCMASK | 4195 |
 | SYS_SIGALTSTACK | 4206 |
-| SYS_FSTAT64 | 4215 |
 | SYS_MADVISE | 4218 |
 | SYS_GETTID | 4222 |
 | SYS_SCHED_GETAFFINITY | 4240 |
-| SYS_CLOCK_GETTIME | 4263 |
-| SYS_OPENAT | 4288 |
 | SYS_PRLIMIT64 | 4338 |
 | SYS_UNAME | 4122 |
 | SYS_PRCTL | 4192 |
@@ -224,7 +240,7 @@ AIR uses bidirectional `IsZeroOperation` decoders on `a0` (3 decoders) and `a1` 
 
 The last three are called by newer Go runtimes. From Go 1.25 the runtime calls `prctl` to name memory regions and threads, and ignores the result. From Go 1.27 it calls `uname` at startup to decide whether `futex_time64` exists; the no-op returns success with a zeroed `utsname`, which the runtime cannot parse, so the runtime probes `futex_time64`, receives 0, and uses the 64-bit time path.
 
-The executor rejects any syscall number not listed on this page or in [MIPS ISA](./mips-isa.md) with `UnsupportedSyscall`. In the `SysLinuxChip` constraints, a Linux syscall ID that is not one of the handled calls (MMAP, MMAP2, BRK, CLONE, EXIT_GROUP, READ, WRITE, FCNTL) is treated as a no-op, so every ID the executor accepts as a no-op is proved by the NOP branch. The circuit is wider than the executor here: a Linux ID the executor rejects would also satisfy the NOP branch (result 0, `A3` 0, no memory access), and `SyscallInstrsChip` accepts a non-Linux ID it does not recognise with `v0` unchanged. Neither leaves the prover a choice, so a proof over such a row is a deterministic execution; it is not one the executor performs, and the honest prover never produces it, since the executor refuses the program. This has been checked by construction: a guest issuing syscall 4999 (or 0x55) is refused by the executor, while a prover that handles the number the way the chips accept it obtains a proof that the unmodified verifier accepts, with the public values the no-op semantics give (0, or `v0` unchanged). Closing it means either decoding every accepted number in the two chips (the verifying keys move) or making the executor accept unknown numbers exactly as the circuit does.
+The executor rejects any syscall number not listed on this page or in [MIPS ISA](./mips-isa.md) with `UnsupportedSyscall`, and the circuit accepts exactly the same set: `SysLinuxChip` decodes every Linux number it handles (the eight with semantics, the four ENOSYS calls pinned to `v0 = ENOSYS`, `A3 = 1`, and the thirteen no-ops pinned to `v0 = 0`, `A3 = 0`) and requires each real row to be one of them; `SyscallInstrsChip` does the same for the calls it handles itself (halt, write, the unconstrained block, hints, commit, verify). A row with any other number has no satisfying assignment, so a proof never exists for an execution the executor would have refused.
 
 ## Cross-Shard Verification
 

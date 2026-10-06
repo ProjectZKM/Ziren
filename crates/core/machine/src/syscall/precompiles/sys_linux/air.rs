@@ -2,7 +2,10 @@ use core::borrow::Borrow;
 
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
-use zkm_core_executor::{syscalls::SyscallCode, Register};
+use zkm_core_executor::{
+    syscalls::{SyscallCode, ENOSYS},
+    Register,
+};
 use zkm_pcs::{
     air::{LookupScope, ZKMAirBuilder},
     Word,
@@ -80,10 +83,58 @@ where
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid - AB::Expr::from_u32(SyscallCode::SYS_WRITE as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_WRITE as u32),
             local.decode_write,
             local.is_real.into(),
         );
+        for (code, op) in [
+            (SyscallCode::SYS_OPEN, local.decode_open),
+            (SyscallCode::SYS_OPENAT, local.decode_openat),
+            (SyscallCode::SYS_FSTAT64, local.decode_fstat64),
+            (SyscallCode::SYS_CLOCK_GETTIME, local.decode_clock_gettime),
+        ] {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                sid.clone() - AB::Expr::from_u32(code as u32),
+                op,
+                local.is_real.into(),
+            );
+        }
+        builder.when(local.is_real).assert_eq(
+            local.is_enosys,
+            local.decode_open.result
+                + local.decode_openat.result
+                + local.decode_fstat64.result
+                + local.decode_clock_gettime.result,
+        );
+        builder.assert_bool(local.is_enosys);
+        for (code, op) in [
+            (SyscallCode::SYS_CLOSE, local.decode_close),
+            (SyscallCode::SYS_MUNMAP, local.decode_munmap),
+            (SyscallCode::SYS_NANOSLEEP, local.decode_nanosleep),
+            (SyscallCode::SYS_RT_SIGACTION, local.decode_rt_sigaction),
+            (SyscallCode::SYS_RT_SIGPROCMASK, local.decode_rt_sigprocmask),
+            (SyscallCode::SYS_SIGALTSTACK, local.decode_sigaltstack),
+            (SyscallCode::SYS_MADVISE, local.decode_madvise),
+            (SyscallCode::SYS_GETTID, local.decode_gettid),
+            (SyscallCode::SYS_SCHED_GETAFFINITY, local.decode_sched_getaffinity),
+            (SyscallCode::SYS_PRLIMIT64, local.decode_prlimit64),
+            (SyscallCode::SYS_UNAME, local.decode_uname),
+            (SyscallCode::SYS_PRCTL, local.decode_prctl),
+            (SyscallCode::SYS_FUTEX_TIME64, local.decode_futex_time64),
+        ] {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                sid.clone() - AB::Expr::from_u32(code as u32),
+                op,
+                local.is_real.into(),
+            );
+        }
+        builder.when(local.is_real).assert_eq(
+            local.is_nop_known,
+            local.decode_close.result + local.decode_munmap.result + local.decode_nanosleep.result + local.decode_rt_sigaction.result + local.decode_rt_sigprocmask.result + local.decode_sigaltstack.result + local.decode_madvise.result + local.decode_gettid.result + local.decode_sched_getaffinity.result + local.decode_prlimit64.result + local.decode_uname.result + local.decode_prctl.result + local.decode_futex_time64.result,
+        );
+        builder.assert_bool(local.is_nop_known);
 
         let is_clone = local.decode_clone.result;
         let is_exit_group = local.decode_exit_group.result;
@@ -98,14 +149,18 @@ where
         builder.assert_bool(local.is_mmap);
 
         let recognized_sum: AB::Expr = local.is_mmap.into()
+            + local.is_enosys.into()
             + is_clone
             + is_exit_group
             + is_brk
             + is_fnctl
             + is_read
             + is_write;
-        let is_nop: AB::Expr = local.is_real.into() - recognized_sum;
-        builder.when(local.is_real).assert_bool(is_nop.clone());
+        // Every real row is a call the executor accepts: one with semantics, one of the four
+        // answered ENOSYS, or one of the thirteen no-ops. Any other number has no satisfying
+        // row, so the chip refuses exactly what the executor refuses.
+        builder.when(local.is_real).assert_one(recognized_sum + local.is_nop_known);
+        let is_nop: AB::Expr = local.is_nop_known.into();
 
         let a0_reduce = local.a0.reduce::<AB>();
         IsZeroOperation::<AB::F>::eval(
@@ -163,6 +218,7 @@ where
         self.eval_write(builder, local, is_write);
         self.eval_mmap(builder, local, is_a0_0);
         self.eval_nop(builder, local, is_nop);
+        self.eval_enosys(builder, local, local.is_enosys);
 
         builder.eval_memory_access(
             local.shard,
@@ -427,13 +483,9 @@ impl SysLinuxChip {
     /// A Linux syscall none of the decoders recognizes is a no-op: `eval` sets
     /// `is_nop = is_real − (is_mmap + is_clone + is_exit_group + is_brk + is_fnctl + is_read +
     /// is_write)`, so every other syscall number, and not only the no-op handlers the executor
-    /// registers, is accepted here with a zero result and a zero output word.
-    ///
-    /// This is wider than the executor, which returns `ExecutionError::UnsupportedSyscall` for a
-    /// number it has no handler for, so an honest trace never contains such a row.  A proof with
-    /// one proves only that the syscall returned 0 and wrote nothing, which is the no-op
-    /// semantics, so the statement stays sound; pinning the accepted numbers to the executor's
-    /// set would make the chip reject what the executor rejects.
+    /// registers (one of the thirteen decoded no-ops), has a zero result and a zero output
+    /// word. A number outside the decoded sets has no satisfying row (see `eval`), so the
+    /// chip accepts exactly the calls the executor accepts.
     fn eval_nop<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
@@ -442,5 +494,18 @@ impl SysLinuxChip {
     ) {
         builder.when(is_nop.clone()).assert_word_zero(*local.output.value());
         builder.when(is_nop).assert_word_zero(local.result);
+    }
+
+    /// The calls the machine does not implement and says so (open, openat, fstat64,
+    /// clock_gettime): the result is `ENOSYS` and the output word (the `$a3` error flag)
+    /// is 1, as the kernel reports an unimplemented call; nothing else is written.
+    fn eval_enosys<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &SysLinuxCols<AB::Var>,
+        is_enosys: AB::Var,
+    ) {
+        builder.when(is_enosys).assert_word_eq(*local.output.value(), Word::<AB::Expr>::from(1u32));
+        builder.when(is_enosys).assert_word_eq(local.result, Word::<AB::Expr>::from(ENOSYS));
     }
 }
