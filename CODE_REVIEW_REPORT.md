@@ -2454,16 +2454,16 @@ This pass answers which of the remaining findings can be closed after the
 latest fixes. The source baselines at the end of the review are:
 
 - the local report workspace and the canonical Ziren tree on
-  `ant-5090-2:~/sd/Ziren` are both at
+  the GPU host are both at
   `11cef6074248664617eeae60fd077fd671a9359f`. The concurrent uncommitted
   VK-shape diagnostic edits to `crates/prover/src/lib.rs` and
   `crates/prover/src/shapes.rs` were not used as closure evidence or
   modified by this audit; and
-- the authoritative GPU tree on `ant-5090-2:~/sd/ziren-gpu` is at
+- the authoritative GPU tree on the GPU host is at
   `904cb3ce293313f4b984d7eb38bbab654796ead2`. Its untracked top-level
   `vk_map.bin` was not used or modified.
 
-The older adjacent local `/data/stephen/ziren-gpu` clone is not authoritative
+The older adjacent local GPU clone is not authoritative
 and is excluded from the final GPU classifications. The Flounder CLI is not
 installed in this environment, so this is a source review plus focused
 execution evidence, not a Flounder control-plane result.
@@ -2554,7 +2554,7 @@ value back in `Drop`, so nested guards unwind to the enclosing device rather
 than clearing the context.
 
 Compiling `core/src/gpu_worker_context.rs` directly with `rustc --test` and
-placing the binary under `~/sd/tmp` executed all five tests successfully:
+placing the binary in a scratch directory executed all five tests successfully:
 empty context, single guard, nested device restoration, deep nesting, and
 panic unwinding.
 
@@ -2657,8 +2657,8 @@ input is not. No commit in the reviewed fix series changes this test.
 | `cargo test -p zkm-pcs a_leaf_ --lib -- --nocapture` | PASS: 2 passed | Wide and narrow malformed BaseFold leaves reject. |
 | `cargo test -p zkm-pcs profile::tests --lib -- --nocapture` | PASS: 7 passed | Current parameter mutations, encoding, digest pin, and mismatch rejection behave as intended. |
 | `cargo test -p zkm-pcs zeroed_bytes_are_the_additive_identity --lib -- --nocapture` | PASS: 1 passed | The zero-value control executes through the `Zeroable` contract. |
-| Remote `rustc --test core/src/gpu_worker_context.rs` with output under `~/sd/tmp` | PASS: 5 passed | ZR-43's TLS restoration, nesting, and unwind behavior execute successfully. |
-| Remote `cargo test -p zkm-gpu-core gpu_worker_context --lib --locked` with `CARGO_TARGET_DIR` under `~/sd/tmp` | BLOCKED before tests | The Ziren recursion build script requires a target-directory layout it did not receive, and the selected Go toolchain rejects the repository's `go.mod`. This is not a test failure; the self-contained module tests above were then executed directly. |
+| Remote `rustc --test core/src/gpu_worker_context.rs` with output in a scratch directory | PASS: 5 passed | ZR-43's TLS restoration, nesting, and unwind behavior execute successfully. |
+| Remote `cargo test -p zkm-gpu-core gpu_worker_context --lib --locked` with `CARGO_TARGET_DIR` in a scratch directory | BLOCKED before tests | The Ziren recursion build script requires a target-directory layout it did not receive, and the selected Go toolchain rejects the repository's `go.mod`. This is not a test failure; the self-contained module tests above were then executed directly. |
 | VK-map profile literal versus PCS digest pin | MATCH: `5f0c3cd4...206b` | The default artifact consumer accepts the map under the committed current profile. |
 | Committed VK-map and VK-root comparison at `d5ee27e` and `11cef607` | BOTH CHANGED TOGETHER TWICE | The transcript regeneration moved both artifacts; the production-block key union then moved both again. |
 
@@ -2835,11 +2835,11 @@ a protocol-soundness defect.
 | `cargo check -p zkm-pcs --all-targets` | PASS | All PCS targets compile at `fb46b8a1`. |
 | `cargo check -p zkm-prover --all-targets` | PASS | All prover targets compile at `fb46b8a1`; compile success does not execute the stale test above. |
 | Direct inspection of `committed_dense_len` and the admitted preprocessed band | COUNTEREXAMPLE: 32 prep + 224 main = 256 | `dense_batch = 226` is not an upper bound for the configured `2^22` Program band. |
-| Remote `cargo test -p zkm-gpu-core --test cuda_backend --locked -- --nocapture` with `CARGO_TARGET_DIR=~/sd/tmp/ziren-gpu-zr37/target` | BLOCKED before tests | Old Go syntax support, missing CUDA headers, and disk exhaustion prevented an independent run; no test assertion executed. |
+| Remote `cargo test -p zkm-gpu-core --test cuda_backend --locked -- --nocapture` with `CARGO_TARGET_DIR` in a scratch directory | BLOCKED before tests | Old Go syntax support, missing CUDA headers, and disk exhaustion prevented an independent run; no test assertion executed. |
 | Ziren `fb46b8a1` field search versus ziren-gpu `9c9d958d` field search | INCOMPATIBLE | Main exposes `jagged_shard_proof`; GPU still has multiple compiled accesses to `basefold_shard_proof`. |
 
-The failed remote build created 2.7 GB only under the audit-owned
-`~/sd/tmp/ziren-gpu-zr37` directory. That exact temporary directory was
+The failed remote build created 2.7 GB only under an audit-owned
+scratch directory. That exact temporary directory was
 deleted after the failure, restoring the space; no repository or pre-existing
 remote file was removed. No product source, VK artifact, or remote checkout
 was changed by this pass. Only this report was appended.
@@ -3229,8 +3229,8 @@ inner/outer verifiers, jagged
 reduction, multi-round BaseFold/WHIR open, and the production construction of
 `trace_at_z` were followed end to end.
 
-The device mirror was inspected read-only at
-`ant-5090-2:~/sd/ziren-gpu`, revision `df44240`. Its pre-existing untracked
+The device mirror was inspected read-only on the GPU host at
+revision `df44240`. Its pre-existing untracked
 `vk_map.bin` was not touched. SP1 v6.3.1 at pinned revision `8252c29` was
 used as the comparison implementation. The Flounder executable is not
 installed, so this section records a manual source and algorithm audit rather
