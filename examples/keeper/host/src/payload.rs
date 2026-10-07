@@ -181,7 +181,13 @@ fn json_hex_u64(v: &Value) -> Result<u64> {
 fn json_hex_bigint_bytes(v: &Value) -> Result<Vec<u8>> {
     match v.as_str() {
         Some(s) => {
-            let bytes = decode_hex(s)?;
+            // a JSON-RPC quantity is minimal hex ("0x0", "0x18ed521"): pad it to whole bytes
+            let digits = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+            let bytes = if digits.len() % 2 == 1 {
+                decode_hex(&format!("0{digits}"))?
+            } else {
+                decode_hex(digits)?
+            };
             let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
             Ok(bytes[start..].to_vec())
         }
