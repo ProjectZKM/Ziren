@@ -41,14 +41,18 @@ Over a whole block the cost per instruction is higher, mainly because of the per
 
 ### Proving throughput
 
-The same 16 consecutive mainnet blocks, 26,138,415 to 26,138,430, proved with both clients on the same GPUs. Proving time runs from the prove request to the compressed proof, warm; throughput is guest cycles divided by it. Ranges are over the 16 blocks.
+The same 16 consecutive mainnet blocks, 26,138,415 to 26,138,430, proved with both clients on the same GPUs. Proving time runs from the prove request to the compressed proof, warm; throughput is guest cycles divided by it. For each client the rows give the range, the median and the 99th percentile over the 16 blocks (by linear interpolation between order statistics), and the sums over all 16.
 
-| Client | Guest cycles | Shards | 1 GPU (s) | 8 GPUs (s) | 1 GPU (MHz) | 8 GPUs (MHz) |
-|--------|-------------:|-------:|----------:|-----------:|------------:|-------------:|
-| Reth | 43–508 M | 33–164 | 17.9–78.7 | 7.8–15.9 | 2.4–6.4 | 5.5–31.9 |
-| Geth | 0.25–2.99 G | 64–537 | 31.9–258 | 10.4–40.8 | 8.0–11.9 | 24.4–73.2 |
-| Reth, all 16 | 3.45 G | 1,491 | 723 | 184 | 4.8 | 18.7 |
-| Geth, all 16 | 22.68 G | 4,472 | 2,138 | 392 | 10.6 | 57.9 |
+| Client | | Guest cycles | Shards | 1 GPU (s) | 8 GPUs (s) | 1 GPU (MHz) | 8 GPUs (MHz) |
+|--------|-|-------------:|-------:|----------:|-----------:|------------:|-------------:|
+| Reth | range | 43–508 M | 33–164 | 17.9–78.7 | 7.8–15.9 | 2.4–6.4 | 5.5–31.9 |
+| | median | 193 M | 87 | 42.1 | 11.2 | 4.6 | 18.0 |
+| | p99 | 484 M | 158 | 75.8 | 15.6 | 6.4 | 31.0 |
+| | all 16 | 3.45 G | 1,491 | 723 | 184 | 4.8 | 18.7 |
+| Geth | range | 0.25–2.99 G | 64–537 | 31.9–258 | 10.4–40.8 | 8.0–11.9 | 24.4–73.2 |
+| | median | 1.27 G | 268 | 127.5 | 23.6 | 10.4 | 54.1 |
+| | p99 | 2.87 G | 518 | 248.9 | 39.5 | 11.8 | 72.4 |
+| | all 16 | 22.68 G | 4,472 | 2,138 | 392 | 10.6 | 57.9 |
 
 A shard costs about 0.48 s on one GPU under either guest, so proving time follows the number of shards, not the number of cycles. The Reth guest runs more of its work in precompiles, so its shards close after 2.3 million cycles on average against 5.1 million for Geth: it proves at a lower rate and still proves every block 1.8 to 3.9 times faster than Geth on one GPU, and 1.3 to 2.6 times faster on eight. Eight GPUs reduce the summed proving time 5.5 times for Geth and 3.9 times for Reth; the gap to linear scaling is the serial recursion tail after the last shard and the start-up interval before every GPU has a shard.
 

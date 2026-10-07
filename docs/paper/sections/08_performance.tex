@@ -117,20 +117,24 @@ Block (guest cycles) & 1 GPU & 2 & 4 & 1 GPU & 2 & 4 \\
 
 \begin{table}[t]
 \centering
-\caption{The same 16 consecutive mainnet blocks, 26\,138\,415 to 26\,138\,430, proved with two execution clients on the same GPUs, analysed configuration. Proving time runs from the prove request at the prover to the compressed proof, over shard proving and recursion; throughput is guest cycles divided by it. Ranges are over the 16 blocks; the last row sums the cycles and the proving time.}
+\caption{The same 16 consecutive mainnet blocks, 26\,138\,415 to 26\,138\,430, proved with two execution clients on the same GPUs, analysed configuration. Proving time runs from the prove request at the prover to the compressed proof, over shard proving and recursion; throughput is guest cycles divided by it. For each client the rows give the range, the median and the 99th percentile over the 16 blocks (by linear interpolation between order statistics, so with 16 blocks the 99th percentile lies just below the maximum), and the sums over all 16, whose throughput is the summed cycles divided by the summed proving time.}
 \label{tab:clients}
 \small
-\begin{tabular}{@{}lrrrrrr@{}}
+\begin{tabular}{@{}llrrrrrr@{}}
 \toprule
- & & & \multicolumn{2}{c}{proving time (s)} & \multicolumn{2}{c}{throughput (MHz)} \\
-\cmidrule(lr){4-5}\cmidrule(lr){6-7}
-Client & Guest cycles & Shards & 1 GPU & 8 GPUs & 1 GPU & 8 GPUs \\
+ & & & & \multicolumn{2}{c}{proving time (s)} & \multicolumn{2}{c}{throughput (MHz)} \\
+\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+Client & & Guest cycles & Shards & 1 GPU & 8 GPUs & 1 GPU & 8 GPUs \\
 \midrule
-Reth (Rust) & 43--508\,M & 33--164 & 17.9--78.7 & 7.8--15.9 & 2.4--6.4 & 5.5--31.9 \\
-Geth (Go) & 0.25--2.99\,G & 64--537 & 31.9--258 & 10.4--40.8 & 8.0--11.9 & 24.4--73.2 \\
+Reth (Rust) & range & 43--508\,M & 33--164 & 17.9--78.7 & 7.8--15.9 & 2.4--6.4 & 5.5--31.9 \\
+ & median & 193\,M & 87 & 42.1 & 11.2 & 4.6 & 18.0 \\
+ & p99 & 484\,M & 158 & 75.8 & 15.6 & 6.4 & 31.0 \\
+ & all 16 & 3.45\,G & 1\,491 & 723 & 184 & 4.8 & 18.7 \\
 \midrule
-Reth, all 16 & 3.45\,G & 1\,491 & 723 & 184 & 4.8 & 18.7 \\
-Geth, all 16 & 22.68\,G & 4\,472 & 2\,138 & 392 & 10.6 & 57.9 \\
+Geth (Go) & range & 0.25--2.99\,G & 64--537 & 31.9--258 & 10.4--40.8 & 8.0--11.9 & 24.4--73.2 \\
+ & median & 1.27\,G & 268 & 127.5 & 23.6 & 10.4 & 54.1 \\
+ & p99 & 2.87\,G & 518 & 248.9 & 39.5 & 11.8 & 72.4 \\
+ & all 16 & 22.68\,G & 4\,472 & 2\,138 & 392 & 10.6 & 57.9 \\
 \bottomrule
 \end{tabular}
 \end{table}
