@@ -34,7 +34,7 @@ use zkm_pcs::ZKMCoreOpts;
 #[test]
 fn real_fibonacci_elf_jit_matches_interpreter() {
     real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/fibonacci",
+        &example_elf("fibonacci"),
         Some(5u32.to_le_bytes().to_vec()),
     );
 }
@@ -44,7 +44,7 @@ fn real_fibonacci_elf_jit_matches_interpreter() {
 #[test]
 fn real_fibonacci_n1000_elf_jit_matches_interpreter() {
     real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/fibonacci",
+        &example_elf("fibonacci"),
         Some(1000u32.to_le_bytes().to_vec()),
     );
 }
@@ -52,7 +52,7 @@ fn real_fibonacci_n1000_elf_jit_matches_interpreter() {
 #[test]
 fn real_large_sum_elf_jit_matches_interpreter() {
     real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/large-sum",
+        &example_elf("large-sum"),
         None,
     );
 }
@@ -60,7 +60,7 @@ fn real_large_sum_elf_jit_matches_interpreter() {
 #[test]
 fn real_json_elf_jit_matches_interpreter() {
     real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/json",
+        &example_elf("json"),
         None,
     );
 }
@@ -68,7 +68,7 @@ fn real_json_elf_jit_matches_interpreter() {
 #[test]
 fn real_keccak_elf_jit_matches_interpreter() {
     real_elf_parity(
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/keccak",
+        &example_elf("keccak"),
         None,
     );
 }
@@ -265,6 +265,14 @@ fn multu_mfhi_mflo_jit_matches_interpreter() {
 /// Shared driver for "real ELF" parity tests.  `input_bytes` is an
 /// optional pre-allocated stdin chunk for SYSHINTREAD; pass `None`
 /// when the guest doesn't read input.
+/// An example guest ELF as `cargo build` in `examples/` leaves it.
+fn example_elf(name: &str) -> String {
+    format!(
+        "{}/../../../examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
 fn real_elf_parity(elf_path: &str, input_bytes: Option<Vec<u8>>) {
     let bytes = match std::fs::read(elf_path) {
         Ok(b) => b,

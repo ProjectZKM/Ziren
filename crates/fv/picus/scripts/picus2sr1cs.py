@@ -21,9 +21,11 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
-TOOLS = "/data/stephen/tools"
+# racket, Picus and cvc5 live under PICUS_TOOLS (default: <tmp>/picus-tools).
+TOOLS = os.environ.get("PICUS_TOOLS", os.path.join(tempfile.gettempdir(), "picus-tools"))
 RACKET = f"{TOOLS}/racket/bin/racket"
 PICUS = f"{TOOLS}/Picus/picus.rkt"
 CVC5DIR = f"{TOOLS}/cvc5gpl/cvc5-Linux-x86_64-static-gpl/bin"

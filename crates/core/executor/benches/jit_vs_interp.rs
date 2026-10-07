@@ -185,9 +185,14 @@ fn main() {
     tracing::info!("speedup vs fast:      {:>7.2}x", mean(&fast) / jit_mean);
     tracing::info!("speedup vs trace:     {:>7.2}x", mean(&trace) / jit_mean);
 
-    let elf_path =
-        "/data/stephen/Ziren/examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/fibonacci";
-    let hello_elf = "/data/stephen/Ziren/crates/test-artifacts/guests/target/elf-compilation/mipsel-zkm-zkvm-elf/release/hello-world";
+    let elf_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../examples/target/elf-compilation/mipsel-zkm-zkvm-elf/release/fibonacci"
+    );
+    let hello_elf = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test-artifacts/guests/target/elf-compilation/mipsel-zkm-zkvm-elf/release/hello-world"
+    );
     if let Ok(hello_bytes) = std::fs::read(hello_elf) {
         tracing::info!(
             "=== hello-world ELF (run_fast end-to-end, no input, {} repeats) ===",
