@@ -164,7 +164,7 @@ The client sends each proving step over RPC to a GPU prover server. It either st
 
 ##### Starting the server in Docker (default)
 
-The client pulls the image, runs it with `docker run --rm --gpus <devices> -p <port>:3000`, waits for it to come up and removes the container when the program exits or is interrupted. Use the image tagged with the SDK's version, `v2.0.0` for Ziren 2.0.0: the server must come from the same release (see below). Because the container receives the private input stream, the image must also be pinned by its digest:
+The client pulls the image, runs it with `docker run --rm --gpus <devices> -p <port>:3000`, waits for it to come up and removes the container when the program exits or is interrupted. The images are published on Docker Hub as [`projectzkm/ziren-gpu`](https://hub.docker.com/r/projectzkm/ziren-gpu); the [tags page](https://hub.docker.com/r/projectzkm/ziren-gpu/tags) lists each tag with its digest. Use the image tagged with the SDK's version, `v2.0.0` for Ziren 2.0.0: the server must come from the same release (see below). Because the container receives the private input stream, the image must also be pinned by its digest:
 
 ```bash
 export ZKM_GPU_IMAGE=projectzkm/ziren-gpu:v2.0.0@sha256:<digest>   # the digest of the published v2.0.0 image
