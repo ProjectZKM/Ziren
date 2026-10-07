@@ -153,9 +153,16 @@ impl SyscallInstrsChip {
             op.populate_from_field_element(syscall_id - F::from_u32(code.syscall_id()));
         }
         let local_calls = [
-            SyscallCode::HALT, SyscallCode::WRITE, SyscallCode::ENTER_UNCONSTRAINED, SyscallCode::EXIT_UNCONSTRAINED,
-            SyscallCode::SYSHINTLEN, SyscallCode::SYSHINTREAD, SyscallCode::SYSVERIFY, SyscallCode::COMMIT,
-            SyscallCode::COMMIT_DEFERRED_PROOFS, SyscallCode::VERIFY_ZKM_PROOF,
+            SyscallCode::HALT,
+            SyscallCode::WRITE,
+            SyscallCode::ENTER_UNCONSTRAINED,
+            SyscallCode::EXIT_UNCONSTRAINED,
+            SyscallCode::SYSHINTLEN,
+            SyscallCode::SYSHINTREAD,
+            SyscallCode::SYSVERIFY,
+            SyscallCode::COMMIT,
+            SyscallCode::COMMIT_DEFERRED_PROOFS,
+            SyscallCode::VERIFY_ZKM_PROOF,
         ];
         cols.is_known_local =
             F::from_bool(local_calls.iter().any(|c| syscall_id == F::from_u32(c.syscall_id())));

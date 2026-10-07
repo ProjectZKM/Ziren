@@ -278,7 +278,9 @@ pub mod sys_linux_tests {
             events::{LinuxEvent, MemoryWriteRecord, PrecompileEvent, SyscallEvent},
             ExecutionRecord,
         };
-        use zkm_pcs::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+        use zkm_pcs::{
+            air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
+        };
 
         use crate::utils::{uni_stark_prove, uni_stark_verify};
 
@@ -310,14 +312,23 @@ pub mod sys_linux_tests {
             c_record: None.into(),
         };
         let mut record = ExecutionRecord::default();
-        record.precompile_events.add_event(SyscallCode::SYS_LINUX, syscall_event, PrecompileEvent::Linux(event));
+        record.precompile_events.add_event(
+            SyscallCode::SYS_LINUX,
+            syscall_event,
+            PrecompileEvent::Linux(event),
+        );
         let chip = super::SysLinuxChip::new();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&record, &mut ExecutionRecord::default()).unwrap();
         // an unsatisfied constraint makes the prover panic (debug checks) or the proof fail
         std::panic::catch_unwind(|| {
             let config = KoalaBearPoseidon2::new();
-            let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut config.challenger(), trace);
+            let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(
+                &config,
+                &chip,
+                &mut config.challenger(),
+                trace,
+            );
             uni_stark_verify(&config, &chip, &mut config.challenger(), &proof).is_ok()
         })
         .unwrap_or(false)

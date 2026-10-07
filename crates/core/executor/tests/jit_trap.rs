@@ -13,7 +13,14 @@ fn trapping_program() -> Program {
         Instruction::new(Opcode::TEQ, Register::T0 as u8, Register::T0 as u32, 0, false, true),
     ];
     while instrs.len() < 600 {
-        instrs.push(Instruction::new(Opcode::ADD, Register::T1 as u8, Register::T1 as u32, 1, false, true));
+        instrs.push(Instruction::new(
+            Opcode::ADD,
+            Register::T1 as u8,
+            Register::T1 as u32,
+            1,
+            false,
+            true,
+        ));
     }
     Program::new(instrs, 0, 0)
 }
