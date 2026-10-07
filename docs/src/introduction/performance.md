@@ -41,7 +41,7 @@ Over a whole block the cost per instruction is higher, mainly because of the per
 
 ### Proving throughput
 
-The same 16 consecutive Ethereum mainnet blocks, 26,138,415 to 26,138,430, proved with both clients on the same GPUs. Proving time runs from the prove request to the compressed proof, warm; throughput is guest cycles divided by it. For each client the rows give the range, the median and the 99th percentile over the 16 blocks (by linear interpolation between order statistics), and the sums over all 16.
+The same 16 consecutive Ethereum mainnet blocks, 26,138,415 to 26,138,430, proved with both clients on the same GPUs. Proving time runs from the prove request to the compressed proof, warm, and excludes the client's execution and verification; throughput is guest cycles divided by it. For each client the rows give the range, the median and the 99th percentile over the 16 blocks (by linear interpolation between order statistics), and the sums over all 16.
 
 | Client | | Guest cycles | Shards | 1 GPU (s) | 8 GPUs (s) | 1 GPU (MHz) | 8 GPUs (MHz) |
 |--------|-|-------------:|-------:|----------:|-----------:|------------:|-------------:|
@@ -55,6 +55,16 @@ The same 16 consecutive Ethereum mainnet blocks, 26,138,415 to 26,138,430, prove
 | | all 16 | 22.68 G | 4,472 | 2,138 | 392 | 10.6 | 57.9 |
 
 A shard costs about 0.48 s on one GPU under either guest, so proving time follows the number of shards, not the number of cycles. The Reth guest runs more of its work in precompiles, so its shards close after 2.3 million cycles on average against 5.1 million for Geth: it proves at a lower rate and still proves every block 1.8 to 3.9 times faster than Geth on one GPU, and 1.3 to 2.6 times faster on eight. Eight GPUs reduce the summed proving time 5.5 times for Geth and 3.9 times for Reth; the gap to linear scaling is the serial recursion tail after the last shard and the start-up interval before every GPU has a shard.
+
+Scaling across GPUs, for three of these blocks proved with Reth (median of three consecutive warm proofs):
+
+| Block (guest cycles) | 1 GPU (s) | 2 GPUs (s) | 4 GPUs (s) | 1 GPU (MHz) | 2 GPUs (MHz) | 4 GPUs (MHz) |
+|----------------------|----------:|-----------:|-----------:|------------:|-------------:|-------------:|
+| 26,138,428 (206 M) | 41.9 | 22.3 | 13.6 | 4.9 | 9.3 | 15.2 |
+| 26,138,416 (348 M) | 57.9 | 30.5 | 17.2 | 6.0 | 11.4 | 20.2 |
+| 26,138,421 (508 M) | 77.6 | 40.4 | 22.3 | 6.5 | 12.6 | 22.8 |
+
+Two GPUs prove each block 1.9 times faster than one, and four 3.1 to 3.5 times faster.
 
 On a GPU, the lookup argument (LogUp-GKR) takes 42% of kernel time and WHIR commitment and opening 19%, in a ten-shard profile. The lookup cost scales with (row, interaction) pairs, so memory instructions, which carry 25 to 26 interactions per row, account for 47% of all pairs.
 
