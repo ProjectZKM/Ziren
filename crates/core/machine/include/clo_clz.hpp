@@ -20,7 +20,7 @@ __ZKM_HOSTDEV__ void event_to_row(
     cols.pc = F::from_canonical_u32(event.pc);
     cols.next_pc = F::from_canonical_u32(event.next_pc);
 
-    write_word_from_u32_v2<F>(cols.a, event.a);
+    write_word_from_u32<F>(cols.a, event.a);
 
     cols.is_real = F::one();
     cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);
@@ -29,7 +29,7 @@ __ZKM_HOSTDEV__ void event_to_row(
     if (event.opcode == Opcode::CLZ) {
         bb = event.b;
     }
-    write_word_from_u32_v2<F>(cols.bb, bb);
+    write_word_from_u32<F>(cols.bb, bb);
 
     // if bb == 0, then result is 32.
     cols.is_bb_zero = F::from_bool(bb == 0);

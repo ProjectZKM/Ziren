@@ -1086,7 +1086,7 @@ mod tests {
 
     #[test]
     #[ignore] // PHASE-2 investigation tool: structural prover's full_point layout
-    fn phase2_circuit_orientation_oracle() {
+    fn circuit_orientation_oracle() {
         use crate::jagged_branching_program::{
             bits_big_endian, full_jagged_evaluation, partial_lagrange, BranchingProgram,
         };

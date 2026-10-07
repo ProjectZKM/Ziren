@@ -317,51 +317,6 @@ pub fn take_logup_device_eq_row_point() -> Option<Vec<Ef4>> {
     LOGUP_DEVICE_EQ_ROW_POINT.with(|c| c.borrow_mut().take())
 }
 
-// ------------------------------------------------------------------
-// Device pack: per-chip first-layer metadata channel.
-//
-// The GPU device-pack kernel builds the packed first-layer slab from the
-// per-chip device tables (numerator/denominator).  Mapping those tables to
-// the global interaction axis + row-parity split requires per-chip metadata
-// (num_interactions, and each quadrant's real-row count) that lives on the
-// host `LogUpGkrCpuLayer`.  The host publishes it here — only for the
-// FirstLayer, only when the device-pack / slab-oracle env gate is set —
-// immediately before the V3 hook dispatch; the GPU hook takes it at entry.
-// Positionally aligned with the drained per-chip stash (both in
-// `LogUpGkrCpuLayer` chip order).
-#[derive(Clone, Debug)]
-pub struct Nv28ChipMeta {
-    /// Layer row variables `R` (rows = `2^R` = `eq_row.len()`).
-    pub num_row_variables: usize,
-    /// Layer interaction variables `I` (cols = `2^I` = `eq_int.len()`).
-    pub num_interaction_variables: usize,
-    /// Per-chip raw interaction (local column) count.
-    pub per_chip_num_int: Vec<u32>,
-    /// Per-chip quadrant-0 (even rows) real row count (`numerator_0.num_real_rows`).
-    pub per_chip_real_upper: Vec<u32>,
-    /// Per-chip quadrant-1 (odd rows) real row count (`numerator_1.num_real_rows`).
-    pub per_chip_real_lower: Vec<u32>,
-}
-
-std::thread_local! {
-    static NV28_CHIP_META: std::cell::RefCell<Option<Nv28ChipMeta>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-/// Host publishes per-chip first-layer metadata for the GPU device-pack
-/// kernel.  Published immediately before the V3 hook dispatch (FirstLayer
-/// only); the hook takes it at entry.
-pub fn publish_nv28_chip_meta(meta: Nv28ChipMeta) {
-    NV28_CHIP_META.with(|c| *c.borrow_mut() = Some(meta));
-}
-
-/// GPU hook consumes the stashed per-chip metadata.  `None` => not a
-/// FirstLayer call, or the device-pack env gate is off.
-#[must_use]
-pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
-    NV28_CHIP_META.with(|c| c.borrow_mut().take())
-}
-
 // BaseFold-over-BN254 wrap port: OUTER-ring jagged BaseFold open/verify
 //
 // The OUTER (wrap) ring proves/verifies the jagged BaseFold open over

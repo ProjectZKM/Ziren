@@ -501,7 +501,7 @@ mod tests {
     /// the commit/open paths read in later phases.  A `dummy` (width-0)
     /// padded MLE yields `None`.
     #[test]
-    fn phase0_trace_ref_matches_raw_matrix() {
+    fn trace_ref_matches_raw_matrix() {
         let mut rng = StdRng::seed_from_u64(606);
         for &(real_log, width) in &[(0usize, 1usize), (2, 1), (3, 5), (4, 3), (5, 7)] {
             let height = 1usize << real_log;

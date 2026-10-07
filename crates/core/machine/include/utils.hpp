@@ -61,17 +61,7 @@ shr_carry(uint8_t input, uint8_t rotation) {
 
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void
-write_word_from_u32(Word<decltype(F::val)>& word, const uint32_t value) {
-    // Coercion to `uint8_t` truncates the number.
-    word._0[0] = F::from_canonical_u8(value).val;
-    word._0[1] = F::from_canonical_u8(value >> 8).val;
-    word._0[2] = F::from_canonical_u8(value >> 16).val;
-    word._0[3] = F::from_canonical_u8(value >> 24).val;
-}
-
-template<class F>
-__ZKM_HOSTDEV__ __ZKM_INLINE__ void
-write_word_from_u32_v2(Word<F>& word, const uint32_t value) {
+write_word_from_u32(Word<F>& word, const uint32_t value) {
     word._0[0] = F::from_canonical_u8(value);
     word._0[1] = F::from_canonical_u8(value >> 8);
     word._0[2] = F::from_canonical_u8(value >> 16);
@@ -274,8 +264,8 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ uint64_t
 populate_add_double_operaion(AddDoubleOperation<F>& self, uint64_t a_u64, uint64_t b_u64) {
     // Carries are recovered in the AIR now — values only.
     uint64_t expected = a_u64 + b_u64;
-    write_word_from_u32_v2<F>(self.value, (uint32_t)expected);
-    write_word_from_u32_v2<F>(self.value_hi, (uint32_t)(expected >> 32));
+    write_word_from_u32<F>(self.value, (uint32_t)expected);
+    write_word_from_u32<F>(self.value_hi, (uint32_t)(expected >> 32));
     return expected;
 }
 

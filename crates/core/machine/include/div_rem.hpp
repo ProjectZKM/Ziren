@@ -55,8 +55,8 @@ namespace zkm_core_machine_sys::div_rem {
     
         uint32_t quotient, remainder;
         std::tie(quotient, remainder) = get_quotient_and_remainder(event.b, event.c, event.opcode);
-        write_word_from_u32_v2<F>(cols.quotient, quotient);
-        write_word_from_u32_v2<F>(cols.remainder, remainder);
+        write_word_from_u32<F>(cols.quotient, quotient);
+        write_word_from_u32<F>(cols.remainder, remainder);
 
         // Calculate flags for sign detection.
         {
@@ -79,9 +79,9 @@ namespace zkm_core_machine_sys::div_rem {
                     F::from_bool((int32_t)event.b == INT32_MIN && (int32_t)event.c == -1);
             }
             const uint32_t max_abs_c_or_1 = std::max(1u, abs_c);
-            write_word_from_u32_v2<F>(cols.abs_remainder, abs_remainder);
-            write_word_from_u32_v2<F>(cols.abs_c, abs_c);
-            write_word_from_u32_v2<F>(cols.max_abs_c_or_1, max_abs_c_or_1);
+            write_word_from_u32<F>(cols.abs_remainder, abs_remainder);
+            write_word_from_u32<F>(cols.abs_c, abs_c);
+            write_word_from_u32<F>(cols.max_abs_c_or_1, max_abs_c_or_1);
 
             // The inlined negation checks (the two ADD request rows).
             const bool signed_op = is_signed_operation(event.opcode);
