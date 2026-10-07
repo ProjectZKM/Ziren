@@ -41,7 +41,7 @@ Over a whole block the cost per instruction is higher, mainly because of the per
 
 ### Proving throughput
 
-The same 16 consecutive mainnet blocks, 26,138,415 to 26,138,430, proved with both clients on the same GPUs. Proving time runs from the prove request to the compressed proof, warm; throughput is guest cycles divided by it. For each client the rows give the range, the median and the 99th percentile over the 16 blocks (by linear interpolation between order statistics), and the sums over all 16.
+The same 16 consecutive Ethereum mainnet blocks, 26,138,415 to 26,138,430, proved with both clients on the same GPUs. Proving time runs from the prove request to the compressed proof, warm; throughput is guest cycles divided by it. For each client the rows give the range, the median and the 99th percentile over the 16 blocks (by linear interpolation between order statistics), and the sums over all 16.
 
 | Client | | Guest cycles | Shards | 1 GPU (s) | 8 GPUs (s) | 1 GPU (MHz) | 8 GPUs (MHz) |
 |--------|-|-------------:|-------:|----------:|-----------:|------------:|-------------:|
