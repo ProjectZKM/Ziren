@@ -865,6 +865,64 @@ mod tests {
         );
     }
 
+    /// A branch/jump in the delay slot of another is a bail site: the
+    /// producer runs a program that holds one (as data the program never
+    /// executes) natively, and hands over to the interpreter only when the
+    /// site runs. Both runs must match the interpreter chunk for chunk.
+    #[test]
+    fn producer_bails_only_at_a_bail_site_that_runs() {
+        use std::sync::atomic::Ordering;
+
+        let bails = || crate::jit_producer::PRODUCER_BAILS.load(Ordering::Relaxed);
+        let before = bails();
+        producer_chunks_match_the_interpreter_on(delay_slot_program(false), false);
+        assert_eq!(bails(), before, "a bail site that never ran handed over to the interpreter");
+        producer_chunks_match_the_interpreter_on(delay_slot_program(true), false);
+        assert!(bails() > before, "the bail site ran on the producer");
+    }
+
+    /// Several shards of ALU and memory work around `JR $3` in a delay slot:
+    /// after a taken `BEQ` that skips it (`reached == false`), or in the
+    /// delay slot of a taken `BEQ` (`reached == true`). The program ends by
+    /// running past its last instruction.
+    fn delay_slot_program(reached: bool) -> Program {
+        use crate::instruction::Instruction;
+        use crate::opcode::Opcode;
+
+        let pc_base = 0x1000_0000u32;
+        let work = |insns: &mut Vec<Instruction>| {
+            for k in 0..3000u32 {
+                insns.push(Instruction::new(Opcode::ADD, 1, 1, 1, false, true));
+                if k % 50 == 0 {
+                    let addr = 0x2000_0000 + 4 * (k % 16);
+                    insns.push(Instruction::new(Opcode::SW, 1, 0, addr, false, true));
+                    insns.push(Instruction::new(Opcode::LW, 2, 0, addr, false, true));
+                }
+            }
+        };
+        let jr = Instruction::new(Opcode::Jump, 0, 3, 0, false, true);
+        let mut insns = Vec::new();
+        work(&mut insns);
+        let at = insns.len() as u32;
+        if reached {
+            // r3 = `at + 6`; BEQ to `at + 4` with JR $3 in its delay slot.
+            insns.push(Instruction::new(Opcode::ADD, 3, 0, pc_base + 4 * (at + 6), false, true));
+            insns.push(Instruction::new(Opcode::BEQ, 0, 0, 8, false, true));
+            insns.push(jr);
+            insns.push(Instruction::new(Opcode::ADD, 4, 4, 1, false, true));
+            insns.push(Instruction::new(Opcode::ADD, 5, 5, 1, false, true));
+            insns.push(Instruction::new(Opcode::ADD, 6, 6, 1, false, true));
+        } else {
+            // BEQ to `at + 4`, over JR $3; JR $3.
+            insns.push(Instruction::new(Opcode::BEQ, 0, 0, 12, false, true));
+            insns.push(Instruction::new(Opcode::ADD, 4, 4, 1, false, true));
+            insns.push(jr);
+            insns.push(jr);
+        }
+        work(&mut insns);
+        Program::new(insns, pc_base, pc_base)
+    }
+
     fn producer_chunks_match_the_interpreter_on(program: Program, sha3_stdin: bool) {
         use crate::minimal_trace::MinimalTrace;
         use crate::Executor;

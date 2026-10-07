@@ -21,6 +21,9 @@
 //!   invalid encodings and operand forms the lowering does not model. The
 //!   handler syncs the native state into the executor, runs
 //!   [`Executor::execute_cycle`] for that one instruction and syncs back.
+//!   At a branch/jump the delay-slot scheme cannot lower (a *bail site*,
+//!   normally a data word that never runs) it instead hands the rest of the
+//!   run to the interpreter.
 //! * **Host driver** ([`run`]): shard fences (`inc_shard_if_need` +
 //!   `bump_record`, exactly the interpreter loop's bookkeeping), oracle
 //!   growth, program end.
@@ -49,6 +52,12 @@ use crate::{ExecutionError, Executor};
 /// count, so pointer width is ample.
 #[doc(hidden)]
 pub static PRODUCER_BATCHES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Runs that reached a bail site and finished in the interpreter, for tests.
+/// Not load-bearing.
+#[doc(hidden)]
+pub static PRODUCER_BAILS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]

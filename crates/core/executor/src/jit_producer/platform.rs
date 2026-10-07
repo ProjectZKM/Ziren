@@ -15,14 +15,15 @@ use std::{
 use zkm_core_jit::{
     backends::x86::{
         producer::{
-            build_producer, producer_reject, runs_in_interpreter, HeightCharge, ProducerConfig,
-            ProducerInstr, ProducerReject, MAX_CHARGES, MAX_STAMPS, POS_A, POS_B, POS_C, POS_HI,
+            build_producer, producer_bail_sites, producer_reject, runs_in_interpreter,
+            HeightCharge, ProducerConfig, ProducerInstr, MAX_CHARGES, MAX_STAMPS, POS_A, POS_B,
+            POS_C, POS_HI,
         },
         JIT_EXIT_BAD_JUMP, JIT_EXIT_FALL_OFF, JIT_EXIT_HOST, JIT_EXIT_ORACLE_FULL,
         JIT_EXIT_SHARD_FENCE,
     },
     context::PRODUCER_HEIGHT_SLOTS,
-    driver::DriverInstruction,
+    driver::{DriverInstruction, JitOpcode},
     JitContext, JitFunction,
 };
 
@@ -63,6 +64,10 @@ struct Bridge<'a> {
     /// restored from here at `EXIT_UNCONSTRAINED` (except `V0`, which the
     /// exit syscall itself writes afterwards).
     snapshot: Option<Vec<Option<MemoryRecord>>>,
+    /// Instruction indices the producer lowered as bail sites, ascending.
+    bail_sites: Arc<[u32]>,
+    /// The handler reached a bail site: the interpreter runs from here on.
+    bailed: bool,
     error: Option<ExecutionError>,
     done: bool,
     fence: bool,
@@ -178,6 +183,21 @@ extern "C" fn producer_handler(ctx: *mut JitContext) -> u64 {
     exec.state.pc = pc;
     exec.state.next_pc =
         if pending != 0 && is_delay_slot(&exec.program, pc) { pending } else { pc.wrapping_add(4) };
+    let index = pc.wrapping_sub(exec.program.pc_base) / 4;
+    if br.bail_sites.binary_search(&index).is_ok() {
+        // Leave the instruction to the interpreter, which runs the rest of the
+        // program. Inside an unconstrained block it will roll the registers back
+        // through `memory_diff`, which the native code never filled: the
+        // snapshot holds every register's value from before the block.
+        if let Some(snapshot) = br.snapshot.take() {
+            for (i, r) in snapshot.into_iter().enumerate() {
+                exec.unconstrained_state.memory_diff.entry(i as u32).or_insert(r);
+            }
+        }
+        br.bailed = true;
+        ctx.exit_code = JIT_EXIT_HOST;
+        return 0;
+    }
     let was_unconstrained = exec.unconstrained;
     match exec.execute_cycle() {
         Err(e) => {
@@ -234,8 +254,8 @@ fn eligible(exec: &Executor<'_>) -> bool {
 }
 
 enum Built {
-    Fn(Arc<JitFunction>),
-    Rejected(ProducerReject),
+    /// The producer and its bail sites.
+    Fn(Arc<JitFunction>, Arc<[u32]>),
     Unavailable(String),
 }
 
@@ -252,17 +272,13 @@ fn cache_key(exec: &Executor<'_>) -> u64 {
     h.finish()
 }
 
-fn cached_producer(exec: &Executor<'_>) -> Option<Arc<JitFunction>> {
+fn cached_producer(exec: &Executor<'_>) -> Option<(Arc<JitFunction>, Arc<[u32]>)> {
     let cache = PRODUCER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = cache.lock().expect("producer cache poisoned");
     let built = guard.entry(cache_key(exec)).or_insert_with(|| Arc::new(build(exec))).clone();
     drop(guard);
     match &*built {
-        Built::Fn(f) => Some(f.clone()),
-        Built::Rejected(reject) => {
-            tracing::debug!("minimal-trace producer declined: {reject:?}");
-            None
-        }
+        Built::Fn(f, bail_sites) => Some((f.clone(), bail_sites.clone())),
         Built::Unavailable(why) => {
             tracing::debug!("minimal-trace producer unavailable: {why}");
             None
@@ -276,11 +292,22 @@ fn build(exec: &Executor<'_>) -> Built {
         "JitContext::height_left has too few slots for MipsAirId"
     );
     let program = &exec.program;
-    let instrs: Vec<DriverInstruction> =
+    let mut instrs: Vec<DriverInstruction> =
         program.instructions.iter().map(to_driver_instruction).collect();
+    // Branch/jump forms the delay-slot scheme cannot lower become trap sites
+    // that hand over to the interpreter (see `producer_handler`). Usually
+    // they are data words in the executable segment that the program never
+    // executes; rejecting the whole program for them interpreted every block
+    // of such a guest.
+    let bail_sites: Arc<[u32]> = producer_bail_sites(&instrs).into();
+    for &i in bail_sites.iter() {
+        instrs[i as usize].opcode = JitOpcode::Unimpl as u8;
+    }
     if let Some(reject) = producer_reject(&instrs) {
-        tracing::warn!("minimal-trace producer: program rejected ({reject:?}); interpreting");
-        return Built::Rejected(reject);
+        return Built::Unavailable(format!("{reject:?} left after the bail sites"));
+    }
+    if !bail_sites.is_empty() {
+        tracing::debug!("minimal-trace producer: {} bail site(s)", bail_sites.len());
     }
     let plans = build_plans(&exec.split_acct, &program.instructions, &instrs);
     let cfg = ProducerConfig {
@@ -293,7 +320,7 @@ fn build(exec: &Executor<'_>) -> Built {
         syscall_handler: producer_handler,
     };
     match build_producer(&instrs, &plans, &cfg) {
-        Ok(f) => Built::Fn(Arc::new(f)),
+        Ok(f) => Built::Fn(Arc::new(f), bail_sites),
         Err(e) => {
             tracing::warn!("minimal-trace producer: build failed ({e}); interpreting");
             Built::Unavailable(e.to_string())
@@ -458,7 +485,7 @@ pub(crate) fn run(
     if !eligible(exec) {
         return Ok(None);
     }
-    let Some(jit_fn) = cached_producer(exec) else {
+    let Some((jit_fn, bail_sites)) = cached_producer(exec) else {
         return Ok(None);
     };
     super::PRODUCER_BATCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -470,6 +497,8 @@ pub(crate) fn run(
         clk_base: 0,
         oracle_base: std::ptr::null_mut(),
         snapshot: None,
+        bail_sites,
+        bailed: false,
         error: None,
         done: false,
         fence: false,
@@ -496,6 +525,15 @@ pub(crate) fn run(
                 }
             }
             JIT_EXIT_HOST => {
+                if br.bailed {
+                    super::PRODUCER_BAILS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tracing::warn!(
+                        "minimal-trace producer: bail site at pc {:#x}; interpreting the rest",
+                        exec.state.pc
+                    );
+                    exec.force_interpreter = true;
+                    return Ok(None);
+                }
                 if br.done {
                     return Ok(Some(true));
                 }
