@@ -226,7 +226,19 @@ The last three are called by newer Go runtimes. From Go 1.25 the runtime calls `
 
 The executor rejects any syscall number not listed on this page or in [MIPS ISA](./mips-isa.md) with `UnsupportedSyscall`, and the circuit accepts exactly the same set. `SysLinuxChip` decodes every Linux ID it accepts, the handled calls (MMAP, MMAP2, BRK, CLONE, EXIT_GROUP, READ, WRITE, FCNTL) and each no-op above (`NOP_SYSCALLS` in the chip), and requires each real row to be one of them; `SyscallInstrsChip` does the same for the calls it handles itself (halt, write, the unconstrained block, hints, commit, verify). A row with any other number has no satisfying assignment, so no proof exists for an execution the executor would refuse.
 
-To add a no-op syscall: add it to the executor's map (`SysNopSyscall`) and to `NOP_SYSCALLS`, and list it in the table above. The test `nop_syscalls_match_the_executor` fails until both agree. The chip's constraints change, so the verifying keys move: the recursion vk map is regenerated in the next release.
+### Adding a syscall
+
+The circuit accepts only the syscall numbers it decodes, so a syscall the executor refuses (`unimplemented syscall N`) is unlocked in both the executor and the chip, then the keys are regenerated. For a Linux call `SYS_NEWCALL = 4nnn` whose result the program does not use (a no-op):
+
+1. **Executor** (`crates/core/executor/src/syscalls/`): `SYS_NEWCALL = 4nnn,` in `enum SyscallCode`; `4nnn => SyscallCode::SYS_NEWCALL,` in `SyscallCode::from_u32`; `syscall_map.insert(SyscallCode::SYS_NEWCALL, Arc::new(SysNopSyscall));` in `default_syscall_map`. `count_map` needs nothing.
+2. **Chip** (`crates/core/machine/src/syscall/precompiles/sys_linux/mod.rs`): add `SYS_NEWCALL` to `NOP_SYSCALLS` and bump the array length. Columns, trace and constraints follow from the array. Update the column-count comment in `columns.rs` (+2).
+3. **Tests**: add the call to `sys_linux_program()`, then run `cargo test -p zkm-core-executor` and `cargo test -p zkm-core-machine sys_linux`. `nop_syscalls_match_the_executor` fails if step 1 or 2 is missing.
+4. **Docs**: a row in the NOP table above.
+5. **GPU prover**: the GPU prover's device trace for `SysLinux` lists the same numbers in the same order. Its generated constraint kernels are regenerated from the new AIR (`gen_zc_kernels`).
+6. **Keys**: the chip's constraints changed, so every recursion vk moves. Regenerate the recursion vk map (`list_shapes` → `build_compress_vks` in chunks → `merge_vk_maps` → `write_vk_root`), then commit `crates/prover/vk_map.bin` and `crates/verifier/bn254-vk/vk_root.bin`. No ceremony: the wrap key does not change. Re-render the on-chain verifier contracts with the new root.
+7. **Release**: publish the SDK and verifier, redeploy the provers, and update anything that pins a program's vk hash.
+
+A call whose result or memory effect the program uses (like `read` or `brk`) gets a handler that records its memory accesses in a `LinuxEvent`, and a decoded branch in `SysLinuxChip` that constrains them, instead of steps 1–2. A call handled without a table (like the hint or commit calls) is added to the `local_calls` list and the `is_known_local` sum of `SyscallInstrsChip` (and the device `event_to_row` in `include/syscall_instrs.hpp`). Batch several unlocks into one release: the key regeneration runs once per release.
 
 ## Cross-Shard Verification
 
