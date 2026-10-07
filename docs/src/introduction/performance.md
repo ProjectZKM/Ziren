@@ -14,9 +14,9 @@ To reproduce measurements on your own hardware, use the [zkvm-benchmarks](https:
 
 ## Measurements
 
-The figures below are from the Ziren V2.0 paper (`docs/paper`). The workload is Ethereum mainnet blocks executed by a MIPS32 build of the `reth` execution client. The hardware is NVIDIA RTX 5090 GPUs (32 GB) in a host with an AMD EPYC 9355 processor and 925 GB of memory.
+The figures below are from the Ziren V2.0 paper (`docs/paper`). The workload is Ethereum mainnet blocks executed by MIPS32 builds of two execution clients, Reth (Rust) and the block keeper of Geth (Go). The hardware is NVIDIA RTX 5090 GPUs (32 GB) in a host with an AMD EPYC 9355 processor and 925 GB of memory.
 
-The proving times and proof size were measured on revisions of the v2.0.0 branch that precede the release in two respects: the Poseidon2 permutation used 13 partial rounds instead of the released 20, and the lookup challenge was not ground. The released configuration therefore differs from these numbers by an unmeasured amount.
+The proving throughput and the proof size are of the released configuration. The GPU kernel profile and the executor rates were measured on revisions of the v2.0.0 branch that precede the release in two respects: the Poseidon2 permutation used 13 partial rounds instead of the released 20, and the lookup challenge was not ground.
 
 ### Instruction efficiency
 
@@ -41,15 +41,16 @@ Over a whole block the cost per instruction is higher, mainly because of the per
 
 ### Proving throughput
 
-One RTX 5090 proves a 288-million-cycle block at 5.9 MHz. Multi-GPU results, on warm wall-clock time of three consecutive proofs:
+The same 16 consecutive mainnet blocks, 26,138,415 to 26,138,430, proved with both clients on the same GPUs. Proving time runs from the prove request to the compressed proof, warm; throughput is guest cycles divided by it. Ranges are over the 16 blocks.
 
-| Block (guest cycles) | 1 GPU (s) | 2 GPUs (s) | 4 GPUs (s) | 1 GPU (MHz) | 2 GPUs (MHz) | 4 GPUs (MHz) |
-|----------------------|----------:|-----------:|-----------:|------------:|-------------:|-------------:|
-| 420 M | 65.9 | 34.3 | 21.0 | 6.4 | 12.2 | 20.0 |
-| 530 M | 84.3 | 44.7 | 26.5 | 6.3 | 11.9 | 20.0 |
-| 912 M | 124.3 | 65.0 | 38.0 | 7.3 | 14.0 | 24.0 |
+| Client | Guest cycles | Shards | 1 GPU (s) | 8 GPUs (s) | 1 GPU (MHz) | 8 GPUs (MHz) |
+|--------|-------------:|-------:|----------:|-----------:|------------:|-------------:|
+| Reth | 43–508 M | 33–164 | 17.9–78.7 | 7.8–15.9 | 2.4–6.4 | 5.5–31.9 |
+| Geth | 0.25–2.99 G | 64–537 | 31.9–258 | 10.4–40.8 | 8.0–11.9 | 24.4–73.2 |
+| Reth, all 16 | 3.45 G | 1,491 | 723 | 184 | 4.8 | 18.7 |
+| Geth, all 16 | 22.68 G | 4,472 | 2,138 | 392 | 10.6 | 57.9 |
 
-Four GPUs reach 3.1 to 3.3 times the throughput of one. The gap to linear scaling is the serial recursion tail over the last shards and the start-up interval before every GPU has a shard.
+A shard costs about 0.48 s on one GPU under either guest, so proving time follows the number of shards, not the number of cycles. The Reth guest runs more of its work in precompiles, so its shards close after 2.3 million cycles on average against 5.1 million for Geth: it proves at a lower rate and still proves every block 1.8 to 3.9 times faster than Geth on one GPU, and 1.3 to 2.6 times faster on eight. Eight GPUs reduce the summed proving time 5.5 times for Geth and 3.9 times for Reth; the gap to linear scaling is the serial recursion tail after the last shard and the start-up interval before every GPU has a shard.
 
 On a GPU, the lookup argument (LogUp-GKR) takes 42% of kernel time and WHIR commitment and opening 19%, in a ten-shard profile. The lookup cost scales with (row, interaction) pairs, so memory instructions, which carry 25 to 26 interactions per row, account for 47% of all pairs.
 
@@ -68,4 +69,4 @@ With one GPU, execution does not limit proving. With several GPUs fed by one hos
 
 ### Proof size
 
-The compressed proof is 603 KiB (617,618 bytes in an instrumented run) and does not grow with the length of the execution. Openings of the first WHIR oracle account for 79% of it. Groth16 and PLONK proofs wrapped from it are constant-size SNARKs for on-chain verification.
+The compressed proof is 274 KiB (280,653 bytes): the root of the recursion tree is proved under a compress schedule (rate 1/8, Johnson-bound WHIR), and since the root program is the same for every tree, the size does not depend on the guest or the length of the execution. Openings of the first WHIR oracle account for most of it. The native verifier checks it in 73 ms. Groth16 and PLONK proofs wrapped from it are constant-size SNARKs for on-chain verification.
