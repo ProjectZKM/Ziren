@@ -587,7 +587,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Initializes a new [ZKMProver].
     #[instrument(name = "initialize prover", level = "debug", skip_all)]
     pub fn new() -> Self {
-        Self::uninitialized()
+        let prover = Self::uninitialized();
+        prover.prewarm_compose_programs();
+        prover
     }
 
     /// [`Self::new`] with the child-vk membership check fixed by the caller
@@ -596,10 +598,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// program built under one setting is a different program from the same
     /// shape built under the other.
     pub fn new_with_vk_verification(vk_verification: Option<bool>) -> Self {
-        Self::uninitialized_with(vk_verification)
+        let prover = Self::uninitialized_with(vk_verification);
+        prover.prewarm_compose_programs();
+        prover
     }
 
-    /// Creates a new [ZKMProver] with lazily initialized components.
+    /// Creates a new [ZKMProver] with lazily initialized components: a compose
+    /// program is built on first use rather than pre-warmed, which suits a
+    /// client that proves elsewhere and only verifies and wraps locally.
     pub fn uninitialized() -> Self {
         Self::uninitialized_with(None)
     }
@@ -674,7 +680,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let _ = core_cache_size;
 
-        let prover = Self {
+        Self {
             core_prover,
             compress_prover,
             shrink_prover,
@@ -692,11 +698,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compose_programs_basefold_cache: Mutex::new(RecursionProgramCache::default()),
             recursion_pks_basefold_cache: Mutex::new(RecursionPkCache::default()),
             recursion_pk_cache_ready: std::sync::Condvar::new(),
-        };
-
-        prover.prewarm_compose_programs();
-
-        prover
+        }
     }
 
     /// Build EVERY compose program a run can reach, once, at construction —
