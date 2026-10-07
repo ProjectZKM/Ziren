@@ -48,9 +48,9 @@ Conformance evidence (\S\ref{sec:verification}), not a proof, identifies the ari
 \toprule
 Component group & core & compress \\
 \midrule
-Query phases & 104.42 & 104.91 \\
+Query phases & 104.42 & 104.83 \\
 Folding rounds & 100.93 & 101.69 \\
-Final polynomial & 106.00 & 108.00 \\
+Final polynomial & 106.00 & 109.00 \\
 \LogUp{} & 106.00 & 116.00 \\
 Batching & 107.00 & 103.00 \\
 Zerocheck & 109.00 & 114.00 \\
@@ -62,7 +62,7 @@ Out-of-domain samples & 213.00 & 200.00 \\
 \end{tabular}
 \end{table}
 
-\paragraph{Result.} Table~\ref{tab:components} gives the components. Each stage is above 100 bits, and the two together give 99.86 bits; the folding rounds are the largest error group in both schedules, and only the compress schedule grinds them (Table~\ref{tab:whir-schedule}). We call $-\log_2 \sum_i \varepsilon_i$, summed over every node $i$ of a block's recursion tree, the block's \emph{composite security}; it falls by $\log_2$ of the node count below the per-stage level. For the measured block's tree of about 150 proofs, all but the root under the core schedule, it is 93.51 bits. These figures bound the interactive protocol's information-theoretic terms. Taking each node's error $\varepsilon_i$ in Theorem~\ref{thm:composition} to be its sum in Table~\ref{tab:components}, which leaves out the unquantified function-binding loss of Layer~2 (\S\ref{sec:iopp-layers}), the Fiat--Shamir compiled composite security against an adversary making $Q$ oracle queries is $93.51 - \log_2 Q$ bits, 53.5 bits at $Q = 2^{40}$, before the digest term of Assumption~\ref{ass:digest}.
+\paragraph{Result.} Table~\ref{tab:components} gives the components. Each stage is above 100 bits, and the two together give 99.88 bits; the folding rounds are the largest error group in both schedules, and only the compress schedule grinds them (Table~\ref{tab:whir-schedule}). We call $-\log_2 \sum_i \varepsilon_i$, summed over every node $i$ of a block's recursion tree, the block's \emph{composite security}; it falls by $\log_2$ of the node count below the per-stage level. For the measured block's tree of about 150 proofs, all but the root under the core schedule, it is 93.51 bits. These figures bound the interactive protocol's information-theoretic terms. Taking each node's error $\varepsilon_i$ in Theorem~\ref{thm:composition} to be its sum in Table~\ref{tab:components}, which leaves out the unquantified function-binding loss of Layer~2 (\S\ref{sec:iopp-layers}), the Fiat--Shamir compiled composite security against an adversary making $Q$ oracle queries is $93.51 - \log_2 Q$ bits, 53.5 bits at $Q = 2^{40}$, before the digest term of Assumption~\ref{ass:digest}.
 
 \subsection{Security in three layers}
 \label{sec:iopp-layers}
