@@ -1,7 +1,7 @@
 \section{Recursion}
 \label{sec:recursion}
 
-Shard proofs are aggregated by a recursion machine: a small register VM over the same field whose programs are compiled from a description of the verifier, executed to a trace, and proved by the same chip/\LogUp{}/zerocheck/Jagged/\WHIR{} pipeline. Its chips are the arithmetic of $\F$ and $\EF$, memory, the $\Poseidon{}$ permutation, a select gate and a batched folding gate for the FRI-style query checks. The root of the tree it builds is the compressed proof; the verifying-key allowlist binds that proof to the advertised machine.
+Shard proofs are aggregated by a recursion machine: a small register VM over the same field whose programs are compiled from a description of the verifier, executed to a trace, and proved by the same chip/\LogUp{}/zerocheck/Jagged/\WHIR{} pipeline. Its chips are the arithmetic of $\F$ and $\EF$, memory, the $\Poseidon{}$ permutation, a select gate and a batched folding gate for the FRI-style query checks. The root of the tree it builds is the compressed proof; the verifying-key allowlist binds that proof to the advertised machine. Shrink and wrap nodes extend the tree past the root for the applications (\S\ref{sec:recursion-shrink-wrap}).
 
 \paragraph{Leaves.} A \emph{leaf} (\emph{normalize}) program verifies one core shard proof in four phases mirroring the host verifier: the transcript prologue (public values, commitment, chip dimensions), the \LogUp{} layer replay, the zerocheck replay with the constraint evaluation of every chip present, and the jagged opening with its closing identity followed by the \WHIR{} verifier. The jagged verifier depends only on the shard's two geometry buckets and the constraint evaluation only on its chip set and whether it is the first shard, so the leaf programs form a bounded set that can be enumerated in advance; on one GPU, consecutive shards of the same class reuse a device-resident proving key. Adjacent leaves are \emph{fused} into one node where shapes allow, and leaves are proved on the same GPU concurrently with core shards. Figure~\ref{fig:recursion} shows the tree.
 
@@ -96,3 +96,19 @@ $K \gets \emptyset$\;
 }
 \Return $\mathsf{MerkleRoot}(K)$\;
 \end{algorithm}
+
+\subsection{Beyond the root: shrink and wrap}
+\label{sec:recursion-shrink-wrap}
+
+The applications of \S\ref{sec:applications} extend the tree past the root with nodes of arity one. Each verifies one child proof, checks the child's key against the allowlist, and re-exports the child's public values, so the statement is unchanged as the proof moves between configurations; the nodes differ only in the configuration they are proved under and in the verifier that reads their proof.
+
+\paragraph{Shrink.} A shrink node verifies the compressed proof under the compress schedule. One program has two variants, which differ only in how its proof is committed. The \Poseidon{} variant is proved under the core configuration, \KB{} traces and \Poseidon{} commitments and transcript, and is the wrap's input. The \Blake{} variant commits the same traces, and runs its transcript, under \Blake{}, opened by jagged \WHIR{} at a low rate, and is the binary stage's input (\S\ref{sec:arch-garbled}).
+
+\paragraph{Wrap.} A wrap node verifies the \Poseidon{} shrink. Its traces stay over \KB{}, while its Merkle trees and transcript use \Poseidon{} over the BN254 scalar field; the transcript absorbs \KB{} elements several to one BN254 element and draws its \KB{} challenges from BN254 outputs. A circuit over BN254 that verifies the wrap proof therefore hashes in its native field and emulates only the \KB{} arithmetic.
+
+\paragraph{The SNARK circuit.} A Groth16~\citep{groth16} or PLONK~\citep{plonk} circuit over BN254, written with gnark~\citep{gnark}, verifies the wrap proof. Its public inputs are a hash of the guest's key, the digest of the committed values and the allowlist root, read from the public values the wrap re-exports. The circuit checks no allowlist; it binds the wrap key itself, in one of two variants.
+\begin{itemize}
+  \item \emph{Fixed wrap key.} The circuit constrains the wrap key's preprocessed commitment and start address to constants, so a proof attests the wrap of some compressed proof under the allowlisted keys, and a new wrap key needs a new circuit and, for Groth16, a new setup. PLONK and the default Groth16 circuit take this form.
+  \item \emph{Wrap key as input.} A Groth16 circuit leaves those two values free, and its public key hash becomes a \Poseidon{} hash over BN254 of the guest key's hash together with them, so the verifier names the wrap key it accepts and one setup serves every wrap key. In this variant the guest digests its committed values with \Blake{} instead of SHA-256.
+\end{itemize}
+In both, an on-chain verifier checks the proof with a constant number of pairings.

@@ -9,8 +9,8 @@
   virt/.style={draw=zirenslate!55, densely dotted, line width=0.4pt},
   tail/.style={draw=zirenslate!65, dashed, line width=0.4pt},
   wcell/.style={draw=zirenteal!70, fill=zirenteal!8, line width=0.4pt},
-  lab/.style={text=black!75},
-  panel/.style={font=\scriptsize\bfseries, text=black!75, anchor=west, inner sep=0pt},
+  lab/.style={text=black!90},
+  panel/.style={font=\footnotesize\bfseries, text=black!90, anchor=west, inner sep=0pt},
 ]
 
 % ------------------------------------------------------------------ (a) sparse
@@ -22,14 +22,14 @@
   \draw[virt] (\x,0) rectangle ++(0.56,\H);
   \draw[\s] (\x,0) rectangle ++(0.56,\h);
   \ifx\n\empty
-    \node[lab, font=\tiny] at (\x+0.28,-0.22) {pad};
+    \node[lab, font=\scriptsize] at (\x+0.28,-0.22) {pad};
   \else
     \node at (\x+0.28,-0.22) {$\mathbf{\n}$};
   \fi
 }
-\draw[zirenslate, |-|] (0.25,0) -- node[lab, left, font=\tiny] {$2^{n}$} (0.25,\H);
-\node[lab, font=\tiny, align=left, anchor=west] at (0.55,2.55)
-  {dotted: virtual zeros above $h_k$, never committed};
+\draw[zirenslate, |-|] (0.25,0) -- node[lab, left, font=\scriptsize] {$2^{n}$} (0.25,\H);
+\node[lab, font=\scriptsize, align=left, anchor=west] at (0.55,2.62)
+  {dotted: virtual zeros above $h_k$,\\ never committed};
 
 % ------------------------------------------------------------------ (b) dense
 \node[panel] at (6.2,3.05) {(b) Dense: $\mathbf Q = \mathbf q_0 \Vert \mathbf q_1$, and the indicator $W$};
@@ -45,18 +45,18 @@
     \node at ($(s\pc)!0.5!(s\c)+(0,0.225)$) {$\mathbf{\n}$};
   \fi
   \draw[wcell] ($(s\pc)+(0,-0.72)$) rectangle ($(s\c)+(0,-0.30)$);
-  \node[lab, font=\tiny] at ($(s\pc)+(0,0.62)$) {$t_{\k}$};
+  \node[lab, font=\scriptsize] at ($(s\pc)+(0,0.62)$) {$t_{\k}$};
 }
-\node[lab, font=\tiny] at ($(s7)+(0,0.62)$) {$A$};
+\node[lab, font=\scriptsize] at ($(s7)+(0,0.62)$) {$A$};
 \draw[tail, fill=zirenslate!4] (s7) rectangle ($(s7)+(0.95,0.45)$);
-\node[lab, font=\tiny] at ($(s7)+(0.475,0.225)$) {$0$};
-\node[lab, font=\tiny] at ($(s7)+(0.95,0.62)$) {$2^{m}$};
+\node[lab, font=\scriptsize] at ($(s7)+(0.475,0.225)$) {$0$};
+\node[lab, font=\scriptsize] at ($(s7)+(0.95,0.62)$) {$2^{m}$};
 \draw[tail] ($(s7)+(0,-0.72)$) rectangle ($(s7)+(0.95,-0.30)$);
 \node[lab, anchor=east] at ($(s0)+(-0.08,0.225)$) {$\mathbf Q$};
 \node[lab, anchor=east] at ($(s0)+(-0.08,-0.51)$) {$W$};
-\node[lab, font=\tiny, anchor=west] at ($(s7)+(1.05,-0.51)$)
+\node[lab, font=\scriptsize, anchor=west] at ($(s7)+(1.05,-0.51)$)
   {$W[t_k{+}j] = w_k\,\mathsf{eq}(j, \bm z_{\mathrm{row}})$};
-\node[lab, font=\tiny, anchor=west] at ($(s7)+(1.05,0.225)$) {free padding};
+\node[lab, font=\scriptsize, anchor=west] at ($(s7)+(1.05,0.225)$) {free padding};
 % rounds and roots
 \draw[decorate, decoration={brace, mirror, amplitude=4pt}, zirenblue!80]
   ($(s0)+(0,-0.85)$) -- node[below=4pt, text=zirenblue!85!black] {round 0 $\to$ root $C_0$} ($(s4)+(0,-0.85)$);

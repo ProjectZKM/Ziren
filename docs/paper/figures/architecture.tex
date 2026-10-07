@@ -1,0 +1,94 @@
+% The architecture: one proving stack, two verifiers.
+\begin{tikzpicture}[
+  font=\small,
+  >={Latex[length=2mm]},
+  box/.style={rectangle, draw=zirenblue, line width=0.6pt, minimum height=1.0cm, align=center, fill=white},
+  stage/.style={box, text width=2.5cm},
+  art/.style={rectangle, draw=zirenslate, line width=0.45pt, rounded corners=1.5pt, font=\scriptsize, minimum height=0.42cm, text width=2.75cm, inner xsep=1pt, align=center, fill=white},
+  frame/.style={draw=zirenblue, line width=0.75pt, rounded corners=9pt},
+  gframe/.style={frame, dashed},
+  panel/.style={draw=zirenslate, dashed, line width=0.5pt},
+  ver/.style={box, fill=zirenlight, line width=0.8pt, text width=2.6cm, minimum height=0.8cm},
+  a/.style={->, line width=0.65pt, zirenorange},
+  lab/.style={font=\footnotesize, zirenteal},
+  tag/.style={font=\scriptsize\itshape, zirenteal},
+  dot/.style={circle, draw=zirenblue, fill=white, line width=0.5pt, inner sep=0pt, minimum size=0.17cm},
+]
+% ---- program
+\node[box, text width=2.3cm] (prog) at (0,2.2) {Guest program};
+\node[box, inner sep=2pt, font=\fontsize{7}{8}\selectfont\ttfamily, align=left] (elf) at (0,0) {%
+  \begin{tabular}{@{}l@{\hspace{0.6em}}l@{}}
+  \textrm{\itshape clk} & \textrm{\itshape instruction}\\[-1pt]
+  \hline
+  $i$   & addu \$4,\$5,\$6\\[-2pt]
+  $i{+}1$ & addiu \$5,\$4,0\\[-2pt]
+  $i{+}2$ & lw \$6,4(\$29)\\[-2pt]
+  $i{+}3$ & bne \$2,\$3,-4\\[-2pt]
+  $i{+}4$ & syscall
+  \end{tabular}};
+\node[lab, below=0.08cm of elf] {MIPS32 image $P$};
+\draw[a] (prog) -- node[lab, right] {compile} (elf);
+
+% ---- execute and prove
+\node[stage] (exec) at (3.9,0) {Execution\\{\scriptsize compiled run, cut into shard descriptors $d_i$}};
+\foreach \k in {2,1} {
+  \node[stage, minimum height=1.25cm] at ($(7.0,0)+(0.16*\k,0.16*\k)$) {};
+}
+\node[stage, minimum height=1.25cm] (shard) at (7.0,0) {ShardProve\\{\scriptsize replay $d_i$, prove; one shard per GPU}};
+\node[stage, minimum height=1.25cm] (rec) at (10.3,0) {};
+\node[font=\small, anchor=north] at (rec.north) {Recursion};
+\begin{scope}[shift={(10.3,-0.3)}]
+  \foreach \x [count=\j] in {-0.8,-0.4,0,0.4,0.8} \node[dot] (l\j) at (\x,-0.15) {};
+  \node[dot] (c1) at (-0.4,0.18) {};
+  \node[dot] (c2) at (0.6,0.18) {};
+  \node[dot, fill=zirenblue] (rt) at (0.1,0.45) {};
+  \foreach \j in {1,2,3} \draw[zirenblue, line width=0.4pt] (l\j) -- (c1);
+  \foreach \j in {4,5} \draw[zirenblue, line width=0.4pt] (l\j) -- (c2);
+  \draw[zirenblue, line width=0.4pt] (c1) -- (rt) (c2) -- (rt);
+\end{scope}
+\draw[a] (elf) -- node[lab, above, pos=0.3] {in, hint} (exec);
+\draw[a] (exec) -- (shard);
+\draw[a] ($(shard.east)+(0.16,0)$) -- node[lab, above] {$\pi_i$} (rec);
+
+% artifacts panel
+\node[art] (r1) at (4.1,2.55) {shard descriptors};
+\node[art] (r2) at (7.0,2.55) {event records};
+\node[art] (r3) at (9.9,2.55) {chips and buses};
+\node[art] (r4) at (4.1,1.95) {\LogUp{}, zerocheck};
+\node[art] (r5) at (7.0,1.95) {jagged \WHIR{}};
+\node[art] (r6) at (9.9,1.95) {key allowlist};
+\node[panel, fit=(r1)(r6), inner sep=4pt] (pan) {};
+\node[tag, above=0.02cm of pan] {$\F = \KB$, $\Hash = \Poseidon$};
+\node[gframe, solid, fit=(exec)(shard)(rec)(pan), inner xsep=8pt, inner ysep=14pt] (main) {};
+\node[lab, font=\small, below=0.05cm of main] {execute and prove};
+
+% ---- compressed proof and the native verifier
+\node[box, text width=2.3cm] (cp) at (14.6,0) {Compressed\\proof $\pi$, $h$};
+\node[ver] (nat) at (14.6,2.2) {Native verifier};
+\draw[a] (main.east |- cp) -- (cp);
+\draw[a] (cp) -- node[lab, right] {publish} (nat);
+
+% ---- applications
+\node[stage] (shrink) at (3.75,-5.0) {Shrink\\{\scriptsize verifies $\pi$}};
+\node[tag, below=0.08cm of shrink, align=center] (tS) {$\F = \KB$\\$\Hash = \Poseidon$ or \Blake};
+\node[stage] (wrap) at (7.25,-3.6) {Wrap\\{\scriptsize verifies the shrink}};
+\node[stage] (snark) at (10.6,-3.6) {SNARK\\{\scriptsize Groth16 or PLONK over BN254}};
+\node[tag, below=0.08cm of wrap] (tW) {\Poseidon{} over BN254};
+\draw[a] (wrap) -- node[lab, above] {$\pi_{\mathrm w}$} (snark);
+\node[stage, dashed] (bin) at (7.25,-6.4) {Binary stage\\{\scriptsize emulates \KB{} over bits}};
+\node[stage, dashed] (nar) at (10.6,-6.4) {Narrow recursion\\{\scriptsize proves a recorded verifier tape}};
+\node[tag, below=0.08cm of bin] (tB) {$\F = \mathbb F_{2^{128}}$, $\Hash = \Blake$};
+\draw[a, dashed] (bin) -- node[lab, above] {$\pi_{\mathrm n}$} (nar);
+\draw[a, dashed] (nar.south east) .. controls +(0.55,-0.85) and +(-0.55,-0.85) .. node[lab, below] (rp) {repeats} (nar.south west);
+\draw[a] (shrink.east) -- ++(0.55,0) |- (wrap.west);
+\draw[a, dashed] (shrink.east) ++(0.55,0) |- (bin.west);
+\node[frame, fit=(shrink)(tS)(wrap)(snark)(tW)(bin)(nar)(tB)(rp)(main.west |- wrap)(main.east |- wrap), inner xsep=3pt, inner ysep=8pt] (apps) {};
+\node[lab, font=\small, below=0.05cm of apps] {applications};
+\node[ver] (oc) at (14.6,-3.6) {On-chain verifier};
+\node[ver, dashed] (gv) at (14.6,-6.4) {Garbled verifier};
+\draw[a] (snark.east) -- (snark.east -| apps.east) -- node[lab, above] {$\pi_{\mathrm{snark}}$} (oc);
+\draw[a, dashed] (nar.east) -- (nar.east -| apps.east) -- node[lab, above] {$\pi_{\mathrm n}$} (gv);
+
+% ---- the compressed proof feeds the shrink
+\draw[a] (cp.south) -- ++(0,-1.75) -| node[lab, pos=0.25, above] {$\pi$} (shrink.north);
+\end{tikzpicture}

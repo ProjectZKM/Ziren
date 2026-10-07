@@ -11,7 +11,7 @@ names the chip that arithmetises the instruction, so the table fixes which
 rows of Appendix~\ref{sec:app-chips} a program can occupy, and with it the
 chip set that Section~\ref{sec:recursion} enumerates over.
 
-Three conventions are worth noting. \texttt{LO} and \texttt{HI} occupy the
+Three conventions apply. \texttt{LO} and \texttt{HI} occupy the
 register file as registers 32 and 33, so the four moves between them and the
 general registers are additions of an immediate zero rather than a chip of
 their own. \texttt{SYNC}, \texttt{SYNCI} and \texttt{PREF} are accepted and
@@ -23,6 +23,34 @@ instructions outside the table (the conditional traps other than \texttt{teq},
 the linking conditional branches \texttt{bgezal} and \texttt{bltzal}, the
 branch-likely forms, \texttt{break} and \texttt{rdhwr}) are not supported: the
 decoder maps them to an unimplemented opcode and execution stops with an error.
+
+\paragraph{System calls the machine does not implement.} The behaviour is fixed in
+every case; none is left unconstrained. A call number outside the machine's table
+(neither an accelerator call nor a listed Linux number) stops the emulator with an error
+before any state changes: the relation rejects, and no proof is produced by the honest
+prover. Seven Linux calls have their semantics (\texttt{brk}, \texttt{read},
+\texttt{write}, \texttt{exit\_group}, \texttt{mmap}/\texttt{mmap2}, \texttt{clone},
+\texttt{fcntl}). Seventeen more, the ones a standard runtime issues while starting
+(\texttt{open}, \texttt{openat}, \texttt{close}, \texttt{fstat64},
+\texttt{clock\_gettime}, \texttt{nanosleep}, \texttt{futex}, \texttt{prctl},
+\texttt{uname}, \texttt{prlimit64}, \texttt{sigaltstack},
+\texttt{rt\_sigaction}, \texttt{rt\_sigprocmask}, \texttt{madvise},
+\texttt{munmap}, \texttt{gettid}, \texttt{sched\_getaffinity}), are accepted as
+no-ops: they touch no memory and return $0$ in \texttt{\$v0} with the error flag
+\texttt{\$a3} clear. That is deterministic, since the machine's memory is fully
+defined, but it is not the ABI's meaning: a program that reads a time, a file or an
+affinity mask through one of them gets no value, and must not depend on one. The
+circuit pins the same outcomes and accepts the same numbers. The \texttt{SysLinux}
+table decodes each of the seven implemented and seventeen no-op numbers and requires a
+real row to carry one of them; the instruction table requires a call it does not send
+to a table to be one of the ten local calls it implements (halt, commit, hint and
+proof-verification calls). A row carrying any other number has no satisfying
+assignment, so a proof states only an execution the emulator performs. We checked
+this by construction: a guest issuing call number 4999 is refused by the emulator,
+and a prover modified to handle the number as a no-op obtained a proof the
+unmodified verifier accepted before the tables enumerated their numbers, and obtains
+none since. The enumeration costs the two chips 11 and 35 columns.
+The accelerator calls are listed in Appendix~\ref{sec:app-chips}.
 
 \footnotesize
 \begin{longtable}{@{}llll>{\raggedright\arraybackslash}p{0.27\textwidth}l@{}}
