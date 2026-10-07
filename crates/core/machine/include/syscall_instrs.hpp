@@ -81,6 +81,48 @@ namespace zkm_core_machine_sys::syscall_instrs {
             syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::COMMIT_DEFERRED_PROOFS))
         );
 
+        // The other calls handled without a table, and whether the row is one of the ten:
+        // mirrors `SyscallInstrsChip::event_to_row` (instructions/trace.rs).
+        populate_is_zero_operation(
+            cols.is_exit_unconstrained,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::EXIT_UNCONSTRAINED))
+        );
+        populate_is_zero_operation(
+            cols.is_hint_read,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::SYSHINTREAD))
+        );
+        populate_is_zero_operation(
+            cols.is_sysverify,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::SYSVERIFY))
+        );
+        populate_is_zero_operation(
+            cols.is_write,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::WRITE))
+        );
+        populate_is_zero_operation(
+            cols.is_verify_zkm_proof,
+            syscall_id - F::from_canonical_u32(to_syscall_id(SyscallCode::VERIFY_ZKM_PROOF))
+        );
+        {
+            const SyscallCode local_calls[] = {
+                SyscallCode::HALT,
+                SyscallCode::WRITE,
+                SyscallCode::ENTER_UNCONSTRAINED,
+                SyscallCode::EXIT_UNCONSTRAINED,
+                SyscallCode::SYSHINTLEN,
+                SyscallCode::SYSHINTREAD,
+                SyscallCode::SYSVERIFY,
+                SyscallCode::COMMIT,
+                SyscallCode::COMMIT_DEFERRED_PROOFS,
+                SyscallCode::VERIFY_ZKM_PROOF,
+            };
+            bool known_local = false;
+            for (const SyscallCode c : local_calls) {
+                known_local = known_local || syscall_id == F::from_canonical_u32(to_syscall_id(c));
+            }
+            cols.is_known_local = known_local ? F::one() : F::zero();
+        }
+
         // If the syscall is `COMMIT` or `COMMIT_DEFERRED_PROOFS`, set the index bitmap and
         // digest word.
         if (syscall_id == F::from_canonical_u32(to_syscall_id(SyscallCode::COMMIT))
