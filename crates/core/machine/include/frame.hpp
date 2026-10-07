@@ -36,9 +36,9 @@ __ZKM_HOSTDEV__ void populate_raw(
     cpu::populate_instruction<F>(frame.instruction, instruction);
     (void)recv_next_pc;
 
-    write_word_from_u32_v2<F>(frame.op_a_access.access.value, a);
-    write_word_from_u32_v2<F>(frame.op_b_access.access.value, b);
-    write_word_from_u32_v2<F>(frame.op_c_access.access.value, c);
+    write_word_from_u32<F>(frame.op_a_access.access.value, a);
+    write_word_from_u32<F>(frame.op_b_access.access.value, b);
+    write_word_from_u32<F>(frame.op_c_access.access.value, c);
 
     // `populate_register_read_write` overwrites `access.value` with the
     // RECORD's value — the two differ on a no-link jump (op_a = r0), and the
@@ -142,11 +142,11 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_mem(
     frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
     frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
     frame.op_b = F::from_canonical_u32(instruction.op_b);
-    write_word_from_u32_v2<F>(frame.op_c, instruction.op_c);
+    write_word_from_u32<F>(frame.op_c, instruction.op_c);
     frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
 
-    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a);
-    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.b);
+    write_word_from_u32<F>(frame.op_a_access.access.value, event.a);
+    write_word_from_u32<F>(frame.op_b_access.access.value, event.b);
 
     // Record-wins ordering, as in `populate_raw`.
     memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
@@ -177,9 +177,9 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_r(
     frame.op_c = F::from_canonical_u32(instruction.op_c);
     frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
 
-    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a);
-    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.b);
-    write_word_from_u32_v2<F>(frame.op_c_access.access.value, event.c);
+    write_word_from_u32<F>(frame.op_a_access.access.value, event.a);
+    write_word_from_u32<F>(frame.op_b_access.access.value, event.b);
+    write_word_from_u32<F>(frame.op_c_access.access.value, event.c);
 
     // Record-wins ordering, as in `populate_raw`.
     memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
@@ -210,11 +210,11 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_imm(
     frame.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
     frame.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
     frame.op_b = F::from_canonical_u32(instruction.op_b);
-    write_word_from_u32_v2<F>(frame.op_c, instruction.op_c);
+    write_word_from_u32<F>(frame.op_c, instruction.op_c);
     frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
 
-    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a);
-    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.b);
+    write_word_from_u32<F>(frame.op_a_access.access.value, event.a);
+    write_word_from_u32<F>(frame.op_b_access.access.value, event.b);
 
     // Record-wins ordering, as in `populate_raw`.
     memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
@@ -242,8 +242,8 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_alu_shamt(
     frame.op_c = F::from_canonical_u32(instruction.op_c);
     frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
 
-    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a);
-    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.b);
+    write_word_from_u32<F>(frame.op_a_access.access.value, event.a);
+    write_word_from_u32<F>(frame.op_b_access.access.value, event.b);
 
     // Record-wins ordering, as in `populate_raw`.
     memory::populate_register_read_write<F>(frame.op_a_access, event.a_record);
@@ -296,9 +296,9 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_syscall_r(
     frame.op_c = F::from_canonical_u32(instruction.op_c);
     frame.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
 
-    write_word_from_u32_v2<F>(frame.op_a_access.access.value, event.a_record.value);
-    write_word_from_u32_v2<F>(frame.op_b_access.access.value, event.arg1);
-    write_word_from_u32_v2<F>(frame.op_c_access.access.value, event.arg2);
+    write_word_from_u32<F>(frame.op_a_access.access.value, event.a_record.value);
+    write_word_from_u32<F>(frame.op_b_access.access.value, event.arg1);
+    write_word_from_u32<F>(frame.op_c_access.access.value, event.arg2);
 
     // Record-wins ordering, as in `populate_raw`.
     OptionMemoryRecordEnum a_record = {};

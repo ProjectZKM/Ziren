@@ -13,7 +13,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_access(
     const MemoryRecord& current_record,
     const MemoryRecord& prev_record
 ) {
-    write_word_from_u32_v2<F>(self.value, current_record.value);
+    write_word_from_u32<F>(self.value, current_record.value);
 
     self.prev_shard = F::from_canonical_u32(prev_record.shard);
     self.prev_clk = F::from_canonical_u32(prev_record.timestamp);
@@ -50,7 +50,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_register_access(
     const uint32_t prev_timestamp,
     const uint32_t value
 ) {
-    write_word_from_u32_v2<F>(self.value, value);
+    write_word_from_u32<F>(self.value, value);
     self.prev_clk = F::from_canonical_u32(prev_timestamp);
 
     const uint32_t diff_minus_one = timestamp - prev_timestamp - 1;
@@ -78,7 +78,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_register_read_write(
     // No read/write branch left: the two arms differed only in what went into
     // `prev_value`, and the conversion to `OptionMemoryRecordEnum` resolved it
     // (a read leaves the previous value equal to its own value).
-    write_word_from_u32_v2<F>(self.prev_value, record.prev_value);
+    write_word_from_u32<F>(self.prev_value, record.prev_value);
     populate_register_access<F>(
         self.access,
         record.timestamp,
@@ -141,7 +141,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_read_write_v2(
             assert(false);
             break;
     }
-    write_word_from_u32_v2<F>(self.prev_value, prev_record.value);
+    write_word_from_u32<F>(self.prev_value, prev_record.value);
     populate_access<F>(self.access, current_record, prev_record);
 }
 }  // namespace zkm_core_machine_sys::memory
