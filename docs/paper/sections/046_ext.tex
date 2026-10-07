@@ -67,8 +67,8 @@ Instructions & Chip (width), frame & Result & Added lookups \\
 \toprule
 Instructions & Chip (width), frame & Effect & Added interactions \\
 \midrule
-\texttt{syscall} & \texttt{SyscallInstrs} (68), R & sends $\mathit{id}$, $b$, $c$ as 16-bit halves & 2 \texttt{LTU}, 2 syscall-bus \\
-Linux ABI calls & \texttt{SysLinux} (100), none & \texttt{brk}, \texttt{mmap}, \texttt{read}, \texttt{write}, \ldots & up to 50, gated \\
+\texttt{syscall} & \texttt{SyscallInstrs} (79), R & sends $\mathit{id}$, $b$, $c$ as 16-bit halves & 2 \texttt{LTU}, 2 syscall-bus \\
+Linux ABI calls & \texttt{SysLinux} (135), none & \texttt{brk}, \texttt{mmap}, \texttt{read}, \texttt{write}, \ldots & up to 50, gated \\
 accelerators & per precompile, none & a hash or curve operation in memory & per chip \\
 \bottomrule
 \end{tabular}

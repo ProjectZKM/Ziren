@@ -40,17 +40,16 @@ no-ops: they touch no memory and return $0$ in \texttt{\$v0} with the error flag
 \texttt{\$a3} clear. That is deterministic, since the machine's memory is fully
 defined, but it is not the ABI's meaning: a program that reads a time, a file or an
 affinity mask through one of them gets no value, and must not depend on one. The
-circuit pins the same outcomes, and is wider than the emulator in one respect: the
-\texttt{SysLinux} table accepts any Linux number it does not recognise as such a
-no-op, and the instruction table accepts any local number it does not recognise with
-\texttt{\$v0} unchanged. Neither leaves the prover a choice (result, flag and the
-absence of memory writes are fixed), so a proof over such a row states a
-deterministic execution; what it does not state is one the emulator would perform,
-since the emulator refuses the call. A program containing such a call is therefore
-never proved by the honest prover, and its verifying key names that program. We
-checked this by construction: a guest issuing call number 4999 is refused by the
-emulator, while a prover that handles the number as the tables accept it obtains a
-proof that the unmodified verifier accepts, with the public values the no-op gives.
+circuit pins the same outcomes and accepts the same numbers. The \texttt{SysLinux}
+table decodes each of the seven implemented and seventeen no-op numbers and requires a
+real row to carry one of them; the instruction table requires a call it does not send
+to a table to be one of the ten local calls it implements (halt, commit, hint and
+proof-verification calls). A row carrying any other number has no satisfying
+assignment, so a proof states only an execution the emulator performs. We checked
+this by construction: a guest issuing call number 4999 is refused by the emulator,
+and a prover modified to handle the number as a no-op obtained a proof the
+unmodified verifier accepted before the tables enumerated their numbers, and obtains
+none since. The enumeration costs the two chips 11 and 35 columns.
 The accelerator calls are listed in Appendix~\ref{sec:app-chips}.
 
 \footnotesize
