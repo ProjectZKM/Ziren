@@ -33,44 +33,29 @@ use zkm_pcs::ZKMCoreOpts;
 /// ran `cargo run -p fibonacci-host`).
 #[test]
 fn real_fibonacci_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        &example_elf("fibonacci"),
-        Some(5u32.to_le_bytes().to_vec()),
-    );
+    real_elf_parity(&example_elf("fibonacci"), Some(5u32.to_le_bytes().to_vec()));
 }
 
 /// fib(1000) — exercises ~40k cycles, so any opcode that fires only
 /// in extended runs will surface here.
 #[test]
 fn real_fibonacci_n1000_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        &example_elf("fibonacci"),
-        Some(1000u32.to_le_bytes().to_vec()),
-    );
+    real_elf_parity(&example_elf("fibonacci"), Some(1000u32.to_le_bytes().to_vec()));
 }
 
 #[test]
 fn real_large_sum_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        &example_elf("large-sum"),
-        None,
-    );
+    real_elf_parity(&example_elf("large-sum"), None);
 }
 
 #[test]
 fn real_json_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        &example_elf("json"),
-        None,
-    );
+    real_elf_parity(&example_elf("json"), None);
 }
 
 #[test]
 fn real_keccak_elf_jit_matches_interpreter() {
-    real_elf_parity(
-        &example_elf("keccak"),
-        None,
-    );
+    real_elf_parity(&example_elf("keccak"), None);
 }
 
 // shape-bin / external-fixture parity tests removed — use the

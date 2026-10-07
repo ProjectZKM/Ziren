@@ -57,8 +57,7 @@ pub static PRODUCER_BATCHES: std::sync::atomic::AtomicUsize =
 /// Runs that reached a bail site and finished in the interpreter, for tests.
 /// Not load-bearing.
 #[doc(hidden)]
-pub static PRODUCER_BAILS: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+pub static PRODUCER_BAILS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 mod platform;
