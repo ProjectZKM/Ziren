@@ -4,7 +4,7 @@ pub mod go;
 mod utils;
 use build::build_program_internal;
 pub use build::{execute_build_program, generate_elf_paths};
-pub use go::generate_go_overlay;
+pub use go::{generate_go_overlay, generate_go_overlay_for};
 
 use clap::Parser;
 
