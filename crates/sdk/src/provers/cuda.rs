@@ -225,7 +225,7 @@ impl Prover<DefaultProverComponents> for CudaProver {
 
 impl Default for CudaProver {
     fn default() -> Self {
-        Self::new(ZKMProver::new(), ZKMGpuServer::default())
+        Self::new(ZKMProver::new_without_prewarm(), ZKMGpuServer::default())
     }
 }
 

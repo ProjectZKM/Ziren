@@ -599,6 +599,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Self::uninitialized_with(vk_verification)
     }
 
+    /// [`Self::new`] without the compose pre-warm, for a client whose
+    /// recursion runs elsewhere (the CUDA prover's GPU server).  It still
+    /// verifies and wraps locally; a compose program it does need is built on
+    /// first use.
+    pub fn new_without_prewarm() -> Self {
+        Self::construct(None, false)
+    }
+
     /// Creates a new [ZKMProver] with lazily initialized components.
     pub fn uninitialized() -> Self {
         Self::uninitialized_with(None)
@@ -607,6 +615,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// [`Self::uninitialized`] with the child-vk membership check fixed by
     /// the caller (`Some`) instead of read from `VERIFY_VK`.
     pub fn uninitialized_with(vk_verification: Option<bool>) -> Self {
+        Self::construct(vk_verification, true)
+    }
+
+    fn construct(vk_verification: Option<bool>, prewarm: bool) -> Self {
         let core_machine = MipsAir::machine(CoreSC::default());
         let core_prover = C::CoreProver::new(core_machine);
 
@@ -694,7 +706,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             recursion_pk_cache_ready: std::sync::Condvar::new(),
         };
 
-        prover.prewarm_compose_programs();
+        if prewarm {
+            prover.prewarm_compose_programs();
+        }
 
         prover
     }

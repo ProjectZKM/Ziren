@@ -17,4 +17,7 @@ fn main() {
     let t = Instant::now();
     let _prover = ZKMProver::<DefaultProverComponents>::new();
     tracing::info!("[time-prover-new] new() took {:?}", t.elapsed());
+    let t = Instant::now();
+    let _prover = ZKMProver::<DefaultProverComponents>::new_without_prewarm();
+    tracing::info!("[time-prover-new] new_without_prewarm() took {:?}", t.elapsed());
 }

@@ -77,7 +77,7 @@ impl ProverClient {
                 }
             }
             "cuda" => Self {
-                prover: Box::new(CudaProver::new(ZKMProver::new(), ZKMGpuServer::default()))
+                prover: Box::new(CudaProver::new(ZKMProver::new_without_prewarm(), ZKMGpuServer::default()))
             },
             "network" => {
                 cfg_if! {
@@ -151,7 +151,12 @@ impl ProverClient {
     /// let client = ProverClient::cuda();
     /// ```
     pub fn cuda() -> Self {
-        Self { prover: Box::new(CudaProver::new(ZKMProver::new(), ZKMGpuServer::default())) }
+        Self {
+            prover: Box::new(CudaProver::new(
+                ZKMProver::new_without_prewarm(),
+                ZKMGpuServer::default(),
+            )),
+        }
     }
 
     /// Creates a new [ProverClient] with the network prover.
