@@ -89,8 +89,6 @@ Other & 5\% & \texttt{ShiftLeftImm} (34.8\,M $\times$ 45) & 5.4\% \\
 
 \paragraph{Scaling across devices.} Table~\ref{tab:cards} and Figure~\ref{fig:scaling} report proving throughput on one to four GPUs for blocks of 420, 530 and 912\,M cycles. Throughput varies by at most 20\% across blocks and scales by $1.9\times$ to two GPUs and $3.1$--$3.3\times$ to four, reaching 20--24\,MHz. The gap to linear scaling is the serial recursion tail and the start-up interval before the emulator has produced a shard for every GPU.
 
-\paragraph{Eight GPUs and a second guest.}\label{sec:perf-eight} A second guest, the \texttt{geth} execution client's block keeper compiled from Go to MIPS32, proved five consecutive mainnet blocks, 26\,138\,235 to 26\,138\,239, on all eight GPUs of the machine in the analysed configuration. The Go runtime issues the no-op Linux calls of Appendix~\ref{sec:app-isa} while starting, which the Rust guest never does. The blocks execute 1.50, 2.95, 1.52, 2.97 and 1.73\,G guest cycles in 282, 519, 292, 521 and 320 shards; wall-clock time, from the witness in memory to the verified compressed proof, is 69.8, 53.9, 68.5 and 56.5\,s for the last four (28--43\,MHz), and 81.0\,s for the first, which starts the per-GPU workers. The core stage alone takes 42.8, 25.7, 41.3 and 28.2\,s, 59--72\,MHz. The remaining 27--28\,s of every block are host emulation of the whole block (7.6--8.9\,s), key setup (3.3\,s) and the serial tail after the last shard, none of which more GPUs shorten; at eight GPUs that fixed part is half of the wall-clock time of the smaller blocks. The guest and the configuration differ from Table~\ref{tab:cards}, so the two are not a scaling series.
-
 \begin{figure}[t]
 \centering
 \input{figures/scaling}
@@ -111,6 +109,23 @@ Block (guest cycles) & 1 GPU & 2 & 4 & 1 GPU & 2 & 4 \\
 420\,M & 65.9 & 34.3 & 21.0 & 6.4 & 12.2 & 20.0 \\
 530\,M & 84.3 & 44.7 & 26.5 & 6.3 & 11.9 & 20.0 \\
 912\,M & 124.3 & 65.0 & 38.0 & 7.3 & 14.0 & 24.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Execution clients.}\label{sec:perf-eight}\label{sec:perf-clients} \Ziren{} proves Ethereum blocks with more than one execution client, compiled to MIPS32 from different languages (Table~\ref{tab:clients}): \texttt{reth}, written in Rust, and the block keeper of \texttt{geth}, written in Go. The Go runtime issues the no-op Linux calls of Appendix~\ref{sec:app-isa} while starting, which the Rust guest never does. For the \texttt{geth} keeper the fixed part of each block, host emulation of the whole block (7.6--8.9\,s), key setup (3.3\,s) and the serial tail after the last shard, is 27--28\,s, half of the wall-clock time of the smaller blocks on eight GPUs; the core stage alone runs at 59--72\,MHz.
+
+\begin{table}[t]
+\centering
+\caption{Two Ethereum execution clients proved by \Ziren{}. Wall-clock time runs from the witness in memory to the verified compressed proof. The \texttt{reth} rows are the four-GPU column of Table~\ref{tab:cards} (measured configuration); the \texttt{geth} rows are four of five consecutive mainnet blocks on eight GPUs (analysed configuration), the first of the five, which starts the per-GPU workers, excluded. The two rows differ in guest, configuration and GPU count, so they are not a comparison of the clients.}
+\label{tab:clients}
+\small
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+Client & Language & Blocks & Guest cycles & GPUs & Wall-clock (s) & Throughput (MHz) \\
+\midrule
+\texttt{reth} & Rust & 3 & 420--912\,M & 4 & 21.0--38.0 & 20--24 \\
+\texttt{geth} keeper & Go & 4 & 1.52--2.97\,G & 8 & 53.9--69.8 & 28--43 \\
 \bottomrule
 \end{tabular}
 \end{table}
