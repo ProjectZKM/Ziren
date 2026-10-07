@@ -155,27 +155,55 @@ Ziren provides a CUDA-based GPU prover, which proves with much lower latency and
 
 #### Usage
 
-Build a CUDA client in one of two ways:
+Select the GPU prover in one of two ways:
 
 - Option A (environment variable): use `ProverClient::new()` with `ZKM_PROVER=cuda`.
 - Option B (direct method): use `ProverClient::cuda()`.
 
-By default the client starts the GPU prover in a Docker container. Because the container receives the private input stream, the image must be pinned by digest:
+The client sends each proving step over RPC to a GPU prover server. It either starts that server itself in a Docker container (the default) or connects to a server that is already running. Either way, generate proofs with the standard methods; nothing else in the host program changes.
+
+##### Starting the server in Docker (default)
+
+The client pulls the image, runs it with `docker run --rm --gpus <devices> -p <port>:3000`, waits for it to come up and removes the container when the program exits or is interrupted. The images are published on the GitHub Container Registry as [`ghcr.io/projectzkm/ziren-gpu`](https://github.com/orgs/ProjectZKM/packages/container/package/ziren-gpu), which lists each tag with its digest. Use the image tagged with the SDK's version, `v2.0.0` for Ziren 2.0.0: the server must come from the same release (see below). Because the container receives the private input stream, the image must also be pinned by its digest:
 
 ```bash
-export ZKM_GPU_IMAGE=projectzkm/ziren-gpu@sha256:<digest>   # a reviewed image digest
+export ZKM_GPU_IMAGE=ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:<digest>   # the digest of the published v2.0.0 image
 ```
 
-A mutable tag such as `projectzkm/ziren-gpu:latest` is refused unless `ZKM_ALLOW_MUTABLE_GPU_IMAGE=1` is set, which is meant for local development only. Further options:
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `ZKM_GPU_IMAGE` | none | The image, as `repo:tag@sha256:<digest>`, with the tag of the SDK's version: `ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:<digest>` for Ziren 2.0.0. |
+| `ZKM_ALLOW_MUTABLE_GPU_IMAGE` | unset | `1` accepts a tag without a digest, such as `:v2.0.0` alone; for local development only. |
+| `CUDA_VISIBLE_DEVICE_INDEX` | all GPUs | The one GPU the container uses (`--gpus device=<index>`). |
+| `CUDA_PORT` | `3000` | Host port the container's server is published on. Give each concurrent client its own port. |
+| `RUST_LOG` | `none` | Log level passed to the server. |
+
+For example, to prove the Fibonacci example on GPU 0:
 
 ```bash
-export CUDA_VISIBLE_DEVICE_INDEX=<index>   # GPU the container uses
-export CUDA_PORT=<port>                    # port of the container's prover server
-export CUDA_RUN_DOCKER=false               # connect to an already running GPU server instead
-export CUDA_ENDPOINT=<url>                 # its endpoint (default: http://localhost:3000/twirp/)
+export ZKM_PROVER=cuda
+export ZKM_GPU_IMAGE=ghcr.io/projectzkm/ziren-gpu:v2.0.0@sha256:<digest>
+export CUDA_VISIBLE_DEVICE_INDEX=0
+cd examples/fibonacci/host && cargo run --release
 ```
 
-With the client built, generate proofs with the standard methods.
+##### Connecting to a running server
+
+To use a server started separately, on this machine or another, turn the container off and give its endpoint:
+
+```bash
+export ZKM_PROVER=cuda
+export CUDA_RUN_DOCKER=false
+export CUDA_ENDPOINT=http://<host>:<port>/twirp/   # default: http://localhost:3000/twirp/
+```
+
+The client then starts nothing; `CUDA_VISIBLE_DEVICE_INDEX`, `CUDA_PORT` and `ZKM_GPU_IMAGE` are ignored, and which GPUs are used is the server's configuration. The endpoint must end in `/twirp/`.
+
+##### Proof types and GPUs
+
+- Core and compressed proofs run on all the GPUs the server drives.
+- Groth16 and PLONK proofs, including `compress_to_groth16()`, add a shrink step that runs only on a server driving a single GPU; on a server driving several, it stops with an error. In Docker mode set `CUDA_VISIBLE_DEVICE_INDEX`, or run one server per GPU.
+- The server must come from the same Ziren release as the SDK. Compressed and wrapped proofs are checked against that release's set of recursion verifying keys (`VERIFY_VK`, on by default), and a server from another release produces keys outside the set.
 
 ### CPU Acceleration
 

@@ -67,7 +67,7 @@ The SDK's `ProverClient::new()` selects its prover from the `ZKM_PROVER` environ
 | `ZKM_PROVER` | Prover |
 |--------------|--------|
 | `local` or `cpu` (default) | CPU prover in the current process |
-| `cuda` | GPU prover, reached over RPC at `CUDA_ENDPOINT` (default `http://localhost:3000/twirp/`) |
+| `cuda` | GPU prover: a server started in Docker by default, or an already running one at `CUDA_ENDPOINT` with `CUDA_RUN_DOCKER=false` (see [GPU Acceleration](../dev/prover.md#gpu-acceleration)) |
 | `network` | ZKM Prover Network (requires the SDK's `network` feature) |
 | `mock` | Mock prover for testing, which produces no real proof |
 
