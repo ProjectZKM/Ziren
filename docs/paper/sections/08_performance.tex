@@ -6,7 +6,7 @@ We evaluate three quantities: \emph{instruction efficiency}, the committed area 
 \subsection{Experimental setup}
 \label{sec:perf-setup}
 
-\paragraph{Workload.} Ethereum mainnet block 25\,907\,955, executed by a MIPS32 build of the \texttt{reth} execution client with an arena-represented witness trie; the guest hashes trie nodes, recomputes a Merkle root over state it does not hold and verifies signatures. A word-wise \texttt{memcmp}, a zero-copy Keccak wrapper and the arena trie reduce it from 379 to 288 million cycles. The single-GPU timing of \emph{Memory traffic and shard size} (\S\ref{sec:perf-after}) uses that cached record; the multi-GPU measurements of \S\ref{sec:perf-after} add blocks of 420, 530 and 912\,M cycles, and the instruction-efficiency census of \S\ref{sec:perf-profile} uses block 25\,955\,640 (495.6\,M cycles) in the analysed configuration.
+\paragraph{Workload.} Ethereum mainnet block 25\,907\,955, executed by a MIPS32 build of the Reth execution client with an arena-represented witness trie; the guest hashes trie nodes, recomputes a Merkle root over state it does not hold and verifies signatures. A word-wise \texttt{memcmp}, a zero-copy Keccak wrapper and the arena trie reduce it from 379 to 288 million cycles. The single-GPU timing of \emph{Memory traffic and shard size} (\S\ref{sec:perf-after}) uses that cached record; the multi-GPU measurements of \S\ref{sec:perf-after} add blocks of 420, 530 and 912\,M cycles, and the instruction-efficiency census of \S\ref{sec:perf-profile} uses block 25\,955\,640 (495.6\,M cycles) in the analysed configuration.
 
 \paragraph{Hardware.} One NVIDIA RTX~5090 (32\,GB) in a virtual machine with eight such GPUs, 124 vCPUs of AMD EPYC 9355 and 925\,GB of memory; the multi-GPU runs use four, and the run of \emph{Eight GPUs and a second guest} all eight (driver 570.153.02, CUDA 12.8, Ubuntu 22.04). The GPU backend is a separate CUDA implementation of the same protocol and is not open source.
 
@@ -113,19 +113,19 @@ Block (guest cycles) & 1 GPU & 2 & 4 & 1 GPU & 2 & 4 \\
 \end{tabular}
 \end{table}
 
-\paragraph{Execution clients.}\label{sec:perf-eight}\label{sec:perf-clients} \Ziren{} proves Ethereum blocks with more than one execution client, compiled to MIPS32 from different languages (Table~\ref{tab:clients}): \texttt{reth}, written in Rust, and the block keeper of \texttt{geth}, written in Go. The Go runtime issues the no-op Linux calls of Appendix~\ref{sec:app-isa} while starting, which the Rust guest never does. For the \texttt{geth} keeper the fixed part of each block, host emulation of the whole block (7.6--8.9\,s), key setup (3.3\,s) and the serial tail after the last shard, is 27--28\,s, half of the wall-clock time of the smaller blocks on eight GPUs; the core stage alone runs at 59--72\,MHz.
+\paragraph{Execution clients.}\label{sec:perf-eight}\label{sec:perf-clients} \Ziren{} proves Ethereum blocks with more than one execution client, compiled to MIPS32 from different languages (Table~\ref{tab:clients}): Reth, written in Rust, and the block keeper of Geth, written in Go. The Go runtime issues the no-op Linux calls of Appendix~\ref{sec:app-isa} while starting, which the Rust guest never does. For the Geth keeper the fixed part of each block, host emulation of the whole block (7.6--8.9\,s), key setup (3.3\,s) and the serial tail after the last shard, is 27--28\,s, half of the wall-clock time of the smaller blocks on eight GPUs; the core stage alone runs at 59--72\,MHz.
 
 \begin{table}[t]
 \centering
-\caption{Two Ethereum execution clients proved by \Ziren{}. Wall-clock time runs from the witness in memory to the verified compressed proof. The \texttt{reth} rows are the four-GPU column of Table~\ref{tab:cards} (measured configuration); the \texttt{geth} rows are four of five consecutive mainnet blocks on eight GPUs (analysed configuration), the first of the five, which starts the per-GPU workers, excluded. The two rows differ in guest, configuration and GPU count, so they are not a comparison of the clients.}
+\caption{Two Ethereum execution clients proved by \Ziren{}. Wall-clock time runs from the witness in memory to the verified compressed proof. The Reth rows are the four-GPU column of Table~\ref{tab:cards} (measured configuration); the Geth rows are four of five consecutive mainnet blocks on eight GPUs (analysed configuration), the first of the five, which starts the per-GPU workers, excluded. The two rows differ in guest, configuration and GPU count, so they are not a comparison of the clients.}
 \label{tab:clients}
 \small
 \begin{tabular}{@{}llrrrrr@{}}
 \toprule
 Client & Language & Blocks & Guest cycles & GPUs & Wall-clock (s) & Throughput (MHz) \\
 \midrule
-\texttt{reth} & Rust & 3 & 420--912\,M & 4 & 21.0--38.0 & 20--24 \\
-\texttt{geth} keeper & Go & 4 & 1.52--2.97\,G & 8 & 53.9--69.8 & 28--43 \\
+Reth & Rust & 3 & 420--912\,M & 4 & 21.0--38.0 & 20--24 \\
+Geth keeper & Go & 4 & 1.52--2.97\,G & 8 & 53.9--69.8 & 28--43 \\
 \bottomrule
 \end{tabular}
 \end{table}
