@@ -3,18 +3,14 @@
 
 This appendix lists the MIPS32 instructions a guest may execute, which is the
 set the relation of \S\ref{sec:statement} quantifies over. It is also the
-table from which the conformance corpus of \S\ref{sec:verification} is
-generated: each row produces ten programs with pseudo-random operands,
-boundary values and the delay-slot placements the instruction admits, giving
-the 770 vectors compared against an independent emulator. The last column
+table from which the conformance corpus of
+\S\ref{sec:verification-conformance} is generated. The last column
 names the chip that arithmetises the instruction, so the table fixes which
 rows of Appendix~\ref{sec:app-chips} a program can occupy, and with it the
 chip set that Section~\ref{sec:recursion} enumerates over.
 
-Three conventions apply. \texttt{LO} and \texttt{HI} occupy the
-register file as registers 32 and 33, so the four moves between them and the
-general registers are additions of an immediate zero rather than a chip of
-their own. \texttt{SYNC}, \texttt{SYNCI} and \texttt{PREF} are accepted and
+Three conventions apply. The four moves to and from \texttt{LO} and
+\texttt{HI} are additions of an immediate zero (\S\ref{sec:overview-format}). \texttt{SYNC}, \texttt{SYNCI} and \texttt{PREF} are accepted and
 retire as no-ops on \texttt{AddSubImm}, as an addition of zero. \texttt{SYSCALL} is absent
 from the table because it is the boundary of the machine rather than a
 computation within it; it is arithmetised by \texttt{SyscallInstrs} and described in
@@ -54,7 +50,7 @@ The accelerator calls are listed in Appendix~\ref{sec:app-chips}.
 
 \footnotesize
 \begin{longtable}{@{}llll>{\raggedright\arraybackslash}p{0.27\textwidth}l@{}}
-\caption{The 77 guest instructions, their primary encoding fields and the chip that proves each. \emph{Op} is bits 31--26 and \emph{func} bits 5--0; a dash marks a field the format does not use, and the immediate forms are distinguished from the register forms by \emph{Op} alone. Rows that share both fields are told apart by another field: \texttt{bgez}, \texttt{bltz}, \texttt{bal} and \texttt{synci} by \emph{rt}, \texttt{rotr} and \texttt{rotrv} from \texttt{srl} and \texttt{srlv} by one bit of \emph{rs} or \emph{sa}, and \texttt{wsbh}, \texttt{seb} and \texttt{seh} by \emph{sa}. Semantics are as transcribed from the architecture manual into the specification table that generates the conformance corpus; on rows marked $^\dagger$ the implementation fixes a choice (\S\ref{sec:isa-emulator}): \texttt{j} and \texttt{jal} take the region bits \texttt{(PC + 4)[31:28]} as zero, exact for text below $2^{28}$, and \texttt{sc} always succeeds, setting \texttt{rt = 1}. Bit ranges \texttt{x[h:l]} include both ends.}\label{tab:isa}\\
+\caption{The 77 guest instructions, their primary encoding fields and the chip that proves each. \emph{Op} is bits 31--26 and \emph{func} bits 5--0; a dash marks a field the format does not use, and the immediate forms are distinguished from the register forms by \emph{Op} alone. Rows that share both fields are told apart by another field: \texttt{bgez}, \texttt{bltz}, \texttt{bal} and \texttt{synci} by \emph{rt}, \texttt{rotr} and \texttt{rotrv} from \texttt{srl} and \texttt{srlv} by one bit of \emph{rs} or \emph{sa}, and \texttt{wsbh}, \texttt{seb} and \texttt{seh} by \emph{sa}. Semantics are as transcribed from the architecture manual into the specification table that generates the conformance corpus; on rows marked $^\dagger$ the implementation fixes a choice (\S\ref{sec:isa-emulator}), taking the region bits \texttt{(PC + 4)[31:28]} as zero and letting \texttt{sc} always succeed. Bit ranges \texttt{x[h:l]} include both ends.}\label{tab:isa}\\
 \toprule
 Mnemonic & Op & func & Family & Semantics & Chip \\
 \midrule

@@ -1,7 +1,7 @@
 \subsection{Chips for the extended instruction set and system calls}
 \label{sec:ext}
 
-Each of these instructions is still one row of one chip, which carries as columns the work a lookup-based design spreads over a sequence of virtual instructions~\citep{jolt}, and \texttt{HI} (register 33) is written by a second access at sub-cycle position 4. That access raises eight interactions, counted as ``an access'' in the tables below: a send and a receive on the memory bus, two timestamp lookups, and two byte lookups each for its previous and its new word.
+Each of these instructions is still one row of one chip, which carries as columns the work a lookup-based design spreads over a sequence of virtual instructions~\citep{jolt}, and \texttt{HI} is written by a second access at sub-cycle position 4. That access raises eight interactions, counted as ``an access'' in the tables below: a send and a receive on the memory bus, two timestamp lookups, and two byte lookups each for its previous and its new word.
 
 \subsubsection{Multiplication}
 \label{sec:ext-mul}
