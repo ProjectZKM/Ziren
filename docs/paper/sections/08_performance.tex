@@ -8,7 +8,7 @@ We evaluate three quantities: \emph{instruction efficiency}, the committed area 
 
 \paragraph{Workload.} Ethereum mainnet block 25\,907\,955, executed by a MIPS32 build of the Reth execution client with an arena-represented witness trie; the guest hashes trie nodes, recomputes a Merkle root over state it does not hold and verifies signatures. A word-wise \texttt{memcmp}, a zero-copy Keccak wrapper and the arena trie reduce it from 379 to 288 million cycles. The single-GPU timing of \emph{Memory traffic and shard size} (\S\ref{sec:perf-after}) uses that cached record; the multi-GPU measurements of \S\ref{sec:perf-after} add blocks of 420, 530 and 912\,M cycles, and the instruction-efficiency census of \S\ref{sec:perf-profile} uses block 25\,955\,640 (495.6\,M cycles) in the analysed configuration.
 
-\paragraph{Hardware.} One NVIDIA RTX~5090 (32\,GB) in a virtual machine with eight such GPUs, 124 vCPUs of AMD EPYC 9355 and 925\,GB of memory; the multi-GPU runs use four, and the run of \emph{Eight GPUs and a second guest} all eight (driver 570.153.02, CUDA 12.8, Ubuntu 22.04). The GPU backend is a separate CUDA implementation of the same protocol and is not open source.
+\paragraph{Hardware.} One NVIDIA RTX~5090 (32\,GB) in a virtual machine with eight such GPUs, 124 vCPUs of AMD EPYC 9355 and 925\,GB of memory; the multi-GPU runs of Table~\ref{tab:cards} use four, and those of Table~\ref{tab:clients} one and all eight (driver 570.153.02, CUDA 12.8, Ubuntu 22.04). The GPU backend is a separate CUDA implementation of the same protocol and is not open source.
 
 \paragraph{Configurations.}\label{sec:perf-revision} Sections~\ref{sec:air}--\ref{sec:security} describe the \emph{analysed configuration}. The timings below, and the proof-size comparison of \S\ref{sec:perf-after}, were taken on an earlier \emph{measured configuration}, which differs in five respects: the $\Poseidon{}$ permutation used 13 partial rounds rather than the corrected 20; the lookup challenge was not ground; the syscall bus carried the sum of two 16-bit half-words rather than the half-words themselves (\S\ref{sec:air-chips}); the set of three soundness fixes of Table~\ref{tab:det-findings} was not applied; and the system-call tables did not enumerate the numbers they accept (Appendix~\ref{sec:app-isa}). Each of the last two adds constraints. The comparisons below are therefore internal to the measured configuration, and the soundness figures of \S\ref{sec:iopp-soundness} are for the analysed one. Unless a caption says otherwise, every timing below is of the measured configuration and every area of the analysed one.
 
@@ -113,19 +113,24 @@ Block (guest cycles) & 1 GPU & 2 & 4 & 1 GPU & 2 & 4 \\
 \end{tabular}
 \end{table}
 
-\paragraph{Execution clients.}\label{sec:perf-eight}\label{sec:perf-clients} \Ziren{} proves Ethereum blocks with more than one execution client, compiled to MIPS32 from different languages (Table~\ref{tab:clients}): Reth, written in Rust, and the block keeper of Geth, written in Go. The Go runtime issues the no-op Linux calls of Appendix~\ref{sec:app-isa} while starting, which the Rust guest never does. For the Geth keeper the fixed part of each block, host emulation of the whole block (7.6--8.9\,s), key setup (3.3\,s) and the serial tail after the last shard, is 27--28\,s, half of the wall-clock time of the smaller blocks on eight GPUs; the core stage alone runs at 59--72\,MHz.
+\paragraph{Execution clients.}\label{sec:perf-eight}\label{sec:perf-clients} \Ziren{} proves Ethereum blocks with more than one execution client compiled to MIPS32 from different languages: Reth, written in Rust, and the block keeper of Geth, written in Go, whose runtime issues the no-op Linux calls of Appendix~\ref{sec:app-isa} while starting. Table~\ref{tab:clients} proves the same 16 consecutive mainnet blocks, 26\,138\,415 to 26\,138\,430, with both clients on the same GPUs, first one and then eight. A shard costs the same GPU time under both guests, 0.59\,s on one GPU, so a block costs in proportion to its shards rather than its cycles. The Reth guest moves hashing, 256-bit arithmetic and elliptic-curve operations into precompiles, each one cycle but many rows (\S\ref{sec:intro-costs}), so its shards close after 2.3 million cycles on average against 5.6 million for Geth. It therefore runs at the lower rate and still proves every block in less time: $3.1$--$7.0\times$ less on one GPU and $1.6$--$4.8\times$ less on eight. Eight GPUs reduce the summed proving time $7.1\times$ for Geth and $4.7\times$ for Reth; the Reth blocks are smaller, so the serial tail after the last shard (\S\ref{sec:perf-pipeline}) is a larger share of each.
 
 \begin{table}[t]
 \centering
-\caption{Two Ethereum execution clients proved by \Ziren{}. Wall-clock time runs from the witness in memory to the verified compressed proof. The Reth rows are the four-GPU column of Table~\ref{tab:cards} (measured configuration); the Geth rows are four of five consecutive mainnet blocks on eight GPUs (analysed configuration), the first of the five, which starts the per-GPU workers, excluded. The two rows differ in guest, configuration and GPU count, so they are not a comparison of the clients.}
+\caption{The same 16 mainnet blocks proved with two execution clients on the same GPUs, analysed configuration. Proving time runs from the prove request at the prover to the compressed proof, over shard proving and recursion; throughput is guest cycles divided by it. Ranges are over the 16 blocks; the last row sums the cycles and the proving time.}
 \label{tab:clients}
 \small
-\begin{tabular}{@{}llrrrrr@{}}
+\begin{tabular}{@{}lrrrrrr@{}}
 \toprule
-Client & Language & Blocks & Guest cycles & GPUs & Wall-clock (s) & Throughput (MHz) \\
+ & & & \multicolumn{2}{c}{proving time (s)} & \multicolumn{2}{c}{throughput (MHz)} \\
+\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Client & Guest cycles & Shards & 1 GPU & 8 GPUs & 1 GPU & 8 GPUs \\
 \midrule
-Reth & Rust & 3 & 420--912\,M & 4 & 21.0--38.0 & 20--24 \\
-Geth keeper & Go & 4 & 1.52--2.97\,G & 8 & 53.9--69.8 & 28--43 \\
+Reth (Rust) & 43--508\,M & 33--164 & 20.5--96.0 & 7.6--16.3 & 2.1--5.3 & 5.6--31.1 \\
+Geth (Go) & 0.36--4.46\,G & 82--771 & 63.2--477 & 12.4--55.7 & 5.7--10.3 & 29.2--80.0 \\
+\midrule
+Reth, all 16 & 3.45\,G & 1\,491 & 876 & 187 & 3.9 & 18.5 \\
+Geth, all 16 & 39.96\,G & 7\,154 & 4\,238 & 599 & 9.4 & 66.7 \\
 \bottomrule
 \end{tabular}
 \end{table}
