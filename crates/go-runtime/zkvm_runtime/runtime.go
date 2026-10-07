@@ -136,7 +136,8 @@ func Commit[T any](value T) {
 		bytes = append(bytes, d...)
 	}
 
-	_, _ = PublicValuesHasher.Write(bytes)
+	// the digest covers the public values written, not the padding
+	_, _ = PublicValuesHasher.Write(bytes[:length])
 
 	SyscallWrite(13, bytes, length)
 }
